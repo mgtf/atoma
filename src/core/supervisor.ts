@@ -22,6 +22,20 @@ export interface SupervisionHooks<C extends Atom> {
    * synthesize lessons from the trace and create a branched type in the registry.
    */
   branchOnEscalation(child: C, trace: readonly TraceEntry[], reason: string): Promise<void>;
+
+  /**
+   * Optional: invoked exactly once when the loop exits with an approved result.
+   * Use it to bump the child type's success counter in the registry so that
+   * trusted types can short-circuit future validator calls.
+   */
+  onApproved?(child: C, result: Result): Promise<void>;
+
+  /**
+   * Optional: invoked exactly once at the moment the loop decides to escalate,
+   * BEFORE `branchOnEscalation` fires. Use it to bump the child type's failure
+   * counter so trust is revoked.
+   */
+  onFailed?(child: C, reason: string): Promise<void>;
 }
 
 const now = (): string => new Date().toISOString();
@@ -78,6 +92,7 @@ export async function superviseLoop<C extends Atom>(
       trace.push({ kind: 'verdict-result', ts: now(), atom: parent.name, payload: v2 });
 
       if (v2.approved) {
+        if (hooks.onApproved) await hooks.onApproved(current, result);
         return { ...result, trace };
       }
 
@@ -99,6 +114,7 @@ export async function superviseLoop<C extends Atom>(
       payload: { phase: e.phase, failingChild: current.name },
     });
 
+    if (hooks.onFailed) await hooks.onFailed(current, `escalation-${e.phase}`);
     await hooks.branchOnEscalation(current, trace, `escalation-${e.phase}`);
 
     parent.injectContext(renderTraceForContext(trace, current.name));

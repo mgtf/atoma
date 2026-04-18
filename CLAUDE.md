@@ -21,19 +21,42 @@ npm run example:research "<topic>"   # live run, requires ANTHROPIC_API_KEY
 
 - **The cheapest atom that can answer, SHOULD answer.** Validation is a yes/no;
   strategy/plan generation is real reasoning. So:
-  - `L2Atom.plan` / `L3Atom.plan` run on `this.model` (Sonnet / Opus).
+  - `L2Atom.plan` / `L3Atom.plan` run on `this.model` (Sonnet / Opus) — but only
+    after the Haiku prefilter declines to short-circuit the decision.
   - `validatePlan` / `validateResult` run on `this.validationModel` (Haiku by
     default) via `llmVerdict` in `src/atoms/L2Atom.ts`.
+- **Prefilter first, reason second.** In `L2Atom.plan` and `L3Atom.plan`, a
+  `prefilterStrategy` call (Haiku, temperature 0, maxTokens 256) scans the
+  tier-child catalog for a clear reuse match. On success, a skeletal Plan is
+  synthesised locally and the Sonnet/Opus strategy call is SKIPPED entirely.
+  Only "escalate" (no clear match, or a new type must be designed) falls
+  through to the full supervisor-tier call. Shared prompt:
+  `PREFILTER_SYSTEM_PROMPT` in `src/atoms/cost.ts` — constant, cached.
+- **Trust fast-path in validators.** Each `validatePlan` / `validateResult`
+  checks `registry.getByName(child.name)` and returns an approved verdict
+  WITHOUT an LLM call when `successes >= TRUST_THRESHOLD_SUCCESSES` (3) AND
+  `failures === 0`. Counters live on `atom_types`; they are bumped by the
+  supervise loop's `onApproved` / `onFailed` hooks that L2 and L3 wire to
+  `registry.recordSuccess` / `registry.recordFailure`.
+- **Patch resets trust.** `AtomRegistry.patch` zeroes `successes` and
+  `failures` along with bumping the version — a changed type has to earn trust
+  again. `branch` creates a new type that starts at zero.
 - **`VALIDATION_SYSTEM_PROMPT` is the ONE system prompt used by every verdict
-  call in the whole system.** It is deliberately constant across tiers and tasks
-  so prompt caching short-circuits the input bill on repeat validations. Do not
-  inline a custom system prompt into a verdict call.
-- Validation params are pinned to `{ temperature: 0, maxTokens: 512 }` inside
-  `llmVerdict`. Raise `maxTokens` only if you actually see truncated verdicts —
-  a verdict is a tiny JSON object and padding the ceiling wastes billed tokens.
+  call in the whole system.** Deliberately constant so prompt caching
+  short-circuits the input bill on repeat validations. Do not inline a custom
+  system prompt into a verdict call. Same rule applies to
+  `PREFILTER_SYSTEM_PROMPT`.
+- Validation params are pinned to `{ temperature: 0, maxTokens: 512 }`, prefilter
+  params to `{ temperature: 0, maxTokens: 256 }`. Raise either only if you see
+  truncated outputs in practice — a Verdict / Prefilter is a tiny JSON object.
 - L3/L2 never pass `tools` or an `executor` on their own LLM calls. Only L1 gets
   tool declarations and a tool loop; that's the whole point of the tier split.
   Grep `executor:` to confirm it only appears in `L1Atom.execute`.
+- **Happy path on a mature type is now 100% Haiku:** prefilter picks the child,
+  trust fast-path skips both validators, L1 does the real work on Haiku with
+  its tool loop. The only time Sonnet or Opus runs is the first few encounters
+  with a type, or when the catalog has no clear match and a new type must be
+  designed.
 
 ## Architecture invariants (don't violate these)
 

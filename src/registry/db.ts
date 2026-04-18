@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS atom_types (
   created_by    TEXT NOT NULL,
   created_at    TEXT NOT NULL,
   version       INTEGER NOT NULL DEFAULT 1,
+  successes     INTEGER NOT NULL DEFAULT 0,
+  failures      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (tier, ordinal)
 );
 
@@ -34,10 +36,23 @@ CREATE INDEX IF NOT EXISTS idx_atom_types_name ON atom_types(name);
 CREATE INDEX IF NOT EXISTS idx_atom_types_tier ON atom_types(tier);
 `;
 
+function addColumnIfMissing(db: DB, table: string, column: string, ddl: string): void {
+  const cols = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
+}
+
 export function openDb(path: string): DB {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // Forward migration for DBs that predate the counter columns. Safe to run
+  // every open: no-op when the columns are already present.
+  addColumnIfMissing(db, 'atom_types', 'successes', 'successes INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(db, 'atom_types', 'failures', 'failures INTEGER NOT NULL DEFAULT 0');
   return db;
 }

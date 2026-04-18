@@ -16,6 +16,16 @@ export { L1Atom } from './atoms/L1Atom.js';
 export { L2Atom, VALIDATION_SYSTEM_PROMPT, llmVerdict } from './atoms/L2Atom.js';
 export { L3Atom } from './atoms/L3Atom.js';
 export { mergeTools } from './atoms/toolMerge.js';
+export {
+  TRUST_THRESHOLD_SUCCESSES,
+  shouldTrustType,
+  trustedApproval,
+  PREFILTER_SYSTEM_PROMPT,
+  prefilterStrategy,
+  prefilterResponseSchema,
+  type PrefilterOutcome,
+  type CatalogEntry,
+} from './atoms/cost.js';
 
 export { ToolSandbox } from './tools/sandbox.js';
 export { InMemoryToolRegistry } from './tools/registry.js';

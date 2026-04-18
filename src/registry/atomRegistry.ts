@@ -24,6 +24,10 @@ export interface AtomType {
   readonly createdBy: string;
   readonly createdAt: string;
   readonly version: number;
+  /** Cumulative count of approved final results produced by this type. */
+  readonly successes: number;
+  /** Cumulative count of escalations that ended this type's supervision loop. */
+  readonly failures: number;
 }
 
 export interface CreateSeed {
@@ -45,6 +49,8 @@ interface Row {
   created_by: string;
   created_at: string;
   version: number;
+  successes: number;
+  failures: number;
 }
 
 function rowToType(row: Row): AtomType {
@@ -59,6 +65,8 @@ function rowToType(row: Row): AtomType {
     createdBy: row.created_by,
     createdAt: row.created_at,
     version: row.version,
+    successes: row.successes ?? 0,
+    failures: row.failures ?? 0,
   };
 }
 
@@ -135,6 +143,8 @@ export class AtomRegistry {
         createdBy: seed.createdBy,
         createdAt: now,
         version: 1,
+        successes: 0,
+        failures: 0,
       };
     })();
   }
@@ -172,10 +182,14 @@ export class AtomRegistry {
 
       const merged = applyMods(current, mods);
 
+      // Patch resets counters: the type's behaviour has changed, so past
+      // successes no longer guarantee anything about the new version. Trust
+      // must be earned again.
       this.db
         .prepare(
           `UPDATE atom_types
-             SET system_prompt = ?, tools_json = ?, params_json = ?, version = ?
+             SET system_prompt = ?, tools_json = ?, params_json = ?, version = ?,
+                 successes = 0, failures = 0
            WHERE tier = ? AND ordinal = ?`
         )
         .run(
@@ -187,7 +201,7 @@ export class AtomRegistry {
           current.ordinal
         );
 
-      return { ...merged, version: nextVersion };
+      return { ...merged, version: nextVersion, successes: 0, failures: 0 };
     })();
   }
 
@@ -252,8 +266,32 @@ export class AtomRegistry {
         createdBy,
         createdAt: now,
         version: 1,
+        successes: 0,
+        failures: 0,
       };
     })();
+  }
+
+  /**
+   * Bump the success counter for a type. Called by the supervise loop after an
+   * approved final result. Trusted types accumulate successes to eventually
+   * short-circuit the validator LLM call.
+   */
+  recordSuccess(name: string): void {
+    this.db
+      .prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?')
+      .run(name);
+  }
+
+  /**
+   * Bump the failure counter. Called by the supervise loop when an escalation
+   * is about to branch the type. Any failure resets trust until enough new
+   * successes accumulate.
+   */
+  recordFailure(name: string): void {
+    this.db
+      .prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?')
+      .run(name);
   }
 
   versionsOf(name: string): { version: number; modifiedAt: string; reason: string | null }[] {

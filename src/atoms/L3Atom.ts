@@ -24,6 +24,7 @@ import {
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
+import { prefilterStrategy, shouldTrustType, trustedApproval } from './cost.js';
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
   readonly tier: Tier = 3;
@@ -102,6 +103,33 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (this.isFallbackMode()) return this.selfPlan(task, ctx);
 
     const catalog = this.registry.listByTier(2);
+
+    // Cheap Haiku prefilter: short-circuit the Opus strategy call when a
+    // catalog L2 is an obvious fit. Creating a new L2 (seed design) still
+    // needs Opus, so "escalate" falls through to the full plan call.
+    if (catalog.length > 0) {
+      const prefilter = await prefilterStrategy({
+        ctx,
+        task,
+        catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
+      });
+      if (prefilter && prefilter.kind === 'reuse') {
+        this.pendingStrategy = {
+          strategy: 'reuse',
+          target: prefilter.target,
+          reasoning: `prefilter: ${prefilter.reasoning}`,
+        };
+        ctx.logger.debug(
+          `[${this.name}] prefilter picked L2 ${prefilter.target}`,
+          { reasoning: prefilter.reasoning }
+        );
+        return {
+          reasoning: `prefilter selected ${prefilter.target}`,
+          proposedAction: `delegate task to L2 "${prefilter.target}"`,
+          expectedOutput: task.description,
+        };
+      }
+    }
     const toolCatalog =
       this.tools.length === 0
         ? '(no tools — children will work with prompts only)'
@@ -235,6 +263,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           `[${this.name}] escalation — branched ${child.name} → ${branched.name} (${reason})`
         );
       },
+      onApproved: async (child, _result) => {
+        this.registry.recordSuccess(child.name);
+      },
+      onFailed: async (child, _reason) => {
+        this.registry.recordFailure(child.name);
+      },
     };
 
     return superviseLoop<L2Atom>(this, l2, task, ctx, hooks);
@@ -291,6 +325,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   // Opus stays reserved for strategy/plan generation; yes/no verdicts are
   // delegated to the cheapest atom that can answer them.
   async validatePlan(child: L2Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
+    const type = this.registry.getByName(child.name);
+    if (type && shouldTrustType(type)) return trustedApproval(type);
     return llmVerdict({
       ctx,
       model: this.validationModel,
@@ -304,6 +340,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   }
 
   async validateResult(child: L2Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
+    const type = this.registry.getByName(child.name);
+    if (type && shouldTrustType(type)) return trustedApproval(type);
     return llmVerdict({
       ctx,
       model: this.validationModel,

@@ -23,6 +23,7 @@ import {
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
+import { prefilterStrategy, shouldTrustType, trustedApproval } from './cost.js';
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
@@ -81,6 +82,34 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     }
 
     const catalog = this.registry.listByTier(1);
+
+    // Cheap Haiku prefilter: if the catalog has an obvious match for this task,
+    // route straight to it and skip the Sonnet strategy call entirely. On
+    // "escalate" (or no catalog) we fall through to the full Sonnet plan.
+    if (catalog.length > 0) {
+      const prefilter = await prefilterStrategy({
+        ctx,
+        task,
+        catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
+      });
+      if (prefilter && prefilter.kind === 'reuse') {
+        this.pendingStrategy = {
+          strategy: 'reuse',
+          target: prefilter.target,
+          reasoning: `prefilter: ${prefilter.reasoning}`,
+        };
+        ctx.logger.debug(
+          `[${this.name}] prefilter picked L1 ${prefilter.target}`,
+          { reasoning: prefilter.reasoning }
+        );
+        return {
+          reasoning: `prefilter selected ${prefilter.target}`,
+          proposedAction: `delegate leaf task to L1 "${prefilter.target}"`,
+          expectedOutput: task.description,
+        };
+      }
+    }
+
     const peerCatalog = this.peers.map((p) => ({ name: p.name, ordinal: p.ordinal }));
 
     const userContent = [
@@ -225,6 +254,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           `[${this.name}] escalation — branched ${child.name} → ${branched.name} (${reason})`
         );
       },
+      onApproved: async (child, _result) => {
+        this.registry.recordSuccess(child.name);
+      },
+      onFailed: async (child, _reason) => {
+        this.registry.recordFailure(child.name);
+      },
     };
 
     return superviseLoop<L1Atom>(this, l1, task, ctx, hooks);
@@ -299,6 +334,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   // (Haiku by default), not the supervisor's own model. The job here is a
   // terse yes/no on the child's plan/result; it does not need Sonnet to answer.
   async validatePlan(child: L1Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
+    const type = this.registry.getByName(child.name);
+    if (type && shouldTrustType(type)) return trustedApproval(type);
     return llmVerdict({
       ctx,
       model: this.validationModel,
@@ -312,6 +349,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
+    const type = this.registry.getByName(child.name);
+    if (type && shouldTrustType(type)) return trustedApproval(type);
     return llmVerdict({
       ctx,
       model: this.validationModel,
