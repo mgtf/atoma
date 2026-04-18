@@ -10,7 +10,7 @@ import type {
   Verdict,
 } from '../core/types.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
-import { PIN_SONNET } from '../core/models.js';
+import { PIN_HAIKU, PIN_SONNET } from '../core/models.js';
 import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
@@ -27,6 +27,7 @@ import { mergeTools } from './toolMerge.js';
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
   readonly model: string;
+  readonly validationModel: string;
   readonly peers: L2Atom[] = [];
 
   private registry: AtomRegistry;
@@ -41,6 +42,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     registry: AtomRegistry;
     peers?: L2Atom[];
     model?: string;
+    validationModel?: string;
   }) {
     super({
       name: args.name,
@@ -50,6 +52,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       params: args.params,
     });
     this.model = args.model ?? PIN_SONNET;
+    this.validationModel = args.validationModel ?? PIN_HAIKU;
     this.registry = args.registry;
     if (args.peers) this.peers.push(...args.peers);
   }
@@ -292,15 +295,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     };
   }
 
-  // Supervisor<L1Atom> contract
+  // Supervisor<L1Atom> contract — validations always run on validationModel
+  // (Haiku by default), not the supervisor's own model. The job here is a
+  // terse yes/no on the child's plan/result; it does not need Sonnet to answer.
   async validatePlan(child: L1Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
     return llmVerdict({
       ctx,
-      model: this.model,
+      model: this.validationModel,
       supervisorName: this.name,
       supervisorTier: 2,
-      systemPrompt: this.effectiveSystemPrompt(),
-      params: this.params,
       subject: 'PLAN',
       child,
       task,
@@ -311,11 +314,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     return llmVerdict({
       ctx,
-      model: this.model,
+      model: this.validationModel,
       supervisorName: this.name,
       supervisorTier: 2,
-      systemPrompt: this.effectiveSystemPrompt(),
-      params: this.params,
       subject: 'RESULT',
       child,
       task,
@@ -367,42 +368,51 @@ function extractFirstJsonObject(s: string): { value: unknown; end: number } {
   throw new Error('unterminated JSON object');
 }
 
+/**
+ * Fixed system prompt used for EVERY validation call across all tiers. It is
+ * identical call-to-call, which lets prompt caching short-circuit the input
+ * bill on repeat verdicts — critical since validations dominate the loop.
+ */
+export const VALIDATION_SYSTEM_PROMPT = [
+  'You validate agent outputs in a three-tier LLM orchestration system.',
+  'Your ONLY job: emit a single Verdict JSON. No prose, no markdown, no tool calls.',
+  'Approve when the subject clearly satisfies the stated task.',
+  'Reject only when there is a concrete, fixable problem you can state in one sentence.',
+  'When rejecting, provide actionable "modifications" and pick a "scope":',
+  '  - "ephemeral": apply only to this instance for this task',
+  '  - "patch":     update the canonical child type for future reuses',
+  '  - "branch":    create a new child type with the modifications applied',
+  'Verdict shapes:',
+  '  {"approved": true, "reasoning": "..."}',
+  '  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "..."}',
+  'Your entire response MUST start with "{" and be ONLY the JSON object.',
+].join('\n');
+
+/** Compact params for validation: verdict JSON is short, be fast and deterministic. */
+const VALIDATION_PARAMS: GenerationParams = { temperature: 0, maxTokens: 512 };
+
 export async function llmVerdict(args: {
   ctx: RunContext;
   model: string;
   supervisorName: string;
   supervisorTier: Tier;
-  systemPrompt: string;
-  params: GenerationParams;
   subject: 'PLAN' | 'RESULT';
   child: Atom;
   task: Task;
   payload: unknown;
 }): Promise<Verdict> {
   const userContent = [
-    `You are "${args.supervisorName}" (tier ${args.supervisorTier}) supervising "${args.child.name}" (tier ${args.child.tier}).`,
-    `Evaluate the ${args.subject} below. Respond with a JSON verdict.`,
-    ``,
+    `Supervisor: "${args.supervisorName}" (tier ${args.supervisorTier})`,
+    `Child: "${args.child.name}" (tier ${args.child.tier})`,
     `Task: ${args.task.description}`,
-    `${args.subject}: ${JSON.stringify(args.payload, null, 2)}`,
-    ``,
-    `Approve only if the ${args.subject.toLowerCase()} is clearly acceptable.`,
-    `If you reject, provide actionable "modifications" and a "scope":`,
-    `  - "ephemeral": change applies only to this instance for this task`,
-    `  - "patch": update the canonical child type (future reuses see the change)`,
-    `  - "branch": create a new child type with these modifications applied`,
-    ``,
-    `Verdict JSON shapes:`,
-    `  {"approved": true, "reasoning": "..."}`,
-    `  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "..."}`,
+    `${args.subject}: ${JSON.stringify(args.payload)}`,
   ].join('\n');
 
-  // Supervision verdicts are pure reasoning: no tool access needed or allowed.
   const resp = await args.ctx.llm.complete({
     model: args.model,
-    systemPrompt: args.systemPrompt,
+    systemPrompt: VALIDATION_SYSTEM_PROMPT,
     userContent,
-    params: args.params,
+    params: VALIDATION_PARAMS,
   });
 
   return parseWith(verdictSchema, resp.text);

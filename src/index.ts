@@ -13,7 +13,7 @@ export { MOLECULES, nextAvailableMolecule, type Molecule } from './registry/taxo
 export { CELLS, nextAvailableCell, type Cell } from './registry/taxonomies/cells.js';
 
 export { L1Atom } from './atoms/L1Atom.js';
-export { L2Atom } from './atoms/L2Atom.js';
+export { L2Atom, VALIDATION_SYSTEM_PROMPT, llmVerdict } from './atoms/L2Atom.js';
 export { L3Atom } from './atoms/L3Atom.js';
 export { mergeTools } from './atoms/toolMerge.js';
 

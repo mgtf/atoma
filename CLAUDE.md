@@ -17,6 +17,24 @@ npm run build          # emits to dist/
 npm run example:research "<topic>"   # live run, requires ANTHROPIC_API_KEY
 ```
 
+## Cost discipline (load-bearing — read before changing any LLM call site)
+
+- **The cheapest atom that can answer, SHOULD answer.** Validation is a yes/no;
+  strategy/plan generation is real reasoning. So:
+  - `L2Atom.plan` / `L3Atom.plan` run on `this.model` (Sonnet / Opus).
+  - `validatePlan` / `validateResult` run on `this.validationModel` (Haiku by
+    default) via `llmVerdict` in `src/atoms/L2Atom.ts`.
+- **`VALIDATION_SYSTEM_PROMPT` is the ONE system prompt used by every verdict
+  call in the whole system.** It is deliberately constant across tiers and tasks
+  so prompt caching short-circuits the input bill on repeat validations. Do not
+  inline a custom system prompt into a verdict call.
+- Validation params are pinned to `{ temperature: 0, maxTokens: 512 }` inside
+  `llmVerdict`. Raise `maxTokens` only if you actually see truncated verdicts —
+  a verdict is a tiny JSON object and padding the ceiling wastes billed tokens.
+- L3/L2 never pass `tools` or an `executor` on their own LLM calls. Only L1 gets
+  tool declarations and a tool loop; that's the whole point of the tier split.
+  Grep `executor:` to confirm it only appears in `L1Atom.execute`.
+
 ## Architecture invariants (don't violate these)
 
 - **`superviseLoop` is the ONLY implementation of the plan→validate→execute→validate

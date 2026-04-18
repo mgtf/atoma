@@ -11,7 +11,7 @@ import type {
   Verdict,
 } from '../core/types.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
-import { resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
+import { PIN_HAIKU, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
 import { llmVerdict } from './L2Atom.js';
 import {
@@ -28,6 +28,7 @@ import { mergeTools } from './toolMerge.js';
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
   readonly tier: Tier = 3;
   readonly model: string;
+  readonly validationModel: string;
 
   private registry: AtomRegistry;
   private pendingStrategy: L3Strategy | null = null;
@@ -41,6 +42,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     params: GenerationParams;
     registry: AtomRegistry;
     model: string;
+    validationModel?: string;
   }) {
     super({
       name: args.name,
@@ -50,6 +52,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: args.params,
     });
     this.model = args.model;
+    this.validationModel = args.validationModel ?? PIN_HAIKU;
     this.registry = args.registry;
   }
 
@@ -284,15 +287,15 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     };
   }
 
-  // Supervisor<L2Atom>
+  // Supervisor<L2Atom> — validations run on validationModel (Haiku by default).
+  // Opus stays reserved for strategy/plan generation; yes/no verdicts are
+  // delegated to the cheapest atom that can answer them.
   async validatePlan(child: L2Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
     return llmVerdict({
       ctx,
-      model: this.model,
+      model: this.validationModel,
       supervisorName: this.name,
       supervisorTier: 3,
-      systemPrompt: this.effectiveSystemPrompt(),
-      params: this.params,
       subject: 'PLAN',
       child,
       task,
@@ -303,11 +306,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   async validateResult(child: L2Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     return llmVerdict({
       ctx,
-      model: this.model,
+      model: this.validationModel,
       supervisorName: this.name,
       supervisorTier: 3,
-      systemPrompt: this.effectiveSystemPrompt(),
-      params: this.params,
       subject: 'RESULT',
       child,
       task,
