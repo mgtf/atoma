@@ -85,18 +85,42 @@ export async function prefilterStrategy(args: {
   ctx: RunContext;
   task: Task;
   catalog: CatalogEntry[];
+  /**
+   * Names already tried and failed during the current supervision cycle.
+   * They are filtered out of the catalog before the LLM sees it, so the
+   * prefilter cannot loop on a child that just proved itself incapable.
+   * If the filtered catalog is empty, we return an escalate outcome so the
+   * caller falls back to the full supervisor plan (which can create a new
+   * type or mutualize).
+   */
+  exclude?: ReadonlySet<string>;
   model?: string;
 }): Promise<PrefilterOutcome | null> {
   if (args.catalog.length === 0) return null;
+
+  const filtered = args.exclude
+    ? args.catalog.filter((c) => !args.exclude!.has(c.name))
+    : args.catalog;
+  if (filtered.length === 0) {
+    return {
+      kind: 'escalate',
+      reasoning: `all catalog entries already tried and failed: ${args.catalog
+        .map((c) => c.name)
+        .join(', ')}`,
+    };
+  }
 
   const userContent = [
     `Task: ${args.task.description}`,
     args.task.constraints?.length
       ? `Constraints:\n${args.task.constraints.map((c) => `- ${c}`).join('\n')}`
       : '',
+    args.exclude && args.exclude.size > 0
+      ? `Already tried and failed THIS task (do NOT pick these): ${[...args.exclude].join(', ')}`
+      : '',
     ``,
     `Catalog:`,
-    args.catalog.map((c) => `  - ${c.name}: ${c.description}`).join('\n'),
+    filtered.map((c) => `  - ${c.name}: ${c.description}`).join('\n'),
   ]
     .filter(Boolean)
     .join('\n');
@@ -110,9 +134,12 @@ export async function prefilterStrategy(args: {
     });
     const outcome = parseWith(prefilterResponseSchema, resp.text);
     if (outcome.kind === 'reuse') {
-      const known = new Set(args.catalog.map((c) => c.name));
+      const known = new Set(filtered.map((c) => c.name));
       if (!known.has(outcome.target)) {
-        return { kind: 'escalate', reasoning: `prefilter returned unknown target "${outcome.target}"` };
+        return {
+          kind: 'escalate',
+          reasoning: `prefilter returned unknown or excluded target "${outcome.target}"`,
+        };
       }
     }
     return outcome;

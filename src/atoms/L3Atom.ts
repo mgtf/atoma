@@ -40,6 +40,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   private registry: AtomRegistry;
   private pendingStrategy: L3Strategy | null = null;
   private l2Peers: L2Atom[] = [];
+  /** See L2Atom.triedChildren — same anti-loop mechanism, one tier up. */
+  private triedChildren = new Set<string>();
+  private lastTaskDescription: string | null = null;
 
   private constructor(args: {
     name: string;
@@ -108,16 +111,24 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   async plan(task: Task, ctx: RunContext): Promise<Plan> {
     if (this.isFallbackMode()) return this.selfPlan(task, ctx);
 
+    // Reset per-task memory when the task changes.
+    if (this.lastTaskDescription !== task.description) {
+      this.triedChildren.clear();
+      this.lastTaskDescription = task.description;
+    }
+
     const catalog = this.registry.listByTier(2);
 
     // Cheap Haiku prefilter: short-circuit the Opus strategy call when a
     // catalog L2 is an obvious fit. Creating a new L2 (seed design) still
     // needs Opus, so "escalate" falls through to the full plan call.
+    // triedChildren is threaded in to break re-pick loops.
     if (catalog.length > 0) {
       const prefilter = await prefilterStrategy({
         ctx,
         task,
         catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
+        exclude: this.triedChildren,
       });
       if (prefilter && prefilter.kind === 'reuse') {
         this.pendingStrategy = {
@@ -125,6 +136,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           target: prefilter.target,
           reasoning: `prefilter: ${prefilter.reasoning}`,
         };
+        this.triedChildren.add(prefilter.target);
         ctx.logger.debug(
           `[${this.name}] prefilter picked L2 ${prefilter.target}`,
           { reasoning: prefilter.reasoning }
@@ -207,6 +219,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       const found = this.registry.getByName(strategy.target);
       if (!found) throw new RegistryNotFoundError(strategy.target);
       l2Type = found;
+      this.triedChildren.add(l2Type.name);
     } else {
       const seed: NonNullable<typeof strategy.seed> =
         strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
@@ -225,6 +238,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         createdBy: this.name,
       });
       ctx.logger.info(`[${this.name}] created L2 ${l2Type.name}`, { ordinal: l2Type.ordinal });
+      this.triedChildren.add(l2Type.name);
     }
 
     const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers);
@@ -319,10 +333,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       userContent,
       params: this.params,
     });
-    const p = parseWith(resultPayloadSchema, resp.text);
+    // Tolerant parse: in fallback mode Opus sometimes ignores the JSON envelope
+    // and dumps the content directly (e.g. a full HTML document instead of
+    // {"output":"..."}). Accept that as the raw output rather than crashing —
+    // the supervisor above has no recovery path for a parse error here.
+    const { output, summary } = parsePayloadTolerant(resp.text);
     return {
-      output: p.output,
-      summary: p.summary,
+      output,
+      summary,
       trace: [],
       producedBy: { tier: 3, name: this.name, viaFallback: this.isFallbackMode() },
     };
@@ -476,4 +494,26 @@ function findBalancedEnd(s: string, start: number): number {
     }
   }
   return -1;
+}
+
+/**
+ * Tolerant result parser for fallback self-execute. Tries the strict
+ * `{output, summary}` schema first, then falls back to wrapping the raw text
+ * as output. This keeps the supervisor alive when Opus ignores the JSON
+ * envelope and dumps content directly.
+ */
+function parsePayloadTolerant(text: string): {
+  output: unknown;
+  summary: string;
+} {
+  try {
+    const p = parseWith(resultPayloadSchema, text);
+    return { output: p.output, summary: p.summary };
+  } catch {
+    const trimmed = text.trim();
+    return {
+      output: trimmed,
+      summary: `fallback produced non-JSON output (${trimmed.length} chars)`,
+    };
+  }
 }
