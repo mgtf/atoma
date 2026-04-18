@@ -17,3 +17,15 @@ export async function resolveLatestOpus(client: Anthropic): Promise<string> {
     return FALLBACK_OPUS;
   }
 }
+
+/**
+ * Some recent Anthropic reasoning models (e.g. `claude-opus-4-7` and later)
+ * no longer accept `temperature` / `top_p` sampling params and return a 400
+ * if you send them. Keep this list conservative: add a model here only once
+ * the API confirms it rejects the param.
+ */
+export function modelSupportsSamplingParams(model: string): boolean {
+  if (/^claude-opus-4-(?:[7-9]|\d{2,})(?:-|$)/.test(model)) return false;
+  if (/^claude-opus-(?:[5-9]|\d{2,})-/.test(model)) return false;
+  return true;
+}

@@ -23,6 +23,7 @@ import {
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { RegistryNotFoundError } from '../core/errors.js';
+import { mergeTools } from './toolMerge.js';
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
   readonly tier: Tier = 3;
@@ -98,9 +99,21 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (this.isFallbackMode()) return this.selfPlan(task, ctx);
 
     const catalog = this.registry.listByTier(2);
+    const toolCatalog =
+      this.tools.length === 0
+        ? '(no tools — children will work with prompts only)'
+        : this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n');
     const userContent = [
       `You are atom "${this.name}" (tier 3 / cell).`,
-      `Decide how to handle this task. Options:`,
+      ``,
+      `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
+      `shells, start servers, or validate anything. Your ONLY job is strategic:`,
+      `choose an L2 molecule (reuse or create) and hand the work off. The L2 will`,
+      `in turn delegate each concrete leaf step to an L1 element — L1 is the only`,
+      `tier allowed to call tools. This hierarchy exists to minimise LLM cost, so`,
+      `keep your reasoning short and your plan high-level.`,
+      ``,
+      `Options:`,
       `  - "reuse": pick an existing L2 molecule from the catalog that fits`,
       `  - "create": design a new L2 molecule and register it (provide a seed)`,
       ``,
@@ -109,22 +122,32 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         ? '  (empty — you must create)'
         : catalog.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
       ``,
+      `System tools the L1 workers will have access to downstream (for context only;`,
+      `do NOT call them yourself):`,
+      toolCatalog,
+      ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       task.constraints?.length ? `Constraints:\n${task.constraints.map((c) => `- ${c}`).join('\n')}` : '',
       ``,
-      `Respond with STRATEGY JSON then PLAN JSON as an array: [strategy, plan].`,
-      `Strategy: {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {...}, "reasoning": "..."}`,
-      `Plan: {"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `CRITICAL OUTPUT FORMAT: your entire response MUST be exactly one JSON array`,
+      `of TWO objects, with no prose before or after, no markdown fences, no tool calls.`,
+      `Shape:`,
+      `[`,
+      `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
+      `  {"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `]`,
+      `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
       .filter(Boolean)
       .join('\n');
 
+    // L3 is a pure reasoning / routing tier: no executor and no tool declarations
+    // are passed to the LLM. Only L1 may actually execute tools.
     const resp = await ctx.llm.complete({
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      tools: this.tools,
       params: this.params,
     });
 
@@ -147,12 +170,20 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       if (!found) throw new RegistryNotFoundError(strategy.target);
       l2Type = found;
     } else {
-      if (!strategy.seed) throw new Error('create requires seed');
+      const seed: NonNullable<typeof strategy.seed> =
+        strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
       l2Type = this.registry.create(2, {
-        description: strategy.seed.description,
-        systemPrompt: strategy.seed.systemPrompt,
-        tools: strategy.seed.tools as Tool[],
-        params: strategy.seed.params as GenerationParams,
+        description:
+          seed.description ?? `L2 molecule created by ${this.name} for: ${task.description}`,
+        systemPrompt:
+          seed.systemPrompt ??
+          [
+            `You are an L2 molecule created by ${this.name}.`,
+            `Decompose sub-tasks into L1 elements and supervise them.`,
+            `Original task: ${task.description}`,
+          ].join('\n'),
+        tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+        params: (seed.params ?? this.params) as GenerationParams,
         createdBy: this.name,
       });
       ctx.logger.info(`[${this.name}] created L2 ${l2Type.name}`, { ordinal: l2Type.ordinal });
@@ -225,8 +256,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   }
 
   private async selfExecute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
+    // Fallback: even here L3 does NOT touch tools. It summarises / reasons only.
+    // If the task truly requires side effects, the supervise loop should retry
+    // through an L2 → L1 path before reaching this branch.
     const userContent = [
-      `You are "${this.name}" (tier 3) executing the approved plan yourself.`,
+      `You are "${this.name}" (tier 3) in FALLBACK: produce a reasoning-only answer.`,
+      `You have NO tools. Do not claim to have written files or started servers.`,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       `Plan: ${JSON.stringify(plan)}`,
@@ -283,49 +318,95 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
 function parseTwoJson(text: string): [unknown, unknown] {
   const trimmed = text.trim();
-  try {
-    const arr = JSON.parse(trimmed);
-    if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
-  } catch {
-    /* continue */
+
+  // Fast path: the model returned a pure JSON array [strategy, plan].
+  const firstBracket = trimmed.indexOf('[');
+  if (firstBracket !== -1) {
+    const firstBrace = trimmed.indexOf('{');
+    if (firstBracket < firstBrace || firstBrace === -1) {
+      const arrEnd = findBalancedEnd(trimmed, firstBracket);
+      if (arrEnd !== -1) {
+        try {
+          const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+        } catch {
+          /* fall through */
+        }
+      }
+    }
   }
+
+  // Two fenced code blocks.
   const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
   if (fences.length >= 2) {
     return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
   }
+
+  // Fallback: extract two successive top-level JSON objects anywhere in the text.
   const start1 = trimmed.indexOf('{');
-  if (start1 === -1) throw new Error('no JSON object');
-  let depth = 0;
-  let end1 = -1;
-  for (let i = start1; i < trimmed.length; i++) {
-    const c = trimmed[i];
-    if (c === '{') depth++;
-    else if (c === '}') {
-      depth--;
-      if (depth === 0) {
-        end1 = i + 1;
-        break;
-      }
-    }
+  if (start1 === -1) {
+    throw new Error(
+      `parseTwoJson: no JSON object found (head: ${trimmed.slice(0, 200)})`
+    );
   }
-  if (end1 === -1) throw new Error('unterminated first JSON');
-  const first = JSON.parse(trimmed.slice(start1, end1));
-  const rest = trimmed.slice(end1);
+  const end1 = findBalancedEnd(trimmed, start1);
+  if (end1 === -1) {
+    throw new Error(
+      `parseTwoJson: unterminated first JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  const first = JSON.parse(trimmed.slice(start1, end1 + 1));
+  const rest = trimmed.slice(end1 + 1);
   const start2 = rest.indexOf('{');
-  if (start2 === -1) throw new Error('missing second JSON');
-  depth = 0;
-  let end2 = -1;
-  for (let i = start2; i < rest.length; i++) {
-    const c = rest[i];
-    if (c === '{') depth++;
-    else if (c === '}') {
+  if (start2 === -1) {
+    throw new Error(
+      `parseTwoJson: missing second JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  const end2 = findBalancedEnd(rest, start2);
+  if (end2 === -1) {
+    throw new Error(
+      `parseTwoJson: unterminated second JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  return [first, JSON.parse(rest.slice(start2, end2 + 1))];
+}
+
+/**
+ * Scan forward from `start` (which must point at `{` or `[`) and return the
+ * index of its matching close bracket, honouring string literals (including
+ * escape sequences). Returns -1 if unterminated.
+ */
+function findBalancedEnd(s: string, start: number): number {
+  const open = s[start];
+  const close = open === '{' ? '}' : open === '[' ? ']' : '';
+  if (!close) return -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === '\\') {
+      escape = true;
+      continue;
+    }
+    if (inString) {
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
       depth--;
-      if (depth === 0) {
-        end2 = i + 1;
-        break;
-      }
+      if (depth === 0) return i;
     }
   }
-  if (end2 === -1) throw new Error('unterminated second JSON');
-  return [first, JSON.parse(rest.slice(start2, end2))];
+  return -1;
 }

@@ -22,6 +22,7 @@ import {
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { RegistryNotFoundError } from '../core/errors.js';
+import { mergeTools } from './toolMerge.js';
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
@@ -81,7 +82,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
     const userContent = [
       `You are atom "${this.name}" (tier 2 / molecule).`,
-      `Decide how to handle this task. Options:`,
+      ``,
+      `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
+      `shells, start servers, or validate anything. Your role is coordination:`,
+      `break the task into a focused leaf sub-task and route it to an L1 element`,
+      `(the only tier that can call tools). If the work needs several leaf steps,`,
+      `give the L1 a single composite leaf with clear instructions — the L1's own`,
+      `LLM loop will call the tools sequentially. Minimise LLM spend: prefer`,
+      `"reuse" or "mutualize" over "create" whenever possible, keep prompts short.`,
+      ``,
+      `Options:`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
       `  - "create": design a new L1 element and register it (provide a seed)`,
       `  - "mutualize": delegate to a peer L2 molecule when their specialty fits better`,
@@ -96,25 +106,34 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ? '  (no peers available)'
         : peerCatalog.map((p) => `  - ${p.name}`).join('\n'),
       ``,
+      `Tools the L1 you spawn will inherit automatically (for context only — do`,
+      `NOT call them yourself):`,
+      this.tools.length === 0
+        ? '  (none)'
+        : this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
+      ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       task.constraints?.length ? `Constraints:\n${task.constraints.map((c) => `- ${c}`).join('\n')}` : '',
       ``,
-      `Respond with a STRATEGY JSON:`,
-      `{"strategy": "reuse"|"create"|"mutualize", "target": "<name>"?, "seed": {"description", "systemPrompt", "tools": [], "params": {}}?, "reasoning": "..."}`,
-      `Then on a new line, the PLAN JSON:`,
-      `{"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
-      ``,
-      `Return BOTH JSON objects as a single array: [strategy, plan].`,
+      `CRITICAL OUTPUT FORMAT: your entire response MUST be exactly one JSON array`,
+      `of TWO objects, with no prose before or after, no markdown fences, no tool calls.`,
+      `Shape:`,
+      `[`,
+      `  {"strategy": "reuse"|"create"|"mutualize", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
+      `  {"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `]`,
+      `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
       .filter(Boolean)
       .join('\n');
 
+    // L2 is a pure reasoning / routing tier: no executor, no tool declarations.
+    // Only L1 may actually execute tools.
     const resp = await ctx.llm.complete({
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      tools: this.tools,
       params: this.params,
     });
 
@@ -148,12 +167,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       if (!found) throw new RegistryNotFoundError(strategy.target);
       l1Type = found;
     } else {
-      if (!strategy.seed) throw new Error('create requires seed');
+      const seed: NonNullable<typeof strategy.seed> =
+        strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
       l1Type = this.registry.create(1, {
-        description: strategy.seed.description,
-        systemPrompt: strategy.seed.systemPrompt,
-        tools: strategy.seed.tools as Tool[],
-        params: strategy.seed.params as GenerationParams,
+        description:
+          seed.description ?? `L1 element created by ${this.name} for: ${task.description}`,
+        systemPrompt:
+          seed.systemPrompt ??
+          [
+            `You are an L1 element created by ${this.name}.`,
+            `Execute a focused leaf task and return a clean, structured result.`,
+            `Original task: ${task.description}`,
+          ].join('\n'),
+        tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+        params: (seed.params ?? this.params) as GenerationParams,
         createdBy: this.name,
       });
       ctx.logger.info(`[${this.name}] created L1 ${l1Type.name}`, { ordinal: l1Type.ordinal });
@@ -228,15 +255,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      tools: this.tools,
       params: this.params,
     });
     return parseWith(planSchema, resp.text);
   }
 
   private async selfExecute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
+    // L2 fallback: reasoning-only. L2 is not allowed to touch tools. If the
+    // task truly needs side effects, the supervise loop should have spawned an
+    // L1 instead of falling back here.
     const userContent = [
-      `You are "${this.name}" (tier 2) executing the approved plan yourself.`,
+      `You are "${this.name}" (tier 2) in FALLBACK: reasoning-only answer.`,
+      `You have NO tools. Do not claim to have written files or run commands.`,
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
@@ -251,7 +281,6 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      tools: this.tools,
       params: this.params,
     });
     const p = parseWith(resultPayloadSchema, resp.text);
@@ -368,6 +397,7 @@ export async function llmVerdict(args: {
     `  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "..."}`,
   ].join('\n');
 
+  // Supervision verdicts are pure reasoning: no tool access needed or allowed.
   const resp = await args.ctx.llm.complete({
     model: args.model,
     systemPrompt: args.systemPrompt,

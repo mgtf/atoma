@@ -15,3 +15,17 @@ export { CELLS, nextAvailableCell, type Cell } from './registry/taxonomies/cells
 export { L1Atom } from './atoms/L1Atom.js';
 export { L2Atom } from './atoms/L2Atom.js';
 export { L3Atom } from './atoms/L3Atom.js';
+export { mergeTools } from './atoms/toolMerge.js';
+
+export { ToolSandbox } from './tools/sandbox.js';
+export { InMemoryToolRegistry } from './tools/registry.js';
+export {
+  writeFileTool,
+  readFileTool,
+  listFilesTool,
+  runShellTool,
+  startStaticServerTool,
+  defaultBuiltinTools,
+  type BuiltinTool,
+  type BuiltinToolOptions,
+} from './tools/builtin.js';

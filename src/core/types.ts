@@ -92,6 +92,13 @@ export interface LlmCompletionRequest {
   params?: GenerationParams;
   cacheSystem?: boolean;
   cacheTools?: boolean;
+  /**
+   * If provided, the LLM client will run a tool-use loop: any `tool_use`
+   * blocks returned by the model are executed locally via this executor and
+   * their results are sent back to the model until it returns a final text
+   * response. Without it the client returns the first response as-is.
+   */
+  executor?: ToolExecutor;
 }
 
 export interface LlmCompletionResponse {
@@ -109,9 +116,22 @@ export interface LlmClient {
   complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse>;
 }
 
+/**
+ * Executes a declared tool by name. Implementations are usually backed by an
+ * in-memory map populated at app startup (the registry stores only the
+ * serializable declaration — name/description/schema — so executors live
+ * outside the DB).
+ */
+export interface ToolExecutor {
+  execute(name: string, args: Record<string, unknown>): Promise<unknown>;
+  has(name: string): boolean;
+}
+
 export interface RunContext {
   readonly logger: Logger;
   readonly signal: AbortSignal;
   readonly llm: LlmClient;
   readonly limits: Limits;
+  /** Optional: tool executor used by atoms when the LLM emits tool_use blocks. */
+  readonly tools?: ToolExecutor;
 }

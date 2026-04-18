@@ -9,11 +9,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "example:research": "tsx src/examples/research-brief.ts"
+    "example:research": "tsx src/examples/research-brief.ts",
+    "example:build": "tsx src/examples/build-app.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
     "better-sqlite3": "^11.3.0",
+    "puppeteer": "^24.41.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
