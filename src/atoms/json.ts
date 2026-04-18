@@ -164,7 +164,13 @@ export const verdictSchema = z.discriminatedUnion('approved', [
     reasoning: z.string(),
     modifications: atomModificationsSchema,
     scope: z.enum(['ephemeral', 'branch', 'patch']),
-    branchName: z.string().optional(),
+    // LLMs sometimes emit `"branchName": null` instead of omitting the key;
+    // accept null and coerce to undefined so the runtime type stays
+    // `string | undefined`.
+    branchName: z
+      .string()
+      .nullish()
+      .transform((v) => v ?? undefined),
   }),
 ]);
 

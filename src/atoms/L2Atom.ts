@@ -17,6 +17,7 @@ import {
   l2StrategySchema,
   parseWith,
   planSchema,
+  repairTruncatedJson,
   resultPayloadSchema,
   verdictSchema,
 } from './json.js';
@@ -244,7 +245,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           child.name,
           verdict.modifications,
           this.name,
-          verdict.branchName
+          verdict.branchName ?? undefined
         );
         ctx.logger.info(`[${this.name}] branched L1 ${child.name} → ${branched.name}`);
         return L1Atom.fromType(branched);
@@ -372,45 +373,122 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
 function parseTwoJson(text: string): [unknown, unknown] {
   const trimmed = text.trim();
-  const asArray = safeParse(trimmed);
-  if (Array.isArray(asArray) && asArray.length >= 2) {
-    return [asArray[0], asArray[1]];
+
+  // Fast path: pure JSON array [strategy, plan].
+  const firstBracket = trimmed.indexOf('[');
+  if (firstBracket !== -1) {
+    const firstBrace = trimmed.indexOf('{');
+    if (firstBracket < firstBrace || firstBrace === -1) {
+      const arrEnd = findBalancedEnd(trimmed, firstBracket);
+      if (arrEnd !== -1) {
+        try {
+          const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+        } catch {
+          /* fall through */
+        }
+      }
+      // Truncation path: the array was never closed. Try to repair it so we
+      // at least recover the strategy (the plan can be approximate).
+      const sliced = trimmed.slice(firstBracket);
+      const repaired = repairTruncatedJson(sliced);
+      if (repaired) {
+        try {
+          const arr = JSON.parse(repaired);
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+          if (Array.isArray(arr) && arr.length === 1) {
+            // Only the strategy came through — synthesise a minimal plan so
+            // the supervise loop can still proceed.
+            return [
+              arr[0],
+              {
+                reasoning: 'plan section truncated; synthesised placeholder',
+                proposedAction: 'delegate to child per strategy',
+                expectedOutput: 'as described in task',
+              },
+            ];
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+    }
   }
-  // fallback: look for two JSON blocks back-to-back
+
+  // Two fenced code blocks.
   const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
   if (fences.length >= 2) {
     return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
   }
-  const first = extractFirstJsonObject(trimmed);
-  const rest = trimmed.slice(first.end);
-  const second = extractFirstJsonObject(rest);
-  return [first.value, second.value];
-}
 
-function safeParse(s: string): unknown {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return undefined;
+  // Two successive top-level JSON objects (string-aware).
+  const start1 = trimmed.indexOf('{');
+  if (start1 === -1) {
+    throw new Error(
+      `parseTwoJson: no JSON object found (head: ${trimmed.slice(0, 200)})`
+    );
   }
+  const end1 = findBalancedEnd(trimmed, start1);
+  if (end1 === -1) {
+    throw new Error(
+      `parseTwoJson: unterminated first JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  const first = JSON.parse(trimmed.slice(start1, end1 + 1));
+  const rest = trimmed.slice(end1 + 1);
+  const start2 = rest.indexOf('{');
+  if (start2 === -1) {
+    throw new Error(
+      `parseTwoJson: missing second JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  const end2 = findBalancedEnd(rest, start2);
+  if (end2 === -1) {
+    throw new Error(
+      `parseTwoJson: unterminated second JSON (head: ${trimmed.slice(0, 200)})`
+    );
+  }
+  return [first, JSON.parse(rest.slice(start2, end2 + 1))];
 }
 
-function extractFirstJsonObject(s: string): { value: unknown; end: number } {
-  const start = s.indexOf('{');
-  if (start === -1) throw new Error('no JSON object');
+/**
+ * Scan forward from `start` (which must point at `{` or `[`) and return the
+ * index of its matching close bracket, honouring string literals and escapes.
+ * Mirrors L3Atom.findBalancedEnd. See CLAUDE.md note: if a third tier appears,
+ * consolidate this helper.
+ */
+function findBalancedEnd(s: string, start: number): number {
+  const open = s[start];
+  const close = open === '{' ? '}' : open === '[' ? ']' : '';
+  if (!close) return -1;
   let depth = 0;
+  let inString = false;
+  let escape = false;
   for (let i = start; i < s.length; i++) {
     const c = s[i];
-    if (c === '{') depth++;
-    else if (c === '}') {
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === '\\') {
+      escape = true;
+      continue;
+    }
+    if (inString) {
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
       depth--;
-      if (depth === 0) {
-        const raw = s.slice(start, i + 1);
-        return { value: JSON.parse(raw), end: i + 1 };
-      }
+      if (depth === 0) return i;
     }
   }
-  throw new Error('unterminated JSON object');
+  return -1;
 }
 
 /**

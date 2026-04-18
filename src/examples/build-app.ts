@@ -65,7 +65,7 @@ async function main(): Promise<void> {
         'The final output you return must include the exact URL the L1 obtained from start_static_server so the user can open it.',
       ].join('\n'),
       tools: toolDecls,
-      params: { maxTokens: 8192 },
+      params: { maxTokens: 16384 },
       createdBy: 'user',
     });
     console.log(`bootstrapped L3 cell: ${l3Type.name}`);

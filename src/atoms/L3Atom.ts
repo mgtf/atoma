@@ -18,6 +18,7 @@ import {
   l3StrategySchema,
   parseWith,
   planSchema,
+  repairTruncatedJson,
   resultPayloadSchema,
   type L3Strategy,
 } from './json.js';
@@ -251,7 +252,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           child.name,
           verdict.modifications,
           this.name,
-          verdict.branchName
+          verdict.branchName ?? undefined
         );
         ctx.logger.info(`[${this.name}] branched L2 ${child.name} → ${branched.name}`);
         const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers);
@@ -374,6 +375,27 @@ function parseTwoJson(text: string): [unknown, unknown] {
         try {
           const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
           if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+        } catch {
+          /* fall through */
+        }
+      }
+      // Truncation path: repair and salvage what we can.
+      const sliced = trimmed.slice(firstBracket);
+      const repaired = repairTruncatedJson(sliced);
+      if (repaired) {
+        try {
+          const arr = JSON.parse(repaired);
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+          if (Array.isArray(arr) && arr.length === 1) {
+            return [
+              arr[0],
+              {
+                reasoning: 'plan section truncated; synthesised placeholder',
+                proposedAction: 'delegate to child per strategy',
+                expectedOutput: 'as described in task',
+              },
+            ];
+          }
         } catch {
           /* fall through */
         }

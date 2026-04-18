@@ -288,26 +288,37 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           interactions: {
             type: 'array',
             description:
-              'Sequence of user interactions to simulate AFTER the page loads. Each item is a click-like event dispatched at page coordinates. Useful for verifying click handlers actually run.',
+              'Sequence of user interactions to simulate AFTER the page loads. Mouse events (click/rightclick) or keyboard events (keydown/keyup/keypress). Use keypress with holdMs to simulate holding a key for a duration — essential for platformer-style inputs like "move right for 500ms while jumping".',
             items: {
               type: 'object',
               properties: {
                 type: {
                   type: 'string',
-                  enum: ['click', 'rightclick'],
-                  description: 'Mouse event kind.',
+                  enum: ['click', 'rightclick', 'keydown', 'keyup', 'keypress'],
+                  description:
+                    'Event kind. "keypress" = keydown then keyup after holdMs.',
                 },
                 selector: {
                   type: 'string',
                   description:
-                    'Optional CSS selector. If omitted, x/y are used as absolute page coordinates.',
+                    'Mouse-only. CSS selector. If omitted, x/y are used as absolute page coordinates.',
                 },
                 x: {
                   type: 'number',
                   description:
-                    'Absolute X (CSS px) if no selector; otherwise offset within the selected element.',
+                    'Mouse-only. Absolute X (CSS px) if no selector; otherwise offset within the selected element.',
                 },
                 y: { type: 'number' },
+                key: {
+                  type: 'string',
+                  description:
+                    'Keyboard-only. Key name e.g. "ArrowRight", "ArrowLeft", "Space", "w", "ArrowUp", "Enter".',
+                },
+                holdMs: {
+                  type: 'number',
+                  description:
+                    'keypress-only. Time in ms between keydown and keyup. Default 120ms.',
+                },
               },
               required: ['type'],
             },
@@ -369,14 +380,35 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
 
         for (const it of interactions) {
           try {
-            const coords = await resolveInteractionCoords(page, it);
-            const button = it.type === 'rightclick' ? 'right' : 'left';
-            await page.mouse.click(coords.x, coords.y, { button });
-            interactionLog.push(
-              `${it.type} at (${coords.x}, ${coords.y})${it.selector ? ` on ${it.selector}` : ''}`
-            );
+            if (it.type === 'click' || it.type === 'rightclick') {
+              const coords = await resolveInteractionCoords(page, it);
+              const button = it.type === 'rightclick' ? 'right' : 'left';
+              await page.mouse.click(coords.x, coords.y, { button });
+              interactionLog.push(
+                `${it.type} at (${coords.x}, ${coords.y})${it.selector ? ` on ${it.selector}` : ''}`
+              );
+            } else if (it.type === 'keydown') {
+              if (!it.key) throw new Error('keydown requires "key"');
+              await page.keyboard.down(it.key as import('puppeteer').KeyInput);
+              interactionLog.push(`keydown ${it.key}`);
+            } else if (it.type === 'keyup') {
+              if (!it.key) throw new Error('keyup requires "key"');
+              await page.keyboard.up(it.key as import('puppeteer').KeyInput);
+              interactionLog.push(`keyup ${it.key}`);
+            } else if (it.type === 'keypress') {
+              if (!it.key) throw new Error('keypress requires "key"');
+              const holdMs =
+                typeof it.holdMs === 'number' && Number.isFinite(it.holdMs)
+                  ? Math.max(0, Math.floor(it.holdMs))
+                  : 120;
+              const key = it.key as import('puppeteer').KeyInput;
+              await page.keyboard.down(key);
+              await new Promise((r) => setTimeout(r, holdMs));
+              await page.keyboard.up(key);
+              interactionLog.push(`keypress ${it.key} (${holdMs}ms)`);
+            }
             // Let listeners run / raf fire.
-            await new Promise((r) => setTimeout(r, 150));
+            await new Promise((r) => setTimeout(r, 80));
           } catch (err) {
             errors.push(
               `interaction ${it.type} failed: ${(err as Error).message}`
@@ -437,10 +469,12 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
 }
 
 interface ParsedInteraction {
-  type: 'click' | 'rightclick';
+  type: 'click' | 'rightclick' | 'keydown' | 'keyup' | 'keypress';
   selector?: string;
   x?: number;
   y?: number;
+  key?: string;
+  holdMs?: number;
 }
 
 function parseInteractions(raw: unknown): ParsedInteraction[] {
@@ -450,7 +484,14 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
     if (!item || typeof item !== 'object') continue;
     const rec = item as Record<string, unknown>;
     const t = rec['type'];
-    if (t !== 'click' && t !== 'rightclick') continue;
+    if (
+      t !== 'click' &&
+      t !== 'rightclick' &&
+      t !== 'keydown' &&
+      t !== 'keyup' &&
+      t !== 'keypress'
+    )
+      continue;
     const parsed: ParsedInteraction = { type: t };
     if (typeof rec['selector'] === 'string' && rec['selector']) {
       parsed.selector = rec['selector'] as string;
@@ -460,6 +501,12 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
     }
     if (typeof rec['y'] === 'number' && Number.isFinite(rec['y'])) {
       parsed.y = rec['y'] as number;
+    }
+    if (typeof rec['key'] === 'string' && rec['key']) {
+      parsed.key = rec['key'] as string;
+    }
+    if (typeof rec['holdMs'] === 'number' && Number.isFinite(rec['holdMs'])) {
+      parsed.holdMs = rec['holdMs'] as number;
     }
     out.push(parsed);
   }

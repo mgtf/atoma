@@ -38,7 +38,7 @@ export class AnthropicLlmClient implements LlmClient {
     const sendRequest = (includeSampling: boolean) =>
       this.client.messages.create({
         model: req.model,
-        max_tokens: req.params?.maxTokens ?? 8192,
+        max_tokens: req.params?.maxTokens ?? 16384,
         ...(includeSampling
           ? {
               temperature: req.params?.temperature ?? 0.2,
