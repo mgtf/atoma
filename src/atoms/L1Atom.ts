@@ -99,19 +99,43 @@ export class L1Atom extends Atom {
       `- Use RELATIVE paths for file tools (e.g. "index.html", not "/abs/index.html").`,
       `- After every tool call, read the result before deciding the next step.`,
       hasValidator
-        ? `- If your output is a web artifact, you MUST call validate_html on the`
+        ? `- For ANY web artifact you produce, call validate_html on the server URL.`
         : null,
       hasValidator
-        ? `  server URL. If errors are reported, read the offending file, fix the`
+        ? `  "No console errors" is NOT sufficient — a broken app that silently`
         : null,
       hasValidator
-        ? `  issue, rewrite it with write_file, and call validate_html again.`
+        ? `  does nothing has no errors either. If the app is interactive (clicks,`
         : null,
       hasValidator
-        ? `  Keep looping (max ~3 attempts) until validate_html returns no errors.`
+        ? `  forms, keys), you MUST pass an "interactions" array that exercises the`
         : null,
       hasValidator
-        ? `  Only then respond with your final JSON result.`
+        ? `  main user flow AND a "smoke" JS expression that asserts the state`
+        : null,
+      hasValidator
+        ? `  actually changed. Example smoke for a clickable grid:`
+        : null,
+      hasValidator
+        ? `    "document.body.innerText.includes('Mine') || document.querySelectorAll('.revealed').length > 0 || (window.revealed && window.revealed.flat().some(v=>v))"`
+        : null,
+      hasValidator
+        ? `  To expose internal game state to your smoke test, attach it to window`
+        : null,
+      hasValidator
+        ? `  (e.g. "window.__game = { revealed, flagged, grid };") inside the HTML.`
+        : null,
+      hasValidator
+        ? `  If validate_html returns ok:false, read the file, diagnose the exact`
+        : null,
+      hasValidator
+        ? `  cause (stacking contexts, pointer-events, missing listeners, wrong`
+        : null,
+      hasValidator
+        ? `  coords, shader version mismatch...), rewrite with write_file, and`
+        : null,
+      hasValidator
+        ? `  re-validate. Loop up to 5 times. Only return success when ok:true.`
         : null,
       ``,
       `When and only when the work is truly done, produce the final result as JSON:`,

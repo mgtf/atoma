@@ -261,10 +261,16 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
     declaration: {
       name: 'validate_html',
       description: [
-        'Load a URL in a real headless browser and report any runtime problems',
-        '(console.error messages, uncaught page errors, failed subresource loads).',
-        'Use this AFTER start_static_server to verify the app you built actually runs.',
-        'Returns { ok: boolean, errors: [...], warnings: [...] }.',
+        'Load a URL in a real headless browser and verify the app actually works.',
+        'Captures console.error, pageerror, and failed subresource loads.',
+        'OPTIONAL: pass `interactions` to simulate user input (clicks, right-clicks)',
+        'at absolute page coordinates — this is how you detect silent bugs like',
+        'elements that render but do not respond. OPTIONAL: pass `smoke`, a JS',
+        'snippet evaluated in the page context after interactions; it must return',
+        '{ ok: true } (or a truthy value) for the check to pass. For any',
+        'interactive app you MUST use interactions + smoke to prove functionality,',
+        'otherwise "no console errors" is meaningless.',
+        'Returns { ok, errors, warnings, failedRequests, smokeResult?, interactionLog? }.',
       ].join(' '),
       inputSchema: {
         type: 'object',
@@ -279,6 +285,38 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             description:
               'Additional time to wait after network idle to catch async errors. Default 1500ms.',
           },
+          interactions: {
+            type: 'array',
+            description:
+              'Sequence of user interactions to simulate AFTER the page loads. Each item is a click-like event dispatched at page coordinates. Useful for verifying click handlers actually run.',
+            items: {
+              type: 'object',
+              properties: {
+                type: {
+                  type: 'string',
+                  enum: ['click', 'rightclick'],
+                  description: 'Mouse event kind.',
+                },
+                selector: {
+                  type: 'string',
+                  description:
+                    'Optional CSS selector. If omitted, x/y are used as absolute page coordinates.',
+                },
+                x: {
+                  type: 'number',
+                  description:
+                    'Absolute X (CSS px) if no selector; otherwise offset within the selected element.',
+                },
+                y: { type: 'number' },
+              },
+              required: ['type'],
+            },
+          },
+          smoke: {
+            type: 'string',
+            description:
+              'JavaScript snippet evaluated in the page context after interactions. Must be an expression (not a function declaration). Should return { ok: boolean, details?: any } or any truthy value to pass. Example: "document.querySelectorAll(\\".revealed\\").length > 0".',
+          },
         },
         required: ['url'],
       },
@@ -289,12 +327,18 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         typeof args['waitMs'] === 'number' && Number.isFinite(args['waitMs'])
           ? Math.max(0, Math.floor(args['waitMs'] as number))
           : 1500;
+      const interactions = parseInteractions(args['interactions']);
+      const smoke =
+        typeof args['smoke'] === 'string' && args['smoke'].trim().length > 0
+          ? args['smoke']
+          : undefined;
 
       const browser = await getBrowser();
       const page = await browser.newPage();
       const errors: string[] = [];
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
+      const interactionLog: string[] = [];
 
       page.on('console', (msg) => {
         const type = msg.type();
@@ -315,17 +359,63 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       });
 
       try {
-        opts.logger?.info(`[tool:validate_html] loading ${url}`);
+        opts.logger?.info(
+          `[tool:validate_html] loading ${url}` +
+            (interactions.length ? ` (+${interactions.length} interactions)` : '') +
+            (smoke ? ' (+smoke)' : '')
+        );
         await page.goto(url, { waitUntil: 'networkidle0', timeout: 15_000 });
         if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+
+        for (const it of interactions) {
+          try {
+            const coords = await resolveInteractionCoords(page, it);
+            const button = it.type === 'rightclick' ? 'right' : 'left';
+            await page.mouse.click(coords.x, coords.y, { button });
+            interactionLog.push(
+              `${it.type} at (${coords.x}, ${coords.y})${it.selector ? ` on ${it.selector}` : ''}`
+            );
+            // Let listeners run / raf fire.
+            await new Promise((r) => setTimeout(r, 150));
+          } catch (err) {
+            errors.push(
+              `interaction ${it.type} failed: ${(err as Error).message}`
+            );
+          }
+        }
+
+        let smokeResult: unknown;
+        let smokeOk = true;
+        if (smoke) {
+          try {
+            smokeResult = await page.evaluate(
+              // We wrap the snippet so callers can write either an expression
+              // ("x > 0") or a full statement block ("const y=...; return y>0").
+              `(() => { try { const __r = (${smoke}); return __r; } catch (e) { return { ok: false, error: String(e) }; } })()`
+            );
+            smokeOk = isSmokeOk(smokeResult);
+            if (!smokeOk) {
+              errors.push(
+                `smoke check failed: ${JSON.stringify(smokeResult).slice(0, 500)}`
+              );
+            }
+          } catch (err) {
+            smokeOk = false;
+            smokeResult = { error: (err as Error).message };
+            errors.push(`smoke evaluation threw: ${(err as Error).message}`);
+          }
+        }
+
         const title = await page.title();
         return {
-          ok: errors.length === 0 && failedRequests.length === 0,
+          ok: errors.length === 0 && failedRequests.length === 0 && smokeOk,
           url,
           title,
           errors,
           warnings,
           failedRequests,
+          interactionLog,
+          ...(smoke ? { smokeResult } : {}),
         };
       } catch (err) {
         return {
@@ -337,12 +427,73 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           ],
           warnings,
           failedRequests,
+          interactionLog,
         };
       } finally {
         await page.close().catch(() => undefined);
       }
     },
   };
+}
+
+interface ParsedInteraction {
+  type: 'click' | 'rightclick';
+  selector?: string;
+  x?: number;
+  y?: number;
+}
+
+function parseInteractions(raw: unknown): ParsedInteraction[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ParsedInteraction[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const t = rec['type'];
+    if (t !== 'click' && t !== 'rightclick') continue;
+    const parsed: ParsedInteraction = { type: t };
+    if (typeof rec['selector'] === 'string' && rec['selector']) {
+      parsed.selector = rec['selector'] as string;
+    }
+    if (typeof rec['x'] === 'number' && Number.isFinite(rec['x'])) {
+      parsed.x = rec['x'] as number;
+    }
+    if (typeof rec['y'] === 'number' && Number.isFinite(rec['y'])) {
+      parsed.y = rec['y'] as number;
+    }
+    out.push(parsed);
+  }
+  return out;
+}
+
+async function resolveInteractionCoords(
+  page: import('puppeteer').Page,
+  it: ParsedInteraction
+): Promise<{ x: number; y: number }> {
+  if (it.selector) {
+    const el = await page.$(it.selector);
+    if (!el) throw new Error(`selector ${it.selector} not found`);
+    const box = await el.boundingBox();
+    if (!box) throw new Error(`selector ${it.selector} has no bounding box`);
+    const offsetX = typeof it.x === 'number' ? it.x : box.width / 2;
+    const offsetY = typeof it.y === 'number' ? it.y : box.height / 2;
+    return { x: box.x + offsetX, y: box.y + offsetY };
+  }
+  if (typeof it.x !== 'number' || typeof it.y !== 'number') {
+    throw new Error('interaction without selector needs absolute x and y');
+  }
+  return { x: it.x, y: it.y };
+}
+
+function isSmokeOk(result: unknown): boolean {
+  if (result === undefined || result === null) return false;
+  if (typeof result === 'boolean') return result;
+  if (typeof result === 'object') {
+    const r = result as Record<string, unknown>;
+    if ('ok' in r) return Boolean(r['ok']);
+    return true;
+  }
+  return Boolean(result);
 }
 
 function expectString(args: Record<string, unknown>, key: string): string {
