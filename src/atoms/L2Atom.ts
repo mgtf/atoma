@@ -15,10 +15,10 @@ import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
   l2StrategySchema,
+  parsePayloadTolerant,
+  parseTwoJson,
   parseWith,
   planSchema,
-  repairTruncatedJson,
-  resultPayloadSchema,
   verdictSchema,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
@@ -29,6 +29,7 @@ import {
   shouldTrustType,
   trustedApproval,
   STRATEGY_MAX_TOKENS,
+  TaskChildrenMemo,
 } from './cost.js';
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
@@ -39,15 +40,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
   private registry: AtomRegistry;
   private pendingStrategy: L2Strategy | null = null;
-  /**
-   * Names of L1 children already delegated to and proven unable to satisfy
-   * supervision during the CURRENT task. The prefilter is told to avoid them
-   * so we don't loop on the same failing catalog match across plan
-   * iterations. Reset via `resetTaskMemory()` when a new task comes in.
-   */
-  private triedChildren = new Set<string>();
-  /** Task description seen on the previous plan() call, used to detect task boundaries. */
-  private lastTaskDescription: string | null = null;
+  private triedChildren = new TaskChildrenMemo();
 
   constructor(args: {
     name: string;
@@ -96,24 +89,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       return this.selfPlan(task, ctx);
     }
 
-    // Reset per-task memory when the supervisor moves to a new task.
-    if (this.lastTaskDescription !== task.description) {
-      this.triedChildren.clear();
-      this.lastTaskDescription = task.description;
-    }
-
+    this.triedChildren.beginTask(task.description);
     const catalog = this.registry.listByTier(1);
 
-    // Cheap Haiku prefilter: if the catalog has an obvious match for this task,
-    // route straight to it and skip the Sonnet strategy call entirely. On
-    // "escalate" (or no catalog) we fall through to the full Sonnet plan.
-    // `triedChildren` is threaded in so repeated failures don't get re-picked.
     if (catalog.length > 0) {
       const prefilter = await prefilterStrategy({
         ctx,
         task,
         catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
-        exclude: this.triedChildren,
+        exclude: this.triedChildren.excluded(),
       });
       if (prefilter && prefilter.kind === 'reuse') {
         this.pendingStrategy = {
@@ -121,9 +105,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           target: prefilter.target,
           reasoning: `prefilter: ${prefilter.reasoning}`,
         };
-        // Record the pick so the next plan iteration (if the outer supervisor
-        // rejects this attempt) won't loop on the same L1.
-        this.triedChildren.add(prefilter.target);
+        this.triedChildren.mark(prefilter.target);
         ctx.logger.debug(
           `[${this.name}] prefilter picked L1 ${prefilter.target}`,
           { reasoning: prefilter.reasoning }
@@ -225,7 +207,6 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       const found = this.registry.getByName(strategy.target);
       if (!found) throw new RegistryNotFoundError(strategy.target);
       l1Type = found;
-      this.triedChildren.add(l1Type.name);
     } else {
       const seed: NonNullable<typeof strategy.seed> =
         strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
@@ -244,8 +225,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         createdBy: this.name,
       });
       ctx.logger.info(`[${this.name}] created L1 ${l1Type.name}`, { ordinal: l1Type.ordinal });
-      this.triedChildren.add(l1Type.name);
     }
+    this.triedChildren.mark(l1Type.name);
 
     const l1 = L1Atom.fromType(l1Type);
     const hooks: SupervisionHooks<L1Atom> = {
@@ -267,7 +248,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           child.name,
           verdict.modifications,
           this.name,
-          verdict.branchName ?? undefined
+          verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L1 ${child.name} → ${branched.name}`);
         return L1Atom.fromType(branched);
@@ -350,20 +331,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       userContent,
       params: this.params,
     });
-    // Tolerant parse: Sonnet occasionally ignores the JSON envelope in fallback
-    // and dumps raw content. Accept that gracefully so the parent supervisor
-    // still gets a Result and can decide what to do next.
-    let output: unknown;
-    let summary: string;
-    try {
-      const p = parseWith(resultPayloadSchema, resp.text);
-      output = p.output;
-      summary = p.summary;
-    } catch {
-      const trimmed = resp.text.trim();
-      output = trimmed;
-      summary = `fallback produced non-JSON output (${trimmed.length} chars)`;
-    }
+    const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,
       summary,
@@ -404,126 +372,6 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       payload: { output: result.output, summary: result.summary },
     });
   }
-}
-
-function parseTwoJson(text: string): [unknown, unknown] {
-  const trimmed = text.trim();
-
-  // Fast path: pure JSON array [strategy, plan].
-  const firstBracket = trimmed.indexOf('[');
-  if (firstBracket !== -1) {
-    const firstBrace = trimmed.indexOf('{');
-    if (firstBracket < firstBrace || firstBrace === -1) {
-      const arrEnd = findBalancedEnd(trimmed, firstBracket);
-      if (arrEnd !== -1) {
-        try {
-          const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
-          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
-        } catch {
-          /* fall through */
-        }
-      }
-      // Truncation path: the array was never closed. Try to repair it so we
-      // at least recover the strategy (the plan can be approximate).
-      const sliced = trimmed.slice(firstBracket);
-      const repaired = repairTruncatedJson(sliced);
-      if (repaired) {
-        try {
-          const arr = JSON.parse(repaired);
-          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
-          if (Array.isArray(arr) && arr.length === 1) {
-            // Only the strategy came through — synthesise a minimal plan so
-            // the supervise loop can still proceed.
-            return [
-              arr[0],
-              {
-                reasoning: 'plan section truncated; synthesised placeholder',
-                proposedAction: 'delegate to child per strategy',
-                expectedOutput: 'as described in task',
-              },
-            ];
-          }
-        } catch {
-          /* fall through */
-        }
-      }
-    }
-  }
-
-  // Two fenced code blocks.
-  const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
-  if (fences.length >= 2) {
-    return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
-  }
-
-  // Two successive top-level JSON objects (string-aware).
-  const start1 = trimmed.indexOf('{');
-  if (start1 === -1) {
-    throw new Error(
-      `parseTwoJson: no JSON object found (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const end1 = findBalancedEnd(trimmed, start1);
-  if (end1 === -1) {
-    throw new Error(
-      `parseTwoJson: unterminated first JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const first = JSON.parse(trimmed.slice(start1, end1 + 1));
-  const rest = trimmed.slice(end1 + 1);
-  const start2 = rest.indexOf('{');
-  if (start2 === -1) {
-    throw new Error(
-      `parseTwoJson: missing second JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const end2 = findBalancedEnd(rest, start2);
-  if (end2 === -1) {
-    throw new Error(
-      `parseTwoJson: unterminated second JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  return [first, JSON.parse(rest.slice(start2, end2 + 1))];
-}
-
-/**
- * Scan forward from `start` (which must point at `{` or `[`) and return the
- * index of its matching close bracket, honouring string literals and escapes.
- * Mirrors L3Atom.findBalancedEnd. See CLAUDE.md note: if a third tier appears,
- * consolidate this helper.
- */
-function findBalancedEnd(s: string, start: number): number {
-  const open = s[start];
-  const close = open === '{' ? '}' : open === '[' ? ']' : '';
-  if (!close) return -1;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (c === '\\') {
-      escape = true;
-      continue;
-    }
-    if (inString) {
-      if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === '{' || c === '[') depth++;
-    else if (c === '}' || c === ']') {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
 }
 
 /**
@@ -573,5 +421,7 @@ export async function llmVerdict(args: {
     params: VALIDATION_PARAMS,
   });
 
-  return parseWith(verdictSchema, resp.text);
+  const raw = parseWith(verdictSchema, resp.text);
+  if (raw.approved) return raw;
+  return { ...raw, branchName: raw.branchName ?? undefined };
 }

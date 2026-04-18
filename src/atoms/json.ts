@@ -119,6 +119,140 @@ export function parseWith<T>(schema: z.ZodSchema<T>, text: string): T {
   return parsed.data;
 }
 
+/**
+ * Scan forward from `start` (which must point at `{` or `[`) and return the
+ * index of its matching close bracket, honouring string literals and escapes.
+ * Returns -1 if the bracket is never closed.
+ */
+export function findBalancedEnd(s: string, start: number): number {
+  const open = s[start];
+  const close = open === '{' ? '}' : open === '[' ? ']' : '';
+  if (!close) return -1;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (c === '\\') {
+      escape = true;
+      continue;
+    }
+    if (inString) {
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === '{' || c === '[') depth++;
+    else if (c === '}' || c === ']') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse an LLM response that is expected to contain two back-to-back JSON
+ * payloads: a `[strategy, plan]` array, two fenced code blocks, or two
+ * successive top-level objects. Includes a best-effort repair for truncated
+ * responses — if the array closes are missing, we repair the tail and accept
+ * a single-object array by synthesising a placeholder plan so the supervise
+ * loop can still move forward.
+ */
+export function parseTwoJson(text: string): [unknown, unknown] {
+  const trimmed = text.trim();
+
+  const firstBracket = trimmed.indexOf('[');
+  if (firstBracket !== -1) {
+    const firstBrace = trimmed.indexOf('{');
+    if (firstBracket < firstBrace || firstBrace === -1) {
+      const arrEnd = findBalancedEnd(trimmed, firstBracket);
+      if (arrEnd !== -1) {
+        try {
+          const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+        } catch {
+          /* fall through */
+        }
+      }
+      const sliced = trimmed.slice(firstBracket);
+      const repaired = repairTruncatedJson(sliced);
+      if (repaired) {
+        try {
+          const arr = JSON.parse(repaired);
+          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+          if (Array.isArray(arr) && arr.length === 1) {
+            return [
+              arr[0],
+              {
+                reasoning: 'plan section truncated; synthesised placeholder',
+                proposedAction: 'delegate to child per strategy',
+                expectedOutput: 'as described in task',
+              },
+            ];
+          }
+        } catch {
+          /* fall through */
+        }
+      }
+    }
+  }
+
+  const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
+  if (fences.length >= 2) {
+    return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
+  }
+
+  const start1 = trimmed.indexOf('{');
+  if (start1 === -1) {
+    throw new Error(`parseTwoJson: no JSON object found (head: ${trimmed.slice(0, 200)})`);
+  }
+  const end1 = findBalancedEnd(trimmed, start1);
+  if (end1 === -1) {
+    throw new Error(`parseTwoJson: unterminated first JSON (head: ${trimmed.slice(0, 200)})`);
+  }
+  const first = JSON.parse(trimmed.slice(start1, end1 + 1));
+  const rest = trimmed.slice(end1 + 1);
+  const start2 = rest.indexOf('{');
+  if (start2 === -1) {
+    throw new Error(`parseTwoJson: missing second JSON (head: ${trimmed.slice(0, 200)})`);
+  }
+  const end2 = findBalancedEnd(rest, start2);
+  if (end2 === -1) {
+    throw new Error(`parseTwoJson: unterminated second JSON (head: ${trimmed.slice(0, 200)})`);
+  }
+  return [first, JSON.parse(rest.slice(start2, end2 + 1))];
+}
+
+/**
+ * Tolerant parser for self-execute result payloads. Tries the strict
+ * `{output, summary}` schema first, then falls back to wrapping the raw text
+ * as output. Used by L2/L3 fallback self-exec where Opus/Sonnet sometimes
+ * ignore the JSON envelope and dump content directly.
+ */
+export function parsePayloadTolerant(text: string): {
+  output: unknown;
+  summary: string;
+} {
+  try {
+    const p = parseWith(resultPayloadSchema, text);
+    return { output: p.output, summary: p.summary };
+  } catch {
+    const trimmed = text.trim();
+    return {
+      output: trimmed,
+      summary: `fallback produced non-JSON output (${trimmed.length} chars)`,
+    };
+  }
+}
+
 export const planSchema = z.object({
   reasoning: z.string(),
   proposedAction: z.string(),
@@ -165,12 +299,11 @@ export const verdictSchema = z.discriminatedUnion('approved', [
     modifications: atomModificationsSchema,
     scope: z.enum(['ephemeral', 'branch', 'patch']),
     // LLMs sometimes emit `"branchName": null` instead of omitting the key;
-    // accept null and coerce to undefined so the runtime type stays
-    // `string | undefined`.
-    branchName: z
-      .string()
-      .nullish()
-      .transform((v) => v ?? undefined),
+    // nullish() tolerates that at runtime. Output type stays
+    // `string | null | undefined` because zod v3 doesn't narrow through a
+    // discriminated union; the consumer (`llmVerdict`) normalises to
+    // `string | undefined` before returning.
+    branchName: z.string().nullish(),
   }),
 ]);
 

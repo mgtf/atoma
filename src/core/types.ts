@@ -55,7 +55,7 @@ export type NegativeVerdict = {
   reasoning: string;
   modifications: AtomModifications;
   scope: MutationScope;
-  branchName?: string | null;
+  branchName?: string;
 };
 export type Verdict = PositiveVerdict | NegativeVerdict;
 

@@ -36,9 +36,18 @@ export {
   PREFILTER_SYSTEM_PROMPT,
   prefilterStrategy,
   prefilterResponseSchema,
+  TaskChildrenMemo,
   type PrefilterOutcome,
   type CatalogEntry,
 } from './atoms/cost.js';
+export {
+  extractJson,
+  parseWith,
+  parseTwoJson,
+  parsePayloadTolerant,
+  findBalancedEnd,
+  repairTruncatedJson,
+} from './atoms/json.js';
 
 export { ToolSandbox } from './tools/sandbox.js';
 export { InMemoryToolRegistry } from './tools/registry.js';

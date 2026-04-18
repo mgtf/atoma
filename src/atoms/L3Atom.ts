@@ -16,10 +16,10 @@ import { L2Atom } from './L2Atom.js';
 import { llmVerdict } from './L2Atom.js';
 import {
   l3StrategySchema,
+  parsePayloadTolerant,
+  parseTwoJson,
   parseWith,
   planSchema,
-  repairTruncatedJson,
-  resultPayloadSchema,
   type L3Strategy,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
@@ -30,6 +30,7 @@ import {
   shouldTrustType,
   trustedApproval,
   STRATEGY_MAX_TOKENS,
+  TaskChildrenMemo,
 } from './cost.js';
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
@@ -40,9 +41,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   private registry: AtomRegistry;
   private pendingStrategy: L3Strategy | null = null;
   private l2Peers: L2Atom[] = [];
-  /** See L2Atom.triedChildren — same anti-loop mechanism, one tier up. */
-  private triedChildren = new Set<string>();
-  private lastTaskDescription: string | null = null;
+  private triedChildren = new TaskChildrenMemo();
 
   private constructor(args: {
     name: string;
@@ -111,24 +110,15 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   async plan(task: Task, ctx: RunContext): Promise<Plan> {
     if (this.isFallbackMode()) return this.selfPlan(task, ctx);
 
-    // Reset per-task memory when the task changes.
-    if (this.lastTaskDescription !== task.description) {
-      this.triedChildren.clear();
-      this.lastTaskDescription = task.description;
-    }
-
+    this.triedChildren.beginTask(task.description);
     const catalog = this.registry.listByTier(2);
 
-    // Cheap Haiku prefilter: short-circuit the Opus strategy call when a
-    // catalog L2 is an obvious fit. Creating a new L2 (seed design) still
-    // needs Opus, so "escalate" falls through to the full plan call.
-    // triedChildren is threaded in to break re-pick loops.
     if (catalog.length > 0) {
       const prefilter = await prefilterStrategy({
         ctx,
         task,
         catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
-        exclude: this.triedChildren,
+        exclude: this.triedChildren.excluded(),
       });
       if (prefilter && prefilter.kind === 'reuse') {
         this.pendingStrategy = {
@@ -136,7 +126,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           target: prefilter.target,
           reasoning: `prefilter: ${prefilter.reasoning}`,
         };
-        this.triedChildren.add(prefilter.target);
+        this.triedChildren.mark(prefilter.target);
         ctx.logger.debug(
           `[${this.name}] prefilter picked L2 ${prefilter.target}`,
           { reasoning: prefilter.reasoning }
@@ -219,7 +209,6 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       const found = this.registry.getByName(strategy.target);
       if (!found) throw new RegistryNotFoundError(strategy.target);
       l2Type = found;
-      this.triedChildren.add(l2Type.name);
     } else {
       const seed: NonNullable<typeof strategy.seed> =
         strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
@@ -238,8 +227,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         createdBy: this.name,
       });
       ctx.logger.info(`[${this.name}] created L2 ${l2Type.name}`, { ordinal: l2Type.ordinal });
-      this.triedChildren.add(l2Type.name);
     }
+    this.triedChildren.mark(l2Type.name);
 
     const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers);
     // thread existing peers so the new instance can mutualize
@@ -266,7 +255,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           child.name,
           verdict.modifications,
           this.name,
-          verdict.branchName ?? undefined
+          verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L2 ${child.name} → ${branched.name}`);
         const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers);
@@ -333,10 +322,6 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       userContent,
       params: this.params,
     });
-    // Tolerant parse: in fallback mode Opus sometimes ignores the JSON envelope
-    // and dumps the content directly (e.g. a full HTML document instead of
-    // {"output":"..."}). Accept that as the raw output rather than crashing —
-    // the supervisor above has no recovery path for a parse error here.
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,
@@ -377,143 +362,5 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       task,
       payload: { output: result.output, summary: result.summary },
     });
-  }
-}
-
-function parseTwoJson(text: string): [unknown, unknown] {
-  const trimmed = text.trim();
-
-  // Fast path: the model returned a pure JSON array [strategy, plan].
-  const firstBracket = trimmed.indexOf('[');
-  if (firstBracket !== -1) {
-    const firstBrace = trimmed.indexOf('{');
-    if (firstBracket < firstBrace || firstBrace === -1) {
-      const arrEnd = findBalancedEnd(trimmed, firstBracket);
-      if (arrEnd !== -1) {
-        try {
-          const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
-          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
-        } catch {
-          /* fall through */
-        }
-      }
-      // Truncation path: repair and salvage what we can.
-      const sliced = trimmed.slice(firstBracket);
-      const repaired = repairTruncatedJson(sliced);
-      if (repaired) {
-        try {
-          const arr = JSON.parse(repaired);
-          if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
-          if (Array.isArray(arr) && arr.length === 1) {
-            return [
-              arr[0],
-              {
-                reasoning: 'plan section truncated; synthesised placeholder',
-                proposedAction: 'delegate to child per strategy',
-                expectedOutput: 'as described in task',
-              },
-            ];
-          }
-        } catch {
-          /* fall through */
-        }
-      }
-    }
-  }
-
-  // Two fenced code blocks.
-  const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
-  if (fences.length >= 2) {
-    return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
-  }
-
-  // Fallback: extract two successive top-level JSON objects anywhere in the text.
-  const start1 = trimmed.indexOf('{');
-  if (start1 === -1) {
-    throw new Error(
-      `parseTwoJson: no JSON object found (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const end1 = findBalancedEnd(trimmed, start1);
-  if (end1 === -1) {
-    throw new Error(
-      `parseTwoJson: unterminated first JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const first = JSON.parse(trimmed.slice(start1, end1 + 1));
-  const rest = trimmed.slice(end1 + 1);
-  const start2 = rest.indexOf('{');
-  if (start2 === -1) {
-    throw new Error(
-      `parseTwoJson: missing second JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  const end2 = findBalancedEnd(rest, start2);
-  if (end2 === -1) {
-    throw new Error(
-      `parseTwoJson: unterminated second JSON (head: ${trimmed.slice(0, 200)})`
-    );
-  }
-  return [first, JSON.parse(rest.slice(start2, end2 + 1))];
-}
-
-/**
- * Scan forward from `start` (which must point at `{` or `[`) and return the
- * index of its matching close bracket, honouring string literals (including
- * escape sequences). Returns -1 if unterminated.
- */
-function findBalancedEnd(s: string, start: number): number {
-  const open = s[start];
-  const close = open === '{' ? '}' : open === '[' ? ']' : '';
-  if (!close) return -1;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < s.length; i++) {
-    const c = s[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (c === '\\') {
-      escape = true;
-      continue;
-    }
-    if (inString) {
-      if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === '{' || c === '[') depth++;
-    else if (c === '}' || c === ']') {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-/**
- * Tolerant result parser for fallback self-execute. Tries the strict
- * `{output, summary}` schema first, then falls back to wrapping the raw text
- * as output. This keeps the supervisor alive when Opus ignores the JSON
- * envelope and dumps content directly.
- */
-function parsePayloadTolerant(text: string): {
-  output: unknown;
-  summary: string;
-} {
-  try {
-    const p = parseWith(resultPayloadSchema, text);
-    return { output: p.output, summary: p.summary };
-  } catch {
-    const trimmed = text.trim();
-    return {
-      output: trimmed,
-      summary: `fallback produced non-JSON output (${trimmed.length} chars)`,
-    };
   }
 }

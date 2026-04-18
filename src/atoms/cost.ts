@@ -75,6 +75,35 @@ export interface CatalogEntry {
 }
 
 /**
+ * Per-task anti-loop memo: tracks which child atoms this supervisor has
+ * already delegated to during the current task, and auto-clears when the task
+ * boundary changes. Shared by L2 and L3 so their prefilter can't re-pick a
+ * failing child across supervise-loop iterations.
+ */
+export class TaskChildrenMemo {
+  private tried = new Set<string>();
+  private lastTask: string | null = null;
+
+  /** Call at the top of `plan()`. Clears memo if the task description changed. */
+  beginTask(description: string): void {
+    if (this.lastTask !== description) {
+      this.tried.clear();
+      this.lastTask = description;
+    }
+  }
+
+  /** Record a child we're about to hand work to. */
+  mark(name: string): void {
+    this.tried.add(name);
+  }
+
+  /** Names to exclude from prefilter catalogs this cycle. */
+  excluded(): ReadonlySet<string> {
+    return this.tried;
+  }
+}
+
+/**
  * Ask Haiku whether any catalog entry clearly matches the task.
  *
  * Returns `null` if the catalog is empty (prefilter is pointless). On any
@@ -109,6 +138,7 @@ export async function prefilterStrategy(args: {
         .join(', ')}`,
     };
   }
+  const filteredNames = new Set(filtered.map((c) => c.name));
 
   const userContent = [
     `Task: ${args.task.description}`,
@@ -133,14 +163,11 @@ export async function prefilterStrategy(args: {
       params: PREFILTER_PARAMS,
     });
     const outcome = parseWith(prefilterResponseSchema, resp.text);
-    if (outcome.kind === 'reuse') {
-      const known = new Set(filtered.map((c) => c.name));
-      if (!known.has(outcome.target)) {
-        return {
-          kind: 'escalate',
-          reasoning: `prefilter returned unknown or excluded target "${outcome.target}"`,
-        };
-      }
+    if (outcome.kind === 'reuse' && !filteredNames.has(outcome.target)) {
+      return {
+        kind: 'escalate',
+        reasoning: `prefilter returned unknown or excluded target "${outcome.target}"`,
+      };
     }
     return outcome;
   } catch (err) {
