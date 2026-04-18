@@ -108,6 +108,13 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
 - **Mutation scopes** (`ephemeral` / `patch` / `branch`) are dispatched by the
   `applyByScope` hook; the loop treats them uniformly. Add new scopes by editing
   the `MutationScope` union *and* each hook implementation (in `L2Atom`, `L3Atom`).
+- **Anti-loop memo**: each supervisor (L2, L3) owns a `TaskChildrenMemo` from
+  `src/atoms/cost.ts` that records which children it already tried during the
+  current task and auto-clears on task boundary. The prefilter is told to
+  exclude them so it cannot re-pick a child that just proved itself incapable
+  within the same supervise-loop cycle. Call `beginTask(task.description)` at
+  the top of `plan()`, `mark(name)` after committing to a child, and read
+  `excluded()` when threading into `prefilterStrategy`.
 
 ## LLM interaction conventions
 
@@ -117,8 +124,18 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   prompt and the last tool. Leave it on unless you have a measurement-backed reason.
 - Model IDs live in `src/core/models.ts`: `PIN_HAIKU`, `PIN_SONNET`, `FALLBACK_OPUS`.
   L3 resolves Opus dynamically at construction via `resolveLatestOpus`.
-- JSON parsing from LLM output uses `parseWith(schema, text)` from `src/atoms/json.ts`.
-  Prefer extending the zod schemas there over hand-rolling extraction.
+- **All JSON parsing from LLM output lives in `src/atoms/json.ts`**. Shared helpers:
+  - `parseWith(schema, text)` — schema-validated parse of a single JSON payload.
+  - `extractJson(text)` — robust JSON extraction tolerant of prose/fence wrapping.
+  - `parseTwoJson(text)` — `[strategy, plan]` pair parse; handles pure arrays,
+    fenced blocks, back-to-back objects, and truncation repair.
+  - `parsePayloadTolerant(text)` — `{output, summary}` parse with fallback to
+    wrapping the raw text when Opus/Sonnet ignores the JSON envelope in
+    fallback mode. Used by `L2Atom.selfExecute` and `L3Atom.selfExecute`.
+  - `repairTruncatedJson(raw)` — balances unterminated strings/brackets so we
+    can salvage a mid-response cutoff.
+  - `findBalancedEnd(s, start)` — string-aware bracket matcher used by the
+    parsers. Do not reinvent these; extend them if a new shape appears.
 
 ## Testing conventions
 
@@ -130,26 +147,50 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
 - When adding a new mechanism, write at minimum one direct supervisor-loop test
   and one registry state-assertion test.
 
+## Tools (L1 side-effects)
+
+- `src/tools/` hosts the whole tool machinery. L1 is the only tier that
+  executes tools; L2/L3 only pass declarations through as context.
+- **`ToolSandbox`** (`src/tools/sandbox.ts`) — filesystem + child-process jail
+  rooted at a workspace directory. All built-in tools resolve paths through it
+  and refuse to escape the root.
+- **`InMemoryToolRegistry`** (`src/tools/registry.ts`) — maps tool name →
+  executor fn. Implements `ToolExecutor` (`src/core/types.ts`), plugged into
+  `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
+- **`defaultBuiltinTools({ sandbox, logger })`** (`src/tools/builtin.ts`)
+  returns: `write_file`, `read_file`, `list_files`, `run_shell`,
+  `start_static_server`, `validate_html`. The validator uses Puppeteer — it
+  can simulate both mouse (`click`, `rightclick`) AND keyboard events
+  (`keydown`, `keyup`, `keypress` with `holdMs`) for platformer-style input.
+- **Tool-use loop**: when `req.executor` is present, `AnthropicLlmClient.complete`
+  runs up to `MAX_TOOL_ITERATIONS=12` rounds of tool_use → tool_result → LLM.
+  Usage is aggregated across rounds and reported once via `MetricsLlmClient`.
+  Only L1 should pass `executor:` — grep confirms it.
+
 ## Things that look wrong but aren't
 
 - `L3Atom.fromType` is `async` while `L2Atom.fromType` is sync. Reason: L3 resolves
   the Opus model via a network call; L2 uses a pinned constant.
-- `L2Atom` and `L3Atom` both define a private `parseTwoJson` helper that looks
-  similar but handles slightly different fallback shapes. Kept local to avoid
-  exporting a grab-bag utility. Consolidate only if a third tier appears.
+- `verdictSchema` in `json.ts` allows `branchName: null` at runtime (LLMs emit
+  it that way), but `NegativeVerdict.branchName` is typed `string | undefined`.
+  `llmVerdict` normalises `null → undefined` once at the parse boundary so
+  every downstream `registry.branch(..., branchName)` call stays clean.
 - `injectContext` appends to an array; `effectiveSystemPrompt` composes them at
-  call time. This means repeated injects stack — intended for trace accumulation
-  during escalation.
+  call time. Repeated injects stack — intended for trace accumulation during
+  escalation.
+- `AnthropicLlmClient.complete` has a one-shot retry **without** sampling
+  params when the model 400s on `temperature`/`top_p`. Guards against brand-new
+  reasoning models that reject those params. See `modelSupportsSamplingParams`
+  in `src/core/models.ts` for the known-deprecated list.
 
 ## Deferred / explicitly out of scope
 
 - Molecule / cell *composition* as a higher-order layer (the original
   "tissues/organs" metaphor). The current cells are top-level, not composed.
 - Multi-process registry (SQLite local only).
-- Streaming, OpenTelemetry, observability dashboards.
-- Generic tool registry with discovery. Tools are supplied at atom construction
-  as plain `Tool[]` values.
-- Rollback CLI for registry versions.
+- Streaming, OpenTelemetry, dashboards beyond the in-process metrics summary.
+- Rollback CLI for registry versions (the DB keeps `atom_type_versions` rows,
+  just no CLI to restore from them yet).
 
 ## Plan file
 
