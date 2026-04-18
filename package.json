@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "example:research": "tsx src/examples/research-brief.ts",
-    "example:build": "tsx src/examples/build-app.ts"
+    "example:build": "tsx src/examples/build-app.ts",
+    "registry": "tsx src/cli/registry.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",

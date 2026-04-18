@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AnthropicLlmClient } from '../core/llm.js';
+import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { AtomRegistry } from '../registry/atomRegistry.js';
@@ -24,7 +25,8 @@ async function main(): Promise<void> {
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
   const anthropic = new Anthropic({ apiKey });
-  const llm = new AnthropicLlmClient(anthropic);
+  const metrics = new InMemoryMetrics();
+  const llm = new MetricsLlmClient(new AnthropicLlmClient(anthropic), metrics);
 
   // Bootstrap: ensure at least one L3 cell exists. Reuse if already there.
   let l3Type = registry.listByTier(3)[0];
@@ -76,8 +78,17 @@ async function main(): Promise<void> {
   console.log(`\nregistry state:`);
   for (const tier of [1, 2, 3] as const) {
     const types = registry.listByTier(tier);
-    console.log(`  tier ${tier}: ${types.map((t) => `${t.name}(v${t.version})`).join(', ') || '(none)'}`);
+    console.log(
+      `  tier ${tier}: ${
+        types
+          .map((t) => `${t.name}(v${t.version}, ✓${t.successes}/✗${t.failures})`)
+          .join(', ') || '(none)'
+      }`
+    );
   }
+
+  console.log(`\nLLM usage:`);
+  console.log(metrics.formatSummary());
 }
 
 main().catch((err) => {

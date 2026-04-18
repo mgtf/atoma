@@ -4,6 +4,18 @@ export * from './core/limits.js';
 export { Atom, type Peerable, type Supervisor } from './core/atom.js';
 export { superviseLoop, type SupervisionHooks, renderTraceForContext } from './core/supervisor.js';
 export { AnthropicLlmClient, MockLlmClient } from './core/llm.js';
+export {
+  InMemoryMetrics,
+  MetricsLlmClient,
+  DEFAULT_PRICES,
+  pricesFor,
+  type LlmCallMetrics,
+  type MetricsRecorder,
+  type MetricsSummary,
+  type ModelAggregate,
+  type ModelPrices,
+  type PriceTable,
+} from './core/metrics.js';
 export { resolveLatestOpus, FALLBACK_OPUS, PIN_SONNET, PIN_HAIKU } from './core/models.js';
 
 export { openDb, type DB } from './registry/db.js';
@@ -18,6 +30,7 @@ export { L3Atom } from './atoms/L3Atom.js';
 export { mergeTools } from './atoms/toolMerge.js';
 export {
   TRUST_THRESHOLD_SUCCESSES,
+  STRATEGY_MAX_TOKENS,
   shouldTrustType,
   trustedApproval,
   PREFILTER_SYSTEM_PROMPT,

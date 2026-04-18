@@ -23,7 +23,12 @@ import {
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
-import { prefilterStrategy, shouldTrustType, trustedApproval } from './cost.js';
+import {
+  prefilterStrategy,
+  shouldTrustType,
+  trustedApproval,
+  STRATEGY_MAX_TOKENS,
+} from './cost.js';
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
@@ -161,12 +166,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       .join('\n');
 
     // L2 is a pure reasoning / routing tier: no executor, no tool declarations.
-    // Only L1 may actually execute tools.
+    // Only L1 may actually execute tools. Cap output at STRATEGY_MAX_TOKENS —
+    // the response is a routing JSON pair, not content.
     const resp = await ctx.llm.complete({
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      params: this.params,
+      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS },
     });
 
     const pair = parseTwoJson(resp.text);

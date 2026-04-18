@@ -11,10 +11,17 @@ is an LLM-backed agent. See `README.md` for the external pitch.
 
 ```bash
 npm install
-npm run typecheck      # tsc --noEmit (strict mode)
-npm test               # vitest run (32 tests, all mocked — no API key needed)
-npm run build          # emits to dist/
-npm run example:research "<topic>"   # live run, requires ANTHROPIC_API_KEY
+npm run typecheck                     # tsc --noEmit (strict mode)
+npm test                              # vitest run — all mocked, no API key needed
+npm run build                         # emits to dist/
+npm run example:research "<topic>"    # live, requires ANTHROPIC_API_KEY
+npm run example:build "<goal>"        # live build-an-app example
+
+npm run registry -- list              # inspect persisted atom types + counters
+npm run registry -- list --tier 2
+npm run registry -- show Hydrogen
+npm run registry -- top --by failure  # sort by failures; also success|ratio
+npm run registry -- --db ./atoma-build.db list   # override DB path
 ```
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
@@ -57,6 +64,24 @@ npm run example:research "<topic>"   # live run, requires ANTHROPIC_API_KEY
   its tool loop. The only time Sonnet or Opus runs is the first few encounters
   with a type, or when the catalog has no clear match and a new type must be
   designed.
+- **Strategy/plan output cap.** L2/L3 `plan()` on the non-fallback path pin
+  `maxTokens: STRATEGY_MAX_TOKENS` (1500) regardless of the atom type's own
+  configured ceiling. The response is a routing JSON pair; padding the ceiling
+  just invites rambling. Fallback/self-exec paths keep the atom's full
+  `maxTokens` because they may produce real content.
+
+## Observability
+
+- **`InMemoryMetrics` + `MetricsLlmClient`** (`src/core/metrics.ts`) wrap any
+  `LlmClient` and record per-call usage. Both examples wrap the Anthropic
+  client and print `metrics.formatSummary()` at the end of a run. Use this as
+  the ground truth for "did the cost discipline work?" — Opus/Sonnet calls
+  should be a single-digit count on any mature-type happy path.
+- Cost estimates come from `DEFAULT_PRICES` (approximate USD per M tokens per
+  Claude family). Override with a custom `PriceTable` when needed.
+- **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
+  any type including version history, sort by success/failure/ratio. Works
+  against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
 
 ## Architecture invariants (don't violate these)
 
