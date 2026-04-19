@@ -1,11 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { resolve } from 'node:path';
+import { setMaxListeners } from 'node:events';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
-import { AtomRegistry } from '../registry/atomRegistry.js';
 import { L3Atom } from '../atoms/L3Atom.js';
+import { TraceRecorder } from '../viz/trace.js';
+import { RecordingLlmClient } from '../viz/recordingLlm.js';
+import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { ToolSandbox } from '../tools/sandbox.js';
 import { InMemoryToolRegistry } from '../tools/registry.js';
 import { defaultBuiltinTools } from '../tools/builtin.js';
@@ -36,11 +39,16 @@ async function main(): Promise<void> {
     process.env['ATOMA_BUILD_WORKSPACE'] ?? './build/app'
   );
 
+  const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
+  const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  const registry = new AtomRegistry(db);
+  const registry = new RecordingRegistry(db, recorder);
   const anthropic = new Anthropic({ apiKey });
   const metrics = new InMemoryMetrics();
-  const llm = new MetricsLlmClient(new AnthropicLlmClient(anthropic), metrics);
+  const llm = new MetricsLlmClient(
+    new RecordingLlmClient(new AnthropicLlmClient(anthropic), recorder),
+    metrics
+  );
 
   const sandbox = new ToolSandbox(workspaceRoot);
   const toolRegistry = new InMemoryToolRegistry();
@@ -83,9 +91,15 @@ async function main(): Promise<void> {
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
   console.log(`L3 ${l3.name} using model ${l3.model}`);
 
+  const signal = AbortSignal.timeout(10 * 60 * 1000);
+  // Every LLM call + supervise-loop hop hangs an `abort` listener on this
+  // signal; on long runs Node trips its default 10-listener warning. Lift
+  // the cap — none of these are true leaks, they all clear on settle.
+  setMaxListeners(0, signal);
+
   const ctx: RunContext = {
     logger: consoleLogger,
-    signal: AbortSignal.timeout(10 * 60 * 1000),
+    signal,
     llm,
     limits: DEFAULT_LIMITS,
     tools: toolRegistry,
@@ -107,14 +121,29 @@ async function main(): Promise<void> {
   // stays reachable. Clean up child processes on exit.
   const shutdown = async (code = 0): Promise<void> => {
     console.log('\nshutting down sandbox children...');
+    recorder.flushPartial();
     await sandbox.cleanup();
     process.exit(code);
   };
   process.on('SIGINT', () => void shutdown(0));
   process.on('SIGTERM', () => void shutdown(0));
 
+  recorder.beginRun(task, `build-app: ${goal.slice(0, 80)}`, {
+    initialTypes: [
+      ...registry.listByTier(1),
+      ...registry.listByTier(2),
+      ...registry.listByTier(3),
+    ],
+  });
   try {
     const result = await l3.handle(task, ctx);
+    recorder.endRun({
+      result: {
+        summary: result.summary,
+        output: result.output,
+        producedBy: result.producedBy,
+      },
+    });
 
     console.log('\n--- result ---');
     console.log(
@@ -141,12 +170,16 @@ async function main(): Promise<void> {
     console.log(metrics.formatSummary());
 
     console.log(
+      `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
+    );
+    console.log(
       '\n✓ app built. The static server should still be running inside the sandbox.'
     );
     console.log('  Press Ctrl+C when you are done testing.');
     // Park forever until a signal comes in.
     await new Promise(() => {});
   } catch (err) {
+    recorder.endRun({ error: (err as Error).message });
     console.error(err);
     await shutdown(1);
   }

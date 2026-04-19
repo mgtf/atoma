@@ -1,10 +1,13 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { setMaxListeners } from 'node:events';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
-import { AtomRegistry } from '../registry/atomRegistry.js';
 import { L3Atom } from '../atoms/L3Atom.js';
+import { TraceRecorder } from '../viz/trace.js';
+import { RecordingLlmClient } from '../viz/recordingLlm.js';
+import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import type { Logger, RunContext, Task } from '../core/types.js';
 
 const consoleLogger: Logger = {
@@ -22,11 +25,16 @@ async function main(): Promise<void> {
   }
 
   const dbPath = process.env['ATOMA_DB_PATH'] ?? './atoma.db';
+  const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
+  const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  const registry = new AtomRegistry(db);
+  const registry = new RecordingRegistry(db, recorder);
   const anthropic = new Anthropic({ apiKey });
   const metrics = new InMemoryMetrics();
-  const llm = new MetricsLlmClient(new AnthropicLlmClient(anthropic), metrics);
+  const llm = new MetricsLlmClient(
+    new RecordingLlmClient(new AnthropicLlmClient(anthropic), recorder),
+    metrics
+  );
 
   // Bootstrap: ensure at least one L3 cell exists. Reuse if already there.
   let l3Type = registry.listByTier(3)[0];
@@ -52,9 +60,15 @@ async function main(): Promise<void> {
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
   console.log(`L3 ${l3.name} using model ${l3.model}`);
 
+  const signal = AbortSignal.timeout(5 * 60 * 1000);
+  // Every LLM call + supervise-loop hop hangs an `abort` listener on this
+  // signal; on long runs Node trips its default 10-listener warning. Lift
+  // the cap — none of these are true leaks, they all clear on settle.
+  setMaxListeners(0, signal);
+
   const ctx: RunContext = {
     logger: consoleLogger,
-    signal: AbortSignal.timeout(5 * 60 * 1000),
+    signal,
     llm,
     limits: DEFAULT_LIMITS,
   };
@@ -69,7 +83,27 @@ async function main(): Promise<void> {
   };
 
   console.log(`\ntask: ${task.description}\n`);
-  const result = await l3.handle(task, ctx);
+  recorder.beginRun(task, `research-brief: ${topic}`, {
+    initialTypes: [
+      ...registry.listByTier(1),
+      ...registry.listByTier(2),
+      ...registry.listByTier(3),
+    ],
+  });
+  let result;
+  try {
+    result = await l3.handle(task, ctx);
+    recorder.endRun({
+      result: {
+        summary: result.summary,
+        output: result.output,
+        producedBy: result.producedBy,
+      },
+    });
+  } catch (err) {
+    recorder.endRun({ error: (err as Error).message });
+    throw err;
+  }
 
   console.log('\n--- result ---');
   console.log(typeof result.output === 'string' ? result.output : JSON.stringify(result.output, null, 2));
@@ -89,6 +123,10 @@ async function main(): Promise<void> {
 
   console.log(`\nLLM usage:`);
   console.log(metrics.formatSummary());
+
+  console.log(
+    `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
+  );
 }
 
 main().catch((err) => {

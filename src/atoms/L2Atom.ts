@@ -176,6 +176,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS },
+      signal: ctx.signal,
     });
 
     const pair = parseTwoJson(resp.text);
@@ -304,6 +305,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: this.params,
+      signal: ctx.signal,
     });
     return parseWith(planSchema, resp.text);
   }
@@ -330,6 +332,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: this.params,
+      signal: ctx.signal,
     });
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
@@ -385,9 +388,13 @@ export const VALIDATION_SYSTEM_PROMPT = [
   'Approve when the subject clearly satisfies the stated task.',
   'Reject only when there is a concrete, fixable problem you can state in one sentence.',
   'When rejecting, provide actionable "modifications" and pick a "scope":',
-  '  - "ephemeral": apply only to this instance for this task',
+  '  - "ephemeral": apply only to this instance for this task (pure retry OK — empty modifications allowed)',
   '  - "patch":     update the canonical child type for future reuses',
   '  - "branch":    create a new child type with the modifications applied',
+  'HARD RULE: scope "patch" and scope "branch" MUST carry at least one non-empty field in "modifications"',
+  '  (systemPromptAppend, systemPromptReplace, additionalContext, addTools, removeTools, or params).',
+  '  If you only have a diagnostic but no concrete prescription, use scope "ephemeral" and put your',
+  '  diagnostic in modifications.additionalContext so the next attempt sees it — do NOT use patch/branch.',
   'Verdict shapes:',
   '  {"approved": true, "reasoning": "..."}',
   '  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "..."}',
@@ -419,6 +426,7 @@ export async function llmVerdict(args: {
     systemPrompt: VALIDATION_SYSTEM_PROMPT,
     userContent,
     params: VALIDATION_PARAMS,
+    signal: args.ctx.signal,
   });
 
   const raw = parseWith(verdictSchema, resp.text);

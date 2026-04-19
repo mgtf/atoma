@@ -5,10 +5,7 @@ import type {
   Tier,
   Tool,
 } from '../core/types.js';
-import {
-  RegistryNotFoundError,
-  ValidationError,
-} from '../core/errors.js';
+import { RegistryNotFoundError } from '../core/errors.js';
 import { nextAvailableElement } from './taxonomies/elements.js';
 import { nextAvailableMolecule } from './taxonomies/molecules.js';
 import { nextAvailableCell } from './taxonomies/cells.js';
@@ -159,6 +156,24 @@ export class AtomRegistry {
       const current = this.getByName(name);
       if (!current) throw new RegistryNotFoundError(name);
 
+      const merged = applyMods(current, mods);
+
+      // No-op guard: validators occasionally return `scope: 'patch'` with a
+      // diagnostic `reasoning` but no concrete `modifications` (or only
+      // nullish/empty fields). `applyMods` then produces an atom byte-identical
+      // to the current one; persisting it would create a misleading duplicate
+      // version AND silently reset the success/failure counters. Short-circuit
+      // so the canonical type is left untouched.
+      const currentToolsJson = JSON.stringify(current.tools);
+      const currentParamsJson = JSON.stringify(current.params);
+      if (
+        merged.systemPrompt === current.systemPrompt &&
+        JSON.stringify(merged.tools) === currentToolsJson &&
+        JSON.stringify(merged.params) === currentParamsJson
+      ) {
+        return current;
+      }
+
       const nextVersion = current.version + 1;
       const now = new Date().toISOString();
 
@@ -173,14 +188,12 @@ export class AtomRegistry {
           current.ordinal,
           current.version,
           current.systemPrompt,
-          JSON.stringify(current.tools),
-          JSON.stringify(current.params),
+          currentToolsJson,
+          currentParamsJson,
           modifiedBy,
           now,
           reason ?? null
         );
-
-      const merged = applyMods(current, mods);
 
       // Patch resets counters: the type's behaviour has changed, so past
       // successes no longer guarantee anything about the new version. Trust
@@ -224,12 +237,20 @@ export class AtomRegistry {
       let ordinal: number;
       let name: string;
       if (overrideName) {
-        if (this.getByName(overrideName)) {
-          throw new ValidationError(`name already in use: ${overrideName}`);
+        // LLM-suggested branch names can collide across supervise-loop
+        // iterations (validator can happily emit the same `branchName` a
+        // second time after that type has already been created). Rather than
+        // throwing — which kills the whole run — we auto-suffix `-2`, `-3`…
+        // so the caller's contract ("branch always succeeds") holds and the
+        // semantic intent of the LLM is preserved.
+        name = overrideName;
+        if (this.getByName(name)) {
+          let suffix = 2;
+          while (this.getByName(`${overrideName}-${suffix}`)) suffix++;
+          name = `${overrideName}-${suffix}`;
         }
         const next = nextAvailable(source.tier, used);
         ordinal = next.ordinal;
-        name = overrideName;
       } else {
         const next = nextAvailable(source.tier, used);
         ordinal = next.ordinal;

@@ -189,6 +189,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS },
+      signal: ctx.signal,
     });
 
     const pair = parseTwoJson(resp.text);
@@ -298,6 +299,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: this.params,
+      signal: ctx.signal,
     });
     return parseWith(planSchema, resp.text);
   }
@@ -321,6 +323,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: this.params,
+      signal: ctx.signal,
     });
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {

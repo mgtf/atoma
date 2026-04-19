@@ -5,13 +5,15 @@
   "type": "module",
   "description": "Three-tier LLM agent framework with persisted atom/molecule/cell taxonomy and symmetric supervision",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && cp src/viz/ui.html dist/viz/ui.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "example:research": "tsx src/examples/research-brief.ts",
     "example:build": "tsx src/examples/build-app.ts",
-    "registry": "tsx src/cli/registry.ts"
+    "registry": "tsx src/cli/registry.ts",
+    "viz": "tsx src/viz/server.ts",
+    "viz:demo": "tsx src/viz/demo.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",

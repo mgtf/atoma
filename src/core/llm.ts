@@ -7,7 +7,19 @@ import type {
   Tool,
 } from './types.js';
 
-const MAX_TOOL_ITERATIONS = 12;
+/** Default per-call cap on tool-use iterations. Callers can override via `LlmCompletionRequest.maxToolIterations`. */
+export const DEFAULT_MAX_TOOL_ITERATIONS = 24;
+
+/**
+ * Hint appended alongside the final tool_result batch when the budget is
+ * exhausted. Tells the model it has NO more tool access this turn and must
+ * produce its final response as text now. Kept short so it doesn't steer the
+ * content of the final answer beyond "stop calling tools".
+ */
+const BUDGET_EXHAUSTED_HINT =
+  'TOOL BUDGET EXHAUSTED for this turn. You have no more tool access. ' +
+  'Produce the final response now as plain text (or structured JSON if the task requires it). ' +
+  'Do NOT attempt to call any more tools — tools are disabled for this message.';
 
 export class AnthropicLlmClient implements LlmClient {
   constructor(private readonly client: Anthropic) {}
@@ -35,42 +47,61 @@ export class AnthropicLlmClient implements LlmClient {
       cacheReadInputTokens: 0,
     };
 
-    const sendRequest = (includeSampling: boolean) =>
-      this.client.messages.create({
-        model: req.model,
-        max_tokens: req.params?.maxTokens ?? 16384,
-        ...(includeSampling
-          ? {
-              temperature: req.params?.temperature ?? 0.2,
-              ...(req.params?.topP !== undefined ? { top_p: req.params.topP } : {}),
-            }
-          : {}),
-        system: systemBlocks,
-        ...(tools.length > 0 ? { tools } : {}),
-        messages,
-      });
+    const sdkOptions: { signal?: AbortSignal } = {};
+    if (req.signal) sdkOptions.signal = req.signal;
 
+    const sendRequest = (
+      opts: { includeSampling: boolean; omitTools?: boolean }
+    ): Promise<Anthropic.Messages.Message> =>
+      this.client.messages.create(
+        {
+          model: req.model,
+          max_tokens: req.params?.maxTokens ?? 16384,
+          ...(opts.includeSampling
+            ? {
+                temperature: req.params?.temperature ?? 0.2,
+                ...(req.params?.topP !== undefined ? { top_p: req.params.topP } : {}),
+              }
+            : {}),
+          system: systemBlocks,
+          ...(tools.length > 0 && !opts.omitTools ? { tools } : {}),
+          messages,
+        },
+        sdkOptions
+      );
+
+    const accumulate = (response: Anthropic.Messages.Message): void => {
+      agg.inputTokens += response.usage.input_tokens;
+      agg.outputTokens += response.usage.output_tokens;
+      agg.cacheCreationInputTokens += response.usage.cache_creation_input_tokens ?? 0;
+      agg.cacheReadInputTokens += response.usage.cache_read_input_tokens ?? 0;
+    };
+
+    const budget = Math.max(1, req.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS);
     let finalResponse: Anthropic.Messages.Message | null = null;
 
-    for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+    for (let iter = 0; iter < budget; iter++) {
+      // Short-circuit the tool loop between iterations as soon as the caller
+      // (usually `RunContext.signal`) aborts. Without this check we would
+      // cheerfully kick off the next HTTP call and only error out mid-flight.
+      if (req.signal?.aborted) {
+        throw req.signal.reason ?? new Error('aborted');
+      }
       let response: Anthropic.Messages.Message;
       try {
-        response = await sendRequest(samplingOk);
+        response = await sendRequest({ includeSampling: samplingOk });
       } catch (err) {
         // Defensive fallback: if the model rejects temperature/top_p (e.g. a
         // newer reasoning model not yet listed in modelSupportsSamplingParams),
         // retry once without sampling params instead of failing the whole run.
         if (iter === 0 && samplingOk && isSamplingParamDeprecatedError(err)) {
-          response = await sendRequest(false);
+          response = await sendRequest({ includeSampling: false });
         } else {
           throw err;
         }
       }
 
-      agg.inputTokens += response.usage.input_tokens;
-      agg.outputTokens += response.usage.output_tokens;
-      agg.cacheCreationInputTokens += response.usage.cache_creation_input_tokens ?? 0;
-      agg.cacheReadInputTokens += response.usage.cache_read_input_tokens ?? 0;
+      accumulate(response);
 
       const shouldLoop =
         response.stop_reason === 'tool_use' &&
@@ -110,12 +141,39 @@ export class AnthropicLlmClient implements LlmClient {
           });
         }
       }
+
+      const isLastIter = iter === budget - 1;
+      if (isLastIter) {
+        // Graceful finalization: we just consumed the last slot on tool
+        // execution but have no budget left to call the model with tools
+        // again. Attach a short "tools disabled, finalize now" hint to the
+        // tool_result batch and do ONE tools-disabled round-trip to coax a
+        // text-only final response. This replaces the old hard throw.
+        messages.push({
+          role: 'user',
+          content: [
+            ...toolResults,
+            { type: 'text', text: BUDGET_EXHAUSTED_HINT },
+          ],
+        });
+        if (req.signal?.aborted) {
+          throw req.signal.reason ?? new Error('aborted');
+        }
+        const finalResp = await sendRequest({
+          includeSampling: samplingOk,
+          omitTools: true,
+        });
+        accumulate(finalResp);
+        finalResponse = finalResp;
+        break;
+      }
+
       messages.push({ role: 'user', content: toolResults });
     }
 
     if (!finalResponse) {
       throw new Error(
-        `AnthropicLlmClient: hit MAX_TOOL_ITERATIONS=${MAX_TOOL_ITERATIONS} without a final response`
+        `AnthropicLlmClient: tool loop exited without a final response (budget=${budget})`
       );
     }
 

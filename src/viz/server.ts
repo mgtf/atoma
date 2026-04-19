@@ -1,0 +1,382 @@
+import { createServer } from 'node:http';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { basename, resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
+
+/**
+ * Tiny read-only HTTP server that exposes runs/*.json produced by
+ * `TraceRecorder` plus the static UI bundled alongside (`ui.html`). No
+ * framework — just `node:http` — keeps the app dependency list clean.
+ *
+ * Also exposes a read-only view of any atom registry (SQLite DB) so the UI
+ * can render a "Registry" screen independent of any particular run.
+ *
+ * Usage:  npm run viz -- --dir ./runs --port 4111 [--db ./atoma.db ...]
+ */
+
+interface Cli {
+  dir: string;
+  port: number;
+  host: string;
+  /** One or more DB paths to expose under /api/registry. */
+  dbs: string[];
+}
+
+function parseArgs(argv: string[]): Cli {
+  const out: Cli = { dir: './runs', port: 4111, host: '127.0.0.1', dbs: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--dir' && argv[i + 1]) out.dir = argv[++i]!;
+    else if (a === '--port' && argv[i + 1]) out.port = Number(argv[++i]);
+    else if (a === '--host' && argv[i + 1]) out.host = argv[++i]!;
+    else if (a === '--db' && argv[i + 1]) out.dbs.push(argv[++i]!);
+  }
+  return out;
+}
+
+const cli = parseArgs(process.argv.slice(2));
+const RUNS_DIR = resolve(cli.dir);
+
+/**
+ * Resolve the list of DB paths we'll serve. Priority:
+ *   1. explicit `--db` flags (can repeat)
+ *   2. env vars `ATOMA_DB_PATH` and `ATOMA_BUILD_DB_PATH` (used by the examples)
+ *   3. `./atoma.db` and `./atoma-build.db` if present in cwd
+ * Duplicates (same resolved path) are collapsed; missing files are kept in the
+ * list so the UI can still show them as empty / show a helpful error.
+ */
+function resolveDbs(): { id: string; label: string; path: string; exists: boolean }[] {
+  const candidates: string[] = [];
+  for (const p of cli.dbs) candidates.push(p);
+  for (const env of ['ATOMA_DB_PATH', 'ATOMA_BUILD_DB_PATH']) {
+    const v = process.env[env];
+    if (v) candidates.push(v);
+  }
+  candidates.push('./atoma.db', './atoma-build.db');
+  const seen = new Set<string>();
+  const out: { id: string; label: string; path: string; exists: boolean }[] = [];
+  for (const c of candidates) {
+    const abs = resolve(c);
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    const label = basename(abs).replace(/\.db$/, '');
+    out.push({ id: label, label, path: abs, exists: existsSync(abs) });
+  }
+  // Dedup by id: if two paths happen to share the basename, keep the first.
+  const byId = new Map<string, typeof out[number]>();
+  for (const d of out) if (!byId.has(d.id)) byId.set(d.id, d);
+  return [...byId.values()];
+}
+
+const DBS = resolveDbs();
+
+const HERE = fileURLToPath(new URL('.', import.meta.url));
+const UI_HTML_PATH = join(HERE, 'ui.html');
+
+function send(res: import('node:http').ServerResponse, code: number, body: string | Buffer, type: string): void {
+  res.writeHead(code, {
+    'content-type': type,
+    'content-length': Buffer.byteLength(body),
+    'cache-control': 'no-store',
+  });
+  res.end(body);
+}
+
+function sendJson(res: import('node:http').ServerResponse, code: number, obj: unknown): void {
+  send(res, code, JSON.stringify(obj), 'application/json; charset=utf-8');
+}
+
+function listIndex(): unknown {
+  if (!existsSync(RUNS_DIR)) return [];
+  const indexFile = join(RUNS_DIR, 'index.json');
+  if (existsSync(indexFile)) {
+    try {
+      return JSON.parse(readFileSync(indexFile, 'utf8'));
+    } catch {
+      // fall through to scanning directly
+    }
+  }
+  // Fallback: scan for *.json (excluding index.json) and return lightweight
+  // summaries — useful if the recorder crashed before writing the index.
+  const files = readdirSync(RUNS_DIR).filter(
+    (f) => f.endsWith('.json') && f !== 'index.json'
+  );
+  const entries = files
+    .map((f) => {
+      const p = join(RUNS_DIR, f);
+      try {
+        const run = JSON.parse(readFileSync(p, 'utf8')) as {
+          id: string;
+          label: string;
+          startedAt: string;
+          endedAt?: string;
+          durationMs?: number;
+          error?: string;
+          totals?: { calls: number; costUsd: number };
+        };
+        return {
+          id: run.id,
+          label: run.label,
+          startedAt: run.startedAt,
+          endedAt: run.endedAt,
+          durationMs: run.durationMs,
+          hasError: !!run.error,
+          calls: run.totals?.calls,
+          costUsd: run.totals?.costUsd,
+          mtime: statSync(p).mtimeMs,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((e): e is NonNullable<typeof e> => e !== null)
+    .sort((a, b) => b.mtime - a.mtime);
+  return entries.map(({ mtime: _mtime, ...rest }) => rest);
+}
+
+interface RegistryHistoryEntry {
+  version: number;
+  systemPrompt: string;
+  tools: string[];
+  params: Record<string, unknown>;
+  modifiedBy: string;
+  modifiedAt: string;
+  reason: string | null;
+}
+
+interface RegistryType {
+  tier: 1 | 2 | 3;
+  ordinal: number;
+  name: string;
+  description: string;
+  systemPrompt: string;
+  tools: string[];
+  params: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  version: number;
+  successes: number;
+  failures: number;
+  /** Archived versions, oldest first. Does NOT include the current version. */
+  history: RegistryHistoryEntry[];
+}
+
+interface RegistrySummary {
+  id: string;
+  label: string;
+  path: string;
+  exists: boolean;
+  counts: { 1: number; 2: number; 3: number; total: number };
+}
+
+function safeParseJson<T>(s: string, fallback: T): T {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function toolNames(toolsJson: string): string[] {
+  const parsed = safeParseJson<Array<{ name?: string }>>(toolsJson, []);
+  return parsed.map((t) => (typeof t?.name === 'string' ? t.name : '?'));
+}
+
+function openReadOnly(path: string): Database.Database {
+  return new Database(path, { readonly: true, fileMustExist: true });
+}
+
+function countsOf(path: string): { 1: number; 2: number; 3: number; total: number } {
+  const zero = { 1: 0, 2: 0, 3: 0, total: 0 };
+  if (!existsSync(path)) return zero;
+  let db: Database.Database | null = null;
+  try {
+    db = openReadOnly(path);
+    const rows = db
+      .prepare('SELECT tier, COUNT(*) as n FROM atom_types GROUP BY tier')
+      .all() as { tier: number; n: number }[];
+    const out = { ...zero };
+    for (const r of rows) {
+      if (r.tier === 1 || r.tier === 2 || r.tier === 3) out[r.tier] = r.n;
+    }
+    out.total = out[1] + out[2] + out[3];
+    return out;
+  } catch {
+    return zero;
+  } finally {
+    db?.close();
+  }
+}
+
+function listRegistries(): RegistrySummary[] {
+  return DBS.map((d) => ({
+    id: d.id,
+    label: d.label,
+    path: d.path,
+    exists: d.exists && existsSync(d.path),
+    counts: countsOf(d.path),
+  }));
+}
+
+function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryType[] } | null {
+  const entry = DBS.find((d) => d.id === id);
+  if (!entry) return null;
+  if (!existsSync(entry.path)) {
+    return {
+      registry: { id: entry.id, label: entry.label, path: entry.path, exists: false, counts: { 1: 0, 2: 0, 3: 0, total: 0 } },
+      types: [],
+    };
+  }
+  const db = openReadOnly(entry.path);
+  try {
+    const rows = db
+      .prepare('SELECT * FROM atom_types ORDER BY tier ASC, ordinal ASC')
+      .all() as Array<{
+        tier: number;
+        ordinal: number;
+        name: string;
+        description: string;
+        system_prompt: string;
+        tools_json: string;
+        params_json: string;
+        created_by: string;
+        created_at: string;
+        version: number;
+        successes: number;
+        failures: number;
+      }>;
+
+    const versions = db
+      .prepare(
+        'SELECT tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason FROM atom_type_versions ORDER BY version ASC'
+      )
+      .all() as Array<{
+        tier: number;
+        ordinal: number;
+        version: number;
+        system_prompt: string;
+        tools_json: string;
+        params_json: string;
+        modified_by: string;
+        modified_at: string;
+        reason: string | null;
+      }>;
+
+    const histByKey = new Map<string, RegistryHistoryEntry[]>();
+    for (const v of versions) {
+      const key = `${v.tier}:${v.ordinal}`;
+      const arr = histByKey.get(key) ?? [];
+      arr.push({
+        version: v.version,
+        systemPrompt: v.system_prompt,
+        tools: toolNames(v.tools_json),
+        params: safeParseJson<Record<string, unknown>>(v.params_json, {}),
+        modifiedBy: v.modified_by,
+        modifiedAt: v.modified_at,
+        reason: v.reason,
+      });
+      histByKey.set(key, arr);
+    }
+
+    const types: RegistryType[] = rows.map((r) => ({
+      tier: r.tier as 1 | 2 | 3,
+      ordinal: r.ordinal,
+      name: r.name,
+      description: r.description,
+      systemPrompt: r.system_prompt,
+      tools: toolNames(r.tools_json),
+      params: safeParseJson<Record<string, unknown>>(r.params_json, {}),
+      createdBy: r.created_by,
+      createdAt: r.created_at,
+      version: r.version,
+      successes: r.successes ?? 0,
+      failures: r.failures ?? 0,
+      history: histByKey.get(`${r.tier}:${r.ordinal}`) ?? [],
+    }));
+
+    const counts = { 1: 0, 2: 0, 3: 0, total: types.length };
+    for (const t of types) counts[t.tier]++;
+    return {
+      registry: { id: entry.id, label: entry.label, path: entry.path, exists: true, counts },
+      types,
+    };
+  } finally {
+    db.close();
+  }
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  const pathname = url.pathname;
+
+  if (pathname === '/' || pathname === '/index.html') {
+    if (!existsSync(UI_HTML_PATH)) {
+      send(res, 500, 'ui.html missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
+      return;
+    }
+    const html = readFileSync(UI_HTML_PATH);
+    send(res, 200, html, 'text/html; charset=utf-8');
+    return;
+  }
+
+  if (pathname === '/api/runs') {
+    sendJson(res, 200, listIndex());
+    return;
+  }
+
+  if (pathname.startsWith('/api/runs/')) {
+    const id = decodeURIComponent(pathname.slice('/api/runs/'.length));
+    if (!/^[A-Za-z0-9_.:\-]+$/.test(id)) {
+      sendJson(res, 400, { error: 'bad id' });
+      return;
+    }
+    const file = join(RUNS_DIR, id + '.json');
+    if (!existsSync(file)) {
+      sendJson(res, 404, { error: 'not found', file });
+      return;
+    }
+    const body = readFileSync(file);
+    send(res, 200, body, 'application/json; charset=utf-8');
+    return;
+  }
+
+  if (pathname === '/api/registries') {
+    sendJson(res, 200, listRegistries());
+    return;
+  }
+
+  if (pathname.startsWith('/api/registry/')) {
+    const id = decodeURIComponent(pathname.slice('/api/registry/'.length));
+    if (!/^[A-Za-z0-9_.\-]+$/.test(id)) {
+      sendJson(res, 400, { error: 'bad id' });
+      return;
+    }
+    try {
+      const dump = dumpRegistry(id);
+      if (!dump) {
+        sendJson(res, 404, { error: 'unknown registry id', id });
+        return;
+      }
+      sendJson(res, 200, dump);
+    } catch (err) {
+      sendJson(res, 500, { error: (err as Error).message });
+    }
+    return;
+  }
+
+  send(res, 404, 'not found', 'text/plain; charset=utf-8');
+});
+
+server.listen(cli.port, cli.host, () => {
+  console.log(`atoma viz server — http://${cli.host}:${cli.port}/`);
+  console.log(`serving runs from: ${RUNS_DIR}`);
+  if (!existsSync(RUNS_DIR)) {
+    console.log(`(directory does not exist yet — it will be created when a run is recorded)`);
+  }
+  console.log('registries exposed:');
+  for (const d of DBS) {
+    const mark = existsSync(d.path) ? '✓' : '✗';
+    console.log(`  [${mark}] ${d.id}  ${d.path}`);
+  }
+});

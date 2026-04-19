@@ -99,6 +99,24 @@ export interface LlmCompletionRequest {
    * response. Without it the client returns the first response as-is.
    */
   executor?: ToolExecutor;
+  /**
+   * Abort signal forwarded to the underlying transport. The Anthropic SDK
+   * honours this on each HTTP round-trip, so a global run-deadline (usually
+   * `RunContext.signal`) can actually cancel long-running completions and
+   * tool-loop iterations. Atom call sites thread `ctx.signal` here.
+   */
+  signal?: AbortSignal;
+  /**
+   * Upper bound on tool-use iterations for this single call. Each iteration
+   * is one round-trip to the model; when the model replies with `tool_use`
+   * we execute the tools, send the results back, and loop again. Tasks with
+   * long convergence patterns (e.g. a build-app L1 that iterates on a
+   * validate_html → fix → re-validate cycle) need more budget than a
+   * one-shot reasoning call. When the budget is exhausted the client does
+   * a final tools-disabled round-trip to force a text response rather than
+   * throwing. Defaults to 24 if omitted.
+   */
+  maxToolIterations?: number;
 }
 
 export interface LlmCompletionResponse {

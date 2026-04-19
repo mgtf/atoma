@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Atoma — visualiseur de runs</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #0b0f17;
+    --panel: #121826;
+    --panel-2: #0f1523;
+    --border: #1f2a3d;
+    --text: #e6edf7;
+    --muted: #8a96ae;
+    --accent: #6ea8ff;
+    --l1: #2dd4bf;
+    --l2: #fbbf24;
+    --l3: #c084fc;
+    --ok: #4ade80;
+    --err: #f87171;
+    --chip: #1a2335;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif; height: 100%; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: 0.3px; }
+  header .dot-l1 { color: var(--l1); }
+  header .dot-l2 { color: var(--l2); }
+  header .dot-l3 { color: var(--l3); }
+  header select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
+    min-width: 320px; max-width: 640px; font: inherit;
+  }
+  header .spacer { flex: 1; }
+  header button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px;
+    cursor: pointer; font: inherit;
+  }
+  header button:hover { border-color: var(--accent); }
+  header input[type=search] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
+    min-width: 200px; font: inherit;
+  }
+  .view-switch { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .view-switch button {
+    border: none; border-radius: 0; padding: 6px 14px; background: var(--panel-2);
+  }
+  .view-switch button.active { background: var(--accent); color: #0b0f17; }
+  .view-switch button + button { border-left: 1px solid var(--border); }
+  .view-switch button.active + button,
+  .view-switch button + button.active { border-left-color: var(--accent); }
+
+  .layout { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.3fr); gap: 0; height: calc(100vh - 49px); }
+  .pane { overflow: auto; padding: 14px 16px; }
+  .pane + .pane { border-left: 1px solid var(--border); background: var(--panel-2); }
+
+  .summary { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .summary h2 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; }
+  .summary .task { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+  .summary .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
+  .summary .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .summary .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .summary .stat .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
+
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .chip {
+    background: var(--chip); color: var(--text); border: 1px solid var(--border);
+    border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px; user-select: none;
+  }
+  .chip.active { background: var(--accent); color: #0b0f17; border-color: var(--accent); }
+  .chip.muted { color: var(--muted); }
+
+  .event {
+    border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 80ms;
+  }
+  .event:hover { border-color: var(--accent); }
+  .event.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .event .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .event .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; min-width: 70px; }
+  .event .role {
+    padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
+    background: #1a2335; border: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .role.plan { color: var(--accent); border-color: #2a3b57; }
+  .role.execute { color: #86efac; border-color: #1e3a2a; }
+  .role.validate-plan, .role.validate-result { color: #fca5a5; border-color: #3b1e1e; }
+  .role.prefilter { color: #c7d2fe; border-color: #2a2a4a; }
+  .role.fallback-plan, .role.fallback-execute { color: #fcd34d; border-color: #3a2f15; }
+  .role.create { color: var(--l1); }
+  .role.patch { color: var(--l2); }
+  .role.branch { color: var(--l3); }
+  .role.recordSuccess { color: var(--ok); }
+  .role.recordFailure { color: var(--err); }
+
+  .tier {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+  }
+  .tier.t1 { background: rgba(45, 212, 191, 0.15); color: var(--l1); }
+  .tier.t2 { background: rgba(251, 191, 36, 0.15); color: var(--l2); }
+  .tier.t3 { background: rgba(192, 132, 252, 0.15); color: var(--l3); }
+  .arrow { color: var(--muted); font-weight: 700; }
+  .name { font-weight: 600; }
+  .meta { color: var(--muted); font-size: 11px; }
+  .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .cost { color: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .err-badge { background: rgba(248, 113, 113, 0.15); color: var(--err); border: 1px solid #3b1e1e; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
+
+  .section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .section h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { word-break: break-word; }
+
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 6px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: 12px; }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  pre {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; max-height: 520px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+  }
+
+  .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
+  .loader { color: var(--muted); text-align: center; padding: 20px; }
+
+  /* swimlanes */
+  .lanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+  .lane { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 80px; }
+  .lane h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .lane.l1 h4 { color: var(--l1); }
+  .lane.l2 h4 { color: var(--l2); }
+  .lane.l3 h4 { color: var(--l3); }
+  .lane .chip { display: inline-block; margin: 2px 4px 2px 0; font-size: 11px; padding: 3px 9px; }
+  .lane .chip.atom { cursor: pointer; }
+  .lane .chip.atom.new { border-color: var(--ok); color: var(--ok); }
+  .lane .chip.atom.patched { border-color: var(--l2); color: var(--l2); }
+  .lane .chip.atom.selected { background: var(--accent); color: #0b0f17; border-color: var(--accent); }
+  .lane .chip .v { opacity: 0.55; font-size: 10px; margin-left: 4px; }
+
+  .origin-legend { display: flex; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  .origin-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .origin-legend .dot.new { background: var(--ok); }
+  .origin-legend .dot.patched { background: var(--l2); }
+  .origin-legend .dot.existing { background: var(--muted); }
+
+  .history-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .history-list .row { display: flex; gap: 8px; align-items: center; }
+  .history-list .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+  .tools-list { display: flex; gap: 4px; flex-wrap: wrap; }
+  .tools-list .chip { font-size: 11px; padding: 2px 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot-l3">●</span><span class="dot-l2">●</span><span class="dot-l1">●</span> &nbsp;Atoma</h1>
+  <div class="view-switch" id="viewSwitch">
+    <button data-view="runs" class="active">Runs</button>
+    <button data-view="registry">Registry</button>
+  </div>
+  <select id="runSelect" title="Sélectionner un run"></select>
+  <select id="registrySelect" title="Sélectionner un registre" style="display:none;"></select>
+  <input id="registrySearch" type="search" placeholder="Filtrer les atomes…" style="display:none;" />
+  <span class="spacer"></span>
+  <button id="refreshBtn" title="Recharger la liste">Rafraîchir</button>
+</header>
+
+<div class="layout">
+  <section class="pane" id="leftPane">
+    <!-- Runs view -->
+    <div id="runsView">
+      <div id="runSummary"></div>
+      <div id="lanesWrap"></div>
+      <div class="filters" id="filters"></div>
+      <div id="eventsList"></div>
+    </div>
+    <!-- Registry view -->
+    <div id="registryView" style="display:none;">
+      <div id="registrySummary"></div>
+      <div id="registryLanes"></div>
+    </div>
+  </section>
+  <section class="pane" id="rightPane">
+    <div class="empty">Sélectionne un évènement à gauche pour en voir le détail.</div>
+  </section>
+</div>
+
+<script>
+const state = {
+  view: 'runs', // 'runs' | 'registry'
+  runs: [],
+  currentRun: null,
+  /** atoms seen in the current run, keyed by name — latest snapshot wins. */
+  atomsByName: new Map(),
+  selectedEventId: null,
+  selectedAtomName: null,
+  filters: { kind: 'all', role: 'all' },
+  // Registry view state
+  registries: [],
+  currentRegistry: null, // { registry, types: [...] }
+  selectedRegistryAtom: null,
+  registryFilter: '',
+};
+
+const $ = (id) => document.getElementById(id);
+const h = (tag, attrs = {}, children = []) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'html') el.innerHTML = v;
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null) el.setAttribute(k, v);
+  }
+  for (const c of [].concat(children)) {
+    if (c == null) continue;
+    if (typeof c === 'string') el.appendChild(document.createTextNode(c));
+    else el.appendChild(c);
+  }
+  return el;
+};
+const fmtMs = (ms) => ms == null ? '—' : ms > 1000 ? (ms/1000).toFixed(2) + 's' : ms + 'ms';
+const fmtCost = (c) => c == null ? '—' : '$' + c.toFixed(4);
+const fmtTime = (ts) => {
+  const d = new Date(ts);
+  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+};
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function tierBadge(tier) {
+  if (!tier) return h('span', { class: 'tier', html: '?' });
+  return h('span', { class: 'tier t' + tier, html: 'L' + tier });
+}
+
+function atomRef(ref) {
+  if (!ref) return h('span', { class: 'meta', html: '?' });
+  const span = h('span', {}, [tierBadge(ref.tier), ' ', h('span', { class: 'name' }, ref.name ?? '?')]);
+  return span;
+}
+
+async function loadIndex() {
+  const r = await fetch('/api/runs');
+  state.runs = await r.json();
+  const sel = $('runSelect');
+  sel.innerHTML = '';
+  if (state.runs.length === 0) {
+    sel.appendChild(h('option', {}, 'Aucun run enregistré'));
+    renderSummary(null);
+    return;
+  }
+  for (const r of state.runs) {
+    const label = `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${r.hasError ? '  ✖' : ''}`;
+    sel.appendChild(h('option', { value: r.id }, label));
+  }
+  selectRun(state.runs[0].id);
+}
+
+async function selectRun(id) {
+  $('runSelect').value = id;
+  $('eventsList').innerHTML = '<div class="loader">Chargement…</div>';
+  $('rightPane').innerHTML = '<div class="empty">Sélectionne un évènement à gauche pour en voir le détail.</div>';
+  const r = await fetch('/api/runs/' + encodeURIComponent(id));
+  if (!r.ok) {
+    $('eventsList').innerHTML = '<div class="empty">Run introuvable.</div>';
+    return;
+  }
+  state.currentRun = await r.json();
+  state.selectedEventId = null;
+  state.selectedAtomName = null;
+  state.atomsByName = buildAtomMap(state.currentRun);
+  renderSummary(state.currentRun);
+  renderLanes(state.currentRun);
+  renderFilters();
+  renderEvents();
+}
+
+/**
+ * Merge every atom type the run touched into a single map, keyed by name.
+ * Sources, in increasing precedence (later overrides earlier):
+ *   1. `run.initialTypes` — snapshot captured at `beginRun` (pre-existing types).
+ *   2. Registry events with snapshots (create / patch / branch) — each bumps
+ *      the version and refreshes counters.
+ * Every entry also carries the list of registry events it saw during the run
+ * so the detail pane can render a mini version-history timeline.
+ */
+function buildAtomMap(run) {
+  const map = new Map();
+  const put = (snap, origin) => {
+    const prev = map.get(snap.name);
+    if (!prev) {
+      map.set(snap.name, { snapshot: snap, origin, events: [] });
+      return;
+    }
+    if (snap.version >= prev.snapshot.version) {
+      // Preserve the strongest origin we've ever seen: created > branched > patched > existing.
+      const strength = { existing: 0, patched: 1, branched: 2, created: 3 };
+      const best = (strength[origin] ?? 0) >= (strength[prev.origin] ?? 0) ? origin : prev.origin;
+      map.set(snap.name, { snapshot: snap, origin: best, events: prev.events });
+    }
+  };
+  for (const s of (run.initialTypes ?? [])) put(s, 'existing');
+  for (const ev of run.events) {
+    if (ev.kind !== 'registry' || !ev.snapshot) continue;
+    const origin = ev.op === 'create' ? 'created' : ev.op === 'branch' ? 'branched' : 'patched';
+    put(ev.snapshot, origin);
+    const entry = map.get(ev.snapshot.name);
+    if (entry) entry.events.push(ev);
+  }
+  // Attach success/failure counter bumps to the owning atom's history too.
+  for (const ev of run.events) {
+    if (ev.kind !== 'registry') continue;
+    if (ev.op !== 'recordSuccess' && ev.op !== 'recordFailure') continue;
+    const entry = map.get(ev.name);
+    if (entry) entry.events.push(ev);
+  }
+  return map;
+}
+
+function renderSummary(run) {
+  const el = $('runSummary');
+  if (!run) { el.innerHTML = ''; return; }
+  const t = run.totals ?? { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  el.innerHTML = '';
+  const grid = h('div', { class: 'grid' }, [
+    statCard('Durée', fmtMs(run.durationMs)),
+    statCard('Appels LLM', String(t.calls)),
+    statCard('Tokens (in/out)', (t.inputTokens ?? 0) + ' / ' + (t.outputTokens ?? 0)),
+    statCard('Cache hit', String(t.cacheReadInputTokens ?? 0)),
+    statCard('Coût', fmtCost(t.costUsd)),
+    statCard('Fallback', run.result?.producedBy?.viaFallback ? 'oui' : 'non'),
+  ]);
+  const models = (t.perModel ?? []).map((m) =>
+    h('span', { class: 'chip muted' }, `${m.model.replace(/^claude-/, '')}  ·  ${m.calls}×  ·  ${fmtCost(m.costUsd)}`)
+  );
+  el.appendChild(h('div', { class: 'summary' }, [
+    h('h2', {}, run.label),
+    h('div', { class: 'task' }, run.task?.description ?? ''),
+    grid,
+    models.length ? h('div', { class: 'filters', style: 'margin-top:10px;' }, models) : null,
+    run.result ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Résultat : ' + (run.result.summary ?? '')) : null,
+    run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Erreur : ' + run.error) : null,
+  ]));
+}
+
+function statCard(k, v) {
+  return h('div', { class: 'stat' }, [h('div', { class: 'k' }, k), h('div', { class: 'v' }, v)]);
+}
+
+function renderLanes(run) {
+  const wrap = $('lanesWrap');
+  wrap.innerHTML = '';
+  const byTier = { 1: [], 2: [], 3: [] };
+  for (const [name, entry] of state.atomsByName.entries()) {
+    byTier[entry.snapshot.tier].push({ name, entry });
+  }
+  // Include atoms that only appeared as actor/child refs on LLM events without
+  // a full snapshot — render a placeholder so the lane doesn't hide them.
+  for (const ev of run.events) {
+    if (ev.kind !== 'llm') continue;
+    for (const ref of [ev.actor, ev.child]) {
+      if (!ref?.tier || !ref?.name) continue;
+      if (state.atomsByName.has(ref.name)) continue;
+      if (byTier[ref.tier].some((x) => x.name === ref.name)) continue;
+      byTier[ref.tier].push({ name: ref.name, entry: null });
+    }
+  }
+  for (const tier of [1, 2, 3]) {
+    byTier[tier].sort((a, b) => (a.entry?.snapshot.ordinal ?? 9999) - (b.entry?.snapshot.ordinal ?? 9999));
+  }
+  const lane = (tier, title) => {
+    const items = byTier[tier];
+    const chips = items.map(({ name, entry }) => {
+      const origin = entry?.origin ?? 'unknown';
+      const cls = 'chip atom ' + (
+        origin === 'created' || origin === 'branched' ? 'new'
+        : origin === 'patched' ? 'patched'
+        : ''
+      ) + (state.selectedAtomName === name ? ' selected' : '');
+      const title = entry
+        ? `${origin} · v${entry.snapshot.version} · ✓${entry.snapshot.successes}/✗${entry.snapshot.failures}`
+        : 'référencé sans snapshot';
+      const children = [name];
+      if (entry) children.push(h('span', { class: 'v' }, 'v' + entry.snapshot.version));
+      const attrs = { class: cls.trim(), title };
+      if (entry) attrs.onclick = () => selectAtom(name);
+      else attrs.style = 'cursor: default; opacity: 0.7;';
+      return h('span', attrs, children);
+    });
+    return h('div', { class: 'lane l' + tier }, [
+      h('h4', {}, title + ` (${items.length})`),
+      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, '— aucun —')),
+    ]);
+  };
+  wrap.appendChild(h('div', { class: 'lanes' }, [
+    lane(3, 'L3 · cellules'),
+    lane(2, 'L2 · molécules'),
+    lane(1, 'L1 · éléments'),
+  ]));
+  wrap.appendChild(h('div', { class: 'origin-legend' }, [
+    h('span', {}, [h('span', { class: 'dot new' }), 'créé/branché pendant ce run']),
+    h('span', {}, [h('span', { class: 'dot patched' }), 'patché pendant ce run']),
+    h('span', {}, [h('span', { class: 'dot existing' }), 'préexistant (réutilisé)']),
+    h('span', { class: 'meta' }, '— clique sur un atome pour voir son prompt complet'),
+  ]));
+}
+
+function selectAtom(name) {
+  const entry = state.atomsByName.get(name);
+  if (!entry) return;
+  state.selectedAtomName = name;
+  state.selectedEventId = null;
+  renderLanes(state.currentRun);
+  renderEvents();
+  renderAtomDetail(entry);
+}
+
+function renderFilters() {
+  const el = $('filters');
+  el.innerHTML = '';
+  const kinds = [
+    ['all', 'Tous'],
+    ['llm', 'LLM'],
+    ['registry', 'Registry'],
+  ];
+  for (const [k, lbl] of kinds) {
+    el.appendChild(h('span', {
+      class: 'chip' + (state.filters.kind === k ? ' active' : ''),
+      onclick: () => { state.filters.kind = k; renderFilters(); renderEvents(); },
+    }, lbl));
+  }
+  const sep = h('span', { class: 'chip muted', style: 'pointer-events: none; background: transparent; border: none;' }, '·');
+  el.appendChild(sep);
+  const roles = [
+    ['all', 'Tous rôles'],
+    ['plan', 'plan'],
+    ['execute', 'execute'],
+    ['validate-plan', 'validate plan'],
+    ['validate-result', 'validate result'],
+    ['prefilter', 'prefilter'],
+    ['fallback-plan', 'fallback plan'],
+    ['fallback-execute', 'fallback execute'],
+  ];
+  for (const [k, lbl] of roles) {
+    el.appendChild(h('span', {
+      class: 'chip' + (state.filters.role === k ? ' active' : ''),
+      onclick: () => { state.filters.role = k; renderFilters(); renderEvents(); },
+    }, lbl));
+  }
+}
+
+function renderEvents() {
+  const el = $('eventsList');
+  el.innerHTML = '';
+  const run = state.currentRun;
+  if (!run) return;
+  const filtered = run.events.filter((e) => {
+    if (state.filters.kind !== 'all' && e.kind !== state.filters.kind) return false;
+    if (e.kind === 'llm' && state.filters.role !== 'all' && e.role !== state.filters.role) return false;
+    return true;
+  });
+  if (filtered.length === 0) {
+    el.appendChild(h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'));
+    return;
+  }
+  for (const ev of filtered) el.appendChild(renderEventCard(ev));
+}
+
+function renderEventCard(ev) {
+  const selected = state.selectedEventId === ev.id ? ' selected' : '';
+  if (ev.kind === 'llm') {
+    const row = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role ' + ev.role }, labelRole(ev.role)),
+    ];
+    if (ev.actor) row.push(atomRef(ev.actor));
+    if (ev.child) {
+      row.push(h('span', { class: 'arrow' }, '→'));
+      row.push(atomRef(ev.child));
+    }
+    if (ev.subject) row.push(h('span', { class: 'meta' }, '[' + ev.subject + ']'));
+    row.push(h('span', { class: 'spacer', style: 'flex:1;' }));
+    row.push(h('span', { class: 'model' }, shortModel(ev.model)));
+    row.push(h('span', { class: 'cost' }, fmtCost(ev.costUsd)));
+    if (ev.error) row.push(h('span', { class: 'err-badge' }, 'erreur'));
+
+    const meta = [
+      `in: ${ev.usage.inputTokens}`,
+      `out: ${ev.usage.outputTokens}`,
+      ev.usage.cacheReadInputTokens ? `cache: ${ev.usage.cacheReadInputTokens}` : null,
+      `${fmtMs(ev.durationMs)}`,
+      ev.stopReason ? `stop: ${ev.stopReason}` : null,
+    ].filter(Boolean).join('  ·  ');
+
+    return h('div', {
+      class: 'event' + selected,
+      onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+    }, [
+      h('div', { class: 'row' }, row),
+      h('div', { class: 'meta', style: 'margin-top:4px;' }, meta),
+    ]);
+  }
+  // registry
+  const row = [
+    h('span', { class: 'when' }, fmtTime(ev.ts)),
+    h('span', { class: 'role ' + ev.op }, ev.op),
+  ];
+  if (ev.tier) row.push(tierBadge(ev.tier));
+  row.push(h('span', { class: 'name' }, ev.name));
+  if (ev.from) {
+    row.push(h('span', { class: 'arrow' }, '←'));
+    row.push(h('span', { class: 'meta' }, 'from ' + ev.from));
+  }
+  if (ev.version != null) row.push(h('span', { class: 'meta' }, 'v' + ev.version));
+  if (ev.by) row.push(h('span', { class: 'meta' }, 'by ' + ev.by));
+  return h('div', {
+    class: 'event' + selected,
+    onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+  }, [h('div', { class: 'row' }, row)]);
+}
+
+function labelRole(r) {
+  return {
+    'plan': 'plan',
+    'execute': 'execute',
+    'validate-plan': 'validate plan',
+    'validate-result': 'validate result',
+    'prefilter': 'prefilter',
+    'fallback-plan': 'fallback plan',
+    'fallback-execute': 'fallback exec',
+    'unknown': 'unknown',
+  }[r] ?? r;
+}
+function shortModel(m) {
+  return (m || '').replace(/^claude-/, '');
+}
+
+function renderDetail(ev) {
+  const el = $('rightPane');
+  el.innerHTML = '';
+  state.selectedAtomName = null;
+  renderLanes(state.currentRun);
+  if (ev.kind === 'llm') {
+    renderLlmDetail(el, ev);
+  } else {
+    renderRegistryDetail(el, ev);
+  }
+}
+
+function renderAtomDetail(entry) {
+  const el = $('rightPane');
+  el.innerHTML = '';
+  const s = entry.snapshot;
+  const originLabel = {
+    created: 'créé pendant ce run',
+    branched: 'branché pendant ce run',
+    patched: 'patché pendant ce run',
+    existing: 'préexistant (réutilisé tel quel)',
+  }[entry.origin] ?? entry.origin;
+
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, `Atome — ${s.name}`),
+    h('div', { class: 'kv' }, [
+      h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(s.tier), ' ', h('span', { class: 'meta' }, `#${s.ordinal}`)]),
+      h('div', { class: 'k' }, 'Version'), h('div', { class: 'v' }, 'v' + s.version),
+      h('div', { class: 'k' }, 'Origine'), h('div', { class: 'v' }, originLabel),
+      h('div', { class: 'k' }, 'Créé par'), h('div', { class: 'v' }, `${s.createdBy}  ·  ${s.createdAt}`),
+      h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
+      h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(s.params)),
+      h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+        (s.tools && s.tools.length)
+          ? h('div', { class: 'tools-list' }, s.tools.map((t) => h('span', { class: 'chip muted' }, t)))
+          : h('span', { class: 'meta' }, '— aucun —')),
+    ]),
+  ]));
+
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Description'),
+    h('pre', {}, s.description || '(vide)'),
+  ]));
+
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'System prompt'),
+    h('pre', {}, s.systemPrompt || '(vide)'),
+  ]));
+
+  if (entry.events && entry.events.length > 0) {
+    const rows = entry.events
+      .slice()
+      .sort((a, b) => a.ts - b.ts)
+      .map((ev) => {
+        const row = [
+          h('span', { class: 'when' }, fmtTime(ev.ts)),
+          h('span', { class: 'role ' + ev.op }, ev.op),
+        ];
+        if (ev.version != null) row.push(h('span', { class: 'meta' }, 'v' + ev.version));
+        if (ev.from) row.push(h('span', { class: 'meta' }, '← ' + ev.from));
+        if (ev.by) row.push(h('span', { class: 'meta' }, 'by ' + ev.by));
+        if (ev.reason) row.push(h('span', { class: 'meta' }, ev.reason));
+        const wrap = h('div', { class: 'row', style: 'cursor:pointer;' }, row);
+        wrap.addEventListener('click', () => {
+          state.selectedEventId = ev.id;
+          state.selectedAtomName = null;
+          renderLanes(state.currentRun);
+          renderEvents();
+          renderDetail(ev);
+        });
+        return wrap;
+      });
+    el.appendChild(h('div', { class: 'section' }, [
+      h('h3', {}, `Historique dans ce run (${entry.events.length})`),
+      h('div', { class: 'history-list' }, rows),
+    ]));
+  }
+}
+
+function renderLlmDetail(el, ev) {
+  const header = h('div', { class: 'section' }, [
+    h('h3', {}, 'Appel LLM — ' + labelRole(ev.role)),
+    h('div', { class: 'kv' }, [
+      ...(ev.actor ? [h('div', { class: 'k' }, 'Acteur'), h('div', { class: 'v' }, [atomRef(ev.actor)])] : []),
+      ...(ev.child ? [h('div', { class: 'k' }, 'Enfant'), h('div', { class: 'v' }, [atomRef(ev.child)])] : []),
+      ...(ev.subject ? [h('div', { class: 'k' }, 'Sujet'), h('div', { class: 'v' }, ev.subject)] : []),
+      h('div', { class: 'k' }, 'Modèle'), h('div', { class: 'v' }, ev.model),
+      h('div', { class: 'k' }, 'Durée'), h('div', { class: 'v' }, fmtMs(ev.durationMs)),
+      h('div', { class: 'k' }, 'Tokens'), h('div', { class: 'v' },
+        `in=${ev.usage.inputTokens}  out=${ev.usage.outputTokens}  cacheRead=${ev.usage.cacheReadInputTokens}  cacheCreate=${ev.usage.cacheCreationInputTokens}`),
+      h('div', { class: 'k' }, 'Coût'), h('div', { class: 'v' }, fmtCost(ev.costUsd)),
+      h('div', { class: 'k' }, 'Stop reason'), h('div', { class: 'v' }, ev.stopReason ?? '—'),
+      ...(ev.error ? [h('div', { class: 'k' }, 'Erreur'), h('div', { class: 'v' }, ev.error)] : []),
+    ]),
+  ]);
+  el.appendChild(header);
+
+  // Tabs: System prompt, User content, Response
+  const tabs = h('div', { class: 'tabs' });
+  const body = h('div');
+  const entries = [
+    ['System prompt', ev.systemPrompt],
+    ['User content', ev.userContent],
+    ['Response', ev.response || (ev.error ? '(aucune réponse — appel en erreur)' : '')],
+  ];
+  entries.forEach(([lbl, txt], i) => {
+    const tab = h('div', { class: 'tab' + (i === 1 ? ' active' : '') }, lbl);
+    tab.addEventListener('click', () => {
+      [...tabs.children].forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      body.innerHTML = '';
+      body.appendChild(h('pre', {}, txt || '(vide)'));
+    });
+    tabs.appendChild(tab);
+  });
+  body.appendChild(h('pre', {}, entries[1][1] || '(vide)'));
+  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Prompts & réponse'), tabs, body]));
+}
+
+function renderRegistryDetail(el, ev) {
+  const head = h('div', { class: 'section' }, [
+    h('h3', {}, 'Mutation registry — ' + ev.op),
+    h('div', { class: 'kv' }, [
+      h('div', { class: 'k' }, 'Nom'), h('div', { class: 'v' }, ev.name),
+      ...(ev.tier ? [h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(ev.tier)])] : []),
+      ...(ev.from ? [h('div', { class: 'k' }, 'Origine'), h('div', { class: 'v' }, ev.from)] : []),
+      ...(ev.by ? [h('div', { class: 'k' }, 'Par'), h('div', { class: 'v' }, ev.by)] : []),
+      ...(ev.version != null ? [h('div', { class: 'k' }, 'Version'), h('div', { class: 'v' }, 'v' + ev.version)] : []),
+      ...(ev.reason ? [h('div', { class: 'k' }, 'Raison'), h('div', { class: 'v' }, ev.reason)] : []),
+    ]),
+  ]);
+  el.appendChild(head);
+  if (ev.modifications) {
+    el.appendChild(h('div', { class: 'section' }, [
+      h('h3', {}, 'Modifications'),
+      h('pre', {}, JSON.stringify(ev.modifications, null, 2)),
+    ]));
+  }
+  if (ev.snapshot) {
+    el.appendChild(h('div', { class: 'section' }, [
+      h('h3', {}, 'Snapshot'),
+      h('div', { class: 'kv' }, [
+        h('div', { class: 'k' }, 'Description'), h('div', { class: 'v' }, ev.snapshot.description),
+        h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(ev.snapshot.params)),
+        h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `${ev.snapshot.successes} / ${ev.snapshot.failures}`),
+        h('div', { class: 'k' }, 'Créé le'), h('div', { class: 'v' }, ev.snapshot.createdAt),
+      ]),
+      h('h3', { style: 'margin-top:12px;' }, 'System prompt'),
+      h('pre', {}, ev.snapshot.systemPrompt),
+    ]));
+  }
+}
+
+$('runSelect').addEventListener('change', (e) => selectRun(e.target.value));
+$('registrySelect').addEventListener('change', (e) => selectRegistry(e.target.value));
+$('registrySearch').addEventListener('input', (e) => {
+  state.registryFilter = e.target.value.toLowerCase();
+  renderRegistryLanes();
+});
+$('refreshBtn').addEventListener('click', () => {
+  if (state.view === 'runs') loadIndex();
+  else loadRegistries();
+});
+
+for (const btn of $('viewSwitch').querySelectorAll('button')) {
+  btn.addEventListener('click', () => switchView(btn.dataset.view));
+}
+
+function switchView(v) {
+  if (state.view === v) return;
+  state.view = v;
+  for (const btn of $('viewSwitch').querySelectorAll('button')) {
+    btn.classList.toggle('active', btn.dataset.view === v);
+  }
+  const isRuns = v === 'runs';
+  $('runsView').style.display = isRuns ? '' : 'none';
+  $('registryView').style.display = isRuns ? 'none' : '';
+  $('runSelect').style.display = isRuns ? '' : 'none';
+  $('registrySelect').style.display = isRuns ? 'none' : '';
+  $('registrySearch').style.display = isRuns ? 'none' : '';
+  $('rightPane').innerHTML = '<div class="empty">' + (isRuns
+    ? 'Sélectionne un évènement à gauche pour en voir le détail.'
+    : 'Sélectionne un atome à gauche pour en voir le détail.') + '</div>';
+  if (!isRuns && state.registries.length === 0) loadRegistries();
+}
+
+async function loadRegistries() {
+  const r = await fetch('/api/registries');
+  state.registries = await r.json();
+  const sel = $('registrySelect');
+  sel.innerHTML = '';
+  if (state.registries.length === 0) {
+    sel.appendChild(h('option', {}, 'Aucun registre configuré'));
+    $('registrySummary').innerHTML = '';
+    $('registryLanes').innerHTML = '<div class="empty">Aucune base SQLite trouvée. Lance le serveur avec `--db path/to/atoma.db`.</div>';
+    return;
+  }
+  for (const reg of state.registries) {
+    const label = `${reg.label}  —  ${reg.counts.total} atomes` + (reg.exists ? '' : '  (absente)');
+    sel.appendChild(h('option', { value: reg.id }, label));
+  }
+  // Prefer the first registry that actually exists on disk.
+  const first = state.registries.find((r) => r.exists) ?? state.registries[0];
+  selectRegistry(first.id);
+}
+
+async function selectRegistry(id) {
+  $('registrySelect').value = id;
+  $('registryLanes').innerHTML = '<div class="loader">Chargement…</div>';
+  $('rightPane').innerHTML = '<div class="empty">Sélectionne un atome à gauche pour en voir le détail.</div>';
+  const r = await fetch('/api/registry/' + encodeURIComponent(id));
+  if (!r.ok) {
+    $('registryLanes').innerHTML = '<div class="empty">Registre introuvable.</div>';
+    return;
+  }
+  state.currentRegistry = await r.json();
+  state.selectedRegistryAtom = null;
+  renderRegistrySummary();
+  renderRegistryLanes();
+}
+
+function renderRegistrySummary() {
+  const el = $('registrySummary');
+  el.innerHTML = '';
+  const reg = state.currentRegistry;
+  if (!reg) return;
+  const { registry, types } = reg;
+  const totalSuccess = types.reduce((n, t) => n + (t.successes ?? 0), 0);
+  const totalFailure = types.reduce((n, t) => n + (t.failures ?? 0), 0);
+  const grid = h('div', { class: 'grid' }, [
+    statCard('L1 · éléments', String(registry.counts[1] ?? 0)),
+    statCard('L2 · molécules', String(registry.counts[2] ?? 0)),
+    statCard('L3 · cellules', String(registry.counts[3] ?? 0)),
+    statCard('Total succès', String(totalSuccess)),
+    statCard('Total échecs', String(totalFailure)),
+  ]);
+  el.appendChild(h('div', { class: 'summary' }, [
+    h('h2', {}, `Registry — ${registry.label}`),
+    h('div', { class: 'task', style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px;' }, registry.path),
+    grid,
+    !registry.exists ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Fichier absent — aucune donnée à afficher') : null,
+  ]));
+}
+
+function renderRegistryLanes() {
+  const el = $('registryLanes');
+  el.innerHTML = '';
+  if (!state.currentRegistry) return;
+  const types = state.currentRegistry.types;
+  const q = state.registryFilter.trim();
+  const match = (t) =>
+    !q ||
+    t.name.toLowerCase().includes(q) ||
+    t.description.toLowerCase().includes(q) ||
+    t.systemPrompt.toLowerCase().includes(q);
+  const byTier = { 1: [], 2: [], 3: [] };
+  for (const t of types) if (match(t)) byTier[t.tier].push(t);
+
+  const lane = (tier, title) => {
+    const items = byTier[tier];
+    const chips = items.map((t) => {
+      const cls = 'chip atom' + (state.selectedRegistryAtom === t.name ? ' selected' : '');
+      const ratio = t.successes + t.failures > 0
+        ? ` · ✓${t.successes}/✗${t.failures}`
+        : '';
+      const title = `v${t.version}${ratio}`;
+      return h('span', {
+        class: cls,
+        title,
+        onclick: () => selectRegistryAtom(t.name),
+      }, [t.name, h('span', { class: 'v' }, 'v' + t.version)]);
+    });
+    return h('div', { class: 'lane l' + tier }, [
+      h('h4', {}, title + ` (${items.length})`),
+      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, q ? '— aucun atome ne correspond —' : '— aucun —')),
+    ]);
+  };
+  el.appendChild(h('div', { class: 'lanes' }, [
+    lane(3, 'L3 · cellules'),
+    lane(2, 'L2 · molécules'),
+    lane(1, 'L1 · éléments'),
+  ]));
+  el.appendChild(h('div', { class: 'origin-legend' }, [
+    h('span', { class: 'meta' }, '— clique sur un atome pour voir son prompt complet + l\'historique des versions'),
+  ]));
+}
+
+function selectRegistryAtom(name) {
+  if (!state.currentRegistry) return;
+  const t = state.currentRegistry.types.find((x) => x.name === name);
+  if (!t) return;
+  state.selectedRegistryAtom = name;
+  renderRegistryLanes();
+  renderRegistryAtomDetail(t);
+}
+
+function renderRegistryAtomDetail(t) {
+  const el = $('rightPane');
+  el.innerHTML = '';
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, `Atome — ${t.name}`),
+    h('div', { class: 'kv' }, [
+      h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(t.tier), ' ', h('span', { class: 'meta' }, `#${t.ordinal}`)]),
+      h('div', { class: 'k' }, 'Version actuelle'), h('div', { class: 'v' }, 'v' + t.version),
+      h('div', { class: 'k' }, 'Créé par'), h('div', { class: 'v' }, `${t.createdBy}  ·  ${t.createdAt}`),
+      h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `✓ ${t.successes}  ·  ✗ ${t.failures}`),
+      h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(t.params)),
+      h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+        (t.tools && t.tools.length)
+          ? h('div', { class: 'tools-list' }, t.tools.map((n) => h('span', { class: 'chip muted' }, n)))
+          : h('span', { class: 'meta' }, '— aucun —')),
+    ]),
+  ]));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Description'),
+    h('pre', {}, t.description || '(vide)'),
+  ]));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, `System prompt (v${t.version} · courant)`),
+    h('pre', {}, t.systemPrompt || '(vide)'),
+  ]));
+
+  if (t.history && t.history.length > 0) {
+    const section = h('div', { class: 'section' }, [
+      h('h3', {}, `Historique des versions (${t.history.length} archivée${t.history.length > 1 ? 's' : ''})`),
+    ]);
+    // Render each archived version as a collapsible block (newest first).
+    const entries = t.history.slice().sort((a, b) => b.version - a.version);
+    for (const h_ of entries) {
+      const body = h('div', { style: 'display:none; margin-top:8px;' }, [
+        h('div', { class: 'kv' }, [
+          h('div', { class: 'k' }, 'Modifié par'), h('div', { class: 'v' }, `${h_.modifiedBy}  ·  ${h_.modifiedAt}`),
+          h('div', { class: 'k' }, 'Raison'), h('div', { class: 'v' }, h_.reason ?? '—'),
+          h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(h_.params)),
+          h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+            (h_.tools && h_.tools.length)
+              ? h('div', { class: 'tools-list' }, h_.tools.map((n) => h('span', { class: 'chip muted' }, n)))
+              : h('span', { class: 'meta' }, '— aucun —')),
+        ]),
+        h('h3', { style: 'margin-top:10px;' }, 'System prompt'),
+        h('pre', {}, h_.systemPrompt || '(vide)'),
+      ]);
+      const header = h('div', {
+        class: 'row',
+        style: 'cursor:pointer; padding:6px 0; border-top:1px solid var(--border);',
+      }, [
+        h('span', { class: 'role patch' }, 'v' + h_.version),
+        h('span', { class: 'meta' }, h_.modifiedAt),
+        h('span', { class: 'meta' }, h_.reason ?? '—'),
+        h('span', { class: 'meta', style: 'margin-left:auto;' }, '▸ afficher / masquer'),
+      ]);
+      header.addEventListener('click', () => {
+        body.style.display = body.style.display === 'none' ? '' : 'none';
+      });
+      section.appendChild(header);
+      section.appendChild(body);
+    }
+    el.appendChild(section);
+  }
+}
+
+loadIndex();
+</script>
+</body>
+</html>

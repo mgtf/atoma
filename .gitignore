@@ -9,3 +9,4 @@ dist/
 coverage/
 .DS_Store
 build/
+runs/

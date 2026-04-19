@@ -82,6 +82,18 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
+  (prompt + response + usage + tier/atom routing) and every registry
+  mutation (`create` / `patch` / `branch` / counter bumps) during a run,
+  then serves a self-contained HTML UI on http://127.0.0.1:4111. Wired into
+  both examples via `RecordingLlmClient` (wraps any `LlmClient`) and
+  `RecordingRegistry` (subclasses `AtomRegistry`) — both observers only,
+  zero effect on runtime behaviour. Runs are persisted as JSON under
+  `./runs/` (override with `ATOMA_RUNS_DIR`). `npm run viz:demo` generates
+  a mocked run with no API key so the UI always has something to render.
+  Role inference in `recordingLlm.ts` keys off the stable `VALIDATION_SYSTEM_PROMPT`
+  and `PREFILTER_SYSTEM_PROMPT` markers plus the `You are atom "X" (tier N)`
+  preamble — keep those markers stable or update `classify()` accordingly.
 
 ## Architecture invariants (don't violate these)
 

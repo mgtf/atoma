@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { extractJson, repairTruncatedJson } from '../src/atoms/json.js';
+import {
+  extractJson,
+  repairTruncatedJson,
+  verdictSchema,
+  isEffectivelyEmptyMods,
+} from '../src/atoms/json.js';
 
 describe('extractJson', () => {
   it('parses a plain JSON object', () => {
@@ -59,5 +64,71 @@ describe('repairTruncatedJson', () => {
 
   it('strips a trailing comma when repairing', () => {
     expect(repairTruncatedJson('{"a":1,')).toBe('{"a":1}');
+  });
+});
+
+describe('verdictSchema', () => {
+  it('accepts an approved verdict', () => {
+    expect(verdictSchema.safeParse({ approved: true, reasoning: 'ok' }).success).toBe(true);
+  });
+
+  it('accepts a rejected ephemeral verdict with empty modifications (pure retry)', () => {
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'transient flake',
+      modifications: {},
+      scope: 'ephemeral',
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it('rejects a patch verdict with empty modifications', () => {
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'diagnostic only, no prescription',
+      modifications: {},
+      scope: 'patch',
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.issues.some((i) => i.path.includes('modifications'))).toBe(true);
+    }
+  });
+
+  it('rejects a branch verdict with only nullish/empty fields in modifications', () => {
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'needs a variant',
+      modifications: { addTools: [], removeTools: [], additionalContext: '' },
+      scope: 'branch',
+      branchName: 'NewThing',
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('accepts a patch verdict with at least one concrete field', () => {
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'tighten output discipline',
+      modifications: { systemPromptAppend: 'Be concise.' },
+      scope: 'patch',
+    });
+    expect(res.success).toBe(true);
+  });
+});
+
+describe('isEffectivelyEmptyMods', () => {
+  it('detects empty / undefined / whitespace-equivalent fields', () => {
+    expect(isEffectivelyEmptyMods(undefined)).toBe(true);
+    expect(isEffectivelyEmptyMods({})).toBe(true);
+    expect(isEffectivelyEmptyMods({ addTools: [], removeTools: [] })).toBe(true);
+    expect(isEffectivelyEmptyMods({ additionalContext: '' })).toBe(true);
+    expect(isEffectivelyEmptyMods({ params: {} })).toBe(true);
+  });
+
+  it('flags as non-empty when any field carries content', () => {
+    expect(isEffectivelyEmptyMods({ systemPromptAppend: 'x' })).toBe(false);
+    expect(isEffectivelyEmptyMods({ params: { temperature: 0.1 } })).toBe(false);
+    expect(isEffectivelyEmptyMods({ removeTools: ['foo'] })).toBe(false);
   });
 });

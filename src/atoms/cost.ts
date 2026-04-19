@@ -161,6 +161,7 @@ export async function prefilterStrategy(args: {
       systemPrompt: PREFILTER_SYSTEM_PROMPT,
       userContent,
       params: PREFILTER_PARAMS,
+      signal: args.ctx.signal,
     });
     const outcome = parseWith(prefilterResponseSchema, resp.text);
     if (outcome.kind === 'reuse' && !filteredNames.has(outcome.target)) {

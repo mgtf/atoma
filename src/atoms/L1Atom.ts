@@ -77,6 +77,7 @@ export class L1Atom extends Atom {
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       params: this.params,
+      signal: ctx.signal,
     });
 
     return parseWith(planSchema, resp.text);
@@ -151,6 +152,14 @@ export class L1Atom extends Atom {
       tools: this.tools,
       params: this.params,
       executor: ctx.tools,
+      signal: ctx.signal,
+      // Iterative build-app style tasks (write_file → start_server →
+      // validate_html → read_file → rewrite → re-validate, up to 5 loops)
+      // burn through tool-use slots fast. The default (24) covers the
+      // no-validator path; when we've wired a validator into the tool set,
+      // give the loop enough room to actually converge before falling back
+      // to the tools-disabled finalization round-trip.
+      maxToolIterations: hasValidator ? 40 : undefined,
     });
 
     const payload = parseWith(resultPayloadSchema, resp.text);

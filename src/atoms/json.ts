@@ -291,21 +291,60 @@ export const atomModificationsSchema = z.object({
   additionalContext: z.string().optional(),
 });
 
-export const verdictSchema = z.discriminatedUnion('approved', [
-  z.object({ approved: z.literal(true), reasoning: z.string() }),
-  z.object({
-    approved: z.literal(false),
-    reasoning: z.string(),
-    modifications: atomModificationsSchema,
-    scope: z.enum(['ephemeral', 'branch', 'patch']),
-    // LLMs sometimes emit `"branchName": null` instead of omitting the key;
-    // nullish() tolerates that at runtime. Output type stays
-    // `string | null | undefined` because zod v3 doesn't narrow through a
-    // discriminated union; the consumer (`llmVerdict`) normalises to
-    // `string | undefined` before returning.
-    branchName: z.string().nullish(),
-  }),
-]);
+/**
+ * True when `mods` contains no actionable change — every field is either
+ * absent, nullish, or an empty string/array/object. Kept exported because both
+ * the verdict refinement (below) and downstream consumers use the same
+ * definition of "empty" to stay in sync.
+ */
+export function isEffectivelyEmptyMods(
+  mods: z.infer<typeof atomModificationsSchema> | undefined
+): boolean {
+  if (!mods) return true;
+  if (typeof mods.systemPromptReplace === 'string' && mods.systemPromptReplace.length > 0) return false;
+  if (typeof mods.systemPromptAppend === 'string' && mods.systemPromptAppend.length > 0) return false;
+  if (typeof mods.additionalContext === 'string' && mods.additionalContext.length > 0) return false;
+  if (Array.isArray(mods.addTools) && mods.addTools.length > 0) return false;
+  if (Array.isArray(mods.removeTools) && mods.removeTools.length > 0) return false;
+  if (mods.params && Object.keys(mods.params).length > 0) return false;
+  return true;
+}
+
+export const verdictSchema = z
+  .discriminatedUnion('approved', [
+    z.object({ approved: z.literal(true), reasoning: z.string() }),
+    z.object({
+      approved: z.literal(false),
+      reasoning: z.string(),
+      modifications: atomModificationsSchema,
+      scope: z.enum(['ephemeral', 'branch', 'patch']),
+      // LLMs sometimes emit `"branchName": null` instead of omitting the key;
+      // nullish() tolerates that at runtime. Output type stays
+      // `string | null | undefined` because zod v3 doesn't narrow through a
+      // discriminated union; the consumer (`llmVerdict`) normalises to
+      // `string | undefined` before returning.
+      branchName: z.string().nullish(),
+    }),
+  ])
+  // A rejected verdict targeting the canonical type (`patch` or `branch`)
+  // MUST carry at least one concrete modification — otherwise the LLM is
+  // merely diagnosing without prescribing, and we'd mutate the registry for
+  // nothing. `ephemeral` is exempt: it's a pure retry of the current
+  // instance, which is occasionally legit (e.g. transient flake).
+  .superRefine((v, ctx) => {
+    if (v.approved) return;
+    if (v.scope === 'ephemeral') return;
+    if (isEffectivelyEmptyMods(v.modifications)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['modifications'],
+        message:
+          `scope "${v.scope}" requires at least one non-empty field in "modifications" ` +
+          '(systemPromptAppend/Replace, additionalContext, addTools, removeTools, or params). ' +
+          'Use scope "ephemeral" when you only have a diagnostic without a concrete fix.',
+      });
+    }
+  });
 
 const toolObjectSchema = z.object({
   name: z.string(),
