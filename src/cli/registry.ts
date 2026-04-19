@@ -15,7 +15,7 @@ import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'top' | 'help';
+  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -41,7 +41,7 @@ function parseArgs(argv: string[]): Args {
       positional.push(token);
     }
   }
-  if (!['list', 'show', 'top', 'help'].includes(cmd)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'help'].includes(cmd)) {
     return { command: 'help', positional: [cmd, ...positional], flags };
   }
   return { command: cmd, positional, flags };
@@ -168,6 +168,74 @@ function cmdTop(
   console.log(renderTable(tableHeaders, sorted.slice(0, 20).map(formatType)));
 }
 
+function cmdDedupe(registry: AtomRegistry, apply: boolean, fuzzy: boolean): void {
+  const groups = registry.findDuplicateGroups({ fuzzy });
+  if (groups.length === 0) {
+    console.log(
+      `no ${fuzzy ? 'fuzzy-' : ''}duplicate groups found. Registry is clean.`
+    );
+    return;
+  }
+  console.log(
+    `${groups.length} ${fuzzy ? 'fuzzy-' : ''}duplicate group(s) detected — names that ${
+      fuzzy ? 'share a token set (word-order insensitive)' : 'normalize to the same key'
+    }:\n`
+  );
+  for (const g of groups) {
+    // Pick winner = most successes, tie-break by lowest ordinal (oldest).
+    const sorted = [...g.types].sort(
+      (a, b) => b.successes - a.successes || a.ordinal - b.ordinal
+    );
+    const winner = sorted[0]!;
+    const losers = sorted.slice(1);
+    console.log(`  [tier ${g.tier}] key="${g.key}"`);
+    console.log(
+      `    winner  : ${winner.name} (ord ${winner.ordinal}, v${winner.version}, ✓${winner.successes}/✗${winner.failures})`
+    );
+    for (const l of losers) {
+      console.log(
+        `    merge ← : ${l.name} (ord ${l.ordinal}, v${l.version}, ✓${l.successes}/✗${l.failures})`
+      );
+    }
+    if (apply) {
+      const refreshed = registry.mergeInto(
+        winner.name,
+        losers.map((l) => l.name)
+      );
+      console.log(
+        `    ✓ merged — ${winner.name} now ✓${refreshed.successes}/✗${refreshed.failures}\n`
+      );
+    } else {
+      console.log('');
+    }
+  }
+  if (!apply) {
+    console.log('DRY RUN. Rerun with --apply to perform the merge.');
+    console.log(
+      'Merging preserves counters (summed into the winner) and archives each loser\'s'
+    );
+    console.log(
+      'history under the winner\'s (tier, ordinal) — the loser rows themselves are deleted.'
+    );
+  } else {
+    console.log('done. Re-run `registry list` to verify.');
+  }
+}
+
+function cmdDescribe(registry: AtomRegistry, name: string, newDescription: string): void {
+  const existing = registry.getByName(name);
+  if (!existing) {
+    console.error(`no atom type named "${name}"`);
+    process.exit(1);
+  }
+  const before = existing.description;
+  const after = registry.describe(name, newDescription, 'cli-describe');
+  console.log(`${name} description updated:`);
+  console.log(`  before: ${before}`);
+  console.log(`  after : ${after.description}`);
+  console.log(`  version: v${existing.version} → v${after.version}`);
+}
+
 function help(): void {
   console.log(`atoma registry CLI
 
@@ -175,6 +243,19 @@ function help(): void {
   show <name>                 — detail of one type + version history
   top  [--tier 1|2|3]         — top 20 by successes (default)
        [--by success|failure|ratio]
+  dedupe [--apply] [--fuzzy]  — detect and (optionally) merge semantic
+                                duplicates. Default matches casing/punctuation
+                                variants ("Minesweeper-WebGL" vs
+                                "minesweeper_webgl"). --fuzzy also matches
+                                word-order variants ("WebGLMinesweeper" vs
+                                "MinesweeperWebGL") by sorting tokens.
+  describe <name> <text>      — overwrite the short description of a type
+                                (useful to heal "description drift" — e.g. a
+                                patched type whose description still says
+                                "Mario platformer" even though the system
+                                prompt now targets Minesweeper). Wraps a
+                                patch with descriptionReplace; the type
+                                version is bumped and counters are reset.
 
 Common flags:
   --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
@@ -201,6 +282,21 @@ function main(): void {
     }
     case 'top':
       return cmdTop(registry, tierFrom(args.flags), args.flags['by'] ?? 'success');
+    case 'dedupe':
+      return cmdDedupe(
+        registry,
+        args.flags['apply'] === 'true',
+        args.flags['fuzzy'] === 'true'
+      );
+    case 'describe': {
+      const name = args.positional[0];
+      const newDescription = args.positional.slice(1).join(' ');
+      if (!name || !newDescription) {
+        console.error('usage: describe <name> <new-description>');
+        process.exit(2);
+      }
+      return cmdDescribe(registry, name, newDescription);
+    }
   }
 }
 

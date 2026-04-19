@@ -1,4 +1,4 @@
-export type EscalationPhase = 'plan' | 'exec';
+export type EscalationPhase = 'plan' | 'exec' | 'repeat';
 
 export class EscalationSignal extends Error {
   constructor(public readonly phase: EscalationPhase) {

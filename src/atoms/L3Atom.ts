@@ -10,15 +10,19 @@ import type {
   Tool,
   Verdict,
 } from '../core/types.js';
-import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
+import {
+  stripBranchProvenance,
+  type AtomRegistry,
+  type AtomType,
+} from '../registry/atomRegistry.js';
 import { PIN_HAIKU, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
 import { llmVerdict } from './L2Atom.js';
 import {
   l3StrategySchema,
   parsePayloadTolerant,
+  parsePlanTolerant,
   parseTwoJson,
-  parseWith,
   planSchema,
   type L3Strategy,
 } from './json.js';
@@ -117,7 +121,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       const prefilter = await prefilterStrategy({
         ctx,
         task,
-        catalog: catalog.map((t) => ({ name: t.name, description: t.description })),
+        // See L2 prefilter call site for rationale: strip the
+        // "(branched from X)" tail so Haiku sees the real description.
+        catalog: catalog.map((t) => ({
+          name: t.name,
+          description: stripBranchProvenance(t.description),
+        })),
         exclude: this.triedChildren.excluded(),
       });
       if (prefilter && prefilter.kind === 'reuse') {
@@ -286,11 +295,28 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   }
 
   private async selfPlan(task: Task, ctx: RunContext): Promise<Plan> {
+    // In fallback mode the L3 IS the executor (no L2 below, no L1 below). If
+    // we hand it tool declarations at execute time, the plan must acknowledge
+    // that — otherwise earlier runs produced plans that said "I'll write
+    // index.html" but ran in a tools-less completion that could only emit
+    // markdown, leaving no file on disk.
+    const hasTools = this.tools.length > 0 && ctx.tools !== undefined;
+    const toolCatalog = hasTools
+      ? this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n')
+      : '(no tools available — reasoning-only answer)';
     const userContent = [
       `You are "${this.name}" (tier 3) in FALLBACK: do the task yourself, no delegation.`,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
-      `Return plan JSON: {"reasoning", "proposedAction", "expectedOutput"}`,
+      hasTools
+        ? 'You HAVE tool access in this fallback turn (see Tools below). Plan concrete tool calls — do NOT describe work as prose when a tool can do it.'
+        : 'You have NO tool access; produce a reasoning-only answer.',
+      `Tools:`,
+      toolCatalog,
+      `IMPORTANT: emit ONE JSON object, NOT an array. Shape exactly:`,
+      `{"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `Your regular mode uses a [strategy, plan] array — that mode is OFF here.`,
+      `The first character of your response MUST be "{".`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -301,29 +327,43 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: this.params,
       signal: ctx.signal,
     });
-    return parseWith(planSchema, resp.text);
+    // Tolerant parse: see L2Atom.selfPlan for rationale — the non-fallback
+    // strategy-array conditioning leaks through even in fallback mode.
+    return parsePlanTolerant(resp.text);
   }
 
   private async selfExecute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
-    // Fallback: even here L3 does NOT touch tools. It summarises / reasons only.
-    // If the task truly requires side effects, the supervise loop should retry
-    // through an L2 → L1 path before reaching this branch.
+    // Fallback executor: the supervise loop already tried L2 → L1 and failed,
+    // so L3 is the last line of defence. We break the "L3 never touches tools"
+    // rule here intentionally — if we don't, side-effect tasks (write a file,
+    // start a server) produce only prose and the user gets nothing on disk.
+    // When `ctx.tools` isn't wired (research-brief-style runs), we fall back
+    // to the old reasoning-only behaviour.
+    const hasTools = this.tools.length > 0 && ctx.tools !== undefined;
+    const hasValidator = hasTools && this.tools.some((t) => t.name === 'validate_html');
     const userContent = [
-      `You are "${this.name}" (tier 3) in FALLBACK: produce a reasoning-only answer.`,
-      `You have NO tools. Do not claim to have written files or started servers.`,
+      `You are "${this.name}" (tier 3) in FALLBACK: L2/L1 supervision failed, you are now the executor.`,
+      hasTools
+        ? 'You HAVE tool access in this fallback turn. Use the tools to actually perform the work — do NOT just describe it. Relative paths for file tools ("index.html", not "/abs/index.html").'
+        : 'You have NO tool access; produce a reasoning-only answer. Do not claim to have written files or started servers.',
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       `Plan: ${JSON.stringify(plan)}`,
-      `Return JSON: {"output", "summary"}`,
+      hasValidator
+        ? 'If the task produces a web artefact, call validate_html on the returned URL after write_file + start_static_server, and iterate (read_file → fix → write_file → re-validate) until ok:true. Only then return success.'
+        : '',
+      `Return JSON: {"output", "summary"} once the work is done.`,
     ]
-      .filter(Boolean)
+      .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
     const resp = await ctx.llm.complete({
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
+      ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
       params: this.params,
       signal: ctx.signal,
+      maxToolIterations: hasValidator ? 40 : undefined,
     });
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {

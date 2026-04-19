@@ -126,6 +126,13 @@ describe('validation cost discipline', () => {
 
     const params = ctx.llm.calls[0]!.params;
     expect(params?.temperature).toBe(0);
-    expect(params?.maxTokens).toBeLessThanOrEqual(512);
+    // Budget was raised from 512 → 2048 after earlier runs showed validator
+    // responses truncated mid-JSON (stop_reason=max_tokens) when reasoning
+    // went long, losing the modifications block and crashing the parser.
+    // The ceiling still constrains spend while leaving room for a complete
+    // verdict JSON; the prompt also instructs "reasoning ≤ 120 words" so
+    // typical completions stay well under 512.
+    expect(params?.maxTokens).toBeLessThanOrEqual(2048);
+    expect(params?.maxTokens).toBeGreaterThanOrEqual(1024);
   });
 });

@@ -18,6 +18,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
     "better-sqlite3": "^11.3.0",
+    "jsonrepair": "^3.14.0",
     "puppeteer": "^24.41.0",
     "zod": "^3.23.8"
   },

@@ -91,7 +91,19 @@ async function main(): Promise<void> {
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
   console.log(`L3 ${l3.name} using model ${l3.model}`);
 
-  const signal = AbortSignal.timeout(10 * 60 * 1000);
+  // 10-minute default matches the original hard-coded budget; override with
+  // ATOMA_BUILD_TIMEOUT_MS for iterative build tasks that need more room
+  // (WebGL Minesweeper-style runs routinely burn 6-8 min in the
+  // validate_html → fix → re-validate loop and benefit from extra headroom).
+  const timeoutMs = Number(process.env['ATOMA_BUILD_TIMEOUT_MS'] ?? 10 * 60 * 1000);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    console.error(
+      `invalid ATOMA_BUILD_TIMEOUT_MS="${process.env['ATOMA_BUILD_TIMEOUT_MS']}" (expected positive integer in ms)`
+    );
+    process.exit(2);
+  }
+  console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
+  const signal = AbortSignal.timeout(timeoutMs);
   // Every LLM call + supervise-loop hop hangs an `abort` listener on this
   // signal; on long runs Node trips its default 10-listener warning. Lift
   // the cap — none of these are true leaks, they all clear on settle.

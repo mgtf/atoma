@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractJson,
+  parseVerdict,
+  parsePlanTolerant,
   repairTruncatedJson,
+  repairPrematureClose,
   verdictSchema,
   isEffectivelyEmptyMods,
 } from '../src/atoms/json.js';
@@ -114,6 +117,153 @@ describe('verdictSchema', () => {
       scope: 'patch',
     });
     expect(res.success).toBe(true);
+  });
+
+  it('strict verdictSchema still rejects a negative verdict missing scope', () => {
+    // verdictSchema itself stays strict — tolerance lives in parseVerdict,
+    // which is what runtime code calls. This test guards against anyone
+    // accidentally weakening the schema and masking real bugs.
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'grid is wrong',
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it('parseVerdict tolerates a Haiku response that omits scope + modifications', () => {
+    // Exact shape from the build-app run that used to crash with
+    // "expected: 'ephemeral' | 'branch' | 'patch', received: undefined".
+    const text = JSON.stringify({
+      approved: false,
+      reasoning:
+        'WebGL shader math is incorrect; grid coords mismatch with mouse events',
+    });
+    const v = parseVerdict(text);
+    expect(v.approved).toBe(false);
+    if (!v.approved) {
+      expect(v.scope).toBe('ephemeral');
+      expect(v.modifications).toEqual({});
+      expect(typeof v.reasoning).toBe('string');
+    }
+  });
+
+  it('parseVerdict still preserves a well-formed negative verdict verbatim', () => {
+    const text = JSON.stringify({
+      approved: false,
+      reasoning: 'tighten prompt',
+      scope: 'patch',
+      modifications: { systemPromptAppend: 'Be concise.' },
+    });
+    const v = parseVerdict(text);
+    expect(v.approved).toBe(false);
+    if (!v.approved) {
+      expect(v.scope).toBe('patch');
+      expect(v.modifications).toEqual({ systemPromptAppend: 'Be concise.' });
+    }
+  });
+
+  it('recovers a verdict with a stray premature closing brace (Haiku regression)', () => {
+    // Observed in the 23:03:03 build run — the LLM emitted a `}` before
+    // `"scope"`, prematurely closing the outer object. `JSON.parse` fails
+    // at the comma after the stray close; our repair keeps the comma,
+    // drops the bracket, and recovers the flat object.
+    const raw = `{
+      "approved": false,
+      "reasoning": "Plan is structurally sound and targets correct tier (L1 executor). However, VISIBLE-DELIVERABLES checklist reveals critical gaps."
+      },
+      "scope": "ephemeral"
+    }`;
+    const v = parseVerdict(raw);
+    expect(v.approved).toBe(false);
+    if (!v.approved) {
+      expect(v.scope).toBe('ephemeral');
+      expect(v.reasoning).toMatch(/structurally sound/);
+    }
+  });
+
+  it('still rejects a patch/branch verdict that forgot both scope and mods', () => {
+    // The coercion defaults missing scope to "ephemeral", so a negative
+    // verdict with NO scope is never promoted to a mutating retry. The
+    // test below simulates Haiku explicitly asking for a patch without
+    // supplying mods — the strict superRefine still bites.
+    const res = verdictSchema.safeParse({
+      approved: false,
+      reasoning: 'bad plan',
+      scope: 'patch',
+      // modifications missing → coerced to {} → superRefine rejects
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
+describe('parsePlanTolerant', () => {
+  const canonical = {
+    reasoning: 'because',
+    proposedAction: 'write index.html',
+    expectedOutput: 'live URL',
+  };
+
+  it('parses the canonical single plan object', () => {
+    expect(parsePlanTolerant(JSON.stringify(canonical))).toEqual(canonical);
+  });
+
+  it('unwraps a [strategy, plan] array (L2 non-fallback shape leaking into fallback)', () => {
+    // Observed in build-app runs after Sucrose escalation: even in
+    // fallback mode the LLM keeps emitting its usual strategy-array
+    // because its non-fallback system prompt primed it for that shape.
+    const strategy = { strategy: 'reuse', target: 'Fluorine', reasoning: 'pf' };
+    const wrapped = JSON.stringify([strategy, canonical]);
+    expect(parsePlanTolerant(wrapped)).toEqual(canonical);
+  });
+
+  it('unwraps a single-element [plan] array', () => {
+    expect(parsePlanTolerant(JSON.stringify([canonical]))).toEqual(canonical);
+  });
+
+  it('surfaces a ValidationError on non-plan shapes', () => {
+    expect(() => parsePlanTolerant('{"foo": 1}')).toThrow(/schema validation failed/);
+  });
+
+  it('tolerates JSON inside a ```json fence', () => {
+    const fenced = '```json\n' + JSON.stringify(canonical) + '\n```';
+    expect(parsePlanTolerant(fenced)).toEqual(canonical);
+  });
+});
+
+describe('repairPrematureClose', () => {
+  it('returns null when the JSON is already balanced', () => {
+    expect(repairPrematureClose('{"a":1,"b":2}')).toBeNull();
+    expect(repairPrematureClose('[1,2,3]')).toBeNull();
+  });
+
+  it('strips a stray outer `}` and keeps the trailing comma as a field separator', () => {
+    const raw = `{
+      "approved": false,
+      "reasoning": "bad"
+      },
+      "scope": "ephemeral"
+    }`;
+    const repaired = repairPrematureClose(raw);
+    expect(repaired).not.toBeNull();
+    const parsed = JSON.parse(repaired!);
+    expect(parsed).toEqual({ approved: false, reasoning: 'bad', scope: 'ephemeral' });
+  });
+
+  it('preserves nested objects inside strings (no false positives)', () => {
+    const raw = '{"reasoning":"contains }, inside","scope":"ephemeral"}';
+    // Valid JSON — nothing should be repaired.
+    expect(repairPrematureClose(raw)).toBeNull();
+  });
+
+  it('handles multiple stray closes in sequence', () => {
+    const raw = `{
+      "a": 1},
+      "b": 2},
+      "c": 3
+    }`;
+    const repaired = repairPrematureClose(raw);
+    expect(repaired).not.toBeNull();
+    expect(JSON.parse(repaired!)).toEqual({ a: 1, b: 2, c: 3 });
   });
 });
 

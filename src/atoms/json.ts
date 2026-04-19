@@ -1,5 +1,81 @@
 import { z } from 'zod';
+import { jsonrepair, JSONRepairError } from 'jsonrepair';
 import { ValidationError } from '../core/errors.js';
+
+/**
+ * Strip stray `}` / `]` tokens that close the OUTER aggregate too early,
+ * when subsequent `, "key": value` fragments should have been kept inside.
+ * This pattern shows up in Haiku verdict output — the model emits:
+ *     { "approved": false, "reasoning": "..."
+ *     },
+ *     "scope": "ephemeral"
+ *     }
+ * where the first `}` is a hallucinated premature close. `JSON.parse` fails
+ * at the comma after the premature close; `jsonrepair` would salvage it
+ * into an array and lose the `scope` field. We handle the case explicitly:
+ * if on a left-to-right depth walk we find a `}` (or `]`) that brings us
+ * back to depth 0 but there is still non-whitespace content after it, drop
+ * that bracket (plus an immediate trailing `,`) and retry.
+ *
+ * Returns the repaired string, or `null` when no premature close is found.
+ */
+export function repairPrematureClose(raw: string): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let dropped = false;
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    if (escape) {
+      out += ch;
+      escape = false;
+      continue;
+    }
+    if (ch === '\\' && inString) {
+      out += ch;
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      continue;
+    }
+    if (ch === '{' || ch === '[') {
+      depth++;
+      out += ch;
+      continue;
+    }
+    if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0) {
+        // Look ahead: any non-whitespace, non-comma content means this
+        // close was premature. Drop the bracket only — KEEP the comma so
+        // the surrounding fields stay correctly delimited as siblings of
+        // the outer aggregate.
+        const after = raw.slice(i + 1);
+        const nonWs = after.match(/^\s*(.)/);
+        if (nonWs && nonWs[1] === ',') {
+          const afterComma = after.replace(/^\s*,\s*/, '');
+          if (afterComma.length > 0 && !/^[\s\}\]]+$/.test(afterComma)) {
+            depth++; // undo: we're dropping the bracket, so we're still open
+            dropped = true;
+            continue; // skip emitting ch; next iterations handle ws + comma
+          }
+        }
+      }
+      out += ch;
+      continue;
+    }
+    out += ch;
+  }
+  return dropped ? out : null;
+}
 
 /**
  * Extract the first JSON object or array from a string. LLMs sometimes wrap JSON
@@ -48,17 +124,33 @@ function tryParseJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (err) {
-    const repaired = repairTruncatedJson(raw);
-    if (repaired === null) {
-      throw new ValidationError(
-        `JSON parse failed: ${(err as Error).message} (first 200 chars: ${raw.slice(0, 200)}… last 120 chars: …${raw.slice(-120)})`
-      );
+    // Three-stage repair, cheapest first:
+    //   1. `repairTruncatedJson` — in-house fix for the common
+    //      `max_tokens` truncation (unterminated string + missing closing
+    //      brackets). Deterministic and targeted.
+    //   2. `repairPrematureClose` — strips hallucinated early `}` / `]`
+    //      tokens that Haiku sometimes emits before further fields.
+    //      Preserves the semantic flat-object shape that `jsonrepair`
+    //      would otherwise coerce into an array.
+    //   3. `jsonrepair` — last-resort tolerant tokenizer for anything
+    //      else (missing commas, unquoted keys, trailing garbage…).
+    // If all three fail, surface a helpful excerpt for debugging.
+    for (const repair of [repairTruncatedJson, repairPrematureClose]) {
+      const repaired = repair(raw);
+      if (repaired === null) continue;
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        /* try next strategy */
+      }
     }
     try {
+      const repaired = jsonrepair(raw);
       return JSON.parse(repaired);
     } catch (err2) {
+      const msg = err2 instanceof JSONRepairError ? err2.message : (err2 as Error).message;
       throw new ValidationError(
-        `JSON parse failed even after repair: ${(err2 as Error).message} (first 200 chars: ${raw.slice(0, 200)}…)`
+        `JSON parse failed: ${(err as Error).message} (repair also failed: ${msg}) (first 200 chars: ${raw.slice(0, 200)}… last 120 chars: …${raw.slice(-120)})`
       );
     }
   }
@@ -253,6 +345,37 @@ export function parsePayloadTolerant(text: string): {
   }
 }
 
+/**
+ * Tolerant plan parser used by L2/L3 fallback `selfPlan`. The supervisor's
+ * *regular* plan method primes the LLM to emit `[strategy, plan]` arrays,
+ * and that conditioning carries over into fallback mode — even with a
+ * fallback-specific user message, Haiku/Sonnet will sometimes still wrap
+ * the plan in an array (observed in build-app runs after escalation).
+ * Accepts:
+ *   - `{reasoning, proposedAction, expectedOutput}` — the canonical shape
+ *   - `[strategy, plan]` — two-element array; take element 1
+ *   - `[plan]` — single-element array; take element 0
+ * Anything else falls through to the strict schema error.
+ */
+export function parsePlanTolerant(text: string): z.infer<typeof planSchema> {
+  const raw = extractJson(text);
+  if (Array.isArray(raw)) {
+    if (raw.length >= 2) {
+      const second = planSchema.safeParse(raw[1]);
+      if (second.success) return second.data;
+    }
+    if (raw.length >= 1) {
+      const first = planSchema.safeParse(raw[0]);
+      if (first.success) return first.data;
+    }
+  }
+  const parsed = planSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new ValidationError(`schema validation failed: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
+
 export const planSchema = z.object({
   reasoning: z.string(),
   proposedAction: z.string(),
@@ -270,6 +393,7 @@ export const resultPayloadSchema = z.object({
 export const atomModificationsSchema = z.object({
   systemPromptAppend: z.string().optional(),
   systemPromptReplace: z.string().optional(),
+  descriptionReplace: z.string().optional(),
   addTools: z
     .array(
       z.object({
@@ -303,11 +427,44 @@ export function isEffectivelyEmptyMods(
   if (!mods) return true;
   if (typeof mods.systemPromptReplace === 'string' && mods.systemPromptReplace.length > 0) return false;
   if (typeof mods.systemPromptAppend === 'string' && mods.systemPromptAppend.length > 0) return false;
+  if (typeof mods.descriptionReplace === 'string' && mods.descriptionReplace.length > 0) return false;
   if (typeof mods.additionalContext === 'string' && mods.additionalContext.length > 0) return false;
   if (Array.isArray(mods.addTools) && mods.addTools.length > 0) return false;
   if (Array.isArray(mods.removeTools) && mods.removeTools.length > 0) return false;
   if (mods.params && Object.keys(mods.params).length > 0) return false;
   return true;
+}
+
+/**
+ * Fill in the fields LLMs most commonly omit on negative verdicts, before
+ * the strict schema runs. Without this a stray Haiku response that returns
+ * `{"approved": false, "reasoning": "..."}` (no scope, no modifications)
+ * would crash the whole run instead of triggering a normal rejection retry.
+ * We default to `scope: "ephemeral"` + empty mods, which is the safest
+ * interpretation: "retry as-is, no registry mutation". The repeat-rejection
+ * short-circuit built on top of `superviseLoop` still escalates if Haiku
+ * keeps misfiring.
+ *
+ * Kept as a standalone coercion function (rather than wrapping it in
+ * `z.preprocess`) because chaining preprocess + discriminatedUnion +
+ * superRefine in Zod v3 collapses the inferred output type back to
+ * `unknown`, breaking every downstream consumer of
+ * `z.infer<typeof verdictSchema>`. Applied at the parseWith boundary
+ * via `parseVerdict` below instead.
+ */
+export function coerceVerdictDefaults(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const obj = raw as Record<string, unknown>;
+  if (obj['approved'] !== false) return raw;
+  const out: Record<string, unknown> = { ...obj };
+  if (typeof out['scope'] !== 'string') out['scope'] = 'ephemeral';
+  if (!out['modifications'] || typeof out['modifications'] !== 'object') {
+    out['modifications'] = {};
+  }
+  if (typeof out['reasoning'] !== 'string') {
+    out['reasoning'] = 'rejected without reasoning (coerced)';
+  }
+  return out;
 }
 
 export const verdictSchema = z
@@ -345,6 +502,23 @@ export const verdictSchema = z
       });
     }
   });
+
+/**
+ * Parse an LLM response expected to contain a verdict JSON, tolerating the
+ * most common Haiku omissions (missing `scope`, missing `modifications`)
+ * via `coerceVerdictDefaults`. Callers should use THIS helper instead of
+ * `parseWith(verdictSchema, ...)` at runtime so negative verdicts are
+ * always well-formed downstream.
+ */
+export function parseVerdict(text: string): z.infer<typeof verdictSchema> {
+  const raw = extractJson(text);
+  const coerced = coerceVerdictDefaults(raw);
+  const parsed = verdictSchema.safeParse(coerced);
+  if (!parsed.success) {
+    throw new ValidationError(`schema validation failed: ${parsed.error.message}`);
+  }
+  return parsed.data;
+}
 
 const toolObjectSchema = z.object({
   name: z.string(),

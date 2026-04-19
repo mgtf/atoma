@@ -43,6 +43,15 @@ export type MutationScope = 'ephemeral' | 'branch' | 'patch';
 export interface AtomModifications {
   systemPromptAppend?: string;
   systemPromptReplace?: string;
+  /**
+   * Overwrite the atom type's short human-readable description. Useful when a
+   * validator realises that a branched/patched atom's *purpose* has drifted
+   * from its original template (e.g. a "platformer builder" description on a
+   * type whose system prompt now targets Minesweeper). The description is
+   * what the prefilter sees when choosing a catalog entry, so keeping it in
+   * sync with the actual system prompt matters for routing accuracy.
+   */
+  descriptionReplace?: string;
   addTools?: Tool[];
   removeTools?: string[];
   params?: Partial<GenerationParams>;
@@ -66,6 +75,7 @@ export interface TraceEntry {
     | 'execute'
     | 'verdict-result'
     | 'applied-modifications'
+    | 'repeat-rejection'
     | 'escalated';
   ts: string;
   atom: string;
@@ -117,6 +127,31 @@ export interface LlmCompletionRequest {
    * throwing. Defaults to 24 if omitted.
    */
   maxToolIterations?: number;
+  /**
+   * Observer callback invoked for every tool invocation inside the tool-use
+   * loop, once per tool_use block. Fires AFTER the tool has run (success or
+   * failure) so the callback sees the observed result. Used by
+   * `RecordingLlmClient` to emit `VizToolEvent`s into the trace — the recorder
+   * is the only known caller today, but the hook is kept general so e.g.
+   * metrics or audit decorators can plug in later. Must not throw; errors
+   * from this callback are swallowed so observability never breaks execution.
+   */
+  onToolInvocation?: (info: ToolInvocationInfo) => void;
+}
+
+export interface ToolInvocationInfo {
+  /** Tool name exactly as declared on the atom. */
+  name: string;
+  /** JSON-serialisable args the model sent to the tool. */
+  args: Record<string, unknown>;
+  /** Raw return value from the tool executor, if the call succeeded. */
+  result?: unknown;
+  /** Error message, if the tool threw. Mutually exclusive with `result`. */
+  error?: string;
+  /** Wall time from executor start to callback invocation. */
+  durationMs: number;
+  /** Wall-clock timestamp at which the tool call STARTED (`Date.now()`). */
+  startedAt: number;
 }
 
 export interface LlmCompletionResponse {

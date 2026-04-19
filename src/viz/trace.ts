@@ -80,7 +80,32 @@ export interface VizRegistryEvent {
   snapshot?: VizRegistrySnapshot;
 }
 
-export type VizEvent = VizLlmEvent | VizRegistryEvent;
+/**
+ * One tool invocation inside an L1 execute loop. Emitted by the Anthropic
+ * client via the `onToolInvocation` observer and recorded verbatim so
+ * post-mortem analyses can see, for every tool call:
+ *   - the exact `args` the model sent (not just that a call happened),
+ *   - the `result` the tool returned (or the `error`),
+ *   - which LLM event triggered the loop, via `llmEventId`.
+ * Without this, we could only see "validate_html was called" in the
+ * terminal log — not whether the smoke/interactions were task-appropriate.
+ */
+export interface VizToolEvent {
+  id: string;
+  ts: number;
+  kind: 'tool';
+  /** The LLM event id whose tool-use loop produced this call. */
+  llmEventId: string;
+  /** Name of the atom that "owns" the LLM call triggering this tool. */
+  actor?: VizAtomRef;
+  name: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  durationMs: number;
+}
+
+export type VizEvent = VizLlmEvent | VizRegistryEvent | VizToolEvent;
 
 export interface VizRunIndexEntry {
   id: string;
@@ -89,6 +114,16 @@ export interface VizRunIndexEntry {
   endedAt?: string;
   durationMs?: number;
   hasError: boolean;
+  /**
+   * True when the run technically produced a result but through the
+   * parent's fallback path (supervise loop escalated, supervisor took over
+   * and produced content itself). Such runs are NOT true successes — the
+   * child atom couldn't satisfy the protocol and the deliverable may be a
+   * degraded "here's how you would do it" text instead of the real artefact.
+   * `hasError` stays false for these; `degraded` is the finer signal the UI
+   * and stats should use to distinguish them from full successes.
+   */
+  degraded?: boolean;
   costUsd?: number;
   calls?: number;
 }
@@ -128,6 +163,12 @@ export interface VizRun {
     output: unknown;
     producedBy: { tier: Tier; name: string; viaFallback: boolean };
   };
+  /**
+   * Mirrors `VizRunIndexEntry.degraded`. Computed from
+   * `result.producedBy.viaFallback` at persist time so consumers of the
+   * full run JSON can surface it without re-walking the events.
+   */
+  degraded?: boolean;
   error?: string;
   totals?: VizRunTotals;
 }
@@ -182,6 +223,13 @@ export class TraceRecorder {
     if (opts.result) this.run.result = opts.result;
     if (opts.error) this.run.error = opts.error;
     this.run.totals = computeTotals(this.run.events);
+    // A run is "degraded" when the supervise loop escalated and the parent
+    // took over via its fallback path. `result.producedBy.viaFallback` is
+    // the single source of truth — set by `superviseLoop` when it enters
+    // the escalation branch.
+    if (this.run.result?.producedBy?.viaFallback === true) {
+      this.run.degraded = true;
+    }
     this.persist();
     const run = this.run;
     this.run = null;
@@ -219,6 +267,7 @@ export class TraceRecorder {
     };
     if (this.run.endedAt !== undefined) entry.endedAt = this.run.endedAt;
     if (this.run.durationMs !== undefined) entry.durationMs = this.run.durationMs;
+    if (this.run.degraded) entry.degraded = true;
     if (this.run.totals) {
       entry.costUsd = this.run.totals.costUsd;
       entry.calls = this.run.totals.calls;

@@ -40,6 +40,56 @@ export interface SupervisionHooks<C extends Atom> {
 
 const now = (): string => new Date().toISOString();
 
+/**
+ * How many consecutive rejections with the SAME normalized reasoning we
+ * tolerate before short-circuiting to escalation. Rationale: if the validator
+ * keeps emitting the identical gripe and the child keeps regenerating
+ * structurally similar output, no new information is being produced —
+ * continuing just burns budget. Empirically three strikes is a good balance
+ * between resilience to transient LLM wiggle and wasted spend: earlier runs
+ * saw five consecutive identical rejects eating ~$0.05-0.10 and ~20s.
+ */
+export const MAX_SAME_REASON_REJECTS = 3;
+
+/**
+ * Normalize a verdict's reasoning for repeat-detection comparisons:
+ * lowercase, strip punctuation, collapse whitespace. Exported so tests and
+ * tooling can assert the normalization the supervisor actually applies.
+ */
+export function normalizeReason(reason: string): string {
+  return reason
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Small bounded tracker: holds the last `window` normalized reasoning keys
+ * and reports when the most recent entry has been repeated `window` times in
+ * a row. Used to detect "the validator is stuck on the same complaint".
+ */
+function makeRepeatTracker(window: number): {
+  push: (reasoning: string) => { repeated: boolean; streakKey: string | null };
+  reset: () => void;
+} {
+  const buf: string[] = [];
+  return {
+    push(reasoning: string): { repeated: boolean; streakKey: string | null } {
+      const key = normalizeReason(reasoning);
+      buf.push(key);
+      if (buf.length > window) buf.shift();
+      if (buf.length === window && buf.every((k) => k === key && k.length > 0)) {
+        return { repeated: true, streakKey: key };
+      }
+      return { repeated: false, streakKey: null };
+    },
+    reset(): void {
+      buf.length = 0;
+    },
+  };
+}
+
 export async function superviseLoop<C extends Atom>(
   parent: Atom & Supervisor<C>,
   child: C,
@@ -51,6 +101,11 @@ export async function superviseLoop<C extends Atom>(
   let planIter = 0;
   let execIter = 0;
   let current: C = child;
+  // Separate trackers for plan-rejects and result-rejects: "same gripe three
+  // times in a row on the plan" and "same gripe three times in a row on the
+  // result" are independent stuck-conditions and should each escalate.
+  const planRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
+  const resultRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
 
   try {
     while (true) {
@@ -68,6 +123,20 @@ export async function superviseLoop<C extends Atom>(
       trace.push({ kind: 'verdict-plan', ts: now(), atom: parent.name, payload: v1 });
 
       if (!v1.approved) {
+        const hit = planRepeat.push(v1.reasoning ?? '');
+        if (hit.repeated) {
+          trace.push({
+            kind: 'repeat-rejection',
+            ts: now(),
+            atom: parent.name,
+            payload: {
+              phase: 'plan',
+              streakKey: hit.streakKey,
+              window: MAX_SAME_REASON_REJECTS,
+            },
+          });
+          throw new EscalationSignal('repeat');
+        }
         current = await hooks.applyByScope(current, v1);
         trace.push({
           kind: 'applied-modifications',
@@ -77,6 +146,9 @@ export async function superviseLoop<C extends Atom>(
         });
         continue;
       }
+      // Plan approved → reset the plan streak; a fresh rejection cycle
+      // should not inherit old identical-reasoning history.
+      planRepeat.reset();
 
       if (execIter >= ctx.limits.maxExecIterations) {
         throw new EscalationSignal('exec');
@@ -94,6 +166,21 @@ export async function superviseLoop<C extends Atom>(
       if (v2.approved) {
         if (hooks.onApproved) await hooks.onApproved(current, result);
         return { ...result, trace };
+      }
+
+      const hit = resultRepeat.push(v2.reasoning ?? '');
+      if (hit.repeated) {
+        trace.push({
+          kind: 'repeat-rejection',
+          ts: now(),
+          atom: parent.name,
+          payload: {
+            phase: 'result',
+            streakKey: hit.streakKey,
+            window: MAX_SAME_REASON_REJECTS,
+          },
+        });
+        throw new EscalationSignal('repeat');
       }
 
       current = await hooks.applyByScope(current, v2);

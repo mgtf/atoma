@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import {
+  AtomRegistry,
+  normalizeNameKey,
+  stripBranchProvenance,
+} from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 
 function makeRegistry(): AtomRegistry {
@@ -135,5 +139,230 @@ describe('AtomRegistry', () => {
     r.create(2, { ...baseSeed, description: 'water-ish' });
     expect(r.getByName('Water')?.tier).toBe(2);
     expect(r.getByName('Hydrogen')?.tier).toBe(1);
+  });
+
+  describe('semantic duplicate handling', () => {
+    it('normalizeNameKey collapses case + punctuation to a common key', () => {
+      expect(normalizeNameKey('Minesweeper-WebGL')).toBe('minesweeperwebgl');
+      expect(normalizeNameKey('minesweeper_webgl')).toBe('minesweeperwebgl');
+      expect(normalizeNameKey('Minesweeper WebGL')).toBe('minesweeperwebgl');
+      expect(normalizeNameKey('minesweeper.webgl')).toBe('minesweeperwebgl');
+      // Word order is intentionally NOT normalized — this is a pragmatic
+      // collision check, not a semantic-similarity engine.
+      expect(normalizeNameKey('WebGLMinesweeper')).toBe('webglminesweeper');
+      expect(normalizeNameKey('MinesweeperWebGL')).toBe('minesweeperwebgl');
+    });
+
+    it('branch auto-suffixes semantic-duplicate overrideNames (case / punctuation variants)', () => {
+      r.create(1, baseSeed);
+      const a = r.branch(
+        'Hydrogen',
+        { systemPromptAppend: 'a' },
+        'tester',
+        'Minesweeper-WebGL'
+      );
+      expect(a.name).toBe('Minesweeper-WebGL');
+
+      // Different casing / separator → same normalized key → must be suffixed.
+      const b = r.branch(
+        'Hydrogen',
+        { systemPromptAppend: 'b' },
+        'tester',
+        'minesweeper webgl'
+      );
+      // Falls through the entire `-N` ladder until the normalized key is free.
+      expect(b.name.startsWith('minesweeper webgl-')).toBe(true);
+      expect(b.name).not.toBe('minesweeper webgl');
+      // The normalized key is guaranteed distinct from the first branch.
+      expect(normalizeNameKey(b.name)).not.toBe(normalizeNameKey(a.name));
+    });
+
+    it('branch on a genuinely different name is untouched', () => {
+      r.create(1, baseSeed);
+      r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'Minesweeper-WebGL');
+      // Different word order → different normalized key → no collision.
+      const b = r.branch(
+        'Hydrogen',
+        { systemPromptAppend: 'b' },
+        'tester',
+        'WebGLMinesweeper'
+      );
+      expect(b.name).toBe('WebGLMinesweeper');
+    });
+
+    it('findDuplicateGroups surfaces same-tier same-key clusters only', () => {
+      // `branch` now prevents new semantic duplicates from entering the
+      // registry, so we can't *create* dupes through the public API.
+      // The dedupe tool exists precisely to clean up DBs that accumulated
+      // duplicates BEFORE that guard was added — we simulate that legacy
+      // state by using separate DB instances and inserting pre-existing
+      // rows via raw SQL (same tier, names that normalize to the same key).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = (r as any).db as import('../src/registry/db.js').DB;
+      const insert = db.prepare(
+        `INSERT INTO atom_types
+         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+      );
+      const now = new Date().toISOString();
+      insert.run(1, 1, 'Minesweeper-WebGL', 'd', 's', '[]', '{}', 't', now);
+      insert.run(1, 2, 'minesweeper_webgl', 'd', 's', '[]', '{}', 't', now);
+      insert.run(1, 3, 'MINESWEEPER WEBGL', 'd', 's', '[]', '{}', 't', now);
+      insert.run(1, 4, 'WebGLMinesweeper', 'd', 's', '[]', '{}', 't', now); // different key → lone
+      insert.run(2, 1, 'Water', 'd', 's', '[]', '{}', 't', now);
+
+      const groups = r.findDuplicateGroups();
+      const mine = groups.find(
+        (g) => g.tier === 1 && g.key === 'minesweeperwebgl'
+      );
+      expect(mine).toBeTruthy();
+      expect(mine!.types.length).toBe(3);
+      // WebGLMinesweeper (different word order → different key) is NOT in
+      // the duplicate group — the pragmatic normalization is order-sensitive
+      // by design.
+      expect(mine!.types.some((t) => t.name === 'WebGLMinesweeper')).toBe(false);
+      // Water is alone on its tier → no group at all.
+      expect(groups.some((g) => g.tier === 2)).toBe(false);
+    });
+
+    it('mergeInto sums counters, archives losers under the winner, and deletes loser rows', () => {
+      // Simulate a legacy polluted DB (branch now prevents the dupes).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = (r as any).db as import('../src/registry/db.js').DB;
+      const insert = db.prepare(
+        `INSERT INTO atom_types
+         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, successes, failures)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      );
+      const now = new Date().toISOString();
+      insert.run(1, 1, 'Widget', 'd', 's', '[]', '{}', 't', now, 1, 0);
+      insert.run(1, 2, 'dup-a', 'd', 'sa', '[]', '{}', 't', now, 1, 0);
+      insert.run(1, 3, 'dup-b', 'd', 'sb', '[]', '{}', 't', now, 1, 1);
+
+      const refreshed = r.mergeInto('Widget', ['dup-a', 'dup-b']);
+      expect(refreshed.successes).toBe(3);
+      expect(refreshed.failures).toBe(1);
+
+      for (const name of ['dup-a', 'dup-b']) {
+        expect(r.getByName(name)).toBeNull();
+      }
+      const hist = r.versionsOf('Widget');
+      expect(hist.length).toBeGreaterThanOrEqual(2);
+      expect(hist.some((h) => (h.reason ?? '').includes('merged from dup-a'))).toBe(true);
+      expect(hist.some((h) => (h.reason ?? '').includes('merged from dup-b'))).toBe(true);
+    });
+
+    it('mergeInto refuses to cross tier boundaries', () => {
+      r.create(1, baseSeed);
+      r.create(2, { ...baseSeed, description: 'm' });
+      expect(() => r.mergeInto('Water', ['Hydrogen'])).toThrow(/cannot merge/);
+    });
+
+    it('branch on a tier with no existing types does not crash on the normalized-key probe', () => {
+      // Regression guard: a fresh empty tier must let `branch` succeed
+      // without attempting to compare against an empty key set.
+      r.create(2, { ...baseSeed, description: 'l2-seed' });
+      // Tier 2 is the only populated tier — branching on Water should work.
+      const b = r.branch('Water', { systemPromptAppend: 'x' }, 't', 'NovelName');
+      expect(b.name).toBe('NovelName');
+    });
+
+    it('mergeInto is a no-op with an empty loser list', () => {
+      const h = r.create(1, baseSeed);
+      const out = r.mergeInto(h.name, []);
+      expect(out.name).toBe(h.name);
+      expect(out.successes).toBe(0);
+    });
+  });
+
+  describe('branch-provenance description handling', () => {
+    it('stripBranchProvenance peels every trailing (branched from X) suffix', () => {
+      expect(
+        stripBranchProvenance('core text (branched from A)')
+      ).toBe('core text');
+      expect(
+        stripBranchProvenance(
+          'core text (branched from A) (branched from B) (branched from C)'
+        )
+      ).toBe('core text');
+      expect(stripBranchProvenance('plain text')).toBe('plain text');
+      // Interior (branched from ...) phrases should NOT be stripped.
+      expect(
+        stripBranchProvenance('note (branched from A) follow-up')
+      ).toBe('note (branched from A) follow-up');
+    });
+
+    it('branch sets description to "<core> (branched from <source>)" — single suffix only', () => {
+      r.create(1, baseSeed);
+      const b1 = r.branch(
+        'Hydrogen',
+        { systemPromptAppend: 'a' },
+        'tester',
+        'ChildA'
+      );
+      expect(b1.description).toBe('test element (branched from Hydrogen)');
+
+      // Branching again from the already-branched type must NOT produce
+      // "(branched from Hydrogen) (branched from ChildA)". The
+      // Hydrogen-provenance tail of the source is peeled first.
+      const b2 = r.branch(
+        'ChildA',
+        { systemPromptAppend: 'b' },
+        'tester',
+        'ChildB'
+      );
+      expect(b2.description).toBe('test element (branched from ChildA)');
+      expect(
+        (b2.description.match(/\(branched from/g) ?? []).length
+      ).toBe(1);
+    });
+
+    it('patch with descriptionReplace updates the canonical description (and bumps the version)', () => {
+      const h = r.create(1, baseSeed);
+      const patched = r.patch(
+        h.name,
+        { descriptionReplace: 'NEW purpose sentence' },
+        'tester',
+        'fix drift'
+      );
+      expect(patched.description).toBe('NEW purpose sentence');
+      expect(patched.version).toBe(2);
+      // A fresh read from the DB reflects it too.
+      expect(r.getByName(h.name)?.description).toBe('NEW purpose sentence');
+    });
+
+    it('descriptionReplace preserves an existing (branched from X) tail', () => {
+      r.create(1, baseSeed);
+      const b = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'Child');
+      const patched = r.patch(
+        b.name,
+        { descriptionReplace: 'NEW purpose' },
+        'tester',
+        'describe drift fix'
+      );
+      // Core text replaced; branch-provenance tail kept so we don't lose
+      // ancestry info.
+      expect(patched.description).toBe('NEW purpose (branched from Hydrogen)');
+    });
+
+    it('description-only patch bumps the version (it\'s meaningful, not a no-op)', () => {
+      const h = r.create(1, baseSeed);
+      const patched = r.patch(
+        h.name,
+        { descriptionReplace: 'just a description change' },
+        'tester'
+      );
+      expect(patched.version).toBe(2);
+    });
+
+    it('patch with byte-identical description + prompt + tools + params stays a no-op', () => {
+      const h = r.create(1, baseSeed);
+      const patched = r.patch(
+        h.name,
+        { descriptionReplace: h.description },
+        'tester'
+      );
+      expect(patched.version).toBe(1);
+    });
   });
 });

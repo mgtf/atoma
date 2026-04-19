@@ -152,6 +152,82 @@ describe('AnthropicLlmClient tool-iteration budget', () => {
     expect(calls[0]!.hadTools).toBe(true);
   });
 
+  it('invokes onToolInvocation for each successful tool call with args + result', async () => {
+    const { sdk } = makeFakeSdk([
+      { kind: 'tool_use', toolName: 'echo', input: { x: 1 } },
+      { kind: 'tool_use', toolName: 'echo', input: { x: 2 } },
+      { kind: 'text', text: 'done' },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+
+    const seen: Array<{ name: string; args: unknown; result?: unknown; error?: string }> = [];
+    await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: echoExecutor,
+      maxToolIterations: 5,
+      onToolInvocation: (info) =>
+        seen.push({ name: info.name, args: info.args, result: info.result, error: info.error }),
+    });
+
+    expect(seen).toEqual([
+      { name: 'echo', args: { x: 1 }, result: 'ok:echo', error: undefined },
+      { name: 'echo', args: { x: 2 }, result: 'ok:echo', error: undefined },
+    ]);
+  });
+
+  it('invokes onToolInvocation with an error when the tool executor throws', async () => {
+    const { sdk } = makeFakeSdk([
+      { kind: 'tool_use', toolName: 'echo', input: {} },
+      { kind: 'text', text: 'done' },
+    ]);
+    const boomExecutor: ToolExecutor = {
+      async execute(): Promise<unknown> {
+        throw new Error('boom');
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+    const seen: Array<{ name: string; error?: string; result?: unknown }> = [];
+    await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: boomExecutor,
+      maxToolIterations: 3,
+      onToolInvocation: (info) =>
+        seen.push({ name: info.name, error: info.error, result: info.result }),
+    });
+    expect(seen).toEqual([
+      { name: 'echo', error: 'boom', result: undefined },
+    ]);
+  });
+
+  it('swallows observer exceptions so the tool loop keeps running', async () => {
+    const { sdk } = makeFakeSdk([
+      { kind: 'tool_use', toolName: 'echo', input: {} },
+      { kind: 'text', text: 'still-ok' },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+    const resp = await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: echoExecutor,
+      maxToolIterations: 3,
+      onToolInvocation: () => {
+        throw new Error('observer crashed');
+      },
+    });
+    expect(resp.text).toBe('still-ok');
+  });
+
   it('aggregates usage across loop + finalization calls', async () => {
     const { sdk } = makeFakeSdk([
       { kind: 'tool_use', toolName: 'echo' },

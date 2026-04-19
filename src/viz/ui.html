@@ -95,6 +95,7 @@
   .role.execute { color: #86efac; border-color: #1e3a2a; }
   .role.validate-plan, .role.validate-result { color: #fca5a5; border-color: #3b1e1e; }
   .role.prefilter { color: #c7d2fe; border-color: #2a2a4a; }
+  .role.tool { color: #fbbf24; border-color: #3a2f15; }
   .role.fallback-plan, .role.fallback-execute { color: #fcd34d; border-color: #3a2f15; }
   .role.create { color: var(--l1); }
   .role.patch { color: var(--l2); }
@@ -258,7 +259,8 @@ async function loadIndex() {
     return;
   }
   for (const r of state.runs) {
-    const label = `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${r.hasError ? '  ✖' : ''}`;
+    const flags = r.hasError ? '  ✖' : r.degraded ? '  ⚠ fallback' : '';
+    const label = `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
     sel.appendChild(h('option', { value: r.id }, label));
   }
   selectRun(state.runs[0].id);
@@ -341,12 +343,19 @@ function renderSummary(run) {
   const models = (t.perModel ?? []).map((m) =>
     h('span', { class: 'chip muted' }, `${m.model.replace(/^claude-/, '')}  ·  ${m.calls}×  ·  ${fmtCost(m.costUsd)}`)
   );
+  const degradedBanner = run.degraded
+    ? h('div', {
+        class: 'err-badge',
+        style: 'margin-top:8px; background: #3b2a10; border-color: #7a5a1e; color: #fbbf24;',
+      }, '⚠ Run dégradé — la boucle de supervision a escaladé et le parent a pris la main via son fallback. Le livrable n\'est pas un vrai succès du protocole.')
+    : null;
   el.appendChild(h('div', { class: 'summary' }, [
     h('h2', {}, run.label),
     h('div', { class: 'task' }, run.task?.description ?? ''),
     grid,
     models.length ? h('div', { class: 'filters', style: 'margin-top:10px;' }, models) : null,
     run.result ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Résultat : ' + (run.result.summary ?? '')) : null,
+    degradedBanner,
     run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Erreur : ' + run.error) : null,
   ]));
 }
@@ -429,6 +438,7 @@ function renderFilters() {
   const kinds = [
     ['all', 'Tous'],
     ['llm', 'LLM'],
+    ['tool', 'Tools'],
     ['registry', 'Registry'],
   ];
   for (const [k, lbl] of kinds) {
@@ -508,6 +518,21 @@ function renderEventCard(ev) {
       h('div', { class: 'meta', style: 'margin-top:4px;' }, meta),
     ]);
   }
+  if (ev.kind === 'tool') {
+    const trow = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role tool' }, 'tool'),
+    ];
+    if (ev.actor) trow.push(atomRef(ev.actor));
+    trow.push(h('span', { class: 'name' }, ev.name));
+    trow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
+    if (ev.error) trow.push(h('span', { class: 'err-badge' }, 'error'));
+    trow.push(h('span', { class: 'meta' }, fmtMs(ev.durationMs)));
+    return h('div', {
+      class: 'event' + selected,
+      onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+    }, [h('div', { class: 'row' }, trow)]);
+  }
   // registry
   const row = [
     h('span', { class: 'when' }, fmtTime(ev.ts)),
@@ -550,8 +575,31 @@ function renderDetail(ev) {
   renderLanes(state.currentRun);
   if (ev.kind === 'llm') {
     renderLlmDetail(el, ev);
+  } else if (ev.kind === 'tool') {
+    renderToolDetail(el, ev);
   } else {
     renderRegistryDetail(el, ev);
+  }
+}
+
+function renderToolDetail(el, ev) {
+  el.appendChild(h('h2', {}, ev.name));
+  const sub = [];
+  if (ev.actor) sub.push('by ' + (ev.actor.name ?? '?'));
+  if (ev.error) sub.push('ERROR');
+  sub.push(fmtMs(ev.durationMs));
+  el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' }, sub.join('  ·  ')));
+  el.appendChild(h('h3', { style: 'margin-top:12px;' }, 'args'));
+  el.appendChild(h('pre', {}, JSON.stringify(ev.args ?? {}, null, 2)));
+  if (ev.error) {
+    el.appendChild(h('h3', { style: 'margin-top:12px;' }, 'error'));
+    el.appendChild(h('pre', {}, ev.error));
+  } else {
+    el.appendChild(h('h3', { style: 'margin-top:12px;' }, 'result'));
+    const rendered = typeof ev.result === 'string'
+      ? ev.result
+      : JSON.stringify(ev.result, null, 2);
+    el.appendChild(h('pre', {}, rendered ?? '(empty)'));
   }
 }
 

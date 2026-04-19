@@ -8,7 +8,12 @@ import type {
   Tier,
   Verdict,
 } from '../src/core/types.js';
-import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
+import {
+  MAX_SAME_REASON_REJECTS,
+  normalizeReason,
+  superviseLoop,
+  type SupervisionHooks,
+} from '../src/core/supervisor.js';
 import { makeCtx } from './helpers.js';
 
 class FakeChild extends Atom {
@@ -246,5 +251,192 @@ describe('superviseLoop', () => {
     expect(parent.isFallbackMode()).toBe(false);
     await superviseLoop(parent, child, { description: 'go' }, ctx, hooks);
     expect(parent.isFallbackMode()).toBe(false);
+  });
+
+  describe('repeat-rejection short-circuit', () => {
+    it('escalates after N consecutive plan rejects with the same normalized reasoning', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: 'needs more detail — it really does',
+          modifications: { systemPromptAppend: 'try harder' },
+          scope: 'ephemeral',
+        });
+      }
+      let branched = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branched++;
+        },
+      };
+      // Give a generous iteration budget so the early short-circuit is the
+      // only path that can end the loop.
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      // Should have escalated on the Nth identical reject, NOT eaten the
+      // full maxPlanIterations budget.
+      expect(child.planCount).toBe(MAX_SAME_REASON_REJECTS);
+      expect(branched).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
+    });
+
+    it('treats surface-level punctuation / casing differences as the same reasoning', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      const variants = [
+        'Needs more detail.',
+        'NEEDS MORE DETAIL!',
+        'needs   more detail...',
+      ];
+      for (const reasoning of variants) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning,
+          modifications: { systemPromptAppend: 'try' },
+          scope: 'ephemeral',
+        });
+      }
+      let branched = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branched++;
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      await superviseLoop(parent, child, { description: 'go' }, ctx, hooks);
+      expect(child.planCount).toBe(3);
+      expect(branched).toBe(1);
+    });
+
+    it('does NOT short-circuit when reasoning genuinely varies between rejects', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      const reasonings = [
+        'missing a step',
+        'wrong tool choice',
+        'needs more specificity',
+        'ok now',
+      ];
+      for (const r of reasonings.slice(0, 3)) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: r,
+          modifications: { systemPromptAppend: 'try' },
+          scope: 'ephemeral',
+        });
+      }
+      parent.queuePlanVerdict({ approved: true, reasoning: reasonings[3]! });
+      parent.queueResultVerdict({ approved: true, reasoning: 'ok' });
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          throw new Error('should not have escalated');
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 10, maxExecIterations: 10 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      expect(result.producedBy.viaFallback).toBe(false);
+    });
+
+    it('an approved plan resets the repeat counter, letting later rejects accumulate fresh', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      // Two identical rejects, then approval → counter resets →
+      // we can tolerate another full window of new identical rejects.
+      const rej = (r: string): Verdict => ({
+        approved: false,
+        reasoning: r,
+        modifications: { systemPromptAppend: 'try' },
+        scope: 'ephemeral',
+      });
+      parent.queuePlanVerdict(rej('same gripe'));
+      parent.queuePlanVerdict(rej('same gripe'));
+      parent.queuePlanVerdict({ approved: true, reasoning: 'ok' });
+      parent.queueResultVerdict(rej('r-bad'));
+      parent.queuePlanVerdict(rej('same gripe'));
+      parent.queuePlanVerdict(rej('same gripe'));
+      parent.queuePlanVerdict({ approved: true, reasoning: 'ok' });
+      parent.queueResultVerdict({ approved: true, reasoning: 'great' });
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          throw new Error('must not escalate');
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      expect(result.producedBy.viaFallback).toBe(false);
+    });
+
+    it('same-gripe streak on RESULT also triggers short-circuit', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({ approved: true, reasoning: 'ok' });
+        parent.queueResultVerdict({
+          approved: false,
+          reasoning: 'deliverable missing the URL',
+          modifications: { systemPromptAppend: 'add url' },
+          scope: 'ephemeral',
+        });
+      }
+      let branched = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branched++;
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      expect(child.execCount).toBe(MAX_SAME_REASON_REJECTS);
+      expect(branched).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
+    });
+
+    it('normalizeReason collapses punctuation, casing, and whitespace to a stable key', () => {
+      expect(normalizeReason('Foo, BAR!')).toBe(normalizeReason('foo bar'));
+      expect(normalizeReason('  foo\n\t bar  ')).toBe('foo bar');
+      expect(normalizeReason('Résumé — OK.')).toBe('résumé ok');
+      expect(normalizeReason('')).toBe('');
+    });
   });
 });

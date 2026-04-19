@@ -5,6 +5,7 @@ import type {
   LlmCompletionRequest,
   LlmCompletionResponse,
   Tool,
+  ToolInvocationInfo,
 } from './types.js';
 
 /** Default per-call cap on tool-use iterations. Callers can override via `LlmCompletionRequest.maxToolIterations`. */
@@ -121,23 +122,37 @@ export class AnthropicLlmClient implements LlmClient {
       );
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
+        const args = (tu.input ?? {}) as Record<string, unknown>;
+        const startedAt = Date.now();
         try {
-          const result = await req.executor!.execute(
-            tu.name,
-            (tu.input ?? {}) as Record<string, unknown>
-          );
+          const result = await req.executor!.execute(tu.name, args);
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,
             content:
               typeof result === 'string' ? result : JSON.stringify(result, null, 2),
           });
+          notifyToolInvocation(req.onToolInvocation, {
+            name: tu.name,
+            args,
+            result,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+          });
         } catch (err) {
+          const errMsg = (err as Error).message;
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,
-            content: `tool "${tu.name}" failed: ${(err as Error).message}`,
+            content: `tool "${tu.name}" failed: ${errMsg}`,
             is_error: true,
+          });
+          notifyToolInvocation(req.onToolInvocation, {
+            name: tu.name,
+            args,
+            error: errMsg,
+            durationMs: Date.now() - startedAt,
+            startedAt,
           });
         }
       }
@@ -192,6 +207,23 @@ export class AnthropicLlmClient implements LlmClient {
         cacheReadInputTokens: agg.cacheReadInputTokens || undefined,
       },
     };
+  }
+}
+
+/**
+ * Swallow-on-error dispatcher for the `onToolInvocation` observer callback.
+ * Observability hooks must never break the tool-use loop — if the recorder
+ * throws, we log-and-continue rather than aborting the call.
+ */
+function notifyToolInvocation(
+  cb: ((info: ToolInvocationInfo) => void) | undefined,
+  info: ToolInvocationInfo
+): void {
+  if (!cb) return;
+  try {
+    cb(info);
+  } catch {
+    // intentionally empty — observer failure must not poison execution
   }
 }
 

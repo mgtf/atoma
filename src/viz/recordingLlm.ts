@@ -86,8 +86,39 @@ export class RecordingLlmClient implements LlmClient {
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
     const started = Date.now();
     const cls = classify(req);
+    // Pre-allocate the LLM event id so tool events can cite it via
+    // `llmEventId`, letting the viz UI group tool calls under the LLM turn
+    // that produced them (instead of a post-hoc nearest-match).
+    const llmEventId = randomUUID();
+    // Wrap the request with our own onToolInvocation observer. We preserve
+    // any caller-provided callback (chain-of-responsibility style) so a
+    // hypothetical future metrics or audit decorator can nest cleanly.
+    const upstreamObserver = req.onToolInvocation;
+    const wrappedReq: LlmCompletionRequest = {
+      ...req,
+      onToolInvocation: (info) => {
+        try {
+          const ev: import('./trace.js').VizToolEvent = {
+            id: randomUUID(),
+            ts: info.startedAt,
+            kind: 'tool',
+            llmEventId,
+            name: info.name,
+            args: info.args,
+            durationMs: info.durationMs,
+          };
+          if (cls.actor) ev.actor = cls.actor;
+          if (info.result !== undefined) ev.result = info.result;
+          if (info.error !== undefined) ev.error = info.error;
+          this.recorder.record(ev);
+        } catch {
+          // Never let trace recording break the tool loop.
+        }
+        upstreamObserver?.(info);
+      },
+    };
     try {
-      const resp = await this.inner.complete(req);
+      const resp = await this.inner.complete(wrappedReq);
       const usage = {
         inputTokens: resp.usage.inputTokens,
         outputTokens: resp.usage.outputTokens,
@@ -102,7 +133,7 @@ export class RecordingLlmClient implements LlmClient {
           usage.outputTokens * p.output) /
         1_000_000;
       this.recorder.record({
-        id: randomUUID(),
+        id: llmEventId,
         ts: started,
         kind: 'llm',
         model: req.model,
@@ -118,7 +149,7 @@ export class RecordingLlmClient implements LlmClient {
       return resp;
     } catch (err) {
       this.recorder.record({
-        id: randomUUID(),
+        id: llmEventId,
         ts: started,
         kind: 'llm',
         model: req.model,
