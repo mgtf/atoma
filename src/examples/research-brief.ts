@@ -71,6 +71,7 @@ async function main(): Promise<void> {
     signal,
     llm,
     limits: DEFAULT_LIMITS,
+    recordTrust: (info) => recorder.recordTrust(info),
   };
 
   const topic = process.argv[2] ?? 'the ecological impact of vertical farming';

@@ -115,6 +115,9 @@ async function main(): Promise<void> {
     llm,
     limits: DEFAULT_LIMITS,
     tools: toolRegistry,
+    // Surface trust fast-path decisions in the trace so the viz lane
+    // shows "why no L2 LLM call was needed" instead of an empty gap.
+    recordTrust: (info) => recorder.recordTrust(info),
   };
 
   const task: Task = {

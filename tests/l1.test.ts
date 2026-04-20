@@ -38,6 +38,53 @@ describe('L1Atom', () => {
     expect(result.producedBy).toEqual({ tier: 1, name: 'Hydrogen', viaFallback: false });
   });
 
+  it('tolerates narrative prose output instead of crashing the run', async () => {
+    // Regression for the Tetris-build run crash: Aluminum (a new L1)
+    // emitted a markdown narrative with an embedded pseudo-JSON block
+    // `{ score, level, state }` and no final `{"output":…,"summary":…}`
+    // payload. Previously `parseWith(resultPayloadSchema,…)` greedily
+    // took first `{` to last `}` and crashed. Now the tolerant path
+    // wraps the prose as `output` + a diagnostic summary, letting the
+    // supervisor's RESULT validator reject it via the normal retry loop
+    // instead of blowing up the whole run.
+    const narrative = `Here is the status report:
+
+**State shape**: { score, level, lines, state }
+    - State: 'playing' or 'gameover'
+
+All gameplay controls wired up. No console errors.`;
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(narrative);
+    const atom = new L1Atom(base);
+    const result = await atom.execute(
+      { description: 'x' },
+      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      ctx
+    );
+    expect(result.output).toBe(narrative.trim());
+    expect(result.summary).toMatch(/fallback produced non-JSON output/);
+  });
+
+  it('prefers the final balanced JSON when the response has prose + payload', async () => {
+    // Narrative first, then a valid payload at the end — the scan-all
+    // candidates branch of parseWith should recover the payload.
+    const text = `Summary bullets:
+- built the app
+- validated
+
+{"output": {"url": "http://localhost:8000/"}, "summary": "built + validated"}`;
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(text);
+    const atom = new L1Atom(base);
+    const result = await atom.execute(
+      { description: 'x' },
+      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      ctx
+    );
+    expect(result.output).toEqual({ url: 'http://localhost:8000/' });
+    expect(result.summary).toBe('built + validated');
+  });
+
   it('applyModifications mutates prompt, tools, params', () => {
     const atom = new L1Atom(base);
     atom.applyModifications({

@@ -2,7 +2,7 @@ import { Atom } from '../core/atom.js';
 import type { Plan, Result, RunContext, Task, Tier } from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import { PIN_HAIKU } from '../core/models.js';
-import { parseWith, planSchema, resultPayloadSchema } from './json.js';
+import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 
 export class L1Atom extends Atom {
   readonly tier: Tier = 1;
@@ -162,11 +162,20 @@ export class L1Atom extends Atom {
       maxToolIterations: hasValidator ? 40 : undefined,
     });
 
-    const payload = parseWith(resultPayloadSchema, resp.text);
+    // Tolerant parse: `parseWith(resultPayloadSchema,…)` now already scans
+    // every balanced {…} candidate in the text, so a narrative with one
+    // embedded pseudo-JSON (e.g. `{ score, level, state }` as a window
+    // shape inside markdown prose) no longer traps us on the first `{`.
+    // If every candidate still fails the schema, fall back to wrapping
+    // the prose as `output` + a diagnostic `summary` instead of crashing
+    // the whole run — the supervisor's RESULT validator can then flag
+    // the degenerate payload via its normal rejection path, giving the
+    // loop a chance to retry.
+    const { output, summary } = parsePayloadTolerant(resp.text);
 
     return {
-      output: payload.output,
-      summary: payload.summary,
+      output,
+      summary,
       trace: [],
       producedBy: { tier: 1, name: this.name, viaFallback: false },
     };

@@ -105,7 +105,27 @@ export interface VizToolEvent {
   durationMs: number;
 }
 
-export type VizEvent = VizLlmEvent | VizRegistryEvent | VizToolEvent;
+/**
+ * Trust fast-path decision recorded by the supervise loop. These are
+ * synthetic approvals emitted by `trustedApproval` when a child type has
+ * enough clean successes to skip validator LLM calls. They carry no cost
+ * and no prompt, but are real supervision events — the UI shows them so
+ * users can see why an "empty lane" (zero L2 LLM calls on a trusted
+ * pipeline) is actually the correct behaviour.
+ */
+export interface VizTrustEvent {
+  id: string;
+  ts: number;
+  kind: 'trust';
+  actor?: VizAtomRef;
+  child?: VizAtomRef;
+  subject: 'PLAN' | 'RESULT';
+  successes: number;
+  failures: number;
+  reasoning: string;
+}
+
+export type VizEvent = VizLlmEvent | VizRegistryEvent | VizToolEvent | VizTrustEvent;
 
 export interface VizRunIndexEntry {
   id: string;
@@ -241,6 +261,26 @@ export class TraceRecorder {
     if (!this.run) return;
     this.run.totals = computeTotals(this.run.events);
     this.persist();
+  }
+
+  /**
+   * Convenience wrapper so call sites can build the full event from the
+   * lighter `TrustFastPathInfo` shape they already have. Keeps the event
+   * id generation and timestamp centralised here.
+   */
+  recordTrust(info: import('../core/types.js').TrustFastPathInfo): void {
+    const ev: VizTrustEvent = {
+      id: randomUUID(),
+      ts: Date.now(),
+      kind: 'trust',
+      actor: { name: info.supervisorName, tier: info.supervisorTier },
+      child: { name: info.childName, tier: info.childTier },
+      subject: info.subject,
+      successes: info.successes,
+      failures: info.failures,
+      reasoning: info.reasoning,
+    };
+    this.record(ev);
   }
 
   private persist(): void {

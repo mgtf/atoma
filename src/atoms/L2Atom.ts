@@ -387,7 +387,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   // terse yes/no on the child's plan/result; it does not need Sonnet to answer.
   async validatePlan(child: L1Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) return trustedApproval(type);
+    if (type && shouldTrustType(type)) {
+      const approval = trustedApproval(type);
+      ctx.recordTrust?.({
+        supervisorName: this.name,
+        supervisorTier: 2,
+        childName: child.name,
+        childTier: child.tier,
+        subject: 'PLAN',
+        successes: type.successes,
+        failures: type.failures,
+        reasoning: approval.reasoning,
+      });
+      return approval;
+    }
     return llmVerdict({
       ctx,
       model: this.validationModel,
@@ -406,7 +419,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) return trustedApproval(type);
+    if (type && shouldTrustType(type)) {
+      const approval = trustedApproval(type);
+      ctx.recordTrust?.({
+        supervisorName: this.name,
+        supervisorTier: 2,
+        childName: child.name,
+        childTier: child.tier,
+        subject: 'RESULT',
+        successes: type.successes,
+        failures: type.failures,
+        reasoning: approval.reasoning,
+      });
+      return approval;
+    }
     return llmVerdict({
       ctx,
       model: this.validationModel,

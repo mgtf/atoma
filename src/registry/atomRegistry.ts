@@ -596,9 +596,14 @@ export class AtomRegistry {
   versionsOf(name: string): { version: number; modifiedAt: string; reason: string | null }[] {
     const t = this.getByName(name);
     if (!t) return [];
+    // Alias snake_case → camelCase at the SQL level. Without the `AS`, the
+    // returned rows have shape `{version, modified_at, reason}` and the
+    // TypeScript cast to `{modifiedAt}` silently produces `undefined` at
+    // every call site — the CLI `show` printed `v1 @ undefined` for months
+    // as a result.
     return this.db
       .prepare(
-        `SELECT version, modified_at, reason
+        `SELECT version, modified_at AS modifiedAt, reason
          FROM atom_type_versions
          WHERE tier = ? AND ordinal = ?
          ORDER BY version ASC`

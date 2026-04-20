@@ -203,12 +203,71 @@ export function repairTruncatedJson(raw: string): string | null {
 }
 
 export function parseWith<T>(schema: z.ZodSchema<T>, text: string): T {
-  const raw = extractJson(text);
-  const parsed = schema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError(`schema validation failed: ${parsed.error.message}`);
+  let primaryErr: unknown = null;
+  try {
+    const raw = extractJson(text);
+    const parsed = schema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+    primaryErr = new ValidationError(
+      `schema validation failed: ${parsed.error.message}`
+    );
+  } catch (err) {
+    // extractJson can throw on malformed JSON (e.g. a greedy first-`{` to
+    // last-`}` slice that scooped up prose from the middle of the text).
+    // We still want to try the candidate-scan fallback below.
+    primaryErr = err;
   }
-  return parsed.data;
+
+  // Fallback: scan every balanced top-level {…}/[…] in the text and keep
+  // the LAST one that parses AND validates. Rationale: build-app runs
+  // occasionally have an L1 that writes a narrative with
+  // `{ score, level, state }`-style pseudo-JSON snippets embedded in
+  // prose before ending with the real `{"output":…, "summary":…}`
+  // payload. `extractJson` greedily grabs from the first `{` to the last
+  // `}`, mixing prose into the slice. Scanning candidates rescues those
+  // runs; the "prefer last" order matches the typical
+  // "narration-then-final-answer" pattern.
+  const candidates = findAllJsonObjects(text);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    try {
+      const obj = JSON.parse(candidates[i]!);
+      const again = schema.safeParse(obj);
+      if (again.success) return again.data;
+    } catch {
+      continue;
+    }
+  }
+  if (primaryErr instanceof ValidationError) throw primaryErr;
+  throw new ValidationError(
+    `schema validation failed: ${
+      primaryErr instanceof Error ? primaryErr.message : String(primaryErr)
+    }`
+  );
+}
+
+/**
+ * Return every balanced top-level `{…}` or `[…]` in the text, in source
+ * order. Honours string literals (with escapes) so `{…}` inside a JSON
+ * string doesn't break the balance walk. Useful when an LLM response
+ * mixes prose with the actual JSON payload — callers can then pick the
+ * candidate that schema-validates, not just the first one greedily
+ * extracted by `extractJson`.
+ */
+export function findAllJsonObjects(text: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i]!;
+    if (ch === '{' || ch === '[') {
+      const end = findBalancedEnd(text, i);
+      if (end === -1) break;
+      out.push(text.slice(i, end + 1));
+      i = end + 1;
+      continue;
+    }
+    i++;
+  }
+  return out;
 }
 
 /**

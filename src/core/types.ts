@@ -180,6 +180,27 @@ export interface ToolExecutor {
   has(name: string): boolean;
 }
 
+/**
+ * Observability hook fired whenever a supervisor short-circuits validation
+ * via the trust fast-path (`shouldTrustType` / `trustedApproval`). Such
+ * decisions skip the LLM call entirely and therefore don't appear in the
+ * trace as `kind: 'llm'` events — but they ARE real supervision decisions
+ * that the visualiser should show, otherwise the lane for a trusted atom
+ * looks suspiciously empty ("zero L2 calls" puzzles users reasonably). The
+ * hook is optional to keep core decoupled from the viz layer.
+ */
+export interface TrustFastPathInfo {
+  supervisorName: string;
+  supervisorTier: Tier;
+  childName: string;
+  childTier: Tier;
+  subject: 'PLAN' | 'RESULT';
+  successes: number;
+  failures: number;
+  /** Reasoning text synthesised by `trustedApproval` (echoed verbatim). */
+  reasoning: string;
+}
+
 export interface RunContext {
   readonly logger: Logger;
   readonly signal: AbortSignal;
@@ -187,4 +208,10 @@ export interface RunContext {
   readonly limits: Limits;
   /** Optional: tool executor used by atoms when the LLM emits tool_use blocks. */
   readonly tools?: ToolExecutor;
+  /**
+   * Optional trust-fast-path observer. When set, L2/L3 validators call this
+   * instead of silently returning `trustedApproval` — the recorder can then
+   * emit a `VizTrustEvent` so the UI lane still shows the decision.
+   */
+  readonly recordTrust?: (info: TrustFastPathInfo) => void;
 }

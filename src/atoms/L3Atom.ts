@@ -379,7 +379,20 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   // delegated to the cheapest atom that can answer them.
   async validatePlan(child: L2Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) return trustedApproval(type);
+    if (type && shouldTrustType(type)) {
+      const approval = trustedApproval(type);
+      ctx.recordTrust?.({
+        supervisorName: this.name,
+        supervisorTier: 3,
+        childName: child.name,
+        childTier: child.tier,
+        subject: 'PLAN',
+        successes: type.successes,
+        failures: type.failures,
+        reasoning: approval.reasoning,
+      });
+      return approval;
+    }
     return llmVerdict({
       ctx,
       model: this.validationModel,
@@ -397,7 +410,20 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
   async validateResult(child: L2Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
-    if (type && shouldTrustType(type)) return trustedApproval(type);
+    if (type && shouldTrustType(type)) {
+      const approval = trustedApproval(type);
+      ctx.recordTrust?.({
+        supervisorName: this.name,
+        supervisorTier: 3,
+        childName: child.name,
+        childTier: child.tier,
+        subject: 'RESULT',
+        successes: type.successes,
+        failures: type.failures,
+        reasoning: approval.reasoning,
+      });
+      return approval;
+    }
     return llmVerdict({
       ctx,
       model: this.validationModel,

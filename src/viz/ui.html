@@ -96,6 +96,7 @@
   .role.validate-plan, .role.validate-result { color: #fca5a5; border-color: #3b1e1e; }
   .role.prefilter { color: #c7d2fe; border-color: #2a2a4a; }
   .role.tool { color: #fbbf24; border-color: #3a2f15; }
+  .role.trust { color: var(--ok); border-color: #1e3a2a; }
   .role.fallback-plan, .role.fallback-execute { color: #fcd34d; border-color: #3a2f15; }
   .role.create { color: var(--l1); }
   .role.patch { color: var(--l2); }
@@ -374,7 +375,7 @@ function renderLanes(run) {
   // Include atoms that only appeared as actor/child refs on LLM events without
   // a full snapshot — render a placeholder so the lane doesn't hide them.
   for (const ev of run.events) {
-    if (ev.kind !== 'llm') continue;
+    if (ev.kind !== 'llm' && ev.kind !== 'trust') continue;
     for (const ref of [ev.actor, ev.child]) {
       if (!ref?.tier || !ref?.name) continue;
       if (state.atomsByName.has(ref.name)) continue;
@@ -439,6 +440,7 @@ function renderFilters() {
     ['all', 'Tous'],
     ['llm', 'LLM'],
     ['tool', 'Tools'],
+    ['trust', 'Trust'],
     ['registry', 'Registry'],
   ];
   for (const [k, lbl] of kinds) {
@@ -533,6 +535,27 @@ function renderEventCard(ev) {
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [h('div', { class: 'row' }, trow)]);
   }
+  if (ev.kind === 'trust') {
+    const trow = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role trust' }, 'trust'),
+    ];
+    if (ev.actor) trow.push(atomRef(ev.actor));
+    if (ev.child) {
+      trow.push(h('span', { class: 'arrow' }, '→'));
+      trow.push(atomRef(ev.child));
+    }
+    trow.push(h('span', { class: 'meta' }, '[' + ev.subject + ']'));
+    trow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
+    trow.push(h('span', { class: 'meta' }, '✓' + ev.successes + '/✗' + ev.failures));
+    return h('div', {
+      class: 'event' + selected,
+      onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+    }, [
+      h('div', { class: 'row' }, trow),
+      h('div', { class: 'meta', style: 'margin-top:4px;' }, 'fast-path (no LLM call)'),
+    ]);
+  }
   // registry
   const row = [
     h('span', { class: 'when' }, fmtTime(ev.ts)),
@@ -577,9 +600,34 @@ function renderDetail(ev) {
     renderLlmDetail(el, ev);
   } else if (ev.kind === 'tool') {
     renderToolDetail(el, ev);
+  } else if (ev.kind === 'trust') {
+    renderTrustDetail(el, ev);
   } else {
     renderRegistryDetail(el, ev);
   }
+}
+
+function renderTrustDetail(el, ev) {
+  el.appendChild(h('h2', {}, 'Trust fast-path — ' + ev.subject));
+  const sub = [];
+  if (ev.actor) sub.push('by ' + (ev.actor.name ?? '?'));
+  if (ev.child) sub.push('→ ' + (ev.child.name ?? '?'));
+  sub.push('✓' + ev.successes + '/✗' + ev.failures);
+  el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' }, sub.join('  ·  ')));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Reasoning'),
+    h('pre', {}, ev.reasoning || '(no reasoning)'),
+  ]));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Why is this here?'),
+    h('pre', {},
+      'The child type has enough clean successes to bypass the validator\n' +
+      'LLM call. The supervisor returned a synthetic approval immediately\n' +
+      'instead of paying for a full verdict round-trip. This is the\n' +
+      'trust-fast-path optimisation from src/atoms/cost.ts — no LLM call\n' +
+      'fires, no tokens are billed. The event appears here so the timeline\n' +
+      'still accounts for the supervision decision.'),
+  ]));
 }
 
 function renderToolDetail(el, ev) {

@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractJson,
+  findAllJsonObjects,
   parseVerdict,
   parsePlanTolerant,
+  parseWith,
   repairTruncatedJson,
   repairPrematureClose,
+  resultPayloadSchema,
   verdictSchema,
   isEffectivelyEmptyMods,
 } from '../src/atoms/json.js';
@@ -227,6 +230,64 @@ describe('parsePlanTolerant', () => {
   it('tolerates JSON inside a ```json fence', () => {
     const fenced = '```json\n' + JSON.stringify(canonical) + '\n```';
     expect(parsePlanTolerant(fenced)).toEqual(canonical);
+  });
+});
+
+describe('findAllJsonObjects', () => {
+  it('returns every top-level balanced {…} / […]', () => {
+    const text = 'preamble {"a":1} interlude {"b":2} coda [1,2,3] tail';
+    expect(findAllJsonObjects(text)).toEqual(['{"a":1}', '{"b":2}', '[1,2,3]']);
+  });
+
+  it('honours braces inside JSON strings (no false positives)', () => {
+    const text = '{"reasoning":"contains } and { in string"} ok';
+    expect(findAllJsonObjects(text)).toEqual([
+      '{"reasoning":"contains } and { in string"}',
+    ]);
+  });
+
+  it('skips unbalanced openers gracefully', () => {
+    const text = 'trailing { no close here';
+    expect(findAllJsonObjects(text)).toEqual([]);
+  });
+});
+
+describe('parseWith — candidate fallback for multi-object responses', () => {
+  it('picks the LAST balanced object that schema-validates when the first extract fails', () => {
+    // Mimics the Tetris-run crash: narrative with an embedded pseudo-JSON
+    // `{ score, level, state }` block, then the real payload at the end.
+    const text = `Here is my summary:
+
+**State shape**: { score, level, lines, state }
+    - score: number
+    - state: 'playing' or 'gameover'
+
+And the required response:
+
+{"output": {"url": "http://localhost:8000/"}, "summary": "built"}`;
+    const parsed = parseWith(resultPayloadSchema, text);
+    expect((parsed.output as { url: string }).url).toBe(
+      'http://localhost:8000/'
+    );
+    expect(parsed.summary).toBe('built');
+  });
+
+  it('still returns the strict extract when it already validates', () => {
+    const text = '{"output":"x","summary":"ok"}';
+    expect(parseWith(resultPayloadSchema, text)).toEqual({
+      output: 'x',
+      summary: 'ok',
+    });
+  });
+
+  it('throws a ValidationError when NO candidate validates', () => {
+    // Either the original extractJson error or the schema-validation
+    // error surfaces — both are ValidationError instances and both
+    // carry a helpful diagnostic excerpt.
+    const text = 'prose only, no real JSON here {not valid}';
+    expect(() => parseWith(resultPayloadSchema, text)).toThrow(
+      /(schema validation failed|JSON parse failed)/
+    );
   });
 });
 
