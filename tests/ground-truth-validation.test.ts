@@ -293,9 +293,16 @@ describe('VALIDATION_SYSTEM_PROMPT — hardening against self-report and domain 
     );
   });
 
-  it('teaches plan validators to demand visible affordances', () => {
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/VISIBLE deliverables/);
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Implicit gameplay requirements/);
+  it('keeps a narrow visible-deliverables rule that only rejects on materially wrong artefacts', () => {
+    // Post-softening: we no longer demand prose enumeration of affordances.
+    // The rule now rejects only when the plan commits to producing an
+    // artefact that clearly cannot satisfy task-named elements (e.g.
+    // colored shapes in place of task-stated numbers/icons). These tokens
+    // are the narrow-rule fingerprint; the old aggressive enumeration
+    // wording was removed deliberately.
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/VISIBLE-DELIVERABLES RULE/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/materially WRONG artefact/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/task-stated[\s\S]*numbers\/icons/);
   });
 
   it('teaches branch creators to use systemPromptReplace on domain drift', () => {

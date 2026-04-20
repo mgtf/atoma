@@ -173,57 +173,124 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
     declaration: {
       name: 'start_static_server',
       description:
-        'Start a static HTTP server (python3 -m http.server) in the background that serves the workspace root, and return the URL to access it. The server runs until the process exits.',
+        'Start a static HTTP server (python3 -m http.server) in the background that serves the workspace root, and return the URL to access it. Pass port=0 (or omit) to let the OS pick a free port — required when several subtasks may call this tool in parallel. The server runs until the process exits.',
       inputSchema: {
         type: 'object',
         properties: {
           port: {
             type: 'number',
-            description: 'Port to listen on. Defaults to 8000.',
+            description:
+              'Port to listen on. Defaults to 0 (OS-assigned). Pass a fixed port only when you must; parallel subtasks MUST leave it unset to avoid "Address already in use" clashes.',
           },
         },
       },
     },
     async execute(args) {
-      const port =
+      const requestedPort =
         typeof args['port'] === 'number' && Number.isFinite(args['port'])
           ? Math.floor(args['port'] as number)
-          : 8000;
-      const child = spawn('python3', ['-m', 'http.server', String(port)], {
-        cwd: opts.sandbox.root,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
-      });
-      opts.sandbox.trackChild(child);
-      opts.logger?.info(`[tool:start_static_server] python3 http.server :${port} in ${opts.sandbox.root}`);
+          : 0;
 
-      // Wait briefly to confirm the process is up and the port is bound.
-      await new Promise((resolve, reject) => {
-        const fail = (msg: string) => reject(new Error(msg));
-        const timer = setTimeout(() => resolve(undefined), 500);
-        child.once('error', (err) => {
-          clearTimeout(timer);
-          fail(`server failed to start: ${err.message}`);
-        });
-        child.stderr?.once('data', (chunk: Buffer) => {
-          const s = chunk.toString();
-          // python prints the Serving line to stderr. That's good news.
-          if (/Serving HTTP/.test(s)) {
-            clearTimeout(timer);
-            resolve(undefined);
-          } else if (/Address already in use/i.test(s)) {
-            clearTimeout(timer);
-            fail(`port ${port} already in use`);
+      // Try the caller's requested port first; if it's taken, kill the
+      // failing child and retry ONCE with port=0 (OS-assigned). This way
+      // an LLM that hard-codes 8000 never blocks the run just because a
+      // stale server from a previous run is still squatting that port.
+      //
+      // Boot timeouts (ms):
+      //   - initial attempt: 3s. Cold-boot Python can take >1.5s on some
+      //     machines (measured ~2s on macOS when python3 is freshly
+      //     invoked). A too-tight cap made the post-EADDRINUSE retry race
+      //     the Python startup and time out spuriously in earlier runs.
+      //   - retry attempt: 5s. We already paid the cost of one failure;
+      //     give the OS-assigned port extra headroom so we don't force
+      //     the LLM to re-enter the tool a third time.
+      const INITIAL_BOOT_TIMEOUT_MS = 3000;
+      const RETRY_BOOT_TIMEOUT_MS = 5000;
+      const attempt = async (
+        portToUse: number,
+        isRetry: boolean
+      ): Promise<{
+        ok: true;
+        url: string;
+        port: number;
+        pid: number | undefined;
+        servedFrom: string;
+        retriedFromPort?: number;
+      }> => {
+        const child = spawn(
+          'python3',
+          ['-m', 'http.server', String(portToUse)],
+          {
+            cwd: opts.sandbox.root,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            detached: false,
           }
-        });
-      });
+        );
+        opts.sandbox.trackChild(child);
 
-      return {
-        ok: true,
-        url: `http://localhost:${port}/`,
-        pid: child.pid,
-        servedFrom: opts.sandbox.root,
+        const bootTimeoutMs = isRetry ? RETRY_BOOT_TIMEOUT_MS : INITIAL_BOOT_TIMEOUT_MS;
+        const actualPort = await new Promise<number>((resolve, reject) => {
+          const fail = (msg: string, kind?: 'eaddrinuse'): void => {
+            const err = new Error(msg) as Error & { kind?: 'eaddrinuse' };
+            if (kind) err.kind = kind;
+            try {
+              child.kill('SIGTERM');
+            } catch {
+              /* already dead */
+            }
+            reject(err);
+          };
+          const timer = setTimeout(() => {
+            if (portToUse > 0) resolve(portToUse);
+            else
+              fail(
+                `server did not print Serving line within ${bootTimeoutMs}ms`
+              );
+          }, bootTimeoutMs);
+          child.once('error', (err) => {
+            clearTimeout(timer);
+            fail(`server failed to start: ${err.message}`);
+          });
+          child.stderr?.on('data', (chunk: Buffer) => {
+            const s = chunk.toString();
+            const match = s.match(/Serving HTTP on [^ ]+ port (\d+)/);
+            if (match && match[1]) {
+              clearTimeout(timer);
+              resolve(Number(match[1]));
+            } else if (/Address already in use/i.test(s)) {
+              clearTimeout(timer);
+              fail(`port ${portToUse} already in use`, 'eaddrinuse');
+            }
+          });
+        });
+
+        opts.logger?.info(
+          `[tool:start_static_server] python3 http.server :${actualPort} in ${opts.sandbox.root}` +
+            (isRetry ? ` (auto-retry after ${requestedPort} was busy)` : '')
+        );
+
+        return {
+          ok: true,
+          url: `http://localhost:${actualPort}/`,
+          port: actualPort,
+          pid: child.pid,
+          servedFrom: opts.sandbox.root,
+          ...(isRetry ? { retriedFromPort: requestedPort } : {}),
+        };
       };
+
+      try {
+        return await attempt(requestedPort, false);
+      } catch (err) {
+        const e = err as Error & { kind?: 'eaddrinuse' };
+        if (e.kind === 'eaddrinuse' && requestedPort > 0) {
+          opts.logger?.warn(
+            `[tool:start_static_server] port ${requestedPort} busy — retrying on OS-assigned port`
+          );
+          return await attempt(0, true);
+        }
+        throw err;
+      }
     },
   };
 }

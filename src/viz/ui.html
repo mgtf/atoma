@@ -97,6 +97,12 @@
   .role.prefilter { color: #c7d2fe; border-color: #2a2a4a; }
   .role.tool { color: #fbbf24; border-color: #3a2f15; }
   .role.trust { color: var(--ok); border-color: #1e3a2a; }
+  .branch-chip {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
+    background: #1a2335; border: 1px solid var(--border);
+    color: #a78bfa; font-family: 'SF Mono', Menlo, monospace;
+  }
   .role.fallback-plan, .role.fallback-execute { color: #fcd34d; border-color: #3a2f15; }
   .role.create { color: var(--l1); }
   .role.patch { color: var(--l2); }
@@ -206,7 +212,7 @@ const state = {
   atomsByName: new Map(),
   selectedEventId: null,
   selectedAtomName: null,
-  filters: { kind: 'all', role: 'all' },
+  filters: { kind: 'all', role: 'all', branchId: 'all' },
   // Registry view state
   registries: [],
   currentRegistry: null, // { registry, types: [...] }
@@ -467,6 +473,31 @@ function renderFilters() {
       onclick: () => { state.filters.role = k; renderFilters(); renderEvents(); },
     }, lbl));
   }
+  // Fan-out branch filter — derive the set of branchIds observed in
+  // the current run. Appears only when there IS fan-out going on
+  // (otherwise the chip is just noise).
+  const run = state.currentRun;
+  if (run) {
+    const branchIds = [...new Set(
+      run.events
+        .map((e) => e.branchId)
+        .filter((b) => typeof b === 'string' && b.length > 0)
+    )];
+    if (branchIds.length > 0) {
+      el.appendChild(h('span', { class: 'chip muted', style: 'pointer-events: none; background: transparent; border: none;' }, '·'));
+      el.appendChild(h('span', {
+        class: 'chip' + (state.filters.branchId === 'all' || !state.filters.branchId ? ' active' : ''),
+        onclick: () => { state.filters.branchId = 'all'; renderFilters(); renderEvents(); },
+      }, 'all branches'));
+      for (const b of branchIds) {
+        el.appendChild(h('span', {
+          class: 'chip' + (state.filters.branchId === b ? ' active' : ''),
+          onclick: () => { state.filters.branchId = b; renderFilters(); renderEvents(); },
+          title: 'branch ' + b,
+        }, '⑂' + b.slice(0, 6)));
+      }
+    }
+  }
 }
 
 function renderEvents() {
@@ -477,6 +508,7 @@ function renderEvents() {
   const filtered = run.events.filter((e) => {
     if (state.filters.kind !== 'all' && e.kind !== state.filters.kind) return false;
     if (e.kind === 'llm' && state.filters.role !== 'all' && e.role !== state.filters.role) return false;
+    if (state.filters.branchId && state.filters.branchId !== 'all' && e.branchId !== state.filters.branchId) return false;
     return true;
   });
   if (filtered.length === 0) {
@@ -484,6 +516,15 @@ function renderEvents() {
     return;
   }
   for (const ev of filtered) el.appendChild(renderEventCard(ev));
+}
+
+function branchChip(branchId) {
+  // Show only the first 6 chars of the uuid — enough to disambiguate
+  // a handful of parallel branches without cluttering the timeline.
+  return h('span', {
+    class: 'branch-chip',
+    title: 'fan-out branch ' + branchId,
+  }, '⑂' + branchId.slice(0, 6));
 }
 
 function renderEventCard(ev) {
@@ -499,6 +540,7 @@ function renderEventCard(ev) {
       row.push(atomRef(ev.child));
     }
     if (ev.subject) row.push(h('span', { class: 'meta' }, '[' + ev.subject + ']'));
+    if (ev.branchId) row.push(branchChip(ev.branchId));
     row.push(h('span', { class: 'spacer', style: 'flex:1;' }));
     row.push(h('span', { class: 'model' }, shortModel(ev.model)));
     row.push(h('span', { class: 'cost' }, fmtCost(ev.costUsd)));
@@ -527,6 +569,7 @@ function renderEventCard(ev) {
     ];
     if (ev.actor) trow.push(atomRef(ev.actor));
     trow.push(h('span', { class: 'name' }, ev.name));
+    if (ev.branchId) trow.push(branchChip(ev.branchId));
     trow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
     if (ev.error) trow.push(h('span', { class: 'err-badge' }, 'error'));
     trow.push(h('span', { class: 'meta' }, fmtMs(ev.durationMs)));
@@ -546,6 +589,7 @@ function renderEventCard(ev) {
       trow.push(atomRef(ev.child));
     }
     trow.push(h('span', { class: 'meta' }, '[' + ev.subject + ']'));
+    if (ev.branchId) trow.push(branchChip(ev.branchId));
     trow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
     trow.push(h('span', { class: 'meta' }, '✓' + ev.successes + '/✗' + ev.failures));
     return h('div', {

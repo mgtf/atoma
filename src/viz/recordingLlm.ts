@@ -110,6 +110,9 @@ export class RecordingLlmClient implements LlmClient {
           if (cls.actor) ev.actor = cls.actor;
           if (info.result !== undefined) ev.result = info.result;
           if (info.error !== undefined) ev.error = info.error;
+          // Echo the fan-out lane id so the viz can group this tool call
+          // with the rest of its subtask chain.
+          if (req.branchId !== undefined) ev.branchId = req.branchId;
           this.recorder.record(ev);
         } catch {
           // Never let trace recording break the tool loop.
@@ -145,6 +148,7 @@ export class RecordingLlmClient implements LlmClient {
         usage,
         costUsd,
         ...cls,
+        ...(req.branchId !== undefined ? { branchId: req.branchId } : {}),
       });
       return resp;
     } catch (err) {
@@ -167,6 +171,7 @@ export class RecordingLlmClient implements LlmClient {
         costUsd: 0,
         error: (err as Error).message,
         ...cls,
+        ...(req.branchId !== undefined ? { branchId: req.branchId } : {}),
       });
       throw err;
     }

@@ -201,27 +201,33 @@ describe('verdictSchema', () => {
 });
 
 describe('parsePlanTolerant', () => {
-  const canonical = {
+  // Legacy shape — coerced by planSchema.preprocess into a FanOutPlan with
+  // a single degenerate subtask. Helper builds the expected post-coercion shape.
+  const legacyInput = {
     reasoning: 'because',
     proposedAction: 'write index.html',
     expectedOutput: 'live URL',
   };
+  const expectedCoerced = {
+    reasoning: 'because',
+    proposedAction: 'write index.html',
+    expectedOutput: 'live URL',
+    subtasks: [{ description: 'write index.html' }],
+    aggregation: { mode: 'concat' },
+  };
 
-  it('parses the canonical single plan object', () => {
-    expect(parsePlanTolerant(JSON.stringify(canonical))).toEqual(canonical);
+  it('coerces a legacy plan object into a single-subtask fan-out plan', () => {
+    expect(parsePlanTolerant(JSON.stringify(legacyInput))).toEqual(expectedCoerced);
   });
 
   it('unwraps a [strategy, plan] array (L2 non-fallback shape leaking into fallback)', () => {
-    // Observed in build-app runs after Sucrose escalation: even in
-    // fallback mode the LLM keeps emitting its usual strategy-array
-    // because its non-fallback system prompt primed it for that shape.
     const strategy = { strategy: 'reuse', target: 'Fluorine', reasoning: 'pf' };
-    const wrapped = JSON.stringify([strategy, canonical]);
-    expect(parsePlanTolerant(wrapped)).toEqual(canonical);
+    const wrapped = JSON.stringify([strategy, legacyInput]);
+    expect(parsePlanTolerant(wrapped)).toEqual(expectedCoerced);
   });
 
   it('unwraps a single-element [plan] array', () => {
-    expect(parsePlanTolerant(JSON.stringify([canonical]))).toEqual(canonical);
+    expect(parsePlanTolerant(JSON.stringify([legacyInput]))).toEqual(expectedCoerced);
   });
 
   it('surfaces a ValidationError on non-plan shapes', () => {
@@ -229,73 +235,96 @@ describe('parsePlanTolerant', () => {
   });
 
   it('tolerates JSON inside a ```json fence', () => {
-    const fenced = '```json\n' + JSON.stringify(canonical) + '\n```';
-    expect(parsePlanTolerant(fenced)).toEqual(canonical);
+    const fenced = '```json\n' + JSON.stringify(legacyInput) + '\n```';
+    expect(parsePlanTolerant(fenced)).toEqual(expectedCoerced);
   });
 
   it('unwraps a {plan: {...}} wrapper (observed in fallback regressions)', () => {
-    // Sonnet sometimes wraps the plan in a `plan` key when it gets
-    // confused between strategy and plan shapes in L2 fallback mode.
-    const wrapped = JSON.stringify({ plan: canonical });
-    expect(parsePlanTolerant(wrapped)).toEqual(canonical);
+    const wrapped = JSON.stringify({ plan: legacyInput });
+    expect(parsePlanTolerant(wrapped)).toEqual(expectedCoerced);
   });
 
   it('unwraps a {strategy, plan} combined envelope', () => {
     const envelope = JSON.stringify({
       strategy: { strategy: 'reuse', target: 'Hydrogen', reasoning: 'pf' },
-      plan: canonical,
+      plan: legacyInput,
     });
-    expect(parsePlanTolerant(envelope)).toEqual(canonical);
+    expect(parsePlanTolerant(envelope)).toEqual(expectedCoerced);
   });
 
   it('picks the plan-shaped candidate from a narrative with multiple JSON objects', () => {
-    // Prose + strategy object + plan object — should pick the plan.
     const text = `Decided to delegate.
 
 {"strategy": "reuse", "target": "Hydrogen"}
 
 And here is the actual plan:
 
-${JSON.stringify(canonical)}`;
-    expect(parsePlanTolerant(text)).toEqual(canonical);
+${JSON.stringify(legacyInput)}`;
+    expect(parsePlanTolerant(text)).toEqual(expectedCoerced);
+  });
+
+  it('passes a fan-out plan through without coercion (subtasks preserved)', () => {
+    const fanout = {
+      reasoning: 'decompose',
+      subtasks: [
+        { description: 'write layout' },
+        { description: 'write logic' },
+      ],
+      aggregation: { mode: 'llm-synthesize', instruction: 'merge into index.html' },
+      expectedOutput: 'working app',
+    };
+    expect(parsePlanTolerant(JSON.stringify(fanout))).toEqual(fanout);
   });
 });
 
 describe('parsePlanWithFallback', () => {
-  const canonical = {
+  const canonicalInput = {
     reasoning: 'r',
     proposedAction: 'a',
     expectedOutput: 'e',
+  };
+  const canonicalExpected = {
+    reasoning: 'r',
+    proposedAction: 'a',
+    expectedOutput: 'e',
+    subtasks: [{ description: 'a' }],
+    aggregation: { mode: 'concat' },
   };
   const fb = {
     reasoning: 'SYN',
     proposedAction: 'SYN',
     expectedOutput: 'SYN',
   };
+  // Fallback is ALSO coerced through the schema — callers can pass a
+  // legacy shape and the returned Plan will have subtasks + aggregation.
+  const fbCoerced = {
+    reasoning: 'SYN',
+    proposedAction: 'SYN',
+    expectedOutput: 'SYN',
+    subtasks: [{ description: 'SYN' }],
+    aggregation: { mode: 'concat' },
+  };
 
-  it('returns the parsed plan when parsing succeeds', () => {
-    expect(parsePlanWithFallback(JSON.stringify(canonical), fb)).toEqual(canonical);
+  it('returns the coerced parsed plan when parsing succeeds', () => {
+    expect(parsePlanWithFallback(JSON.stringify(canonicalInput), fb)).toEqual(
+      canonicalExpected
+    );
   });
 
-  it('returns the fallback when LLM emits a strategy-only object (no plan fields)', () => {
-    // Exact shape observed in the Tetris fallback crash:
-    //   {"strategy": "reuse", "target": "Aluminum"}
-    // → no reasoning / proposedAction / expectedOutput.
+  it('returns the coerced fallback when LLM emits a strategy-only object', () => {
     const strategyOnly = JSON.stringify({ strategy: 'reuse', target: 'Aluminum' });
-    expect(parsePlanWithFallback(strategyOnly, fb)).toEqual(fb);
+    expect(parsePlanWithFallback(strategyOnly, fb)).toEqual(fbCoerced);
   });
 
-  it('returns the fallback on completely malformed responses', () => {
-    expect(parsePlanWithFallback('this is not JSON at all', fb)).toEqual(fb);
-    expect(parsePlanWithFallback('', fb)).toEqual(fb);
-    expect(parsePlanWithFallback('{incomplete: no quotes}', fb)).toEqual(fb);
+  it('returns the coerced fallback on completely malformed responses', () => {
+    expect(parsePlanWithFallback('this is not JSON at all', fb)).toEqual(fbCoerced);
+    expect(parsePlanWithFallback('', fb)).toEqual(fbCoerced);
+    expect(parsePlanWithFallback('{incomplete: no quotes}', fb)).toEqual(fbCoerced);
   });
 
-  it('returns the fallback when LLM emits a result envelope by mistake', () => {
-    // Another variant: the LLM emits `{output, summary}` (the result
-    // payload shape) when it was supposed to emit a plan.
+  it('returns the coerced fallback when LLM emits a result envelope by mistake', () => {
     const resultShape = JSON.stringify({ output: 'done', summary: 'ok' });
-    expect(parsePlanWithFallback(resultShape, fb)).toEqual(fb);
+    expect(parsePlanWithFallback(resultShape, fb)).toEqual(fbCoerced);
   });
 });
 

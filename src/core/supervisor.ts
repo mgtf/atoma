@@ -20,8 +20,26 @@ export interface SupervisionHooks<C extends Atom> {
   /**
    * Called once when the supervision loop escalates. Implementations typically
    * synthesize lessons from the trace and create a branched type in the registry.
+   *
+   * RETURN VALUE CONTRACT:
+   *   - `void` / `undefined` — the registry was updated (if at all) and the
+   *     loop should proceed straight to the parent-fallback path. This is
+   *     the legacy behaviour preserved for supervisors that only want to
+   *     record a lesson for future tasks.
+   *   - `C` (a fresh child instance of the branched type) — the loop will
+   *     INSTALL the replacement, reset its rejection-streak trackers, and
+   *     give the branched child ONE complete plan+validate+execute+validate
+   *     cycle before falling back to the parent. This lets the anti-
+   *     Frankenstein branch (fresh narrow prompt aligned with the current
+   *     subtask) actually demonstrate whether it solves the task, instead
+   *     of being recorded-but-never-tried. Second escalations still fall
+   *     through to the parent fallback — we never re-branch twice.
    */
-  branchOnEscalation(child: C, trace: readonly TraceEntry[], reason: string): Promise<void>;
+  branchOnEscalation(
+    child: C,
+    trace: readonly TraceEntry[],
+    reason: string
+  ): Promise<C | void>;
 
   /**
    * Optional: invoked exactly once when the loop exits with an approved result.
@@ -52,6 +70,23 @@ const now = (): string => new Date().toISOString();
 export const MAX_SAME_REASON_REJECTS = 3;
 
 /**
+ * Policy-marker detector: some validator failure modes shift the *specific*
+ * complaint across rejections but stay anchored on the same meta-policy
+ * (e.g. "VISIBLE-DELIVERABLES enumeration is incomplete" where the exact
+ * missing item rotates between attempts). The verbatim-equality tracker
+ * can't catch that because each reasoning string is literally different.
+ * We separately flag when the same policy marker appears in
+ * MAX_SAME_MARKER_REJECTS consecutive rejections.
+ *
+ * Keep the marker list tight and conservative: false positives here cause
+ * premature escalation on legitimate, progressing fix loops. Each token
+ * must be a phrase the validator prompt itself uses as a category label,
+ * not a generic word that could coincidentally recur.
+ */
+export const POLICY_MARKERS = ['visible-deliverables', 'visible deliverables'] as const;
+export const MAX_SAME_MARKER_REJECTS = 3;
+
+/**
  * Normalize a verdict's reasoning for repeat-detection comparisons:
  * lowercase, strip punctuation, collapse whitespace. Exported so tests and
  * tooling can assert the normalization the supervisor actually applies.
@@ -62,6 +97,20 @@ export function normalizeReason(reason: string): string {
     .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Return the first known policy marker that appears in `reason`, or null
+ * if none do. Markers are matched against the lowercased + punctuation-
+ * stripped form so casing / surrounding punctuation don't affect the hit.
+ */
+export function detectPolicyMarker(reason: string): string | null {
+  const normalized = normalizeReason(reason);
+  for (const marker of POLICY_MARKERS) {
+    const target = normalizeReason(marker);
+    if (target.length > 0 && normalized.includes(target)) return target;
+  }
+  return null;
 }
 
 /**
@@ -90,6 +139,37 @@ function makeRepeatTracker(window: number): {
   };
 }
 
+/**
+ * Bounded marker tracker: like `makeRepeatTracker` but fires when the same
+ * POLICY MARKER appears in `window` consecutive rejections — even when the
+ * surrounding prose differs. This catches the "drifting nit" failure mode
+ * where the validator keeps escalating the same category of complaint
+ * without the child ever getting to execute. `push` returns `null` on
+ * rejections with no detectable marker (they don't extend nor reset any
+ * running streak — only a reset() call clears it).
+ */
+function makeMarkerTracker(window: number): {
+  push: (reasoning: string) => { repeated: boolean; marker: string | null };
+  reset: () => void;
+} {
+  const buf: string[] = [];
+  return {
+    push(reasoning: string): { repeated: boolean; marker: string | null } {
+      const marker = detectPolicyMarker(reasoning);
+      if (marker === null) return { repeated: false, marker: null };
+      buf.push(marker);
+      if (buf.length > window) buf.shift();
+      if (buf.length === window && buf.every((m) => m === marker)) {
+        return { repeated: true, marker };
+      }
+      return { repeated: false, marker: null };
+    },
+    reset(): void {
+      buf.length = 0;
+    },
+  };
+}
+
 export async function superviseLoop<C extends Atom>(
   parent: Atom & Supervisor<C>,
   child: C,
@@ -98,128 +178,209 @@ export async function superviseLoop<C extends Atom>(
   hooks: SupervisionHooks<C>
 ): Promise<Result> {
   const trace: TraceEntry[] = [];
-  let planIter = 0;
-  let execIter = 0;
   let current: C = child;
-  // Separate trackers for plan-rejects and result-rejects: "same gripe three
-  // times in a row on the plan" and "same gripe three times in a row on the
-  // result" are independent stuck-conditions and should each escalate.
-  const planRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
-  const resultRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
+  // One-shot branch retry: when a branchOnEscalation hook returns a fresh
+  // child instance, we run ONE more full supervise cycle with it (resetting
+  // the iteration counters and rejection-streak trackers) before giving up
+  // to the parent fallback. Second escalation falls through.
+  let hasTriedBranch = false;
 
-  try {
-    while (true) {
-      if (planIter >= ctx.limits.maxPlanIterations) {
-        throw new EscalationSignal('plan');
-      }
-      planIter++;
+  // The outer loop exists purely to reset the per-cycle state
+  // (counters + trackers) when a branch-retry happens. In the common case
+  // it runs exactly once.
+  outer: while (true) {
+    let planIter = 0;
+    let execIter = 0;
+    // Separate trackers for plan-rejects and result-rejects: "same gripe three
+    // times in a row on the plan" and "same gripe three times in a row on the
+    // result" are independent stuck-conditions and should each escalate.
+    const planRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
+    const resultRepeat = makeRepeatTracker(MAX_SAME_REASON_REJECTS);
+    // Parallel trackers keyed on POLICY MARKERS (e.g. "VISIBLE-DELIVERABLES"):
+    // catches the "drifting nit" failure mode where the validator keeps
+    // escalating the same category of complaint with different specifics —
+    // the verbatim `planRepeat` can't see those as repeats because the
+    // reasoning strings literally differ.
+    const planMarker = makeMarkerTracker(MAX_SAME_MARKER_REJECTS);
+    const resultMarker = makeMarkerTracker(MAX_SAME_MARKER_REJECTS);
 
-      if (ctx.signal.aborted) throw ctx.signal.reason ?? new Error('aborted');
+    try {
+      while (true) {
+        if (planIter >= ctx.limits.maxPlanIterations) {
+          throw new EscalationSignal('plan');
+        }
+        planIter++;
 
-      const plan = await current.plan(task, ctx);
-      trace.push({ kind: 'plan', ts: now(), atom: current.name, payload: plan });
+        if (ctx.signal.aborted) throw ctx.signal.reason ?? new Error('aborted');
 
-      const v1 = await parent.validatePlan(current, plan, task, ctx);
-      trace.push({ kind: 'verdict-plan', ts: now(), atom: parent.name, payload: v1 });
+        const plan = await current.plan(task, ctx);
+        trace.push({ kind: 'plan', ts: now(), atom: current.name, payload: plan });
 
-      if (!v1.approved) {
-        const hit = planRepeat.push(v1.reasoning ?? '');
+        const v1 = await parent.validatePlan(current, plan, task, ctx);
+        trace.push({ kind: 'verdict-plan', ts: now(), atom: parent.name, payload: v1 });
+
+        if (!v1.approved) {
+          const hit = planRepeat.push(v1.reasoning ?? '');
+          if (hit.repeated) {
+            trace.push({
+              kind: 'repeat-rejection',
+              ts: now(),
+              atom: parent.name,
+              payload: {
+                phase: 'plan',
+                streakKey: hit.streakKey,
+                window: MAX_SAME_REASON_REJECTS,
+              },
+            });
+            throw new EscalationSignal('repeat');
+          }
+          const markerHit = planMarker.push(v1.reasoning ?? '');
+          if (markerHit.repeated) {
+            trace.push({
+              kind: 'repeat-rejection',
+              ts: now(),
+              atom: parent.name,
+              payload: {
+                phase: 'plan',
+                markerKey: markerHit.marker,
+                window: MAX_SAME_MARKER_REJECTS,
+              },
+            });
+            throw new EscalationSignal('repeat');
+          }
+          current = await hooks.applyByScope(current, v1);
+          trace.push({
+            kind: 'applied-modifications',
+            ts: now(),
+            atom: current.name,
+            payload: { phase: 'plan', scope: v1.scope },
+          });
+          continue;
+        }
+        // Plan approved → reset the plan streaks; a fresh rejection cycle
+        // should not inherit old identical-reasoning history.
+        planRepeat.reset();
+        planMarker.reset();
+
+        if (execIter >= ctx.limits.maxExecIterations) {
+          throw new EscalationSignal('exec');
+        }
+        execIter++;
+
+        if (ctx.signal.aborted) throw ctx.signal.reason ?? new Error('aborted');
+
+        const result = await current.execute(task, plan, ctx);
+        trace.push({ kind: 'execute', ts: now(), atom: current.name, payload: result });
+
+        const v2 = await parent.validateResult(current, result, task, ctx);
+        trace.push({
+          kind: 'verdict-result',
+          ts: now(),
+          atom: parent.name,
+          payload: v2,
+        });
+
+        if (v2.approved) {
+          if (hooks.onApproved) await hooks.onApproved(current, result);
+          return { ...result, trace };
+        }
+
+        const hit = resultRepeat.push(v2.reasoning ?? '');
         if (hit.repeated) {
           trace.push({
             kind: 'repeat-rejection',
             ts: now(),
             atom: parent.name,
             payload: {
-              phase: 'plan',
+              phase: 'result',
               streakKey: hit.streakKey,
               window: MAX_SAME_REASON_REJECTS,
             },
           });
           throw new EscalationSignal('repeat');
         }
-        current = await hooks.applyByScope(current, v1);
+        const markerHitR = resultMarker.push(v2.reasoning ?? '');
+        if (markerHitR.repeated) {
+          trace.push({
+            kind: 'repeat-rejection',
+            ts: now(),
+            atom: parent.name,
+            payload: {
+              phase: 'result',
+              markerKey: markerHitR.marker,
+              window: MAX_SAME_MARKER_REJECTS,
+            },
+          });
+          throw new EscalationSignal('repeat');
+        }
+
+        current = await hooks.applyByScope(current, v2);
         trace.push({
           kind: 'applied-modifications',
           ts: now(),
           atom: current.name,
-          payload: { phase: 'plan', scope: v1.scope },
+          payload: { phase: 'result', scope: v2.scope },
         });
-        continue;
       }
-      // Plan approved → reset the plan streak; a fresh rejection cycle
-      // should not inherit old identical-reasoning history.
-      planRepeat.reset();
+    } catch (e) {
+      if (!(e instanceof EscalationSignal)) throw e;
 
-      if (execIter >= ctx.limits.maxExecIterations) {
-        throw new EscalationSignal('exec');
-      }
-      execIter++;
+      trace.push({
+        kind: 'escalated',
+        ts: now(),
+        atom: parent.name,
+        payload: { phase: e.phase, failingChild: current.name },
+      });
 
-      if (ctx.signal.aborted) throw ctx.signal.reason ?? new Error('aborted');
+      if (hooks.onFailed) await hooks.onFailed(current, `escalation-${e.phase}`);
+      const replacement = await hooks.branchOnEscalation(
+        current,
+        trace,
+        `escalation-${e.phase}`
+      );
 
-      const result = await current.execute(task, plan, ctx);
-      trace.push({ kind: 'execute', ts: now(), atom: current.name, payload: result });
-
-      const v2 = await parent.validateResult(current, result, task, ctx);
-      trace.push({ kind: 'verdict-result', ts: now(), atom: parent.name, payload: v2 });
-
-      if (v2.approved) {
-        if (hooks.onApproved) await hooks.onApproved(current, result);
-        return { ...result, trace };
-      }
-
-      const hit = resultRepeat.push(v2.reasoning ?? '');
-      if (hit.repeated) {
+      if (replacement && !hasTriedBranch) {
+        // Give the branched child ONE clean cycle before falling back to
+        // the parent. The branch was created precisely to address the
+        // failure mode that just escalated — it deserves to prove whether
+        // the fresh prompt actually solves the task. Counters and streak
+        // trackers reset naturally by re-entering the outer loop.
+        hasTriedBranch = true;
         trace.push({
-          kind: 'repeat-rejection',
+          kind: 'branch-retry',
           ts: now(),
-          atom: parent.name,
+          atom: replacement.name,
           payload: {
-            phase: 'result',
-            streakKey: hit.streakKey,
-            window: MAX_SAME_REASON_REJECTS,
+            from: current.name,
+            reason: `escalation-${e.phase}`,
           },
         });
-        throw new EscalationSignal('repeat');
+        current = replacement;
+        continue outer;
       }
 
-      current = await hooks.applyByScope(current, v2);
-      trace.push({
-        kind: 'applied-modifications',
-        ts: now(),
-        atom: current.name,
-        payload: { phase: 'result', scope: v2.scope },
-      });
-    }
-  } catch (e) {
-    if (!(e instanceof EscalationSignal)) throw e;
+      parent.injectContext(renderTraceForContext(trace, current.name));
+      parent.setFallbackMode(true);
+      try {
+        const plan = await parent.plan(task, ctx);
+        trace.push({ kind: 'plan', ts: now(), atom: parent.name, payload: plan });
 
-    trace.push({
-      kind: 'escalated',
-      ts: now(),
-      atom: parent.name,
-      payload: { phase: e.phase, failingChild: current.name },
-    });
+        const result = await parent.execute(task, plan, ctx);
+        trace.push({
+          kind: 'execute',
+          ts: now(),
+          atom: parent.name,
+          payload: result,
+        });
 
-    if (hooks.onFailed) await hooks.onFailed(current, `escalation-${e.phase}`);
-    await hooks.branchOnEscalation(current, trace, `escalation-${e.phase}`);
-
-    parent.injectContext(renderTraceForContext(trace, current.name));
-    parent.setFallbackMode(true);
-    try {
-      const plan = await parent.plan(task, ctx);
-      trace.push({ kind: 'plan', ts: now(), atom: parent.name, payload: plan });
-
-      const result = await parent.execute(task, plan, ctx);
-      trace.push({ kind: 'execute', ts: now(), atom: parent.name, payload: result });
-
-      return {
-        ...result,
-        trace,
-        producedBy: { ...result.producedBy, viaFallback: true },
-      };
-    } finally {
-      parent.setFallbackMode(false);
+        return {
+          ...result,
+          trace,
+          producedBy: { ...result.producedBy, viaFallback: true },
+        };
+      } finally {
+        parent.setFallbackMode(false);
+      }
     }
   }
 }

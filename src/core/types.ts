@@ -23,11 +23,60 @@ export interface GenerationParams {
   topP?: number;
 }
 
+/**
+ * One unit of work a supervisor hands to a child atom. Spelled out as its
+ * own shape (rather than reusing `Task`) because a subtask carries a
+ * routing hint (`preferredChild`) that has no place at the task-level API.
+ * `description` is the "what" the child must accomplish. `inputs` is an
+ * optional structured payload passed through the child's Task at
+ * supervision time. `preferredChild` is a soft hint — the supervisor's
+ * prefilter/create path still gets the final say — meant for planners
+ * that already know which catalog entry fits best.
+ */
+export interface SubtaskSpec {
+  readonly description: string;
+  readonly inputs?: Record<string, unknown>;
+  readonly preferredChild?: string;
+}
+
+/**
+ * How a supervisor combines the N `Result`s produced by its subtasks into
+ * the single `Result` it returns to its own supervisor. Two modes today:
+ *   - `concat`: mechanical aggregation — outputs concatenated into an
+ *     array, summaries joined. Cheap (no LLM call), useful when sub-
+ *     results are naturally independent artefacts (ex: N research
+ *     summaries → 1 brief).
+ *   - `llm-synthesize`: the supervisor's own model is called with the N
+ *     sub-results and `instruction` to produce a final structured
+ *     output. Expensive but necessary when the final deliverable is a
+ *     COMBINED artefact (ex: L1s produce layout/logic/rendering
+ *     fragments → the L2 synthesizer assembles them into `index.html`).
+ */
+export interface AggregationSpec {
+  readonly mode: 'concat' | 'llm-synthesize';
+  readonly instruction?: string;
+}
+
+/**
+ * Fan-out plan emitted by L2/L3 supervisors. `subtasks` is ALWAYS at
+ * least length 1 — a "single-subtask" plan is the degenerate fan-out
+ * case, not a separate shape. This keeps the execute loop uniform:
+ * `Promise.all(subtasks.map(run))` trivially collapses to a single
+ * child run when N=1.
+ */
 export interface Plan {
   readonly reasoning: string;
-  readonly proposedAction: string;
-  readonly toolCalls?: ToolCall[];
+  readonly subtasks: readonly SubtaskSpec[];
+  readonly aggregation: AggregationSpec;
   readonly expectedOutput: string;
+  /**
+   * Legacy single-action hint, kept for L1 plans (which still describe
+   * a single direct action) and for backwards-compat with older
+   * `{reasoning, proposedAction, expectedOutput}` shapes. Optional on
+   * fan-out plans — the subtasks carry the detail.
+   */
+  readonly proposedAction?: string;
+  readonly toolCalls?: ToolCall[];
 }
 
 export interface Result {
@@ -76,7 +125,8 @@ export interface TraceEntry {
     | 'verdict-result'
     | 'applied-modifications'
     | 'repeat-rejection'
-    | 'escalated';
+    | 'escalated'
+    | 'branch-retry';
   ts: string;
   atom: string;
   payload: unknown;
@@ -137,6 +187,15 @@ export interface LlmCompletionRequest {
    * from this callback are swallowed so observability never breaks execution.
    */
   onToolInvocation?: (info: ToolInvocationInfo) => void;
+  /**
+   * Optional fan-out lane identifier echoed back on trace events emitted
+   * for this completion (the LLM event itself AND any tool events from
+   * its tool-use loop). Callers usually copy this from
+   * `RunContext.currentBranchId` — see L2/L3 runSubtask. Not the same
+   * thing as the completion's own id; multiple completions within the
+   * same branch share this value.
+   */
+  branchId?: string;
 }
 
 export interface ToolInvocationInfo {
@@ -199,6 +258,8 @@ export interface TrustFastPathInfo {
   failures: number;
   /** Reasoning text synthesised by `trustedApproval` (echoed verbatim). */
   reasoning: string;
+  /** Fan-out lane id — set by `forkBranch` when the trust check happens inside a subtask. */
+  branchId?: string;
 }
 
 export interface RunContext {
@@ -214,4 +275,14 @@ export interface RunContext {
    * emit a `VizTrustEvent` so the UI lane still shows the decision.
    */
   readonly recordTrust?: (info: TrustFastPathInfo) => void;
+  /**
+   * Fan-out lane identifier (uuid) of the subtask currently executing.
+   * Set by L2/L3 when they dispatch `Promise.all` over subtasks — each
+   * parallel branch gets its own shallow-cloned ctx with a unique id, so
+   * every event recorded downstream (LLM call, tool invocation, trust
+   * fast-path) carries that id. The viz uses it to group events into
+   * per-subtask lanes rather than collapsing parallel chains into one
+   * confused timeline. Absent (undefined) at the trunk level.
+   */
+  readonly currentBranchId?: string;
 }

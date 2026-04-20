@@ -27,6 +27,8 @@ import {
   type L3Strategy,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
+import { forkBranch } from '../core/branchCtx.js';
+import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
@@ -36,6 +38,33 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
+
+/**
+ * Fresh narrow-domain system prompt for an L2 branched after escalation.
+ * Same purpose as `buildNarrowL1Prompt`: start the branch clean instead
+ * of inheriting the failed parent's prompt. The branched atom's
+ * rebrandPersona pass at `registry.branch` time will swap in the branch's
+ * actual taxonomy name on the "You are {Name}" line.
+ */
+export function buildNarrowL2Prompt(subtaskDescription: string): string {
+  return [
+    `You are an L2 molecule that decomposes a single-purpose task into`,
+    `orthogonal L1 leaf subtasks and supervises their parallel execution.`,
+    ``,
+    `Your current subtask: ${subtaskDescription}`,
+    ``,
+    `Do NOT import assumptions from other domains — the parent type you`,
+    `were branched from may have been narrowly specialised for a`,
+    `different problem. IGNORE its domain and focus SOLELY on this`,
+    `subtask as stated.`,
+    ``,
+    `You NEVER execute tools yourself. Your job:`,
+    `  1. Decompose the subtask into 1+ orthogonal L1 subtasks`,
+    `  2. Choose an L1 for each (reuse a catalog match or create a narrow new one)`,
+    `  3. Pick an aggregation mode (concat or llm-synthesize) matching the artefact`,
+    `  4. Return the strategy+plan JSON pair`,
+  ].join('\n');
+}
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
   readonly tier: Tier = 3;
@@ -140,9 +169,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           `[${this.name}] prefilter picked L2 ${prefilter.target}`,
           { reasoning: prefilter.reasoning }
         );
+        // Prefilter degenerate case: one subtask, one preferred child.
         return {
           reasoning: `prefilter selected ${prefilter.target}`,
           proposedAction: `delegate task to L2 "${prefilter.target}"`,
+          subtasks: [
+            {
+              description: task.description,
+              preferredChild: prefilter.target,
+              ...(task.inputs ? { inputs: task.inputs } : {}),
+            },
+          ],
+          aggregation: { mode: 'concat' as const },
           expectedOutput: task.description,
         };
       }
@@ -156,14 +194,43 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ``,
       `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
       `shells, start servers, or validate anything. Your ONLY job is strategic:`,
-      `choose an L2 molecule (reuse or create) and hand the work off. The L2 will`,
-      `in turn delegate each concrete leaf step to an L1 element — L1 is the only`,
-      `tier allowed to call tools. This hierarchy exists to minimise LLM cost, so`,
-      `keep your reasoning short and your plan high-level.`,
+      `DECOMPOSE the task into orthogonal subtasks and route each to an L2`,
+      `molecule. The L2s will in turn decompose their own work into L1 leaf`,
+      `tasks — L1 is the only tier allowed to call tools. Keep your reasoning`,
+      `short and your plan high-level.`,
       ``,
-      `Options:`,
+      `== DECOMPOSITION DISCIPLINE ==`,
+      `Break the task into a LIST of subtasks. Each subtask:`,
+      `  - targets one coherent aspect of the overall work`,
+      `  - is ORTHOGONAL to the others (no cross-dependencies — they run`,
+      `    in PARALLEL)`,
+      `  - carries a "preferredChild" naming the L2 molecule that should`,
+      `    handle it (required for N>1 plans)`,
+      `For genuinely atomic tasks, emit a single-subtask list. Do NOT force`,
+      `decomposition when one L2 can clearly handle the whole thing.`,
+      ``,
+      `== AGGREGATION ==`,
+      `Pick how the sub-results combine:`,
+      `  - "concat": mechanical array join (no extra LLM call)`,
+      `  - "llm-synthesize": you run one more call to merge sub-results into a`,
+      `    unified deliverable (provide an "instruction" string)`,
+      ``,
+      `== STRATEGY OPTIONS (baseline when a subtask lacks preferredChild) ==`,
       `  - "reuse": pick an existing L2 molecule from the catalog that fits`,
       `  - "create": design a new L2 molecule and register it (provide a seed)`,
+      ``,
+      `CRITICAL — domain-match rule:`,
+      `  ONLY "reuse" an L2 whose description matches the task's domain. If the`,
+      `  best candidate's description names a different domain than the task`,
+      `  (even when the workflow looks similar), DO NOT reuse it — its prompt`,
+      `  will bias downstream decisions and you'll escalate. Use "create" with a`,
+      `  fresh narrow seed instead.`,
+      ``,
+      `CRITICAL — "preferredChild" naming rule:`,
+      `  - If you set "preferredChild" on a subtask, it MUST be the EXACT name of`,
+      `    an L2 already listed in the catalog below. Do NOT invent new names.`,
+      `  - If none of the existing L2s fit a subtask, OMIT "preferredChild" and set`,
+      `    strategy="create" so the supervisor auto-spawns a fresh L2.`,
       ``,
       `L2 catalog (molecules):`,
       catalog.length === 0
@@ -183,7 +250,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -213,39 +280,115 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.pendingStrategy = null;
     if (!strategy) return this.selfExecute(task, plan, ctx);
 
-    let l2Type: AtomType;
+    const subtasks = plan.subtasks;
+
+    // Fan-out: one superviseLoop per subtask, all in parallel. Per-subtask
+    // hooks close over the subtask description so `branchOnEscalation`
+    // writes a FRESH L2 system prompt aligned with this subtask, not
+    // inherited from the parent (same anti-Frankenstein pattern as L2).
+    const subResults = await Promise.all(
+      subtasks.map((subtask, idx) => {
+        const hooks = this.makeL2Hooks(ctx, subtask.description);
+        return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
+      })
+    );
+
+    return this.aggregate(subResults, plan.aggregation, task, ctx);
+  }
+
+  private async runSubtask(args: {
+    subtask: Plan['subtasks'][number];
+    strategy: L3Strategy;
+    parentTask: Task;
+    idx: number;
+    hooks: SupervisionHooks<L2Atom>;
+    ctx: RunContext;
+  }): Promise<Result> {
+    const { subtask, strategy, parentTask, idx, hooks, ctx } = args;
+    const l2Type = this.resolveL2ForSubtask(subtask, strategy, parentTask, idx, ctx);
+    this.triedChildren.mark(l2Type.name);
+    const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers);
+    for (const p of this.l2Peers) l2.addPeer(p);
+    this.l2Peers.push(l2);
+    const subTask: Task = subtask.inputs
+      ? { description: subtask.description, inputs: subtask.inputs }
+      : { description: subtask.description };
+    // Fork a branch-scoped ctx so the viz can render each L2 subtask
+    // (and its downstream L1 tree) as its own lane.
+    const branchCtx = forkBranch(ctx, randomUUID());
+    return superviseLoop<L2Atom>(this, l2, subTask, branchCtx, hooks);
+  }
+
+  private resolveL2ForSubtask(
+    subtask: Plan['subtasks'][number],
+    strategy: L3Strategy,
+    parentTask: Task,
+    idx: number,
+    ctx: RunContext
+  ): AtomType {
+    if (subtask.preferredChild) {
+      const found = this.registry.getByName(subtask.preferredChild);
+      if (found) {
+        if (found.tier !== 2) {
+          throw new Error(
+            `subtask preferredChild "${subtask.preferredChild}" is tier ${found.tier}, expected L2`
+          );
+        }
+        return found;
+      }
+      // Planner hallucination (same failure mode as in L2.resolveL1ForSubtask):
+      // fallback to auto-creation instead of crashing the whole fan-out.
+      ctx.logger.warn(
+        `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" not in registry — auto-creating a fresh L2`
+      );
+      return this.createSubtaskL2(subtask, strategy, parentTask);
+    }
+    if (idx > 0) {
+      ctx.logger.warn(
+        `[${this.name}] subtask #${idx} has no preferredChild — auto-creating a fresh L2`
+      );
+      return this.createSubtaskL2(subtask, strategy, parentTask);
+    }
     if (strategy.strategy === 'reuse') {
       if (!strategy.target) throw new Error('reuse requires target');
       const found = this.registry.getByName(strategy.target);
       if (!found) throw new RegistryNotFoundError(strategy.target);
-      l2Type = found;
-    } else {
-      const seed: NonNullable<typeof strategy.seed> =
-        strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
-      l2Type = this.registry.create(2, {
-        description:
-          seed.description ?? `L2 molecule created by ${this.name} for: ${task.description}`,
-        systemPrompt:
-          seed.systemPrompt ??
-          [
-            `You are an L2 molecule created by ${this.name}.`,
-            `Decompose sub-tasks into L1 elements and supervise them.`,
-            `Original task: ${task.description}`,
-          ].join('\n'),
-        tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
-        params: (seed.params ?? this.params) as GenerationParams,
-        createdBy: this.name,
-      });
-      ctx.logger.info(`[${this.name}] created L2 ${l2Type.name}`, { ordinal: l2Type.ordinal });
+      return found;
     }
-    this.triedChildren.mark(l2Type.name);
+    return this.createSubtaskL2(subtask, strategy, parentTask);
+  }
 
-    const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers);
-    // thread existing peers so the new instance can mutualize
-    for (const p of this.l2Peers) l2.addPeer(p);
-    this.l2Peers.push(l2);
+  /**
+   * Create a fresh L2 for a subtask that can't be routed to an existing
+   * catalog entry. Mirrors L2Atom.createSubtaskL1 — description takes the
+   * subtask's description so prefilter can route to it on future runs.
+   */
+  private createSubtaskL2(
+    subtask: Plan['subtasks'][number],
+    strategy: L3Strategy,
+    parentTask: Task
+  ): AtomType {
+    const seed: NonNullable<typeof strategy.seed> =
+      strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
+    return this.registry.create(2, {
+      description:
+        seed.description ?? `L2 for subtask: ${subtask.description.slice(0, 120)}`,
+      systemPrompt:
+        seed.systemPrompt ??
+        [
+          `You are an L2 molecule created by ${this.name}.`,
+          `Decompose sub-tasks into L1 elements and supervise them.`,
+          `Subtask you were handed: ${subtask.description}`,
+          `Parent task (for context only): ${parentTask.description}`,
+        ].join('\n'),
+      tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+      params: (seed.params ?? this.params) as GenerationParams,
+      createdBy: this.name,
+    });
+  }
 
-    const hooks: SupervisionHooks<L2Atom> = {
+  private makeL2Hooks(ctx: RunContext, subtaskDescription: string): SupervisionHooks<L2Atom> {
+    return {
       applyByScope: async (child, verdict) => {
         if (verdict.scope === 'ephemeral') {
           child.applyModifications(verdict.modifications);
@@ -273,15 +416,31 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         return fresh;
       },
       branchOnEscalation: async (child, _trace, reason) => {
+        // Reset the L2's system prompt so it's aligned with THIS subtask's
+        // domain rather than inherited from the parent that failed.
+        const narrowPrompt = buildNarrowL2Prompt(subtaskDescription);
+        const narrowDesc = `L2 narrow orchestrator for: ${subtaskDescription.slice(0, 120)}`;
         const branched = this.registry.branch(
           child.name,
-          { additionalContext: 'Branched after escalation. Prior L2 flow failed.' },
+          {
+            systemPromptReplace: narrowPrompt,
+            descriptionReplace: narrowDesc,
+            additionalContext:
+              `Branched after escalation. Prior L2 flow failed because the inherited prompt was` +
+              ` misaligned with this subtask.`,
+          },
           this.name,
           undefined
         );
         ctx.logger.warn(
           `[${this.name}] escalation — branched ${child.name} → ${branched.name} (${reason})`
         );
+        // Hand the fresh L2 instance back so superviseLoop can give it one
+        // attempt before falling back to this L3. Same rationale as at L2:
+        // the narrow-template branch exists specifically to fix the failure
+        // that just escalated — letting it try in-flight is strictly more
+        // informative than recording it and never exercising it.
+        return L2Atom.fromType(branched, this.registry);
       },
       onApproved: async (child, _result) => {
         this.registry.recordSuccess(child.name);
@@ -290,8 +449,65 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         this.registry.recordFailure(child.name);
       },
     };
+  }
 
-    return superviseLoop<L2Atom>(this, l2, task, ctx, hooks);
+  /**
+   * Combine N sub-results. See L2Atom.aggregate for the contract — the
+   * L3 variant uses Opus for llm-synthesize (this.model) because the
+   * synthesis step is closer to top-level planning than routine merge.
+   */
+  private async aggregate(
+    subResults: Result[],
+    aggregation: Plan['aggregation'],
+    parentTask: Task,
+    ctx: RunContext
+  ): Promise<Result> {
+    if (subResults.length === 1) {
+      return subResults[0]!;
+    }
+    if (aggregation.mode === 'concat') {
+      const outputs = subResults.map((r) => r.output);
+      const summary = `${subResults.length} subtasks aggregated (concat): ${subResults
+        .map((r, i) => `#${i + 1} ${r.summary}`)
+        .join(' | ')}`;
+      return {
+        output: outputs,
+        summary,
+        trace: [],
+        producedBy: { tier: 3, name: this.name, viaFallback: false },
+      };
+    }
+    const userContent = [
+      `You are "${this.name}" (tier 3). Synthesise a single result from ${subResults.length} sub-results.`,
+      `Original task: ${parentTask.description}`,
+      aggregation.instruction
+        ? `Merge instruction: ${aggregation.instruction}`
+        : 'Merge instruction: combine the sub-results into one coherent final deliverable.',
+      ``,
+      `Sub-results:`,
+      ...subResults.map(
+        (r, i) =>
+          `--- #${i + 1} (by ${r.producedBy.name}) ---\nsummary: ${r.summary}\noutput: ${
+            typeof r.output === 'string' ? r.output : JSON.stringify(r.output)
+          }`
+      ),
+      ``,
+      `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
+    ].join('\n');
+    const resp = await ctx.llm.complete({
+      model: this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      userContent,
+      params: this.params,
+      signal: ctx.signal,
+    });
+    const { output, summary } = parsePayloadTolerant(resp.text);
+    return {
+      output,
+      summary,
+      trace: [],
+      producedBy: { tier: 3, name: this.name, viaFallback: false },
+    };
   }
 
   private async selfPlan(task: Task, ctx: RunContext): Promise<Plan> {

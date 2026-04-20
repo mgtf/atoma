@@ -47,6 +47,15 @@ export interface VizLlmEvent {
   };
   costUsd: number;
   error?: string;
+  /**
+   * Optional identifier of the fan-out branch this event belongs to.
+   * When a supervisor dispatches N subtasks in parallel, each subtask
+   * runs under its own `branchId`, letting the viz group events by
+   * lane so parallel chains don't collapse into one confused timeline.
+   * Absent (undefined) for events outside any fan-out context (e.g. the
+   * supervisor's own plan/aggregation calls at the trunk level).
+   */
+  branchId?: string;
 }
 
 export interface VizRegistrySnapshot {
@@ -103,6 +112,8 @@ export interface VizToolEvent {
   result?: unknown;
   error?: string;
   durationMs: number;
+  /** See VizLlmEvent.branchId — fan-out lane identifier. */
+  branchId?: string;
 }
 
 /**
@@ -123,6 +134,8 @@ export interface VizTrustEvent {
   successes: number;
   failures: number;
   reasoning: string;
+  /** See VizLlmEvent.branchId — fan-out lane identifier. */
+  branchId?: string;
 }
 
 export type VizEvent = VizLlmEvent | VizRegistryEvent | VizToolEvent | VizTrustEvent;
@@ -279,6 +292,7 @@ export class TraceRecorder {
       successes: info.successes,
       failures: info.failures,
       reasoning: info.reasoning,
+      ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
     };
     this.record(ev);
   }

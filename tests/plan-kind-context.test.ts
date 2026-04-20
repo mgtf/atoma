@@ -88,7 +88,7 @@ describe('llmVerdict — injects Plan-kind hint based on child tier', () => {
 
 describe('VALIDATION_SYSTEM_PROMPT — tier-scoped visible-deliverables rule', () => {
   it('defines DIRECT and DELEGATION as distinct plan kinds', () => {
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/VISIBLE-DELIVERABLES RULE \(tier-aware\)/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/VISIBLE-DELIVERABLES RULE \(tier-aware[^)]*\)/);
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/If Plan kind is DIRECT/);
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/If Plan kind is DELEGATION/);
   });
@@ -102,13 +102,24 @@ describe('VALIDATION_SYSTEM_PROMPT — tier-scoped visible-deliverables rule', (
     );
   });
 
-  it('still requires enumeration on DIRECT plans (L1 or fallback)', () => {
-    // Keep the rule that enforces the checklist on the executor tier.
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
-      /plan MUST enumerate the VISIBLE deliverables/
-    );
-    // And on fallback supervisors.
+  it('keeps the DIRECT-plan rule narrow: reject on concrete missing element, not mere absence of enumeration', () => {
+    // Post-softening the DIRECT rule no longer demands prose enumeration of
+    // every affordance — it rejects only when the plan commits to a
+    // materially WRONG artefact (colored shapes in place of task-stated
+    // numbers/icons, etc.). Narrow the tests accordingly.
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/materially WRONG artefact/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/name the CONCRETE task-stated element/);
+    // Fallback-supervisor scope is still called out.
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/supervisor acting[\s\S]*in fallback/);
+  });
+
+  it('explicitly bans rejecting DIRECT plans for polish / enumeration / smoke nits', () => {
+    // These are the anti-patterns the soften pass added — each one burned a
+    // Haiku round on a production run with zero progress. Lock them in.
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/DO NOT reject a plan because/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/omits prose enumeration/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/smoke[\s-]*test snippet could be slightly more thorough/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/could "go further" on feedback polish/);
   });
 
   it('RESULT validation narrows visible-deliverables check to DIRECT plans too', () => {

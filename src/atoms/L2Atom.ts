@@ -26,6 +26,8 @@ import {
   planSchema,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
+import { forkBranch } from '../core/branchCtx.js';
+import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
@@ -35,6 +37,39 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
+
+/**
+ * Fresh narrow-responsibility system prompt used when `branchOnEscalation`
+ * spawns a new L1 after the parent type couldn't solve a task. The parent
+ * is kept intact; the NEW branch gets this prompt written fresh so it
+ * doesn't carry forward any domain bias (e.g. "You are Nitrogen, a WebGL
+ * platformer builder" bleeding into a dashboard task). The branched
+ * atom's rebrandPersona pass at `registry.branch` time will then swap in
+ * the branch's actual taxonomy name on the "You are {Name}" line.
+ */
+export function buildNarrowL1Prompt(subtaskDescription: string): string {
+  return [
+    `You are an L1 element builder with ONE narrow responsibility.`,
+    `Your current subtask: ${subtaskDescription}`,
+    ``,
+    `Do NOT import assumptions from other domains — the parent type you`,
+    `were branched from may have been narrowly specialised for a`,
+    `different problem (platformer, minesweeper, etc.); IGNORE its`,
+    `domain and focus SOLELY on this subtask as stated.`,
+    ``,
+    `Call tools sequentially to produce the deliverable. For web`,
+    `artefacts:`,
+    `  1. write_file the complete source`,
+    `  2. start_static_server to serve it (port 0 = OS-assigned is fine)`,
+    `  3. validate_html on the returned URL with appropriate interactions`,
+    `     and a smoke check that asserts the key state transitions`,
+    `  4. if validation fails: read_file, diagnose, write_file with the`,
+    `     fix, re-validate. Up to 4 iterations.`,
+    `  5. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+    ``,
+    `For non-web artefacts, adapt the loop but keep the JSON envelope.`,
+  ].join('\n');
+}
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
@@ -120,9 +155,19 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           `[${this.name}] prefilter picked L1 ${prefilter.target}`,
           { reasoning: prefilter.reasoning }
         );
+        // Prefilter degenerate case: one subtask, one preferred child.
+        // The fan-out loop collapses to a single child run.
         return {
           reasoning: `prefilter selected ${prefilter.target}`,
           proposedAction: `delegate leaf task to L1 "${prefilter.target}"`,
+          subtasks: [
+            {
+              description: task.description,
+              preferredChild: prefilter.target,
+              ...(task.inputs ? { inputs: task.inputs } : {}),
+            },
+          ],
+          aggregation: { mode: 'concat' as const },
           expectedOutput: task.description,
         };
       }
@@ -134,17 +179,58 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `You are atom "${this.name}" (tier 2 / molecule).`,
       ``,
       `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
-      `shells, start servers, or validate anything. Your role is coordination:`,
-      `break the task into a focused leaf sub-task and route it to an L1 element`,
-      `(the only tier that can call tools). If the work needs several leaf steps,`,
-      `give the L1 a single composite leaf with clear instructions — the L1's own`,
-      `LLM loop will call the tools sequentially. Minimise LLM spend: prefer`,
-      `"reuse" or "mutualize" over "create" whenever possible, keep prompts short.`,
+      `shells, start servers, or validate anything. Your role is to DECOMPOSE the`,
+      `task into orthogonal subtasks and route each to an L1 element (the only`,
+      `tier that can call tools).`,
       ``,
-      `Options:`,
+      `== DECOMPOSITION DISCIPLINE ==`,
+      `Split the task into a LIST of subtasks. Each subtask:`,
+      `  - has ONE single-responsibility description ("write the HTML layout",`,
+      `    "implement game state machine", "start server + run validation")`,
+      `  - is ORTHOGONAL to every other subtask — no subtask reads or depends on`,
+      `    another subtask's output. Subtasks run in PARALLEL.`,
+      `  - targets a specific L1 element via "preferredChild" (required for N>1,`,
+      `    optional for N=1 where your strategy field still drives selection).`,
+      `A single-responsibility task is still valid: emit a list with exactly ONE`,
+      `subtask. Do NOT force decomposition when the task is genuinely atomic.`,
+      ``,
+      `== AGGREGATION ==`,
+      `Pick how the N sub-results combine into one deliverable:`,
+      `  - "concat": mechanical array-join (cheap, no extra LLM call). Use when`,
+      `    sub-results are independent artefacts or a list is the natural output.`,
+      `  - "llm-synthesize": you run one more LLM call to merge the sub-results`,
+      `    into a single coherent artefact. Use when the final deliverable is a`,
+      `    COMBINED product (e.g. L1s produce layout/logic/render fragments, an`,
+      `    aggregation step assembles them into one file). Provide a short`,
+      `    "instruction" describing how to merge.`,
+      ``,
+      `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
       `  - "create": design a new L1 element and register it (provide a seed)`,
       `  - "mutualize": delegate to a peer L2 molecule when their specialty fits better`,
+      `Prefer "reuse" over "create" whenever possible.`,
+      ``,
+      `CRITICAL — domain-match rule:`,
+      `  ONLY "reuse" an L1 whose catalog description matches the task's domain.`,
+      `  If the best candidate's description names a DIFFERENT domain than the`,
+      `  task (e.g. you need a "dashboard builder" and the candidate is described`,
+      `  as a "Mario-like platformer builder"), DO NOT reuse it — even if its`,
+      `  toolset is the same and its workflow "looks similar". That atom's system`,
+      `  prompt is domain-biased and will fight your task for 5 iterations before`,
+      `  escalating. Use "create" with a fresh narrow seed instead. Cross-domain`,
+      `  reuse is the #1 failure mode in the training trace.`,
+      ``,
+      `CRITICAL — "preferredChild" naming rule:`,
+      `  - If you set "preferredChild" on a subtask, it MUST be the EXACT name of`,
+      `    an L1 already listed in the catalog below. Do NOT invent new names.`,
+      `    Do NOT use chemical-element names like "Carbon" or "Oxygen" unless they`,
+      `    are literally listed in the catalog.`,
+      `  - If none of the existing L1s fit a subtask, OMIT "preferredChild" entirely`,
+      `    and set strategy="create" — the supervisor will auto-spawn a fresh L1`,
+      `    whose narrow responsibility matches your subtask.description.`,
+      `  - Never mix: do not set "preferredChild" to an uncatalogued name "hoping"`,
+      `    it will be created. The supervisor does auto-create on miss but you`,
+      `    lose the ability to control its description and seed.`,
       ``,
       `L1 catalog (elements):`,
       catalog.length === 0
@@ -171,7 +257,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create"|"mutualize", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L1-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -212,35 +298,150 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       return peer.handleDirect(task, ctx);
     }
 
-    let l1Type: AtomType;
+    const subtasks = plan.subtasks;
+
+    // Fan-out: run each subtask in parallel with per-subtask hooks. The
+    // hooks close over the subtask's description so `branchOnEscalation`
+    // can write a FRESH system prompt aligned with THIS subtask's
+    // domain — not the parent's (which is where the Frankenstein
+    // contamination came from: Nitrogen kept its platformer prompt
+    // through branches even when branched for a dashboard task).
+    const subResults = await Promise.all(
+      subtasks.map((subtask, idx) => {
+        const hooks = this.makeL1Hooks(ctx, subtask.description);
+        return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
+      })
+    );
+
+    return this.aggregate(subResults, plan.aggregation, task, ctx);
+  }
+
+  /**
+   * Run one subtask through a supervise-loop on the appropriate L1 child.
+   * Child resolution order:
+   *   1. subtask.preferredChild → registry lookup (must exist)
+   *   2. degenerate single-subtask fan-out → fall back to the strategy
+   *      resolved at plan-time (reuse/create)
+   *   3. multi-subtask fan-out without preferredChild → error (the
+   *      planner is expected to label each subtask with its target L1)
+   */
+  private async runSubtask(args: {
+    subtask: Plan['subtasks'][number];
+    strategy: L2Strategy;
+    parentTask: Task;
+    idx: number;
+    hooks: SupervisionHooks<L1Atom>;
+    ctx: RunContext;
+  }): Promise<Result> {
+    const { subtask, strategy, parentTask, idx, hooks, ctx } = args;
+    const l1Type = this.resolveL1ForSubtask(subtask, strategy, parentTask, idx, ctx);
+    this.triedChildren.mark(l1Type.name);
+    const l1 = L1Atom.fromType(l1Type);
+    const subTask: Task = subtask.inputs
+      ? { description: subtask.description, inputs: subtask.inputs }
+      : { description: subtask.description };
+    // Fork a branch-scoped ctx so every LLM/tool/trust event recorded
+    // inside this supervise loop carries a unique branchId. Viz renders
+    // each branch as its own lane instead of interleaving them.
+    const branchCtx = forkBranch(ctx, randomUUID());
+    return superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+  }
+
+  private resolveL1ForSubtask(
+    subtask: Plan['subtasks'][number],
+    strategy: L2Strategy,
+    parentTask: Task,
+    idx: number,
+    ctx: RunContext
+  ): AtomType {
+    if (subtask.preferredChild) {
+      const found = this.registry.getByName(subtask.preferredChild);
+      if (found) {
+        if (found.tier !== 1) {
+          throw new Error(
+            `subtask preferredChild "${subtask.preferredChild}" is tier ${found.tier}, expected L1`
+          );
+        }
+        return found;
+      }
+      // Planner hallucination: preferredChild does not exist. Sonnet
+      // sometimes invents chemical-element names ("Carbon") that AREN'T
+      // in the catalog yet. Rather than crash the whole fan-out (killing
+      // N-1 healthy subtasks via Promise.all), create a NEW L1 on the fly
+      // whose description takes the subtask's own description — that way
+      // future runs can prefilter to it. The auto-assigned taxonomy name
+      // will differ from the hallucinated one; we log the mismatch.
+      ctx.logger.warn(
+        `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" not in registry — auto-creating a fresh L1`
+      );
+      return this.createSubtaskL1(subtask, strategy, parentTask);
+    }
+    // No preferredChild: the single-subtask path uses the strategy
+    // resolved at plan-time. For idx > 0 we still auto-create to
+    // avoid the same "kill the whole fan-out" failure mode — the
+    // planner is mis-behaving but the run can still produce SOME
+    // output rather than none.
+    if (idx > 0) {
+      ctx.logger.warn(
+        `[${this.name}] subtask #${idx} has no preferredChild — auto-creating a fresh L1 (planner should have labeled this subtask)`
+      );
+      return this.createSubtaskL1(subtask, strategy, parentTask);
+    }
     if (strategy.strategy === 'reuse') {
       if (!strategy.target) throw new Error('reuse requires target');
       const found = this.registry.getByName(strategy.target);
       if (!found) throw new RegistryNotFoundError(strategy.target);
-      l1Type = found;
-    } else {
-      const seed: NonNullable<typeof strategy.seed> =
-        strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
-      l1Type = this.registry.create(1, {
-        description:
-          seed.description ?? `L1 element created by ${this.name} for: ${task.description}`,
-        systemPrompt:
-          seed.systemPrompt ??
-          [
-            `You are an L1 element created by ${this.name}.`,
-            `Execute a focused leaf task and return a clean, structured result.`,
-            `Original task: ${task.description}`,
-          ].join('\n'),
-        tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
-        params: (seed.params ?? this.params) as GenerationParams,
-        createdBy: this.name,
-      });
-      ctx.logger.info(`[${this.name}] created L1 ${l1Type.name}`, { ordinal: l1Type.ordinal });
+      return found;
     }
-    this.triedChildren.mark(l1Type.name);
+    // create with explicit strategy seed
+    return this.createSubtaskL1(subtask, strategy, parentTask);
+  }
 
-    const l1 = L1Atom.fromType(l1Type);
-    const hooks: SupervisionHooks<L1Atom> = {
+  /**
+   * Create a new L1 for a subtask that couldn't be routed to an existing
+   * catalog entry. Used both for explicit `strategy: "create"` plans and
+   * for the fallback paths above (hallucinated preferredChild, missing
+   * preferredChild in multi-subtask plan). Description defaults to the
+   * subtask's own description, so the new L1's catalog entry is
+   * prefilter-friendly on future runs.
+   */
+  private createSubtaskL1(
+    subtask: Plan['subtasks'][number],
+    strategy: L2Strategy,
+    parentTask: Task
+  ): AtomType {
+    const seed: NonNullable<typeof strategy.seed> =
+      strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
+    return this.registry.create(1, {
+      description:
+        seed.description ?? `L1 for subtask: ${subtask.description.slice(0, 120)}`,
+      // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
+      // created L1 should be a narrow specialist — one concern, one output
+      // shape — not a Swiss-army knife that tries to solve the whole task.
+      systemPrompt:
+        seed.systemPrompt ??
+        [
+          `You are an L1 element with ONE narrow responsibility.`,
+          `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
+          `Call tools sequentially to produce your single output. Return a structured`,
+          `{"output", "summary"} JSON at the end.`,
+          ``,
+          `Scope boundary: if the subtask seems to require coordinating with other`,
+          `subtasks (reading their outputs, sharing state) — that's a planning bug at`,
+          `a higher tier. You still execute YOUR subtask in isolation; do NOT invent`,
+          `cross-subtask side effects.`,
+          ``,
+          `Subtask you were handed: ${subtask.description}`,
+          `Parent task (for context only): ${parentTask.description}`,
+        ].join('\n'),
+      tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+      params: (seed.params ?? this.params) as GenerationParams,
+      createdBy: this.name,
+    });
+  }
+
+  private makeL1Hooks(ctx: RunContext, subtaskDescription: string): SupervisionHooks<L1Atom> {
+    return {
       applyByScope: async (child, verdict) => {
         if (verdict.scope === 'ephemeral') {
           child.applyModifications(verdict.modifications);
@@ -265,15 +466,36 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         return L1Atom.fromType(branched);
       },
       branchOnEscalation: async (child, _trace, reason) => {
+        // Aligned system prompt: start the branch FRESH with the current
+        // subtask's domain, not inherited from the parent. Without this
+        // reset, a "platformer builder" parent gets branched into a
+        // "dashboard builder" child that still introduces itself as a
+        // platformer and keeps emitting platformer plans (Frankenstein).
+        const narrowPrompt = buildNarrowL1Prompt(subtaskDescription);
+        const narrowDesc = `L1 narrow builder for: ${subtaskDescription.slice(0, 120)}`;
         const branched = this.registry.branch(
           child.name,
-          { additionalContext: 'Branched after escalation. Previous attempts failed.' },
+          {
+            systemPromptReplace: narrowPrompt,
+            descriptionReplace: narrowDesc,
+            additionalContext:
+              `Branched after escalation. Previous attempts failed because the inherited prompt` +
+              ` was misaligned with this task. Prompt has been reset to a narrow template focused` +
+              ` on the current subtask.`,
+          },
           this.name,
           undefined
         );
         ctx.logger.warn(
           `[${this.name}] escalation — branched ${child.name} → ${branched.name} (${reason})`
         );
+        // Return a fresh L1 instance of the branched type so the supervise
+        // loop can give it one attempt before falling back to this L2.
+        // Without this, the branch was recorded in the registry but never
+        // actually tried on the current task — purely a lesson for future
+        // runs. By handing the new instance back we let the anti-
+        // Frankenstein narrow prompt prove itself in-flight.
+        return L1Atom.fromType(branched);
       },
       onApproved: async (child, _result) => {
         this.registry.recordSuccess(child.name);
@@ -282,8 +504,73 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         this.registry.recordFailure(child.name);
       },
     };
+  }
 
-    return superviseLoop<L1Atom>(this, l1, task, ctx, hooks);
+  /**
+   * Combine N sub-results into the supervisor's single Result.
+   *   - `concat`: mechanical array-join. Cheap, no LLM call. Output
+   *     becomes `[subResults[0].output, subResults[1].output, …]`
+   *     unless N=1 where we return the single result directly (same
+   *     shape as pre-fan-out behaviour).
+   *   - `llm-synthesize`: ask the supervisor's own model to merge the
+   *     N sub-results into a final `{output, summary}` using
+   *     `aggregation.instruction` as the merge prompt.
+   */
+  private async aggregate(
+    subResults: Result[],
+    aggregation: Plan['aggregation'],
+    parentTask: Task,
+    ctx: RunContext
+  ): Promise<Result> {
+    if (subResults.length === 1) {
+      // Degenerate fan-out (N=1): preserve the exact pre-fan-out shape so
+      // existing call sites and tests see no difference.
+      return subResults[0]!;
+    }
+    if (aggregation.mode === 'concat') {
+      const outputs = subResults.map((r) => r.output);
+      const summary = `${subResults.length} subtasks aggregated (concat): ${subResults
+        .map((r, i) => `#${i + 1} ${r.summary}`)
+        .join(' | ')}`;
+      return {
+        output: outputs,
+        summary,
+        trace: [],
+        producedBy: { tier: 2, name: this.name, viaFallback: false },
+      };
+    }
+    // llm-synthesize
+    const userContent = [
+      `You are "${this.name}" (tier 2). Synthesise a single result from ${subResults.length} sub-results.`,
+      `Original task: ${parentTask.description}`,
+      aggregation.instruction
+        ? `Merge instruction: ${aggregation.instruction}`
+        : 'Merge instruction: combine the sub-results into one coherent final deliverable.',
+      ``,
+      `Sub-results:`,
+      ...subResults.map(
+        (r, i) =>
+          `--- #${i + 1} (by ${r.producedBy.name}) ---\nsummary: ${r.summary}\noutput: ${
+            typeof r.output === 'string' ? r.output : JSON.stringify(r.output)
+          }`
+      ),
+      ``,
+      `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
+    ].join('\n');
+    const resp = await ctx.llm.complete({
+      model: this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      userContent,
+      params: this.params,
+      signal: ctx.signal,
+    });
+    const { output, summary } = parsePayloadTolerant(resp.text);
+    return {
+      output,
+      summary,
+      trace: [],
+      producedBy: { tier: 2, name: this.name, viaFallback: false },
+    };
   }
 
   /** Mutualization target: peer runs the task end-to-end without further supervision. */
@@ -490,19 +777,33 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  the task. Aspirational language ("will write...", "will validate...") is',
   '  EXPECTED at plan-time and is NEVER grounds for rejection — absence of executed',
   '  work is not a defect of a plan.',
-  '  VISIBLE-DELIVERABLES RULE (tier-aware):',
+  '  VISIBLE-DELIVERABLES RULE (tier-aware, narrowly scoped):',
   '    - If Plan kind is DIRECT (child tier 1, the executor, OR a supervisor acting',
-  '      in fallback): for tasks that produce an interactive artefact (an app, a',
-  '      game, a UI) the plan MUST enumerate the VISIBLE deliverables — not just',
-  '      "render a grid" but every user-perceivable affordance the task implies:',
-  '      numbers/text displayed, icons or glyphs for distinct states, feedback on',
-  '      each interaction kind, end-state screens. A plan that only describes',
-  '      colored shapes for a task that needs numbers and icons is structurally',
-  '      broken and MUST be rejected with an additionalContext listing the',
-  '      missing visible affordances.',
-  '      Implicit gameplay requirements (e.g. Minesweeper must show mine counts',
-  '      and flag icons) are NOT optional just because the task statement didn\'t',
-  '      list them word-for-word.',
+  '      in fallback): reject ONLY when the plan commits to building a',
+  '      materially WRONG artefact — colored shapes in place of task-named',
+  '      numbers/icons, a static page in place of the task-named interactive',
+  '      element, or a stand-in for a task-named affordance that clearly',
+  '      cannot satisfy the task (e.g. task says "Minesweeper" and the plan',
+  '      does not mention mine counts or flag icons at all).',
+  '      When you reject, name the CONCRETE task-stated element that the plan',
+  '      fails to cover, in one short sentence, and put it in',
+  '      modifications.additionalContext. A single missing element is enough',
+  '      — do not chain a checklist of optional polish items.',
+  '      DO NOT reject a plan because:',
+  '        * it omits prose enumeration of affordances the implementation',
+  '          will naturally produce (e.g. the plan says "FPS meter with',
+  '          rolling graph and numeric readout" — that IS sufficient, you',
+  '          need not demand a per-pixel breakdown of axis labels, grid',
+  '          lines, tick formats);',
+  '        * the smoke-test snippet could be slightly more thorough — smoke',
+  '          quality is a RESULT-phase concern (re-evaluate then via ground',
+  '          truth), not a plan-phase blocker;',
+  '        * it could "go further" on feedback polish, end-state screens,',
+  '          animation detail, etc. — absence of polish is not structural',
+  '          brokenness and is NOT grounds for plan rejection.',
+  '      Heuristic: if the plan, executed faithfully, would plausibly pass a',
+  '      validate_html + smoke-check against the task, approve it. The plan',
+  '      phase is a sanity gate, not a design review.',
   '    - If Plan kind is DELEGATION (child tier 2 or 3, routing to a lower tier):',
   '      the plan is a ROUTING decision. The visible-deliverables checklist does',
   '      NOT apply here — enumerating per-affordance UX detail is the downstream',
@@ -565,6 +866,42 @@ export const VALIDATION_SYSTEM_PROMPT = [
   'to Minesweeper — issue a scope "patch" with modifications.descriptionReplace set to a',
   'fresh one-sentence description of what the type ACTUALLY does now. Accurate descriptions',
   'cut routing cost; stale ones cause the prefilter to escalate unnecessarily.',
+  '',
+  '== FAN-OUT DECOMPOSITION ==',
+  'When Subject kind is PLAN and the plan carries a "subtasks" list, the child',
+  'supervisor has decomposed the task into orthogonal parallel subtasks. Verify:',
+  '  - subtasks is a non-empty array. Single-subtask plans (N=1) are PERFECTLY',
+  '    VALID — a genuinely atomic task (e.g. "build one index.html with all',
+  '    concerns in one file") should NOT be padded with artificial subtasks.',
+  '    DO NOT reject a plan just because N=1. DO NOT reject because',
+  '    "aggregation.mode is \'concat\' for a single artefact" — concat is the',
+  '    correct default for N=1, it is a no-op (the single sub-result passes',
+  '    through unchanged). The ONLY reason to require "llm-synthesize" is when',
+  '    N>1 AND the final deliverable is a COMBINED product of the sub-results.',
+  '  - each subtask has a concrete "description" (not "do the next step"). The',
+  '    planner must write each description precisely enough that a child can act',
+  '    on it without needing to read the others.',
+  '  - NO subtask depends on another\'s output. Subtasks run in PARALLEL via',
+  '    Promise.all; if the planner wrote "subtask 2 uses subtask 1\'s URL", that',
+  '    is STRUCTURALLY BROKEN — reject with scope "ephemeral" and an',
+  '    additionalContext pointing at the implicit dependency.',
+  '  - for N>1, each subtask SHOULD carry "preferredChild". A missing or',
+  '    invented "preferredChild" (a name not present in the "Delegation',
+  '    target(s):" block) will force the supervisor to auto-create a fresh',
+  '    child whose description matches subtask.description. That is',
+  '    recoverable but wasteful — if "preferredChild" is set, it MUST match',
+  '    an actual catalog entry. Reject plans that reference an unknown name',
+  '    (e.g. "Carbon" when the catalog lists only "Hydrogen, Helium, …")',
+  '    with scope "ephemeral" and an additionalContext telling the planner',
+  '    to either use a real catalog name or omit preferredChild entirely.',
+  '  - "aggregation.mode" is one of "concat" (mechanical join) or',
+  '    "llm-synthesize" (merge via an extra LLM call). If the final deliverable',
+  '    is a SINGLE combined artefact (e.g. an index.html assembled from pieces)',
+  '    "concat" is almost always wrong — prefer "llm-synthesize" with a clear',
+  '    "instruction" string.',
+  'Artefact-collision rule: if two subtasks both produce side-effects on the',
+  'same named resource (same file path, same port, same DB row), that is NOT',
+  'parallel-safe. Reject with a note about which resources collide.',
   '',
   '== BRANCHING ACROSS DOMAINS ==',
   'When you set scope "branch" with a branchName, the new type INHERITS the parent\'s',
@@ -686,12 +1023,13 @@ export async function llmVerdict(args: {
  * a compact context string with each target's description + trust counters,
  * for injection into the validator's userContent.
  *
- * Heuristic: scans `proposedAction` (and optionally `expectedOutput`) for
- * `L\d "name"` or `\bL\d-(name)\b` patterns, plus any catalog name that
- * appears as a whole word. We don't parse strategy JSON (not every plan
- * carries one). Returns `undefined` when no target can be identified or
- * the registry has no matching entry — in that case the verdict skips the
- * block entirely rather than inject noise.
+ * Fan-out aware: first checks `subtasks[].preferredChild` (authoritative
+ * for multi-subtask plans since Phase 3). Falls back to legacy heuristics
+ * — `L\d "name"` patterns and whole-word catalog scan in
+ * `proposedAction` + `expectedOutput` — for single-subtask legacy plans
+ * or plans that skip `preferredChild`. Returns `undefined` when no target
+ * can be identified or the registry has no matching entry, so the verdict
+ * skips the block entirely rather than inject noise.
  */
 export function buildTargetContext(
   plan: unknown,
@@ -699,35 +1037,53 @@ export function buildTargetContext(
 ): string | undefined {
   if (!plan || typeof plan !== 'object') return undefined;
   const planObj = plan as Record<string, unknown>;
-  const haystack = [planObj['proposedAction'], planObj['expectedOutput']]
-    .filter((s): s is string => typeof s === 'string' && s.length > 0)
-    .join('\n');
-  if (haystack.length === 0) return undefined;
 
   const found: string[] = [];
   const seen = new Set<string>();
 
-  // Structured hint: `L1 "Foo"` / `L2 "Bar"` — the canonical delegation shape
-  // produced by L2/L3 `plan()`. Catches the common case first.
-  const quoted = /\bL[123]\s+"([^"]+)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = quoted.exec(haystack)) !== null) {
-    const name = m[1]!;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    found.push(name);
+  // Authoritative path: subtasks.preferredChild, one per subtask. This
+  // is where multi-subtask fan-out plans explicitly name their targets,
+  // so we rely on it first and skip the regex heuristics when present.
+  const subtasks = planObj['subtasks'];
+  if (Array.isArray(subtasks)) {
+    for (const st of subtasks) {
+      if (!st || typeof st !== 'object') continue;
+      const pc = (st as Record<string, unknown>)['preferredChild'];
+      if (typeof pc === 'string' && pc.length > 0 && !seen.has(pc)) {
+        seen.add(pc);
+        found.push(pc);
+      }
+    }
   }
 
-  // Fallback scan: any catalog atom name that appears as a whole word in
-  // the haystack. Keeps the set bounded by requiring registry presence.
   if (found.length === 0) {
-    for (const tier of [1, 2, 3] as const) {
-      for (const t of registry.listByTier(tier)) {
-        const safe = t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const re = new RegExp(`\\b${safe}\\b`);
-        if (re.test(haystack) && !seen.has(t.name)) {
-          seen.add(t.name);
-          found.push(t.name);
+    const haystack = [planObj['proposedAction'], planObj['expectedOutput']]
+      .filter((s): s is string => typeof s === 'string' && s.length > 0)
+      .join('\n');
+    if (haystack.length === 0 && found.length === 0) return undefined;
+
+    // Structured hint: `L1 "Foo"` / `L2 "Bar"` — the canonical delegation shape
+    // produced by L2/L3 `plan()`. Catches the common case first.
+    const quoted = /\bL[123]\s+"([^"]+)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = quoted.exec(haystack)) !== null) {
+      const name = m[1]!;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      found.push(name);
+    }
+
+    // Fallback scan: any catalog atom name that appears as a whole word in
+    // the haystack. Keeps the set bounded by requiring registry presence.
+    if (found.length === 0) {
+      for (const tier of [1, 2, 3] as const) {
+        for (const t of registry.listByTier(tier)) {
+          const safe = t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const re = new RegExp(`\\b${safe}\\b`);
+          if (re.test(haystack) && !seen.has(t.name)) {
+            seen.add(t.name);
+            found.push(t.name);
+          }
         }
       }
     }

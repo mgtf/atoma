@@ -9,7 +9,9 @@ import type {
   Verdict,
 } from '../src/core/types.js';
 import {
+  MAX_SAME_MARKER_REJECTS,
   MAX_SAME_REASON_REJECTS,
+  detectPolicyMarker,
   normalizeReason,
   superviseLoop,
   type SupervisionHooks,
@@ -437,6 +439,235 @@ describe('superviseLoop', () => {
       expect(normalizeReason('  foo\n\t bar  ')).toBe('foo bar');
       expect(normalizeReason('Résumé — OK.')).toBe('résumé ok');
       expect(normalizeReason('')).toBe('');
+    });
+  });
+
+  describe('policy-marker repeat detection', () => {
+    it('detectPolicyMarker picks up VISIBLE-DELIVERABLES regardless of punctuation / casing', () => {
+      expect(detectPolicyMarker('The VISIBLE-DELIVERABLES checklist is incomplete.')).toBeTruthy();
+      expect(detectPolicyMarker('visible deliverables are missing')).toBeTruthy();
+      expect(detectPolicyMarker('something else entirely')).toBeNull();
+    });
+
+    it('escalates when the same policy marker recurs in N consecutive rejections — even if the surrounding prose differs', async () => {
+      // This is the real-world failure mode post-mortem from the dashboard
+      // run: five plan rejections, each one carrying a DIFFERENT specific
+      // complaint but all anchored on the same "VISIBLE-DELIVERABLES"
+      // category. The verbatim-equality tracker couldn't see those as
+      // repeats; the marker tracker must.
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      const rotatingComplaints = [
+        'VISIBLE-DELIVERABLES: missing FPS numeric readout format',
+        'VISIBLE-DELIVERABLES: axis labels on FPS graph unspecified',
+        'VISIBLE-DELIVERABLES: timestamp format for keystrokes not stated',
+        'VISIBLE-DELIVERABLES: mouse delta display affordance absent',
+      ];
+      for (const r of rotatingComplaints) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: r,
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+      let branched = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branched++;
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      // Should have escalated on the Nth marker repeat, NOT eaten the
+      // full iter budget and NOT waited for a verbatim reasoning repeat.
+      expect(child.planCount).toBe(MAX_SAME_MARKER_REJECTS);
+      expect(branched).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
+    });
+
+    it('does NOT escalate when marker rejections are interleaved with approvals', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      // One marker reject, plan approved, result approved → marker streak
+      // must reset when the plan passes.
+      parent.queuePlanVerdict({
+        approved: false,
+        reasoning: 'VISIBLE-DELIVERABLES: tweak #1',
+        modifications: { systemPromptAppend: 'x' },
+        scope: 'ephemeral',
+      });
+      parent.queuePlanVerdict({ approved: true, reasoning: 'ok' });
+      parent.queueResultVerdict({ approved: true, reasoning: 'great' });
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          throw new Error('must not escalate');
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 20, maxExecIterations: 20 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      expect(result.producedBy.viaFallback).toBe(false);
+    });
+  });
+
+  describe('branch-retry on escalation', () => {
+    it('installs a branched child returned by branchOnEscalation and runs one more cycle before parent fallback', async () => {
+      const parent = new FakeParent();
+      const original = new FakeChild('orig');
+      const replacement = new FakeChild('branched');
+
+      // First pass: three identical plan rejects → escalate via repeat.
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: 'same gripe exactly',
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+      // Second pass on the replacement: plan+result both approved.
+      parent.queuePlanVerdict({ approved: true, reasoning: 'ok' });
+      parent.queueResultVerdict({ approved: true, reasoning: 'great' });
+
+      let branchCalls = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branchCalls++;
+          return replacement;
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 10, maxExecIterations: 10 },
+      });
+      const result = await superviseLoop(
+        parent,
+        original,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+
+      expect(branchCalls).toBe(1);
+      expect(original.planCount).toBe(MAX_SAME_REASON_REJECTS);
+      expect(replacement.planCount).toBe(1);
+      expect(replacement.execCount).toBe(1);
+      // Solved via the branched child, NOT via the parent fallback.
+      expect(result.producedBy.viaFallback).toBe(false);
+      expect(result.output).toBe('branched:output');
+      expect(parent.selfPlans).toBe(0);
+      expect(parent.selfExecs).toBe(0);
+    });
+
+    it('falls back to parent when the branched child ALSO escalates (only one retry)', async () => {
+      const parent = new FakeParent();
+      const original = new FakeChild('orig');
+      const replacement = new FakeChild('branched');
+
+      // First cycle: 3 identical rejects → escalate.
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: 'same gripe exactly',
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+      // Second cycle on replacement: 3 identical rejects again → escalate.
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: 'still the same gripe',
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+
+      let branchCalls = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branchCalls++;
+          // Return the replacement ONCE; on subsequent calls still return
+          // it — the loop guard is what prevents the second retry, not
+          // the hook itself. This asserts that contract holds.
+          return replacement;
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 10, maxExecIterations: 10 },
+      });
+      const result = await superviseLoop(
+        parent,
+        original,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+
+      // branchOnEscalation was called on BOTH escalations (original and
+      // replacement), but the loop only honoured the first replacement —
+      // the second escalation falls through to the parent fallback.
+      expect(branchCalls).toBe(2);
+      expect(original.planCount).toBe(MAX_SAME_REASON_REJECTS);
+      expect(replacement.planCount).toBe(MAX_SAME_REASON_REJECTS);
+      expect(parent.selfPlans).toBe(1);
+      expect(parent.selfExecs).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
+    });
+
+    it('falls back to parent when branchOnEscalation returns void (legacy hook contract preserved)', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: 'same gripe exactly',
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+      let branchCalls = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branchCalls++;
+          // Returning undefined (void) keeps pre-branch-retry behaviour:
+          // register the lesson, then go straight to parent fallback.
+        },
+      };
+      const ctx = makeCtx({
+        limits: { maxPlanIterations: 10, maxExecIterations: 10 },
+      });
+      const result = await superviseLoop(
+        parent,
+        child,
+        { description: 'go' },
+        ctx,
+        hooks
+      );
+      expect(branchCalls).toBe(1);
+      expect(parent.selfPlans).toBe(1);
+      expect(parent.selfExecs).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
     });
   });
 });

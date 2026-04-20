@@ -1,0 +1,55 @@
+import type {
+  LlmClient,
+  LlmCompletionRequest,
+  RunContext,
+  TrustFastPathInfo,
+} from './types.js';
+
+/**
+ * Derive a child RunContext that tags every observable event (LLM call,
+ * tool invocation, trust fast-path) with the given `branchId`. Used by
+ * L2/L3 when they fan-out `Promise.all` over subtasks: each subtask
+ * runs with its own branch ctx, so the trace/viz can render parallel
+ * chains in distinct lanes instead of collapsing them into one
+ * interleaved timeline.
+ *
+ * What gets wrapped:
+ *   - `llm.complete(req)` → injects `branchId` on `req` unless the
+ *     caller already supplied one (honours existing explicit value).
+ *     RecordingLlmClient reads `req.branchId` and propagates it to
+ *     both the LLM event AND any tool events from the tool-use loop.
+ *   - `recordTrust(info)` → caller's callback is wrapped so we can
+ *     stamp `branchId` before handing the info on. Since
+ *     `TrustFastPathInfo` is the narrow contract the recorder uses,
+ *     we extend it with the branch id via a cast-free pattern: we
+ *     simply spread the branchId into the object we forward.
+ *   - `currentBranchId` → the field itself, in case any downstream
+ *     consumer reads ctx directly.
+ */
+export function forkBranch(ctx: RunContext, branchId: string): RunContext {
+  const wrappedLlm: LlmClient = {
+    complete: (req: LlmCompletionRequest) =>
+      ctx.llm.complete({
+        ...req,
+        branchId: req.branchId ?? branchId,
+      }),
+  };
+  const wrappedRecordTrust = ctx.recordTrust
+    ? (info: TrustFastPathInfo) => {
+        ctx.recordTrust!({ ...info, branchId } as TrustFastPathInfo & {
+          branchId: string;
+        });
+      }
+    : undefined;
+
+  const out: RunContext = {
+    logger: ctx.logger,
+    signal: ctx.signal,
+    llm: wrappedLlm,
+    limits: ctx.limits,
+    ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
+    ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
+    currentBranchId: branchId,
+  };
+  return out;
+}

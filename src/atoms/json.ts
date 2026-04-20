@@ -202,7 +202,10 @@ export function repairTruncatedJson(raw: string): string | null {
   return out;
 }
 
-export function parseWith<T>(schema: z.ZodSchema<T>, text: string): T {
+export function parseWith<S extends z.ZodTypeAny>(
+  schema: S,
+  text: string
+): z.infer<S> {
   let primaryErr: unknown = null;
   try {
     const raw = extractJson(text);
@@ -481,23 +484,93 @@ export function parsePlanTolerant(text: string): z.infer<typeof planSchema> {
  */
 export function parsePlanWithFallback(
   text: string,
-  fallback: { reasoning: string; proposedAction: string; expectedOutput: string }
+  fallback: {
+    reasoning: string;
+    proposedAction?: string;
+    expectedOutput: string;
+    subtasks?: readonly { description: string; inputs?: Record<string, unknown>; preferredChild?: string }[];
+    aggregation?: { mode: 'concat' | 'llm-synthesize'; instruction?: string };
+  }
 ): z.infer<typeof planSchema> {
   try {
     return parsePlanTolerant(text);
   } catch {
-    return fallback;
+    // Run the fallback through the same preprocessor so callers can
+    // supply either the new fan-out shape OR the legacy
+    // `{proposedAction, expectedOutput}` — the schema's `z.preprocess`
+    // normalises both into a well-formed FanOutPlan.
+    return planSchema.parse(fallback);
   }
 }
 
-export const planSchema = z.object({
-  reasoning: z.string(),
-  proposedAction: z.string(),
-  toolCalls: z
-    .array(z.object({ name: z.string(), args: z.record(z.unknown()) }))
-    .optional(),
-  expectedOutput: z.string(),
+/**
+ * Shape of one subtask in a fan-out plan. `description` is the leaf
+ * task the child must accomplish; `inputs` is an optional structured
+ * payload; `preferredChild` is a soft routing hint the supervisor
+ * considers alongside its prefilter/create logic.
+ */
+export const subtaskSpecSchema = z.object({
+  description: z.string(),
+  inputs: z.record(z.unknown()).optional(),
+  preferredChild: z.string().optional(),
 });
+
+/**
+ * Aggregation spec — how a supervisor combines N sub-results into 1.
+ * `concat` is mechanical, `llm-synthesize` triggers a supervisor LLM
+ * call using `instruction` as the merge prompt.
+ */
+export const aggregationSpecSchema = z.object({
+  mode: z.enum(['concat', 'llm-synthesize']),
+  instruction: z.string().optional(),
+});
+
+/**
+ * Fan-out plan: always carries a `subtasks` list (minimum length 1).
+ * Legacy single-action plans `{reasoning, proposedAction, expectedOutput}`
+ * are coerced into this shape via `z.preprocess` — their entire payload
+ * becomes a single degenerate subtask, so every call site can assume
+ * `plan.subtasks` is present and iterable.
+ */
+export const planSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+    const obj = raw as Record<string, unknown>;
+    // Already in the new shape? Leave it alone.
+    if (Array.isArray(obj['subtasks'])) return obj;
+    // Legacy shape with only proposedAction/expectedOutput — coerce into
+    // a single-subtask fan-out plan so downstream consumers stay uniform.
+    // The supervisor's own task description is not available here, so we
+    // reuse the proposedAction as the subtask's description (or
+    // expectedOutput as a fallback).
+    const proposedAction = obj['proposedAction'];
+    const expectedOutput = obj['expectedOutput'];
+    if (typeof proposedAction === 'string' || typeof expectedOutput === 'string') {
+      const subtaskDesc =
+        typeof proposedAction === 'string' && proposedAction.length > 0
+          ? proposedAction
+          : typeof expectedOutput === 'string'
+            ? expectedOutput
+            : 'execute the task';
+      return {
+        ...obj,
+        subtasks: [{ description: subtaskDesc }],
+        aggregation: obj['aggregation'] ?? { mode: 'concat' },
+      };
+    }
+    return obj;
+  },
+  z.object({
+    reasoning: z.string(),
+    subtasks: z.array(subtaskSpecSchema).min(1),
+    aggregation: aggregationSpecSchema.default({ mode: 'concat' }),
+    expectedOutput: z.string(),
+    proposedAction: z.string().optional(),
+    toolCalls: z
+      .array(z.object({ name: z.string(), args: z.record(z.unknown()) }))
+      .optional(),
+  })
+);
 
 export const resultPayloadSchema = z.object({
   output: z.unknown(),
