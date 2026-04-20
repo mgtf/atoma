@@ -17,7 +17,7 @@ import {
 } from '../registry/atomRegistry.js';
 import { PIN_HAIKU, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
-import { llmVerdict } from './L2Atom.js';
+import { buildTargetContext, llmVerdict } from './L2Atom.js';
 import {
   l3StrategySchema,
   parsePayloadTolerant,
@@ -389,6 +389,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       child,
       task,
       payload: plan,
+      // Inject the downstream-target description so Haiku can judge the
+      // routing on facts, not on name-based guesses.
+      targetContext: buildTargetContext(plan, this.registry),
     });
   }
 

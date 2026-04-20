@@ -397,6 +397,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       child,
       task,
       payload: plan,
+      // Inject the description of anything the plan wants to delegate to,
+      // so Haiku doesn't judge "delegate to L1 Fluorine" from the name
+      // alone and hallucinate what Fluorine does.
+      targetContext: buildTargetContext(plan, this.registry),
     });
   }
 
@@ -571,6 +575,18 @@ export async function llmVerdict(args: {
   child: Atom;
   task: Task;
   payload: unknown;
+  /**
+   * Optional pre-formatted description of the atoms the plan references
+   * (usually the DELEGATION target's name + description + trust counters).
+   * Injected verbatim into userContent so Haiku doesn't have to guess what
+   * an atom named "Fluorine" actually does. Without this field, earlier
+   * runs saw Haiku reject a valid `delegate to L1 "Fluorine"` plan with
+   * hallucinated reasoning ("Fluorine's description indicates it builds
+   * generic web apps/games without specialization in WebGL") even though
+   * Fluorine's description literally said "WebGL Minesweeper builder".
+   * The caller builds this string (it has the registry); we just inject.
+   */
+  targetContext?: string;
 }): Promise<Verdict> {
   // `Subject kind` is repeated as its own field so the validator cannot miss
   // the PLAN-vs-RESULT distinction — the bar is different between the two and
@@ -609,6 +625,7 @@ export async function llmVerdict(args: {
     `Subject kind: ${subjectHint}`,
     `Plan kind: ${planKindHint}`,
     `Task: ${args.task.description}`,
+    args.targetContext ? `Delegation target(s):\n${args.targetContext}` : '',
     `${args.subject}: ${JSON.stringify(args.payload)}`,
     groundTruthBlock,
   ]
@@ -626,6 +643,70 @@ export async function llmVerdict(args: {
   const raw = parseVerdict(resp.text);
   if (raw.approved) return raw;
   return { ...raw, branchName: raw.branchName ?? undefined };
+}
+
+/**
+ * Extract likely delegation-target atom names from a PLAN payload and build
+ * a compact context string with each target's description + trust counters,
+ * for injection into the validator's userContent.
+ *
+ * Heuristic: scans `proposedAction` (and optionally `expectedOutput`) for
+ * `L\d "name"` or `\bL\d-(name)\b` patterns, plus any catalog name that
+ * appears as a whole word. We don't parse strategy JSON (not every plan
+ * carries one). Returns `undefined` when no target can be identified or
+ * the registry has no matching entry — in that case the verdict skips the
+ * block entirely rather than inject noise.
+ */
+export function buildTargetContext(
+  plan: unknown,
+  registry: AtomRegistry
+): string | undefined {
+  if (!plan || typeof plan !== 'object') return undefined;
+  const planObj = plan as Record<string, unknown>;
+  const haystack = [planObj['proposedAction'], planObj['expectedOutput']]
+    .filter((s): s is string => typeof s === 'string' && s.length > 0)
+    .join('\n');
+  if (haystack.length === 0) return undefined;
+
+  const found: string[] = [];
+  const seen = new Set<string>();
+
+  // Structured hint: `L1 "Foo"` / `L2 "Bar"` — the canonical delegation shape
+  // produced by L2/L3 `plan()`. Catches the common case first.
+  const quoted = /\bL[123]\s+"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = quoted.exec(haystack)) !== null) {
+    const name = m[1]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    found.push(name);
+  }
+
+  // Fallback scan: any catalog atom name that appears as a whole word in
+  // the haystack. Keeps the set bounded by requiring registry presence.
+  if (found.length === 0) {
+    for (const tier of [1, 2, 3] as const) {
+      for (const t of registry.listByTier(tier)) {
+        const safe = t.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`\\b${safe}\\b`);
+        if (re.test(haystack) && !seen.has(t.name)) {
+          seen.add(t.name);
+          found.push(t.name);
+        }
+      }
+    }
+  }
+
+  const lines: string[] = [];
+  for (const name of found) {
+    const type = registry.getByName(name);
+    if (!type) continue;
+    const desc = stripBranchProvenance(type.description);
+    lines.push(
+      `  - ${type.name} (L${type.tier}, v${type.version}, ✓${type.successes}/✗${type.failures}): ${desc}`
+    );
+  }
+  return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
 /**
