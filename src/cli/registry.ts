@@ -15,7 +15,7 @@ import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'help';
+  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'rebrand' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -41,7 +41,7 @@ function parseArgs(argv: string[]): Args {
       positional.push(token);
     }
   }
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'help'].includes(cmd)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'help'].includes(cmd)) {
     return { command: 'help', positional: [cmd, ...positional], flags };
   }
   return { command: cmd, positional, flags };
@@ -118,10 +118,21 @@ function cmdList(registry: AtomRegistry, tier: Tier | undefined): void {
   console.log(renderTable(tableHeaders, rows));
 }
 
-function cmdShow(registry: AtomRegistry, name: string): void {
+function cmdShow(registry: AtomRegistry, name: string, dbPath: string): void {
   const type = registry.getByName(name);
   if (!type) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no atom type named "${name}" in ${dbPath}`);
+    // Surface a short hint: which other DB file exists in cwd and how to
+    // point the CLI at it. The two default DBs (atoma.db and
+    // atoma-build.db) host different domains (research vs build-app),
+    // and forgetting --db is by far the most common CLI friction.
+    const defaults = ['./atoma.db', './atoma-build.db'];
+    const others = defaults.filter((p) => p !== dbPath);
+    if (others.length > 0) {
+      console.error(
+        `  hint: try \`--db ${others.join(' | --db ')}\`, or run \`list\` first to see what's in each DB.`
+      );
+    }
     process.exit(1);
   }
   console.log(`${type.name}  (tier ${type.tier}, ordinal ${type.ordinal}, v${type.version})`);
@@ -222,6 +233,54 @@ function cmdDedupe(registry: AtomRegistry, apply: boolean, fuzzy: boolean): void
   }
 }
 
+function cmdRebrand(registry: AtomRegistry, name: string | null, all: boolean): void {
+  if (all) {
+    const names: string[] = [];
+    for (const tier of [1, 2, 3] as const) {
+      for (const t of registry.listByTier(tier)) names.push(t.name);
+    }
+    if (names.length === 0) {
+      console.log('(registry is empty)');
+      return;
+    }
+    let touched = 0;
+    for (const n of names) {
+      const { changed } = registry.rebrand(n, 'cli-rebrand');
+      if (changed) {
+        console.log(`  ✓ rebranded ${n}`);
+        touched++;
+      }
+    }
+    console.log(
+      touched === 0
+        ? 'no atoms needed rebranding — all personas already match their names.'
+        : `rebranded ${touched}/${names.length} atom(s). Re-run show <name> to verify.`
+    );
+    return;
+  }
+  if (!name) {
+    console.error('usage: rebrand <name> | rebrand --all');
+    process.exit(2);
+  }
+  const existing = registry.getByName(name);
+  if (!existing) {
+    console.error(`no atom type named "${name}"`);
+    process.exit(1);
+  }
+  const before = existing.systemPrompt.split('\n')[0] ?? '';
+  const { type, changed } = registry.rebrand(name, 'cli-rebrand');
+  if (!changed) {
+    console.log(`${name}: persona already matches name. No change.`);
+    console.log(`  first line: ${before.slice(0, 100)}`);
+    return;
+  }
+  const after = type.systemPrompt.split('\n')[0] ?? '';
+  console.log(`${name} rebranded:`);
+  console.log(`  before: ${before.slice(0, 100)}`);
+  console.log(`  after : ${after.slice(0, 100)}`);
+  console.log(`  version: v${existing.version} → v${type.version}`);
+}
+
 function cmdDescribe(registry: AtomRegistry, name: string, newDescription: string): void {
   const existing = registry.getByName(name);
   if (!existing) {
@@ -256,6 +315,12 @@ function help(): void {
                                 prompt now targets Minesweeper). Wraps a
                                 patch with descriptionReplace; the type
                                 version is bumped and counters are reset.
+  rebrand <name>              — align the "You are <Name>…" first line of
+    | rebrand --all             the systemPrompt with the atom's actual
+                                taxonomy name. Fixes legacy seeds that
+                                hardcoded a persona ("You are Carbon…")
+                                that then contaminated every branch. Use
+                                --all to sweep the whole registry at once.
 
 Common flags:
   --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
@@ -278,7 +343,7 @@ function main(): void {
         console.error('usage: show <name>');
         process.exit(2);
       }
-      return cmdShow(registry, name);
+      return cmdShow(registry, name, dbPath);
     }
     case 'top':
       return cmdTop(registry, tierFrom(args.flags), args.flags['by'] ?? 'success');
@@ -297,6 +362,12 @@ function main(): void {
       }
       return cmdDescribe(registry, name, newDescription);
     }
+    case 'rebrand':
+      return cmdRebrand(
+        registry,
+        args.positional[0] ?? null,
+        args.flags['all'] === 'true'
+      );
   }
 }
 

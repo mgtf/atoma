@@ -20,7 +20,7 @@ import {
   type L2Strategy,
   l2StrategySchema,
   parsePayloadTolerant,
-  parsePlanTolerant,
+  parsePlanWithFallback,
   parseTwoJson,
   parseVerdict,
   planSchema,
@@ -336,11 +336,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       params: this.params,
       signal: ctx.signal,
     });
-    // Tolerant parse: even with the explicit "emit ONE object" hint above,
-    // the LLM sometimes still wraps the plan in an array because its
-    // non-fallback system prompt is heavily conditioned to the
-    // [strategy, plan] shape. parsePlanTolerant unwraps those for us.
-    return parsePlanTolerant(resp.text);
+    // Tolerant parse WITH fallback: even with the explicit "emit ONE
+    // object" hint above, Sonnet's non-fallback routing prompt is
+    // heavily conditioned to emit a `[strategy, plan]` pair. When it
+    // goes even more off-piste (emitting pure strategy JSON, a result
+    // envelope, or free-form prose), `parsePlanWithFallback` synthesises
+    // a stub plan from the task rather than crashing the whole run —
+    // selfExecute can still do real work with the tools, and a missing
+    // "plan text" is not a reason to throw away the fallback safety net.
+    return parsePlanWithFallback(resp.text, {
+      reasoning: `fallback: could not parse a plan from the LLM response; proceeding with direct execution of the task`,
+      proposedAction: `execute the task directly using the available tools (${
+        this.tools.map((t) => t.name).join(', ') || 'none'
+      })`,
+      expectedOutput: task.description,
+    });
   }
 
   private async selfExecute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {

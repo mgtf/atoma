@@ -21,7 +21,7 @@ import { buildTargetContext, llmVerdict } from './L2Atom.js';
 import {
   l3StrategySchema,
   parsePayloadTolerant,
-  parsePlanTolerant,
+  parsePlanWithFallback,
   parseTwoJson,
   planSchema,
   type L3Strategy,
@@ -327,9 +327,17 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: this.params,
       signal: ctx.signal,
     });
-    // Tolerant parse: see L2Atom.selfPlan for rationale — the non-fallback
-    // strategy-array conditioning leaks through even in fallback mode.
-    return parsePlanTolerant(resp.text);
+    // Tolerant parse WITH fallback: see L2Atom.selfPlan for rationale —
+    // the routing-conditioned prompt sometimes produces responses that
+    // don't include any plan-shaped fields. We synthesise a stub plan
+    // from the task so selfExecute can still run with the tools.
+    return parsePlanWithFallback(resp.text, {
+      reasoning: `fallback: could not parse a plan from the LLM response; proceeding with direct execution of the task`,
+      proposedAction: `execute the task directly using the available tools (${
+        this.tools.map((t) => t.name).join(', ') || 'none'
+      })`,
+      expectedOutput: task.description,
+    });
   }
 
   private async selfExecute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {

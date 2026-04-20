@@ -4,6 +4,7 @@ import {
   findAllJsonObjects,
   parseVerdict,
   parsePlanTolerant,
+  parsePlanWithFallback,
   parseWith,
   repairTruncatedJson,
   repairPrematureClose,
@@ -230,6 +231,71 @@ describe('parsePlanTolerant', () => {
   it('tolerates JSON inside a ```json fence', () => {
     const fenced = '```json\n' + JSON.stringify(canonical) + '\n```';
     expect(parsePlanTolerant(fenced)).toEqual(canonical);
+  });
+
+  it('unwraps a {plan: {...}} wrapper (observed in fallback regressions)', () => {
+    // Sonnet sometimes wraps the plan in a `plan` key when it gets
+    // confused between strategy and plan shapes in L2 fallback mode.
+    const wrapped = JSON.stringify({ plan: canonical });
+    expect(parsePlanTolerant(wrapped)).toEqual(canonical);
+  });
+
+  it('unwraps a {strategy, plan} combined envelope', () => {
+    const envelope = JSON.stringify({
+      strategy: { strategy: 'reuse', target: 'Hydrogen', reasoning: 'pf' },
+      plan: canonical,
+    });
+    expect(parsePlanTolerant(envelope)).toEqual(canonical);
+  });
+
+  it('picks the plan-shaped candidate from a narrative with multiple JSON objects', () => {
+    // Prose + strategy object + plan object — should pick the plan.
+    const text = `Decided to delegate.
+
+{"strategy": "reuse", "target": "Hydrogen"}
+
+And here is the actual plan:
+
+${JSON.stringify(canonical)}`;
+    expect(parsePlanTolerant(text)).toEqual(canonical);
+  });
+});
+
+describe('parsePlanWithFallback', () => {
+  const canonical = {
+    reasoning: 'r',
+    proposedAction: 'a',
+    expectedOutput: 'e',
+  };
+  const fb = {
+    reasoning: 'SYN',
+    proposedAction: 'SYN',
+    expectedOutput: 'SYN',
+  };
+
+  it('returns the parsed plan when parsing succeeds', () => {
+    expect(parsePlanWithFallback(JSON.stringify(canonical), fb)).toEqual(canonical);
+  });
+
+  it('returns the fallback when LLM emits a strategy-only object (no plan fields)', () => {
+    // Exact shape observed in the Tetris fallback crash:
+    //   {"strategy": "reuse", "target": "Aluminum"}
+    // → no reasoning / proposedAction / expectedOutput.
+    const strategyOnly = JSON.stringify({ strategy: 'reuse', target: 'Aluminum' });
+    expect(parsePlanWithFallback(strategyOnly, fb)).toEqual(fb);
+  });
+
+  it('returns the fallback on completely malformed responses', () => {
+    expect(parsePlanWithFallback('this is not JSON at all', fb)).toEqual(fb);
+    expect(parsePlanWithFallback('', fb)).toEqual(fb);
+    expect(parsePlanWithFallback('{incomplete: no quotes}', fb)).toEqual(fb);
+  });
+
+  it('returns the fallback when LLM emits a result envelope by mistake', () => {
+    // Another variant: the LLM emits `{output, summary}` (the result
+    // payload shape) when it was supposed to emit a plan.
+    const resultShape = JSON.stringify({ output: 'done', summary: 'ok' });
+    expect(parsePlanWithFallback(resultShape, fb)).toEqual(fb);
   });
 });
 

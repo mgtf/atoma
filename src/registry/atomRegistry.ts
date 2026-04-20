@@ -150,6 +150,33 @@ export function stripBranchProvenance(description: string): string {
   return out.trim();
 }
 
+/**
+ * Rewrite a leading "You are <PersonaName>" line so the persona matches the
+ * atom's actual name. Addresses a recurring contamination where Sonnet, when
+ * authoring a seed system prompt, hardcodes a name like "You are Carbon, an
+ * L1 element..." that then persists through branches — every descendant of
+ * the seeded atom ends up thinking it's Carbon even when its registry name
+ * is Phosphorus, Silicon, Aluminum, etc.
+ *
+ * Only rewrites when:
+ *   - the prompt starts with `/^You are <Capitalized>\b/` (excludes English
+ *     articles like "You are a focused worker" — lowercase → untouched)
+ *   - the captured name differs from `newName` (idempotent otherwise)
+ *
+ * Keeps everything else (punctuation, rest of the prompt) intact.
+ * Only the first identity assertion at the very start is rewritten;
+ * subsequent "You are ..." occurrences later in the body (if any) are
+ * left alone because they may be about the USER, not the atom.
+ */
+export function rebrandPersona(systemPrompt: string, newName: string): string {
+  const match = systemPrompt.match(/^(You are )([A-Z][A-Za-z0-9_-]*)/);
+  if (!match) return systemPrompt;
+  if (match[2] === newName) return systemPrompt;
+  return (
+    match[1]! + newName + systemPrompt.slice(match[1]!.length + match[2]!.length)
+  );
+}
+
 export class AtomRegistry {
   constructor(private readonly db: DB) {}
 
@@ -182,6 +209,10 @@ export class AtomRegistry {
       const used = new Set(usedRows.map((r) => r.ordinal));
       const { ordinal, name } = nextAvailable(tier, used);
       const now = new Date().toISOString();
+      // Align the persona baked into the seed prompt with the taxonomy name
+      // we just assigned. Without this, Sonnet-authored seeds with a
+      // hardcoded "You are Carbon" line silently pollute every future branch.
+      const systemPrompt = rebrandPersona(seed.systemPrompt, name);
 
       this.db
         .prepare(
@@ -194,7 +225,7 @@ export class AtomRegistry {
           ordinal,
           name,
           seed.description,
-          seed.systemPrompt,
+          systemPrompt,
           JSON.stringify(seed.tools),
           JSON.stringify(seed.params),
           seed.createdBy,
@@ -206,7 +237,7 @@ export class AtomRegistry {
         ordinal,
         name,
         description: seed.description,
-        systemPrompt: seed.systemPrompt,
+        systemPrompt,
         tools: seed.tools,
         params: seed.params,
         createdBy: seed.createdBy,
@@ -349,6 +380,13 @@ export class AtomRegistry {
       // (b) inflated every prefilter LLM prompt by hundreds of tokens.
       const coreDescription = stripBranchProvenance(merged.description);
       const finalDescription = `${coreDescription} (branched from ${fromName})`;
+      // Rebrand the persona to match the branch's new name. Without this,
+      // the chain "Fluorine (seeded 'You are Carbon…')" → "Silicon (branched
+      // from Aluminum)" keeps introducing itself as Carbon. The validator
+      // prompt already flags this via BRANCHING ACROSS DOMAINS, but the
+      // runtime rewrite closes the loop for the `branchOnEscalation` hook
+      // which cannot supply a systemPromptReplace itself.
+      const systemPrompt = rebrandPersona(merged.systemPrompt, name);
       this.db
         .prepare(
           `INSERT INTO atom_types
@@ -360,7 +398,7 @@ export class AtomRegistry {
           ordinal,
           name,
           finalDescription,
-          merged.systemPrompt,
+          systemPrompt,
           JSON.stringify(merged.tools),
           JSON.stringify(merged.params),
           createdBy,
@@ -372,7 +410,7 @@ export class AtomRegistry {
         ordinal,
         name,
         description: finalDescription,
-        systemPrompt: merged.systemPrompt,
+        systemPrompt,
         tools: merged.tools,
         params: merged.params,
         createdBy,
@@ -473,6 +511,30 @@ export class AtomRegistry {
       modifiedBy,
       'descriptionReplace via registry.describe'
     );
+  }
+
+  /**
+   * Force-align an existing atom's systemPrompt persona with its taxonomy
+   * name, using `rebrandPersona`. Returns the updated type if a rewrite
+   * happened, or the untouched type otherwise. Used by the
+   * `registry rebrand` CLI to retrofit legacy atoms that were created
+   * before the auto-rebrand landed. Internally a `patch` with a fresh
+   * systemPromptReplace so the version history is preserved.
+   */
+  rebrand(name: string, modifiedBy = 'rebrand'): { type: AtomType; changed: boolean } {
+    const current = this.getByName(name);
+    if (!current) throw new RegistryNotFoundError(name);
+    const rebranded = rebrandPersona(current.systemPrompt, current.name);
+    if (rebranded === current.systemPrompt) {
+      return { type: current, changed: false };
+    }
+    const patched = this.patch(
+      name,
+      { systemPromptReplace: rebranded },
+      modifiedBy,
+      `persona rebrand: aligned "You are …" line with atom name "${name}"`
+    );
+    return { type: patched, changed: true };
   }
 
   /**

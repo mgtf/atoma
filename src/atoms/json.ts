@@ -408,31 +408,86 @@ export function parsePayloadTolerant(text: string): {
  * Tolerant plan parser used by L2/L3 fallback `selfPlan`. The supervisor's
  * *regular* plan method primes the LLM to emit `[strategy, plan]` arrays,
  * and that conditioning carries over into fallback mode — even with a
- * fallback-specific user message, Haiku/Sonnet will sometimes still wrap
- * the plan in an array (observed in build-app runs after escalation).
- * Accepts:
- *   - `{reasoning, proposedAction, expectedOutput}` — the canonical shape
+ * fallback-specific user message, Haiku/Sonnet sometimes still emit:
  *   - `[strategy, plan]` — two-element array; take element 1
  *   - `[plan]` — single-element array; take element 0
- * Anything else falls through to the strict schema error.
+ *   - `{strategy, plan}` — combined wrapper; unwrap `.plan`
+ *   - `{plan: {…}}` — wrapped; unwrap `.plan`
+ *   - a narrative with multiple `{…}` — scan all candidates, pick the one
+ *     that matches the plan schema (reuses `findAllJsonObjects`).
+ * If NONE of the above yields a valid plan, this throws — callers in
+ * fallback mode should catch and synthesise a trivial plan from the task
+ * rather than crashing the whole run.
  */
 export function parsePlanTolerant(text: string): z.infer<typeof planSchema> {
-  const raw = extractJson(text);
-  if (Array.isArray(raw)) {
-    if (raw.length >= 2) {
-      const second = planSchema.safeParse(raw[1]);
-      if (second.success) return second.data;
-    }
-    if (raw.length >= 1) {
-      const first = planSchema.safeParse(raw[0]);
-      if (first.success) return first.data;
+  // Try the raw extract first (fastest path), then scan candidates.
+  const seen: unknown[] = [];
+  try {
+    seen.push(extractJson(text));
+  } catch {
+    /* extractJson can fail on multi-object text — fall through to scan */
+  }
+  for (const obj of findAllJsonObjects(text)) {
+    try {
+      seen.push(JSON.parse(obj));
+    } catch {
+      /* skip */
     }
   }
-  const parsed = planSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError(`schema validation failed: ${parsed.error.message}`);
+
+  const candidatesFor = (raw: unknown): unknown[] => {
+    if (Array.isArray(raw)) {
+      // [strategy, plan] or [plan]: tier the array elements too.
+      return [raw[1], raw[0], raw].filter((x) => x !== undefined);
+    }
+    if (raw && typeof raw === 'object') {
+      const obj = raw as Record<string, unknown>;
+      // Common wrappers Haiku emits when nervous about the shape.
+      return [
+        obj['plan'],
+        obj['payload'],
+        raw, // plain shape
+      ].filter((x) => x !== undefined);
+    }
+    return [raw];
+  };
+
+  for (const raw of seen) {
+    for (const cand of candidatesFor(raw)) {
+      const parsed = planSchema.safeParse(cand);
+      if (parsed.success) return parsed.data;
+    }
   }
-  return parsed.data;
+
+  const details = seen[0]
+    ? JSON.stringify(seen[0]).slice(0, 200)
+    : text.slice(0, 200);
+  throw new ValidationError(
+    `schema validation failed: no plan-shaped object found in response (saw: ${details}…)`
+  );
+}
+
+/**
+ * Wrapper around `parsePlanTolerant` that never throws: returns a
+ * synthesised plan derived from the task description when the LLM
+ * response doesn't contain anything plan-shaped. Used by L2/L3 fallback
+ * `selfPlan` where crashing the whole run because the fallback LLM went
+ * off-format is strictly worse than feeding `selfExecute` a stub plan
+ * and letting it do its thing with the tools.
+ *
+ * Why a separate helper: the strict `parsePlanTolerant` is still useful
+ * in call sites (e.g. tests, non-fallback paths) where a malformed
+ * response SHOULD surface as an error.
+ */
+export function parsePlanWithFallback(
+  text: string,
+  fallback: { reasoning: string; proposedAction: string; expectedOutput: string }
+): z.infer<typeof planSchema> {
+  try {
+    return parsePlanTolerant(text);
+  } catch {
+    return fallback;
+  }
 }
 
 export const planSchema = z.object({
