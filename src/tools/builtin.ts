@@ -324,6 +324,8 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
     return browser;
   };
 
+  const stuck = makeSmokeStuckTracker(SMOKE_STUCK_WINDOW);
+
   return {
     declaration: {
       name: 'validate_html',
@@ -350,7 +352,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           waitMs: {
             type: 'number',
             description:
-              'Additional time to wait after network idle to catch async errors. Default 1500ms.',
+              'Additional time to wait after DOM ready to catch async errors (rAF, fetch chains, late scripts). Default 500ms — bump this explicitly when the app does non-trivial work on load.',
           },
           interactions: {
             type: 'array',
@@ -393,7 +395,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           smoke: {
             type: 'string',
             description:
-              'JavaScript snippet evaluated in the page context after interactions. Must be an expression (not a function declaration). Should return { ok: boolean, details?: any } or any truthy value to pass. Example: "document.querySelectorAll(\\".revealed\\").length > 0".',
+              'JavaScript EXPRESSION evaluated in the page context after interactions (wrapped internally as `(() => { const __r = (YOUR_CODE); ... })()` — it CANNOT start with `const`, `let`, `return`, `function`, or contain top-level `;`-separated statements). Should return { ok: boolean, details?: any } or any truthy value to pass. Simple form: `document.querySelectorAll(".revealed").length > 0`. For logic that needs locals, wrap in an IIFE: `(() => { const x = compute(); return x > 0 })()`. For state-heavy apps (games, etc.), EXPOSE A `window.__test` helper from the app and call it here — do NOT try to simulate inputs that need domain-specific knowledge (e.g. a specific winning chess move).',
           },
         },
         required: ['url'],
@@ -401,15 +403,69 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
     },
     async execute(args) {
       const url = expectString(args, 'url');
+      // Default post-load settle reduced 1500 → 500ms. For local static
+      // HTML served by start_static_server, 500ms is enough to let
+      // DOMContentLoaded handlers run and any same-tick rAF fire.
+      // Heavier apps (fetch chains during onload) can still bump this
+      // explicitly via the `waitMs` arg.
       const waitMs =
         typeof args['waitMs'] === 'number' && Number.isFinite(args['waitMs'])
           ? Math.max(0, Math.floor(args['waitMs'] as number))
-          : 1500;
+          : 500;
       const interactions = parseInteractions(args['interactions']);
       const smoke =
         typeof args['smoke'] === 'string' && args['smoke'].trim().length > 0
           ? args['smoke']
           : undefined;
+
+      // Cheap pre-flight check on the smoke snippet. The tool wraps it as
+      // `(() => { try { const __r = (${smoke}); return __r; } ... })()`
+      // which requires `smoke` to be an EXPRESSION — a top-level `const`,
+      // `let`, `function` declaration, or bare `return` inside the parens
+      // is a syntax error ("Unexpected token 'const'") that we can catch
+      // locally without paying the Puppeteer round-trip. Observed in
+      // production: three ~4s validate_html calls burned purely on
+      // `smoke evaluation threw: Unexpected token 'const'`. Rejecting
+      // here also teaches the model the right pattern via a clear error
+      // instead of an opaque "unexpected token".
+      if (smoke !== undefined) {
+        const syntax = detectSmokeStatementError(smoke);
+        if (syntax) {
+          return {
+            ok: false,
+            url,
+            errors: [`smoke rejected pre-flight: ${syntax}`],
+            warnings: [],
+            failedRequests: [],
+            interactionLog: [],
+            smokeResult: { error: syntax, hint: SMOKE_EXPR_HINT },
+          };
+        }
+      }
+
+      // Same-smoke-stuck short-circuit. If the model has been retrying
+      // the exact same smoke assertion against the same app and it keeps
+      // failing, more Puppeteer rounds won't help — the assertion is
+      // structurally unreachable (needs inputs the model can't
+      // reproduce, or references a state that the app never enters).
+      // Observed in production: 15+ consecutive calls on a chess puzzle
+      // asserting `statusText.includes('Checkmate')` after random
+      // clicks that couldn't produce a mate. We surface a coaching
+      // error instead of running Puppeteer yet again.
+      if (smoke !== undefined && stuck.isStuck(smoke)) {
+        return {
+          ok: false,
+          url,
+          errors: [
+            `smoke stuck: this assertion has failed at least ${SMOKE_STUCK_THRESHOLD} times within the last ${SMOKE_STUCK_WINDOW} calls. ` +
+              SMOKE_STUCK_HINT,
+          ],
+          warnings: [],
+          failedRequests: [],
+          interactionLog: [],
+          smokeResult: { error: 'stuck', hint: SMOKE_STUCK_HINT },
+        };
+      }
 
       const browser = await getBrowser();
       const page = await browser.newPage();
@@ -442,7 +498,14 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             (interactions.length ? ` (+${interactions.length} interactions)` : '') +
             (smoke ? ' (+smoke)' : '')
         );
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 15_000 });
+        // `domcontentloaded` waits only for HTML parse — adequate for
+        // local static files, which are what start_static_server serves.
+        // The earlier `networkidle0` wait was 500ms+ of guaranteed idle
+        // on top of the load, burning ~1s per call × 15-25 calls per
+        // run of pure overhead. Callers can still ask for more settle
+        // time via `waitMs` when they know the page kicks off async
+        // work (e.g. fetch during onload).
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 });
         if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
 
         for (const it of interactions) {
@@ -503,6 +566,8 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             smokeResult = { error: (err as Error).message };
             errors.push(`smoke evaluation threw: ${(err as Error).message}`);
           }
+          // Record outcome for the stuck-detector above.
+          stuck.record(smoke, smokeOk);
         }
 
         const title = await page.title();
@@ -599,6 +664,77 @@ async function resolveInteractionCoords(
   return { x: it.x, y: it.y };
 }
 
+/**
+ * History length over which the stuck-smoke detector counts failures.
+ * Kept at module level so tests and the error-message text stay in sync.
+ *
+ * Previous version used a strict "N CONSECUTIVE identical failures"
+ * window. The model learned to route around it by interleaving a
+ * trivially-passing sanity smoke between real-assertion retries
+ * (observed: 5 occurrences of the same failing smoke across 9 calls
+ * but never 3 in a row, so the detector never fired). Switching to
+ * "N failing occurrences within the last WINDOW calls" is immune to
+ * that gaming pattern — the model cannot accumulate N failures of the
+ * same assertion without tripping the guard, regardless of what it
+ * interleaves.
+ */
+export const SMOKE_STUCK_WINDOW = 10;
+
+/**
+ * Minimum cumulative failures of the same normalised smoke inside the
+ * sliding window before the detector flips to stuck.
+ */
+export const SMOKE_STUCK_THRESHOLD = 3;
+
+/**
+ * Bounded tracker for "the same smoke assertion keeps failing across
+ * a short history window". Returns a small imperative handle:
+ *   - `record(smoke, ok)` — register the outcome of the most recent
+ *     Puppeteer evaluation. Whitespace is normalised so minor
+ *     formatting tweaks still count as the same assertion.
+ *   - `isStuck(smoke)` — returns true when the LAST `windowSize`
+ *     recorded outcomes contain at least `failureThreshold` FAILURES
+ *     that share the same normalised smoke body as the argument.
+ *     Interleaving an unrelated passing smoke between attempts does
+ *     NOT reset the count — the model cannot game the detector by
+ *     spacing out retries.
+ *
+ * Defaults: `SMOKE_STUCK_WINDOW` (10) and `SMOKE_STUCK_THRESHOLD` (3).
+ * Exported for unit tests.
+ */
+export function makeSmokeStuckTracker(
+  opts:
+    | { windowSize: number; failureThreshold: number }
+    | number = { windowSize: SMOKE_STUCK_WINDOW, failureThreshold: SMOKE_STUCK_THRESHOLD }
+): {
+  record: (smoke: string, ok: boolean) => void;
+  isStuck: (smoke: string) => boolean;
+} {
+  // Backwards-compatible: a number is interpreted as windowSize with
+  // failureThreshold defaulting to the module constant. Tests and
+  // older call sites that pass a single `number` keep working.
+  const { windowSize, failureThreshold } =
+    typeof opts === 'number'
+      ? { windowSize: opts, failureThreshold: SMOKE_STUCK_THRESHOLD }
+      : opts;
+  const history: Array<{ normalized: string; ok: boolean }> = [];
+  const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
+  return {
+    record(smoke, ok): void {
+      history.push({ normalized: normalize(smoke), ok });
+      if (history.length > windowSize) history.shift();
+    },
+    isStuck(smoke): boolean {
+      const target = normalize(smoke);
+      let failures = 0;
+      for (const h of history) {
+        if (h.normalized === target && !h.ok) failures++;
+      }
+      return failures >= failureThreshold;
+    },
+  };
+}
+
 function isSmokeOk(result: unknown): boolean {
   if (result === undefined || result === null) return false;
   if (typeof result === 'boolean') return result;
@@ -608,6 +744,114 @@ function isSmokeOk(result: unknown): boolean {
     return true;
   }
   return Boolean(result);
+}
+
+/**
+ * Shared coaching hints, reused by the pre-flight and stuck-smoke
+ * branches so the L1 narrow prompt and the tool error channel speak the
+ * same language. Kept at module level so the strings are identical to
+ * the examples in `buildNarrowL1Prompt`.
+ */
+const SMOKE_EXPR_HINT =
+  'The `smoke` arg must be a JS EXPRESSION, not a statement. It is ' +
+  'wrapped as `(() => { const __r = (YOUR_CODE); ... })()`. A top-level ' +
+  '`const` / `let` / `return` breaks parsing. Wrap any logic in an IIFE, ' +
+  'e.g. `(() => { const x = computeIt(); return x > 0 })()`.';
+
+const SMOKE_STUCK_HINT =
+  'Change your strategy rather than retry the same assertion. Options: ' +
+  '(1) expose a deterministic test hook from your app code — e.g. ' +
+  '`window.__test = { solveMateIn1: () => boolean, forceState: (fen) => void }` ' +
+  '— and call it from smoke so you do not need to simulate fragile ' +
+  'click/keyboard inputs; (2) if the assertion needs domain-specific ' +
+  'state (a specific chess position, a specific game step), seed that ' +
+  'state from the smoke IIFE directly; (3) accept the functionality as ' +
+  'verified by a simpler invariant (element exists + renders) and move ' +
+  'on — you do not need end-to-end gameplay in a smoke check.';
+
+/**
+ * Quick lexical check: does the smoke snippet look like a top-level
+ * STATEMENT (which won't parse inside `(${smoke})`) rather than an
+ * expression? We don't do a full JS parse — we look for the leading
+ * keywords that produce the "Unexpected token 'const'" class of errors.
+ * An IIFE (`(function(){...})()`) or `(() => ...)` passes fine because
+ * it starts with `(`, not with `const`/`let`/`return`/etc.
+ *
+ * Exported for unit tests — consumers should use the pre-flight path
+ * inside `validateHtmlTool.execute` rather than call this directly.
+ */
+export function detectSmokeStatementError(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  // Banned leaders. These patterns fire ONLY when the snippet starts
+  // with the keyword at top-level — anything inside a balanced
+  // `( ... )` or `{ ... }` is fine because the wrapper already makes
+  // that a nested scope.
+  const leaderPatterns: Array<{ re: RegExp; keyword: string }> = [
+    { re: /^const\s/, keyword: 'const' },
+    { re: /^let\s/, keyword: 'let' },
+    { re: /^var\s/, keyword: 'var' },
+    { re: /^return\s/, keyword: 'return' },
+    { re: /^function\s/, keyword: 'function declaration' },
+    { re: /^if\s*\(/, keyword: 'if' },
+    { re: /^for\s*\(/, keyword: 'for' },
+    { re: /^while\s*\(/, keyword: 'while' },
+    { re: /^throw\s/, keyword: 'throw' },
+  ];
+  for (const { re, keyword } of leaderPatterns) {
+    if (re.test(trimmed)) {
+      return `smoke starts with top-level \`${keyword}\` — that is a STATEMENT, not an expression.`;
+    }
+  }
+  // Multi-line snippets that separate statements with `;` at the top
+  // level (e.g. `const x = 1; x > 0`) are also statements. Heuristic:
+  // if the snippet contains a naked `;` that isn't inside any bracket
+  // AND is not the very last non-whitespace char, it's almost certainly
+  // a statement-series masquerading as an expression.
+  if (hasTopLevelStatementSeparator(trimmed)) {
+    return 'smoke contains a top-level `;` — that indicates separate statements. Wrap the whole thing in an IIFE: `(() => { ...; return X })()`.';
+  }
+  return null;
+}
+
+/**
+ * Scan `s` for a `;` at depth 0 (not inside `()`, `[]`, or `{}`) that
+ * is followed by non-whitespace. Used to catch statement-series where
+ * the author forgot to wrap in an IIFE.
+ */
+function hasTopLevelStatementSeparator(s: string): boolean {
+  let depth = 0;
+  let inString: '"' | "'" | '`' | null = null;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === inString) inString = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inString = ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ';' && depth === 0) {
+      // Is there non-whitespace AFTER this `;`?
+      for (let j = i + 1; j < s.length; j++) {
+        if (!/\s/.test(s[j]!)) return true;
+      }
+      return false;
+    }
+  }
+  return false;
 }
 
 function expectString(args: Record<string, unknown>, key: string): string {

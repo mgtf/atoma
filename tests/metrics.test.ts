@@ -56,11 +56,16 @@ describe('InMemoryMetrics', () => {
     expect(s.totals.costUsd).toBeCloseTo(22, 2);
   });
 
-  it('applies the cached-input rate to cacheReadInputTokens', () => {
+  it('applies the cached-input rate to cacheReadInputTokens (Anthropic counters are disjoint)', () => {
+    // Per Anthropic docs: "total_input_tokens = cache_read_input_tokens
+    // + cache_creation_input_tokens + input_tokens". input_tokens is
+    // ONLY the content after the last cache breakpoint — NOT a grand
+    // total — so a call served entirely from cache reports
+    // input_tokens=0, cache_read_input_tokens=N.
     const m = new InMemoryMetrics();
     m.record({
       model: 'claude-opus-4-7',
-      inputTokens: 1_000_000,             // total seen by the model
+      inputTokens: 0,                     // nothing new after the breakpoint
       outputTokens: 0,
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 1_000_000,    // all served from cache
@@ -69,8 +74,55 @@ describe('InMemoryMetrics', () => {
     });
     const s = m.summary();
     const opus = s.perModel[0]!;
-    // cacheReadInputTokens @ cached rate (1.5), non-cached portion is 0
+    // 1M @ cached_input rate ($1.5) = $1.5
     expect(opus.costUsd).toBeCloseTo(1.5, 3);
+  });
+
+  it('applies the 1.25x write-cost multiplier to cacheCreationInputTokens (5-min TTL)', () => {
+    // Per Anthropic docs: "5-minute cache write tokens are 1.25 times
+    // the base input tokens price". Earlier versions billed cache
+    // creation at 1x input, under-reporting cost by 20% on any prompt
+    // that primed a new cache entry.
+    const m = new InMemoryMetrics();
+    m.record({
+      model: 'claude-haiku-4-5-20251001',
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 1_000_000,
+      cacheReadInputTokens: 0,
+      durationMs: 10,
+      stopReason: 'end_turn',
+    });
+    // Haiku input = $1/M, cache create = $1 × 1.25 = $1.25/M
+    expect(m.summary().perModel[0]!.costUsd).toBeCloseTo(1.25, 3);
+  });
+
+  it('produces non-negative cost even when cache_read vastly exceeds input_tokens (regression)', () => {
+    // Regression for the bug observed on a chess-puzzle run: the
+    // Potassium L1 tool-loop had input_tokens=8193 and
+    // cache_read_input_tokens=1_523_986. With the old subtractive
+    // formula, (input - cache_read) went deeply negative and the total
+    // summary printed costUsd: -$0.92. Under the correct disjoint
+    // formula, cost is strictly positive.
+    const m = new InMemoryMetrics();
+    m.record({
+      model: 'claude-haiku-4-5-20251001',
+      inputTokens: 8_193,
+      outputTokens: 55_801,
+      cacheCreationInputTokens: 139_408,
+      cacheReadInputTokens: 1_523_986,
+      durationMs: 400_000,
+      stopReason: 'end_turn',
+    });
+    const cost = m.summary().perModel[0]!.costUsd;
+    expect(cost).toBeGreaterThan(0);
+    // Sanity: roughly
+    //   8193 @ $1   = $0.008
+    //   1.52M @ $.1 = $0.152
+    //   139k @ $1.25= $0.174
+    //   55.8k @ $5  = $0.279
+    //   → ~$0.613
+    expect(cost).toBeCloseTo(0.613, 1);
   });
 
   it('formatSummary produces a readable table', () => {

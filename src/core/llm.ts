@@ -157,6 +157,37 @@ export class AnthropicLlmClient implements LlmClient {
         }
       }
 
+      // Rolling cache breakpoint: each iteration the request looks like
+      // system + [user task] + [asst tool_use + user tool_result]*N.
+      // Anthropic's prompt caching caches up to the last cache_control-
+      // marked block. By moving the breakpoint forward each round, we pay
+      // 10% input price for everything up to the PREVIOUS breakpoint and
+      // only full price for the newest delta.
+      //
+      // Why this matters: without a rolling breakpoint, the only cached
+      // segment is the system prompt. Haiku 4.5's minimum cacheable prompt
+      // is 4096 tokens — our L1 narrow prompts sit around 800 tokens, so
+      // caching the system prompt alone silently fails the length check
+      // and produces 0 cache reads. With the breakpoint on a growing
+      // conversation, the prefix quickly exceeds 4096 and caching kicks
+      // in for the rest of the tool loop.
+      //
+      // Anthropic caps breakpoints at 4 PER REQUEST. Leaving stale
+      // cache_control markers on previous rounds' tool_result blocks
+      // compounds every iteration and eventually trips a
+      // "A maximum of 4 blocks with cache_control may be provided.
+      // Found 5." 400 error. The pattern MUST remove the prior
+      // breakpoint before placing the new one — "moving", not
+      // "accumulating". We leave the system and last-tool breakpoints
+      // intact and only manage the one on the user turn.
+      clearRollingBreakpoint(messages);
+      if (toolResults.length > 0) {
+        const last = toolResults[toolResults.length - 1]!;
+        (last as Anthropic.Messages.ToolResultBlockParam & {
+          cache_control?: { type: 'ephemeral' };
+        }).cache_control = { type: 'ephemeral' };
+      }
+
       const isLastIter = iter === budget - 1;
       if (isLastIter) {
         // Graceful finalization: we just consumed the last slot on tool
@@ -238,6 +269,29 @@ function isSamplingParamDeprecatedError(err: unknown): boolean {
     msg.includes('temperature is deprecated') ||
     msg.includes('top_p is deprecated')
   );
+}
+
+/**
+ * Strip any `cache_control` markers we previously placed on user turn
+ * content blocks (tool_result or text). Anthropic caps cache breakpoints
+ * at 4 per request — the rolling-breakpoint pattern depends on MOVING
+ * the breakpoint forward, not accumulating one per iteration. We leave
+ * the system-prompt and last-tool breakpoints alone (they live on
+ * separate params, not on `messages`) so callers keep their 2 fixed
+ * breakpoints and we manage the single rolling one on messages.
+ */
+function clearRollingBreakpoint(
+  messages: Anthropic.Messages.MessageParam[]
+): void {
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+    if (!Array.isArray(m.content)) continue;
+    for (const block of m.content) {
+      if (block && typeof block === 'object' && 'cache_control' in block) {
+        delete (block as { cache_control?: unknown }).cache_control;
+      }
+    }
+  }
 }
 
 function toAnthropicTools(

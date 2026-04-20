@@ -45,6 +45,40 @@ export function pricesFor(model: string, table: PriceTable = DEFAULT_PRICES): Mo
   return { input: 0, output: 0, cachedInput: 0 };
 }
 
+/**
+ * USD cost for a single LLM call given Anthropic's disjoint token
+ * counters. Per docs:
+ *   "total_input_tokens = cache_read_input_tokens +
+ *    cache_creation_input_tokens + input_tokens"
+ * where `input_tokens` is ONLY the content after the last cache
+ * breakpoint — NOT a grand total. 5-minute cache writes are billed at
+ * 1.25× the base input price.
+ *
+ * Exported so both `InMemoryMetrics.summary` and `RecordingLlmClient`
+ * (viz) use the same formula — previously they had two copies that
+ * drifted; the viz copy still had the old subtractive bug and produced
+ * negative costs on runs with heavy cache reads.
+ */
+export const CACHE_CREATE_MULTIPLIER_5M = 1.25;
+
+export function estimateCostUsd(
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+  },
+  prices: ModelPrices
+): number {
+  return (
+    (usage.inputTokens * prices.input +
+      usage.cacheReadInputTokens * prices.cachedInput +
+      usage.cacheCreationInputTokens * prices.input * CACHE_CREATE_MULTIPLIER_5M +
+      usage.outputTokens * prices.output) /
+    1_000_000
+  );
+}
+
 export interface ModelAggregate {
   readonly model: string;
   readonly calls: number;
@@ -86,11 +120,7 @@ export class InMemoryMetrics implements MetricsRecorder {
     const buckets = new Map<string, ModelAggregate>();
     for (const e of this.events) {
       const p = pricesFor(e.model, this.prices);
-      const cost =
-        ((e.inputTokens - e.cacheReadInputTokens) * p.input +
-          e.cacheReadInputTokens * p.cachedInput +
-          e.cacheCreationInputTokens * p.input +
-          e.outputTokens * p.output) / 1_000_000;
+      const cost = estimateCostUsd(e, p);
       const prev = buckets.get(e.model) ?? {
         model: e.model,
         calls: 0,

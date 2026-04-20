@@ -5,7 +5,12 @@ import type {
   LlmCompletionResponse,
   Tier,
 } from '../core/types.js';
-import { pricesFor, type PriceTable, DEFAULT_PRICES } from '../core/metrics.js';
+import {
+  pricesFor,
+  estimateCostUsd,
+  type PriceTable,
+  DEFAULT_PRICES,
+} from '../core/metrics.js';
 import type { TraceRecorder, VizLlmEvent } from './trace.js';
 
 const VALIDATION_MARKER =
@@ -129,12 +134,12 @@ export class RecordingLlmClient implements LlmClient {
         cacheCreationInputTokens: resp.usage.cacheCreationInputTokens ?? 0,
       };
       const p = pricesFor(req.model, this.prices);
-      const costUsd =
-        ((usage.inputTokens - usage.cacheReadInputTokens) * p.input +
-          usage.cacheReadInputTokens * p.cachedInput +
-          usage.cacheCreationInputTokens * p.input +
-          usage.outputTokens * p.output) /
-        1_000_000;
+      // Shared formula lives in src/core/metrics.ts (estimateCostUsd)
+      // so the viz and the metrics summary never drift apart. Before
+      // the extraction, this file had an independent (and buggy) copy
+      // that subtracted cache_read from inputTokens and produced
+      // negative totals on cache-heavy runs.
+      const costUsd = estimateCostUsd(usage, p);
       this.recorder.record({
         id: llmEventId,
         ts: started,

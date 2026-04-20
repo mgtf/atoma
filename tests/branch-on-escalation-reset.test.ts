@@ -59,6 +59,57 @@ describe('buildNarrowL1Prompt', () => {
     expect(prompt).toContain('validate_html');
     expect(prompt).toMatch(/Up to 4 iterations/);
   });
+
+  it('includes the shared smoke-test design guidance (IIFE + __test pattern + loop discipline)', () => {
+    // Shared block between the escalation branch path and the
+    // create-fresh-L1 path. Guards against someone trimming it.
+    const prompt = buildNarrowL1Prompt('build anything');
+    expect(prompt).toMatch(/SMOKE-TEST DESIGN/);
+    expect(prompt).toMatch(/pure EXPRESSION/);
+    expect(prompt).toMatch(/window\.__test/);
+    expect(prompt).toMatch(/SMOKE-LOOP DISCIPLINE/);
+    expect(prompt).toMatch(/cumulative over[\s\S]*sliding window/);
+  });
+});
+
+describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guidance', () => {
+  it('new L1s created inline (not via escalation branch) get the shared SMOKE_DESIGN_GUIDANCE block', async () => {
+    // Regression: earlier the smoke guidance only lived in
+    // buildNarrowL1Prompt (the escalation-branch path), so freshly-
+    // created L1s on the fanout happy path missed it and kept
+    // hitting the IIFE / simulate-input pitfalls. This test wires a
+    // minimal L2 through fan-out-with-create so we can inspect the
+    // system prompt the registry actually stored.
+    const { AtomRegistry } = await import('../src/registry/atomRegistry.js');
+    const { openDb } = await import('../src/registry/db.js');
+    const { L2Atom } = await import('../src/atoms/L2Atom.js');
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l2Type = reg.create(2, {
+      description: 'l2',
+      systemPrompt: 'l2',
+      tools: [],
+      params: {},
+      createdBy: 'test',
+    });
+    const water = L2Atom.fromType(l2Type, reg);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const created = (water as any).createSubtaskL1(
+      { description: 'build a chess puzzle grid', preferredChild: undefined },
+      { action: 'create', seed: undefined },
+      { description: 'parent task' }
+    );
+    expect(created.systemPrompt).toMatch(/SMOKE-TEST DESIGN/);
+    expect(created.systemPrompt).toMatch(/window\.__test/);
+    expect(created.systemPrompt).toMatch(/SMOKE-LOOP DISCIPLINE/);
+    // And the fresh-L1 preamble is still present — we ADDED the
+    // guidance, we did not replace the original contract.
+    expect(created.systemPrompt).toContain(
+      'You are an L1 element with ONE narrow responsibility.'
+    );
+    expect(created.systemPrompt).toContain(
+      'Subtask you were handed: build a chess puzzle grid'
+    );
+  });
 });
 
 describe('buildNarrowL2Prompt', () => {

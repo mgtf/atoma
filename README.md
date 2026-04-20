@@ -52,14 +52,22 @@ cp .env.example .env        # fill ANTHROPIC_API_KEY
 npm run typecheck
 npm test
 npm run example:research "vertical farming"
+npm run example:build "Build a modular dashboard in a single index.html with a canvas2D fps meter, a mouse tracker, and a keystroke logger."
+npm run viz                 # web UI for the persisted run traces under ./runs
 ```
 
 ## Layout
 
-- `src/core/` — types, base `Atom`, `superviseLoop` with escalation, Anthropic wrapper
+- `src/core/` — types, base `Atom`, `superviseLoop` with escalation, Anthropic
+  wrapper (with tool-use loop + rolling prompt-cache breakpoint), cost/metrics
 - `src/registry/` — SQLite registry, tier taxonomies (elements/molecules/cells)
 - `src/atoms/` — concrete `L1Atom`, `L2Atom`, `L3Atom`
-- `src/examples/research-brief.ts` — end-to-end demo
+- `src/tools/` — `ToolSandbox`, the built-in toolbox (`write_file`, `read_file`,
+  `list_files`, `run_shell`, `start_static_server`, `validate_html`) used by
+  L1 to produce real artefacts
+- `src/viz/` — run recorder + self-contained web visualiser (`npm run viz`)
+- `src/examples/` — `research-brief.ts` (text research) and `build-app.ts`
+  (end-to-end "build me a working web app" demo)
 - `tests/` — vitest unit + integration tests (mock LLM)
 
 ## Model auto-update

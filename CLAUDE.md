@@ -69,6 +69,33 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   configured ceiling. The response is a routing JSON pair; padding the ceiling
   just invites rambling. Fallback/self-exec paths keep the atom's full
   `maxTokens` because they may produce real content.
+- **Prompt caching thresholds are load-bearing.** Claude Haiku 4.5's minimum
+  cacheable prompt is 4096 tokens, Sonnet 4.6 is 2048. The
+  `VALIDATION_SYSTEM_PROMPT` sits at ~5000 tokens — its `== WORKED EXAMPLES ==`
+  section is deliberately verbose to clear the Haiku threshold. Trimming the
+  examples below ~4100 tokens silently disables caching for every validator
+  call (Anthropic does NOT error — `cache_creation_input_tokens` and
+  `cache_read_input_tokens` both return 0). Confirm caching is alive via the
+  metrics summary's `cache_read` column — it should be > 0 on every run that
+  does more than one Haiku call. If it's 0, check the prompt length first.
+- **Rolling cache breakpoint in the tool-use loop.**
+  `AnthropicLlmClient.complete` places `cache_control: { type: 'ephemeral' }`
+  on the LAST `tool_result` block each iteration and CLEARS prior rolling
+  markers before adding the new one (`clearRollingBreakpoint`). Anthropic
+  caps cache breakpoints at 4 per request — accumulating markers trips a
+  `"A maximum of 4 blocks with cache_control may be provided."` 400. The
+  two permanent breakpoints are system-prompt and last-tool; the rolling
+  third is the one we manage. Long tool loops then cache the entire
+  growing conversation at 10% input price — a chess-puzzle run went from
+  1.6M uncached tokens to 1.5M cached + 100k new on the same task.
+- **One cost formula, one code path.** `estimateCostUsd` in
+  `src/core/metrics.ts` is the single source of truth. Anthropic's three
+  input counters are DISJOINT — `input_tokens` is ONLY the content after
+  the last cache breakpoint, NOT a grand total
+  (`total = input + cache_read + cache_creation`). Older formulas that
+  subtracted `cache_read` from `inputTokens` produced negative costs on
+  cache-heavy runs; do not reintroduce that. Both `InMemoryMetrics.summary`
+  and `RecordingLlmClient` import from this one helper.
 
 ## Observability
 
@@ -165,7 +192,15 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   executes tools; L2/L3 only pass declarations through as context.
 - **`ToolSandbox`** (`src/tools/sandbox.ts`) — filesystem + child-process jail
   rooted at a workspace directory. All built-in tools resolve paths through it
-  and refuse to escape the root.
+  and refuse to escape the root. A module-level `process.on('exit')` handler
+  SIGKILLs every tracked `ChildProcess` even on crash-exit paths where
+  `sandbox.cleanup()` never runs (uncaught exceptions, unhandled rejections,
+  hard `process.exit(code)`). Without this, failed runs left stale Python
+  `http.server` children squatting common ports and every subsequent run
+  burned ~5s per port on EADDRINUSE auto-retries. Do NOT register custom
+  `uncaughtException` / `unhandledRejection` handlers from here — Node's
+  default policy calls `exit` anyway, and swallowing errors globally hides
+  real bugs (we tried it, it produced silent 42s hangs).
 - **`InMemoryToolRegistry`** (`src/tools/registry.ts`) — maps tool name →
   executor fn. Implements `ToolExecutor` (`src/core/types.ts`), plugged into
   `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
@@ -174,10 +209,34 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   `start_static_server`, `validate_html`. The validator uses Puppeteer — it
   can simulate both mouse (`click`, `rightclick`) AND keyboard events
   (`keydown`, `keyup`, `keypress` with `holdMs`) for platformer-style input.
+- **`start_static_server`** auto-retries on port=0 when a caller-specified
+  port is busy (logs `⚠ port N busy — retrying on OS-assigned port`). Initial
+  boot-timeout is 3s, retry boot-timeout is 5s — cold-start Python can take
+  >1.5s on macOS and a too-tight cap produced spurious failures.
+- **`validate_html` smoke contract**: the `smoke` arg is a JS EXPRESSION
+  wrapped as `(() => { const __r = (YOUR_CODE); return __r })()`. Top-level
+  `const` / `let` / `return` / `function` / statement-series break parsing
+  — `detectSmokeStatementError` rejects them BEFORE Puppeteer and returns
+  a coaching message. A separate stuck detector
+  (`makeSmokeStuckTracker({ windowSize: 10, failureThreshold: 3 })`)
+  short-circuits when the same normalised smoke has failed 3+ times
+  within the last 10 calls — CUMULATIVE, not consecutive, because earlier
+  runs saw the model interleave a sanity smoke between real retries to
+  defeat a consecutive-only detector. Both shortcuts return the same
+  `SMOKE_DESIGN_GUIDANCE` text as a hint.
 - **Tool-use loop**: when `req.executor` is present, `AnthropicLlmClient.complete`
-  runs up to `MAX_TOOL_ITERATIONS=12` rounds of tool_use → tool_result → LLM.
-  Usage is aggregated across rounds and reported once via `MetricsLlmClient`.
-  Only L1 should pass `executor:` — grep confirms it.
+  runs up to `DEFAULT_MAX_TOOL_ITERATIONS` (24) rounds of tool_use →
+  tool_result → LLM, with a graceful "tool budget exhausted" final
+  round-trip when the cap hits. Usage is aggregated across rounds and
+  reported once via `MetricsLlmClient`. Only L1 should pass `executor:` —
+  grep confirms it.
+- **Shared smoke-test guidance.** `SMOKE_DESIGN_GUIDANCE` in
+  `src/atoms/L2Atom.ts` teaches L1 the IIFE contract, the
+  `window.__test` hook pattern for state-heavy apps, and the smoke-loop
+  discipline. It is appended by BOTH `buildNarrowL1Prompt` (escalation-branch
+  path) AND `createSubtaskL1` (fresh-L1-on-fanout path). Adding new L1
+  creation sites? Append this block too, or new L1s will miss the
+  discipline and thrash on smoke design.
 
 ## Things that look wrong but aren't
 
