@@ -56,11 +56,32 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   On `reuse + decomposable` L2/L3.plan FALL THROUGH to the full
   supervisor plan call, with the prefilter target preserved as a
   `== PREFILTER HINT ==` section in the userContent so Sonnet/Opus can
-  set `preferredChild: <target>` on each leaf subtask. Prompt tells
-  Haiku to set `true` only when the task clearly enumerates multiple
-  orthogonal artefacts (`package.json + index.js + tests`, not "build
-  a chess puzzle"). A decomposable short-circuit collapse is the
-  failure mode we want to avoid on multi-artefact builds.
+  set `preferredChild: <target>` on each leaf subtask. The prompt tells
+  Haiku to emit `decomposable: false` when artefacts are COUPLED (test
+  imports the lib, package.json runs the test, README documents the
+  API, client imports server types, config read by code) — those cases
+  are structurally sequential and a single L1 tool-loop beats a fan-
+  out. `decomposable: true` is reserved for artefacts GENUINELY
+  orthogonal with no shared imports/refs/depends-on (e.g. three
+  unrelated puzzle games, three independent web scrapes). Measured
+  impact on the library+tests+docs scenario: tightening this rule
+  dropped a $0.18 run (1 Opus + 1 Sonnet) to a $0.05 run (0 Opus + 0
+  Sonnet, 7 Haiku — 100% happy path).
+- **L3 prefilter catalog enrichment — L1 affinity.** When `L3.plan`
+  builds the prefilter catalog it appends each L2 description with a
+  "REACHABLE L1 CHILDREN" block listing (a) canonical L1s (reachable
+  from any L2 via tier-1 prefilter) and (b) L1s dynamically created
+  by that L2 (`createdBy` match). Without this, L3.prefilter saw only
+  the L2 self-description and escalated on tasks that needed a
+  specific L1 bucket the parent L2 didn't mention (observed on the
+  library+tests task: "catalog offers only web/HTTP orchestrators"
+  → full Opus plan). The enrichment is paired with an `L1-affinity
+  rule` clause in `PREFILTER_SYSTEM_PROMPT` so Haiku is told
+  explicitly to count children's capabilities in the match decision
+  — "an L2 whose own description is narrow can STILL be a valid
+  reuse pick if its REACHABLE L1 CHILDREN cover the task's needs."
+  The block is formatted on a dedicated line (not a parenthetical
+  tail) so Haiku parses it as structure rather than flavour text.
 - **Prefilter fast-path in `validatePlan`.** Plans synthesised by the
   prefilter carry an internal `viaPrefilter: true` flag (set in
   `L2.plan` / `L3.plan` on the skeletal-plan literal). Both
@@ -204,18 +225,37 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   before this rule may still carry task-themed descriptions; leave them
   alone, they'll lose the prefilter race naturally.
 - **Canonical bootstrap in `examples/build-app.ts`.** On every run we
-  call four idempotent seeders from `src/atoms/capability.ts`:
+  call five idempotent seeders from `src/atoms/capability.ts`:
   `ensureCanonicalL1` / `ensureCanonicalL2` (web build bucket,
-  marked `bootstrap-canonical`) and `ensureCanonicalHttpL1` /
+  marked `bootstrap-canonical`), `ensureCanonicalHttpL1` /
   `ensureCanonicalHttpL2` (Node HTTP server bucket, marked
-  `bootstrap-canonical-http`). Each pair seeds a domain-neutral
-  L1 + L2 so L3.prefilter / L2.prefilter has an obvious reusable
-  target on day one for both recipe families. Without the HTTP
-  canonicals the first Node/REST run had no L1 in its bucket and
-  force-matched the web canonical, which is the Methane-picks-
-  Hydrogen failure the #3/#4/#5 fix series was written for. Helpers
-  look up existing entries by `createdBy` marker, refresh tools via
-  `patch + addTools` on hit, or create otherwise.
+  `bootstrap-canonical-http`), and `ensureCanonicalFileScribeL1`
+  (file-scribe bucket for JSON/markdown/text authoring, marked
+  `bootstrap-canonical-filescribe`). Three L1 buckets + two L2
+  orchestrators give L3.prefilter / L2.prefilter an obvious
+  reusable target on day one for every recipe family the project
+  handles. Without the HTTP canonicals the first Node/REST run had
+  no L1 in its bucket and force-matched the web canonical
+  (Methane-picks-Hydrogen — the #3/#4/#5 fix series' trigger).
+  Without the file-scribe canonical, L2 routed file-authoring
+  subtasks (README.md, config.json) to Helium (HTTP L1) and got
+  correctly rejected on domain mismatch (#12). No file-scribe L2
+  counterpart — Methane acts as an agnostic router that dispatches
+  to Lithium for file-flavoured subtasks via its own prefilter.
+  Helpers look up existing entries by `createdBy` marker, refresh
+  tools via `patch + addTools` on hit, or create otherwise.
+- **L1 plan shape — ASPIRATIONAL prose, no literal toolCalls.**
+  `L1Atom.plan` now explicitly forbids emitting a `toolCalls` array
+  in the plan response (#11). The plan expresses INTENT via the
+  `proposedAction` prose field; the execute phase's tool-use loop
+  carries out the actual sequence. Earlier shape asked for a
+  `toolCalls: [{name, args}]?` option, and the LLM used it to paste
+  full file contents into `write_file.args.content` — which
+  repeatedly got truncated mid-string by the output maxTokens cap
+  and then rejected by the validator as "incomplete payload",
+  triggering a repeat-rejection escalation cascade. `planSchema`
+  still tolerates `toolCalls` (legacy parse safety) but the L1 plan
+  prompt never asks for it.
 - **Bucket-scoped tool filtering in the canonical helpers.** Each
   `ensureCanonical*` pipes its caller-supplied toolset through
   `pickTools(tools, scope)` before creating/patching so a kitchen-
@@ -426,6 +466,35 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   cutting concerns (ground-truth probe bucket gate, tracing) that
   need to inspect declared scope without exposing the mutable tools
   array with its executor closures.
+- There are THREE canonical L1s (web, http, file-scribe) but only TWO
+  canonical L2s (web, http). The file-scribe bucket deliberately has
+  no L2 counterpart — the HTTP L2 Methane acts as an agnostic router
+  that dispatches to the file-scribe L1 via its own prefilter when a
+  file-authoring subtask appears. An L2 file-scribe could be added
+  later if L3 ever needs to discriminate the bucket before delegating,
+  but for current tasks the asymmetry produces happier prefilter
+  matches (L3 picks Methane with high confidence seeing the
+  file-scribe L1 in its REACHABLE L1 CHILDREN block).
+- `L3Atom.plan` formats each L2 catalog entry as a multi-line block
+  (description + REACHABLE L1 CHILDREN block on separate lines), not
+  a one-line parenthetical tail. Haiku parses the multi-line structure
+  correctly; earlier attempts at a parenthetical "(dispatches leaves
+  to …)" tail were ignored by the model and didn't change its escalate
+  rate. The verbose layout wins ~$0.12/run on tasks that genuinely
+  match through L1 affinity.
+- The tailing-edge partial-persist in `TraceRecorder` (300ms throttle)
+  is `unref()`'d so a pending timer can't keep the process alive past
+  its own business. Without this, a run that finished its l3.handle
+  early but still had a buffered flush scheduled would hold the event
+  loop alive until the timer fired and tore down the (already-done)
+  TraceRecorder. `endRun()`'s synchronous `persist()` happens BEFORE
+  we clear the timer specifically so the final state wins the race
+  over any trailing-edge flush.
+- Live viz is POLLING, not SSE or WebSocket. The UI polls
+  `/api/runs/<id>` every 1s while `endedAt` is undefined, and
+  `/api/runs` every 2s to detect newly-started runs. Adding fs.watch
+  + SSE would roughly double the server surface for marginal latency
+  benefit on a single-observer dev-loop tool — not worth it.
 
 ## Deferred / explicitly out of scope
 
