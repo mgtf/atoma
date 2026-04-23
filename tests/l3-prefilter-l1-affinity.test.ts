@@ -29,6 +29,33 @@ const seed = {
   createdBy: 'test',
 };
 
+/**
+ * Extract the multi-line block of a single L2 catalog entry from the
+ * prefilter userContent. The catalog is rendered as
+ *   - <Name>: <base>\n    REACHABLE L1 CHILDREN ...\n      - <child>\n ...
+ * so we slice from the first occurrence of "- <Name>:" to the next
+ * line starting with "  - " (next catalog entry) or the next empty
+ * line (end of catalog section).
+ */
+function extractCatalogBlock(userContent: string, l2Name: string): string {
+  const lines = userContent.split('\n');
+  const startIdx = lines.findIndex((l) => l.trimStart().startsWith(`- ${l2Name}:`));
+  if (startIdx < 0) return '';
+  const block: string[] = [lines[startIdx]!];
+  // Catalog items are indented by exactly 2 spaces ("  - Name: ...");
+  // child items inside a REACHABLE L1 CHILDREN block use 6 spaces
+  // ("      - Child: ..."). We stop ONLY at the next 2-space catalog
+  // entry or an empty separator, so the nested child lines are
+  // captured in the block.
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (/^ {2}- \w+:/.test(line)) break;
+    if (line.trim() === '') break;
+    block.push(line);
+  }
+  return block.join('\n');
+}
+
 function seedRegistry() {
   const reg = new AtomRegistry(openDb(':memory:'));
   const l3 = reg.create(3, seed);
@@ -83,9 +110,11 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
     const prefilterCall = ctx.llm.calls[0]!;
     const user = prefilterCall.userContent;
 
-    // Each L2 catalog line carries the "dispatches leaves to:" tail.
-    expect(user).toMatch(/Water:\s.*dispatches leaves to:/);
-    expect(user).toMatch(/Methane:\s.*dispatches leaves to:/);
+    // Each L2 catalog line carries a REACHABLE L1 CHILDREN block on its own line.
+    expect(user).toMatch(/REACHABLE L1 CHILDREN/);
+    // The block appears once per L2 (Water + Methane).
+    const occurrences = (user.match(/REACHABLE L1 CHILDREN/g) ?? []).length;
+    expect(occurrences).toBe(2);
 
     // Both L2s see all three canonical L1s (canonicals are reachable
     // from any L2 via tier-1 prefilter).
@@ -116,14 +145,14 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
     await l3.plan({ description: 'some task' }, ctx);
 
     const user = ctx.llm.calls[0]!.userContent;
-    // The "Boron" (or whatever taxonomy name it got — 4th L1 created)
-    // custom-L1 description must surface on Methane's line.
-    // Grep the Methane catalog line block.
-    const methaneLine = user.split('\n').find((l) => l.includes('Methane:')) ?? '';
-    expect(methaneLine).toMatch(/bespoke JWT handler/);
-    // Water's line should NOT list the Methane-owned child.
-    const waterLine = user.split('\n').find((l) => l.includes('Water:')) ?? '';
-    expect(waterLine).not.toMatch(/bespoke JWT handler/);
+    // The block is now multi-line: extract the Methane block (from the
+    // "Methane:" line down to the next catalog entry's "- " line) and
+    // assert the custom L1 appears in it.
+    const methaneBlock = extractCatalogBlock(user, 'Methane');
+    expect(methaneBlock).toMatch(/bespoke JWT handler/);
+    // Water's block should NOT list the Methane-owned custom child.
+    const waterBlock = extractCatalogBlock(user, 'Water');
+    expect(waterBlock).not.toMatch(/bespoke JWT handler/);
   });
 
   it('emits a bare L2 description (no dispatches tail) when the registry has no L1s yet', async () => {
