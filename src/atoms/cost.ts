@@ -47,6 +47,11 @@ export function trustedApproval(type: AtomType): PositiveVerdict {
  * One shared system prompt for all prefilter calls — constant across tiers and
  * tasks so prompt caching short-circuits the input bill. This is the cheapest
  * atom doing the cheapest decision: "is there a clear catalog match?"
+ *
+ * Note on stability: this string is a cache key for Haiku. Trimming it below
+ * the 4096-token threshold silently disables caching (see CLAUDE.md). When
+ * adding rules here, prefer appending terse lines over rewriting — the total
+ * mass preserves cache hits across runs.
  */
 export const PREFILTER_SYSTEM_PROMPT = [
   'You pre-filter catalog lookups for a three-tier LLM orchestrator.',
@@ -55,8 +60,29 @@ export const PREFILTER_SYSTEM_PROMPT = [
   'You do NOT design new types, you do NOT call tools, you do NOT produce plans.',
   'Bias strongly toward escalation when in doubt — escalation to the supervisor',
   'is cheap relative to selecting a wrong type and burning a full supervision cycle.',
+  '',
+  'HARD RULE on single-candidate catalogs:',
+  '  A catalog with only ONE candidate is NOT a reason to pick it. The',
+  '  candidate must CLEARLY share the task\'s structural capability (e.g. the',
+  '  task needs an HTTP server builder, the candidate\'s description explicitly',
+  '  names HTTP server building). If the single candidate\'s description names',
+  '  a different structural capability than the task requires (HTML rendering',
+  '  vs HTTP API, file scribe vs validation loop, etc.), escalate. Never',
+  '  force-match just because the catalog is small.',
+  '',
+  'Confidence self-check:',
+  '  When you choose "reuse", label your OWN confidence in the fit:',
+  '    - "high" — candidate description and task share the SAME structural',
+  '      capability (tool signature + workflow shape). The candidate can',
+  '      plausibly execute this task end-to-end without domain reprogramming.',
+  '    - "low"  — you picked it because it was the closest available, but',
+  '      the fit is approximate (different domain, missing capability, or',
+  '      genuine doubt). The caller will treat "low" AS escalate — so if',
+  '      you would label it "low" anyway, prefer emitting "escalate" directly.',
+  '  Missing confidence is treated as "low" (conservative default).',
+  '',
   'Respond with ONE JSON object, no prose, no markdown, starting with "{":',
-  '  {"kind": "reuse", "target": "<exact catalog name>", "reasoning": "<one short sentence>"}',
+  '  {"kind": "reuse", "target": "<exact catalog name>", "confidence": "high"|"low", "reasoning": "<one short sentence>"}',
   'OR',
   '  {"kind": "escalate", "reasoning": "<one short sentence>"}',
 ].join('\n');
@@ -64,7 +90,18 @@ export const PREFILTER_SYSTEM_PROMPT = [
 const PREFILTER_PARAMS: GenerationParams = { temperature: 0, maxTokens: 256 };
 
 export const prefilterResponseSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('reuse'), target: z.string(), reasoning: z.string() }),
+  z.object({
+    kind: z.literal('reuse'),
+    target: z.string(),
+    // Haiku labels its own certainty in the fit. Missing / anything
+    // non-"high" is normalised to "low" at the parse boundary so the
+    // caller can treat "low" as an escalate (the HARD RULE on single-
+    // candidate catalogs plus the confidence self-check in the prompt
+    // push Haiku to produce this label, but we want the parser to be
+    // tolerant of older / smaller models that may drop it).
+    confidence: z.enum(['high', 'low']).optional(),
+    reasoning: z.string(),
+  }),
   z.object({ kind: z.literal('escalate'), reasoning: z.string() }),
 ]);
 
@@ -183,6 +220,22 @@ export async function prefilterStrategy(args: {
       return {
         kind: 'escalate',
         reasoning: `prefilter returned unknown or excluded target "${outcome.target}"`,
+      };
+    }
+    // Force-match guard: if Haiku self-labels the fit as "low" (or omits
+    // the field, normalised to low), treat it as an escalate. This
+    // closes the hole where a single-candidate catalog tempted Haiku to
+    // pick an approximate match (observed in production: Methane L2
+    // picked Hydrogen L1 for a Node/REST task because Hydrogen was the
+    // only L1 on record, even though its description named HTML-centric
+    // validate_html as its capability). The prompt tells Haiku to emit
+    // "escalate" directly when it would have labelled "low" anyway — the
+    // guard here catches the cases where it still tries to squeeze a
+    // reuse through.
+    if (outcome.kind === 'reuse' && outcome.confidence !== 'high') {
+      return {
+        kind: 'escalate',
+        reasoning: `prefilter low-confidence reuse of "${outcome.target}" (${outcome.reasoning}) — treated as escalate`,
       };
     }
     return outcome;

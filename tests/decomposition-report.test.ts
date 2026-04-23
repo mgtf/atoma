@@ -64,6 +64,7 @@ describe('formatDecompositionReport', () => {
         response: JSON.stringify({
           kind: 'reuse',
           target: 'Water',
+          confidence: 'high',
           reasoning: 'Water exactly matches the task scope.',
         }),
       }),
@@ -73,6 +74,7 @@ describe('formatDecompositionReport', () => {
         response: JSON.stringify({
           kind: 'reuse',
           target: 'Potassium',
+          confidence: 'high',
           reasoning: 'Potassium owns the chess puzzle leaf work.',
         }),
       }),

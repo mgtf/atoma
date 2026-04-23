@@ -64,7 +64,7 @@ describe('description drift — branch + prefilter', () => {
     const l2 = L2Atom.fromType(r.getByName('Water')!, r);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'B', reasoning: 'match' })
+      jsonText({ kind: 'reuse', target: 'B', confidence: 'high', reasoning: 'match' })
     );
     await l2.plan({ description: 'build a game' }, ctx);
 
@@ -87,7 +87,7 @@ describe('description drift — branch + prefilter', () => {
     const l3 = L3Atom.buildWithModel(l3Type, r, FALLBACK_OPUS);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'WaterB', reasoning: 'match' })
+      jsonText({ kind: 'reuse', target: 'WaterB', confidence: 'high', reasoning: 'match' })
     );
     await l3.plan({ description: 'something' }, ctx);
 

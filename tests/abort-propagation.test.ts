@@ -122,7 +122,12 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
   it('prefilterStrategy forwards ctx.signal', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'matches' })
+      jsonText({
+        kind: 'reuse',
+        target: 'Hydrogen',
+        confidence: 'high',
+        reasoning: 'matches',
+      })
     );
     await prefilterStrategy({
       ctx,

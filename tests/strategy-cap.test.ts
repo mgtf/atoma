@@ -62,7 +62,12 @@ describe('strategy maxTokens cap', () => {
     const ctx = makeCtx();
     // prefilter picks Hydrogen
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'matches' })
+      jsonText({
+        kind: 'reuse',
+        target: 'Hydrogen',
+        confidence: 'high',
+        reasoning: 'matches',
+      })
     );
 
     await l2.plan({ description: 'fetch example.com' }, ctx);

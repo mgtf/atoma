@@ -17,7 +17,12 @@ describe('prefilterStrategy', () => {
   it('picks reuse when Haiku finds a clear match', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'matches' })
+      jsonText({
+        kind: 'reuse',
+        target: 'Hydrogen',
+        confidence: 'high',
+        reasoning: 'matches',
+      })
     );
     const outcome = await prefilterStrategy({
       ctx,
@@ -27,7 +32,12 @@ describe('prefilterStrategy', () => {
         { name: 'Helium', description: 'writes files' },
       ],
     });
-    expect(outcome).toEqual({ kind: 'reuse', target: 'Hydrogen', reasoning: 'matches' });
+    expect(outcome).toEqual({
+      kind: 'reuse',
+      target: 'Hydrogen',
+      confidence: 'high',
+      reasoning: 'matches',
+    });
     expect(ctx.llm.calls).toHaveLength(1);
     expect(ctx.llm.calls[0]!.model).toBe(PIN_HAIKU);
     expect(ctx.llm.calls[0]!.systemPrompt).toBe(PREFILTER_SYSTEM_PROMPT);
@@ -47,12 +57,51 @@ describe('prefilterStrategy', () => {
   it('escalates when Haiku returns a target not in the catalog', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Plutonium', reasoning: 'imagined' })
+      jsonText({
+        kind: 'reuse',
+        target: 'Plutonium',
+        confidence: 'high',
+        reasoning: 'imagined',
+      })
     );
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 't' },
       catalog: [{ name: 'Hydrogen', description: 'h' }],
+    });
+    expect(outcome?.kind).toBe('escalate');
+  });
+
+  it('escalates when Haiku picks reuse with low confidence', async () => {
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({
+        kind: 'reuse',
+        target: 'Hydrogen',
+        confidence: 'low',
+        reasoning: 'only available option but HTML-centric, task is Node/REST',
+      })
+    );
+    const outcome = await prefilterStrategy({
+      ctx,
+      task: { description: 'build a Node REST API' },
+      catalog: [{ name: 'Hydrogen', description: 'writes HTML, validates via headless browser' }],
+    });
+    expect(outcome?.kind).toBe('escalate');
+    if (outcome?.kind === 'escalate') {
+      expect(outcome.reasoning).toMatch(/low-confidence/);
+    }
+  });
+
+  it('escalates when Haiku picks reuse but omits confidence (conservative default)', async () => {
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'plausible' })
+    );
+    const outcome = await prefilterStrategy({
+      ctx,
+      task: { description: 't' },
+      catalog: [{ name: 'Hydrogen', description: 'generic builder' }],
     });
     expect(outcome?.kind).toBe('escalate');
   });
