@@ -522,7 +522,18 @@ export const subtaskSpecSchema = z.object({
  */
 export const aggregationSpecSchema = z.object({
   mode: z.enum(['concat', 'llm-synthesize']),
-  instruction: z.string().optional(),
+  // Sonnet / Opus frequently emit `"instruction": null` when the chosen
+  // aggregation mode is "concat" (no merge instruction needed) — a
+  // plain `.optional()` rejects null and crashes the whole plan parse.
+  // Same pattern as verdictSchema.branchName (see CLAUDE.md "Things that
+  // look wrong but aren't"): accept null at the parse boundary and
+  // normalise to undefined via transform so the rest of the code sees
+  // the clean `string | undefined` shape.
+  instruction: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
 });
 
 /**

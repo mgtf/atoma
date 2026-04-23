@@ -38,6 +38,27 @@ describe('aggregationSpecSchema', () => {
       aggregationSpecSchema.safeParse({ mode: 'llm-synthesize', instruction: 'merge' }).success
     ).toBe(true);
   });
+
+  it('normalises instruction: null to undefined (Sonnet emits null on concat mode)', () => {
+    const parsed = aggregationSpecSchema.parse({ mode: 'concat', instruction: null });
+    expect(parsed.instruction).toBeUndefined();
+    expect(parsed.mode).toBe('concat');
+  });
+
+  it('accepts a full planSchema with aggregation.instruction: null without throwing', () => {
+    // This is the exact shape observed in production crashing the Ammonia
+    // L2 replan on the Node/REST run — Sonnet emitted {mode: "concat",
+    // instruction: null} and zod rejected it before the schema tolerated
+    // null.
+    const plan = {
+      reasoning: 'decompose',
+      subtasks: [{ description: 'x' }],
+      aggregation: { mode: 'concat', instruction: null },
+      expectedOutput: 'done',
+    };
+    const parsed = aggregationSpecSchema.safeParse(plan.aggregation);
+    expect(parsed.success).toBe(true);
+  });
 });
 
 describe('planSchema — fan-out native shape', () => {
