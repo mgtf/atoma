@@ -122,6 +122,121 @@ All gameplay controls wired up. No console errors.`;
     expect(result.summary).toBe('built + validated');
   });
 
+  it('prefixes the summary with [INTERNAL VALIDATION FAILED] when last validate_html returned ok:false (#3)', async () => {
+    // Observed in the backgammon timeout run: the L1 called validate_html,
+    // saw ok:false on its LAST invocation, but then declared success via
+    // its final JSON envelope. The supervisor's ground-truth probe
+    // rejected moments later on the same 404 the L1 had already seen,
+    // triggering a cascade of redundant rejections. The gate
+    // transparently surfaces the contradiction so the validator
+    // rejects cleanly on its FIRST pass.
+    const ctx = makeCtx();
+    // First LLM round: the model emits a tool_use for validate_html...
+    // ...actually, we simulate via the manual onToolInvocation path:
+    // the MockLlmClient doesn't run a tool loop, so we wire the
+    // callback by calling the tool observer ourselves via the
+    // stub-LLM pattern used in tool-trace.test.ts.
+    //
+    // Simplest approach: use a custom inner LLM that fires
+    // onToolInvocation for validate_html then returns the final JSON.
+    class StubInner {
+      async complete(req: import('../src/core/types.js').LlmCompletionRequest): Promise<import('../src/core/types.js').LlmCompletionResponse> {
+        // Simulate the tool-use loop: the model called validate_html
+        // and it returned ok:false with a failedRequest.
+        req.onToolInvocation?.({
+          name: 'validate_html',
+          args: { url: 'http://localhost:8000/' },
+          result: {
+            ok: false,
+            errors: [],
+            failedRequests: [{ url: 'http://localhost:8000/style.css', reason: 'net::ERR_ABORTED' }],
+          },
+          durationMs: 10,
+          startedAt: Date.now(),
+        });
+        // Then the model declares victory anyway.
+        return {
+          text: JSON.stringify({
+            output: 'http://localhost:8000/',
+            summary: 'Minesweeper built and validated',
+          }),
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      }
+    }
+    ctx.llm = new StubInner() as unknown as typeof ctx.llm;
+
+    const atom = new L1Atom({
+      ...base,
+      tools: [
+        {
+          name: 'validate_html',
+          description: 'validate',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    });
+    const result = await atom.execute(
+      { description: 'build a game' },
+      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      ctx
+    );
+    expect(result.summary).toMatch(/\[INTERNAL VALIDATION FAILED/);
+    expect(result.summary).toMatch(/1 failed request/);
+    expect(result.summary).toMatch(/Minesweeper built and validated/);
+  });
+
+  it('does NOT prefix when last validate_html returned ok:true (happy path unchanged)', async () => {
+    class StubInner {
+      async complete(req: import('../src/core/types.js').LlmCompletionRequest): Promise<import('../src/core/types.js').LlmCompletionResponse> {
+        req.onToolInvocation?.({
+          name: 'validate_html',
+          args: { url: 'http://localhost:8000/' },
+          result: { ok: true, errors: [], failedRequests: [] },
+          durationMs: 10,
+          startedAt: Date.now(),
+        });
+        return {
+          text: JSON.stringify({ output: 'http://localhost:8000/', summary: 'clean' }),
+          stopReason: 'end_turn',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        };
+      }
+    }
+    const ctx = makeCtx();
+    ctx.llm = new StubInner() as unknown as typeof ctx.llm;
+    const atom = new L1Atom({
+      ...base,
+      tools: [
+        {
+          name: 'validate_html',
+          description: 'validate',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+    });
+    const result = await atom.execute(
+      { description: 'x' },
+      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      ctx
+    );
+    expect(result.summary).not.toMatch(/INTERNAL VALIDATION FAILED/);
+    expect(result.summary).toBe('clean');
+  });
+
+  it('does NOT prefix when L1 never called validate_html (e.g. a pure-computation task)', async () => {
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ output: 'result', summary: 'no validation needed' }));
+    const atom = new L1Atom(base); // tools: []
+    const result = await atom.execute(
+      { description: 'x' },
+      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      ctx
+    );
+    expect(result.summary).not.toMatch(/INTERNAL VALIDATION FAILED/);
+  });
+
   it('applyModifications mutates prompt, tools, params', () => {
     const atom = new L1Atom(base);
     atom.applyModifications({

@@ -156,6 +156,42 @@ export class L1Atom extends Atom {
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
 
+    // Track the OUTCOME of each validate_html call observed during the
+    // tool loop so we can gate the final result on it (#3). The L1
+    // narrow prompt tells the model "only return success when ok:true"
+    // but Haiku sometimes claims a success summary after seeing an
+    // ok:false last call — the result then looks green to the parser,
+    // the supervisor's ground-truth probe re-validates and rejects on
+    // the actual 404 / failedRequests, and we land in a cascade of
+    // validator rejections the model can't reason its way out of.
+    // Recording the last validate_html ok flag here lets us annotate
+    // the summary so the supervisor validator sees the contradiction
+    // transparently on the FIRST pass, before spiralling.
+    let lastValidateHtml: { ok: boolean; summary: string } | null = null;
+    const onToolInvocation = (info: import('../core/types.js').ToolInvocationInfo): void => {
+      if (info.name !== 'validate_html') return;
+      const r = info.result as Record<string, unknown> | undefined;
+      if (!r || typeof r !== 'object') return;
+      const ok = r['ok'] === true;
+      const errors = Array.isArray(r['errors']) ? (r['errors'] as unknown[]) : [];
+      const failedRequests = Array.isArray(r['failedRequests'])
+        ? (r['failedRequests'] as unknown[])
+        : [];
+      const smokeResult = r['smokeResult'];
+      const smokeErr =
+        smokeResult && typeof smokeResult === 'object' && 'error' in smokeResult
+          ? String((smokeResult as Record<string, unknown>)['error'])
+          : null;
+      const parts: string[] = [];
+      if (errors.length > 0) parts.push(`${errors.length} console error(s)`);
+      if (failedRequests.length > 0) parts.push(`${failedRequests.length} failed request(s)`);
+      if (smokeErr) parts.push(`smoke: ${smokeErr.slice(0, 80)}`);
+      lastValidateHtml = {
+        ok,
+        summary: parts.length > 0 ? parts.join(', ') : ok ? 'clean load' : 'unknown failure',
+      };
+    };
+
     const resp = await ctx.llm.complete({
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
@@ -164,6 +200,7 @@ export class L1Atom extends Atom {
       params: this.params,
       executor: ctx.tools,
       signal: ctx.signal,
+      onToolInvocation,
       // Iterative build-app style tasks (write_file → start_server →
       // validate_html → read_file → rewrite → re-validate, up to 5 loops)
       // burn through tool-use slots fast. The default (24) covers the
@@ -182,7 +219,19 @@ export class L1Atom extends Atom {
     // the whole run — the supervisor's RESULT validator can then flag
     // the degenerate payload via its normal rejection path, giving the
     // loop a chance to retry.
-    const { output, summary } = parsePayloadTolerant(resp.text);
+    const { output, summary: rawSummary } = parsePayloadTolerant(resp.text);
+
+    // Validation-gate annotation (#3). When the L1 called
+    // validate_html at least once AND the LAST outcome was ok:false,
+    // rewrite the summary to include an explicit INTERNAL VALIDATION
+    // FAILED banner. The supervisor validator (Haiku) then sees the
+    // contradiction directly in the RESULT payload — no need to wait
+    // for its own ground-truth probe to re-run validate_html and
+    // produce the same signal via a longer path.
+    const summary =
+      lastValidateHtml && !(lastValidateHtml as { ok: boolean }).ok
+        ? `[INTERNAL VALIDATION FAILED — last validate_html: ${(lastValidateHtml as { summary: string }).summary}] ${rawSummary}`
+        : rawSummary;
 
     return {
       output,
