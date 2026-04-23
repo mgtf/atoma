@@ -6,11 +6,15 @@ import { ToolSandbox } from '../src/tools/sandbox.js';
 import { InMemoryToolRegistry } from '../src/tools/registry.js';
 import {
   defaultBuiltinTools,
-  writeFileTool,
-  readFileTool,
+  fetchUrlTool,
   listFilesTool,
+  readFileTool,
   runShellTool,
+  startNodeServerTool,
+  writeFileTool,
 } from '../src/tools/builtin.js';
+import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 describe('ToolSandbox', () => {
   let root: string;
@@ -162,9 +166,11 @@ describe('InMemoryToolRegistry', () => {
       expect(reg.has('write_file')).toBe(true);
       expect(reg.has('nonexistent')).toBe(false);
       expect(reg.declarations().map((t) => t.name).sort()).toEqual([
+        'fetch_url',
         'list_files',
         'read_file',
         'run_shell',
+        'start_node_server',
         'start_static_server',
         'validate_html',
         'write_file',
@@ -182,5 +188,162 @@ describe('InMemoryToolRegistry', () => {
   it('throws a clear error for unknown tools', async () => {
     const reg = new InMemoryToolRegistry();
     await expect(reg.execute('ghost', {})).rejects.toThrow(/no executor for tool "ghost"/);
+  });
+});
+
+describe('fetchUrlTool', () => {
+  let server: Server;
+  let baseUrl: string;
+  let sandbox: ToolSandbox;
+  let root: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-fetchurl-'));
+    sandbox = new ToolSandbox(root);
+    server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
+        if (req.url === '/json') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ received: body, method: req.method, path: req.url }));
+        } else if (req.url === '/404') {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('not found');
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end(`hello ${req.url}`);
+        }
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as AddressInfo).port;
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    await sandbox.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('GETs a URL and returns status + body', async () => {
+    const tool = fetchUrlTool({ sandbox });
+    const res = (await tool.execute({ url: `${baseUrl}/hi` })) as {
+      ok: boolean;
+      status: number;
+      body: string;
+    };
+    expect(res.ok).toBe(true);
+    expect(res.status).toBe(200);
+    expect(res.body).toBe('hello /hi');
+  });
+
+  it('POSTs a JSON object body and auto-sets content-type', async () => {
+    const tool = fetchUrlTool({ sandbox });
+    const res = (await tool.execute({
+      url: `${baseUrl}/json`,
+      method: 'POST',
+      body: { x: 42 },
+    })) as { ok: boolean; status: number; body: string };
+    expect(res.ok).toBe(true);
+    const parsed = JSON.parse(res.body) as { received: string; method: string };
+    expect(parsed.method).toBe('POST');
+    expect(parsed.received).toBe('{"x":42}');
+  });
+
+  it('returns ok=false with the status when the server replies 404 (not a throw)', async () => {
+    const tool = fetchUrlTool({ sandbox });
+    const res = (await tool.execute({ url: `${baseUrl}/404` })) as {
+      ok: boolean;
+      status: number;
+      body: string;
+    };
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(404);
+    expect(res.body).toBe('not found');
+  });
+
+  it('returns a timeout shape when the request exceeds timeoutMs', async () => {
+    // Close the primary server and point at a dead port to force a
+    // network-level hang (AbortError). The loopback address returns
+    // ECONNREFUSED fast, but forcing timeoutMs=1 catches even sub-ms
+    // connects — we just assert the shape.
+    await new Promise<void>((r) => server.close(() => r()));
+    const tool = fetchUrlTool({ sandbox });
+    const res = (await tool.execute({
+      url: 'http://127.0.0.1:1/',  // port 1 is effectively closed
+      timeoutMs: 50,
+    })) as { ok: boolean; error?: string; timeout?: boolean };
+    expect(res.ok).toBe(false);
+    expect(res.error).toBeTruthy();
+  });
+});
+
+describe('startNodeServerTool', () => {
+  let root: string;
+  let sandbox: ToolSandbox;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-nodesrv-'));
+    sandbox = new ToolSandbox(root);
+  });
+
+  afterEach(async () => {
+    await sandbox.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('boots a node entry file that emits LISTENING_ON_PORT and returns its URL', async () => {
+    const entry = `
+      const http = require('http');
+      const srv = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, path: req.url }));
+      });
+      srv.listen(Number(process.env.PORT) || 0, '127.0.0.1', () => {
+        const addr = srv.address();
+        console.log('LISTENING_ON_PORT=' + addr.port);
+      });
+    `;
+    writeFileSync(join(root, 'server.js'), entry, 'utf8');
+
+    const startTool = startNodeServerTool({ sandbox });
+    const res = (await startTool.execute({ entry: 'server.js' })) as {
+      ok: boolean;
+      url: string;
+      port: number;
+    };
+    expect(res.ok).toBe(true);
+    expect(res.port).toBeGreaterThan(0);
+    expect(res.url).toMatch(/^http:\/\/localhost:\d+\/$/);
+
+    // Smoke: use fetch_url to probe the booted server.
+    const fetchTool = fetchUrlTool({ sandbox });
+    // start_node_server returns localhost, but the node entry bound to
+    // 127.0.0.1 — on most systems "localhost" resolves to 127.0.0.1 but
+    // we probe the numeric form to avoid a DNS edge case tripping the
+    // test in CI.
+    const probe = (await fetchTool.execute({
+      url: `http://127.0.0.1:${res.port}/hello`,
+    })) as { ok: boolean; status: number; body: string };
+    expect(probe.ok).toBe(true);
+    expect(probe.status).toBe(200);
+    const parsed = JSON.parse(probe.body) as { ok: boolean; path: string };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.path).toBe('/hello');
+  });
+
+  it('returns an informative error when the node entry exits before emitting the marker', async () => {
+    // This server prints nothing and exits immediately — no LISTENING
+    // marker ever appears, so the tool should reject with the stderr-
+    // preserving error.
+    const entry = `console.error('boom'); process.exit(1);`;
+    writeFileSync(join(root, 'broken.js'), entry, 'utf8');
+    const startTool = startNodeServerTool({ sandbox });
+    await expect(
+      startTool.execute({ entry: 'broken.js' })
+    ).rejects.toThrow(/node server exited early/);
   });
 });

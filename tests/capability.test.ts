@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_BOOTSTRAP_MARKER,
+  CANONICAL_HTTP_BOOTSTRAP_MARKER,
+  CANONICAL_L2_HTTP_DESCRIPTION,
   CANONICAL_L2_WEB_DESCRIPTION,
   capabilityDescription,
   looksTaskThemed,
@@ -27,6 +29,60 @@ describe('capabilityDescription', () => {
     expect(desc).toMatch(/validate_html/);
     // The task-neutral invariant: no domain terms leak in.
     expect(desc).not.toMatch(/chess|minesweeper|mario|puzzle/i);
+  });
+
+  it('picks the http-server-build+probe bucket when Node server tools are present (tier 1)', () => {
+    const desc = capabilityDescription(
+      makeTools([
+        'write_file',
+        'read_file',
+        'list_files',
+        'run_shell',
+        'fetch_url',
+        'start_node_server',
+      ]),
+      1
+    );
+    expect(desc).toMatch(/Node HTTP server builder/);
+    expect(desc).toMatch(/LISTENING_ON_PORT/);
+    // It must NOT describe itself as a web artefact builder — the whole
+    // point of the separate bucket is the structural distinction.
+    expect(desc).not.toMatch(/single-file web artefact builder/);
+    expect(desc).not.toMatch(/validate_html/);
+  });
+
+  it('uses the orchestrator variant for the http-server bucket at tier 2', () => {
+    const tools = makeTools([
+      'write_file',
+      'run_shell',
+      'fetch_url',
+      'start_node_server',
+    ]);
+    const leaf = capabilityDescription(tools, 1);
+    const orch = capabilityDescription(tools, 2);
+    expect(leaf).toMatch(/Node HTTP server builder/);
+    expect(orch).toMatch(/Node HTTP server orchestrator/);
+    expect(orch).not.toBe(leaf);
+  });
+
+  it('prefers the http-server bucket over web-artefact when both would match (bucket order discipline)', () => {
+    // A kitchen-sink toolset has tools for both buckets. Bucket order
+    // puts http-server first so a Node builder is correctly labeled
+    // rather than silently demoted to a web-artefact builder by virtue
+    // of the web bucket appearing earlier.
+    const kitchen = makeTools([
+      'write_file',
+      'read_file',
+      'list_files',
+      'run_shell',
+      'fetch_url',
+      'start_node_server',
+      'start_static_server',
+      'validate_html',
+    ]);
+    const desc = capabilityDescription(kitchen, 1);
+    expect(desc).toMatch(/Node HTTP server builder/);
+    expect(desc).not.toMatch(/single-file web artefact builder/);
   });
 
   it('falls back to write+serve when validate_html is missing (tier 1)', () => {
@@ -171,5 +227,21 @@ describe('canonical-bootstrap constants', () => {
   it('CANONICAL_L2_WEB_DESCRIPTION matches capabilityDescription at tier 2 for the web bucket', () => {
     const webTools = makeTools(['write_file', 'start_static_server', 'validate_html']);
     expect(CANONICAL_L2_WEB_DESCRIPTION).toBe(capabilityDescription(webTools, 2));
+  });
+
+  it('exposes a distinct HTTP marker + L2 description alongside the web ones', () => {
+    expect(CANONICAL_HTTP_BOOTSTRAP_MARKER).toBe('bootstrap-canonical-http');
+    expect(CANONICAL_HTTP_BOOTSTRAP_MARKER).not.toBe(CANONICAL_BOOTSTRAP_MARKER);
+    expect(CANONICAL_L2_HTTP_DESCRIPTION).toMatch(/Node HTTP server orchestrator/);
+  });
+
+  it('CANONICAL_L2_HTTP_DESCRIPTION matches capabilityDescription at tier 2 for the http bucket', () => {
+    const httpTools = makeTools([
+      'write_file',
+      'run_shell',
+      'fetch_url',
+      'start_node_server',
+    ]);
+    expect(CANONICAL_L2_HTTP_DESCRIPTION).toBe(capabilityDescription(httpTools, 2));
   });
 });

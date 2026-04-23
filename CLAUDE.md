@@ -170,14 +170,47 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   before this rule may still carry task-themed descriptions; leave them
   alone, they'll lose the prefilter race naturally.
 - **Canonical bootstrap in `examples/build-app.ts`.** On every run we
-  call `ensureCanonicalL1` / `ensureCanonicalL2` (from
-  `src/atoms/capability.ts`) which idempotently seed a domain-neutral
-  L1 and L2 tagged `createdBy = CANONICAL_BOOTSTRAP_MARKER`. They give
-  L3.prefilter / L2.prefilter an obvious reusable target on every run,
-  so we don't ask Sonnet/Opus to mint a theme-poisoned clone of the
-  same recipe each time. The helpers look up the existing canonical
-  entry by `createdBy` marker, refresh its tools via `patch + addTools`
-  if found, or create it otherwise.
+  call four idempotent seeders from `src/atoms/capability.ts`:
+  `ensureCanonicalL1` / `ensureCanonicalL2` (web build bucket,
+  marked `bootstrap-canonical`) and `ensureCanonicalHttpL1` /
+  `ensureCanonicalHttpL2` (Node HTTP server bucket, marked
+  `bootstrap-canonical-http`). Each pair seeds a domain-neutral
+  L1 + L2 so L3.prefilter / L2.prefilter has an obvious reusable
+  target on day one for both recipe families. Without the HTTP
+  canonicals the first Node/REST run had no L1 in its bucket and
+  force-matched the web canonical, which is the Methane-picks-
+  Hydrogen failure the #3/#4/#5 fix series was written for. Helpers
+  look up existing entries by `createdBy` marker, refresh tools via
+  `patch + addTools` on hit, or create otherwise.
+- **Bucket-scoped tool filtering in the canonical helpers.** Each
+  `ensureCanonical*` pipes its caller-supplied toolset through
+  `pickTools(tools, scope)` before creating/patching so a kitchen-
+  sink caller (build-app.ts passes all 8 tools) still produces a
+  narrow canonical: the web L1 gets {write_file, read_file,
+  list_files, start_static_server, validate_html}; the HTTP L1 gets
+  {write_file, read_file, list_files, run_shell, fetch_url,
+  start_node_server}. Without this, the kitchen-sink signature
+  matches the FIRST bucket in `CAPABILITY_BUCKETS` and every
+  canonical gets the same label, collapsing the whole per-bucket
+  discrimination we rely on. Bucket order matters too: `http-server-
+  build+probe` precedes `web-artefact-build+validate` so a
+  kitchen-sink L1 created dynamically (mergeTools from L2) lands on
+  the HTTP label when start_node_server is present.
+- **HTTP bucket contract (`start_node_server` + `fetch_url`).** The
+  L1 HTTP canonical writes server code that reads `process.env.PORT`
+  and emits the literal line `LISTENING_ON_PORT=<N>` on stdout once
+  bound. `start_node_server` injects `PORT=0` and parses that marker
+  to discover the OS-assigned port — without the marker the tool
+  times out. This contract is baked into `CANONICAL_HTTP_L1_SYSTEM_
+  PROMPT_LINES`; new tools in the http bucket must preserve or
+  replace it explicitly.
+- **Auxiliary vs required overlap in `capabilityDescription`.** When
+  a tool is in a bucket's `required` list AND in `AUXILIARY_TOOLS`
+  (e.g. `run_shell` for the http-server bucket), the primary bucket
+  label already describes how it is used — so `capabilityDescription`
+  skips the auxiliary trailer for those tools. Without the skip,
+  CANONICAL_L2_HTTP_DESCRIPTION could not stay in sync with
+  `capabilityDescription(httpTools, 2)`.
 
 ## LLM interaction conventions
 

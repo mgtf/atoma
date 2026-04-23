@@ -296,6 +296,264 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
 }
 
 /**
+ * fetch_url — issue an HTTP(S) request and return status/headers/body.
+ *
+ * The companion tool to `start_node_server`: once an L1 has booted a Node
+ * HTTP server, it needs a way to probe the endpoints it just wrote (GET
+ * /health, POST /users with a body, etc.) so the validate-and-fix loop
+ * has a signal to iterate on. `fetch_url` is the L1-tier analogue of
+ * `validate_html` for headless web artefacts: small, focused, and
+ * purpose-built to feed the supervise-loop.
+ *
+ * Notes:
+ *   - Body is returned as a UTF-8 STRING. JSON parsing is the caller's
+ *     job — keeps the tool surface small and avoids silently dropping
+ *     non-JSON responses (HTML error pages, plain-text 404 bodies).
+ *   - No URL allowlist: callers need to hit arbitrary URLs (localhost
+ *     for probing their own server, real APIs for mocked integrations).
+ *     The sandbox still confines filesystem + child processes; network
+ *     is intentionally open.
+ *   - Hard timeout defaults to 10s. A Node server that doesn't answer
+ *     an HTTP request within 10s is almost certainly broken, and the
+ *     L1 loop should see "timeout" as a fix signal rather than wait
+ *     30s+ and exhaust its tool budget.
+ */
+export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
+  const DEFAULT_TIMEOUT_MS = 10_000;
+  return {
+    declaration: {
+      name: 'fetch_url',
+      description: [
+        'Issue an HTTP(S) request to any URL (localhost for probing your own server, or external APIs).',
+        'Returns { status, headers, body }. Body is a UTF-8 string — parse JSON yourself if you need it.',
+        'Use this AFTER start_node_server to verify the endpoints you just wrote actually answer correctly.',
+      ].join(' '),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'Absolute URL, e.g. "http://localhost:3000/health".' },
+          method: {
+            type: 'string',
+            description: 'HTTP method (GET|POST|PUT|PATCH|DELETE). Defaults to GET.',
+          },
+          body: {
+            type: ['string', 'object'],
+            description:
+              'Request body. If an object is passed, it is JSON-stringified and Content-Type defaults to application/json.',
+          },
+          headers: {
+            type: 'object',
+            description: 'Additional request headers as a flat string→string map.',
+          },
+          timeoutMs: {
+            type: 'number',
+            description: `Request timeout. Defaults to ${DEFAULT_TIMEOUT_MS}.`,
+          },
+        },
+        required: ['url'],
+      },
+    },
+    async execute(args) {
+      const url = expectString(args, 'url');
+      const methodRaw = typeof args['method'] === 'string' ? args['method']!.toUpperCase() : 'GET';
+      const method = methodRaw;
+      const timeoutMs =
+        typeof args['timeoutMs'] === 'number' && Number.isFinite(args['timeoutMs'])
+          ? (args['timeoutMs'] as number)
+          : DEFAULT_TIMEOUT_MS;
+
+      const rawHeaders =
+        args['headers'] && typeof args['headers'] === 'object' && !Array.isArray(args['headers'])
+          ? (args['headers'] as Record<string, unknown>)
+          : {};
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(rawHeaders)) {
+        if (typeof v === 'string') headers.set(k, v);
+      }
+
+      let bodyInit: string | undefined;
+      if (args['body'] !== undefined && args['body'] !== null) {
+        if (typeof args['body'] === 'string') {
+          bodyInit = args['body'];
+        } else if (typeof args['body'] === 'object') {
+          bodyInit = JSON.stringify(args['body']);
+          if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+        }
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      opts.logger?.info(`[tool:fetch_url] ${method} ${url}`);
+      try {
+        const res = await fetch(url, {
+          method,
+          headers,
+          ...(bodyInit !== undefined ? { body: bodyInit } : {}),
+          signal: controller.signal,
+        });
+        const text = await res.text();
+        const respHeaders: Record<string, string> = {};
+        res.headers.forEach((value, key) => {
+          respHeaders[key] = value;
+        });
+        return {
+          ok: res.ok,
+          status: res.status,
+          headers: respHeaders,
+          body: text,
+        };
+      } catch (err) {
+        const e = err as Error & { name?: string };
+        if (e.name === 'AbortError') {
+          return {
+            ok: false,
+            error: `fetch_url timed out after ${timeoutMs}ms`,
+            timeout: true,
+          };
+        }
+        return { ok: false, error: e.message };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+/**
+ * start_node_server — spawn a long-running Node process that listens on
+ * an OS-assigned port and return its URL.
+ *
+ * The tier-1 counterpart to `start_static_server` for HTTP API builds.
+ * L1 writes an Express/native-http server into a JS file, starts it
+ * via this tool, then probes it with `fetch_url`. Same process-tracking
+ * machinery as `start_static_server` — the module-level exit handler
+ * in `sandbox.ts` SIGKILLs orphaned children even on crash-exit paths.
+ *
+ * Port discovery contract:
+ *   - The tool injects `PORT=0` into the child's env (standard Node
+ *     convention: the server binds to an OS-assigned port by reading
+ *     `process.env.PORT`).
+ *   - The L1's server code MUST emit the literal line
+ *         LISTENING_ON_PORT=<N>
+ *     on stdout once it has successfully bound. Example:
+ *         const srv = app.listen(Number(process.env.PORT) || 0, () => {
+ *           const p = srv.address().port;
+ *           console.log('LISTENING_ON_PORT=' + p);
+ *         });
+ *     We do not parse Express's default "Listening on 3000" or arbitrary
+ *     "Server running at ..." strings — the explicit marker is the only
+ *     contract, and L1 is told about it via the canonical HTTP prompt.
+ *   - If the child exits before emitting the marker (e.g. a syntax
+ *     error, a missing dep), the tool returns { ok: false, stderr } so
+ *     the L1 loop gets a concrete signal.
+ */
+export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
+  const BOOT_TIMEOUT_MS = 8_000;
+  return {
+    declaration: {
+      name: 'start_node_server',
+      description: [
+        'Spawn `node <entry>` as a background process with PORT=0 (OS-assigned) and return the bound URL.',
+        'The server MUST emit the literal line "LISTENING_ON_PORT=<port>" on stdout once it has bound.',
+        'Example listener:',
+        '  app.listen(Number(process.env.PORT) || 0, function(){ console.log("LISTENING_ON_PORT=" + this.address().port); });',
+        'The server runs until the run exits (sandbox cleanup SIGKILLs it).',
+      ].join(' '),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          entry: {
+            type: 'string',
+            description: 'Relative path to the Node entry file (e.g. "index.js", "server.js").',
+          },
+          env: {
+            type: 'object',
+            description:
+              'Extra environment variables passed to the child process (merged over PORT=0 and the parent env).',
+          },
+        },
+        required: ['entry'],
+      },
+    },
+    async execute(args) {
+      const entry = expectString(args, 'entry');
+      const entryAbs = opts.sandbox.resolve(entry);
+      const extraEnv =
+        args['env'] && typeof args['env'] === 'object' && !Array.isArray(args['env'])
+          ? (args['env'] as Record<string, unknown>)
+          : {};
+      const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0' };
+      for (const [k, v] of Object.entries(extraEnv)) {
+        if (typeof v === 'string') env[k] = v;
+      }
+
+      const child = spawn('node', [entryAbs], {
+        cwd: opts.sandbox.root,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: false,
+        env,
+      });
+      opts.sandbox.trackChild(child);
+
+      let stderrBuf = '';
+      const port = await new Promise<number>((resolve, reject) => {
+        const fail = (msg: string): void => {
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            /* already dead */
+          }
+          reject(new Error(msg));
+        };
+        const timer = setTimeout(() => {
+          fail(
+            `node server did not emit LISTENING_ON_PORT=<N> within ${BOOT_TIMEOUT_MS}ms. stderr: ${stderrBuf.slice(0, 400)}`
+          );
+        }, BOOT_TIMEOUT_MS);
+
+        child.once('error', (err) => {
+          clearTimeout(timer);
+          fail(`node server failed to start: ${err.message}`);
+        });
+        child.once('exit', (code) => {
+          // Only relevant if this fires before we've seen the marker.
+          clearTimeout(timer);
+          fail(
+            `node server exited early (code=${code}). stderr: ${stderrBuf.slice(0, 400)}`
+          );
+        });
+        child.stdout?.on('data', (chunk: Buffer) => {
+          const s = chunk.toString();
+          const match = s.match(/LISTENING_ON_PORT=(\d+)/);
+          if (match && match[1]) {
+            clearTimeout(timer);
+            // Detach the early-exit listener — the server is up now,
+            // subsequent exits are the sandbox cleanup's job.
+            child.removeAllListeners('exit');
+            resolve(Number(match[1]));
+          }
+        });
+        child.stderr?.on('data', (chunk: Buffer) => {
+          stderrBuf += chunk.toString();
+        });
+      });
+
+      opts.logger?.info(
+        `[tool:start_node_server] node ${entry} :${port} in ${opts.sandbox.root}`
+      );
+
+      return {
+        ok: true,
+        url: `http://localhost:${port}/`,
+        port,
+        pid: child.pid,
+        servedFrom: opts.sandbox.root,
+      };
+    },
+  };
+}
+
+/**
  * validate_html — headless-browser sanity check.
  *
  * Opens `url` in a fresh Puppeteer page, waits for network idle, and returns
@@ -871,5 +1129,7 @@ export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
     runShellTool(opts),
     startStaticServerTool(opts),
     validateHtmlTool(opts),
+    fetchUrlTool(opts),
+    startNodeServerTool(opts),
   ];
 }

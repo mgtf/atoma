@@ -7,7 +7,12 @@ import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SMOKE_DESIGN_GUIDANCE } from '../atoms/L2Atom.js';
-import { ensureCanonicalL1, ensureCanonicalL2 } from '../atoms/capability.js';
+import {
+  ensureCanonicalL1,
+  ensureCanonicalL2,
+  ensureCanonicalHttpL1,
+  ensureCanonicalHttpL2,
+} from '../atoms/capability.js';
 import { TraceRecorder } from '../viz/trace.js';
 import { formatDecompositionReport } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
@@ -99,13 +104,21 @@ async function main(): Promise<void> {
   // to execute. Idempotent: we match by the `CANONICAL_BOOTSTRAP_MARKER`
   // in `createdBy`, refreshing tools on each run so the canonical
   // catalog follows the current executor set.
-  const canonicalL2 = ensureCanonicalL2(registry, toolDecls);
+  const canonicalL2Web = ensureCanonicalL2(registry, toolDecls);
   console.log(
-    `canonical L2: ${canonicalL2.name} (v${canonicalL2.version}) — ${canonicalL2.description.slice(0, 70)}…`
+    `canonical L2 (web): ${canonicalL2Web.name} (v${canonicalL2Web.version}) — ${canonicalL2Web.description.slice(0, 70)}…`
   );
-  const canonicalL1 = ensureCanonicalL1(registry, toolDecls, SMOKE_DESIGN_GUIDANCE);
+  const canonicalL2Http = ensureCanonicalHttpL2(registry, toolDecls);
   console.log(
-    `canonical L1: ${canonicalL1.name} (v${canonicalL1.version}) — ${canonicalL1.description.slice(0, 70)}…`
+    `canonical L2 (http): ${canonicalL2Http.name} (v${canonicalL2Http.version}) — ${canonicalL2Http.description.slice(0, 70)}…`
+  );
+  const canonicalL1Web = ensureCanonicalL1(registry, toolDecls, SMOKE_DESIGN_GUIDANCE);
+  console.log(
+    `canonical L1 (web): ${canonicalL1Web.name} (v${canonicalL1Web.version}) — ${canonicalL1Web.description.slice(0, 70)}…`
+  );
+  const canonicalL1Http = ensureCanonicalHttpL1(registry, toolDecls);
+  console.log(
+    `canonical L1 (http): ${canonicalL1Http.name} (v${canonicalL1Http.version}) — ${canonicalL1Http.description.slice(0, 70)}…`
   );
 
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);

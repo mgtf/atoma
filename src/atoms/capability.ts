@@ -60,6 +60,20 @@ interface CapabilityBucket {
 
 const CAPABILITY_BUCKETS: readonly CapabilityBucket[] = [
   {
+    id: 'http-server-build+probe',
+    // Listed BEFORE the web-artefact bucket so a toolset that has BOTH
+    // (a kitchen-sink L1 carrying the full executor set) sorts to the
+    // HTTP label when `start_node_server` is present — the two workflows
+    // are genuinely distinct (HTML render loop vs HTTP request/response
+    // loop) and we don't want a Node/REST build to be described as a
+    // "web artefact builder".
+    required: ['write_file', 'run_shell', 'start_node_server', 'fetch_url'],
+    leafLabel:
+      'Node HTTP server builder: writes server code on disk, runs "npm install" via run_shell, boots the server through start_node_server (LISTENING_ON_PORT convention), and iterates against fetch_url probes until endpoints answer correctly',
+    orchestratorLabel:
+      'Node HTTP server orchestrator: routes a leaf task to a tier-1 builder that writes server code, installs dependencies, boots a Node process, and probes endpoints via fetch_url',
+  },
+  {
     id: 'web-artefact-build+validate',
     required: ['write_file', 'start_static_server', 'validate_html'],
     leafLabel:
@@ -125,8 +139,17 @@ export function capabilityDescription(
     parts.push(tier === 1 ? primary.leafLabel : primary.orchestratorLabel);
   }
 
+  // Auxiliary tools are EXTRA capabilities beyond the primary bucket.
+  // If a tool is already part of the primary bucket's required list
+  // (e.g. run_shell for http-server-build+probe), skip it here — the
+  // bucket label already describes how it is used. Without this
+  // skip, the http bucket would get double-described (primary label +
+  // "capable of delegating to a tier-1 atom that executes shell
+  // commands…") which is both noisy and makes the canonical constants
+  // impossible to keep in sync with capabilityDescription output.
+  const primaryRequired = new Set(primary?.required ?? []);
   for (const [name, label] of Object.entries(AUXILIARY_TOOLS)) {
-    if (names.has(name)) {
+    if (names.has(name) && !primaryRequired.has(name)) {
       parts.push(
         tier === 1 ? label : `capable of delegating to a tier-1 atom that ${label}`
       );
@@ -205,8 +228,54 @@ export function resolveCreationDescription(
   return cleaned;
 }
 
-/** Marker for registry entries created by the example's bootstrap step. */
+/** Marker for the canonical WEB L1/L2 entries (single-file artefact + headless
+ * validator) created by the example's bootstrap step. Kept as
+ * `bootstrap-canonical` for backwards compatibility with legacy DBs — new
+ * canonical bootstraps should use the bucket-scoped markers (WEB_MARKER,
+ * HTTP_MARKER) instead. */
 export const CANONICAL_BOOTSTRAP_MARKER = 'bootstrap-canonical';
+
+/** Marker for the canonical HTTP L1/L2 entries (Node server builder + API
+ * probe loop). Separate from the web marker so both canonicals coexist in
+ * the same registry without one idempotent-refreshing over the other. */
+export const CANONICAL_HTTP_BOOTSTRAP_MARKER = 'bootstrap-canonical-http';
+
+/**
+ * The TOOL SIGNATURE of each canonical atom. These are the names of the
+ * tools we SELECT from the caller-provided toolset when seeding a
+ * canonical — they deliberately DO NOT include auxiliary tools
+ * (fetch_url, run_shell) for the web canonical, nor validate_html /
+ * start_static_server for the http canonical. Without this narrowing a
+ * kitchen-sink L1 would match the first CAPABILITY_BUCKETS entry
+ * regardless of domain, collapsing the whole per-bucket distinction we
+ * just built.
+ *
+ * read_file + list_files are universal read-only auxiliaries and ride
+ * along in both scopes — they don't drive bucket selection (no bucket
+ * requires them) but L1s genuinely need them in practice.
+ */
+const WEB_L1_TOOL_SCOPE: readonly string[] = [
+  'write_file',
+  'read_file',
+  'list_files',
+  'start_static_server',
+  'validate_html',
+];
+
+const HTTP_L1_TOOL_SCOPE: readonly string[] = [
+  'write_file',
+  'read_file',
+  'list_files',
+  'run_shell',
+  'fetch_url',
+  'start_node_server',
+];
+
+/** Filter a tool list down to the given scope (by tool name). */
+function pickTools(tools: readonly Tool[], scope: readonly string[]): Tool[] {
+  const scopeSet = new Set(scope);
+  return tools.filter((t) => scopeSet.has(t.name));
+}
 
 /**
  * Description used for the canonical tier-2 "web build orchestrator"
@@ -223,6 +292,15 @@ export const CANONICAL_BOOTSTRAP_MARKER = 'bootstrap-canonical';
  */
 export const CANONICAL_L2_WEB_DESCRIPTION =
   'single-file web artefact orchestrator: routes a leaf task to a tier-1 builder that writes an index.html on disk, serves it, and validates via headless browser (validate_html)';
+
+/**
+ * Description used for the canonical tier-2 HTTP orchestrator. Mirror of
+ * CANONICAL_L2_WEB_DESCRIPTION — kept as a named export so downstream
+ * tooling doesn't have to re-derive it from the bucket table. Must match
+ * the orchestratorLabel of the `http-server-build+probe` bucket above.
+ */
+export const CANONICAL_L2_HTTP_DESCRIPTION =
+  'Node HTTP server orchestrator: routes a leaf task to a tier-1 builder that writes server code, installs dependencies, boots a Node process, and probes endpoints via fetch_url';
 
 const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element with ONE narrow responsibility.`,
@@ -248,6 +326,51 @@ const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `registry metadata. Keep the catalog reusable.`,
 ];
 
+const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
+  `You are an L1 element specialised for Node HTTP server builds.`,
+  `Your job: write a single self-contained server entry point, install its`,
+  `dependencies, boot it, and verify the endpoints with HTTP probes.`,
+  ``,
+  `Typical tool sequence:`,
+  `  1. write_file  package.json  (declare dependencies; keep the dep list MINIMAL)`,
+  `  2. write_file  <entry>.js    (Express / native http; MUST read process.env.PORT`,
+  `                                and print "LISTENING_ON_PORT=" + address().port`,
+  `                                so start_node_server can discover the bound port)`,
+  `  3. run_shell   npm install    (give it time — first install can take 20s+)`,
+  `  4. start_node_server entry=<entry>.js`,
+  `  5. fetch_url   http://localhost:<port>/<endpoint>  for each route you expose`,
+  `  6. if a probe fails: read_file the source, diagnose, write_file the fix,`,
+  `     kill+respawn via a second start_node_server call. Up to 4 iterations.`,
+  `  7. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+  ``,
+  `HARD RULE on the LISTENING_ON_PORT marker: your server MUST print the`,
+  `literal line "LISTENING_ON_PORT=<N>" on stdout after it has successfully`,
+  `bound the port. start_node_server parses this marker to discover the`,
+  `OS-assigned port — without it the tool times out and the iteration is`,
+  `wasted. Example (Express):`,
+  `  const srv = app.listen(Number(process.env.PORT) || 0, () => {`,
+  `    const p = srv.address().port;`,
+  `    console.log('LISTENING_ON_PORT=' + p);`,
+  `  });`,
+  ``,
+  `Scope boundary: if the subtask seems to require coordinating with other`,
+  `subtasks (reading their outputs, sharing state) — that is a planning bug`,
+  `at L2/L3, not an excuse to expand scope. Surface it in your summary.`,
+];
+
+const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
+  `You are a domain-neutral L2 orchestrator for Node HTTP server builds.`,
+  `DELEGATION DISCIPLINE: you NEVER call tools yourself. Decompose the task`,
+  `into orthogonal L1 leaves (server code, client stub, schema file, etc.)`,
+  `and delegate each to a tier-1 atom.`,
+  `Prefer reusing the existing canonical HTTP L1 via prefilter — only`,
+  `request a new L1 when the toolset genuinely diverges.`,
+  ``,
+  `Scope boundary: task-specific nouns (endpoint paths, request shapes,`,
+  `database names) belong in the SUBTASK DESCRIPTION you pass down, never`,
+  `in the L1's registry metadata. Keep the catalog reusable.`,
+];
+
 /**
  * Idempotently ensure the registry has a canonical L1 "web artefact
  * builder" — the one L2.prefilter is supposed to reuse for every
@@ -269,22 +392,23 @@ export function ensureCanonicalL1(
   tools: readonly Tool[],
   smokeGuidance: string
 ): AtomType {
+  const scoped = pickTools(tools, WEB_L1_TOOL_SCOPE);
   const existing = registry
     .listByTier(1)
     .find((t) => t.createdBy === CANONICAL_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: tools as Tool[] },
+      { addTools: scoped },
       'build-app-bootstrap',
       'refresh canonical L1 tools'
     );
   }
   const systemPrompt = [...CANONICAL_L1_SYSTEM_PROMPT_LINES, ``, smokeGuidance].join('\n');
   return registry.create(1, {
-    description: capabilityDescription(tools, 1),
+    description: capabilityDescription(scoped, 1),
     systemPrompt,
-    tools: tools as Tool[],
+    tools: scoped,
     params: {},
     createdBy: CANONICAL_BOOTSTRAP_MARKER,
   });
@@ -298,22 +422,94 @@ export function ensureCanonicalL2(
   registry: AtomRegistry,
   tools: readonly Tool[]
 ): AtomType {
+  const scoped = pickTools(tools, WEB_L1_TOOL_SCOPE);
   const existing = registry
     .listByTier(2)
     .find((t) => t.createdBy === CANONICAL_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: tools as Tool[] },
+      { addTools: scoped },
       'build-app-bootstrap',
       'refresh canonical L2 tools'
     );
   }
   return registry.create(2, {
-    description: capabilityDescription(tools, 2),
+    description: capabilityDescription(scoped, 2),
     systemPrompt: CANONICAL_L2_SYSTEM_PROMPT_LINES.join('\n'),
-    tools: tools as Tool[],
+    tools: scoped,
     params: {},
     createdBy: CANONICAL_BOOTSTRAP_MARKER,
+  });
+}
+
+/**
+ * Canonical Node HTTP L1 — the tier-1 counterpart to the web canonical
+ * for builds that expose an HTTP API instead of a browser-runnable
+ * single-file page. Tool signature is scoped to the HTTP bucket
+ * (write_file + run_shell + start_node_server + fetch_url, plus
+ * read_file / list_files as universal auxiliaries) so the registry
+ * description lands on the "Node HTTP server builder" label and
+ * prefilter can cleanly discriminate it from the web canonical.
+ *
+ * Idempotency and tool refresh follow the same pattern as
+ * `ensureCanonicalL1`. Marker: CANONICAL_HTTP_BOOTSTRAP_MARKER (distinct
+ * from the web marker so the two canonicals coexist without
+ * overwriting each other's registry row).
+ */
+export function ensureCanonicalHttpL1(
+  registry: AtomRegistry,
+  tools: readonly Tool[]
+): AtomType {
+  const scoped = pickTools(tools, HTTP_L1_TOOL_SCOPE);
+  const existing = registry
+    .listByTier(1)
+    .find((t) => t.createdBy === CANONICAL_HTTP_BOOTSTRAP_MARKER);
+  if (existing) {
+    return registry.patch(
+      existing.name,
+      { addTools: scoped },
+      'build-app-bootstrap',
+      'refresh canonical HTTP L1 tools'
+    );
+  }
+  return registry.create(1, {
+    description: capabilityDescription(scoped, 1),
+    systemPrompt: CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES.join('\n'),
+    tools: scoped,
+    params: {},
+    createdBy: CANONICAL_HTTP_BOOTSTRAP_MARKER,
+  });
+}
+
+/**
+ * Canonical Node HTTP L2 — tier-2 counterpart. Its description names
+ * "Node HTTP server orchestrator" so L3.prefilter can route
+ * HTTP-flavoured tasks to it without having to create a fresh L2 every
+ * time (the behaviour we saw on the Methane/Hydrogen Node/REST run that
+ * triggered this whole fix series).
+ */
+export function ensureCanonicalHttpL2(
+  registry: AtomRegistry,
+  tools: readonly Tool[]
+): AtomType {
+  const scoped = pickTools(tools, HTTP_L1_TOOL_SCOPE);
+  const existing = registry
+    .listByTier(2)
+    .find((t) => t.createdBy === CANONICAL_HTTP_BOOTSTRAP_MARKER);
+  if (existing) {
+    return registry.patch(
+      existing.name,
+      { addTools: scoped },
+      'build-app-bootstrap',
+      'refresh canonical HTTP L2 tools'
+    );
+  }
+  return registry.create(2, {
+    description: capabilityDescription(scoped, 2),
+    systemPrompt: CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES.join('\n'),
+    tools: scoped,
+    params: {},
+    createdBy: CANONICAL_HTTP_BOOTSTRAP_MARKER,
   });
 }
