@@ -15,8 +15,26 @@ import type {
   RunContext,
   Task,
   Tier,
+  Tool,
   Verdict,
 } from '../src/core/types.js';
+
+function makeTools(names: readonly string[]): Tool[] {
+  return names.map((name) => ({
+    name,
+    description: `${name} tool`,
+    parameters: { type: 'object', properties: {}, required: [] },
+    execute: async () => ({ ok: true as const, output: 'noop' as unknown }),
+  }));
+}
+
+const WEB_TOOLS = makeTools([
+  'write_file',
+  'read_file',
+  'list_files',
+  'start_static_server',
+  'validate_html',
+]);
 
 /**
  * Regression tests for the anti-Frankenstein branchOnEscalation fix.
@@ -52,34 +70,75 @@ describe('buildNarrowL1Prompt', () => {
     expect(prompt).toMatch(/IGNORE its[\s\S]*domain/);
   });
 
-  it('includes the standard web-artefact build loop guidance', () => {
-    const prompt = buildNarrowL1Prompt('anything');
+  it('includes the standard web-artefact build loop guidance when tools match the web bucket', () => {
+    const prompt = buildNarrowL1Prompt('anything', WEB_TOOLS);
     expect(prompt).toContain('write_file');
     expect(prompt).toContain('start_static_server');
     expect(prompt).toContain('validate_html');
     expect(prompt).toMatch(/Up to 4 iterations/);
   });
 
-  it('includes the shared smoke-test design guidance (IIFE + __test pattern + loop discipline)', () => {
+  it('includes the shared smoke-test design guidance when tools match the web bucket', () => {
     // Shared block between the escalation branch path and the
-    // create-fresh-L1 path. Guards against someone trimming it.
-    const prompt = buildNarrowL1Prompt('build anything');
+    // create-fresh-L1 path. Only appears for the WEB bucket — HTTP and
+    // unknown buckets skip it (fix #8b).
+    const prompt = buildNarrowL1Prompt('build anything', WEB_TOOLS);
     expect(prompt).toMatch(/SMOKE-TEST DESIGN/);
     expect(prompt).toMatch(/pure EXPRESSION/);
     expect(prompt).toMatch(/window\.__test/);
     expect(prompt).toMatch(/SMOKE-LOOP DISCIPLINE/);
     expect(prompt).toMatch(/cumulative over[\s\S]*sliding window/);
   });
+
+  it('uses the HTTP canonical sequence when tools match the http-server-build+probe bucket', () => {
+    const httpTools = makeTools([
+      'write_file',
+      'read_file',
+      'list_files',
+      'run_shell',
+      'fetch_url',
+      'start_node_server',
+    ]);
+    const prompt = buildNarrowL1Prompt('build a REST API', httpTools);
+    // HTTP-specific markers from CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES.
+    expect(prompt).toMatch(/LISTENING_ON_PORT/);
+    expect(prompt).toMatch(/start_node_server/);
+    expect(prompt).toMatch(/fetch_url/);
+    // MUST NOT leak web/smoke guidance — this is the whole point of #8b.
+    expect(prompt).not.toMatch(/SMOKE-TEST DESIGN/);
+    expect(prompt).not.toMatch(/validate_html/);
+    expect(prompt).not.toMatch(/start_static_server/);
+  });
+
+  it('falls back to a generic tools-only template when the toolset matches no known bucket', () => {
+    // Emphasis of the generic branch: NO smoke guidance, NO validate_html
+    // narrative. Just "use only what you were given".
+    const prompt = buildNarrowL1Prompt('ad-hoc task', makeTools(['rare_a', 'rare_b']));
+    expect(prompt).not.toMatch(/SMOKE-TEST DESIGN/);
+    expect(prompt).not.toMatch(/validate_html/);
+    expect(prompt).not.toMatch(/start_node_server/);
+    expect(prompt).toMatch(/ONLY the/);
+  });
+
+  it('defaults childTools to [] and produces a valid generic prompt (backwards compat)', () => {
+    // Callers that haven't migrated to passing tools yet still get a
+    // sensible fallback.
+    const prompt = buildNarrowL1Prompt('anything');
+    expect(prompt).toContain('Your current subtask: anything');
+    expect(prompt).not.toMatch(/SMOKE-TEST DESIGN/);
+  });
 });
 
 describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guidance', () => {
-  it('new L1s created inline (not via escalation branch) get the shared SMOKE_DESIGN_GUIDANCE block', async () => {
+  it('new L1s that inherit validate_html from the L2 toolset get SMOKE_DESIGN_GUIDANCE', async () => {
     // Regression: earlier the smoke guidance only lived in
     // buildNarrowL1Prompt (the escalation-branch path), so freshly-
     // created L1s on the fanout happy path missed it and kept
-    // hitting the IIFE / simulate-input pitfalls. This test wires a
-    // minimal L2 through fan-out-with-create so we can inspect the
-    // system prompt the registry actually stored.
+    // hitting the IIFE / simulate-input pitfalls. After #8b the block
+    // is only appended when the child's merged tools include
+    // validate_html (the web bucket) — so this test wires an L2 with
+    // the web toolset so the merged child tools carry validate_html
+    // and the guidance kicks in.
     const { AtomRegistry } = await import('../src/registry/atomRegistry.js');
     const { openDb } = await import('../src/registry/db.js');
     const { L2Atom } = await import('../src/atoms/L2Atom.js');
@@ -87,7 +146,7 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     const l2Type = reg.create(2, {
       description: 'l2',
       systemPrompt: 'l2',
-      tools: [],
+      tools: WEB_TOOLS,
       params: {},
       createdBy: 'test',
     });

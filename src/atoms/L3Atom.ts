@@ -38,7 +38,10 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
-import { resolveCreationDescription } from './capability.js';
+import {
+  bucketIdForTools,
+  resolveCreationDescription,
+} from './capability.js';
 
 /**
  * Fresh narrow-domain system prompt for an L2 branched after escalation.
@@ -47,7 +50,21 @@ import { resolveCreationDescription } from './capability.js';
  * rebrandPersona pass at `registry.branch` time will swap in the branch's
  * actual taxonomy name on the "You are {Name}" line.
  */
-export function buildNarrowL2Prompt(subtaskDescription: string): string {
+export function buildNarrowL2Prompt(
+  subtaskDescription: string,
+  childTools: readonly Tool[] = []
+): string {
+  // BUCKET-AWARE framing: the closing line hints at the downstream L1
+  // bucket so the branched L2 orchestrator doesn't describe itself as
+  // web-focused when its tools are HTTP-scoped (or vice-versa). Parallel
+  // to buildNarrowL1Prompt — see there for the full rationale (fix #8b).
+  const bucket = bucketIdForTools(childTools);
+  const bucketHint =
+    bucket === 'http-server-build+probe'
+      ? `Your leaf tier-1 will write Node HTTP server code, boot it via start_node_server, and probe endpoints with fetch_url — do NOT ask it to run validate_html or start_static_server.`
+      : bucket === 'web-artefact-build+validate'
+        ? `Your leaf tier-1 will write a single-file web artefact, serve it via start_static_server, and validate via headless browser (validate_html).`
+        : `Your leaf tier-1 works with whatever tools it has been handed — do not assume a specific bucket.`;
   return [
     `You are an L2 molecule that decomposes a single-purpose task into`,
     `orthogonal L1 leaf subtasks and supervises their parallel execution.`,
@@ -64,6 +81,8 @@ export function buildNarrowL2Prompt(subtaskDescription: string): string {
     `  2. Choose an L1 for each (reuse a catalog match or create a narrow new one)`,
     `  3. Pick an aggregation mode (concat or llm-synthesize) matching the artefact`,
     `  4. Return the strategy+plan JSON pair`,
+    ``,
+    bucketHint,
   ].join('\n');
 }
 
@@ -450,15 +469,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       branchOnEscalation: async (child, _trace, reason) => {
         // Reset the L2's system prompt so it's aligned with THIS subtask's
         // domain rather than inherited from the parent that failed.
-        const narrowPrompt = buildNarrowL2Prompt(subtaskDescription);
+        // BUCKET-AWARE: buildNarrowL2Prompt reads childTools so the
+        // narrow prompt's closing hint matches the downstream bucket
+        // (fix #8b).
+        const childType = this.registry.getByName(child.name);
+        const childTools = childType?.tools ?? [];
+        const narrowPrompt = buildNarrowL2Prompt(subtaskDescription, childTools);
         // Capability-first description — match the rule enforced in
         // createSubtaskL2. The task narrative lives in narrowPrompt
         // (systemPromptReplace); the registry must stay tier/tool-
         // scoped so prefilter cross-domain reuse stays clean.
         // Atom.tools is protected — pull the tool signature via the
         // registry, which is the authoritative source anyway.
-        const childType = this.registry.getByName(child.name);
-        const childTools = childType?.tools ?? [];
         const narrowDesc = resolveCreationDescription(undefined, childTools, 2);
         const branched = this.registry.branch(
           child.name,

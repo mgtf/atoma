@@ -37,7 +37,11 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
-import { resolveCreationDescription } from './capability.js';
+import {
+  bucketIdForTools,
+  CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
+  resolveCreationDescription,
+} from './capability.js';
 
 /**
  * Shared smoke-test design guidance. Appended to every L1 system
@@ -112,31 +116,68 @@ export const SMOKE_DESIGN_GUIDANCE = [
  * platformer builder" bleeding into a dashboard task). The branched
  * atom's rebrandPersona pass at `registry.branch` time will then swap in
  * the branch's actual taxonomy name on the "You are {Name}" line.
+ *
+ * BUCKET-AWARE: the tool-sequence body is keyed on the child's tool
+ * signature. A branch of an HTTP L1 (start_node_server + fetch_url) no
+ * longer gets the web/validate_html flow + SMOKE_DESIGN_GUIDANCE —
+ * because the guidance taught the model to REACH FOR validate_html as
+ * a "smoke primitive" even when the atom's declared tools didn't
+ * include it, then the executor happily ran it (observed in the
+ * Node/REST run: Helium-branch atoms calling validate_html against a
+ * JSON API, result rejection, cascade of escalations). The branch of
+ * an HTTP atom now gets the HTTP canonical sequence; the branch of a
+ * web atom still gets the validate_html loop + smoke guidance; an
+ * unknown-bucket branch falls back to a domain-neutral tools-only
+ * template.
  */
-export function buildNarrowL1Prompt(subtaskDescription: string): string {
-  return [
+export function buildNarrowL1Prompt(
+  subtaskDescription: string,
+  childTools: readonly Tool[] = []
+): string {
+  const header = [
     `You are an L1 element builder with ONE narrow responsibility.`,
     `Your current subtask: ${subtaskDescription}`,
     ``,
     `Do NOT import assumptions from other domains — the parent type you`,
     `were branched from may have been narrowly specialised for a`,
-    `different problem (platformer, minesweeper, etc.); IGNORE its`,
-    `domain and focus SOLELY on this subtask as stated.`,
+    `different problem (platformer, minesweeper, HTTP API, etc.);`,
+    `IGNORE its domain and focus SOLELY on this subtask as stated.`,
     ``,
-    `Call tools sequentially to produce the deliverable. For web`,
-    `artefacts:`,
-    `  1. write_file the complete source`,
-    `  2. start_static_server to serve it (port 0 = OS-assigned is fine)`,
-    `  3. validate_html on the returned URL with appropriate interactions`,
-    `     and a smoke check that asserts the key state transitions`,
-    `  4. if validation fails: read_file, diagnose, write_file with the`,
-    `     fix, re-validate. Up to 4 iterations.`,
-    `  5. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
-    ``,
-    `For non-web artefacts, adapt the loop but keep the JSON envelope.`,
-    ``,
-    SMOKE_DESIGN_GUIDANCE,
-  ].join('\n');
+  ];
+
+  const bucket = bucketIdForTools(childTools);
+  let bucketBody: string[];
+  if (bucket === 'http-server-build+probe') {
+    // HTTP sequence + LISTENING_ON_PORT contract, mirror of the
+    // canonical HTTP L1 prompt (single source of truth).
+    bucketBody = [...CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES];
+  } else if (bucket === 'web-artefact-build+validate') {
+    bucketBody = [
+      `Call tools sequentially to produce the deliverable:`,
+      `  1. write_file the complete source`,
+      `  2. start_static_server to serve it (port 0 = OS-assigned is fine)`,
+      `  3. validate_html on the returned URL with appropriate interactions`,
+      `     and a smoke check that asserts the key state transitions`,
+      `  4. if validation fails: read_file, diagnose, write_file with the`,
+      `     fix, re-validate. Up to 4 iterations.`,
+      `  5. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+      ``,
+      SMOKE_DESIGN_GUIDANCE,
+    ];
+  } else {
+    // Unknown bucket — keep a generic tools-only template. DO NOT append
+    // SMOKE_DESIGN_GUIDANCE here: the smoke discipline is web-bucket
+    // specific and leaking it teaches the model to invoke validate_html
+    // even when the atom's declared tools don't include it.
+    bucketBody = [
+      `Call tools sequentially to produce the deliverable. Use ONLY the`,
+      `tools you were handed — do NOT invoke anything that isn't in your`,
+      `declared tool list. Return JSON {"output": <...>, "summary": "<...>"}`,
+      `once the work is done.`,
+    ];
+  }
+
+  return [...header, ...bucketBody].join('\n');
 }
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
@@ -532,6 +573,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // the tool signature; task-specific info still flows to the atom via
     // `handle(task, ctx)` at runtime. See `src/atoms/capability.ts` for
     // the full rationale.
+    // BUCKET-AWARE system prompt: only append SMOKE_DESIGN_GUIDANCE when
+    // the merged toolset includes validate_html (the web bucket). An HTTP
+    // L1 or a custom-bucket L1 that doesn't own validate_html should not
+    // be told about smoke primitives it can't use — that guidance taught
+    // earlier runs to INVOKE validate_html anyway via the shared executor
+    // (fix #8b). See buildNarrowL1Prompt for the mirror logic on the
+    // escalation branch path.
+    const hasValidateHtml = mergedTools.some((t) => t.name === 'validate_html');
     return this.registry.create(1, {
       description: resolveCreationDescription(seed.description, mergedTools, 1),
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
@@ -553,13 +602,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           `Subtask you were handed: ${subtask.description}`,
           `Parent task (for context only): ${parentTask.description}`,
           ``,
-          // Same smoke-test discipline as the escalation-branch path
-          // (buildNarrowL1Prompt). Without this block, a newly-created
-          // L1 missed the IIFE/__test guidance and burned rounds on
-          // the two failure modes it diagnoses (observed on the chess
-          // puzzle run: 20+ validate_html calls rotating the same
-          // unreachable assertion).
-          SMOKE_DESIGN_GUIDANCE,
+          ...(hasValidateHtml ? [SMOKE_DESIGN_GUIDANCE] : []),
         ].join('\n'),
       tools: mergedTools,
       params: (seed.params ?? this.params) as GenerationParams,
@@ -598,7 +641,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // reset, a "platformer builder" parent gets branched into a
         // "dashboard builder" child that still introduces itself as a
         // platformer and keeps emitting platformer plans (Frankenstein).
-        const narrowPrompt = buildNarrowL1Prompt(subtaskDescription);
+        //
+        // BUCKET-AWARE: buildNarrowL1Prompt reads childTools to pick
+        // the tool-sequence body (HTTP vs web vs generic). Without
+        // this, a branch of an HTTP L1 inherited the web/validate_html
+        // + SMOKE_DESIGN_GUIDANCE body and the model invoked
+        // validate_html on a JSON API — fix #8b.
         // Capability-first registry description — the old
         // "L1 narrow builder for: <subtaskDescription>" label leaked
         // the task narrative back into the registry, the exact
@@ -614,6 +662,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // tool signature anyway.
         const childType = this.registry.getByName(child.name);
         const childTools = childType?.tools ?? [];
+        const narrowPrompt = buildNarrowL1Prompt(subtaskDescription, childTools);
         const narrowDesc = resolveCreationDescription(undefined, childTools, 1);
         const branched = this.registry.branch(
           child.name,

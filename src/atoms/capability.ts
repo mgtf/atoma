@@ -278,6 +278,19 @@ function pickTools(tools: readonly Tool[], scope: readonly string[]): Tool[] {
 }
 
 /**
+ * Return the CAPABILITY_BUCKETS id that best describes the given tool set
+ * (first bucket whose `required` list is fully covered), or null if no
+ * bucket matches. Used by prompt-selection code (e.g. the narrow-branch
+ * L1 prompt) to tailor its guidance to the atom's actual bucket instead
+ * of leaking web-centric smoke discipline into an HTTP atom.
+ */
+export function bucketIdForTools(tools: readonly Tool[]): string | null {
+  const names = new Set(tools.map((t) => t.name));
+  const match = CAPABILITY_BUCKETS.find((b) => b.required.every((r) => names.has(r)));
+  return match?.id ?? null;
+}
+
+/**
  * Description used for the canonical tier-2 "web build orchestrator"
  * seeded by `examples/build-app.ts`. Kept as a named export (not just
  * derived inline) so tests and downstream tooling can reference the
@@ -302,7 +315,7 @@ export const CANONICAL_L2_WEB_DESCRIPTION =
 export const CANONICAL_L2_HTTP_DESCRIPTION =
   'Node HTTP server orchestrator: routes a leaf task to a tier-1 builder that writes server code, installs dependencies, boots a Node process, and probes endpoints via fetch_url';
 
-const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
+export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element with ONE narrow responsibility.`,
   `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
   `Call tools sequentially to produce your single output. Return a structured`,
@@ -314,7 +327,7 @@ const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `silently growing your remit.`,
 ];
 
-const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
+export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are a domain-neutral L2 orchestrator for single-file web builds.`,
   `DELEGATION DISCIPLINE: you NEVER call tools yourself. Decompose the task`,
   `into AT MOST one L1 leaf (the write + serve + validate loop) and delegate.`,
@@ -326,7 +339,7 @@ const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `registry metadata. Keep the catalog reusable.`,
 ];
 
-const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
+export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element specialised for Node HTTP server builds.`,
   `Your job: write a single self-contained server entry point, install its`,
   `dependencies, boot it, and verify the endpoints with HTTP probes.`,
@@ -358,7 +371,7 @@ const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `at L2/L3, not an excuse to expand scope. Surface it in your summary.`,
 ];
 
-const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
+export const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are a domain-neutral L2 orchestrator for Node HTTP server builds.`,
   `DELEGATION DISCIPLINE: you NEVER call tools yourself. Decompose the task`,
   `into orthogonal L1 leaves (server code, client stub, schema file, etc.)`,
