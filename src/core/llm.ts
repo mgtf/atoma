@@ -120,10 +120,48 @@ export class AnthropicLlmClient implements LlmClient {
       const toolUses = response.content.filter(
         (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
       );
+      // Declared-tools scope enforcement (#8a). The LLM sees a tool
+      // DECLARATION list (req.tools) — and should only invoke those —
+      // but the shared InMemoryToolRegistry registered at runtime has
+      // every available tool. Without a scope gate, a model that
+      // learned about e.g. validate_html from an unrelated guidance
+      // block can ASK for it and the executor will happily run it,
+      // then the result gets fed back as signal (observed in the
+      // Node/REST live run: HTTP-scope atoms invoking validate_html
+      // on a JSON API because SMOKE_DESIGN_GUIDANCE taught the
+      // pattern, resulting in validator rejections and escalation
+      // cascades). We gate on the declared-tool names here: off-
+      // list requests are turned into a descriptive tool_result
+      // error without hitting the executor, so the model sees the
+      // rejection as part of its conversation and can course-correct.
+      // If req.tools is empty or absent, the gate is disabled (no
+      // declaration = no scope to enforce).
+      const declaredToolNames =
+        req.tools && req.tools.length > 0
+          ? new Set(req.tools.map((t) => t.name))
+          : null;
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
         const args = (tu.input ?? {}) as Record<string, unknown>;
         const startedAt = Date.now();
+        if (declaredToolNames && !declaredToolNames.has(tu.name)) {
+          const declaredList = [...declaredToolNames].sort().join(', ');
+          const errMsg = `tool "${tu.name}" is NOT in your declared tools. You may only invoke: ${declaredList}. Do not call "${tu.name}" again for this task.`;
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content: errMsg,
+            is_error: true,
+          });
+          notifyToolInvocation(req.onToolInvocation, {
+            name: tu.name,
+            args,
+            error: errMsg,
+            durationMs: Date.now() - startedAt,
+            startedAt,
+          });
+          continue;
+        }
         try {
           const result = await req.executor!.execute(tu.name, args);
           toolResults.push({
