@@ -177,6 +177,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
             { reasoning: prefilter.reasoning }
           );
           // Prefilter degenerate case: one subtask, one preferred child.
+          // viaPrefilter=true — see L2.plan mirror comment + planSchema.
           return {
             reasoning: `prefilter selected ${prefilter.target}`,
             proposedAction: `delegate task to L2 "${prefilter.target}"`,
@@ -189,6 +190,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
             ],
             aggregation: { mode: 'concat' as const },
             expectedOutput: task.description,
+            viaPrefilter: true,
           };
         }
         // Decomposable: fall through to Opus plan with target as hint.
@@ -640,6 +642,17 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   // Opus stays reserved for strategy/plan generation; yes/no verdicts are
   // delegated to the cheapest atom that can answer them.
   async validatePlan(child: L2Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
+    // Prefilter fast-path — see L2Atom.validatePlan for full rationale.
+    // Same decision, one tier up: a viaPrefilter plan is Haiku's own
+    // capability-match short-circuit, not a Sonnet/Opus strategy, and
+    // a second Haiku pass on it is redundant signal that was observed
+    // in production to reject freshly-bootstrapped canonicals.
+    if (plan.viaPrefilter) {
+      return {
+        approved: true,
+        reasoning: `prefilter fast-path: plan was synthesised by Haiku's capability-match decision on child "${child.name}", no separate validator pass needed`,
+      };
+    }
     const type = this.registry.getByName(child.name);
     if (type && shouldTrustType(type)) {
       const approval = trustedApproval(type);

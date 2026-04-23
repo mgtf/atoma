@@ -77,6 +77,15 @@ export interface Plan {
    */
   readonly proposedAction?: string;
   readonly toolCalls?: ToolCall[];
+  /**
+   * Internal provenance marker set when a plan was synthesised by the
+   * Haiku prefilter short-circuit in L2/L3.plan (not by the full
+   * Sonnet/Opus strategy call). The supervisor's validatePlan treats
+   * such plans as already-vetted — see planSchema docs in json.ts and
+   * L2Atom.validatePlan for the full rationale. LLMs never set this
+   * field; the plan synthesiser in L2/L3 does.
+   */
+  readonly viaPrefilter?: boolean;
 }
 
 export interface Result {

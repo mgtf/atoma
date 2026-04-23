@@ -236,6 +236,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           // Prefilter degenerate case: one subtask, one preferred child.
           // The fan-out loop collapses to a single child run.
+          //
+          // viaPrefilter=true marks this plan as Haiku-synthesised so the
+          // supervisor's validatePlan skips the redundant second Haiku
+          // vet on it (see validatePlan + planSchema docs for why).
           return {
             reasoning: `prefilter selected ${prefilter.target}`,
             proposedAction: `delegate leaf task to L1 "${prefilter.target}"`,
@@ -248,6 +252,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             ],
             aggregation: { mode: 'concat' as const },
             expectedOutput: task.description,
+            viaPrefilter: true,
           };
         }
         // Decomposable reuse: fall through to the Sonnet plan with
@@ -820,6 +825,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   // (Haiku by default), not the supervisor's own model. The job here is a
   // terse yes/no on the child's plan/result; it does not need Sonnet to answer.
   async validatePlan(child: L1Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
+    // Prefilter fast-path: a plan synthesised by the Haiku prefilter
+    // short-circuit is already the product of a capability-match
+    // decision — asking another Haiku to vet "delegate leaf task to L1
+    // Helium" produces no new signal and regularly rejects the
+    // freshly-bootstrapped canonical picks. We short-circuit to
+    // approval, which matches the semantic of validatePlan (yes/no on
+    // the plan's fitness) without paying the redundant round-trip.
+    // Trust counters are NOT used here: an untrusted but prefilter-
+    // validated child gets the pass precisely because the prefilter
+    // already did the capability-match reasoning.
+    if (plan.viaPrefilter) {
+      return {
+        approved: true,
+        reasoning: `prefilter fast-path: plan was synthesised by Haiku's capability-match decision on child "${child.name}", no separate validator pass needed`,
+      };
+    }
     const type = this.registry.getByName(child.name);
     if (type && shouldTrustType(type)) {
       const approval = trustedApproval(type);

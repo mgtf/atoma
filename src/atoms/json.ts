@@ -580,6 +580,16 @@ export const planSchema = z.preprocess(
     toolCalls: z
       .array(z.object({ name: z.string(), args: z.record(z.unknown()) }))
       .optional(),
+    // NOTE: the Plan interface in types.ts also carries a
+    // `viaPrefilter?: boolean` flag used by supervisor.validatePlan as
+    // a "this plan was Haiku-synthesised, skip the redundant
+    // validator pass" fast-path. We deliberately DO NOT list it in
+    // this zod schema — z.object() strips unknown keys at parse, so
+    // an LLM that emits `"viaPrefilter": true` in its routing JSON
+    // can't claim the fast-path by spoofing the marker. The field
+    // only survives when it's set on a TypeScript literal (inside
+    // L2.plan / L3.plan's skeletal-plan return path), which is the
+    // only place it should ever be set.
   })
 );
 
