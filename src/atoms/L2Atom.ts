@@ -199,6 +199,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     this.triedChildren.beginTask(task.description);
     const catalog = this.registry.listByTier(1);
 
+    // Prefilter may either short-circuit the plan (single-subtask reuse)
+    // or drop a hint that survives into the Sonnet plan call. The
+    // "decomposable" flag controls which: if Haiku sees a composite
+    // task, it picks a reusable child AND flags the task as needing
+    // decomposition — we then fall through to Sonnet with the target
+    // as a preferred-child hint, so Sonnet can emit a multi-subtask
+    // plan that routes each leaf to the same reused child instead of
+    // collapsing the whole task onto one L1 run.
+    let prefilterHint: { target: string; reasoning: string } | null = null;
     if (catalog.length > 0) {
       const prefilter = await prefilterStrategy({
         ctx,
@@ -214,31 +223,42 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         actor: { name: this.name, tier: 2 },
       });
       if (prefilter && prefilter.kind === 'reuse') {
-        this.pendingStrategy = {
-          strategy: 'reuse',
-          target: prefilter.target,
-          reasoning: `prefilter: ${prefilter.reasoning}`,
-        };
-        this.triedChildren.mark(prefilter.target);
+        if (!prefilter.decomposable) {
+          this.pendingStrategy = {
+            strategy: 'reuse',
+            target: prefilter.target,
+            reasoning: `prefilter: ${prefilter.reasoning}`,
+          };
+          this.triedChildren.mark(prefilter.target);
+          ctx.logger.debug(
+            `[${this.name}] prefilter picked L1 ${prefilter.target}`,
+            { reasoning: prefilter.reasoning }
+          );
+          // Prefilter degenerate case: one subtask, one preferred child.
+          // The fan-out loop collapses to a single child run.
+          return {
+            reasoning: `prefilter selected ${prefilter.target}`,
+            proposedAction: `delegate leaf task to L1 "${prefilter.target}"`,
+            subtasks: [
+              {
+                description: task.description,
+                preferredChild: prefilter.target,
+                ...(task.inputs ? { inputs: task.inputs } : {}),
+              },
+            ],
+            aggregation: { mode: 'concat' as const },
+            expectedOutput: task.description,
+          };
+        }
+        // Decomposable reuse: fall through to the Sonnet plan with
+        // the target as a hint. Do NOT mark triedChildren — the child
+        // hasn't been consumed yet, and we want Sonnet to freely set
+        // it as preferredChild on the decomposed subtasks.
+        prefilterHint = { target: prefilter.target, reasoning: prefilter.reasoning };
         ctx.logger.debug(
-          `[${this.name}] prefilter picked L1 ${prefilter.target}`,
+          `[${this.name}] prefilter flagged decomposable reuse of ${prefilter.target} — deferring to Sonnet plan`,
           { reasoning: prefilter.reasoning }
         );
-        // Prefilter degenerate case: one subtask, one preferred child.
-        // The fan-out loop collapses to a single child run.
-        return {
-          reasoning: `prefilter selected ${prefilter.target}`,
-          proposedAction: `delegate leaf task to L1 "${prefilter.target}"`,
-          subtasks: [
-            {
-              description: task.description,
-              preferredChild: prefilter.target,
-              ...(task.inputs ? { inputs: task.inputs } : {}),
-            },
-          ],
-          aggregation: { mode: 'concat' as const },
-          expectedOutput: task.description,
-        };
       }
     }
 
@@ -306,6 +326,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ? '  (empty — no elements exist yet; "reuse" is not possible)'
         : catalog.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
       ``,
+      // Prefilter hint from the decomposable short-circuit. Haiku has
+      // already identified a reusable child but flagged the task as
+      // multi-artefact — we preserve that signal so Sonnet sets
+      // preferredChild on each leaf subtask instead of picking an
+      // unrelated child or minting a new one.
+      prefilterHint
+        ? [
+            `== PREFILTER HINT ==`,
+            `A lightweight prefilter identified "${prefilterHint.target}" as the reusable L1`,
+            `for the leaf work (${prefilterHint.reasoning}). It also flagged this task as`,
+            `decomposable. Prefer setting "preferredChild": "${prefilterHint.target}" on each`,
+            `leaf subtask, unless one subtask genuinely needs a different capability — in`,
+            `which case still split, but use a different child there.`,
+            ``,
+          ].join('\n')
+        : '',
       `Peer L2 catalog (molecules you can mutualize with):`,
       peerCatalog.length === 0
         ? '  (no peers available)'

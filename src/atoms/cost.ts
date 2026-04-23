@@ -81,8 +81,26 @@ export const PREFILTER_SYSTEM_PROMPT = [
   '      you would label it "low" anyway, prefer emitting "escalate" directly.',
   '  Missing confidence is treated as "low" (conservative default).',
   '',
+  'Decomposability hint (reuse only):',
+  '  The default caller behaviour on "reuse" is to hand the ENTIRE task to',
+  '  the chosen child as a single subtask (skipping the full supervisor',
+  '  plan call). That is correct for atomic tasks. For a COMPOSITE task',
+  '  that enumerates multiple orthogonal artefacts (e.g. "index.js +',
+  '  package.json + tests", "index.html + styles.css + script.js", "server',
+  '  + client + schema"), the single-subtask collapse is wrong — the',
+  '  supervisor should decompose the task into one subtask per artefact',
+  '  and route them in parallel, even if each subtask ends up on the',
+  '  same reused child.',
+  '  Set "decomposable": true when the task clearly enumerates multiple',
+  '  orthogonal artefacts or steps. Set "decomposable": false (or omit)',
+  '  for a single-responsibility task the chosen child can handle end-to-',
+  '  end. Be CONSERVATIVE — default is false. A task saying "build a chess',
+  '  puzzle with 8x8 board" is NOT decomposable (one artefact, even if the',
+  '  description is long). A task saying "create package.json AND',
+  '  index.js AND a test file" IS decomposable.',
+  '',
   'Respond with ONE JSON object, no prose, no markdown, starting with "{":',
-  '  {"kind": "reuse", "target": "<exact catalog name>", "confidence": "high"|"low", "reasoning": "<one short sentence>"}',
+  '  {"kind": "reuse", "target": "<exact catalog name>", "confidence": "high"|"low", "decomposable": true|false, "reasoning": "<one short sentence>"}',
   'OR',
   '  {"kind": "escalate", "reasoning": "<one short sentence>"}',
 ].join('\n');
@@ -100,6 +118,15 @@ export const prefilterResponseSchema = z.discriminatedUnion('kind', [
     // push Haiku to produce this label, but we want the parser to be
     // tolerant of older / smaller models that may drop it).
     confidence: z.enum(['high', 'low']).optional(),
+    // Hint from Haiku: does the task enumerate multiple orthogonal
+    // artefacts that warrant decomposition at the supervisor tier, or
+    // can the chosen child handle it end-to-end as a single subtask?
+    // Omitted / false keeps the existing short-circuit behaviour (one
+    // subtask, skip the full supervisor plan call). True makes the
+    // caller fall through to the full Sonnet/Opus plan, with Haiku's
+    // reuse target preserved as a routing hint. Default is false (most
+    // single-artefact tasks).
+    decomposable: z.boolean().optional(),
     reasoning: z.string(),
   }),
   z.object({ kind: z.literal('escalate'), reasoning: z.string() }),

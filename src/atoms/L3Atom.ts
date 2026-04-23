@@ -147,6 +147,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.triedChildren.beginTask(task.description);
     const catalog = this.registry.listByTier(2);
 
+    // See L2.plan for the design: "decomposable" flips the prefilter
+    // from a hard short-circuit to a routing hint that survives into
+    // the Opus plan call.
+    let prefilterHint: { target: string; reasoning: string } | null = null;
     if (catalog.length > 0) {
       const prefilter = await prefilterStrategy({
         ctx,
@@ -161,30 +165,38 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         actor: { name: this.name, tier: 3 },
       });
       if (prefilter && prefilter.kind === 'reuse') {
-        this.pendingStrategy = {
-          strategy: 'reuse',
-          target: prefilter.target,
-          reasoning: `prefilter: ${prefilter.reasoning}`,
-        };
-        this.triedChildren.mark(prefilter.target);
+        if (!prefilter.decomposable) {
+          this.pendingStrategy = {
+            strategy: 'reuse',
+            target: prefilter.target,
+            reasoning: `prefilter: ${prefilter.reasoning}`,
+          };
+          this.triedChildren.mark(prefilter.target);
+          ctx.logger.debug(
+            `[${this.name}] prefilter picked L2 ${prefilter.target}`,
+            { reasoning: prefilter.reasoning }
+          );
+          // Prefilter degenerate case: one subtask, one preferred child.
+          return {
+            reasoning: `prefilter selected ${prefilter.target}`,
+            proposedAction: `delegate task to L2 "${prefilter.target}"`,
+            subtasks: [
+              {
+                description: task.description,
+                preferredChild: prefilter.target,
+                ...(task.inputs ? { inputs: task.inputs } : {}),
+              },
+            ],
+            aggregation: { mode: 'concat' as const },
+            expectedOutput: task.description,
+          };
+        }
+        // Decomposable: fall through to Opus plan with target as hint.
+        prefilterHint = { target: prefilter.target, reasoning: prefilter.reasoning };
         ctx.logger.debug(
-          `[${this.name}] prefilter picked L2 ${prefilter.target}`,
+          `[${this.name}] prefilter flagged decomposable reuse of ${prefilter.target} — deferring to Opus plan`,
           { reasoning: prefilter.reasoning }
         );
-        // Prefilter degenerate case: one subtask, one preferred child.
-        return {
-          reasoning: `prefilter selected ${prefilter.target}`,
-          proposedAction: `delegate task to L2 "${prefilter.target}"`,
-          subtasks: [
-            {
-              description: task.description,
-              preferredChild: prefilter.target,
-              ...(task.inputs ? { inputs: task.inputs } : {}),
-            },
-          ],
-          aggregation: { mode: 'concat' as const },
-          expectedOutput: task.description,
-        };
       }
     }
     const toolCatalog =
@@ -239,6 +251,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         ? '  (empty — you must create)'
         : catalog.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
       ``,
+      // Prefilter hint from the decomposable short-circuit. See L2.plan
+      // for rationale — same pattern, one tier up.
+      prefilterHint
+        ? [
+            `== PREFILTER HINT ==`,
+            `A lightweight prefilter identified "${prefilterHint.target}" as the reusable L2`,
+            `for this task (${prefilterHint.reasoning}). It also flagged the task as`,
+            `decomposable. Prefer setting "preferredChild": "${prefilterHint.target}" on each`,
+            `subtask, unless one subtask genuinely needs a different orchestrator.`,
+            ``,
+          ].join('\n')
+        : '',
       `System tools the L1 workers will have access to downstream (for context only;`,
       `do NOT call them yourself):`,
       toolCatalog,
