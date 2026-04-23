@@ -39,6 +39,40 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   Only "escalate" (no clear match, or a new type must be designed) falls
   through to the full supervisor-tier call. Shared prompt:
   `PREFILTER_SYSTEM_PROMPT` in `src/atoms/cost.ts` — constant, cached.
+- **Prefilter confidence guard.** The `reuse` variant of
+  `prefilterResponseSchema` carries an optional `confidence: "high"|"low"`.
+  `prefilterStrategy` in `src/atoms/cost.ts` rewrites any `reuse` outcome
+  with non-`high` confidence (including omitted) into an `escalate` before
+  returning it. The prompt instructs Haiku to label its own certainty and
+  to prefer emitting `escalate` outright when it would otherwise pick
+  "low". Rationale: on a single-candidate catalog Haiku used to force-
+  match the only available option (observed: `Methane` picking `Hydrogen`
+  for a Node/REST task because Hydrogen was the only L1 on record).
+  Structurally required regardless of catalog size — the prompt has a
+  HARD RULE against single-candidate force-matching.
+- **Prefilter decomposable hint.** The `reuse` variant also carries an
+  optional `decomposable: boolean`. On `reuse + !decomposable` the
+  skeletal-plan short-circuit fires as before (happy path, 0 Sonnet).
+  On `reuse + decomposable` L2/L3.plan FALL THROUGH to the full
+  supervisor plan call, with the prefilter target preserved as a
+  `== PREFILTER HINT ==` section in the userContent so Sonnet/Opus can
+  set `preferredChild: <target>` on each leaf subtask. Prompt tells
+  Haiku to set `true` only when the task clearly enumerates multiple
+  orthogonal artefacts (`package.json + index.js + tests`, not "build
+  a chess puzzle"). A decomposable short-circuit collapse is the
+  failure mode we want to avoid on multi-artefact builds.
+- **Prefilter fast-path in `validatePlan`.** Plans synthesised by the
+  prefilter carry an internal `viaPrefilter: true` flag (set in
+  `L2.plan` / `L3.plan` on the skeletal-plan literal). Both
+  `L2.validatePlan` and `L3.validatePlan` open with an early-return to
+  approval when the flag is set — Haiku validating a Haiku-picked one-
+  line routing decision produces no new signal and was observed
+  rejecting freshly-bootstrapped canonicals (the Node/REST
+  Helium-rejected-then-hallucinated-Neon cascade). CRITICAL: the
+  flag is deliberately OMITTED from `planSchema` so an LLM cannot
+  spoof `viaPrefilter: true` in its routing JSON — `z.object()` strips
+  unknown keys at parse, so only the skeletal-plan literal can carry
+  the marker into `validatePlan`.
 - **Trust fast-path in validators.** Each `validatePlan` / `validateResult`
   checks `registry.getByName(child.name)` and returns an approved verdict
   WITHOUT an LLM call when `successes >= TRUST_THRESHOLD_SUCCESSES` (3) AND
@@ -211,6 +245,52 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   skips the auxiliary trailer for those tools. Without the skip,
   CANONICAL_L2_HTTP_DESCRIPTION could not stay in sync with
   `capabilityDescription(httpTools, 2)`.
+- **Bucket-aware narrow prompts.** `buildNarrowL1Prompt(subtask,
+  childTools)` in `L2Atom.ts` and `buildNarrowL2Prompt(subtask,
+  childTools)` in `L3Atom.ts` pick their tool-sequence body from the
+  child's bucket via `bucketIdForTools(tools)` — HTTP bucket gets the
+  LISTENING_ON_PORT sequence (reuses `CANONICAL_HTTP_L1_SYSTEM_
+  PROMPT_LINES`), web bucket gets the write/serve/validate_html loop
+  + `SMOKE_DESIGN_GUIDANCE`, unknown buckets get a generic "use only
+  your declared tools" template with NO smoke guidance. Without this
+  gate, the narrow prompt unconditionally appended
+  `SMOKE_DESIGN_GUIDANCE` — which taught HTTP atoms to reach for
+  validate_html even when it wasn't in their declared tools, and the
+  executor happily ran whatever the model asked for. Fix #8b.
+  `createSubtaskL1` mirrors the rule: only appends
+  `SMOKE_DESIGN_GUIDANCE` when the merged tools include
+  `validate_html`. New L1/L2 escalation-branch paths must thread
+  `childTools` (via `registry.getByName(child.name)?.tools` since
+  `Atom.tools` is protected) into the builder or they'll regress.
+- **Executor scope enforcement.** `AnthropicLlmClient.complete`'s
+  tool-use loop gates every `tool_use` block against `req.tools`
+  BEFORE invoking the executor: an off-scope request is turned into
+  a `tool_result` with `is_error: true` listing the declared tools,
+  so the model sees the rejection inline without burning a real tool
+  execution. Gate is DISABLED when `req.tools` is empty/absent (no
+  declaration to enforce). Defence in depth paired with bucket-aware
+  prompts: even if future guidance regresses or a model hallucinates
+  a tool name, the executor won't silently honour it. Fix #8a.
+- **Ground-truth probe is a WEB-bucket invariant, not universal.**
+  `probeGroundTruth` (in `L2Atom.ts`, invoked from `llmVerdict` on
+  RESULT verdicts) only fires when BOTH (a) `ctx.tools` has
+  `validate_html` AND (b) the CHILD atom declares `validate_html` in
+  its own `toolNames()`. The child gate was added after an HTTP-
+  bucket Helium returned `"http://localhost:59375/"` and the probe
+  ran Puppeteer against a JSON API, got "errors", rejected a valid
+  result, cascade. `Atom.toolNames()` is the public accessor to the
+  declared tool names (the full tools array stays protected). Fix #9.
+- **`VALIDATION_SYSTEM_PROMPT` must explicitly endorse the L1 plan
+  shape.** The TIERING CONTRACT section names `toolCalls` as a valid
+  L1 plan field and states "aspirational toolCalls at plan time are
+  EXPECTED" plus "placeholders / references to runtime data the plan
+  cannot yet know are acceptable". Without this, Haiku over-applied
+  the L2/L3-must-delegate rule to L1 plans and rejected every L1
+  that pre-declared its tool sequence (observed in the Node/REST
+  run: three consecutive `"L1 must NOT propose tool invocations"`
+  rejects → escalate → branch cascade). Do NOT trim this section;
+  it's specifically load-bearing for the HTTP canonical happy path.
+  Fix #10.
 
 ## LLM interaction conventions
 
@@ -263,9 +343,16 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
 - **`defaultBuiltinTools({ sandbox, logger })`** (`src/tools/builtin.ts`)
   returns: `write_file`, `read_file`, `list_files`, `run_shell`,
-  `start_static_server`, `validate_html`. The validator uses Puppeteer — it
-  can simulate both mouse (`click`, `rightclick`) AND keyboard events
-  (`keydown`, `keyup`, `keypress` with `holdMs`) for platformer-style input.
+  `start_static_server`, `validate_html`, `fetch_url`,
+  `start_node_server`. The web validator (`validate_html`) uses
+  Puppeteer — it can simulate both mouse (`click`, `rightclick`) AND
+  keyboard events (`keydown`, `keyup`, `keypress` with `holdMs`) for
+  platformer-style input. The HTTP pair (`fetch_url` +
+  `start_node_server`) powers the Node bucket: `fetch_url` is a
+  general HTTP probe (GET + POST JSON, 10s default timeout), and
+  `start_node_server` spawns `node <entry>` with `PORT=0` in env and
+  parses a `LISTENING_ON_PORT=<N>` line from stdout to discover the
+  bound port (see HTTP bucket contract above).
 - **`start_static_server`** auto-retries on port=0 when a caller-specified
   port is busy (logs `⚠ port N busy — retrying on OS-assigned port`). Initial
   boot-timeout is 3s, retry boot-timeout is 5s — cold-start Python can take
@@ -310,6 +397,35 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   params when the model 400s on `temperature`/`top_p`. Guards against brand-new
   reasoning models that reject those params. See `modelSupportsSamplingParams`
   in `src/core/models.ts` for the known-deprecated list.
+- `aggregationSpecSchema.instruction` is
+  `.string().nullable().optional().transform(v => v ?? undefined)` —
+  Sonnet/Opus routinely emit `"instruction": null` on `mode: "concat"`
+  plans and a plain `.optional()` would reject and crash the plan
+  parse (observed on a branched L2 replan). Same shape as
+  `verdictSchema.branchName`: accept null at the boundary, normalise
+  to undefined so the TypeScript type stays `string | undefined`.
+- The `Plan` interface in `src/core/types.ts` carries a
+  `viaPrefilter?: boolean` flag but `planSchema` in `src/atoms/json.ts`
+  does NOT list it. This is deliberate: the flag is an internal
+  provenance marker set on skeletal-plan literals inside
+  `L2.plan` / `L3.plan`, and `z.object()` strips unknown keys at parse
+  so an LLM cannot spoof `viaPrefilter: true` in its routing JSON.
+  See the note in `planSchema` for the full rationale.
+- `capabilityDescription` orders HTTP before web in `CAPABILITY_BUCKETS`
+  even though "specific before general" usually favours the more
+  fine-grained web bucket. Reason: the Node bucket's required tools
+  (`start_node_server`) are structurally incompatible with the web
+  bucket, so a toolset carrying `start_node_server` genuinely belongs
+  to HTTP. Putting HTTP first means a dynamically-created L1 inheriting
+  the kitchen-sink toolset from Methane gets the HTTP label, not the
+  web one. The canonical helpers `pickTools` their input so canonical
+  web L1s never see the HTTP-only tools in the first place — order
+  only matters for dynamically created atoms.
+- `Atom.toolNames(): string[]` is public while `Atom.tools: Tool[]` is
+  protected. The names accessor was added specifically for cross-
+  cutting concerns (ground-truth probe bucket gate, tracing) that
+  need to inspect declared scope without exposing the mutable tools
+  array with its executor closures.
 
 ## Deferred / explicitly out of scope
 
