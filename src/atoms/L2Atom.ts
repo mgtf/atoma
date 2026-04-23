@@ -1328,7 +1328,12 @@ export async function llmVerdict(args: {
   // believed it. We don't invent task-specific interactions (too risky); we
   // just check the page loads cleanly. If the page throws pageerror or has
   // console errors the validator now has hard evidence the claim is false.
-  const groundTruthBlock = await probeGroundTruth(args);
+  const groundTruthBlock = await probeGroundTruth({
+    ctx: args.ctx,
+    subject: args.subject,
+    payload: args.payload,
+    child: args.child,
+  });
 
   const userContent = [
     `Supervisor: "${args.supervisorName}" (tier ${args.supervisorTier})`,
@@ -1490,10 +1495,30 @@ async function probeGroundTruth(args: {
   ctx: RunContext;
   subject: 'PLAN' | 'RESULT';
   payload: unknown;
+  /**
+   * The child atom whose RESULT we are validating. We inspect its
+   * declared tool names to decide whether a validate_html ground-truth
+   * probe even makes sense: an HTTP-bucket L1 produces a JSON REST API
+   * URL, and running Puppeteer against it returns "errors" that the
+   * supervisor then (incorrectly) treats as a child failure. The probe
+   * is a web-bucket invariant, not a universal one — #9.
+   */
+  child: import('../core/atom.js').Atom;
 }): Promise<string> {
   if (args.subject !== 'RESULT') return '';
   const tools = args.ctx.tools;
   if (!tools || !tools.has('validate_html')) return '';
+  // Bucket gate: the probe is a web-artefact sanity check. A child that
+  // does NOT declare validate_html cannot have produced a web artefact
+  // the probe is designed to verify — probing the result URL with
+  // Puppeteer would just generate noise that Haiku reads as "errors
+  // contradict the child's claim" and reject a perfectly valid HTTP
+  // result. Observed in the Node/REST live run: Helium (HTTP-scope)
+  // returned the bound URL; the supervisor ran validate_html against
+  // the JSON API, got Puppeteer errors, rejected, cascade of
+  // escalations. We require the child itself to advertise
+  // validate_html before treating it as a web artefact.
+  if (!args.child.toolNames().includes('validate_html')) return '';
   const url = extractResultUrl(args.payload);
   if (!url) return '';
 

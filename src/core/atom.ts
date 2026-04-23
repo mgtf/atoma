@@ -65,6 +65,16 @@ export abstract class Atom {
     this.injectedContext.push(text);
   }
 
+  /**
+   * Public view of the atom's declared tool NAMES (not the tool objects,
+   * which carry closures). Used by cross-cutting concerns (supervisor
+   * ground-truth probes, tracing) that need to know what the atom can
+   * legitimately invoke without exposing the mutable tools array.
+   */
+  toolNames(): string[] {
+    return this.tools.map((t) => t.name);
+  }
+
   setFallbackMode(on: boolean): void {
     this.fallbackMode = on;
   }

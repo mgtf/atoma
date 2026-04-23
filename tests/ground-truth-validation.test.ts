@@ -19,11 +19,22 @@ import type { ToolExecutor } from '../src/core/types.js';
  */
 
 function makeChild(): L1Atom {
+  // Bucket gate (#9): the ground-truth probe only fires when the child
+  // declares validate_html — otherwise the child can't have produced a
+  // web artefact the probe is designed to verify. Tests in this file
+  // assert the happy path (probe fires), so the child must advertise
+  // validate_html.
   return new L1Atom({
     name: 'Hydrogen',
     ordinal: 1,
     systemPrompt: 'sys',
-    tools: [],
+    tools: [
+      {
+        name: 'validate_html',
+        description: 'validate a URL',
+        inputSchema: { type: 'object', properties: {} },
+      },
+    ],
     params: {},
   });
 }
@@ -141,6 +152,57 @@ describe('llmVerdict — ground-truth re-validation', () => {
     expect(tools.calls).toHaveLength(1);
     expect(tools.calls[0]!.name).toBe('validate_html');
     expect(tools.calls[0]!.args['url']).toBe('http://localhost:8000/');
+  });
+
+  it('skips the probe when the child does NOT declare validate_html (#9 — HTTP-bucket atoms return a URL that is NOT a web page)', async () => {
+    // This is the exact scenario the Node/REST live run hit: Helium
+    // (HTTP-scope L1) returned "http://localhost:55947/" as its
+    // output. Without the bucket gate, the supervisor ran Puppeteer
+    // against a JSON API endpoint, got errors, and rejected the
+    // child. The gate skips the probe when the child doesn't have
+    // validate_html in its declared tools.
+    const tools = new MockToolExecutor();
+    const ctx = makeCtx();
+    (ctx as { tools?: ToolExecutor }).tools = tools;
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
+
+    const httpChild = new L1Atom({
+      name: 'Helium',
+      ordinal: 2,
+      systemPrompt: 'sys',
+      tools: [
+        {
+          name: 'write_file',
+          description: 'write',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'start_node_server',
+          description: 'start',
+          inputSchema: { type: 'object', properties: {} },
+        },
+        {
+          name: 'fetch_url',
+          description: 'fetch',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      params: {},
+    });
+
+    await llmVerdict({
+      ctx,
+      model: 'claude-haiku-test',
+      supervisorName: 'Methane',
+      supervisorTier: 2,
+      subject: 'RESULT',
+      child: httpChild,
+      task: { description: 'build a REST API' },
+      payload: { output: 'http://localhost:55947/', summary: 's' },
+    });
+
+    // validate_html NOT invoked — the probe skipped the HTTP child.
+    expect(tools.calls).toHaveLength(0);
   });
 
   it('skips the probe for PLAN verdicts (too early for runtime evidence)', async () => {
