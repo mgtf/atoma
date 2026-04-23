@@ -1,4 +1,4 @@
-import type { Tool } from '../core/types.js';
+import type { Tier, Tool } from '../core/types.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
 
 /**
@@ -31,36 +31,64 @@ import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
  * registry entry just stops advertising it.
  */
 
-/** Toolset-based capability buckets, ordered from most-specific to most-general. */
+/**
+ * Toolset-based capability buckets, ordered from most-specific to most-
+ * general. Each bucket carries TIER-SPECIFIC labels so an L1 and an L2
+ * with identical tool signatures get DIFFERENT registry descriptions —
+ * the tier-1 atom IS the thing doing the work ("builder", "writer"),
+ * the tier-2 atom ORCHESTRATES and DELEGATES ("orchestrator", "router").
+ *
+ * Without this distinction, fresh L2s created via L3.createSubtaskL2
+ * would inherit an L1-shaped label like "single-file web artefact
+ * builder: writes an index.html on disk…", which is both misleading
+ * (L2s never call tools) and poisonous for prefilter (prefilter matches
+ * on the description; an L3 looking for an L2 could match an L1 or
+ * vice-versa).
+ */
 interface CapabilityBucket {
   id: string;
   required: readonly string[];
-  label: string;
+  /** tier-1 label — "X builder/writer: directly calls tools to …". */
+  leafLabel: string;
+  /**
+   * tier-2 label — "X orchestrator: decomposes and delegates to a tier-1
+   * atom that does Y". Tier 3 reuses the same string, prefixed by its
+   * cell-level role.
+   */
+  orchestratorLabel: string;
 }
 
 const CAPABILITY_BUCKETS: readonly CapabilityBucket[] = [
   {
     id: 'web-artefact-build+validate',
     required: ['write_file', 'start_static_server', 'validate_html'],
-    label:
+    leafLabel:
       'single-file web artefact builder: writes an index.html on disk, serves it locally, and iterates against headless-browser validation (validate_html) until zero console errors',
+    orchestratorLabel:
+      'single-file web artefact orchestrator: routes a leaf task to a tier-1 builder that writes an index.html on disk, serves it, and validates via headless browser (validate_html)',
   },
   {
     id: 'web-artefact-write+serve',
     required: ['write_file', 'start_static_server'],
-    label:
+    leafLabel:
       'static-site runner: writes files on disk and serves them locally (no headless validation in the loop)',
+    orchestratorLabel:
+      'static-site orchestrator: routes a leaf task to a tier-1 atom that writes files and serves them locally (no headless validation)',
   },
   {
     id: 'web-artefact-write+validate',
     required: ['write_file', 'validate_html'],
-    label:
+    leafLabel:
       'HTML writer + headless validator: writes files and checks them through a headless browser',
+    orchestratorLabel:
+      'HTML-validation orchestrator: routes a leaf task to a tier-1 atom that writes HTML and validates via headless browser',
   },
   {
     id: 'file-scribe',
     required: ['write_file'],
-    label: 'file scribe: reads, writes, and lists workspace files',
+    leafLabel: 'file scribe: reads, writes, and lists workspace files',
+    orchestratorLabel:
+      'file-scribe orchestrator: routes a leaf task to a tier-1 file scribe (read, write, list)',
   },
 ];
 
@@ -70,32 +98,50 @@ const AUXILIARY_TOOLS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Canonical capability description for a set of tools. Deterministic — two
- * atoms with the same tool signature always get the same string, so
- * prefilter (which matches on description) treats them as
- * interchangeable.
+ * Canonical capability description for a set of tools at a given tier.
+ * Deterministic — two atoms with the same tool signature AND the same
+ * tier always get the same string, so prefilter (which matches on
+ * description) treats them as interchangeable. Different tiers with
+ * the same tool signature get distinct labels so an L1 and an L2
+ * never look like the same role to prefilter.
  *
  * The output is intentionally task-neutral: no domain nouns, no grid
  * dimensions, no UI verbs. Anything task-specific must live on the
  * runtime `task.description`, not on the registry entry.
  */
-export function capabilityDescription(tools: readonly Tool[]): string {
+export function capabilityDescription(
+  tools: readonly Tool[],
+  tier: Tier
+): string {
   const names = new Set(tools.map((t) => t.name));
   const parts: string[] = [];
 
   const primary = CAPABILITY_BUCKETS.find((b) => b.required.every((r) => names.has(r)));
-  if (primary) parts.push(primary.label);
+  if (primary) {
+    // Tier-1: the "hands" — baseline label. Tier-2 and tier-3: the
+    // "brain" — orchestrator label. We don't create tier-3 atoms at
+    // runtime (L3 is user-bootstrapped), but the function accepts it
+    // for symmetry and future-proofing.
+    parts.push(tier === 1 ? primary.leafLabel : primary.orchestratorLabel);
+  }
 
   for (const [name, label] of Object.entries(AUXILIARY_TOOLS)) {
-    if (names.has(name)) parts.push(label);
+    if (names.has(name)) {
+      parts.push(
+        tier === 1 ? label : `capable of delegating to a tier-1 atom that ${label}`
+      );
+    }
   }
 
   if (parts.length === 0) {
     // No bucket matched — still produce a stable, distinguishable label
     // instead of falling back to task prose. Sort for determinism so the
-    // same toolset never produces two different descriptions.
+    // same toolset never produces two different descriptions. Prefix
+    // the role so tier-cross contamination stays visible in prefilter.
     const sig = [...names].sort().join(', ');
-    parts.push(`custom toolset: ${sig || 'no tools'}`);
+    const role =
+      tier === 1 ? 'leaf' : tier === 2 ? 'orchestrator' : 'top-level cell';
+    parts.push(`custom ${role} toolset: ${sig || 'no tools'}`);
   }
 
   return parts.join('; ');
@@ -135,21 +181,24 @@ export function looksTaskThemed(desc: string): boolean {
 }
 
 /**
- * Pick a description for a newly-created atom:
+ * Pick a description for a newly-created atom at a given tier:
  *   1. If the LLM's seed suggested a description AND it looks clean
  *      (short, task-neutral), honour it — the planner may have useful
  *      nuance we don't want to lose.
  *   2. Otherwise, derive the canonical capability label from the
- *      tool signature.
+ *      tool signature AT THAT TIER (so an L1 and an L2 with the same
+ *      toolset get distinguishable labels).
  *
- * Call sites: `L2Atom.createSubtaskL1`, `L3Atom.createSubtaskL2`, and the
- * canonical-bootstrap path in `examples/build-app.ts`.
+ * Call sites: `L2Atom.createSubtaskL1`, `L3Atom.createSubtaskL2`, the
+ * escalation-branch paths in both, and the canonical-bootstrap in
+ * `examples/build-app.ts`.
  */
 export function resolveCreationDescription(
   suggested: string | undefined,
-  tools: readonly Tool[]
+  tools: readonly Tool[],
+  tier: Tier
 ): string {
-  const canonical = capabilityDescription(tools);
+  const canonical = capabilityDescription(tools, tier);
   const cleaned = suggested?.trim();
   if (!cleaned) return canonical;
   if (looksTaskThemed(cleaned)) return canonical;
@@ -161,12 +210,19 @@ export const CANONICAL_BOOTSTRAP_MARKER = 'bootstrap-canonical';
 
 /**
  * Description used for the canonical tier-2 "web build orchestrator"
- * seeded by `examples/build-app.ts`. L3.prefilter matches on this string
- * so the first run on a clean registry doesn't need to spin up a bespoke
- * L2 for a plain web-artefact task.
+ * seeded by `examples/build-app.ts`. Kept as a named export (not just
+ * derived inline) so tests and downstream tooling can reference the
+ * exact string. It's the same value you'd get from
+ * `capabilityDescription(tools, 2)` when `tools` includes the
+ * web-artefact-build+validate bucket — we materialise it at module
+ * load time via a helper that mirrors the bucket directly so we stay
+ * decoupled from the actual tool list the example wires at runtime.
+ *
+ * NB: the exact wording MUST match the tier-2 orchestratorLabel of the
+ * `web-artefact-build+validate` bucket — see the bucket table above.
  */
 export const CANONICAL_L2_WEB_DESCRIPTION =
-  'web artefact orchestrator: routes a single-file web-build leaf to an L1 element (write + serve + validate loop), no side-effects at tier 2';
+  'single-file web artefact orchestrator: routes a leaf task to a tier-1 builder that writes an index.html on disk, serves it, and validates via headless browser (validate_html)';
 
 const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element with ONE narrow responsibility.`,
@@ -226,7 +282,7 @@ export function ensureCanonicalL1(
   }
   const systemPrompt = [...CANONICAL_L1_SYSTEM_PROMPT_LINES, ``, smokeGuidance].join('\n');
   return registry.create(1, {
-    description: capabilityDescription(tools),
+    description: capabilityDescription(tools, 1),
     systemPrompt,
     tools: tools as Tool[],
     params: {},
@@ -254,7 +310,7 @@ export function ensureCanonicalL2(
     );
   }
   return registry.create(2, {
-    description: CANONICAL_L2_WEB_DESCRIPTION,
+    description: capabilityDescription(tools, 2),
     systemPrompt: CANONICAL_L2_SYSTEM_PROMPT_LINES.join('\n'),
     tools: tools as Tool[],
     params: {},

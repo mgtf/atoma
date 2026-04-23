@@ -219,7 +219,13 @@ describe('L2 branchOnEscalation — resets the L1 prompt to the current subtask'
     expect(branched.systemPrompt).not.toContain('Do platformer things');
     // Description also replaced — the Frankenstein "platformer builder"
     // label is gone from the description body.
-    expect(branched.description).toMatch(/L1 narrow builder for: build a Tetris grid/);
+    // Fix 2: the branch path now writes a capability-first description
+    // so escalations can't re-theme the registry with whatever task
+    // happened to trigger them. The task narrative stays in
+    // systemPromptReplace (asserted above), not in the registry row.
+    expect(branched.description).not.toMatch(/Tetris|platformer|Goomba|Mario/i);
+    expect(branched.description).not.toMatch(/narrow builder for:/);
+    expect(branched.description).toMatch(/builder|scribe|toolset/);
   });
 });
 
@@ -255,7 +261,9 @@ describe('L3 branchOnEscalation — resets the L2 prompt to the current subtask'
       'Your current subtask: orchestrate a dashboard build'
     );
     expect(branchedL2.systemPrompt).not.toContain('platformer');
-    expect(branchedL2.description).toMatch(/L2 narrow orchestrator for: orchestrate a dashboard/);
+    expect(branchedL2.description).not.toMatch(/dashboard|platformer/i);
+    expect(branchedL2.description).not.toMatch(/narrow orchestrator for:/);
+    expect(branchedL2.description).toMatch(/orchestrator|toolset/);
   });
 });
 

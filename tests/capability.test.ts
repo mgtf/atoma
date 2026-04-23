@@ -18,9 +18,10 @@ function makeTools(names: readonly string[]): Tool[] {
 }
 
 describe('capabilityDescription', () => {
-  it('picks the web-artefact-build+validate bucket when write + serve + validate are present', () => {
+  it('picks the web-artefact-build+validate bucket when write + serve + validate are present (tier 1 = builder)', () => {
     const desc = capabilityDescription(
-      makeTools(['write_file', 'read_file', 'list_files', 'start_static_server', 'validate_html'])
+      makeTools(['write_file', 'read_file', 'list_files', 'start_static_server', 'validate_html']),
+      1
     );
     expect(desc).toMatch(/single-file web artefact builder/);
     expect(desc).toMatch(/validate_html/);
@@ -28,35 +29,66 @@ describe('capabilityDescription', () => {
     expect(desc).not.toMatch(/chess|minesweeper|mario|puzzle/i);
   });
 
-  it('falls back to write+serve when validate_html is missing', () => {
+  it('falls back to write+serve when validate_html is missing (tier 1)', () => {
     const desc = capabilityDescription(
-      makeTools(['write_file', 'read_file', 'start_static_server'])
+      makeTools(['write_file', 'read_file', 'start_static_server']),
+      1
     );
     expect(desc).toMatch(/static-site runner/);
     expect(desc).not.toMatch(/validate_html/);
   });
 
-  it('appends auxiliary capabilities for fetch_url / run_shell', () => {
+  it('appends auxiliary capabilities for fetch_url / run_shell at tier 1', () => {
     const desc = capabilityDescription(
-      makeTools(['write_file', 'start_static_server', 'validate_html', 'fetch_url', 'run_shell'])
+      makeTools(['write_file', 'start_static_server', 'validate_html', 'fetch_url', 'run_shell']),
+      1
     );
     expect(desc).toMatch(/single-file web artefact builder/);
     expect(desc).toMatch(/fetches arbitrary HTTP URLs/);
     expect(desc).toMatch(/executes shell commands/);
   });
 
-  it('produces a stable custom-toolset label when no known capability matches', () => {
-    const a = capabilityDescription(makeTools(['rare_tool_b', 'rare_tool_a']));
-    const b = capabilityDescription(makeTools(['rare_tool_a', 'rare_tool_b']));
+  it('produces a stable custom-toolset label when no known capability matches (tier 1)', () => {
+    const a = capabilityDescription(makeTools(['rare_tool_b', 'rare_tool_a']), 1);
+    const b = capabilityDescription(makeTools(['rare_tool_a', 'rare_tool_b']), 1);
     expect(a).toBe(b);
-    expect(a).toMatch(/custom toolset/);
+    expect(a).toMatch(/custom leaf toolset/);
     // Stable ordering: sort alphabetically so different insertion orders collapse.
     expect(a).toContain('rare_tool_a, rare_tool_b');
   });
 
-  it('is deterministic across calls for the same tool signature', () => {
+  it('is deterministic across calls for the same tool signature + tier', () => {
     const tools = makeTools(['write_file', 'start_static_server', 'validate_html']);
-    expect(capabilityDescription(tools)).toBe(capabilityDescription(tools));
+    expect(capabilityDescription(tools, 1)).toBe(capabilityDescription(tools, 1));
+    expect(capabilityDescription(tools, 2)).toBe(capabilityDescription(tools, 2));
+  });
+
+  it('uses the orchestrator variant of the bucket at tier 2 so L2s never read as L1 builders', () => {
+    const tools = makeTools(['write_file', 'start_static_server', 'validate_html']);
+    const leaf = capabilityDescription(tools, 1);
+    const orch = capabilityDescription(tools, 2);
+    expect(orch).toMatch(/single-file web artefact orchestrator/);
+    expect(orch).toMatch(/routes a leaf task to a tier-1 builder/);
+    expect(orch).not.toBe(leaf);
+    // L1-builder-only phrasing must NOT appear in the L2 label, else
+    // prefilter on L3 side could cross-match an L1 as an L2.
+    expect(orch).not.toMatch(/^single-file web artefact builder/);
+  });
+
+  it('wraps auxiliary tool labels with delegation framing at tier 2', () => {
+    const tools = makeTools(['fetch_url', 'run_shell']);
+    const leaf = capabilityDescription(tools, 1);
+    const orch = capabilityDescription(tools, 2);
+    expect(leaf).toMatch(/fetches arbitrary HTTP URLs/);
+    expect(orch).toMatch(/delegating to a tier-1 atom that fetches arbitrary HTTP URLs/);
+    expect(orch).toMatch(/delegating to a tier-1 atom that executes shell commands/);
+  });
+
+  it('distinguishes custom toolsets by tier as well', () => {
+    const tools = makeTools(['rare_tool_a', 'rare_tool_b']);
+    expect(capabilityDescription(tools, 1)).toMatch(/custom leaf toolset/);
+    expect(capabilityDescription(tools, 2)).toMatch(/custom orchestrator toolset/);
+    expect(capabilityDescription(tools, 3)).toMatch(/custom top-level cell toolset/);
   });
 });
 
@@ -98,33 +130,46 @@ describe('looksTaskThemed', () => {
 describe('resolveCreationDescription', () => {
   const webTools = makeTools(['write_file', 'start_static_server', 'validate_html']);
 
-  it('returns the canonical capability label when no suggestion is provided', () => {
-    const out = resolveCreationDescription(undefined, webTools);
-    expect(out).toBe(capabilityDescription(webTools));
-  });
-
-  it('replaces task-themed suggestions with the canonical label', () => {
-    const out = resolveCreationDescription(
-      'L1 for subtask: build a chess puzzle with 8x8 grid and drag-and-drop',
-      webTools
+  it('returns the canonical capability label at the requested tier when no suggestion is provided', () => {
+    expect(resolveCreationDescription(undefined, webTools, 1)).toBe(
+      capabilityDescription(webTools, 1)
     );
-    expect(out).toBe(capabilityDescription(webTools));
+    expect(resolveCreationDescription(undefined, webTools, 2)).toBe(
+      capabilityDescription(webTools, 2)
+    );
   });
 
-  it('honours a clean, generic suggestion', () => {
+  it('replaces task-themed suggestions with the tier-appropriate canonical label', () => {
+    const themed = 'L1 for subtask: build a chess puzzle with 8x8 grid and drag-and-drop';
+    expect(resolveCreationDescription(themed, webTools, 1)).toBe(
+      capabilityDescription(webTools, 1)
+    );
+    expect(resolveCreationDescription(themed, webTools, 2)).toBe(
+      capabilityDescription(webTools, 2)
+    );
+  });
+
+  it('honours a clean, generic suggestion regardless of tier', () => {
     const suggestion = 'focused HTML writer specialised for single-file deliverables';
-    const out = resolveCreationDescription(suggestion, webTools);
-    expect(out).toBe(suggestion);
+    expect(resolveCreationDescription(suggestion, webTools, 1)).toBe(suggestion);
+    expect(resolveCreationDescription(suggestion, webTools, 2)).toBe(suggestion);
   });
 
   it('treats blank suggestions as missing', () => {
-    expect(resolveCreationDescription('   ', webTools)).toBe(capabilityDescription(webTools));
+    expect(resolveCreationDescription('   ', webTools, 1)).toBe(
+      capabilityDescription(webTools, 1)
+    );
   });
 });
 
 describe('canonical-bootstrap constants', () => {
   it('exposes a marker + L2 description callers can rely on', () => {
     expect(CANONICAL_BOOTSTRAP_MARKER).toBe('bootstrap-canonical');
-    expect(CANONICAL_L2_WEB_DESCRIPTION).toMatch(/web artefact orchestrator/);
+    expect(CANONICAL_L2_WEB_DESCRIPTION).toMatch(/single-file web artefact orchestrator/);
+  });
+
+  it('CANONICAL_L2_WEB_DESCRIPTION matches capabilityDescription at tier 2 for the web bucket', () => {
+    const webTools = makeTools(['write_file', 'start_static_server', 'validate_html']);
+    expect(CANONICAL_L2_WEB_DESCRIPTION).toBe(capabilityDescription(webTools, 2));
   });
 });

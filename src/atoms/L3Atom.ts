@@ -378,7 +378,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // `L2Atom.createSubtaskL1`: prevent per-task L2 singletons from
     // poisoning L3's prefilter catalog.
     return this.registry.create(2, {
-      description: resolveCreationDescription(seed.description, mergedTools),
+      description: resolveCreationDescription(seed.description, mergedTools, 2),
       systemPrompt:
         seed.systemPrompt ??
         [
@@ -425,7 +425,15 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         // Reset the L2's system prompt so it's aligned with THIS subtask's
         // domain rather than inherited from the parent that failed.
         const narrowPrompt = buildNarrowL2Prompt(subtaskDescription);
-        const narrowDesc = `L2 narrow orchestrator for: ${subtaskDescription.slice(0, 120)}`;
+        // Capability-first description — match the rule enforced in
+        // createSubtaskL2. The task narrative lives in narrowPrompt
+        // (systemPromptReplace); the registry must stay tier/tool-
+        // scoped so prefilter cross-domain reuse stays clean.
+        // Atom.tools is protected — pull the tool signature via the
+        // registry, which is the authoritative source anyway.
+        const childType = this.registry.getByName(child.name);
+        const childTools = childType?.tools ?? [];
+        const narrowDesc = resolveCreationDescription(undefined, childTools, 2);
         const branched = this.registry.branch(
           child.name,
           {

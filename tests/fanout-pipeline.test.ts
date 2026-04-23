@@ -169,8 +169,8 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     // As of the capability-first description policy, freshly-created
     // L1s advertise a tool-signature-derived label instead of echoing
     // the subtask narrative. This test's fixture L2 has no tools, so
-    // the canonical fallback is the "custom toolset" catch-all.
-    expect(newL1.description).toMatch(/custom toolset/);
+    // the canonical fallback is the tier-1 "custom leaf toolset" label.
+    expect(newL1.description).toMatch(/custom leaf toolset/);
     expect(newL1.description).not.toMatch(/L1 for subtask/);
   });
 
@@ -184,7 +184,12 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     const ctx = makeCtx();
     // Prefilter picks Hydrogen → synthetic plan with 1 subtask.
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'direct match' })
+      jsonText({
+        kind: 'reuse',
+        target: 'Hydrogen',
+        confidence: 'high',
+        reasoning: 'direct match',
+      })
     );
     ctx.llm.enqueueText(
       jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' })

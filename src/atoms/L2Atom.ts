@@ -492,7 +492,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // `handle(task, ctx)` at runtime. See `src/atoms/capability.ts` for
     // the full rationale.
     return this.registry.create(1, {
-      description: resolveCreationDescription(seed.description, mergedTools),
+      description: resolveCreationDescription(seed.description, mergedTools, 1),
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
       // created L1 should be a narrow specialist — one concern, one output
       // shape — not a Swiss-army knife that tries to solve the whole task.
@@ -558,7 +558,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // "dashboard builder" child that still introduces itself as a
         // platformer and keeps emitting platformer plans (Frankenstein).
         const narrowPrompt = buildNarrowL1Prompt(subtaskDescription);
-        const narrowDesc = `L1 narrow builder for: ${subtaskDescription.slice(0, 120)}`;
+        // Capability-first registry description — the old
+        // "L1 narrow builder for: <subtaskDescription>" label leaked
+        // the task narrative back into the registry, the exact
+        // pollution fix A eliminated in createSubtaskL1. This path is
+        // the ESCALATION entry into the registry; it needs the same
+        // rule so branches don't re-theme the catalog with whatever
+        // task happened to trigger the escalation. Task context still
+        // reaches the atom via the narrowPrompt (which bakes in the
+        // subtask).
+        // We can't read child.tools directly here — Atom.tools is
+        // protected — so we re-resolve via the registry entry. The
+        // registry is the authoritative source of truth for an atom's
+        // tool signature anyway.
+        const childType = this.registry.getByName(child.name);
+        const childTools = childType?.tools ?? [];
+        const narrowDesc = resolveCreationDescription(undefined, childTools, 1);
         const branched = this.registry.branch(
           child.name,
           {

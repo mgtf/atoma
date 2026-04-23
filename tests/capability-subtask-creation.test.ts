@@ -49,7 +49,8 @@ describe('L2Atom.createSubtaskL1 — capability-first description', () => {
       { description: 'parent task' }
     );
     // Registry description is capability-derived, not task-themed.
-    expect(created.description).toBe(capabilityDescription(webTools));
+    expect(created.description).toBe(capabilityDescription(webTools, 1));
+    expect(created.description).toMatch(/builder/);
     expect(created.description).not.toMatch(/chess|mate|8x8|drag-and-drop/i);
     // The subtask description still reaches the prompt (via the fresh-L1 template).
     expect(created.systemPrompt).toContain('Subtask you were handed: build a chess puzzle');
@@ -72,7 +73,7 @@ describe('L2Atom.createSubtaskL1 — capability-first description', () => {
       { action: 'create', seed: undefined },
       { description: 'parent' }
     );
-    expect(created.description).toBe(capabilityDescription(webTools));
+    expect(created.description).toBe(capabilityDescription(webTools, 1));
   });
 
   it('honours a clean, generic seed.description when the LLM got it right', () => {
@@ -125,7 +126,30 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
       },
       { description: 'parent task' }
     );
-    expect(created.description).toBe(capabilityDescription(webTools));
+    expect(created.description).toBe(capabilityDescription(webTools, 2));
+    expect(created.description).toMatch(/orchestrator/);
+    expect(created.description).not.toMatch(/builder:/);
     expect(created.description).not.toMatch(/minesweeper|10x10|flag/i);
+  });
+
+  it('tier-2 description stays distinct from tier-1 for the same toolset (L2 ≠ L1)', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const webTools = makeTools(['write_file', 'start_static_server', 'validate_html']);
+    const l3Type = reg.create(3, {
+      description: 'l3',
+      systemPrompt: 'l3',
+      tools: webTools,
+      params: {},
+      createdBy: 'test',
+    });
+    const l3 = await L3Atom.fromType(l3Type, reg, undefined);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const createdL2 = (l3 as any).createSubtaskL2(
+      { description: 'anything', preferredChild: undefined },
+      { action: 'create', seed: undefined },
+      { description: 'parent' }
+    );
+    expect(createdL2.description).toBe(capabilityDescription(webTools, 2));
+    expect(createdL2.description).not.toBe(capabilityDescription(webTools, 1));
   });
 });

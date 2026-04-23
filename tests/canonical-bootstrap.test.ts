@@ -34,7 +34,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     const reg = new AtomRegistry(openDb(':memory:'));
     const l1 = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
     expect(l1.tier).toBe(1);
-    expect(l1.description).toBe(capabilityDescription(WEB_TOOLS));
+    expect(l1.description).toBe(capabilityDescription(WEB_TOOLS, 1));
     expect(l1.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
     expect(l1.systemPrompt).toContain('ONE narrow responsibility');
     expect(l1.systemPrompt).toContain('SMOKE-TEST DESIGN');
@@ -82,7 +82,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(stillLegacy.description).toBe(legacy.description);
     expect(stillLegacy.createdBy).toBe('Water');
     expect(canonical.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
-    expect(canonical.description).toBe(capabilityDescription(WEB_TOOLS));
+    expect(canonical.description).toBe(capabilityDescription(WEB_TOOLS, 1));
   });
 
   it('refreshes the canonical tool list when the executor set grows between runs', () => {
