@@ -5,6 +5,7 @@ import type {
   PositiveVerdict,
   RunContext,
   Task,
+  Tier,
 } from '../core/types.js';
 import { PIN_HAIKU } from '../core/models.js';
 import { parseWith } from './json.js';
@@ -124,6 +125,16 @@ export async function prefilterStrategy(args: {
    */
   exclude?: ReadonlySet<string>;
   model?: string;
+  /**
+   * Optional caller attribution. When provided we prepend a short
+   * `You are atom "<name>" (tier <N>) ...` preamble to the userContent so
+   * the run trace can attribute this prefilter call to the L2 or L3 that
+   * issued it. Without this, prefilter events show up as ownerless in the
+   * decomposition report (the shared system prompt intentionally stays
+   * constant to preserve prompt caching, so the preamble is the only
+   * place where per-caller context can live).
+   */
+  actor?: { name: string; tier: Tier };
 }): Promise<PrefilterOutcome | null> {
   if (args.catalog.length === 0) return null;
 
@@ -141,6 +152,10 @@ export async function prefilterStrategy(args: {
   const filteredNames = new Set(filtered.map((c) => c.name));
 
   const userContent = [
+    args.actor
+      ? `You are atom "${args.actor.name}" (tier ${args.actor.tier}) running a prefilter catalog lookup.`
+      : '',
+    args.actor ? `` : '',
     `Task: ${args.task.description}`,
     args.task.constraints?.length
       ? `Constraints:\n${args.task.constraints.map((c) => `- ${c}`).join('\n')}`
@@ -152,7 +167,7 @@ export async function prefilterStrategy(args: {
     `Catalog:`,
     filtered.map((c) => `  - ${c.name}: ${c.description}`).join('\n'),
   ]
-    .filter(Boolean)
+    .filter((l) => typeof l === 'string')
     .join('\n');
 
   try {

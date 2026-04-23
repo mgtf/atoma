@@ -52,10 +52,6 @@ function classify(req: LlmCompletionRequest): Classification {
     return out;
   }
 
-  if (req.systemPrompt.startsWith(PREFILTER_MARKER)) {
-    return { role: 'prefilter' };
-  }
-
   const actorMatch = req.userContent.match(
     /You are (?:atom\s+)?"?([^"\n]+?)"?\s*\(tier\s*(\d)/
   );
@@ -63,6 +59,10 @@ function classify(req: LlmCompletionRequest): Classification {
     actorMatch && actorMatch[1] && actorMatch[2]
       ? { name: actorMatch[1].trim(), tier: Number(actorMatch[2]) as Tier }
       : undefined;
+
+  if (req.systemPrompt.startsWith(PREFILTER_MARKER)) {
+    return actor ? { role: 'prefilter', actor } : { role: 'prefilter' };
+  }
 
   if (/FALLBACK/.test(req.userContent)) {
     const role: VizLlmEvent['role'] =

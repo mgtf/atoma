@@ -6,6 +6,7 @@ dist/
 *.db-journal
 *.db-wal
 *.db-shm
+.registry-archive/
 coverage/
 .DS_Store
 build/

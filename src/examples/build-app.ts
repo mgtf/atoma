@@ -6,7 +6,10 @@ import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { L3Atom } from '../atoms/L3Atom.js';
+import { SMOKE_DESIGN_GUIDANCE } from '../atoms/L2Atom.js';
+import { ensureCanonicalL1, ensureCanonicalL2 } from '../atoms/capability.js';
 import { TraceRecorder } from '../viz/trace.js';
+import { formatDecompositionReport } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { ToolSandbox } from '../tools/sandbox.js';
@@ -88,6 +91,23 @@ async function main(): Promise<void> {
     console.log(`reusing L3 cell: ${l3Type.name} (v${l3Type.version})`);
   }
 
+  // Bootstrap canonical L2 + L1 catalog entries. These are capability-
+  // focused, domain-neutral atoms seeded so L3/L2 prefilter has a clean
+  // reusable target on every run — without them the first build on a
+  // fresh registry spawns a bespoke (and usually theme-poisoned) clone
+  // of the same "single-file web artefact" recipe we already know how
+  // to execute. Idempotent: we match by the `CANONICAL_BOOTSTRAP_MARKER`
+  // in `createdBy`, refreshing tools on each run so the canonical
+  // catalog follows the current executor set.
+  const canonicalL2 = ensureCanonicalL2(registry, toolDecls);
+  console.log(
+    `canonical L2: ${canonicalL2.name} (v${canonicalL2.version}) — ${canonicalL2.description.slice(0, 70)}…`
+  );
+  const canonicalL1 = ensureCanonicalL1(registry, toolDecls, SMOKE_DESIGN_GUIDANCE);
+  console.log(
+    `canonical L1: ${canonicalL1.name} (v${canonicalL1.version}) — ${canonicalL1.description.slice(0, 70)}…`
+  );
+
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
   console.log(`L3 ${l3.name} using model ${l3.model}`);
 
@@ -152,7 +172,7 @@ async function main(): Promise<void> {
   });
   try {
     const result = await l3.handle(task, ctx);
-    recorder.endRun({
+    const persistedRun = recorder.endRun({
       result: {
         summary: result.summary,
         output: result.output,
@@ -183,6 +203,11 @@ async function main(): Promise<void> {
 
     console.log(`\nLLM usage:`);
     console.log(metrics.formatSummary());
+
+    if (persistedRun) {
+      console.log('');
+      console.log(formatDecompositionReport(persistedRun));
+    }
 
     console.log(
       `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`

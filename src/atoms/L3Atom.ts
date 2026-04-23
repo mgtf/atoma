@@ -38,6 +38,7 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
+import { resolveCreationDescription } from './capability.js';
 
 /**
  * Fresh narrow-domain system prompt for an L2 branched after escalation.
@@ -157,6 +158,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           description: stripBranchProvenance(t.description),
         })),
         exclude: this.triedChildren.excluded(),
+        actor: { name: this.name, tier: 3 },
       });
       if (prefilter && prefilter.kind === 'reuse') {
         this.pendingStrategy = {
@@ -370,9 +372,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   ): AtomType {
     const seed: NonNullable<typeof strategy.seed> =
       strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
+    const mergedTools = mergeTools(this.tools, (seed.tools ?? []) as Tool[]);
+    // Registry description is a CAPABILITY label, not a task narrative —
+    // see `src/atoms/capability.ts` for why. Same motivation as
+    // `L2Atom.createSubtaskL1`: prevent per-task L2 singletons from
+    // poisoning L3's prefilter catalog.
     return this.registry.create(2, {
-      description:
-        seed.description ?? `L2 for subtask: ${subtask.description.slice(0, 120)}`,
+      description: resolveCreationDescription(seed.description, mergedTools),
       systemPrompt:
         seed.systemPrompt ??
         [
@@ -381,7 +387,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           `Subtask you were handed: ${subtask.description}`,
           `Parent task (for context only): ${parentTask.description}`,
         ].join('\n'),
-      tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+      tools: mergedTools,
       params: (seed.params ?? this.params) as GenerationParams,
       createdBy: this.name,
     });

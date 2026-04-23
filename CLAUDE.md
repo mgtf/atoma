@@ -154,6 +154,30 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   within the same supervise-loop cycle. Call `beginTask(task.description)` at
   the top of `plan()`, `mark(name)` after committing to a child, and read
   `excluded()` when threading into `prefilterStrategy`.
+- **Registry descriptions are CAPABILITY labels, NEVER task narratives.**
+  `L2Atom.createSubtaskL1` and `L3Atom.createSubtaskL2` both route the
+  seed/fallback description through `resolveCreationDescription` in
+  `src/atoms/capability.ts`. A task-themed seed ("Mate-in-1 chess builder,
+  8x8 board, drag-and-drop") is dropped in favour of a tool-signature-
+  derived label ("single-file web artefact builder: writes index.html,
+  serves locally, validates via headless browser"). Rationale: the
+  description is the prefilter key on subsequent runs — if it encodes
+  theme, the catalog fills with task-bound singletons that prefilter
+  refuses to reuse cross-domain and the next run spawns yet another
+  near-clone. Task-specific context still reaches the atom via
+  `handle(task, ctx)` and the system-prompt template that bakes the
+  subtask description at creation time. Legacy registry entries from
+  before this rule may still carry task-themed descriptions; leave them
+  alone, they'll lose the prefilter race naturally.
+- **Canonical bootstrap in `examples/build-app.ts`.** On every run we
+  call `ensureCanonicalL1` / `ensureCanonicalL2` (from
+  `src/atoms/capability.ts`) which idempotently seed a domain-neutral
+  L1 and L2 tagged `createdBy = CANONICAL_BOOTSTRAP_MARKER`. They give
+  L3.prefilter / L2.prefilter an obvious reusable target on every run,
+  so we don't ask Sonnet/Opus to mint a theme-poisoned clone of the
+  same recipe each time. The helpers look up the existing canonical
+  entry by `createdBy` marker, refresh its tools via `patch + addTools`
+  if found, or create it otherwise.
 
 ## LLM interaction conventions
 

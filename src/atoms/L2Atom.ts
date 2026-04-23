@@ -37,6 +37,7 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
 } from './cost.js';
+import { resolveCreationDescription } from './capability.js';
 
 /**
  * Shared smoke-test design guidance. Appended to every L1 system
@@ -210,6 +211,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           description: stripBranchProvenance(t.description),
         })),
         exclude: this.triedChildren.excluded(),
+        actor: { name: this.name, tier: 2 },
       });
       if (prefilter && prefilter.kind === 'reuse') {
         this.pendingStrategy = {
@@ -479,9 +481,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   ): AtomType {
     const seed: NonNullable<typeof strategy.seed> =
       strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
+    const mergedTools = mergeTools(this.tools, (seed.tools ?? []) as Tool[]);
+    // IMPORTANT: the registry description is the prefilter key on future
+    // runs. Early versions echoed the full task narrative here ("L1 for
+    // subtask: build a chess puzzle with 8x8 board + drag-and-drop + …"),
+    // which locked each new L1 to a single theme and polluted the catalog
+    // with task-bound singletons that prefilter could never re-use
+    // cross-domain. We now force a capability-first label derived from
+    // the tool signature; task-specific info still flows to the atom via
+    // `handle(task, ctx)` at runtime. See `src/atoms/capability.ts` for
+    // the full rationale.
     return this.registry.create(1, {
-      description:
-        seed.description ?? `L1 for subtask: ${subtask.description.slice(0, 120)}`,
+      description: resolveCreationDescription(seed.description, mergedTools),
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
       // created L1 should be a narrow specialist — one concern, one output
       // shape — not a Swiss-army knife that tries to solve the whole task.
@@ -509,7 +520,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           // unreachable assertion).
           SMOKE_DESIGN_GUIDANCE,
         ].join('\n'),
-      tools: mergeTools(this.tools, (seed.tools ?? []) as Tool[]),
+      tools: mergedTools,
       params: (seed.params ?? this.params) as GenerationParams,
       createdBy: this.name,
     });

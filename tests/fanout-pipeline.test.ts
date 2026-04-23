@@ -166,7 +166,12 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     expect(l1Names).toContain('Hydrogen');
     expect(l1Names.length).toBe(2);
     const newL1 = reg.listByTier(1).find((t) => t.name !== 'Hydrogen')!;
-    expect(newL1.description).toMatch(/L1 for subtask: B/);
+    // As of the capability-first description policy, freshly-created
+    // L1s advertise a tool-signature-derived label instead of echoing
+    // the subtask narrative. This test's fixture L2 has no tools, so
+    // the canonical fallback is the "custom toolset" catch-all.
+    expect(newL1.description).toMatch(/custom toolset/);
+    expect(newL1.description).not.toMatch(/L1 for subtask/);
   });
 
   it('degenerate N=1 preserves the pre-fan-out result shape (single, unwrapped)', async () => {
