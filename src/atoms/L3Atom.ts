@@ -171,15 +171,50 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // the Opus plan call.
     let prefilterHint: { target: string; reasoning: string } | null = null;
     if (catalog.length > 0) {
+      // L1-affinity enrichment: for each L2 in the catalog, append a
+      // short summary of the L1 children it would dispatch to. Without
+      // this, L3.prefilter saw only the L2's own description — a
+      // file-authoring task ("Node lib + README.md + package.json")
+      // produced an "escalate" because no L2 description mentioned
+      // file-scribe capability, triggering a full Opus plan ($0.12/run)
+      // just to conclude "route to Methane, it dispatches to the
+      // file-scribe L1 anyway". Now Haiku sees the L1 affinity directly
+      // on the L2 catalog entry and can high-confidence pick.
+      //
+      // L1-children heuristic: a L2 "dispatches to" every canonical L1
+      // (reachable via prefilter at the L2 tier) + any L1 it has
+      // dynamically created (createdBy === L2.name). Kept deliberately
+      // cheap — just a name + clipped description hint per child, no
+      // tool lists or metadata.
+      const allL1s = this.registry.listByTier(1);
+      const canonicalMarkers = new Set([
+        'bootstrap-canonical',
+        'bootstrap-canonical-http',
+        'bootstrap-canonical-filescribe',
+      ]);
+      const l1Affinity = (l2Name: string): typeof allL1s =>
+        allL1s.filter(
+          (l1) => canonicalMarkers.has(l1.createdBy) || l1.createdBy === l2Name
+        );
+      const prefilterCatalog = catalog.map((t) => {
+        const base = stripBranchProvenance(t.description);
+        const children = l1Affinity(t.name);
+        if (children.length === 0) return { name: t.name, description: base };
+        const hint = children
+          .map(
+            (c) =>
+              `${c.name} — ${stripBranchProvenance(c.description).slice(0, 90)}`
+          )
+          .join('; ');
+        return {
+          name: t.name,
+          description: `${base} (dispatches leaves to: ${hint})`,
+        };
+      });
       const prefilter = await prefilterStrategy({
         ctx,
         task,
-        // See L2 prefilter call site for rationale: strip the
-        // "(branched from X)" tail so Haiku sees the real description.
-        catalog: catalog.map((t) => ({
-          name: t.name,
-          description: stripBranchProvenance(t.description),
-        })),
+        catalog: prefilterCatalog,
         exclude: this.triedChildren.excluded(),
         actor: { name: this.name, tier: 3 },
       });
