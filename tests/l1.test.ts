@@ -25,6 +25,43 @@ describe('L1Atom', () => {
     expect(plan.proposedAction).toBe('answer');
   });
 
+  it('plan prompt instructs the model NOT to emit a toolCalls array (#11 — aspirational plan shape)', async () => {
+    // Regression: earlier the L1 plan prompt asked for
+    // {"reasoning","proposedAction","expectedOutput","toolCalls"?} and the
+    // model used the option to paste literal file contents into
+    // toolCalls[0].args.content. When the content exceeded the response
+    // maxTokens cap it got truncated mid-string and the Haiku validator
+    // rejected the incomplete payload — triggering a repeat-rejection
+    // escalation cascade observed in the fan-out run. The fix rewrites
+    // the plan prompt to explicitly forbid toolCalls at plan time.
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' })
+    );
+    const atom = new L1Atom(base);
+    await atom.plan({ description: 't' }, ctx);
+    const userContent = ctx.llm.calls[0]!.userContent;
+    // The CRITICAL plan-shape section must be present.
+    expect(userContent).toMatch(/aspirational, no literal payloads/);
+    expect(userContent).toMatch(/no "toolCalls" field/);
+    // And the JSON shape hint must not list toolCalls either.
+    expect(userContent).not.toMatch(/"toolCalls":/);
+  });
+
+  it('still accepts a Plan whose JSON omits proposedAction / expectedOutput gracefully — schema has defaults', async () => {
+    // Sanity: the schema is liberal at parse time; a lean plan still works.
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' })
+    );
+    const atom = new L1Atom(base);
+    const plan = await atom.plan({ description: 't' }, ctx);
+    expect(plan.reasoning).toBe('r');
+    expect(plan.proposedAction).toBe('a');
+    expect(plan.expectedOutput).toBe('e');
+    expect(plan.toolCalls).toBeUndefined();
+  });
+
   it('executes and produces a Result', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ output: '4', summary: 'computed 2+2' }));

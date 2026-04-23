@@ -64,8 +64,19 @@ export class L1Atom extends Atom {
       `returns errors, read the offending file, fix it, rewrite, and re-validate`,
       `until validate_html reports no errors. Only then return success.`,
       ``,
-      `Respond with JSON matching this shape:`,
-      `{"reasoning": "...", "proposedAction": "...", "expectedOutput": "...", "toolCalls": [{"name": "...", "args": {...}}]?}`,
+      `CRITICAL — plan shape (aspirational, no literal payloads):`,
+      `Describe your intended tool sequence in the "proposedAction" field as PROSE`,
+      `("first I will write_file server.js with a native-http GET /health handler, then`,
+      `start_node_server, then fetch_url /health to verify"). Do NOT embed the literal`,
+      `file content, JSON body, or full args into the plan — that belongs in the`,
+      `execute phase. Short plans are reliably validated; long plans that paste file`,
+      `contents get truncated mid-string by the model's output cap and the validator`,
+      `rejects the incomplete payload (observed as a cascade of escalations in earlier`,
+      `runs).`,
+      ``,
+      `Respond with JSON matching this shape (no "toolCalls" field — the execute`,
+      `phase handles actual tool calls):`,
+      `{"reasoning": "...", "proposedAction": "...", "expectedOutput": "..."}`,
     ]
       .filter(Boolean)
       .join('\n');
