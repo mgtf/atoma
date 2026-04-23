@@ -240,6 +240,15 @@ export const CANONICAL_BOOTSTRAP_MARKER = 'bootstrap-canonical';
  * the same registry without one idempotent-refreshing over the other. */
 export const CANONICAL_HTTP_BOOTSTRAP_MARKER = 'bootstrap-canonical-http';
 
+/** Marker for the canonical file-scribe L1 (JSON/markdown/text static
+ * files, no server, no browser). Distinct from the web + http markers so
+ * all three canonicals coexist in the same registry. Separated at the
+ * L1 tier only — Opus at L3 / Sonnet at L2 can route file-scribe
+ * subtasks to this L1 via prefilter without needing a dedicated file-
+ * scribe L2 (the existing HTTP L2 Methane works fine as an agnostic
+ * router here). */
+export const CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER = 'bootstrap-canonical-filescribe';
+
 /**
  * The TOOL SIGNATURE of each canonical atom. These are the names of the
  * tools we SELECT from the caller-provided toolset when seeding a
@@ -269,6 +278,20 @@ const HTTP_L1_TOOL_SCOPE: readonly string[] = [
   'run_shell',
   'fetch_url',
   'start_node_server',
+];
+
+const FILESCRIBE_L1_TOOL_SCOPE: readonly string[] = [
+  // A minimal file-authoring toolkit: write / read / list workspace files,
+  // plus run_shell so the atom can do quick `node -e` / `python3 -c`
+  // validations of what it just wrote (JSON-parses, field values match,
+  // markdown structure, etc.) without pulling in headless browsers or a
+  // Node server runtime. No validate_html (not a web artefact), no
+  // start_node_server / fetch_url (not an HTTP service). The bucket
+  // purpose is documented in the canonical prompt below.
+  'write_file',
+  'read_file',
+  'list_files',
+  'run_shell',
 ];
 
 /** Filter a tool list down to the given scope (by tool name). */
@@ -382,6 +405,32 @@ export const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `Scope boundary: task-specific nouns (endpoint paths, request shapes,`,
   `database names) belong in the SUBTASK DESCRIPTION you pass down, never`,
   `in the L1's registry metadata. Keep the catalog reusable.`,
+];
+
+export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
+  `You are an L1 element specialised for static-file authoring: JSON,`,
+  `markdown, YAML, text, configuration files, documentation — anything`,
+  `that is NOT a runnable server, NOT a browser-rendered page.`,
+  ``,
+  `Typical tool sequence:`,
+  `  1. write_file  <path>        (the file the subtask asks for)`,
+  `  2. read_file   <path>        (optional, echo-back verification)`,
+  `  3. run_shell   (optional)    (quick structural validation, e.g.`,
+  `                                \`node -e 'JSON.parse(require("fs").readFileSync("config.json","utf8"))'\``,
+  `                                or \`python3 -c 'import json; json.load(open("config.json"))'\`)`,
+  `  4. return JSON {"output": {"path": "<path>"}, "summary": "<one sentence>"}`,
+  ``,
+  `Scope boundary — this is a NARROW bucket:`,
+  `  - You do NOT start servers (no start_node_server, no start_static_server).`,
+  `  - You do NOT probe HTTP endpoints (no fetch_url).`,
+  `  - You do NOT render HTML in a browser (no validate_html).`,
+  `  Those are the HTTP and web buckets' responsibility; a planner that`,
+  `  routes one of those to you is wrong — surface it in your summary`,
+  `  and return whatever file you legitimately wrote. Do NOT grow your`,
+  `  remit silently.`,
+  ``,
+  `The output JSON envelope is mandatory — {"output", "summary"} — even`,
+  `if the file is a single byte. The supervisor validator reads it.`,
 ];
 
 /**
@@ -524,5 +573,59 @@ export function ensureCanonicalHttpL2(
     tools: scoped,
     params: {},
     createdBy: CANONICAL_HTTP_BOOTSTRAP_MARKER,
+  });
+}
+
+/**
+ * Canonical file-scribe L1 — the tier-1 bucket for static-file
+ * authoring (JSON, markdown, config, text). Mirror of
+ * `ensureCanonicalL1` (web) and `ensureCanonicalHttpL1` (http), scoped
+ * to the `file-scribe` bucket: `write_file`, `read_file`, `list_files`,
+ * `run_shell`. No server startup, no browser rendering — those are
+ * the other buckets.
+ *
+ * Why this exists: the Node/REST fan-out run (task = "server.js +
+ * config.json + README.md") exposed a routing gap. Opus at L3
+ * decomposes the task into three L2 subtasks and routes them all to
+ * Methane (HTTP L2, the only non-web L2). Methane's prefilter then
+ * tried to route the README / config subtasks to Helium — the only
+ * non-web L1 — and got correctly rejected as a domain mismatch
+ * ("Helium's capability is HTTP server building, not documentation
+ * authoring"). Without a file-scribe canonical in the L1 catalog,
+ * the only options were (a) create a fresh ad-hoc L1 (wasteful and
+ * prefilter-blind on the next run) or (b) escalate to Methane
+ * fallback. Adding this canonical closes that gap: Methane.prefilter
+ * now picks it cleanly for file-authoring subtasks, the fan-out hits
+ * 100% happy path on repeat runs.
+ *
+ * No file-scribe L2 counterpart — the existing HTTP L2 (Methane)
+ * happily orchestrates to this L1 via prefilter. An L2 file-scribe
+ * would only matter if L3 needed to discriminate at the L2 level,
+ * and for the observed tasks that layer already works: the L3
+ * Neuron picks Methane for the whole task, Methane decomposes and
+ * routes each sub-subtask to the right L1 bucket.
+ */
+export function ensureCanonicalFileScribeL1(
+  registry: AtomRegistry,
+  tools: readonly Tool[]
+): AtomType {
+  const scoped = pickTools(tools, FILESCRIBE_L1_TOOL_SCOPE);
+  const existing = registry
+    .listByTier(1)
+    .find((t) => t.createdBy === CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER);
+  if (existing) {
+    return registry.patch(
+      existing.name,
+      { addTools: scoped },
+      'build-app-bootstrap',
+      'refresh canonical file-scribe L1 tools'
+    );
+  }
+  return registry.create(1, {
+    description: capabilityDescription(scoped, 1),
+    systemPrompt: CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES.join('\n'),
+    tools: scoped,
+    params: {},
+    createdBy: CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER,
   });
 }

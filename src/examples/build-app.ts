@@ -12,6 +12,7 @@ import {
   ensureCanonicalL2,
   ensureCanonicalHttpL1,
   ensureCanonicalHttpL2,
+  ensureCanonicalFileScribeL1,
 } from '../atoms/capability.js';
 import { TraceRecorder } from '../viz/trace.js';
 import { formatDecompositionReport } from '../viz/report.js';
@@ -119,6 +120,10 @@ async function main(): Promise<void> {
   const canonicalL1Http = ensureCanonicalHttpL1(registry, toolDecls);
   console.log(
     `canonical L1 (http): ${canonicalL1Http.name} (v${canonicalL1Http.version}) — ${canonicalL1Http.description.slice(0, 70)}…`
+  );
+  const canonicalL1FileScribe = ensureCanonicalFileScribeL1(registry, toolDecls);
+  console.log(
+    `canonical L1 (file-scribe): ${canonicalL1FileScribe.name} (v${canonicalL1FileScribe.version}) — ${canonicalL1FileScribe.description.slice(0, 70)}…`
   );
 
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
