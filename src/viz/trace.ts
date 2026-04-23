@@ -157,6 +157,14 @@ export interface VizRunIndexEntry {
    * and stats should use to distinguish them from full successes.
    */
   degraded?: boolean;
+  /**
+   * True when the run is STILL EXECUTING — partial-persist snapshots carry
+   * this flag so the viz UI can render a "● LIVE" indicator and start
+   * polling for updates. The final `endRun()` persist clears the flag
+   * (the presence of `endedAt` is also a signal, but inFlight is the
+   * explicit one the UI reads).
+   */
+  inFlight?: boolean;
   costUsd?: number;
   calls?: number;
 }
@@ -209,6 +217,16 @@ export interface VizRun {
 export class TraceRecorder {
   private run: VizRun | null = null;
   readonly runsDir: string;
+  /**
+   * Trailing-edge throttle for partial persists. Every `record()` call
+   * schedules a flush after PERSIST_THROTTLE_MS unless one is already
+   * pending. Keeps disk writes bounded when a run fires events faster
+   * than the filesystem can accept them, while still giving the live
+   * viz polling (1s cadence) plenty of fresh data to render. Cleared
+   * by `endRun` so the final synchronous flush wins the race.
+   */
+  private persistTimer: NodeJS.Timeout | null = null;
+  private static readonly PERSIST_THROTTLE_MS = 300;
 
   constructor(runsDir: string = './runs') {
     this.runsDir = resolve(runsDir);
@@ -243,6 +261,28 @@ export class TraceRecorder {
   record(event: VizEvent): void {
     if (!this.run) return;
     this.run.events.push(event);
+    this.schedulePartialPersist();
+  }
+
+  /**
+   * Trailing-edge throttled partial persist. Enables live tailing from
+   * the viz UI: while a run is in flight, every ~300ms the latest
+   * event list (+ computed totals) is flushed to disk, so the UI
+   * polling on `/api/runs/:id` sees incremental progress instead of
+   * having to wait for endRun.
+   */
+  private schedulePartialPersist(): void {
+    if (!this.run) return;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.flushPartial();
+    }, TraceRecorder.PERSIST_THROTTLE_MS);
+    // Let the event loop exit even if the timer is still pending
+    // (the synchronous endRun.persist() path supersedes it anyway).
+    if (typeof (this.persistTimer as { unref?: () => void }).unref === 'function') {
+      (this.persistTimer as { unref?: () => void }).unref?.();
+    }
   }
 
   endRun(opts: {
@@ -250,6 +290,12 @@ export class TraceRecorder {
     error?: string;
   } = {}): VizRun | null {
     if (!this.run) return null;
+    // Cancel any pending trailing-edge partial persist so it can't race
+    // with (and overwrite) the final synchronous persist below.
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer);
+      this.persistTimer = null;
+    }
     const endedAt = new Date().toISOString();
     this.run.endedAt = endedAt;
     this.run.durationMs = Date.parse(endedAt) - Date.parse(this.run.startedAt);
@@ -322,6 +368,9 @@ export class TraceRecorder {
     if (this.run.endedAt !== undefined) entry.endedAt = this.run.endedAt;
     if (this.run.durationMs !== undefined) entry.durationMs = this.run.durationMs;
     if (this.run.degraded) entry.degraded = true;
+    // Inflight flag: partial persists during the run carry it; the
+    // final endRun persist (which sets endedAt) clears it.
+    if (this.run.endedAt === undefined) entry.inFlight = true;
     if (this.run.totals) {
       entry.costUsd = this.run.totals.costUsd;
       entry.calls = this.run.totals.calls;

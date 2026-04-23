@@ -218,7 +218,16 @@ const state = {
   currentRegistry: null, // { registry, types: [...] }
   selectedRegistryAtom: null,
   registryFilter: '',
+  // Live polling state. When a run is in-flight (endedAt undefined),
+  // we poll /api/runs/<id> every 1s and re-render as new events arrive.
+  // We also poll /api/runs (the index) every 2s to detect freshly-
+  // started runs that appeared after the page was loaded.
+  livePollHandle: null,
+  indexPollHandle: null,
 };
+
+const LIVE_POLL_MS = 1000;
+const INDEX_POLL_MS = 2000;
 
 const $ = (id) => document.getElementById(id);
 const h = (tag, attrs = {}, children = []) => {
@@ -255,22 +264,78 @@ function atomRef(ref) {
   return span;
 }
 
+function runSelectLabel(r) {
+  const flags = r.hasError
+    ? '  ✖'
+    : r.inFlight
+      ? '  ● LIVE'
+      : r.degraded
+        ? '  ⚠ fallback'
+        : '';
+  return `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
+}
+
+function populateRunSelect(runs, keepSelection) {
+  const sel = $('runSelect');
+  sel.innerHTML = '';
+  if (runs.length === 0) {
+    sel.appendChild(h('option', {}, 'Aucun run enregistré'));
+    return;
+  }
+  for (const r of runs) sel.appendChild(h('option', { value: r.id }, runSelectLabel(r)));
+  if (keepSelection && runs.some((r) => r.id === keepSelection)) sel.value = keepSelection;
+}
+
 async function loadIndex() {
   const r = await fetch('/api/runs');
   state.runs = await r.json();
-  const sel = $('runSelect');
-  sel.innerHTML = '';
   if (state.runs.length === 0) {
-    sel.appendChild(h('option', {}, 'Aucun run enregistré'));
+    populateRunSelect(state.runs);
     renderSummary(null);
     return;
   }
-  for (const r of state.runs) {
-    const flags = r.hasError ? '  ✖' : r.degraded ? '  ⚠ fallback' : '';
-    const label = `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
-    sel.appendChild(h('option', { value: r.id }, label));
-  }
+  populateRunSelect(state.runs);
   selectRun(state.runs[0].id);
+  scheduleIndexPoll();
+}
+
+/**
+ * Poll /api/runs every INDEX_POLL_MS so freshly-started runs appear in
+ * the top of the dropdown without a manual refresh. If the dropdown was
+ * on the newest run, stay on it (auto-advance to the fresh live run).
+ */
+function scheduleIndexPoll() {
+  if (state.indexPollHandle) clearTimeout(state.indexPollHandle);
+  state.indexPollHandle = setTimeout(async () => {
+    state.indexPollHandle = null;
+    if (state.view !== 'runs') {
+      scheduleIndexPoll();
+      return;
+    }
+    try {
+      const r = await fetch('/api/runs');
+      if (!r.ok) {
+        scheduleIndexPoll();
+        return;
+      }
+      const fresh = await r.json();
+      const topChanged = (fresh[0]?.id ?? null) !== (state.runs[0]?.id ?? null);
+      const anyInflight = fresh.some((r) => r.inFlight);
+      const newCount = fresh.length !== state.runs.length;
+      state.runs = fresh;
+      if (topChanged || newCount || anyInflight) {
+        const currentId = state.currentRun?.id ?? null;
+        populateRunSelect(fresh, currentId);
+        // Auto-advance to the fresh top run if the user hadn't drilled
+        // into a specific run OR the previous selection was the
+        // former top (i.e. they were following the latest).
+        if (topChanged && (!currentId || !fresh.some((r) => r.id === currentId))) {
+          selectRun(fresh[0].id);
+        }
+      }
+    } catch {}
+    scheduleIndexPoll();
+  }, INDEX_POLL_MS);
 }
 
 async function selectRun(id) {
@@ -290,6 +355,57 @@ async function selectRun(id) {
   renderLanes(state.currentRun);
   renderFilters();
   renderEvents();
+  // Kick off live polling if the run is in-flight (no endedAt yet).
+  scheduleLivePoll(id);
+}
+
+/**
+ * Poll the selected run every LIVE_POLL_MS while it's in-flight. When
+ * new events appear we rebuild the derived maps and re-render the left
+ * pane. The right pane (event detail) is preserved if the previously
+ * selected event still exists in the new event list.
+ */
+function scheduleLivePoll(runId) {
+  if (state.livePollHandle) clearTimeout(state.livePollHandle);
+  // Not in-flight → nothing to poll.
+  if (!state.currentRun || state.currentRun.endedAt) return;
+  state.livePollHandle = setTimeout(async () => {
+    state.livePollHandle = null;
+    // User navigated away / picked another run — stop.
+    if (!state.currentRun || state.currentRun.id !== runId) return;
+    try {
+      const r = await fetch('/api/runs/' + encodeURIComponent(runId));
+      if (!r.ok) {
+        scheduleLivePoll(runId);
+        return;
+      }
+      const fresh = await r.json();
+      const changed =
+        fresh.events.length !== state.currentRun.events.length ||
+        (fresh.endedAt && !state.currentRun.endedAt);
+      if (changed) {
+        const prevSelectedId = state.selectedEventId;
+        state.currentRun = fresh;
+        state.atomsByName = buildAtomMap(fresh);
+        renderSummary(fresh);
+        renderLanes(fresh);
+        renderFilters();
+        renderEvents();
+        // Re-select the same event in the right pane if it still exists,
+        // so the user's context doesn't jump every second.
+        if (prevSelectedId) {
+          const stillThere = fresh.events.find((e) => e.id === prevSelectedId);
+          if (stillThere) {
+            state.selectedEventId = prevSelectedId;
+            renderDetail(stillThere);
+          }
+        }
+      }
+    } catch {}
+    // Continue polling until endedAt arrives. Once it does, the next
+    // tick won't schedule a new timer (early return at top).
+    scheduleLivePoll(runId);
+  }, LIVE_POLL_MS);
 }
 
 /**
@@ -356,11 +472,19 @@ function renderSummary(run) {
         style: 'margin-top:8px; background: #3b2a10; border-color: #7a5a1e; color: #fbbf24;',
       }, '⚠ Run dégradé — la boucle de supervision a escaladé et le parent a pris la main via son fallback. Le livrable n\'est pas un vrai succès du protocole.')
     : null;
+  const isLive = !run.endedAt;
+  const liveBanner = isLive
+    ? h('div', {
+        class: 'err-badge',
+        style: 'margin-top:8px; background: #0f2a18; border-color: #1e7a3a; color: #4ade80;',
+      }, '● LIVE — le run est encore en cours, cette vue se rafraîchit toutes les ' + (LIVE_POLL_MS / 1000) + ' s.')
+    : null;
   el.appendChild(h('div', { class: 'summary' }, [
-    h('h2', {}, run.label),
+    h('h2', {}, (isLive ? '● ' : '') + run.label),
     h('div', { class: 'task' }, run.task?.description ?? ''),
     grid,
     models.length ? h('div', { class: 'filters', style: 'margin-top:10px;' }, models) : null,
+    liveBanner,
     run.result ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Résultat : ' + (run.result.summary ?? '')) : null,
     degradedBanner,
     run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Erreur : ' + run.error) : null,
