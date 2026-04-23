@@ -725,6 +725,30 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         };
       }
 
+      // Oscillation short-circuit (#2). If the SAME smoke has both
+      // passed and failed in the window, the assertion itself is
+      // non-deterministic — a sporadic pass is not a real signal, and
+      // the L1 is likely going to declare victory on one of those
+      // passes while the supervisor's ground-truth probe sees a fail
+      // state (observed on the backgammon timeout run: internal smoke
+      // oscillated ok/fail while the supervisor kept rejecting with a
+      // 404 it couldn't escape from). We stop the loop and surface a
+      // coaching error distinct from the isStuck one.
+      if (smoke !== undefined && stuck.isOscillating(smoke)) {
+        return {
+          ok: false,
+          url,
+          errors: [
+            `smoke non-deterministic: this assertion produced BOTH passes AND failures within the last ${SMOKE_STUCK_WINDOW} calls against the same page. ` +
+              SMOKE_OSCILLATION_HINT,
+          ],
+          warnings: [],
+          failedRequests: [],
+          interactionLog: [],
+          smokeResult: { error: 'oscillating', hint: SMOKE_OSCILLATION_HINT },
+        };
+      }
+
       const browser = await getBrowser();
       const page = await browser.newPage();
       const errors: string[] = [];
@@ -967,6 +991,22 @@ export function makeSmokeStuckTracker(
 ): {
   record: (smoke: string, ok: boolean) => void;
   isStuck: (smoke: string) => boolean;
+  /**
+   * Inconsistency detector (#2): returns true when the same normalised
+   * smoke assertion has BOTH passed AND failed within the window. That
+   * pattern is NOT the "same assertion fails N times" pattern isStuck
+   * catches — it's the subtler "smoke gives sporadic success between
+   * real failures", observed on the backgammon timeout run where
+   * Hydrogen declared the run successful after a sporadic pass even
+   * though the supervisor's ground-truth probe kept reporting a 404.
+   * A sporadic-pass smoke is a BUG in the smoke design (e.g. the
+   * assertion depends on timing or side-effects that aren't
+   * deterministically seeded), not valid progress signal. We surface a
+   * targeted coaching hint (distinct from the isStuck one) so the
+   * model knows to swap to a deterministic `window.__test` hook
+   * rather than keep retrying.
+   */
+  isOscillating: (smoke: string) => boolean;
 } {
   // Backwards-compatible: a number is interpreted as windowSize with
   // failureThreshold defaulting to the module constant. Tests and
@@ -989,6 +1029,23 @@ export function makeSmokeStuckTracker(
         if (h.normalized === target && !h.ok) failures++;
       }
       return failures >= failureThreshold;
+    },
+    isOscillating(smoke): boolean {
+      const target = normalize(smoke);
+      let passes = 0;
+      let fails = 0;
+      for (const h of history) {
+        if (h.normalized !== target) continue;
+        if (h.ok) passes++;
+        else fails++;
+      }
+      // Require at least one of each AND at least 3 total occurrences
+      // of the same smoke — a single pass followed by a single fail is
+      // often just the natural "validate -> fix -> re-validate" loop
+      // and shouldn't trip the detector. Three or more occurrences
+      // with BOTH polarities is the signature of a non-deterministic
+      // assertion.
+      return passes > 0 && fails > 0 && passes + fails >= 3;
     },
   };
 }
@@ -1026,6 +1083,21 @@ const SMOKE_STUCK_HINT =
   'state from the smoke IIFE directly; (3) accept the functionality as ' +
   'verified by a simpler invariant (element exists + renders) and move ' +
   'on — you do not need end-to-end gameplay in a smoke check.';
+
+const SMOKE_OSCILLATION_HINT =
+  'Your smoke assertion is NON-DETERMINISTIC: it passed at least once ' +
+  'AND failed at least once against the same page within this session. ' +
+  'A sporadic pass is NOT a validation signal — the supervisor\'s ' +
+  'independent ground-truth probe will re-run the page and either see ' +
+  'the fail state or a different issue entirely, rejecting your ' +
+  'result. Stop retrying. Root-cause options: (1) the assertion ' +
+  'depends on TIMING (animation frame, setTimeout, fetch) — wrap it ' +
+  'in a deterministic wait or a window.__test hook that the app ' +
+  'updates synchronously; (2) the assertion depends on an INIT side-' +
+  'effect that isn\'t seeded before the check — initialise the state ' +
+  'from the smoke IIFE before asserting; (3) the assertion is racing ' +
+  'against the server boot — add a window.__test hook that the app ' +
+  'flips only after it\'s fully ready, and assert that flag first.';
 
 /**
  * Quick lexical check: does the smoke snippet look like a top-level

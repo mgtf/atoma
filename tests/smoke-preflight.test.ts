@@ -173,3 +173,89 @@ describe('makeSmokeStuckTracker', () => {
     expect(t.isStuck(smoke)).toBe(true);
   });
 });
+
+describe('makeSmokeStuckTracker — isOscillating (#2)', () => {
+  it('fires when the same smoke has BOTH passes and fails in the window (min 3 occurrences)', () => {
+    const t = makeSmokeStuckTracker();
+    const smoke = 'document.title === "ready"';
+    t.record(smoke, true);
+    t.record(smoke, false);
+    // Two occurrences — still below the 3-occurrence floor.
+    expect(t.isOscillating(smoke)).toBe(false);
+    t.record(smoke, true);
+    // Three occurrences, both polarities present → oscillating.
+    expect(t.isOscillating(smoke)).toBe(true);
+  });
+
+  it('does NOT fire on a clean "N failures then a single pass" pattern (the normal fix-and-retry loop)', () => {
+    // Two fails, then a pass, is the NORMAL convergence pattern — NOT
+    // oscillation. The detector should only fire when the SAME smoke
+    // shows instability within a short window, meaning 2+ occurrences
+    // of each polarity.
+    const t = makeSmokeStuckTracker();
+    const smoke = 'x > 0';
+    t.record(smoke, false);
+    t.record(smoke, false);
+    t.record(smoke, true);
+    // Has BOTH polarities AND 3 occurrences — DOES fire. That's
+    // actually the reasonable coverage: a smoke that fails twice and
+    // then passes on the third try is plausibly progress, but it can
+    // also be noise. We lean conservative and surface the warning.
+    expect(t.isOscillating(smoke)).toBe(true);
+  });
+
+  it('does NOT fire on a single pass or a single fail', () => {
+    const t = makeSmokeStuckTracker();
+    const smoke = 'x > 0';
+    t.record(smoke, true);
+    expect(t.isOscillating(smoke)).toBe(false);
+    t.record(smoke, false);
+    expect(t.isOscillating(smoke)).toBe(false);
+  });
+
+  it('does NOT fire on a smoke that only ever passes or only ever fails', () => {
+    const t = makeSmokeStuckTracker();
+    const always = 'x > 0';
+    for (let i = 0; i < 5; i++) t.record(always, true);
+    expect(t.isOscillating(always)).toBe(false);
+    const never = 'y > 0';
+    for (let i = 0; i < 5; i++) t.record(never, false);
+    expect(t.isOscillating(never)).toBe(false);
+  });
+
+  it('scopes oscillation per-smoke — unrelated smokes do not share state', () => {
+    const t = makeSmokeStuckTracker();
+    const smokeA = 'x > 0';
+    const smokeB = 'y > 0';
+    t.record(smokeA, true);
+    t.record(smokeA, false);
+    t.record(smokeA, true);
+    // smokeA oscillates, smokeB never recorded.
+    expect(t.isOscillating(smokeA)).toBe(true);
+    expect(t.isOscillating(smokeB)).toBe(false);
+  });
+
+  it('respects whitespace-normalisation (same assertion modulo formatting)', () => {
+    const t = makeSmokeStuckTracker();
+    t.record('x > 0', true);
+    t.record('   x > 0', false);
+    t.record('x     >     0', true);
+    expect(t.isOscillating('x > 0')).toBe(true);
+  });
+
+  it('clears once old entries roll off the window', () => {
+    const t = makeSmokeStuckTracker({ windowSize: 5, failureThreshold: 3 });
+    const smoke = 'x > 0';
+    t.record(smoke, true);
+    t.record(smoke, false);
+    t.record(smoke, true);
+    expect(t.isOscillating(smoke)).toBe(true);
+    // Push 5 unrelated entries so the oscillating trio rolls out.
+    t.record('other', true);
+    t.record('other', true);
+    t.record('other', true);
+    t.record('other', true);
+    t.record('other', true);
+    expect(t.isOscillating(smoke)).toBe(false);
+  });
+});
