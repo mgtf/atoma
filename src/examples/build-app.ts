@@ -15,7 +15,7 @@ import {
   ensureCanonicalFileScribeL1,
 } from '../atoms/capability.js';
 import { TraceRecorder } from '../viz/trace.js';
-import { formatDecompositionReport } from '../viz/report.js';
+import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { ToolSandbox } from '../tools/sandbox.js';
@@ -237,8 +237,47 @@ async function main(): Promise<void> {
     // Park forever until a signal comes in.
     await new Promise(() => {});
   } catch (err) {
-    recorder.endRun({ error: (err as Error).message });
-    console.error(err);
+    // Format a richer post-mortem when the run aborts. #4 —
+    // the default AbortError / timeout message ("This operation was
+    // aborted") is unactionable; we dig into the partial run trace
+    // the recorder has kept to surface: which tier/atom was running
+    // last, which tool loops consumed the budget, and which
+    // validator rejections the supervise loop couldn't recover from.
+    // Everything stays best-effort: a diagnostic crash must not mask
+    // the underlying error.
+    const errMsg = (err as Error).message ?? String(err);
+    const isTimeout =
+      signal.aborted &&
+      (signal.reason instanceof Error
+        ? /timeout|aborted/i.test(signal.reason.message ?? '')
+        : true);
+    const run = recorder.currentRun;
+    let postMortem = '';
+    if (run) {
+      try {
+        postMortem = formatTimeoutPostMortem(run, {
+          budgetMs: timeoutMs,
+          isTimeout,
+        });
+      } catch {
+        // swallow — we're already in the error path, don't pile on
+      }
+    }
+    recorder.endRun({
+      error: isTimeout ? `run aborted after ${Math.round(timeoutMs / 1000)}s budget` : errMsg,
+    });
+    console.error('\n--- run failed ---');
+    console.error(isTimeout ? `⏱ TIMEOUT after ${Math.round(timeoutMs / 1000)}s — budget exhausted` : `✖ ${errMsg}`);
+    if (postMortem) {
+      console.error('');
+      console.error(postMortem);
+    }
+    console.error('');
+    console.error(`LLM usage at abort:`);
+    console.error(metrics.formatSummary());
+    console.error(
+      `\nrun enregistré dans ${recorder.runsDir} — ouvre le visualiseur pour plus de détails : npm run viz`
+    );
     await shutdown(1);
   }
 }

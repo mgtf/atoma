@@ -361,3 +361,134 @@ export function formatDecompositionReport(
   lines.push(...formatToolBlock(tools, excerptLimit));
   return lines.join('\n');
 }
+
+/**
+ * Post-mortem rendered when a run aborts (timeout or thrown error).
+ * Different focus from the decomposition report: that one answers
+ * "what did each tier do?" across a clean run, the post-mortem
+ * answers "where did the budget go and what was the last failure
+ * mode before we gave up?". Designed to be actionable from the
+ * terminal alone, so a user can decide their next move (raise the
+ * budget, fix a guidance issue, retry) without opening the viz.
+ *
+ * Sections surfaced:
+ *   1. An at-a-glance summary: total tool calls broken down by name,
+ *      latest atom active before the abort.
+ *   2. The tool call bloat signal: if one tool (typically
+ *      validate_html or fetch_url) dominated the budget, call that
+ *      out — "40 validate_html calls consumed the budget" is far
+ *      more actionable than "timeout at 10min".
+ *   3. The last 2 NEGATIVE validator verdicts (the same shape used
+ *      by extractBranchDiagnostic) — Haiku's reasoning usually cites
+ *      the concrete signal the run couldn't escape (e.g. a 404, a
+ *      parse error, a smoke oscillation).
+ *
+ * Fails silently on missing data — the post-mortem is strictly
+ * additive to the existing error-path output; a malformed trace
+ * must not mask the original error.
+ */
+export function formatTimeoutPostMortem(
+  run: VizRun,
+  opts: { budgetMs: number; isTimeout: boolean }
+): string {
+  const lines: string[] = [];
+  const totalLlm = run.events.filter(isLlm).length;
+  const totalTool = run.events.filter(isTool).length;
+  lines.push(`== post-mortem ==`);
+  lines.push(
+    `events captured : ${run.events.length} total — ${totalLlm} LLM call(s), ${totalTool} tool call(s)`
+  );
+
+  // Last active atom (most recent event with an actor).
+  const lastActive = [...run.events]
+    .reverse()
+    .find((e) => 'actor' in e && e.actor?.name);
+  if (lastActive && 'actor' in lastActive && lastActive.actor) {
+    const a = lastActive.actor;
+    lines.push(
+      `last active atom: ${a.name ?? '?'}` +
+        (a.tier !== undefined ? ` (tier ${a.tier})` : '') +
+        (lastActive.kind === 'tool' ? ` — last event was a \`${lastActive.name}\` tool call` : '')
+    );
+  }
+
+  // Tool call dominance: a single tool (validate_html, fetch_url,
+  // write_file, etc.) eating most of the budget is the #1 signal of
+  // a stuck fix-loop. Surface the top-3 by count.
+  const toolCounts = new Map<string, number>();
+  for (const ev of run.events) {
+    if (!isTool(ev)) continue;
+    toolCounts.set(ev.name, (toolCounts.get(ev.name) ?? 0) + 1);
+  }
+  if (toolCounts.size > 0) {
+    const top = [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+    const domShare = top[0]![1] / totalTool;
+    lines.push(
+      `tool call bloat : ${top
+        .map(([n, c]) => `${n} ×${c}`)
+        .join(', ')}` + (domShare >= 0.5 && totalTool >= 5
+        ? `  [⚠ ${top[0]![0]} dominated — ${Math.round(domShare * 100)}% of tool budget]`
+        : '')
+    );
+  }
+
+  // Last 2 negative validator verdicts with their reasoning — the
+  // concrete rejection Haiku / the fallback validator couldn't
+  // escape. Same extraction pattern as extractBranchDiagnostic, but
+  // scoped to the whole run rather than a single supervise-loop
+  // trace.
+  const negVerdicts: Array<{ phase: string; atom: string; reasoning: string }> = [];
+  for (let i = run.events.length - 1; i >= 0 && negVerdicts.length < 2; i--) {
+    const ev = run.events[i];
+    if (!ev || !isLlm(ev)) continue;
+    if (ev.role !== 'validate-plan' && ev.role !== 'validate-result') continue;
+    const parsed = tryParseVerdict(ev.response);
+    if (!parsed || parsed.approved !== false) continue;
+    negVerdicts.push({
+      phase: ev.role === 'validate-plan' ? 'PLAN' : 'RESULT',
+      atom: ev.actor?.name ?? '?',
+      reasoning: clip(parsed.reasoning, 400),
+    });
+  }
+  if (negVerdicts.length > 0) {
+    lines.push('');
+    lines.push('last validator rejections (newest first):');
+    for (const v of negVerdicts) {
+      lines.push(`  [${v.phase} by ${v.atom}] ${v.reasoning}`);
+    }
+  }
+
+  // Actionable suggestion bar.
+  lines.push('');
+  if (opts.isTimeout) {
+    lines.push(
+      `next steps: (a) raise ATOMA_BUILD_TIMEOUT_MS above ${Math.round(opts.budgetMs / 1000)}s ` +
+        `for ambitious tasks; (b) open the viz on this run (npm run viz) to see ` +
+        `the exact tool loop that consumed the budget; (c) simplify the task to ` +
+        `a smaller first-pass deliverable.`
+    );
+  } else {
+    lines.push(
+      `next steps: open the viz on this run (npm run viz) and inspect the last LLM ` +
+        `call for the actual parse / validation error.`
+    );
+  }
+
+  return lines.join('\n');
+}
+
+function tryParseVerdict(text: string): { approved: boolean; reasoning: string } | null {
+  if (!text || text.trim().length === 0) return null;
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    const obj = JSON.parse(match[0]) as Record<string, unknown>;
+    if (typeof obj['approved'] !== 'boolean') return null;
+    return {
+      approved: obj['approved'],
+      reasoning: typeof obj['reasoning'] === 'string' ? obj['reasoning'] : '',
+    };
+  } catch {
+    return null;
+  }
+}
