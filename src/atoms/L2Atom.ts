@@ -40,6 +40,7 @@ import {
 import {
   bucketIdForTools,
   CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
+  extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
 
@@ -132,9 +133,10 @@ export const SMOKE_DESIGN_GUIDANCE = [
  */
 export function buildNarrowL1Prompt(
   subtaskDescription: string,
-  childTools: readonly Tool[] = []
+  childTools: readonly Tool[] = [],
+  diagnostic: string = ''
 ): string {
-  const header = [
+  const header: string[] = [
     `You are an L1 element builder with ONE narrow responsibility.`,
     `Your current subtask: ${subtaskDescription}`,
     ``,
@@ -144,6 +146,24 @@ export function buildNarrowL1Prompt(
     `IGNORE its domain and focus SOLELY on this subtask as stated.`,
     ``,
   ];
+  // Diagnostic injection (#1): when the supervise loop passes us the
+  // parent's trace, surface the validator's last rejection reasoning(s)
+  // verbatim so the branched L1 knows the CONCRETE fix it has to land
+  // (e.g. "GROUND-TRUTH EVIDENCE: validate_html reported 404 on URL"),
+  // rather than retrying the whole deliverable from scratch.
+  if (diagnostic.length > 0) {
+    header.push(`== PRIOR ATTEMPT DIAGNOSIS (act on this, do NOT ignore) ==`);
+    header.push(diagnostic);
+    header.push(``);
+    header.push(
+      `Your first move should diagnose and fix the exact issue cited above.`
+    );
+    header.push(
+      `Do NOT rewrite the entire deliverable until you have verified the root`
+    );
+    header.push(`cause of that specific failure.`);
+    header.push(``);
+  }
 
   const bucket = bucketIdForTools(childTools);
   let bucketBody: string[];
@@ -635,7 +655,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx.logger.info(`[${this.name}] branched L1 ${child.name} → ${branched.name}`);
         return L1Atom.fromType(branched);
       },
-      branchOnEscalation: async (child, _trace, reason) => {
+      branchOnEscalation: async (child, trace, reason) => {
         // Aligned system prompt: start the branch FRESH with the current
         // subtask's domain, not inherited from the parent. Without this
         // reset, a "platformer builder" parent gets branched into a
@@ -643,26 +663,31 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // platformer and keeps emitting platformer plans (Frankenstein).
         //
         // BUCKET-AWARE: buildNarrowL1Prompt reads childTools to pick
-        // the tool-sequence body (HTTP vs web vs generic). Without
-        // this, a branch of an HTTP L1 inherited the web/validate_html
-        // + SMOKE_DESIGN_GUIDANCE body and the model invoked
-        // validate_html on a JSON API — fix #8b.
-        // Capability-first registry description — the old
-        // "L1 narrow builder for: <subtaskDescription>" label leaked
-        // the task narrative back into the registry, the exact
-        // pollution fix A eliminated in createSubtaskL1. This path is
-        // the ESCALATION entry into the registry; it needs the same
-        // rule so branches don't re-theme the catalog with whatever
-        // task happened to trigger the escalation. Task context still
-        // reaches the atom via the narrowPrompt (which bakes in the
-        // subtask).
-        // We can't read child.tools directly here — Atom.tools is
-        // protected — so we re-resolve via the registry entry. The
-        // registry is the authoritative source of truth for an atom's
-        // tool signature anyway.
+        // the tool-sequence body (HTTP vs web vs generic) — fix #8b.
+        //
+        // DIAGNOSTIC INJECTION (#1): we also extract the parent's last
+        // validator rejection reasoning(s) from the trace and inject
+        // them as a "== PRIOR ATTEMPT DIAGNOSIS ==" block in the narrow
+        // prompt. Without this, a branch created after a ground-truth
+        // 404 rejection had NO idea the parent hit a 404 — it just saw
+        // "previous attempts failed" and re-ran the full deliverable
+        // cycle (observed on the backgammon run: Beryllium did 23
+        // identical validate_html calls after Hydrogen's 16, never
+        // fixing the underlying server/file mismatch).
+        //
+        // Capability-first registry description: the task narrative
+        // stays in the narrow prompt; the registry row stays tier /
+        // tool scoped so prefilter cross-domain reuse stays clean.
+        // Atom.tools is protected, so we re-resolve the toolset via
+        // the registry — the registry is the authoritative source.
         const childType = this.registry.getByName(child.name);
         const childTools = childType?.tools ?? [];
-        const narrowPrompt = buildNarrowL1Prompt(subtaskDescription, childTools);
+        const diagnostic = extractBranchDiagnostic(trace);
+        const narrowPrompt = buildNarrowL1Prompt(
+          subtaskDescription,
+          childTools,
+          diagnostic
+        );
         const narrowDesc = resolveCreationDescription(undefined, childTools, 1);
         const branched = this.registry.branch(
           child.name,
@@ -672,7 +697,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             additionalContext:
               `Branched after escalation. Previous attempts failed because the inherited prompt` +
               ` was misaligned with this task. Prompt has been reset to a narrow template focused` +
-              ` on the current subtask.`,
+              ` on the current subtask.` +
+              (diagnostic.length > 0
+                ? `\nVALIDATOR DIAGNOSIS (injected into the new system prompt too):\n${diagnostic}`
+                : ''),
           },
           this.name,
           undefined

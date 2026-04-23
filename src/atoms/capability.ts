@@ -301,6 +301,83 @@ function pickTools(tools: readonly Tool[], scope: readonly string[]): Tool[] {
 }
 
 /**
+ * Walk a supervise-loop trace backwards and extract the diagnostic
+ * information we want to inject into a branched atom's prompt so the
+ * branch doesn't repeat the same mistake that triggered the
+ * escalation. Returns an empty string when there's nothing useful.
+ *
+ * Today we surface (in order):
+ *   - Up to the 2 most-recent `verdict-result`/`verdict-plan` entries
+ *     with `approved === false`: their reasoning often quotes a
+ *     ground-truth probe response (e.g. "GROUND-TRUTH EVIDENCE:
+ *     validate_html reported 404"), which is the signal the branched
+ *     L1 must act on rather than rewrite the whole deliverable from
+ *     scratch.
+ *   - The LAST `applied-modifications` entry's `additionalContext`
+ *     when present — that's the concrete "next-attempt" hint the
+ *     validator produced on its last failed round.
+ *
+ * We cap the output at ~1500 characters so the injection stays
+ * bounded: a long narrative diagnostic crowds out the actual
+ * subtask description and confuses the model more than it helps.
+ */
+export function extractBranchDiagnostic(
+  trace: readonly { kind: string; payload: unknown }[]
+): string {
+  const lines: string[] = [];
+  const rejections: Array<{ phase: string; reasoning: string }> = [];
+
+  // Walk newest-first, collect up to 2 negative verdicts.
+  for (let i = trace.length - 1; i >= 0 && rejections.length < 2; i--) {
+    const entry = trace[i];
+    if (!entry) continue;
+    if (entry.kind !== 'verdict-plan' && entry.kind !== 'verdict-result') continue;
+    const payload = entry.payload as {
+      approved?: boolean;
+      reasoning?: string;
+      modifications?: { additionalContext?: string };
+    } | null;
+    if (!payload || payload.approved !== false) continue;
+    const reasoning =
+      typeof payload.reasoning === 'string' && payload.reasoning.length > 0
+        ? payload.reasoning.slice(0, 700)
+        : '';
+    if (!reasoning) continue;
+    rejections.push({
+      phase: entry.kind === 'verdict-plan' ? 'PLAN' : 'RESULT',
+      reasoning,
+    });
+  }
+
+  if (rejections.length > 0) {
+    lines.push(`Prior attempt was REJECTED by the supervisor. Verbatim validator feedback (most recent first):`);
+    for (const r of rejections) {
+      lines.push(`  [${r.phase}] ${r.reasoning}`);
+    }
+  }
+
+  // Last applied-modifications additionalContext — validator's "next-
+  // attempt" instruction, if any.
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const entry = trace[i];
+    if (!entry || entry.kind !== 'applied-modifications') continue;
+    const payload = entry.payload as {
+      modifications?: { additionalContext?: string };
+    } | null;
+    const hint = payload?.modifications?.additionalContext;
+    if (typeof hint === 'string' && hint.trim().length > 0) {
+      lines.push(`Validator's prescription for the next attempt:`);
+      lines.push(`  ${hint.trim().slice(0, 500)}`);
+      break;
+    }
+  }
+
+  if (lines.length === 0) return '';
+  const out = lines.join('\n');
+  return out.length > 1500 ? out.slice(0, 1500) + '…' : out;
+}
+
+/**
  * Return the CAPABILITY_BUCKETS id that best describes the given tool set
  * (first bucket whose `required` list is fully covered), or null if no
  * bucket matches. Used by prompt-selection code (e.g. the narrow-branch

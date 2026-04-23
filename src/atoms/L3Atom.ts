@@ -40,6 +40,7 @@ import {
 } from './cost.js';
 import {
   bucketIdForTools,
+  extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
 
@@ -52,7 +53,8 @@ import {
  */
 export function buildNarrowL2Prompt(
   subtaskDescription: string,
-  childTools: readonly Tool[] = []
+  childTools: readonly Tool[] = [],
+  diagnostic: string = ''
 ): string {
   // BUCKET-AWARE framing: the closing line hints at the downstream L1
   // bucket so the branched L2 orchestrator doesn't describe itself as
@@ -65,7 +67,7 @@ export function buildNarrowL2Prompt(
       : bucket === 'web-artefact-build+validate'
         ? `Your leaf tier-1 will write a single-file web artefact, serve it via start_static_server, and validate via headless browser (validate_html).`
         : `Your leaf tier-1 works with whatever tools it has been handed — do not assume a specific bucket.`;
-  return [
+  const lines: string[] = [
     `You are an L2 molecule that decomposes a single-purpose task into`,
     `orthogonal L1 leaf subtasks and supervises their parallel execution.`,
     ``,
@@ -76,14 +78,31 @@ export function buildNarrowL2Prompt(
     `different problem. IGNORE its domain and focus SOLELY on this`,
     `subtask as stated.`,
     ``,
+  ];
+  // Diagnostic injection (#1) — see buildNarrowL1Prompt for the
+  // rationale. Same shape, one tier up.
+  if (diagnostic.length > 0) {
+    lines.push(`== PRIOR ATTEMPT DIAGNOSIS (act on this, do NOT ignore) ==`);
+    lines.push(diagnostic);
+    lines.push(``);
+    lines.push(
+      `Your decomposition should target the SPECIFIC failure cited above — don't`
+    );
+    lines.push(
+      `re-plan the full task from scratch when a targeted fix is the right move.`
+    );
+    lines.push(``);
+  }
+  lines.push(
     `You NEVER execute tools yourself. Your job:`,
     `  1. Decompose the subtask into 1+ orthogonal L1 subtasks`,
     `  2. Choose an L1 for each (reuse a catalog match or create a narrow new one)`,
     `  3. Pick an aggregation mode (concat or llm-synthesize) matching the artefact`,
     `  4. Return the strategy+plan JSON pair`,
     ``,
-    bucketHint,
-  ].join('\n');
+    bucketHint
+  );
+  return lines.join('\n');
 }
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
@@ -200,15 +219,21 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         const base = stripBranchProvenance(t.description);
         const children = l1Affinity(t.name);
         if (children.length === 0) return { name: t.name, description: base };
-        const hint = children
+        // Format the L1-affinity hint on its own line(s) with an
+        // explicit "REACHABLE L1 CHILDREN" preamble, not a parenthetical
+        // tail on the L2 description. Earlier attempts used
+        // "(dispatches leaves to: …)" but Haiku kept parsing it as
+        // flavour text and escalating on "L2 description seems narrow"
+        // reasoning. A clearly-delimited block is harder to ignore.
+        const childLines = children
           .map(
             (c) =>
-              `${c.name} — ${stripBranchProvenance(c.description).slice(0, 90)}`
+              `      - ${c.name}: ${stripBranchProvenance(c.description).slice(0, 120)}`
           )
-          .join('; ');
+          .join('\n');
         return {
           name: t.name,
-          description: `${base} (dispatches leaves to: ${hint})`,
+          description: `${base}\n    REACHABLE L1 CHILDREN (this L2 can dispatch any leaf task to any of these):\n${childLines}`,
         };
       });
       const prefilter = await prefilterStrategy({
@@ -501,15 +526,22 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         this.l2Peers.push(fresh);
         return fresh;
       },
-      branchOnEscalation: async (child, _trace, reason) => {
+      branchOnEscalation: async (child, trace, reason) => {
         // Reset the L2's system prompt so it's aligned with THIS subtask's
         // domain rather than inherited from the parent that failed.
         // BUCKET-AWARE: buildNarrowL2Prompt reads childTools so the
         // narrow prompt's closing hint matches the downstream bucket
-        // (fix #8b).
+        // (fix #8b). DIAGNOSTIC INJECTION: pass the extracted
+        // validator rejection reasonings into the narrow prompt so
+        // the branched L2 can target the specific failure (#1).
         const childType = this.registry.getByName(child.name);
         const childTools = childType?.tools ?? [];
-        const narrowPrompt = buildNarrowL2Prompt(subtaskDescription, childTools);
+        const diagnostic = extractBranchDiagnostic(trace);
+        const narrowPrompt = buildNarrowL2Prompt(
+          subtaskDescription,
+          childTools,
+          diagnostic
+        );
         // Capability-first description — match the rule enforced in
         // createSubtaskL2. The task narrative lives in narrowPrompt
         // (systemPromptReplace); the registry must stay tier/tool-
@@ -524,7 +556,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
             descriptionReplace: narrowDesc,
             additionalContext:
               `Branched after escalation. Prior L2 flow failed because the inherited prompt was` +
-              ` misaligned with this subtask.`,
+              ` misaligned with this subtask.` +
+              (diagnostic.length > 0
+                ? `\nVALIDATOR DIAGNOSIS (injected into the new system prompt too):\n${diagnostic}`
+                : ''),
           },
           this.name,
           undefined
