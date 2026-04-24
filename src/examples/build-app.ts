@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { resolve } from 'node:path';
 import { setMaxListeners } from 'node:events';
 import { AnthropicLlmClient } from '../core/llm.js';
+import { OllamaLlmClient } from '../core/llmOllama.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
@@ -31,9 +32,20 @@ const consoleLogger: Logger = {
 };
 
 async function main(): Promise<void> {
+  // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
+  // run against a local Ollama install (or Ollama Cloud via a :cloud
+  // tag). The Ollama path ignores ANTHROPIC_API_KEY and doesn't need a
+  // network-reachable Anthropic endpoint. The L3 Opus-discovery step
+  // (`resolveLatestOpus`) is also skipped — L3 falls back to its
+  // FALLBACK_OPUS model id string, which the OllamaLlmClient then
+  // silently substitutes with its configured default model.
+  const provider = (process.env['ATOMA_LLM'] ?? 'anthropic').toLowerCase();
+  const useOllama = provider === 'ollama';
   const apiKey = process.env['ANTHROPIC_API_KEY'];
-  if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY is required. Copy .env.example to .env and fill it.');
+  if (!useOllama && !apiKey) {
+    console.error(
+      'ANTHROPIC_API_KEY is required (or set ATOMA_LLM=ollama to use a local Ollama model).'
+    );
     process.exit(1);
   }
 
@@ -52,11 +64,26 @@ async function main(): Promise<void> {
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   const registry = new RecordingRegistry(db, recorder);
-  const anthropic = new Anthropic({ apiKey });
+  // Anthropic SDK is still constructed when ollama is selected — it
+  // stays unused at inference time but L3.fromType accepts an optional
+  // Anthropic client for its Opus-resolution step, and we pass
+  // `undefined` when on the Ollama path so we never touch the network.
+  const anthropic = useOllama ? undefined : new Anthropic({ apiKey: apiKey! });
   const metrics = new InMemoryMetrics();
+  const baseClient = useOllama
+    ? new OllamaLlmClient({
+        baseUrl: process.env['OLLAMA_BASE_URL'],
+        defaultModel: process.env['OLLAMA_MODEL'],
+      })
+    : new AnthropicLlmClient(anthropic!);
   const llm = new MetricsLlmClient(
-    new RecordingLlmClient(new AnthropicLlmClient(anthropic), recorder),
+    new RecordingLlmClient(baseClient, recorder),
     metrics
+  );
+  console.log(
+    useOllama
+      ? `llm provider: ollama — ${process.env['OLLAMA_MODEL'] ?? 'glm-5.1:cloud'} @ ${process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'}`
+      : `llm provider: anthropic`
   );
 
   const sandbox = new ToolSandbox(workspaceRoot);

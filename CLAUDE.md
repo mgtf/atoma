@@ -340,6 +340,32 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   prompt and the last tool. Leave it on unless you have a measurement-backed reason.
 - Model IDs live in `src/core/models.ts`: `PIN_HAIKU`, `PIN_SONNET`, `FALLBACK_OPUS`.
   L3 resolves Opus dynamically at construction via `resolveLatestOpus`.
+- **Alternative provider: Ollama (`src/core/llmOllama.ts`).** The
+  `OllamaLlmClient` implements the same `LlmClient` interface and
+  targets any Ollama-exposed model (local or Ollama-Cloud via a
+  `:cloud` tag). Activate via env: `ATOMA_LLM=ollama` (default:
+  `anthropic`). Optional `OLLAMA_BASE_URL` (default
+  `http://localhost:11434`) and `OLLAMA_MODEL` (default
+  `glm-5.1:cloud`). Implementation notes:
+    - The request's `req.model` field is IGNORED — our atom tier
+      dispatches Haiku vs Sonnet vs Opus but Ollama runs a single
+      model per endpoint, so all three tiers collapse onto the
+      configured `defaultModel`. Cost-discipline call-graph shape
+      still holds; only per-call cost changes.
+    - `cache_control` is Anthropic-specific; Ollama silently ignores
+      it. `usage.cacheReadInputTokens` stays 0 — cache metrics are
+      meaningless for this path.
+    - The declared-tools scope gate (#8a) is mirrored in the Ollama
+      tool-use loop: off-scope `tool_calls` get a `role: "tool"`
+      error appended and `onToolInvocation` fires with `error`, with
+      the executor untouched. Safety contract is provider-neutral.
+    - Tool budget exhaustion mirrors `AnthropicLlmClient`: one
+      tools-disabled round-trip with a `TOOL BUDGET EXHAUSTED` user
+      message to force a final text reply.
+    - L3's `resolveLatestOpus` network call is SKIPPED under Ollama
+      — `build-app.ts` passes `anthropic: undefined` to
+      `L3Atom.fromType`, so L3 uses the `FALLBACK_OPUS` id string
+      which the Ollama client then maps to `defaultModel`.
 - **All JSON parsing from LLM output lives in `src/atoms/json.ts`**. Shared helpers:
   - `parseWith(schema, text)` — schema-validated parse of a single JSON payload.
   - `extractJson(text)` — robust JSON extraction tolerant of prose/fence wrapping.
