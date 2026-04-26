@@ -32,6 +32,22 @@ const consoleLogger: Logger = {
   error: (m, meta) => console.error(`✖ ${m}`, meta ?? ''),
 };
 
+interface CliArgs {
+  goal?: string;
+  learnSkills: boolean;
+}
+
+function parseArgs(argv: readonly string[]): CliArgs {
+  let goal: string | undefined;
+  let learnSkills = false;
+  for (const a of argv) {
+    if (a === '--learn-skills') learnSkills = true;
+    else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
+    else if (goal === undefined) goal = a;
+  }
+  return { goal, learnSkills };
+}
+
 async function main(): Promise<void> {
   // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
   // run against a local Ollama install (or Ollama Cloud via a :cloud
@@ -50,9 +66,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const args = parseArgs(process.argv.slice(2));
   const goal =
-    process.argv[2] ??
+    args.goal ??
     'Build a minimal WebGL Minesweeper game (10x10 grid, 10 mines). Implement everything in a single index.html that loads and runs standalone. Left-click reveals a cell, right-click flags. Then start a local static server and return the URL.';
+  // The CLI flag wins over the env var; both end up at the same env-var
+  // mutation so the L2 onApproved hook (which reads it at call time)
+  // doesn't have to learn about a second source of truth.
+  if (args.learnSkills) {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    console.log('skill auto-distillation: ON (--learn-skills)');
+  } else if (process.env['ATOMA_SKILL_LEARN'] === '1') {
+    console.log('skill auto-distillation: ON (ATOMA_SKILL_LEARN=1)');
+  } else {
+    console.log('skill auto-distillation: off (pass --learn-skills to enable)');
+  }
 
   // Use a dedicated DB + workspace for build runs so we don't interfere with
   // the research-brief example's registry or clutter the repo root.

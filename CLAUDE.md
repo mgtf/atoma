@@ -391,8 +391,9 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   Falls back to the legacy branch path on Sonnet error / empty
   response — skill update is OPPORTUNISTIC, never mandatory.
 
-- **Auto-creation (#C3).** Off by default. Set `ATOMA_SKILL_LEARN=1`
-  to enable. When a run completes WITHOUT a matched skill and is
+- **Auto-creation (#C3).** Off by default. Pass `--learn-skills` to
+  `npm run example:build` (or set `ATOMA_SKILL_LEARN=1`) to enable.
+  When a run completes WITHOUT a matched skill and is
   approved by the validator, Sonnet distills it into a new skill
   via `learnSkillFromRun`: the prompt asks for `{id, description,
   when_to_use, body}` as JSON and parses tolerantly via
