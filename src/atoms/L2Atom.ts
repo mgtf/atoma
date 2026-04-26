@@ -111,6 +111,52 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `a sliding window.`,
 ].join('\n');
 
+/** Kebab-case id check (lowercase letters, digits, single dashes). */
+export function isSafeSkillId(id: string): boolean {
+  return /^[a-z0-9]+(-[a-z0-9]+)*$/.test(id) && id.length >= 3 && id.length <= 60;
+}
+
+/**
+ * Parse a Sonnet skill-draft response. The model is instructed to
+ * emit ONE JSON object; we tolerate prose-with-fenced-json the
+ * same way `extractJson` does for plan parsing. Returns null for
+ * unparseable / structurally-incomplete drafts so the caller can
+ * skip silently — auto-creation is best-effort.
+ *
+ * Accepts both `when_to_use` (snake-case, what the prompt asks for)
+ * and `whenToUse` (camelCase, in case the model normalises) so a
+ * minor naming drift does not throw away the draft.
+ */
+export function parseSkillDraft(text: string): {
+  id: string;
+  description: string;
+  whenToUse: string;
+  body: string;
+} | null {
+  if (!text || text.trim().length === 0) return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(match[0]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const id = typeof obj['id'] === 'string' ? (obj['id'] as string).trim() : null;
+  const description =
+    typeof obj['description'] === 'string' ? (obj['description'] as string).trim() : null;
+  const whenToUseRaw =
+    typeof obj['when_to_use'] === 'string'
+      ? (obj['when_to_use'] as string)
+      : typeof obj['whenToUse'] === 'string'
+        ? (obj['whenToUse'] as string)
+        : null;
+  const whenToUse = whenToUseRaw ? whenToUseRaw.trim() : null;
+  const body = typeof obj['body'] === 'string' ? (obj['body'] as string).trim() : null;
+  if (!id || !description || !whenToUse || !body) return null;
+  return { id, description, whenToUse, body };
+}
+
 /**
  * Render a skill body as a context block injected into the L1's
  * effective system prompt. The clear delimiters help the model parse
@@ -514,17 +560,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
     const subtasks = plan.subtasks;
 
-    // Fan-out: run each subtask in parallel with per-subtask hooks. The
-    // hooks close over the subtask's description so `branchOnEscalation`
-    // can write a FRESH system prompt aligned with THIS subtask's
-    // domain — not the parent's (which is where the Frankenstein
-    // contamination came from: Nitrogen kept its platformer prompt
-    // through branches even when branched for a dashboard task).
+    // Fan-out: run each subtask in parallel. Hooks are created INSIDE
+    // runSubtask now (after the skill prefilter attempt) so they know
+    // whether a skill drove the run — that info gates the C3 skill
+    // auto-creation path on the onApproved hook.
     const subResults = await Promise.all(
-      subtasks.map((subtask, idx) => {
-        const hooks = this.makeL1Hooks(ctx, subtask.description);
-        return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
-      })
+      subtasks.map((subtask, idx) =>
+        this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx })
+      )
     );
 
     return this.aggregate(subResults, plan.aggregation, task, ctx);
@@ -544,10 +587,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     strategy: L2Strategy;
     parentTask: Task;
     idx: number;
-    hooks: SupervisionHooks<L1Atom>;
     ctx: RunContext;
   }): Promise<Result> {
-    const { subtask, strategy, parentTask, idx, hooks, ctx } = args;
+    const { subtask, strategy, parentTask, idx, ctx } = args;
     const l1Type = this.resolveL1ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l1Type.name);
     const l1 = L1Atom.fromType(l1Type);
@@ -567,7 +609,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // the prompt + caching + confidence-guard semantics stay
     // identical to the existing tier prefilter — the only change
     // is the catalog (skills instead of children).
+    let skillMatchAttempted = false;
     if (this.skillRegistry) {
+      skillMatchAttempted = true;
       const skills = await this.matchSkill(l1Type.name, subTask, ctx);
       if (skills) {
         l1.injectContext(skillContextBlock(skills.skill));
@@ -577,11 +621,121 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         );
       }
     }
+
+    // Hooks are built HERE (after the match attempt) so the
+    // onApproved hook can decide whether to run the C3 skill-
+    // learning path: only fire when the prefilter saw skills but
+    // none matched, AND the env flag is on, AND the run succeeded
+    // without escalation.
+    const hooks = this.makeL1Hooks(ctx, subtask.description, {
+      l1Name: l1Type.name,
+      subTask,
+      skillMatchAttempted,
+    });
+
     // Fork a branch-scoped ctx so every LLM/tool/trust event recorded
     // inside this supervise loop carries a unique branchId. Viz renders
     // each branch as its own lane instead of interleaving them.
     const branchCtx = forkBranch(ctx, randomUUID());
     return superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+  }
+
+  /**
+   * Distill a successful run into a new skill (#3). Called from the
+   * onApproved hook when ATOMA_SKILL_LEARN is on, the L1 had no
+   * skill matched at prefilter time, and the supervise loop
+   * approved the result without escalation. We ask Sonnet to
+   * extract a kebab-case skill id, a short description, an
+   * activation hint, and a body — all designed to feed back into
+   * the skill prefilter on the NEXT run on a similar task.
+   *
+   * Guardrails:
+   *  - Pre-existing skill with the same id: SKIP. The original
+   *    skill carries its own trust counters and possibly hand-edits;
+   *    auto-creation must not clobber it.
+   *  - Malformed JSON: warn + skip. The run is already approved;
+   *    the failure to learn isn't a run failure.
+   *  - id sanity check: kebab-case, alphanum + dash only. Anything
+   *    else is rejected to keep the on-disk filesystem layout safe.
+   */
+  private async learnSkillFromRun(args: {
+    l1Name: string;
+    subTask: Task;
+    result: Result;
+    child: L1Atom;
+    ctx: RunContext;
+  }): Promise<void> {
+    if (!this.skillRegistry) return;
+    const userContent = [
+      `You are distilling a successful run into a reusable SKILL — a markdown`,
+      `recipe attached to a tier-1 element so future runs on a similar task can`,
+      `follow it instead of re-discovering the steps.`,
+      ``,
+      `An L1 element just completed a subtask without escalation. Look at the`,
+      `subtask description and the L1's summary, infer the GENERAL PATTERN, and`,
+      `output a skill draft.`,
+      ``,
+      `== L1 ATOM ==`,
+      `${args.child.name} (tier 1)`,
+      ``,
+      `== SUBTASK THAT WAS COMPLETED ==`,
+      args.subTask.description,
+      ``,
+      `== L1 SUMMARY OF WHAT IT DID ==`,
+      args.result.summary,
+      ``,
+      `Output ONLY a JSON object — no fences, no preamble. The first character`,
+      `must be "{". Required fields:`,
+      `  "id":            kebab-case identifier, 3-6 words, like "write-package-json".`,
+      `  "description":   one-line summary, ≤90 chars.`,
+      `  "when_to_use":   one-line activation hint, ≤140 chars. Should describe`,
+      `                   the SHAPE of the matching task, not its specific theme.`,
+      `  "body":          markdown recipe, ≤500 chars total. Concrete steps the`,
+      `                   L1 should take, NOT prose. Example shape:`,
+      `                     "1. write_file <name>.\\n2. start_static_server.\\n3. validate_html with smoke."`,
+      ``,
+      `Skip the JSON entirely (return empty) if the run was too task-specific to`,
+      `generalise (e.g. it depended on hard-coded numbers a future run wouldn't`,
+      `share).`,
+    ].join('\n');
+
+    const resp = await args.ctx.llm.complete({
+      model: this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      userContent,
+      params: { ...this.params, maxTokens: 800, temperature: 0 },
+      signal: args.ctx.signal,
+    });
+    const draft = parseSkillDraft(resp.text);
+    if (!draft) {
+      args.ctx.logger.debug(
+        `[${this.name}] skill draft did not parse, skipping; raw=${resp.text.slice(0, 120)}`
+      );
+      return;
+    }
+    if (!isSafeSkillId(draft.id)) {
+      args.ctx.logger.warn(
+        `[${this.name}] skill auto-creation rejected: unsafe id "${draft.id}"`
+      );
+      return;
+    }
+    const existing = this.skillRegistry.loadFor(args.l1Name).find((s) => s.id === draft.id);
+    if (existing) {
+      args.ctx.logger.debug(
+        `[${this.name}] skill ${draft.id} already exists for ${args.l1Name}, not overwriting`
+      );
+      return;
+    }
+    this.skillRegistry.save(args.l1Name, {
+      id: draft.id,
+      description: draft.description,
+      whenToUse: draft.whenToUse,
+      kind: 'llm',
+      body: draft.body,
+    });
+    args.ctx.logger.info(
+      `[${this.name}] learned new skill "${draft.id}" for ${args.l1Name}`
+    );
   }
 
   /**
@@ -799,7 +953,24 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     });
   }
 
-  private makeL1Hooks(ctx: RunContext, subtaskDescription: string): SupervisionHooks<L1Atom> {
+  private makeL1Hooks(
+    ctx: RunContext,
+    subtaskDescription: string,
+    skillCtx: {
+      /** L1 atom-type name for this subtask (skills are namespaced by it). */
+      l1Name: string;
+      /** The actual subtask Task, needed by skill-learning prompts. */
+      subTask: Task;
+      /**
+       * True when L2 ran a skill-prefilter for this subtask. False
+       * when no SkillRegistry was wired (skills disabled). Gates the
+       * C3 skill auto-creation path: we only learn a new skill when
+       * we DID look for one and didn't find a match — never when
+       * skills are disabled wholesale.
+       */
+      skillMatchAttempted: boolean;
+    }
+  ): SupervisionHooks<L1Atom> {
     return {
       applyByScope: async (child, verdict) => {
         if (verdict.scope === 'ephemeral') {
@@ -941,7 +1112,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // Frankenstein narrow prompt prove itself in-flight.
         return L1Atom.fromType(branched);
       },
-      onApproved: async (child, _result) => {
+      onApproved: async (child, result) => {
         this.registry.recordSuccess(child.name);
         // Skill trust counter bump (C2a). When the supervise loop
         // approves a result and a skill drove the run, record a
@@ -952,6 +1123,33 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const skillId = child.activeSkillId();
         if (skillId && this.skillRegistry) {
           this.skillRegistry.recordSuccess(child.name, skillId);
+        } else if (
+          // Skill auto-creation (C3). Fires when ALL of:
+          //   - L2 attempted a skill match for this subtask;
+          //   - no skill matched (the run was novel);
+          //   - the run was approved (i.e. it's a clean reusable pattern);
+          //   - the env flag ATOMA_SKILL_LEARN is on (off by default
+          //     because each learning event costs one Sonnet call,
+          //     and not every project wants automatic mutation of
+          //     its skills folder).
+          !skillId &&
+          skillCtx.skillMatchAttempted &&
+          this.skillRegistry &&
+          process.env['ATOMA_SKILL_LEARN'] === '1'
+        ) {
+          try {
+            await this.learnSkillFromRun({
+              l1Name: skillCtx.l1Name,
+              subTask: skillCtx.subTask,
+              result,
+              child,
+              ctx,
+            });
+          } catch (err) {
+            ctx.logger.warn(
+              `[${this.name}] skill auto-creation failed: ${(err as Error).message}`
+            );
+          }
         }
       },
       onFailed: async (child, _reason) => {
