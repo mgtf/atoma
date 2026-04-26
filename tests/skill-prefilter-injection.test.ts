@@ -207,10 +207,18 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
       );
     }
     // After 3 identical rejections the supervise loop escalates.
-    // branchOnEscalation creates a branched L1; the loop gives it ONE
-    // clean cycle. Stub that cycle as another reject loop so we
-    // ultimately fall through to parent fallback (L2.selfPlan +
-    // L2.selfExecute).
+    // branchOnEscalation runs the C2b skill-update path FIRST: a
+    // Sonnet `improveSkillBody` call generates an updated body, the
+    // SkillRegistry overwrites the file (preserving counters), and a
+    // fresh L1 instance is returned for the supervise loop's one-shot
+    // branch retry. We stub that Sonnet call here.
+    ctx.llm.enqueueText(
+      'STEP 1: write_file index.html (updated to address the validator\'s diagnosis).\n' +
+      'STEP 2: start_static_server.\nSTEP 3: validate_html.'
+    );
+    // The fresh L1 (with updated skill body) gets ONE clean cycle.
+    // We script another reject loop so we ultimately fall through to
+    // parent fallback (L2.selfPlan + L2.selfExecute).
     for (let i = 0; i < 3; i++) {
       ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
       ctx.llm.enqueueText(
@@ -223,6 +231,12 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
       { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }
     ));
     ctx.llm.enqueueText(jsonText({ output: 'fallback', summary: 'fallback ok' }));
+    // Defensive extras in case the flow asks for more than expected
+    // (e.g. the supervise loop adds an iteration we didn't account
+    // for); if they're never consumed it's a harmless overcount.
+    for (let i = 0; i < 4; i++) {
+      ctx.llm.enqueueText(jsonText({ output: 'fallback', summary: 'extra' }));
+    }
 
     await water.handleDirect({ description: 'task' }, ctx);
 

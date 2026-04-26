@@ -585,6 +585,74 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   /**
+   * Generate an improved skill body via a Sonnet call (this.model).
+   * Inputs:
+   *   - the failing skill's current body,
+   *   - the verbatim validator diagnosis (extractBranchDiagnostic
+   *     output) explaining WHY the prior run was rejected,
+   *   - the subtask description.
+   *
+   * The model is instructed to produce a TARGETED revision — fix
+   * the cited failure, keep the rest of the recipe stable, do not
+   * balloon the length. Output is plain markdown; we trim and
+   * return the raw text. A blank or whitespace-only response
+   * returns null so the caller can fall back to the legacy branch
+   * path instead of saving an empty body.
+   *
+   * Sonnet (this.model) is the right model here:
+   *  - the task is real reasoning (synthesise a fix from a
+   *    diagnostic), not yes/no validation;
+   *  - Haiku would routinely flatten the body or miss the precise
+   *    diagnostic detail;
+   *  - Opus would be overkill for the bounded context.
+   */
+  private async improveSkillBody(args: {
+    skill: import('../skills/types.js').Skill;
+    diagnostic: string;
+    subtaskDescription: string;
+    ctx: RunContext;
+  }): Promise<string | null> {
+    const userContent = [
+      `You are revising a SKILL — a reusable how-to recipe attached to a tier-1 element.`,
+      `The skill drove a recent run that the supervisor REJECTED. Your job: produce an`,
+      `IMPROVED body for the skill that fixes the specific failure, while keeping the`,
+      `skill applicable to its general task class. Do NOT rewrite the whole recipe.`,
+      ``,
+      `== SKILL ID ==`,
+      args.skill.id,
+      ``,
+      `== SKILL DESCRIPTION ==`,
+      args.skill.description,
+      ``,
+      `== CURRENT SKILL BODY ==`,
+      args.skill.body,
+      ``,
+      `== SUBTASK THAT TRIGGERED THE FAILURE ==`,
+      args.subtaskDescription,
+      ``,
+      `== VALIDATOR DIAGNOSIS ==`,
+      args.diagnostic,
+      ``,
+      `Output ONLY the new skill body as plain markdown — no JSON envelope, no fences,`,
+      `no preamble. Aim for the same length as the current body, slightly longer at most.`,
+      `If the current body already addresses the diagnosis correctly and the failure was`,
+      `due to something the recipe cannot fix (e.g. environment issue), return the body`,
+      `unchanged.`,
+    ].join('\n');
+
+    const resp = await args.ctx.llm.complete({
+      model: this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      userContent,
+      params: { ...this.params, maxTokens: 1500, temperature: 0 },
+      signal: args.ctx.signal,
+    });
+    const text = (resp.text ?? '').trim();
+    if (!text) return null;
+    return text;
+  }
+
+  /**
    * Run a Haiku skill-prefilter for the L1 named `l1Name` and the
    * given subtask. Returns the matched skill + the model's reasoning
    * when a confident match exists, null otherwise (no skills, no
@@ -784,6 +852,62 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const childType = this.registry.getByName(child.name);
         const childTools = childType?.tools ?? [];
         const diagnostic = extractBranchDiagnostic(trace);
+
+        // Skill update path (C2b). When the failed run was driven by
+        // a skill, the cleanest remediation is to UPDATE THE SKILL
+        // BODY using the validator's diagnosis — not to branch the
+        // atom type. The skill lives in the SkillRegistry; a save
+        // here overwrites the body but PRESERVES trust counters
+        // (C1's save() contract). We then return a fresh L1
+        // instance with the updated body injected, and the
+        // supervise-loop's `hasTriedBranch` mechanism gives that
+        // instance ONE more clean cycle. If the second pass also
+        // fails the loop falls through to the parent fallback path
+        // — same as the legacy branch flow.
+        //
+        // We require BOTH activeSkillId AND a non-empty diagnostic
+        // before attempting an update: re-running the same skill
+        // body without anything new for the model to act on would
+        // just reproduce the previous outcome.
+        const activeSkillId = child.activeSkillId();
+        if (activeSkillId && this.skillRegistry && diagnostic.length > 0 && childType) {
+          const skills = this.skillRegistry.loadFor(child.name);
+          const oldSkill = skills.find((s) => s.id === activeSkillId);
+          if (oldSkill) {
+            try {
+              const newBody = await this.improveSkillBody({
+                skill: oldSkill,
+                diagnostic,
+                subtaskDescription,
+                ctx,
+              });
+              if (newBody) {
+                this.skillRegistry.save(child.name, {
+                  id: oldSkill.id,
+                  description: oldSkill.description,
+                  whenToUse: oldSkill.whenToUse,
+                  kind: oldSkill.kind,
+                  body: newBody,
+                });
+                ctx.logger.warn(
+                  `[${this.name}] skill ${activeSkillId} on ${child.name} updated after escalation (${reason}); retrying L1 with new body`
+                );
+                const fresh = L1Atom.fromType(childType);
+                fresh.injectContext(skillContextBlock({ id: activeSkillId, body: newBody }));
+                fresh.setActiveSkill(activeSkillId);
+                return fresh;
+              }
+            } catch (err) {
+              // Sonnet unavailable / parse error / network blip —
+              // fall through to the legacy branch path so the run
+              // still has a recovery channel.
+              ctx.logger.warn(
+                `[${this.name}] skill update failed: ${(err as Error).message}; falling back to standard branch`
+              );
+            }
+          }
+        }
+
         const narrowPrompt = buildNarrowL1Prompt(
           subtaskDescription,
           childTools,
