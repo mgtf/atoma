@@ -138,7 +138,52 @@ export interface VizTrustEvent {
   branchId?: string;
 }
 
-export type VizEvent = VizLlmEvent | VizRegistryEvent | VizToolEvent | VizTrustEvent;
+/**
+ * Skill-pipeline event recorded during a run: match, body injection,
+ * trust counter bump, auto-creation, post-failure update. Skills run
+ * orthogonally to the atom-type registry (different on-disk store,
+ * different counters), so they get their own VizEvent variant rather
+ * than reusing VizRegistryEvent — viz consumers can render them in a
+ * dedicated lane without conflating with atom_types mutations.
+ *
+ * `op` semantics:
+ *   - 'match'    Haiku skill-prefilter picked this skill for the
+ *                current subtask. Carries `reasoning`.
+ *   - 'inject'   The skill body was injected into the L1's effective
+ *                system prompt via injectContext. Always follows a
+ *                'match' (paired event for symmetry).
+ *   - 'learn'    Sonnet auto-distilled a NEW skill from a successful
+ *                novel-task run (#C3). Carries `reasoning` describing
+ *                the body summary.
+ *   - 'update'   Sonnet revised an EXISTING skill's body after a
+ *                supervise-loop escalation (#C2b). Carries the
+ *                validator diagnosis as `reasoning`.
+ *   - 'success'  / 'failure'  Trust counter bumped. Mirrors the
+ *                onApproved / onFailed hook outcomes.
+ */
+export interface VizSkillEvent {
+  id: string;
+  ts: number;
+  kind: 'skill';
+  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure';
+  /** L1 atom-type name the skill is namespaced under. */
+  l1Name: string;
+  /** Stable kebab-case skill id within that namespace. */
+  skillId: string;
+  /** Atom that triggered the event (usually the supervising L2). */
+  actor?: VizAtomRef;
+  /** Free-form text — match reasoning, validator diagnosis, body excerpt. */
+  reasoning?: string;
+  /** Fan-out lane id (echo from the supervisor's branchCtx). */
+  branchId?: string;
+}
+
+export type VizEvent =
+  | VizLlmEvent
+  | VizRegistryEvent
+  | VizToolEvent
+  | VizTrustEvent
+  | VizSkillEvent;
 
 export interface VizRunIndexEntry {
   id: string;
@@ -338,6 +383,26 @@ export class TraceRecorder {
       successes: info.successes,
       failures: info.failures,
       reasoning: info.reasoning,
+      ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
+    };
+    this.record(ev);
+  }
+
+  /**
+   * Convenience wrapper for skill-pipeline events. Mirrors `recordTrust` —
+   * call sites in L2Atom emit a typed `SkillEventInfo`, the recorder
+   * stamps id+ts and persists the full `VizSkillEvent`.
+   */
+  recordSkillEvent(info: import('../core/types.js').SkillEventInfo): void {
+    const ev: VizSkillEvent = {
+      id: randomUUID(),
+      ts: Date.now(),
+      kind: 'skill',
+      op: info.op,
+      l1Name: info.l1Name,
+      skillId: info.skillId,
+      actor: { name: info.actorName, tier: info.actorTier },
+      ...(info.reasoning !== undefined ? { reasoning: info.reasoning } : {}),
       ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
     };
     this.record(ev);

@@ -109,6 +109,13 @@
   .role.branch { color: var(--l3); }
   .role.recordSuccess { color: var(--ok); }
   .role.recordFailure { color: var(--err); }
+  .role.skill { color: #f0abfc; border-color: #3b1e3a; }
+  .role.match { color: #f0abfc; border-color: #3b1e3a; }
+  .role.inject { color: #d8b4fe; border-color: #2e1d4d; }
+  .role.learn { color: #86efac; border-color: #1e3a2a; }
+  .role.update { color: #fcd34d; border-color: #3a2f15; }
+  .role.success { color: var(--ok); }
+  .role.failure { color: var(--err); }
 
   .tier {
     display: inline-block; padding: 1px 6px; border-radius: 4px;
@@ -175,10 +182,12 @@
   <div class="view-switch" id="viewSwitch">
     <button data-view="runs" class="active">Runs</button>
     <button data-view="registry">Registry</button>
+    <button data-view="skills">Skills</button>
   </div>
   <select id="runSelect" title="Sélectionner un run"></select>
   <select id="registrySelect" title="Sélectionner un registre" style="display:none;"></select>
   <input id="registrySearch" type="search" placeholder="Filtrer les atomes…" style="display:none;" />
+  <input id="skillsSearch" type="search" placeholder="Filtrer les skills…" style="display:none;" />
   <span class="spacer"></span>
   <button id="refreshBtn" title="Recharger la liste">Rafraîchir</button>
 </header>
@@ -196,6 +205,11 @@
     <div id="registryView" style="display:none;">
       <div id="registrySummary"></div>
       <div id="registryLanes"></div>
+    </div>
+    <!-- Skills view -->
+    <div id="skillsView" style="display:none;">
+      <div id="skillsSummary"></div>
+      <div id="skillsLanes"></div>
     </div>
   </section>
   <section class="pane" id="rightPane">
@@ -218,6 +232,11 @@ const state = {
   currentRegistry: null, // { registry, types: [...] }
   selectedRegistryAtom: null,
   registryFilter: '',
+  // Skills view state
+  skillNamespaces: [], // [{ l1Name, count }]
+  skillsByL1: {},      // l1Name -> [SkillSummary]
+  selectedSkill: null, // { l1Name, id }
+  skillsFilter: '',
   // Live polling state. When a run is in-flight (endedAt undefined),
   // we poll /api/runs/<id> every 1s and re-render as new events arrive.
   // We also poll /api/runs (the index) every 2s to detect freshly-
@@ -571,6 +590,7 @@ function renderFilters() {
     ['llm', 'LLM'],
     ['tool', 'Tools'],
     ['trust', 'Trust'],
+    ['skill', 'Skills'],
     ['registry', 'Registry'],
   ];
   for (const [k, lbl] of kinds) {
@@ -724,6 +744,23 @@ function renderEventCard(ev) {
       h('div', { class: 'meta', style: 'margin-top:4px;' }, 'fast-path (no LLM call)'),
     ]);
   }
+  if (ev.kind === 'skill') {
+    const srow = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role ' + ev.op }, ev.op),
+    ];
+    if (ev.actor) srow.push(atomRef(ev.actor));
+    srow.push(h('span', { class: 'arrow' }, '·'));
+    srow.push(h('span', { class: 'name' }, ev.l1Name + '/' + ev.skillId));
+    if (ev.branchId) srow.push(branchChip(ev.branchId));
+    return h('div', {
+      class: 'event' + selected,
+      onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+    }, [
+      h('div', { class: 'row' }, srow),
+      ev.reasoning ? h('div', { class: 'meta', style: 'margin-top:4px;' }, ev.reasoning) : null,
+    ]);
+  }
   // registry
   const row = [
     h('span', { class: 'when' }, fmtTime(ev.ts)),
@@ -770,9 +807,47 @@ function renderDetail(ev) {
     renderToolDetail(el, ev);
   } else if (ev.kind === 'trust') {
     renderTrustDetail(el, ev);
+  } else if (ev.kind === 'skill') {
+    renderSkillEventDetail(el, ev);
   } else {
     renderRegistryDetail(el, ev);
   }
+}
+
+function renderSkillEventDetail(el, ev) {
+  const opLabel = {
+    match: 'Skill match (Haiku skill-prefilter)',
+    inject: 'Skill body injecté dans le prompt L1',
+    learn: 'Skill auto-distillée (Sonnet)',
+    update: 'Skill body révisé après échec (Sonnet)',
+    success: 'Compteur succès incrémenté',
+    failure: 'Compteur échec incrémenté',
+  }[ev.op] ?? ev.op;
+  el.appendChild(h('h2', {}, opLabel));
+  const sub = [];
+  if (ev.actor) sub.push('par ' + (ev.actor.name ?? '?'));
+  sub.push(ev.l1Name + ' / ' + ev.skillId);
+  el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' }, sub.join('  ·  ')));
+  if (ev.reasoning) {
+    el.appendChild(h('div', { class: 'section' }, [
+      h('h3', {}, 'Reasoning / diagnostic'),
+      h('pre', {}, ev.reasoning),
+    ]));
+  }
+  // Convenience: jump straight to the skill's full content in the Skills tab.
+  const open = h('span', {
+    class: 'chip',
+    style: 'cursor:pointer;',
+    onclick: () => {
+      switchView('skills');
+      // Defer until skills are loaded.
+      setTimeout(() => selectSkill(ev.l1Name, ev.skillId), 0);
+    },
+  }, '→ ouvrir la skill complète');
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Lien'),
+    open,
+  ]));
 }
 
 function renderTrustDetail(el, ev) {
@@ -966,9 +1041,14 @@ $('registrySearch').addEventListener('input', (e) => {
   state.registryFilter = e.target.value.toLowerCase();
   renderRegistryLanes();
 });
+$('skillsSearch').addEventListener('input', (e) => {
+  state.skillsFilter = e.target.value.toLowerCase();
+  renderSkillsLanes();
+});
 $('refreshBtn').addEventListener('click', () => {
   if (state.view === 'runs') loadIndex();
-  else loadRegistries();
+  else if (state.view === 'registry') loadRegistries();
+  else loadSkills();
 });
 
 for (const btn of $('viewSwitch').querySelectorAll('button')) {
@@ -982,15 +1062,172 @@ function switchView(v) {
     btn.classList.toggle('active', btn.dataset.view === v);
   }
   const isRuns = v === 'runs';
+  const isReg = v === 'registry';
+  const isSkills = v === 'skills';
   $('runsView').style.display = isRuns ? '' : 'none';
-  $('registryView').style.display = isRuns ? 'none' : '';
+  $('registryView').style.display = isReg ? '' : 'none';
+  $('skillsView').style.display = isSkills ? '' : 'none';
   $('runSelect').style.display = isRuns ? '' : 'none';
-  $('registrySelect').style.display = isRuns ? 'none' : '';
-  $('registrySearch').style.display = isRuns ? 'none' : '';
-  $('rightPane').innerHTML = '<div class="empty">' + (isRuns
+  $('registrySelect').style.display = isReg ? '' : 'none';
+  $('registrySearch').style.display = isReg ? '' : 'none';
+  $('skillsSearch').style.display = isSkills ? '' : 'none';
+  const emptyMsg = isRuns
     ? 'Sélectionne un évènement à gauche pour en voir le détail.'
-    : 'Sélectionne un atome à gauche pour en voir le détail.') + '</div>';
-  if (!isRuns && state.registries.length === 0) loadRegistries();
+    : isReg
+      ? 'Sélectionne un atome à gauche pour en voir le détail.'
+      : 'Sélectionne une skill à gauche pour en voir le détail.';
+  $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
+  if (isReg && state.registries.length === 0) loadRegistries();
+  if (isSkills && state.skillNamespaces.length === 0) loadSkills();
+}
+
+async function loadSkills() {
+  $('skillsLanes').innerHTML = '<div class="loader">Chargement…</div>';
+  $('skillsSummary').innerHTML = '';
+  let r;
+  try {
+    r = await fetch('/api/skills');
+  } catch {
+    $('skillsLanes').innerHTML = '<div class="empty">Erreur réseau.</div>';
+    return;
+  }
+  if (!r.ok) {
+    $('skillsLanes').innerHTML = '<div class="empty">Endpoint /api/skills indisponible.</div>';
+    return;
+  }
+  state.skillNamespaces = await r.json();
+  state.skillsByL1 = {};
+  // Load each namespace in parallel — skill catalogs are small (≤ a few
+  // dozen entries per L1), so a fan-out fetch keeps the first paint
+  // snappy without burdening the server.
+  await Promise.all(state.skillNamespaces.map(async (ns) => {
+    try {
+      const sr = await fetch('/api/skills/' + encodeURIComponent(ns.l1Name));
+      if (sr.ok) state.skillsByL1[ns.l1Name] = await sr.json();
+    } catch {
+      // Leave the namespace blank — UI shows "(échec de chargement)".
+    }
+  }));
+  renderSkillsSummary();
+  renderSkillsLanes();
+}
+
+function renderSkillsSummary() {
+  const el = $('skillsSummary');
+  el.innerHTML = '';
+  const total = state.skillNamespaces.reduce((n, ns) => n + ns.count, 0);
+  let totalSucc = 0;
+  let totalFail = 0;
+  for (const arr of Object.values(state.skillsByL1)) {
+    for (const s of arr) {
+      totalSucc += s.successes ?? 0;
+      totalFail += s.failures ?? 0;
+    }
+  }
+  const grid = h('div', { class: 'grid' }, [
+    statCard('Namespaces L1', String(state.skillNamespaces.length)),
+    statCard('Skills · total', String(total)),
+    statCard('Total succès', String(totalSucc)),
+    statCard('Total échecs', String(totalFail)),
+  ]);
+  el.appendChild(h('div', { class: 'summary' }, [
+    h('h2', {}, 'Skills'),
+    h('div', { class: 'task', style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px;' },
+      'Recettes persistées sous chaque L1 — match Haiku, injection au plan, compteurs de confiance.'),
+    grid,
+    state.skillNamespaces.length === 0
+      ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Aucune skill enregistrée. Définis ATOMA_SKILLS_DIR ou lance un run avec ATOMA_SKILL_LEARN=1.')
+      : null,
+  ]));
+}
+
+function renderSkillsLanes() {
+  const el = $('skillsLanes');
+  el.innerHTML = '';
+  if (state.skillNamespaces.length === 0) {
+    el.appendChild(h('div', { class: 'empty' }, 'Aucune skill — la prochaine run avec auto-distillation en créera.'));
+    return;
+  }
+  const q = state.skillsFilter.trim();
+  const lanes = h('div', { class: 'lanes' });
+  for (const ns of state.skillNamespaces) {
+    const skills = state.skillsByL1[ns.l1Name] ?? [];
+    const matching = skills.filter((s) =>
+      !q ||
+      s.id.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q) ||
+      s.whenToUse.toLowerCase().includes(q)
+    );
+    if (q && matching.length === 0) continue;
+    const chips = matching.map((s) => {
+      const sel = state.selectedSkill
+        && state.selectedSkill.l1Name === ns.l1Name
+        && state.selectedSkill.id === s.id;
+      const cls = 'chip atom' + (sel ? ' selected' : '');
+      const counter = (s.successes + s.failures > 0)
+        ? ` · ✓${s.successes}/✗${s.failures}`
+        : '';
+      const langBadge = s.language ? ' · ' + s.language : '';
+      const title = `${s.description}\n${s.whenToUse}\nkind=${s.kind}${langBadge}${counter}`;
+      return h('span', {
+        class: cls,
+        title,
+        onclick: () => selectSkill(ns.l1Name, s.id),
+      }, [
+        s.id,
+        h('span', { class: 'v' }, s.kind === 'script' ? (s.language ?? 'script') : 'llm'),
+      ]);
+    });
+    lanes.appendChild(h('div', { class: 'lane l1' }, [
+      h('h4', {}, `${ns.l1Name}  (${matching.length}${q && matching.length !== ns.count ? '/' + ns.count : ''})`),
+      h('div', {}, matching.length ? chips : h('span', { class: 'meta' }, '— aucune —')),
+    ]));
+  }
+  el.appendChild(lanes);
+  el.appendChild(h('div', { class: 'origin-legend', style: 'margin-top:8px;' }, [
+    h('span', { class: 'meta' }, '— clique sur une skill pour voir son corps complet'),
+  ]));
+}
+
+async function selectSkill(l1Name, id) {
+  state.selectedSkill = { l1Name, id };
+  // If we're on another tab, switch first so the user actually sees the detail.
+  if (state.view !== 'skills') switchView('skills');
+  renderSkillsLanes();
+  $('rightPane').innerHTML = '<div class="loader">Chargement…</div>';
+  let r;
+  try {
+    r = await fetch('/api/skills/' + encodeURIComponent(l1Name) + '/' + encodeURIComponent(id));
+  } catch {
+    $('rightPane').innerHTML = '<div class="empty">Erreur réseau.</div>';
+    return;
+  }
+  if (!r.ok) {
+    $('rightPane').innerHTML = '<div class="empty">Skill introuvable.</div>';
+    return;
+  }
+  const skill = await r.json();
+  renderSkillDetail(skill, l1Name);
+}
+
+function renderSkillDetail(s, l1Name) {
+  const el = $('rightPane');
+  el.innerHTML = '';
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, `Skill — ${s.id}`),
+    h('div', { class: 'kv' }, [
+      h('div', { class: 'k' }, 'L1 namespace'), h('div', { class: 'v' }, l1Name),
+      h('div', { class: 'k' }, 'Kind'), h('div', { class: 'v' }, s.kind + (s.language ? ` · ${s.language}` : '')),
+      h('div', { class: 'k' }, 'Description'), h('div', { class: 'v' }, s.description),
+      h('div', { class: 'k' }, 'When to use'), h('div', { class: 'v' }, s.whenToUse),
+      h('div', { class: 'k' }, 'Compteurs'), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
+      h('div', { class: 'k' }, 'Mis à jour'), h('div', { class: 'v' }, s.updatedAt),
+    ]),
+  ]));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, s.kind === 'script' ? `Body — ${s.language} script` : 'Body — markdown recipe'),
+    h('pre', {}, s.body || '(vide)'),
+  ]));
 }
 
 async function loadRegistries() {
@@ -1165,6 +1402,65 @@ function renderRegistryAtomDetail(t) {
       section.appendChild(body);
     }
     el.appendChild(section);
+  }
+
+  // L1-only: surface the persisted skills attached to this atom-type.
+  // Mirrors the Skills tab UI but inline, so users can jump from a
+  // registry deep-dive straight to the recipes that augment this L1.
+  if (t.tier === 1) {
+    const skillsSection = h('div', { class: 'section' }, [
+      h('h3', {}, 'Skills attachées'),
+      h('div', { class: 'meta', style: 'margin-bottom:6px;' }, 'Chargement…'),
+    ]);
+    el.appendChild(skillsSection);
+    fetchAndRenderL1Skills(t.name, skillsSection);
+  }
+}
+
+async function fetchAndRenderL1Skills(l1Name, section) {
+  let r;
+  try {
+    r = await fetch('/api/skills/' + encodeURIComponent(l1Name));
+  } catch {
+    section.innerHTML = '';
+    section.appendChild(h('h3', {}, 'Skills attachées'));
+    section.appendChild(h('div', { class: 'meta' }, 'Erreur réseau.'));
+    return;
+  }
+  // 400/500 -> show error, but a 404 means "no skills for this L1".
+  if (!r.ok) {
+    section.innerHTML = '';
+    section.appendChild(h('h3', {}, 'Skills attachées'));
+    section.appendChild(h('div', { class: 'meta' }, '— aucune —'));
+    return;
+  }
+  const skills = await r.json();
+  section.innerHTML = '';
+  section.appendChild(h('h3', {}, `Skills attachées (${skills.length})`));
+  if (skills.length === 0) {
+    section.appendChild(h('div', { class: 'meta' }, '— aucune skill enregistrée pour cet atome —'));
+    return;
+  }
+  // Cache so the Skills tab doesn't have to refetch when the user
+  // jumps over via "Voir dans l'onglet Skills".
+  state.skillsByL1[l1Name] = skills;
+  for (const s of skills) {
+    const counter = (s.successes + s.failures > 0)
+      ? ` · ✓${s.successes}/✗${s.failures}`
+      : '';
+    const langBadge = s.language ? ' · ' + s.language : '';
+    const head = h('div', { class: 'row', style: 'cursor:pointer; padding:6px 0; border-top:1px solid var(--border); align-items:center;' }, [
+      h('span', { class: 'role ' + (s.kind === 'script' ? 'inject' : 'match') }, s.kind === 'script' ? (s.language ?? 'script') : 'llm'),
+      h('span', { class: 'name' }, s.id),
+      h('span', { class: 'meta' }, s.description),
+      h('span', { class: 'meta', style: 'margin-left:auto;' }, counter || '—'),
+      h('span', { class: 'meta', title: 'kind=' + s.kind + langBadge }, '↗'),
+    ]);
+    head.addEventListener('click', () => {
+      switchView('skills');
+      setTimeout(() => selectSkill(l1Name, s.id), 0);
+    });
+    section.appendChild(head);
   }
 }
 

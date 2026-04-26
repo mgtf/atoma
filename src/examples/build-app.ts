@@ -194,6 +194,9 @@ async function main(): Promise<void> {
     // Surface trust fast-path decisions in the trace so the viz lane
     // shows "why no L2 LLM call was needed" instead of an empty gap.
     recordTrust: (info) => recorder.recordTrust(info),
+    // Mirror recordTrust for skill-pipeline events so the viz can render
+    // a Skills lane (match / inject / learn / update / counter bumps).
+    recordSkill: (info) => recorder.recordSkillEvent(info),
   };
 
   const task: Task = {

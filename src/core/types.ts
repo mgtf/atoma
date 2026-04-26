@@ -271,6 +271,28 @@ export interface TrustFastPathInfo {
   branchId?: string;
 }
 
+/**
+ * Skill-pipeline event surfaced to the trace recorder. Mirrors the shape of
+ * `VizSkillEvent` minus the storage-layer fields (id/ts/kind), so call sites
+ * in L2Atom.ts emit a typed payload rather than reaching into the viz module
+ * directly. The recorder fills in id + ts and tags `kind: 'skill'`.
+ *
+ * `op` semantics — see VizSkillEvent in src/viz/trace.ts for the canonical
+ * documentation. Kept in sync because the union here is the source of truth
+ * for what L2 may emit.
+ */
+export interface SkillEventInfo {
+  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure';
+  l1Name: string;
+  skillId: string;
+  actorName: string;
+  actorTier: Tier;
+  /** Match reasoning, validator diagnosis, body excerpt — free-form. */
+  reasoning?: string;
+  /** Fan-out lane id — set by `forkBranch` when the event happens inside a subtask. */
+  branchId?: string;
+}
+
 export interface RunContext {
   readonly logger: Logger;
   readonly signal: AbortSignal;
@@ -284,6 +306,14 @@ export interface RunContext {
    * emit a `VizTrustEvent` so the UI lane still shows the decision.
    */
   readonly recordTrust?: (info: TrustFastPathInfo) => void;
+  /**
+   * Optional skill-pipeline observer. When set, L2 surfaces match /
+   * inject / learn / update / success / failure events here so the viz
+   * recorder can render a Skills lane next to the LLM/tool/registry
+   * lanes. Same pattern as `recordTrust` — observer only, no effect on
+   * runtime behaviour when undefined.
+   */
+  readonly recordSkill?: (info: SkillEventInfo) => void;
   /**
    * Fan-out lane identifier (uuid) of the subtask currently executing.
    * Set by L2/L3 when they dispatch `Promise.all` over subtasks — each

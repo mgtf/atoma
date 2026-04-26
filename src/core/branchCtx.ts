@@ -2,6 +2,7 @@ import type {
   LlmClient,
   LlmCompletionRequest,
   RunContext,
+  SkillEventInfo,
   TrustFastPathInfo,
 } from './types.js';
 
@@ -41,6 +42,11 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
         });
       }
     : undefined;
+  const wrappedRecordSkill = ctx.recordSkill
+    ? (info: SkillEventInfo) => {
+        ctx.recordSkill!({ ...info, branchId });
+      }
+    : undefined;
 
   const out: RunContext = {
     logger: ctx.logger,
@@ -49,6 +55,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     limits: ctx.limits,
     ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
     ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
+    ...(wrappedRecordSkill !== undefined ? { recordSkill: wrappedRecordSkill } : {}),
     currentBranchId: branchId,
   };
   return out;

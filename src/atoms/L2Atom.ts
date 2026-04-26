@@ -682,6 +682,27 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx.logger.debug(
           `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
         );
+        // Match + inject are emitted as a paired event sequence so the
+        // viz can render either the match decision alone (rare) or the
+        // full inject side-effect (common). Keeping them separate also
+        // lets a future replay engine elide the inject if it wants to
+        // re-run the model with a fresh body.
+        ctx.recordSkill?.({
+          op: 'match',
+          l1Name: l1Type.name,
+          skillId: skills.skill.id,
+          actorName: this.name,
+          actorTier: 2,
+          reasoning: skills.reasoning,
+        });
+        ctx.recordSkill?.({
+          op: 'inject',
+          l1Name: l1Type.name,
+          skillId: skills.skill.id,
+          actorName: this.name,
+          actorTier: 2,
+          reasoning: `kind=${skills.skill.kind}${skills.skill.language ? `; language=${skills.skill.language}` : ''}`,
+        });
       }
     }
 
@@ -799,6 +820,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     args.ctx.logger.info(
       `[${this.name}] learned new skill "${draft.id}" for ${args.l1Name}`
     );
+    args.ctx.recordSkill?.({
+      op: 'learn',
+      l1Name: args.l1Name,
+      skillId: draft.id,
+      actorName: this.name,
+      actorTier: 2,
+      reasoning: draft.description,
+    });
   }
 
   /**
@@ -1127,6 +1156,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                 ctx.logger.warn(
                   `[${this.name}] skill ${activeSkillId} on ${child.name} updated after escalation (${reason}); retrying L1 with new body`
                 );
+                ctx.recordSkill?.({
+                  op: 'update',
+                  l1Name: child.name,
+                  skillId: activeSkillId,
+                  actorName: this.name,
+                  actorTier: 2,
+                  reasoning: diagnostic.slice(0, 400),
+                });
                 const fresh = L1Atom.fromType(childType);
                 fresh.injectContext(
                   skillContextBlock({
@@ -1194,6 +1231,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const skillId = child.activeSkillId();
         if (skillId && this.skillRegistry) {
           this.skillRegistry.recordSuccess(child.name, skillId);
+          ctx.recordSkill?.({
+            op: 'success',
+            l1Name: child.name,
+            skillId,
+            actorName: this.name,
+            actorTier: 2,
+          });
         } else if (
           // Skill auto-creation (C3). Fires when ALL of:
           //   - L2 attempted a skill match for this subtask;
@@ -1228,6 +1272,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const skillId = child.activeSkillId();
         if (skillId && this.skillRegistry) {
           this.skillRegistry.recordFailure(child.name, skillId);
+          ctx.recordSkill?.({
+            op: 'failure',
+            l1Name: child.name,
+            skillId,
+            actorName: this.name,
+            actorTier: 2,
+          });
         }
       },
     };

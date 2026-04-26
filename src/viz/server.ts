@@ -3,6 +3,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import { SkillRegistry } from '../skills/registry.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -21,6 +22,8 @@ interface Cli {
   host: string;
   /** One or more DB paths to expose under /api/registry. */
   dbs: string[];
+  /** Optional skills root dir (overrides ATOMA_SKILLS_DIR). */
+  skillsDir?: string;
 }
 
 function parseArgs(argv: string[]): Cli {
@@ -31,12 +34,15 @@ function parseArgs(argv: string[]): Cli {
     else if (a === '--port' && argv[i + 1]) out.port = Number(argv[++i]);
     else if (a === '--host' && argv[i + 1]) out.host = argv[++i]!;
     else if (a === '--db' && argv[i + 1]) out.dbs.push(argv[++i]!);
+    else if (a === '--skills-dir' && argv[i + 1]) out.skillsDir = argv[++i]!;
   }
   return out;
 }
 
 const cli = parseArgs(process.argv.slice(2));
 const RUNS_DIR = resolve(cli.dir);
+const SKILLS_DIR = resolve(cli.skillsDir ?? process.env['ATOMA_SKILLS_DIR'] ?? './skills');
+const skillRegistry = new SkillRegistry(SKILLS_DIR);
 
 /**
  * Resolve the list of DB paths we'll serve. Priority:
@@ -306,6 +312,87 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
   }
 }
 
+interface SkillNamespaceSummary {
+  l1Name: string;
+  count: number;
+}
+
+interface SkillSummary {
+  id: string;
+  description: string;
+  whenToUse: string;
+  kind: 'llm' | 'script';
+  language?: 'node' | 'python' | 'bash';
+  successes: number;
+  failures: number;
+  updatedAt: string;
+}
+
+/**
+ * List the L1 namespaces that have at least one skill on disk. The viz UI
+ * uses this for the top-level "Skills" tab to render a per-L1 breakdown
+ * before drilling into individual recipes. Returns an empty array if the
+ * skills root doesn't exist (fresh repo / skills feature off).
+ */
+function listSkillNamespaces(): SkillNamespaceSummary[] {
+  if (!existsSync(SKILLS_DIR)) return [];
+  const out: SkillNamespaceSummary[] = [];
+  for (const entry of readdirSync(SKILLS_DIR)) {
+    const p = join(SKILLS_DIR, entry);
+    let st;
+    try {
+      st = statSync(p);
+    } catch {
+      continue;
+    }
+    if (!st.isDirectory()) continue;
+    if (!/^[A-Za-z0-9._-]+$/.test(entry)) continue;
+    let count = 0;
+    try {
+      count = skillRegistry.loadFor(entry).length;
+    } catch {
+      count = 0;
+    }
+    if (count > 0) out.push({ l1Name: entry, count });
+  }
+  out.sort((a, b) => a.l1Name.localeCompare(b.l1Name));
+  return out;
+}
+
+function listSkillsForL1(l1Name: string): SkillSummary[] {
+  const skills = skillRegistry.loadFor(l1Name);
+  return skills.map((s) => ({
+    id: s.id,
+    description: s.description,
+    whenToUse: s.whenToUse,
+    kind: s.kind,
+    ...(s.language ? { language: s.language } : {}),
+    successes: s.successes,
+    failures: s.failures,
+    updatedAt: s.updatedAt,
+  }));
+}
+
+function getSkillById(
+  l1Name: string,
+  skillId: string
+): (SkillSummary & { body: string }) | null {
+  const skills = skillRegistry.loadFor(l1Name);
+  const found = skills.find((s) => s.id === skillId);
+  if (!found) return null;
+  return {
+    id: found.id,
+    description: found.description,
+    whenToUse: found.whenToUse,
+    kind: found.kind,
+    ...(found.language ? { language: found.language } : {}),
+    successes: found.successes,
+    failures: found.failures,
+    updatedAt: found.updatedAt,
+    body: found.body,
+  };
+}
+
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
@@ -346,6 +433,46 @@ const server = createServer((req, res) => {
     return;
   }
 
+  if (pathname === '/api/skills') {
+    sendJson(res, 200, listSkillNamespaces());
+    return;
+  }
+
+  if (pathname.startsWith('/api/skills/')) {
+    const rest = decodeURIComponent(pathname.slice('/api/skills/'.length));
+    const parts = rest.split('/').filter(Boolean);
+    // Validate every component up-front so a malformed segment can't
+    // slip past the SkillRegistry path-component check (which throws
+    // on unsafe chars but produces a less friendly HTTP response).
+    if (parts.length === 0 || parts.some((p) => !/^[A-Za-z0-9._-]+$/.test(p))) {
+      sendJson(res, 400, { error: 'bad skill path' });
+      return;
+    }
+    if (parts.length === 1) {
+      try {
+        sendJson(res, 200, listSkillsForL1(parts[0]!));
+      } catch (err) {
+        sendJson(res, 500, { error: (err as Error).message });
+      }
+      return;
+    }
+    if (parts.length === 2) {
+      try {
+        const skill = getSkillById(parts[0]!, parts[1]!);
+        if (!skill) {
+          sendJson(res, 404, { error: 'skill not found', l1: parts[0], id: parts[1] });
+          return;
+        }
+        sendJson(res, 200, skill);
+      } catch (err) {
+        sendJson(res, 500, { error: (err as Error).message });
+      }
+      return;
+    }
+    sendJson(res, 400, { error: 'bad skill path' });
+    return;
+  }
+
   if (pathname.startsWith('/api/registry/')) {
     const id = decodeURIComponent(pathname.slice('/api/registry/'.length));
     if (!/^[A-Za-z0-9_.\-]+$/.test(id)) {
@@ -379,4 +506,6 @@ server.listen(cli.port, cli.host, () => {
     const mark = existsSync(d.path) ? '✓' : '✗';
     console.log(`  [${mark}] ${d.id}  ${d.path}`);
   }
+  const skillsMark = existsSync(SKILLS_DIR) ? '✓' : '✗';
+  console.log(`skills root: [${skillsMark}] ${SKILLS_DIR}`);
 });
