@@ -25,6 +25,16 @@
 
 export type SkillKind = 'llm' | 'script';
 
+/**
+ * Languages supported by `kind: 'script'` skills. The L1 receives the
+ * skill body verbatim, writes it to a sandbox file with the matching
+ * extension, and runs it via `run_shell`. Picking a language sets
+ * the file extension AND tells `run_shell` which interpreter to use
+ * (node, python3, bash). All three appear in the default
+ * `runShellTool` allowlist (`src/tools/builtin.ts`).
+ */
+export type SkillLanguage = 'node' | 'python' | 'bash';
+
 export interface Skill {
   /** Stable kebab-case id within the L1 namespace. */
   readonly id: string;
@@ -36,16 +46,27 @@ export interface Skill {
    */
   readonly whenToUse: string;
   /**
-   * Phase-1 only `'llm'` is supported at runtime; `'script'` is a
-   * declared placeholder so a future phase can land deterministic
-   * skills without bumping the on-disk format.
+   * `'llm'` — the body is markdown instructions baked into the
+   * L1's effective system prompt; the L1's normal LLM tool-use
+   * loop drives execution. This is the auto-creation default
+   * (`learnSkillFromRun` / C3) and the dominant mode in practice.
+   *
+   * `'script'` — the body IS executable code in `language`. The L1
+   * is told to write the body to a sandbox file, invoke it via
+   * `run_shell`, capture stdout, and return it. Runtime cost is
+   * 1 LLM call + 2 tool calls (write_file + run_shell) regardless
+   * of how many lines the script is — strictly cheaper than
+   * `'llm'` on tasks whose deliverable is fully deterministic.
    */
   readonly kind: SkillKind;
   /**
-   * Markdown body — instructions baked into the L1 system prompt
-   * when the skill is the chosen match. Should be written as a
-   * concrete how-to ("first write package.json with this layout,
-   * then start the server, …"), not as prose.
+   * Required when `kind === 'script'`. Selects extension + run_shell
+   * interpreter. Ignored for `kind: 'llm'`.
+   */
+  readonly language?: SkillLanguage;
+  /**
+   * For `kind: 'llm'`: markdown how-to baked into the system prompt.
+   * For `kind: 'script'`: the executable source in `language`.
    */
   readonly body: string;
   /**
@@ -69,6 +90,8 @@ export interface SkillFrontmatter {
   readonly description: string;
   readonly whenToUse: string;
   readonly kind: SkillKind;
+  /** Required iff `kind === 'script'`; rejected for `kind: 'llm'`. */
+  readonly language?: SkillLanguage;
 }
 
 export interface SkillMeta {

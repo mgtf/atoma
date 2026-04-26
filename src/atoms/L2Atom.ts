@@ -159,12 +159,62 @@ export function parseSkillDraft(text: string): {
 
 /**
  * Render a skill body as a context block injected into the L1's
- * effective system prompt. The clear delimiters help the model parse
- * "this is a recipe to follow" vs the rest of its prompt, and they
- * also make traces easier to grep when debugging which skill was
- * active on a given run.
+ * effective system prompt. Branch on kind:
+ *
+ *   - `kind: 'llm'` (default): the body is a recipe of natural-
+ *     language steps; the L1 follows them with its normal tool-use
+ *     loop. Same shape we've shipped since C2a.
+ *
+ *   - `kind: 'script'`: the body IS executable code in `language`.
+ *     The injected block instructs the L1 to write_file the body
+ *     verbatim to a sandbox-local `_skill_<id>.<ext>`, run it via
+ *     `run_shell <interpreter> <file> [args...]`, capture stdout,
+ *     and return that as its result. Single LLM call + 2 tool
+ *     calls regardless of script length — strictly cheaper than
+ *     an LLM-driven recipe on tasks whose deliverable is fully
+ *     deterministic.
+ *
+ * The clear delimiters help the model parse "this is a recipe to
+ * follow" vs the rest of its prompt, and they also make traces
+ * easier to grep when debugging which skill was active on a given
+ * run.
  */
-export function skillContextBlock(skill: { id: string; body: string }): string {
+export function skillContextBlock(skill: {
+  id: string;
+  body: string;
+  kind?: 'llm' | 'script';
+  language?: 'node' | 'python' | 'bash';
+}): string {
+  if (skill.kind === 'script') {
+    if (!skill.language) {
+      throw new Error(`skillContextBlock: kind:"script" requires language`);
+    }
+    const ext = scriptExtension(skill.language);
+    const interpreter = skill.language === 'python' ? 'python3' : skill.language;
+    const filename = `_skill_${skill.id}.${ext}`;
+    return [
+      `== ACTIVE SKILL: ${skill.id} (kind: script, language: ${skill.language}) ==`,
+      `This skill ships an EXECUTABLE script (below). Your task is NOT to`,
+      `interpret the script — it is to RUN IT. Concretely:`,
+      ``,
+      `  1. Extract the script's CLI arguments from the current subtask`,
+      `     description (the script's source documents what it expects).`,
+      `  2. write_file ${filename} with the script body VERBATIM (do not`,
+      `     edit, summarise, or paraphrase — the body is canonical).`,
+      `  3. run_shell { command: "${interpreter}", args: ["${filename}", ...your-args] }`,
+      `  4. Read the run_shell result. Stdout is your deliverable; stderr`,
+      `     surfaces error messages if the script throws.`,
+      `  5. Return JSON {"output": <stdout-summary>, "summary": "<one sentence>"}.`,
+      ``,
+      `Do NOT improvise additional tool calls. The script body is canonical;`,
+      `your role is to wire CLI args into it and return its output.`,
+      ``,
+      `== SCRIPT BODY ==`,
+      skill.body.trim(),
+      ``,
+      `== END ACTIVE SKILL ==`,
+    ].join('\n');
+  }
   return [
     `== ACTIVE SKILL: ${skill.id} ==`,
     `Follow this recipe step-by-step for the current subtask. The recipe was`,
@@ -176,6 +226,12 @@ export function skillContextBlock(skill: { id: string; body: string }): string {
     ``,
     `== END ACTIVE SKILL ==`,
   ].join('\n');
+}
+
+function scriptExtension(language: 'node' | 'python' | 'bash'): string {
+  if (language === 'node') return 'js';
+  if (language === 'python') return 'py';
+  return 'sh';
 }
 
 /**
@@ -614,10 +670,17 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       skillMatchAttempted = true;
       const skills = await this.matchSkill(l1Type.name, subTask, ctx);
       if (skills) {
-        l1.injectContext(skillContextBlock(skills.skill));
+        l1.injectContext(
+          skillContextBlock({
+            id: skills.skill.id,
+            body: skills.skill.body,
+            kind: skills.skill.kind,
+            ...(skills.skill.language ? { language: skills.skill.language } : {}),
+          })
+        );
         l1.setActiveSkill(skills.skill.id);
         ctx.logger.debug(
-          `[${this.name}] skill matched: ${skills.skill.id} (${skills.reasoning})`
+          `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
         );
       }
     }
@@ -1058,13 +1121,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   description: oldSkill.description,
                   whenToUse: oldSkill.whenToUse,
                   kind: oldSkill.kind,
+                  ...(oldSkill.language ? { language: oldSkill.language } : {}),
                   body: newBody,
                 });
                 ctx.logger.warn(
                   `[${this.name}] skill ${activeSkillId} on ${child.name} updated after escalation (${reason}); retrying L1 with new body`
                 );
                 const fresh = L1Atom.fromType(childType);
-                fresh.injectContext(skillContextBlock({ id: activeSkillId, body: newBody }));
+                fresh.injectContext(
+                  skillContextBlock({
+                    id: activeSkillId,
+                    body: newBody,
+                    kind: oldSkill.kind,
+                    ...(oldSkill.language ? { language: oldSkill.language } : {}),
+                  })
+                );
                 fresh.setActiveSkill(activeSkillId);
                 return fresh;
               }

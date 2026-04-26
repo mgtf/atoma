@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Skill, SkillFrontmatter, SkillKind, SkillMeta } from './types.js';
+import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta } from './types.js';
 
 /**
  * Filesystem-backed skill store. Skills live under
@@ -64,6 +64,7 @@ export class SkillRegistry {
           description: frontmatter.description,
           whenToUse: frontmatter.whenToUse,
           kind: frontmatter.kind,
+          ...(frontmatter.language !== undefined ? { language: frontmatter.language } : {}),
           body,
           successes: meta.successes,
           failures: meta.failures,
@@ -87,11 +88,27 @@ export class SkillRegistry {
    * the same id refreshes content but PRESERVES counters — patches
    * shouldn't punish a skill that was earning trust).
    */
-  save(l1Name: string, skill: Pick<Skill, 'id' | 'description' | 'whenToUse' | 'kind' | 'body'>): Skill {
+  save(
+    l1Name: string,
+    skill: Pick<Skill, 'id' | 'description' | 'whenToUse' | 'kind' | 'body'> &
+      Partial<Pick<Skill, 'language'>>
+  ): Skill {
+    if (skill.kind === 'script' && !skill.language) {
+      throw new Error(`save: kind:"script" requires a language (node|python|bash)`);
+    }
+    if (skill.kind === 'llm' && skill.language) {
+      throw new Error(`save: kind:"llm" must not declare a language; got "${skill.language}"`);
+    }
     const dir = this.skillDir(l1Name, skill.id);
     mkdirSync(dir, { recursive: true });
     const md = renderFrontmatter(
-      { id: skill.id, description: skill.description, whenToUse: skill.whenToUse, kind: skill.kind },
+      {
+        id: skill.id,
+        description: skill.description,
+        whenToUse: skill.whenToUse,
+        kind: skill.kind,
+        ...(skill.language ? { language: skill.language } : {}),
+      },
       skill.body
     );
     writeFileSync(join(dir, 'SKILL.md'), md, 'utf8');
@@ -105,6 +122,7 @@ export class SkillRegistry {
       description: skill.description,
       whenToUse: skill.whenToUse,
       kind: skill.kind,
+      ...(skill.language ? { language: skill.language } : {}),
       body: skill.body,
       successes: meta.successes,
       failures: meta.failures,
@@ -199,29 +217,48 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
   const description = fields['description'];
   const whenToUse = fields['when_to_use'];
   const kindRaw = fields['kind'] ?? 'llm';
+  const languageRaw = fields['language'];
   if (!id) throw new Error('SKILL.md frontmatter missing required field: id');
   if (!description) throw new Error('SKILL.md frontmatter missing required field: description');
   if (!whenToUse) throw new Error('SKILL.md frontmatter missing required field: when_to_use');
   if (kindRaw !== 'llm' && kindRaw !== 'script') {
     throw new Error(`SKILL.md frontmatter "kind" must be llm | script, got: ${kindRaw}`);
   }
+  // Language is required for kind:script, forbidden for kind:llm.
+  let language: SkillLanguage | undefined;
+  if (kindRaw === 'script') {
+    if (!languageRaw) {
+      throw new Error('SKILL.md frontmatter kind:"script" requires a "language" field (node|python|bash)');
+    }
+    if (languageRaw !== 'node' && languageRaw !== 'python' && languageRaw !== 'bash') {
+      throw new Error(`SKILL.md frontmatter "language" must be node|python|bash, got: ${languageRaw}`);
+    }
+    language = languageRaw;
+  } else if (languageRaw) {
+    throw new Error(`SKILL.md frontmatter "language" only valid with kind:"script"; got language=${languageRaw} on kind:llm`);
+  }
   return {
-    frontmatter: { id, description, whenToUse, kind: kindRaw as SkillKind },
+    frontmatter: {
+      id,
+      description,
+      whenToUse,
+      kind: kindRaw as SkillKind,
+      ...(language ? { language } : {}),
+    },
     body,
   };
 }
 
 /** Inverse of parseFrontmatter — emits a minimal canonical SKILL.md text. */
 export function renderFrontmatter(frontmatter: SkillFrontmatter, body: string): string {
-  return [
+  const lines: string[] = [
     '---',
     `id: ${frontmatter.id}`,
     `description: ${frontmatter.description}`,
     `when_to_use: ${frontmatter.whenToUse}`,
     `kind: ${frontmatter.kind}`,
-    '---',
-    '',
-    body.trim(),
-    '',
-  ].join('\n');
+  ];
+  if (frontmatter.language) lines.push(`language: ${frontmatter.language}`);
+  lines.push('---', '', body.trim(), '');
+  return lines.join('\n');
 }

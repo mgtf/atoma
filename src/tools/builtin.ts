@@ -105,7 +105,14 @@ export function listFilesTool(opts: BuiltinToolOptions): BuiltinTool {
 
 export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
   const allowlist = new Set(
-    opts.shellAllowlist ?? ['node', 'npm', 'npx', 'python3', 'ls', 'cat', 'echo', 'which']
+    // `bash` is on the default list specifically so `kind: 'script'`
+    // skills with `language: 'bash'` can be invoked via run_shell.
+    // The skill body still runs inside the ToolSandbox jail (cwd
+    // pinned, no network egress beyond what fetch_url declares), so
+    // adding bash here doesn't broaden the blast radius of run_shell —
+    // a determined LLM could already chain shell-equivalent flows via
+    // node -e or python3 -c.
+    opts.shellAllowlist ?? ['node', 'npm', 'npx', 'python3', 'bash', 'ls', 'cat', 'echo', 'which']
   );
   const timeoutMs = opts.shellTimeoutMs ?? 30_000;
 
