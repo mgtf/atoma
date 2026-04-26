@@ -15,6 +15,7 @@ import {
   ensureCanonicalHttpL2,
   ensureCanonicalFileScribeL1,
 } from '../atoms/capability.js';
+import { SkillRegistry } from '../skills/registry.js';
 import { TraceRecorder } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
@@ -153,7 +154,17 @@ async function main(): Promise<void> {
     `canonical L1 (file-scribe): ${canonicalL1FileScribe.name} (v${canonicalL1FileScribe.version}) — ${canonicalL1FileScribe.description.slice(0, 70)}…`
   );
 
-  const l3 = await L3Atom.fromType(l3Type, registry, anthropic);
+  // Skill store — shared by every atom in the run. Skills are
+  // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills) so
+  // they survive across invocations. L1 atoms hydrate their `skills()`
+  // accessor from this registry on demand; L2 runs a Haiku
+  // skill-prefilter against the matched L1's skills before entering
+  // each supervise loop.
+  const skillsDir = process.env['ATOMA_SKILLS_DIR'] ?? './skills';
+  const skillRegistry = new SkillRegistry(skillsDir);
+  console.log(`skills root: ${skillRegistry.rootDir}`);
+
+  const l3 = await L3Atom.fromType(l3Type, registry, anthropic, skillRegistry);
   console.log(`L3 ${l3.name} using model ${l3.model}`);
 
   // 10-minute default matches the original hard-coded budget; override with

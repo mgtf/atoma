@@ -43,6 +43,7 @@ import {
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
+import type { SkillRegistry } from '../skills/registry.js';
 
 /**
  * Fresh narrow-domain system prompt for an L2 branched after escalation.
@@ -114,6 +115,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   private pendingStrategy: L3Strategy | null = null;
   private l2Peers: L2Atom[] = [];
   private triedChildren = new TaskChildrenMemo();
+  /** SkillRegistry threaded down to every L2 instance L3 creates. */
+  readonly skillRegistry: SkillRegistry | null;
 
   private constructor(args: {
     name: string;
@@ -124,6 +127,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     registry: AtomRegistry;
     model: string;
     validationModel?: string;
+    skillRegistry?: SkillRegistry | null;
   }) {
     super({
       name: args.name,
@@ -135,12 +139,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.model = args.model;
     this.validationModel = args.validationModel ?? PIN_HAIKU;
     this.registry = args.registry;
+    this.skillRegistry = args.skillRegistry ?? null;
   }
 
   static async fromType(
     type: AtomType,
     registry: AtomRegistry,
-    client?: Anthropic
+    client?: Anthropic,
+    skillRegistry: SkillRegistry | null = null
   ): Promise<L3Atom> {
     if (type.tier !== 3) throw new Error(`L3Atom.fromType requires tier=3`);
     const model = client ? await resolveLatestOpus(client) : FALLBACK_OPUS;
@@ -152,6 +158,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: type.params,
       registry,
       model,
+      skillRegistry,
     });
   }
 
@@ -159,7 +166,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   static buildWithModel(
     type: AtomType,
     registry: AtomRegistry,
-    model: string = FALLBACK_OPUS
+    model: string = FALLBACK_OPUS,
+    skillRegistry: SkillRegistry | null = null
   ): L3Atom {
     if (type.tier !== 3) throw new Error(`L3Atom.buildWithModel requires tier=3`);
     return new L3Atom({
@@ -170,6 +178,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: type.params,
       registry,
       model,
+      skillRegistry,
     });
   }
 
@@ -414,7 +423,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const { subtask, strategy, parentTask, idx, hooks, ctx } = args;
     const l2Type = this.resolveL2ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l2Type.name);
-    const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers);
+    const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers, this.skillRegistry);
     for (const p of this.l2Peers) l2.addPeer(p);
     this.l2Peers.push(l2);
     const subTask: Task = subtask.inputs
@@ -512,7 +521,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
             this.name,
             verdict.reasoning
           );
-          const fresh = L2Atom.fromType(patched, this.registry, this.l2Peers);
+          const fresh = L2Atom.fromType(patched, this.registry, this.l2Peers, this.skillRegistry);
           return fresh;
         }
         const branched = this.registry.branch(
@@ -522,7 +531,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L2 ${child.name} → ${branched.name}`);
-        const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers);
+        const fresh = L2Atom.fromType(branched, this.registry, this.l2Peers, this.skillRegistry);
         this.l2Peers.push(fresh);
         return fresh;
       },
@@ -572,7 +581,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         // the narrow-template branch exists specifically to fix the failure
         // that just escalated — letting it try in-flight is strictly more
         // informative than recording it and never exercising it.
-        return L2Atom.fromType(branched, this.registry);
+        return L2Atom.fromType(branched, this.registry, [], this.skillRegistry);
       },
       onApproved: async (child, _result) => {
         this.registry.recordSuccess(child.name);

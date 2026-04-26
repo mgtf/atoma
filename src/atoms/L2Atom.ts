@@ -43,6 +43,8 @@ import {
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
+import type { Skill } from '../skills/types.js';
+import type { SkillRegistry } from '../skills/registry.js';
 
 /**
  * Shared smoke-test design guidance. Appended to every L1 system
@@ -108,6 +110,27 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `smokes does NOT reset the stuck detector — it is cumulative over`,
   `a sliding window.`,
 ].join('\n');
+
+/**
+ * Render a skill body as a context block injected into the L1's
+ * effective system prompt. The clear delimiters help the model parse
+ * "this is a recipe to follow" vs the rest of its prompt, and they
+ * also make traces easier to grep when debugging which skill was
+ * active on a given run.
+ */
+export function skillContextBlock(skill: { id: string; body: string }): string {
+  return [
+    `== ACTIVE SKILL: ${skill.id} ==`,
+    `Follow this recipe step-by-step for the current subtask. The recipe was`,
+    `learned from prior successful runs and is the FASTEST path to a clean`,
+    `result. Deviate only when the subtask explicitly asks for something the`,
+    `recipe does not cover.`,
+    ``,
+    skill.body.trim(),
+    ``,
+    `== END ACTIVE SKILL ==`,
+  ].join('\n');
+}
 
 /**
  * Fresh narrow-responsibility system prompt used when `branchOnEscalation`
@@ -209,6 +232,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   private registry: AtomRegistry;
   private pendingStrategy: L2Strategy | null = null;
   private triedChildren = new TaskChildrenMemo();
+  /**
+   * Optional skill store — when present, every runSubtask runs a
+   * skill-prefilter against the resolved L1's skills before entering
+   * the supervise loop. The L1's effective system prompt is augmented
+   * with the matched skill body via injectContext, and trust counters
+   * on the skill are bumped via the onApproved / onFailed hooks. When
+   * absent, the supervise loop runs as before — skill matching is
+   * strictly opt-in. Threaded from L3.fromType down through
+   * L2Atom.fromType so a single SkillRegistry instance is shared
+   * across every atom in a run.
+   */
+  readonly skillRegistry: SkillRegistry | null;
 
   constructor(args: {
     name: string;
@@ -220,6 +255,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     peers?: L2Atom[];
     model?: string;
     validationModel?: string;
+    skillRegistry?: SkillRegistry | null;
   }) {
     super({
       name: args.name,
@@ -231,10 +267,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     this.model = args.model ?? PIN_SONNET;
     this.validationModel = args.validationModel ?? PIN_HAIKU;
     this.registry = args.registry;
+    this.skillRegistry = args.skillRegistry ?? null;
     if (args.peers) this.peers.push(...args.peers);
   }
 
-  static fromType(type: AtomType, registry: AtomRegistry, peers: L2Atom[] = []): L2Atom {
+  static fromType(
+    type: AtomType,
+    registry: AtomRegistry,
+    peers: L2Atom[] = [],
+    skillRegistry: SkillRegistry | null = null
+  ): L2Atom {
     if (type.tier !== 2) throw new Error(`L2Atom.fromType requires tier=2`);
     return new L2Atom({
       name: type.name,
@@ -244,6 +286,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       params: type.params,
       registry,
       peers,
+      skillRegistry,
     });
   }
 
@@ -511,11 +554,69 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const subTask: Task = subtask.inputs
       ? { description: subtask.description, inputs: subtask.inputs }
       : { description: subtask.description };
+
+    // Skill prefilter (C2a). When a SkillRegistry is wired and the
+    // child has at least one persisted skill, run a Haiku
+    // prefilter call against the skill catalog. If it picks one
+    // with high confidence, inject the skill body into the L1's
+    // effective system prompt via injectContext and tag the
+    // instance via setActiveSkill so the hooks can bump the
+    // skill's own trust counters on approve / fail.
+    //
+    // Skill prefilter REUSES `prefilterStrategy` from cost.ts so
+    // the prompt + caching + confidence-guard semantics stay
+    // identical to the existing tier prefilter — the only change
+    // is the catalog (skills instead of children).
+    if (this.skillRegistry) {
+      const skills = await this.matchSkill(l1Type.name, subTask, ctx);
+      if (skills) {
+        l1.injectContext(skillContextBlock(skills.skill));
+        l1.setActiveSkill(skills.skill.id);
+        ctx.logger.debug(
+          `[${this.name}] skill matched: ${skills.skill.id} (${skills.reasoning})`
+        );
+      }
+    }
     // Fork a branch-scoped ctx so every LLM/tool/trust event recorded
     // inside this supervise loop carries a unique branchId. Viz renders
     // each branch as its own lane instead of interleaving them.
     const branchCtx = forkBranch(ctx, randomUUID());
     return superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+  }
+
+  /**
+   * Run a Haiku skill-prefilter for the L1 named `l1Name` and the
+   * given subtask. Returns the matched skill + the model's reasoning
+   * when a confident match exists, null otherwise (no skills, no
+   * registry, or prefilter escalated). The prefilter uses the same
+   * confidence-guard + decomposable schema as the tier prefilter,
+   * so the safety contract is uniform.
+   *
+   * The injected userContent labels each catalog entry as
+   * "<skillId>: <description>. When to use: <whenToUse>" so Haiku
+   * sees BOTH the capability summary and the activation hint.
+   */
+  private async matchSkill(
+    l1Name: string,
+    subTask: Task,
+    ctx: RunContext
+  ): Promise<{ skill: Skill; reasoning: string } | null> {
+    if (!this.skillRegistry) return null;
+    const skills = this.skillRegistry.loadFor(l1Name);
+    if (skills.length === 0) return null;
+    const outcome = await prefilterStrategy({
+      ctx,
+      task: subTask,
+      catalog: skills.map((s) => ({
+        name: s.id,
+        description: `${s.description}. When to use: ${s.whenToUse}`,
+      })),
+      actor: { name: this.name, tier: 2 },
+    });
+    if (!outcome || outcome.kind !== 'reuse') return null;
+    const matched = skills.find((s) => s.id === outcome.target);
+    if (!matched) return null;
+    return { skill: matched, reasoning: outcome.reasoning };
   }
 
   private resolveL1ForSubtask(
@@ -718,9 +819,23 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       },
       onApproved: async (child, _result) => {
         this.registry.recordSuccess(child.name);
+        // Skill trust counter bump (C2a). When the supervise loop
+        // approves a result and a skill drove the run, record a
+        // success on the skill itself — this is what lets future
+        // runs "trust" the skill more, and (in a follow-up) lets
+        // the system identify mature skills worth promoting from
+        // hand-written to auto-managed.
+        const skillId = child.activeSkillId();
+        if (skillId && this.skillRegistry) {
+          this.skillRegistry.recordSuccess(child.name, skillId);
+        }
       },
       onFailed: async (child, _reason) => {
         this.registry.recordFailure(child.name);
+        const skillId = child.activeSkillId();
+        if (skillId && this.skillRegistry) {
+          this.skillRegistry.recordFailure(child.name, skillId);
+        }
       },
     };
   }

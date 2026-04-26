@@ -53,6 +53,29 @@ export class L1Atom extends Atom {
     return this.skillsList;
   }
 
+  /**
+   * Per-instance ACTIVE skill — set by L2 when its skill-prefilter
+   * matched a skill for the current subtask. Read by the L2 hooks
+   * (`onApproved` / `onFailed`) so trust counters can bump on the
+   * exact skill that drove the run, and by branchOnEscalation to
+   * route a failed run into a skill-update path instead of the
+   * legacy registry.branch (commit 2b).
+   *
+   * Stored on the instance — not the type — because two parallel
+   * subtasks can resolve the SAME L1 type but pick DIFFERENT skills.
+   */
+  private activeSkillIdField: string | null = null;
+
+  /** Mark this instance as currently driven by `skillId`. Pass null to clear. */
+  setActiveSkill(skillId: string | null): void {
+    this.activeSkillIdField = skillId;
+  }
+
+  /** Active skill id for this run, or null if none was matched. */
+  activeSkillId(): string | null {
+    return this.activeSkillIdField;
+  }
+
   static fromType(
     type: AtomType,
     model: string = PIN_HAIKU,
