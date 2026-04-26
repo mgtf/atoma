@@ -391,8 +391,17 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   Falls back to the legacy branch path on Sonnet error / empty
   response — skill update is OPPORTUNISTIC, never mandatory.
 
-- **Auto-creation (#C3).** Off by default. Pass `--learn-skills` to
-  `npm run example:build` (or set `ATOMA_SKILL_LEARN=1`) to enable.
+- **Auto-creation (#C3).** ON by default in `npm run example:build`.
+  Pass `--no-learn-skills` (or set `ATOMA_SKILL_LEARN=0`) to disable
+  for a single run. The lib (`L2Atom.onApproved`) still reads
+  `ATOMA_SKILL_LEARN === '1'` at hook time — `build-app.ts` writes
+  that env var to '1' by default before invoking `l3.handle`, and to
+  '0' when `--no-learn-skills` is passed. Marginal cost is ~1 Sonnet
+  call (~$0.003) per novel-task success — kept on by default because
+  in practice "I forgot the flag" was the dominant failure mode and
+  the safety guards (id sanity check, no-overwrite of existing ids,
+  tolerant JSON parser) absorb the bulk of the bad-distillation
+  risk.
   When a run completes WITHOUT a matched skill and is
   approved by the validator, Sonnet distills it into a new skill
   via `learnSkillFromRun`: the prompt asks for `{id, description,

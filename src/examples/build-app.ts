@@ -34,18 +34,18 @@ const consoleLogger: Logger = {
 
 interface CliArgs {
   goal?: string;
-  learnSkills: boolean;
+  noLearnSkills: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
   let goal: string | undefined;
-  let learnSkills = false;
+  let noLearnSkills = false;
   for (const a of argv) {
-    if (a === '--learn-skills') learnSkills = true;
+    if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, learnSkills };
+  return { goal, noLearnSkills };
 }
 
 async function main(): Promise<void> {
@@ -70,16 +70,18 @@ async function main(): Promise<void> {
   const goal =
     args.goal ??
     'Build a minimal WebGL Minesweeper game (10x10 grid, 10 mines). Implement everything in a single index.html that loads and runs standalone. Left-click reveals a cell, right-click flags. Then start a local static server and return the URL.';
-  // The CLI flag wins over the env var; both end up at the same env-var
-  // mutation so the L2 onApproved hook (which reads it at call time)
-  // doesn't have to learn about a second source of truth.
-  if (args.learnSkills) {
-    process.env['ATOMA_SKILL_LEARN'] = '1';
-    console.log('skill auto-distillation: ON (--learn-skills)');
-  } else if (process.env['ATOMA_SKILL_LEARN'] === '1') {
-    console.log('skill auto-distillation: ON (ATOMA_SKILL_LEARN=1)');
+  // Auto-distillation is ON by default in this example. Priority is
+  // CLI flag > env var > default-on. The L2 onApproved hook reads
+  // ATOMA_SKILL_LEARN === '1' at call time, so we just set the env
+  // var here and the lib stays unchanged.
+  if (args.noLearnSkills) {
+    process.env['ATOMA_SKILL_LEARN'] = '0';
+    console.log('skill auto-distillation: off (--no-learn-skills)');
+  } else if (process.env['ATOMA_SKILL_LEARN'] === '0') {
+    console.log('skill auto-distillation: off (ATOMA_SKILL_LEARN=0)');
   } else {
-    console.log('skill auto-distillation: off (pass --learn-skills to enable)');
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    console.log('skill auto-distillation: ON (default — pass --no-learn-skills to disable)');
   }
 
   // Use a dedicated DB + workspace for build runs so we don't interfere with
