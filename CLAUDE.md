@@ -332,6 +332,90 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   it's specifically load-bearing for the HTTP canonical happy path.
   Fix #10.
 
+## Skills (persistent task patterns)
+
+Skills are reusable how-to recipes attached to L1 atoms,
+filesystem-backed and shared across runs. They're orthogonal to
+the atom-type registry: an atom's IDENTITY (name, system prompt,
+tool signature) lives in `atom_types`; an atom's repertoire of
+LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
+
+- **Disk layout** (`src/skills/registry.ts`):
+  ```
+  ./skills/<l1-name>/<skill-id>/SKILL.md     — frontmatter + body
+  ./skills/<l1-name>/<skill-id>/_meta.json   — counters + updatedAt
+  ```
+  `SKILL.md` carries YAML-style frontmatter (`id`, `description`,
+  `when_to_use`, `kind: llm|script`) followed by a markdown body.
+  Counters live in a sidecar JSON specifically so `recordSuccess`
+  / `recordFailure` never touch human-authored content. The id is
+  validated via `isSafeSkillId` (kebab-case, 3–60 chars) so a
+  malicious id can't escape the namespace via `..`. `SkillRegistry`
+  override path: `ATOMA_SKILLS_DIR` env var (default `./skills`).
+
+- **Match → inject (#C2a).** `L2.runSubtask` runs a Haiku skill-
+  prefilter against the resolved L1's persistent skill catalog
+  BEFORE entering the supervise loop. The prefilter REUSES
+  `prefilterStrategy` from `cost.ts`, so the confidence guard
+  (low → escalate) and the decomposable hint apply uniformly.
+  On a `reuse + high-confidence` match, the matched skill body is
+  injected into the L1's effective system prompt via the existing
+  `Atom.injectContext` mechanism, wrapped in clearly-delimited
+  `== ACTIVE SKILL: <id> ==` … `== END ACTIVE SKILL ==` blocks
+  that are easy to grep in traces. The instance is tagged via
+  `L1Atom.setActiveSkill(id)` so the supervise-loop hooks know
+  which skill drove the run.
+
+- **Trust counters per skill (#C2a).** `onApproved` and `onFailed`
+  hooks bump `_meta.json.successes` / `_meta.json.failures` on the
+  matched skill in addition to the existing atom-type counters. A
+  skill earns trust independently of its host atom; the same atom
+  type can host multiple skills with very different trust profiles.
+
+- **Update on failure (#C2b).** When a run driven by a skill
+  ESCALATES, `branchOnEscalation` enters the SKILL UPDATE PATH
+  before the legacy registry-branch path:
+    1. Extract the verbatim validator diagnosis via
+       `extractBranchDiagnostic(trace)`.
+    2. Sonnet (`this.model`) generates a TARGETED revision of the
+       skill body (`improveSkillBody`) — instructed to keep changes
+       focused, not balloon the length, and return the body
+       unchanged if the failure is environmental.
+    3. `SkillRegistry.save` overwrites the body but PRESERVES the
+       counters (the C1 save contract).
+    4. A fresh L1 instance is returned with the updated skill
+       injected; the supervise loop's `hasTriedBranch` mechanism
+       gives it ONE clean cycle. If it also fails, the loop falls
+       through to the parent fallback path (skill failure +1 on
+       `_meta.json` so the churn is observable).
+  Falls back to the legacy branch path on Sonnet error / empty
+  response — skill update is OPPORTUNISTIC, never mandatory.
+
+- **Auto-creation (#C3).** Off by default. Set `ATOMA_SKILL_LEARN=1`
+  to enable. When a run completes WITHOUT a matched skill and is
+  approved by the validator, Sonnet distills it into a new skill
+  via `learnSkillFromRun`: the prompt asks for `{id, description,
+  when_to_use, body}` as JSON and parses tolerantly via
+  `parseSkillDraft` (accepts `when_to_use` and `whenToUse`,
+  fenced JSON, prose-with-JSON). Guards: malformed JSON → debug
+  log + skip; `isSafeSkillId` rejects unsafe ids; an existing skill
+  with the same id is NEVER overwritten (counter-preserving).
+  Costs one Sonnet call per learning event; off by default
+  precisely so projects don't pay for it on every run.
+
+- **Skill-prefilter fires when at least one skill exists.**
+  `matchSkill` short-circuits without an LLM call when the registry
+  returns 0 skills for the L1, but it still sets
+  `skillMatchAttempted = true` — so a novel run on a skill-less L1
+  is correctly recognised as a learning opportunity. Tests that
+  drive the skill-prefilter LLM slot must pre-seed at least one
+  scarecrow skill so the slot actually fires.
+
+- **`kind: 'script'` declared but not yet implemented.** The
+  frontmatter accepts it as a placeholder so the storage format is
+  forwards-compatible — at runtime today every skill is treated as
+  `kind: 'llm'`. Phase 2 wires deterministic exec.
+
 ## LLM interaction conventions
 
 - All LLM calls go through `LlmClient` (`src/core/llm.ts`). Never call the Anthropic
