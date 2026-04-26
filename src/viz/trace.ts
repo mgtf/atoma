@@ -210,6 +210,15 @@ export interface VizRunIndexEntry {
    * explicit one the UI reads).
    */
   inFlight?: boolean;
+  /**
+   * True when the run was terminated by an explicit user signal (Ctrl-C
+   * → SIGINT, or programmatic cancellation) BEFORE the L3 produced a
+   * result. Set by `endRun({ cancelled: true })`. Distinguishes a
+   * deliberate user-initiated stop from a true `hasError` (system
+   * fault, timeout, internal exception) so the UI can label runs
+   * "✕ cancelled" instead of "● LIVE" once the user has killed them.
+   */
+  cancelled?: boolean;
   costUsd?: number;
   calls?: number;
 }
@@ -255,6 +264,8 @@ export interface VizRun {
    * full run JSON can surface it without re-walking the events.
    */
   degraded?: boolean;
+  /** Mirrors `VizRunIndexEntry.cancelled`. Set by `endRun({ cancelled: true })`. */
+  cancelled?: boolean;
   error?: string;
   totals?: VizRunTotals;
 }
@@ -333,6 +344,13 @@ export class TraceRecorder {
   endRun(opts: {
     result?: VizRun['result'];
     error?: string;
+    /**
+     * Caller asserts the run was cancelled by an explicit user signal
+     * (Ctrl-C / SIGINT / programmatic stop) — used by build-app.ts's
+     * shutdown handler to distinguish "user pressed Ctrl-C mid-run"
+     * from "system failure" so the viz can label it accordingly.
+     */
+    cancelled?: boolean;
   } = {}): VizRun | null {
     if (!this.run) return null;
     // Cancel any pending trailing-edge partial persist so it can't race
@@ -346,6 +364,7 @@ export class TraceRecorder {
     this.run.durationMs = Date.parse(endedAt) - Date.parse(this.run.startedAt);
     if (opts.result) this.run.result = opts.result;
     if (opts.error) this.run.error = opts.error;
+    if (opts.cancelled) this.run.cancelled = true;
     this.run.totals = computeTotals(this.run.events);
     // A run is "degraded" when the supervise loop escalated and the parent
     // took over via its fallback path. `result.producedBy.viaFallback` is
@@ -433,6 +452,7 @@ export class TraceRecorder {
     if (this.run.endedAt !== undefined) entry.endedAt = this.run.endedAt;
     if (this.run.durationMs !== undefined) entry.durationMs = this.run.durationMs;
     if (this.run.degraded) entry.degraded = true;
+    if (this.run.cancelled) entry.cancelled = true;
     // Inflight flag: partial persists during the run carry it; the
     // final endRun persist (which sets endedAt) clears it.
     if (this.run.endedAt === undefined) entry.inFlight = true;

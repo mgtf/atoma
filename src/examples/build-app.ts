@@ -243,9 +243,23 @@ async function main(): Promise<void> {
 
   // Keep the process alive until the user hits Ctrl+C so the static server
   // stays reachable. Clean up child processes on exit.
+  //
+  // Run-state semantics on signal: if the recorder still has a current
+  // run (i.e. l3.handle hadn't resolved yet → the user cancelled the
+  // run mid-flight), we close it cleanly with `cancelled: true` so the
+  // viz can label it "✕ cancelled" instead of leaving it as "● LIVE"
+  // forever. If currentRun is null the run already ended (success or
+  // error) before the signal arrived — endRun would no-op anyway.
   const shutdown = async (code = 0): Promise<void> => {
     console.log('\nshutting down sandbox children...');
-    recorder.flushPartial();
+    if (recorder.currentRun !== null) {
+      recorder.endRun({
+        error: 'run cancelled by user (signal received)',
+        cancelled: true,
+      });
+    } else {
+      recorder.flushPartial();
+    }
     await sandbox.cleanup();
     process.exit(code);
   };

@@ -284,13 +284,18 @@ function atomRef(ref) {
 }
 
 function runSelectLabel(r) {
-  const flags = r.hasError
-    ? '  ✖'
-    : r.inFlight
-      ? '  ● LIVE'
-      : r.degraded
-        ? '  ⚠ fallback'
-        : '';
+  // `cancelled` wins over `hasError` because user-cancellation is a
+  // deliberate action, not a fault — we set both flags on the index
+  // entry but the UI label should reflect the user's intent.
+  const flags = r.cancelled
+    ? '  ✕ cancelled'
+    : r.hasError
+      ? '  ✖'
+      : r.inFlight
+        ? '  ● LIVE'
+        : r.degraded
+          ? '  ⚠ fallback'
+          : '';
   return `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
 }
 
