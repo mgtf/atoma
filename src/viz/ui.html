@@ -983,22 +983,155 @@ function renderLlmDetail(el, ev) {
   const tabs = h('div', { class: 'tabs' });
   const body = h('div');
   const entries = [
-    ['System prompt', ev.systemPrompt],
-    ['User content', ev.userContent],
-    ['Response', ev.response || (ev.error ? '(aucune réponse — appel en erreur)' : '')],
+    ['System prompt', ev.systemPrompt, 'raw'],
+    ['User content', ev.userContent, 'raw'],
+    ['Response', ev.response || (ev.error ? '(aucune réponse — appel en erreur)' : ''), 'response'],
   ];
-  entries.forEach(([lbl, txt], i) => {
+  const renderTab = (txt, kind) => {
+    body.innerHTML = '';
+    if (kind === 'response') {
+      // Try the strategy+plan structured render first; fall back to
+      // pretty-printed JSON; fall back to raw text. The walls-of-JSON
+      // we used to render here are ~unreadable for plan/prefilter calls.
+      const node = renderStructuredResponse(txt);
+      body.appendChild(node);
+      return;
+    }
+    body.appendChild(h('pre', {}, txt || '(vide)'));
+  };
+  entries.forEach(([lbl, txt, kind], i) => {
     const tab = h('div', { class: 'tab' + (i === 1 ? ' active' : '') }, lbl);
     tab.addEventListener('click', () => {
       [...tabs.children].forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
-      body.innerHTML = '';
-      body.appendChild(h('pre', {}, txt || '(vide)'));
+      renderTab(txt, kind);
     });
     tabs.appendChild(tab);
   });
-  body.appendChild(h('pre', {}, entries[1][1] || '(vide)'));
+  renderTab(entries[1][1], entries[1][2]);
   el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Prompts & réponse'), tabs, body]));
+}
+
+/**
+ * Try to make sense of an LLM response body. Three rendering paths:
+ *   1. strategy+plan pair (a JSON array of two objects whose first carries
+ *      a `strategy` field and whose second carries `subtasks`) — render
+ *      structured sections so a human can scan it without parsing JSON
+ *      in their head. This is the main case for L2/L3 plan calls.
+ *   2. any other JSON — pretty-print with 2-space indent and word-wrap.
+ *   3. non-JSON / parse error — raw text inside <pre>.
+ * Returns a single element to insert into the body.
+ */
+function renderStructuredResponse(txt) {
+  if (!txt || !txt.trim()) return h('pre', {}, '(vide)');
+  const parsed = tryParseJson(txt);
+  if (parsed === undefined) return h('pre', {}, txt);
+  // Strategy + plan pair detection.
+  if (Array.isArray(parsed) && parsed.length === 2
+    && parsed[0] && typeof parsed[0] === 'object' && 'strategy' in parsed[0]
+    && parsed[1] && typeof parsed[1] === 'object' && Array.isArray(parsed[1].subtasks)
+  ) {
+    return renderStrategyPlanPair(parsed[0], parsed[1], txt);
+  }
+  // Anything else parseable: prettify.
+  const wrap = h('div');
+  wrap.appendChild(h('pre', {}, JSON.stringify(parsed, null, 2)));
+  return wrap;
+}
+
+function tryParseJson(txt) {
+  try { return JSON.parse(txt); } catch {}
+  // Tolerate fenced JSON ```json ... ```
+  const fence = txt.match(/```(?:json)?\s*([\s\S]+?)\s*```/);
+  if (fence) {
+    try { return JSON.parse(fence[1]); } catch {}
+  }
+  // Tolerate leading/trailing prose around a balanced JSON value.
+  const start = txt.search(/[\[{]/);
+  if (start >= 0) {
+    try { return JSON.parse(txt.slice(start)); } catch {}
+  }
+  return undefined;
+}
+
+function renderStrategyPlanPair(strategy, plan, raw) {
+  const wrap = h('div', { class: 'plan-card' });
+
+  // Strategy block.
+  const stratKv = h('div', { class: 'kv' }, [
+    h('div', { class: 'k' }, 'Strategy'), h('div', { class: 'v' }, strategy.strategy || '—'),
+    ...(strategy.target ? [h('div', { class: 'k' }, 'Target'), h('div', { class: 'v' }, strategy.target)] : []),
+    h('div', { class: 'k' }, 'Reasoning'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, strategy.reasoning || '—'),
+  ]);
+  wrap.appendChild(h('div', { class: 'section', style: 'margin-top:8px;' }, [
+    h('h3', {}, 'Strategy'),
+    stratKv,
+    ...(strategy.seed ? [
+      h('h3', { style: 'margin-top:10px;' }, 'Seed'),
+      h('pre', {}, JSON.stringify(strategy.seed, null, 2)),
+    ] : []),
+  ]));
+
+  // Plan block.
+  const aggMode = plan.aggregation && plan.aggregation.mode ? plan.aggregation.mode : 'concat';
+  const planKv = h('div', { class: 'kv' }, [
+    h('div', { class: 'k' }, 'Reasoning'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.reasoning || '—'),
+    h('div', { class: 'k' }, 'Aggregation'), h('div', { class: 'v' },
+      h('span', {
+        class: 'chip',
+        title: aggMode === 'sequential'
+          ? 'phases run one-at-a-time on a shared workspace'
+          : aggMode === 'llm-synthesize'
+            ? 'parallel — supervisor merges sub-results via LLM'
+            : 'parallel — outputs concatenated mechanically',
+      }, aggMode)
+    ),
+    ...(plan.aggregation && plan.aggregation.instruction
+      ? [h('div', { class: 'k' }, 'Merge instruction'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.aggregation.instruction)]
+      : []),
+    h('div', { class: 'k' }, 'Expected output'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.expectedOutput || '—'),
+  ]);
+
+  // Subtasks list — the part that was unreadable as raw JSON.
+  const subtasks = plan.subtasks || [];
+  const orderHint = aggMode === 'sequential' ? 'sequential phases' : 'parallel subtasks';
+  const subtaskCards = subtasks.map((s, i) => {
+    const head = h('div', { class: 'row', style: 'gap:6px;' }, [
+      h('span', { class: 'role ' + (aggMode === 'sequential' ? 'inject' : 'plan') },
+        aggMode === 'sequential' ? `phase #${i + 1}` : `#${i + 1}`),
+      ...(s.preferredChild ? [h('span', { class: 'name' }, '➜ ' + s.preferredChild)] : []),
+    ]);
+    const desc = h('div', { style: 'white-space:pre-wrap; margin-top:4px;' }, s.description || '');
+    const inputs = s.inputs && Object.keys(s.inputs).length > 0
+      ? h('div', { class: 'meta', style: 'margin-top:4px; white-space:pre-wrap;' },
+          'inputs: ' + JSON.stringify(s.inputs))
+      : null;
+    return h('div', { class: 'section', style: 'margin:6px 0; padding:8px;' }, [head, desc, inputs]);
+  });
+
+  wrap.appendChild(h('div', { class: 'section', style: 'margin-top:8px;' }, [
+    h('h3', {}, `Plan — ${subtasks.length} ${orderHint}`),
+    planKv,
+    ...(subtasks.length > 0
+      ? [h('h3', { style: 'margin-top:10px;' }, 'Subtasks'), ...subtaskCards]
+      : []),
+  ]));
+
+  // Raw JSON fallback toggle for the curious / debugging.
+  const rawWrap = h('div', { style: 'display:none; margin-top:8px;' }, [
+    h('pre', {}, JSON.stringify([strategy, plan], null, 2)),
+  ]);
+  const toggle = h('div', {
+    class: 'meta',
+    style: 'cursor:pointer; margin-top:6px;',
+    onclick: () => {
+      rawWrap.style.display = rawWrap.style.display === 'none' ? '' : 'none';
+    },
+  }, '▸ afficher / masquer le JSON brut');
+  wrap.appendChild(toggle);
+  wrap.appendChild(rawWrap);
+
+  return wrap;
 }
 
 function renderRegistryDetail(el, ev) {
