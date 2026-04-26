@@ -582,7 +582,16 @@ export const planSchema = z.preprocess(
     reasoning: z.string(),
     subtasks: z.array(subtaskSpecSchema).min(1),
     aggregation: aggregationSpecSchema.default({ mode: 'concat' }),
-    expectedOutput: z.string(),
+    // `expectedOutput` is informational (it surfaces in the trace +
+    // narrow-prompt builder). Marking it optional with a default
+    // protects the run from crashes when a truncated response leaves
+    // the field unwritten — observed when an Opus PHASED plan with
+    // 3 detailed phases blew past the (then-1500) STRATEGY_MAX_TOKENS
+    // cap and finished mid-subtask, before emitting `aggregation` or
+    // `expectedOutput`. The cap has been raised since, but keeping
+    // this defaulted is defence in depth — a single truncated plan
+    // shouldn't take the whole run down.
+    expectedOutput: z.string().default(''),
     proposedAction: z.string().optional(),
     toolCalls: z
       .array(z.object({ name: z.string(), args: z.record(z.unknown()) }))

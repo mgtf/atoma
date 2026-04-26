@@ -23,13 +23,18 @@ export const TRUST_THRESHOLD_SUCCESSES = 3;
 /**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
- * — ~500-1000 tokens in practice. A higher ceiling just invites the model to
- * pad reasoning unnecessarily and raises the per-task output bill.
+ * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED
+ * plan from Opus with detailed phase descriptions; before phasing landed a
+ * 1500-token cap was enough but multi-phase plans on stack tasks (SSR app
+ * with SQLite + external API + UI) blew past it and produced truncated
+ * `expectedOutput` fields that crashed the planSchema parse.
+ * `expectedOutput` and `aggregation` are now also defaulted in planSchema
+ * (defence in depth) — but the right place to fix it is at the source.
  *
  * Fallback / self-exec calls still use the atom's configured maxTokens
  * because they may produce actual content, not routing JSON.
  */
-export const STRATEGY_MAX_TOKENS = 1500;
+export const STRATEGY_MAX_TOKENS = 3000;
 
 export function shouldTrustType(type: AtomType): boolean {
   return type.failures === 0 && type.successes >= TRUST_THRESHOLD_SUCCESSES;

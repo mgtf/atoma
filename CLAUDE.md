@@ -130,10 +130,18 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   L1 tool loop on Haiku. New-type encounters add Sonnet for the L2 plan
   step or Opus for the L3 plan step.
 - **Strategy/plan output cap.** L2/L3 `plan()` on the non-fallback path pin
-  `maxTokens: STRATEGY_MAX_TOKENS` (1500) regardless of the atom type's own
-  configured ceiling. The response is a routing JSON pair; padding the ceiling
-  just invites rambling. Fallback/self-exec paths keep the atom's full
-  `maxTokens` because they may produce real content.
+  `maxTokens: STRATEGY_MAX_TOKENS` (3000) regardless of the atom type's own
+  configured ceiling. The response is a routing JSON pair + a list of
+  subtasks with descriptions. Sized for Opus PHASED plans with 3-5 phases
+  of detailed instructions; the previous 1500-token cap was set when L3
+  emitted skeletal 1-subtask plans, and silently truncated multi-phase
+  plans on stack tasks (SSR app with SQLite + external API + UI), producing
+  unparseable JSON that crashed `planSchema`. As defence in depth,
+  `expectedOutput` and `aggregation` in `planSchema` are now defaulted
+  rather than required, so a future cap-overrun degrades to a parseable
+  plan with empty `expectedOutput` and `concat` aggregation rather than
+  taking the whole run down. Fallback/self-exec paths keep the atom's
+  full `maxTokens` because they may produce real content.
 - **Aggregation modes — `concat`, `llm-synthesize`, `sequential`.**
   The `aggregation.mode` field on a Plan picks how the supervisor
   combines N sub-results AND drives the dispatch shape:
