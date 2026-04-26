@@ -3,7 +3,26 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
+
+/**
+ * Stub Opus plan response — the L3 shortcut is gone, so every l3.plan()
+ * now emits a prefilter call AND an Opus plan call. These tests inspect
+ * the prefilter userContent (call #0) and don't care about the plan
+ * itself; we just enqueue a minimal valid response so the plan parse
+ * succeeds and the test can assert on the prefilter call.
+ */
+function stubOpusPlan(target: string): string {
+  return jsonTextPair(
+    { strategy: 'reuse', target, reasoning: 'stub' },
+    {
+      reasoning: 'stub',
+      subtasks: [{ description: 't', preferredChild: target }],
+      aggregation: { mode: 'concat' },
+      expectedOutput: 'stub',
+    }
+  );
+}
 
 /**
  * Regression test for the L3.prefilter L1-affinity enrichment.
@@ -105,6 +124,7 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
         reasoning: 'test',
       })
     );
+    ctx.llm.enqueueText(stubOpusPlan('Methane'));
     await l3.plan({ description: 'some task' }, ctx);
 
     const prefilterCall = ctx.llm.calls[0]!;
@@ -142,6 +162,7 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
         reasoning: 'test',
       })
     );
+    ctx.llm.enqueueText(stubOpusPlan('Methane'));
     await l3.plan({ description: 'some task' }, ctx);
 
     const user = ctx.llm.calls[0]!.userContent;
@@ -170,6 +191,7 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
         reasoning: 'test',
       })
     );
+    ctx.llm.enqueueText(stubOpusPlan('Water'));
     await l3.plan({ description: 't' }, ctx);
     const user = ctx.llm.calls[0]!.userContent;
     expect(user).toMatch(/Water: orchestrator/);

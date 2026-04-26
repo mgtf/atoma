@@ -51,22 +51,29 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   Structurally required regardless of catalog size — the prompt has a
   HARD RULE against single-candidate force-matching.
 - **Prefilter decomposable hint.** The `reuse` variant also carries an
-  optional `decomposable: boolean`. On `reuse + !decomposable` the
-  skeletal-plan short-circuit fires as before (happy path, 0 Sonnet).
-  On `reuse + decomposable` L2/L3.plan FALL THROUGH to the full
-  supervisor plan call, with the prefilter target preserved as a
-  `== PREFILTER HINT ==` section in the userContent so Sonnet/Opus can
-  set `preferredChild: <target>` on each leaf subtask. The prompt tells
-  Haiku to emit `decomposable: false` when artefacts are COUPLED (test
-  imports the lib, package.json runs the test, README documents the
-  API, client imports server types, config read by code) — those cases
-  are structurally sequential and a single L1 tool-loop beats a fan-
-  out. `decomposable: true` is reserved for artefacts GENUINELY
-  orthogonal with no shared imports/refs/depends-on (e.g. three
-  unrelated puzzle games, three independent web scrapes). Measured
-  impact on the library+tests+docs scenario: tightening this rule
-  dropped a $0.18 run (1 Opus + 1 Sonnet) to a $0.05 run (0 Opus + 0
-  Sonnet, 7 Haiku — 100% happy path).
+  optional `decomposable: boolean`. At **L2** the original contract
+  holds: `reuse + !decomposable` fires the skeletal-plan short-circuit
+  (happy path, 0 Sonnet), `reuse + decomposable` falls through to the
+  full supervisor plan with the target as a `== PREFILTER HINT ==`.
+  At **L3** the short-circuit is GONE — every L3 run defers to the
+  Opus plan call regardless of the `decomposable` flag, with the
+  prefilter target carried forward as a hint. The framework's value
+  at the top tier is decomposition reasoning; collapsing that to a
+  1-subtask routing decision wasted the tier and produced visibly
+  monolithic deliverables (a Pong build that delegated all of
+  scaffold+input+physics to a single Hydrogen run, with no per-phase
+  smoke checkpoint). Cost: ~+$0.10/run on L3, deliberately accepted.
+  The prompt tells Haiku to emit `decomposable: false` when artefacts
+  are COUPLED (test imports the lib, package.json runs the test,
+  README documents the API, client imports server types, config read
+  by code) — at L2 those cases are structurally sequential and a
+  single L1 tool-loop beats a fan-out. `decomposable: true` is
+  reserved for artefacts GENUINELY orthogonal with no shared
+  imports/refs/depends-on (e.g. three unrelated puzzle games, three
+  independent web scrapes). Measured impact on the
+  library+tests+docs scenario at L2: tightening this rule dropped a
+  $0.18 run (1 Opus + 1 Sonnet) to a $0.05 run (0 Opus + 0 Sonnet,
+  7 Haiku — 100% L2 happy path).
 - **L3 prefilter catalog enrichment — L1 affinity.** When `L3.plan`
   builds the prefilter catalog it appends each L2 description with a
   "REACHABLE L1 CHILDREN" block listing (a) canonical L1s (reachable
@@ -114,16 +121,46 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
 - L3/L2 never pass `tools` or an `executor` on their own LLM calls. Only L1 gets
   tool declarations and a tool loop; that's the whole point of the tier split.
   Grep `executor:` to confirm it only appears in `L1Atom.execute`.
-- **Happy path on a mature type is now 100% Haiku:** prefilter picks the child,
-  trust fast-path skips both validators, L1 does the real work on Haiku with
-  its tool loop. The only time Sonnet or Opus runs is the first few encounters
-  with a type, or when the catalog has no clear match and a new type must be
-  designed.
+- **Happy path tier-by-tier.** L2 happy path (mature L1 child, prefilter
+  matches with `!decomposable`) is 100% Haiku — prefilter picks, trust fast-
+  path skips validators, L1 does the work. **L3 always pays for one Opus
+  call** because the L3 prefilter shortcut is intentionally gone (see
+  "Prefilter decomposable hint" above). So a mature-type L3 run is 1 Opus
+  (plan) + N Haiku (prefilters + validators short-circuited by trust) +
+  L1 tool loop on Haiku. New-type encounters add Sonnet for the L2 plan
+  step or Opus for the L3 plan step.
 - **Strategy/plan output cap.** L2/L3 `plan()` on the non-fallback path pin
   `maxTokens: STRATEGY_MAX_TOKENS` (1500) regardless of the atom type's own
   configured ceiling. The response is a routing JSON pair; padding the ceiling
   just invites rambling. Fallback/self-exec paths keep the atom's full
   `maxTokens` because they may produce real content.
+- **Aggregation modes — `concat`, `llm-synthesize`, `sequential`.**
+  The `aggregation.mode` field on a Plan picks how the supervisor
+  combines N sub-results AND drives the dispatch shape:
+    - `concat` / `llm-synthesize` → subtasks run in PARALLEL via
+      `Promise.all`. Use for ORTHOGONAL decomposition (no shared
+      artefacts between subtasks). `concat` joins outputs into an array,
+      `llm-synthesize` runs one supervisor LLM call to merge.
+    - `sequential` → subtasks run ONE AT A TIME with a `for...of` loop.
+      Each step's `summary` is threaded into the next step's
+      `task.inputs.previousStepSummary` so the next L2/L1 sees the
+      narrative state. Aggregation is a no-op LLM-wise: the FINAL
+      step's output IS the deliverable, earlier phase summaries are
+      preserved in the wrapper summary for trace auditability.
+      Use when phases SHARE an evolving artefact (build → extend →
+      smoke). The sandbox filesystem is implicitly shared, so phases
+      mutate the same on-disk artefact; the threaded `previousStepSummary`
+      carries narrative state, not bytes.
+  Pick driven by the L3 / L2 plan prompt: PHASED tasks (apps, games,
+  multi-step builds) lean toward `sequential`, ORTHOGONAL fan-outs
+  (independent research, parallel scrapes) lean toward `concat`. The
+  `VALIDATION_SYSTEM_PROMPT` knows about all three modes — sequential
+  plans with inter-step dependencies are EXPECTED and must not be
+  rejected by Haiku as "structurally broken" (the way parallel plans
+  with deps would be). Implementation: the dispatch branch lives in a
+  `dispatchSubtasks` private method on both `L2Atom` and `L3Atom`,
+  not in `superviseLoop` — the loop is per-subtask, the dispatch
+  shape is per-plan.
 - **Prompt caching thresholds are load-bearing.** Claude Haiku 4.5's minimum
   cacheable prompt is 4096 tokens, Sonnet 4.6 is 2048. The
   `VALIDATION_SYSTEM_PROMPT` sits at ~5000 tokens — its `== WORKED EXAMPLES ==`

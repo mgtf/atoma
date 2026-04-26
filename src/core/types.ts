@@ -41,19 +41,28 @@ export interface SubtaskSpec {
 
 /**
  * How a supervisor combines the N `Result`s produced by its subtasks into
- * the single `Result` it returns to its own supervisor. Two modes today:
+ * the single `Result` it returns to its own supervisor. Three modes:
  *   - `concat`: mechanical aggregation — outputs concatenated into an
  *     array, summaries joined. Cheap (no LLM call), useful when sub-
  *     results are naturally independent artefacts (ex: N research
- *     summaries → 1 brief).
+ *     summaries → 1 brief). Subtasks run in PARALLEL via Promise.all.
  *   - `llm-synthesize`: the supervisor's own model is called with the N
  *     sub-results and `instruction` to produce a final structured
  *     output. Expensive but necessary when the final deliverable is a
  *     COMBINED artefact (ex: L1s produce layout/logic/rendering
  *     fragments → the L2 synthesizer assembles them into `index.html`).
+ *     Subtasks run in PARALLEL via Promise.all.
+ *   - `sequential`: subtasks run ONE AT A TIME, with each step's summary
+ *     threaded into the next step's `inputs.previousStepSummary`. The
+ *     final aggregated result is the LAST step's output (no extra LLM
+ *     call). Use when phases share an artefact that EVOLVES across
+ *     steps (build-then-extend-then-smoke on the same file). The
+ *     workspace filesystem is implicitly shared, so phases mutate the
+ *     same on-disk artefact; the threaded `previousStepSummary` carries
+ *     the narrative state, not the bytes.
  */
 export interface AggregationSpec {
-  readonly mode: 'concat' | 'llm-synthesize';
+  readonly mode: 'concat' | 'llm-synthesize' | 'sequential';
   readonly instruction?: string;
 }
 

@@ -155,7 +155,14 @@ describe('prefilter decomposable hint', () => {
     expect(plan.subtasks).toHaveLength(2);
   });
 
-  it('L3.plan: decomposable=false (or omitted) → short-circuit preserved', async () => {
+  it('L3.plan: ALWAYS falls through to Opus, regardless of decomposable flag', async () => {
+    // L3 deliberately gives up the skeletal-plan shortcut that L2 keeps:
+    // even when the prefilter says "reuse + non-decomposable", L3 still
+    // runs the Opus plan, with the target carried forward as a routing
+    // hint. The framework's value at the top tier is decomposition
+    // reasoning — collapsing that to a 1-subtask routing decision wastes
+    // the tier and produced visibly broken Pong-type runs (one big L2
+    // delegation, no phase-by-phase smoke).
     const reg = new AtomRegistry(openDb(':memory:'));
     const l3Type = reg.create(3, seed);
     reg.create(2, { ...seed, description: 'orchestrator' });
@@ -167,13 +174,34 @@ describe('prefilter decomposable hint', () => {
         kind: 'reuse',
         target: 'Water',
         confidence: 'high',
-        // decomposable omitted → falsy → short-circuit
+        // decomposable omitted: would have short-circuited under the
+        // old contract; under the new contract L3 still calls Opus.
         reasoning: 'atomic',
       })
     );
+    // Opus plan call follows.
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Water', reasoning: 'use Water' },
+        {
+          reasoning: 'opus plan',
+          subtasks: [
+            { description: 'whole task', preferredChild: 'Water' },
+          ],
+          aggregation: { mode: 'concat' },
+          expectedOutput: 'done',
+        }
+      )
+    );
 
     const plan = await l3.plan({ description: 'single artefact' }, ctx);
+    // 2 calls now: prefilter + Opus plan. The shortcut is gone.
+    expect(ctx.llm.calls).toHaveLength(2);
+    // The Opus call must have received the prefilter hint in its userContent.
+    expect(ctx.llm.calls[1]!.userContent).toContain('== PREFILTER HINT ==');
+    expect(ctx.llm.calls[1]!.userContent).toContain('Water');
+    // And no `viaPrefilter` flag — only the L2 skeletal shortcut sets that.
+    expect(plan).not.toHaveProperty('viaPrefilter');
     expect(plan.subtasks).toHaveLength(1);
-    expect(ctx.llm.calls).toHaveLength(1);
   });
 });

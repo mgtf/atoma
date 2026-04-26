@@ -489,7 +489,7 @@ export function parsePlanWithFallback(
     proposedAction?: string;
     expectedOutput: string;
     subtasks?: readonly { description: string; inputs?: Record<string, unknown>; preferredChild?: string }[];
-    aggregation?: { mode: 'concat' | 'llm-synthesize'; instruction?: string };
+    aggregation?: { mode: 'concat' | 'llm-synthesize' | 'sequential'; instruction?: string };
   }
 ): z.infer<typeof planSchema> {
   try {
@@ -517,11 +517,18 @@ export const subtaskSpecSchema = z.object({
 
 /**
  * Aggregation spec — how a supervisor combines N sub-results into 1.
- * `concat` is mechanical, `llm-synthesize` triggers a supervisor LLM
- * call using `instruction` as the merge prompt.
+ *   - `concat`: mechanical join, no LLM call. Subtasks dispatched in
+ *     PARALLEL via Promise.all. Use for orthogonal subtasks.
+ *   - `llm-synthesize`: 1 supervisor LLM call merges sub-results using
+ *     `instruction` as the merge prompt. Subtasks dispatched in PARALLEL.
+ *   - `sequential`: subtasks dispatched ONE AT A TIME, with each step's
+ *     summary threaded into the next step's `inputs.previousStepSummary`.
+ *     Final result = LAST step's output. Use when phases share artefacts
+ *     (build-then-extend-then-test on the same file). No extra LLM call
+ *     for the aggregation itself.
  */
 export const aggregationSpecSchema = z.object({
-  mode: z.enum(['concat', 'llm-synthesize']),
+  mode: z.enum(['concat', 'llm-synthesize', 'sequential']),
   // Sonnet / Opus frequently emit `"instruction": null` when the chosen
   // aggregation mode is "concat" (no merge instruction needed) — a
   // plain `.optional()` rejects null and crashes the whole plan parse.

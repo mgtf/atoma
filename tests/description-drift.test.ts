@@ -4,7 +4,7 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
 /**
  * Regression tests for the "description drift" fix:
@@ -88,6 +88,20 @@ describe('description drift — branch + prefilter', () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'WaterB', confidence: 'high', reasoning: 'match' })
+    );
+    // L3 no longer short-circuits on prefilter — it always runs the
+    // Opus plan call. Stub a minimal valid response so the test reaches
+    // its assertion on the prefilter userContent (call #0).
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'WaterB', reasoning: 'stub' },
+        {
+          reasoning: 'stub',
+          subtasks: [{ description: 't', preferredChild: 'WaterB' }],
+          aggregation: { mode: 'concat' },
+          expectedOutput: 'stub',
+        }
+      )
     );
     await l3.plan({ description: 'something' }, ctx);
 

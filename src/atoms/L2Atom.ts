@@ -503,6 +503,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `    COMBINED product (e.g. L1s produce layout/logic/render fragments, an`,
       `    aggregation step assembles them into one file). Provide a short`,
       `    "instruction" describing how to merge.`,
+      `  - "sequential": phases run ONE AT A TIME on the SAME workspace. Each`,
+      `    step receives "previousStepSummary" automatically in its inputs. Use`,
+      `    when phases share an evolving artefact (build → extend → smoke). The`,
+      `    final phase's output is the deliverable; no extra LLM merge call.`,
+      `    Rare at L2 (one L1 usually carries a leaf task end-to-end), but`,
+      `    valid when a parent L3 already split into a phase you must yourself`,
+      `    chain (e.g. "build artefact then run review"); usually L3 owns this.`,
       ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
@@ -573,7 +580,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create"|"mutualize", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L1-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize", "instruction": "..."?}, "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L1-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -615,18 +622,52 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     }
 
     const subtasks = plan.subtasks;
+    const subResults = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
+    return this.aggregate(subResults, plan.aggregation, task, ctx);
+  }
 
-    // Fan-out: run each subtask in parallel. Hooks are created INSIDE
-    // runSubtask now (after the skill prefilter attempt) so they know
-    // whether a skill drove the run — that info gates the C3 skill
-    // auto-creation path on the onApproved hook.
-    const subResults = await Promise.all(
+  /**
+   * Mirror of L3Atom.dispatchSubtasks. See that comment for the full
+   * rationale; the logic is identical at this tier — sequential phases
+   * thread `previousStepSummary` into each next subtask's `inputs`,
+   * concat / llm-synthesize fan out via Promise.all. Hooks are created
+   * INSIDE runSubtask (after the skill prefilter attempt) so they know
+   * whether a skill drove the run — that info gates the C3 skill
+   * auto-creation path on the onApproved hook.
+   */
+  private async dispatchSubtasks(
+    subtasks: readonly Plan['subtasks'][number][],
+    plan: Plan,
+    strategy: L2Strategy,
+    task: Task,
+    ctx: RunContext
+  ): Promise<Result[]> {
+    if (plan.aggregation.mode === 'sequential') {
+      const out: Result[] = [];
+      let previousSummary: string | undefined;
+      for (let idx = 0; idx < subtasks.length; idx++) {
+        const baseSubtask = subtasks[idx]!;
+        const subtask = previousSummary !== undefined
+          ? {
+              ...baseSubtask,
+              inputs: {
+                ...(baseSubtask.inputs ?? {}),
+                previousStepSummary: previousSummary,
+                previousStepIndex: idx - 1,
+              },
+            }
+          : baseSubtask;
+        const r = await this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx });
+        out.push(r);
+        previousSummary = r.summary;
+      }
+      return out;
+    }
+    return Promise.all(
       subtasks.map((subtask, idx) =>
         this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx })
       )
     );
-
-    return this.aggregate(subResults, plan.aggregation, task, ctx);
   }
 
   /**
@@ -1305,6 +1346,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // existing call sites and tests see no difference.
       return subResults[0]!;
     }
+    if (aggregation.mode === 'sequential') {
+      // Phased pipeline: the FINAL phase carries the deliverable. See
+      // L3Atom.aggregate sequential branch for full rationale.
+      const last = subResults[subResults.length - 1]!;
+      const phaseSummaries = subResults
+        .map((r, i) => `phase #${i + 1} (${r.producedBy.name}): ${r.summary}`)
+        .join(' | ');
+      return {
+        output: last.output,
+        summary: `${subResults.length} sequential phases — final: ${last.summary}. Trace: ${phaseSummaries}`,
+        trace: [],
+        producedBy: { tier: 2, name: this.name, viaFallback: false },
+      };
+    }
     if (aggregation.mode === 'concat') {
       const outputs = subResults.map((r) => r.output);
       const summary = `${subResults.length} subtasks aggregated (concat): ${subResults
@@ -1680,22 +1735,39 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '',
   '== FAN-OUT DECOMPOSITION ==',
   'When Subject kind is PLAN and the plan carries a "subtasks" list, the child',
-  'supervisor has decomposed the task into orthogonal parallel subtasks. Verify:',
-  '  - subtasks is a non-empty array. Single-subtask plans (N=1) are PERFECTLY',
-  '    VALID — a genuinely atomic task (e.g. "build one index.html with all',
-  '    concerns in one file") should NOT be padded with artificial subtasks.',
-  '    DO NOT reject a plan just because N=1. DO NOT reject because',
-  '    "aggregation.mode is \'concat\' for a single artefact" — concat is the',
-  '    correct default for N=1, it is a no-op (the single sub-result passes',
-  '    through unchanged). The ONLY reason to require "llm-synthesize" is when',
-  '    N>1 AND the final deliverable is a COMBINED product of the sub-results.',
+  'supervisor has decomposed the task. There are TWO valid decomposition shapes,',
+  'distinguished by aggregation.mode:',
+  '  PARALLEL ("concat" or "llm-synthesize"): subtasks are orthogonal, run via',
+  '    Promise.all, no shared state.',
+  '  SEQUENTIAL ("sequential"): subtasks run ONE AT A TIME on a SHARED workspace.',
+  '    Step N consumes the artefact step N-1 left behind. The runtime threads the',
+  '    previous step\'s summary into step N\'s inputs.previousStepSummary',
+  '    automatically — the planner does NOT have to do it manually.',
+  'Verify based on which shape the plan declared:',
+  '  - subtasks is a non-empty array. Single-subtask plans (N=1) are valid for',
+  '    GENUINELY indivisible work (e.g. "look up the time", "write a one-line',
+  '    config"). For app/game/library builds, prefer N>=2.',
+  '    DO NOT reject a plan just because N=1 if the task IS atomic. DO NOT reject',
+  '    because "aggregation.mode is \'concat\' for a single artefact" — concat is',
+  '    the correct default for N=1.',
   '  - each subtask has a concrete "description" (not "do the next step"). The',
   '    planner must write each description precisely enough that a child can act',
-  '    on it without needing to read the others.',
-  '  - NO subtask depends on another\'s output. Subtasks run in PARALLEL via',
-  '    Promise.all; if the planner wrote "subtask 2 uses subtask 1\'s URL", that',
-  '    is STRUCTURALLY BROKEN — reject with scope "ephemeral" and an',
-  '    additionalContext pointing at the implicit dependency.',
+  '    on it. For sequential plans, descriptions can refer to "the artefact built',
+  '    in the previous phase" — that is EXPECTED, not a defect.',
+  '  - PARALLEL plans (mode "concat"|"llm-synthesize"): NO subtask depends on',
+  '    another\'s output. Subtasks run via Promise.all; if the planner wrote',
+  '    "subtask 2 uses subtask 1\'s URL" with mode="concat", that is STRUCTURALLY',
+  '    BROKEN — reject with scope "ephemeral" and additionalContext pointing at',
+  '    the dependency, suggesting either mode="sequential" or true orthogonality.',
+  '    Artefact-collision rule (parallel only): if two parallel subtasks both',
+  '    produce side-effects on the same resource (same file path, same port,',
+  '    same DB row), that is NOT parallel-safe. Reject with the colliding resources.',
+  '  - SEQUENTIAL plans (mode "sequential"): inter-step dependencies are',
+  '    EXPECTED and CORRECT. The whole point is step N consumes step N-1\'s',
+  '    state via the shared workspace + previousStepSummary. Do NOT reject for',
+  '    "subtask 2 reads the file from subtask 1" — that is the contract. DO',
+  '    reject if a sequential plan has only one subtask (use concat instead) or',
+  '    if a phase\'s description is too vague to produce a checkable artefact.',
   '  - for N>1, each subtask SHOULD carry "preferredChild". A missing or',
   '    invented "preferredChild" (a name not present in the "Delegation',
   '    target(s):" block) will force the supervisor to auto-create a fresh',
@@ -1705,14 +1777,15 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '    (e.g. "Carbon" when the catalog lists only "Hydrogen, Helium, …")',
   '    with scope "ephemeral" and an additionalContext telling the planner',
   '    to either use a real catalog name or omit preferredChild entirely.',
-  '  - "aggregation.mode" is one of "concat" (mechanical join) or',
-  '    "llm-synthesize" (merge via an extra LLM call). If the final deliverable',
-  '    is a SINGLE combined artefact (e.g. an index.html assembled from pieces)',
-  '    "concat" is almost always wrong — prefer "llm-synthesize" with a clear',
-  '    "instruction" string.',
-  'Artefact-collision rule: if two subtasks both produce side-effects on the',
-  'same named resource (same file path, same port, same DB row), that is NOT',
-  'parallel-safe. Reject with a note about which resources collide.',
+  '    For sequential plans it is COMMON for multiple phases to target the',
+  '    same preferredChild — that is the expected pattern, not a defect.',
+  '  - "aggregation.mode" is one of "concat" (mechanical join, parallel),',
+  '    "llm-synthesize" (merge via an extra LLM call, parallel) or "sequential"',
+  '    (phased pipeline, last phase is the deliverable). If the final deliverable',
+  '    is a SINGLE COMBINED artefact (e.g. an index.html assembled from pieces in',
+  '    parallel) "concat" is almost always wrong — prefer "llm-synthesize". If the',
+  '    final artefact must EVOLVE through review checkpoints (build → extend →',
+  '    smoke), prefer "sequential".',
   '',
   '== BRANCHING ACROSS DOMAINS ==',
   'When you set scope "branch" with a branchName, the new type INHERITS the parent\'s',

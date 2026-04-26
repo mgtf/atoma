@@ -96,9 +96,11 @@ export function buildNarrowL2Prompt(
   }
   lines.push(
     `You NEVER execute tools yourself. Your job:`,
-    `  1. Decompose the subtask into 1+ orthogonal L1 subtasks`,
+    `  1. Decompose the subtask into 1+ L1 subtasks (orthogonal/parallel OR`,
+    `     phased/sequential — pick the shape that matches the artefact's nature)`,
     `  2. Choose an L1 for each (reuse a catalog match or create a narrow new one)`,
-    `  3. Pick an aggregation mode (concat or llm-synthesize) matching the artefact`,
+    `  3. Pick aggregation mode: "concat" / "llm-synthesize" for parallel,`,
+    `     "sequential" for phased pipelines on a shared workspace`,
     `  4. Return the strategy+plan JSON pair`,
     ``,
     bucketHint
@@ -194,9 +196,16 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.triedChildren.beginTask(task.description);
     const catalog = this.registry.listByTier(2);
 
-    // See L2.plan for the design: "decomposable" flips the prefilter
-    // from a hard short-circuit to a routing hint that survives into
-    // the Opus plan call.
+    // L3 NEVER short-circuits the prefilter into a skeletal plan.
+    // The framework's value at the top tier is decomposition reasoning
+    // — collapsing that to a 1-subtask routing decision wastes the
+    // tier. The prefilter still runs (cheap Haiku call) and survives
+    // as a routing HINT injected into the Opus plan; it can no longer
+    // bypass Opus entirely. See L2.plan for the symmetric "decomposable"
+    // flag — at L2 the hint is paired with a happy-path shortcut, but
+    // L2's role is leaf-routing (one L1) where short-circuiting makes
+    // sense. L3's role is task-shaping; it has to think every time.
+    // Cost: ~+$0.10/run vs the previous shortcut, deliberately accepted.
     let prefilterHint: { target: string; reasoning: string } | null = null;
     if (catalog.length > 0) {
       // L1-affinity enrichment: for each L2 in the catalog, append a
@@ -253,38 +262,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         actor: { name: this.name, tier: 3 },
       });
       if (prefilter && prefilter.kind === 'reuse') {
-        if (!prefilter.decomposable) {
-          this.pendingStrategy = {
-            strategy: 'reuse',
-            target: prefilter.target,
-            reasoning: `prefilter: ${prefilter.reasoning}`,
-          };
-          this.triedChildren.mark(prefilter.target);
-          ctx.logger.debug(
-            `[${this.name}] prefilter picked L2 ${prefilter.target}`,
-            { reasoning: prefilter.reasoning }
-          );
-          // Prefilter degenerate case: one subtask, one preferred child.
-          // viaPrefilter=true — see L2.plan mirror comment + planSchema.
-          return {
-            reasoning: `prefilter selected ${prefilter.target}`,
-            proposedAction: `delegate task to L2 "${prefilter.target}"`,
-            subtasks: [
-              {
-                description: task.description,
-                preferredChild: prefilter.target,
-                ...(task.inputs ? { inputs: task.inputs } : {}),
-              },
-            ],
-            aggregation: { mode: 'concat' as const },
-            expectedOutput: task.description,
-            viaPrefilter: true,
-          };
-        }
-        // Decomposable: fall through to Opus plan with target as hint.
+        // No more short-circuit: regardless of `decomposable`, hand the
+        // target to Opus as a routing hint and let the full plan call
+        // decide the actual shape (single-subtask or multi-subtask).
         prefilterHint = { target: prefilter.target, reasoning: prefilter.reasoning };
         ctx.logger.debug(
-          `[${this.name}] prefilter flagged decomposable reuse of ${prefilter.target} — deferring to Opus plan`,
+          `[${this.name}] prefilter picked L2 ${prefilter.target} as routing hint — deferring to Opus plan`,
           { reasoning: prefilter.reasoning }
         );
       }
@@ -298,26 +281,53 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ``,
       `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
       `shells, start servers, or validate anything. Your ONLY job is strategic:`,
-      `DECOMPOSE the task into orthogonal subtasks and route each to an L2`,
-      `molecule. The L2s will in turn decompose their own work into L1 leaf`,
-      `tasks — L1 is the only tier allowed to call tools. Keep your reasoning`,
-      `short and your plan high-level.`,
+      `DECOMPOSE the task into subtasks and route each to an L2 molecule.`,
+      `The L2s will in turn decompose their own work into L1 leaf tasks — L1`,
+      `is the only tier allowed to call tools. Keep your reasoning short and`,
+      `your plan high-level.`,
       ``,
-      `== DECOMPOSITION DISCIPLINE ==`,
-      `Break the task into a LIST of subtasks. Each subtask:`,
-      `  - targets one coherent aspect of the overall work`,
-      `  - is ORTHOGONAL to the others (no cross-dependencies — they run`,
-      `    in PARALLEL)`,
-      `  - carries a "preferredChild" naming the L2 molecule that should`,
-      `    handle it (required for N>1 plans)`,
-      `For genuinely atomic tasks, emit a single-subtask list. Do NOT force`,
-      `decomposition when one L2 can clearly handle the whole thing.`,
+      `== DECOMPOSITION DISCIPLINE — pick ONE shape ==`,
+      `For non-trivial tasks emit 2-5 subtasks. Pick the shape that matches`,
+      `the task's natural structure:`,
+      ``,
+      `  ORTHOGONAL (parallel) — subtasks are INDEPENDENT, no shared state.`,
+      `    Each runs in its own workspace lane and produces a separate`,
+      `    artefact. Aggregation is "concat" or "llm-synthesize".`,
+      `    Examples: "research topic A" + "research topic B" + "summarise both";`,
+      `    "build library" + "write tests" + "draft README" (only when these`,
+      `    don't import each other).`,
+      ``,
+      `  PHASED (sequential) — subtasks SHARE the same evolving artefact.`,
+      `    Step N starts from where step N-1 left off (same workspace files).`,
+      `    Each step receives a "previousStepSummary" automatically in its`,
+      `    inputs. Aggregation is "sequential" — the FINAL phase carries`,
+      `    the deliverable. No extra LLM call for aggregation.`,
+      `    Examples: build apps and games (scaffold → wire input/logic →`,
+      `    smoke-test); refactors (rewrite module → migrate callers →`,
+      `    delete old module); pipelines (fetch data → transform → load).`,
+      `    Use this whenever phases need to verify each other's work or`,
+      `    when the artefact MUST go through review checkpoints.`,
+      ``,
+      `When in doubt for an APP / GAME / FILE-BUILD task: prefer PHASED.`,
+      `One big monolithic subtask delegates real reasoning to the L2 prompt`,
+      `and skips the value of phase-by-phase smoke validation.`,
+      ``,
+      `Each subtask carries a "preferredChild" naming the L2 molecule that`,
+      `should handle it (required for N>1 plans). Multiple phases can target`,
+      `the SAME L2 — that's the common case for PHASED builds.`,
+      ``,
+      `Single-subtask plans are reserved for GENUINELY indivisible tasks`,
+      `(e.g. "look up the current time", "write a one-line config file"). For`,
+      `apps, libraries, builds, multi-step procedures: ALWAYS emit ≥2 subtasks.`,
       ``,
       `== AGGREGATION ==`,
-      `Pick how the sub-results combine:`,
-      `  - "concat": mechanical array join (no extra LLM call)`,
-      `  - "llm-synthesize": you run one more call to merge sub-results into a`,
-      `    unified deliverable (provide an "instruction" string)`,
+      `Pick how the sub-results combine — must match decomposition shape:`,
+      `  - "concat": mechanical array join (no extra LLM call). For ORTHOGONAL.`,
+      `  - "llm-synthesize": one more call to merge sub-results into a unified`,
+      `    deliverable (provide an "instruction" string). For ORTHOGONAL when`,
+      `    sub-results need synthesis.`,
+      `  - "sequential": phases run one-at-a-time on a shared workspace; final`,
+      `    phase's output is the deliverable. For PHASED.`,
       ``,
       `== STRATEGY OPTIONS (baseline when a subtask lacks preferredChild) ==`,
       `  - "reuse": pick an existing L2 molecule from the catalog that fits`,
@@ -341,15 +351,17 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         ? '  (empty — you must create)'
         : catalog.map((t) => `  - ${t.name}: ${t.description}`).join('\n'),
       ``,
-      // Prefilter hint from the decomposable short-circuit. See L2.plan
-      // for rationale — same pattern, one tier up.
+      // Prefilter hint — never a hard route, just a strong default.
+      // L3 always runs this Opus plan; the prefilter just narrows the
+      // candidate space so Opus doesn't waste tokens re-discovering
+      // which L2 fits the task domain.
       prefilterHint
         ? [
             `== PREFILTER HINT ==`,
-            `A lightweight prefilter identified "${prefilterHint.target}" as the reusable L2`,
-            `for this task (${prefilterHint.reasoning}). It also flagged the task as`,
-            `decomposable. Prefer setting "preferredChild": "${prefilterHint.target}" on each`,
-            `subtask, unless one subtask genuinely needs a different orchestrator.`,
+            `A lightweight prefilter identified "${prefilterHint.target}" as the most likely`,
+            `reusable L2 for this task (${prefilterHint.reasoning}). Prefer setting`,
+            `"preferredChild": "${prefilterHint.target}" on each subtask that aligns with that`,
+            `L2's capability, unless a subtask genuinely needs a different orchestrator.`,
             ``,
           ].join('\n')
         : '',
@@ -366,7 +378,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize", "instruction": "..."?}, "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -397,19 +409,59 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (!strategy) return this.selfExecute(task, plan, ctx);
 
     const subtasks = plan.subtasks;
+    const subResults = await this.dispatchSubtasks(subtasks, plan, strategy, task, ctx);
+    return this.aggregate(subResults, plan.aggregation, task, ctx);
+  }
 
-    // Fan-out: one superviseLoop per subtask, all in parallel. Per-subtask
-    // hooks close over the subtask description so `branchOnEscalation`
-    // writes a FRESH L2 system prompt aligned with this subtask, not
-    // inherited from the parent (same anti-Frankenstein pattern as L2).
-    const subResults = await Promise.all(
+  /**
+   * Dispatch the subtasks of a plan according to its aggregation mode.
+   *   - sequential: for-of with await; each step's summary is threaded
+   *     into the next step's `inputs.previousStepSummary` so the next
+   *     L2 sees what the previous one accomplished. The workspace
+   *     filesystem is shared (same sandbox), so phases that mutate the
+   *     same artefact (build → extend → smoke) get implicit state
+   *     handover via disk; the threaded summary is the NARRATIVE state.
+   *   - concat / llm-synthesize: Promise.all (current behaviour).
+   * The branch is in dispatch, not aggregate, because the dispatch
+   * shape (parallel vs sequential) is what differs — the aggregate
+   * call shape stays uniform (it gets an in-order array of Results).
+   */
+  private async dispatchSubtasks(
+    subtasks: readonly Plan['subtasks'][number][],
+    plan: Plan,
+    strategy: L3Strategy,
+    task: Task,
+    ctx: RunContext
+  ): Promise<Result[]> {
+    if (plan.aggregation.mode === 'sequential') {
+      const out: Result[] = [];
+      let previousSummary: string | undefined;
+      for (let idx = 0; idx < subtasks.length; idx++) {
+        const baseSubtask = subtasks[idx]!;
+        const subtask = previousSummary !== undefined
+          ? {
+              ...baseSubtask,
+              inputs: {
+                ...(baseSubtask.inputs ?? {}),
+                previousStepSummary: previousSummary,
+                previousStepIndex: idx - 1,
+              },
+            }
+          : baseSubtask;
+        const hooks = this.makeL2Hooks(ctx, subtask.description);
+        const r = await this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
+        out.push(r);
+        previousSummary = r.summary;
+      }
+      return out;
+    }
+    // Parallel branch (concat / llm-synthesize).
+    return Promise.all(
       subtasks.map((subtask, idx) => {
         const hooks = this.makeL2Hooks(ctx, subtask.description);
         return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
       })
     );
-
-    return this.aggregate(subResults, plan.aggregation, task, ctx);
   }
 
   private async runSubtask(args: {
@@ -605,6 +657,22 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   ): Promise<Result> {
     if (subResults.length === 1) {
       return subResults[0]!;
+    }
+    if (aggregation.mode === 'sequential') {
+      // For phased pipelines, the FINAL phase's result is the deliverable.
+      // The earlier phases produced intermediate state on disk that the
+      // final phase consumed and validated. We keep their summaries in
+      // the wrapper summary so the trace stays auditable.
+      const last = subResults[subResults.length - 1]!;
+      const phaseSummaries = subResults
+        .map((r, i) => `phase #${i + 1} (${r.producedBy.name}): ${r.summary}`)
+        .join(' | ');
+      return {
+        output: last.output,
+        summary: `${subResults.length} sequential phases — final: ${last.summary}. Trace: ${phaseSummaries}`,
+        trace: [],
+        producedBy: { tier: 3, name: this.name, viaFallback: false },
+      };
     }
     if (aggregation.mode === 'concat') {
       const outputs = subResults.map((r) => r.output);
