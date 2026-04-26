@@ -142,9 +142,19 @@ export class SkillRegistry {
 
   private bump(l1Name: string, skillId: string, kind: 'success' | 'failure'): void {
     const dir = this.skillDir(l1Name, skillId);
+    // No skill on disk at all — no SKILL.md, no skill folder. The
+    // bump silently no-ops; the supervise loop must not create a
+    // counter for a skill that doesn't exist.
+    if (!existsSync(join(dir, 'SKILL.md'))) return;
     const metaPath = join(dir, '_meta.json');
-    if (!existsSync(metaPath)) return;
-    const cur = readMeta(metaPath);
+    // Hand-written skills come WITHOUT a sidecar meta file. The
+    // first counter bump initialises one at zero so future loads
+    // see persistent counters. Without this, hand-authored skills
+    // never accumulate trust — observed when seeding a kind:script
+    // skill via cat heredoc and watching its counter stay empty.
+    const cur = existsSync(metaPath)
+      ? readMeta(metaPath)
+      : { successes: 0, failures: 0, updatedAt: nowIso() };
     const next: SkillMeta = {
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),

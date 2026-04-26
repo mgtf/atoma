@@ -180,6 +180,46 @@ describe('SkillRegistry', () => {
     expect(skill!.description).toBe('d refreshed');
   });
 
+  it('initializes _meta.json on first bump for a hand-written skill (no save() pre-call)', async () => {
+    // Reproduces the live regression: a SKILL.md created via a
+    // shell heredoc (no SkillRegistry.save call) had no _meta.json,
+    // so the first recordSuccess no-op'd and the counter never
+    // accumulated. The fix initialises the meta file lazily on
+    // first bump.
+    const { writeFileSync, mkdirSync, existsSync: exists } = await import('node:fs');
+    const skillDir = join(dir, 'Hydrogen', 'hand-written');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      [
+        '---',
+        'id: hand-written',
+        'description: a hand-written skill that bypassed save()',
+        'when_to_use: whenever the test needs it',
+        'kind: llm',
+        '---',
+        'do the thing',
+      ].join('\n'),
+      'utf8'
+    );
+    expect(exists(join(skillDir, '_meta.json'))).toBe(false);
+    reg.recordSuccess('Hydrogen', 'hand-written');
+    expect(exists(join(skillDir, '_meta.json'))).toBe(true);
+    const [skill] = reg.loadFor('Hydrogen');
+    expect(skill!.successes).toBe(1);
+    expect(skill!.failures).toBe(0);
+  });
+
+  it('still no-ops when the SKILL.md itself is missing (no rogue counter creation)', async () => {
+    // The bump must not create _meta.json for a skill that doesn't
+    // exist on disk — the supervise loop should not be able to
+    // accidentally manifest a counter for a skill ID it pulled out
+    // of thin air (e.g. cached from a deleted skill).
+    const { existsSync: exists } = await import('node:fs');
+    reg.recordSuccess('Hydrogen', 'never-existed');
+    expect(exists(join(dir, 'Hydrogen', 'never-existed'))).toBe(false);
+  });
+
   it('SKILL.md on disk is hand-readable (frontmatter + body)', () => {
     reg.save('Hydrogen', {
       id: 'foo',
