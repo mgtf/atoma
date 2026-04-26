@@ -3,10 +3,26 @@ import type { Plan, Result, RunContext, Task, Tier } from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import { PIN_HAIKU } from '../core/models.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
+import type { Skill } from '../skills/types.js';
+import { SkillRegistry } from '../skills/registry.js';
 
 export class L1Atom extends Atom {
   readonly tier: Tier = 1;
   readonly model: string;
+
+  /**
+   * Persistent skills the atom has accumulated across runs. Loaded
+   * from a `SkillRegistry` (filesystem-backed by default at
+   * `./skills/<l1-name>/`) at construction time. Empty for fresh
+   * atoms; populated for canonicals that have been seeded with
+   * skill files or for atoms whose past supervised runs produced
+   * skills (auto-creation lands in a follow-up commit).
+   *
+   * Use `skills()` for the public read accessor. The array is held
+   * privately so a future patch path (e.g. a `learnSkill` mutator)
+   * keeps the storage encapsulated.
+   */
+  private readonly skillsList: Skill[];
 
   constructor(args: {
     name: string;
@@ -15,6 +31,7 @@ export class L1Atom extends Atom {
     tools: readonly import('../core/types.js').Tool[];
     params: import('../core/types.js').GenerationParams;
     model?: string;
+    skills?: readonly Skill[];
   }) {
     super({
       name: args.name,
@@ -24,11 +41,39 @@ export class L1Atom extends Atom {
       params: args.params,
     });
     this.model = args.model ?? PIN_HAIKU;
+    this.skillsList = args.skills ? [...args.skills] : [];
   }
 
-  static fromType(type: AtomType, model: string = PIN_HAIKU): L1Atom {
+  /**
+   * Read-only view of the atom's persistent skills. Called by L2 at
+   * skill-prefilter time (subsequent commit) and by tracing /
+   * observability paths.
+   */
+  skills(): readonly Skill[] {
+    return this.skillsList;
+  }
+
+  static fromType(
+    type: AtomType,
+    model: string = PIN_HAIKU,
+    skillRegistry?: SkillRegistry
+  ): L1Atom {
     if (type.tier !== 1) {
       throw new Error(`L1Atom.fromType requires tier=1, got tier=${type.tier}`);
+    }
+    // Skill loading is OPT-IN — passing a SkillRegistry hydrates the
+    // atom with its persistent skill set. Tests that don't care
+    // about skills can omit the arg and get the legacy behaviour.
+    let skills: readonly Skill[] = [];
+    if (skillRegistry) {
+      try {
+        skills = skillRegistry.loadFor(type.name);
+      } catch {
+        // A malformed skills folder must not bring down atom
+        // construction — the run should still proceed without
+        // skills if the load fails.
+        skills = [];
+      }
     }
     return new L1Atom({
       name: type.name,
@@ -37,6 +82,7 @@ export class L1Atom extends Atom {
       tools: type.tools,
       params: type.params,
       model,
+      skills,
     });
   }
 
