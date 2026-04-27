@@ -444,9 +444,60 @@ describe('superviseLoop', () => {
 
   describe('policy-marker repeat detection', () => {
     it('detectPolicyMarker picks up VISIBLE-DELIVERABLES regardless of punctuation / casing', () => {
-      expect(detectPolicyMarker('The VISIBLE-DELIVERABLES checklist is incomplete.')).toBeTruthy();
-      expect(detectPolicyMarker('visible deliverables are missing')).toBeTruthy();
+      expect(detectPolicyMarker('The VISIBLE-DELIVERABLES checklist is incomplete.')).toBe(
+        'visible-deliverables'
+      );
+      expect(detectPolicyMarker('visible deliverables are missing')).toBe('visible-deliverables');
       expect(detectPolicyMarker('something else entirely')).toBeNull();
+    });
+
+    it('groups all "no evidence" / "no ground-truth" phrasings under one canonical marker', () => {
+      // Real reasonings from the LoL-SSR run: rotating specifics, same
+      // meta-complaint. They must all collapse to the same marker id so
+      // makeMarkerTracker treats them as a streak.
+      const phrasings = [
+        'RESULT claims 172 champions but provides no ground-truth evidence (validate_html output, fetch_url body)',
+        'RESULT claims success but provides no ground-truth evidence. The child reports 200 but the task requires fetch_url body confirmation',
+        'RESULT claims success but provides no evidence. Self-reported summary is unverifiable.',
+      ];
+      const ids = phrasings.map(detectPolicyMarker);
+      expect(ids.every((id) => id === 'ground-truth-evidence')).toBe(true);
+    });
+
+    it('escalates on three rotating ground-truth-evidence rejections (LoL-SSR run regression)', async () => {
+      const parent = new FakeParent();
+      const child = new FakeChild('A');
+      // Phase-1 result rejects from the actual run, paraphrased to
+      // exercise the synonym set: "no ground-truth evidence", "no
+      // ground-truth", "provides no evidence". The verbatim tracker
+      // can't see these as a streak; the marker tracker must.
+      // We queue them as plan verdicts (FakeParent's plan-verdict path
+      // is what the existing tests exercise) — same code path.
+      const rotating = [
+        'RESULT claims 172 champions fetched but provides no ground-truth evidence',
+        'RESULT claims success but the task explicitly requires fetch_url body — no ground-truth shown',
+        'RESULT claims completion but provides no evidence of the helper SQL queries',
+      ];
+      for (const r of rotating) {
+        parent.queuePlanVerdict({
+          approved: false,
+          reasoning: r,
+          modifications: { systemPromptAppend: 'x' },
+          scope: 'ephemeral',
+        });
+      }
+      let branched = 0;
+      const hooks: SupervisionHooks<FakeChild> = {
+        applyByScope: async (c) => c,
+        branchOnEscalation: async () => {
+          branched++;
+        },
+      };
+      const ctx = makeCtx({ limits: { maxPlanIterations: 20, maxExecIterations: 20 } });
+      const result = await superviseLoop(parent, child, { description: 'go' }, ctx, hooks);
+      expect(child.planCount).toBe(MAX_SAME_MARKER_REJECTS);
+      expect(branched).toBe(1);
+      expect(result.producedBy.viaFallback).toBe(true);
     });
 
     it('escalates when the same policy marker recurs in N consecutive rejections — even if the surrounding prose differs', async () => {

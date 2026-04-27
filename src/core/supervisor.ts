@@ -82,8 +82,42 @@ export const MAX_SAME_REASON_REJECTS = 3;
  * premature escalation on legitimate, progressing fix loops. Each token
  * must be a phrase the validator prompt itself uses as a category label,
  * not a generic word that could coincidentally recur.
+ *
+ * `ground-truth` family added after the LoL-SSR run: the validator kept
+ * rejecting RESULTs with rotating specifics ("no fetch_url body shown",
+ * "no LISTENING_ON_PORT echoed", "no schema confirmation") all anchored
+ * on the same meta-complaint "you didn't show me the evidence". The
+ * verbatim tracker missed it and budget burned waiting for the verbatim
+ * 3-streak that never came; meanwhile the skill-update path (which only
+ * fires on escalation) never got to learn that the L1 needs to print a
+ * GROUND-TRUTH block in its summary.
  */
-export const POLICY_MARKERS = ['visible-deliverables', 'visible deliverables'] as const;
+/**
+ * Each entry is a CATEGORY: detectPolicyMarker returns the `id` whenever
+ * ANY of its synonyms appears in the reasoning. This lets rotating
+ * phrasings of the same meta-complaint ("no ground-truth evidence" vs
+ * "provides no evidence" vs "no evidence shown") count toward the SAME
+ * streak in `makeMarkerTracker`. Without the canonical-id grouping, three
+ * rejections phrased differently but anchored on the same theme would
+ * each split into singleton streaks and never trip the threshold.
+ */
+export const POLICY_MARKERS: readonly { id: string; synonyms: readonly string[] }[] = [
+  {
+    id: 'visible-deliverables',
+    synonyms: ['visible-deliverables', 'visible deliverables'],
+  },
+  {
+    id: 'ground-truth-evidence',
+    synonyms: [
+      'ground-truth evidence',
+      'ground truth evidence',
+      'no ground-truth',
+      'no ground truth',
+      'no evidence',
+      'provides no evidence',
+    ],
+  },
+];
 export const MAX_SAME_MARKER_REJECTS = 3;
 
 /**
@@ -106,9 +140,11 @@ export function normalizeReason(reason: string): string {
  */
 export function detectPolicyMarker(reason: string): string | null {
   const normalized = normalizeReason(reason);
-  for (const marker of POLICY_MARKERS) {
-    const target = normalizeReason(marker);
-    if (target.length > 0 && normalized.includes(target)) return target;
+  for (const category of POLICY_MARKERS) {
+    for (const synonym of category.synonyms) {
+      const target = normalizeReason(synonym);
+      if (target.length > 0 && normalized.includes(target)) return category.id;
+    }
   }
   return null;
 }

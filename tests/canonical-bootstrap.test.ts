@@ -3,6 +3,7 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import {
   CANONICAL_BOOTSTRAP_MARKER,
+  CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
   CANONICAL_L2_WEB_DESCRIPTION,
   capabilityDescription,
   ensureCanonicalL1,
@@ -83,6 +84,28 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(stillLegacy.createdBy).toBe('Water');
     expect(canonical.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
     expect(canonical.description).toBe(capabilityDescription(WEB_TOOLS, 1));
+  });
+
+  it('HTTP L1 system prompt instructs the child to embed a == GROUND TRUTH == block in its summary', () => {
+    // Regression for the LoL-SSR run: the HTTP L1 was producing
+    // self-reported summaries ("server started, all endpoints work") that
+    // the validator kept rejecting on a rotating no-evidence theme. The
+    // result-reporting contract now requires a verbatim block listing
+    // LISTENING_ON_PORT, bound URL, per-endpoint probes with status +
+    // body[0:200], and a schema/state line. Drift this prompt and the
+    // validator-side EXCEPTION clause that whitelists the embedded block
+    // becomes meaningless.
+    const prompt = CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES.join('\n');
+    expect(prompt).toMatch(/== GROUND TRUTH ==/);
+    expect(prompt).toMatch(/LISTENING_ON_PORT=/);
+    expect(prompt).toMatch(/probe: /);
+    expect(prompt).toMatch(/body\[0:200\]/);
+    expect(prompt).toMatch(/schema\/state:/);
+    // Phase-2 of the LoL-SSR run: Helium stuffed the block into the
+    // "output" field as prose, validator rejected on placement. The
+    // prompt must explicitly forbid that and show the canonical shape.
+    expect(prompt).toMatch(/NEVER stuff prose[\s\S]+?GROUND-TRUTH block into "output"/);
+    expect(prompt).toMatch(/"summary"\s*:\s*"Built Node SSR app/);
   });
 
   it('refreshes the canonical tool list when the executor set grows between runs', () => {
