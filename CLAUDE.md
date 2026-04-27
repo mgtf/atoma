@@ -673,7 +673,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 ## Plan file
 
 The approved plan lives at
-`/Users/mgtf/.claude/plans/j-aimerais-d-finir-une-entit-purrfect-dragon.md`.
+`docs/architecture-plan.md`.
 Reference it before major refactors.
 
 ## Language
