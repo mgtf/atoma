@@ -35,17 +35,20 @@ const consoleLogger: Logger = {
 interface CliArgs {
   goal?: string;
   noLearnSkills: boolean;
+  noPromoteSkills: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
   let goal: string | undefined;
   let noLearnSkills = false;
+  let noPromoteSkills = false;
   for (const a of argv) {
     if (a === '--no-learn-skills') noLearnSkills = true;
+    else if (a === '--no-promote-skills') noPromoteSkills = true;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, noLearnSkills };
+  return { goal, noLearnSkills, noPromoteSkills };
 }
 
 async function main(): Promise<void> {
@@ -82,6 +85,27 @@ async function main(): Promise<void> {
   } else {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     console.log('skill auto-distillation: ON (default — pass --no-learn-skills to disable)');
+  }
+  // Skill llm→script PROMOTION (#C2c). When a kind:llm skill crosses
+  // TRUST_PROMOTE_THRESHOLD_SUCCESSES (5) with zero failures, the L2
+  // makes a single Sonnet call to compile its body into a deterministic
+  // Node script. On approval the next match runs the script via
+  // write_file + run_shell instead of an LLM tool-loop. Same priority
+  // ordering as auto-distillation: CLI flag > env var > default-on.
+  // Demotion (any future failure on the script form) restores the
+  // stashed llm body from the `_fallback.md` sidecar, and the
+  // failures-must-be-zero gate then blocks re-promotion until the
+  // operator resets the counters by hand.
+  if (args.noPromoteSkills) {
+    process.env['ATOMA_SKILL_PROMOTE'] = '0';
+    console.log('skill llm→script promotion: off (--no-promote-skills)');
+  } else if (process.env['ATOMA_SKILL_PROMOTE'] === '0') {
+    console.log('skill llm→script promotion: off (ATOMA_SKILL_PROMOTE=0)');
+  } else {
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    console.log(
+      'skill llm→script promotion: ON (default — pass --no-promote-skills to disable)'
+    );
   }
 
   // Use a dedicated DB + workspace for build runs so we don't interfere with

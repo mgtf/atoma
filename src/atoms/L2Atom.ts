@@ -36,6 +36,7 @@ import {
   trustedApproval,
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
+  TRUST_PROMOTE_THRESHOLD_SUCCESSES,
 } from './cost.js';
 import {
   bucketIdForTools,
@@ -197,17 +198,26 @@ export function skillContextBlock(skill: {
       `This skill ships an EXECUTABLE script (below). Your task is NOT to`,
       `interpret the script — it is to RUN IT. Concretely:`,
       ``,
-      `  1. Extract the script's CLI arguments from the current subtask`,
-      `     description (the script's source documents what it expects).`,
+      `  1. The script's CLI argument is the current subtask description as`,
+      `     a JSON-encoded string. Pass it verbatim as argv[2].`,
       `  2. write_file ${filename} with the script body VERBATIM (do not`,
       `     edit, summarise, or paraphrase — the body is canonical).`,
-      `  3. run_shell { command: "${interpreter}", args: ["${filename}", ...your-args] }`,
-      `  4. Read the run_shell result. Stdout is your deliverable; stderr`,
-      `     surfaces error messages if the script throws.`,
-      `  5. Return JSON {"output": <stdout-summary>, "summary": "<one sentence>"}.`,
-      ``,
-      `Do NOT improvise additional tool calls. The script body is canonical;`,
-      `your role is to wire CLI args into it and return its output.`,
+      `  3. run_shell { command: "${interpreter}", args: ["${filename}",`,
+      `       <JSON.stringify(subtaskDescription)>] }`,
+      `  4. Read the run_shell result.`,
+      `     - On success: stdout is the script's deliverable. If the LAST`,
+      `       non-empty line of stdout parses as a JSON object with`,
+      `       {"output", "summary"} fields, RETURN THOSE VERBATIM as your`,
+      `       own envelope — do not re-summarise. This preserves the`,
+      `       embedded "== GROUND TRUTH ==" block the script emitted, which`,
+      `       the supervisor's validator credits as evidence.`,
+      `     - If stdout is plain text, wrap it: {"output": "<stdout>",`,
+      `       "summary": "ran ${skill.id}; stdout: <first 200 chars>"}.`,
+      `     - On error (non-zero exit / stderr non-empty): return the`,
+      `       stderr in summary so the supervisor can diagnose.`,
+      `  5. Do NOT improvise additional tool calls. The script body is`,
+      `     canonical; your role is to wire CLI args, run it, and forward`,
+      `     its envelope.`,
       ``,
       `== SCRIPT BODY ==`,
       skill.body.trim(),
@@ -940,6 +950,226 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   /**
+   * Try to PROMOTE a `kind: 'llm'` skill to `kind: 'script'` after a
+   * successful run. The eligibility gate runs first (cheap local
+   * check); only if it passes do we make the Sonnet compile call. The
+   * compile asks the model to either produce a deterministic Node
+   * script body OR refuse with a reason. On a clean compile we call
+   * `registry.promoteToScript` which stashes the original llm body in
+   * `_fallback.md` so demotion can restore it.
+   *
+   * The trigger condition is `successes >= TRUST_PROMOTE_THRESHOLD &&
+   * failures === 0 && kind === 'llm'`. The `failures === 0` clause
+   * also blocks RE-promotion after a demotion (which bumps `failures`
+   * via `recordFailure` upstream), so a script that broke and got
+   * rolled back doesn't immediately get re-compiled on the next
+   * success — the operator has to reset the counter to invite
+   * another attempt.
+   *
+   * Cost: ONE Sonnet call (~$0.01) per promotion attempt. If the model
+   * declines (returns `promotable: false`), no script is saved and the
+   * skill stays as `kind: 'llm'`. We do NOT retry on the next success
+   * either — the eligibility gate (`successes >= threshold`) keeps
+   * firing forever once the threshold is crossed, so to prevent
+   * Sonnet-call thrash on un-promotable skills we mark the attempt in
+   * a sidecar `_meta.json` field. Future runs see it and skip.
+   */
+  private async tryPromoteSkill(args: {
+    l1Name: string;
+    skillId: string;
+    subTask: Task;
+    result: Result;
+    ctx: RunContext;
+  }): Promise<void> {
+    if (!this.skillRegistry) return;
+    if (process.env['ATOMA_SKILL_PROMOTE'] !== '1') return;
+    const skills = this.skillRegistry.loadFor(args.l1Name);
+    const skill = skills.find((s) => s.id === args.skillId);
+    if (!skill) return;
+    if (skill.kind !== 'llm') return;
+    if (skill.failures > 0) return;
+    if (skill.successes < TRUST_PROMOTE_THRESHOLD_SUCCESSES) return;
+    if (skill.promotionRefusedAt) {
+      // Sonnet already declined to compile this body. Skip the call
+      // until the body changes (which clears the stamp via save) or
+      // the operator manually clears it. Without this gate every
+      // future success on a structurally non-promotable skill burns
+      // ~$0.005 (1 Sonnet call returning the same refusal).
+      args.ctx.logger.debug(
+        `[${this.name}] skill "${args.skillId}" promotion previously refused at ${skill.promotionRefusedAt}; skipping`
+      );
+      return;
+    }
+    args.ctx.logger.info(
+      `[${this.name}] skill "${args.skillId}" eligible for promotion (${skill.successes} successes / 0 failures); attempting compile`
+    );
+    let compiled: { promotable: true; language: 'node'; body: string } | { promotable: false; reason: string };
+    try {
+      compiled = await this.compileSkillToScript({
+        skill,
+        subTask: args.subTask,
+        result: args.result,
+        ctx: args.ctx,
+      });
+    } catch (err) {
+      args.ctx.logger.warn(
+        `[${this.name}] skill compile errored: ${(err as Error).message}; leaving as kind:llm`
+      );
+      return;
+    }
+    if (!compiled.promotable) {
+      args.ctx.logger.info(
+        `[${this.name}] skill "${args.skillId}" not promotable: ${compiled.reason}`
+      );
+      // Stamp the refusal so the gate above short-circuits on every
+      // subsequent success until the body changes. This is the
+      // anti-thrash guard: in the LoL-SSR run we observed Sonnet
+      // refuse a structurally non-promotable recipe (schema design,
+      // API shape choice) — we don't want to pay $0.005 to learn
+      // the same fact on every future success of the same recipe.
+      this.skillRegistry.markPromotionRefused(args.l1Name, args.skillId);
+      args.ctx.recordSkill?.({
+        op: 'promote',
+        l1Name: args.l1Name,
+        skillId: args.skillId,
+        actorName: this.name,
+        actorTier: 2,
+        reasoning: `refused: ${compiled.reason}`,
+      });
+      return;
+    }
+    this.skillRegistry.promoteToScript({
+      l1Name: args.l1Name,
+      skillId: args.skillId,
+      language: compiled.language,
+      scriptBody: compiled.body,
+    });
+    args.ctx.logger.info(
+      `[${this.name}] skill "${args.skillId}" promoted to kind:script (${compiled.language}, ${compiled.body.length} chars)`
+    );
+    args.ctx.recordSkill?.({
+      op: 'promote',
+      l1Name: args.l1Name,
+      skillId: args.skillId,
+      actorName: this.name,
+      actorTier: 2,
+      reasoning: `compiled to ${compiled.language} after ${skill.successes} successes`,
+    });
+  }
+
+  /**
+   * Sonnet compile of a `kind: 'llm'` recipe into a parameterised Node
+   * script. Returns either a script body the L1 can run via
+   * write_file + run_shell with a JSON-encoded subtask description as
+   * argv[2], OR a refusal with a reason (when the recipe has
+   * branching that doesn't reduce cleanly to deterministic steps).
+   *
+   * The prompt deliberately includes the most recent successful
+   * subtask + result summary as a CONCRETE example: gives the model
+   * the actual shape of inputs the script will see at runtime, so it
+   * doesn't over-generalise the parameter surface.
+   */
+  private async compileSkillToScript(args: {
+    skill: import('../skills/types.js').Skill;
+    subTask: Task;
+    result: Result;
+    ctx: RunContext;
+  }): Promise<
+    | { promotable: true; language: 'node'; body: string }
+    | { promotable: false; reason: string }
+  > {
+    const userContent = [
+      `You are PROMOTING a SKILL — a reusable how-to recipe attached to a tier-1`,
+      `element — from kind:llm (markdown instructions for the LLM tool-loop) to`,
+      `kind:script (a deterministic Node.js program). The L1 atom will execute`,
+      `the script via write_file + run_shell on every future match instead of`,
+      `re-discovering the steps with an LLM tool-loop. That cuts Haiku`,
+      `tool-loop spend on stable patterns to ~zero.`,
+      ``,
+      `RUNTIME CONTRACT — your script will be invoked as:`,
+      `  node _skill_<id>.js '<json-encoded-subtask-description>'`,
+      `i.e. process.argv[2] is a JSON-encoded string carrying the natural-language`,
+      `subtask. Your script may parse hints from it (regex / string contains) but`,
+      `should mostly rely on the deterministic steps the recipe encodes. The`,
+      `script's final stdout MUST be a single JSON line of shape`,
+      `{"output": <deliverable>, "summary": "<one sentence including a verbatim`,
+      `\\"== GROUND TRUTH ==\\" block as the L1 result-reporting contract requires>"}.`,
+      ``,
+      `If the recipe has irreducible LLM steps — 'pick the right SQL helpers',`,
+      `'design a schema', 'reason about the API shape' — you cannot promote it.`,
+      `In that case return {"promotable": false, "reason": "<one sentence>"}.`,
+      `Don't force a fragile script just to satisfy the request.`,
+      ``,
+      `== SKILL ID ==`,
+      args.skill.id,
+      ``,
+      `== SKILL DESCRIPTION ==`,
+      args.skill.description,
+      ``,
+      `== SKILL when_to_use ==`,
+      args.skill.whenToUse,
+      ``,
+      `== CURRENT (kind:llm) BODY ==`,
+      args.skill.body,
+      ``,
+      `== EXAMPLE SUBTASK THAT THIS SKILL JUST HANDLED ==`,
+      args.subTask.description,
+      ``,
+      `== EXAMPLE L1 SUMMARY OF THAT RUN ==`,
+      args.result.summary,
+      ``,
+      `Output ONLY a JSON object — no fences, no preamble, first character "{":`,
+      `  Promotable case: {"promotable": true, "language": "node", "body": "<full script source>"}`,
+      `  Refusal case:    {"promotable": false, "reason": "<one sentence>"}`,
+      `The script body MUST be the COMPLETE source — do not truncate, do not`,
+      `paste placeholders. Use only stdlib + the dependencies the recipe`,
+      `already names (e.g. better-sqlite3); install via npm at runtime when`,
+      `needed; emit LISTENING_ON_PORT=<n> on stdout if you spawn a server.`,
+    ].join('\n');
+
+    const resp = await args.ctx.llm.complete({
+      model: this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      userContent,
+      params: { ...this.params, maxTokens: 4000, temperature: 0 },
+      signal: args.ctx.signal,
+    });
+    const raw = (resp.text ?? '').trim();
+    if (!raw) return { promotable: false, reason: 'empty model response' };
+    let parsed: unknown;
+    try {
+      // Tolerate surrounding fences just in case Sonnet wraps despite
+      // the explicit instruction.
+      const stripped = raw.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      parsed = JSON.parse(stripped);
+    } catch {
+      return { promotable: false, reason: 'malformed JSON in compile response' };
+    }
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { promotable: false, reason: 'compile response was not an object' };
+    }
+    const obj = parsed as Record<string, unknown>;
+    if (obj['promotable'] === false) {
+      return {
+        promotable: false,
+        reason: typeof obj['reason'] === 'string' ? obj['reason'] : 'unspecified',
+      };
+    }
+    if (obj['promotable'] !== true) {
+      return { promotable: false, reason: 'compile response missing promotable=true|false' };
+    }
+    const language = obj['language'];
+    const body = obj['body'];
+    if (language !== 'node' || typeof body !== 'string' || body.trim().length === 0) {
+      return {
+        promotable: false,
+        reason: `compile response has invalid language=${String(language)} or empty body`,
+      };
+    }
+    return { promotable: true, language: 'node', body };
+  }
+
+  /**
    * Run a Haiku skill-prefilter for the L1 named `l1Name` and the
    * given subtask. Returns the matched skill + the model's reasoning
    * when a confident match exists, null otherwise (no skills, no
@@ -1279,6 +1509,26 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             actorName: this.name,
             actorTier: 2,
           });
+          // Skill llm→script PROMOTION (#C2c). After bumping the
+          // success counter, check whether this skill has crossed the
+          // promotion threshold. The eligibility gate inside
+          // tryPromoteSkill is cheap (counter read) and short-circuits
+          // before any Sonnet call, so this is safe to run on every
+          // approved skilled run. Failures inside the helper are
+          // logged + swallowed — promotion is opportunistic.
+          try {
+            await this.tryPromoteSkill({
+              l1Name: child.name,
+              skillId,
+              subTask: skillCtx.subTask,
+              result,
+              ctx,
+            });
+          } catch (err) {
+            ctx.logger.warn(
+              `[${this.name}] skill promotion attempt errored: ${(err as Error).message}`
+            );
+          }
         } else if (
           // Skill auto-creation (C3). Fires when ALL of:
           //   - L2 attempted a skill match for this subtask;
@@ -1320,6 +1570,31 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             actorName: this.name,
             actorTier: 2,
           });
+          // Skill DEMOTION (#C2c). If a `kind: 'script'` skill drove
+          // the run that just escalated, restore its original llm
+          // body from the `_fallback.md` sidecar. The script form
+          // proved fragile on this task; reverting to the LLM-driven
+          // recipe lets future runs adapt where the fixed script
+          // couldn't. The `failures > 0` clause inside tryPromoteSkill
+          // then blocks accidental re-promotion until counters are
+          // reset by the operator.
+          const matched = this.skillRegistry.loadFor(child.name).find((s) => s.id === skillId);
+          if (matched && matched.kind === 'script' && matched.fallbackBody) {
+            const restored = this.skillRegistry.demoteToLlm(child.name, skillId);
+            if (restored) {
+              ctx.logger.info(
+                `[${this.name}] skill "${skillId}" demoted to kind:llm after script failure`
+              );
+              ctx.recordSkill?.({
+                op: 'demote',
+                l1Name: child.name,
+                skillId,
+                actorName: this.name,
+                actorTier: 2,
+                reasoning: `script failed; restored ${matched.fallbackBody.length}-char fallback`,
+              });
+            }
+          }
         }
       },
     };

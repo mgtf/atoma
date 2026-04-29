@@ -165,7 +165,7 @@ export interface VizSkillEvent {
   id: string;
   ts: number;
   kind: 'skill';
-  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure';
+  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure' | 'promote' | 'demote';
   /** L1 atom-type name the skill is namespaced under. */
   l1Name: string;
   /** Stable kebab-case skill id within that namespace. */

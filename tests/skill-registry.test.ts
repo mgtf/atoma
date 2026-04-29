@@ -282,6 +282,179 @@ describe('SkillRegistry', () => {
       console.warn = orig;
     }
   });
+
+  describe('promoteToScript / demoteToLlm — llm↔script lifecycle', () => {
+    it('promoteToScript stashes the original body in _fallback.md and rewrites SKILL.md', () => {
+      reg.save('Helium', {
+        id: 'scaffold-node-ssr',
+        description: 'scaffold a Node SSR server with SQLite',
+        whenToUse: 'task is a Node SSR app with persistence',
+        kind: 'llm',
+        body: '1. write_file package.json\n2. write_file server.js\n3. npm install\n4. start_node_server',
+      });
+      // Earn some trust before promotion.
+      reg.recordSuccess('Helium', 'scaffold-node-ssr');
+      reg.recordSuccess('Helium', 'scaffold-node-ssr');
+
+      const promoted = reg.promoteToScript({
+        l1Name: 'Helium',
+        skillId: 'scaffold-node-ssr',
+        language: 'node',
+        scriptBody: 'console.log(JSON.stringify({output: "ok", summary: "done"}))',
+      });
+      expect(promoted.kind).toBe('script');
+      expect(promoted.language).toBe('node');
+      expect(promoted.body).toMatch(/console\.log/);
+      // Counters are PRESERVED across promotion (already-trusted skill).
+      expect(promoted.successes).toBe(2);
+      expect(promoted.failures).toBe(0);
+
+      // Disk state: SKILL.md frontmatter says script + node, sidecar holds llm body.
+      const skillFile = join(dir, 'Helium', 'scaffold-node-ssr', 'SKILL.md');
+      const skillText = readFileSync(skillFile, 'utf8');
+      expect(skillText).toMatch(/kind: script/);
+      expect(skillText).toMatch(/language: node/);
+      const fallbackFile = join(dir, 'Helium', 'scaffold-node-ssr', '_fallback.md');
+      expect(existsSync(fallbackFile)).toBe(true);
+      expect(readFileSync(fallbackFile, 'utf8')).toMatch(/start_node_server/);
+
+      // loadFor exposes fallbackBody on the loaded skill.
+      const loaded = reg.loadFor('Helium')[0]!;
+      expect(loaded.kind).toBe('script');
+      expect(loaded.fallbackBody).toMatch(/start_node_server/);
+    });
+
+    it('promoteToScript refuses to overwrite an already-script skill (would erase fallback)', () => {
+      reg.save('Helium', {
+        id: 'x',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'script',
+        language: 'node',
+        body: 'console.log("first")',
+      });
+      expect(() =>
+        reg.promoteToScript({
+          l1Name: 'Helium',
+          skillId: 'x',
+          language: 'node',
+          scriptBody: 'console.log("second")',
+        })
+      ).toThrow(/already kind:"script"/);
+    });
+
+    it('demoteToLlm restores the fallback body verbatim and keeps counters', () => {
+      reg.save('Helium', {
+        id: 'roundtrip',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'ORIGINAL llm recipe — step 1, step 2',
+      });
+      reg.recordSuccess('Helium', 'roundtrip');
+      reg.promoteToScript({
+        l1Name: 'Helium',
+        skillId: 'roundtrip',
+        language: 'node',
+        scriptBody: 'console.log("script")',
+      });
+      // Demote (script just failed in the wild).
+      reg.recordFailure('Helium', 'roundtrip');
+      const demoted = reg.demoteToLlm('Helium', 'roundtrip')!;
+      expect(demoted.kind).toBe('llm');
+      expect(demoted.body).toMatch(/ORIGINAL llm recipe/);
+      // Counters: 1 success + 1 failure (the demotion-trigger), preserved.
+      expect(demoted.successes).toBe(1);
+      expect(demoted.failures).toBe(1);
+
+      // _fallback.md is INTENTIONALLY left in place so a future
+      // re-promotion (after manual counter reset) can compare.
+      const fallbackFile = join(dir, 'Helium', 'roundtrip', '_fallback.md');
+      expect(existsSync(fallbackFile)).toBe(true);
+    });
+
+    it('demoteToLlm returns null when the skill is not currently kind:script', () => {
+      reg.save('Helium', {
+        id: 'plain',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'still llm',
+      });
+      expect(reg.demoteToLlm('Helium', 'plain')).toBeNull();
+    });
+
+    it('markPromotionRefused stamps _meta.json so the supervisor can short-circuit future Sonnet compile calls', () => {
+      reg.save('Helium', {
+        id: 'too-llm-shaped',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'recipe with irreducible LLM steps',
+      });
+      const meta = reg.markPromotionRefused('Helium', 'too-llm-shaped')!;
+      expect(meta.promotionRefusedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      // loadFor surfaces the stamp on the Skill so the L2 gate can read it.
+      const loaded = reg.loadFor('Helium')[0]!;
+      expect(loaded.promotionRefusedAt).toBe(meta.promotionRefusedAt);
+    });
+
+    it('counter bumps PRESERVE promotionRefusedAt (only save() clears it)', () => {
+      reg.save('Helium', {
+        id: 'sticky',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'b',
+      });
+      const stamped = reg.markPromotionRefused('Helium', 'sticky')!;
+      reg.recordSuccess('Helium', 'sticky');
+      reg.recordSuccess('Helium', 'sticky');
+      const after = reg.loadFor('Helium')[0]!;
+      expect(after.successes).toBe(2);
+      expect(after.promotionRefusedAt).toBe(stamped.promotionRefusedAt);
+    });
+
+    it('save() CLEARS promotionRefusedAt — a rewritten body deserves a fresh compile attempt', () => {
+      reg.save('Helium', {
+        id: 'rewritten',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'old recipe',
+      });
+      reg.markPromotionRefused('Helium', 'rewritten');
+      expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeTruthy();
+      // Simulate improveSkillBody / re-distillation rewriting the body.
+      reg.save('Helium', {
+        id: 'rewritten',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'NEW recipe — much more procedural now',
+      });
+      expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeUndefined();
+    });
+
+    it('markPromotionRefused returns null for a missing skill (no auto-create)', () => {
+      expect(reg.markPromotionRefused('Helium', 'does-not-exist')).toBeNull();
+    });
+
+    it('demoteToLlm returns null when no fallback sidecar is present', () => {
+      // Hand-author a kind:script skill (skipping the promoteToScript path)
+      // to simulate a skill created script-first via the auto-creation
+      // pipeline once that lands. There's no _fallback.md to restore.
+      reg.save('Helium', {
+        id: 'born-script',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'script',
+        language: 'node',
+        body: 'console.log("hi")',
+      });
+      expect(reg.demoteToLlm('Helium', 'born-script')).toBeNull();
+    });
+  });
 });
 
 describe('L1Atom.skills() integration', () => {

@@ -3,6 +3,16 @@ import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta } from './types.js';
 
 /**
+ * Sidecar filename holding the original `kind: 'llm'` body of a skill
+ * that has since been PROMOTED to `kind: 'script'`. Lives next to
+ * SKILL.md inside the skill folder. Read on `loadFor`, written on
+ * `promoteToScript`, consulted (and copied back) on `demoteToLlm`.
+ * Plain text — no frontmatter — because its only purpose is to be
+ * dropped back into SKILL.md verbatim during demotion.
+ */
+export const FALLBACK_FILENAME = '_fallback.md';
+
+/**
  * Filesystem-backed skill store. Skills live under
  *   <rootDir>/<l1-name>/<skill-id>/SKILL.md   (frontmatter + body)
  *   <rootDir>/<l1-name>/<skill-id>/_meta.json (counters)
@@ -59,6 +69,10 @@ export class SkillRegistry {
         const text = readFileSync(skillFile, 'utf8');
         const { frontmatter, body } = parseFrontmatter(text);
         const meta = readMeta(join(skillDir, '_meta.json'));
+        const fallbackPath = join(skillDir, FALLBACK_FILENAME);
+        const fallbackBody = existsSync(fallbackPath)
+          ? readFileSync(fallbackPath, 'utf8').trim()
+          : undefined;
         out.push({
           id: frontmatter.id,
           description: frontmatter.description,
@@ -66,9 +80,11 @@ export class SkillRegistry {
           kind: frontmatter.kind,
           ...(frontmatter.language !== undefined ? { language: frontmatter.language } : {}),
           body,
+          ...(fallbackBody ? { fallbackBody } : {}),
           successes: meta.successes,
           failures: meta.failures,
           updatedAt: meta.updatedAt,
+          ...(meta.promotionRefusedAt ? { promotionRefusedAt: meta.promotionRefusedAt } : {}),
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -113,9 +129,19 @@ export class SkillRegistry {
     );
     writeFileSync(join(dir, 'SKILL.md'), md, 'utf8');
     // Preserve existing counters if a meta file is already there.
+    // INTENTIONALLY DROP `promotionRefusedAt`: a save() means the body
+    // changed (or the kind flipped). Sonnet's prior refusal was a
+    // judgment about the OLD body; the new body deserves a fresh
+    // compile attempt next time the trust gate is crossed. Without
+    // this clear, an `improveSkillBody`-revised recipe could never
+    // earn promotion even if the rewrite makes it script-shaped.
     const metaPath = join(dir, '_meta.json');
     const existing = existsSync(metaPath) ? readMeta(metaPath) : { successes: 0, failures: 0, updatedAt: nowIso() };
-    const meta: SkillMeta = { ...existing, updatedAt: nowIso() };
+    const meta: SkillMeta = {
+      successes: existing.successes,
+      failures: existing.failures,
+      updatedAt: nowIso(),
+    };
     writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
     return {
       id: skill.id,
@@ -128,6 +154,110 @@ export class SkillRegistry {
       failures: meta.failures,
       updatedAt: meta.updatedAt,
     };
+  }
+
+  /**
+   * Mark a skill as having recently failed Sonnet compile (the model
+   * answered `{"promotable": false, ...}`). The supervisor's
+   * promotion gate skips any skill whose meta carries this stamp,
+   * preventing a fresh Sonnet compile call on every future success
+   * for a skill whose recipe is structurally non-promotable (e.g.
+   * recipes containing irreducible LLM reasoning steps like SQL
+   * schema design or external-API shape choice). The stamp is
+   * cleared automatically by `save()` whenever the skill body is
+   * rewritten — a revised body is a new compile candidate.
+   *
+   * No-op (returns null) when the skill folder doesn't exist; we
+   * never auto-create a meta file for a non-existent skill.
+   */
+  markPromotionRefused(l1Name: string, skillId: string): SkillMeta | null {
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return null;
+    const metaPath = join(dir, '_meta.json');
+    const cur = existsSync(metaPath)
+      ? readMeta(metaPath)
+      : { successes: 0, failures: 0, updatedAt: nowIso() };
+    const next: SkillMeta = {
+      ...cur,
+      promotionRefusedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    return next;
+  }
+
+  /**
+   * Promote an existing `kind: 'llm'` skill to `kind: 'script'`. Writes
+   * the current llm body to the `_fallback.md` sidecar so demotion can
+   * restore it verbatim, then rewrites SKILL.md with the new script
+   * body + language. Counters are PRESERVED — promotion is a body
+   * reformulation of an already-trusted skill, not a fresh record.
+   *
+   * Refuses (throws) if the skill on disk is already `kind: 'script'`.
+   * That guard keeps double-promotion from clobbering an existing
+   * fallback (the original llm body would be lost).
+   */
+  promoteToScript(args: {
+    l1Name: string;
+    skillId: string;
+    language: SkillLanguage;
+    scriptBody: string;
+  }): Skill {
+    const dir = this.skillDir(args.l1Name, args.skillId);
+    const skillFile = join(dir, 'SKILL.md');
+    if (!existsSync(skillFile)) {
+      throw new Error(`promoteToScript: no skill at ${skillFile}`);
+    }
+    const text = readFileSync(skillFile, 'utf8');
+    const { frontmatter, body: currentBody } = parseFrontmatter(text);
+    if (frontmatter.kind !== 'llm') {
+      throw new Error(
+        `promoteToScript: skill ${args.skillId} is already kind:"${frontmatter.kind}"; refusing to overwrite`
+      );
+    }
+    writeFileSync(join(dir, FALLBACK_FILENAME), currentBody.trim() + '\n', 'utf8');
+    return this.save(args.l1Name, {
+      id: frontmatter.id,
+      description: frontmatter.description,
+      whenToUse: frontmatter.whenToUse,
+      kind: 'script',
+      language: args.language,
+      body: args.scriptBody,
+    });
+  }
+
+  /**
+   * Demote a `kind: 'script'` skill back to `kind: 'llm'` by restoring
+   * the fallback body that was preserved at promotion time. Counters
+   * are PRESERVED (the failure counter has already been bumped via
+   * `recordFailure` upstream — that's what triggers demotion in the
+   * first place). The `_fallback.md` sidecar is INTENTIONALLY left in
+   * place: keeping it lets a future re-promotion compare against the
+   * historical body, and a `failures > 0` gate at promote-attempt
+   * time blocks accidental re-promotion until counters are reset.
+   *
+   * No-op (returns null) when the skill doesn't exist, isn't currently
+   * kind:script, or has no fallback body — the caller should treat
+   * those as "nothing to demote" rather than as errors.
+   */
+  demoteToLlm(l1Name: string, skillId: string): Skill | null {
+    const dir = this.skillDir(l1Name, skillId);
+    const skillFile = join(dir, 'SKILL.md');
+    if (!existsSync(skillFile)) return null;
+    const text = readFileSync(skillFile, 'utf8');
+    const { frontmatter } = parseFrontmatter(text);
+    if (frontmatter.kind !== 'script') return null;
+    const fallbackPath = join(dir, FALLBACK_FILENAME);
+    if (!existsSync(fallbackPath)) return null;
+    const fallbackBody = readFileSync(fallbackPath, 'utf8').trim();
+    if (!fallbackBody) return null;
+    return this.save(l1Name, {
+      id: frontmatter.id,
+      description: frontmatter.description,
+      whenToUse: frontmatter.whenToUse,
+      kind: 'llm',
+      body: fallbackBody,
+    });
   }
 
   /** Bump the success counter for a known skill (no-op if not found). */
@@ -159,6 +289,9 @@ export class SkillRegistry {
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),
       updatedAt: nowIso(),
+      // Preserve `promotionRefusedAt` across counter bumps — only
+      // `save()` (i.e. a body rewrite) and manual edits clear it.
+      ...(cur.promotionRefusedAt ? { promotionRefusedAt: cur.promotionRefusedAt } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
   }
@@ -180,10 +313,15 @@ function readMeta(path: string): SkillMeta {
   if (!existsSync(path)) return { successes: 0, failures: 0, updatedAt: nowIso() };
   try {
     const obj = JSON.parse(readFileSync(path, 'utf8')) as Partial<SkillMeta>;
+    const promotionRefusedAt =
+      typeof obj.promotionRefusedAt === 'string' && obj.promotionRefusedAt.length > 0
+        ? obj.promotionRefusedAt
+        : undefined;
     return {
       successes: typeof obj.successes === 'number' ? obj.successes : 0,
       failures: typeof obj.failures === 'number' ? obj.failures : 0,
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : nowIso(),
+      ...(promotionRefusedAt ? { promotionRefusedAt } : {}),
     };
   } catch {
     return { successes: 0, failures: 0, updatedAt: nowIso() };

@@ -291,7 +291,7 @@ export interface TrustFastPathInfo {
  * for what L2 may emit.
  */
 export interface SkillEventInfo {
-  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure';
+  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure' | 'promote' | 'demote';
   l1Name: string;
   skillId: string;
   actorName: string;

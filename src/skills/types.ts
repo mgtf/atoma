@@ -70,6 +70,15 @@ export interface Skill {
    */
   readonly body: string;
   /**
+   * Set ONLY on a skill that was promoted from `kind: 'llm'` to
+   * `kind: 'script'` and still has its original llm recipe stashed in
+   * the `_fallback.md` sidecar. Used by the demotion path: when a
+   * promoted script fails, we restore this content as the body and
+   * flip `kind` back to `'llm'`. Persisted as a separate file so the
+   * frontmatter stays one-line-per-key.
+   */
+  readonly fallbackBody?: string;
+  /**
    * Cumulative successes — incremented when a supervise-loop run
    * using this skill is approved. Persisted in `_meta.json`.
    */
@@ -78,6 +87,8 @@ export interface Skill {
   readonly failures: number;
   /** ISO timestamp of the most recent file update. */
   readonly updatedAt: string;
+  /** Mirrors `SkillMeta.promotionRefusedAt`; see there for semantics. */
+  readonly promotionRefusedAt?: string;
 }
 
 /**
@@ -98,4 +109,15 @@ export interface SkillMeta {
   readonly successes: number;
   readonly failures: number;
   readonly updatedAt: string;
+  /**
+   * ISO timestamp of the most recent Sonnet compile attempt that
+   * returned `promotable: false`. Set by `markPromotionRefused`,
+   * read by `tryPromoteSkill`'s eligibility gate (any non-empty
+   * value short-circuits before the Sonnet call). Cleared on the
+   * next `save()` of the skill body — a freshly distilled or
+   * `improveSkillBody`-revised recipe is a new candidate and
+   * deserves a fresh compile attempt. Operator can manually clear
+   * by deleting the field from `_meta.json`.
+   */
+  readonly promotionRefusedAt?: string;
 }

@@ -21,6 +21,23 @@ import { parseWith } from './json.js';
 export const TRUST_THRESHOLD_SUCCESSES = 3;
 
 /**
+ * When an `kind: 'llm'` skill crosses this many SUCCESSES with zero
+ * recorded failures, the supervisor will attempt to PROMOTE it to a
+ * deterministic `kind: 'script'` body via a Sonnet compile call. The
+ * promoted skill executes via a single LLM round-trip + write_file +
+ * run_shell instead of a full LLM-driven recipe each time, cutting
+ * Haiku tool-loop spend on stable patterns. Demotion (any future
+ * failure on the script form) restores the original llm body from a
+ * sidecar `_fallback.md` and increments `failures`; the `failures > 0`
+ * gate then blocks re-promotion until the operator manually resets the
+ * counters or deletes the skill. Five was picked to match the trust
+ * level we observed on the LoL-SSR run's `scaffold-node-ssr-sqlite-api`
+ * skill (5/2 lifetime) — i.e. enough successful runs that the recipe
+ * is genuinely repeatable, but not so high that promotion never fires.
+ */
+export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 5;
+
+/**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
  * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED

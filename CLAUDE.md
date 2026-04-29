@@ -466,10 +466,40 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   drive the skill-prefilter LLM slot must pre-seed at least one
   scarecrow skill so the slot actually fires.
 
-- **`kind: 'script'` declared but not yet implemented.** The
-  frontmatter accepts it as a placeholder so the storage format is
-  forwards-compatible — at runtime today every skill is treated as
-  `kind: 'llm'`. Phase 2 wires deterministic exec.
+- **Promotion llm→script (#C2c).** When a `kind: 'llm'` skill crosses
+  `TRUST_PROMOTE_THRESHOLD_SUCCESSES` (5) with zero recorded failures,
+  the L2's `onApproved` hook fires `tryPromoteSkill` which (a) loads
+  the skill, (b) re-checks eligibility, (c) makes ONE Sonnet compile
+  call (`compileSkillToScript`) asking for a deterministic Node
+  script body OR a refusal, (d) on success calls
+  `SkillRegistry.promoteToScript` which stashes the original llm body
+  in `_fallback.md` and rewrites SKILL.md with `kind: script` +
+  `language: node`. Counters are PRESERVED across promotion.
+  Demotion fires from `onFailed` when a `kind: 'script'` skill drives
+  a run that escalates: `recordFailure` has already bumped the
+  failure counter, then `demoteToLlm` reads `_fallback.md` and
+  rewrites SKILL.md back to `kind: llm` with the original body. The
+  `failures > 0` clause inside `tryPromoteSkill` then blocks
+  accidental re-promotion until the operator manually resets the
+  counters in `_meta.json`. Gated by `ATOMA_SKILL_PROMOTE` env var:
+  ON by default in `build-app.ts` (toggle with `--no-promote-skills`),
+  OFF in the lib so unit-test runs don't make stray Sonnet calls.
+  Marginal cost is ~1 Sonnet call (~$0.01) per promotion event.
+  `_fallback.md` is INTENTIONALLY left in place after demotion so a
+  future re-promotion (post-counter-reset) can compare against the
+  historical body.
+
+- **`kind: 'script'` skills execute via tool-loop, not server-side
+  invocation.** `skillContextBlock` injects an active-skill block
+  whose body tells the L1 to: (1) extract CLI args from the subtask
+  description, (2) `write_file _skill_<id>.<ext>` with the script
+  body verbatim, (3) `run_shell <interpreter> _skill_<id>.<ext>
+  [args...]`, (4) return the stdout. The L1 is still in the loop —
+  but for ONE LLM round-trip + 2 tool calls regardless of script
+  length, vs the N-round LLM tool-loop a `kind: llm` recipe drives.
+  The script's stdout MUST be a single JSON line of shape
+  `{"output": ..., "summary": "<one sentence with embedded == GROUND
+  TRUTH == block>"}`; `compileSkillToScript`'s prompt enforces this.
 
 ## LLM interaction conventions
 
