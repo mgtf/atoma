@@ -130,6 +130,35 @@ export function capabilityDescription(
   const names = new Set(tools.map((t) => t.name));
   const parts: string[] = [];
 
+  // KITCHEN-SINK detection: a toolset that satisfies BOTH genuinely
+  // distinct workflow families (Node-HTTP request/response loop AND
+  // web-artefact render/validate loop) has no single specialty — it is
+  // the full executor set that dynamic children inherit via mergeTools.
+  // Labelling it with the first matching bucket ASSERTED a specialty
+  // the atom doesn't have: every dynamically created L2/L1 came out
+  // "Node HTTP server orchestrator/builder", the domain-match rule then
+  // (correctly) refused to reuse them for non-HTTP tasks, and each run
+  // spawned fresh clones (observed: Ammonia/CarbonDioxide/Glucose/
+  // Sucrose/Ethanol all carrying the same lying HTTP label across the
+  // CLI-build runs). An honest general-purpose label is REUSABLE: the
+  // prefilter can match it for any of the three families. Note the
+  // subset-nesting of buckets makes multi-match the NORM (file-scribe ⊂
+  // everything), so the signal is specifically http+web TOGETHER, not
+  // "more than one match".
+  const matchedIds = new Set(
+    CAPABILITY_BUCKETS.filter((b) => b.required.every((r) => names.has(r))).map(
+      (b) => b.id
+    )
+  );
+  if (
+    matchedIds.has('http-server-build+probe') &&
+    matchedIds.has('web-artefact-build+validate')
+  ) {
+    return tier === 1
+      ? 'general-purpose builder (web + HTTP + files): full toolbox — writes files, runs shell, serves static pages with headless validation, boots Node servers probed via fetch_url; no single specialty'
+      : 'general-purpose orchestrator (web + HTTP + files): routes leaf tasks to tier-1 atoms across web-artefact, Node-HTTP-server and file-authoring workflows; a valid reuse target for tasks from any of those domains';
+  }
+
   const primary = CAPABILITY_BUCKETS.find((b) => b.required.every((r) => names.has(r)));
   if (primary) {
     // Tier-1: the "hands" — baseline label. Tier-2 and tier-3: the
@@ -199,7 +228,16 @@ const TASK_THEME_PATTERNS: readonly RegExp[] = [
  */
 export function looksTaskThemed(desc: string): boolean {
   if (!desc) return false;
-  if (desc.length > 140) return true;
+  // 200, not the original 140: planner-authored seeds are the ONLY
+  // channel through which a dynamic atom can get an honest role label
+  // ("CLI/file project orchestrator: routes file-authoring leaves…"),
+  // and Opus/Sonnet routinely write 150-190 chars for those. At 140
+  // nearly every legitimate seed was dropped in favour of the
+  // tool-derived label — which for kitchen-sink toolsets used to be
+  // the lying "Node HTTP server orchestrator" (see the general-purpose
+  // rule in capabilityDescription). The theme patterns below still
+  // catch domain-poisoned seeds regardless of length.
+  if (desc.length > 200) return true;
   return TASK_THEME_PATTERNS.some((re) => re.test(desc));
 }
 

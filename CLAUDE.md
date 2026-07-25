@@ -21,6 +21,7 @@ npm run registry -- list              # inspect persisted atom types + counters
 npm run registry -- list --tier 2
 npm run registry -- show Hydrogen
 npm run registry -- top --by failure  # sort by failures; also success|ratio
+npm run registry -- remove Glucose --db ./atoma-build.db  # delete dynamic-creation debris
 npm run registry -- --db ./atoma-build.db list   # override DB path
 
 npm run skills -- list                # all skills: kind, counters, refusal stamps
@@ -786,11 +787,32 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   fine-grained web bucket. Reason: the Node bucket's required tools
   (`start_node_server`) are structurally incompatible with the web
   bucket, so a toolset carrying `start_node_server` genuinely belongs
-  to HTTP. Putting HTTP first means a dynamically-created L1 inheriting
-  the kitchen-sink toolset from Methane gets the HTTP label, not the
-  web one. The canonical helpers `pickTools` their input so canonical
-  web L1s never see the HTTP-only tools in the first place — order
-  only matters for dynamically created atoms.
+  to HTTP. The canonical helpers `pickTools` their input so canonical
+  web L1s never see the HTTP-only tools in the first place. NOTE: a
+  toolset satisfying BOTH the http bucket AND web-build+validate (the
+  kitchen-sink case — dynamic children inheriting the full executor
+  set via mergeTools) no longer takes the first-match label; it gets
+  the honest `general-purpose builder/orchestrator (web + HTTP +
+  files)` label instead. The first-match HTTP label ASSERTED a
+  specialty the atom didn't have, the domain-match rule then refused
+  reuse for non-HTTP tasks, and every CLI run spawned fresh clones
+  (the Ammonia/CarbonDioxide/Glucose/Sucrose/Ethanol series). The
+  bucket ORDER still matters for partial overlaps (http tools +
+  start_static_server but no validate_html stays HTTP). Companion
+  change: `looksTaskThemed`'s length cutoff is 200 (was 140) so
+  planner-authored ROLE seeds ("CLI/file project orchestrator: …",
+  typically 150-190 chars) survive instead of being dropped for the
+  tool-derived label; the theme patterns still catch domain-poisoned
+  seeds at any length.
+- `AtomRegistry.remove` (CLI `registry remove <name> [--force]`)
+  deletes only the LIVE row: the version history stays and gains a
+  `[removed]` tombstone row with the final state. Deliberate — the
+  deferred rollback CLI needs `atom_type_versions`, and `create`
+  allocates ordinals from live ∪ history rows so a removed atom's
+  taxonomy name is never re-issued to a future atom (which would
+  inherit its identity in old run traces and skill namespaces).
+  Canonical/bootstrap atoms and user-created cells are refused
+  without `--force`.
 - `Atom.toolNames(): string[]` is public while `Atom.tools: Tool[]` is
   protected. The names accessor was added specifically for cross-
   cutting concerns (ground-truth probe bucket gate, tracing) that

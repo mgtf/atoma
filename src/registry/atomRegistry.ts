@@ -203,9 +203,19 @@ export class AtomRegistry {
 
   create(tier: Tier, seed: CreateSeed): AtomType {
     return this.db.transaction((): AtomType => {
+      // Allocation considers live rows ∪ version-history rows: an atom
+      // deleted via `remove` leaves a `[removed]` tombstone in
+      // atom_type_versions precisely so its ordinal (and therefore its
+      // taxonomy NAME) is never re-issued — a reused name would let a
+      // future atom silently inherit the dead atom's identity in old
+      // run traces and skill namespaces.
       const usedRows = this.db
-        .prepare('SELECT ordinal FROM atom_types WHERE tier = ?')
-        .all(tier) as { ordinal: number }[];
+        .prepare(
+          `SELECT ordinal FROM atom_types WHERE tier = ?
+           UNION
+           SELECT DISTINCT ordinal FROM atom_type_versions WHERE tier = ?`
+        )
+        .all(tier, tier) as { ordinal: number }[];
       const used = new Set(usedRows.map((r) => r.ordinal));
       const { ordinal, name } = nextAvailable(tier, used);
       const now = new Date().toISOString();
@@ -419,6 +429,51 @@ export class AtomRegistry {
         successes: 0,
         failures: 0,
       };
+    })();
+  }
+
+  /**
+   * Remove a type from the live catalog. OPERATOR tool (CLI `remove`) —
+   * nothing in the runtime supervise loop ever deletes a type; the
+   * loop's lifecycle verbs are patch/branch and counter bumps. Exists
+   * to clean up dynamic-creation debris (the misdescribed clone series
+   * a lying capability label used to spawn: one near-identical L2 per
+   * run, none ever reused). Returns the removed type, or null when no
+   * such name exists.
+   *
+   * The version HISTORY is kept, and the final live state is archived
+   * into it as a `[removed]` tombstone row. Two reasons: (a) the
+   * deferred rollback CLI relies on `atom_type_versions` surviving,
+   * and (b) the tombstone keeps the taxonomy ordinal marked as used —
+   * `create` allocates from live rows ∪ version-history rows, so a
+   * freed ordinal is never handed to a future atom that would silently
+   * inherit the dead atom's name in old run traces.
+   */
+  remove(name: string): AtomType | null {
+    return this.db.transaction((): AtomType | null => {
+      const current = this.getByName(name);
+      if (!current) return null;
+      this.db
+        .prepare(
+          `INSERT INTO atom_type_versions
+           (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          current.tier,
+          current.ordinal,
+          current.version,
+          current.systemPrompt,
+          JSON.stringify(current.tools),
+          JSON.stringify(current.params),
+          'operator-remove',
+          new Date().toISOString(),
+          `[removed] final state of ${current.name} (${current.successes}✓/${current.failures}✗, createdBy: ${current.createdBy})`
+        );
+      this.db
+        .prepare('DELETE FROM atom_types WHERE tier = ? AND ordinal = ?')
+        .run(current.tier, current.ordinal);
+      return current;
     })();
   }
 

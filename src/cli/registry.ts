@@ -15,7 +15,7 @@ import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'rebrand' | 'help';
+  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'rebrand' | 'remove' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -41,7 +41,7 @@ function parseArgs(argv: string[]): Args {
       positional.push(token);
     }
   }
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'help'].includes(cmd)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'help'].includes(cmd)) {
     return { command: 'help', positional: [cmd, ...positional], flags };
   }
   return { command: cmd, positional, flags };
@@ -295,6 +295,37 @@ function cmdDescribe(registry: AtomRegistry, name: string, newDescription: strin
   console.log(`  version: v${existing.version} → v${after.version}`);
 }
 
+/**
+ * Permanently delete a type + its version history. Guarded: canonical
+ * bootstrap atoms and user-created cells are refused without --force,
+ * because deleting them breaks the next run's happy path (the bootstrap
+ * would recreate them at zero trust) or orphans the whole registry
+ * (removing the only L3). Dynamic-creation debris (createdBy = an atom
+ * name) deletes without friction — that's the intended use.
+ */
+function cmdRemove(registry: AtomRegistry, name: string, force: boolean): void {
+  const existing = registry.getByName(name);
+  if (!existing) {
+    console.error(`no atom type named "${name}"`);
+    process.exit(1);
+  }
+  const isProtected =
+    existing.createdBy.startsWith('bootstrap-canonical') || existing.createdBy === 'user';
+  if (isProtected && !force) {
+    console.error(
+      `refusing to remove "${name}" (createdBy: ${existing.createdBy}) — it is a canonical/bootstrap atom.\n` +
+        `  Removing it resets the happy path (recreated at zero trust on the next run). Pass --force if you really mean it.`
+    );
+    process.exit(2);
+  }
+  const removed = registry.remove(name)!;
+  console.log(
+    `removed ${removed.name} (tier ${removed.tier}, v${removed.version}, ` +
+      `${removed.successes}✓/${removed.failures}✗, createdBy: ${removed.createdBy})`
+  );
+  console.log(`  description was: ${removed.description.slice(0, 100)}`);
+}
+
 function help(): void {
   console.log(`atoma registry CLI
 
@@ -321,6 +352,11 @@ function help(): void {
                                 hardcoded a persona ("You are Carbon…")
                                 that then contaminated every branch. Use
                                 --all to sweep the whole registry at once.
+  remove <name> [--force]     — permanently delete a type + its version
+                                history. For dynamic-creation debris
+                                (mislabelled clone series). Canonical
+                                bootstrap atoms and user-created cells
+                                are refused without --force.
 
 Common flags:
   --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
@@ -368,6 +404,14 @@ function main(): void {
         args.positional[0] ?? null,
         args.flags['all'] === 'true'
       );
+    case 'remove': {
+      const name = args.positional[0];
+      if (!name) {
+        console.error('usage: remove <name> [--force]');
+        process.exit(2);
+      }
+      return cmdRemove(registry, name, args.flags['force'] === 'true');
+    }
   }
 }
 

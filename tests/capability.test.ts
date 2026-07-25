@@ -65,11 +65,15 @@ describe('capabilityDescription', () => {
     expect(orch).not.toBe(leaf);
   });
 
-  it('prefers the http-server bucket over web-artefact when both would match (bucket order discipline)', () => {
-    // A kitchen-sink toolset has tools for both buckets. Bucket order
-    // puts http-server first so a Node builder is correctly labeled
-    // rather than silently demoted to a web-artefact builder by virtue
-    // of the web bucket appearing earlier.
+  it('labels a KITCHEN-SINK toolset (http + web families together) as general-purpose, not HTTP', () => {
+    // Regression for the clone-proliferation bug: the full executor set
+    // that dynamic children inherit via mergeTools satisfies BOTH the
+    // http bucket AND the web bucket. The old first-match rule labelled
+    // every such atom "Node HTTP server orchestrator/builder" — a lying
+    // specialty that made the domain-match rule refuse reuse for any
+    // non-HTTP task, so every CLI run spawned a fresh clone (Ammonia,
+    // CarbonDioxide, Glucose, Sucrose, Ethanol…). The honest label is
+    // general-purpose — a legitimate reuse target for ANY family.
     const kitchen = makeTools([
       'write_file',
       'read_file',
@@ -80,9 +84,30 @@ describe('capabilityDescription', () => {
       'start_static_server',
       'validate_html',
     ]);
-    const desc = capabilityDescription(kitchen, 1);
+    const leaf = capabilityDescription(kitchen, 1);
+    const orch = capabilityDescription(kitchen, 2);
+    expect(leaf).toMatch(/general-purpose builder \(web \+ HTTP \+ files\)/);
+    expect(orch).toMatch(/general-purpose orchestrator \(web \+ HTTP \+ files\)/);
+    expect(leaf).not.toMatch(/Node HTTP server builder/);
+    expect(orch).not.toMatch(/Node HTTP server orchestrator/);
+    expect(orch).not.toBe(leaf);
+  });
+
+  it('still prefers the http-server bucket when the toolset is http-flavoured WITHOUT the full web family', () => {
+    // Bucket order discipline survives the general-purpose rule: an
+    // http toolset that also carries start_static_server (but NOT
+    // validate_html — so the web-build+validate bucket does not match)
+    // stays a Node HTTP builder rather than degrading to static-site.
+    const httpish = makeTools([
+      'write_file',
+      'run_shell',
+      'fetch_url',
+      'start_node_server',
+      'start_static_server',
+    ]);
+    const desc = capabilityDescription(httpish, 1);
     expect(desc).toMatch(/Node HTTP server builder/);
-    expect(desc).not.toMatch(/single-file web artefact builder/);
+    expect(desc).not.toMatch(/general-purpose/);
   });
 
   it('falls back to write+serve when validate_html is missing (tier 1)', () => {
@@ -168,9 +193,23 @@ describe('looksTaskThemed', () => {
     expect(looksTaskThemed('L1 for subtask: fetch some URL')).toBe(true);
   });
 
-  it('flags descriptions longer than 140 chars as narrative', () => {
-    expect(looksTaskThemed('x'.repeat(141))).toBe(true);
+  it('flags descriptions longer than 200 chars as narrative', () => {
+    // 200, not the original 140: Opus/Sonnet-authored role seeds
+    // ("CLI/file project orchestrator: routes file-authoring leaves…")
+    // routinely run 150-190 chars, and at 140 nearly every legitimate
+    // seed was dropped in favour of the tool-derived label — which for
+    // kitchen-sink toolsets used to be the lying HTTP one.
+    expect(looksTaskThemed('x'.repeat(201))).toBe(true);
+    expect(looksTaskThemed('x'.repeat(180))).toBe(false);
     expect(looksTaskThemed('x'.repeat(50))).toBe(false);
+  });
+
+  it('honours a realistic 150-190 char planner role seed (regression: clone proliferation)', () => {
+    const plannerSeed =
+      'CLI/file project orchestrator: routes file-authoring and shell-verified build leaves to a tier-1 file scribe; verifies deliverables via node and npm probes, no HTTP serving';
+    expect(plannerSeed.length).toBeGreaterThan(140); // would have been dropped before
+    expect(plannerSeed.length).toBeLessThanOrEqual(200);
+    expect(looksTaskThemed(plannerSeed)).toBe(false);
   });
 
   it('does NOT flag capability-style descriptions', () => {
