@@ -175,30 +175,46 @@ async function main(): Promise<void> {
   console.log(`workspace: ${sandbox.root}`);
   console.log(`tools: ${toolDecls.map((t) => t.name).join(', ')}\n`);
 
-  // Bootstrap or reuse a builder L3 cell.
+  // Bootstrap or reuse a builder L3 cell. The system prompt is
+  // ARTEFACT-NEUTRAL on purpose: earlier revisions said "Prefer a
+  // single index.html when possible" and "the final output must
+  // include the exact URL from start_static_server" — a web bias
+  // baked into the PERSISTED L3 prompt that pressured every plan
+  // toward the serve+validate pattern regardless of the task's
+  // nature. The reuse branch refreshes the persisted prompt whenever
+  // this constant changes, so a stale Neuron cannot keep an old bias
+  // alive across runs (same idempotent-seeder pattern as the
+  // ensureCanonical* helpers).
+  const neuronSystemPrompt = [
+    'You are Neuron, a top-level cell that builds real apps end-to-end.',
+    'DELEGATION DISCIPLINE: you NEVER call tools yourself. You choose an L2 molecule (reuse or create) and hand the task over. The L2 will in turn route a focused leaf task to an L1 element; L1 is the ONLY tier that writes files, runs shell commands, starts servers and validates artefacts. This hierarchy keeps LLM cost low — do not try to do the work from here.',
+    'Produce runnable, self-contained artefacts shaped by the task itself: a single index.html for browser pages, a Node entry file for HTTP servers/APIs, plain script/config/doc files for CLI and file deliverables. Never impose one artefact shape on a task of a different nature.',
+    'The final output you return must state how the deliverable was verified (which probe ran and its result) and give its entry point: the served URL when a server is part of the deliverable, otherwise the main file path plus the command that runs it.',
+  ].join('\n');
   let l3Type = registry.listByTier(3).find((t) => t.name === 'Neuron');
   if (!l3Type) {
     l3Type = registry.create(3, {
       description:
         'A top-level cell that orchestrates real application builds by delegating strategy to L2 molecules; concrete side-effects happen only at L1.',
-      systemPrompt: [
-        'You are Neuron, a top-level cell that builds real apps end-to-end.',
-        'DELEGATION DISCIPLINE: you NEVER call tools yourself. You choose an L2 molecule (reuse or create) and hand the task over. The L2 will in turn route a focused leaf task to an L1 element; L1 is the ONLY tier that writes files, runs shell commands, starts servers or validates HTML. This hierarchy keeps LLM cost low — do not try to do the work from here.',
-        'Produce runnable, self-contained artefacts. Prefer a single index.html when possible.',
-        'The final output you return must include the exact URL the L1 obtained from start_static_server so the user can open it.',
-      ].join('\n'),
+      systemPrompt: neuronSystemPrompt,
       tools: toolDecls,
       params: { maxTokens: 16384 },
       createdBy: 'user',
     });
     console.log(`bootstrapped L3 cell: ${l3Type.name}`);
   } else {
-    // Always refresh the tools (executor set may have changed across runs).
+    // Always refresh the tools (executor set may have changed across
+    // runs) and re-align the system prompt with the current seed.
     l3Type = registry.patch(
       l3Type.name,
-      { addTools: toolDecls },
+      {
+        addTools: toolDecls,
+        ...(l3Type.systemPrompt !== neuronSystemPrompt
+          ? { systemPromptReplace: neuronSystemPrompt }
+          : {}),
+      },
       'build-app',
-      'refresh system tools'
+      'refresh system tools + seed prompt'
     );
     console.log(`reusing L3 cell: ${l3Type.name} (v${l3Type.version})`);
   }
@@ -277,12 +293,25 @@ async function main(): Promise<void> {
     recordSkill: (info) => recorder.recordSkillEvent(info),
   };
 
+  // Constraints are ARTEFACT-NEUTRAL on purpose. The original wording
+  // hardcoded the web pattern ("start_static_server ... validate_html ...")
+  // for every task — written for the Minesweeper demo, it forced a
+  // serve+validate phase onto non-web deliverables. Observed on the
+  // greet-cli live run: L3's prefilter flagged the constraints as
+  // "fundamentally incompatible" with a CLI task, then dutifully planned
+  // a phase 2 that served a directory listing just to satisfy them, and
+  // the learn path distilled that workaround into a junk skill. The
+  // verification-method choice belongs to the plan prompts'
+  // "VERIFICATION MATCHES THE ARTEFACT" rule, not to the harness.
   const task: Task = {
     description: goal,
     constraints: [
       'The L1 worker must actually create the files on disk via the write_file tool.',
-      'The L1 worker must actually start the server via the start_static_server tool and return that URL.',
-      'The L1 worker must call validate_html on the returned URL and iterate (read + rewrite) until there are zero console.error messages and zero failed requests.',
+      'The deliverable must be VERIFIED with the probe matching its nature: ' +
+        'browser-rendered pages via start_static_server + validate_html, iterating ' +
+        '(read + rewrite) until zero console.error messages and zero failed requests; ' +
+        'HTTP servers/APIs via start_node_server + fetch_url probes; ' +
+        'CLI tools, scripts and configs via run_shell executing the artefact and checking its output.',
       'Keep the implementation small and self-contained.',
     ],
   };
@@ -364,7 +393,7 @@ async function main(): Promise<void> {
       `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
     );
     console.log(
-      '\n✓ app built. The static server should still be running inside the sandbox.'
+      '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
     );
     console.log('  Press Ctrl+C when you are done testing.');
     // Park forever until a signal comes in.
