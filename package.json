@@ -12,11 +12,14 @@
     "example:research": "tsx src/examples/research-brief.ts",
     "example:build": "tsx src/examples/build-app.ts",
     "registry": "tsx src/cli/registry.ts",
+    "skills": "tsx src/cli/skills.ts",
     "viz": "tsx src/viz/server.ts",
     "viz:demo": "tsx src/viz/demo.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.60.0",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "@anthropic-ai/sdk": "^0.115.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.3.0",
     "jsonrepair": "^3.14.0",
     "puppeteer": "^24.41.0",

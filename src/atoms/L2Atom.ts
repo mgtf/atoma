@@ -32,6 +32,7 @@ import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
 import {
   prefilterStrategy,
+  shouldTrustSkill,
   shouldTrustType,
   trustedApproval,
   SKILL_PREFILTER_SYSTEM_PROMPT,
@@ -243,6 +244,35 @@ function scriptExtension(language: 'node' | 'python' | 'bash'): string {
   if (language === 'node') return 'js';
   if (language === 'python') return 'py';
   return 'sh';
+}
+
+/**
+ * Strict parse of the script-skill stdout contract: the LAST non-empty
+ * line must be a JSON object with an `output` field and a string
+ * `summary`. Anything else returns null — the deterministic dispatch
+ * treats a missing envelope as "script off-contract" and falls back to
+ * the LLM loop rather than guessing at a wrap. (The LLM path stays
+ * tolerant: `skillContextBlock` tells the L1 how to wrap plain stdout.)
+ */
+function parseScriptEnvelope(stdout: string): { output: unknown; summary: string } | null {
+  const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const last = lines[lines.length - 1];
+  if (!last) return null;
+  try {
+    const obj = JSON.parse(last) as Record<string, unknown>;
+    if (
+      obj !== null &&
+      typeof obj === 'object' &&
+      !Array.isArray(obj) &&
+      'output' in obj &&
+      typeof obj['summary'] === 'string'
+    ) {
+      return { output: obj['output'], summary: obj['summary'] };
+    }
+  } catch {
+    // not JSON — off-contract
+  }
+  return null;
 }
 
 /**
@@ -522,6 +552,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `    valid when a parent L3 already split into a phase you must yourself`,
       `    chain (e.g. "build artefact then run review"); usually L3 owns this.`,
       ``,
+      `== VERIFICATION MATCHES THE ARTEFACT ==`,
+      `When a subtask verifies work, its description must name the probe`,
+      `matching the deliverable: browser-rendered pages → start_static_server`,
+      `+ validate_html; HTTP servers/APIs → start_node_server + fetch_url;`,
+      `CLI tools / scripts / configs / docs → run_shell executing the`,
+      `artefact (node/npm) plus reading files back. NEVER send a non-browser`,
+      `artefact into a serve+validate_html loop — the worker would fabricate`,
+      `an index.html just to have something to serve.`,
+      ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
       `  - "create": design a new L1 element and register it (provide a seed)`,
@@ -722,6 +761,43 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       skillMatchAttempted = true;
       const skills = await this.matchSkill(l1Type.name, subTask, ctx);
       if (skills) {
+        ctx.logger.debug(
+          `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
+        );
+        ctx.recordSkill?.({
+          op: 'match',
+          l1Name: l1Type.name,
+          skillId: skills.skill.id,
+          actorName: this.name,
+          actorTier: 2,
+          reasoning: skills.reasoning,
+        });
+
+        // Deterministic dispatch (#C4). A TRUSTED `kind: 'script'` skill
+        // (3+ clean runs, zero failures — every freshly promoted script
+        // qualifies since promotion requires 5/0) is executed DIRECTLY
+        // via write_file + run_shell: zero LLM calls, no L1 plan/execute,
+        // no validators. The script's exit code + envelope contract
+        // ({"output", "summary"} as the last stdout line) IS the ground
+        // truth. Any deviation — non-zero exit, missing envelope, tool
+        // error — falls through to the normal inject-and-supervise path
+        // below, so the fast-path can never make a run fail that the LLM
+        // loop would have saved. Kill switch: ATOMA_SKILL_DIRECT=0.
+        if (
+          skills.skill.kind === 'script' &&
+          shouldTrustSkill(skills.skill) &&
+          ctx.tools &&
+          process.env['ATOMA_SKILL_DIRECT'] !== '0'
+        ) {
+          const direct = await this.runScriptSkillDirect(
+            skills.skill,
+            l1Type.name,
+            subTask,
+            ctx
+          );
+          if (direct) return direct;
+        }
+
         l1.injectContext(
           skillContextBlock({
             id: skills.skill.id,
@@ -731,22 +807,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           })
         );
         l1.setActiveSkill(skills.skill.id);
-        ctx.logger.debug(
-          `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
-        );
         // Match + inject are emitted as a paired event sequence so the
         // viz can render either the match decision alone (rare) or the
         // full inject side-effect (common). Keeping them separate also
         // lets a future replay engine elide the inject if it wants to
         // re-run the model with a fresh body.
-        ctx.recordSkill?.({
-          op: 'match',
-          l1Name: l1Type.name,
-          skillId: skills.skill.id,
-          actorName: this.name,
-          actorTier: 2,
-          reasoning: skills.reasoning,
-        });
         ctx.recordSkill?.({
           op: 'inject',
           l1Name: l1Type.name,
@@ -1208,6 +1273,95 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const matched = skills.find((s) => s.id === outcome.target);
     if (!matched) return null;
     return { skill: matched, reasoning: outcome.reasoning };
+  }
+
+  /**
+   * #C4 — deterministic dispatch of a trusted `kind: 'script'` skill.
+   *
+   * Mirrors the exact calling convention `skillContextBlock` teaches the
+   * L1 (same filename, same interpreter, same argv[2] = JSON-encoded
+   * subtask description, same last-stdout-line envelope), but performs
+   * the two tool calls DIRECTLY instead of paying an LLM round-trip to
+   * have Haiku wire them. Returns null on ANY deviation — tool error,
+   * non-zero exit, missing/invalid envelope — so the caller falls back
+   * to the normal inject-and-supervise path. A deterministic failure
+   * deliberately does NOT bump the skill's failure counter: the LLM
+   * loop gets its shot first, and only a full supervise-loop escalation
+   * counts as a skill failure (existing onFailed semantics, which also
+   * drive script→llm demotion).
+   *
+   * On success the skill's success counter bumps here (the supervise
+   * loop never runs, so its onApproved hook can't). Atom-type counters
+   * are intentionally NOT touched — the L1 model never executed, so the
+   * run proves nothing about the atom type.
+   */
+  private async runScriptSkillDirect(
+    skill: Skill,
+    l1Name: string,
+    subTask: Task,
+    ctx: RunContext
+  ): Promise<Result | null> {
+    if (!skill.language) return null;
+    const filename = `_skill_${skill.id}.${scriptExtension(skill.language)}`;
+    const interpreter = skill.language === 'python' ? 'python3' : skill.language;
+    try {
+      await ctx.tools!.execute('write_file', { path: filename, content: skill.body });
+      const res = (await ctx.tools!.execute('run_shell', {
+        command: interpreter,
+        args: [filename, JSON.stringify(subTask.description)],
+      })) as { exitCode?: number; stdout?: string; stderr?: string } | null;
+      if (!res || res.exitCode !== 0 || typeof res.stdout !== 'string') {
+        ctx.logger.debug(
+          `[${this.name}] direct dispatch of ${skill.id} failed (exit=${res?.exitCode ?? '?'}; stderr=${(res?.stderr ?? '').slice(0, 200)}) — falling back to the LLM loop`
+        );
+        return null;
+      }
+      const envelope = parseScriptEnvelope(res.stdout);
+      if (!envelope) {
+        ctx.logger.debug(
+          `[${this.name}] direct dispatch of ${skill.id}: stdout carried no {"output","summary"} envelope — falling back to the LLM loop`
+        );
+        return null;
+      }
+      this.skillRegistry?.recordSuccess(l1Name, skill.id);
+      ctx.recordSkill?.({
+        op: 'direct',
+        l1Name,
+        skillId: skill.id,
+        actorName: this.name,
+        actorTier: 2,
+        reasoning: `deterministic ${skill.language} run: exit 0, envelope ok (${res.stdout.length} chars stdout)`,
+      });
+      ctx.recordSkill?.({
+        op: 'success',
+        l1Name,
+        skillId: skill.id,
+        actorName: this.name,
+        actorTier: 2,
+        reasoning: 'direct dispatch succeeded',
+      });
+      ctx.logger.debug(
+        `[${this.name}] skill ${skill.id} ran via deterministic dispatch (0 LLM calls)`
+      );
+      return {
+        output: envelope.output,
+        summary: envelope.summary,
+        trace: [
+          {
+            kind: 'execute',
+            ts: new Date().toISOString(),
+            atom: l1Name,
+            payload: { directSkillDispatch: skill.id, interpreter, filename },
+          },
+        ],
+        producedBy: { tier: 1, name: l1Name, viaFallback: false },
+      };
+    } catch (err) {
+      ctx.logger.debug(
+        `[${this.name}] direct dispatch of ${skill.id} threw: ${(err as Error).message} — falling back to the LLM loop`
+      );
+      return null;
+    }
   }
 
   private resolveL1ForSubtask(

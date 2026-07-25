@@ -160,12 +160,25 @@ export interface VizTrustEvent {
  *                validator diagnosis as `reasoning`.
  *   - 'success'  / 'failure'  Trust counter bumped. Mirrors the
  *                onApproved / onFailed hook outcomes.
+ *   - 'direct'   Trusted `kind: 'script'` skill executed via the
+ *                DETERMINISTIC dispatch fast-path (write_file +
+ *                run_shell, zero LLM calls — no L1 plan/execute, no
+ *                validators). Carries the run outcome as `reasoning`.
  */
 export interface VizSkillEvent {
   id: string;
   ts: number;
   kind: 'skill';
-  op: 'match' | 'inject' | 'learn' | 'update' | 'success' | 'failure' | 'promote' | 'demote';
+  op:
+    | 'match'
+    | 'inject'
+    | 'learn'
+    | 'update'
+    | 'success'
+    | 'failure'
+    | 'promote'
+    | 'demote'
+    | 'direct';
   /** L1 atom-type name the skill is namespaced under. */
   l1Name: string;
   /** Stable kebab-case skill id within that namespace. */

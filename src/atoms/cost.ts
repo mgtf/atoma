@@ -57,6 +57,19 @@ export function shouldTrustType(type: AtomType): boolean {
   return type.failures === 0 && type.successes >= TRUST_THRESHOLD_SUCCESSES;
 }
 
+/**
+ * Same trust contract, applied to a SKILL's own counters. Gates the
+ * deterministic dispatch of `kind: 'script'` skills in `L2.runSubtask`:
+ * a trusted script runs via write_file + run_shell with ZERO LLM calls
+ * (no L1 plan/execute, no validators). Note that promotion already
+ * requires TRUST_PROMOTE_THRESHOLD_SUCCESSES (5) clean runs, so every
+ * freshly promoted script qualifies immediately; hand-written scripts
+ * must first earn 3 clean runs through the normal LLM loop.
+ */
+export function shouldTrustSkill(skill: { successes: number; failures: number }): boolean {
+  return skill.failures === 0 && skill.successes >= TRUST_THRESHOLD_SUCCESSES;
+}
+
 /** Synthetic verdict returned by the trust fast-path in place of an LLM call. */
 export function trustedApproval(type: AtomType): PositiveVerdict {
   return {

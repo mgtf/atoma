@@ -827,6 +827,9 @@ function renderSkillEventDetail(el, ev) {
     update: 'Skill body révisé après échec (Sonnet)',
     success: 'Compteur succès incrémenté',
     failure: 'Compteur échec incrémenté',
+    promote: 'Skill promue llm → script (compile Sonnet)',
+    demote: 'Skill rétrogradée script → llm (fallback restauré)',
+    direct: 'Script exécuté en dispatch déterministe (0 appel LLM)',
   }[ev.op] ?? ev.op;
   el.appendChild(h('h2', {}, opLabel));
   const sub = [];

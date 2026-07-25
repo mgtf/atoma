@@ -1,8 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { resolve } from 'node:path';
 import { setMaxListeners } from 'node:events';
+import { makeAnthropicClient } from './auth.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
+import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
@@ -36,19 +37,22 @@ interface CliArgs {
   goal?: string;
   noLearnSkills: boolean;
   noPromoteSkills: boolean;
+  noDirectSkills: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
   let goal: string | undefined;
   let noLearnSkills = false;
   let noPromoteSkills = false;
+  let noDirectSkills = false;
   for (const a of argv) {
     if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a === '--no-promote-skills') noPromoteSkills = true;
+    else if (a === '--no-direct-skills') noDirectSkills = true;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, noLearnSkills, noPromoteSkills };
+  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills };
 }
 
 async function main(): Promise<void> {
@@ -61,13 +65,9 @@ async function main(): Promise<void> {
   // silently substitutes with its configured default model.
   const provider = (process.env['ATOMA_LLM'] ?? 'anthropic').toLowerCase();
   const useOllama = provider === 'ollama';
-  const apiKey = process.env['ANTHROPIC_API_KEY'];
-  if (!useOllama && !apiKey) {
-    console.error(
-      'ANTHROPIC_API_KEY is required (or set ATOMA_LLM=ollama to use a local Ollama model).'
-    );
-    process.exit(1);
-  }
+  // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
+  // Code installation (Claude Agent SDK) — subscription auth, no API key.
+  const useClaudeCli = provider === 'claude-cli' || provider === 'claude';
 
   const args = parseArgs(process.argv.slice(2));
   const goal =
@@ -107,6 +107,22 @@ async function main(): Promise<void> {
       'skill llm→script promotion: ON (default — pass --no-promote-skills to disable)'
     );
   }
+  // Deterministic dispatch of TRUSTED kind:script skills (#C4). A script
+  // skill with 3+ clean runs executes via write_file + run_shell with
+  // ZERO LLM calls; any deviation falls back to the normal LLM loop.
+  // Unlike learn/promote this is a kill switch, not an opt-in — the lib
+  // enables it whenever ATOMA_SKILL_DIRECT !== '0', because the path
+  // costs nothing and is gated by trust counters.
+  if (args.noDirectSkills) {
+    process.env['ATOMA_SKILL_DIRECT'] = '0';
+    console.log('trusted script direct dispatch: off (--no-direct-skills)');
+  } else if (process.env['ATOMA_SKILL_DIRECT'] === '0') {
+    console.log('trusted script direct dispatch: off (ATOMA_SKILL_DIRECT=0)');
+  } else {
+    console.log(
+      'trusted script direct dispatch: ON (default — pass --no-direct-skills to disable)'
+    );
+  }
 
   // Use a dedicated DB + workspace for build runs so we don't interfere with
   // the research-brief example's registry or clutter the repo root.
@@ -119,18 +135,24 @@ async function main(): Promise<void> {
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   const registry = new RecordingRegistry(db, recorder);
-  // Anthropic SDK is still constructed when ollama is selected — it
-  // stays unused at inference time but L3.fromType accepts an optional
-  // Anthropic client for its Opus-resolution step, and we pass
-  // `undefined` when on the Ollama path so we never touch the network.
-  const anthropic = useOllama ? undefined : new Anthropic({ apiKey: apiKey! });
+  // The Anthropic SDK client only exists on the direct-API path — it
+  // feeds L3.fromType's Opus-resolution step. On the ollama and
+  // claude-cli paths we pass `undefined` so we never touch the API
+  // (L3 falls back to FALLBACK_OPUS, which each provider then maps to
+  // its own model). Credential resolution happens inside
+  // makeAnthropicClient (API key → ANTHROPIC_AUTH_TOKEN → `ant auth
+  // login` CLI profile; ATOMA_AUTH=cli drops a stale exported key so
+  // the profile wins). Exits with guidance if nothing resolves.
+  const anthropic = useOllama || useClaudeCli ? undefined : makeAnthropicClient();
   const metrics = new InMemoryMetrics();
   const baseClient = useOllama
     ? new OllamaLlmClient({
         baseUrl: process.env['OLLAMA_BASE_URL'],
         defaultModel: process.env['OLLAMA_MODEL'],
       })
-    : new AnthropicLlmClient(anthropic!);
+    : useClaudeCli
+      ? new ClaudeCliLlmClient()
+      : new AnthropicLlmClient(anthropic!);
   const llm = new MetricsLlmClient(
     new RecordingLlmClient(baseClient, recorder),
     metrics
@@ -138,7 +160,9 @@ async function main(): Promise<void> {
   console.log(
     useOllama
       ? `llm provider: ollama — ${process.env['OLLAMA_MODEL'] ?? 'glm-5.1:cloud'} @ ${process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'}`
-      : `llm provider: anthropic`
+      : useClaudeCli
+        ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${process.env['ATOMA_CLAUDE_MODEL'] ? ` (overridden: ${process.env['ATOMA_CLAUDE_MODEL']})` : ''}`
+        : `llm provider: anthropic`
   );
 
   const sandbox = new ToolSandbox(workspaceRoot);

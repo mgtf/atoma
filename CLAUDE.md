@@ -22,6 +22,11 @@ npm run registry -- list --tier 2
 npm run registry -- show Hydrogen
 npm run registry -- top --by failure  # sort by failures; also success|ratio
 npm run registry -- --db ./atoma-build.db list   # override DB path
+
+npm run skills -- list                # all skills: kind, counters, refusal stamps
+npm run skills -- list --l1 Helium
+npm run skills -- show Helium scaffold-node-ssr-sqlite-api
+npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + clear refusal
 ```
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
@@ -332,6 +337,20 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   skips the auxiliary trailer for those tools. Without the skip,
   CANONICAL_L2_HTTP_DESCRIPTION could not stay in sync with
   `capabilityDescription(httpTools, 2)`.
+- **Plan-time verification is ARTEFACT-MATCHED.** Both plan prompts
+  (`L3Atom.plan`, `L2Atom.plan`) carry a `== VERIFICATION MATCHES THE
+  ARTEFACT ==` block: browser-rendered pages → start_static_server +
+  validate_html; HTTP servers/APIs → start_node_server + fetch_url;
+  CLI tools / scripts / configs / docs → run_shell executing the
+  artefact + file read-back, with verification usually folded INTO
+  the build phase. Added after the clock-cli live run (2026-07-25)
+  where the Opus plan gave a Node CLI a "serve + validate_html"
+  phase 2 — Hydrogen burned 9 failed static-server boots and
+  fabricated a parasitic index.html just to have something to serve
+  (~half the run's calls wasted). L3's own plan has NO validator
+  above it (there is no L4), so the plan prompt is the only place
+  this class of defect can be stopped. Do not trim the block; it's
+  covered by `tests/plan-verification-guidance.test.ts`.
 - **Bucket-aware narrow prompts.** `buildNarrowL1Prompt(subtask,
   childTools)` in `L2Atom.ts` and `buildNarrowL2Prompt(subtask,
   childTools)` in `L3Atom.ts` pick their tool-sequence body from the
@@ -494,8 +513,10 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   failure counter, then `demoteToLlm` reads `_fallback.md` and
   rewrites SKILL.md back to `kind: llm` with the original body. The
   `failures > 0` clause inside `tryPromoteSkill` then blocks
-  accidental re-promotion until the operator manually resets the
-  counters in `_meta.json`. Gated by `ATOMA_SKILL_PROMOTE` env var:
+  accidental re-promotion until the operator resets the counters
+  (`npm run skills -- reset <l1> <id>` — also clears the
+  `promotionRefusedAt` compile-refusal stamp, the other permanent
+  dead-end). Gated by `ATOMA_SKILL_PROMOTE` env var:
   ON by default in `build-app.ts` (toggle with `--no-promote-skills`),
   OFF in the lib so unit-test runs don't make stray Sonnet calls.
   Marginal cost is ~1 Sonnet call (~$0.01) per promotion event.
@@ -503,17 +524,43 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   future re-promotion (post-counter-reset) can compare against the
   historical body.
 
-- **`kind: 'script'` skills execute via tool-loop, not server-side
-  invocation.** `skillContextBlock` injects an active-skill block
-  whose body tells the L1 to: (1) extract CLI args from the subtask
-  description, (2) `write_file _skill_<id>.<ext>` with the script
-  body verbatim, (3) `run_shell <interpreter> _skill_<id>.<ext>
-  [args...]`, (4) return the stdout. The L1 is still in the loop —
-  but for ONE LLM round-trip + 2 tool calls regardless of script
-  length, vs the N-round LLM tool-loop a `kind: llm` recipe drives.
+- **`kind: 'script'` skills execute via tool-loop while UNTRUSTED,
+  deterministically once TRUSTED (#C4).** Two paths:
+    - UNTRUSTED (successes < 3, or any failure): `skillContextBlock`
+      injects an active-skill block whose body tells the L1 to: (1)
+      pass the JSON-encoded subtask description as argv[2], (2)
+      `write_file _skill_<id>.<ext>` with the script body verbatim,
+      (3) `run_shell <interpreter> _skill_<id>.<ext> [args...]`,
+      (4) return the stdout envelope. ONE LLM round-trip + 2 tool
+      calls regardless of script length.
+    - TRUSTED (`shouldTrustSkill` in `cost.ts`: 3+ successes, 0
+      failures — every freshly promoted script qualifies since
+      promotion needs 5/0): `L2.runSubtask` short-circuits into
+      `runScriptSkillDirect`, which performs the SAME two tool calls
+      itself. ZERO LLM calls — no L1 plan/execute, no validators.
+      The exit code + stdout envelope IS the ground truth. ANY
+      deviation (non-zero exit, missing envelope, tool error) falls
+      back to the untrusted path above, and a deterministic failure
+      deliberately does NOT bump the skill failure counter — only a
+      full supervise-loop escalation counts (that's also what drives
+      script→llm demotion). On success the dispatch bumps the SKILL
+      counter itself (the loop's onApproved never runs) and leaves
+      atom-type counters untouched (the L1 model never executed).
+      Kill switch: `ATOMA_SKILL_DIRECT=0` (or `--no-direct-skills`
+      in `build-app.ts`); default ON.
   The script's stdout MUST be a single JSON line of shape
   `{"output": ..., "summary": "<one sentence with embedded == GROUND
-  TRUTH == block>"}`; `compileSkillToScript`'s prompt enforces this.
+  TRUTH == block>"}`; `compileSkillToScript`'s prompt enforces this,
+  and `parseScriptEnvelope` in `L2Atom.ts` is the strict parse the
+  deterministic path applies (LLM path stays tolerant — the L1 is
+  told how to wrap plain stdout).
+
+- **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
+  `show <l1> <id>`, `reset <l1> <id>`. Works against any store via
+  `--dir` or `ATOMA_SKILLS_DIR`. `reset` zeroes counters AND clears
+  `promotionRefusedAt` — the sanctioned escape hatch for the two
+  promotion dead-ends (`failures > 0` after a demotion; a compile
+  refusal on an unchanged body).
 
 ## LLM interaction conventions
 
@@ -549,6 +596,44 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       — `build-app.ts` passes `anthropic: undefined` to
       `L3Atom.fromType`, so L3 uses the `FALLBACK_OPUS` id string
       which the Ollama client then maps to `defaultModel`.
+- **Alternative provider: Claude Code CLI (`src/core/llmClaudeCli.ts`).**
+  `ClaudeCliLlmClient` routes every LLM call through the LOCAL Claude
+  Code installation via the Claude Agent SDK — subscription auth
+  (`claude /login`), NO API key. Activate via `ATOMA_LLM=claude-cli`.
+  Implementation notes:
+    - `req.model` maps to CLI ALIASES by tier (/haiku/→'haiku',
+      /sonnet/→'sonnet', /opus/→'opus') because subscription-served
+      model versions shift while aliases stay valid. Override all
+      tiers with `ATOMA_CLAUDE_MODEL`. The tier call-graph shape
+      holds; the exact models are whatever Claude Code resolves.
+    - Tools are bridged through an IN-PROCESS MCP server whose
+      handlers call `req.executor` directly — sandbox, truncation
+      (`truncateToolResultContent`), and `onToolInvocation` all
+      apply. Built-ins are disabled (`tools: []`) so the model can
+      ONLY use atoma's declared tools (the #8a scope gate at harness
+      level); `toolAliases` maps bare names (write_file) onto MCP
+      names (mcp__atoma__write_file) so prompts stay provider-neutral.
+    - `settingSources: []` keeps the subprocess in SDK isolation —
+      no CLAUDE.md / project settings bleed into atom prompts. The
+      subprocess env DROPS any exported ANTHROPIC_API_KEY so a stale
+      key can't shadow the CLI's OAuth login.
+    - `@anthropic-ai/claude-agent-sdk` peers on zod@^4 while atoma is
+      on zod@3 — installed with `--legacy-peer-deps`, and the bridge
+      deliberately avoids the SDK's zod4-only `tool()` helper by
+      registering tools on a raw `McpServer` (zod3-compatible) via
+      `jsonSchemaToZodShape`. Don't switch to `tool()` without
+      migrating the repo to zod 4.
+    - Costs printed by metrics are API-price equivalents of the token
+      counts; on a subscription nothing is billed per token. Each
+      `complete()` spawns a CLI subprocess — runs are slower than the
+      direct API (~2-5s overhead per call).
+- **Example auth (`src/examples/auth.ts`).** `makeAnthropicClient`
+  builds the direct-API client from the SDK's native credential chain:
+  ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → `ant auth login` OAuth
+  profile (zero-arg `new Anthropic()`, SDK ≥0.93). `ATOMA_AUTH=cli`
+  drops a set ANTHROPIC_API_KEY first so a stale exported key can't
+  shadow a working CLI profile (the #1 auth trap — the chain puts the
+  env key first).
 - **All JSON parsing from LLM output lives in `src/atoms/json.ts`**. Shared helpers:
   - `parseWith(schema, text)` — schema-validated parse of a single JSON payload.
   - `extractJson(text)` — robust JSON extraction tolerant of prose/fence wrapping.

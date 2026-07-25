@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { setMaxListeners } from 'node:events';
+import { makeAnthropicClient } from './auth.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
@@ -18,18 +18,14 @@ const consoleLogger: Logger = {
 };
 
 async function main(): Promise<void> {
-  const apiKey = process.env['ANTHROPIC_API_KEY'];
-  if (!apiKey) {
-    console.error('ANTHROPIC_API_KEY is required. Copy .env.example to .env and fill it.');
-    process.exit(1);
-  }
-
   const dbPath = process.env['ATOMA_DB_PATH'] ?? './atoma.db';
   const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   const registry = new RecordingRegistry(db, recorder);
-  const anthropic = new Anthropic({ apiKey });
+  // API key → ANTHROPIC_AUTH_TOKEN → `ant auth login` CLI profile;
+  // ATOMA_AUTH=cli drops a stale exported key so the profile wins.
+  const anthropic = makeAnthropicClient();
   const metrics = new InMemoryMetrics();
   const llm = new MetricsLlmClient(
     new RecordingLlmClient(new AnthropicLlmClient(anthropic), recorder),

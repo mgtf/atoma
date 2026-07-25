@@ -260,6 +260,44 @@ export class SkillRegistry {
     });
   }
 
+  /**
+   * Operator-facing counter reset (CLI `skills reset`). Zeroes both
+   * counters AND drops `promotionRefusedAt` — the reset expresses an
+   * explicit operator judgment that the skill deserves a fresh start,
+   * which includes a fresh Sonnet compile attempt once it re-earns the
+   * promotion threshold. This is the only sanctioned way out of the
+   * two dead-ends the automatic gates create: `failures > 0` blocks
+   * re-promotion forever after a demotion, and a compile-refusal stamp
+   * parks an unchanged body indefinitely.
+   *
+   * Returns the fresh meta, or null when the skill doesn't exist (we
+   * never create a meta file for a non-existent skill).
+   */
+  resetCounters(l1Name: string, skillId: string): SkillMeta | null {
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return null;
+    const meta: SkillMeta = { successes: 0, failures: 0, updatedAt: nowIso() };
+    writeFileSync(join(dir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+    return meta;
+  }
+
+  /**
+   * Enumerate the L1 namespaces that have at least one skill folder.
+   * Used by the skills CLI to sweep the whole store.
+   */
+  listNamespaces(): string[] {
+    if (!existsSync(this.rootDir)) return [];
+    return readdirSync(this.rootDir)
+      .filter((entry) => {
+        try {
+          return statSync(join(this.rootDir, entry)).isDirectory();
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => a.localeCompare(b));
+  }
+
   /** Bump the success counter for a known skill (no-op if not found). */
   recordSuccess(l1Name: string, skillId: string): void {
     this.bump(l1Name, skillId, 'success');
