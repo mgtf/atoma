@@ -73,6 +73,6 @@ npm run viz                 # web UI for the persisted run traces under ./runs
 ## Model auto-update
 
 `L3Atom.fromType(type, registry, anthropic)` calls `client.models.list()` and picks
-the most recently released Opus. Falls back to `claude-opus-4-7` on error or when
+the most recently released Opus. Falls back to `claude-opus-5` on error or when
 no Opus is listed. L1 and L2 pin to `claude-haiku-4-5-20251001` and
-`claude-sonnet-4-6`.
+`claude-sonnet-5`.

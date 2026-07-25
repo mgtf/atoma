@@ -21,6 +21,14 @@ export interface GenerationParams {
   temperature?: number;
   maxTokens?: number;
   topP?: number;
+  /**
+   * Reasoning-depth hint (`output_config: {effort}`) for models that
+   * support it (Sonnet 4.6+/5, Opus 4.5+/5 — the client gates via
+   * `modelSupportsEffort`; Haiku rejects the param). Plan/strategy call
+   * sites pin `'medium'`: those models default to `'high'`, the most
+   * expensive setting, and a routing JSON pair does not need it.
+   */
+  effort?: 'low' | 'medium' | 'high';
 }
 
 /**

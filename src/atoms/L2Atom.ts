@@ -345,8 +345,9 @@ export function buildNarrowL1Prompt(
       `  2. start_static_server to serve it (port 0 = OS-assigned is fine)`,
       `  3. validate_html on the returned URL with appropriate interactions`,
       `     and a smoke check that asserts the key state transitions`,
-      `  4. if validation fails: read_file, diagnose, write_file with the`,
-      `     fix, re-validate. Up to 4 iterations.`,
+      `  4. if validation fails: read_file, diagnose, apply the fix with`,
+      `     edit_file (exact str_replace — no whole-file rewrite), re-validate.`,
+      `     Up to 4 iterations.`,
       `  5. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
       ``,
       SMOKE_DESIGN_GUIDANCE,
@@ -650,7 +651,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS },
+      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
       signal: ctx.signal,
     });
 

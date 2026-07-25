@@ -166,6 +166,7 @@ describe('InMemoryToolRegistry', () => {
       expect(reg.has('write_file')).toBe(true);
       expect(reg.has('nonexistent')).toBe(false);
       expect(reg.declarations().map((t) => t.name).sort()).toEqual([
+        'edit_file',
         'fetch_url',
         'list_files',
         'read_file',

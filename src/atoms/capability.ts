@@ -301,8 +301,14 @@ export const CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER = 'bootstrap-canonical-filesc
  * along in both scopes — they don't drive bucket selection (no bucket
  * requires them) but L1s genuinely need them in practice.
  */
+// `edit_file` (targeted str_replace) is in EVERY bucket scope: revision
+// cycles used to re-emit whole files through write_file — full content
+// billed as output tokens on each retouch, the dominant spend of long
+// L1 tool loops. It does not participate in bucket DETECTION (no
+// CAPABILITY_BUCKETS.required list mentions it), so labels are unchanged.
 const WEB_L1_TOOL_SCOPE: readonly string[] = [
   'write_file',
+  'edit_file',
   'read_file',
   'list_files',
   'start_static_server',
@@ -311,6 +317,7 @@ const WEB_L1_TOOL_SCOPE: readonly string[] = [
 
 const HTTP_L1_TOOL_SCOPE: readonly string[] = [
   'write_file',
+  'edit_file',
   'read_file',
   'list_files',
   'run_shell',
@@ -327,6 +334,7 @@ const FILESCRIBE_L1_TOOL_SCOPE: readonly string[] = [
   // start_node_server / fetch_url (not an HTTP service). The bucket
   // purpose is documented in the canonical prompt below.
   'write_file',
+  'edit_file',
   'read_file',
   'list_files',
   'run_shell',
@@ -459,6 +467,11 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `Call tools sequentially to produce your single output. Return a structured`,
   `{"output", "summary"} JSON at the end.`,
   ``,
+  `EDIT DISCIPLINE: when FIXING or revising an existing file, use edit_file`,
+  `(exact str_replace) instead of re-emitting the whole file through`,
+  `write_file — you only pay for the changed span. Reserve write_file for`,
+  `the FIRST version of a file or a genuine full rewrite.`,
+  ``,
   `Scope boundary: if the subtask seems to require coordinating with other`,
   `subtasks (reading their outputs, sharing state) — that's a planning bug at`,
   `L2/L3, not an excuse to expand scope. Surface it in your summary instead of`,
@@ -490,8 +503,10 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `  3. run_shell   npm install    (give it time — first install can take 20s+)`,
   `  4. start_node_server entry=<entry>.js`,
   `  5. fetch_url   http://localhost:<port>/<endpoint>  for each route you expose`,
-  `  6. if a probe fails: read_file the source, diagnose, write_file the fix,`,
-  `     kill+respawn via a second start_node_server call. Up to 4 iterations.`,
+  `  6. if a probe fails: read_file the source, diagnose, apply the fix with`,
+  `     edit_file (exact str_replace — do NOT re-emit the whole file through`,
+  `     write_file for a small fix), kill+respawn via a second`,
+  `     start_node_server call. Up to 4 iterations.`,
   `  7. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
   ``,
   `HARD RULE on the LISTENING_ON_PORT marker: your server MUST print the`,
@@ -606,7 +621,9 @@ export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `  3. run_shell   (optional)    (quick structural validation, e.g.`,
   `                                \`node -e 'JSON.parse(require("fs").readFileSync("config.json","utf8"))'\``,
   `                                or \`python3 -c 'import json; json.load(open("config.json"))'\`)`,
-  `  4. return the JSON envelope per the RESULT-REPORTING CONTRACT below.`,
+  `  4. to FIX an issue in a file you already wrote: edit_file (exact`,
+  `     str_replace) — do NOT re-emit the whole file through write_file.`,
+  `  5. return the JSON envelope per the RESULT-REPORTING CONTRACT below.`,
   ``,
   `Scope boundary — this is a NARROW bucket:`,
   `  - You do NOT start servers (no start_node_server, no start_static_server).`,

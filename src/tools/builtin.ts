@@ -1,9 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Tool, Logger } from '../core/types.js';
-import type { ToolSandbox } from './sandbox.js';
+import { sandboxChildEnv, type ToolSandbox } from './sandbox.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
 const execFileAsync = promisify(execFile);
@@ -46,6 +46,81 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
       writeFileSync(abs, content, 'utf8');
       opts.logger?.info(`[tool:write_file] ${path} (${content.length} bytes)`);
       return { ok: true, path, bytes: content.length };
+    },
+  };
+}
+
+/**
+ * Targeted in-place edit — the cost-discipline counterpart to
+ * `write_file`. Revision cycles used to re-emit ENTIRE files through
+ * `write_file` (full content billed as output tokens on every retouch,
+ * the dominant spend of long L1 tool loops); a str_replace edit only
+ * emits the changed spans. Contract mirrors the classic str_replace
+ * tool: `old_string` must match EXACTLY and be UNIQUE in the file —
+ * 0 matches or >1 matches error out with a coaching message (pass
+ * `replace_all: true` to substitute every occurrence instead).
+ */
+export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
+  return {
+    declaration: {
+      name: 'edit_file',
+      description:
+        'Replace an exact text span inside an existing workspace file. PREFER this over write_file when MODIFYING a file — you only emit the changed text, not the whole content. `old_string` must match exactly (including whitespace) and be unique in the file; set replace_all=true to substitute every occurrence. Use relative paths only.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative file path inside the workspace.' },
+          old_string: {
+            type: 'string',
+            description: 'Exact existing text to replace (must be unique unless replace_all).',
+          },
+          new_string: {
+            type: 'string',
+            description: 'Replacement text (may be empty to delete the span).',
+          },
+          replace_all: {
+            type: 'boolean',
+            description: 'Replace every occurrence instead of requiring a unique match.',
+          },
+        },
+        required: ['path', 'old_string', 'new_string'],
+      },
+    },
+    async execute(args) {
+      const path = expectString(args, 'path');
+      const oldString = expectString(args, 'old_string');
+      const newString = typeof args['new_string'] === 'string' ? (args['new_string'] as string) : '';
+      const replaceAll = args['replace_all'] === true;
+      if (oldString.length === 0) {
+        throw new Error('edit_file: old_string must be non-empty (to create a file, use write_file)');
+      }
+      if (oldString === newString) {
+        throw new Error('edit_file: old_string and new_string are identical — nothing to do');
+      }
+      const abs = opts.sandbox.resolve(path);
+      if (!existsSync(abs)) {
+        throw new Error(`edit_file: no such file "${path}" — use write_file to create it first`);
+      }
+      const content = readFileSync(abs, 'utf8');
+      const occurrences = content.split(oldString).length - 1;
+      if (occurrences === 0) {
+        throw new Error(
+          `edit_file: old_string not found in "${path}". It must match the file EXACTLY, including whitespace and indentation — read_file the current content and retry with a verbatim span.`
+        );
+      }
+      if (occurrences > 1 && !replaceAll) {
+        throw new Error(
+          `edit_file: old_string matches ${occurrences} times in "${path}" — extend it with surrounding context to make it unique, or pass replace_all=true.`
+        );
+      }
+      const next = replaceAll
+        ? content.split(oldString).join(newString)
+        : content.replace(oldString, newString);
+      writeFileSync(abs, next, 'utf8');
+      opts.logger?.info(
+        `[tool:edit_file] ${path} (${replaceAll ? occurrences : 1} replacement${occurrences > 1 && replaceAll ? 's' : ''}, ${next.length} bytes)`
+      );
+      return { ok: true, path, replacements: replaceAll ? occurrences : 1, bytes: next.length };
     },
   };
 }
@@ -156,6 +231,9 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
           cwd: opts.sandbox.root,
           timeout: timeoutMs,
           maxBuffer: 2 * 1024 * 1024,
+          // Model-authored code must never see the parent's secrets
+          // (ANTHROPIC_API_KEY et al.) — allowlisted env only.
+          env: sandboxChildEnv(),
         });
         return { exitCode: 0, stdout, stderr };
       } catch (err) {
@@ -231,6 +309,7 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
             cwd: opts.sandbox.root,
             stdio: ['ignore', 'pipe', 'pipe'],
             detached: false,
+            env: sandboxChildEnv(),
           }
         );
         opts.sandbox.trackChild(child);
@@ -489,7 +568,10 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
         args['env'] && typeof args['env'] === 'object' && !Array.isArray(args['env'])
           ? (args['env'] as Record<string, unknown>)
           : {};
-      const env: NodeJS.ProcessEnv = { ...process.env, PORT: '0' };
+      // Allowlisted base env (no parent secrets), PORT=0 for OS-assigned
+      // port discovery, then the model-supplied extras on top — those are
+      // task config (API keys the TASK owns, feature flags), not ours.
+      const env: NodeJS.ProcessEnv = sandboxChildEnv({ PORT: '0' });
       for (const [k, v] of Object.entries(extraEnv)) {
         if (typeof v === 'string') env[k] = v;
       }
@@ -1203,6 +1285,7 @@ function expectString(args: Record<string, unknown>, key: string): string {
 export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
   return [
     writeFileTool(opts),
+    editFileTool(opts),
     readFileTool(opts),
     listFilesTool(opts),
     runShellTool(opts),

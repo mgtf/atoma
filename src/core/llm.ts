@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { modelSupportsSamplingParams } from './models.js';
+import { modelSupportsEffort, modelSupportsSamplingParams } from './models.js';
 import type {
   LlmClient,
   LlmCompletionRequest,
@@ -48,6 +48,12 @@ export class AnthropicLlmClient implements LlmClient {
 
     const tools = toAnthropicTools(req.tools ?? [], req.cacheTools !== false);
     const samplingOk = modelSupportsSamplingParams(req.model);
+    // `output_config: {effort}` — sent only when the caller asked for it
+    // AND the model accepts it (Haiku 4.5 rejects the param with a 400).
+    const effort =
+      req.params?.effort !== undefined && modelSupportsEffort(req.model)
+        ? req.params.effort
+        : undefined;
 
     const messages: Anthropic.Messages.MessageParam[] = [
       { role: 'user', content: req.userContent },
@@ -75,6 +81,9 @@ export class AnthropicLlmClient implements LlmClient {
                 temperature: req.params?.temperature ?? 0.2,
                 ...(req.params?.topP !== undefined ? { top_p: req.params.topP } : {}),
               }
+            : {}),
+          ...(effort !== undefined
+            ? ({ output_config: { effort } } as Record<string, unknown>)
             : {}),
           system: systemBlocks,
           // Tool declarations render at position 0 of the prompt, so REMOVING

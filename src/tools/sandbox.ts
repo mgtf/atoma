@@ -1,6 +1,50 @@
-import { mkdirSync, existsSync } from 'node:fs';
-import { resolve, relative, isAbsolute, join } from 'node:path';
+import { mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { resolve, relative, isAbsolute, join, dirname, basename } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
+
+/**
+ * Environment variables a sandboxed child process is allowed to inherit.
+ * Everything else — ANTHROPIC_API_KEY first among them — is STRIPPED:
+ * `run_shell` executes model-authored code, and `fetch_url`/`npm` give
+ * that code unrestricted network egress, so a leaked credential in the
+ * child env is a one-liner exfiltration (and an unbounded-spend risk).
+ * The allowlist covers what interpreters and npm actually need: binary
+ * lookup (PATH), caches and tmp (HOME/TMPDIR/…), locale/terminal
+ * basics, and Node/npm knobs.
+ */
+const CHILD_ENV_ALLOWLIST: readonly string[] = [
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'TERM',
+  'SHELL',
+  'USER',
+  'LOGNAME',
+  'NODE_ENV',
+  'npm_config_cache',
+];
+
+/**
+ * Build the minimal environment for a sandboxed child process: the
+ * allowlisted subset of `process.env`, plus caller-supplied extras
+ * (e.g. `PORT` for server tools). Extras win on conflict.
+ */
+export function sandboxChildEnv(
+  extra: Record<string, string> = {}
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    const val = process.env[key];
+    if (val !== undefined) env[key] = val;
+  }
+  return { ...env, ...extra };
+}
 
 /**
  * Module-level registry of every ChildProcess ever tracked across any
@@ -62,6 +106,14 @@ function ensureGlobalExitHandler(): void {
  */
 export class ToolSandbox {
   readonly root: string;
+  /**
+   * Fully symlink-resolved root, computed once. Containment checks run
+   * against THIS, not `root`: on macOS common workspace parents are
+   * themselves symlinks (/tmp → /private/tmp, /var → /private/var), so
+   * comparing a realpath'd candidate against the lexical root would
+   * reject every legitimate path.
+   */
+  private readonly realRoot: string;
   private readonly children: ChildProcess[] = [];
   private readonly cleanupHooks: Array<() => Promise<void> | void> = [];
 
@@ -71,6 +123,7 @@ export class ToolSandbox {
     if (!existsSync(abs)) {
       mkdirSync(abs, { recursive: true });
     }
+    this.realRoot = realpathSync(abs);
     ensureGlobalExitHandler();
   }
 
@@ -85,7 +138,8 @@ export class ToolSandbox {
 
   /**
    * Resolve a caller-supplied path against the sandbox root. Throws if the
-   * resolved path escapes the sandbox.
+   * resolved path escapes the sandbox — lexically (`..`, absolute paths)
+   * OR through a symlink planted inside the workspace.
    */
   resolve(input: string): string {
     if (typeof input !== 'string' || input.length === 0) {
@@ -97,7 +151,38 @@ export class ToolSandbox {
     if (rel.startsWith('..') || isAbsolute(rel)) {
       throw new Error(`path escapes sandbox: ${input} (resolved ${base}, outside ${this.root})`);
     }
+    // Symlink containment: `path.resolve` is purely lexical, so a link
+    // created INSIDE the workspace (run_shell can `ln -s /etc pwn`)
+    // passed the check above while pointing outside the jail. Follow
+    // the deepest existing ancestor through realpath and re-run the
+    // containment check against the symlink-resolved root.
+    const real = this.realpathDeepestExisting(base);
+    const realRel = relative(this.realRoot, real);
+    if (realRel.startsWith('..') || isAbsolute(realRel)) {
+      throw new Error(
+        `path escapes sandbox via symlink: ${input} (real path ${real}, outside ${this.realRoot})`
+      );
+    }
     return base;
+  }
+
+  /**
+   * Symlink-resolve the deepest EXISTING ancestor of `abs` and re-append
+   * the not-yet-created tail segments. Lets `resolve()` vet paths that
+   * are about to be written (write_file creates parents as needed) while
+   * still following any symlink that already sits on the path.
+   */
+  private realpathDeepestExisting(abs: string): string {
+    let dir = abs;
+    const tail: string[] = [];
+    while (!existsSync(dir)) {
+      tail.unshift(basename(dir));
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    const real = realpathSync(dir);
+    return tail.length > 0 ? join(real, ...tail) : real;
   }
 
   trackChild(child: ChildProcess): void {

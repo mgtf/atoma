@@ -589,8 +589,24 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   SDK directly from atom code.
 - **Prompt caching (`cache_control: ephemeral`) is on by default** for system
   prompt and the last tool. Leave it on unless you have a measurement-backed reason.
-- Model IDs live in `src/core/models.ts`: `PIN_HAIKU`, `PIN_SONNET`, `FALLBACK_OPUS`.
-  L3 resolves Opus dynamically at construction via `resolveLatestOpus`.
+- Model IDs live in `src/core/models.ts`: `PIN_HAIKU`
+  (`claude-haiku-4-5`), `PIN_SONNET` (`claude-sonnet-5`),
+  `FALLBACK_OPUS` (`claude-opus-5`). L3 resolves Opus dynamically at
+  construction via `resolveLatestOpus`. The 5-series pins reject
+  sampling params (the client omits `temperature`/`top_p` via
+  `modelSupportsSamplingParams`) and run adaptive thinking by default —
+  thinking counts against `max_tokens`, which is why `STRATEGY_MAX_TOKENS`
+  is 8000 (was 3000: a plan call could otherwise burn the whole cap on
+  thinking before emitting a token).
+- **`output_config: {effort}` on plan/strategy calls.**
+  `GenerationParams.effort` (`'low'|'medium'|'high'`) is sent by
+  `AnthropicLlmClient` only when the caller pins it AND
+  `modelSupportsEffort(model)` is true (Sonnet 4.6+/5, Opus 4.5+/5,
+  Fable/Mythos — Haiku 4.5 and Sonnet ≤4.5 reject the param with a
+  400). `L2.plan` and `L3.plan` pin `effort: 'medium'`: those models
+  default to `'high'` (the most expensive setting) and a routing-JSON
+  plan doesn't need it. Validators/prefilters run on Haiku and never
+  carry it. Covered by `effort-param.test.ts`.
 - **Alternative provider: Ollama (`src/core/llmOllama.ts`).** The
   `OllamaLlmClient` implements the same `LlmClient` interface and
   targets any Ollama-exposed model (local or Ollama-Cloud via a
@@ -693,13 +709,47 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `uncaughtException` / `unhandledRejection` handlers from here — Node's
   default policy calls `exit` anyway, and swallowing errors globally hides
   real bugs (we tried it, it produced silent 42s hangs).
+  - **Env allowlist for child processes (#7a).** `sandboxChildEnv(extra?)`
+    builds the environment for every spawned child (`run_shell`,
+    `start_static_server`, `start_node_server`) from a small allowlist
+    (`PATH`, `HOME`, `TMPDIR`, locale, Node/npm knobs) plus caller
+    extras — the parent `process.env` is NEVER spread in. `run_shell`
+    executes model-authored code and `fetch_url`/`npm` grant it network
+    egress, so an inherited `ANTHROPIC_API_KEY` was a one-liner
+    exfiltration (and unbounded-spend) vector. `start_node_server` still
+    layers the model-supplied `env` extras on top of the allowlisted
+    base — those are TASK-owned config (the task's own API keys, feature
+    flags), not ours. Covered end-to-end by `sandbox-hardening.test.ts`
+    (a `run_shell` child reads back `unset` for a parent secret).
+  - **Symlink containment (#7b).** `ToolSandbox.resolve` was purely
+    lexical (`path.resolve` + `relative`), so a symlink planted INSIDE
+    the workspace by `run_shell` (`ln -s /etc pwn`) passed the check and
+    `read_file` followed it out of the jail — contradicting the class
+    docstring. `resolve` now also realpath-resolves the deepest existing
+    ancestor of the candidate and re-checks containment against a
+    realpath'd `realRoot`. `realRoot` is resolved once at construction
+    because common workspace parents are themselves symlinks on macOS
+    (`/tmp` → `/private/tmp`); comparing against the lexical root would
+    reject every legitimate path. Not-yet-created tail segments (a deep
+    new file `write_file` will `mkdir -p`) are re-appended after the
+    realpath so writes still validate.
 - **`InMemoryToolRegistry`** (`src/tools/registry.ts`) — maps tool name →
   executor fn. Implements `ToolExecutor` (`src/core/types.ts`), plugged into
   `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
 - **`defaultBuiltinTools({ sandbox, logger })`** (`src/tools/builtin.ts`)
-  returns: `write_file`, `read_file`, `list_files`, `run_shell`,
-  `start_static_server`, `validate_html`, `fetch_url`,
-  `start_node_server`. The web validator (`validate_html`) uses
+  returns: `write_file`, `edit_file`, `read_file`, `list_files`,
+  `run_shell`, `start_static_server`, `validate_html`, `fetch_url`,
+  `start_node_server`. **`edit_file`** is a targeted str_replace edit —
+  the cost-discipline counterpart to `write_file`: revision cycles used
+  to re-emit ENTIRE files (full content billed as output tokens on each
+  retouch — the dominant spend of long L1 tool loops), and `edit_file`
+  emits only the changed span. Contract: `old_string` must match
+  exactly and be unique (0/>1 matches error with a coaching message)
+  unless `replace_all: true`. It is in all three bucket scopes but does
+  NOT participate in bucket DETECTION (no `CAPABILITY_BUCKETS.required`
+  lists it), so capability labels are unchanged; the canonical + narrow
+  L1 prompts tell the model to prefer it over `write_file` for fixes.
+  The web validator (`validate_html`) uses
   Puppeteer — it can simulate both mouse (`click`, `rightclick`) AND
   keyboard events (`keydown`, `keyup`, `keypress` with `holdMs`) for
   platformer-style input. The HTTP pair (`fetch_url` +

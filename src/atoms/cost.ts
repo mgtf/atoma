@@ -48,10 +48,17 @@ export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 5;
  * `expectedOutput` and `aggregation` are now also defaulted in planSchema
  * (defence in depth) — but the right place to fix it is at the source.
  *
+ * 8000, not the historical 3000: Opus 5 / Sonnet 5 run ADAPTIVE THINKING
+ * by default and `max_tokens` caps thinking + response TOGETHER — a
+ * 3000 cap can be consumed entirely by thinking before a single plan
+ * token is emitted. This is a CAP, not a target: you only pay for what
+ * the model actually generates, and the plan call sites pin
+ * `effort: 'medium'` which keeps thinking volume modest.
+ *
  * Fallback / self-exec calls still use the atom's configured maxTokens
  * because they may produce actual content, not routing JSON.
  */
-export const STRATEGY_MAX_TOKENS = 3000;
+export const STRATEGY_MAX_TOKENS = 8000;
 
 export function shouldTrustType(type: AtomType): boolean {
   return type.failures === 0 && type.successes >= TRUST_THRESHOLD_SUCCESSES;

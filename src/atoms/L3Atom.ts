@@ -415,7 +415,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS },
+      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
       signal: ctx.signal,
     });
 
