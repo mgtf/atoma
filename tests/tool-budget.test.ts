@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { AnthropicLlmClient, DEFAULT_MAX_TOOL_ITERATIONS } from '../src/core/llm.js';
+import {
+  AnthropicLlmClient,
+  DEFAULT_MAX_TOOL_ITERATIONS,
+  MAX_TOOL_RESULT_CHARS,
+  truncateToolResultContent,
+} from '../src/core/llm.js';
 import type { ToolExecutor } from '../src/core/types.js';
 
 /**
@@ -7,15 +12,18 @@ import type { ToolExecutor } from '../src/core/types.js';
  *  - default budget is the bumped constant
  *  - per-call `maxToolIterations` caps the loop
  *  - on budget exhaustion we gracefully finalize with a tools-disabled
- *    round-trip instead of throwing
+ *    round-trip instead of throwing — tools stay DECLARED (cache prefix
+ *    preserved) but `tool_choice: none` forbids their use
  */
 
 interface SdkCall {
   params: {
     tools?: unknown;
+    tool_choice?: { type: string };
     messages: Array<{ role: string; content: unknown }>;
   };
   hadTools: boolean;
+  toolChoice: string | undefined;
 }
 
 type Reply =
@@ -40,6 +48,7 @@ function makeFakeSdk(queue: Reply[]): {
         calls.push({
           params,
           hadTools: Array.isArray(params.tools) && params.tools.length > 0,
+          toolChoice: params.tool_choice?.type,
         });
         const next = queue.shift();
         if (!next) {
@@ -115,10 +124,15 @@ describe('AnthropicLlmClient tool-iteration budget', () => {
     expect(resp.text).toBe(finalText);
     expect(calls.length).toBe(3);
 
-    // The first two calls advertise tools; the finalization call must NOT.
+    // Every call keeps the tool declarations (dropping them would invalidate
+    // the whole prompt cache on the loop's largest request); the finalization
+    // call instead forbids tool use via tool_choice: none.
     expect(calls[0]!.hadTools).toBe(true);
+    expect(calls[0]!.toolChoice).toBeUndefined();
     expect(calls[1]!.hadTools).toBe(true);
-    expect(calls[2]!.hadTools).toBe(false);
+    expect(calls[1]!.toolChoice).toBeUndefined();
+    expect(calls[2]!.hadTools).toBe(true);
+    expect(calls[2]!.toolChoice).toBe('none');
 
     // The finalization user turn must carry our "budget exhausted" hint so
     // the model actually stops trying to call tools.
@@ -249,5 +263,58 @@ describe('AnthropicLlmClient tool-iteration budget', () => {
     // + one finalization round = 2 calls total.
     expect(resp.usage.inputTokens).toBe(2);
     expect(resp.usage.outputTokens).toBe(2);
+  });
+});
+
+describe('tool_result truncation', () => {
+  it('truncateToolResultContent keeps short content verbatim', () => {
+    expect(truncateToolResultContent('hello')).toBe('hello');
+  });
+
+  it('truncateToolResultContent elides the middle with an explicit marker', () => {
+    const big = 'H'.repeat(30_000) + 'MIDDLE' + 'T'.repeat(30_000);
+    const out = truncateToolResultContent(big);
+    expect(out.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 300);
+    expect(out.startsWith('H')).toBe(true);
+    expect(out.endsWith('T')).toBe(true);
+    expect(out).toContain('tool output truncated');
+    expect(out).not.toContain('MIDDLE');
+  });
+
+  it('truncates the model-facing tool_result but hands the observer the full result', async () => {
+    const bigOutput = 'x'.repeat(MAX_TOOL_RESULT_CHARS * 3);
+    const bigExecutor: ToolExecutor = {
+      async execute(): Promise<string> {
+        return bigOutput;
+      },
+    };
+    const { sdk, calls } = makeFakeSdk([
+      { kind: 'tool_use', toolName: 'echo' },
+      { kind: 'text', text: 'done' },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+    const seen: unknown[] = [];
+    await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: bigExecutor,
+      maxToolIterations: 5,
+      onToolInvocation: (info) => seen.push(info.result),
+    });
+
+    // Observer (viz/trace) keeps the untruncated result.
+    expect(seen).toEqual([bigOutput]);
+
+    // The second SDK call carries the tool_result turn — its content must be
+    // capped and marked, not the raw 60K-char payload.
+    const toolResultTurn = calls[1]!.params.messages.at(-1)!;
+    expect(toolResultTurn.role).toBe('user');
+    const blocks = toolResultTurn.content as Array<{ type: string; content?: string }>;
+    const tr = blocks.find((b) => b.type === 'tool_result')!;
+    expect(tr.content!.length).toBeLessThan(MAX_TOOL_RESULT_CHARS + 300);
+    expect(tr.content!).toContain('tool output truncated');
   });
 });

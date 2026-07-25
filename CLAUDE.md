@@ -609,6 +609,22 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   round-trip when the cap hits. Usage is aggregated across rounds and
   reported once via `MetricsLlmClient`. Only L1 should pass `executor:` —
   grep confirms it.
+- **Tool results are truncated before reaching the model.** Any single
+  tool_result over `MAX_TOOL_RESULT_CHARS` (20k chars ≈ 5k tokens) gets
+  head/tail elision with an explicit `[... tool output truncated ...]`
+  marker (`truncateToolResultContent` in `src/core/llm.ts`). Rationale:
+  `read_file` returns whole files and `run_shell` up to 2 MB — beyond
+  Haiku's entire 200K window — and every byte stays resident in the
+  transcript for the rest of the loop, re-billed each round. Observers
+  (`onToolInvocation` → viz/trace) still receive the UNTRUNCATED result;
+  only the model-facing payload is elided. Serialization is compact
+  `JSON.stringify(result)` — no pretty-print indent on billed tokens.
+- **Budget-exhausted finalization keeps tools declared.** The final
+  tools-disabled round-trip sends `tool_choice: {type: 'none'}` instead
+  of dropping `tools` — tool declarations render at position 0 of the
+  prompt, so removing them would invalidate the ENTIRE prompt cache on
+  the largest request of the loop. `tool_choice` changes don't touch the
+  tools/system cache tiers.
 - **Shared smoke-test guidance.** `SMOKE_DESIGN_GUIDANCE` in
   `src/atoms/L2Atom.ts` teaches L1 the IIFE contract, the
   `window.__test` hook pattern for state-heavy apps, and the smoke-loop

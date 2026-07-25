@@ -9,7 +9,10 @@ import { MockLlmClient } from '../src/core/llm.js';
 
 describe('pricesFor', () => {
   it('classifies Opus, Sonnet, Haiku model IDs', () => {
-    expect(pricesFor('claude-opus-4-7').input).toBe(15);
+    // Opus 4.5+/5 list price is $5/M input — NOT the Claude 3 Opus $15/M.
+    expect(pricesFor('claude-opus-4-7').input).toBe(5);
+    expect(pricesFor('claude-opus-4-7').output).toBe(25);
+    expect(pricesFor('claude-opus-5').input).toBe(5);
     expect(pricesFor('claude-sonnet-4-6').input).toBe(3);
     expect(pricesFor('claude-haiku-4-5-20251001').input).toBe(1);
   });
@@ -47,13 +50,13 @@ describe('InMemoryMetrics', () => {
     expect(s.totals.calls).toBe(2);
 
     const opus = s.perModel.find((p) => p.model === 'claude-opus-4-7')!;
-    expect(opus.costUsd).toBeCloseTo(15, 3); // 1M input @ $15
+    expect(opus.costUsd).toBeCloseTo(5, 3); // 1M input @ $5
 
     const haiku = s.perModel.find((p) => p.model.includes('haiku'))!;
     // 2M input @ $1 + 1M output @ $5 = $2 + $5 = $7
     expect(haiku.costUsd).toBeCloseTo(7, 3);
 
-    expect(s.totals.costUsd).toBeCloseTo(22, 2);
+    expect(s.totals.costUsd).toBeCloseTo(12, 2);
   });
 
   it('applies the cached-input rate to cacheReadInputTokens (Anthropic counters are disjoint)', () => {
@@ -74,8 +77,8 @@ describe('InMemoryMetrics', () => {
     });
     const s = m.summary();
     const opus = s.perModel[0]!;
-    // 1M @ cached_input rate ($1.5) = $1.5
-    expect(opus.costUsd).toBeCloseTo(1.5, 3);
+    // 1M @ cached_input rate ($0.5) = $0.5
+    expect(opus.costUsd).toBeCloseTo(0.5, 3);
   });
 
   it('applies the 1.25x write-cost multiplier to cacheCreationInputTokens (5-min TTL)', () => {

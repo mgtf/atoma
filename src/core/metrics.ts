@@ -35,7 +35,12 @@ export type PriceTable = ReadonlyArray<{
 }>;
 
 export const DEFAULT_PRICES: PriceTable = [
-  { match: /opus/i,   prices: { input: 15, output: 75, cachedInput: 1.5 } },
+  // Current-generation Opus (4.5 through 5) is $5/$25 — the old 15/75/1.5
+  // row was Claude 3 Opus pricing and overstated every Opus call 3×, which
+  // in turn made the "L3 always pays one Opus plan" tradeoff look 3× more
+  // expensive than it really is. Pin an older Opus 4.0/4.1 ($15/$75) via a
+  // custom PriceTable if you ever need one.
+  { match: /opus/i,   prices: { input: 5,  output: 25, cachedInput: 0.5 } },
   { match: /sonnet/i, prices: { input: 3,  output: 15, cachedInput: 0.3 } },
   { match: /haiku/i,  prices: { input: 1,  output: 5,  cachedInput: 0.1 } },
 ];

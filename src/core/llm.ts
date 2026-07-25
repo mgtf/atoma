@@ -12,6 +12,18 @@ import type {
 export const DEFAULT_MAX_TOOL_ITERATIONS = 24;
 
 /**
+ * Cap on the serialized size of a single tool_result sent back to the model.
+ * Tool outputs are otherwise unbounded (`read_file` returns whole files,
+ * `run_shell` up to its 2 MB maxBuffer ≈ 500K tokens — beyond Haiku's whole
+ * 200K context window), and every byte stays resident in the transcript for
+ * the REST of the tool loop, re-billed on each iteration. 20K chars ≈ 5K
+ * tokens keeps any single result useful while bounding both cost and the
+ * context-overflow crash vector. Observers (`onToolInvocation`) still get
+ * the untruncated result — only the model-facing payload is elided.
+ */
+export const MAX_TOOL_RESULT_CHARS = 20_000;
+
+/**
  * Hint appended alongside the final tool_result batch when the budget is
  * exhausted. Tells the model it has NO more tool access this turn and must
  * produce its final response as text now. Kept short so it doesn't steer the
@@ -52,7 +64,7 @@ export class AnthropicLlmClient implements LlmClient {
     if (req.signal) sdkOptions.signal = req.signal;
 
     const sendRequest = (
-      opts: { includeSampling: boolean; omitTools?: boolean }
+      opts: { includeSampling: boolean; disableTools?: boolean }
     ): Promise<Anthropic.Messages.Message> =>
       this.client.messages.create(
         {
@@ -65,7 +77,18 @@ export class AnthropicLlmClient implements LlmClient {
               }
             : {}),
           system: systemBlocks,
-          ...(tools.length > 0 && !opts.omitTools ? { tools } : {}),
+          // Tool declarations render at position 0 of the prompt, so REMOVING
+          // them on the finalization round-trip would invalidate the entire
+          // prompt cache (tools + system + messages) on the largest request
+          // of the whole loop. `tool_choice: none` forbids tool use while
+          // leaving the cached prefix byte-identical — tool_choice changes
+          // do not invalidate the tools/system cache tiers.
+          ...(tools.length > 0
+            ? {
+                tools,
+                ...(opts.disableTools ? { tool_choice: { type: 'none' as const } } : {}),
+              }
+            : {}),
           messages,
         },
         sdkOptions
@@ -164,11 +187,15 @@ export class AnthropicLlmClient implements LlmClient {
         }
         try {
           const result = await req.executor!.execute(tu.name, args);
+          // Compact stringify — the pretty-print indent of the old
+          // `JSON.stringify(result, null, 2)` was pure token overhead on
+          // every tool result of every iteration.
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,
-            content:
-              typeof result === 'string' ? result : JSON.stringify(result, null, 2),
+            content: truncateToolResultContent(
+              typeof result === 'string' ? result : JSON.stringify(result)
+            ),
           });
           notifyToolInvocation(req.onToolInvocation, {
             name: tu.name,
@@ -182,7 +209,7 @@ export class AnthropicLlmClient implements LlmClient {
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,
-            content: `tool "${tu.name}" failed: ${errMsg}`,
+            content: truncateToolResultContent(`tool "${tu.name}" failed: ${errMsg}`),
             is_error: true,
           });
           notifyToolInvocation(req.onToolInvocation, {
@@ -245,7 +272,7 @@ export class AnthropicLlmClient implements LlmClient {
         }
         const finalResp = await sendRequest({
           includeSampling: samplingOk,
-          omitTools: true,
+          disableTools: true,
         });
         accumulate(finalResp);
         finalResponse = finalResp;
@@ -294,6 +321,29 @@ function notifyToolInvocation(
   } catch {
     // intentionally empty — observer failure must not poison execution
   }
+}
+
+/**
+ * Head/tail elision for oversized tool results. Keeps the opening of the
+ * output (usually the part the model asked for) and the tail (where shell
+ * errors and exit summaries land), with an explicit marker so the model
+ * knows content was dropped rather than absent.
+ */
+export function truncateToolResultContent(
+  content: string,
+  maxChars: number = MAX_TOOL_RESULT_CHARS
+): string {
+  if (content.length <= maxChars) return content;
+  const head = content.slice(0, Math.floor(maxChars * 0.7));
+  const tail = content.slice(content.length - Math.floor(maxChars * 0.2));
+  const dropped = content.length - head.length - tail.length;
+  return (
+    `${head}\n` +
+    `[... tool output truncated: ${dropped} chars omitted. ` +
+    `If you need the missing part, request a narrower output ` +
+    `(smaller file, quieter command, more specific probe) ...]\n` +
+    `${tail}`
+  );
 }
 
 function isSamplingParamDeprecatedError(err: unknown): boolean {

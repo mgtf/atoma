@@ -23,9 +23,17 @@ export async function resolveLatestOpus(client: Anthropic): Promise<string> {
  * no longer accept `temperature` / `top_p` sampling params and return a 400
  * if you send them. Keep this list conservative: add a model here only once
  * the API confirms it rejects the param.
+ *
+ * GA aliases are suffix-less (`claude-opus-5`, `claude-sonnet-5`), so every
+ * pattern must accept end-of-string as well as a `-` after the version —
+ * `resolveLatestOpus` returns exactly those alias forms. Sonnet 5+ rejects
+ * NON-DEFAULT sampling params, and every call site here pins an explicit
+ * temperature, so it belongs on the reject list too.
  */
 export function modelSupportsSamplingParams(model: string): boolean {
   if (/^claude-opus-4-(?:[7-9]|\d{2,})(?:-|$)/.test(model)) return false;
-  if (/^claude-opus-(?:[5-9]|\d{2,})-/.test(model)) return false;
+  if (/^claude-opus-(?:[5-9]|\d{2,})(?:-|$)/.test(model)) return false;
+  if (/^claude-sonnet-(?:[5-9]|\d{2,})(?:-|$)/.test(model)) return false;
+  if (/^claude-(?:fable|mythos)-/.test(model)) return false;
   return true;
 }
