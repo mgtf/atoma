@@ -17,14 +17,17 @@ const VALIDATION_MARKER =
   'You validate agent outputs in a three-tier LLM orchestration system.';
 const PREFILTER_MARKER =
   'You pre-filter catalog lookups for a three-tier LLM orchestrator.';
+const SKILL_PREFILTER_MARKER =
+  'You match a subtask against a catalog of learned skills';
 
 type Classification = Pick<VizLlmEvent, 'role' | 'actor' | 'child' | 'subject'>;
 
 /**
  * Infer caller/role from request shape. Relies on stable markers in the
  * current prompt constants (VALIDATION_SYSTEM_PROMPT, PREFILTER_SYSTEM_PROMPT,
- * and the `You are atom "X" (tier N)` preamble used by every plan/execute
- * userContent). Keep in sync if those prompts are reworded.
+ * SKILL_PREFILTER_SYSTEM_PROMPT, and the `You are atom "X" (tier N)` preamble
+ * used by every plan/execute userContent). Keep in sync if those prompts are
+ * reworded.
  */
 function classify(req: LlmCompletionRequest): Classification {
   if (req.systemPrompt.startsWith(VALIDATION_MARKER)) {
@@ -60,7 +63,13 @@ function classify(req: LlmCompletionRequest): Classification {
       ? { name: actorMatch[1].trim(), tier: Number(actorMatch[2]) as Tier }
       : undefined;
 
-  if (req.systemPrompt.startsWith(PREFILTER_MARKER)) {
+  // The skill prefilter has its own system prompt (SKILL_PREFILTER_SYSTEM_
+  // PROMPT in cost.ts) but plays the same role in the call graph — map both
+  // markers onto 'prefilter' so the UI lane stays unified.
+  if (
+    req.systemPrompt.startsWith(PREFILTER_MARKER) ||
+    req.systemPrompt.startsWith(SKILL_PREFILTER_MARKER)
+  ) {
     return actor ? { role: 'prefilter', actor } : { role: 'prefilter' };
   }
 

@@ -145,6 +145,63 @@ export const PREFILTER_SYSTEM_PROMPT = [
   '  {"kind": "escalate", "reasoning": "<one short sentence>"}',
 ].join('\n');
 
+/**
+ * Dedicated system prompt for the SKILL prefilter (L2.matchSkill). Constant
+ * for the same prompt-caching reason as PREFILTER_SYSTEM_PROMPT.
+ *
+ * Why not reuse PREFILTER_SYSTEM_PROMPT: that prompt is written for ATOM
+ * catalogs and carries a HARD RULE against single-candidate force-matching
+ * (an atom mismatch burns a full supervision cycle). For skills the economics
+ * are inverted — a young skill library usually has exactly ONE recipe, and
+ * that recipe exists precisely because a task like this one succeeded before.
+ * Under the atom prompt, Haiku escalated on single-skill catalogs, the run
+ * lost the injection, and the "learn" branch then paid a Sonnet call to
+ * distill a skill that already existed (deduped only after the money was
+ * spent). The L1-affinity and decomposable clauses are likewise meaningless
+ * for skills, so they're gone here. The confidence self-check stays: the
+ * low→escalate guard in `prefilterStrategy` applies uniformly to both prompts.
+ */
+export const SKILL_PREFILTER_SYSTEM_PROMPT = [
+  'You match a subtask against a catalog of learned skills — reusable how-to',
+  'recipes attached to the worker atom that will execute the task.',
+  'Pick the ONE skill whose recipe would genuinely guide this task, or declare',
+  'that none fits.',
+  'You do NOT design new skills, you do NOT call tools, you do NOT produce plans.',
+  '',
+  'What a match means: the matched skill body is INJECTED into the worker\'s',
+  'system prompt as an active recipe. A fitting recipe saves the worker from',
+  're-deriving a known workflow; a WRONG recipe actively misleads it.',
+  '"escalate" simply means the worker runs unguided — safe, but wasteful when',
+  'a fitting recipe exists.',
+  '',
+  'Single-candidate catalogs are NORMAL here: a young skill library often has',
+  'exactly one recipe, and that recipe usually exists BECAUSE a task like this',
+  'one succeeded before. "Only one candidate" is NOT a reason to escalate —',
+  'judge the fit on its own merits, exactly as you would among ten candidates.',
+  '',
+  'Match on WORKFLOW SHAPE, not on surface domain words:',
+  '  - "reuse" when the recipe\'s steps (files to write, tools to run, checks',
+  '    to perform) transfer to this task even if the topic differs — a recipe',
+  '    learned on a movie API applies to a book API.',
+  '  - "escalate" when the recipe\'s workflow is structurally different — it',
+  '    scaffolds an HTTP server but the task writes a static page; it seeds a',
+  '    database but the task scrapes a website.',
+  '',
+  'Confidence self-check:',
+  '  When you choose "reuse", label your OWN confidence in the fit:',
+  '    - "high" — the recipe\'s workflow clearly covers this task end-to-end',
+  '      or nearly so.',
+  '    - "low"  — closest available, but the fit is approximate. The caller',
+  '      treats "low" AS escalate — if you would label "low" anyway, prefer',
+  '      emitting "escalate" directly.',
+  '  Missing confidence is treated as "low" (conservative default).',
+  '',
+  'Respond with ONE JSON object, no prose, no markdown, starting with "{":',
+  '  {"kind": "reuse", "target": "<exact skill id>", "confidence": "high"|"low", "reasoning": "<one short sentence>"}',
+  'OR',
+  '  {"kind": "escalate", "reasoning": "<one short sentence>"}',
+].join('\n');
+
 const PREFILTER_PARAMS: GenerationParams = { temperature: 0, maxTokens: 256 };
 
 export const prefilterResponseSchema = z.discriminatedUnion('kind', [
@@ -230,6 +287,15 @@ export async function prefilterStrategy(args: {
   exclude?: ReadonlySet<string>;
   model?: string;
   /**
+   * System prompt override. Defaults to PREFILTER_SYSTEM_PROMPT (atom
+   * catalogs). The skill prefilter passes SKILL_PREFILTER_SYSTEM_PROMPT —
+   * same machinery, same schema, same confidence guard, but without the
+   * atom-specific single-candidate HARD RULE that made Haiku escalate on
+   * one-skill catalogs. Any override must be a CONSTANT string (prompt
+   * caching keys on it).
+   */
+  systemPrompt?: string;
+  /**
    * Optional caller attribution. When provided we prepend a short
    * `You are atom "<name>" (tier <N>) ...` preamble to the userContent so
    * the run trace can attribute this prefilter call to the L2 or L3 that
@@ -277,7 +343,7 @@ export async function prefilterStrategy(args: {
   try {
     const resp = await args.ctx.llm.complete({
       model: args.model ?? PIN_HAIKU,
-      systemPrompt: PREFILTER_SYSTEM_PROMPT,
+      systemPrompt: args.systemPrompt ?? PREFILTER_SYSTEM_PROMPT,
       userContent,
       params: PREFILTER_PARAMS,
       signal: args.ctx.signal,

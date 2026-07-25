@@ -6,7 +6,11 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom, skillContextBlock } from '../src/atoms/L2Atom.js';
-import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
+import {
+  PREFILTER_SYSTEM_PROMPT,
+  SKILL_PREFILTER_SYSTEM_PROMPT,
+  TRUST_THRESHOLD_SUCCESSES,
+} from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
@@ -34,6 +38,36 @@ describe('skillContextBlock', () => {
     expect(out).toMatch(/== ACTIVE SKILL: web-build ==/);
     expect(out).toMatch(/Step 1\./);
     expect(out).toMatch(/== END ACTIVE SKILL ==/);
+  });
+});
+
+describe('SKILL_PREFILTER_SYSTEM_PROMPT — dedicated skill-matching contract', () => {
+  it('is a distinct constant from the atom-catalog prefilter prompt', () => {
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).not.toBe(PREFILTER_SYSTEM_PROMPT);
+  });
+
+  it('drops the atom-specific clauses that are meaningless (or harmful) for skills', () => {
+    // The single-candidate HARD RULE is the regression this prompt exists to
+    // fix: under the atom prompt, an L1 with exactly ONE learned skill (the
+    // nominal early-life case) was pushed toward escalate, losing the
+    // injection AND triggering a redundant Sonnet learn call.
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).not.toMatch(/HARD RULE/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).not.toMatch(/REACHABLE L1 CHILDREN/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).not.toMatch(/decomposable/i);
+  });
+
+  it('explicitly permits single-candidate matching', () => {
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/Single-candidate catalogs are NORMAL/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/NOT a reason to escalate/);
+  });
+
+  it('keeps the shared confidence contract so the low→escalate guard applies unchanged', () => {
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/"high"/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/"low"/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/Missing confidence is treated as "low"/);
+    // Same JSON envelope as prefilterResponseSchema expects.
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/"kind": "reuse"/);
+    expect(SKILL_PREFILTER_SYSTEM_PROMPT).toMatch(/"kind": "escalate"/);
   });
 });
 
@@ -112,6 +146,11 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
 
     // 4 calls total = tier prefilter + skill prefilter + L1.plan + L1.execute.
     expect(ctx.llm.calls).toHaveLength(4);
+    // The tier prefilter (call #1) keeps the atom-catalog prompt; the skill
+    // prefilter (call #2) runs on its DEDICATED prompt — the atom prompt's
+    // single-candidate HARD RULE made Haiku escalate on one-skill catalogs.
+    expect(ctx.llm.calls[0]!.systemPrompt).toBe(PREFILTER_SYSTEM_PROMPT);
+    expect(ctx.llm.calls[1]!.systemPrompt).toBe(SKILL_PREFILTER_SYSTEM_PROMPT);
     // Skill prefilter (call #2) sees the skill catalog in its userContent.
     expect(ctx.llm.calls[1]!.userContent).toMatch(/web-build-loop/);
     expect(ctx.llm.calls[1]!.userContent).toMatch(/single-file web artefact/);

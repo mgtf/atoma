@@ -34,6 +34,7 @@ import {
   prefilterStrategy,
   shouldTrustType,
   trustedApproval,
+  SKILL_PREFILTER_SYSTEM_PROMPT,
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
@@ -1173,9 +1174,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
    * Run a Haiku skill-prefilter for the L1 named `l1Name` and the
    * given subtask. Returns the matched skill + the model's reasoning
    * when a confident match exists, null otherwise (no skills, no
-   * registry, or prefilter escalated). The prefilter uses the same
-   * confidence-guard + decomposable schema as the tier prefilter,
-   * so the safety contract is uniform.
+   * registry, or prefilter escalated). The prefilter reuses the tier
+   * prefilter MACHINERY (schema + low-confidence guard) but with the
+   * dedicated SKILL_PREFILTER_SYSTEM_PROMPT — the atom-catalog prompt
+   * carries a HARD RULE against single-candidate force-matching that
+   * made Haiku escalate on one-skill catalogs, which both lost the
+   * injection AND triggered a redundant Sonnet learn call for a
+   * pattern that was already on disk.
    *
    * The injected userContent labels each catalog entry as
    * "<skillId>: <description>. When to use: <whenToUse>" so Haiku
@@ -1196,6 +1201,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         name: s.id,
         description: `${s.description}. When to use: ${s.whenToUse}`,
       })),
+      systemPrompt: SKILL_PREFILTER_SYSTEM_PROMPT,
       actor: { name: this.name, tier: 2 },
     });
     if (!outcome || outcome.kind !== 'reuse') return null;

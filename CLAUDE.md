@@ -114,7 +114,8 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   call in the whole system.** Deliberately constant so prompt caching
   short-circuits the input bill on repeat validations. Do not inline a custom
   system prompt into a verdict call. Same rule applies to
-  `PREFILTER_SYSTEM_PROMPT`.
+  `PREFILTER_SYSTEM_PROMPT` and `SKILL_PREFILTER_SYSTEM_PROMPT` (the skill
+  prefilter's dedicated prompt — also constant, see the Skills section).
 - Validation params are pinned to `{ temperature: 0, maxTokens: 512 }`, prefilter
   params to `{ temperature: 0, maxTokens: 256 }`. Raise either only if you see
   truncated outputs in practice — a Verdict / Prefilter is a tiny JSON object.
@@ -218,9 +219,10 @@ npm run registry -- --db ./atoma-build.db list   # override DB path
   zero effect on runtime behaviour. Runs are persisted as JSON under
   `./runs/` (override with `ATOMA_RUNS_DIR`). `npm run viz:demo` generates
   a mocked run with no API key so the UI always has something to render.
-  Role inference in `recordingLlm.ts` keys off the stable `VALIDATION_SYSTEM_PROMPT`
-  and `PREFILTER_SYSTEM_PROMPT` markers plus the `You are atom "X" (tier N)`
-  preamble — keep those markers stable or update `classify()` accordingly.
+  Role inference in `recordingLlm.ts` keys off the stable `VALIDATION_SYSTEM_PROMPT`,
+  `PREFILTER_SYSTEM_PROMPT`, and `SKILL_PREFILTER_SYSTEM_PROMPT` markers plus
+  the `You are atom "X" (tier N)` preamble — keep those markers stable or
+  update `classify()` accordingly.
 
 ## Architecture invariants (don't violate these)
 
@@ -401,8 +403,20 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - **Match → inject (#C2a).** `L2.runSubtask` runs a Haiku skill-
   prefilter against the resolved L1's persistent skill catalog
   BEFORE entering the supervise loop. The prefilter REUSES
-  `prefilterStrategy` from `cost.ts`, so the confidence guard
-  (low → escalate) and the decomposable hint apply uniformly.
+  `prefilterStrategy` from `cost.ts` (same schema, same low →
+  escalate confidence guard) but with the dedicated
+  `SKILL_PREFILTER_SYSTEM_PROMPT` — NOT the atom-catalog prompt.
+  Rationale: `PREFILTER_SYSTEM_PROMPT` carries a HARD RULE against
+  single-candidate force-matching that is correct for atoms (a
+  mismatch burns a supervision cycle) but inverted for skills: a
+  young skill library usually has exactly ONE recipe, and it exists
+  precisely because a task like this one succeeded before. Under the
+  shared prompt Haiku escalated on one-skill catalogs, the run lost
+  the injection, and the learn branch then paid a Sonnet call to
+  distill a skill that was already on disk (deduped only after the
+  spend). The skill prompt drops the single-candidate rule plus the
+  L1-affinity/decomposable clauses (meaningless for skills) and
+  matches on WORKFLOW SHAPE, not surface domain words.
   On a `reuse + high-confidence` match, the matched skill body is
   injected into the L1's effective system prompt via the existing
   `Atom.injectContext` mechanism, wrapped in clearly-delimited
