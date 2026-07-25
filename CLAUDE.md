@@ -295,7 +295,27 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   counterpart — Methane acts as an agnostic router that dispatches
   to Lithium for file-flavoured subtasks via its own prefilter.
   Helpers look up existing entries by `createdBy` marker, refresh
-  tools via `patch + addTools` on hit, or create otherwise.
+  tools AND the system prompt via `patch` on hit (prompt refresh is
+  conditional — the patch no-op guard keeps unchanged runs free and
+  counter-preserving; a genuinely changed seed prompt re-aligns the
+  persisted row and legitimately resets trust), or create otherwise.
+  `build-app.ts` applies the same conditional-refresh pattern to the
+  Neuron L3 seed prompt.
+- **GROUND-TRUTH evidence contract for non-web/http L1s.**
+  `GROUND_TRUTH_EVIDENCE_LINES` in `src/atoms/capability.ts` teaches
+  the generic evidence-reporting contract (paste run_shell stdout,
+  read_file excerpts of written files, list_files lines into a
+  `== GROUND TRUTH ==` block in `summary`). Appended to: the
+  file-scribe canonical prompt, the unknown-bucket branch of
+  `buildNarrowL1Prompt`, and BOTH prompt sources of `createSubtaskL1`
+  (planner-authored seeds included — Sonnet/Opus seeds never spell
+  out the reporting contract). Added after the wc-cli live run: the
+  doc-phase L1s produced six correct READMEs in a row but returned
+  narrative-only summaries, and the Haiku validator (correctly)
+  rejected each as unverifiable self-reporting — two escalation
+  branches of pure churn. The web and HTTP canonicals keep their own
+  domain-specific ground-truth sections; this is the bucket-neutral
+  fallback. Covered by `tests/canonical-filescribe-bootstrap.test.ts`.
 - **L1 plan shape — ASPIRATIONAL prose, no literal toolCalls.**
   `L1Atom.plan` now explicitly forbids emitting a `toolCalls` array
   in the plan response (#11). The plan expresses INTENT via the

@@ -114,4 +114,37 @@ describe('ensureCanonicalFileScribeL1 — bootstrap (#12)', () => {
     expect(l1.systemPrompt).toMatch(/do NOT probe HTTP endpoints/);
     expect(l1.systemPrompt).toMatch(/do NOT render HTML/);
   });
+
+  it('system prompt carries the GROUND-TRUTH evidence contract (wc-cli rejection-loop regression)', () => {
+    // The doc-phase L1s did correct work but returned narrative-only
+    // summaries; the validator rightly rejected them as unverifiable
+    // and the run looped through two escalation branches. Non-web/http
+    // L1s must be TAUGHT to paste tool outputs into the summary.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l1 = ensureCanonicalFileScribeL1(reg, KITCHEN_SINK);
+    expect(l1.systemPrompt).toMatch(/== GROUND TRUTH ==/);
+    expect(l1.systemPrompt).toMatch(/RESULT-REPORTING CONTRACT/);
+    expect(l1.systemPrompt).toMatch(/VERBATIM excerpts/);
+  });
+
+  it('re-aligns a STALE persisted system prompt on the next bootstrap (idempotent seeder)', () => {
+    // The ensure* helpers used to refresh only the tool list — a prompt
+    // fix in the seed constants never reached a registry row written by
+    // an earlier version. The refresh must be conditional: unchanged
+    // prompt → no version bump (the patch no-op guard preserves trust
+    // counters); changed prompt → re-aligned, counters legitimately
+    // reset (a changed type re-earns trust).
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const created = ensureCanonicalFileScribeL1(reg, KITCHEN_SINK);
+    reg.recordSuccess(created.name);
+    // Idempotent re-run: same prompt → no version bump, counters kept.
+    const same = ensureCanonicalFileScribeL1(reg, KITCHEN_SINK);
+    expect(same.version).toBe(created.version);
+    expect(reg.getByName(created.name)!.successes).toBe(1);
+    // Simulate a row persisted by an OLDER seed (different prompt).
+    reg.patch(created.name, { systemPromptReplace: 'stale legacy prompt' }, 'test');
+    const healed = ensureCanonicalFileScribeL1(reg, KITCHEN_SINK);
+    expect(healed.systemPrompt).toMatch(/== GROUND TRUTH ==/);
+    expect(healed.systemPrompt).not.toMatch(/stale legacy prompt/);
+  });
 });

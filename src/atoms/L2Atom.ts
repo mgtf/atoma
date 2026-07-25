@@ -44,6 +44,7 @@ import {
   bucketIdForTools,
   CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
   extractBranchDiagnostic,
+  GROUND_TRUTH_EVIDENCE_LINES,
   resolveCreationDescription,
 } from './capability.js';
 import type { Skill } from '../skills/types.js';
@@ -354,12 +355,17 @@ export function buildNarrowL1Prompt(
     // Unknown bucket — keep a generic tools-only template. DO NOT append
     // SMOKE_DESIGN_GUIDANCE here: the smoke discipline is web-bucket
     // specific and leaking it teaches the model to invoke validate_html
-    // even when the atom's declared tools don't include it.
+    // even when the atom's declared tools don't include it. The generic
+    // GROUND-TRUTH evidence contract, however, is bucket-neutral and
+    // REQUIRED: without it, non-web/http L1s return narrative-only
+    // summaries that the validator correctly rejects as unverifiable
+    // (the wc-cli README rejection loop).
     bucketBody = [
       `Call tools sequentially to produce the deliverable. Use ONLY the`,
       `tools you were handed — do NOT invoke anything that isn't in your`,
-      `declared tool list. Return JSON {"output": <...>, "summary": "<...>"}`,
-      `once the work is done.`,
+      `declared tool list.`,
+      ``,
+      ...GROUND_TRUTH_EVIDENCE_LINES,
     ];
   }
 
@@ -1447,29 +1453,39 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // (fix #8b). See buildNarrowL1Prompt for the mirror logic on the
     // escalation branch path.
     const hasValidateHtml = mergedTools.some((t) => t.name === 'validate_html');
+    // The GROUND-TRUTH evidence contract is appended to BOTH prompt
+    // sources — the planner-authored seed AND the default template. A
+    // seed prompt written by Sonnet/Opus never spells out the reporting
+    // contract, and an L1 that omits pasted tool outputs gets its
+    // (otherwise correct) results rejected by the validator as
+    // unverifiable self-reporting (the wc-cli README rejection loop).
+    const basePrompt =
+      seed.systemPrompt ??
+      [
+        `You are an L1 element with ONE narrow responsibility.`,
+        `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
+        `Call tools sequentially to produce your single output. Return a structured`,
+        `{"output", "summary"} JSON at the end.`,
+        ``,
+        `Scope boundary: if the subtask seems to require coordinating with other`,
+        `subtasks (reading their outputs, sharing state) — that's a planning bug at`,
+        `a higher tier. You still execute YOUR subtask in isolation; do NOT invent`,
+        `cross-subtask side effects.`,
+        ``,
+        `Subtask you were handed: ${subtask.description}`,
+        `Parent task (for context only): ${parentTask.description}`,
+      ].join('\n');
     return this.registry.create(1, {
       description: resolveCreationDescription(seed.description, mergedTools, 1),
       // Default system prompt emphasises SINGLE-RESPONSIBILITY. A freshly
       // created L1 should be a narrow specialist — one concern, one output
       // shape — not a Swiss-army knife that tries to solve the whole task.
-      systemPrompt:
-        seed.systemPrompt ??
-        [
-          `You are an L1 element with ONE narrow responsibility.`,
-          `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
-          `Call tools sequentially to produce your single output. Return a structured`,
-          `{"output", "summary"} JSON at the end.`,
-          ``,
-          `Scope boundary: if the subtask seems to require coordinating with other`,
-          `subtasks (reading their outputs, sharing state) — that's a planning bug at`,
-          `a higher tier. You still execute YOUR subtask in isolation; do NOT invent`,
-          `cross-subtask side effects.`,
-          ``,
-          `Subtask you were handed: ${subtask.description}`,
-          `Parent task (for context only): ${parentTask.description}`,
-          ``,
-          ...(hasValidateHtml ? [SMOKE_DESIGN_GUIDANCE] : []),
-        ].join('\n'),
+      systemPrompt: [
+        basePrompt,
+        ``,
+        ...GROUND_TRUTH_EVIDENCE_LINES,
+        ...(hasValidateHtml ? [``, SMOKE_DESIGN_GUIDANCE] : []),
+      ].join('\n'),
       tools: mergedTools,
       params: (seed.params ?? this.params) as GenerationParams,
       createdBy: this.name,

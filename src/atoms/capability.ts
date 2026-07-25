@@ -522,6 +522,40 @@ export const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
   `in the L1's registry metadata. Keep the catalog reusable.`,
 ];
 
+/**
+ * Provider- and bucket-NEUTRAL evidence contract for L1 final reports.
+ * The web and HTTP canonical prompts carry their own domain-specific
+ * GROUND-TRUTH sections (smoke results, LISTENING_ON_PORT + probes);
+ * this is the generic file/shell flavour for every other L1 — the
+ * file-scribe canonical, dynamically created L1s, and the unknown-
+ * bucket narrow template.
+ *
+ * Why it exists: on the wc-cli live run (2026-07-25) the doc-phase
+ * subtask demanded "include all real tool outputs in your final report
+ * as proof"; Lithium-family L1s did the work CORRECTLY (6 good README
+ * writes in a row) but returned narrative-only summaries, so the Haiku
+ * validator rejected every result as unverifiable self-reporting —
+ * two escalation branches deep before the operator killed the run.
+ * The rejection was CORRECT per the validation contract; the missing
+ * piece was teaching non-web/http L1s how to report evidence.
+ */
+export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
+  `RESULT-REPORTING CONTRACT (mandatory): the {"output", "summary"}`,
+  `envelope you return MUST embed a verbatim "== GROUND TRUTH ==" block`,
+  `inside "summary": one headline sentence, then a real newline ("\\n"),`,
+  `then "== GROUND TRUTH ==" on its own line, then the evidence lines —`,
+  `VERBATIM excerpts of the tool outputs that PROVE the work:`,
+  `  - the stdout (and exit status) of every run_shell command you ran,`,
+  `  - the key lines of every file you wrote (read_file/cat excerpt —`,
+  `    truncate long files, but do NOT omit them),`,
+  `  - a list_files line whenever file existence is part of the claim.`,
+  `WHY: the supervisor validator REJECTS results that read as`,
+  `self-reported ("I wrote the README, everything works") because a`,
+  `narrative claim without pasted tool output is unverifiable.`,
+  `Re-running the same work identically will NOT fix a rejected report —`,
+  `embedding the evidence will.`,
+];
+
 export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element specialised for static-file authoring: JSON,`,
   `markdown, YAML, text, configuration files, documentation — anything`,
@@ -529,11 +563,12 @@ export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   ``,
   `Typical tool sequence:`,
   `  1. write_file  <path>        (the file the subtask asks for)`,
-  `  2. read_file   <path>        (optional, echo-back verification)`,
+  `  2. read_file   <path>        (echo-back verification — its output is`,
+  `                                your GROUND-TRUTH evidence, keep it)`,
   `  3. run_shell   (optional)    (quick structural validation, e.g.`,
   `                                \`node -e 'JSON.parse(require("fs").readFileSync("config.json","utf8"))'\``,
   `                                or \`python3 -c 'import json; json.load(open("config.json"))'\`)`,
-  `  4. return JSON {"output": {"path": "<path>"}, "summary": "<one sentence>"}`,
+  `  4. return the JSON envelope per the RESULT-REPORTING CONTRACT below.`,
   ``,
   `Scope boundary — this is a NARROW bucket:`,
   `  - You do NOT start servers (no start_node_server, no start_static_server).`,
@@ -544,8 +579,7 @@ export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `  and return whatever file you legitimately wrote. Do NOT grow your`,
   `  remit silently.`,
   ``,
-  `The output JSON envelope is mandatory — {"output", "summary"} — even`,
-  `if the file is a single byte. The supervisor validator reads it.`,
+  ...GROUND_TRUTH_EVIDENCE_LINES,
 ];
 
 /**
@@ -570,18 +604,28 @@ export function ensureCanonicalL1(
   smokeGuidance: string
 ): AtomType {
   const scoped = pickTools(tools, WEB_L1_TOOL_SCOPE);
+  const systemPrompt = [...CANONICAL_L1_SYSTEM_PROMPT_LINES, ``, smokeGuidance].join('\n');
   const existing = registry
     .listByTier(1)
     .find((t) => t.createdBy === CANONICAL_BOOTSTRAP_MARKER);
   if (existing) {
+    // Prompt refresh mirrors the tools refresh: when the SEED prompt
+    // constant changed since the persisted row was written, re-align it.
+    // The patch no-op guard keeps this free (no version bump, counters
+    // preserved) on every run where nothing actually changed; a real
+    // prompt change legitimately resets trust (changed type must re-earn).
     return registry.patch(
       existing.name,
-      { addTools: scoped },
+      {
+        addTools: scoped,
+        ...(existing.systemPrompt !== systemPrompt
+          ? { systemPromptReplace: systemPrompt }
+          : {}),
+      },
       'build-app-bootstrap',
-      'refresh canonical L1 tools'
+      'refresh canonical L1 tools + seed prompt'
     );
   }
-  const systemPrompt = [...CANONICAL_L1_SYSTEM_PROMPT_LINES, ``, smokeGuidance].join('\n');
   return registry.create(1, {
     description: capabilityDescription(scoped, 1),
     systemPrompt,
@@ -600,20 +644,26 @@ export function ensureCanonicalL2(
   tools: readonly Tool[]
 ): AtomType {
   const scoped = pickTools(tools, WEB_L1_TOOL_SCOPE);
+  const systemPrompt = CANONICAL_L2_SYSTEM_PROMPT_LINES.join('\n');
   const existing = registry
     .listByTier(2)
     .find((t) => t.createdBy === CANONICAL_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: scoped },
+      {
+        addTools: scoped,
+        ...(existing.systemPrompt !== systemPrompt
+          ? { systemPromptReplace: systemPrompt }
+          : {}),
+      },
       'build-app-bootstrap',
-      'refresh canonical L2 tools'
+      'refresh canonical L2 tools + seed prompt'
     );
   }
   return registry.create(2, {
     description: capabilityDescription(scoped, 2),
-    systemPrompt: CANONICAL_L2_SYSTEM_PROMPT_LINES.join('\n'),
+    systemPrompt,
     tools: scoped,
     params: {},
     createdBy: CANONICAL_BOOTSTRAP_MARKER,
@@ -639,20 +689,26 @@ export function ensureCanonicalHttpL1(
   tools: readonly Tool[]
 ): AtomType {
   const scoped = pickTools(tools, HTTP_L1_TOOL_SCOPE);
+  const systemPrompt = CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES.join('\n');
   const existing = registry
     .listByTier(1)
     .find((t) => t.createdBy === CANONICAL_HTTP_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: scoped },
+      {
+        addTools: scoped,
+        ...(existing.systemPrompt !== systemPrompt
+          ? { systemPromptReplace: systemPrompt }
+          : {}),
+      },
       'build-app-bootstrap',
-      'refresh canonical HTTP L1 tools'
+      'refresh canonical HTTP L1 tools + seed prompt'
     );
   }
   return registry.create(1, {
     description: capabilityDescription(scoped, 1),
-    systemPrompt: CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES.join('\n'),
+    systemPrompt,
     tools: scoped,
     params: {},
     createdBy: CANONICAL_HTTP_BOOTSTRAP_MARKER,
@@ -671,20 +727,26 @@ export function ensureCanonicalHttpL2(
   tools: readonly Tool[]
 ): AtomType {
   const scoped = pickTools(tools, HTTP_L1_TOOL_SCOPE);
+  const systemPrompt = CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES.join('\n');
   const existing = registry
     .listByTier(2)
     .find((t) => t.createdBy === CANONICAL_HTTP_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: scoped },
+      {
+        addTools: scoped,
+        ...(existing.systemPrompt !== systemPrompt
+          ? { systemPromptReplace: systemPrompt }
+          : {}),
+      },
       'build-app-bootstrap',
-      'refresh canonical HTTP L2 tools'
+      'refresh canonical HTTP L2 tools + seed prompt'
     );
   }
   return registry.create(2, {
     description: capabilityDescription(scoped, 2),
-    systemPrompt: CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES.join('\n'),
+    systemPrompt,
     tools: scoped,
     params: {},
     createdBy: CANONICAL_HTTP_BOOTSTRAP_MARKER,
@@ -725,20 +787,26 @@ export function ensureCanonicalFileScribeL1(
   tools: readonly Tool[]
 ): AtomType {
   const scoped = pickTools(tools, FILESCRIBE_L1_TOOL_SCOPE);
+  const systemPrompt = CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES.join('\n');
   const existing = registry
     .listByTier(1)
     .find((t) => t.createdBy === CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER);
   if (existing) {
     return registry.patch(
       existing.name,
-      { addTools: scoped },
+      {
+        addTools: scoped,
+        ...(existing.systemPrompt !== systemPrompt
+          ? { systemPromptReplace: systemPrompt }
+          : {}),
+      },
       'build-app-bootstrap',
-      'refresh canonical file-scribe L1 tools'
+      'refresh canonical file-scribe L1 tools + seed prompt'
     );
   }
   return registry.create(1, {
     description: capabilityDescription(scoped, 1),
-    systemPrompt: CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES.join('\n'),
+    systemPrompt,
     tools: scoped,
     params: {},
     createdBy: CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER,
