@@ -89,6 +89,8 @@ export interface Skill {
   readonly updatedAt: string;
   /** Mirrors `SkillMeta.promotionRefusedAt`; see there for semantics. */
   readonly promotionRefusedAt?: string;
+  /** Mirrors `SkillMeta.promotionRefusedReason`; see there for semantics. */
+  readonly promotionRefusedReason?: string;
 }
 
 /**
@@ -120,4 +122,15 @@ export interface SkillMeta {
    * by deleting the field from `_meta.json`.
    */
   readonly promotionRefusedAt?: string;
+  /**
+   * Sonnet's verbatim explanation for the refusal (bounded to
+   * REFUSAL_REASON_MAX_CHARS at write time). Persisted alongside the
+   * stamp because the WHY is the actionable part: "irreducible LLM
+   * reasoning" tells the operator the skill can never compile, while
+   * a workflow-shape complaint might be fixed by a body revision.
+   * Before this field the reason only lived in run traces, and
+   * answering "why do I have no script skills?" meant grepping
+   * ./runs. Lifecycle is identical to `promotionRefusedAt`.
+   */
+  readonly promotionRefusedReason?: string;
 }

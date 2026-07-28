@@ -13,6 +13,13 @@ import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta } fro
 export const FALLBACK_FILENAME = '_fallback.md';
 
 /**
+ * Upper bound on the persisted `promotionRefusedReason`. Sonnet's refusal
+ * explanations are one or two sentences; the cap only exists so a runaway
+ * response can't balloon a `_meta.json` that every `loadFor` reads.
+ */
+export const REFUSAL_REASON_MAX_CHARS = 500;
+
+/**
  * Filesystem-backed skill store. Skills live under
  *   <rootDir>/<l1-name>/<skill-id>/SKILL.md   (frontmatter + body)
  *   <rootDir>/<l1-name>/<skill-id>/_meta.json (counters)
@@ -85,6 +92,9 @@ export class SkillRegistry {
           failures: meta.failures,
           updatedAt: meta.updatedAt,
           ...(meta.promotionRefusedAt ? { promotionRefusedAt: meta.promotionRefusedAt } : {}),
+          ...(meta.promotionRefusedReason
+            ? { promotionRefusedReason: meta.promotionRefusedReason }
+            : {}),
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -170,16 +180,18 @@ export class SkillRegistry {
    * No-op (returns null) when the skill folder doesn't exist; we
    * never auto-create a meta file for a non-existent skill.
    */
-  markPromotionRefused(l1Name: string, skillId: string): SkillMeta | null {
+  markPromotionRefused(l1Name: string, skillId: string, reason?: string): SkillMeta | null {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
     const metaPath = join(dir, '_meta.json');
     const cur = existsSync(metaPath)
       ? readMeta(metaPath)
       : { successes: 0, failures: 0, updatedAt: nowIso() };
+    const trimmed = reason?.trim().slice(0, REFUSAL_REASON_MAX_CHARS);
     const next: SkillMeta = {
       ...cur,
       promotionRefusedAt: nowIso(),
+      ...(trimmed ? { promotionRefusedReason: trimmed } : {}),
       updatedAt: nowIso(),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
@@ -348,9 +360,12 @@ export class SkillRegistry {
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),
       updatedAt: nowIso(),
-      // Preserve `promotionRefusedAt` across counter bumps — only
-      // `save()` (i.e. a body rewrite) and manual edits clear it.
+      // Preserve `promotionRefusedAt` (+ its reason) across counter bumps —
+      // only `save()` (i.e. a body rewrite) and manual edits clear them.
       ...(cur.promotionRefusedAt ? { promotionRefusedAt: cur.promotionRefusedAt } : {}),
+      ...(cur.promotionRefusedReason
+        ? { promotionRefusedReason: cur.promotionRefusedReason }
+        : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
   }
@@ -376,11 +391,20 @@ function readMeta(path: string): SkillMeta {
       typeof obj.promotionRefusedAt === 'string' && obj.promotionRefusedAt.length > 0
         ? obj.promotionRefusedAt
         : undefined;
+    // The reason is meaningless without its stamp — a hand-edited meta that
+    // deleted the stamp but left the reason reads as unstamped.
+    const promotionRefusedReason =
+      promotionRefusedAt &&
+      typeof obj.promotionRefusedReason === 'string' &&
+      obj.promotionRefusedReason.length > 0
+        ? obj.promotionRefusedReason.slice(0, REFUSAL_REASON_MAX_CHARS)
+        : undefined;
     return {
       successes: typeof obj.successes === 'number' ? obj.successes : 0,
       failures: typeof obj.failures === 'number' ? obj.failures : 0,
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : nowIso(),
       ...(promotionRefusedAt ? { promotionRefusedAt } : {}),
+      ...(promotionRefusedReason ? { promotionRefusedReason } : {}),
     };
   } catch {
     return { successes: 0, failures: 0, updatedAt: nowIso() };

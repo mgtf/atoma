@@ -122,6 +122,9 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   console.log(`  updated at  : ${s.updatedAt}`);
   if (s.promotionRefusedAt) {
     console.log(`  ⚠ promotion refused at ${s.promotionRefusedAt} — \`reset\` clears the stamp`);
+    if (s.promotionRefusedReason) {
+      console.log(`    reason: ${s.promotionRefusedReason}`);
+    }
   }
   if (s.fallbackBody) {
     console.log(`  has _fallback.md (original llm body preserved from promotion)`);

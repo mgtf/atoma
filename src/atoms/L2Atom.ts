@@ -1167,7 +1167,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // refuse a structurally non-promotable recipe (schema design,
       // API shape choice) — we don't want to pay $0.005 to learn
       // the same fact on every future success of the same recipe.
-      this.skillRegistry.markPromotionRefused(args.l1Name, args.skillId);
+      this.skillRegistry.markPromotionRefused(args.l1Name, args.skillId, compiled.reason);
       args.ctx.recordSkill?.({
         op: 'promote',
         l1Name: args.l1Name,

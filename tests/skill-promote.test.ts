@@ -225,6 +225,9 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     const stamped = skills.loadFor('Hydrogen').find((s) => s.id === 'web-build-loop')!;
     expect(stamped.promotionRefusedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    // Sonnet's verbatim WHY is persisted next to the stamp — the operator
+    // reads it via `skills show` instead of grepping run traces.
+    expect(stamped.promotionRefusedReason).toBe('too LLM-shaped');
 
     // Second run on the same skill: the gate must short-circuit BEFORE
     // any compile call. We do not enqueue a 5th LLM response — if the

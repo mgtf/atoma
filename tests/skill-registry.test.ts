@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SkillRegistry, parseFrontmatter, renderFrontmatter } from '../src/skills/registry.js';
+import {
+  SkillRegistry,
+  parseFrontmatter,
+  renderFrontmatter,
+  REFUSAL_REASON_MAX_CHARS,
+} from '../src/skills/registry.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 
 /**
@@ -404,11 +409,38 @@ describe('SkillRegistry', () => {
         kind: 'llm',
         body: 'recipe with irreducible LLM steps',
       });
-      const meta = reg.markPromotionRefused('Helium', 'too-llm-shaped')!;
+      const meta = reg.markPromotionRefused(
+        'Helium',
+        'too-llm-shaped',
+        'schema design is an irreducible LLM reasoning step'
+      )!;
       expect(meta.promotionRefusedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-      // loadFor surfaces the stamp on the Skill so the L2 gate can read it.
+      // loadFor surfaces the stamp AND the reason on the Skill: the WHY is
+      // the actionable part for the operator ("why do I have no script
+      // skills?" used to require grepping ./runs).
       const loaded = reg.loadFor('Helium')[0]!;
       expect(loaded.promotionRefusedAt).toBe(meta.promotionRefusedAt);
+      expect(loaded.promotionRefusedReason).toBe(
+        'schema design is an irreducible LLM reasoning step'
+      );
+    });
+
+    it('markPromotionRefused bounds the persisted reason and tolerates its absence', () => {
+      reg.save('Helium', {
+        id: 'bounded',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'b',
+      });
+      const long = reg.markPromotionRefused('Helium', 'bounded', 'x'.repeat(2000))!;
+      expect(long.promotionRefusedReason).toHaveLength(REFUSAL_REASON_MAX_CHARS);
+      // A reason-less stamp (legacy callers, empty Sonnet reason) stays valid
+      // and does not write an empty-string field.
+      reg.save('Helium', { id: 'bounded', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b2' });
+      const bare = reg.markPromotionRefused('Helium', 'bounded')!;
+      expect(bare.promotionRefusedAt).toBeTruthy();
+      expect(bare.promotionRefusedReason).toBeUndefined();
     });
 
     it('counter bumps PRESERVE promotionRefusedAt (only save() clears it)', () => {
@@ -419,12 +451,13 @@ describe('SkillRegistry', () => {
         kind: 'llm',
         body: 'b',
       });
-      const stamped = reg.markPromotionRefused('Helium', 'sticky')!;
+      const stamped = reg.markPromotionRefused('Helium', 'sticky', 'because reasons')!;
       reg.recordSuccess('Helium', 'sticky');
       reg.recordSuccess('Helium', 'sticky');
       const after = reg.loadFor('Helium')[0]!;
       expect(after.successes).toBe(2);
       expect(after.promotionRefusedAt).toBe(stamped.promotionRefusedAt);
+      expect(after.promotionRefusedReason).toBe('because reasons');
     });
 
     it('save() CLEARS promotionRefusedAt — a rewritten body deserves a fresh compile attempt', () => {
@@ -435,7 +468,7 @@ describe('SkillRegistry', () => {
         kind: 'llm',
         body: 'old recipe',
       });
-      reg.markPromotionRefused('Helium', 'rewritten');
+      reg.markPromotionRefused('Helium', 'rewritten', 'old body was judgment-shaped');
       expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeTruthy();
       // Simulate improveSkillBody / re-distillation rewriting the body.
       reg.save('Helium', {
@@ -446,6 +479,8 @@ describe('SkillRegistry', () => {
         body: 'NEW recipe — much more procedural now',
       });
       expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeUndefined();
+      // The reason is a judgment about the OLD body — it clears with the stamp.
+      expect(reg.loadFor('Helium')[0]!.promotionRefusedReason).toBeUndefined();
     });
 
     it('markPromotionRefused returns null for a missing skill (no auto-create)', () => {
