@@ -2859,6 +2859,20 @@ const PROBEABLE_EXTENSIONS = new Set([
 ]);
 
 /**
+ * Runtime and library names that are structurally indistinguishable from
+ * filenames (`Node.js` has the same shape as `README.md`) and appear
+ * constantly in summaries and READMEs. Measured over 85 recorded runs:
+ * `Node.js` was the single most frequent prose "path" at 40 payloads, twice
+ * the next entry, and every hit was noise. Prose mentions are advisory so
+ * these never caused a false verdict, but skipping them saves a pointless
+ * read attempt and keeps a probe slot for a real file.
+ */
+const NON_FILE_PROSE_TOKENS = new Set([
+  'node.js', 'next.js', 'nuxt.js', 'vue.js', 'three.js', 'd3.js', 'express.js',
+  'react.js', 'angular.js', 'jquery.js', 'socket.io',
+]);
+
+/**
  * Extract the workspace-relative file paths a RESULT claims to have produced.
  * Mirrors `extractResultUrl`'s tolerance: structured fields first, then a
  * constrained free-text scan of `output` / `summary`.
@@ -2918,7 +2932,14 @@ export function extractResultFileClaims(payload: unknown): {
     if (/(^|\/)_skill_/.test(p)) return;
     const m = p.match(/\.([A-Za-z][A-Za-z0-9]{0,8})$/);
     if (!m) return;
-    if (requireKnownExt && !PROBEABLE_EXTENSIONS.has(m[1]!.toLowerCase())) return;
+    if (requireKnownExt) {
+      if (!PROBEABLE_EXTENSIONS.has(m[1]!.toLowerCase())) return;
+      if (NON_FILE_PROSE_TOKENS.has(p.toLowerCase())) return;
+      // URL leftovers: the sweep runs after the scheme is gone, so
+      // "http://localhost:8000/index.html" surfaces as "8000/index.html".
+      // A leading all-digits segment is never a real workspace path.
+      if (/^\d+\//.test(p)) return;
+    }
     if (structured.includes(p) || mentioned.includes(p)) return;
     into.push(p);
   };

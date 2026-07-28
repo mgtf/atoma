@@ -189,6 +189,22 @@ describe('extractResultFilePaths', () => {
     expect(claims.structured).not.toContain('_skill_document-cli-from-source.js');
   });
 
+  it('skips runtime/library names and URL leftovers in prose (measured noise)', () => {
+    // Replaying 85 recorded runs through the extractor: "Node.js" was the most
+    // frequent prose "path" at 40 payloads — twice the next entry — and
+    // "8000/index.html" (a scheme-stripped localhost URL) appeared 13 times.
+    // Both are pure noise. They never caused a false verdict (prose is
+    // advisory) but they burned a read attempt and a probe slot.
+    const claims = extractResultFileClaims({
+      output: 'ok',
+      summary:
+        'Requires Node.js >= 12. Served at http://localhost:8000/index.html. Wrote README.md.',
+    });
+    expect(claims.mentioned).not.toContain('Node.js');
+    expect(claims.mentioned).not.toContain('8000/index.html');
+    expect(claims.mentioned).toContain('README.md');
+  });
+
   it('picks up path-advertising field NAMES like readme_path', () => {
     const claims = extractResultFileClaims({ output: { readme_path: 'docs/GUIDE.md' } });
     expect(claims.structured).toEqual(['docs/GUIDE.md']);
