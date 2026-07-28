@@ -122,9 +122,12 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   system prompt into a verdict call. Same rule applies to
   `PREFILTER_SYSTEM_PROMPT` and `SKILL_PREFILTER_SYSTEM_PROMPT` (the skill
   prefilter's dedicated prompt — also constant, see the Skills section).
-- Validation params are pinned to `{ temperature: 0, maxTokens: 512 }`, prefilter
-  params to `{ temperature: 0, maxTokens: 256 }`. Raise either only if you see
-  truncated outputs in practice — a Verdict / Prefilter is a tiny JSON object.
+- Validation params are pinned to `{ temperature: 0, maxTokens: 2048 }`
+  (`VALIDATION_PARAMS`, `src/atoms/L2Atom.ts`), prefilter params to
+  `{ temperature: 0, maxTokens: 256 }`. Raise either only if you see truncated
+  outputs in practice — a Verdict / Prefilter is a small JSON object. (This
+  bullet said 512 for months; the code has been 2048 since verdicts started
+  carrying reasoning long enough to act on.)
 - L3/L2 never pass `tools` or an `executor` on their own LLM calls. Only L1 gets
   tool declarations and a tool loop; that's the whole point of the tier split.
   Grep `executor:` to confirm it only appears in `L1Atom.execute`.
@@ -137,13 +140,17 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   L1 tool loop on Haiku. New-type encounters add Sonnet for the L2 plan
   step or Opus for the L3 plan step.
 - **Strategy/plan output cap.** L2/L3 `plan()` on the non-fallback path pin
-  `maxTokens: STRATEGY_MAX_TOKENS` (3000) regardless of the atom type's own
-  configured ceiling. The response is a routing JSON pair + a list of
-  subtasks with descriptions. Sized for Opus PHASED plans with 3-5 phases
-  of detailed instructions; the previous 1500-token cap was set when L3
-  emitted skeletal 1-subtask plans, and silently truncated multi-phase
-  plans on stack tasks (SSR app with SQLite + external API + UI), producing
-  unparseable JSON that crashed `planSchema`. As defence in depth,
+  `maxTokens: STRATEGY_MAX_TOKENS` (**8000**) plus `effort: 'medium'`,
+  regardless of the atom type's own configured ceiling. The response is a
+  routing JSON pair + a list of subtasks with descriptions. History: 1500 was
+  set when L3 emitted skeletal 1-subtask plans and silently truncated
+  multi-phase plans on stack tasks (SSR app with SQLite + external API + UI),
+  producing unparseable JSON that crashed `planSchema`; 3000 fixed that; 8000
+  is the current value because Opus 5 / Sonnet 5 run ADAPTIVE THINKING by
+  default and `max_tokens` caps thinking + response TOGETHER — a 3000 cap can
+  be consumed entirely by thinking before a single plan token is emitted.
+  It is a CAP, not a target: you only pay for what is generated, and
+  `effort: 'medium'` keeps thinking volume modest. As defence in depth,
   `expectedOutput` and `aggregation` in `planSchema` are now defaulted
   rather than required, so a future cap-overrun degrades to a parseable
   plan with empty `expectedOutput` and `concat` aggregation rather than
@@ -856,6 +863,32 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 
 ## Things that look wrong but aren't
 
+- **`DEFAULT_LIMITS.maxExecIterations` (5) is UNREACHABLE, and that is
+  currently fine.** `superviseLoop` has one loop body: a RESULT rejection
+  falls out of it and re-enters at `plan()`, incrementing `planIter`. So
+  `execIter <= planIter <= maxPlanIterations` and the exec guard can only fire
+  if `maxExecIterations < maxPlanIterations`. Effective result-retry budget is
+  3. Two knock-on facts: escalations driven by repeated RESULT rejections are
+  raised as `EscalationSignal('plan')` (so post-mortems mislabel the phase),
+  and on run `2026-07-25T22-10-42` the retries *degraded* the artefact
+  (README 1059 → 933 → 1731 bytes, a probe's evidence lost mid-cycle) — so do
+  NOT raise `maxPlanIterations` to "unlock" the 5.
+  **F8 — why "just re-execute without re-planning" is not a free fix:**
+  `L2Atom.execute` / `L3Atom.execute` consume-and-null `pendingStrategy`, then
+  silently `return this.selfExecute(...)` when it is missing. Re-executing a
+  tier-2 child without an intervening `plan()` therefore collapses the tier
+  (Sonnet at L2, **Opus with a 40-iteration tool loop** at L3), wires `tools`
+  + `executor` above tier 1 in violation of the tier split, and stamps
+  `viaFallback: false` — so the collapse is invisible in the trace, the
+  metrics and the viz, while `onApproved` still credits a success. `L1Atom`
+  *is* safe (its `execute` builds everything from the `plan` argument), but
+  the loop is generic. Any attempt needs: a capability predicate
+  (`supportsPlanReuse()`, false on `Atom`, true only on `L1Atom` — not a
+  `tier === 1` test), an object-identity check that `applyByScope` returned
+  the SAME instance (`patch`/`branch` return a fresh `L1Atom.fromType(...)`
+  that never produced the plan and has lost its injected skill), a single
+  plan-free retry, and continued `planIter` accounting so the worst case
+  stays at 3.
 - `L3Atom.fromType` is `async` while `L2Atom.fromType` is sync. Reason: L3 resolves
   the Opus model via a network call; L2 uses a pinned constant.
 - `verdictSchema` in `json.ts` allows `branchName: null` at runtime (LLMs emit
