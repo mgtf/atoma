@@ -134,8 +134,10 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(result.summary).toBe('script ran clean');
     expect(result.producedBy).toEqual({ tier: 1, name: 'Hydrogen', viaFallback: false });
 
-    // The two tool calls mirror skillContextBlock's calling convention.
-    expect(calls).toHaveLength(2);
+    // write + run mirror skillContextBlock's calling convention, then the
+    // scratch script is removed — it is scaffolding, not deliverable, and
+    // subtasks routinely assert the exact workspace contents afterwards.
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toEqual({
       name: 'write_file',
       args: { path: '_skill_scaffold-config.js', content: SCRIPT_BODY },
@@ -145,6 +147,12 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       command: 'node',
       args: ['_skill_scaffold-config.js', JSON.stringify('scaffold the config')],
     });
+    expect(calls[2]!.name).toBe('run_shell');
+    expect(calls[2]!.args['args']).toEqual([
+      '-e',
+      'require("fs").rmSync(process.argv[1],{force:true})',
+      '_skill_scaffold-config.js',
+    ]);
 
     // Skill success counter bumped by the dispatch itself (the supervise
     // loop never ran, so its onApproved hook could not).
@@ -205,8 +213,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
 
     expect(result.summary).toBe('llm path ok');
-    // The direct attempt DID try both tools before giving up.
-    expect(calls.map((c) => c.name)).toEqual(['write_file', 'run_shell']);
+    // The direct attempt DID try both tools before giving up — and still
+    // cleaned up its scratch file on the way out (the `finally`), so a failed
+    // dispatch doesn't leave debris for the LLM loop to trip over.
+    expect(calls.map((c) => c.name)).toEqual(['write_file', 'run_shell', 'run_shell']);
+    expect(calls[2]!.args['args']).toContain('_skill_scaffold-config.js');
     // A deterministic failure is NOT a skill failure: the LLM loop got
     // its shot and approved, so the skill records a success.
     const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;

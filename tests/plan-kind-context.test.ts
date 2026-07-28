@@ -49,7 +49,14 @@ describe('llmVerdict — injects Plan-kind hint based on child tier', () => {
 
     const content = ctx.llm.calls[0]!.userContent;
     expect(content).toMatch(/Plan kind: DIRECT/);
-    expect(content).toMatch(/apply the VISIBLE-deliverables checklist/);
+    expect(content).toMatch(/VISIBLE-deliverables checklist/i);
+    // …but scoped to interactive artefacts. The hint used to hand the
+    // checklist to the validator for EVERY tier-1 child, so a file-scribe
+    // writing a README got rejected citing "visible affordances" it cannot
+    // have (run 2026-07-25T22-10-42). Tier picks DIRECT vs DELEGATION; the
+    // ARTEFACT KIND gates the checklist.
+    expect(content).toMatch(/ONLY where the task describes an interactive artefact/);
+    expect(content).toMatch(/static-file deliverable/);
   });
 
   it('child tier 2 → Plan kind DELEGATION with explicit "do NOT demand" wording', async () => {

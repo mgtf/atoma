@@ -218,9 +218,16 @@ export function skillContextBlock(skill: {
       `       "summary": "ran ${skill.id}; stdout: <first 200 chars>"}.`,
       `     - On error (non-zero exit / stderr non-empty): return the`,
       `       stderr in summary so the supervisor can diagnose.`,
-      `  5. Do NOT improvise additional tool calls. The script body is`,
-      `     canonical; your role is to wire CLI args, run it, and forward`,
-      `     its envelope.`,
+      `  5. DELETE the scratch file once you have its output:`,
+      `     run_shell { command: "node", args: ["-e",`,
+      `       "require(\\"fs\\").rmSync(process.argv[1],{force:true})",`,
+      `       "${filename}"] }`,
+      `     It is scaffolding, NOT part of the deliverable — subtasks often end`,
+      `     with "list_files to confirm exactly <these files> exist", and a`,
+      `     leftover ${filename} makes that check fail.`,
+      `  6. Do NOT improvise additional tool calls beyond those. The script`,
+      `     body is canonical; your role is to wire CLI args, run it, clean up,`,
+      `     and forward its envelope.`,
       ``,
       `== SCRIPT BODY ==`,
       skill.body.trim(),
@@ -1340,6 +1347,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         command: interpreter,
         args: [filename, JSON.stringify(subTask.description)],
       })) as { exitCode?: number; stdout?: string; stderr?: string } | null;
+      // The scratch script is NOT part of the deliverable: subtasks routinely
+      // end with "list_files to confirm exactly <these files> exist", and a
+      // stray `_skill_*.js` makes that check fail (or worse, ships in the
+      // artefact). Clean it up on every exit path — see the `finally` below.
+      // Kept as a separate call rather than folded into the run so a cleanup
+      // failure can never mask the script's own result.
       if (!res || res.exitCode !== 0 || typeof res.stdout !== 'string') {
         ctx.logger.debug(
           `[${this.name}] direct dispatch of ${skill.id} failed (exit=${res?.exitCode ?? '?'}; stderr=${(res?.stderr ?? '').slice(0, 200)}) — falling back to the LLM loop`
@@ -1391,6 +1404,30 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         `[${this.name}] direct dispatch of ${skill.id} threw: ${(err as Error).message} — falling back to the LLM loop`
       );
       return null;
+    } finally {
+      await this.removeScratchScript(filename, ctx);
+    }
+  }
+
+  /**
+   * Best-effort removal of the scratch script written by the deterministic
+   * dispatch. Uses `node -e` because the sandbox toolbox has no delete tool
+   * and `rm` is not on `run_shell`'s allowlist; `node` is. Note the `-e` argv
+   * offset: with `node -e <code> <arg>` the argument lands at `process.argv[1]`
+   * (NOT [2] as in a script invocation) — verified, and the reason the script
+   * itself cannot simply be passed inline via `-e`.
+   *
+   * Swallows every failure: cleanup must never turn a successful dispatch
+   * into a fallback, nor mask the script's own error.
+   */
+  private async removeScratchScript(filename: string, ctx: RunContext): Promise<void> {
+    try {
+      await ctx.tools?.execute('run_shell', {
+        command: 'node',
+        args: ['-e', 'require("fs").rmSync(process.argv[1],{force:true})', filename],
+      });
+    } catch {
+      /* best effort — the deliverable check may still see the file */
     }
   }
 
@@ -2485,7 +2522,15 @@ export async function llmVerdict(args: {
   const planKind: 'DIRECT' | 'DELEGATION' = args.child.tier === 1 ? 'DIRECT' : 'DELEGATION';
   const planKindHint =
     planKind === 'DIRECT'
-      ? 'DIRECT — the child IS the executor (tier 1 or fallback); apply the VISIBLE-deliverables checklist.'
+      ? // The checklist is scoped to the artefact KIND, not just the tier. The
+        // prompt body reserves it for interactive artefacts (apps, games, UIs),
+        // but this hint used to hand it to the validator for EVERY tier-1
+        // child — including a file-scribe writing a README. Observed on run
+        // 2026-07-25T22-10-42: the validator rejected a documentation result
+        // citing "the task's visible-affordances checklist" for a markdown
+        // file, which has no affordances to enumerate. Tier still selects
+        // DIRECT vs DELEGATION; the artefact kind now gates the checklist.
+        'DIRECT — the child IS the executor (tier 1 or fallback). Apply the VISIBLE-deliverables checklist ONLY where the task describes an interactive artefact (app, game, UI). For a static-file deliverable (docs, config, data, a CLI script), judge the plan on whether it writes and verifies THAT file — do not demand visible affordances it cannot have.'
       : 'DELEGATION — the child is routing to a lower tier; do NOT demand visible-deliverable enumeration in THIS plan — that is the downstream L1\'s job.';
 
   // Ground-truth probe: for RESULT verdicts that include a URL, re-run
