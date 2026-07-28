@@ -11,6 +11,7 @@
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/full_deliverable-~$0.50-gold)
 ![zero](https://img.shields.io/badge/learned_tasks-$0.00-black)
+![benchmark](https://img.shields.io/badge/vs_Opus--direct-1.5–4.7×_cheaper_on_learned_families-success)
 
 </div>
 
@@ -56,6 +57,36 @@ Every number below comes from live runs recorded in `./runs` (traces, tokens, co
 | Prompt-cache hits per run | **0.8 – 1.7M tokens** at 10% input price |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
 | Broken deliverable detected by the compiled verifier | **exit 1, per-command diff** (mutation-tested) |
+
+## 🥊 Head-to-head: atoma vs frontier-direct
+
+Same task **verbatim**, same sandbox, same 9 tools, same transport and token
+accounting on both sides. The baseline is Opus 5 as a single tool-loop agent with
+a competent generic engineer prompt, default settings — what a from-scratch user
+gets. Every deliverable was verified by hand on both sides.
+
+| Task | atoma's learning maturity | atoma | Opus 5 direct | Cost verdict |
+|---|---|---|---|---|
+| `colstat` CLI | **mature** (2 trusted compiled skills) | **$0.226** ✓ | $1.061 ✓ | **atoma 4.7×** |
+| `linefreq` CLI | mature | **$0.205** ✓ *(2 phases at $0.00)* | $0.302 ✓ | **atoma 1.5×** |
+| Pomodoro web app | immature (no relevant skill) | $0.852 ✗ *timeout* | **$0.498** ✓ | **Opus — outright** |
+| `todos` HTTP API | immature | $0.399 ✓ *(+2 skills learned)* | **$0.223** ✓ | Opus 1.8× |
+
+Three honest readings:
+
+1. **The cost advantage tracks learning maturity exactly.** On the family with
+   9 runs of experience, atoma beats frontier-direct 1.5–4.7× — *with independent
+   validation and a deterministic re-verifier on top*, while the baseline can only
+   self-certify.
+2. **Immature families pay tuition — and the tuition becomes an asset.** The
+   `todos` run cost $0.18 more than the baseline and *learned two skills during
+   the benchmark itself*; the CLI family rode that same mechanism from $0.66 down
+   to $0.21. The Pomodoro loss is real and diagnostic: the web bucket has the most
+   expensive verification loop and no learned recipes yet — it is the designated
+   next milestone (a probe-manifest equivalent for browser evidence).
+3. **Frontier-direct cost is wildly variant** ($0.22–$1.06 on comparable tasks —
+   thinking depth is unpredictable), while mature atoma is stable at $0.20–0.23.
+   For billable production, cost *predictability* matters nearly as much as the mean.
 
 ## 🏗️ Architecture
 
