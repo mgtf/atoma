@@ -414,6 +414,35 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   ran Puppeteer against a JSON API, got "errors", rejected a valid
   result, cascade. `Atom.toolNames()` is the public accessor to the
   declared tool names (the full tools array stays protected). Fix #9.
+- **Two ground-truth probes, MUTUALLY EXCLUSIVE by bucket.**
+  `probeGroundTruth` dispatches: a child declaring `validate_html` gets
+  the web load-and-look probe; every other file-producing child gets
+  `probeFilesGroundTruth` — the supervisor-side READ-BACK probe (#F9).
+  Running both would double the cost and, on a non-web artefact, add
+  Puppeteer noise the validator reads as a contradiction.
+  The read-back probe re-reads the workspace itself and hands the
+  validator facts instead of narration: which claimed paths exist,
+  their real sizes, a bounded excerpt of each (`FILE_PROBE_MAX_FILES`
+  = 6, `FILE_PROBE_EXCERPT_CHARS` = 400), plus a `list_files` of the
+  root — which also surfaces debris the deliverable should not carry.
+  No prompt cooperation from the child, no LLM call, only local fs
+  tool calls. Why it exists: the web probe returned `''` for
+  file-scribe children, so their RESULTs were judged on SELF-REPORTING
+  alone — a child that under-reported its evidence got rejected for it
+  (a wasted supervise cycle on a correct deliverable), and a
+  FABRICATED claim passed every validator (run
+  `2026-07-25T22-10-42`: a README asserted a Node version requirement
+  drifting 10.0.0 → 14.0.0 → 12.0 while `package.json` had no
+  `engines` field, approved three times).
+  Two load-bearing details: `extractResultFilePaths` requires a file
+  extension to START WITH A LETTER, otherwise version strings like
+  `1.0.0` parse as filenames and the block reports phantom missing
+  files; and the evidence block instructs the validator to reject ONLY
+  on a contradiction (claimed-but-missing / claimed-but-empty /
+  excerpt-refuted) and explicitly NOT because an excerpt is truncated
+  or the child's description was terse — that framing is what keeps
+  the probe from re-creating the over-demanding rejections the audit
+  found. Both probes now also honour `ctx.signal`.
 - **`VALIDATION_SYSTEM_PROMPT` must explicitly endorse the L1 plan
   shape.** The TIERING CONTRACT section names `toolCalls` as a valid
   L1 plan field and states "aspirational toolCalls at plan time are

@@ -2719,19 +2719,22 @@ async function probeGroundTruth(args: {
   child: import('../core/atom.js').Atom;
 }): Promise<string> {
   if (args.subject !== 'RESULT') return '';
+  if (args.ctx.signal?.aborted) return '';
   const tools = args.ctx.tools;
-  if (!tools || !tools.has('validate_html')) return '';
-  // Bucket gate: the probe is a web-artefact sanity check. A child that
-  // does NOT declare validate_html cannot have produced a web artefact
-  // the probe is designed to verify — probing the result URL with
-  // Puppeteer would just generate noise that Haiku reads as "errors
-  // contradict the child's claim" and reject a perfectly valid HTTP
-  // result. Observed in the Node/REST live run: Helium (HTTP-scope)
-  // returned the bound URL; the supervisor ran validate_html against
-  // the JSON API, got Puppeteer errors, rejected, cascade of
-  // escalations. We require the child itself to advertise
-  // validate_html before treating it as a web artefact.
-  if (!args.child.toolNames().includes('validate_html')) return '';
+  if (!tools) return '';
+  // Bucket dispatch. The two probes are MUTUALLY EXCLUSIVE: a child that
+  // declares validate_html gets the web load-and-look probe below; every
+  // other file-producing child gets the read-back probe (#F9). Running both
+  // would double the cost and, for a non-web artefact, add Puppeteer noise
+  // the validator reads as contradiction.
+  if (!tools.has('validate_html') || !args.child.toolNames().includes('validate_html')) {
+    return probeFilesGroundTruth(args);
+  }
+  // (Bucket gate handled by the dispatch above: reaching here means BOTH the
+  // context and the child declare validate_html, so this really is a web
+  // artefact. The gate exists because Helium — HTTP-scope — once returned a
+  // bound API URL, the supervisor ran Puppeteer against the JSON endpoint,
+  // read the errors as a contradiction, and cascaded into escalations.)
   const url = extractResultUrl(args.payload);
   if (!url) return '';
 
@@ -2761,6 +2764,154 @@ async function probeGroundTruth(args: {
       'This strongly suggests the child\'s deliverable is not actually running.',
     ].join('\n');
   }
+}
+
+/** Max files the read-back probe will open, and per-file excerpt budget. */
+const FILE_PROBE_MAX_FILES = 6;
+const FILE_PROBE_EXCERPT_CHARS = 400;
+
+/**
+ * Extract the workspace-relative file paths a RESULT claims to have produced.
+ * Mirrors `extractResultUrl`'s tolerance: structured fields first, then a
+ * constrained free-text scan of `output` / `summary`.
+ *
+ * The free-text regex requires the extension to START WITH A LETTER
+ * (`\.[A-Za-z][A-Za-z0-9]{0,5}`) — without that, version strings like
+ * "1.0.0" parse as filenames and the probe reports phantom missing files.
+ * Absolute paths and `..` segments are dropped here rather than left for
+ * `sandbox.resolve` to throw on: a path escaping the workspace is not
+ * evidence about the deliverable, it is noise.
+ *
+ * Exported for tests.
+ */
+export function extractResultFilePaths(payload: unknown): string[] {
+  const out: string[] = [];
+  const push = (v: unknown): void => {
+    if (typeof v !== 'string') return;
+    const p = v.trim();
+    if (!p || p.startsWith('/') || p.includes('..') || /^https?:\/\//i.test(p)) return;
+    if (!/\.[A-Za-z][A-Za-z0-9]{0,5}$/.test(p)) return;
+    if (!out.includes(p)) out.push(p);
+  };
+  if (!payload || typeof payload !== 'object') return out;
+  const obj = payload as Record<string, unknown>;
+  const output = obj['output'];
+
+  if (output && typeof output === 'object' && !Array.isArray(output)) {
+    const o = output as Record<string, unknown>;
+    push(o['path']);
+    push(o['entry']);
+    for (const key of ['paths', 'files', 'written']) {
+      const arr = o[key];
+      if (Array.isArray(arr)) for (const item of arr) push(item);
+    }
+  }
+  if (Array.isArray(output)) for (const item of output) push(item);
+  push(obj['path']);
+  push(output);
+
+  // Free-text sweep: the GROUND-TRUTH block routinely names files inline
+  // ("wrote README.md", "cat package.json").
+  const freeText: string[] = [];
+  if (typeof output === 'string') freeText.push(output);
+  if (typeof obj['summary'] === 'string') freeText.push(obj['summary'] as string);
+  for (const text of freeText) {
+    for (const m of text.matchAll(/[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,5}\b/g)) {
+      push(m[0]);
+      if (out.length >= FILE_PROBE_MAX_FILES) return out.slice(0, FILE_PROBE_MAX_FILES);
+    }
+  }
+  return out.slice(0, FILE_PROBE_MAX_FILES);
+}
+
+/**
+ * #F9 — supervisor-side READ-BACK probe for file-producing children.
+ *
+ * Why it exists: `probeGroundTruth`'s web probe returns '' for any child that
+ * does not declare `validate_html`, so a file-scribe L1's RESULT was judged on
+ * SELF-REPORTING alone. Two failure modes followed from that. A child could
+ * under-report its evidence and be rejected for it (costing a full supervise
+ * cycle even though the deliverable was correct), and — worse — a FABRICATED
+ * claim could pass every validator: on run 2026-07-25T22-10-42 a README
+ * asserted a Node version requirement that drifted 10.0.0 → 14.0.0 → 12.0
+ * across cycles while `package.json` had no `engines` field at all, and three
+ * validators approved it.
+ *
+ * The probe reads the workspace back itself and hands the validator facts
+ * instead of narration: which claimed paths exist, their real sizes, a bounded
+ * excerpt of each, plus a `list_files` of the root (which also surfaces debris
+ * the deliverable should not contain). It needs no prompt cooperation from the
+ * child and no LLM call — only local fs tool calls.
+ *
+ * Deliberately conservative: it reports, and tells the validator to reject
+ * only on a CONTRADICTION (claimed-but-missing, claimed-but-empty). A file
+ * being smaller or differently worded than described is not grounds to fail —
+ * that framing is what kept the web probe from producing false rejections.
+ */
+async function probeFilesGroundTruth(args: {
+  ctx: RunContext;
+  payload: unknown;
+  child: import('../core/atom.js').Atom;
+}): Promise<string> {
+  const tools = args.ctx.tools;
+  if (!tools || !tools.has('read_file')) return '';
+  // Only for children that actually write files — otherwise there is nothing
+  // to read back and the probe would just add an empty evidence block.
+  if (!args.child.toolNames().includes('write_file')) return '';
+  const paths = extractResultFilePaths(args.payload);
+  if (paths.length === 0) return '';
+
+  const lines: string[] = [];
+  for (const path of paths) {
+    if (args.ctx.signal?.aborted) return '';
+    try {
+      const raw = await tools.execute('read_file', { path });
+      const content =
+        raw && typeof raw === 'object' && typeof (raw as Record<string, unknown>)['content'] === 'string'
+          ? ((raw as Record<string, unknown>)['content'] as string)
+          : typeof raw === 'string'
+            ? raw
+            : JSON.stringify(raw);
+      const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
+      lines.push(
+        `- ${path}: EXISTS (${content.length} chars)` +
+          (content.trim().length === 0 ? ' — WARNING: file is EMPTY' : '') +
+          `\n    excerpt: ${JSON.stringify(excerpt)}${content.length > excerpt.length ? ' …(truncated)' : ''}`
+      );
+    } catch (err) {
+      lines.push(`- ${path}: MISSING or unreadable (${(err as Error).message})`);
+    }
+  }
+
+  let listing = '';
+  if (tools.has('list_files') && !args.ctx.signal?.aborted) {
+    try {
+      const raw = (await tools.execute('list_files', { path: '.' })) as {
+        entries?: Array<{ name?: string; kind?: string; size?: number }>;
+      } | null;
+      const entries = Array.isArray(raw?.entries) ? raw!.entries! : [];
+      listing = entries
+        .map((e) => `${e.name}${e.kind === 'dir' ? '/' : ''} (${e.size ?? '?'}b)`)
+        .join(', ');
+    } catch {
+      /* listing is a bonus, not a requirement */
+    }
+  }
+
+  return [
+    '',
+    '== GROUND-TRUTH EVIDENCE (independent file read-back) ==',
+    'The supervisor re-read the workspace itself. This is OBJECTIVE evidence —',
+    "weight it above the child's self-reported claims.",
+    ...lines,
+    listing ? `workspace root now contains: ${listing}` : '',
+    'REJECT only on a CONTRADICTION with this evidence — a file the RESULT',
+    'claims but which is MISSING or EMPTY, or a statement the excerpts refute.',
+    'Do NOT reject merely because an excerpt is truncated here, or because the',
+    'child described a file more briefly than its contents.',
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function summarizeValidateHtml(raw: unknown): string {
