@@ -225,6 +225,79 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
+  it('DEMOTES a script back to its llm fallback after 2 consecutive deterministic failures', async () => {
+    trustAtomType();
+    // Reach kind:script the production way — promotion writes _fallback.md,
+    // which is what demotion restores.
+    skills.save('Hydrogen', {
+      id: 'scaffold-config',
+      description: 'write a canonical config file',
+      whenToUse: 'when the subtask asks for the standard config scaffold',
+      kind: 'llm',
+      body: '1. derive fields from the workspace.\n2. write_file config.\n3. read back.',
+    });
+    skills.promoteToScript({
+      l1Name: 'Hydrogen',
+      skillId: 'scaffold-config',
+      language: 'node',
+      scriptBody: SCRIPT_BODY,
+    });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
+      skills.recordSuccess('Hydrogen', 'scaffold-config');
+    }
+    // Brittle script: exits 1 on every run, LLM loop saves the subtask.
+    const { executor } = makeExecutor({ exitCode: 1, stdout: '', stderr: 'REVERIFY-FAIL: nothing extracted' });
+
+    for (const runLabel of ['first', 'second'] as const) {
+      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const events: SkillEventInfo[] = [];
+      const ctx = makeCtxWith(executor, events);
+      ctx.llm.enqueueText(
+        jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      );
+      ctx.llm.enqueueText(
+        jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+      );
+      ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+      ctx.llm.enqueueText(jsonText({ output: 'saved by the loop', summary: `llm ok (${runLabel})` }));
+      const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+      expect(result.summary).toBe(`llm ok (${runLabel})`);
+      if (runLabel === 'first') {
+        // Streak at 1 — still a script, no demotion yet.
+        expect(skills.loadFor('Hydrogen')[0]!.kind).toBe('script');
+        expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBe(1);
+      } else {
+        // Streak hit 2 — demoted, original llm recipe restored, and the
+        // demotion is visible in the event stream.
+        const demoted = skills.loadFor('Hydrogen')[0]!;
+        expect(demoted.kind).toBe('llm');
+        expect(demoted.body).toMatch(/derive fields from the workspace/);
+        expect(events.some((e) => e.op === 'demote')).toBe(true);
+        // save() during demotion cleared the streak with the body rewrite.
+        expect(demoted.directFailures).toBeUndefined();
+      }
+    }
+  });
+
+  it('a deterministic SUCCESS clears the failure streak', async () => {
+    trustAtomType();
+    saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
+    skills.markDirectFailure('Hydrogen', 'scaffold-config');
+    expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBe(1);
+    const { executor } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtxWith(executor);
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+    );
+    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    expect(result.summary).toBe('script ran clean');
+    expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBeUndefined();
+  });
+
   it('treats a self-reported FAILED envelope as off-contract even on exit 0', async () => {
     // The deterministic path has no validator downstream, and a compiled
     // script can announce its own failure while still exiting 0 — measured on

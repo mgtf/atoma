@@ -149,6 +149,11 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(compileCall.userContent).toMatch(/NO TASK-SPECIFIC LITERALS/);
     expect(compileCall.userContent).toMatch(/Never hardcode a filename/);
     expect(compileCall.userContent).toMatch(/exit NON-ZERO rather than/);
+    // Robust extraction: the slugify rehearsal's compiled script truncated
+    // commands at quotes, deduped four invocations into one, and reported a
+    // phantom mismatch. Compiled scripts must survive formatting variance.
+    expect(compileCall.userContent).toMatch(/INPUT VARIANCE/);
+    expect(compileCall.userContent).toMatch(/ARGUMENTS ARE PART OF THE COMMAND/);
   });
 
   it('does NOT promote when the skill has any failures recorded (gate prevents thrash after demotion)', async () => {

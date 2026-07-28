@@ -91,6 +91,8 @@ export interface Skill {
   readonly promotionRefusedAt?: string;
   /** Mirrors `SkillMeta.promotionRefusedReason`; see there for semantics. */
   readonly promotionRefusedReason?: string;
+  /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
+  readonly directFailures?: number;
 }
 
 /**
@@ -133,4 +135,17 @@ export interface SkillMeta {
    * ./runs. Lifecycle is identical to `promotionRefusedAt`.
    */
   readonly promotionRefusedReason?: string;
+  /**
+   * Consecutive deterministic-dispatch failures for a `kind: script`
+   * skill (non-zero exit / missing envelope in `runScriptSkillDirect`).
+   * NOT the trust failure counter: these failures fall back to the
+   * validated LLM loop and are invisible to `shouldTrustSkill`. Bumped by
+   * `markDirectFailure`, cleared by `clearDirectFailures` on a
+   * deterministic success, by `save()` (body changed) and by
+   * `resetCounters`. When it reaches `DIRECT_DISPATCH_DEMOTE_AFTER` the
+   * L2 demotes the script to its llm fallback — the escape hatch for a
+   * structurally brittle script that never escalates (and therefore
+   * never hits the onFailed demotion path) but fails on every match.
+   */
+  readonly directFailures?: number;
 }

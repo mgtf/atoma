@@ -716,6 +716,30 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   handles these scripts correctly, since there the L1 derives the
   positional args itself), whereas the failure being closed is a
   false positive.
+- **Deterministic-failure streak demotes a brittle script (#C4b).**
+  `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
+  missing envelope) call `noteDirectFailure`, which bumps
+  `_meta.json.directFailures` via `SkillRegistry.markDirectFailure`; at
+  `DIRECT_DISPATCH_DEMOTE_AFTER` (2) the script is demoted to its llm
+  fallback. This is DISTINCT from the trust failure counter: deterministic
+  failures fall back to the validated LLM loop (which usually still
+  delivers, so the run records a SUCCESS), meaning a structurally brittle
+  script never escalates and the onFailed demotion path is unreachable —
+  without the streak it would fail on every match forever, burning two
+  tool calls + the full fallback each time. Demonstrated live (slugify
+  rehearsal, 2026-07-28): the compiled reverify script's command regex
+  excluded quotes, so `node index.js "Hello World"` was amputated to
+  `node index.js`, four documented invocations deduped into one bare
+  command, and a phantom mismatch failed a correct deliverable — then the
+  L1 fallback burned the run's whole 600s budget rewriting the README and
+  re-running the same script. The streak is cleared ONLY by a
+  deterministic success (`clearDirectFailures`) — an LLM-loop success
+  proves the recipe, not the script — plus the usual `save()` /
+  `resetCounters` paths. Environmental failures (executor threw) do not
+  count. The compile prompt gained a paired `INPUT VARIANCE — MANDATORY`
+  block: model-authored artefacts vary in formatting between runs, a
+  command's arguments are part of the command, and empty extraction must
+  exit non-zero. Covered by `skill-direct-dispatch.test.ts`.
 - **A `kind: script` skill with no `_fallback.md` is UNDEMOTABLE.**
   `demoteToLlm` returns null when the file is absent, and
   `resetCounters` does not change `kind` — so a broken script authored

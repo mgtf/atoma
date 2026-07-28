@@ -38,6 +38,25 @@ export const TRUST_THRESHOLD_SUCCESSES = 3;
 export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 5;
 
 /**
+ * Consecutive DETERMINISTIC dispatch failures (non-zero exit or missing
+ * stdout envelope) after which a `kind: script` skill is demoted back to
+ * its llm fallback. Deterministic failures deliberately do NOT bump the
+ * trust failure counter (they fall back to the validated LLM loop, which
+ * usually still delivers), but without this bound a structurally brittle
+ * script — one whose extraction logic cannot survive real input variance —
+ * fails on EVERY match forever: it never escalates (so `demoteToLlm` on
+ * the onFailed path is unreachable) and never improves, and each match
+ * pays two wasted tool calls plus the full LLM fallback. Demonstrated by
+ * the slugify rehearsal run (2026-07-28): the compiled reverify script
+ * amputated quoted CLI arguments, deduped four documented invocations
+ * into one bare command, and reported a phantom mismatch — it would have
+ * done so on every future CLI README as well. Reset by a deterministic
+ * SUCCESS (not by an LLM-loop success, which proves nothing about the
+ * script).
+ */
+export const DIRECT_DISPATCH_DEMOTE_AFTER = 2;
+
+/**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
  * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED

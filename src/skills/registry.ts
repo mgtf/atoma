@@ -95,6 +95,7 @@ export class SkillRegistry {
           ...(meta.promotionRefusedReason
             ? { promotionRefusedReason: meta.promotionRefusedReason }
             : {}),
+          ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -196,6 +197,46 @@ export class SkillRegistry {
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
     return next;
+  }
+
+  /**
+   * Bump the consecutive deterministic-dispatch failure count and return
+   * the new value. See `SkillMeta.directFailures` for semantics — this is
+   * NOT the trust failure counter. No-op (returns 0) for a missing skill.
+   */
+  markDirectFailure(l1Name: string, skillId: string): number {
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return 0;
+    const metaPath = join(dir, '_meta.json');
+    const cur = existsSync(metaPath)
+      ? readMeta(metaPath)
+      : { successes: 0, failures: 0, updatedAt: nowIso() };
+    const next: SkillMeta = {
+      ...cur,
+      directFailures: (cur.directFailures ?? 0) + 1,
+      updatedAt: nowIso(),
+    };
+    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    return next.directFailures ?? 0;
+  }
+
+  /**
+   * Reset the deterministic-failure streak — called on a deterministic
+   * SUCCESS only. An LLM-loop success is deliberately not a reset: it
+   * proves the recipe, not the script.
+   */
+  clearDirectFailures(l1Name: string, skillId: string): void {
+    const dir = this.skillDir(l1Name, skillId);
+    const metaPath = join(dir, '_meta.json');
+    if (!existsSync(join(dir, 'SKILL.md')) || !existsSync(metaPath)) return;
+    const cur = readMeta(metaPath);
+    if (!cur.directFailures) return;
+    const { directFailures: _dropped, ...rest } = cur;
+    writeFileSync(
+      metaPath,
+      JSON.stringify({ ...rest, updatedAt: nowIso() }, null, 2),
+      'utf8'
+    );
   }
 
   /**
@@ -360,12 +401,14 @@ export class SkillRegistry {
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),
       updatedAt: nowIso(),
-      // Preserve `promotionRefusedAt` (+ its reason) across counter bumps —
-      // only `save()` (i.e. a body rewrite) and manual edits clear them.
+      // Preserve `promotionRefusedAt` (+ its reason) and `directFailures`
+      // across counter bumps — only `save()` (i.e. a body rewrite), manual
+      // edits and their dedicated clear paths reset them.
       ...(cur.promotionRefusedAt ? { promotionRefusedAt: cur.promotionRefusedAt } : {}),
       ...(cur.promotionRefusedReason
         ? { promotionRefusedReason: cur.promotionRefusedReason }
         : {}),
+      ...(cur.directFailures ? { directFailures: cur.directFailures } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
   }
@@ -399,12 +442,17 @@ function readMeta(path: string): SkillMeta {
       obj.promotionRefusedReason.length > 0
         ? obj.promotionRefusedReason.slice(0, REFUSAL_REASON_MAX_CHARS)
         : undefined;
+    const directFailures =
+      typeof obj.directFailures === 'number' && obj.directFailures > 0
+        ? Math.floor(obj.directFailures)
+        : undefined;
     return {
       successes: typeof obj.successes === 'number' ? obj.successes : 0,
       failures: typeof obj.failures === 'number' ? obj.failures : 0,
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : nowIso(),
       ...(promotionRefusedAt ? { promotionRefusedAt } : {}),
       ...(promotionRefusedReason ? { promotionRefusedReason } : {}),
+      ...(directFailures ? { directFailures } : {}),
     };
   } catch {
     return { successes: 0, failures: 0, updatedAt: nowIso() };

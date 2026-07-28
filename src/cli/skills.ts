@@ -126,6 +126,11 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
       console.log(`    reason: ${s.promotionRefusedReason}`);
     }
   }
+  if (s.directFailures) {
+    console.log(
+      `  ⚠ ${s.directFailures} consecutive deterministic-dispatch failure(s) — demotes to llm at 2`
+    );
+  }
   if (s.fallbackBody) {
     console.log(`  has _fallback.md (original llm body preserved from promotion)`);
   }

@@ -39,6 +39,7 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
+  DIRECT_DISPATCH_DEMOTE_AFTER,
 } from './cost.js';
 import {
   bucketIdForTools,
@@ -1318,6 +1319,19 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `inventing a plausible-looking example. A script that fabricates`,
       `documentation is worse than one that refuses.`,
       ``,
+      `INPUT VARIANCE — MANDATORY. Model-authored artefacts the script reads`,
+      `(READMEs, docs, configs) vary in formatting between runs: fenced blocks`,
+      `vs inline code, "$ " prompt prefixes, prose annotations, different`,
+      `heading levels. Extraction logic must tolerate that variance, and a`,
+      `command's ARGUMENTS ARE PART OF THE COMMAND — capture the complete`,
+      `command line (e.g. the full fenced line), never a prefix truncated at a`,
+      `quote or punctuation. Observed failure: a compiled reverify script`,
+      `matched commands with a character class that excluded quotes, so`,
+      `\`node index.js "Hello World"\` was amputated to \`node index.js\`, four`,
+      `documented invocations deduped into one bare command, and the script`,
+      `reported a phantom mismatch on a correct deliverable. When extraction`,
+      `finds nothing where the recipe expects something, exit NON-ZERO.`,
+      ``,
       `FAILURE SIGNALLING — MANDATORY. There is NO validator downstream of a`,
       `trusted script: whatever you print is taken as the deliverable. So if a`,
       `precondition is missing or a step fails, you MUST:`,
@@ -1492,6 +1506,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx.logger.debug(
           `[${this.name}] direct dispatch of ${skill.id} failed (exit=${res?.exitCode ?? '?'}; stderr=${(res?.stderr ?? '').slice(0, 200)}) — falling back to the LLM loop`
         );
+        this.noteDirectFailure(l1Name, skill, ctx);
         return null;
       }
       const envelope = parseScriptEnvelope(res.stdout);
@@ -1499,8 +1514,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx.logger.debug(
           `[${this.name}] direct dispatch of ${skill.id}: stdout carried no {"output","summary"} envelope — falling back to the LLM loop`
         );
+        this.noteDirectFailure(l1Name, skill, ctx);
         return null;
       }
+      this.skillRegistry?.clearDirectFailures(l1Name, skill.id);
       this.skillRegistry?.recordSuccess(l1Name, skill.id);
       ctx.recordSkill?.({
         op: 'direct',
@@ -1555,6 +1572,43 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
    * Swallows every failure: cleanup must never turn a successful dispatch
    * into a fallback, nor mask the script's own error.
    */
+  /**
+   * Record a deterministic-dispatch contract failure and demote the script
+   * back to its llm fallback once the streak reaches
+   * DIRECT_DISPATCH_DEMOTE_AFTER. Deterministic failures never bump the
+   * trust failure counter (the LLM fallback usually still delivers), so
+   * without this a structurally brittle script fails on every match
+   * forever — it never escalates, so the onFailed demotion path is
+   * unreachable from here. Environmental failures (tool executor threw)
+   * deliberately do NOT come through this method; only the two contract
+   * branches (non-zero exit / missing envelope) do.
+   */
+  private noteDirectFailure(l1Name: string, skill: Skill, ctx: RunContext): void {
+    if (!this.skillRegistry) return;
+    const streak = this.skillRegistry.markDirectFailure(l1Name, skill.id);
+    if (streak < DIRECT_DISPATCH_DEMOTE_AFTER) return;
+    const demoted = this.skillRegistry.demoteToLlm(l1Name, skill.id);
+    if (!demoted) {
+      // No _fallback.md (hand-authored script) — nothing to restore. The
+      // pre-flight envelope gate is what keeps such skills mostly harmless.
+      ctx.logger.warn(
+        `[${this.name}] script skill "${skill.id}" hit ${streak} deterministic failures but has no llm fallback — leaving as-is`
+      );
+      return;
+    }
+    ctx.logger.warn(
+      `[${this.name}] script skill "${skill.id}" demoted to llm after ${streak} consecutive deterministic failures (fallback recipe restored)`
+    );
+    ctx.recordSkill?.({
+      op: 'demote',
+      l1Name,
+      skillId: skill.id,
+      actorName: this.name,
+      actorTier: 2,
+      reasoning: `${streak} consecutive deterministic dispatch failures — compiled script is structurally brittle, llm fallback restored`,
+    });
+  }
+
   private async removeScratchScript(filename: string, ctx: RunContext): Promise<void> {
     try {
       await ctx.tools?.execute('run_shell', {
