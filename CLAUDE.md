@@ -343,6 +343,24 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   RAISED THE EVIDENCE FORMAT (see below): the child records what it observed,
   the supervisor reads and cross-checks. If you are tempted to add command
   replay, re-read this paragraph first.
+- **A compiled skill must contain NO task-specific literals.** The registry
+  already forbids task narratives in descriptions
+  (`resolveCreationDescription`); the same rule is load-bearing for promoted
+  script BODIES, and more so — a markdown recipe saying "document the real
+  invocations" adapts to the next task, a compiled
+  `invocations = ['node index.js sample.txt']` cannot. Observed on the
+  caesar-cli run: `document-cli-from-source`, promoted after being learned on
+  a file-analyzer task, shipped a README documenting
+  `node index.js sample.txt` / `npm start -- sample.txt` for a Caesar-cipher
+  CLI — both print the usage message instead of ciphering. Every validator
+  approved it, correctly per their contract: the probe record covered the
+  CLI's real behaviour and the read-back confirmed the README exists, but
+  nothing checks whether documented examples are APPLICABLE to this artefact.
+  `compileSkillToScript`'s prompt now requires deriving everything
+  task-specific from the workspace and argv[2], and exiting NON-ZERO rather
+  than inventing a plausible example — a script that fabricates documentation
+  is worse than one that refuses. Guarded by an assertion on the compile
+  prompt in `tests/skill-promote.test.ts`.
 - **`output.probes[]` — machine-readable probe record.** The evidence contract
   asks L1s for `output.probes: [{cmd, exitCode, stdout, note?}]`, plus
   `expectedStdout`/`actualStdout`/`match` when they compare against an

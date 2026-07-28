@@ -137,6 +137,18 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // future demotion can restore it verbatim.
     expect(after.fallbackBody).toMatch(/start_static_server/);
     expect(existsSync(join(dir, 'Hydrogen', 'web-build-loop', '_fallback.md'))).toBe(true);
+
+    // The compile prompt must forbid baking task-specific literals into the
+    // script. Observed defect: a promoted documentation script carried
+    // `invocations = ['node index.js sample.txt']` from the file-analyzer task
+    // it was learned on, so a later Caesar-cipher CLI shipped a README whose
+    // documented examples printed the usage message instead of ciphering — and
+    // every validator approved it, because the artefact itself was fine. A
+    // markdown recipe adapts; a compiled literal cannot.
+    const compileCall = ctx.llm.calls.at(-1)!;
+    expect(compileCall.userContent).toMatch(/NO TASK-SPECIFIC LITERALS/);
+    expect(compileCall.userContent).toMatch(/Never hardcode a filename/);
+    expect(compileCall.userContent).toMatch(/exit NON-ZERO rather than/);
   });
 
   it('does NOT promote when the skill has any failures recorded (gate prevents thrash after demotion)', async () => {
