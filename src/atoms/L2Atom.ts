@@ -2077,19 +2077,42 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
+    // The trust fast-path skips the LLM validator — but it must NOT skip the
+    // ground-truth probe. The probe costs zero tokens (local fs / one page
+    // load), so the cheapest path has no excuse to be the blindest one, and a
+    // trusted type is precisely the one nobody is watching any more. Observed
+    // on the json-cli run: Lithium at 6/0 and Ammonia at 8/0 meant ZERO
+    // validation calls for the whole run, so the read-back probe never fired
+    // and a RESULT claiming "exit code 1" shipped while the CLI actually
+    // exits 0. On a contradiction we hand the decision to the LLM validator
+    // (passing the block along so the probe doesn't run twice) rather than
+    // rejecting outright — a path-extraction heuristic must never fail a run
+    // on its own.
+    let trustedProbe: GroundTruthCheck | null = null;
     if (type && shouldTrustType(type)) {
-      const approval = trustedApproval(type);
-      ctx.recordTrust?.({
-        supervisorName: this.name,
-        supervisorTier: 2,
-        childName: child.name,
-        childTier: child.tier,
+      trustedProbe = await checkGroundTruth({
+        ctx,
         subject: 'RESULT',
-        successes: type.successes,
-        failures: type.failures,
-        reasoning: approval.reasoning,
+        payload: result,
+        child,
       });
-      return approval;
+      if (!trustedProbe.contradiction) {
+        const approval = trustedApproval(type);
+        ctx.recordTrust?.({
+          supervisorName: this.name,
+          supervisorTier: 2,
+          childName: child.name,
+          childTier: child.tier,
+          subject: 'RESULT',
+          successes: type.successes,
+          failures: type.failures,
+          reasoning: approval.reasoning,
+        });
+        return approval;
+      }
+      ctx.logger.warn(
+        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ground-truth evidence contradicts the RESULT — falling through to a full verdict`
+      );
     }
     return llmVerdict({
       ctx,
@@ -2098,6 +2121,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       supervisorTier: 2,
       subject: 'RESULT',
       child,
+      ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
       task,
       payload: { output: result.output, summary: result.summary },
     });
@@ -2503,6 +2527,13 @@ export async function llmVerdict(args: {
    * The caller builds this string (it has the registry); we just inject.
    */
   targetContext?: string;
+  /**
+   * Ground-truth evidence block already computed by the caller. Supplied by
+   * the trust fast-path when its own probe found a contradiction and it is
+   * handing the decision to the LLM: without it, the probe would run a
+   * second time (a wasted Puppeteer launch for the web bucket).
+   */
+  groundTruthBlock?: string;
 }): Promise<Verdict> {
   // `Subject kind` is repeated as its own field so the validator cannot miss
   // the PLAN-vs-RESULT distinction — the bar is different between the two and
@@ -2541,12 +2572,14 @@ export async function llmVerdict(args: {
   // believed it. We don't invent task-specific interactions (too risky); we
   // just check the page loads cleanly. If the page throws pageerror or has
   // console errors the validator now has hard evidence the claim is false.
-  const groundTruthBlock = await probeGroundTruth({
-    ctx: args.ctx,
-    subject: args.subject,
-    payload: args.payload,
-    child: args.child,
-  });
+  const groundTruthBlock =
+    args.groundTruthBlock ??
+    (await probeGroundTruth({
+      ctx: args.ctx,
+      subject: args.subject,
+      payload: args.payload,
+      child: args.child,
+    }));
 
   const userContent = [
     `Supervisor: "${args.supervisorName}" (tier ${args.supervisorTier})`,
@@ -2702,6 +2735,43 @@ export function extractResultUrl(payload: unknown): string | null {
     if (m && m[0]) return m[0];
   }
   return null;
+}
+
+/**
+ * Ground-truth probe result. `contradiction` is set ONLY on hard, unambiguous
+ * evidence that something the child CLAIMED does not exist:
+ *   - file bucket: a claimed path is MISSING or EMPTY
+ *   - web bucket: the URL could not be probed at all (unreachable)
+ * Console errors / `ok: false` deliberately do NOT set it — those are judgment
+ * calls that belong to the LLM validator, and tripping on them would make the
+ * trust fast-path fire false alarms on working deliverables.
+ *
+ * Used by `checkGroundTruth`, which the trust fast-path consults before
+ * rubber-stamping a trusted child (the probe costs no tokens, so there is no
+ * reason for the cheapest path to be the blindest one).
+ */
+export interface GroundTruthCheck {
+  readonly block: string;
+  readonly contradiction: boolean;
+}
+
+/**
+ * Probe wrapper that reports whether the evidence CONTRADICTS the child's
+ * claims, not just what the evidence says. See `GroundTruthCheck`.
+ */
+export async function checkGroundTruth(args: {
+  ctx: RunContext;
+  subject: 'PLAN' | 'RESULT';
+  payload: unknown;
+  child: Atom;
+}): Promise<GroundTruthCheck> {
+  const block = await probeGroundTruth(args);
+  if (!block) return { block: '', contradiction: false };
+  const contradiction =
+    /: MISSING or unreadable/.test(block) ||
+    /WARNING: file is EMPTY/.test(block) ||
+    /but the tool call failed/.test(block);
+  return { block, contradiction };
 }
 
 async function probeGroundTruth(args: {

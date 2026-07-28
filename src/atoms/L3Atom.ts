@@ -17,7 +17,12 @@ import {
 } from '../registry/atomRegistry.js';
 import { PIN_HAIKU, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
-import { buildTargetContext, llmVerdict } from './L2Atom.js';
+import {
+  buildTargetContext,
+  checkGroundTruth,
+  llmVerdict,
+  type GroundTruthCheck,
+} from './L2Atom.js';
 import {
   l3StrategySchema,
   parsePayloadTolerant,
@@ -877,19 +882,32 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
   async validateResult(child: L2Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
     const type = this.registry.getByName(child.name);
+    // Mirror of L2.validateResult: the trust fast-path skips the LLM
+    // validator but NOT the ground-truth probe — it costs no tokens, and a
+    // trusted type is exactly the one nobody watches any more. A contradiction
+    // hands the decision to the LLM validator (with the block passed along so
+    // the probe doesn't run twice), never to an outright reject.
+    const payload = { output: result.output, summary: result.summary };
+    let trustedProbe: GroundTruthCheck | null = null;
     if (type && shouldTrustType(type)) {
-      const approval = trustedApproval(type);
-      ctx.recordTrust?.({
-        supervisorName: this.name,
-        supervisorTier: 3,
-        childName: child.name,
-        childTier: child.tier,
-        subject: 'RESULT',
-        successes: type.successes,
-        failures: type.failures,
-        reasoning: approval.reasoning,
-      });
-      return approval;
+      trustedProbe = await checkGroundTruth({ ctx, subject: 'RESULT', payload, child });
+      if (!trustedProbe.contradiction) {
+        const approval = trustedApproval(type);
+        ctx.recordTrust?.({
+          supervisorName: this.name,
+          supervisorTier: 3,
+          childName: child.name,
+          childTier: child.tier,
+          subject: 'RESULT',
+          successes: type.successes,
+          failures: type.failures,
+          reasoning: approval.reasoning,
+        });
+        return approval;
+      }
+      ctx.logger.warn(
+        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ground-truth evidence contradicts the RESULT — falling through to a full verdict`
+      );
     }
     return llmVerdict({
       ctx,
@@ -899,7 +917,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       subject: 'RESULT',
       child,
       task,
-      payload: { output: result.output, summary: result.summary },
+      payload,
+      ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
     });
   }
 }

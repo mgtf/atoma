@@ -110,7 +110,26 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
 - **Trust fast-path in validators.** Each `validatePlan` / `validateResult`
   checks `registry.getByName(child.name)` and returns an approved verdict
   WITHOUT an LLM call when `successes >= TRUST_THRESHOLD_SUCCESSES` (3) AND
-  `failures === 0`. Counters live on `atom_types`; they are bumped by the
+  `failures === 0`.
+  **BUT the RESULT fast-path is NOT blind: it runs the ground-truth probe
+  first.** The probe costs zero tokens (local fs reads, or one page load for
+  the web bucket), so the cheapest path has no excuse to be the least
+  verified one — and a trusted type is precisely the one nobody watches any
+  more. Observed on the json-cli run: Lithium at 6✓ and Ammonia at 8✓ meant
+  ZERO validation calls for the entire run, the read-back probe never fired,
+  and a RESULT claiming "exit code 1" shipped while the CLI actually exits 0.
+  `checkGroundTruth` returns `{block, contradiction}`; `contradiction` is set
+  only on HARD evidence (claimed path MISSING or EMPTY; web URL unreachable)
+  — never on console errors or `ok: false`, which are judgment calls that
+  would make the fast-path fire false alarms on working deliverables. On a
+  contradiction the supervisor logs an OVERRIDDEN warning and falls through
+  to a full `llmVerdict`, passing the already-computed block via
+  `groundTruthBlock` so the probe does not run twice. It never rejects on its
+  own: a path-extraction heuristic must not fail a run by itself. When the
+  RESULT names no files the probe returns `''` and makes no tool calls at
+  all, so trusted subtasks returning plain summaries stay exactly as cheap
+  as before. Covered by `tests/trust-fastpath-groundtruth.test.ts`, whose
+  first case asserts ZERO LLM calls — that is the cost-discipline guard. Counters live on `atom_types`; they are bumped by the
   supervise loop's `onApproved` / `onFailed` hooks that L2 and L3 wire to
   `registry.recordSuccess` / `registry.recordFailure`.
 - **Patch resets trust.** `AtomRegistry.patch` zeroes `successes` and
