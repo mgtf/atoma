@@ -328,6 +328,35 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   persisted row and legitimately resets trust), or create otherwise.
   `build-app.ts` applies the same conditional-refresh pattern to the
   Neuron L3 seed prompt.
+- **Verification is READ-ONLY by design: the supervisor never replays the
+  child's commands.** It may run FIXED, idempotent probes it owns
+  (`validate_html` loading a URL; the file read-back), but it does not execute
+  command strings the child names. Measured before deciding: of 185 recorded
+  RESULT payloads only 3 (1.6%) carried a structured `cmd` + expected-output
+  claim, so the *safe* subset had almost no trigger surface, while the subset
+  with real coverage (prose, 14%) would mean regex-extracting model-authored
+  shell strings — the exact failure class behind two false overrides, with the
+  blast radius escalated from "phantom missing file" to "ran the wrong
+  command". Real samples also need shell-quote parsing
+  (`node index.js "Héllo Wörld — Ça va, 42 fois!!"`), and execution is not
+  idempotent, so verifying could mutate the artefact being verified. Instead we
+  RAISED THE EVIDENCE FORMAT (see below): the child records what it observed,
+  the supervisor reads and cross-checks. If you are tempted to add command
+  replay, re-read this paragraph first.
+- **`output.probes[]` — machine-readable probe record.** The evidence contract
+  asks L1s for `output.probes: [{cmd, exitCode, stdout, note?}]`, plus
+  `expectedStdout`/`actualStdout`/`match` when they compare against an
+  expectation. `extractRecordedProbes` normalises the shapes children already
+  emitted spontaneously (`examples_verified`, snake_case variants) so
+  formalising the field did not invalidate them. The read-back probe renders
+  the record next to the file excerpts and invites the validator to cross-check
+  documentation against it — that comparison is a JUDGMENT and stays with the
+  LLM. Only two things are decided in code, both mechanically unambiguous:
+  `match: false`, and `expected` ≠ `actual` when both are present. A non-zero
+  `exitCode` is explicitly NOT a failure (error-case probes are supposed to
+  exit non-zero). Motivating defect: the json-cli run documented "exit code 1"
+  while the CLI exits 0 — detectable with zero execution, because the
+  inconsistency was between what the child observed and what it wrote down.
 - **GROUND-TRUTH evidence contract for non-web/http L1s.**
   `GROUND_TRUTH_EVIDENCE_LINES` in `src/atoms/capability.ts` teaches
   the generic evidence-reporting contract (paste run_shell stdout,

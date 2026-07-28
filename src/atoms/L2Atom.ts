@@ -2756,6 +2756,114 @@ export interface GroundTruthCheck {
 }
 
 /**
+ * A probe entry the child recorded in `output.probes` (see
+ * GROUND_TRUTH_EVIDENCE_LINES). Shape-tolerant: children in the wild have
+ * emitted `cmd`/`command`, `stdout`/`actual_stdout`, snake and camel case, so
+ * we normalise rather than demand one spelling.
+ */
+interface RecordedProbe {
+  cmd: string;
+  exitCode?: number;
+  stdout?: string;
+  expected?: string;
+  actual?: string;
+  match?: boolean;
+  note?: string;
+}
+
+function pickString(o: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === 'string') return v;
+  }
+  return undefined;
+}
+
+/**
+ * Normalise the child's recorded probe list. Accepts `probes`,
+ * `examples_verified` and `verifications` because children already emit those
+ * spontaneously — formalising the field in the prompt should not invalidate
+ * the shapes they were producing before it existed.
+ *
+ * Exported for tests.
+ */
+export function extractRecordedProbes(payload: unknown): RecordedProbe[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const output = (payload as Record<string, unknown>)['output'];
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return [];
+  const o = output as Record<string, unknown>;
+  const out: RecordedProbe[] = [];
+  for (const key of ['probes', 'examples_verified', 'examplesVerified', 'verifications']) {
+    const arr = o[key];
+    if (!Array.isArray(arr)) continue;
+    for (const raw of arr) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const e = raw as Record<string, unknown>;
+      const cmd = pickString(e, ['cmd', 'command', 'invocation']);
+      if (!cmd) continue;
+      const exit = e['exitCode'] ?? e['exit_code'] ?? e['exit'];
+      const probe: RecordedProbe = { cmd };
+      if (typeof exit === 'number') probe.exitCode = exit;
+      const stdout = pickString(e, ['stdout', 'actualStdout', 'actual_stdout', 'output']);
+      if (stdout !== undefined) probe.stdout = stdout;
+      const expected = pickString(e, ['expectedStdout', 'expected_stdout', 'expected']);
+      if (expected !== undefined) probe.expected = expected;
+      const actual = pickString(e, ['actualStdout', 'actual_stdout', 'actual']);
+      if (actual !== undefined) probe.actual = actual;
+      if (typeof e['match'] === 'boolean') probe.match = e['match'] as boolean;
+      const note = pickString(e, ['note', 'case', 'description']);
+      if (note !== undefined) probe.note = note;
+      out.push(probe);
+    }
+  }
+  return out.slice(0, 12);
+}
+
+/**
+ * Render the recorded probes for the validator, and flag the ONLY two
+ * mechanically unambiguous self-reported failures:
+ *   - `match: false`
+ *   - `expected` and `actual` both present and different
+ * Nothing else is decided in code. In particular a non-zero `exitCode` is NOT
+ * a failure — error-case probes are supposed to exit non-zero — and whether a
+ * documented claim matches the record is a judgment left to the validator,
+ * which now has both sides in front of it.
+ */
+function renderRecordedProbes(probes: RecordedProbe[]): {
+  lines: string[];
+  selfReportedFailure: boolean;
+} {
+  if (probes.length === 0) return { lines: [], selfReportedFailure: false };
+  const lines: string[] = ['', "The child's OWN recorded probe outputs (from output.probes):"];
+  let selfReportedFailure = false;
+  for (const p of probes) {
+    const mismatch =
+      p.match === false ||
+      (p.expected !== undefined && p.actual !== undefined && p.expected !== p.actual);
+    if (mismatch) selfReportedFailure = true;
+    const bits: string[] = [];
+    if (p.exitCode !== undefined) bits.push(`exit=${p.exitCode}`);
+    if (p.stdout !== undefined) bits.push(`stdout=${JSON.stringify(p.stdout.slice(0, 160))}`);
+    if (p.expected !== undefined && p.actual !== undefined) {
+      bits.push(
+        `expected=${JSON.stringify(p.expected.slice(0, 80))} actual=${JSON.stringify(p.actual.slice(0, 80))}`
+      );
+    }
+    if (p.note) bits.push(`note=${JSON.stringify(p.note.slice(0, 80))}`);
+    lines.push(
+      `- ${JSON.stringify(p.cmd.slice(0, 120))}: ${bits.join(', ') || '(no outcome recorded)'}` +
+        (mismatch ? '  <-- SELF-REPORTED MISMATCH' : '')
+    );
+  }
+  lines.push(
+    'Cross-check the read-back file contents against these records: a claim',
+    'documented in a file that the child\'s own probe output contradicts (e.g. a',
+    'documented exit code that differs from the recorded one) is a CONTRADICTION.'
+  );
+  return { lines, selfReportedFailure };
+}
+
+/**
  * Probe wrapper that reports whether the evidence CONTRADICTS the child's
  * claims, not just what the evidence says. See `GroundTruthCheck`.
  */
@@ -2770,7 +2878,11 @@ export async function checkGroundTruth(args: {
   const contradiction =
     /: MISSING or unreadable/.test(block) ||
     /WARNING: file is EMPTY/.test(block) ||
-    /but the tool call failed/.test(block);
+    /but the tool call failed/.test(block) ||
+    // The child's own probe record says an expectation did not hold. Nothing
+    // read this before, so a self-reported mismatch could sail through the
+    // trust fast-path unexamined.
+    /<-- SELF-REPORTED MISMATCH/.test(block);
   return { block, contradiction };
 }
 
@@ -3021,7 +3133,14 @@ async function probeFilesGroundTruth(args: {
   // to read back and the probe would just add an empty evidence block.
   if (!args.child.toolNames().includes('write_file')) return '';
   const claims = extractResultFileClaims(args.payload);
-  if (claims.structured.length === 0 && claims.mentioned.length === 0) return '';
+  const recorded = renderRecordedProbes(extractRecordedProbes(args.payload));
+  if (
+    claims.structured.length === 0 &&
+    claims.mentioned.length === 0 &&
+    recorded.lines.length === 0
+  ) {
+    return '';
+  }
 
   const lines: string[] = [];
   for (const [path, isClaim] of [
@@ -3053,7 +3172,7 @@ async function probeFilesGroundTruth(args: {
       }
     }
   }
-  if (lines.length === 0) return '';
+  if (lines.length === 0 && recorded.lines.length === 0) return '';
 
   let listing = '';
   if (tools.has('list_files') && !args.ctx.signal?.aborted) {
@@ -3077,8 +3196,11 @@ async function probeFilesGroundTruth(args: {
     "weight it above the child's self-reported claims.",
     ...lines,
     listing ? `workspace root now contains: ${listing}` : '',
+    ...recorded.lines,
+    '',
     'REJECT only on a CONTRADICTION with this evidence — a file the RESULT',
-    'claims but which is MISSING or EMPTY, or a statement the excerpts refute.',
+    'claims but which is MISSING or EMPTY, a documented statement the excerpts',
+    'or the recorded probe outputs refute, or a SELF-REPORTED MISMATCH above.',
     'Do NOT reject merely because an excerpt is truncated here, or because the',
     'child described a file more briefly than its contents.',
   ]

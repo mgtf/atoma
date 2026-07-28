@@ -3,6 +3,7 @@ import {
   llmVerdict,
   extractResultFilePaths,
   extractResultFileClaims,
+  extractRecordedProbes,
 } from '../src/atoms/L2Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { makeCtx, jsonText } from './helpers.js';
@@ -221,6 +222,42 @@ describe('extractResultFilePaths', () => {
   });
 });
 
+describe('recorded probe records (evidence format, no execution)', () => {
+  it('normalises the shapes children already emit spontaneously', () => {
+    // `examples_verified` with snake_case expected/actual is the real shape
+    // from the pad-cli run — formalising `probes` in the prompt must not
+    // invalidate what children were already producing.
+    const probes = extractRecordedProbes({
+      output: {
+        examples_verified: [
+          { cmd: 'node index.js 10 "hi"', expected_stdout: 'hi        \n', actual_stdout: 'hi        \n', match: true },
+        ],
+      },
+    });
+    expect(probes).toHaveLength(1);
+    expect(probes[0]!.cmd).toBe('node index.js 10 "hi"');
+    expect(probes[0]!.expected).toBe('hi        \n');
+    expect(probes[0]!.match).toBe(true);
+  });
+
+  it('reads the documented `probes` shape including exit codes', () => {
+    const probes = extractRecordedProbes({
+      output: {
+        probes: [
+          { cmd: 'node index.js', exitCode: 1, stdout: 'Usage: pad-cli', note: 'missing-args' },
+        ],
+      },
+    });
+    expect(probes[0]!.exitCode).toBe(1);
+    expect(probes[0]!.note).toBe('missing-args');
+  });
+
+  it('returns nothing when the payload carries no record', () => {
+    expect(extractRecordedProbes({ output: { files: ['a.js'] } })).toEqual([]);
+    expect(extractRecordedProbes(null)).toEqual([]);
+  });
+});
+
 describe('file read-back probe (#F9)', () => {
   it('injects real sizes and excerpts for the files the RESULT claims', async () => {
     const exec = new FsExecutor({
@@ -273,6 +310,56 @@ describe('file read-back probe (#F9)', () => {
     const content = await runVerdict(ctx, fileChild(), { output: { path: 'big.md' } });
     expect(content).toMatch(/…\(truncated\)/);
     expect(content).toMatch(/Do NOT reject merely because an excerpt is truncated/);
+  });
+
+  it('surfaces the recorded probes next to the file excerpts', async () => {
+    const exec = new FsExecutor({ 'README.md': '# cli\n\nExits 1 on bad input.\n' });
+    const ctx = ctxWith(exec);
+    const content = await runVerdict(ctx, fileChild(), {
+      output: {
+        files: ['README.md'],
+        probes: [{ cmd: 'node index.js /nope', exitCode: 0, stdout: 'Error: not found' }],
+      },
+      summary: 'documented the error behaviour',
+    });
+    expect(content).toMatch(/OWN recorded probe outputs/);
+    expect(content).toMatch(/node index\.js \/nope/);
+    expect(content).toMatch(/exit=0/);
+    // The validator is explicitly invited to cross-check the README excerpt
+    // (which says "Exits 1") against the recorded exit=0. That comparison is
+    // a judgment, so it is NOT decided in code.
+    expect(content).toMatch(/Cross-check the read-back file contents against these records/);
+  });
+
+  it('flags a SELF-REPORTED MISMATCH as a contradiction (match:false)', async () => {
+    const exec = new FsExecutor({ 'README.md': '# cli' });
+    const ctx = ctxWith(exec);
+    const content = await runVerdict(ctx, fileChild(), {
+      output: {
+        files: ['README.md'],
+        probes: [
+          { cmd: 'node index.js 10 hi', expectedStdout: 'hi        ', actualStdout: 'hi', match: false },
+        ],
+      },
+      summary: 'all verified',
+    });
+    // Assert the ARROW marker, which is what the contradiction detector keys
+    // on — the bare phrase also appears in the block's instruction line.
+    expect(content).toMatch(/<-- SELF-REPORTED MISMATCH/);
+  });
+
+  it('does NOT treat a non-zero exit as a failure (error-case probes are meant to)', async () => {
+    const exec = new FsExecutor({ 'README.md': '# cli' });
+    const ctx = ctxWith(exec);
+    const content = await runVerdict(ctx, fileChild(), {
+      output: {
+        files: ['README.md'],
+        probes: [{ cmd: 'node index.js', exitCode: 1, note: 'missing-args case' }],
+      },
+      summary: 'documented',
+    });
+    expect(content).toMatch(/exit=1/);
+    expect(content).not.toMatch(/<-- SELF-REPORTED MISMATCH/);
   });
 
   it('does NOT fire for a web-bucket child (the validate_html probe owns those)', async () => {
