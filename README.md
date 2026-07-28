@@ -81,9 +81,11 @@ Three honest readings:
 2. **Immature families pay tuition — and the tuition becomes an asset.** The
    `todos` run cost $0.18 more than the baseline and *learned two skills during
    the benchmark itself*; the CLI family rode that same mechanism from $0.66 down
-   to $0.21. The Pomodoro loss is real and diagnostic: the web bucket has the most
-   expensive verification loop and no learned recipes yet — it is the designated
-   next milestone (a probe-manifest equivalent for browser evidence).
+   to $0.21. The Pomodoro loss is real and diagnostic — the web bucket has the
+   most expensive verification loop — but even the *losing* run banked two
+   recipes from its approved early phases (a stateful-widget build pattern and a
+   zero-console-error verification pattern encoding exactly the evidence
+   discipline it was punished for lacking). The next web run starts from them.
 3. **Frontier-direct cost is wildly variant** ($0.22–$1.06 on comparable tasks —
    thinking depth is unpredictable), while mature atoma is stable at $0.20–0.23.
    For billable production, cost *predictability* matters nearly as much as the mean.
