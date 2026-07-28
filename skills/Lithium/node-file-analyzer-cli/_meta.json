@@ -1,7 +1,7 @@
 {
-  "successes": 8,
+  "successes": 9,
   "failures": 0,
-  "updatedAt": "2026-07-28T13:01:11.480Z",
+  "updatedAt": "2026-07-28T13:23:22.139Z",
   "promotionRefusedAt": "2026-07-28T10:29:32.762Z",
   "promotionRefusedReason": "The core step 'parse/process, compute stats via small recursive/pure helper functions' is different for every invocation (line-numbering, word-frequency, checksum, cipher, etc.) and requires reasoning about the specific summary logic each task actually asks for; a fixed script cannot derive that logic from argv[2] alone without risking exactly the kind of generic-but-wrong deliverable the mandate warns against, so this is an irreducible LLM design step rather than a deterministic recipe."
 }

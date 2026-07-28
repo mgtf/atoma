@@ -1,5 +1,7 @@
 {
-  "successes": 6,
+  "successes": 0,
   "failures": 0,
-  "updatedAt": "2026-07-28T13:07:13.031Z"
+  "updatedAt": "2026-07-28T13:38:22.315Z",
+  "promotionRefusedAt": "2026-07-28T13:38:22.315Z",
+  "promotionRefusedReason": "operator: v2 compiled parser failed offline regression on 6/6 real workspaces (extraction, claims parsing, multi-line comparison) — deterministic verification of free-form prose is structurally brittle; needs a machine-readable probe manifest as input before recompiling"
 }

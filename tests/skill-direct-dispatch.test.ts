@@ -275,6 +275,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
         expect(events.some((e) => e.op === 'demote')).toBe(true);
         // save() during demotion cleared the streak with the body rewrite.
         expect(demoted.directFailures).toBeUndefined();
+        // Anti-oscillation: without the stamp, the restored llm form would
+        // re-earn 5/0, recompile the SAME body, produce the SAME brittle
+        // script, and loop forever. Cleared only by a body revision.
+        expect(demoted.promotionRefusedAt).toBeTruthy();
+        expect(demoted.promotionRefusedReason).toMatch(/auto-demoted/);
       }
     }
   });

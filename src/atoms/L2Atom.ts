@@ -1603,6 +1603,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ctx.logger.warn(
       `[${this.name}] script skill "${skill.id}" demoted to llm after ${streak} consecutive deterministic failures (fallback recipe restored)`
     );
+    // Stamp the refusal too, or the demotion OSCILLATES: the restored llm
+    // form re-earns 5/0, the compile re-runs on the same body, produces the
+    // same structurally brittle script, and the cycle repeats forever — one
+    // Sonnet call plus two wasted dispatches per lap. The stamp parks
+    // re-compilation until the BODY changes (save() clears it), which is the
+    // only event that could change the compile's outcome. NOTE: demoteToLlm
+    // just rewrote SKILL.md via save(), so the stamp must be set AFTER it.
+    this.skillRegistry.markPromotionRefused(
+      l1Name,
+      skill.id,
+      `auto-demoted: compiled form failed ${streak} consecutive deterministic dispatches — recompiling the same body would reproduce the same script; revise the body first`
+    );
     ctx.recordSkill?.({
       op: 'demote',
       l1Name,
