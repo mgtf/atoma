@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
-import { TRUST_PROMOTE_THRESHOLD_SUCCESSES, TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
+import {
+  shouldTrustSkill,
+  TRUST_PROMOTE_THRESHOLD_SUCCESSES,
+  TRUST_THRESHOLD_SUCCESSES,
+} from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { makeCtx, jsonText } from './helpers.js';
 
@@ -122,9 +126,13 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(after.kind).toBe('script');
     expect(after.language).toBe('node');
     expect(after.body).toMatch(/process\.argv\[2\]/);
-    // Counters preserved across promotion.
+    // Counters are RESET by promotion, so the never-yet-executed script form
+    // is NOT immediately trusted by the no-validator deterministic dispatch
+    // (shouldTrustSkill needs 3 successes / 0 failures). It has to earn them
+    // through the validated LLM loop first.
     expect(after.failures).toBe(0);
-    expect(after.successes).toBe(TRUST_PROMOTE_THRESHOLD_SUCCESSES + 1);
+    expect(after.successes).toBe(0);
+    expect(shouldTrustSkill(after)).toBe(false);
     // The original llm body was stashed in the fallback sidecar so a
     // future demotion can restore it verbatim.
     expect(after.fallbackBody).toMatch(/start_static_server/);

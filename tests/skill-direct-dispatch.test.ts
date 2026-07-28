@@ -214,6 +214,61 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
+  it('treats a self-reported FAILED envelope as off-contract even on exit 0', async () => {
+    // The deterministic path has no validator downstream, and a compiled
+    // script can announce its own failure while still exiting 0 — measured on
+    // the freshly-promoted `document-cli-from-source`:
+    //   {"output":null,"summary":"FAILED: index.js ... not found ..."}  EXIT=0
+    // Accepting that credited a success and entrenched a broken script.
+    trustAtomType();
+    saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
+    const failEnvelope = JSON.stringify({
+      output: null,
+      summary: 'FAILED: index.js and/or package.json not found in workspace.',
+    });
+    const { executor } = makeExecutor({ exitCode: 0, stdout: failEnvelope, stderr: '' });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtxWith(executor);
+
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+    );
+    // The LLM loop must take over.
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done properly', summary: 'ok' }));
+
+    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    expect(result.summary).toBe('ok');
+    expect(ctx.llm.calls).toHaveLength(4);
+  });
+
+  it('treats output:null as off-contract (no silent success on a null deliverable)', async () => {
+    trustAtomType();
+    saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
+    const nullOut = JSON.stringify({ output: null, summary: 'wrote nothing, all good!' });
+    const { executor } = makeExecutor({ exitCode: 0, stdout: nullOut, stderr: '' });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtxWith(executor);
+
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+
+    await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    // And crucially: no success was credited to the skill by the direct path.
+    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1); // from the LLM loop only
+    expect(loaded.failures).toBe(0);
+  });
+
   it('falls back to the LLM loop when stdout carries no {"output","summary"} envelope', async () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);

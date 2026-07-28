@@ -305,9 +305,19 @@ describe('SkillRegistry', () => {
       expect(promoted.kind).toBe('script');
       expect(promoted.language).toBe('node');
       expect(promoted.body).toMatch(/console\.log/);
-      // Counters are PRESERVED across promotion (already-trusted skill).
-      expect(promoted.successes).toBe(2);
+      // Counters are RESET across promotion. The successes were earned by the
+      // MARKDOWN recipe under a validated LLM loop; the compiled script has
+      // never run. Inheriting them armed the no-validator deterministic
+      // dispatch on the script's very first match (shouldTrustSkill needs
+      // 3/0) — see promoteToScript's rationale. The script form must earn its
+      // trust through the validated loop first.
+      expect(promoted.successes).toBe(0);
       expect(promoted.failures).toBe(0);
+      // And the reset is on DISK, not just in the returned object.
+      const metaAfter = JSON.parse(
+        readFileSync(join(dir, 'Helium', 'scaffold-node-ssr', '_meta.json'), 'utf8')
+      );
+      expect(metaAfter.successes).toBe(0);
 
       // Disk state: SKILL.md frontmatter says script + node, sidecar holds llm body.
       const skillFile = join(dir, 'Helium', 'scaffold-node-ssr', 'SKILL.md');
@@ -343,7 +353,7 @@ describe('SkillRegistry', () => {
       ).toThrow(/already kind:"script"/);
     });
 
-    it('demoteToLlm restores the fallback body verbatim and keeps counters', () => {
+    it('demoteToLlm restores the fallback body verbatim and keeps post-promotion counters', () => {
       reg.save('Helium', {
         id: 'roundtrip',
         description: 'd',
@@ -363,8 +373,10 @@ describe('SkillRegistry', () => {
       const demoted = reg.demoteToLlm('Helium', 'roundtrip')!;
       expect(demoted.kind).toBe('llm');
       expect(demoted.body).toMatch(/ORIGINAL llm recipe/);
-      // Counters: 1 success + 1 failure (the demotion-trigger), preserved.
-      expect(demoted.successes).toBe(1);
+      // The pre-promotion success was cleared BY the promotion (see
+      // promoteToScript); demotion itself preserves whatever the script form
+      // accumulated — here just the failure that triggered it.
+      expect(demoted.successes).toBe(0);
       expect(demoted.failures).toBe(1);
 
       // _fallback.md is INTENTIONALLY left in place so a future

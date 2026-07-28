@@ -569,6 +569,29 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       atom-type counters untouched (the L1 model never executed).
       Kill switch: `ATOMA_SKILL_DIRECT=0` (or `--no-direct-skills`
       in `build-app.ts`); default ON.
+  **The envelope parse is the ONLY gate on this path** (it returns before
+  the supervise loop, so no validator sees the result and `onFailed` —
+  hence `demoteToLlm` — is unreachable from it). The exit code alone is
+  not enough: a compiled script can announce its own failure and still
+  exit 0. Measured on the freshly-promoted `document-cli-from-source`,
+  run in a workspace without the CLI:
+  `{"output":null,"summary":"FAILED: index.js ... not found ..."}` with
+  `EXIT=0` — accepted, then credited via `recordSuccess`, entrenching a
+  broken script at 6/0, 7/0… `parseScriptEnvelope` therefore rejects
+  `output: null | undefined` and any `summary` matching
+  `/^\s*(FAILED|ERROR)\b/i` as OFF-CONTRACT (→ back to the validated LLM
+  loop, no counter bump), and `compileSkillToScript`'s prompt now
+  *requires* a non-zero exit on failure.
+- **Promotion RESETS the skill's counters** (`SkillRegistry.promoteToScript`).
+  They used to be preserved ("a body reformulation of an already-trusted
+  skill") — wrong, and dangerously so: the successes were all earned by the
+  MARKDOWN recipe under a validated LLM loop, while the compiled script is a
+  brand-new artefact that has never executed once. Inheriting 5/0 armed the
+  no-validator deterministic dispatch (`shouldTrustSkill` needs 3/0) on the
+  script's very FIRST match. The script form now earns its 3 clean runs
+  through the validated loop before running unwatched. Note the corollary
+  for `demoteToLlm`: the counters it preserves are the script form's own,
+  since promotion already cleared the markdown form's.
   The script's stdout MUST be a single JSON line of shape
   `{"output": ..., "summary": "<one sentence with embedded == GROUND
   TRUTH == block>"}`; `compileSkillToScript`'s prompt enforces this,
@@ -683,6 +706,34 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     can salvage a mid-response cutoff.
   - `findBalancedEnd(s, start)` — string-aware bracket matcher used by the
     parsers. Do not reinvent these; extend them if a new shape appears.
+- **NESTED ``` FENCES DESTROY EVIDENCE — the gate is load-bearing.** The fence
+  regex is non-greedy, so it stops at the FIRST closing ``` — and an L1
+  obeying the GROUND-TRUTH contract pastes shell output into `summary`, which
+  routinely contains a nested ```bash block. The capture then ended
+  mid-string, `repairTruncatedJson` closed it into something **schema-valid
+  but amputated**, and `parseWith` returned that lossy object *without ever
+  reaching* its candidate-scan fallback. Measured on run
+  `2026-07-25T22-10-42`: a 162-char summary reached the validator as 39 chars
+  with the `## Usage` proof gone → correct rejection → a whole wasted
+  supervise cycle; a phase-1 summary was silently cut from 2620 recoverable
+  chars to 308, so the next phase ran blind. Three guards now:
+    1. `fencedPayloadIsBalanced` — a fence capture is only trusted when it
+       holds a BALANCED payload; otherwise the fence is ignored and the brace
+       walk over the full text recovers the object (backticks inside a JSON
+       string are legal there). Same gate in `parseTwoJson`, whose fence
+       branch `JSON.parse`s with no repair net at all.
+    2. `extractJsonEx` reports `repaired: boolean`; `parseWith` holds a
+       repaired-but-valid parse aside as a LAST RESORT and prefers a clean
+       candidate — but only one that is strictly LARGER (`safeSize`), so a
+       short example envelope quoted in prose can't displace the real payload.
+    3. Do **NOT** add a "try the first balanced object" step ahead of the
+       legacy first-`{`-to-last-`}` slice in `extractJsonEx`. It looks free
+       and it silently defeats the prefer-the-LAST-candidate semantics: on a
+       response that shows an example envelope before the real payload it
+       returns the example. Guarded by
+       `does NOT hijack the "prefer the LAST candidate" semantics` in
+       `tests/json.test.ts` — that test exists because the fix attempt
+       broke it twice.
 
 ## Testing conventions
 

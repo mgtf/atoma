@@ -1,0 +1,98 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { ToolSandbox, sandboxChildEnv } from '../src/tools/sandbox.js';
+import { runShellTool } from '../src/tools/builtin.js';
+
+/**
+ * Tests for the two sandbox-security findings of the cost review (#7):
+ *  a. child processes must NOT inherit the parent's secrets
+ *     (ANTHROPIC_API_KEY + open network egress = one-liner exfiltration)
+ *  b. symlinks planted inside the workspace must not escape the jail
+ *     (path.resolve is lexical; the docstring promised symlink safety
+ *     the old code didn't deliver)
+ */
+
+describe('sandboxChildEnv — env allowlist (#7a)', () => {
+  let envBefore: string | undefined;
+  beforeEach(() => {
+    envBefore = process.env['ATOMA_TEST_SECRET'];
+    process.env['ATOMA_TEST_SECRET'] = 'sk-super-secret';
+  });
+  afterEach(() => {
+    if (envBefore === undefined) delete process.env['ATOMA_TEST_SECRET'];
+    else process.env['ATOMA_TEST_SECRET'] = envBefore;
+  });
+
+  it('strips everything outside the allowlist, keeps PATH/HOME, honours extras', () => {
+    const env = sandboxChildEnv({ PORT: '0' });
+    expect(env['ATOMA_TEST_SECRET']).toBeUndefined();
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+    expect(env['PATH']).toBe(process.env['PATH']);
+    expect(env['PORT']).toBe('0');
+  });
+
+  it('run_shell children cannot read parent secrets (end to end)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-env-'));
+    const sandbox = new ToolSandbox(dir);
+    try {
+      const tool = runShellTool({ sandbox });
+      const res = (await tool.execute({
+        command: 'node',
+        args: ['-e', "console.log(process.env.ATOMA_TEST_SECRET || 'unset')"],
+      })) as { exitCode: number; stdout: string };
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.trim()).toBe('unset');
+    } finally {
+      await sandbox.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('ToolSandbox.resolve — symlink containment (#7b)', () => {
+  let outside: string;
+  let dir: string;
+  let sandbox: ToolSandbox;
+
+  beforeEach(() => {
+    outside = mkdtempSync(join(tmpdir(), 'atoma-outside-'));
+    writeFileSync(join(outside, 'secret.txt'), 'outside the jail', 'utf8');
+    dir = mkdtempSync(join(tmpdir(), 'atoma-jail-'));
+    sandbox = new ToolSandbox(dir);
+  });
+  afterEach(async () => {
+    await sandbox.cleanup();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  it('rejects a symlinked DIR pointing outside the sandbox', () => {
+    symlinkSync(outside, join(dir, 'pwn'), 'dir');
+    expect(() => sandbox.resolve('pwn/secret.txt')).toThrow(/escapes sandbox via symlink/);
+    expect(() => sandbox.resolve('pwn')).toThrow(/escapes sandbox via symlink/);
+  });
+
+  it('rejects a symlinked FILE pointing outside the sandbox', () => {
+    symlinkSync(join(outside, 'secret.txt'), join(dir, 'innocent.txt'));
+    expect(() => sandbox.resolve('innocent.txt')).toThrow(/escapes sandbox via symlink/);
+  });
+
+  it('still rejects lexical ".." escapes', () => {
+    expect(() => sandbox.resolve('../outside.txt')).toThrow(/escapes sandbox/);
+  });
+
+  it('allows legitimate paths, including not-yet-created nested files', () => {
+    mkdirSync(join(dir, 'src'));
+    expect(() => sandbox.resolve('src/main.js')).not.toThrow();
+    // write_file creates parents — a deep new path must still resolve.
+    expect(() => sandbox.resolve('a/b/c/new.txt')).not.toThrow();
+  });
+
+  it('allows a symlink pointing to a sibling INSIDE the workspace', () => {
+    mkdirSync(join(dir, 'real'));
+    symlinkSync(join(dir, 'real'), join(dir, 'link'), 'dir');
+    expect(() => sandbox.resolve('link/file.txt')).not.toThrow();
+  });
+});

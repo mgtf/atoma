@@ -190,8 +190,20 @@ export class SkillRegistry {
    * Promote an existing `kind: 'llm'` skill to `kind: 'script'`. Writes
    * the current llm body to the `_fallback.md` sidecar so demotion can
    * restore it verbatim, then rewrites SKILL.md with the new script
-   * body + language. Counters are PRESERVED — promotion is a body
-   * reformulation of an already-trusted skill, not a fresh record.
+   * body + language.
+   *
+   * Counters are RESET to 0/0. They were preserved in the original
+   * implementation ("a body reformulation of an already-trusted skill"),
+   * and that reasoning is wrong in a way that turned out to be dangerous:
+   * the successes were all earned by the MARKDOWN recipe driving a
+   * validated LLM tool-loop, while the compiled script is a brand-new
+   * artefact that has never executed even once. Inheriting 5/0 armed the
+   * deterministic dispatch (`shouldTrustSkill` needs 3/0) on its very
+   * first match — and that path returns before the supervise loop, so
+   * nothing would have validated its output, and `onFailed`/`demoteToLlm`
+   * are unreachable from it. Observed on `document-cli-from-source` after
+   * the 2026-07-25 run. Resetting makes the script form earn its 3 clean
+   * runs THROUGH the validated loop before it is trusted to run unwatched.
    *
    * Refuses (throws) if the skill on disk is already `kind: 'script'`.
    * That guard keeps double-promotion from clobbering an existing
@@ -216,7 +228,7 @@ export class SkillRegistry {
       );
     }
     writeFileSync(join(dir, FALLBACK_FILENAME), currentBody.trim() + '\n', 'utf8');
-    return this.save(args.l1Name, {
+    const saved = this.save(args.l1Name, {
       id: frontmatter.id,
       description: frontmatter.description,
       whenToUse: frontmatter.whenToUse,
@@ -224,6 +236,15 @@ export class SkillRegistry {
       language: args.language,
       body: args.scriptBody,
     });
+    // `save` preserves counters by contract (C1); the script form must start
+    // from zero — see the rationale above.
+    const meta = this.resetCounters(args.l1Name, frontmatter.id);
+    return {
+      ...saved,
+      successes: meta?.successes ?? 0,
+      failures: meta?.failures ?? 0,
+      updatedAt: meta?.updatedAt ?? saved.updatedAt,
+    };
   }
 
   /**

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   extractJson,
+  extractJsonEx,
   findAllJsonObjects,
+  parsePayloadTolerant,
+  parseTwoJson,
   parseVerdict,
   parsePlanTolerant,
   parsePlanWithFallback,
@@ -51,6 +54,95 @@ describe('extractJson', () => {
 
   it('throws a useful ValidationError when there is no JSON at all', () => {
     expect(() => extractJson('no json here, sorry')).toThrow(/no JSON found/);
+  });
+});
+
+/**
+ * Regression suite for the NESTED-FENCE evidence-destruction bug.
+ *
+ * The fence regex is non-greedy, so it stops at the first closing ``` — and
+ * an L1 obeying the GROUND-TRUTH evidence contract pastes shell output into
+ * `summary`, which routinely contains a nested ```bash block. The capture
+ * then ended mid-string, `repairTruncatedJson` closed it into something
+ * schema-VALID BUT AMPUTATED, and `parseWith` returned that lossy object
+ * without ever reaching the candidate scan that would have recovered the
+ * intact payload.
+ *
+ * Measured on run 2026-07-25T22-10-42: a 162-char summary reached the
+ * validator as 39 chars with the `## Usage` proof gone; the validator
+ * (correctly) rejected it as "cut off mid-sentence", costing a full extra
+ * supervise cycle. The same bug silently truncated a phase-1 summary from
+ * 2620 recoverable chars to 308, so the next phase ran blind.
+ */
+describe('nested ``` fence inside a JSON string (evidence-destruction regression)', () => {
+  const summary =
+    'Documented rev-cli.\n== GROUND TRUTH ==\n```bash\n$ node index.js racecar\nReversed: racecar\nPalindrome: yes\n```\n## Usage section present with 3 verified invocations.';
+  const envelope = { output: 'README.md written', summary };
+  const fenced = '```json\n' + JSON.stringify(envelope) + '\n```';
+
+  it('extractJson recovers the FULL payload despite the nested fence', () => {
+    expect(extractJson(fenced)).toEqual(envelope);
+  });
+
+  it('recovers it WITHOUT resorting to a lossy repair', () => {
+    const out = extractJsonEx(fenced);
+    expect(out.repaired).toBe(false);
+    expect((out.value as typeof envelope).summary).toBe(summary);
+  });
+
+  it('parsePayloadTolerant preserves the whole evidence block (162 chars, not 39)', () => {
+    const parsed = parsePayloadTolerant(fenced);
+    expect(String(parsed.summary)).toBe(summary);
+    expect(String(parsed.summary)).toContain('## Usage');
+    expect(String(parsed.summary).length).toBe(summary.length);
+  });
+
+  it('parseWith keeps the intact payload for the result schema', () => {
+    const parsed = parseWith(resultPayloadSchema, fenced);
+    expect(parsed.summary).toBe(summary);
+  });
+
+  it('survives MULTIPLE nested fences in the same string', () => {
+    const multi = {
+      output: 'ok',
+      summary: 'a\n```bash\nx\n```\nb\n```json\n{"not":"the payload"}\n```\nc',
+    };
+    expect(extractJson('```json\n' + JSON.stringify(multi) + '\n```')).toEqual(multi);
+  });
+
+  it('parseTwoJson survives a nested fence in the first payload', () => {
+    const strategy = { strategy: 'reuse', target: 'Lithium', reasoning: 'run: ```bash\nls\n```' };
+    const plan = { reasoning: 'r', subtasks: [{ description: 'd' }] };
+    const text =
+      '```json\n' + JSON.stringify(strategy) + '\n```\n```json\n' + JSON.stringify(plan) + '\n```';
+    const [a, b] = parseTwoJson(text);
+    expect(a).toEqual(strategy);
+    expect(b).toEqual(plan);
+  });
+
+  it('still honours a well-formed fence with no nesting (no behaviour change)', () => {
+    expect(extractJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
+    expect(extractJsonEx('```json\n{"a":1}\n```').repaired).toBe(false);
+  });
+
+  it('a genuinely truncated payload still parses via repair, and is flagged', () => {
+    // No closing fence at all — the max_tokens cutoff case the repair exists for.
+    const out = extractJsonEx('{"output":"x","summary":"unterminated');
+    expect(out.repaired).toBe(true);
+    expect((out.value as { output: string }).output).toBe('x');
+  });
+
+  it('does NOT hijack the "prefer the LAST candidate" semantics', () => {
+    // Guard against the regression this fix nearly introduced: trying the
+    // first BALANCED object up front made a short example envelope shown in
+    // prose win over the real payload that follows. The balanced-object
+    // recovery must therefore run only where the old code would have gone to
+    // a lossy repair — never ahead of the legacy slice.
+    const text =
+      'Example of the shape: {"output":"e","summary":"s"} — and here is the real result:\n' +
+      '{"output":"the real deliverable","summary":"the actual evidence block"}';
+    const parsed = parseWith(resultPayloadSchema, text);
+    expect(parsed.output).toBe('the real deliverable');
   });
 });
 

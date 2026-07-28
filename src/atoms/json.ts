@@ -86,11 +86,57 @@ export function repairPrematureClose(raw: string): string | null {
  * unterminated string and balancing brackets before parsing again.
  */
 export function extractJson(text: string): unknown {
+  return extractJsonEx(text).value;
+}
+
+/**
+ * True when a ``` fence capture actually contains a BALANCED JSON payload.
+ *
+ * Why this gate exists: the fence regex is non-greedy, so it stops at the
+ * FIRST closing ``` — and an L1 obeying the GROUND-TRUTH evidence contract
+ * pastes shell output into `summary`, which routinely contains a nested
+ * ```bash block. The capture then ends mid-string, `repairTruncatedJson`
+ * closes it into something schema-VALID BUT AMPUTATED, and the caller
+ * silently ships mutilated evidence to the validator. Measured on a real
+ * run: a 162-char summary arrived as 39 chars with the `## Usage` proof
+ * gone, and the validator (correctly) rejected it as "cut off mid-sentence"
+ * — costing a full extra supervise cycle. Two of four L1 executes in that
+ * run lost their evidence this way, one of them silently.
+ *
+ * When the capture is unbalanced we IGNORE the fence and fall through to
+ * the brace walk over the full text, which is string-aware and recovers
+ * the complete object (backticks inside a JSON string are legal and
+ * harmless there).
+ */
+function fencedPayloadIsBalanced(capture: string): boolean {
+  const firstBrace = capture.indexOf('{');
+  const firstBracket = capture.indexOf('[');
+  let start = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) start = Math.min(firstBrace, firstBracket);
+  else if (firstBrace !== -1) start = firstBrace;
+  else if (firstBracket !== -1) start = firstBracket;
+  if (start === -1) return false;
+  return findBalancedEnd(capture, start) !== -1;
+}
+
+/** Outcome of a JSON extraction, flagging whether a lossy repair was used. */
+export interface ExtractOutcome {
+  readonly value: unknown;
+  /**
+   * True when the payload only parsed after `repairTruncatedJson` /
+   * `repairPrematureClose` / `jsonrepair`. Repaired payloads can be
+   * schema-valid yet missing content, so `parseWith` treats them as a
+   * LAST RESORT rather than a success.
+   */
+  readonly repaired: boolean;
+}
+
+export function extractJsonEx(text: string): ExtractOutcome {
   const trimmed = text.trim();
 
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fenced && fenced[1]) {
-    return tryParseJson(fenced[1]);
+  if (fenced && fenced[1] && fencedPayloadIsBalanced(fenced[1])) {
+    return tryParseJsonEx(fenced[1]);
   }
 
   const firstBrace = trimmed.indexOf('{');
@@ -108,21 +154,35 @@ export function extractJson(text: string): unknown {
   const end = Math.max(lastBrace, lastBracket);
   if (end <= start) {
     // No closing bracket — most likely a truncated response.
-    return tryParseJson(trimmed.slice(start));
+    return tryParseJsonEx(trimmed.slice(start));
   }
   // First try a clean slice up to the last visible closing bracket. If that
   // fails (e.g. the response is truncated with extra partial content past the
   // last balanced close), fall back to repairing the full tail.
+  //
+  // NOTE: do NOT insert a "try the first balanced object" step here. It looks
+  // like a free recovery, but on a response that shows a short example
+  // envelope in prose before the real payload it returns the EXAMPLE — and
+  // that silently defeats the "prefer the LAST candidate" semantics
+  // `parseWith` depends on. Verified by
+  // `does NOT hijack the "prefer the LAST candidate" semantics` in
+  // tests/json.test.ts. The nested-fence case does not need it: once the
+  // fence gate above deflects an unbalanced capture, this very slice parses
+  // the full object cleanly (backticks inside a JSON string are legal).
   try {
-    return JSON.parse(trimmed.slice(start, end + 1));
+    return { value: JSON.parse(trimmed.slice(start, end + 1)), repaired: false };
   } catch {
-    return tryParseJson(trimmed.slice(start));
+    return tryParseJsonEx(trimmed.slice(start));
   }
 }
 
 function tryParseJson(raw: string): unknown {
+  return tryParseJsonEx(raw).value;
+}
+
+function tryParseJsonEx(raw: string): ExtractOutcome {
   try {
-    return JSON.parse(raw);
+    return { value: JSON.parse(raw), repaired: false };
   } catch (err) {
     // Three-stage repair, cheapest first:
     //   1. `repairTruncatedJson` — in-house fix for the common
@@ -139,14 +199,14 @@ function tryParseJson(raw: string): unknown {
       const repaired = repair(raw);
       if (repaired === null) continue;
       try {
-        return JSON.parse(repaired);
+        return { value: JSON.parse(repaired), repaired: true };
       } catch {
         /* try next strategy */
       }
     }
     try {
       const repaired = jsonrepair(raw);
-      return JSON.parse(repaired);
+      return { value: JSON.parse(repaired), repaired: true };
     } catch (err2) {
       const msg = err2 instanceof JSONRepairError ? err2.message : (err2 as Error).message;
       throw new ValidationError(
@@ -207,13 +267,24 @@ export function parseWith<S extends z.ZodTypeAny>(
   text: string
 ): z.infer<S> {
   let primaryErr: unknown = null;
+  // A REPAIRED primary parse is schema-valid but potentially amputated (the
+  // repair closes an unterminated string, silently dropping whatever came
+  // after the cut). Hold it aside instead of returning it, so the candidate
+  // scan below gets a chance to supply the intact payload. Without this,
+  // `parseWith` returned the lossy object and never reached the scan —
+  // that is how a run shipped a 39-char summary in place of a 162-char one.
+  let repairedFallback: { data: z.infer<S>; size: number } | null = null;
   try {
-    const raw = extractJson(text);
+    const { value: raw, repaired } = extractJsonEx(text);
     const parsed = schema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-    primaryErr = new ValidationError(
-      `schema validation failed: ${parsed.error.message}`
-    );
+    if (parsed.success) {
+      if (!repaired) return parsed.data;
+      repairedFallback = { data: parsed.data, size: safeSize(parsed.data) };
+    } else {
+      primaryErr = new ValidationError(
+        `schema validation failed: ${parsed.error.message}`
+      );
+    }
   } catch (err) {
     // extractJson can throw on malformed JSON (e.g. a greedy first-`{` to
     // last-`}` slice that scooped up prose from the middle of the text).
@@ -235,17 +306,42 @@ export function parseWith<S extends z.ZodTypeAny>(
     try {
       const obj = JSON.parse(candidates[i]!);
       const again = schema.safeParse(obj);
-      if (again.success) return again.data;
+      if (!again.success) continue;
+      // When a repaired primary is in hand, only prefer this clean candidate
+      // if it carries STRICTLY MORE content. Guard rationale: a response can
+      // legitimately contain an early short example object that validates
+      // (e.g. prose showing `{"output":…,"summary":…}`) followed by the real
+      // — truncated — payload. Preferring "clean" unconditionally would ship
+      // the example and drop the real work.
+      if (repairedFallback !== null && safeSize(again.data) <= repairedFallback.size) {
+        continue;
+      }
+      return again.data;
     } catch {
       continue;
     }
   }
+  if (repairedFallback !== null) return repairedFallback.data;
   if (primaryErr instanceof ValidationError) throw primaryErr;
   throw new ValidationError(
     `schema validation failed: ${
       primaryErr instanceof Error ? primaryErr.message : String(primaryErr)
     }`
   );
+}
+
+/**
+ * Serialized size of a parsed payload, used to compare "how much content
+ * survived" between a repaired parse and a clean candidate. Falls back to 0
+ * on anything non-serialisable so the comparison degrades to "prefer the
+ * repaired primary" rather than throwing.
+ */
+function safeSize(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -359,9 +455,23 @@ export function parseTwoJson(text: string): [unknown, unknown] {
     }
   }
 
+  // Same nested-fence hazard as `extractJson`: these captures are non-greedy,
+  // so a ``` block embedded inside a JSON string truncates them — and here the
+  // `JSON.parse` calls have NO repair net, so a truncated capture throws and
+  // takes the whole plan parse down. Only trust the fences when BOTH captures
+  // hold balanced payloads; otherwise fall through to the brace walk below,
+  // which is string-aware.
   const fences = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
-  if (fences.length >= 2) {
-    return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
+  if (
+    fences.length >= 2 &&
+    fencedPayloadIsBalanced(fences[0]![1]!) &&
+    fencedPayloadIsBalanced(fences[1]![1]!)
+  ) {
+    try {
+      return [JSON.parse(fences[0]![1]!), JSON.parse(fences[1]![1]!)];
+    } catch {
+      /* fall through to the brace walk */
+    }
   }
 
   const start1 = trimmed.indexOf('{');

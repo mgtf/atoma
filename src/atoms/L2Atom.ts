@@ -268,6 +268,20 @@ function parseScriptEnvelope(stdout: string): { output: unknown; summary: string
       'output' in obj &&
       typeof obj['summary'] === 'string'
     ) {
+      // SELF-REPORTED FAILURE GUARD. The deterministic path has no validator
+      // downstream (it returns before the supervise loop), so this parse is
+      // the ONLY gate between a script's stdout and a result the parent
+      // treats as a success — and the exit code cannot be trusted alone:
+      // measured on the freshly-promoted `document-cli-from-source`, a run in
+      // a workspace without the CLI printed
+      //   {"output":null,"summary":"FAILED: index.js ... not found ..."}
+      // with EXIT=0, which the old check accepted and then credited with
+      // `recordSuccess` — entrenching a broken script at 6/0, 7/0, …
+      // A null/absent output or a summary that announces its own failure is
+      // therefore treated as OFF-CONTRACT: returning null sends the subtask
+      // back through the normal (validated) LLM loop.
+      if (obj['output'] === null || obj['output'] === undefined) return null;
+      if (/^\s*(FAILED|ERROR)\b/i.test(obj['summary'])) return null;
       return { output: obj['output'], summary: obj['summary'] };
     }
   } catch {
@@ -1167,6 +1181,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `script's final stdout MUST be a single JSON line of shape`,
       `{"output": <deliverable>, "summary": "<one sentence including a verbatim`,
       `\\"== GROUND TRUTH ==\\" block as the L1 result-reporting contract requires>"}.`,
+      ``,
+      `FAILURE SIGNALLING — MANDATORY. There is NO validator downstream of a`,
+      `trusted script: whatever you print is taken as the deliverable. So if a`,
+      `precondition is missing or a step fails, you MUST:`,
+      `  - write the diagnosis to stderr, AND`,
+      `  - exit with a NON-ZERO code (process.exit(1)).`,
+      `Do NOT print a success-shaped envelope carrying a "FAILED …" summary and`,
+      `then exit 0 — the supervisor reads the exit code, and a zero exit means`,
+      `"the deliverable is done". Never emit "output": null.`,
       ``,
       `If the recipe has irreducible LLM steps — 'pick the right SQL helpers',`,
       `'design a schema', 'reason about the API shape' — you cannot promote it.`,
