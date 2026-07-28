@@ -276,6 +276,23 @@ function main() {
   let pkg = null;
   try { pkg = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8')); } catch (e) { pkg = null; }
 
+  // Persist the machine-readable probe manifest alongside the README so
+  // later verification passes re-run and diff against a parseable record
+  // instead of prose. Merge by cmd if a manifest already exists.
+  const manifestPath = path.join(cwd, '.atoma-probes.json');
+  let manifest = { version: 1, entries: [] };
+  try {
+    const prev = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (prev && Array.isArray(prev.entries)) manifest = { version: 1, entries: prev.entries };
+  } catch (e) { /* absent or invalid: start fresh */ }
+  for (let i = 0; i < invocations.length; i++) {
+    const r = results[i];
+    if (r.spawnError) continue;
+    const entry = { cmd: invocations[i], exitCode: r.code, stdout: r.stdout, stderr: r.stderr };
+    const at = manifest.entries.findIndex(e => e && e.cmd === entry.cmd);
+    if (at >= 0) manifest.entries[at] = entry; else manifest.entries.push(entry);
+  }
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   const readme = buildReadme({ entryFile, invocations, results, pkg });
   fs.writeFileSync(path.join(cwd, 'README.md'), readme, 'utf8');
 

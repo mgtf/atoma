@@ -716,7 +716,27 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   handles these scripts correctly, since there the L1 derives the
   positional args itself), whereas the failure being closed is a
   false positive.
-- **Deterministic-failure streak demotes a brittle script (#C4b).**
+- **Probe manifest — the deterministic interface for verification
+  (#C5).** `PROBE_MANIFEST_FILENAME` (`.atoma-probes.json`, workspace
+  root): `{"version":1,"entries":[{"cmd","exitCode","stdout","stderr"}]}`
+  with FULL verbatim outputs, merged by cmd. Three contract sites teach
+  it: `GROUND_TRUTH_EVIDENCE_LINES` tells every non-web L1 to write it
+  after verifying invocations with run_shell; `compileSkillToScript`'s
+  `PROBE MANIFEST` block makes compiled verification scripts read it as
+  PRIMARY input (re-run each cmd, byte-for-byte diff; prose parsing is
+  fallback only) and makes scripts that verify invocations write/merge
+  it; the `reverify-cli-readme-invocations` skill body is manifest-first.
+  WHY: two compile generations of prose-parsing verification — the
+  second under an explicitly hardened INPUT VARIANCE prompt, visibly
+  obeyed — failed offline regression on 6/6 real archived workspaces
+  (extraction found nothing on three README styles, claims parsing found
+  nothing on another, multi-line stdout got truncated to its first line
+  on the last). Free-form model-authored markdown is not a parseable
+  interface; a machine-written JSON record is. The README stays for
+  humans, machine verification reads machine input. The live
+  `readme-from-verified-runs` compiled script was hand-patched (via
+  `SkillRegistry.save`, counters preserved) to write the manifest — it
+  already collected exactly the needed data.
   `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
   missing envelope) call `noteDirectFailure`, which bumps
   `_meta.json.directFailures` via `SkillRegistry.markDirectFailure`; at

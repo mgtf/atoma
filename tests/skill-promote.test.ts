@@ -154,6 +154,11 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // phantom mismatch. Compiled scripts must survive formatting variance.
     expect(compileCall.userContent).toMatch(/INPUT VARIANCE/);
     expect(compileCall.userContent).toMatch(/ARGUMENTS ARE PART OF THE COMMAND/);
+    // The probe manifest is the deterministic interface: verification
+    // scripts read it as PRIMARY input instead of parsing prose, and
+    // scripts that verify invocations must write/merge it.
+    expect(compileCall.userContent).toMatch(/PROBE MANIFEST/);
+    expect(compileCall.userContent).toContain('.atoma-probes.json');
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).

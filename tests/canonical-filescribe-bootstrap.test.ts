@@ -9,6 +9,7 @@ import {
   ensureCanonicalFileScribeL1,
   ensureCanonicalHttpL1,
   ensureCanonicalL1,
+  PROBE_MANIFEST_FILENAME,
 } from '../src/atoms/capability.js';
 import type { Tool } from '../src/core/types.js';
 
@@ -125,6 +126,12 @@ describe('ensureCanonicalFileScribeL1 — bootstrap (#12)', () => {
     expect(l1.systemPrompt).toMatch(/== GROUND TRUTH ==/);
     expect(l1.systemPrompt).toMatch(/RESULT-REPORTING CONTRACT/);
     expect(l1.systemPrompt).toMatch(/VERBATIM excerpts/);
+    // The on-disk probe manifest — the machine-readable interface that
+    // later verification passes re-run and diff against. Two compile
+    // generations of prose-parsing verification failed 6/6 real
+    // workspaces; this contract is what makes verify scripts compilable.
+    expect(l1.systemPrompt).toMatch(/PROBE MANIFEST ON DISK/);
+    expect(l1.systemPrompt).toContain(PROBE_MANIFEST_FILENAME);
   });
 
   it('re-aligns a STALE persisted system prompt on the next bootstrap (idempotent seeder)', () => {

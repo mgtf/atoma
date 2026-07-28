@@ -630,7 +630,31 @@ export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
   `that your own recorded probe contradicts (exitCode 0) is the single most`,
   `common way a deliverable ships wrong — and prose cannot be checked`,
   `mechanically, so a table in "summary" does not substitute for this.`,
+  ``,
+  `PROBE MANIFEST ON DISK: whenever you verified invocations of a runnable`,
+  `artefact (a CLI, a script) with run_shell, ALSO write_file`,
+  `".atoma-probes.json" in the workspace root with the same record:`,
+  `  {"version": 1, "entries": [`,
+  `    {"cmd": "<exact command>", "exitCode": <observed>,`,
+  `     "stdout": "<verbatim>", "stderr": "<verbatim>"} ]}`,
+  `Full verbatim stdout/stderr per entry (unlike the in-envelope record,`,
+  `size is fine here); one entry per DISTINCT verified invocation; UPDATE`,
+  `the file (merge by cmd) if it already exists. WHY: this file is the`,
+  `machine-readable interface later verification passes re-run and diff`,
+  `against — prose in a README cannot be parsed reliably, this can.`,
 ];
+
+/**
+ * Workspace-root filename of the probe manifest taught by
+ * `GROUND_TRUTH_EVIDENCE_LINES`. A verification pass that finds this file
+ * re-runs each recorded cmd and compares byte-for-byte — the deterministic
+ * interface that makes compiled reverify scripts robust. Measured need: two
+ * compile generations of a prose-parsing reverify script (the second under
+ * an explicitly hardened extraction prompt) failed offline regression on
+ * 6/6 real archived workspaces — free-form markdown is not a parseable
+ * interface, this file is.
+ */
+export const PROBE_MANIFEST_FILENAME = '.atoma-probes.json';
 
 export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element specialised for static-file authoring: JSON,`,
