@@ -2,6 +2,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { truncateToolResultContent, DEFAULT_MAX_TOOL_ITERATIONS } from './llm.js';
+import { modelSupportsEffort } from './models.js';
 import type {
   LlmClient,
   LlmCompletionRequest,
@@ -49,6 +50,23 @@ import type {
  *     `estimateCostUsd` are what the tokens WOULD cost at API prices —
  *     on a subscription nothing is billed per token.
  */
+/**
+ * Effort pass-through gate for the CLI transport. `maxTokens` cannot be
+ * enforced through the Agent SDK (documented above), which means adaptive
+ * thinking runs at its default `'high'` — measured on the rehearsal runs:
+ * a single `compileSkillToScript` call emitted ~20k output tokens and ran
+ * ~7 minutes through the subprocess, long enough to get killed by the run
+ * deadline twice in a row. `effort` IS exposed by the SDK, so a caller-
+ * pinned effort is the one real lever this transport has. Same gate rule
+ * as `AnthropicLlmClient`: only when the caller pinned it AND the declared
+ * model (the tier pin, before alias resolution) supports the param.
+ */
+export function cliEffortFor(req: LlmCompletionRequest): 'low' | 'medium' | 'high' | undefined {
+  if (req.params?.effort === undefined) return undefined;
+  if (!modelSupportsEffort(req.model)) return undefined;
+  return req.params.effort;
+}
+
 export class ClaudeCliLlmClient implements LlmClient {
   private readonly maxIter: number;
 
@@ -85,6 +103,7 @@ export class ClaudeCliLlmClient implements LlmClient {
         ...(toolOptions.toolAliases ? { toolAliases: toolOptions.toolAliases } : {}),
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
+        ...(cliEffortFor(req) ? { effort: cliEffortFor(req) } : {}),
         maxTurns: hasTools ? budget : 2,
         abortController: abort,
         // Drop a (possibly stale) exported API key so the CLI's own OAuth

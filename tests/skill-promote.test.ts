@@ -154,6 +154,10 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // phantom mismatch. Compiled scripts must survive formatting variance.
     expect(compileCall.userContent).toMatch(/INPUT VARIANCE/);
     expect(compileCall.userContent).toMatch(/ARGUMENTS ARE PART OF THE COMMAND/);
+    // effort is pinned because the claude-cli transport cannot enforce
+    // maxTokens: at the default 'high' a compile ran ~7 min and got killed
+    // by the run deadline (rehearsal runs 4 and 5).
+    expect(compileCall.params?.effort).toBe('medium');
   });
 
   it('does NOT promote when the skill has any failures recorded (gate prevents thrash after demotion)', async () => {

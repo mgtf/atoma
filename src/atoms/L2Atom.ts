@@ -1377,7 +1377,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      params: { ...this.params, maxTokens: 4000, temperature: 0 },
+      // `effort: 'medium'` is load-bearing on the claude-cli transport,
+      // where maxTokens is advisory-only: at the default 'high' a compile
+      // ran ~7 minutes / ~20k thinking+output tokens through the subprocess
+      // and was killed by the run deadline twice (rehearsal runs 4 and 5).
+      params: { ...this.params, maxTokens: 4000, temperature: 0, effort: 'medium' },
       signal: args.ctx.signal,
     });
     const raw = (resp.text ?? '').trim();

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { resolveCliModel, jsonSchemaToZodShape } from '../src/core/llmClaudeCli.js';
+import { resolveCliModel, jsonSchemaToZodShape, cliEffortFor } from '../src/core/llmClaudeCli.js';
 import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
+import type { LlmCompletionRequest } from '../src/core/types.js';
 
 describe('resolveCliModel — tier pins → Claude Code aliases', () => {
   let envBefore: string | undefined;
@@ -25,6 +26,33 @@ describe('resolveCliModel — tier pins → Claude Code aliases', () => {
     expect(resolveCliModel('some-custom-model')).toBe('some-custom-model');
     process.env['ATOMA_CLAUDE_MODEL'] = 'sonnet';
     expect(resolveCliModel(FALLBACK_OPUS)).toBe('sonnet');
+  });
+});
+
+describe('cliEffortFor — the one generation lever the CLI transport has', () => {
+  const base = { systemPrompt: 's', userContent: 'u' };
+
+  it('passes a caller-pinned effort through on an effort-capable model', () => {
+    const req: LlmCompletionRequest = {
+      ...base,
+      model: PIN_SONNET,
+      params: { effort: 'medium' },
+    };
+    expect(cliEffortFor(req)).toBe('medium');
+  });
+
+  it('returns undefined when the caller did not pin effort (validators/prefilters)', () => {
+    const req: LlmCompletionRequest = { ...base, model: PIN_SONNET, params: { maxTokens: 4000 } };
+    expect(cliEffortFor(req)).toBeUndefined();
+  });
+
+  it('gates on the declared tier pin — Haiku rejects the param', () => {
+    const req: LlmCompletionRequest = {
+      ...base,
+      model: PIN_HAIKU,
+      params: { effort: 'medium' },
+    };
+    expect(cliEffortFor(req)).toBeUndefined();
   });
 });
 
