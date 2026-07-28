@@ -2877,49 +2877,92 @@ const PROBEABLE_EXTENSIONS = new Set([
  * Exported for tests.
  */
 export function extractResultFilePaths(payload: unknown): string[] {
-  const out: string[] = [];
-  const push = (v: unknown, opts: { requireKnownExt: boolean }): void => {
+  const claims = extractResultFileClaims(payload);
+  return [...claims.structured, ...claims.mentioned].slice(0, FILE_PROBE_MAX_FILES);
+}
+
+/**
+ * File paths a RESULT refers to, split by how much they can be trusted as an
+ * EXISTENCE CLAIM:
+ *
+ *   - `structured` — the child put the path in a dedicated field
+ *     (`output.files[]`, `output.path`, `output.readme_path`, …). That is an
+ *     explicit assertion that the file was produced, so a miss here is a real
+ *     contradiction.
+ *   - `mentioned` — the path only appears in prose. Prose is semantically
+ *     blind: it cannot tell "the file I wrote" from "the file I confirm is
+ *     GONE". The pad-cli run proved the cost of ignoring that distinction —
+ *     the child correctly reported "no scaffolding files
+ *     (_skill_document-cli-from-source.js) present" (F3 working as designed),
+ *     the sweep read that as a claim of existence, and the phantom miss
+ *     overrode the trust fast-path on a flawless result.
+ *
+ * The probe therefore reports mentioned paths only when they EXIST (as
+ * corroboration) and never lets them signal a contradiction. `list_files`
+ * already covers the "what is actually in the workspace" question, which is
+ * the real defence against stray files.
+ *
+ * `_skill_*` scaffolding is excluded outright: it is framework-generated, and
+ * its ABSENCE is the desired end state (see `removeScratchScript`).
+ */
+export function extractResultFileClaims(payload: unknown): {
+  structured: string[];
+  mentioned: string[];
+} {
+  const structured: string[] = [];
+  const mentioned: string[] = [];
+  const accept = (v: unknown, into: string[], requireKnownExt: boolean): void => {
     if (typeof v !== 'string') return;
     const p = v.trim();
     if (!p || p.startsWith('/') || p.includes('..') || /^https?:\/\//i.test(p)) return;
+    if (/(^|\/)_skill_/.test(p)) return;
     const m = p.match(/\.([A-Za-z][A-Za-z0-9]{0,8})$/);
     if (!m) return;
-    if (opts.requireKnownExt && !PROBEABLE_EXTENSIONS.has(m[1]!.toLowerCase())) return;
-    if (!out.includes(p)) out.push(p);
+    if (requireKnownExt && !PROBEABLE_EXTENSIONS.has(m[1]!.toLowerCase())) return;
+    if (structured.includes(p) || mentioned.includes(p)) return;
+    into.push(p);
   };
-  if (!payload || typeof payload !== 'object') return out;
+  const claim = (v: unknown): void => accept(v, structured, false);
+  const mention = (v: unknown): void => accept(v, mentioned, true);
+
+  if (!payload || typeof payload !== 'object') return { structured, mentioned };
   const obj = payload as Record<string, unknown>;
   const output = obj['output'];
 
-  // Structured fields: explicit claims by the child, so any plausible
-  // extension is probed.
-  const structured = { requireKnownExt: false };
+  // STRUCTURED: dedicated fields. Any plausible extension is accepted here
+  // because the child chose to put the path in a field, not in a sentence.
   if (output && typeof output === 'object' && !Array.isArray(output)) {
     const o = output as Record<string, unknown>;
-    push(o['path'], structured);
-    push(o['entry'], structured);
     for (const key of ['paths', 'files', 'written']) {
       const arr = o[key];
-      if (Array.isArray(arr)) for (const item of arr) push(item, structured);
+      if (Array.isArray(arr)) for (const item of arr) claim(item);
+    }
+    // Any string field whose NAME advertises a path (`path`, `entry`,
+    // `readme_path`, `output_file`, …). Observed in the wild: `readme_path`.
+    for (const [key, value] of Object.entries(o)) {
+      if (typeof value !== 'string') continue;
+      if (/(^|_)(path|file|entry)s?$/i.test(key)) claim(value);
     }
   }
-  if (Array.isArray(output)) for (const item of output) push(item, structured);
-  push(obj['path'], structured);
-  push(output, structured);
+  if (Array.isArray(output)) for (const item of output) claim(item);
+  claim(obj['path']);
+  claim(output);
 
-  // Free-text sweep: the GROUND-TRUTH block routinely names files inline
-  // ("wrote README.md", "cat package.json"). Gated by
-  // PROBEABLE_EXTENSIONS — see there for why a shape heuristic is not enough.
+  // MENTIONED: prose sweep. Informational only — never a contradiction.
   const freeText: string[] = [];
   if (typeof output === 'string') freeText.push(output);
   if (typeof obj['summary'] === 'string') freeText.push(obj['summary'] as string);
   for (const text of freeText) {
     for (const m of text.matchAll(/[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,8}\b/g)) {
-      push(m[0], { requireKnownExt: true });
-      if (out.length >= FILE_PROBE_MAX_FILES) return out.slice(0, FILE_PROBE_MAX_FILES);
+      mention(m[0]);
+      if (structured.length + mentioned.length >= FILE_PROBE_MAX_FILES) break;
     }
   }
-  return out.slice(0, FILE_PROBE_MAX_FILES);
+  const room = Math.max(0, FILE_PROBE_MAX_FILES - structured.length);
+  return {
+    structured: structured.slice(0, FILE_PROBE_MAX_FILES),
+    mentioned: mentioned.slice(0, room),
+  };
 }
 
 /**
@@ -2956,11 +2999,14 @@ async function probeFilesGroundTruth(args: {
   // Only for children that actually write files — otherwise there is nothing
   // to read back and the probe would just add an empty evidence block.
   if (!args.child.toolNames().includes('write_file')) return '';
-  const paths = extractResultFilePaths(args.payload);
-  if (paths.length === 0) return '';
+  const claims = extractResultFileClaims(args.payload);
+  if (claims.structured.length === 0 && claims.mentioned.length === 0) return '';
 
   const lines: string[] = [];
-  for (const path of paths) {
+  for (const [path, isClaim] of [
+    ...claims.structured.map((p) => [p, true] as const),
+    ...claims.mentioned.map((p) => [p, false] as const),
+  ]) {
     if (args.ctx.signal?.aborted) return '';
     try {
       const raw = await tools.execute('read_file', { path });
@@ -2973,13 +3019,20 @@ async function probeFilesGroundTruth(args: {
       const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
       lines.push(
         `- ${path}: EXISTS (${content.length} chars)` +
-          (content.trim().length === 0 ? ' — WARNING: file is EMPTY' : '') +
+          (content.trim().length === 0 && isClaim ? ' — WARNING: file is EMPTY' : '') +
           `\n    excerpt: ${JSON.stringify(excerpt)}${content.length > excerpt.length ? ' …(truncated)' : ''}`
       );
     } catch (err) {
-      lines.push(`- ${path}: MISSING or unreadable (${(err as Error).message})`);
+      // A miss is only reportable for a STRUCTURED claim. A prose mention that
+      // does not resolve is usually the child saying a file is absent — which
+      // is often the DESIRED state — so reporting it would invent a
+      // contradiction out of a correct statement.
+      if (isClaim) {
+        lines.push(`- ${path}: MISSING or unreadable (${(err as Error).message})`);
+      }
     }
   }
+  if (lines.length === 0) return '';
 
   let listing = '';
   if (tools.has('list_files') && !args.ctx.signal?.aborted) {

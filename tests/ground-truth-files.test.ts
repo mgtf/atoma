@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { llmVerdict, extractResultFilePaths } from '../src/atoms/L2Atom.js';
+import {
+  llmVerdict,
+  extractResultFilePaths,
+  extractResultFileClaims,
+} from '../src/atoms/L2Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { makeCtx, jsonText } from './helpers.js';
 import type { RunContext, Tool, ToolExecutor } from '../src/core/types.js';
@@ -161,6 +165,33 @@ describe('extractResultFilePaths', () => {
       output: { files: ['/etc/passwd', '../outside.txt', 'http://localhost:8000/x.html'] },
     });
     expect(paths).toEqual([]);
+  });
+
+  it('separates STRUCTURED claims from prose MENTIONS (pad-cli regression)', () => {
+    // Exact shape from the pad-cli run. The child correctly reported that it
+    // had cleaned up its scaffolding — "no _skill_*.js present" — and the old
+    // sweep read that as a claim of EXISTENCE, then flagged the (desired)
+    // absence as a contradiction, overriding the trust fast-path on a flawless
+    // result. Prose cannot distinguish "file I wrote" from "file I confirm is
+    // gone", so it may never signal a contradiction.
+    const claims = extractResultFileClaims({
+      output: {
+        files: ['package.json', 'index.js', 'README.md'],
+        readme_path: 'README.md',
+        file_count: 3,
+      },
+      summary:
+        'README.md created. No scaffolding files (_skill_document-cli-from-source.js or similar) present.',
+    });
+    expect(claims.structured).toEqual(['package.json', 'index.js', 'README.md']);
+    // `_skill_*` is framework scaffolding whose absence is the goal — never probed.
+    expect(claims.mentioned).not.toContain('_skill_document-cli-from-source.js');
+    expect(claims.structured).not.toContain('_skill_document-cli-from-source.js');
+  });
+
+  it('picks up path-advertising field NAMES like readme_path', () => {
+    const claims = extractResultFileClaims({ output: { readme_path: 'docs/GUIDE.md' } });
+    expect(claims.structured).toEqual(['docs/GUIDE.md']);
   });
 
   it('caps the number of probed files', () => {
