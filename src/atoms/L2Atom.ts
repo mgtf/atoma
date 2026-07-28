@@ -298,6 +298,33 @@ function parseScriptEnvelope(stdout: string): { output: unknown; summary: string
 }
 
 /**
+ * PRE-FLIGHT gate for deterministic dispatch: does this script body even
+ * attempt the `{"output", "summary"}` stdout envelope?
+ *
+ * `parseScriptEnvelope` already catches an off-contract script AFTER the
+ * fact — but by then the script has run, and a script written against a
+ * different calling convention has already had its side effects. Concrete
+ * case: a hand-authored `scaffold-package-json` reads argv positionally
+ * (`name`, `version`, `description...`) while direct dispatch passes ONE
+ * arg — the JSON-encoded subtask description. Dispatching it writes a
+ * `package.json` whose `name` is the whole task sentence, exits 0, prints
+ * prose, fails the envelope parse, and hands the LLM loop a workspace
+ * already polluted with a bogus artefact.
+ *
+ * A script that never names `output`/`summary` cannot satisfy the envelope,
+ * so refusing to run it costs nothing and skips straight to the (validated)
+ * LLM tool-loop path — which handles these scripts correctly, because there
+ * the L1 derives the positional args from the subtask itself.
+ *
+ * Deliberately a cheap token check rather than a parse: false negatives only
+ * fall back to the LLM loop (safe), whereas the failure we are closing is a
+ * false positive. Keep it that way.
+ */
+export function scriptDeclaresEnvelope(body: string): boolean {
+  return /\boutput\b/.test(body) && /\bsummary\b/.test(body);
+}
+
+/**
  * Fresh narrow-responsibility system prompt used when `branchOnEscalation`
  * spawns a new L1 after the parent type couldn't solve a task. The parent
  * is kept intact; the NEW branch gets this prompt written fresh so it
@@ -923,6 +950,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `                   L1 should take, NOT prose. Example shape:`,
       `                     "1. write_file <name>.\\n2. start_static_server.\\n3. validate_html with smoke."`,
       ``,
+      `THE BODY MUST GENERALISE. Every step describes what to do for the CLASS of`,
+      `task, using PLACEHOLDERS (<entry>, <file>, <arg>) for anything specific to`,
+      `THIS run. Never copy a concrete filename, argument value, flag or expected`,
+      `output out of the run above. Where a step needs a task-specific value, say`,
+      `how to DERIVE it ("read the entry file's usage string to get its real`,
+      `arguments"), not what it happened to be this time.`,
+      `Observed failure: a documentation recipe learned on a file-analyzer task`,
+      `kept the literal step "run node index.js sample.txt", so a later`,
+      `Caesar-cipher CLI shipped a README documenting an invocation that just`,
+      `prints the usage message — and it passed every validator, because the`,
+      `artefact itself was fine.`,
+      ``,
       `Skip the JSON entirely (return empty) if the run was too task-specific to`,
       `generalise (e.g. it depended on hard-coded numbers a future run wouldn't`,
       `share).`,
@@ -1023,6 +1062,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ``,
       `== VALIDATOR DIAGNOSIS ==`,
       args.diagnostic,
+      ``,
+      `KEEP IT GENERAL. The body is reused across the whole CLASS of task, so use`,
+      `PLACEHOLDERS (<entry>, <file>, <arg>) for anything specific to the run that`,
+      `just failed, and never bake in a concrete filename, argument value or`,
+      `expected output. Where a step needs a task-specific value, say how to DERIVE`,
+      `it rather than what it was this time. Fixing one run by hardcoding its`,
+      `details breaks every later task in the class.`,
       ``,
       `Output ONLY the new skill body as plain markdown — no JSON envelope, no fences,`,
       `no preamble. Aim for the same length as the current body, slightly longer at most.`,
@@ -1353,6 +1399,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ctx: RunContext
   ): Promise<Result | null> {
     if (!skill.language) return null;
+    if (!scriptDeclaresEnvelope(skill.body)) {
+      ctx.logger.debug(
+        `[${this.name}] direct dispatch of ${skill.id} skipped: body never emits an {"output","summary"} envelope — running the LLM loop instead (no side effects)`
+      );
+      return null;
+    }
     const filename = `_skill_${skill.id}.${scriptExtension(skill.language)}`;
     const interpreter = skill.language === 'python' ? 'python3' : skill.language;
     try {

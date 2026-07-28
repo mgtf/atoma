@@ -301,6 +301,56 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(ctx.llm.calls).toHaveLength(4);
   });
 
+  it('never RUNS a script whose body cannot emit the envelope (pre-flight gate)', async () => {
+    trustAtomType();
+    // A hand-authored script written against a different calling convention:
+    // positional argv, prose stdout. Dispatching it would write a bogus
+    // artefact (its argv[0] is the whole JSON-encoded subtask description)
+    // BEFORE the envelope parse could reject it, leaving the LLM loop to
+    // clean up after a side effect it didn't cause. The gate must skip the
+    // run entirely, not run-then-reject.
+    skills.save('Hydrogen', {
+      id: 'scaffold-config',
+      description: 'write a canonical config file',
+      whenToUse: 'when the subtask asks for the standard config scaffold',
+      kind: 'script',
+      language: 'node',
+      body: [
+        `const fs = require('fs');`,
+        `const name = process.argv[2];`,
+        `fs.writeFileSync('config.json', JSON.stringify({ name }));`,
+        `console.log('wrote config.json: ' + name);`,
+      ].join('\n'),
+    });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
+      skills.recordSuccess('Hydrogen', 'scaffold-config');
+    }
+    const { executor, calls } = makeExecutor({ exitCode: 0, stdout: 'wrote config.json', stderr: '' });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const events: SkillEventInfo[] = [];
+    const ctx = makeCtxWith(executor, events);
+
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+
+    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    expect(result.summary).toBe('ok');
+    // Zero tool calls from the dispatch path: no write_file, no run_shell,
+    // and therefore no scratch-script cleanup either.
+    expect(calls).toHaveLength(0);
+    // No deterministic-dispatch event was recorded: the skill still drove the
+    // run (and so still earns its counter bump through the normal validated
+    // path), but it was never credited with a script execution.
+    expect(events.map((e) => e.op)).not.toContain('direct');
+    expect(events.map((e) => e.op)).toContain('match');
+  });
+
   it('honours the ATOMA_SKILL_DIRECT=0 kill switch', async () => {
     process.env['ATOMA_SKILL_DIRECT'] = '0';
     trustAtomType();

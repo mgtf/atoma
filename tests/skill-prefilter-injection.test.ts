@@ -282,6 +282,15 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     const refreshed = skills.loadFor('Hydrogen');
     expect(refreshed[0]!.failures).toBeGreaterThanOrEqual(1);
     expect(refreshed[0]!.successes).toBe(0);
+
+    // The revision prompt must carry the same generality constraint as the
+    // distillation prompt: "fix the failure" is an invitation to hardcode
+    // the failing run's specifics into a body reused by the whole class.
+    const improveCall = ctx.llm.calls.find((c) => c.userContent.includes('IMPROVED body'));
+    expect(improveCall).toBeDefined();
+    const improvePrompt = improveCall!.userContent;
+    expect(improvePrompt).toMatch(/KEEP IT GENERAL/);
+    expect(improvePrompt).toMatch(/PLACEHOLDERS/);
   });
 
   it('does NOT bump skill counters when no skill was active (orthogonal pathway)', async () => {

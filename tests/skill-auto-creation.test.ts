@@ -182,6 +182,17 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(created.successes).toBe(0);
     expect(created.failures).toBe(0);
     expect(existsSync(join(dir, 'Hydrogen', 'web-build-loop', 'SKILL.md'))).toBe(true);
+
+    // The distillation prompt must constrain the BODY to generalise, not
+    // just `when_to_use`. A learned body that bakes in this run's literal
+    // filenames/arguments is silently wrong on every later task in the
+    // class — and passes every validator, because the artefact is fine.
+    const learnCall = ctx.llm.calls.find((c) => c.userContent.includes('"when_to_use"'));
+    expect(learnCall).toBeDefined();
+    const learnPrompt = learnCall!.userContent;
+    expect(learnPrompt).toMatch(/BODY MUST GENERALISE/);
+    expect(learnPrompt).toMatch(/PLACEHOLDERS/);
+    expect(learnPrompt).toMatch(/Never copy a concrete filename/);
   });
 
   it('does NOT overwrite an existing skill with the same id (counter preservation)', async () => {

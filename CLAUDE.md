@@ -700,6 +700,44 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   and `parseScriptEnvelope` in `L2Atom.ts` is the strict parse the
   deterministic path applies (LLM path stays tolerant — the L1 is
   told how to wrap plain stdout).
+- **Pre-flight envelope gate on deterministic dispatch.**
+  `runScriptSkillDirect` calls `scriptDeclaresEnvelope(skill.body)`
+  BEFORE `write_file` and returns null (→ LLM loop) when the body
+  never names `output`/`summary`. `parseScriptEnvelope` alone rejects
+  off-contract scripts only AFTER they have run and had their side
+  effects. Concrete case: the hand-authored
+  `skills/Lithium/scaffold-package-json` reads argv POSITIONALLY
+  (`name`, `version`, `description...`) whereas direct dispatch passes
+  ONE arg — the JSON-encoded subtask description. Dispatching it wrote
+  a `package.json` whose `name` was the whole task sentence, exited 0,
+  printed prose, failed the parse, and handed the LLM loop a workspace
+  already polluted. The gate is a cheap token check on purpose: a
+  false negative only falls back to the validated LLM loop (which
+  handles these scripts correctly, since there the L1 derives the
+  positional args itself), whereas the failure being closed is a
+  false positive.
+- **A `kind: script` skill with no `_fallback.md` is UNDEMOTABLE.**
+  `demoteToLlm` returns null when the file is absent, and
+  `resetCounters` does not change `kind` — so a broken script authored
+  directly as `kind: script` (rather than reached via
+  `promoteToScript`, which always writes the fallback) has no
+  automatic way back to the LLM form. `scaffold-package-json` is in
+  exactly that state. The pre-flight gate above is what keeps it
+  harmless; if you ever author a script skill by hand, either satisfy
+  the stdout envelope or drop an `_fallback.md` next to it.
+- **Learned and revised skill bodies must GENERALISE.** Both
+  `learnSkillFromRun` (distillation) and `improveSkillBody` (revision
+  on escalation) carry an explicit rule: use placeholders for anything
+  specific to the originating run, and describe how to DERIVE a
+  task-specific value rather than what it happened to be. Without it,
+  a documentation recipe learned on a file-analyzer task kept the
+  literal step `run node index.js sample.txt`; a later Caesar-cipher
+  CLI then shipped a README documenting an invocation that only prints
+  the usage message — and passed every validator, because the artefact
+  itself was fine. `when_to_use` already had a generality constraint;
+  the `body` field did not, which is where the literal entered.
+  Locked by tests in `skill-auto-creation.test.ts` and
+  `skill-prefilter-injection.test.ts`.
 
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
   `show <l1> <id>`, `reset <l1> <id>`. Works against any store via
