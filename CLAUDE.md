@@ -738,6 +738,33 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   the `body` field did not, which is where the literal entered.
   Locked by tests in `skill-auto-creation.test.ts` and
   `skill-prefilter-injection.test.ts`.
+- **Verification split at learn time.** `learnSkillFromRun`'s prompt asks
+  for an OPTIONAL second skill under a `"verification"` key when the run
+  contained a purely MECHANICAL verification sub-workflow (run the real
+  invocations, compare exit codes/stdout/stderr, read files back — every
+  step derivable from the workspace alone). Parsed by `parseSkillDrafts`
+  (primary = top-level object, so the single-object contract is unchanged);
+  guards (`isSafeSkillId`, no-overwrite) apply PER DRAFT, and a
+  verification draft reusing the primary's id is dropped at parse. Both
+  skills are born `kind: llm` and earn promotion independently. Rationale:
+  monolithic build+verify recipes get REFUSED at promotion because the
+  build half is irreducible LLM reasoning (verbatim Sonnet refusal on
+  `scaffold-node-cli-tool` at 5✓: "designing bespoke CLI business logic …
+  from a free-form natural-language spec … is an irreducible LLM reasoning
+  step"), while the verification half alone is exactly what compiles into
+  a deterministic zero-token script. The split is where script-shaped
+  skills come from; without it the catalog only accumulates judgment
+  recipes and the #C4 deterministic path never gets candidates. Still ONE
+  Sonnet call per learning event (`maxTokens` 1600, was 800 — the split
+  can double the JSON and 5-series adaptive thinking shares the cap).
+- **Promotion-refusal reasons are persisted.** `markPromotionRefused`
+  stores Sonnet's verbatim explanation as `promotionRefusedReason` in
+  `_meta.json` (bounded by `REFUSAL_REASON_MAX_CHARS` = 500), shown by
+  `skills show`. Same lifecycle as the stamp: preserved across counter
+  bumps, cleared by `save()` and `resetCounters`; `readMeta` drops an
+  orphaned reason whose stamp was hand-deleted. The WHY is the actionable
+  part — "irreducible LLM reasoning" means the skill can never compile,
+  a workflow-shape complaint might be fixed by a body revision.
 
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
   `show <l1> <id>`, `reset <l1> <id>`. Works against any store via

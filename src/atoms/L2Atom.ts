@@ -131,21 +131,14 @@ export function isSafeSkillId(id: string): boolean {
  * and `whenToUse` (camelCase, in case the model normalises) so a
  * minor naming drift does not throw away the draft.
  */
-export function parseSkillDraft(text: string): {
+export interface SkillDraft {
   id: string;
   description: string;
   whenToUse: string;
   body: string;
-} | null {
-  if (!text || text.trim().length === 0) return null;
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+}
+
+function coerceSkillDraft(obj: Record<string, unknown>): SkillDraft | null {
   const id = typeof obj['id'] === 'string' ? (obj['id'] as string).trim() : null;
   const description =
     typeof obj['description'] === 'string' ? (obj['description'] as string).trim() : null;
@@ -159,6 +152,59 @@ export function parseSkillDraft(text: string): {
   const body = typeof obj['body'] === 'string' ? (obj['body'] as string).trim() : null;
   if (!id || !description || !whenToUse || !body) return null;
   return { id, description, whenToUse, body };
+}
+
+export function parseSkillDraft(text: string): SkillDraft | null {
+  if (!text || text.trim().length === 0) return null;
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(match[0]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  return coerceSkillDraft(obj);
+}
+
+/**
+ * Multi-draft variant used by `learnSkillFromRun`: the primary draft is the
+ * top-level object (same contract as `parseSkillDraft`), plus an OPTIONAL
+ * standalone verification skill nested under a `"verification"` key — the
+ * distillation prompt asks for the split when the run contained a purely
+ * MECHANICAL verification sub-workflow. Rationale: monolithic build+verify
+ * recipes get refused at promotion time because the build half is
+ * irreducible LLM reasoning ("designing bespoke CLI business logic … is an
+ * irreducible LLM reasoning step" — Sonnet, on scaffold-node-cli-tool at
+ * 5✓), while the verification half alone is exactly what compiles into a
+ * deterministic zero-token script. Splitting at LEARN time is what lets the
+ * catalog accumulate script-shaped skills at all.
+ *
+ * Best-effort per draft: a malformed primary does not discard a valid
+ * verification draft (and vice versa). A verification draft reusing the
+ * primary's id is dropped — two skills may not share a folder.
+ */
+export function parseSkillDrafts(text: string): SkillDraft[] {
+  if (!text || text.trim().length === 0) return [];
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return [];
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(match[0]) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const drafts: SkillDraft[] = [];
+  const primary = coerceSkillDraft(obj);
+  if (primary) drafts.push(primary);
+  const nested = obj['verification'];
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const verification = coerceSkillDraft(nested as Record<string, unknown>);
+    if (verification && (!primary || verification.id !== primary.id)) {
+      drafts.push(verification);
+    }
+  }
+  return drafts;
 }
 
 /**
@@ -962,6 +1008,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `prints the usage message — and it passed every validator, because the`,
       `artefact itself was fine.`,
       ``,
+      `== OPTIONAL SECOND SKILL: SPLIT OUT MECHANICAL VERIFICATION ==`,
+      `If the run included a verification sub-workflow that is purely MECHANICAL`,
+      `— running the artefact's real invocations, comparing exit codes / stdout /`,
+      `stderr against what is documented or expected, reading files back — ALSO`,
+      `emit it as a standalone skill under a "verification" key on the same JSON`,
+      `object (same four fields, a DIFFERENT id). Verification recipes are the`,
+      `ones that can later compile into deterministic zero-cost scripts, but only`,
+      `if they carry no design steps: every step must be DERIVABLE from the`,
+      `workspace alone (the entry file, invocations documented in the README,`,
+      `fixture files present on disk). Do NOT emit "verification" when checking`,
+      `was a single trivial read-back, or when it cannot be described without`,
+      `design judgment. The primary skill keeps its own inline verification`,
+      `steps regardless — the split copy is the standalone, reusable version.`,
+      ``,
       `Skip the JSON entirely (return empty) if the run was too task-specific to`,
       `generalise (e.g. it depended on hard-coded numbers a future run wouldn't`,
       `share).`,
@@ -971,47 +1031,56 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       model: this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
-      params: { ...this.params, maxTokens: 800, temperature: 0 },
+      // 1600, not 800: the optional verification split can double the JSON,
+      // and on 5-series models adaptive thinking shares this cap with the
+      // response — a truncated draft is a silently lost learning event.
+      params: { ...this.params, maxTokens: 1600, temperature: 0 },
       signal: args.ctx.signal,
     });
-    const draft = parseSkillDraft(resp.text);
-    if (!draft) {
+    const drafts = parseSkillDrafts(resp.text);
+    if (drafts.length === 0) {
       args.ctx.logger.debug(
         `[${this.name}] skill draft did not parse, skipping; raw=${resp.text.slice(0, 120)}`
       );
       return;
     }
-    if (!isSafeSkillId(draft.id)) {
-      args.ctx.logger.warn(
-        `[${this.name}] skill auto-creation rejected: unsafe id "${draft.id}"`
+    // Guards apply PER DRAFT: a bad primary must not discard a good
+    // verification skill, and vice versa. The existence check re-reads the
+    // registry inside the loop so a duplicate id later in the same response
+    // hits the no-overwrite guard like any other duplicate.
+    for (const draft of drafts) {
+      if (!isSafeSkillId(draft.id)) {
+        args.ctx.logger.warn(
+          `[${this.name}] skill auto-creation rejected: unsafe id "${draft.id}"`
+        );
+        continue;
+      }
+      const existing = this.skillRegistry.loadFor(args.l1Name).find((s) => s.id === draft.id);
+      if (existing) {
+        args.ctx.logger.debug(
+          `[${this.name}] skill ${draft.id} already exists for ${args.l1Name}, not overwriting`
+        );
+        continue;
+      }
+      this.skillRegistry.save(args.l1Name, {
+        id: draft.id,
+        description: draft.description,
+        whenToUse: draft.whenToUse,
+        kind: 'llm',
+        body: draft.body,
+      });
+      args.ctx.logger.info(
+        `[${this.name}] learned new skill "${draft.id}" for ${args.l1Name}`
       );
-      return;
+      args.ctx.recordSkill?.({
+        op: 'learn',
+        l1Name: args.l1Name,
+        skillId: draft.id,
+        actorName: this.name,
+        actorTier: 2,
+        reasoning: draft.description,
+      });
     }
-    const existing = this.skillRegistry.loadFor(args.l1Name).find((s) => s.id === draft.id);
-    if (existing) {
-      args.ctx.logger.debug(
-        `[${this.name}] skill ${draft.id} already exists for ${args.l1Name}, not overwriting`
-      );
-      return;
-    }
-    this.skillRegistry.save(args.l1Name, {
-      id: draft.id,
-      description: draft.description,
-      whenToUse: draft.whenToUse,
-      kind: 'llm',
-      body: draft.body,
-    });
-    args.ctx.logger.info(
-      `[${this.name}] learned new skill "${draft.id}" for ${args.l1Name}`
-    );
-    args.ctx.recordSkill?.({
-      op: 'learn',
-      l1Name: args.l1Name,
-      skillId: draft.id,
-      actorName: this.name,
-      actorTier: 2,
-      reasoning: draft.description,
-    });
   }
 
   /**

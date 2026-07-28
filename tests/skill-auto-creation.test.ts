@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { L2Atom, parseSkillDraft, isSafeSkillId } from '../src/atoms/L2Atom.js';
+import { L2Atom, parseSkillDraft, parseSkillDrafts, isSafeSkillId } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { makeCtx, jsonText } from './helpers.js';
@@ -61,6 +61,62 @@ describe('parseSkillDraft / isSafeSkillId', () => {
   it('extracts JSON from a fenced/prefixed wrapper (Sonnet sometimes adds it)', () => {
     const wrapped = 'Here is the skill:\n```json\n{"id":"x","description":"d","when_to_use":"w","body":"b"}\n```';
     expect(parseSkillDraft(wrapped)).not.toBeNull();
+  });
+
+  it('parseSkillDrafts: single object stays a single draft (backward compat)', () => {
+    const text = JSON.stringify({
+      id: 'build-cli',
+      description: 'd',
+      when_to_use: 'w',
+      body: 'b',
+    });
+    const out = parseSkillDrafts(text);
+    expect(out.map((d) => d.id)).toEqual(['build-cli']);
+  });
+
+  it('parseSkillDrafts: extracts the optional nested verification skill', () => {
+    const text = JSON.stringify({
+      id: 'build-cli',
+      description: 'build a Node CLI from a spec',
+      when_to_use: 'building a small CLI',
+      body: '1. write <entry>\n2. verify\n3. document',
+      verification: {
+        id: 'verify-cli-invocations',
+        description: 'run every documented invocation and compare outputs',
+        when_to_use: 'a CLI exists and its documented behaviour must be checked',
+        body: '1. read README for invocations\n2. run_shell each\n3. compare exit/stderr\n4. ground truth block',
+      },
+    });
+    const out = parseSkillDrafts(text);
+    expect(out.map((d) => d.id)).toEqual(['build-cli', 'verify-cli-invocations']);
+    expect(out[1]!.body).toMatch(/run_shell each/);
+  });
+
+  it('parseSkillDrafts: a bad primary does not discard a valid verification draft', () => {
+    const text = JSON.stringify({
+      id: 'build-cli',
+      // description missing → primary invalid
+      when_to_use: 'w',
+      body: 'b',
+      verification: {
+        id: 'verify-cli-invocations',
+        description: 'd',
+        when_to_use: 'w',
+        body: 'b',
+      },
+    });
+    expect(parseSkillDrafts(text).map((d) => d.id)).toEqual(['verify-cli-invocations']);
+  });
+
+  it('parseSkillDrafts: drops a verification draft that reuses the primary id', () => {
+    const text = JSON.stringify({
+      id: 'same-id',
+      description: 'd',
+      when_to_use: 'w',
+      body: 'b',
+      verification: { id: 'same-id', description: 'd2', when_to_use: 'w2', body: 'b2' },
+    });
+    expect(parseSkillDrafts(text).map((d) => d.id)).toEqual(['same-id']);
   });
 
   it('isSafeSkillId enforces kebab-case + length bounds', () => {
@@ -193,6 +249,88 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(learnPrompt).toMatch(/BODY MUST GENERALISE/);
     expect(learnPrompt).toMatch(/PLACEHOLDERS/);
     expect(learnPrompt).toMatch(/Never copy a concrete filename/);
+    // The verification-split contract: mechanical verification distills as a
+    // SEPARATE skill — the compilable half of a build+verify run.
+    expect(learnPrompt).toMatch(/SPLIT OUT MECHANICAL VERIFICATION/);
+    expect(learnPrompt).toMatch(/"verification" key/);
+    expect(learnPrompt).toMatch(/DERIVABLE from the\s+workspace alone/);
+  });
+
+  it('saves BOTH skills when the draft carries a verification split', async () => {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ensureChildIsTrusted();
+    skills.save('Hydrogen', {
+      id: 'unrelated',
+      description: 'something else',
+      whenToUse: 'never matches our task',
+      kind: 'llm',
+      body: 'b',
+    });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built and verified a CLI' }));
+    // Learn call → primary + verification split.
+    ctx.llm.enqueueText(
+      JSON.stringify({
+        id: 'build-node-cli',
+        description: 'build a dependency-free Node CLI from a spec',
+        when_to_use: 'when the subtask builds a small standalone CLI',
+        body: '1. write <entry>.\n2. run_shell the real invocations.\n3. document.',
+        verification: {
+          id: 'verify-documented-invocations',
+          description: 'run every invocation documented in the README, compare outputs',
+          when_to_use: 'a CLI and its README exist; documented behaviour must be re-checked',
+          body: '1. read README, enumerate documented commands.\n2. run_shell each.\n3. compare exit codes + stderr.\n4. emit == GROUND TRUTH == block.',
+        },
+      })
+    );
+
+    await water.handleDirect({ description: 'build a small CLI' }, ctx);
+    const learned = skills.loadFor('Hydrogen').map((s) => s.id).sort();
+    expect(learned).toEqual(['build-node-cli', 'unrelated', 'verify-documented-invocations']);
+    // Both are born kind:llm — the verification skill earns its compile at
+    // the promotion threshold like any other, it is just SHAPED to pass it.
+    const verify = skills.loadFor('Hydrogen').find((s) => s.id === 'verify-documented-invocations')!;
+    expect(verify.kind).toBe('llm');
+    expect(verify.successes).toBe(0);
+  });
+
+  it('an unsafe verification id skips ONLY the verification draft', async () => {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ensureChildIsTrusted();
+    skills.save('Hydrogen', {
+      id: 'unrelated',
+      description: 'something else',
+      whenToUse: 'never matches our task',
+      kind: 'llm',
+      body: 'b',
+    });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    ctx.llm.enqueueText(
+      JSON.stringify({
+        id: 'good-primary',
+        description: 'd',
+        when_to_use: 'w',
+        body: 'b',
+        verification: { id: '../escape', description: 'd', when_to_use: 'w', body: 'b' },
+      })
+    );
+
+    await water.handleDirect({ description: 'task' }, ctx);
+    const learned = skills.loadFor('Hydrogen').map((s) => s.id).sort();
+    expect(learned).toEqual(['good-primary', 'unrelated']);
   });
 
   it('does NOT overwrite an existing skill with the same id (counter preservation)', async () => {
