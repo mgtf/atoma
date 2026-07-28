@@ -2841,13 +2841,35 @@ const FILE_PROBE_MAX_FILES = 6;
 const FILE_PROBE_EXCERPT_CHARS = 400;
 
 /**
+ * File extensions the FREE-TEXT sweep will accept. A closed allowlist, not a
+ * shape heuristic, because dotted identifiers are everywhere in these
+ * summaries and any "looks like name.ext" rule swallows them: the slug-cli
+ * run had `bin.main` and `scripts.start` — package.json KEY PATHS — read as
+ * filenames, reported MISSING, and that false contradiction overrode the
+ * trust fast-path on a perfectly good result. Since dotted keys are ubiquitous
+ * (`scripts.start`, `engines.node`, `dependencies.express`), a loose rule
+ * would defeat the fast-path systematically, which is the project's central
+ * saving. Failing the other way is safe: an unusual real extension just means
+ * the probe gathers less evidence, never a phantom contradiction.
+ */
+const PROBEABLE_EXTENSIONS = new Set([
+  'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'json', 'md', 'markdown', 'txt',
+  'html', 'htm', 'css', 'scss', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf',
+  'env', 'sh', 'bash', 'py', 'rb', 'sql', 'csv', 'tsv', 'xml', 'svg', 'lock',
+]);
+
+/**
  * Extract the workspace-relative file paths a RESULT claims to have produced.
  * Mirrors `extractResultUrl`'s tolerance: structured fields first, then a
  * constrained free-text scan of `output` / `summary`.
  *
- * The free-text regex requires the extension to START WITH A LETTER
- * (`\.[A-Za-z][A-Za-z0-9]{0,5}`) — without that, version strings like
- * "1.0.0" parse as filenames and the probe reports phantom missing files.
+ * Two tiers of trust, deliberately different:
+ *   - STRUCTURED fields (`output.path`, `output.files[]`, …) are explicit
+ *     claims by the child, so any plausible extension is probed.
+ *   - FREE TEXT is a guess we are making on its behalf, so it must clear
+ *     `PROBEABLE_EXTENSIONS`. The extension must also start with a letter, or
+ *     version strings like "1.0.0" parse as filenames.
+ *
  * Absolute paths and `..` segments are dropped here rather than left for
  * `sandbox.resolve` to throw on: a path escaping the workspace is not
  * evidence about the deliverable, it is noise.
@@ -2856,38 +2878,44 @@ const FILE_PROBE_EXCERPT_CHARS = 400;
  */
 export function extractResultFilePaths(payload: unknown): string[] {
   const out: string[] = [];
-  const push = (v: unknown): void => {
+  const push = (v: unknown, opts: { requireKnownExt: boolean }): void => {
     if (typeof v !== 'string') return;
     const p = v.trim();
     if (!p || p.startsWith('/') || p.includes('..') || /^https?:\/\//i.test(p)) return;
-    if (!/\.[A-Za-z][A-Za-z0-9]{0,5}$/.test(p)) return;
+    const m = p.match(/\.([A-Za-z][A-Za-z0-9]{0,8})$/);
+    if (!m) return;
+    if (opts.requireKnownExt && !PROBEABLE_EXTENSIONS.has(m[1]!.toLowerCase())) return;
     if (!out.includes(p)) out.push(p);
   };
   if (!payload || typeof payload !== 'object') return out;
   const obj = payload as Record<string, unknown>;
   const output = obj['output'];
 
+  // Structured fields: explicit claims by the child, so any plausible
+  // extension is probed.
+  const structured = { requireKnownExt: false };
   if (output && typeof output === 'object' && !Array.isArray(output)) {
     const o = output as Record<string, unknown>;
-    push(o['path']);
-    push(o['entry']);
+    push(o['path'], structured);
+    push(o['entry'], structured);
     for (const key of ['paths', 'files', 'written']) {
       const arr = o[key];
-      if (Array.isArray(arr)) for (const item of arr) push(item);
+      if (Array.isArray(arr)) for (const item of arr) push(item, structured);
     }
   }
-  if (Array.isArray(output)) for (const item of output) push(item);
-  push(obj['path']);
-  push(output);
+  if (Array.isArray(output)) for (const item of output) push(item, structured);
+  push(obj['path'], structured);
+  push(output, structured);
 
   // Free-text sweep: the GROUND-TRUTH block routinely names files inline
-  // ("wrote README.md", "cat package.json").
+  // ("wrote README.md", "cat package.json"). Gated by
+  // PROBEABLE_EXTENSIONS — see there for why a shape heuristic is not enough.
   const freeText: string[] = [];
   if (typeof output === 'string') freeText.push(output);
   if (typeof obj['summary'] === 'string') freeText.push(obj['summary'] as string);
   for (const text of freeText) {
-    for (const m of text.matchAll(/[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,5}\b/g)) {
-      push(m[0]);
+    for (const m of text.matchAll(/[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,8}\b/g)) {
+      push(m[0], { requireKnownExt: true });
       if (out.length >= FILE_PROBE_MAX_FILES) return out.slice(0, FILE_PROBE_MAX_FILES);
     }
   }

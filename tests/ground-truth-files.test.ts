@@ -126,6 +126,36 @@ describe('extractResultFilePaths', () => {
     expect(paths).toEqual(['package.json']);
   });
 
+  it('does NOT mistake dotted JSON key paths for filenames (slug-cli regression)', () => {
+    // Real payload shape from the slug-cli run: the summary described the
+    // package.json structure, and `bin.main` / `scripts.start` were extracted
+    // as filenames, reported MISSING, and that false contradiction overrode
+    // the trust fast-path on a perfectly good result. Dotted keys are
+    // ubiquitous in these summaries, so a "looks like name.ext" rule would
+    // defeat the fast-path systematically.
+    const paths = extractResultFilePaths({
+      output: { files: ['package.json', 'index.js'] },
+      summary:
+        'package.json declares bin.main -> index.js and scripts.start -> node index.js; ' +
+        'engines.node is unset; dependencies.express absent. Wrote README.md too.',
+    });
+    expect(paths).not.toContain('bin.main');
+    expect(paths).not.toContain('scripts.start');
+    expect(paths).not.toContain('engines.node');
+    expect(paths).not.toContain('dependencies.express');
+    // …while the genuine files still come through.
+    expect(paths).toEqual(expect.arrayContaining(['package.json', 'index.js', 'README.md']));
+  });
+
+  it('still probes an unusual extension when the child claims it STRUCTURALLY', () => {
+    // Two tiers of trust: an explicit structured claim is probed whatever the
+    // extension; only the free-text guess needs the allowlist.
+    expect(extractResultFilePaths({ output: { path: 'report.xyz' } })).toEqual(['report.xyz']);
+    expect(
+      extractResultFilePaths({ output: 'ok', summary: 'wrote report.xyz' })
+    ).toEqual([]);
+  });
+
   it('drops absolute paths, parent traversals and URLs', () => {
     const paths = extractResultFilePaths({
       output: { files: ['/etc/passwd', '../outside.txt', 'http://localhost:8000/x.html'] },
