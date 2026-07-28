@@ -22,6 +22,7 @@ import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/repor
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { ToolSandbox } from '../tools/sandbox.js';
+import { prepareWorkspace } from './workspace.js';
 import { InMemoryToolRegistry } from '../tools/registry.js';
 import { defaultBuiltinTools } from '../tools/builtin.js';
 import type { Logger, RunContext, Task } from '../core/types.js';
@@ -38,6 +39,7 @@ interface CliArgs {
   noLearnSkills: boolean;
   noPromoteSkills: boolean;
   noDirectSkills: boolean;
+  cleanWorkspace: boolean;
 }
 
 function parseArgs(argv: readonly string[]): CliArgs {
@@ -45,15 +47,18 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let noLearnSkills = false;
   let noPromoteSkills = false;
   let noDirectSkills = false;
+  let cleanWorkspace = false;
   for (const a of argv) {
     if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a === '--no-promote-skills') noPromoteSkills = true;
     else if (a === '--no-direct-skills') noDirectSkills = true;
+    else if (a === '--clean-workspace') cleanWorkspace = true;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills };
+  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace };
 }
+
 
 async function main(): Promise<void> {
   // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
@@ -164,6 +169,11 @@ async function main(): Promise<void> {
         ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${process.env['ATOMA_CLAUDE_MODEL'] ? ` (overridden: ${process.env['ATOMA_CLAUDE_MODEL']})` : ''}`
         : `llm provider: anthropic`
   );
+
+  // Runs BEFORE the sandbox is constructed: ToolSandbox realpath-resolves
+  // its root at construction, so archiving the directory afterwards would
+  // leave every tool pointing at the archive.
+  prepareWorkspace(workspaceRoot, args.cleanWorkspace);
 
   const sandbox = new ToolSandbox(workspaceRoot);
   const toolRegistry = new InMemoryToolRegistry();
