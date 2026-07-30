@@ -1,12 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { spawn, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import type { Tool, Logger } from '../core/types.js';
 import { sandboxChildEnv, type ToolSandbox } from './sandbox.js';
 import puppeteer, { type Browser } from 'puppeteer';
-
-const execFileAsync = promisify(execFile);
 
 export interface BuiltinToolOptions {
   sandbox: ToolSandbox;
@@ -226,29 +223,85 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
         );
       }
       opts.logger?.info(`[tool:run_shell] ${command} ${argv.join(' ')}`);
-      try {
-        const { stdout, stderr } = await execFileAsync(command, argv, {
+      // Spawned in its OWN PROCESS GROUP (`detached: true`, POSIX pgid ==
+      // child pid) and the WHOLE GROUP is SIGKILLed once the command
+      // finishes or times out. This makes the declared contract ("do NOT
+      // use this for long-running processes") enforceable: with the old
+      // promisified execFile, `bash -c "python3 -m http.server 0 &"`
+      // double-forked — bash exited 0, the server survived as an orphan
+      // outside the sandbox's tracked-children list, squatted its port for
+      // DAYS, and every later web run burned boot retries against it
+      // (observed: two http.servers from a Saturday session still alive
+      // the following Tuesday, one of them on port 8000). execFile's own
+      // timeout has the same blind spot: it signals the child only, never
+      // the grandchildren.
+      return await new Promise((resolvePromise) => {
+        const child = spawn(command, argv, {
           cwd: opts.sandbox.root,
-          timeout: timeoutMs,
-          maxBuffer: 2 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          detached: true,
           // Model-authored code must never see the parent's secrets
           // (ANTHROPIC_API_KEY et al.) — allowlisted env only.
           env: sandboxChildEnv(),
         });
-        return { exitCode: 0, stdout, stderr };
-      } catch (err) {
-        const e = err as NodeJS.ErrnoException & {
-          stdout?: string;
-          stderr?: string;
-          code?: number | string;
+        opts.sandbox.trackChild(child);
+
+        const MAX_BUFFER = 2 * 1024 * 1024;
+        let stdout = '';
+        let stderr = '';
+        let timedOut = false;
+        child.stdout?.on('data', (c: Buffer) => {
+          if (stdout.length < MAX_BUFFER) stdout += c.toString();
+        });
+        child.stderr?.on('data', (c: Buffer) => {
+          if (stderr.length < MAX_BUFFER) stderr += c.toString();
+        });
+
+        const killGroup = (): void => {
+          try {
+            if (child.pid) process.kill(-child.pid, 'SIGKILL');
+          } catch {
+            /* group already gone (or non-POSIX) — fall through */
+          }
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* already dead */
+          }
         };
-        return {
-          exitCode: typeof e.code === 'number' ? e.code : 1,
-          stdout: e.stdout ?? '',
-          stderr: e.stderr ?? e.message,
-          error: e.message,
-        };
-      }
+        const timer = setTimeout(() => {
+          timedOut = true;
+          killGroup();
+        }, timeoutMs);
+
+        child.once('error', (err) => {
+          clearTimeout(timer);
+          killGroup();
+          resolvePromise({ exitCode: 1, stdout, stderr: stderr || err.message, error: err.message });
+        });
+        child.once('exit', (code, signal) => {
+          clearTimeout(timer);
+          // The command itself is done — reap any grandchildren it left
+          // behind (`&`-backgrounded servers and the like). By contract
+          // they do not belong to run_shell's lifetime.
+          killGroup();
+          if (timedOut) {
+            resolvePromise({
+              exitCode: 1,
+              stdout,
+              stderr,
+              error: `run_shell: timed out after ${timeoutMs}ms (process group killed)`,
+            });
+          } else {
+            resolvePromise({
+              exitCode: code ?? (signal ? 1 : 0),
+              stdout,
+              stderr,
+              ...(signal ? { error: `terminated by ${signal}` } : {}),
+            });
+          }
+        });
+      });
     },
   };
 }

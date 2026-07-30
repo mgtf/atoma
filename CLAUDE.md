@@ -971,6 +971,22 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `uncaughtException` / `unhandledRejection` handlers from here — Node's
   default policy calls `exit` anyway, and swallowing errors globally hides
   real bugs (we tried it, it produced silent 42s hangs).
+  - **run_shell kills its whole process GROUP (#7c).** `runShellTool`
+    spawns `detached: true` (own POSIX process group) and SIGKILLs the
+    group (`process.kill(-pid)`) on exit, error AND timeout — the old
+    promisified-execFile path signalled only the direct child, so
+    `bash -c "python3 -m http.server 0 &"` double-forked and the server
+    survived as an untracked orphan (observed live: two http.servers from
+    a Saturday session still squatting ports — one on 8000 — the
+    following Tuesday, degrading every web run's boot sequence with
+    EADDRINUSE retries). This makes the tool's declared "do NOT use for
+    long-running processes" contract ENFORCEABLE: `&`-backgrounded
+    grandchildren are reaped when the command ends, by design — a model
+    that wants a live server must use start_static_server /
+    start_node_server, whose children the sandbox tracks and reaps. The
+    global exit handler also tries the negative-pid kill first for the
+    crash-exit path. Covered by the #7c tests in
+    `sandbox-security.test.ts`.
   - **Env allowlist for child processes (#7a).** `sandboxChildEnv(extra?)`
     builds the environment for every spawned child (`run_shell`,
     `start_static_server`, `start_node_server`) from a small allowlist

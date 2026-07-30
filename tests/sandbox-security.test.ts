@@ -49,6 +49,77 @@ describe('sandboxChildEnv — env allowlist (#7a)', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('run_shell reaps `&`-backgrounded grandchildren — no orphan survives the command (#7c)', async () => {
+    // The double-fork vector: `bash -c "server &"` exits 0 immediately and
+    // the promisified-execFile implementation left the grandchild running
+    // FOREVER, outside the tracked-children list (observed live: two
+    // python http.servers from a Saturday session still squatting ports —
+    // one on 8000 — the following Tuesday, degrading every web run's boot
+    // sequence). run_shell now spawns in its own process group and kills
+    // the WHOLE group once the command exits, making the declared "no
+    // long-running processes" contract enforceable.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-orphan-'));
+    const sandbox = new ToolSandbox(dir);
+    try {
+      const tool = runShellTool({ sandbox });
+      const res = (await tool.execute({
+        command: 'bash',
+        args: ['-c', 'sleep 300 & echo PID=$!'],
+      })) as { exitCode: number; stdout: string };
+      expect(res.exitCode).toBe(0);
+      const pid = Number(res.stdout.match(/PID=(\d+)/)?.[1]);
+      expect(pid).toBeGreaterThan(0);
+      // SIGKILL delivery is asynchronous — give it a beat, then the
+      // grandchild must be gone (kill(pid, 0) throws ESRCH).
+      await new Promise((r) => setTimeout(r, 150));
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+      if (alive) {
+        try {
+          process.kill(pid, 'SIGKILL'); // never leak from the test itself
+        } catch {
+          /* raced to death — fine */
+        }
+      }
+      expect(alive).toBe(false);
+    } finally {
+      await sandbox.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('run_shell timeout kills the whole group, not just the direct child', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-timeout-'));
+    const sandbox = new ToolSandbox(dir);
+    try {
+      const tool = runShellTool({ sandbox, shellTimeoutMs: 500 });
+      const started = Date.now();
+      const res = (await tool.execute({
+        command: 'bash',
+        args: ['-c', 'echo PID=$$; sleep 300'],
+      })) as { exitCode: number; stdout: string; error?: string };
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(res.exitCode).not.toBe(0);
+      expect(res.error).toMatch(/timed out.*process group killed/);
+      const pid = Number(res.stdout.match(/PID=(\d+)/)?.[1]);
+      await new Promise((r) => setTimeout(r, 150));
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+      } catch {
+        alive = false;
+      }
+      expect(alive).toBe(false);
+    } finally {
+      await sandbox.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('ToolSandbox.resolve — symlink containment (#7b)', () => {

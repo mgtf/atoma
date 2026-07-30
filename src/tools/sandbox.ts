@@ -86,6 +86,17 @@ function ensureGlobalExitHandler(): void {
   // govern error propagation and scope ourselves to killing children.
   process.on('exit', () => {
     for (const child of ALL_TRACKED_CHILDREN) {
+      // Children spawned `detached: true` lead their own process group
+      // (pgid == pid), so a negative-pid kill takes down any grandchildren
+      // they forked — the double-fork orphan vector (`bash -c "server &"`
+      // via run_shell) that a plain child.kill cannot reach. Fall through
+      // to the single-process kill for non-detached children (negative-pid
+      // kill on a non-leader throws ESRCH; the catch chains both paths).
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        /* not a group leader (or already gone) — try the plain kill */
+      }
       try {
         child.kill('SIGKILL');
       } catch {
