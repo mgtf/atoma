@@ -27,6 +27,21 @@ export interface AtomType {
   readonly failures: number;
 }
 
+/**
+ * One archived row of `atom_type_versions` — the content a version had
+ * when a later patch superseded it. Consumed by the registry CLI's
+ * `history` / `rollback` commands. NOTE: `description` is not versioned.
+ */
+export interface AtomVersionRow {
+  readonly version: number;
+  readonly systemPrompt: string;
+  readonly tools: Tool[];
+  readonly params: GenerationParams;
+  readonly modifiedBy: string;
+  readonly modifiedAt: string;
+  readonly reason?: string;
+}
+
 export interface CreateSeed {
   readonly description: string;
   readonly systemPrompt: string;
@@ -331,6 +346,137 @@ export class AtomRegistry {
         );
 
       return { ...merged, version: nextVersion, successes: 0, failures: 0 };
+    })();
+  }
+
+  /**
+   * Archived versions of a type, oldest first. Each row is the content a
+   * version HAD when a patch superseded it — the LIVE version is not in
+   * this list (it lives in `atom_types`). Rows for a `[removed]` tombstone
+   * are included: history outlives the live row by design.
+   */
+  listVersions(name: string): AtomVersionRow[] {
+    const current = this.getByName(name);
+    if (!current) throw new RegistryNotFoundError(name);
+    const rows = this.db
+      .prepare(
+        `SELECT version, system_prompt, tools_json, params_json,
+                modified_by, modified_at, reason
+         FROM atom_type_versions
+         WHERE tier = ? AND ordinal = ?
+         ORDER BY version ASC`
+      )
+      .all(current.tier, current.ordinal) as {
+        version: number;
+        system_prompt: string;
+        tools_json: string;
+        params_json: string;
+        modified_by: string;
+        modified_at: string;
+        reason: string | null;
+      }[];
+    return rows.map((r) => ({
+      version: r.version,
+      systemPrompt: r.system_prompt,
+      tools: JSON.parse(r.tools_json) as Tool[],
+      params: JSON.parse(r.params_json) as GenerationParams,
+      modifiedBy: r.modified_by,
+      modifiedAt: r.modified_at,
+      ...(r.reason ? { reason: r.reason } : {}),
+    }));
+  }
+
+  /**
+   * Restore an ARCHIVED version's content as a NEW live version —
+   * roll-forward-to-the-past, never history rewriting: the current
+   * content is archived like any patch would, the version counter keeps
+   * increasing, and the restored type re-earns trust from 0/0 (its
+   * behaviour just changed; "patch resets trust" applies to a rollback
+   * exactly as much as to a forward patch).
+   *
+   * Restores systemPrompt + tools + params EXACTLY (this is deliberately
+   * NOT routed through `applyMods`, whose params merge cannot delete a
+   * key added by a later version). The description is NOT versioned in
+   * `atom_type_versions` and therefore keeps its current value.
+   *
+   * Two caveats the CLI surfaces to the operator:
+   *   - canonical/bootstrap types are re-aligned by their idempotent
+   *     seeder on the next run, which will simply patch the rollback
+   *     away if the seed prompt differs — rollback is for DYNAMIC types,
+   *     or for pinning a canonical during a single diagnostic run;
+   *   - rolling back to content identical to the live row is a no-op
+   *     (mirrors the patch no-op guard).
+   */
+  rollback(name: string, toVersion: number, modifiedBy = 'registry-cli:rollback'): AtomType {
+    return this.db.transaction((): AtomType => {
+      const current = this.getByName(name);
+      if (!current) throw new RegistryNotFoundError(name);
+      if (toVersion === current.version) {
+        throw new Error(`rollback: v${toVersion} is already the live version of ${name}`);
+      }
+      const row = this.db
+        .prepare(
+          `SELECT system_prompt, tools_json, params_json
+           FROM atom_type_versions
+           WHERE tier = ? AND ordinal = ? AND version = ?`
+        )
+        .get(current.tier, current.ordinal, toVersion) as
+        | { system_prompt: string; tools_json: string; params_json: string }
+        | undefined;
+      if (!row) {
+        const available = this.listVersions(name).map((v) => v.version);
+        throw new Error(
+          `rollback: ${name} has no archived v${toVersion} (archived: ${available.join(', ') || 'none'}; live: v${current.version})`
+        );
+      }
+
+      // No-op guard, same rationale as patch's: a content-identical
+      // "restore" would only reset counters and pollute history.
+      if (
+        row.system_prompt === current.systemPrompt &&
+        row.tools_json === JSON.stringify(current.tools) &&
+        row.params_json === JSON.stringify(current.params)
+      ) {
+        return current;
+      }
+
+      const now = new Date().toISOString();
+      const nextVersion = current.version + 1;
+      this.db
+        .prepare(
+          `INSERT INTO atom_type_versions
+           (tier, ordinal, version, system_prompt, tools_json, params_json, modified_by, modified_at, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          current.tier,
+          current.ordinal,
+          current.version,
+          current.systemPrompt,
+          JSON.stringify(current.tools),
+          JSON.stringify(current.params),
+          modifiedBy,
+          now,
+          `superseded by rollback to v${toVersion}`
+        );
+      this.db
+        .prepare(
+          `UPDATE atom_types
+             SET system_prompt = ?, tools_json = ?, params_json = ?, version = ?,
+                 successes = 0, failures = 0
+           WHERE tier = ? AND ordinal = ?`
+        )
+        .run(
+          row.system_prompt,
+          row.tools_json,
+          row.params_json,
+          nextVersion,
+          current.tier,
+          current.ordinal
+        );
+      const restored = this.getByName(name);
+      if (!restored) throw new RegistryNotFoundError(name);
+      return restored;
     })();
   }
 
@@ -710,6 +856,7 @@ export class AtomRegistry {
     })();
   }
 
+  /** Light variant of `listVersions`: metadata only, `[]` for a missing name. */
   versionsOf(name: string): { version: number; modifiedAt: string; reason: string | null }[] {
     const t = this.getByName(name);
     if (!t) return [];

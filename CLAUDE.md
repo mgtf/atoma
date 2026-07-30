@@ -21,6 +21,8 @@ npm run registry -- list              # inspect persisted atom types + counters
 npm run registry -- list --tier 2
 npm run registry -- show Hydrogen
 npm run registry -- top --by failure  # sort by failures; also success|ratio
+npm run registry -- history Hydrogen  # archived versions: prompt head, tools, who/when/why
+npm run registry -- rollback Hydrogen --to 2   # restore v2 content as a NEW live version
 npm run registry -- remove Glucose --db ./atoma-build.db  # delete dynamic-creation debris
 npm run registry -- --db ./atoma-build.db list   # override DB path
 
@@ -1161,12 +1163,26 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - `AtomRegistry.remove` (CLI `registry remove <name> [--force]`)
   deletes only the LIVE row: the version history stays and gains a
   `[removed]` tombstone row with the final state. Deliberate — the
-  deferred rollback CLI needs `atom_type_versions`, and `create`
-  allocates ordinals from live ∪ history rows so a removed atom's
-  taxonomy name is never re-issued to a future atom (which would
-  inherit its identity in old run traces and skill namespaces).
-  Canonical/bootstrap atoms and user-created cells are refused
-  without `--force`.
+  rollback CLI reads `atom_type_versions`, and `create` allocates
+  ordinals from live ∪ history rows so a removed atom's taxonomy name
+  is never re-issued to a future atom (which would inherit its identity
+  in old run traces and skill namespaces). Canonical/bootstrap atoms
+  and user-created cells are refused without `--force`.
+- **Rollback is roll-forward-to-the-past.** `AtomRegistry.rollback(name,
+  toVersion)` (CLI `registry rollback <name> --to <v>`; inspect with
+  `registry history <name>`) restores an archived version's
+  prompt/tools/params EXACTLY as a NEW live version: history stays
+  append-only, the version counter keeps rising, and counters reset —
+  "patch resets trust" applies to a rollback exactly as much as to a
+  forward patch. Deliberately NOT routed through `applyMods`, whose
+  params merge cannot delete a key a later version added. Description is
+  not versioned (`atom_type_versions` has no column) and is kept as-is.
+  Caveat surfaced by the CLI: canonical/bootstrap types are re-aligned
+  by their idempotent seeder on the next run, which patches a rollback
+  away if the seed differs — rollback is for DYNAMIC types, or for
+  pinning a canonical during a single diagnostic run. Content-identical
+  restores are a no-op (mirrors the patch guard). `listVersions` is the
+  full-content accessor; `versionsOf` stays the light metadata variant.
 - `Atom.toolNames(): string[]` is public while `Atom.tools: Tool[]` is
   protected. The names accessor was added specifically for cross-
   cutting concerns (ground-truth probe bucket gate, tracing) that
@@ -1208,8 +1224,6 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   "tissues/organs" metaphor). The current cells are top-level, not composed.
 - Multi-process registry (SQLite local only).
 - Streaming, OpenTelemetry, dashboards beyond the in-process metrics summary.
-- Rollback CLI for registry versions (the DB keeps `atom_type_versions` rows,
-  just no CLI to restore from them yet).
 
 ## Plan file
 

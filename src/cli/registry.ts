@@ -15,7 +15,17 @@ import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'top' | 'dedupe' | 'describe' | 'rebrand' | 'remove' | 'help';
+  command:
+    | 'list'
+    | 'show'
+    | 'top'
+    | 'dedupe'
+    | 'describe'
+    | 'rebrand'
+    | 'remove'
+    | 'history'
+    | 'rollback'
+    | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -41,7 +51,7 @@ function parseArgs(argv: string[]): Args {
       positional.push(token);
     }
   }
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'help'].includes(cmd)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'help'].includes(cmd)) {
     return { command: 'help', positional: [cmd, ...positional], flags };
   }
   return { command: cmd, positional, flags };
@@ -357,10 +367,77 @@ function help(): void {
                                 (mislabelled clone series). Canonical
                                 bootstrap atoms and user-created cells
                                 are refused without --force.
+  history <name>              — archived versions of a type (prompt head,
+                                tools, who/when/why), plus the live one.
+  rollback <name> --to <v>    — restore an archived version's content as a
+                                NEW live version (roll-forward: history
+                                stays append-only, version keeps rising,
+                                counters reset — the restored behaviour
+                                re-earns trust). Prompt/tools/params are
+                                restored exactly; description is not
+                                versioned and is kept as-is.
 
 Common flags:
   --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
 `);
+}
+
+function cmdHistory(registry: AtomRegistry, name: string): void {
+  const live = registry.getByName(name);
+  if (!live) {
+    console.error(`no atom type named "${name}"`);
+    process.exit(1);
+  }
+  const rows = registry.listVersions(name);
+  console.log(`${name} (tier ${live.tier}) — ${rows.length} archived version(s), live: v${live.version}\n`);
+  for (const v of rows) {
+    const head = v.systemPrompt.split('\n')[0]?.slice(0, 70) ?? '';
+    console.log(
+      `  v${v.version}  ${v.modifiedAt.slice(0, 19)}  by ${v.modifiedBy}` +
+        (v.reason ? `\n      reason: ${v.reason.slice(0, 110)}` : '')
+    );
+    console.log(`      prompt: ${head}…  tools: ${v.tools.map((t) => t.name).join(', ') || '(none)'}`);
+  }
+  console.log(
+    `  v${live.version}  (LIVE)  ✓${live.successes}/✗${live.failures}\n` +
+      `      prompt: ${live.systemPrompt.split('\n')[0]?.slice(0, 70)}…\n\n` +
+      `rollback with: registry rollback ${name} --to <version>`
+  );
+}
+
+function cmdRollback(registry: AtomRegistry, name: string, toRaw: string | undefined): void {
+  const to = Number(toRaw);
+  if (!toRaw || !Number.isInteger(to) || to < 1) {
+    console.error('usage: rollback <name> --to <version>   (see `history <name>` for versions)');
+    process.exit(2);
+  }
+  const before = registry.getByName(name);
+  if (!before) {
+    console.error(`no atom type named "${name}"`);
+    process.exit(1);
+  }
+  try {
+    const after = registry.rollback(name, to);
+    if (after.version === before.version) {
+      console.log(`no-op: v${to} content is identical to the live v${before.version}; nothing changed.`);
+      return;
+    }
+    console.log(
+      `${name}: restored v${to} content as NEW live v${after.version} (was v${before.version}).\n` +
+        `  counters reset ${before.successes}/${before.failures} → 0/0 — the restored type re-earns trust.\n` +
+        `  description is not versioned and was kept as-is.`
+    );
+    if (/^bootstrap-/.test(after.createdBy)) {
+      console.log(
+        `  ⚠ ${name} is a canonical/bootstrap type: its seeder re-aligns the prompt on the\n` +
+          `    next run and will patch this rollback away if the seed differs. Rollback is\n` +
+          `    for dynamic types, or for pinning a canonical during a single diagnostic run.`
+      );
+    }
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
 }
 
 function main(): void {
@@ -411,6 +488,22 @@ function main(): void {
         process.exit(2);
       }
       return cmdRemove(registry, name, args.flags['force'] === 'true');
+    }
+    case 'history': {
+      const name = args.positional[0];
+      if (!name) {
+        console.error('usage: history <name>');
+        process.exit(2);
+      }
+      return cmdHistory(registry, name);
+    }
+    case 'rollback': {
+      const name = args.positional[0];
+      if (!name) {
+        console.error('usage: rollback <name> --to <version>');
+        process.exit(2);
+      }
+      return cmdRollback(registry, name, args.flags['to']);
     }
   }
 }

@@ -141,6 +141,63 @@ describe('AtomRegistry', () => {
     expect(r.getByName('Hydrogen')?.tier).toBe(1);
   });
 
+  describe('history + rollback (roll-forward to the past)', () => {
+    it('rollback restores an archived version as a NEW live version with counters reset', () => {
+      const h = r.create(1, { ...baseSeed, systemPrompt: 'v1 prompt', params: { maxTokens: 4000 } });
+      r.patch(h.name, { systemPromptReplace: 'v2 prompt', params: { maxTokens: 9000, temperature: 0.2 } }, 'tester');
+      r.patch(h.name, { systemPromptReplace: 'v3 prompt' }, 'tester');
+      r.recordSuccess(h.name);
+      r.recordSuccess(h.name);
+
+      const restored = r.rollback(h.name, 1, 'operator');
+      // Roll-forward: version keeps rising, history stays append-only.
+      expect(restored.version).toBe(4);
+      expect(restored.systemPrompt).toBe('v1 prompt');
+      // EXACT params restore — the later-added `temperature` key is GONE,
+      // which the applyMods merge could never do.
+      expect(restored.params).toEqual({ maxTokens: 4000 });
+      // The restored behaviour re-earns trust.
+      expect(restored.successes).toBe(0);
+      expect(restored.failures).toBe(0);
+      // v3 was archived on the way out, with a rollback-attributed reason.
+      const hist = r.listVersions(h.name);
+      expect(hist.map((v) => v.version)).toEqual([1, 2, 3]);
+      expect(hist[2]!.systemPrompt).toBe('v3 prompt');
+      expect(hist[2]!.reason).toMatch(/rollback to v1/);
+    });
+
+    it('rollback to a content-identical version is a no-op (counters preserved)', () => {
+      const h = r.create(1, { ...baseSeed, systemPrompt: 'same' });
+      r.patch(h.name, { systemPromptReplace: 'other' }, 'tester');
+      r.rollback(h.name, 1); // live v3 == v1 content
+      r.recordSuccess(h.name);
+      const before = r.getByName(h.name)!;
+      const out = r.rollback(h.name, 1); // v1 content == live content → no-op
+      expect(out.version).toBe(before.version);
+      expect(out.successes).toBe(1);
+    });
+
+    it('rollback rejects the live version and unknown versions with actionable errors', () => {
+      const h = r.create(1, baseSeed);
+      r.patch(h.name, { systemPromptReplace: 'v2' }, 'tester');
+      expect(() => r.rollback(h.name, 2)).toThrow(/already the live version/);
+      expect(() => r.rollback(h.name, 7)).toThrow(/no archived v7 .*archived: 1.*live: v2/);
+      expect(() => r.rollback('Nonexistium', 1)).toThrow();
+    });
+
+    it('listVersions carries full content; versionsOf stays the light variant', () => {
+      const h = r.create(1, { ...baseSeed, systemPrompt: 'v1 prompt' });
+      r.patch(h.name, { systemPromptReplace: 'v2 prompt' }, 'tester', 'why');
+      const full = r.listVersions(h.name);
+      expect(full).toHaveLength(1);
+      expect(full[0]!.systemPrompt).toBe('v1 prompt');
+      expect(full[0]!.modifiedBy).toBe('tester');
+      expect(full[0]!.tools).toEqual(h.tools);
+      const light = r.versionsOf(h.name);
+      expect(light[0]).not.toHaveProperty('systemPrompt');
+    });
+  });
+
   describe('semantic duplicate handling', () => {
     it('normalizeNameKey collapses case + punctuation to a common key', () => {
       expect(normalizeNameKey('Minesweeper-WebGL')).toBe('minesweeperwebgl');
