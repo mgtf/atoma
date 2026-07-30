@@ -42,6 +42,21 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(reg.listByTier(1)).toHaveLength(1);
   });
 
+  it('WEB L1 system prompt carries the ground-truth evidence contract (pomodoro triple-rejection regression)', () => {
+    // Three consecutive live attempts at a web deliverable died with the
+    // SAME validator complaint — "narrative claims are not evidence" — and
+    // the root cause was here: the http and file-scribe canonicals carry
+    // explicit evidence contracts, the web canonical carried NONE. Hydrogen
+    // was never told HOW to prove its work.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l1 = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
+    expect(l1.systemPrompt).toMatch(/== GROUND TRUTH ==/);
+    expect(l1.systemPrompt).toMatch(/RESULT-REPORTING CONTRACT/);
+    expect(l1.systemPrompt).toMatch(/validate_html outcome VERBATIM/);
+    expect(l1.systemPrompt).toMatch(/"probes"/);
+    expect(l1.systemPrompt).toMatch(/NARRATIVE claim .* WILL be rejected/s);
+  });
+
   it('creates canonical L2 on first call with canonical description + bootstrap marker', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const l2 = ensureCanonicalL2(reg, WEB_TOOLS);
