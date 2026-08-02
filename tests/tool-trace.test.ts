@@ -66,6 +66,59 @@ function makeTmpRecorder(): { recorder: TraceRecorder; dir: string } {
   return { recorder, dir };
 }
 
+describe('RecordingLlmClient — in-flight llm-start markers', () => {
+  it('records a start event BEFORE the call resolves, paired to the completion via llmEventId', async () => {
+    const { recorder, dir } = makeTmpRecorder();
+    try {
+      const rec = new RecordingLlmClient(new InnerStubLlm(), recorder);
+      await rec.complete({
+        model: 'stub',
+        systemPrompt: 'sys',
+        userContent: 'You are atom "Fluorine" (tier 1). Your plan has been APPROVED. Execute it now.',
+      });
+      const events = recorder.currentRun!.events;
+      const start = events.find((e) => e.kind === 'llm-start');
+      const done = events.find((e) => e.kind === 'llm');
+      expect(start).toBeDefined();
+      expect(done).toBeDefined();
+      // Pairing contract the UI relies on to hide superseded starts.
+      expect(start.llmEventId).toBe(done.id);
+      // Classification is available at start time — same role/actor.
+      expect(start.role).toBe('execute');
+      expect(start.actor).toEqual({ name: 'Fluorine', tier: 1 });
+      // Start precedes completion in the event stream.
+      expect(events.indexOf(start)).toBeLessThan(events.indexOf(done));
+    } finally {
+      recorder.endRun();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a THROWN call still pairs (error completion); only a hard kill leaves an orphan start', async () => {
+    const { recorder, dir } = makeTmpRecorder();
+    try {
+      const boom: LlmClient = {
+        async complete(): Promise<LlmCompletionResponse> {
+          throw new Error('socket hang up');
+        },
+      };
+      const rec = new RecordingLlmClient(boom, recorder);
+      await expect(
+        rec.complete({ model: 'stub', systemPrompt: 'sys', userContent: 'u' })
+      ).rejects.toThrow('socket hang up');
+      const events = recorder.currentRun!.events;
+      const start = events.find((e) => e.kind === 'llm-start');
+      const done = events.find((e) => e.kind === 'llm');
+      expect(start.llmEventId).toBe(done.id);
+      expect(done.stopReason).toBe('error');
+      expect(done.error).toBe('socket hang up');
+    } finally {
+      recorder.endRun();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('RecordingLlmClient — tool-call tracing', () => {
   it('emits one VizToolEvent per invocation, tied to the spawning LLM event', async () => {
     const { recorder, dir } = makeTmpRecorder();

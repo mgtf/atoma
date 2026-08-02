@@ -191,8 +191,34 @@ export interface VizSkillEvent {
   branchId?: string;
 }
 
+/**
+ * Emitted the moment an LLM call LEAVES the process, before any response
+ * exists — the completion event (kind 'llm', same id in `llmEventId`)
+ * supersedes it. Purpose: the polling UI can show what a live run is doing
+ * RIGHT NOW (in-flight call + ticking elapsed) instead of only completed
+ * steps, and an ended run with an unpaired start renders as "interrupted" —
+ * the exact signature of a network blip killing a claude-cli subprocess
+ * mid-call (observed live: a run went silent for 10 minutes with zero
+ * events while its README-phase call hung; the viz showed nothing amiss).
+ * Deliberately tiny — no prompts, no usage; the completion carries those.
+ */
+export interface VizLlmStartEvent {
+  id: string;
+  ts: number;
+  kind: 'llm-start';
+  /** Pre-allocated id of the completion event this start will pair with. */
+  llmEventId: string;
+  model: string;
+  role: VizLlmEvent['role'];
+  actor?: VizLlmEvent['actor'];
+  child?: VizLlmEvent['child'];
+  subject?: VizLlmEvent['subject'];
+  branchId?: string;
+}
+
 export type VizEvent =
   | VizLlmEvent
+  | VizLlmStartEvent
   | VizRegistryEvent
   | VizToolEvent
   | VizTrustEvent

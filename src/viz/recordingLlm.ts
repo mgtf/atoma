@@ -104,6 +104,25 @@ export class RecordingLlmClient implements LlmClient {
     // `llmEventId`, letting the viz UI group tool calls under the LLM turn
     // that produced them (instead of a post-hoc nearest-match).
     const llmEventId = randomUUID();
+    // In-flight marker: lets the polling UI render "happening NOW" (and an
+    // ended run render an unpaired start as "interrupted"). The completion
+    // or error event below supersedes it via llmEventId.
+    try {
+      this.recorder.record({
+        id: randomUUID(),
+        ts: started,
+        kind: 'llm-start',
+        llmEventId,
+        model: req.model,
+        role: cls.role,
+        ...(cls.actor ? { actor: cls.actor } : {}),
+        ...(cls.child ? { child: cls.child } : {}),
+        ...(cls.subject ? { subject: cls.subject } : {}),
+        ...(req.branchId !== undefined ? { branchId: req.branchId } : {}),
+      });
+    } catch {
+      // Observability must never break the call itself.
+    }
     // Wrap the request with our own onToolInvocation observer. We preserve
     // any caller-provided callback (chain-of-responsibility style) so a
     // hypothetical future metrics or audit decorator can nest cleanly.

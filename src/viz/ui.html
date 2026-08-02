@@ -174,6 +174,9 @@
   .history-list .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
   .tools-list { display: flex; gap: 4px; flex-wrap: wrap; }
   .tools-list .chip { font-size: 11px; padding: 2px 8px; }
+  .live-dot { color: var(--ok); animation: livePulse 1.2s ease-in-out infinite; margin-right: 4px; }
+  @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+  .interrupted { opacity: 0.75; border-left: 3px solid var(--err); }
 </style>
 </head>
 <body>
@@ -198,6 +201,7 @@
     <!-- Runs view -->
     <div id="runsView">
       <div id="runSummary"></div>
+      <div id="nowBanner"></div>
       <div id="lanesWrap"></div>
       <div class="filters" id="filters"></div>
       <div id="eventsList"></div>
@@ -433,10 +437,21 @@ function scheduleLivePoll(runId) {
         }
       }
     } catch {}
+    // Even with no new events, the in-flight elapsed must tick: a long
+    // LLM call produces zero events while it runs — that silence is
+    // precisely what the banner exists to make visible.
+    refreshNowBanner();
     // Continue polling until endedAt arrives. Once it does, the next
     // tick won't schedule a new timer (early return at top).
     scheduleLivePoll(runId);
   }, LIVE_POLL_MS);
+}
+
+function refreshNowBanner() {
+  const run = state.currentRun;
+  if (!run) return;
+  const completedIds = new Set(run.events.filter((e) => e.kind === 'llm').map((e) => e.id));
+  renderNowBanner(run, completedIds, !run.endedAt);
 }
 
 /**
@@ -661,9 +676,23 @@ function renderEvents() {
   el.innerHTML = '';
   const run = state.currentRun;
   if (!run) return;
+  // Pair llm-start markers with their completions: a start whose
+  // llmEventId already exists as a completed 'llm' event is superseded
+  // and hidden. Unpaired starts are either IN FLIGHT (live run — shown
+  // in the "en ce moment" banner) or INTERRUPTED (ended run — shown
+  // inline, the signature of a killed subprocess / network blip).
+  const completedIds = new Set(run.events.filter((e) => e.kind === 'llm').map((e) => e.id));
+  const isLive = !run.endedAt;
+  renderNowBanner(run, completedIds, isLive);
   const filtered = run.events.filter((e) => {
-    if (state.filters.kind !== 'all' && e.kind !== state.filters.kind) return false;
-    if (e.kind === 'llm' && state.filters.role !== 'all' && e.role !== state.filters.role) return false;
+    if (e.kind === 'llm-start') {
+      if (completedIds.has(e.llmEventId)) return false; // superseded
+      if (isLive) return false; // rendered in the banner instead
+      // ended run + unpaired → keep: interrupted call, worth seeing.
+    }
+    const kindForFilter = e.kind === 'llm-start' ? 'llm' : e.kind;
+    if (state.filters.kind !== 'all' && kindForFilter !== state.filters.kind) return false;
+    if ((e.kind === 'llm' || e.kind === 'llm-start') && state.filters.role !== 'all' && e.role !== state.filters.role) return false;
     if (state.filters.branchId && state.filters.branchId !== 'all' && e.branchId !== state.filters.branchId) return false;
     return true;
   });
@@ -672,6 +701,44 @@ function renderEvents() {
     return;
   }
   for (const ev of filtered) el.appendChild(renderEventCard(ev));
+}
+
+/**
+ * "EN CE MOMENT" — the in-flight calls of a live run, with a ticking
+ * elapsed. Data source: unpaired llm-start events. The 1s live poll
+ * re-renders this, so the elapsed advances without its own timer.
+ */
+function renderNowBanner(run, completedIds, isLive) {
+  const host = $('nowBanner');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!isLive) return;
+  const inFlight = run.events.filter(
+    (e) => e.kind === 'llm-start' && !completedIds.has(e.llmEventId)
+  );
+  if (inFlight.length === 0) return;
+  const wrap = h('div', { class: 'section', style: 'border-left: 3px solid var(--accent); margin-bottom: 8px;' });
+  wrap.appendChild(h('h3', {}, [
+    h('span', { class: 'live-dot' }, '●'),
+    h('span', {}, ' En ce moment'),
+  ]));
+  for (const s of inFlight) {
+    const secs = Math.max(0, Math.round((Date.now() - s.ts) / 1000));
+    const row = [
+      h('span', { class: 'role ' + s.role }, labelRole(s.role)),
+    ];
+    if (s.actor) row.push(atomRef(s.actor));
+    if (s.child) {
+      row.push(h('span', { class: 'arrow' }, '→'));
+      row.push(atomRef(s.child));
+    }
+    row.push(h('span', { class: 'meta' }, s.model));
+    row.push(h('span', { class: 'meta', style: secs > 120 ? 'color: var(--err); font-weight: 600;' : '' },
+      '⏱ ' + secs + 's' + (secs > 120 ? ' — anormalement long ?' : '')));
+    if (s.branchId) row.push(branchChip(s.branchId));
+    wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, row));
+  }
+  host.appendChild(wrap);
 }
 
 function branchChip(branchId) {
@@ -685,6 +752,21 @@ function branchChip(branchId) {
 
 function renderEventCard(ev) {
   const selected = state.selectedEventId === ev.id ? ' selected' : '';
+  if (ev.kind === 'llm-start') {
+    // Only reachable for an ENDED run with an unpaired start: the call
+    // left the process and never came back — killed subprocess, network
+    // blip, or the run deadline. Making this visible post-mortem is the
+    // point; it used to look like the run "did nothing" for minutes.
+    const row = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role ' + ev.role }, labelRole(ev.role)),
+      h('span', { class: 'meta', style: 'color: var(--err); font-weight: 600;' }, '✕ interrompu — jamais terminé'),
+    ];
+    if (ev.actor) row.splice(2, 0, atomRef(ev.actor));
+    row.push(h('span', { class: 'meta' }, ev.model));
+    if (ev.branchId) row.push(branchChip(ev.branchId));
+    return h('div', { class: 'event interrupted' }, row);
+  }
   if (ev.kind === 'llm') {
     const row = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),

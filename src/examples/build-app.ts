@@ -275,7 +275,13 @@ async function main(): Promise<void> {
   // ATOMA_BUILD_TIMEOUT_MS for iterative build tasks that need more room
   // (WebGL Minesweeper-style runs routinely burn 6-8 min in the
   // validate_html → fix → re-validate loop and benefit from extra headroom).
-  const timeoutMs = Number(process.env['ATOMA_BUILD_TIMEOUT_MS'] ?? 10 * 60 * 1000);
+  // Default budget is transport-aware: the claude-cli path adds 2-5s of
+  // subprocess overhead to EVERY call, so a 3-phase cold start (~23 LLM
+  // calls) that fits comfortably in 600s on the direct API dies at the
+  // deadline on the CLI (measured twice on the same task before this).
+  const timeoutMs = Number(
+    process.env['ATOMA_BUILD_TIMEOUT_MS'] ?? (useClaudeCli ? 15 * 60 * 1000 : 10 * 60 * 1000)
+  );
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     console.error(
       `invalid ATOMA_BUILD_TIMEOUT_MS="${process.env['ATOMA_BUILD_TIMEOUT_MS']}" (expected positive integer in ms)`
