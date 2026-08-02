@@ -237,6 +237,8 @@ const state = {
   atomsByName: new Map(),
   selectedEventId: null,
   selectedAtomName: null,
+  /** Sticky "Prompts & réponse" tab index — survives event switches and re-renders. */
+  detailTabIndex: 1,
   filters: { kind: 'all', role: 'all', branchId: 'all' },
   // Registry view state
   registries: [],
@@ -420,19 +422,31 @@ function scheduleLivePoll(runId) {
         (fresh.endedAt && !state.currentRun.endedAt);
       if (changed) {
         const prevSelectedId = state.selectedEventId;
+        const hadDetailBefore = prevSelectedId
+          ? state.currentRun.events.some((e) => e.id === prevSelectedId)
+          : false;
+        // The left pane rebuilds — keep the user's scroll position so new
+        // events appending at the bottom don't yank the view around.
+        const leftPane = $('leftPane');
+        const leftScroll = leftPane ? leftPane.scrollTop : 0;
         state.currentRun = fresh;
         state.atomsByName = buildAtomMap(fresh);
         renderSummary(fresh);
         renderLanes(fresh);
         renderFilters();
         renderEvents();
-        // Re-select the same event in the right pane if it still exists,
-        // so the user's context doesn't jump every second.
+        if (leftPane) leftPane.scrollTop = leftScroll;
+        // Right pane: recorded events are IMMUTABLE, so if the selected
+        // event was already rendered, leave the pane completely alone —
+        // re-rendering it every poll tick reset the active tab (e.g. the
+        // user reading "Response" got bounced back) and the scroll. Only
+        // render when the selection is materialising for the first time
+        // (it was selected while still absent from the fetched snapshot).
         if (prevSelectedId) {
           const stillThere = fresh.events.find((e) => e.id === prevSelectedId);
           if (stillThere) {
             state.selectedEventId = prevSelectedId;
-            renderDetail(stillThere);
+            if (!hadDetailBefore) renderDetail(stillThere);
           }
         }
       }
@@ -1096,16 +1110,21 @@ function renderLlmDetail(el, ev) {
     }
     body.appendChild(h('pre', {}, txt || '(vide)'));
   };
+  // Sticky tab: remember which tab the user reads (e.g. "Response") so
+  // opening another event — or any future re-render — lands on the same
+  // one instead of bouncing back to the default.
+  const initial = Math.min(state.detailTabIndex ?? 1, entries.length - 1);
   entries.forEach(([lbl, txt, kind], i) => {
-    const tab = h('div', { class: 'tab' + (i === 1 ? ' active' : '') }, lbl);
+    const tab = h('div', { class: 'tab' + (i === initial ? ' active' : '') }, lbl);
     tab.addEventListener('click', () => {
       [...tabs.children].forEach((t) => t.classList.remove('active'));
       tab.classList.add('active');
+      state.detailTabIndex = i;
       renderTab(txt, kind);
     });
     tabs.appendChild(tab);
   });
-  renderTab(entries[1][1], entries[1][2]);
+  renderTab(entries[initial][1], entries[initial][2]);
   el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Prompts & réponse'), tabs, body]));
 }
 
