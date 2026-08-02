@@ -2,6 +2,8 @@ import { resolve } from 'node:path';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { modelForTier } from '../core/models.js';
+import { RoutingLlmClient } from '../core/llmRouting.js';
+import { buildReferencedProviders } from './providers.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
@@ -159,8 +161,21 @@ async function main(): Promise<void> {
     : useClaudeCli
       ? new ClaudeCliLlmClient()
       : new AnthropicLlmClient(anthropic!);
+  // Per-tier PROVIDER routing: tier pins may carry a `provider:` prefix
+  // (ATOMA_MODEL_L1=zai:glm-4.5-air → L1 on Z.ai, L2/L3 on the default
+  // provider). Only referenced providers are constructed; with none, the
+  // router is a transparent passthrough. Observability wraps the ROUTER,
+  // so calls are recorded once, with the vendor visible in the model id.
+  const providers = buildReferencedProviders();
+  const routedClient =
+    Object.keys(providers).length > 0
+      ? new RoutingLlmClient(baseClient, providers)
+      : baseClient;
+  if (Object.keys(providers).length > 0) {
+    console.log(`tier providers: ${Object.keys(providers).join(', ')} (routed by model prefix)`);
+  }
   const llm = new MetricsLlmClient(
-    new RecordingLlmClient(baseClient, recorder),
+    new RecordingLlmClient(routedClient, recorder),
     metrics
   );
   console.log(

@@ -4,6 +4,7 @@ export * from './core/limits.js';
 export { Atom, type Peerable, type Supervisor } from './core/atom.js';
 export { superviseLoop, type SupervisionHooks, renderTraceForContext } from './core/supervisor.js';
 export { AnthropicLlmClient, MockLlmClient } from './core/llm.js';
+export { RoutingLlmClient, splitProviderModel } from './core/llmRouting.js';
 export {
   InMemoryMetrics,
   MetricsLlmClient,

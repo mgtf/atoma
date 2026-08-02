@@ -43,6 +43,11 @@ export const DEFAULT_PRICES: PriceTable = [
   { match: /opus/i,   prices: { input: 5,  output: 25, cachedInput: 0.5 } },
   { match: /sonnet/i, prices: { input: 3,  output: 15, cachedInput: 0.3 } },
   { match: /haiku/i,  prices: { input: 1,  output: 5,  cachedInput: 0.1 } },
+  // Z.ai GLM family (matched with or without a routing prefix, e.g.
+  // "zai:glm-4.5-air"). APPROXIMATE mid-family numbers — Z.ai prices per
+  // model vary widely (Air/Flash tiers are far cheaper than flagships);
+  // override with a custom PriceTable for billing-grade accounting.
+  { match: /glm/i,    prices: { input: 0.6, output: 2.2, cachedInput: 0.11 } },
 ];
 
 export function pricesFor(model: string, table: PriceTable = DEFAULT_PRICES): ModelPrices {

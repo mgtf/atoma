@@ -859,7 +859,25 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   while Anthropic pins still collapse onto `defaultModel`), or future
   clients' ids as-is. An explicit `ATOMA_MODEL_L3` also SKIPS
   `resolveLatestOpus`'s network call. Covered by
-  `tests/model-tiers.test.ts`. The 5-series pins reject
+  `tests/model-tiers.test.ts`.
+- **Cross-VENDOR tier routing (`RoutingLlmClient`,
+  `src/core/llmRouting.ts`).** A tier pin may carry a `provider:` prefix
+  — `ATOMA_MODEL_L1=zai:glm-4.5-air` routes every L1 call to Z.ai while
+  L2/L3 stay on the session's default provider. Parsing is deliberately
+  conservative: the prefix routes ONLY when it names a CONFIGURED
+  provider, otherwise the whole string is a model id for the default
+  client (Ollama tags legitimately contain colons — `qwen3:8b` must not
+  parse as provider "qwen3"). `buildReferencedProviders`
+  (`src/examples/providers.ts`) constructs only the providers actually
+  referenced by tier pins: zai (Anthropic-COMPATIBLE endpoint
+  `https://api.z.ai/api/anthropic`, served by the existing
+  `AnthropicLlmClient` with `ZAI_API_KEY`/`ZAI_BASE_URL` — same trick
+  Claude Code users employ for GLM), anthropic, ollama, claude-cli.
+  Observability decorators wrap the ROUTER, so calls record once and the
+  recorded model id keeps its prefix — the vendor stays visible in
+  traces and cost tables. `DEFAULT_PRICES` has an APPROXIMATE `/glm/i`
+  row; override with a custom PriceTable for billing-grade numbers.
+  Covered by `tests/llm-routing.test.ts`. The 5-series pins reject
   sampling params (the client omits `temperature`/`top_p` via
   `modelSupportsSamplingParams`) and run adaptive thinking by default —
   thinking counts against `max_tokens`, which is why `STRATEGY_MAX_TOKENS`
