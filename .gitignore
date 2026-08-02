@@ -11,4 +11,5 @@ coverage/
 .DS_Store
 build/
 runs/
+burnin/logs/
 .claude/settings.*
