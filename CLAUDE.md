@@ -1246,6 +1246,24 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   + SSE would roughly double the server surface for marginal latency
   benefit on a single-observer dev-loop tool — not worth it.
 
+## Considered and rejected (do not re-propose naively)
+
+- **Trust-gated restore of the L3 skeletal short-circuit.** Tempting on
+  mature families (saves the ~$0.07 Opus plan), rejected 2026-08-02 for a
+  structural reason: the Opus plan is what CARVES OUT the phase boundaries
+  that skills match against — collapse the task into one subtask and the
+  skill prefilter matches one build-ish skill for the whole thing, the
+  verification phase stops existing as a subtask, and the compiled-script
+  dispatch (the $0.00 path) is STARVED on exactly the families it serves.
+  Net effect: pay less for planning, pay more for verification, lose the
+  checkpoints. Also the proposed gate was measuring the wrong thing: L2
+  trust counts well-scoped SUBTASK executions, not whole-task
+  decomposition ability — the same inference error behind the monolithic
+  Pong (see "Prefilter decomposable hint"). If plan cost ever matters at
+  scale, the right shape is PLAN TEMPLATING: memoise the structure of
+  successful plans per (trusted L2 × task shape) and instantiate without
+  Opus — phases survive, skills keep matching, dispatch keeps firing.
+
 ## Deferred / explicitly out of scope
 
 - Molecule / cell *composition* as a higher-order layer (the original
@@ -1255,9 +1273,11 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 
 ## Plan file
 
-The approved plan lives at
-`docs/architecture-plan.md`.
-Reference it before major refactors.
+The original greenfield plan (`docs/architecture-plan.md`) was removed in the
+2026-08 cleanup — it predated skills, manifests, the burn-in harness and the
+5-series model migration, and THIS file has long superseded it as the
+reference. Recover it from git history if the genesis rationale is ever
+needed. Before major refactors, this file is what you consult.
 
 ## Language
 
