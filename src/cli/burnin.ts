@@ -129,6 +129,21 @@ export function toCsvRow(args: {
 export const CSV_HEADER =
   'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,trace';
 
+/**
+ * Signature of a MISCONFIGURED launch, not a task failure: the run died
+ * almost instantly and spent nothing (dead API key → 401 on the first
+ * call, wrong provider env, missing login…). Observed live: `npm run
+ * burnin` without ATOMA_LLM=claude-cli marched through the task list at
+ * two phantom failed rows per minute against a revoked key. One config
+ * failure should abort the batch, not pollute the curve N times.
+ */
+export function looksLikeConfigFailure(stats: RunStats, durationS: number | null): boolean {
+  if (stats.outcome === 'delivered') return false;
+  const fast = durationS !== null && durationS <= 15;
+  const spentNothing = stats.costUsd === null || stats.costUsd === 0;
+  return fast && spentNothing;
+}
+
 export function summarize(
   rows: { family: string; outcome: string; costUsd: number | null }[]
 ): string {
@@ -276,6 +291,15 @@ async function main(): Promise<void> {
         `llm=${stats.llmCalls ?? '?'} (O${stats.opusCalls}/S${stats.sonnetCalls}/H${stats.haikuCalls})  ` +
         `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}`
     );
+    if (summaryRows.length === 1 && looksLikeConfigFailure(stats, durationS) && !argv.includes('--force')) {
+      console.error(
+        `\n✗ first task failed in ${durationS}s with zero spend — this is the signature of a\n` +
+          `  misconfigured provider (dead ANTHROPIC_API_KEY? missing ATOMA_LLM=claude-cli?),\n` +
+          `  not of a hard task. Batch ABORTED to avoid filling the curve with phantom rows.\n` +
+          `  Check the last log under burnin/logs/, fix the env, and re-run (--force to override).`
+      );
+      process.exit(1);
+    }
   }
 
   console.log('\n== batch summary ==');

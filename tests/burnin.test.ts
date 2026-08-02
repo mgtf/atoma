@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseRunLog, toCsvRow, summarize, CSV_HEADER } from '../src/cli/burnin.js';
+import { parseRunLog, toCsvRow, summarize, looksLikeConfigFailure, CSV_HEADER } from '../src/cli/burnin.js';
 
 // Trimmed from a real delivered run (colstat, run 9): the exact formatSummary
 // shape the harness parses in production.
@@ -53,6 +53,23 @@ describe('burnin parseRunLog', () => {
     expect(s.outcome).toBe('error');
     expect(s.costUsd).toBeNull();
     expect(s.llmCalls).toBeNull();
+  });
+});
+
+describe('burnin looksLikeConfigFailure — abort-the-batch guard', () => {
+  it('flags an instant zero-spend failure (dead key signature, observed live)', () => {
+    const s = parseRunLog('--- run failed ---\nTOTAL  2  4  0  0  0.0000  ');
+    expect(looksLikeConfigFailure(s, 1)).toBe(true);
+  });
+
+  it('does NOT flag a real failure that spent real money over real time', () => {
+    const s = parseRunLog(FAILED_LOG);
+    expect(looksLikeConfigFailure(s, 902)).toBe(false);
+  });
+
+  it('does NOT flag a fast cheap DELIVERED run (mature families are supposed to be fast)', () => {
+    const s = parseRunLog(DELIVERED_LOG);
+    expect(looksLikeConfigFailure(s, 12)).toBe(false);
   });
 });
 
