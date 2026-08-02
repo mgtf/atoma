@@ -68,7 +68,7 @@ describe('OllamaLlmClient', () => {
 
     const client = new OllamaLlmClient({ defaultModel: 'glm-5.1:cloud' });
     const resp = await client.complete({
-      model: 'ignored-will-use-default',
+      model: 'claude-haiku-4-5-20251001', // Anthropic pin → collapses onto defaultModel
       systemPrompt: 'you are a helper',
       userContent: 'hi',
     });
@@ -103,7 +103,7 @@ describe('OllamaLlmClient', () => {
     });
     const client = new OllamaLlmClient();
     await client.complete({
-      model: 'ignored',
+      model: 'claude-opus-5', // Anthropic pin → collapses onto defaultModel
       systemPrompt: 's',
       userContent: 'u',
       tools: [
@@ -347,7 +347,7 @@ describe('OllamaLlmClient', () => {
       baseUrl: 'http://remote:9999/',
       defaultModel: 'llama3.3:70b',
     });
-    await client.complete({ model: 'ignored', systemPrompt: 's', userContent: 'u' });
+    await client.complete({ model: 'claude-opus-5', systemPrompt: 's', userContent: 'u' });
     expect(String(calls[0]![0])).toBe('http://remote:9999/api/chat');
     const body = JSON.parse(calls[0]![1]!.body as string);
     expect(body.model).toBe('llama3.3:70b');
