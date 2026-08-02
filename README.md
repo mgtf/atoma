@@ -57,6 +57,7 @@ each run's trace, and the whole table regenerates with `npm run burnin`.
 | Frontier-model (Opus) calls per run | **exactly 1** (the plan — by design) |
 | Mature-pattern subtask, L2 happy path | **$0.05** (was $0.18 before prefilters — 0 Opus, 0 Sonnet) |
 | Prompt-cache hits per run | **0.2 – 1.7M tokens** at 10% input price |
+| Decomposable task → 3 deliverables in **parallel branches** (measured over 6 runs / 18 tools) | $0.40/run = **$0.13 per deliverable** — the fan-out amortizes the plan |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
 | Broken deliverable detected by the compiled verifier | **exit 1, per-command diff** (mutation-tested) |
 | Full state wipe → relearn, three separate epochs | **same decay trajectory every time** |

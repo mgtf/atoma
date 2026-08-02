@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "trio-1",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) jsonlint/ — Node CLI validating a JSON file: path as argv[2], prints 'valid' and exits 0, or the parse error to stderr and exits 1; (2) wordcount/ — Node CLI printing the number of words in a text file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (3) b64/ — Node CLI base64-encoding a file (argv[2]) to stdout, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    },
+    {
+      "id": "trio-2",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) rot13/ — Node CLI printing the ROT13 transform of a text file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (2) csvcols/ — Node CLI printing the number of comma-separated columns of the FIRST line of a file (argv[2]), exit 1 with clear stderr on missing or empty file; (3) filesize/ — Node CLI printing the size in bytes of a file (argv[2]), exit 1 with clear stderr on a missing file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    },
+    {
+      "id": "trio-3",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) revwords/ — Node CLI printing each line of a text file (argv[2]) with its word order reversed, exit 1 with clear stderr on missing/unreadable file; (2) sumints/ — Node CLI printing the sum of all standalone integers found in a file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (3) noblank/ — Node CLI printing a file (argv[2]) with blank lines removed, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    },
+    {
+      "id": "trio-4",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) slugline/ — Node CLI printing each line of a file (argv[2]) as a lowercase-hyphenated slug, exit 1 with clear stderr on missing/unreadable file; (2) maxnum/ — Node CLI printing the largest number found in a whitespace-separated file (argv[2]), exit 1 with clear stderr on missing file or when no number is present; (3) tabcount/ — Node CLI printing the number of TAB characters in a file (argv[2]), exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    },
+    {
+      "id": "trio-5",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) initials/ — Node CLI printing, for each line of a file (argv[2]), the first letter of each word concatenated in uppercase, exit 1 with clear stderr on missing/unreadable file; (2) evenlines/ — Node CLI printing only the even-numbered lines of a file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (3) charcount/ — Node CLI printing the number of characters (excluding newlines) in a file (argv[2]), exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    },
+    {
+      "id": "trio-6",
+      "family": "cli-trio",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files — fully unrelated, buildable independently (in parallel if you wish): (1) titlecase/ — Node CLI printing a text file (argv[2]) with every word capitalized, exit 1 with clear stderr on missing/unreadable file; (2) minnum/ — Node CLI printing the smallest number found in a whitespace-separated file (argv[2]), exit 1 with clear stderr on missing file or when no number is present; (3) lastword/ — Node CLI printing the last word of each line of a file (argv[2]), exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour, and each tool is verified by re-running every invocation documented in its README exactly as written."
+    }
+  ]
+}
