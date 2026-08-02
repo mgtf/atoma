@@ -180,6 +180,12 @@ export class ClaudeCliLlmClient implements LlmClient {
  * Exported for tests.
  */
 export function resolveCliModel(model: string): string {
+  // Debug-only escape hatch: collapse EVERY tier onto one model. This
+  // deliberately breaks the cheapest-model-that-can-answer gradient — its
+  // only legitimate uses are tier-isolation debugging and smoke tests.
+  // PER-TIER selection does not live here: it's the provider-agnostic
+  // ATOMA_MODEL_L1/L2/L3 (src/core/models.ts), whose values arrive as
+  // req.model — aliases like 'sonnet' pass straight through below.
   const override = process.env['ATOMA_CLAUDE_MODEL'];
   if (override && override.trim().length > 0) return override.trim();
   if (/haiku/i.test(model)) return 'haiku';

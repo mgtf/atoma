@@ -15,7 +15,7 @@ import {
   type AtomRegistry,
   type AtomType,
 } from '../registry/atomRegistry.js';
-import { PIN_HAIKU, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
+import { modelForTier, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
 import {
   buildTargetContext,
@@ -144,7 +144,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       params: args.params,
     });
     this.model = args.model;
-    this.validationModel = args.validationModel ?? PIN_HAIKU;
+    this.validationModel = args.validationModel ?? modelForTier(1);
     this.registry = args.registry;
     this.skillRegistry = args.skillRegistry ?? null;
   }
@@ -156,7 +156,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     skillRegistry: SkillRegistry | null = null
   ): Promise<L3Atom> {
     if (type.tier !== 3) throw new Error(`L3Atom.fromType requires tier=3`);
-    const model = client ? await resolveLatestOpus(client) : FALLBACK_OPUS;
+    // An explicit ATOMA_MODEL_L3 pins the tier and SKIPS the network
+    // resolution — provider-agnostic override beats live Opus discovery.
+    const pinned = modelForTier(3);
+    const model = pinned !== FALLBACK_OPUS ? pinned : client ? await resolveLatestOpus(client) : FALLBACK_OPUS;
     return new L3Atom({
       name: type.name,
       ordinal: type.ordinal,
@@ -173,7 +176,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   static buildWithModel(
     type: AtomType,
     registry: AtomRegistry,
-    model: string = FALLBACK_OPUS,
+    model: string = modelForTier(3),
     skillRegistry: SkillRegistry | null = null
   ): L3Atom {
     if (type.tier !== 3) throw new Error(`L3Atom.buildWithModel requires tier=3`);

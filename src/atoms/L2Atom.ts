@@ -14,7 +14,7 @@ import {
   type AtomRegistry,
   type AtomType,
 } from '../registry/atomRegistry.js';
-import { PIN_HAIKU, PIN_SONNET } from '../core/models.js';
+import { modelForTier } from '../core/models.js';
 import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
@@ -510,8 +510,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       tools: [...args.tools],
       params: args.params,
     });
-    this.model = args.model ?? PIN_SONNET;
-    this.validationModel = args.validationModel ?? PIN_HAIKU;
+    this.model = args.model ?? modelForTier(2);
+    this.validationModel = args.validationModel ?? modelForTier(1);
     this.registry = args.registry;
     this.skillRegistry = args.skillRegistry ?? null;
     if (args.peers) this.peers.push(...args.peers);

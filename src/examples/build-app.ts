@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
+import { modelForTier } from '../core/models.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
@@ -166,9 +167,19 @@ async function main(): Promise<void> {
     useOllama
       ? `llm provider: ollama — ${process.env['OLLAMA_MODEL'] ?? 'glm-5.1:cloud'} @ ${process.env['OLLAMA_BASE_URL'] ?? 'http://localhost:11434'}`
       : useClaudeCli
-        ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${process.env['ATOMA_CLAUDE_MODEL'] ? ` (overridden: ${process.env['ATOMA_CLAUDE_MODEL']})` : ''}`
+        ? `llm provider: claude-cli — local Claude Code auth; tiers map to haiku/sonnet/opus aliases${
+            process.env['ATOMA_CLAUDE_MODEL']
+              ? ` (⚠ DEBUG override, ALL tiers: ${process.env['ATOMA_CLAUDE_MODEL']} — cost gradient flattened)`
+              : ''
+          }`
         : `llm provider: anthropic`
   );
+  // Provider-agnostic per-tier model pins (ATOMA_MODEL_L1/L2/L3) — show
+  // the effective gradient whenever any tier deviates from its default.
+  const tierPins = ([1, 2, 3] as const)
+    .filter((t) => process.env[`ATOMA_MODEL_L${t}`])
+    .map((t) => `L${t}=${modelForTier(t)}`);
+  if (tierPins.length > 0) console.log(`tier models: ${tierPins.join('  ')}`);
 
   // Runs BEFORE the sandbox is constructed: ToolSandbox realpath-resolves
   // its root at construction, so archiving the directory afterwards would

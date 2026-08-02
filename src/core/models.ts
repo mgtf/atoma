@@ -11,6 +11,30 @@ export const FALLBACK_OPUS = 'claude-opus-5';
 export const PIN_SONNET = 'claude-sonnet-5';
 export const PIN_HAIKU = 'claude-haiku-4-5-20251001';
 
+/**
+ * PROVIDER-AGNOSTIC per-tier model selection. The project's unit of
+ * configuration is the TIER (decreasing model power L3→L1 is the whole
+ * thesis), not any vendor's model family — so the env vars are named by
+ * tier and accept ANY model id the active LlmClient can serve:
+ *
+ *   ATOMA_MODEL_L1=...   default: claude-haiku-4-5-20251001
+ *   ATOMA_MODEL_L2=...   default: claude-sonnet-5
+ *   ATOMA_MODEL_L3=...   default: claude-opus-5 (or live-resolved Opus)
+ *
+ * Read at CALL time so tests and per-run env changes behave. Notes per
+ * provider: under claude-cli, aliases work ('sonnet' for L3 is the
+ * no-Opus-on-this-plan escape hatch — the L1/L2 gradient below survives);
+ * under ollama, a non-`claude-*` value is honoured verbatim per tier
+ * (see resolveOllamaModel); validators/prefilters always ride the L1
+ * tier's model — validation is a yes/no, it belongs on the cheapest
+ * capable model regardless of vendor.
+ */
+export function modelForTier(tier: 1 | 2 | 3): string {
+  const env = process.env[`ATOMA_MODEL_L${tier}`];
+  if (env && env.trim().length > 0) return env.trim();
+  return tier === 1 ? PIN_HAIKU : tier === 2 ? PIN_SONNET : FALLBACK_OPUS;
+}
+
 export async function resolveLatestOpus(client: Anthropic): Promise<string> {
   try {
     const page = await client.models.list({ limit: 100 });

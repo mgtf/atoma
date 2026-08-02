@@ -7,7 +7,7 @@ import type {
   Task,
   Tier,
 } from '../core/types.js';
-import { PIN_HAIKU } from '../core/models.js';
+import { modelForTier } from '../core/models.js';
 import { parseWith } from './json.js';
 
 /**
@@ -381,7 +381,7 @@ export async function prefilterStrategy(args: {
 
   try {
     const resp = await args.ctx.llm.complete({
-      model: args.model ?? PIN_HAIKU,
+      model: args.model ?? modelForTier(1),
       systemPrompt: args.systemPrompt ?? PREFILTER_SYSTEM_PROMPT,
       userContent,
       params: PREFILTER_PARAMS,

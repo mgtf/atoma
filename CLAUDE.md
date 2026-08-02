@@ -847,7 +847,19 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - Model IDs live in `src/core/models.ts`: `PIN_HAIKU`
   (`claude-haiku-4-5`), `PIN_SONNET` (`claude-sonnet-5`),
   `FALLBACK_OPUS` (`claude-opus-5`). L3 resolves Opus dynamically at
-  construction via `resolveLatestOpus`. The 5-series pins reject
+  construction via `resolveLatestOpus`.
+- **Per-tier model selection is PROVIDER-AGNOSTIC: `modelForTier(tier)`**
+  reads `ATOMA_MODEL_L1/L2/L3` at call time (defaults = the pins above)
+  and is the ONLY place tier→model policy lives — L1/L2/L3 atoms,
+  validators and prefilters all draw from it (validation always rides
+  the L1 tier's model). The vars are named by TIER, not by vendor model
+  family, so any provider's ids work: `ATOMA_MODEL_L3=sonnet` under
+  claude-cli (no-Opus plans), a qwen gradient under ollama
+  (`resolveOllamaModel` honours explicit non-`claude-*` values verbatim,
+  while Anthropic pins still collapse onto `defaultModel`), or future
+  clients' ids as-is. An explicit `ATOMA_MODEL_L3` also SKIPS
+  `resolveLatestOpus`'s network call. Covered by
+  `tests/model-tiers.test.ts`. The 5-series pins reject
   sampling params (the client omits `temperature`/`top_p` via
   `modelSupportsSamplingParams`) and run adaptive thinking by default —
   thinking counts against `max_tokens`, which is why `STRATEGY_MAX_TOKENS`
@@ -895,9 +907,15 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   Implementation notes:
     - `req.model` maps to CLI ALIASES by tier (/haiku/→'haiku',
       /sonnet/→'sonnet', /opus/→'opus') because subscription-served
-      model versions shift while aliases stay valid. Override all
-      tiers with `ATOMA_CLAUDE_MODEL`. The tier call-graph shape
-      holds; the exact models are whatever Claude Code resolves.
+      model versions shift while aliases stay valid. Per-tier selection
+      does NOT live in this client: it's the provider-agnostic
+      `ATOMA_MODEL_L1/L2/L3` (see `modelForTier`), whose values arrive
+      as `req.model` — e.g. `ATOMA_MODEL_L3=sonnet` is the
+      no-Opus-on-this-plan escape hatch, the alias passes through
+      verbatim and the L1/L2 gradient below survives.
+      `ATOMA_CLAUDE_MODEL` (ALL tiers onto one model) is DEBUG-ONLY: it
+      deliberately flattens the cost gradient the whole project exists
+      to exploit, and the build-app banner shouts when it is set.
     - Tools are bridged through an IN-PROCESS MCP server whose
       handlers call `req.executor` directly — sandbox, truncation
       (`truncateToolResultContent`), and `onToolInvocation` all

@@ -27,6 +27,15 @@ describe('resolveCliModel — tier pins → Claude Code aliases', () => {
     process.env['ATOMA_CLAUDE_MODEL'] = 'sonnet';
     expect(resolveCliModel(FALLBACK_OPUS)).toBe('sonnet');
   });
+
+  it('tier-agnostic per-tier selection flows through as req.model (aliases pass verbatim)', () => {
+    // ATOMA_MODEL_L3=sonnet (models.ts) makes L3 calls arrive with
+    // req.model='sonnet' — the alias passes straight through: this is the
+    // no-Opus-on-this-plan escape hatch, and the L1/L2 gradient below it
+    // is untouched because those tiers carry their own models.
+    expect(resolveCliModel('sonnet')).toBe('sonnet');
+    expect(resolveCliModel(PIN_HAIKU)).toBe('haiku');
+  });
 });
 
 describe('cliEffortFor — the one generation lever the CLI transport has', () => {

@@ -21,13 +21,14 @@ import type {
  *   specific; don't expect the same cost-per-run profile as the
  *   Haiku-heavy happy path. The `usage.cacheReadInputTokens` field
  *   stays at 0 — it's a metric for Anthropic runs only.
- * - The `req.model` field is IGNORED here: the atom code dispatches
- *   between PIN_HAIKU / PIN_SONNET / FALLBACK_OPUS based on tier, but
- *   Ollama runs a single model per endpoint. Hence all three tiers'
- *   requests land on the configured `defaultModel`. Cost-discipline
- *   decisions made at atom level (validator on cheap, plan on
- *   expensive) still structure the CALL GRAPH, but the underlying
- *   per-call cost becomes uniform.
+ * - Model mapping (`resolveOllamaModel`): Anthropic-pinned `req.model`
+ *   values (claude-*) collapse onto the configured `defaultModel` — the
+ *   historical single-model behaviour. But an EXPLICIT non-claude model
+ *   (set per tier via the provider-agnostic ATOMA_MODEL_L1/L2/L3) is
+ *   honoured VERBATIM, so a local three-tier gradient works:
+ *     ATOMA_MODEL_L1=qwen3:4b ATOMA_MODEL_L2=qwen3:14b ATOMA_MODEL_L3=qwen3:32b
+ *   Cost-discipline decisions at atom level (validator on cheap, plan on
+ *   expensive) structure the call graph either way.
  * - Declared-tools scope enforcement (#8a) and onToolInvocation
  *   mirror the Anthropic client: an LLM that asks for a tool not in
  *   `req.tools` gets a tool_result error and the executor isn't
@@ -76,6 +77,18 @@ interface OllamaChatResponse {
   eval_count?: number;
 }
 
+/**
+ * Which Ollama model serves this request. Anthropic pins (claude-*) are
+ * tier markers, not real endpoints here — they collapse onto the client's
+ * defaultModel. Anything else is an EXPLICIT choice made via the
+ * provider-agnostic per-tier env vars (ATOMA_MODEL_L1/L2/L3) and is
+ * honoured verbatim, enabling a genuine cheap→expensive local gradient.
+ */
+export function resolveOllamaModel(reqModel: string, defaultModel: string): string {
+  if (!reqModel || /^claude-/i.test(reqModel)) return defaultModel;
+  return reqModel;
+}
+
 export class OllamaLlmClient implements LlmClient {
   private readonly baseUrl: string;
   private readonly defaultModel: string;
@@ -88,7 +101,7 @@ export class OllamaLlmClient implements LlmClient {
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
-    const model = this.defaultModel;
+    const model = resolveOllamaModel(req.model, this.defaultModel);
     const messages: OllamaMessage[] = [
       { role: 'system', content: req.systemPrompt },
       { role: 'user', content: req.userContent },

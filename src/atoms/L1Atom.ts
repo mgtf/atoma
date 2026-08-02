@@ -1,7 +1,7 @@
 import { Atom } from '../core/atom.js';
 import type { Plan, Result, RunContext, Task, Tier } from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
-import { PIN_HAIKU } from '../core/models.js';
+import { modelForTier } from '../core/models.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { SkillRegistry } from '../skills/registry.js';
@@ -40,7 +40,7 @@ export class L1Atom extends Atom {
       tools: [...args.tools],
       params: args.params,
     });
-    this.model = args.model ?? PIN_HAIKU;
+    this.model = args.model ?? modelForTier(1);
     this.skillsList = args.skills ? [...args.skills] : [];
   }
 
@@ -78,7 +78,7 @@ export class L1Atom extends Atom {
 
   static fromType(
     type: AtomType,
-    model: string = PIN_HAIKU,
+    model: string = modelForTier(1),
     skillRegistry?: SkillRegistry
   ): L1Atom {
     if (type.tier !== 1) {
