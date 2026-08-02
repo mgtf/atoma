@@ -6,10 +6,10 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-650_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-671_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
-![cost](https://img.shields.io/badge/full_deliverable-~$0.50-gold)
+![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
 ![zero](https://img.shields.io/badge/learned_tasks-$0.00-black)
 ![benchmark](https://img.shields.io/badge/vs_Opus--direct-1.5–4.7×_cheaper_on_learned_families-success)
 
@@ -47,16 +47,19 @@ progressively compiled away. Three mechanisms compound:
 
 ## 📊 Measured, not promised
 
-Every number below comes from live runs recorded in `./runs` (traces, tokens, costs).
+Every number below comes from live runs — per-call timings, tokens and costs are in
+each run's trace, and the whole table regenerates with `npm run burnin`.
 
 | Metric | Value |
 |---|---|
-| Full CLI deliverable (build + harden + document + **re-verify**) | **~$0.50 / run** |
+| **Day one** (fresh clone, empty registry): full CLI deliverable | **$0.37** — bootstrap + plan + build + learn |
+| Same task, **second run** (skills matched, trust earned) | **$0.22 · 138s** wall |
 | Frontier-model (Opus) calls per run | **exactly 1** (the plan — by design) |
 | Mature-pattern subtask, L2 happy path | **$0.05** (was $0.18 before prefilters — 0 Opus, 0 Sonnet) |
-| Prompt-cache hits per run | **0.8 – 1.7M tokens** at 10% input price |
+| Prompt-cache hits per run | **0.2 – 1.7M tokens** at 10% input price |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
 | Broken deliverable detected by the compiled verifier | **exit 1, per-command diff** (mutation-tested) |
+| Full state wipe → relearn, three separate epochs | **same decay trajectory every time** |
 
 ## 🥊 Head-to-head: atoma vs frontier-direct
 
@@ -96,6 +99,29 @@ Three honest readings:
 3. **Frontier-direct cost is wildly variant** ($0.22–$1.06 on comparable tasks —
    thinking depth is unpredictable), while mature atoma is stable at $0.20–0.23.
    For billable production, cost *predictability* matters nearly as much as the mean.
+
+*The benchmark's trained state (compiled skills, mature counters) is preserved under
+the `trained-snapshot` git tag; the repo itself ships clean — see the lifecycle note
+below.*
+
+## 🧬 The repo is the framework; learned state is runtime data
+
+`skills/`, the registry DBs and the run traces are **gitignored by design**: they
+mutate on every run, and they are the system's memory, not its source. A fresh clone
+starts at day zero and earns its own state — a property we validate by wiping
+everything and re-running from scratch. Three full epochs so far, same trajectory
+each time: bootstrap the canonical atoms, learn a build+verify skill pair on the
+first novel task (one distillation call produces both), reuse them intra-run, then
+watch the per-task cost fall. The `trained-snapshot` tag archives a fully-matured
+store for inspection or restoration.
+
+Recent transport engineering, measured on the same warm task:
+
+| Fix | Effect |
+|---|---|
+| `effort` pin through the Claude Code CLI (its `maxTokens` is advisory-only) | skill-compile calls: ~7 min → ~1 min |
+| Thinking parity for Haiku-tier calls (the CLI defaulted thinking ON; the API never asks) | prefilters **17.5s → 4.4s/call**; whole run **250s → 138s (−45%)** |
+| Transport-aware run budgets, orphan-process group-kill, config-failure batch abort | no more phantom rows, port squatters, or deadline-starved compiles |
 
 ## 🏗️ Architecture
 
@@ -173,8 +199,15 @@ structurally:
 - **Sandboxed execution** — filesystem jail with symlink containment, child-process env
   allowlist (secrets physically absent from anything the model spawns), executor-level
   tool-scope enforcement.
-- **Full observability** — every LLM call, tool call, registry mutation and skill event
-  is recorded per run; a built-in web visualizer replays any run end-to-end.
+- **Full observability, including RIGHT NOW** — every LLM call, tool call, registry
+  mutation and skill event is recorded per run; the built-in web visualizer replays
+  any run end-to-end, shows a **live "happening now" banner** for in-flight calls
+  (ticking elapsed, >120s flagged), marks calls a crash or network blip left
+  unfinished as *interrupted*, and renders the burn-in cost curve in its own tab.
+- **Operator tooling with an undo** — `registry history <name>` lists every archived
+  version of an atom; `registry rollback <name> --to <v>` restores one exactly
+  (append-only history, trust counters reset — a restored behaviour re-earns its
+  reputation like any other change).
 
 ## 🔌 Runs on your terms
 
@@ -190,14 +223,15 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 650 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 671 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
 ATOMA_LLM=claude-cli  npm run example:build "…"    # Claude subscription, no key
 
-npm run viz          # replay any recorded run in the browser
+npm run viz          # replay any run — or watch a live one, in-flight calls included
 npm run registry -- list             # inspect the persisted atom taxonomy
+npm run registry -- history Hydrogen # archived versions; rollback --to <v> restores one
 npm run skills -- list               # inspect learned skills, trust counters, refusals
 
 npm run burnin       # run a task batch through the real pipeline and append
@@ -225,15 +259,17 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 
 ## 🗺️ Where this goes
 
-- **Today** — self-optimizing task execution with compounding cost decay, live-validated
-  on real deliverables (web artefacts, HTTP APIs, CLIs, documentation).
-- **Next** — richer compiled-skill library, cross-project skill sharing, registry
-  rollback tooling.
+- **Today** — self-optimizing task execution with compounding cost decay, validated
+  across three from-scratch epochs on real deliverables (web artefacts, HTTP APIs,
+  CLIs, documentation), with live in-flight observability and operator undo.
+- **Next** — cross-project skill sharing, a probe-manifest equivalent for browser
+  evidence (the web tier's path to zero-token verification), prefilter catalog
+  pruning once registries grow past ~20 atoms.
 - **The bet** — agent platforms will be judged on **marginal cost per solved task**.
   atoma is built so that number trends to zero.
 
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 650 tests · three LLM transports · every claim above is reproducible from <code>./runs</code></sub>
+<sub>TypeScript · SQLite · zod · 671 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>
