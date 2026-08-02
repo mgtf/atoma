@@ -12,4 +12,4 @@ coverage/
 build/
 runs/
 burnin/logs/
-.claude/settings.*
+.claude/settings.local.json
