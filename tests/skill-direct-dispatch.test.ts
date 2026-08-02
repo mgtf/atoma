@@ -140,18 +140,18 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(calls).toHaveLength(3);
     expect(calls[0]).toEqual({
       name: 'write_file',
-      args: { path: '_skill_scaffold-config.cjs', content: SCRIPT_BODY },
+      args: { path: '_skill_scaffold-config.mjs', content: SCRIPT_BODY },
     });
     expect(calls[1]!.name).toBe('run_shell');
     expect(calls[1]!.args).toEqual({
       command: 'node',
-      args: ['_skill_scaffold-config.cjs', JSON.stringify('scaffold the config')],
+      args: ['_skill_scaffold-config.mjs', JSON.stringify('scaffold the config')],
     });
     expect(calls[2]!.name).toBe('run_shell');
     expect(calls[2]!.args['args']).toEqual([
       '-e',
       'require("fs").rmSync(process.argv[1],{force:true})',
-      '_skill_scaffold-config.cjs',
+      '_skill_scaffold-config.mjs',
     ]);
 
     // Skill success counter bumped by the dispatch itself (the supervise
@@ -217,7 +217,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // cleaned up its scratch file on the way out (the `finally`), so a failed
     // dispatch doesn't leave debris for the LLM loop to trip over.
     expect(calls.map((c) => c.name)).toEqual(['write_file', 'run_shell', 'run_shell']);
-    expect(calls[2]!.args['args']).toContain('_skill_scaffold-config.cjs');
+    expect(calls[2]!.args['args']).toContain('_skill_scaffold-config.mjs');
     // A deterministic failure is NOT a skill failure: the LLM loop got
     // its shot and approved, so the skill records a success.
     const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;

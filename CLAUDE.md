@@ -758,20 +758,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `readme-from-verified-runs` compiled script was hand-patched (via
   `SkillRegistry.save`, counters preserved) to write the manifest — it
   already collected exactly the needed data.
-- **Node scratch scripts are `.cjs` — the workspace owns `.js` semantics.**
-  `scriptExtension('node')` returns `cjs`: the scratch `_skill_*` file
+- **Node scratch scripts are `.mjs` — the workspace owns `.js` semantics.**
+  `scriptExtension('node')` returns `mjs`: the scratch `_skill_*` file
   lands in the WORKSPACE, and a task-authored root `package.json` with
-  `"type": "module"` turns any `.js` there into ESM — a compiled
-  CommonJS script then dies with "require is not defined in ES module
-  scope". Observed live (triov batch, 2026-08-02): two consecutive
-  dispatch failures on exactly this drove a natural #C4b demotion of a
-  script whose logic was perfectly sound; the full self-healing stack
-  (dispatch → contract failure → streak → demotion → stamp → llm
-  fallback) executed autonomously across two runs with zero failed
-  deliverables — working as designed, on the wrong root cause. The
-  compile prompt now pins COMMONJS explicitly (never import/export),
-  and the demoted skill was reset (sanctioned path) to re-earn
-  compilation under the fixed runtime.
+  `"type": "module"` flipped a bare-`.js` scratch to ESM — the compiled
+  CommonJS script died with "require is not defined in ES module scope"
+  (triov batch, 2026-08-02: two consecutive dispatch failures → natural
+  #C4b demotion of a logically sound script; the full self-healing stack
+  executed autonomously across two runs with zero failed deliverables —
+  working as designed, on the wrong root cause). The INVARIANT is the
+  explicit extension — never bare `.js`; ESM (`.mjs`) over `.cjs` is the
+  house-coherence choice, the repo itself being `"type": "module"` +
+  NodeNext. The compile prompt pins ESM (import from 'node:…', no
+  __dirname/__filename — use process.cwd()). A legacy CommonJS body
+  written to `.mjs` crashes cleanly on first dispatch and the
+  directFailures streak demotes it — stragglers are covered. The skill
+  demoted by the original incident was reset (sanctioned path) to
+  re-earn compilation under the fixed runtime.
 - **Deterministic-failure streak demotes a brittle script (#C4b).**
   `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
   missing envelope) call `noteDirectFailure`, which bumps
