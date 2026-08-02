@@ -454,6 +454,20 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
    * shape (parallel vs sequential) is what differs — the aggregate
    * call shape stays uniform (it gets an in-order array of Results).
    */
+  /**
+   * Plan-scoped aliases from a hallucinated/anticipated `preferredChild`
+   * name to the L2 actually created for it. An Opus plan routinely names
+   * ONE invented child (e.g. "Ethane") on SEVERAL subtasks; without the
+   * alias each subtask's lookup missed independently and auto-created its
+   * own clone. Observed on the first cold-start run: phases 1 and 2 both
+   * asked for "Ethane" and the registry gained Ammonia AND CarbonDioxide —
+   * two L2s with the identical capability label, born two minutes apart,
+   * for one plan. Cleared at each dispatch; resolution happens in the
+   * synchronous prefix of runSubtask, so the map is race-free even under
+   * the parallel branch.
+   */
+  private readonly planChildAliases = new Map<string, string>();
+
   private async dispatchSubtasks(
     subtasks: readonly Plan['subtasks'][number][],
     plan: Plan,
@@ -461,6 +475,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     task: Task,
     ctx: RunContext
   ): Promise<Result[]> {
+    this.planChildAliases.clear();
     if (plan.aggregation.mode === 'sequential') {
       const out: Result[] = [];
       let previousSummary: string | undefined;
@@ -532,12 +547,26 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         }
         return found;
       }
+      // A previous subtask of THIS plan already resolved the same invented
+      // name — reuse its L2 instead of minting a same-labelled clone.
+      const aliased = this.planChildAliases.get(subtask.preferredChild);
+      if (aliased) {
+        const type = this.registry.getByName(aliased);
+        if (type && type.tier === 2) {
+          ctx.logger.info(
+            `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" → reusing ${aliased} created earlier in this plan`
+          );
+          return type;
+        }
+      }
       // Planner hallucination (same failure mode as in L2.resolveL1ForSubtask):
       // fallback to auto-creation instead of crashing the whole fan-out.
       ctx.logger.warn(
         `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" not in registry — auto-creating a fresh L2`
       );
-      return this.createSubtaskL2(subtask, strategy, parentTask);
+      const created = this.createSubtaskL2(subtask, strategy, parentTask);
+      this.planChildAliases.set(subtask.preferredChild, created.name);
+      return created;
     }
     if (idx > 0) {
       ctx.logger.warn(

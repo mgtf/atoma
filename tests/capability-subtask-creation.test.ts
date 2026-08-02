@@ -132,6 +132,57 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     expect(created.description).not.toMatch(/minesweeper|10x10|flag/i);
   });
 
+  it('a plan naming the SAME invented preferredChild on two subtasks creates ONE L2, not clones', async () => {
+    // Cold-start regression: the Opus plan asked for "Ethane" on both
+    // phases; each lookup missed independently and the registry gained
+    // Ammonia AND CarbonDioxide — identical capability labels, one plan.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const tools = makeTools(['write_file', 'read_file', 'run_shell']);
+    const l3Type = reg.create(3, {
+      description: 'l3',
+      systemPrompt: 'l3',
+      tools,
+      params: {},
+      createdBy: 'test',
+    });
+    const l3 = await L3Atom.fromType(l3Type, reg, undefined);
+    const ctx = { logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } };
+    const strategy = {
+      action: 'create',
+      seed: { description: 'CLI project orchestrator', tools: [], params: {} },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const any3 = l3 as any;
+    any3.planChildAliases.clear();
+    const first = any3.resolveL2ForSubtask(
+      { description: 'phase 1: build the CLI', preferredChild: 'Ethane' },
+      strategy,
+      { description: 'parent' },
+      0,
+      ctx
+    );
+    const second = any3.resolveL2ForSubtask(
+      { description: 'phase 2: document the CLI', preferredChild: 'Ethane' },
+      strategy,
+      { description: 'parent' },
+      1,
+      ctx
+    );
+    expect(second.name).toBe(first.name);
+    expect(reg.listByTier(2)).toHaveLength(1);
+    // A DIFFERENT invented name still gets its own L2 — the alias is
+    // per-name, not a blanket "reuse whatever was created last".
+    const third = any3.resolveL2ForSubtask(
+      { description: 'phase 3: something else', preferredChild: 'Benzene' },
+      strategy,
+      { description: 'parent' },
+      2,
+      ctx
+    );
+    expect(third.name).not.toBe(first.name);
+    expect(reg.listByTier(2)).toHaveLength(2);
+  });
+
   it('tier-2 description stays distinct from tier-1 for the same toolset (L2 ≠ L1)', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const webTools = makeTools(['write_file', 'start_static_server', 'validate_html']);
