@@ -12,4 +12,9 @@ coverage/
 build/
 runs/
 burnin/logs/
+burnin/results.csv
+# Learned runtime state — the framework is the repo, the trained state is
+# data. Skills regrow through use (the trained-snapshot tag preserves the
+# pre-reset store); the registry DBs were always ignored via *.db.
+skills/
 .claude/settings.local.json

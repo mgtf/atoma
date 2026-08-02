@@ -1,7 +1,0 @@
-{
-  "successes": 6,
-  "failures": 0,
-  "updatedAt": "2026-07-28T12:50:38.434Z",
-  "promotionRefusedAt": "2026-07-28T08:07:21.416Z",
-  "promotionRefusedReason": "Each invocation requires designing bespoke CLI business logic (e.g. temperature conversion, OS-username greeting, argument parsing rules) from a free-form natural-language spec, which is an irreducible LLM reasoning step, not a deterministic recipe that can be scripted once and reused verbatim."
-}

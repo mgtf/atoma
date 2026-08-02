@@ -1,7 +1,0 @@
-timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,trace
-2026-08-02T03:20:27.860Z,cli-inicheck,cli,delivered,0.4089,323,12,1,0,11,1,0,0,2026-08-02T03-20-28-501-aa0fe177.json
-2026-08-02T03:25:51.882Z,cli-jsonpick,cli,delivered,0.1993,190,10,1,0,9,2,0,0,2026-08-02T03-25-52-552-3055e450.json
-2026-08-02T03:29:02.312Z,web-counter,web,delivered,0.4484,410,13,1,1,11,0,1,2,2026-08-02T03-29-02-958-d3489ff3.json
-2026-08-02T03:35:54.134Z,web-stopwatch,web,delivered,0.4598,479,10,1,0,9,0,0,0,2026-08-02T03-35-54-764-0210a239.json
-2026-08-02T03:43:55.261Z,http-kv,http,failed,0.8355,902,31,1,2,28,0,0,4,2026-08-02T03-43-55-905-22ef5b8b.json
-2026-08-02T03:58:58.129Z,http-healthz,http,delivered,0.1876,173,10,1,0,9,0,0,0,2026-08-02T03-58-58-838-2e9012e7.json
