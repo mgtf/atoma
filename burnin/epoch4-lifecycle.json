@@ -1,0 +1,44 @@
+{
+  "tasks": [
+    {
+      "id": "e4-upper",
+      "family": "cli",
+      "goal": "a Node CLI 'upper' that uppercases a file: reads a path as argv[2], prints the file content uppercased to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-linecount",
+      "family": "cli",
+      "goal": "a Node CLI 'linecount' that counts lines of a file: reads a path as argv[2], prints the number of lines to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-revlines",
+      "family": "cli",
+      "goal": "a Node CLI 'revlines' that reverses the line order of a file: reads a path as argv[2], prints the lines in reverse order to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-trim",
+      "family": "cli",
+      "goal": "a Node CLI 'trimfile' that strips leading and trailing whitespace from every line of a file: reads a path as argv[2], prints the trimmed lines to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-tabs2spaces",
+      "family": "cli",
+      "goal": "a Node CLI 'tabs2spaces' that converts tabs to two spaces in a file: reads a path as argv[2], prints the converted content to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-numbered",
+      "family": "cli",
+      "goal": "a Node CLI 'numbered' that prefixes each line of a file with its 1-based line number and a tab: reads a path as argv[2], prints the numbered lines to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-dedupe",
+      "family": "cli",
+      "goal": "a Node CLI 'dedupe' that removes consecutive duplicate lines of a file: reads a path as argv[2], prints the deduplicated lines to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "e4-longest",
+      "family": "cli",
+      "goal": "a Node CLI 'longest' that prints the longest line of a file: reads a path as argv[2], prints the longest line (first one on ties) to stdout, exits 1 with a clear stderr error on a missing argument or unreadable file. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    }
+  ]
+}
