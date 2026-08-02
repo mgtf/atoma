@@ -41,6 +41,62 @@ function parseArgs(argv: string[]): Cli {
 
 const cli = parseArgs(process.argv.slice(2));
 const RUNS_DIR = resolve(cli.dir);
+const BURNIN_CSV = resolve(process.env['ATOMA_BURNIN_CSV'] ?? './burnin/results.csv');
+
+/**
+ * Parse burnin/results.csv (written by `npm run burnin`) into typed rows.
+ * The CSV is machine-written with simple cells (no quoting needed — task
+ * goals are not in it), so a plain split is correct. Missing file → empty
+ * list: the UI shows a "run a batch" hint instead of an error.
+ */
+function loadBurnin(): {
+  rows: {
+    ts: string;
+    taskId: string;
+    family: string;
+    outcome: string;
+    costUsd: number | null;
+    durationS: number | null;
+    llmCalls: number | null;
+    opusCalls: number;
+    sonnetCalls: number;
+    haikuCalls: number;
+    deterministicPhases: number;
+    escalations: number;
+    learnedSkills: number;
+    trace: string;
+  }[];
+  csvPath: string;
+} {
+  if (!existsSync(BURNIN_CSV)) return { rows: [], csvPath: BURNIN_CSV };
+  const lines = readFileSync(BURNIN_CSV, 'utf8').split('\n').filter((l) => l.trim().length > 0);
+  const rows = [];
+  for (const line of lines.slice(1)) {
+    const c = line.split(',');
+    if (c.length < 14) continue;
+    const num = (s: string | undefined): number | null => {
+      const n = Number(s);
+      return s !== undefined && s !== '' && Number.isFinite(n) ? n : null;
+    };
+    rows.push({
+      ts: c[0]!,
+      taskId: c[1]!,
+      family: c[2]!,
+      outcome: c[3]!,
+      costUsd: num(c[4]),
+      durationS: num(c[5]),
+      llmCalls: num(c[6]),
+      opusCalls: num(c[7]) ?? 0,
+      sonnetCalls: num(c[8]) ?? 0,
+      haikuCalls: num(c[9]) ?? 0,
+      deterministicPhases: num(c[10]) ?? 0,
+      escalations: num(c[11]) ?? 0,
+      learnedSkills: num(c[12]) ?? 0,
+      trace: c[13]!,
+    });
+  }
+  return { rows, csvPath: BURNIN_CSV };
+}
 const SKILLS_DIR = resolve(cli.skillsDir ?? process.env['ATOMA_SKILLS_DIR'] ?? './skills');
 const skillRegistry = new SkillRegistry(SKILLS_DIR);
 
@@ -430,6 +486,11 @@ const server = createServer((req, res) => {
 
   if (pathname === '/api/registries') {
     sendJson(res, 200, listRegistries());
+    return;
+  }
+
+  if (pathname === '/api/burnin') {
+    sendJson(res, 200, loadBurnin());
     return;
   }
 

@@ -27,6 +27,10 @@ npm run registry -- remove Glucose --db ./atoma-build.db  # delete dynamic-creat
 npm run registry -- --db ./atoma-build.db list   # override DB path
 
 npm run skills -- list                # all skills: kind, counters, refusal stamps
+
+npm run burnin                        # batch tasks through the REAL pipeline; appends
+                                      # per-run economics to burnin/results.csv
+npm run burnin -- tasks.json --family cli --out custom.csv --timeout 900000
 npm run skills -- list --l1 Helium
 npm run skills -- show Helium scaffold-node-ssr-sqlite-api
 npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + clear refusal
@@ -244,6 +248,21 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **Burn-in harness** (`npm run burnin`, `src/cli/burnin.ts`): runs a task
+  batch through the real `example:build` path (one clean workspace per task,
+  child spawned in its own process group and group-killed after
+  `✓ build finished` — delivered runs that started a server idle on purpose)
+  and appends per-run economics to `burnin/results.csv`: cost, duration,
+  calls per model tier, deterministic phases, escalations, learned skills,
+  trace filename. Every batch extends the cost-decay curve AND matures the
+  skill/trust counters — the harness IS usage. Task file:
+  `burnin/tasks-default.json` (`{tasks: [{id, family, goal}]}`); logs under
+  `burnin/logs/` (gitignored), CSV committed. Rendered by the viz's
+  **Burn-in** tab (`/api/burnin` reads the CSV, override with
+  `ATOMA_BURNIN_CSV`): per-family stat cards, an SVG cost-per-run scatter in
+  batch order (x axis = experience), and a row table where clicking opens
+  the run's full trace in the Runs view. Parsing/summary helpers are pure
+  and exported — covered by `tests/burnin.test.ts` on real log excerpts.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

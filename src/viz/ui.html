@@ -183,6 +183,7 @@
     <button data-view="runs" class="active">Runs</button>
     <button data-view="registry">Registry</button>
     <button data-view="skills">Skills</button>
+    <button data-view="burnin">Burn-in</button>
   </div>
   <select id="runSelect" title="Sélectionner un run"></select>
   <select id="registrySelect" title="Sélectionner un registre" style="display:none;"></select>
@@ -210,6 +211,12 @@
     <div id="skillsView" style="display:none;">
       <div id="skillsSummary"></div>
       <div id="skillsLanes"></div>
+    </div>
+    <!-- Burn-in view -->
+    <div id="burninView" style="display:none;">
+      <div id="burninSummary"></div>
+      <div id="burninChart"></div>
+      <div id="burninRows"></div>
     </div>
   </section>
   <section class="pane" id="rightPane">
@@ -1205,9 +1212,11 @@ function switchView(v) {
   const isRuns = v === 'runs';
   const isReg = v === 'registry';
   const isSkills = v === 'skills';
+  const isBurnin = v === 'burnin';
   $('runsView').style.display = isRuns ? '' : 'none';
   $('registryView').style.display = isReg ? '' : 'none';
   $('skillsView').style.display = isSkills ? '' : 'none';
+  $('burninView').style.display = isBurnin ? '' : 'none';
   $('runSelect').style.display = isRuns ? '' : 'none';
   $('registrySelect').style.display = isReg ? '' : 'none';
   $('registrySearch').style.display = isReg ? '' : 'none';
@@ -1216,10 +1225,150 @@ function switchView(v) {
     ? 'Sélectionne un évènement à gauche pour en voir le détail.'
     : isReg
       ? 'Sélectionne un atome à gauche pour en voir le détail.'
-      : 'Sélectionne une skill à gauche pour en voir le détail.';
+      : isBurnin
+        ? 'Clique une ligne du tableau pour ouvrir la trace du run correspondant.'
+        : 'Sélectionne une skill à gauche pour en voir le détail.';
   $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
   if (isReg && state.registries.length === 0) loadRegistries();
   if (isSkills && state.skillNamespaces.length === 0) loadSkills();
+  if (isBurnin) loadBurnin();
+}
+
+// ── Burn-in view ─────────────────────────────────────────────────────────
+// The cost-decay curve, rendered from burnin/results.csv via /api/burnin.
+// Left pane: per-family stat cards, an SVG scatter of cost per run in batch
+// order (the x axis IS experience), and the row table — clicking a row jumps
+// to that run's full trace in the Runs view.
+
+const FAMILY_COLORS = { cli: '#34d399', web: '#60a5fa', http: '#c084fc' };
+
+async function loadBurnin() {
+  $('burninSummary').innerHTML = '<div class="loader">Chargement…</div>';
+  let payload;
+  try {
+    const r = await fetch('/api/burnin');
+    payload = await r.json();
+  } catch (e) {
+    $('burninSummary').innerHTML = '<div class="empty">API burnin injoignable.</div>';
+    return;
+  }
+  const rows = payload.rows || [];
+  state.burninRows = rows;
+  if (rows.length === 0) {
+    $('burninSummary').innerHTML =
+      '<div class="empty">Aucune mesure — lance un batch avec <code>npm run burnin</code> (CSV attendu : ' +
+      payload.csvPath + ')</div>';
+    $('burninChart').innerHTML = '';
+    $('burninRows').innerHTML = '';
+    return;
+  }
+  renderBurninSummary(rows);
+  renderBurninChart(rows);
+  renderBurninRows(rows);
+}
+
+function renderBurninSummary(rows) {
+  const byFam = new Map();
+  for (const r of rows) {
+    const f = byFam.get(r.family) || { n: 0, ok: 0, cost: 0, costN: 0, det: 0, learned: 0, lastCost: null };
+    f.n++;
+    if (r.outcome === 'delivered') f.ok++;
+    if (r.costUsd != null) { f.cost += r.costUsd; f.costN++; f.lastCost = r.costUsd; }
+    f.det += r.deterministicPhases;
+    f.learned += r.learnedSkills;
+    byFam.set(r.family, f);
+  }
+  const el = $('burninSummary');
+  el.innerHTML = '';
+  const wrap = h('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;' });
+  for (const [fam, f] of [...byFam.entries()].sort()) {
+    const color = FAMILY_COLORS[fam] || 'var(--accent)';
+    const mean = f.costN ? (f.cost / f.costN) : null;
+    wrap.appendChild(h('div', { class: 'section', style: 'flex:1; min-width:150px; border-left: 3px solid ' + color + '; padding:8px 10px;' }, [
+      h('div', { style: 'font-weight:600; color:' + color + ';' }, fam),
+      h('div', { class: 'muted', style: 'font-size:11px;' },
+        f.ok + '/' + f.n + ' livrés · ' + f.det + ' phases $0.00 · ' + f.learned + ' skills appris'),
+      h('div', { style: 'font-size:18px; margin-top:2px;' },
+        (mean != null ? '$' + mean.toFixed(3) : '—') +
+        (f.lastCost != null ? ' ' : '')),
+      f.lastCost != null
+        ? h('div', { class: 'muted', style: 'font-size:11px;' }, 'dernier run : $' + f.lastCost.toFixed(3))
+        : h('span', {}, ''),
+    ]));
+  }
+  el.appendChild(wrap);
+}
+
+function renderBurninChart(rows) {
+  const plotted = rows.filter((r) => r.costUsd != null);
+  if (plotted.length === 0) { $('burninChart').innerHTML = ''; return; }
+  const W = 640, H = 170, PAD = 28;
+  const maxCost = Math.max(...plotted.map((r) => r.costUsd), 0.1);
+  const x = (i) => PAD + (plotted.length === 1 ? 0 : (i * (W - PAD * 2)) / (plotted.length - 1));
+  const y = (c) => H - PAD - (c / maxCost) * (H - PAD * 2);
+  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%; max-width:' + W + 'px; background: var(--panel, rgba(127,127,127,.06)); border-radius:6px;">';
+  // Y grid: 0, mid, max.
+  for (const c of [0, maxCost / 2, maxCost]) {
+    svg += '<line x1="' + PAD + '" y1="' + y(c) + '" x2="' + (W - PAD) + '" y2="' + y(c) + '" stroke="currentColor" stroke-opacity="0.12"/>' +
+      '<text x="4" y="' + (y(c) + 3) + '" font-size="9" fill="currentColor" fill-opacity="0.5">$' + c.toFixed(2) + '</text>';
+  }
+  // Per-family polyline + points; failures are hollow red-ringed.
+  const fams = [...new Set(plotted.map((r) => r.family))];
+  for (const fam of fams) {
+    const color = FAMILY_COLORS[fam] || '#f59e0b';
+    const pts = [];
+    plotted.forEach((r, i) => { if (r.family === fam) pts.push([x(i), y(r.costUsd), r]); });
+    if (pts.length > 1) {
+      svg += '<polyline fill="none" stroke="' + color + '" stroke-opacity="0.5" stroke-width="1.5" points="' +
+        pts.map((p) => p[0] + ',' + p[1]).join(' ') + '"/>';
+    }
+    for (const [px, py, r] of pts) {
+      const failed = r.outcome !== 'delivered';
+      svg += failed
+        ? '<circle cx="' + px + '" cy="' + py + '" r="4" fill="none" stroke="#ef4444" stroke-width="2"><title>' + r.taskId + ' — ' + r.outcome + ' $' + r.costUsd + '</title></circle>'
+        : '<circle cx="' + px + '" cy="' + py + '" r="3.5" fill="' + color + '"><title>' + r.taskId + ' — $' + r.costUsd + (r.deterministicPhases ? ' · ' + r.deterministicPhases + ' phases $0' : '') + '</title></circle>';
+    }
+  }
+  svg += '<text x="' + (W - PAD) + '" y="' + (H - 6) + '" font-size="9" text-anchor="end" fill="currentColor" fill-opacity="0.5">runs (ordre chronologique = expérience) →</text>';
+  svg += '</svg>';
+  $('burninChart').innerHTML = '<div class="section">' + svg + '</div>';
+}
+
+function renderBurninRows(rows) {
+  const el = $('burninRows');
+  el.innerHTML = '';
+  const list = h('div', {});
+  for (const r of [...rows].reverse()) {
+    const color = FAMILY_COLORS[r.family] || 'var(--accent)';
+    const line = h('div', {
+      class: 'event',
+      style: 'cursor:' + (r.trace ? 'pointer' : 'default') + '; border-left: 3px solid ' + color + ';',
+      onclick: () => {
+        if (!r.trace) return;
+        const id = r.trace.replace(/\.json$/, '');
+        switchView('runs');
+        loadIndex().then(() => {
+          if (state.runs.some((x) => x.id === id)) {
+            $('runSelect').value = id;
+            selectRun(id);
+          }
+        });
+      },
+    }, [
+      h('span', {
+        style: 'margin-right:6px; color: var(--' + (r.outcome === 'delivered' ? 'ok' : 'err') + ');',
+      }, r.outcome === 'delivered' ? '✓' : '✗'),
+      h('strong', {}, r.taskId),
+      h('span', { class: 'muted', style: 'margin-left:6px; font-size:11px;' },
+        r.ts.slice(0, 16).replace('T', ' ') + ' · $' + (r.costUsd != null ? r.costUsd.toFixed(3) : '?') +
+        ' · ' + (r.durationS != null ? r.durationS + 's' : '?') +
+        ' · O' + r.opusCalls + '/S' + r.sonnetCalls + '/H' + r.haikuCalls +
+        (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
+        (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '')),
+    ]);
+    list.appendChild(line);
+  }
+  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Runs (récent → ancien)'), list]));
 }
 
 async function loadSkills() {

@@ -73,6 +73,10 @@ gets. Every deliverable was verified by hand on both sides.
 | Pomodoro web app — 4th attempt | after 2 learned recipes + 3 platform fixes | **$0.537** ✓ *0 escalations* | $0.498 ✓ | parity |
 | `todos` HTTP API | immature | $0.399 ✓ *(+2 skills learned)* | **$0.223** ✓ | Opus 1.8× |
 
+Reproduce it: `npm run burnin` replays a task batch through the real pipeline and
+appends each run's economics to `burnin/results.csv` — the curve is a regenerable
+measurement, not a session anecdote, and it renders live in the viz's **Burn-in** tab.
+
 Three honest readings:
 
 1. **The cost advantage tracks learning maturity exactly.** On the family with
@@ -195,6 +199,13 @@ ATOMA_LLM=claude-cli  npm run example:build "…"    # Claude subscription, no k
 npm run viz          # replay any recorded run in the browser
 npm run registry -- list             # inspect the persisted atom taxonomy
 npm run skills -- list               # inspect learned skills, trust counters, refusals
+
+npm run burnin       # run a task batch through the real pipeline and append
+                     # per-run economics to burnin/results.csv — every batch
+                     # extends the cost-decay curve, and each run matures the
+                     # skill/trust counters as a side effect. The curve renders
+                     # live in the viz's Burn-in tab.
+npm run burnin -- my-tasks.json --family cli --timeout 900000
 ```
 
 ## 📁 Layout
