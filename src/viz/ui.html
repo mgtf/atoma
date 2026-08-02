@@ -515,6 +515,9 @@ function renderSummary(run) {
   if (!run) { el.innerHTML = ''; return; }
   const t = run.totals ?? { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
   el.innerHTML = '';
+  const directCount = (run.events ?? []).filter(
+    (e) => e.kind === 'skill' && e.op === 'direct'
+  ).length;
   const grid = h('div', { class: 'grid' }, [
     statCard('Durée', fmtMs(run.durationMs)),
     statCard('Appels LLM', String(t.calls)),
@@ -523,6 +526,11 @@ function renderSummary(run) {
     statCard('Coût', fmtCost(t.costUsd)),
     statCard('Fallback', run.result?.producedBy?.viaFallback ? 'oui' : 'non'),
   ]);
+  if (directCount > 0) {
+    const card = statCard('⚡ Phases $0.00', directCount + ' (dispatch déterministe)');
+    card.style.borderLeft = '3px solid #ffd700';
+    grid.appendChild(card);
+  }
   const models = (t.perModel ?? []).map((m) =>
     h('span', { class: 'chip muted' }, `${m.model.replace(/^claude-/, '')}  ·  ${m.calls}×  ·  ${fmtCost(m.costUsd)}`)
   );
@@ -853,16 +861,27 @@ function renderEventCard(ev) {
     ]);
   }
   if (ev.kind === 'skill') {
+    // The zero-token moment deserves to LOOK like one: a trusted compiled
+    // skill executing with no LLM at all used to render as a barely
+    // visible one-liner — the most important event in the system was the
+    // least visible ("je ne vois pas le run à $0 dans la viz").
+    const isDirect = ev.op === 'direct';
     const srow = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),
-      h('span', { class: 'role ' + ev.op }, ev.op),
+      h('span', { class: 'role ' + ev.op }, isDirect ? '⚡ direct' : ev.op),
     ];
     if (ev.actor) srow.push(atomRef(ev.actor));
     srow.push(h('span', { class: 'arrow' }, '·'));
     srow.push(h('span', { class: 'name' }, ev.l1Name + '/' + ev.skillId));
+    if (isDirect) {
+      srow.push(h('span', {
+        style: 'color: #ffd700; font-weight: 700;',
+      }, '0 appel LLM · $0.00'));
+    }
     if (ev.branchId) srow.push(branchChip(ev.branchId));
     return h('div', {
       class: 'event' + selected,
+      style: isDirect ? 'border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.06);' : '',
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [
       h('div', { class: 'row' }, srow),
