@@ -750,7 +750,7 @@ function renderNowBanner(run, completedIds, isLive) {
     row.push(h('span', { class: 'meta', style: secs > 120 ? 'color: var(--err); font-weight: 600;' : '' },
       '⏱ ' + secs + 's' + (secs > 120 ? ' — anormalement long ?' : '')));
     if (s.branchId) row.push(branchChip(s.branchId));
-    wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, row));
+    wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, [h('div', { class: 'row' }, row)]));
   }
   host.appendChild(wrap);
 }
@@ -779,7 +779,7 @@ function renderEventCard(ev) {
     if (ev.actor) row.splice(2, 0, atomRef(ev.actor));
     row.push(h('span', { class: 'meta' }, ev.model));
     if (ev.branchId) row.push(branchChip(ev.branchId));
-    return h('div', { class: 'event interrupted' }, row);
+    return h('div', { class: 'event interrupted' }, [h('div', { class: 'row' }, row)]);
   }
   if (ev.kind === 'llm') {
     const row = [
@@ -1455,18 +1455,18 @@ function renderBurninRows(rows) {
           }
         });
       },
-    }, [
+    }, [h('div', { class: 'row' }, [
       h('span', {
-        style: 'margin-right:6px; color: var(--' + (r.outcome === 'delivered' ? 'ok' : 'err') + ');',
+        style: 'color: var(--' + (r.outcome === 'delivered' ? 'ok' : 'err') + ');',
       }, r.outcome === 'delivered' ? '✓' : '✗'),
       h('strong', {}, r.taskId),
-      h('span', { class: 'muted', style: 'margin-left:6px; font-size:11px;' },
+      h('span', { class: 'muted', style: 'font-size:11px;' },
         r.ts.slice(0, 16).replace('T', ' ') + ' · $' + (r.costUsd != null ? r.costUsd.toFixed(3) : '?') +
         ' · ' + (r.durationS != null ? r.durationS + 's' : '?') +
         ' · O' + r.opusCalls + '/S' + r.sonnetCalls + '/H' + r.haikuCalls +
         (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
         (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '')),
-    ]);
+    ])]);
     list.appendChild(line);
   }
   el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Runs (récent → ancien)'), list]));
