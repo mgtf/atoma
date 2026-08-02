@@ -67,6 +67,25 @@ export function cliEffortFor(req: LlmCompletionRequest): 'low' | 'medium' | 'hig
   return req.params.effort;
 }
 
+/**
+ * Thinking parity with the direct-API semantics. On the API, Haiku 4.5
+ * thinks ONLY when a caller explicitly requests it — and atoma never does:
+ * prefilters are 256-token routing decisions, verdicts are small JSON.
+ * Under the Claude Code CLI, adaptive thinking defaults ON and `maxTokens`
+ * is advisory-only, so those same calls ran UNBOUNDED reasoning. Measured
+ * on a warm e2e run: the L3 prefilter emitted 3,017 tokens over 35.6s for
+ * a decision capped at 256 tokens on the API path; five Haiku prefilters
+ * ate 87s — 35% of the whole run. Disabling thinking when the call
+ * resolves to the haiku alias restores the reference behaviour (the gate
+ * is the RESOLVED alias, so an ATOMA_CLAUDE_MODEL override to a thinking
+ * tier keeps that tier's API-default semantics). Sonnet/Opus keep the
+ * CLI's adaptive default — that matches the API too, and their plan calls
+ * are already bounded by the `effort` pin.
+ */
+export function cliThinkingFor(req: LlmCompletionRequest): { type: 'disabled' } | undefined {
+  return resolveCliModel(req.model) === 'haiku' ? { type: 'disabled' } : undefined;
+}
+
 export class ClaudeCliLlmClient implements LlmClient {
   private readonly maxIter: number;
 
@@ -104,6 +123,7 @@ export class ClaudeCliLlmClient implements LlmClient {
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         ...(cliEffortFor(req) ? { effort: cliEffortFor(req) } : {}),
+        ...(cliThinkingFor(req) ? { thinking: cliThinkingFor(req) } : {}),
         maxTurns: hasTools ? budget : 2,
         abortController: abort,
         // Drop a (possibly stale) exported API key so the CLI's own OAuth

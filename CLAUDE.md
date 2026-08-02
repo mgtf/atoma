@@ -905,6 +905,15 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       ONLY use atoma's declared tools (the #8a scope gate at harness
       level); `toolAliases` maps bare names (write_file) onto MCP
       names (mcp__atoma__write_file) so prompts stay provider-neutral.
+    - **Thinking parity (`cliThinkingFor`)**: haiku-tier calls get
+      `thinking: {type:'disabled'}` — on the API, Haiku 4.5 thinks only
+      on explicit request (never made by atoma), but the CLI defaults
+      adaptive thinking ON with `maxTokens` advisory-only. Measured: an
+      L3 prefilter emitted 3,017 tokens over 35.6s for a 256-token-capped
+      routing decision; five Haiku prefilters = 35% of a warm run's wall
+      time. Gate is the RESOLVED alias so ATOMA_CLAUDE_MODEL overrides
+      keep their own tier's semantics. Sonnet/Opus keep the adaptive
+      default (API parity; their plan calls are bounded by the effort pin).
     - `settingSources: []` keeps the subprocess in SDK isolation —
       no CLAUDE.md / project settings bleed into atom prompts. The
       subprocess env DROPS any exported ANTHROPIC_API_KEY so a stale

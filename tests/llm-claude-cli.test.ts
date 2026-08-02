@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
-import { resolveCliModel, jsonSchemaToZodShape, cliEffortFor } from '../src/core/llmClaudeCli.js';
+import { resolveCliModel, jsonSchemaToZodShape, cliEffortFor, cliThinkingFor } from '../src/core/llmClaudeCli.js';
 import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
 import type { LlmCompletionRequest } from '../src/core/types.js';
 
@@ -53,6 +53,35 @@ describe('cliEffortFor — the one generation lever the CLI transport has', () =
       params: { effort: 'medium' },
     };
     expect(cliEffortFor(req)).toBeUndefined();
+  });
+});
+
+describe('cliThinkingFor — API-parity thinking gate for the haiku tier', () => {
+  let envBefore;
+  beforeEach(() => {
+    envBefore = process.env['ATOMA_CLAUDE_MODEL'];
+    delete process.env['ATOMA_CLAUDE_MODEL'];
+  });
+  afterEach(() => {
+    if (envBefore === undefined) delete process.env['ATOMA_CLAUDE_MODEL'];
+    else process.env['ATOMA_CLAUDE_MODEL'] = envBefore;
+  });
+  const base = { systemPrompt: 's', userContent: 'u' };
+
+  it('disables thinking for haiku-tier calls (prefilters/validators never think on the API)', () => {
+    expect(cliThinkingFor({ ...base, model: PIN_HAIKU })).toEqual({ type: 'disabled' });
+  });
+
+  it('leaves sonnet/opus on the CLI adaptive default — same as the API default', () => {
+    expect(cliThinkingFor({ ...base, model: PIN_SONNET })).toBeUndefined();
+    expect(cliThinkingFor({ ...base, model: FALLBACK_OPUS })).toBeUndefined();
+  });
+
+  it('gates on the RESOLVED alias so an ATOMA_CLAUDE_MODEL override keeps its own semantics', () => {
+    process.env['ATOMA_CLAUDE_MODEL'] = 'sonnet';
+    expect(cliThinkingFor({ ...base, model: PIN_HAIKU })).toBeUndefined();
+    process.env['ATOMA_CLAUDE_MODEL'] = 'haiku';
+    expect(cliThinkingFor({ ...base, model: FALLBACK_OPUS })).toEqual({ type: 'disabled' });
   });
 });
 
