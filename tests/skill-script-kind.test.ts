@@ -178,7 +178,7 @@ describe('skillContextBlock — kind: script (phase 2)', () => {
       body: 'console.log("hi");',
     });
     expect(out).toMatch(/== ACTIVE SKILL: write-package-json \(kind: script, language: node\) ==/);
-    expect(out).toMatch(/_skill_write-package-json\.js/);
+    expect(out).toMatch(/_skill_write-package-json\.cjs/);
     expect(out).toMatch(/run_shell.*command: "node"/);
     expect(out).toMatch(/console\.log\("hi"\)/);
     expect(out).toMatch(/Do NOT improvise additional tool calls/);

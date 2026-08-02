@@ -297,7 +297,15 @@ export function skillContextBlock(skill: {
 }
 
 function scriptExtension(language: 'node' | 'python' | 'bash'): string {
-  if (language === 'node') return 'js';
+  // 'cjs', NOT 'js': the scratch file lands in the WORKSPACE, whose module
+  // semantics belong to the deliverable — a task-authored root package.json
+  // with `"type": "module"` turns any `.js` into ESM and a compiled
+  // CommonJS script dies with "require is not defined in ES module scope".
+  // Observed live (triov batch, 2026-08-02): two consecutive dispatch
+  // failures on exactly this, driving a natural #C4b demotion of a script
+  // whose logic was perfectly sound. `.cjs` pins CommonJS regardless of
+  // ambient package.json.
+  if (language === 'node') return 'cjs';
   if (language === 'python') return 'py';
   return 'sh';
 }
@@ -1298,7 +1306,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `tool-loop spend on stable patterns to ~zero.`,
       ``,
       `RUNTIME CONTRACT — your script will be invoked as:`,
-      `  node _skill_<id>.js '<json-encoded-subtask-description>'`,
+      `  node _skill_<id>.cjs '<json-encoded-subtask-description>'`,
+      `MODULE SEMANTICS — the scratch file is .cjs, so write COMMONJS`,
+      `(require(), module-free top-level). NEVER use import/export: the`,
+      `workspace may carry a task-authored package.json with "type": "module",`,
+      `and .cjs is what shields the script from it.`,
       `i.e. process.argv[2] is a JSON-encoded string carrying the natural-language`,
       `subtask. Your script may parse hints from it (regex / string contains) but`,
       `should mostly rely on the deterministic steps the recipe encodes. The`,

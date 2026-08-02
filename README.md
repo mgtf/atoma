@@ -176,6 +176,13 @@ then script trust — counters reset at compile time), while demotion takes exac
 deterministic failures. A wrong script can never entrench itself; a right one converges
 to free.
 
+*Field-proven, autonomously:* when a workspace's module semantics broke a compiled
+verifier (an ESM `package.json` turned the CommonJS scratch into a crash), the whole
+safety stack executed by itself across two runs — dispatch → contract failure → failure
+streak → demotion to the recipe → anti-recompile stamp with the reason persisted —
+**with zero failed deliverables**: every run still shipped via the validated LLM
+fallback while the system quarantined its own broken optimization.
+
 **What compiles, compiles honestly.** The compiler refuses recipes that require judgment —
 verbatim refusal from a live run, persisted to disk:
 

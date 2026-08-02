@@ -758,6 +758,21 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `readme-from-verified-runs` compiled script was hand-patched (via
   `SkillRegistry.save`, counters preserved) to write the manifest — it
   already collected exactly the needed data.
+- **Node scratch scripts are `.cjs` — the workspace owns `.js` semantics.**
+  `scriptExtension('node')` returns `cjs`: the scratch `_skill_*` file
+  lands in the WORKSPACE, and a task-authored root `package.json` with
+  `"type": "module"` turns any `.js` there into ESM — a compiled
+  CommonJS script then dies with "require is not defined in ES module
+  scope". Observed live (triov batch, 2026-08-02): two consecutive
+  dispatch failures on exactly this drove a natural #C4b demotion of a
+  script whose logic was perfectly sound; the full self-healing stack
+  (dispatch → contract failure → streak → demotion → stamp → llm
+  fallback) executed autonomously across two runs with zero failed
+  deliverables — working as designed, on the wrong root cause. The
+  compile prompt now pins COMMONJS explicitly (never import/export),
+  and the demoted skill was reset (sanctioned path) to re-earn
+  compilation under the fixed runtime.
+- **Deterministic-failure streak demotes a brittle script (#C4b).**
   `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
   missing envelope) call `noteDirectFailure`, which bumps
   `_meta.json.directFailures` via `SkillRegistry.markDirectFailure`; at

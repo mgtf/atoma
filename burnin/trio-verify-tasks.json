@@ -1,0 +1,24 @@
+{
+  "tasks": [
+    {
+      "id": "triov-1",
+      "family": "cli-trio-v",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files: (1) hexhead/ — Node CLI printing the first 16 bytes of a file (argv[2]) as space-separated lowercase hex, exit 1 with clear stderr on missing/unreadable file; (2) dupwords/ — Node CLI printing each word that appears more than once in a text file (argv[2]), one per line, exit 1 with clear stderr on missing/unreadable file; (3) padleft/ — Node CLI printing each line of a file (argv[2]) left-padded with spaces to 20 characters, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour. The plan MUST include, for each tool, a SEPARATE FINAL VERIFICATION STEP distinct from its build step: re-run every invocation documented in that tool's README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "triov-2",
+      "family": "cli-trio-v",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files: (1) firstn/ — Node CLI printing the first N lines of a file: path as argv[2], N as argv[3] (default 5), exit 1 with clear stderr on missing/unreadable file or non-positive N; (2) vowelcount/ — Node CLI printing the number of vowels in a file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (3) joinlines/ — Node CLI printing a file (argv[2]) with all lines joined by a single space, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour. The plan MUST include, for each tool, a SEPARATE FINAL VERIFICATION STEP distinct from its build step: re-run every invocation documented in that tool's README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "triov-3",
+      "family": "cli-trio-v",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files: (1) sortlines/ — Node CLI printing the lines of a file (argv[2]) sorted alphabetically, exit 1 with clear stderr on missing/unreadable file; (2) digitsum/ — Node CLI printing the sum of all single digits appearing in a file (argv[2]), exit 1 with clear stderr on missing/unreadable file; (3) starbox/ — Node CLI printing the content of a file (argv[2]) framed in a box of asterisks, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour. The plan MUST include, for each tool, a SEPARATE FINAL VERIFICATION STEP distinct from its build step: re-run every invocation documented in that tool's README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "triov-4",
+      "family": "cli-trio-v",
+      "goal": "Three INDEPENDENT command-line utilities, each in its OWN subdirectory of the workspace, sharing no code and no files: (1) squeeze/ — Node CLI printing a file (argv[2]) with runs of repeated spaces collapsed to one, exit 1 with clear stderr on missing/unreadable file; (2) countdown/ — Node CLI printing the integers from N down to 1, one per line, N as argv[2], exit 1 with clear stderr when N is missing or not a positive integer; (3) mirror/ — Node CLI printing each line of a file (argv[2]) reversed character by character, exit 1 with clear stderr on missing/unreadable file. EACH subdirectory ships its own package.json, fixtures, and README with a 'Verified invocations' section documenting real observed behaviour. The plan MUST include, for each tool, a SEPARATE FINAL VERIFICATION STEP distinct from its build step: re-run every invocation documented in that tool's README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    }
+  ]
+}
