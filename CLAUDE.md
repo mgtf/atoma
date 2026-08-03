@@ -775,6 +775,16 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **An UNCHANGED skill revision is NOT a revision.** `improveSkillBody`
+  is explicitly told to return the body as-is when the failure was
+  environmental — but saving it anyway is harmful twice over: `save()`
+  clears the promotion-refusal stamp on the premise that the body
+  changed (so the anti-thrash guard evaporates), and the one-shot branch
+  retry then re-runs an identical recipe against an identical diagnosis
+  for a guaranteed-identical outcome. The escalation path now compares
+  trimmed bodies and treats "unchanged" as "no revision available",
+  falling through to the legacy registry-branch path. Covered in
+  `skill-prefilter-injection.test.ts`.
 - **A demotion stamps the COMPILING generation.** `promoteToScript`
   records `compiledGeneration` (the `COMPILE_PROMPT_GENERATION` that
   produced the script body); `noteDirectFailure`'s stamp uses THAT value,

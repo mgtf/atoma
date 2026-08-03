@@ -1971,7 +1971,23 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                 subtaskDescription,
                 ctx,
               });
-              if (newBody) {
+              // An UNCHANGED body is a legitimate answer (the prompt tells
+              // the model to return it as-is when the failure was
+              // environmental) — but saving it would be actively harmful:
+              // `save()` clears the promotion-refusal stamp on the premise
+              // that the body changed, and retrying an identical recipe
+              // against an identical diagnosis is a guaranteed-identical
+              // outcome. Treat it as "no revision available" and let the
+              // legacy branch path take over.
+              const revised =
+                newBody && newBody.trim() !== oldSkill.body.trim() ? newBody : null;
+              if (!revised && newBody) {
+                ctx.logger.info(
+                  `[${this.name}] skill ${activeSkillId} revision returned an UNCHANGED body (environmental failure?) — skipping the save and the retry`
+                );
+              }
+              if (revised) {
+                const newBody = revised;
                 this.skillRegistry.save(child.name, {
                   id: oldSkill.id,
                   description: oldSkill.description,

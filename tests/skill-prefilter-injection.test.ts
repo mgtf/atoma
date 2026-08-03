@@ -335,3 +335,46 @@ describe('L1Atom.activeSkillId', () => {
     expect(atom.activeSkillId()).toBeNull();
   });
 });
+
+describe('skill revision: an UNCHANGED body is not a revision', () => {
+  it('does not save, does not clear the refusal stamp, does not retry', async () => {
+    // improveSkillBody is TOLD to return the body unchanged when the failure
+    // was environmental. Saving it anyway would clear the promotion-refusal
+    // stamp (save() assumes the body changed) and retry an identical recipe
+    // against an identical diagnosis — a guaranteed-identical outcome.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-unchanged-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    const BODY = '1. do the thing\n2. verify it';
+    skills.save('Hydrogen', {
+      id: 'stable', description: 'd', whenToUse: 'w', kind: 'llm', body: BODY,
+    });
+    skills.markPromotionRefused('Hydrogen', 'stable', 'irreducible', 'somegen');
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'stable', confidence: 'high', reasoning: 'fit' }));
+    // Three plan/reject cycles → escalation.
+    for (let i = 0; i < 3; i++) {
+      ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+      ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'no', scope: 'ephemeral' }));
+    }
+    // The revision call returns the SAME body (with incidental whitespace).
+    ctx.llm.enqueueText('  ' + BODY + '  ');
+    // What happens AFTER the revision decision (legacy branch path, parent
+    // fallback) is not what this test is about — the assertion is on the
+    // skill store, so letting the mock run dry there is fine and keeps the
+    // test from encoding an unrelated call sequence.
+    await water.handleDirect({ description: 'task' }, ctx).catch(() => undefined);
+
+    const after = skills.loadFor('Hydrogen')[0]!;
+    // Body untouched AND the stamp survived — the anti-thrash guard holds.
+    expect(after.body.trim()).toBe(BODY);
+    expect(after.promotionRefusedAt).toBeTruthy();
+    expect(after.promotionRefusedGeneration).toBe('somegen');
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
