@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "web-tally",
+      "family": "web",
+      "goal": "a single-file index.html tally counter: a large count display starting at 0, +1 and -1 buttons, a reset button, and the count shown in red when negative. Expose the state as window.__tally = {count}. No external assets. Serve it with a local static server and verify in a real browser that the page loads with zero console errors, that clicking +1 raises the displayed count, and that Reset returns it to 0."
+    },
+    {
+      "id": "web-toggle",
+      "family": "web",
+      "goal": "a single-file index.html theme toggle demo: a heading, a paragraph of text, and a button that switches the page between a light and a dark palette, with the current mode shown as text. Expose the state as window.__theme = {mode}. No external assets. Serve it with a local static server and verify in a real browser that the page loads with zero console errors, that clicking the button flips the mode, and that the displayed mode text matches the state."
+    }
+  ]
+}

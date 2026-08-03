@@ -6,7 +6,7 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-699_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-701_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
@@ -136,6 +136,26 @@ Recent transport engineering, measured on the same warm task:
 | Demotion stamps the generation that COMPILED the failing script | a fix to the compiler is never blocked by the failure of a pre-fix artifact |
 | Probe manifest health-checked; both shell and http entry shapes specified | the machine interface between prompt-written evidence and compiled readers holds |
 
+## 🔧 What hardening looks like here
+
+Most of the engineering in this repo is not features — it is closing the gap
+between "the mechanism works" and "the mechanism cannot be fooled by reality".
+A representative sweep, every item triggered by an observed live failure:
+
+| Symptom in the wild | What it exposed | Fix |
+|---|---|---|
+| A skill stayed parked after the compiler improved | Refusal stamps assumed a fixed compiler | Stamps carry the compile-prompt **generation**; a newer compiler re-earns its shot |
+| …and the demotion re-parked it | The stamp recorded *when*, not *what compiled* | Demotion stamps the generation that **produced the failing script** |
+| A compiled verifier crashed on `entry.cmd` | The manifest contract was taught to writers only | Compiler learns **all three entry shapes**; validator too |
+| A revision "fixed" nothing but cleared the stamp | An unchanged body was treated as a change | Unchanged revisions are a no-op, guard intact |
+| A compile died to the run deadline (3×) | Post-approval work shared the deliverable's budget | Bookkeeping gets **its own** abort budget |
+| A batch burned 5 tasks on a dead credential | The config guard only watched task #1 | Streak-based abort at **any** position |
+| The viz polled a dead run forever | "No endedAt" was read as "still alive" | **Abandoned-run** detection by last activity |
+
+Each one is a test in the suite, and most are a paragraph in `CLAUDE.md`
+explaining the failure that motivated it — so the reasoning survives the
+commit that fixed it.
+
 ## 🏗️ Architecture
 
 Every *atom* is an LLM-backed agent. Three tiers, one shared supervision protocol,
@@ -243,7 +263,7 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 699 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 701 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
@@ -291,5 +311,5 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 699 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
+<sub>TypeScript · SQLite · zod · 701 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>
