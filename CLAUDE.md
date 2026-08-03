@@ -2,6 +2,21 @@
 
 Project-level notes for Claude Code. Read this before making changes.
 
+## Map (1400 lines — jump, don't scroll)
+
+| Section | When you need it |
+|---|---|
+| Commands | run/inspect anything (`build`, `burnin`, `viz`, `registry`, `skills`) |
+| Cost discipline | **read before touching ANY LLM call site** |
+| Observability | metrics, viz, burn-in ledger, run traces |
+| Architecture invariants | before changing the supervision loop / tiers / registry |
+| Skills | the learn → compile → dispatch lifecycle and every guard on it |
+| LLM interaction conventions | providers, per-tier models, JSON parsing, prompt caching |
+| Testing conventions | how to add tests that actually catch the bug class |
+| Tools | sandbox, the 9 builtins, their contracts |
+| Things that look wrong but aren't | **read before "fixing" something odd** |
+| Considered and rejected | **read before proposing an optimization** |
+
 ## What this is
 
 `atoma` is a TypeScript framework for three-tier LLM agent orchestration. Every atom

@@ -6,7 +6,7 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-686_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-699_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
@@ -60,7 +60,7 @@ each run's trace, and the whole table regenerates with `npm run burnin`.
 | Decomposable task → 3 deliverables in **parallel branches** (measured over 6 runs / 18 tools) | $0.40/run = **$0.13 per deliverable** — the fan-out amortizes the plan |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
 | Families that reached compiled-skill dispatch | **CLI + HTTP** (docs, CLI verification, API probing) |
-| Mature HTTP run (recipes + one compiled phase) | **$0.13 · 146s** |
+| Mature HTTP run (2 compiled phases, 0 Sonnet) | **$0.126 · 132s** — cheapest measured run |
 | Broken deliverable detected by the compiled verifier | **exit 1, per-command diff** (mutation-tested) |
 | Full state wipe → relearn, three separate epochs | **same decay trajectory every time** |
 
@@ -132,6 +132,8 @@ Recent transport engineering, measured on the same warm task:
 | Transport-aware run budgets, orphan-process group-kill, config-failure batch abort | no more phantom rows, port squatters, or deadline-starved compiles |
 | Post-approval bookkeeping (distillation, compilation) on its own abort budget | learning is never discarded to protect a deadline the deliverable already met |
 | Refusal stamps carry the compile-prompt generation | an evolved compiler automatically re-earns its shot — no operator reset |
+| Demotion stamps the generation that COMPILED the failing script | a fix to the compiler is never blocked by the failure of a pre-fix artifact |
+| Probe manifest health-checked; both shell and http entry shapes specified | the machine interface between prompt-written evidence and compiled readers holds |
 
 ## 🏗️ Architecture
 
@@ -240,7 +242,7 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 686 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 699 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
@@ -288,5 +290,5 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 686 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
+<sub>TypeScript · SQLite · zod · 699 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>
