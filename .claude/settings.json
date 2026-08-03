@@ -1,6 +1,7 @@
 {
   "permissions": {
     "allow": [
+      "Bash(*)",
       "Bash(npm *)",
       "Bash(npx *)",
       "Bash(node *)",
