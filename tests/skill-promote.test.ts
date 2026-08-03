@@ -159,6 +159,11 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // scripts that verify invocations must write/merge it.
     expect(compileCall.userContent).toMatch(/PROBE MANIFEST/);
     expect(compileCall.userContent).toContain('.atoma-probes.json');
+    // TWO manifest shapes (shell + http) must be spelled out: a compiled
+    // HTTP verifier crashed reading entry.cmd on http-shaped entries.
+    expect(compileCall.userContent).toMatch(/TWO SHAPES/);
+    expect(compileCall.userContent).toMatch(/"probe": "http"/);
+    expect(compileCall.userContent).toMatch(/entry ORDER as significant/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
