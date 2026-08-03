@@ -116,6 +116,15 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(prompt).toMatch(/probe: /);
     expect(prompt).toMatch(/body\[0:200\]/);
     expect(prompt).toMatch(/schema\/state:/);
+    // HTTP probes are fetch_url-shaped, not shell-shaped — the on-disk
+    // manifest needs its own entry kind or compiled HTTP verifiers are
+    // forced back to prose parsing. Observed live (http-ping closer 3):
+    // the compiled verify script found no manifest, tried to parse the
+    // README's probe lines, and exited 1 on format variance — the exact
+    // failure class the manifest exists to close.
+    expect(prompt).toMatch(/PROBE MANIFEST ON DISK/);
+    expect(prompt).toMatch(/"probe": "http"/);
+    expect(prompt).toContain('.atoma-probes.json');
     // Phase-2 of the LoL-SSR run: Helium stuffed the block into the
     // "output" field as prose, validator rejected on placement. The
     // prompt must explicitly forbid that and show the canonical shape.
