@@ -58,6 +58,7 @@ each run's trace, and the whole table regenerates with `npm run burnin`.
 | Mature-pattern subtask, L2 happy path | **$0.05** (was $0.18 before prefilters — 0 Opus, 0 Sonnet) |
 | Prompt-cache hits per run | **0.2 – 1.7M tokens** at 10% input price |
 | Decomposable task → 3 deliverables in **parallel branches** (measured over 6 runs / 18 tools) | $0.40/run = **$0.13 per deliverable** — the fan-out amortizes the plan |
+| HTTP family, batch mean: first exposure → after compilation | **$0.341 → $0.248** (−27%), dispatch on every run |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
 | Families that reached compiled-skill dispatch | **CLI + HTTP** (docs, CLI verification, API probing) |
 | Mature HTTP run (2 compiled phases, 0 Sonnet) | **$0.126 · 132s** — cheapest measured run |
