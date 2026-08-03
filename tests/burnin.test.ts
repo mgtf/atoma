@@ -39,6 +39,8 @@ describe('burnin parseRunLog', () => {
     expect(s.sonnetCalls).toBe(0);
     expect(s.deterministicPhases).toBe(2);
     expect(s.learnedSkills).toBe(0);
+    expect(s.promotions).toBe(0);
+    expect(s.demotions).toBe(0);
   });
 
   it('classifies a timeout as failed and still reads its cost', () => {
@@ -46,6 +48,25 @@ describe('burnin parseRunLog', () => {
     expect(s.outcome).toBe('failed');
     expect(s.costUsd).toBeCloseTo(0.8523, 4);
     expect(s.sonnetCalls).toBe(2);
+  });
+
+  it('counts lifecycle events: promotion, refusal, demotion, dispatch fallback', () => {
+    // The curve must explain WHY a run cost what it cost: a compile, a
+    // refusal, a demotion and a fallback all move the number.
+    const s = parseRunLog(
+      [
+        'ℹ skill "x" promoted to kind:script (node, 8324 chars)',
+        'ℹ skill "y" not promotable: irreducible reasoning',
+        '⚠ script skill "z" demoted to llm after 2 consecutive deterministic failures',
+        '[A] direct dispatch of z failed (exit=1) — falling back to the LLM loop',
+        'TOTAL  9  1  2  3  0.5000  ',
+        '✓ build finished',
+      ].join('\n')
+    );
+    expect(s.promotions).toBe(1);
+    expect(s.refusals).toBe(1);
+    expect(s.demotions).toBe(1);
+    expect(s.dispatchFallbacks).toBe(1);
   });
 
   it('a killed/empty log degrades to error with null economics, not a crash', () => {

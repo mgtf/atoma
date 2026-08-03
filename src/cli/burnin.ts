@@ -46,6 +46,14 @@ export interface RunStats {
   readonly deterministicPhases: number;
   readonly escalations: number;
   readonly learnedSkills: number;
+  /** llm→script compilations that succeeded in this run. */
+  readonly promotions: number;
+  /** compile attempts the compiler REFUSED as irreducible. */
+  readonly refusals: number;
+  /** script→llm demotions (the safety net firing). */
+  readonly demotions: number;
+  /** dispatches that hit a contract failure and fell back to the LLM loop. */
+  readonly dispatchFallbacks: number;
 }
 
 /** Parse one model row of `formatSummary` (e.g. `claude-opus-5  1  2  1552  0  0.0672`). */
@@ -95,6 +103,10 @@ export function parseRunLog(log: string): RunStats {
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
     escalations: (log.match(/escalat/gi) ?? []).length,
     learnedSkills: (log.match(/learned new skill/g) ?? []).length,
+    promotions: (log.match(/promoted to kind:script/g) ?? []).length,
+    refusals: (log.match(/not promotable:/g) ?? []).length,
+    demotions: (log.match(/demoted to llm after/g) ?? []).length,
+    dispatchFallbacks: (log.match(/falling back to the LLM loop/g) ?? []).length,
   };
 }
 
@@ -121,13 +133,17 @@ export function toCsvRow(args: {
     s.deterministicPhases,
     s.escalations,
     s.learnedSkills,
+    s.promotions,
+    s.refusals,
+    s.demotions,
+    s.dispatchFallbacks,
     args.trace,
   ];
   return cells.map((c) => String(c)).join(',');
 }
 
 export const CSV_HEADER =
-  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,trace';
+  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace';
 
 /**
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
@@ -289,7 +305,10 @@ async function main(): Promise<void> {
     console.log(
       `  ${stats.outcome === 'delivered' ? '✓' : '✗'} ${stats.outcome}  $${stats.costUsd ?? '?'}  ${durationS}s  ` +
         `llm=${stats.llmCalls ?? '?'} (O${stats.opusCalls}/S${stats.sonnetCalls}/H${stats.haikuCalls})  ` +
-        `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}`
+        `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}` +
+        (stats.promotions ? `  ⚡promoted=${stats.promotions}` : '') +
+        (stats.demotions ? `  🛡️demoted=${stats.demotions}` : '') +
+        (stats.dispatchFallbacks ? `  ↩fallback=${stats.dispatchFallbacks}` : '')
     );
     if (summaryRows.length === 1 && looksLikeConfigFailure(stats, durationS) && !argv.includes('--force')) {
       console.error(

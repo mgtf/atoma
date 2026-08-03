@@ -1509,7 +1509,10 @@ function renderBurninRows(rows) {
         ' · ' + (r.durationS != null ? r.durationS + 's' : '?') +
         ' · O' + r.opusCalls + '/S' + r.sonnetCalls + '/H' + r.haikuCalls +
         (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
-        (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '')),
+        (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '') +
+        (r.promotions ? ' · ⚙️compile×' + r.promotions : '') +
+        (r.demotions ? ' · 🛡️demote×' + r.demotions : '') +
+        (r.dispatchFallbacks ? ' · ↩' + r.dispatchFallbacks : '')),
     ])]);
     list.appendChild(line);
   }

@@ -64,6 +64,10 @@ function loadBurnin(): {
     deterministicPhases: number;
     escalations: number;
     learnedSkills: number;
+    promotions: number;
+    refusals: number;
+    demotions: number;
+    dispatchFallbacks: number;
     trace: string;
   }[];
   csvPath: string;
@@ -92,7 +96,12 @@ function loadBurnin(): {
       deterministicPhases: num(c[10]) ?? 0,
       escalations: num(c[11]) ?? 0,
       learnedSkills: num(c[12]) ?? 0,
-      trace: c[13]!,
+      // Lifecycle columns appended later — older rows simply lack them.
+      promotions: num(c[13]) ?? 0,
+      refusals: num(c[14]) ?? 0,
+      demotions: num(c[15]) ?? 0,
+      dispatchFallbacks: num(c[16]) ?? 0,
+      trace: (c.length > 17 ? c[17] : c[13]) ?? '',
     });
   }
   return { rows, csvPath: BURNIN_CSV };
