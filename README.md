@@ -6,7 +6,7 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-701_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-703_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
@@ -151,6 +151,7 @@ A representative sweep, every item triggered by an observed live failure:
 | A compile died to the run deadline (3×) | Post-approval work shared the deliverable's budget | Bookkeeping gets **its own** abort budget |
 | A batch burned 5 tasks on a dead credential | The config guard only watched task #1 | Streak-based abort at **any** position |
 | The viz polled a dead run forever | "No endedAt" was read as "still alive" | **Abandoned-run** detection by last activity |
+| One web run recorded `{x:304,y:392}`, another `{selector:"#toggle"}` | The tool accepts coordinates; the contract never forbade them | Manifest interactions must be **selector-based** — validated |
 
 Each one is a test in the suite, and most are a paragraph in `CLAUDE.md`
 explaining the failure that motivated it — so the reasoning survives the
@@ -263,7 +264,7 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 701 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 703 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
@@ -311,5 +312,5 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 701 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
+<sub>TypeScript · SQLite · zod · 703 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>

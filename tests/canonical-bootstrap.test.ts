@@ -60,6 +60,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(l1.systemPrompt).toMatch(/PROBE MANIFEST ON DISK/);
     expect(l1.systemPrompt).toMatch(/"probe": "web"/);
     expect(l1.systemPrompt).toMatch(/served\s+URL is EPHEMERAL/);
+    expect(l1.systemPrompt).toMatch(/INTERACTIONS MUST BE SELECTOR-BASED/);
   });
 
   it('creates canonical L2 on first call with canonical description + bootstrap marker', () => {

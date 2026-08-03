@@ -514,6 +514,13 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `interactions and the smoke expression are stable — recording those`,
   `three makes a later pass able to re-serve the artefact and replay the`,
   `exact same validation. Prose in a README cannot be replayed; this can.`,
+  `INTERACTIONS MUST BE SELECTOR-BASED — MANDATORY. Record`,
+  `{"type":"click","selector":"#start"}, NEVER pixel coordinates`,
+  `({"x":304,"y":392}), even though validate_html accepts them: coordinates`,
+  `depend on the viewport, fonts and layout of THIS run and are worthless`,
+  `to a later pass, while a selector survives any re-render. If an element`,
+  `has no usable selector, ADD an id to it in the artefact — that is a`,
+  `legitimate, tiny improvement to the deliverable, not a workaround.`,
 ];
 
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [

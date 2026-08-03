@@ -822,6 +822,12 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - **Three manifest entry shapes, one per bucket.** `{cmd, exitCode,
   stdout, stderr}` (shell), `{probe:"http", method, path, status, body}`
   and `{probe:"web", file, interactions, smoke, expected, consoleErrors}`.
+  Web interactions MUST be SELECTOR-based, never pixel coordinates —
+  `validate_html` accepts coordinates, so the contract has to forbid them
+  (observed live: two web runs in one batch, one recording
+  {selector:"#toggle"} and one {x:304,y:392} — the latter is worthless
+  after any re-render; the validator now flags it, and the prompt tells
+  the L1 to ADD an id to the artefact when no selector exists).
   The web shape deliberately records the FILE + interactions + smoke
   expression and NOT the served URL: the port is fresh every run, so a
   URL is unreplayable while those three are exactly what lets a later

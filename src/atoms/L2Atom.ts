@@ -3527,6 +3527,26 @@ export function validateProbeManifest(raw: string): string[] {
       // the served URL is deliberately not recorded (fresh port per run).
       if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
       if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
+      // Coordinate-based interactions are NOT replayable — they encode this
+      // run's viewport/fonts/layout. validate_html accepts them, so the
+      // contract has to reject them here (observed live: one web run
+      // recorded {x:304,y:392} while another recorded {selector:'#toggle'}).
+      const inter = en['interactions'];
+      if (Array.isArray(inter)) {
+        const coordOnly = inter.filter(
+          (a) =>
+            a &&
+            typeof a === 'object' &&
+            typeof (a as Record<string, unknown>)['selector'] !== 'string' &&
+            (typeof (a as Record<string, unknown>)['x'] === 'number' ||
+              typeof (a as Record<string, unknown>)['y'] === 'number')
+        ).length;
+        if (coordOnly > 0) {
+          problems.push(
+            `entry #${i} (web): ${coordOnly} interaction(s) use pixel coordinates instead of a "selector" — not replayable after a re-render`
+          );
+        }
+      }
     } else if (kind === 'shell') {
       if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
     } else {

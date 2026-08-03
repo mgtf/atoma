@@ -49,6 +49,49 @@ describe('validateProbeManifest', () => {
     ).toEqual([]);
   });
 
+  it('flags pixel-coordinate interactions — they die on the next re-render', () => {
+    // Observed live: two web runs in the same batch, one recording
+    // {selector:'#toggle'} (replayable) and one {x:304,y:392} (worthless to
+    // a later pass). validate_html accepts both, so the contract must reject
+    // coordinates here.
+    const problems = validateProbeManifest(
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            probe: 'web',
+            file: 'index.html',
+            smoke: 'window.__tally.count === 2',
+            interactions: [
+              { type: 'click', x: 304, y: 392, label: '+1 button' },
+              { type: 'click', selector: '#reset' },
+            ],
+          },
+        ],
+      })
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/1 interaction\(s\) use pixel coordinates/);
+  });
+
+  it('accepts selector-based interactions', () => {
+    expect(
+      validateProbeManifest(
+        JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              probe: 'web',
+              file: 'index.html',
+              smoke: 'x',
+              interactions: [{ type: 'click', selector: '#a' }, { type: 'keydown', selector: '#b' }],
+            },
+          ],
+        })
+      )
+    ).toEqual([]);
+  });
+
   it('reports a web entry missing its replayable fields', () => {
     const problems = validateProbeManifest(
       JSON.stringify({ version: 1, entries: [{ probe: 'web', file: 'index.html' }] })
