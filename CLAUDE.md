@@ -819,6 +819,18 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   disabling a gate: a typo must never make the system less careful.
   Use `shouldTrustType` / `shouldTrustSkill` (which call the helpers) —
   never compare against the raw constants in new code.
+- **Three manifest entry shapes, one per bucket.** `{cmd, exitCode,
+  stdout, stderr}` (shell), `{probe:"http", method, path, status, body}`
+  and `{probe:"web", file, interactions, smoke, expected, consoleErrors}`.
+  The web shape deliberately records the FILE + interactions + smoke
+  expression and NOT the served URL: the port is fresh every run, so a
+  URL is unreplayable while those three are exactly what lets a later
+  pass re-serve and re-validate. The compile prompt lists all three and
+  instructs the compiler to REFUSE promotion when a recipe's core work is
+  web validation — a compiled script has no browser tooling, and a script
+  that pretends to validate a page is worse than no script. That refusal
+  is the honest ceiling for the web family until (if ever) a
+  browser-capable dispatch path exists.
 - **The probe manifest is health-checked (`validateProbeManifest`).**
   The manifest is written by PROMPT (L1 evidence contracts) and read by
   COMPILED SCRIPTS with no validator between them — a malformed one

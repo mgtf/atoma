@@ -499,6 +499,21 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `                          "smokeResult": true}] }`,
   `Worked example of a GOOD summary:`,
   `  "summary": "Pomodoro timer built and validated.\\n== GROUND TRUTH ==\\nindex.html (14231 bytes) — list_files: index.html\\nserved at http://localhost:53311/\\nvalidate_html: ok=true, consoleErrors=0, failedRequests=0\\nsmoke: window.__pomo.remaining < 1500 after Start click -> true\\nwindow.__pomo = { remaining: 1497, running: true, cycles: 0, mode: 'WORK' }"`,
+  ``,
+  `PROBE MANIFEST ON DISK: whenever you validated a page, ALSO write_file`,
+  `".atoma-probes.json" in the workspace root:`,
+  `  {"version": 1, "entries": [`,
+  `    {"probe": "web", "file": "index.html",`,
+  `     "interactions": [{"type": "click", "selector": "#start"}],`,
+  `     "smoke": "<the exact smoke expression you ran>",`,
+  `     "expected": "<its observed result, JSON-encoded>",`,
+  `     "consoleErrors": 0, "failedRequests": 0} ]}`,
+  `One entry per DISTINCT validation you performed, in the order you ran`,
+  `them; merge by file+smoke if the file already exists. WHY: the served`,
+  `URL is EPHEMERAL (a fresh port every run) but the FILE, the`,
+  `interactions and the smoke expression are stable — recording those`,
+  `three makes a later pass able to re-serve the artefact and replay the`,
+  `exact same validation. Prose in a README cannot be replayed; this can.`,
 ];
 
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [

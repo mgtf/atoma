@@ -55,6 +55,11 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(l1.systemPrompt).toMatch(/validate_html outcome VERBATIM/);
     expect(l1.systemPrompt).toMatch(/"probes"/);
     expect(l1.systemPrompt).toMatch(/NARRATIVE claim .* WILL be rejected/s);
+    // Web probes need the FILE + interactions + smoke recorded, never the
+    // ephemeral served URL — that is what makes a validation replayable.
+    expect(l1.systemPrompt).toMatch(/PROBE MANIFEST ON DISK/);
+    expect(l1.systemPrompt).toMatch(/"probe": "web"/);
+    expect(l1.systemPrompt).toMatch(/served\s+URL is EPHEMERAL/);
   });
 
   it('creates canonical L2 on first call with canonical description + bootstrap marker', () => {
