@@ -775,6 +775,15 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **A demotion stamps the COMPILING generation.** `promoteToScript`
+  records `compiledGeneration` (the `COMPILE_PROMPT_GENERATION` that
+  produced the script body); `noteDirectFailure`'s stamp uses THAT value,
+  not the generation in force at demotion time. Without this the
+  generation gate defeats itself through a side door: the two-shape
+  manifest fix landed, the OLD script failed once more, and stamping the
+  NEW generation re-parked the skill against the very compiler that would
+  have fixed it. A script produced by compiler A failing tells you nothing
+  about compiler B's output. Covered in `skill-promote.test.ts`.
 - **Lifecycle thresholds are operator-configurable at call time.**
   `trustThreshold()` / `promoteThreshold()` / `demoteAfter()` in
   `src/atoms/cost.ts` read `ATOMA_TRUST_THRESHOLD` /

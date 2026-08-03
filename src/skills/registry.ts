@@ -98,6 +98,7 @@ export class SkillRegistry {
           ...(meta.promotionRefusedGeneration
             ? { promotionRefusedGeneration: meta.promotionRefusedGeneration }
             : {}),
+          ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
           ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
         });
       } catch (err) {
@@ -297,6 +298,8 @@ export class SkillRegistry {
     skillId: string;
     language: SkillLanguage;
     scriptBody: string;
+    /** COMPILE_PROMPT_GENERATION that produced scriptBody. */
+    compiledGeneration?: string;
   }): Skill {
     const dir = this.skillDir(args.l1Name, args.skillId);
     const skillFile = join(dir, 'SKILL.md');
@@ -322,6 +325,17 @@ export class SkillRegistry {
     // `save` preserves counters by contract (C1); the script form must start
     // from zero — see the rationale above.
     const meta = this.resetCounters(args.l1Name, frontmatter.id);
+    // Record WHICH compiler produced this body: demotion stamps this value,
+    // so a later compiler generation is never blocked by the failure of a
+    // script it did not produce.
+    if (args.compiledGeneration && meta) {
+      const metaPath = join(this.skillDir(args.l1Name, frontmatter.id), '_meta.json');
+      writeFileSync(
+        metaPath,
+        JSON.stringify({ ...meta, compiledGeneration: args.compiledGeneration }, null, 2),
+        'utf8'
+      );
+    }
     return {
       ...saved,
       successes: meta?.successes ?? 0,
@@ -487,6 +501,9 @@ function readMeta(path: string): SkillMeta {
       ...(promotionRefusedReason ? { promotionRefusedReason } : {}),
       ...(promotionRefusedAt && typeof obj.promotionRefusedGeneration === 'string' && obj.promotionRefusedGeneration.length > 0
         ? { promotionRefusedGeneration: obj.promotionRefusedGeneration }
+        : {}),
+      ...(typeof obj.compiledGeneration === 'string' && obj.compiledGeneration.length > 0
+        ? { compiledGeneration: obj.compiledGeneration }
         : {}),
       ...(directFailures ? { directFailures } : {}),
     };

@@ -426,3 +426,34 @@ describe('refusal stamps expire with the compile-prompt generation', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('demotion stamps the COMPILING generation, not the current one', () => {
+  it('a script compiled by an older compiler leaves a STALE stamp when it fails', () => {
+    // The trap this closes: the two-shape manifest fix landed, the old
+    // script failed once more, and stamping the CURRENT generation re-parked
+    // the skill against the very compiler that would have fixed it. A script
+    // produced by compiler A failing says nothing about compiler B's output.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-compgen-'));
+    const skills = new SkillRegistry(dir);
+    skills.save('Hydrogen', {
+      id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'recipe',
+    });
+    skills.promoteToScript({
+      l1Name: 'Hydrogen',
+      skillId: 's',
+      language: 'node',
+      scriptBody: 'console.log(1)',
+      compiledGeneration: 'oldgen01',
+    });
+    const promoted = skills.loadFor('Hydrogen')[0]!;
+    expect(promoted.compiledGeneration).toBe('oldgen01');
+
+    // Demotion path stamps the compiling generation…
+    skills.markPromotionRefused('Hydrogen', 's', 'auto-demoted: …', promoted.compiledGeneration);
+    const stamped = skills.loadFor('Hydrogen')[0]!;
+    expect(stamped.promotionRefusedGeneration).toBe('oldgen01');
+    // …which differs from today's compiler, so the gate treats it as stale.
+    expect(stamped.promotionRefusedGeneration).not.toBe(COMPILE_PROMPT_GENERATION);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

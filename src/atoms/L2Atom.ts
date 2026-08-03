@@ -1436,6 +1436,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       skillId: args.skillId,
       language: compiled.language,
       scriptBody: compiled.body,
+      compiledGeneration: COMPILE_PROMPT_GENERATION,
     });
     args.ctx.logger.info(
       `[${this.name}] skill "${args.skillId}" promoted to kind:script (${compiled.language}, ${compiled.body.length} chars)`
@@ -1718,11 +1719,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // re-compilation until the BODY changes (save() clears it), which is the
     // only event that could change the compile's outcome. NOTE: demoteToLlm
     // just rewrote SKILL.md via save(), so the stamp must be set AFTER it.
+    // Stamp the generation that COMPILED the failing script — not the one in
+    // force now. If the compiler has since evolved, iteration-1's gate treats
+    // this stamp as stale and lets the new compiler try (a script produced by
+    // compiler A failing says nothing about compiler B's output).
     this.skillRegistry.markPromotionRefused(
       l1Name,
       skill.id,
-      `auto-demoted: compiled form failed ${streak} consecutive deterministic dispatches — recompiling the same body would reproduce the same script; revise the body first`,
-      COMPILE_PROMPT_GENERATION
+      `auto-demoted: compiled form failed ${streak} consecutive deterministic dispatches — recompiling the SAME body with the SAME compiler would reproduce it; revise the body or wait for a compiler change`,
+      skill.compiledGeneration ?? COMPILE_PROMPT_GENERATION
     );
     ctx.recordSkill?.({
       op: 'demote',

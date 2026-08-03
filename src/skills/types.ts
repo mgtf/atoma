@@ -93,6 +93,8 @@ export interface Skill {
   readonly promotionRefusedReason?: string;
   /** Mirrors `SkillMeta.promotionRefusedGeneration`; see there. */
   readonly promotionRefusedGeneration?: string;
+  /** Mirrors `SkillMeta.compiledGeneration`; see there. */
+  readonly compiledGeneration?: string;
   /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
   readonly directFailures?: number;
 }
@@ -146,6 +148,17 @@ export interface SkillMeta {
    * treated as stale and retried once.
    */
   readonly promotionRefusedGeneration?: string;
+  /**
+   * COMPILE_PROMPT_GENERATION that produced the CURRENT `kind: script`
+   * body. Set by `promoteToScript`. On demotion the refusal stamp records
+   * THIS value rather than the generation in force at demotion time: a
+   * script compiled by compiler A failing tells us nothing about what
+   * compiler B would produce, so stamping "B" would block the very
+   * recompile that fixes it (observed live: the two-shape manifest fix
+   * landed, the old script failed once more, and the demotion stamped the
+   * NEW generation — re-parking the skill against the corrected compiler).
+   */
+  readonly compiledGeneration?: string;
   /**
    * Consecutive deterministic-dispatch failures for a `kind: script`
    * skill (non-zero exit / missing envelope in `runScriptSkillDirect`).

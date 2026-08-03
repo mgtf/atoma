@@ -114,6 +114,11 @@
   .role.inject { color: #d8b4fe; border-color: #2e1d4d; }
   .role.learn { color: #86efac; border-color: #1e3a2a; }
   .role.update { color: #fcd34d; border-color: #3a2f15; }
+  /* Lifecycle ops deserve distinct weight: promote/direct are the wins the
+     whole project aims at, demote is the safety net firing. */
+  .role.promote { color: #ffd700; border-color: #4a3c00; font-weight: 700; }
+  .role.direct { color: #ffd700; border-color: #4a3c00; font-weight: 700; }
+  .role.demote { color: #fca5a5; border-color: #4a1e1e; font-weight: 700; }
   .role.success { color: var(--ok); }
   .role.failure { color: var(--err); }
 
@@ -529,6 +534,26 @@ function renderSummary(run) {
   if (directCount > 0) {
     const card = statCard('⚡ Phases $0.00', directCount + ' (dispatch déterministe)');
     card.style.borderLeft = '3px solid #ffd700';
+    grid.appendChild(card);
+  }
+  // Skill LIFECYCLE digest — what this run changed about the system itself,
+  // which is invisible in per-event noise: learned recipes, compilations,
+  // demotions, and dispatches that fell back to the LLM loop.
+  const skillEvents = (run.events ?? []).filter((e) => e.kind === 'skill');
+  const tally = {
+    learn: skillEvents.filter((e) => e.op === 'learn').length,
+    promote: skillEvents.filter((e) => e.op === 'promote').length,
+    demote: skillEvents.filter((e) => e.op === 'demote').length,
+    update: skillEvents.filter((e) => e.op === 'update').length,
+  };
+  if (tally.learn || tally.promote || tally.demote || tally.update) {
+    const bits = [];
+    if (tally.learn) bits.push('📖 ' + tally.learn + ' skill(s) appris');
+    if (tally.promote) bits.push('⚡ ' + tally.promote + ' compilation(s)');
+    if (tally.demote) bits.push('🛡️ ' + tally.demote + ' démotion(s)');
+    if (tally.update) bits.push('✏️ ' + tally.update + ' révision(s)');
+    const card = statCard('Cycle de vie', bits.join(' · '));
+    card.style.borderLeft = '3px solid #f0abfc';
     grid.appendChild(card);
   }
   const models = (t.perModel ?? []).map((m) =>
