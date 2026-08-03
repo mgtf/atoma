@@ -29,6 +29,34 @@ describe('validateProbeManifest', () => {
     ).toEqual([]);
   });
 
+  it('accepts a web-shaped manifest (file + smoke, never the ephemeral URL)', () => {
+    expect(
+      validateProbeManifest(
+        JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              probe: 'web',
+              file: 'index.html',
+              interactions: [{ type: 'click', selector: '#start' }],
+              smoke: 'window.__pomo.running === true',
+              expected: 'true',
+              consoleErrors: 0,
+            },
+          ],
+        })
+      )
+    ).toEqual([]);
+  });
+
+  it('reports a web entry missing its replayable fields', () => {
+    const problems = validateProbeManifest(
+      JSON.stringify({ version: 1, entries: [{ probe: 'web', file: 'index.html' }] })
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/#0 \(web\).*smoke/);
+  });
+
   it('accepts a MIXED manifest — that is the documented contract', () => {
     expect(
       validateProbeManifest(
@@ -37,6 +65,7 @@ describe('validateProbeManifest', () => {
           entries: [
             { cmd: 'node x.js', exitCode: 1, stdout: '', stderr: 'boom' },
             { probe: 'http', method: 'POST', path: '/inc', status: 200, body: '{"value":1}' },
+            { probe: 'web', file: 'index.html', smoke: 'document.title === "x"' },
           ],
         })
       )
@@ -74,6 +103,6 @@ describe('validateProbeManifest', () => {
     expect(problems).toHaveLength(3);
     expect(problems[0]).toMatch(/#0 \(shell\).*exitCode/);
     expect(problems[1]).toMatch(/#1 \(http\).*status/);
-    expect(problems[2]).toMatch(/#2: neither shell-shaped/);
+    expect(problems[2]).toMatch(/#2: matches no known shape/);
   });
 });

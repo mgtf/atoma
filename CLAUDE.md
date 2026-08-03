@@ -841,6 +841,11 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   manifest MIXING shell + http entries is VALID (documented contract);
   only structural breakage is reported (bad JSON, version ≠ 1, entries
   not an array or empty, per-entry shape missing its required fields).
+  It knows all THREE shapes — keep it in sync with the writers
+  (GROUND_TRUTH_EVIDENCE_LINES, the http and web canonicals) and the
+  reader (compileSkillToScript): teaching a new shape to one side only
+  turns the health check into a false alarm, which is how iteration 16
+  nearly broke iteration 4.
   GATED on the child having reported probes — a plain file-scribe
   deliverable pays no extra tool call, which keeps the exact-call-count
   assertions in the #F9 tests (a deliberate cost guard) intact.

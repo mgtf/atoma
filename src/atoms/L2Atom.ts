@@ -3506,16 +3506,32 @@ export function validateProbeManifest(raw: string): string[] {
       return;
     }
     const en = e as Record<string, unknown>;
-    const isHttp = en['probe'] === 'http' || typeof en['path'] === 'string';
-    if (isHttp) {
+    // THREE shapes, one per bucket — keep in sync with the writers
+    // (GROUND_TRUTH_EVIDENCE_LINES, the http and web canonicals) and the
+    // reader (compileSkillToScript's manifest block). Dispatch on the
+    // discriminator first, then on distinctive fields.
+    const kind =
+      en['probe'] === 'http' || typeof en['path'] === 'string'
+        ? 'http'
+        : en['probe'] === 'web' || typeof en['smoke'] === 'string'
+          ? 'web'
+          : typeof en['cmd'] === 'string'
+            ? 'shell'
+            : null;
+    if (kind === 'http') {
       if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
       if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
       if (typeof en['status'] !== 'number') problems.push(`entry #${i} (http): missing numeric "status"`);
-    } else if (typeof en['cmd'] === 'string') {
+    } else if (kind === 'web') {
+      // The FILE and the SMOKE are what make a web validation replayable;
+      // the served URL is deliberately not recorded (fresh port per run).
+      if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
+      if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
+    } else if (kind === 'shell') {
       if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
     } else {
       problems.push(
-        `entry #${i}: neither shell-shaped ("cmd" + "exitCode") nor http-shaped ("method" + "path" + "status")`
+        `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
       );
     }
   });
