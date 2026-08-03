@@ -3434,6 +3434,64 @@ export function extractResultFileClaims(payload: unknown): {
  * being smaller or differently worded than described is not grounds to fail —
  * that framing is what kept the web probe from producing false rejections.
  */
+/**
+ * Shape check for the on-disk probe manifest. The manifest is written by
+ * PROMPT (L1 evidence contracts) and read by COMPILED SCRIPTS with no
+ * validator in between — a malformed one silently breaks every future
+ * deterministic dispatch, and the failure surfaces far from its cause
+ * (observed: a third-generation HTTP verifier crashed on entries missing
+ * the fields its shape expected). Returns human-readable problems for the
+ * read-back evidence block; an EMPTY list means "well-formed or absent".
+ *
+ * Deliberately tolerant: unknown extra fields are fine (forward
+ * compatibility), and a manifest mixing shell and http entries is VALID —
+ * that is the documented contract. Only structural breakage is reported.
+ */
+export function validateProbeManifest(raw: string): string[] {
+  const problems: string[] = [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return [`${PROBE_MANIFEST_FILENAME} is not valid JSON: ${(err as Error).message}`];
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return [`${PROBE_MANIFEST_FILENAME} must be a JSON object with an "entries" array`];
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (obj['version'] !== 1) {
+    problems.push(`${PROBE_MANIFEST_FILENAME}: expected "version": 1, got ${JSON.stringify(obj['version'])}`);
+  }
+  const entries = obj['entries'];
+  if (!Array.isArray(entries)) {
+    problems.push(`${PROBE_MANIFEST_FILENAME}: "entries" must be an array`);
+    return problems;
+  }
+  if (entries.length === 0) {
+    problems.push(`${PROBE_MANIFEST_FILENAME}: "entries" is empty — nothing for a later pass to re-verify`);
+  }
+  entries.forEach((e, i) => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) {
+      problems.push(`${PROBE_MANIFEST_FILENAME}: entry #${i} is not an object`);
+      return;
+    }
+    const en = e as Record<string, unknown>;
+    const isHttp = en['probe'] === 'http' || typeof en['path'] === 'string';
+    if (isHttp) {
+      if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
+      if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
+      if (typeof en['status'] !== 'number') problems.push(`entry #${i} (http): missing numeric "status"`);
+    } else if (typeof en['cmd'] === 'string') {
+      if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
+    } else {
+      problems.push(
+        `entry #${i}: neither shell-shaped ("cmd" + "exitCode") nor http-shaped ("method" + "path" + "status")`
+      );
+    }
+  });
+  return problems;
+}
+
 async function probeFilesGroundTruth(args: {
   ctx: RunContext;
   payload: unknown;
@@ -3455,6 +3513,31 @@ async function probeFilesGroundTruth(args: {
   }
 
   const lines: string[] = [];
+  // Manifest health check — it is the interface later compiled verifiers
+  // depend on, and nothing else audits it (written by prompt, read by
+  // script). GATED on the child having reported probes: only then is a
+  // manifest expected, so a plain file-scribe deliverable pays no extra
+  // tool call (the exact-call-count assertions in the #F9 tests are a
+  // deliberate cost guard — respect them).
+  if (recorded.lines.length > 0) try {
+    const rawManifest = await tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
+    const text =
+      rawManifest && typeof rawManifest === 'object' && typeof (rawManifest as Record<string, unknown>)['content'] === 'string'
+        ? ((rawManifest as Record<string, unknown>)['content'] as string)
+        : typeof rawManifest === 'string'
+          ? rawManifest
+          : '';
+    if (text.trim().length > 0) {
+      const problems = validateProbeManifest(text);
+      lines.push(
+        problems.length === 0
+          ? `${PROBE_MANIFEST_FILENAME}: well-formed (machine-readable probe record present)`
+          : `${PROBE_MANIFEST_FILENAME}: MALFORMED — ${problems.slice(0, 4).join('; ')}`
+      );
+    }
+  } catch {
+    // Absent manifest is normal for non-runnable deliverables — say nothing.
+  }
   for (const [path, isClaim] of [
     ...claims.structured.map((p) => [p, true] as const),
     ...claims.mentioned.map((p) => [p, false] as const),

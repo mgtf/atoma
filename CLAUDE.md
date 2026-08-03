@@ -775,6 +775,20 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **The probe manifest is health-checked (`validateProbeManifest`).**
+  The manifest is written by PROMPT (L1 evidence contracts) and read by
+  COMPILED SCRIPTS with no validator between them — a malformed one
+  silently breaks every future deterministic dispatch and surfaces far
+  from its cause. The read-back probe now validates it and reports
+  either `well-formed` or the specific breakage into the evidence block.
+  Tolerant by design: unknown extra fields pass (forward compat) and a
+  manifest MIXING shell + http entries is VALID (documented contract);
+  only structural breakage is reported (bad JSON, version ≠ 1, entries
+  not an array or empty, per-entry shape missing its required fields).
+  GATED on the child having reported probes — a plain file-scribe
+  deliverable pays no extra tool call, which keeps the exact-call-count
+  assertions in the #F9 tests (a deliberate cost guard) intact.
+  Covered by `tests/probe-manifest-validation.test.ts`.
 - **Refusal stamps EXPIRE with the compile-prompt generation.**
   `COMPILE_PROMPT_GENERATION` (`src/atoms/L2Atom.ts`) is a djb2 hash of
   `buildCompileSkillPrompt`'s static template rendered with fixed
