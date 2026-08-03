@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "http-ping",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'pingd' (pingd.js): GET /ping returns 200 {\"pong\":true}; GET /version returns 200 {\"version\":\"1.0.0\"}; any other path returns 404 with a JSON error. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written, and confirm observed status codes and bodies match the README claims."
+    }
+  ]
+}

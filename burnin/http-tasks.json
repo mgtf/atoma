@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "http-echo",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'echod' (echod.js): GET /healthz returns 200 {\"ok\":true,\"uptimeMs\":<number>}; GET /echo?msg=<text> returns 200 {\"echo\":\"<text>\"} or 400 with a JSON error when msg is missing; any other path returns 404 with a JSON error. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written, and confirm observed status codes and bodies match the README claims."
+    },
+    {
+      "id": "http-counter",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'countd' (countd.js): POST /inc increments an in-memory counter and returns 200 {\"value\":<n>}; GET /value returns 200 {\"value\":<n>}; POST /reset sets it to 0 and returns 204; any other path returns 404 with a JSON error. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written, and confirm observed status codes and bodies match the README claims."
+    },
+    {
+      "id": "http-kvlite",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'kvlite' (kvlite.js): PUT /kv/<key> stores the raw JSON body under the key and returns 204; GET /kv/<key> returns the stored JSON or 404 with a JSON error; DELETE /kv/<key> removes it (204, or 404 if unknown); GET /kv returns the JSON array of keys. Items live in memory. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written (state-dependent probes in their documented order), and confirm observed status codes and bodies match the README claims."
+    },
+    {
+      "id": "http-todos",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'todod' (todod.js): POST /todos with JSON body {\"title\":string} returns 201 with {id,title}; a missing title or invalid JSON returns 400 with a JSON error; GET /todos returns the full array; DELETE /todos/<id> returns 204 or 404 if unknown. Items live in memory. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written (state-dependent probes in their documented order), and confirm observed status codes and bodies match the README claims."
+    },
+    {
+      "id": "http-time",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'timed' (timed.js): GET /now returns 200 {\"iso\":\"<ISO-8601 string>\"}; GET /unix returns 200 {\"epochMs\":<number>}; any other path returns 404 with a JSON error. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body — for time-varying fields, document the SHAPE that was verified (field present, type, format) rather than the exact value. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written, and confirm observed status codes and body SHAPES match the README claims."
+    },
+    {
+      "id": "http-notes",
+      "family": "http",
+      "goal": "A zero-dependency Node HTTP JSON API 'noted' (noted.js): PUT /notes/<id> with JSON body {\"text\":string} stores the note and returns 204 (400 with a JSON error on invalid body); GET /notes/<id> returns 200 {id,text} or 404 with a JSON error; GET /notes returns the JSON array of note ids. Notes live in memory. Ship package.json and a README with a 'Verified probes' section documenting every request made with its real observed status code and body. The plan MUST include a SEPARATE FINAL VERIFICATION STEP distinct from the build: start the server fresh, re-run EVERY probe documented in the README exactly as written (state-dependent probes in their documented order), and confirm observed status codes and bodies match the README claims."
+    }
+  ]
+}

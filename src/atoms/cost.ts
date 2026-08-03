@@ -57,6 +57,23 @@ export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 5;
 export const DIRECT_DISPATCH_DEMOTE_AFTER = 2;
 
 /**
+ * Own abort budget for POST-APPROVAL bookkeeping LLM calls (skill
+ * distillation in `learnSkillFromRun`, llm→script compilation in
+ * `compileSkillToScript`) — deliberately DECOUPLED from the run's
+ * deadline signal. By the time these calls fire, the deliverable is
+ * already approved: killing a compile to protect the run budget
+ * protects nothing, and it kept happening — three separate incidents
+ * of the run deadline landing mid-compile under the claude-cli
+ * transport, the last one leaving a run HUNG with no endedAt after
+ * the aborted subprocess (http-ping closer, 2026-08-03). The
+ * trade-off is explicit: a run may extend past its deadline by at
+ * most this budget while bookkeeping completes. `improveSkillBody`
+ * deliberately KEEPS the run signal — it gates an escalation retry,
+ * i.e. the deliverable itself.
+ */
+export const POST_APPROVAL_LLM_TIMEOUT_MS = 240_000;
+
+/**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
  * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED

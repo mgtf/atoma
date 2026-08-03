@@ -40,6 +40,7 @@ import {
   TaskChildrenMemo,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
   DIRECT_DISPATCH_DEMOTE_AFTER,
+  POST_APPROVAL_LLM_TIMEOUT_MS,
 } from './cost.js';
 import {
   bucketIdForTools,
@@ -1049,7 +1050,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // and on 5-series models adaptive thinking shares this cap with the
       // response — a truncated draft is a silently lost learning event.
       params: { ...this.params, maxTokens: 1600, temperature: 0 },
-      signal: args.ctx.signal,
+      // Post-approval bookkeeping: own budget, never the run deadline.
+      signal: AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS),
     });
     const drafts = parseSkillDrafts(resp.text);
     if (drafts.length === 0) {
@@ -1414,7 +1416,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // ran ~7 minutes / ~20k thinking+output tokens through the subprocess
       // and was killed by the run deadline twice (rehearsal runs 4 and 5).
       params: { ...this.params, maxTokens: 4000, temperature: 0, effort: 'medium' },
-      signal: args.ctx.signal,
+      // Post-approval bookkeeping: own budget, never the run deadline.
+      signal: AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS),
     });
     const raw = (resp.text ?? '').trim();
     if (!raw) return { promotable: false, reason: 'empty model response' };

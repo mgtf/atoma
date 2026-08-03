@@ -314,3 +314,44 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(fallbackContent).toMatch(/validate_html/);
   });
 });
+
+describe('post-approval bookkeeping — decoupled from the run deadline', () => {
+  it('the compile call carries its OWN signal, not the run signal', async () => {
+    // Three separate live incidents of the run deadline landing mid-compile
+    // under claude-cli, the last leaving a run hung with no endedAt. By
+    // compile time the deliverable is approved — the run budget protects
+    // nothing there.
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-decouple-'));
+    const skills = new SkillRegistry(dir);
+    const db = openDb(':memory:');
+    const reg = new AtomRegistry(db);
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
+    skills.save('Hydrogen', {
+      id: 'web-build-loop',
+      description: 'd',
+      whenToUse: 'w',
+      kind: 'llm',
+      body: 'b',
+    });
+    for (let i = 0; i < 5; i++) skills.recordSuccess('Hydrogen', 'web-build-loop');
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const runSignal = new AbortController().signal;
+    const ctx = { ...makeCtx(), signal: runSignal };
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'built' }));
+    ctx.llm.enqueueText(JSON.stringify({ promotable: false, reason: 'nope' }));
+
+    await water.handleDirect({ description: 'task' }, ctx);
+    const compileCall = ctx.llm.calls.at(-1)!;
+    expect(compileCall.signal).toBeDefined();
+    expect(compileCall.signal).not.toBe(runSignal);
+    expect(compileCall.signal!.aborted).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
