@@ -410,7 +410,7 @@ async function selectRun(id) {
 function scheduleLivePoll(runId) {
   if (state.livePollHandle) clearTimeout(state.livePollHandle);
   // Not in-flight → nothing to poll.
-  if (!state.currentRun || state.currentRun.endedAt) return;
+  if (!state.currentRun || state.currentRun.endedAt || isAbandoned(state.currentRun)) return;
   state.livePollHandle = setTimeout(async () => {
     state.livePollHandle = null;
     // User navigated away / picked another run — stop.
@@ -539,6 +539,11 @@ function renderSummary(run) {
   // Skill LIFECYCLE digest — what this run changed about the system itself,
   // which is invisible in per-event noise: learned recipes, compilations,
   // demotions, and dispatches that fell back to the LLM loop.
+  if (isAbandoned(run)) {
+    const card = statCard('⚠ Run abandonné', 'aucune activité depuis >5 min, sans endedAt');
+    card.style.borderLeft = '3px solid var(--err)';
+    grid.appendChild(card);
+  }
   const skillEvents = (run.events ?? []).filter((e) => e.kind === 'skill');
   const tally = {
     learn: skillEvents.filter((e) => e.op === 'learn').length,
@@ -729,7 +734,7 @@ function renderEvents() {
   // in the "en ce moment" banner) or INTERRUPTED (ended run — shown
   // inline, the signature of a killed subprocess / network blip).
   const completedIds = new Set(run.events.filter((e) => e.kind === 'llm').map((e) => e.id));
-  const isLive = !run.endedAt;
+  const isLive = !run.endedAt && !isAbandoned(run);
   renderNowBanner(run, completedIds, isLive);
   const filtered = run.events.filter((e) => {
     if (e.kind === 'llm-start') {
@@ -755,6 +760,25 @@ function renderEvents() {
  * elapsed. Data source: unpaired llm-start events. The 1s live poll
  * re-renders this, so the elapsed advances without its own timer.
  */
+/**
+ * A run with no `endedAt` is only LIVE if something still happens. A crash,
+ * a hard kill or a network blip that took the process down leaves the trace
+ * without its closing stamp forever — and the UI used to poll such a run
+ * eternally while showing a "happening now" banner for a call that died
+ * hours ago (observed: a run hung by an aborted claude-cli subprocess).
+ * Verdict is time-based on the LAST recorded event: no activity for
+ * ABANDONED_AFTER_MS means abandoned.
+ */
+const ABANDONED_AFTER_MS = 5 * 60 * 1000;
+
+function isAbandoned(run) {
+  if (run.endedAt) return false;
+  const evs = run.events ?? [];
+  if (evs.length === 0) return Date.now() - Date.parse(run.startedAt) > ABANDONED_AFTER_MS;
+  const last = Math.max(...evs.map((e) => e.ts ?? 0));
+  return Date.now() - last > ABANDONED_AFTER_MS;
+}
+
 function renderNowBanner(run, completedIds, isLive) {
   const host = $('nowBanner');
   if (!host) return;
