@@ -17,6 +17,8 @@
  */
 
 import { SkillRegistry } from '../skills/registry.js';
+import { COMPILE_PROMPT_GENERATION } from '../atoms/L2Atom.js';
+import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
 import type { Skill } from '../skills/types.js';
 
 interface Args {
@@ -128,9 +130,35 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   }
   if (s.directFailures) {
     console.log(
-      `  ⚠ ${s.directFailures} consecutive deterministic-dispatch failure(s) — demotes to llm at 2`
+      `  ⚠ ${s.directFailures} consecutive deterministic-dispatch failure(s) — demotes to llm at ${demoteAfter()}`
     );
   }
+  // Lifecycle position: what has to happen next, and whether anything blocks
+  // it. Without this an operator sees counters but not the CONSEQUENCE.
+  const next: string[] = [];
+  if (s.kind === 'llm') {
+    if (s.failures > 0) {
+      next.push(`blocked: ${s.failures} failure(s) recorded — \`reset\` to clear`);
+    } else if (s.promotionRefusedAt && s.promotionRefusedGeneration === COMPILE_PROMPT_GENERATION) {
+      next.push('blocked: refused by the CURRENT compiler — revise the body or `reset`');
+    } else if (s.promotionRefusedAt) {
+      next.push('will RETRY compilation (stamp predates the current compiler)');
+    } else if (s.successes >= promoteThreshold()) {
+      next.push('eligible NOW for llm→script compilation');
+    } else {
+      next.push(`${promoteThreshold() - s.successes} more clean run(s) → compile attempt`);
+    }
+  } else {
+    if (s.failures > 0) {
+      next.push(`blocked: ${s.failures} failure(s) — dispatch stays off until \`reset\``);
+    } else if (s.successes >= trustThreshold()) {
+      next.push('TRUSTED — runs via zero-LLM deterministic dispatch');
+    } else {
+      next.push(`${trustThreshold() - s.successes} more clean run(s) → zero-LLM dispatch`);
+    }
+    if (!s.fallbackBody) next.push('no _fallback.md — cannot be auto-demoted');
+  }
+  console.log(`  next        : ${next.join(' · ')}`);
   if (s.fallbackBody) {
     console.log(`  has _fallback.md (original llm body preserved from promotion)`);
   }
@@ -151,8 +179,8 @@ function cmdReset(registry: SkillRegistry, l1: string, id: string): void {
       (before.promotionRefusedAt ? `, promotionRefusedAt cleared` : '')
   );
   console.log(
-    `  the skill re-earns trust from scratch (deterministic dispatch after 3 clean runs,` +
-      ` promotion attempt after 5).`
+    `  the skill re-earns trust from scratch (deterministic dispatch after ${trustThreshold()} clean runs,` +
+      ` promotion attempt after ${promoteThreshold()}).`
   );
 }
 
