@@ -775,6 +775,16 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **Lifecycle thresholds are operator-configurable at call time.**
+  `trustThreshold()` / `promoteThreshold()` / `demoteAfter()` in
+  `src/atoms/cost.ts` read `ATOMA_TRUST_THRESHOLD` /
+  `ATOMA_PROMOTE_THRESHOLD` / `ATOMA_DEMOTE_AFTER`, defaulting to the
+  documented constants (3 / 5 / 2 — still what tests assert). Read at
+  CALL time so a single run can be made more cautious without a rebuild.
+  Invalid, zero or negative values fall back to the DEFAULT rather than
+  disabling a gate: a typo must never make the system less careful.
+  Use `shouldTrustType` / `shouldTrustSkill` (which call the helpers) —
+  never compare against the raw constants in new code.
 - **The probe manifest is health-checked (`validateProbeManifest`).**
   The manifest is written by PROMPT (L1 evidence contracts) and read by
   COMPILED SCRIPTS with no validator between them — a malformed one

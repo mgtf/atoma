@@ -21,6 +21,39 @@ import { parseWith } from './json.js';
 export const TRUST_THRESHOLD_SUCCESSES = 3;
 
 /**
+ * Operator overrides for the three lifecycle thresholds, read at CALL time
+ * so a single run can be made more (or less) cautious without a rebuild:
+ *   ATOMA_TRUST_THRESHOLD   → successes before validators are skipped (3)
+ *   ATOMA_PROMOTE_THRESHOLD → successes before llm→script compilation (5)
+ *   ATOMA_DEMOTE_AFTER      → deterministic failures before demotion (2)
+ * Invalid or non-positive values fall back to the default rather than
+ * disabling a safety gate — a typo must never make the system LESS careful.
+ * The constants above remain the documented defaults and the values tests
+ * assert against.
+ */
+function envThreshold(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/** Successes (with zero failures) before a type/skill skips validation. */
+export function trustThreshold(): number {
+  return envThreshold('ATOMA_TRUST_THRESHOLD', TRUST_THRESHOLD_SUCCESSES);
+}
+
+/** Successes (with zero failures) before an llm skill attempts compilation. */
+export function promoteThreshold(): number {
+  return envThreshold('ATOMA_PROMOTE_THRESHOLD', TRUST_PROMOTE_THRESHOLD_SUCCESSES);
+}
+
+/** Consecutive deterministic failures before a script skill is demoted. */
+export function demoteAfter(): number {
+  return envThreshold('ATOMA_DEMOTE_AFTER', DIRECT_DISPATCH_DEMOTE_AFTER);
+}
+
+/**
  * When an `kind: 'llm'` skill crosses this many SUCCESSES with zero
  * recorded failures, the supervisor will attempt to PROMOTE it to a
  * deterministic `kind: 'script'` body via a Sonnet compile call. The
@@ -97,7 +130,7 @@ export const POST_APPROVAL_LLM_TIMEOUT_MS = 240_000;
 export const STRATEGY_MAX_TOKENS = 8000;
 
 export function shouldTrustType(type: AtomType): boolean {
-  return type.failures === 0 && type.successes >= TRUST_THRESHOLD_SUCCESSES;
+  return type.failures === 0 && type.successes >= trustThreshold();
 }
 
 /**
@@ -110,7 +143,7 @@ export function shouldTrustType(type: AtomType): boolean {
  * must first earn 3 clean runs through the normal LLM loop.
  */
 export function shouldTrustSkill(skill: { successes: number; failures: number }): boolean {
-  return skill.failures === 0 && skill.successes >= TRUST_THRESHOLD_SUCCESSES;
+  return skill.failures === 0 && skill.successes >= trustThreshold();
 }
 
 /** Synthetic verdict returned by the trust fast-path in place of an LLM call. */

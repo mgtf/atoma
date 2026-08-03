@@ -39,6 +39,8 @@ import {
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
+  promoteThreshold,
+  demoteAfter,
   DIRECT_DISPATCH_DEMOTE_AFTER,
   POST_APPROVAL_LLM_TIMEOUT_MS,
 } from './cost.js';
@@ -1364,7 +1366,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     if (!skill) return;
     if (skill.kind !== 'llm') return;
     if (skill.failures > 0) return;
-    if (skill.successes < TRUST_PROMOTE_THRESHOLD_SUCCESSES) return;
+    if (skill.successes < promoteThreshold()) return;
     if (skill.promotionRefusedAt && skill.promotionRefusedGeneration !== COMPILE_PROMPT_GENERATION) {
       // The stamp predates the CURRENT compiler. Its premise ("recompiling
       // this body reproduces the same script") is false once the compile
@@ -1696,7 +1698,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   private noteDirectFailure(l1Name: string, skill: Skill, ctx: RunContext): void {
     if (!this.skillRegistry) return;
     const streak = this.skillRegistry.markDirectFailure(l1Name, skill.id);
-    if (streak < DIRECT_DISPATCH_DEMOTE_AFTER) return;
+    if (streak < demoteAfter()) return;
     const demoted = this.skillRegistry.demoteToLlm(l1Name, skill.id);
     if (!demoted) {
       // No _fallback.md (hand-authored script) — nothing to restore. The
