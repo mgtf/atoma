@@ -6,7 +6,7 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-671_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-686_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
@@ -59,6 +59,8 @@ each run's trace, and the whole table regenerates with `npm run burnin`.
 | Prompt-cache hits per run | **0.2 – 1.7M tokens** at 10% input price |
 | Decomposable task → 3 deliverables in **parallel branches** (measured over 6 runs / 18 tools) | $0.40/run = **$0.13 per deliverable** — the fan-out amortizes the plan |
 | Learned task on a trusted compiled skill | **$0.00 — zero LLM calls**, 2 tool calls |
+| Families that reached compiled-skill dispatch | **CLI + HTTP** (docs, CLI verification, API probing) |
+| Mature HTTP run (recipes + one compiled phase) | **$0.13 · 146s** |
 | Broken deliverable detected by the compiled verifier | **exit 1, per-command diff** (mutation-tested) |
 | Full state wipe → relearn, three separate epochs | **same decay trajectory every time** |
 
@@ -110,11 +112,16 @@ below.*
 `skills/`, the registry DBs and the run traces are **gitignored by design**: they
 mutate on every run, and they are the system's memory, not its source. A fresh clone
 starts at day zero and earns its own state — a property we validate by wiping
-everything and re-running from scratch. Three full epochs so far, same trajectory
+everything and re-running from scratch. Four full epochs so far, same trajectory
 each time: bootstrap the canonical atoms, learn a build+verify skill pair on the
 first novel task (one distillation call produces both), reuse them intra-run, then
-watch the per-task cost fall. The `trained-snapshot` tag archives a fully-matured
-store for inspection or restoration.
+watch the per-task cost fall. Epoch 4 traversed the ENTIRE lifecycle hands-off in
+one batch — nine runs, zero operator-touched counters: cold start $0.285 → skills
+matched → validators retired at 3✓ → at 5✓ the compiler REFUSED the build recipe
+("designing bespoke CLI business logic from a free-form spec is an irreducible LLM
+reasoning step") and PROMOTED the verify recipe → the script earned 3 clean runs
+under the validated loop → zero-LLM dispatch. The `trained-snapshot` tag archives
+a fully-matured store for inspection or restoration.
 
 Recent transport engineering, measured on the same warm task:
 
@@ -123,6 +130,8 @@ Recent transport engineering, measured on the same warm task:
 | `effort` pin through the Claude Code CLI (its `maxTokens` is advisory-only) | skill-compile calls: ~7 min → ~1 min |
 | Thinking parity for Haiku-tier calls (the CLI defaulted thinking ON; the API never asks) | prefilters **17.5s → 4.4s/call**; whole run **250s → 138s (−45%)** |
 | Transport-aware run budgets, orphan-process group-kill, config-failure batch abort | no more phantom rows, port squatters, or deadline-starved compiles |
+| Post-approval bookkeeping (distillation, compilation) on its own abort budget | learning is never discarded to protect a deadline the deliverable already met |
+| Refusal stamps carry the compile-prompt generation | an evolved compiler automatically re-earns its shot — no operator reset |
 
 ## 🏗️ Architecture
 
@@ -231,7 +240,7 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 671 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 686 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
@@ -279,5 +288,5 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 671 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
+<sub>TypeScript · SQLite · zod · 686 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>
