@@ -91,6 +91,8 @@ export interface Skill {
   readonly promotionRefusedAt?: string;
   /** Mirrors `SkillMeta.promotionRefusedReason`; see there for semantics. */
   readonly promotionRefusedReason?: string;
+  /** Mirrors `SkillMeta.promotionRefusedGeneration`; see there. */
+  readonly promotionRefusedGeneration?: string;
   /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
   readonly directFailures?: number;
 }
@@ -135,6 +137,15 @@ export interface SkillMeta {
    * ./runs. Lifecycle is identical to `promotionRefusedAt`.
    */
   readonly promotionRefusedReason?: string;
+  /**
+   * COMPILE_PROMPT_GENERATION in force when the refusal/demotion stamp was
+   * written. The stamp's premise — "recompiling this body reproduces the
+   * same script" — holds only while the COMPILER is unchanged, so
+   * `tryPromoteSkill` ignores a stamp whose generation differs from the
+   * current one (and clears it). Absent on legacy stamps, which are then
+   * treated as stale and retried once.
+   */
+  readonly promotionRefusedGeneration?: string;
   /**
    * Consecutive deterministic-dispatch failures for a `kind: script`
    * skill (non-zero exit / missing envelope in `runScriptSkillDirect`).

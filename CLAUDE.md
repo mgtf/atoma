@@ -775,6 +775,22 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **Refusal stamps EXPIRE with the compile-prompt generation.**
+  `COMPILE_PROMPT_GENERATION` (`src/atoms/L2Atom.ts`) is a djb2 hash of
+  `buildCompileSkillPrompt`'s static template rendered with fixed
+  placeholders — edit any line of the compile prompt and the id changes.
+  `markPromotionRefused` records it; `tryPromoteSkill` IGNORES (and
+  clears, via `clearPromotionRefusal`) a stamp whose generation differs
+  from the current one, giving the evolved compiler exactly one shot.
+  Rationale: the stamp's premise is "recompiling this body reproduces the
+  same script", which is FALSE once the compiler itself changed. Observed
+  live: the probe-manifest contract landed, a demoted HTTP skill was
+  stamped under the old prompt, and benefiting from the new contract
+  required a manual `skills reset` — the only operator intervention in an
+  otherwise autonomous cycle. Legacy stamps (no generation recorded) are
+  treated as stale and retried once. Same-generation stamps still
+  short-circuit before the Sonnet call, so the anti-thrash guarantee is
+  intact. Covered by `skill-promote.test.ts` (both directions).
 - **Deterministic-failure streak demotes a brittle script (#C4b).**
   `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
   missing envelope) call `noteDirectFailure`, which bumps

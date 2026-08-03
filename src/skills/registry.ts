@@ -95,6 +95,9 @@ export class SkillRegistry {
           ...(meta.promotionRefusedReason
             ? { promotionRefusedReason: meta.promotionRefusedReason }
             : {}),
+          ...(meta.promotionRefusedGeneration
+            ? { promotionRefusedGeneration: meta.promotionRefusedGeneration }
+            : {}),
           ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
         });
       } catch (err) {
@@ -181,7 +184,12 @@ export class SkillRegistry {
    * No-op (returns null) when the skill folder doesn't exist; we
    * never auto-create a meta file for a non-existent skill.
    */
-  markPromotionRefused(l1Name: string, skillId: string, reason?: string): SkillMeta | null {
+  markPromotionRefused(
+    l1Name: string,
+    skillId: string,
+    reason?: string,
+    generation?: string
+  ): SkillMeta | null {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
     const metaPath = join(dir, '_meta.json');
@@ -193,6 +201,7 @@ export class SkillRegistry {
       ...cur,
       promotionRefusedAt: nowIso(),
       ...(trimmed ? { promotionRefusedReason: trimmed } : {}),
+      ...(generation ? { promotionRefusedGeneration: generation } : {}),
       updatedAt: nowIso(),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
@@ -218,6 +227,27 @@ export class SkillRegistry {
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
     return next.directFailures ?? 0;
+  }
+
+  /**
+   * Drop the refusal/demotion stamp (timestamp, reason, generation) while
+   * KEEPING counters. Used when the stamp is stale because the compile
+   * prompt generation moved on — the stamp's premise no longer holds, so
+   * the evolved compiler deserves a shot without an operator reset.
+   */
+  clearPromotionRefusal(l1Name: string, skillId: string): void {
+    const dir = this.skillDir(l1Name, skillId);
+    const metaPath = join(dir, '_meta.json');
+    if (!existsSync(join(dir, 'SKILL.md')) || !existsSync(metaPath)) return;
+    const cur = readMeta(metaPath);
+    if (!cur.promotionRefusedAt) return;
+    const {
+      promotionRefusedAt: _a,
+      promotionRefusedReason: _r,
+      promotionRefusedGeneration: _g,
+      ...rest
+    } = cur;
+    writeFileSync(metaPath, JSON.stringify({ ...rest, updatedAt: nowIso() }, null, 2), 'utf8');
   }
 
   /**
@@ -408,6 +438,9 @@ export class SkillRegistry {
       ...(cur.promotionRefusedReason
         ? { promotionRefusedReason: cur.promotionRefusedReason }
         : {}),
+      ...(cur.promotionRefusedGeneration
+        ? { promotionRefusedGeneration: cur.promotionRefusedGeneration }
+        : {}),
       ...(cur.directFailures ? { directFailures: cur.directFailures } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
@@ -452,6 +485,9 @@ function readMeta(path: string): SkillMeta {
       updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : nowIso(),
       ...(promotionRefusedAt ? { promotionRefusedAt } : {}),
       ...(promotionRefusedReason ? { promotionRefusedReason } : {}),
+      ...(promotionRefusedAt && typeof obj.promotionRefusedGeneration === 'string' && obj.promotionRefusedGeneration.length > 0
+        ? { promotionRefusedGeneration: obj.promotionRefusedGeneration }
+        : {}),
       ...(directFailures ? { directFailures } : {}),
     };
   } catch {

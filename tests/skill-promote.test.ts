@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { L2Atom } from '../src/atoms/L2Atom.js';
+import { L2Atom, COMPILE_PROMPT_GENERATION } from '../src/atoms/L2Atom.js';
 import {
   shouldTrustSkill,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
@@ -352,6 +352,72 @@ describe('post-approval bookkeeping — decoupled from the run deadline', () => 
     expect(compileCall.signal).toBeDefined();
     expect(compileCall.signal).not.toBe(runSignal);
     expect(compileCall.signal!.aborted).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('refusal stamps expire with the compile-prompt generation', () => {
+  it('a stamp from an older generation is cleared and the compile retried', async () => {
+    // The manual-reset case, automated: when the compile PROMPT evolves (e.g.
+    // the probe-manifest contract landed), a stamp written under the old
+    // prompt no longer justifies skipping — its premise ("same body → same
+    // script") assumed a fixed compiler.
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-gen-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
+    skills.save('Hydrogen', {
+      id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
+    });
+    for (let i = 0; i < 5; i++) skills.recordSuccess('Hydrogen', 'web-build-loop');
+    // Stamp from a DIFFERENT (stale) generation.
+    skills.markPromotionRefused('Hydrogen', 'web-build-loop', 'old verdict', 'deadbeef');
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    // A compile response IS enqueued — if the stale stamp still blocked, the
+    // mock would end with this reply unconsumed.
+    ctx.llm.enqueueText(JSON.stringify({ promotable: false, reason: 'still no' }));
+
+    await water.handleDirect({ description: 'task' }, ctx);
+    expect(ctx.llm.calls).toHaveLength(5); // the 5th IS the retried compile
+    const after = skills.loadFor('Hydrogen')[0]!;
+    // Re-stamped with the CURRENT generation, so the next success skips.
+    expect(after.promotionRefusedGeneration).toBe(COMPILE_PROMPT_GENERATION);
+    expect(after.promotionRefusedReason).toMatch(/still no/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a stamp from the CURRENT generation still short-circuits (no wasted compile)', async () => {
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-gen2-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
+    skills.save('Hydrogen', {
+      id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
+    });
+    for (let i = 0; i < 5; i++) skills.recordSuccess('Hydrogen', 'web-build-loop');
+    skills.markPromotionRefused('Hydrogen', 'web-build-loop', 'current verdict', COMPILE_PROMPT_GENERATION);
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    // NO compile reply enqueued: the gate must not call.
+    await water.handleDirect({ description: 'task' }, ctx);
+    expect(ctx.llm.calls).toHaveLength(4);
     rmSync(dir, { recursive: true, force: true });
   });
 });
