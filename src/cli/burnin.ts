@@ -291,6 +291,7 @@ async function main(): Promise<void> {
 
   console.log(`burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${process.env['ATOMA_LLM'] ?? 'anthropic'}`);
   const summaryRows: { family: string; outcome: string; costUsd: number | null }[] = [];
+  let consecutiveConfigFailures = 0;
 
   for (const task of tasks) {
     const ts = new Date().toISOString();
@@ -310,11 +311,21 @@ async function main(): Promise<void> {
         (stats.demotions ? `  🛡️demoted=${stats.demotions}` : '') +
         (stats.dispatchFallbacks ? `  ↩fallback=${stats.dispatchFallbacks}` : '')
     );
-    if (summaryRows.length === 1 && looksLikeConfigFailure(stats, durationS) && !argv.includes('--force')) {
+    // Abort on the CONFIG-FAILURE signature — at any position, not just the
+    // first task. A credential that dies mid-batch (expired token, exhausted
+    // quota, revoked key) produces the same instant zero-spend rows, and
+    // burning the remaining tasks against it only pollutes the curve. Two in
+    // a row is the trigger: one isolated fast failure can legitimately be a
+    // task that bounced off a guard.
+    if (looksLikeConfigFailure(stats, durationS)) consecutiveConfigFailures++;
+    else consecutiveConfigFailures = 0;
+    const abortThreshold = summaryRows.length === 1 ? 1 : 2;
+    if (consecutiveConfigFailures >= abortThreshold && !argv.includes('--force')) {
       console.error(
-        `\n✗ first task failed in ${durationS}s with zero spend — this is the signature of a\n` +
-          `  misconfigured provider (dead ANTHROPIC_API_KEY? missing ATOMA_LLM=claude-cli?),\n` +
-          `  not of a hard task. Batch ABORTED to avoid filling the curve with phantom rows.\n` +
+        `\n✗ ${consecutiveConfigFailures} task(s) failed almost instantly with zero spend — the signature of a\n` +
+          `  misconfigured or expired provider (dead ANTHROPIC_API_KEY? missing ATOMA_LLM=claude-cli?\n` +
+          `  exhausted quota mid-batch?), not of a hard task. Batch ABORTED after ${summaryRows.length}/${tasks.length}\n` +
+          `  task(s) to avoid filling the curve with phantom rows.\n` +
           `  Check the last log under burnin/logs/, fix the env, and re-run (--force to override).`
       );
       process.exit(1);
