@@ -11,7 +11,7 @@ import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { L3Atom } from '../atoms/L3Atom.js';
-import { SMOKE_DESIGN_GUIDANCE } from '../atoms/L2Atom.js';
+import { SMOKE_DESIGN_GUIDANCE } from '../atoms/prompts.js';
 import {
   ensureCanonicalL1,
   ensureCanonicalL2,
