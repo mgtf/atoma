@@ -73,6 +73,7 @@ export {
 } from './groundTruth.js';
 export { extractRecordedProbes } from '../contracts/witness.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
+import { scriptInterpreter, scriptScratchFilename } from '../skills/abi.js';
 // Compatibility re-exports: tests and the skills CLI historically import
 // these from L2Atom; the definitions now live in src/contracts/ and
 // src/skills/compilePrompt.ts.
@@ -281,8 +282,8 @@ export function skillContextBlock(skill: {
       throw new Error(`skillContextBlock: kind:"script" requires language`);
     }
     const ext = scriptExtension(skill.language);
-    const interpreter = skill.language === 'python' ? 'python3' : skill.language;
-    const filename = `_skill_${skill.id}.${ext}`;
+    const interpreter = scriptInterpreter(skill.language ?? 'node');
+    const filename = scriptScratchFilename(skill.id, skill.language ?? 'node');
     return [
       `== ACTIVE SKILL: ${skill.id} (kind: script, language: ${skill.language}) ==`,
       `This skill ships an EXECUTABLE script (below). Your task is NOT to`,
@@ -1417,8 +1418,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       );
       return null;
     }
-    const filename = `_skill_${skill.id}.${scriptExtension(skill.language)}`;
-    const interpreter = skill.language === 'python' ? 'python3' : skill.language;
+    const filename = scriptScratchFilename(skill.id, skill.language);
+    const interpreter = scriptInterpreter(skill.language);
     try {
       await ctx.tools!.execute('write_file', { path: filename, content: skill.body });
       const res = (await ctx.tools!.execute('run_shell', {
