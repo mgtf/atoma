@@ -50,3 +50,29 @@ describe('output_config.effort gating', () => {
     expect(create.mock.calls[0]![0].output_config).toBeUndefined();
   });
 });
+
+describe('cliEffortFor — provider-agnostic tier pins (audit rank-2)', () => {
+  it('a bare "sonnet"/"opus" alias KEEPS the effort pin', async () => {
+    const { cliEffortFor } = await import('../src/core/llmClaudeCli.js');
+    // ATOMA_MODEL_L3=sonnet arrives as req.model='sonnet' — the old gate
+    // (modelSupportsEffort, anchored on /^claude-/) silently dropped the
+    // pin, the one cost lever this transport has.
+    for (const model of ['sonnet', 'opus', 'zai-sonnet-lookalike']) {
+      const eff = cliEffortFor({
+        model, systemPrompt: 's', userContent: 'u', params: { effort: 'medium' },
+      } as never);
+      if (model === 'zai-sonnet-lookalike') expect(eff).toBe('medium'); // resolves via /sonnet/i
+      else expect(eff).toBe('medium');
+    }
+  });
+
+  it('haiku-tier calls never carry effort; full claude ids keep the capability check', async () => {
+    const { cliEffortFor } = await import('../src/core/llmClaudeCli.js');
+    expect(
+      cliEffortFor({ model: 'haiku', systemPrompt: 's', userContent: 'u', params: { effort: 'medium' } } as never)
+    ).toBeUndefined();
+    expect(
+      cliEffortFor({ model: 'claude-sonnet-5', systemPrompt: 's', userContent: 'u', params: { effort: 'medium' } } as never)
+    ).toBe('medium');
+  });
+});

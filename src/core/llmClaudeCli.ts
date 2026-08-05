@@ -63,6 +63,18 @@ import type {
  */
 export function cliEffortFor(req: LlmCompletionRequest): 'low' | 'medium' | 'high' | undefined {
   if (req.params?.effort === undefined) return undefined;
+  // Gate on the RESOLVED alias, exactly like cliThinkingFor below — NOT on
+  // the raw pin. modelSupportsEffort is anchored on /^claude-/, so a
+  // provider-agnostic tier pin like ATOMA_MODEL_L3=sonnet failed the check
+  // and silently dropped the effort pin — the ONE cost lever this
+  // transport has (its maxTokens is advisory-only). Measured incident
+  // class: a compile at default effort ran ~7 minutes / ~20k thinking
+  // tokens and was killed by the run deadline. 'sonnet'/'opus' aliases
+  // take the pin; 'haiku' never carries one (atoma never sends it there);
+  // anything else falls back to the id-based capability check.
+  const alias = resolveCliModel(req.model);
+  if (alias === 'sonnet' || alias === 'opus') return req.params.effort;
+  if (alias === 'haiku') return undefined;
   if (!modelSupportsEffort(req.model)) return undefined;
   return req.params.effort;
 }

@@ -36,12 +36,21 @@ export function splitProviderModel(
  */
 export class RoutingLlmClient implements LlmClient {
   private readonly known: string[];
+  private readonly providers: Record<string, LlmClient>;
 
   constructor(
     private readonly defaultClient: LlmClient,
-    private readonly providers: Record<string, LlmClient> = {}
+    providers: Record<string, LlmClient> = {}
   ) {
-    this.known = Object.keys(providers).map((k) => k.toLowerCase());
+    // Normalise the map's keys ONCE: `known` was lowercased while the map
+    // kept its original casing, so a mixed-case provider name (e.g.
+    // {"ZAI": client}) matched the prefix but missed the lookup — making
+    // the "unreachable by construction" throw below reachable for any
+    // public-API consumer. One normalisation, both sides agree forever.
+    this.providers = Object.fromEntries(
+      Object.entries(providers).map(([k, v]) => [k.toLowerCase(), v])
+    );
+    this.known = Object.keys(this.providers);
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {

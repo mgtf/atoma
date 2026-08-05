@@ -59,3 +59,21 @@ describe('RoutingLlmClient — per-tier provider dispatch', () => {
     expect(dflt.seen).toEqual(['qwen3:8b']);
   });
 });
+
+describe('RoutingLlmClient — mixed-case provider keys (audit rank-2)', () => {
+  it('routes "zai:model" when the provider was registered as "ZAI"', async () => {
+    const { RoutingLlmClient } = await import('../src/core/llmRouting.js');
+    const calls: string[] = [];
+    const mk = (tag: string) => ({
+      complete: async (req: { model: string }) => {
+        calls.push(`${tag}:${req.model}`);
+        return { text: 'ok', usage: { inputTokens: 0, outputTokens: 0 } };
+      },
+    });
+    const router = new RoutingLlmClient(mk('default') as never, { ZAI: mk('zai') as never });
+    await router.complete({ model: 'zai:glm-4.5-air', systemPrompt: 's', userContent: 'u' } as never);
+    // Old behavior: prefix matched `known` (lowercased) but the map lookup
+    // missed the original-case key → the "unreachable" throw fired.
+    expect(calls).toEqual(['zai:glm-4.5-air']);
+  });
+});
