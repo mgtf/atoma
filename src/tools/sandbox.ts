@@ -1,6 +1,7 @@
-import { mkdirSync, existsSync, realpathSync } from 'node:fs';
+import { mkdirSync, existsSync, realpathSync, mkdtempSync } from 'node:fs';
 import { resolve, relative, isAbsolute, join, dirname, basename } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 /**
  * Environment variables a sandboxed child process is allowed to inherit.
@@ -43,7 +44,28 @@ export function sandboxChildEnv(
     const val = process.env[key];
     if (val !== undefined) env[key] = val;
   }
+  // HOME is allowlisted for tool CACHES (npm, pip, node-gyp) — but the
+  // REAL home is a credential store: run_shell executes model-authored
+  // code with network egress (fetch_url, npm), and ~/.aws/credentials,
+  // ~/.netrc or ~/.ssh were one `cat` away (same exfiltration class the
+  // allowlist itself was built against for env vars, #7a — this closes
+  // the FILE side). Children get a scratch HOME under the OS tmpdir:
+  // caches still work (they're just cold), dotfiles are out of reach.
+  // Callers may still override via `extra` (task-owned config).
+  if (env['HOME'] !== undefined && extra['HOME'] === undefined) {
+    env['HOME'] = scratchHome();
+  }
   return { ...env, ...extra };
+}
+
+let scratchHomeDir: string | null = null;
+
+/** Lazily-created per-process scratch HOME for sandbox children. */
+function scratchHome(): string {
+  if (!scratchHomeDir) {
+    scratchHomeDir = mkdtempSync(join(tmpdir(), 'atoma-home-'));
+  }
+  return scratchHomeDir;
 }
 
 /**

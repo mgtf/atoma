@@ -167,3 +167,21 @@ describe('ToolSandbox.resolve — symlink containment (#7b)', () => {
     expect(() => sandbox.resolve('link/file.txt')).not.toThrow();
   });
 });
+
+describe('child HOME is a scratch dir, not the credential store (audit rank-11)', () => {
+  it('run_shell children see a HOME that is NOT the real home', async () => {
+    // run_shell executes model-authored code with network egress; the real
+    // HOME made ~/.aws/credentials, ~/.netrc and ~/.ssh one `cat` away —
+    // the same exfiltration class the env allowlist (#7a) closed for
+    // variables, left open on the FILE side.
+    const { sandboxChildEnv } = await import('../src/tools/sandbox.js');
+    const env = sandboxChildEnv();
+    expect(env['HOME']).toBeDefined();
+    expect(env['HOME']).not.toBe(process.env['HOME']);
+    expect(env['HOME']).toMatch(/atoma-home-/);
+    // Caller-supplied HOME (task-owned config) still wins.
+    expect(sandboxChildEnv({ HOME: '/task/home' })['HOME']).toBe('/task/home');
+    // Stable within the process: caches accumulate across tool calls.
+    expect(sandboxChildEnv()['HOME']).toBe(env['HOME']);
+  });
+});
