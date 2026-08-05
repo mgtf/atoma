@@ -161,8 +161,13 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(compileCall.userContent).toContain('.atoma-probes.json');
     // TWO manifest shapes (shell + http) must be spelled out: a compiled
     // HTTP verifier crashed reading entry.cmd on http-shaped entries.
-    expect(compileCall.userContent).toMatch(/TWO SHAPES/);
+    // THREE shapes, all present — the prompt used to say "TWO SHAPES" while
+    // listing three, and the old assertion froze the lie (audit finding): a
+    // literal-minded compiler could legitimately ignore web entries.
+    expect(compileCall.userContent).toMatch(/THREE SHAPES/);
+    expect(compileCall.userContent).toMatch(/"cmd"/);
     expect(compileCall.userContent).toMatch(/"probe": "http"/);
+    expect(compileCall.userContent).toMatch(/"probe": "web"/);
     expect(compileCall.userContent).toMatch(/entry ORDER as significant/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed

@@ -49,9 +49,22 @@ import {
   CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
   extractBranchDiagnostic,
   GROUND_TRUTH_EVIDENCE_LINES,
-  PROBE_MANIFEST_FILENAME,
   resolveCreationDescription,
 } from './capability.js';
+import {
+  PROBE_MANIFEST_FILENAME,
+  manifestReaderLines,
+  validateProbeManifest,
+} from '../contracts/probeManifest.js';
+import {
+  parseScriptEnvelope,
+  scriptDeclaresEnvelope,
+  scriptExtension,
+} from '../contracts/scriptEnvelope.js';
+// Compatibility re-exports: tests and the skills CLI historically import
+// these from L2Atom; the definitions now live in src/contracts/.
+export { validateProbeManifest } from '../contracts/probeManifest.js';
+export { scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import type { Skill } from '../skills/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 
@@ -299,93 +312,8 @@ export function skillContextBlock(skill: {
   ].join('\n');
 }
 
-function scriptExtension(language: 'node' | 'python' | 'bash'): string {
-  // 'mjs', NEVER bare 'js': the scratch file lands in the WORKSPACE, whose
-  // `.js` semantics belong to the deliverable — a task-authored root
-  // package.json with `"type": "module"` flipped a `.js` scratch to ESM and
-  // a CommonJS script died with "require is not defined in ES module
-  // scope" (observed live, triov batch 2026-08-02: two dispatch failures →
-  // natural #C4b demotion of a logically sound script). The invariant is
-  // the EXPLICIT extension; `.mjs` (over `.cjs`) is the house choice —
-  // the repo itself is ESM (`"type": "module"`, NodeNext) and compiled
-  // skills follow the same dialect. The compile prompt pins ESM (import,
-  // no __dirname); a legacy CommonJS body written to `.mjs` crashes
-  // cleanly on first dispatch and the directFailures streak demotes it —
-  // the self-healing path covers stragglers.
-  if (language === 'node') return 'mjs';
-  if (language === 'python') return 'py';
-  return 'sh';
-}
 
-/**
- * Strict parse of the script-skill stdout contract: the LAST non-empty
- * line must be a JSON object with an `output` field and a string
- * `summary`. Anything else returns null — the deterministic dispatch
- * treats a missing envelope as "script off-contract" and falls back to
- * the LLM loop rather than guessing at a wrap. (The LLM path stays
- * tolerant: `skillContextBlock` tells the L1 how to wrap plain stdout.)
- */
-function parseScriptEnvelope(stdout: string): { output: unknown; summary: string } | null {
-  const lines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const last = lines[lines.length - 1];
-  if (!last) return null;
-  try {
-    const obj = JSON.parse(last) as Record<string, unknown>;
-    if (
-      obj !== null &&
-      typeof obj === 'object' &&
-      !Array.isArray(obj) &&
-      'output' in obj &&
-      typeof obj['summary'] === 'string'
-    ) {
-      // SELF-REPORTED FAILURE GUARD. The deterministic path has no validator
-      // downstream (it returns before the supervise loop), so this parse is
-      // the ONLY gate between a script's stdout and a result the parent
-      // treats as a success — and the exit code cannot be trusted alone:
-      // measured on the freshly-promoted `document-cli-from-source`, a run in
-      // a workspace without the CLI printed
-      //   {"output":null,"summary":"FAILED: index.js ... not found ..."}
-      // with EXIT=0, which the old check accepted and then credited with
-      // `recordSuccess` — entrenching a broken script at 6/0, 7/0, …
-      // A null/absent output or a summary that announces its own failure is
-      // therefore treated as OFF-CONTRACT: returning null sends the subtask
-      // back through the normal (validated) LLM loop.
-      if (obj['output'] === null || obj['output'] === undefined) return null;
-      if (/^\s*(FAILED|ERROR)\b/i.test(obj['summary'])) return null;
-      return { output: obj['output'], summary: obj['summary'] };
-    }
-  } catch {
-    // not JSON — off-contract
-  }
-  return null;
-}
 
-/**
- * PRE-FLIGHT gate for deterministic dispatch: does this script body even
- * attempt the `{"output", "summary"}` stdout envelope?
- *
- * `parseScriptEnvelope` already catches an off-contract script AFTER the
- * fact — but by then the script has run, and a script written against a
- * different calling convention has already had its side effects. Concrete
- * case: a hand-authored `scaffold-package-json` reads argv positionally
- * (`name`, `version`, `description...`) while direct dispatch passes ONE
- * arg — the JSON-encoded subtask description. Dispatching it writes a
- * `package.json` whose `name` is the whole task sentence, exits 0, prints
- * prose, fails the envelope parse, and hands the LLM loop a workspace
- * already polluted with a bogus artefact.
- *
- * A script that never names `output`/`summary` cannot satisfy the envelope,
- * so refusing to run it costs nothing and skips straight to the (validated)
- * LLM tool-loop path — which handles these scripts correctly, because there
- * the L1 derives the positional args from the subtask itself.
- *
- * Deliberately a cheap token check rather than a parse: false negatives only
- * fall back to the LLM loop (safe), whereas the failure we are closing is a
- * false positive. Keep it that way.
- */
-export function scriptDeclaresEnvelope(body: string): boolean {
-  return /\boutput\b/.test(body) && /\bsummary\b/.test(body);
-}
 
 /**
  * Fresh narrow-responsibility system prompt used when `branchOnEscalation`
@@ -550,37 +478,7 @@ export function buildCompileSkillPrompt(args: {
       `reported a phantom mismatch on a correct deliverable. When extraction`,
       `finds nothing where the recipe expects something, exit NON-ZERO.`,
       ``,
-      `PROBE MANIFEST — PREFER MACHINE INPUT OVER PROSE. The workspace may`,
-      `contain "${PROBE_MANIFEST_FILENAME}": {"version": 1, "entries": [...]}`,
-      `— the record of what earlier phases already executed and verified.`,
-      `Entries come in TWO SHAPES and a manifest may MIX them; dispatch on`,
-      `the fields present, never assume one shape:`,
-      `  SHELL:  {"cmd": "node x.js a", "exitCode": 0, "stdout": "...",`,
-      `           "stderr": "..."}         → re-run cmd, compare exit/stdout/stderr`,
-      `  HTTP:   {"probe": "http", "method": "GET", "path": "/status",`,
-      `           "status": 200, "body": "..."}  → boot the server, request`,
-      `           method+path against the bound port, compare status + body`,
-      `  WEB:    {"probe": "web", "file": "index.html", "interactions": [...],`,
-      `           "smoke": "<expr>", "expected": "<json>", "consoleErrors": 0}`,
-      `           → serve the workspace, replay interactions + smoke, compare.`,
-      `           NOTE: a compiled script has NO browser tooling, so a WEB`,
-      `           entry is verifiable only in the LLM tool-loop (validate_html)`,
-      `           — if the recipe's core work is web validation, REFUSE`,
-      `           promotion rather than shipping a script that fakes it.`,
-      `Skip (do not crash on) any entry whose shape you don't recognise, and`,
-      `treat entry ORDER as significant — state-dependent HTTP probes (PUT`,
-      `then GET) are recorded in the sequence that made them pass.`,
-      `When the recipe involves re-running / verifying / documenting`,
-      `invocations, the script MUST read this manifest as its PRIMARY input`,
-      `and fall back to prose parsing only when the manifest is absent. Two`,
-      `compile generations of prose-parsing verification failed offline`,
-      `regression on 6/6 real workspaces — free-form markdown is not a`,
-      `parseable interface; the manifest is. A THIRD generation then crashed`,
-      `reading \`entry.cmd\` on http-shaped entries (undefined) — hence the`,
-      `explicit two-shape contract above. Conversely, when the script itself`,
-      `executes and verifies invocations, it MUST write/merge this manifest`,
-      `in the matching shape so later passes inherit a machine-readable`,
-      `record.`,
+      ...manifestReaderLines(),
       ``,
       `FAILURE SIGNALLING — MANDATORY. There is NO validator downstream of a`,
       `trusted script: whatever you print is taken as the deliverable. So if a`,
@@ -3464,99 +3362,6 @@ export function extractResultFileClaims(payload: unknown): {
  * being smaller or differently worded than described is not grounds to fail —
  * that framing is what kept the web probe from producing false rejections.
  */
-/**
- * Shape check for the on-disk probe manifest. The manifest is written by
- * PROMPT (L1 evidence contracts) and read by COMPILED SCRIPTS with no
- * validator in between — a malformed one silently breaks every future
- * deterministic dispatch, and the failure surfaces far from its cause
- * (observed: a third-generation HTTP verifier crashed on entries missing
- * the fields its shape expected). Returns human-readable problems for the
- * read-back evidence block; an EMPTY list means "well-formed or absent".
- *
- * Deliberately tolerant: unknown extra fields are fine (forward
- * compatibility), and a manifest mixing shell and http entries is VALID —
- * that is the documented contract. Only structural breakage is reported.
- */
-export function validateProbeManifest(raw: string): string[] {
-  const problems: string[] = [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    return [`${PROBE_MANIFEST_FILENAME} is not valid JSON: ${(err as Error).message}`];
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return [`${PROBE_MANIFEST_FILENAME} must be a JSON object with an "entries" array`];
-  }
-  const obj = parsed as Record<string, unknown>;
-  if (obj['version'] !== 1) {
-    problems.push(`${PROBE_MANIFEST_FILENAME}: expected "version": 1, got ${JSON.stringify(obj['version'])}`);
-  }
-  const entries = obj['entries'];
-  if (!Array.isArray(entries)) {
-    problems.push(`${PROBE_MANIFEST_FILENAME}: "entries" must be an array`);
-    return problems;
-  }
-  if (entries.length === 0) {
-    problems.push(`${PROBE_MANIFEST_FILENAME}: "entries" is empty — nothing for a later pass to re-verify`);
-  }
-  entries.forEach((e, i) => {
-    if (!e || typeof e !== 'object' || Array.isArray(e)) {
-      problems.push(`${PROBE_MANIFEST_FILENAME}: entry #${i} is not an object`);
-      return;
-    }
-    const en = e as Record<string, unknown>;
-    // THREE shapes, one per bucket — keep in sync with the writers
-    // (GROUND_TRUTH_EVIDENCE_LINES, the http and web canonicals) and the
-    // reader (compileSkillToScript's manifest block). Dispatch on the
-    // discriminator first, then on distinctive fields.
-    const kind =
-      en['probe'] === 'http' || typeof en['path'] === 'string'
-        ? 'http'
-        : en['probe'] === 'web' || typeof en['smoke'] === 'string'
-          ? 'web'
-          : typeof en['cmd'] === 'string'
-            ? 'shell'
-            : null;
-    if (kind === 'http') {
-      if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
-      if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
-      if (typeof en['status'] !== 'number') problems.push(`entry #${i} (http): missing numeric "status"`);
-    } else if (kind === 'web') {
-      // The FILE and the SMOKE are what make a web validation replayable;
-      // the served URL is deliberately not recorded (fresh port per run).
-      if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
-      if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
-      // Coordinate-based interactions are NOT replayable — they encode this
-      // run's viewport/fonts/layout. validate_html accepts them, so the
-      // contract has to reject them here (observed live: one web run
-      // recorded {x:304,y:392} while another recorded {selector:'#toggle'}).
-      const inter = en['interactions'];
-      if (Array.isArray(inter)) {
-        const coordOnly = inter.filter(
-          (a) =>
-            a &&
-            typeof a === 'object' &&
-            typeof (a as Record<string, unknown>)['selector'] !== 'string' &&
-            (typeof (a as Record<string, unknown>)['x'] === 'number' ||
-              typeof (a as Record<string, unknown>)['y'] === 'number')
-        ).length;
-        if (coordOnly > 0) {
-          problems.push(
-            `entry #${i} (web): ${coordOnly} interaction(s) use pixel coordinates instead of a "selector" — not replayable after a re-render`
-          );
-        }
-      }
-    } else if (kind === 'shell') {
-      if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
-    } else {
-      problems.push(
-        `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
-      );
-    }
-  });
-  return problems;
-}
 
 async function probeFilesGroundTruth(args: {
   ctx: RunContext;

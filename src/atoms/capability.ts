@@ -1,4 +1,5 @@
 import type { Tier, Tool } from '../core/types.js';
+import { manifestWriterLines } from '../contracts/probeManifest.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
 
 /**
@@ -500,27 +501,7 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `Worked example of a GOOD summary:`,
   `  "summary": "Pomodoro timer built and validated.\\n== GROUND TRUTH ==\\nindex.html (14231 bytes) — list_files: index.html\\nserved at http://localhost:53311/\\nvalidate_html: ok=true, consoleErrors=0, failedRequests=0\\nsmoke: window.__pomo.remaining < 1500 after Start click -> true\\nwindow.__pomo = { remaining: 1497, running: true, cycles: 0, mode: 'WORK' }"`,
   ``,
-  `PROBE MANIFEST ON DISK: whenever you validated a page, ALSO write_file`,
-  `".atoma-probes.json" in the workspace root:`,
-  `  {"version": 1, "entries": [`,
-  `    {"probe": "web", "file": "index.html",`,
-  `     "interactions": [{"type": "click", "selector": "#start"}],`,
-  `     "smoke": "<the exact smoke expression you ran>",`,
-  `     "expected": "<its observed result, JSON-encoded>",`,
-  `     "consoleErrors": 0, "failedRequests": 0} ]}`,
-  `One entry per DISTINCT validation you performed, in the order you ran`,
-  `them; merge by file+smoke if the file already exists. WHY: the served`,
-  `URL is EPHEMERAL (a fresh port every run) but the FILE, the`,
-  `interactions and the smoke expression are stable — recording those`,
-  `three makes a later pass able to re-serve the artefact and replay the`,
-  `exact same validation. Prose in a README cannot be replayed; this can.`,
-  `INTERACTIONS MUST BE SELECTOR-BASED — MANDATORY. Record`,
-  `{"type":"click","selector":"#start"}, NEVER pixel coordinates`,
-  `({"x":304,"y":392}), even though validate_html accepts them: coordinates`,
-  `depend on the viewport, fonts and layout of THIS run and are worthless`,
-  `to a later pass, while a selector survives any re-render. If an element`,
-  `has no usable selector, ADD an id to it in the artefact — that is a`,
-  `legitimate, tiny improvement to the deliverable, not a workaround.`,
+...manifestWriterLines('web').map((l) => `${l}`),
 ];
 
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
@@ -592,16 +573,7 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `  - schema/state: <one-line summary of any DB/file mutations the run`,
   `    produced — e.g. "matches=40, picks=200, champions=172">`,
   ``,
-  `PROBE MANIFEST ON DISK: whenever you verified HTTP endpoints, ALSO`,
-  `write_file ".atoma-probes.json" in the workspace root:`,
-  `  {"version": 1, "entries": [`,
-  `    {"probe": "http", "method": "GET", "path": "/status",`,
-  `     "status": 200, "body": "<verbatim first 200 chars>"} ]}`,
-  `One entry per DISTINCT verified request, in the order you ran them`,
-  `(state-dependent probes keep their sequence); merge by method+path if`,
-  `the file already exists. WHY: this file is the machine-readable`,
-  `interface later verification passes re-run and diff against — prose in`,
-  `a README cannot be parsed reliably, this can.`,
+...manifestWriterLines('http').map((l) => `${l}`),
   ``,
   `WHY: the supervisor validator rejects RESULTs that read as self-reported`,
   `("I started the server, all endpoints work") because they are`,
@@ -687,17 +659,7 @@ export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
   `common way a deliverable ships wrong — and prose cannot be checked`,
   `mechanically, so a table in "summary" does not substitute for this.`,
   ``,
-  `PROBE MANIFEST ON DISK: whenever you verified invocations of a runnable`,
-  `artefact (a CLI, a script) with run_shell, ALSO write_file`,
-  `".atoma-probes.json" in the workspace root with the same record:`,
-  `  {"version": 1, "entries": [`,
-  `    {"cmd": "<exact command>", "exitCode": <observed>,`,
-  `     "stdout": "<verbatim>", "stderr": "<verbatim>"} ]}`,
-  `Full verbatim stdout/stderr per entry (unlike the in-envelope record,`,
-  `size is fine here); one entry per DISTINCT verified invocation; UPDATE`,
-  `the file (merge by cmd) if it already exists. WHY: this file is the`,
-  `machine-readable interface later verification passes re-run and diff`,
-  `against — prose in a README cannot be parsed reliably, this can.`,
+...manifestWriterLines('shell').map((l) => `${l}`),
 ];
 
 /**
@@ -710,7 +672,7 @@ export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
  * 6/6 real archived workspaces — free-form markdown is not a parseable
  * interface, this file is.
  */
-export const PROBE_MANIFEST_FILENAME = '.atoma-probes.json';
+export { PROBE_MANIFEST_FILENAME } from '../contracts/probeManifest.js';
 
 export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `You are an L1 element specialised for static-file authoring: JSON,`,
