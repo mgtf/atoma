@@ -261,7 +261,12 @@ typed witnesses (`witness.ts`, populated onto `Result.evidence` by L1).
 The prompt blocks embed EXAMPLE objects parsed through their schemas at
 module load — schema/example drift fails the whole suite. RULE: never
 hand-write a JSON shape in a prompt that code elsewhere parses; render
-it from a contracts example. The probe machinery lives in
+it from a contracts example. Same one-definition rule for the script
+INVOCATION ABI (`src/skills/abi.ts`: scratch filename, interpreter,
+argv — both dispatch paths import it), the off-scope tool rejection
+(`offScopeToolMessage` in `src/core/llm.ts`, used by every transport
+loop) and CLI argument parsing (`src/cli/args.ts` — flags anywhere;
+unknown commands print help and exit 1, never the silent-help 0). The probe machinery lives in
 `src/atoms/groundTruth.ts` (zero LLM calls by construction); the compile
 prompt + generation hash in `src/skills/compilePrompt.ts`; L2Atom
 re-exports all the historical names so old imports keep working.
@@ -1246,10 +1251,29 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `start_node_server` spawns `node <entry>` with `PORT=0` in env and
   parses a `LISTENING_ON_PORT=<N>` line from stdout to discover the
   bound port (see HTTP bucket contract above).
-- **`start_static_server`** auto-retries on port=0 when a caller-specified
-  port is busy (logs `⚠ port N busy — retrying on OS-assigned port`). Initial
-  boot-timeout is 3s, retry boot-timeout is 5s — cold-start Python can take
-  >1.5s on macOS and a too-tight cap produced spurious failures.
+- **`start_static_server` boot contract (rewritten 2026-08-05).** port=0
+  is resolved IN-PROCESS via a throwaway net.Server (python prints the
+  assigned port on block-buffered stdout — parsing it was structurally
+  unreliable: measured 100% timeout on every port=0 boot, and the
+  EADDRINUSE auto-retry could never succeed). python runs with `-u`; the
+  "Serving" match scans BOTH streams with accumulated buffers; a child
+  that exits before serving fails FAST with the output tail (no more
+  phantom ok:true with a dead URL). Boot timers are 8s/10s and are only
+  the silent-but-alive fallback — healthy boots resolve on the match
+  (pyenv python takes ~5s to first output). Both server tools spawn
+  DETACHED (own process group) and `cleanup()` group-kills before the
+  unit SIGTERM — grandchildren (workers, double-forks) are reaped.
+  `start_node_server` matches LISTENING_ON_PORT against an ACCUMULATED
+  buffer with a trailing-digit guard (a marker straddling a chunk
+  boundary bound fetch_url to a wrong port). `list_files` uses lstat and
+  reports symlinks as their own kind (statSync followed dangling links
+  and threw, killing the read-back probe on valid deliverables).
+  Sandbox children get a SCRATCH HOME under the OS tmpdir (the real HOME
+  is a credential store — ~/.aws, ~/.netrc, ~/.ssh were one cat away
+  from model-authored code with network egress; #7a closed the env-var
+  side, this closes the file side). Covered by
+  `tests/static-server-boot.test.ts` + additions in
+  `sandbox-security.test.ts`.
 - **`validate_html` smoke contract**: the `smoke` arg is a JS EXPRESSION
   wrapped as `(() => { const __r = (YOUR_CODE); return __r })()`. Top-level
   `const` / `let` / `return` / `function` / statement-series break parsing
