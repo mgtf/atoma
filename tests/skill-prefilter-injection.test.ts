@@ -378,3 +378,45 @@ describe('skill revision: an UNCHANGED body is not a revision', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('active skill survives a patch verdict (audit rank-7)', () => {
+  it('the fresh L1 instance keeps the injected skill AND the attribution id', async () => {
+    // patch/branch return a brand-new L1Atom.fromType instance: no injected
+    // context, activeSkillId null. A skill-driven run continued WITHOUT its
+    // recipe after a mid-loop patch, and the skill's trust counters were
+    // never bumped (onApproved reads activeSkillId from the CURRENT child).
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-carry-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    skills.save('Hydrogen', {
+      id: 'the-recipe', description: 'd', whenToUse: 'w', kind: 'llm', body: 'step 1: do it',
+    });
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'the-recipe', confidence: 'high', reasoning: 'f' }));
+    // Plan → validator PATCHES (not approve): fresh instance replaces child.
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(
+      jsonText({ approved: false, reasoning: 'tighten prompt', scope: 'patch', modifications: { systemPromptAppend: 'be precise' } })
+    );
+    // Retry on the patched instance: plan → approve → execute → approve.
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r2', proposedAction: 'a2', expectedOutput: 'e2' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'did it' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
+
+    await water.handleDirect({ description: 'task' }, ctx);
+
+    // The attribution held: the skill's counter bumped despite the patch.
+    const after = skills.loadFor('Hydrogen')[0]!;
+    expect(after.successes).toBe(1);
+    // And the patched instance's prompts carried the recipe forward.
+    const post = ctx.llm.calls.slice(4);
+    expect(post.some((c) => (c.systemPrompt ?? '').includes('ACTIVE SKILL: the-recipe'))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

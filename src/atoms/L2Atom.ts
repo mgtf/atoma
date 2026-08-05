@@ -1726,6 +1726,23 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           child.applyModifications(verdict.modifications);
           return child;
         }
+        // patch/branch return a FRESH L1Atom.fromType instance — which
+        // starts with NO injected context and a null activeSkillId. When
+        // the run was skill-driven, the replacement used to continue
+        // WITHOUT the recipe that was steering it (mid-loop amnesia) and,
+        // worse, with the attribution cut: onApproved/onFailed read
+        // activeSkillId() to bump the SKILL's counters, so the skill that
+        // drove a patched run earned nothing (or escaped its failure).
+        const carrySkill = (fresh: L1Atom): L1Atom => {
+          const skillId = child instanceof L1Atom ? child.activeSkillId() : null;
+          if (!skillId) return fresh;
+          const skill = this.skillRegistry?.loadFor(child.name).find((k) => k.id === skillId);
+          if (skill) {
+            fresh.injectContext(skillContextBlock(skill));
+            fresh.setActiveSkill(skillId);
+          }
+          return fresh;
+        };
         if (verdict.scope === 'patch') {
           const patched = this.registry.patch(
             child.name,
@@ -1733,7 +1750,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             this.name,
             verdict.reasoning
           );
-          return L1Atom.fromType(patched);
+          return carrySkill(L1Atom.fromType(patched));
         }
         const branched = this.registry.branch(
           child.name,
@@ -1742,7 +1759,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L1 ${child.name} → ${branched.name}`);
-        return L1Atom.fromType(branched);
+        return carrySkill(L1Atom.fromType(branched));
       },
       branchOnEscalation: async (child, trace, reason) => {
         // Aligned system prompt: start the branch FRESH with the current
