@@ -1468,26 +1468,25 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   successful plans per (trusted L2 × task shape) and instantiate without
   Opus — phases survive, skills keep matching, dispatch keeps firing.
 
-## Next structural slice (audited, planned, not yet executed)
+## Structural slices — status
 
-From the 2026-08-05 architecture audit (45 verified findings; every
-RANKED item is fixed — these are the remaining module moves, ordered by
-value; each is a behaviour-preserving extraction under the 734-test net):
+From the 2026-08-05 architecture audit. DONE: **SkillLifecycle**
+(`src/skills/lifecycle.ts` — the whole match/learn/revise/promote/
+dispatch/demote engine behind a SkillLifecycleHost interface; L2Atom
+keeps thin delegators + re-exports), **verdict engine**
+(`src/atoms/verdict.ts` — VALIDATION_SYSTEM_PROMPT + llmVerdict), and
+**structured ground-truth facts** (`GroundTruthFacts`: the probes RETURN
+what they observed — missing/empty claimed files, web-probe tool
+failure, self-reported mismatch — and `checkGroundTruth` decides from
+those fields; it used to regex-match marker strings the probes
+themselves had rendered, so a wording edit could silently disarm the
+trust-fast-path override). L2Atom: 3,692 → ~1,590 lines over the
+campaign.
 
-- **SkillLifecycle collaborator** (`src/skills/lifecycle.ts`, ~1,500
-  lines out of L2Atom): matchSkill, learnSkillFromRun, tryPromoteSkill,
-  compileSkillToScript, improveSkillBody, runScriptSkillDirect,
-  noteDirectFailure. Constructor takes {name, model, params,
-  skillRegistry}; L2Atom keeps thin delegating methods + re-exports.
-- **Verdict engine** (`src/atoms/verdict.ts`): llmVerdict + the
-  VALIDATION_SYSTEM_PROMPT machinery (~1,200 pure lines) — and replace
-  the contradiction-detection regexes over the evidence block with
-  structured facts returned by checkGroundTruth (the regexes re-parse
-  text the probe itself rendered).
-- **Supervisor mirror helpers** for the 4 duplicated L2/L3 pairs
-  (dispatchSubtasks, resolve*ForSubtask + planChildAliases, selfPlan/
-  selfExecute, validator plumbing) — extract shared functions
-  parameterised by tier, NOT a base class.
+REMAINING (needs a design pass, not urgent): **supervisor mirror
+helpers** for the duplicated L2/L3 pairs (dispatchSubtasks,
+resolve*ForSubtask + planChildAliases, selfPlan/selfExecute, validator
+plumbing) — shared functions parameterised by tier, NOT a base class.
 
 ## Deferred / explicitly out of scope
 

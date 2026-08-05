@@ -80,6 +80,32 @@ function renderRecordedProbes(probes: RecordedProbe[]): {
 }
 
 /**
+ * STRUCTURED FACTS from the probes (audit: the contradiction decision used
+ * to re-parse, via regex, marker strings the probes themselves had rendered
+ * — any wording edit silently disarmed the check). The probes now RETURN
+ * what they observed; the rendered block is for the validator's eyes only.
+ */
+export interface GroundTruthFacts {
+  /** Structured claims whose read-back failed (path missing/unreadable). */
+  missingOrUnreadable: string[];
+  /** Structured claims that read back EMPTY. */
+  emptyClaimedFiles: string[];
+  /** The web re-validation tool call itself failed (URL unreachable…). */
+  probeToolFailure: boolean;
+  /** The child's own probe record contains a mismatch. */
+  selfReportedMismatch: boolean;
+}
+
+export function emptyGroundTruthFacts(): GroundTruthFacts {
+  return {
+    missingOrUnreadable: [],
+    emptyClaimedFiles: [],
+    probeToolFailure: false,
+    selfReportedMismatch: false,
+  };
+}
+
+/**
  * Probe wrapper that reports whether the evidence CONTRADICTS the child's
  * claims, not just what the evidence says. See `GroundTruthCheck`.
  */
@@ -89,20 +115,29 @@ export async function checkGroundTruth(args: {
   payload: unknown;
   child: Atom;
 }): Promise<GroundTruthCheck> {
-  const block = await probeGroundTruth(args);
+  const { block, facts } = await probeGroundTruthEx(args);
   if (!block) return { block: '', contradiction: false };
+  // Decided from the probes' STRUCTURED facts — never by re-parsing the
+  // rendered block (a wording edit used to silently disarm this check).
   const contradiction =
-    /: MISSING or unreadable/.test(block) ||
-    /WARNING: file is EMPTY/.test(block) ||
-    /but the tool call failed/.test(block) ||
+    facts.missingOrUnreadable.length > 0 ||
+    facts.emptyClaimedFiles.length > 0 ||
+    facts.probeToolFailure ||
     // The child's own probe record says an expectation did not hold. Nothing
     // read this before, so a self-reported mismatch could sail through the
     // trust fast-path unexamined.
-    /<-- SELF-REPORTED MISMATCH/.test(block);
+    facts.selfReportedMismatch;
   return { block, contradiction };
 }
 
-export async function probeGroundTruth(args: {
+/** Compat wrapper: the rendered block only (llmVerdict's evidence input). */
+export async function probeGroundTruth(
+  args: Parameters<typeof probeGroundTruthEx>[0]
+): Promise<string> {
+  return (await probeGroundTruthEx(args)).block;
+}
+
+export async function probeGroundTruthEx(args: {
   ctx: RunContext;
   subject: 'PLAN' | 'RESULT';
   payload: unknown;
@@ -115,11 +150,12 @@ export async function probeGroundTruth(args: {
    * is a web-bucket invariant, not a universal one — #9.
    */
   child: import('../core/atom.js').Atom;
-}): Promise<string> {
-  if (args.subject !== 'RESULT') return '';
-  if (args.ctx.signal?.aborted) return '';
+}): Promise<{ block: string; facts: GroundTruthFacts }> {
+  const empty = { block: '', facts: emptyGroundTruthFacts() };
+  if (args.subject !== 'RESULT') return empty;
+  if (args.ctx.signal?.aborted) return empty;
   const tools = args.ctx.tools;
-  if (!tools) return '';
+  if (!tools) return empty;
   // Bucket dispatch. The two probes are MUTUALLY EXCLUSIVE: a child that
   // declares validate_html gets the web load-and-look probe below; every
   // other file-producing child gets the read-back probe (#F9). Running both
@@ -134,7 +170,7 @@ export async function probeGroundTruth(args: {
   // bound API URL, the supervisor ran Puppeteer against the JSON endpoint,
   // read the errors as a contradiction, and cascaded into escalations.)
   const url = extractResultUrl(args.payload);
-  if (!url) return '';
+  if (!url) return empty;
 
   try {
     // Minimal load-and-look probe: no interactions, no smoke. The goal is
@@ -143,24 +179,30 @@ export async function probeGroundTruth(args: {
     // clean-load bar is conservative.
     const raw = await tools.execute('validate_html', { url, waitMs: 1500 });
     const summary = summarizeValidateHtml(raw);
-    return [
-      '',
-      '== GROUND-TRUTH EVIDENCE (independent re-validation) ==',
-      `Supervisor independently re-ran validate_html on ${url}.`,
-      'This is OBJECTIVE evidence — weight it above the child\'s self-reported claims.',
-      'If this evidence contradicts the child\'s RESULT, REJECT the verdict.',
-      summary,
-    ].join('\n');
+    return {
+      block: [
+        '',
+        '== GROUND-TRUTH EVIDENCE (independent re-validation) ==',
+        `Supervisor independently re-ran validate_html on ${url}.`,
+        'This is OBJECTIVE evidence — weight it above the child\'s self-reported claims.',
+        'If this evidence contradicts the child\'s RESULT, REJECT the verdict.',
+        summary,
+      ].join('\n'),
+      facts: emptyGroundTruthFacts(),
+    };
   } catch (err) {
     // Probe failures are themselves signal (e.g. URL unreachable → the
     // child's deliverable isn't actually running). Surface, don't swallow.
-    return [
-      '',
-      '== GROUND-TRUTH EVIDENCE (independent re-validation) ==',
-      `Supervisor tried to re-run validate_html on ${url} but the tool call failed:`,
-      `  ${(err as Error).message}`,
-      'This strongly suggests the child\'s deliverable is not actually running.',
-    ].join('\n');
+    return {
+      block: [
+        '',
+        '== GROUND-TRUTH EVIDENCE (independent re-validation) ==',
+        `Supervisor tried to re-run validate_html on ${url} but the tool call failed:`,
+        `  ${(err as Error).message}`,
+        'This strongly suggests the child\'s deliverable is not actually running.',
+      ].join('\n'),
+      facts: { ...emptyGroundTruthFacts(), probeToolFailure: true },
+    };
   }
 }
 
@@ -343,20 +385,23 @@ async function probeFilesGroundTruth(args: {
   ctx: RunContext;
   payload: unknown;
   child: import('../core/atom.js').Atom;
-}): Promise<string> {
+}): Promise<{ block: string; facts: GroundTruthFacts }> {
+  const empty = { block: '', facts: emptyGroundTruthFacts() };
+  const facts = emptyGroundTruthFacts();
   const tools = args.ctx.tools;
-  if (!tools || !tools.has('read_file')) return '';
+  if (!tools || !tools.has('read_file')) return empty;
   // Only for children that actually write files — otherwise there is nothing
   // to read back and the probe would just add an empty evidence block.
-  if (!args.child.toolNames().includes('write_file')) return '';
+  if (!args.child.toolNames().includes('write_file')) return empty;
   const claims = extractResultFileClaims(args.payload);
   const recorded = renderRecordedProbes(extractRecordedProbes(args.payload));
+  facts.selfReportedMismatch = recorded.selfReportedFailure;
   if (
     claims.structured.length === 0 &&
     claims.mentioned.length === 0 &&
     recorded.lines.length === 0
   ) {
-    return '';
+    return empty;
   }
 
   const lines: string[] = [];
@@ -399,7 +444,7 @@ async function probeFilesGroundTruth(args: {
     ...claims.structured.map((p) => [p, true] as const),
     ...claims.mentioned.map((p) => [p, false] as const),
   ]) {
-    if (args.ctx.signal?.aborted) return '';
+    if (args.ctx.signal?.aborted) return empty;
     try {
       const raw = await tools.execute('read_file', { path });
       const content =
@@ -409,6 +454,7 @@ async function probeFilesGroundTruth(args: {
             ? raw
             : JSON.stringify(raw);
       const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
+      if (content.trim().length === 0 && isClaim) facts.emptyClaimedFiles.push(path);
       lines.push(
         `- ${path}: EXISTS (${content.length} chars)` +
           (content.trim().length === 0 && isClaim ? ' — WARNING: file is EMPTY' : '') +
@@ -420,11 +466,12 @@ async function probeFilesGroundTruth(args: {
       // is often the DESIRED state — so reporting it would invent a
       // contradiction out of a correct statement.
       if (isClaim) {
+        facts.missingOrUnreadable.push(path);
         lines.push(`- ${path}: MISSING or unreadable (${(err as Error).message})`);
       }
     }
   }
-  if (lines.length === 0 && recorded.lines.length === 0) return '';
+  if (lines.length === 0 && recorded.lines.length === 0) return empty;
 
   let listing = '';
   if (tools.has('list_files') && !args.ctx.signal?.aborted) {
@@ -441,7 +488,7 @@ async function probeFilesGroundTruth(args: {
     }
   }
 
-  return [
+  const block = [
     '',
     '== GROUND-TRUTH EVIDENCE (independent file read-back) ==',
     'The supervisor re-read the workspace itself. This is OBJECTIVE evidence —',
@@ -458,6 +505,7 @@ async function probeFilesGroundTruth(args: {
   ]
     .filter(Boolean)
     .join('\n');
+  return { block, facts };
 }
 
 function summarizeValidateHtml(raw: unknown): string {
