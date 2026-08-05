@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawn } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
 import type { Tool, Logger } from '../core/types.js';
 import { sandboxChildEnv, type ToolSandbox } from './sandbox.js';
 import puppeteer, { type Browser } from 'puppeteer';
@@ -306,6 +307,30 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
   };
 }
 
+
+/**
+ * Ask the OS for a free port by binding a throwaway net.Server on port 0
+ * and closing it. Used by start_static_server: python prints its
+ * "Serving HTTP on :: port N" line to STDOUT, which is BLOCK-BUFFERED when
+ * piped — parsing the assigned port out of a port=0 child was structurally
+ * unreliable (measured: 100% of port=0 boots timed out; the model then
+ * burned LLM round-trips retrying with hard-coded ports). Binding
+ * in-process gets a concrete port the OS just handed out; the close→spawn
+ * race window is real but tiny, and the EADDRINUSE retry path covers
+ * exactly that loss.
+ */
+function osAssignedPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createNetServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      const port = addr && typeof addr === 'object' ? addr.port : 0;
+      srv.close(() => (port > 0 ? resolve(port) : reject(new Error('no port assigned'))));
+    });
+  });
+}
+
 export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
   return {
     declaration: {
@@ -342,8 +367,16 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
       //   - retry attempt: 5s. We already paid the cost of one failure;
       //     give the OS-assigned port extra headroom so we don't force
       //     the LLM to re-enter the tool a third time.
-      const INITIAL_BOOT_TIMEOUT_MS = 3000;
-      const RETRY_BOOT_TIMEOUT_MS = 5000;
+      // Since the Serving-line match became reliable (-u + both streams +
+      // accumulation), the timer is only the silent-but-alive FALLBACK —
+      // healthy boots resolve on the match, dead children fail on exit.
+      // So the timers can afford to cover slow interpreters: a pyenv
+      // python3 measured ~5.2s to first output, and the old 3s timer
+      // fired mid-boot, reporting a port as ready ~2s before the server
+      // actually bound it (a race the old code hid by never confirming
+      // port=0 boots at all).
+      const INITIAL_BOOT_TIMEOUT_MS = 8000;
+      const RETRY_BOOT_TIMEOUT_MS = 10_000;
       const attempt = async (
         portToUse: number,
         isRetry: boolean
@@ -355,9 +388,15 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
         servedFrom: string;
         retriedFromPort?: number;
       }> => {
+        // port=0 is resolved IN-PROCESS (see osAssignedPort) so the child
+        // is always told a concrete port — we never need to parse the
+        // OS-assigned port out of python's buffered stdout.
+        const concretePort = portToUse === 0 ? await osAssignedPort() : portToUse;
         const child = spawn(
           'python3',
-          ['-m', 'http.server', String(portToUse)],
+          // -u: unbuffered stdio, so the "Serving" line arrives as soon as
+          // python prints it instead of sitting in a 4k block buffer.
+          ['-u', '-m', 'http.server', String(concretePort)],
           {
             cwd: opts.sandbox.root,
             stdio: ['ignore', 'pipe', 'pipe'],
@@ -369,7 +408,15 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
 
         const bootTimeoutMs = isRetry ? RETRY_BOOT_TIMEOUT_MS : INITIAL_BOOT_TIMEOUT_MS;
         const actualPort = await new Promise<number>((resolve, reject) => {
+          let settled = false;
+          // ACCUMULATED buffers, per stream: the Serving line can straddle
+          // a chunk boundary, and python emits it on stdout (stderr kept
+          // for older/altered pythons and for the EADDRINUSE message).
+          let outBuf = '';
+          let errBuf = '';
           const fail = (msg: string, kind?: 'eaddrinuse'): void => {
+            if (settled) return;
+            settled = true;
             const err = new Error(msg) as Error & { kind?: 'eaddrinuse' };
             if (kind) err.kind = kind;
             try {
@@ -379,26 +426,54 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
             }
             reject(err);
           };
+          const succeed = (port: number): void => {
+            if (settled) return;
+            settled = true;
+            resolve(port);
+          };
           const timer = setTimeout(() => {
-            if (portToUse > 0) resolve(portToUse);
-            else
-              fail(
-                `server did not print Serving line within ${bootTimeoutMs}ms`
-              );
+            // The child is alive (exit would have failed fast below) but
+            // never printed a recognisable Serving line. Assume it bound
+            // the port we told it — the old fixed-port semantics — rather
+            // than killing a probably-working server.
+            succeed(concretePort);
           }, bootTimeoutMs);
+          const scan = (): void => {
+            const all = outBuf + '\n' + errBuf;
+            const match = all.match(/Serving HTTP on [^ ]+ port (\d+)/);
+            if (match && match[1]) {
+              clearTimeout(timer);
+              succeed(Number(match[1]));
+            } else if (/Address already in use/i.test(all)) {
+              clearTimeout(timer);
+              fail(`port ${concretePort} already in use`, 'eaddrinuse');
+            }
+          };
+          child.stdout?.on('data', (chunk: Buffer) => {
+            outBuf = (outBuf + chunk.toString()).slice(-4096);
+            scan();
+          });
+          child.stderr?.on('data', (chunk: Buffer) => {
+            errBuf = (errBuf + chunk.toString()).slice(-4096);
+            scan();
+          });
           child.once('error', (err) => {
             clearTimeout(timer);
             fail(`server failed to start: ${err.message}`);
           });
-          child.stderr?.on('data', (chunk: Buffer) => {
-            const s = chunk.toString();
-            const match = s.match(/Serving HTTP on [^ ]+ port (\d+)/);
-            if (match && match[1]) {
-              clearTimeout(timer);
-              resolve(Number(match[1]));
-            } else if (/Address already in use/i.test(s)) {
-              clearTimeout(timer);
-              fail(`port ${portToUse} already in use`, 'eaddrinuse');
+          // A child that DIES before serving must fail fast and loudly —
+          // the old code let the boot timer expire and, on a fixed port,
+          // report ok:true with a dead URL into the validation chain.
+          child.once('exit', (code) => {
+            clearTimeout(timer);
+            if (/Address already in use/i.test(errBuf + outBuf)) {
+              fail(`port ${concretePort} already in use`, 'eaddrinuse');
+            } else {
+              const tail = (errBuf + outBuf).slice(-300).trim();
+              fail(
+                `server exited with code ${code} before serving` +
+                  (tail ? ` — output tail: ${tail}` : '')
+              );
             }
           });
         });

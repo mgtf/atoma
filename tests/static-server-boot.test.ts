@@ -1,0 +1,86 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { get } from 'node:http';
+import { ToolSandbox } from '../src/tools/sandbox.js';
+import { startStaticServerTool } from '../src/tools/builtin.js';
+
+/**
+ * REAL integration tests — this tool had ZERO and its default path
+ * (port=0) failed 100% of the time in production: python prints the
+ * "Serving HTTP on :: port N" line on STDOUT, block-buffered when piped,
+ * while the boot parser only listened on stderr. Every web run burned
+ * LLM round-trips rediscovering that a hard-coded port "works".
+ */
+
+function fetchStatus(url: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = get(url, (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.on('error', reject);
+    req.setTimeout(4000, () => req.destroy(new Error('timeout')));
+  });
+}
+
+describe('start_static_server — boot contract', () => {
+  const dirs: string[] = [];
+  const sandboxes: ToolSandbox[] = [];
+  afterEach(async () => {
+    for (const s of sandboxes.splice(0)) await s.cleanup();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it('port=0 (the DEFAULT) boots and serves — the 100%-failure regression', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-static-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'index.html'), '<!doctype html><title>ok</title>', 'utf8');
+    const sandbox = new ToolSandbox(dir);
+    sandboxes.push(sandbox);
+    const tool = startStaticServerTool({ sandbox });
+    const res = (await tool.execute({ port: 0 })) as { ok: boolean; url: string; port: number };
+    expect(res.ok).toBe(true);
+    expect(res.port).toBeGreaterThan(0);
+    expect(await fetchStatus(res.url)).toBe(200);
+  }, 15_000);
+
+  it('busy fixed port auto-retries onto a WORKING OS-assigned server', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-static2-'));
+    dirs.push(dir);
+    writeFileSync(join(dir, 'index.html'), 'hi', 'utf8');
+    const sandbox = new ToolSandbox(dir);
+    sandboxes.push(sandbox);
+    const tool = startStaticServerTool({ sandbox });
+    // Occupy a port with a first server, then ask a second for the same.
+    const first = (await tool.execute({ port: 0 })) as { port: number };
+    const second = (await tool.execute({ port: first.port })) as {
+      ok: boolean;
+      url: string;
+      retriedFromPort?: number;
+    };
+    expect(second.ok).toBe(true);
+    expect(second.retriedFromPort).toBe(first.port);
+    // The retried server actually serves — the old parser could never
+    // confirm a port=0 boot, so this path was structurally dead.
+    expect(await fetchStatus(second.url)).toBe(200);
+  }, 20_000);
+
+  it('a child that dies before serving fails FAST and loudly — no phantom ok:true', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-static3-'));
+    dirs.push(dir);
+    const sandbox = new ToolSandbox(dir);
+    sandboxes.push(sandbox);
+    const tool = startStaticServerTool({ sandbox });
+    // Port 70000 is out of range — python exits during argparse/bind.
+    // (Port 1 was the first attempt: macOS since Big Sur lets non-root
+    // bind privileged ports, so python served it happily.)
+    const t0 = Date.now();
+    await expect(tool.execute({ port: 70000 })).rejects.toThrow(/exited with code/);
+    // Exit-driven, not timer-driven: well under the 8s fallback timer
+    // the old code would have waited out before reporting a DEAD server
+    // as ok:true (interpreter boot itself can take ~5s under pyenv).
+    expect(Date.now() - t0).toBeLessThan(7500);
+  }, 15_000);
+});
