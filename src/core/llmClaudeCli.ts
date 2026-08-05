@@ -98,6 +98,16 @@ export function cliThinkingFor(req: LlmCompletionRequest): { type: 'disabled' } 
   return resolveCliModel(req.model) === 'haiku' ? { type: 'disabled' } : undefined;
 }
 
+
+/**
+ * True when a CLI "assistant text" is actually an upstream transport
+ * error passed through verbatim (5xx family — transient; 4xx are real
+ * request errors the caller must see).
+ */
+export function isCliTransportErrorText(text: string): boolean {
+  return /^\s*API Error: 5\d\d\b/.test(text);
+}
+
 export class ClaudeCliLlmClient implements LlmClient {
   private readonly maxIter: number;
 
@@ -106,6 +116,22 @@ export class ClaudeCliLlmClient implements LlmClient {
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
+    // TRANSIENT-OVERLOAD GUARD. The CLI subprocess surfaces upstream 5xx
+    // ("API Error: 529 Overloaded") as the assistant TEXT of an otherwise
+    // successful turn — observed live: a plan call returned that string,
+    // parseTwoJson chewed on the error message, and the whole run died on
+    // a condition that is transient BY DEFINITION. One retry after a short
+    // pause; a second occurrence throws a real transport error so metrics
+    // record an error call instead of a parser crash far from the cause.
+    const first = await this.completeOnce(req);
+    if (!isCliTransportErrorText(first.text)) return first;
+    await new Promise((r) => setTimeout(r, 3000));
+    const second = await this.completeOnce(req);
+    if (!isCliTransportErrorText(second.text)) return second;
+    throw new Error(`claude-cli transport error (after 1 retry): ${second.text.slice(0, 200)}`);
+  }
+
+  private async completeOnce(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
     const hasTools = req.executor !== undefined && (req.tools?.length ?? 0) > 0;
     const budget = Math.max(1, req.maxToolIterations ?? this.maxIter);
 

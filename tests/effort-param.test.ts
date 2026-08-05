@@ -76,3 +76,14 @@ describe('cliEffortFor — provider-agnostic tier pins (audit rank-2)', () => {
     ).toBe('medium');
   });
 });
+
+describe('claude-cli transport: upstream 5xx text is retried, then thrown (web-tally incident)', () => {
+  it('classifies transport-error text correctly', async () => {
+    const { isCliTransportErrorText } = await import('../src/core/llmClaudeCli.js');
+    expect(isCliTransportErrorText('API Error: 529 Overloaded. This is a server-side issue…')).toBe(true);
+    expect(isCliTransportErrorText('API Error: 500 Internal')).toBe(true);
+    // 4xx are real request errors the caller must see; JSON plans pass through.
+    expect(isCliTransportErrorText('API Error: 400 Bad Request')).toBe(false);
+    expect(isCliTransportErrorText('{"reasoning": "API Error: 529 mentioned in prose"}')).toBe(false);
+  });
+});
