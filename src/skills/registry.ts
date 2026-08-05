@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta } from './types.js';
+import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
 
 /**
  * Sidecar filename holding the original `kind: 'llm'` body of a skill
@@ -99,6 +99,7 @@ export class SkillRegistry {
             ? { promotionRefusedGeneration: meta.promotionRefusedGeneration }
             : {}),
           ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
+          ...(meta.provenance ? { provenance: meta.provenance } : {}),
           ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
         });
       } catch (err) {
@@ -122,7 +123,8 @@ export class SkillRegistry {
   save(
     l1Name: string,
     skill: Pick<Skill, 'id' | 'description' | 'whenToUse' | 'kind' | 'body'> &
-      Partial<Pick<Skill, 'language'>>
+      Partial<Pick<Skill, 'language'>>,
+    provenance?: SkillProvenance
   ): Skill {
     if (skill.kind === 'script' && !skill.language) {
       throw new Error(`save: kind:"script" requires a language (node|python|bash)`);
@@ -152,10 +154,14 @@ export class SkillRegistry {
     // earn promotion even if the rewrite makes it script-shaped.
     const metaPath = join(dir, '_meta.json');
     const existing = existsSync(metaPath) ? readMeta(metaPath) : { successes: 0, failures: 0, updatedAt: nowIso() };
+    const nextProvenance: SkillProvenance | undefined = provenance
+      ? { ...provenance, at: provenance.at ?? nowIso() }
+      : existing.provenance;
     const meta: SkillMeta = {
       successes: existing.successes,
       failures: existing.failures,
       updatedAt: nowIso(),
+      ...(nextProvenance ? { provenance: nextProvenance } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
     return {
@@ -394,8 +400,20 @@ export class SkillRegistry {
   resetCounters(l1Name: string, skillId: string): SkillMeta | null {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
-    const meta: SkillMeta = { successes: 0, failures: 0, updatedAt: nowIso() };
-    writeFileSync(join(dir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+    // A reset zeroes COUNTERS and drops the refusal stamp — it does not
+    // rewrite history about the body itself: compiledGeneration (which
+    // compiler produced the current script) and provenance (who wrote the
+    // body) describe the artefact, not its trust, and survive the reset.
+    const metaPath = join(dir, '_meta.json');
+    const cur = existsSync(metaPath) ? readMeta(metaPath) : null;
+    const meta: SkillMeta = {
+      successes: 0,
+      failures: 0,
+      updatedAt: nowIso(),
+      ...(cur?.compiledGeneration ? { compiledGeneration: cur.compiledGeneration } : {}),
+      ...(cur?.provenance ? { provenance: cur.provenance } : {}),
+    };
+    writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
     return meta;
   }
 
@@ -455,6 +473,13 @@ export class SkillRegistry {
       ...(cur.promotionRefusedGeneration
         ? { promotionRefusedGeneration: cur.promotionRefusedGeneration }
         : {}),
+      // AUDIT FIX (verified live-adjacent): omitting compiledGeneration here
+      // meant the FIRST success after a promotion erased it, so a later
+      // demotion stamped the CURRENT compiler generation — re-parking the
+      // skill against the very compiler that would have fixed it. The whole
+      // point of recording the COMPILING generation dies without this line.
+      ...(cur.compiledGeneration ? { compiledGeneration: cur.compiledGeneration } : {}),
+      ...(cur.provenance ? { provenance: cur.provenance } : {}),
       ...(cur.directFailures ? { directFailures: cur.directFailures } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
@@ -504,6 +529,12 @@ function readMeta(path: string): SkillMeta {
         : {}),
       ...(typeof obj.compiledGeneration === 'string' && obj.compiledGeneration.length > 0
         ? { compiledGeneration: obj.compiledGeneration }
+        : {}),
+      ...(obj.provenance &&
+      typeof obj.provenance === 'object' &&
+      !Array.isArray(obj.provenance) &&
+      typeof (obj.provenance as unknown as Record<string, unknown>)['mechanism'] === 'string'
+        ? { provenance: obj.provenance as SkillProvenance }
         : {}),
       ...(directFailures ? { directFailures } : {}),
     };

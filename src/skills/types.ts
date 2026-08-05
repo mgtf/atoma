@@ -26,6 +26,22 @@
 export type SkillKind = 'llm' | 'script';
 
 /**
+ * PROVENANCE — what produced the current skill body (P3: provenance by
+ * default). `mechanism` says HOW the body came to be, `model` which LLM
+ * authored it (absent for hand-authored bodies), `at` when. Recorded at
+ * save time and preserved across counter bumps; a body rewrite records a
+ * fresh provenance. The script form's compiler provenance is the separate
+ * `compiledGeneration` field (the compile-prompt hash), which answers a
+ * different question: not "who wrote this" but "which compiler contract
+ * was in force".
+ */
+export interface SkillProvenance {
+  readonly mechanism: 'distilled' | 'revised' | 'compiled' | 'hand-authored';
+  readonly model?: string;
+  readonly at?: string;
+}
+
+/**
  * Languages supported by `kind: 'script'` skills. The L1 receives the
  * skill body verbatim, writes it to a sandbox file with the matching
  * extension, and runs it via `run_shell`. Picking a language sets
@@ -95,6 +111,8 @@ export interface Skill {
   readonly promotionRefusedGeneration?: string;
   /** Mirrors `SkillMeta.compiledGeneration`; see there. */
   readonly compiledGeneration?: string;
+  /** Mirrors `SkillMeta.provenance`; see there. */
+  readonly provenance?: SkillProvenance;
   /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
   readonly directFailures?: number;
 }
@@ -159,6 +177,8 @@ export interface SkillMeta {
    * NEW generation — re-parking the skill against the corrected compiler).
    */
   readonly compiledGeneration?: string;
+  /** What produced the current body — see `SkillProvenance`. */
+  readonly provenance?: SkillProvenance;
   /**
    * Consecutive deterministic-dispatch failures for a `kind: script`
    * skill (non-zero exit / missing envelope in `runScriptSkillDirect`).

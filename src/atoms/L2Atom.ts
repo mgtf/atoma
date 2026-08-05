@@ -1144,7 +1144,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         whenToUse: draft.whenToUse,
         kind: 'llm',
         body: draft.body,
-      });
+      }, { mechanism: 'distilled', model: this.model });
       args.ctx.logger.info(
         `[${this.name}] learned new skill "${draft.id}" for ${args.l1Name}`
       );
@@ -1902,7 +1902,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   kind: oldSkill.kind,
                   ...(oldSkill.language ? { language: oldSkill.language } : {}),
                   body: newBody,
-                });
+                }, { mechanism: 'revised', model: this.model });
                 ctx.logger.warn(
                   `[${this.name}] skill ${activeSkillId} on ${child.name} updated after escalation (${reason}); retrying L1 with new body`
                 );

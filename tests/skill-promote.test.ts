@@ -462,3 +462,45 @@ describe('demotion stamps the COMPILING generation, not the current one', () => 
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('compiledGeneration + provenance survive the counter lifecycle (audit rank-3)', () => {
+  it('bump and reset preserve them; demotion drops the script generation', () => {
+    // The verified audit finding: bump() rebuilt the meta field-by-field and
+    // omitted compiledGeneration, so the FIRST success after a promotion
+    // erased it — and the demotion path then stamped the CURRENT compiler
+    // generation, re-parking the skill against the very compiler that would
+    // have fixed it. The whole iteration-9 mechanism was dead on arrival
+    // for any script that succeeded at least once before failing.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-lifecycle-gen-'));
+    const skills = new SkillRegistry(dir);
+    skills.save(
+      'Hydrogen',
+      { id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'recipe' },
+      { mechanism: 'distilled', model: 'claude-sonnet-5' }
+    );
+    expect(skills.loadFor('Hydrogen')[0]!.provenance).toMatchObject({
+      mechanism: 'distilled',
+      model: 'claude-sonnet-5',
+    });
+
+    skills.promoteToScript({
+      l1Name: 'Hydrogen', skillId: 's', language: 'node',
+      scriptBody: 'console.log(1)', compiledGeneration: 'oldgen01',
+    });
+    // The killer sequence: successes BETWEEN promotion and failure.
+    skills.recordSuccess('Hydrogen', 's');
+    skills.recordSuccess('Hydrogen', 's');
+    expect(skills.loadFor('Hydrogen')[0]!.compiledGeneration).toBe('oldgen01');
+
+    // Operator reset keeps body facts too (counters ≠ body history).
+    skills.resetCounters('Hydrogen', 's');
+    const afterReset = skills.loadFor('Hydrogen')[0]!;
+    expect(afterReset.compiledGeneration).toBe('oldgen01');
+
+    // Demotion restores the llm body — the script generation goes with it.
+    const demoted = skills.demoteToLlm('Hydrogen', 's');
+    expect(demoted!.kind).toBe('llm');
+    expect(skills.loadFor('Hydrogen')[0]!.compiledGeneration).toBeUndefined();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
