@@ -149,3 +149,36 @@ describe('validateProbeManifest', () => {
     expect(problems[2]).toMatch(/#2: matches no known shape/);
   });
 });
+
+describe('manifest health check fires for HTTP children (audit rank-8)', () => {
+  it('an http-tooled child with NO cmd-shaped probes still gets its manifest checked', async () => {
+    // Dead-code regression: the gate keyed on extractRecordedProbes, which
+    // requires `cmd` — http children record {method,path,status}, so the
+    // exact family that writes http manifests was never health-checked.
+    const { checkGroundTruth } = await import('../src/atoms/groundTruth.js');
+    const executed: string[] = [];
+    const tools = {
+      has: (n: string) => ['read_file', 'list_files'].includes(n),
+      execute: async (name: string, argsIn: Record<string, unknown>) => {
+        executed.push(`${name}:${String(argsIn['path'] ?? '')}`);
+        if (name === 'read_file' && argsIn['path'] === '.atoma-probes.json') {
+          return { content: JSON.stringify({ version: 2, entries: [] }) }; // malformed on purpose
+        }
+        if (name === 'read_file') return { content: 'srv' };
+        return { entries: [] };
+      },
+    };
+    const child = {
+      toolNames: () => ['write_file', 'run_shell', 'fetch_url', 'start_node_server'],
+    };
+    const res = await checkGroundTruth({
+      ctx: { tools, logger: { debug() {}, info() {}, warn() {}, error() {} } } as never,
+      subject: 'RESULT',
+      payload: { output: { entry: 'server.js' }, summary: 's' },
+      child: child as never,
+    });
+    expect(executed).toContain('read_file:.atoma-probes.json');
+    expect(res.block).toMatch(/MALFORMED/);
+    expect(res.block).toMatch(/expected "version": 1/);
+  });
+});

@@ -366,7 +366,17 @@ async function probeFilesGroundTruth(args: {
   // manifest expected, so a plain file-scribe deliverable pays no extra
   // tool call (the exact-call-count assertions in the #F9 tests are a
   // deliberate cost guard — respect them).
-  if (recorded.lines.length > 0) try {
+  // GATE (cost guard): plain file-scribe deliverables must not pay an
+  // extra tool call — the #F9 tests pin their exact call counts. But the
+  // recorded-probes trigger alone was DEAD CODE for the HTTP bucket:
+  // extractRecordedProbes requires a `cmd` field, and HTTP children
+  // record {method, path, status} probes — so the one family that WRITES
+  // http manifests never had them health-checked. An HTTP-tooled child
+  // is expected to leave a manifest; check it for them too.
+  const httpChild = ['fetch_url', 'start_node_server'].some((t) =>
+    args.child.toolNames().includes(t)
+  );
+  if (recorded.lines.length > 0 || httpChild) try {
     const rawManifest = await tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
     const text =
       rawManifest && typeof rawManifest === 'object' && typeof (rawManifest as Record<string, unknown>)['content'] === 'string'
