@@ -5,6 +5,7 @@ import type {
   Tool,
   ToolInvocationInfo,
 } from './types.js';
+import { truncateToolResultContent } from './llm.js';
 
 /**
  * `LlmClient` backed by Ollama's chat API. Lets atoma run against a
@@ -209,7 +210,14 @@ export class OllamaLlmClient implements LlmClient {
           const result = await req.executor!.execute(toolName, args);
           messages.push({
             role: 'tool',
-            content: typeof result === 'string' ? result : JSON.stringify(result),
+            // Truncation parity with the Anthropic loop: read_file returns
+            // whole files and run_shell up to 2 MB — untruncated, every
+            // byte stays resident in the transcript and is re-sent each
+            // round. The observer callback below still gets the FULL
+            // result; only the model-facing payload is elided.
+            content: truncateToolResultContent(
+              typeof result === 'string' ? result : JSON.stringify(result)
+            ),
             ...(tc.id ? { tool_call_id: tc.id } : {}),
             name: toolName,
           });
@@ -267,6 +275,15 @@ export class OllamaLlmClient implements LlmClient {
         aggOutput += json.eval_count ?? 0;
         finalText = json.message?.content ?? '';
         stopReason = 'tool_budget_exhausted';
+      } else {
+        // FAIL LOUDLY: the silent fall-through returned finalText='' and a
+        // null stopReason, so the caller's JSON parse crashed far from the
+        // cause with zero transport context. An HTTP failure on the
+        // finalization round-trip is a transport error like any other.
+        const body = await resp.text().catch(() => '');
+        throw new Error(
+          `Ollama budget-exhausted finalization failed: HTTP ${resp.status} ${body.slice(0, 200)}`
+        );
       }
     }
 
