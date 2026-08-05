@@ -228,13 +228,23 @@ export class MetricsLlmClient implements LlmClient {
     try {
       resp = await this.inner.complete(req);
     } catch (err) {
-      // Still record the failed call so it shows up in totals.
+      // Record the failed call WITH whatever usage the loop aggregated
+      // before dying (attached by AnthropicLlmClient.raise). Zeros meant
+      // a run killed on round 7 of a tool loop reported none of the six
+      // rounds it PAID for — burn-in rows showed llm=? / cost=null and
+      // the curve understated exactly the runs that hurt most.
+      const partial = (err as { partialUsage?: {
+        inputTokens: number;
+        outputTokens: number;
+        cacheCreationInputTokens: number;
+        cacheReadInputTokens: number;
+      } }).partialUsage;
       this.recorder.record({
         model: req.model,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheCreationInputTokens: 0,
-        cacheReadInputTokens: 0,
+        inputTokens: partial?.inputTokens ?? 0,
+        outputTokens: partial?.outputTokens ?? 0,
+        cacheCreationInputTokens: partial?.cacheCreationInputTokens ?? 0,
+        cacheReadInputTokens: partial?.cacheReadInputTokens ?? 0,
         durationMs: Date.now() - started,
         stopReason: 'error',
       });

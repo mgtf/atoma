@@ -222,3 +222,33 @@ describe('MetricsLlmClient', () => {
     expect(DEFAULT_PRICES.some((p) => p.match.test('claude-haiku-4-5-20251001'))).toBe(true);
   });
 });
+
+describe('partial usage survives a mid-loop death (audit rank-12)', () => {
+  it('MetricsLlmClient records the tokens attached to the error', async () => {
+    const { InMemoryMetrics, MetricsLlmClient } = await import('../src/core/metrics.js');
+    const metrics = new InMemoryMetrics();
+    const dying = {
+      complete: async () => {
+        const err = new Error('deadline abort on round 7') as Error & {
+          partialUsage?: Record<string, number>;
+        };
+        // What AnthropicLlmClient.raise() attaches: six rounds already paid.
+        err.partialUsage = {
+          inputTokens: 1200, outputTokens: 3400,
+          cacheCreationInputTokens: 500, cacheReadInputTokens: 90_000,
+        };
+        throw err;
+      },
+    };
+    const client = new MetricsLlmClient(dying as never, metrics);
+    await expect(
+      client.complete({ model: 'claude-haiku-4-5', systemPrompt: 's', userContent: 'u' } as never)
+    ).rejects.toThrow(/deadline abort/);
+    const sum = metrics.summary();
+    // The paid-for tokens are in the totals instead of zeros.
+    expect(sum.totals.calls).toBe(1);
+    expect(sum.totals.inputTokens).toBe(1200);
+    expect(sum.totals.outputTokens).toBe(3400);
+    expect(sum.totals.cacheReadInputTokens).toBe(90_000);
+  });
+});

@@ -69,6 +69,20 @@ export class AnthropicLlmClient implements LlmClient {
     const sdkOptions: { signal?: AbortSignal } = {};
     if (req.signal) sdkOptions.signal = req.signal;
 
+    // Attach the usage aggregated SO FAR to any error leaving this loop.
+    // A run killed mid-loop (deadline abort, transport 400 on round 7)
+    // used to lose every token it had already paid for — MetricsLlmClient
+    // recorded zeros, burn-in rows showed llm=? / cost=null, and the
+    // cost curve silently understated exactly the runs that hurt most.
+    const raise = (err: unknown): never => {
+      try {
+        (err as { partialUsage?: typeof agg }).partialUsage = { ...agg };
+      } catch {
+        // frozen/exotic abort reasons can't carry properties — fine.
+      }
+      throw err;
+    };
+
     const sendRequest = (
       opts: { includeSampling: boolean; disableTools?: boolean }
     ): Promise<Anthropic.Messages.Message> =>
@@ -118,7 +132,7 @@ export class AnthropicLlmClient implements LlmClient {
       // (usually `RunContext.signal`) aborts. Without this check we would
       // cheerfully kick off the next HTTP call and only error out mid-flight.
       if (req.signal?.aborted) {
-        throw req.signal.reason ?? new Error('aborted');
+        raise(req.signal.reason ?? new Error('aborted'));
       }
       let response: Anthropic.Messages.Message;
       try {
@@ -130,7 +144,7 @@ export class AnthropicLlmClient implements LlmClient {
         if (iter === 0 && samplingOk && isSamplingParamDeprecatedError(err)) {
           response = await sendRequest({ includeSampling: false });
         } else {
-          throw err;
+          throw raise(err);
         }
       }
 
@@ -277,7 +291,7 @@ export class AnthropicLlmClient implements LlmClient {
           ],
         });
         if (req.signal?.aborted) {
-          throw req.signal.reason ?? new Error('aborted');
+          raise(req.signal.reason ?? new Error('aborted'));
         }
         const finalResp = await sendRequest({
           includeSampling: samplingOk,
