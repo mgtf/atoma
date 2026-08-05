@@ -17,6 +17,7 @@
  */
 
 import { SkillRegistry } from '../skills/registry.js';
+import { parseCliArgs } from './args.js';
 import { COMPILE_PROMPT_GENERATION } from '../atoms/L2Atom.js';
 import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
 import type { Skill } from '../skills/types.js';
@@ -28,30 +29,12 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const rest = argv.slice(2);
-  if (rest.length === 0) return { command: 'help', positional: [], flags: {} };
-  const cmd = rest[0] as Args['command'];
-  const positional: string[] = [];
-  const flags: Record<string, string> = {};
-  for (let i = 1; i < rest.length; i++) {
-    const token = rest[i]!;
-    if (token.startsWith('--')) {
-      const key = token.slice(2);
-      const next = rest[i + 1];
-      if (next && !next.startsWith('--')) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = 'true';
-      }
-    } else {
-      positional.push(token);
-    }
+  const { command, positional, flags } = parseCliArgs(argv);
+  if (command === null) return { command: 'help', positional, flags };
+  if (!['list', 'show', 'reset', 'help'].includes(command)) {
+    return { command: 'help', positional: [command, ...positional], flags };
   }
-  if (!['list', 'show', 'reset', 'help'].includes(cmd)) {
-    return { command: 'help', positional: [cmd, ...positional], flags };
-  }
-  return { command: cmd, positional, flags };
+  return { command: command as Args['command'], positional, flags };
 }
 
 function dirFrom(flags: Record<string, string>): string {
@@ -208,6 +191,8 @@ function main(): void {
   const args = parseArgs(process.argv);
   if (args.command === 'help') {
     help(args.positional[0]);
+    // Unknown command → error exit; bare `skills` or `skills help` → 0.
+    if (args.positional.length > 0) process.exit(1);
     return;
   }
   const registry = new SkillRegistry(dirFrom(args.flags));

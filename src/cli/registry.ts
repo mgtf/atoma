@@ -11,6 +11,7 @@
  */
 
 import { openDb } from '../registry/db.js';
+import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
 
@@ -31,30 +32,12 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const rest = argv.slice(2);
-  if (rest.length === 0) return { command: 'help', positional: [], flags: {} };
-  const cmd = rest[0] as Args['command'];
-  const positional: string[] = [];
-  const flags: Record<string, string> = {};
-  for (let i = 1; i < rest.length; i++) {
-    const token = rest[i]!;
-    if (token.startsWith('--')) {
-      const key = token.slice(2);
-      const next = rest[i + 1];
-      if (next && !next.startsWith('--')) {
-        flags[key] = next;
-        i++;
-      } else {
-        flags[key] = 'true';
-      }
-    } else {
-      positional.push(token);
-    }
+  const { command, positional, flags } = parseCliArgs(argv);
+  if (command === null) return { command: 'help', positional, flags };
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'help'].includes(command)) {
+    return { command: 'help', positional: [command, ...positional], flags };
   }
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'help'].includes(cmd)) {
-    return { command: 'help', positional: [cmd, ...positional], flags };
-  }
-  return { command: cmd, positional, flags };
+  return { command: command as Args['command'], positional, flags };
 }
 
 function dbPathFrom(flags: Record<string, string>): string {
@@ -442,7 +425,14 @@ function cmdRollback(registry: AtomRegistry, name: string, toRaw: string | undef
 
 function main(): void {
   const args = parseArgs(process.argv);
-  if (args.command === 'help') return help();
+  if (args.command === 'help') {
+    help();
+    // Reached via an unknown/mistyped command? That's an ERROR, not a
+    // request for help — scripts piping this CLI must not keep going on
+    // a no-op that exited 0 (the silent-help failure the audit flagged).
+    if (args.positional.length > 0) process.exit(1);
+    return;
+  }
 
   const dbPath = dbPathFrom(args.flags);
   const registry = new AtomRegistry(openDb(dbPath));
