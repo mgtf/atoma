@@ -15,7 +15,8 @@
     "burnin": "tsx src/cli/burnin.ts",
     "skills": "tsx src/cli/skills.ts",
     "viz": "tsx src/viz/server.ts",
-    "viz:demo": "tsx src/viz/demo.ts"
+    "viz:demo": "tsx src/viz/demo.ts",
+    "ledger": "tsx src/cli/ledger.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",

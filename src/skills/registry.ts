@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendLedger } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
 
@@ -145,6 +146,11 @@ export class SkillRegistry {
       skill.body
     );
     writeFileSync(join(dir, 'SKILL.md'), md, 'utf8');
+    appendLedger({
+      kind: 'skill-save',
+      entity: `${l1Name}/${skill.id}`,
+      detail: { kind: skill.kind, ...(provenance ? { mechanism: provenance.mechanism } : {}) },
+    });
     // Preserve existing counters if a meta file is already there.
     // INTENTIONALLY DROP `promotionRefusedAt`: a save() means the body
     // changed (or the kind flipped). Sonnet's prior refusal was a
@@ -212,6 +218,11 @@ export class SkillRegistry {
       updatedAt: nowIso(),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    appendLedger({
+      kind: 'promotion-refused',
+      entity: `${l1Name}/${skillId}`,
+      detail: { ...(generation ? { generation } : {}), ...(trimmed ? { reason: trimmed.slice(0, 160) } : {}) },
+    });
     return next;
   }
 
@@ -233,6 +244,11 @@ export class SkillRegistry {
       updatedAt: nowIso(),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    appendLedger({
+      kind: 'direct-failure',
+      entity: `${l1Name}/${skillId}`,
+      detail: { streak: next.directFailures ?? 0 },
+    });
     return next.directFailures ?? 0;
   }
 
@@ -334,6 +350,11 @@ export class SkillRegistry {
     // Record WHICH compiler produced this body: demotion stamps this value,
     // so a later compiler generation is never blocked by the failure of a
     // script it did not produce.
+    appendLedger({
+      kind: 'promote',
+      entity: `${args.l1Name}/${args.skillId}`,
+      detail: { language: args.language, ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}) },
+    });
     if (args.compiledGeneration && meta) {
       const metaPath = join(this.skillDir(args.l1Name, frontmatter.id), '_meta.json');
       writeFileSync(
@@ -375,6 +396,7 @@ export class SkillRegistry {
     if (!existsSync(fallbackPath)) return null;
     const fallbackBody = readFileSync(fallbackPath, 'utf8').trim();
     if (!fallbackBody) return null;
+    appendLedger({ kind: 'demote', entity: `${l1Name}/${skillId}` });
     return this.save(l1Name, {
       id: frontmatter.id,
       description: frontmatter.description,
@@ -400,6 +422,7 @@ export class SkillRegistry {
   resetCounters(l1Name: string, skillId: string): SkillMeta | null {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
+    appendLedger({ kind: 'counters-reset', entity: `${l1Name}/${skillId}`, detail: { reason: 'reset' } });
     // A reset zeroes COUNTERS and drops the refusal stamp — it does not
     // rewrite history about the body itself: compiledGeneration (which
     // compiler produced the current script) and provenance (who wrote the
@@ -436,11 +459,13 @@ export class SkillRegistry {
 
   /** Bump the success counter for a known skill (no-op if not found). */
   recordSuccess(l1Name: string, skillId: string): void {
+    appendLedger({ kind: 'skill-success', entity: `${l1Name}/${skillId}` });
     this.bump(l1Name, skillId, 'success');
   }
 
   /** Bump the failure counter for a known skill (no-op if not found). */
   recordFailure(l1Name: string, skillId: string): void {
+    appendLedger({ kind: 'skill-failure', entity: `${l1Name}/${skillId}` });
     this.bump(l1Name, skillId, 'failure');
   }
 

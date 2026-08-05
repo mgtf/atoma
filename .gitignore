@@ -18,3 +18,4 @@ burnin/results.csv
 # pre-reset store); the registry DBs were always ignored via *.db.
 skills/
 .claude/settings.local.json
+atoma-ledger.jsonl

@@ -1,4 +1,5 @@
 import type { DB } from './db.js';
+import { appendLedger } from '../core/ledger.js';
 import type {
   AtomModifications,
   GenerationParams,
@@ -344,6 +345,7 @@ export class AtomRegistry {
           current.tier,
           current.ordinal
         );
+    appendLedger({ kind: 'counters-reset', entity: name, detail: { reason: 'patch' } });
 
       return { ...merged, version: nextVersion, successes: 0, failures: 0 };
     })();
@@ -474,6 +476,7 @@ export class AtomRegistry {
           current.tier,
           current.ordinal
         );
+    appendLedger({ kind: 'counters-reset', entity: name, detail: { reason: 'rollback' } });
       const restored = this.getByName(name);
       if (!restored) throw new RegistryNotFoundError(name);
       return restored;
@@ -629,6 +632,7 @@ export class AtomRegistry {
    * short-circuit the validator LLM call.
    */
   recordSuccess(name: string): void {
+    appendLedger({ kind: 'type-success', entity: name });
     this.db
       .prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?')
       .run(name);
@@ -640,6 +644,7 @@ export class AtomRegistry {
    * successes accumulate.
    */
   recordFailure(name: string): void {
+    appendLedger({ kind: 'type-failure', entity: name });
     this.db
       .prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?')
       .run(name);
