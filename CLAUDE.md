@@ -1468,6 +1468,27 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   successful plans per (trusted L2 × task shape) and instantiate without
   Opus — phases survive, skills keep matching, dispatch keeps firing.
 
+## Next structural slice (audited, planned, not yet executed)
+
+From the 2026-08-05 architecture audit (45 verified findings; every
+RANKED item is fixed — these are the remaining module moves, ordered by
+value; each is a behaviour-preserving extraction under the 734-test net):
+
+- **SkillLifecycle collaborator** (`src/skills/lifecycle.ts`, ~1,500
+  lines out of L2Atom): matchSkill, learnSkillFromRun, tryPromoteSkill,
+  compileSkillToScript, improveSkillBody, runScriptSkillDirect,
+  noteDirectFailure. Constructor takes {name, model, params,
+  skillRegistry}; L2Atom keeps thin delegating methods + re-exports.
+- **Verdict engine** (`src/atoms/verdict.ts`): llmVerdict + the
+  VALIDATION_SYSTEM_PROMPT machinery (~1,200 pure lines) — and replace
+  the contradiction-detection regexes over the evidence block with
+  structured facts returned by checkGroundTruth (the regexes re-parse
+  text the probe itself rendered).
+- **Supervisor mirror helpers** for the 4 duplicated L2/L3 pairs
+  (dispatchSubtasks, resolve*ForSubtask + planChildAliases, selfPlan/
+  selfExecute, validator plumbing) — extract shared functions
+  parameterised by tier, NOT a base class.
+
 ## Deferred / explicitly out of scope
 
 - Molecule / cell *composition* as a higher-order layer (the original
