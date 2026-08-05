@@ -518,3 +518,70 @@ describe('SkillRegistry.resetCounters', () => {
     expect(skills.listNamespaces()).toEqual(['Hydrogen', 'Lithium']);
   });
 });
+
+describe('anti-redispatch guard — a reproduced dispatch output routes to the LLM loop (epoch-5 run 5)', () => {
+  it('same ctx, reworded subtask, fresh L2 instance: the byte-identical output is caught', async () => {
+    // The $1.63 lesson, with the REAL replan shape: supervisor replans
+    // build FRESH L2 instances and reword subtasks, so no instance/task
+    // state survives — only the run context does. The guard keys on the
+    // dispatch OUTPUT: a summary this run has already seen from this
+    // skill means the deterministic re-run cannot answer the content
+    // rejection that caused the retry.
+    process.env['ATOMA_SKILL_DIRECT'] = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-redispatch-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
+    skills.save('Hydrogen', {
+      id: 'verify-stuff', description: 'd', whenToUse: 'w', kind: 'script', language: 'node',
+      body: 'console.log(JSON.stringify({output: "ok", summary: "done"}))',
+    });
+    for (let i = 0; i < 3; i++) skills.recordSuccess('Hydrogen', 'verify-stuff');
+
+    const executor = {
+      has: () => true,
+      declarations: () => [],
+      execute: async (name: string) => {
+        if (name === 'run_shell')
+          return { stdout: JSON.stringify({ output: 'ok', summary: 'done' }) + '\n', exitCode: 0, stderr: '' };
+        return { ok: true };
+      },
+    };
+    const ctx = { ...makeCtx(), tools: executor as never };
+
+    // Attempt 1: dispatch fires (2 prefilter calls only).
+    const water1 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
+    const first = await water1.handleDirect({ description: 'verify every documented command' }, ctx);
+    expect(first.summary).toBe('done');
+    expect(ctx.llm.calls).toHaveLength(2);
+
+    // Attempt 2 (upstream rejected the content → replan): FRESH instance,
+    // reworded description, same ctx. The dispatch reproduces 'done' — the
+    // guard catches it and the validated LLM loop runs instead.
+    const water2 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'adapted', summary: 'did it differently this time' }));
+    const second = await water2.handleDirect(
+      { description: 're-run EVERY command in the README verbatim' },
+      ctx
+    );
+    expect(second.summary).toMatch(/differently/);
+    expect(ctx.llm.calls.length).toBe(6); // the L1 loop actually ran
+
+    // A NEW run (fresh ctx): the guard resets, dispatch fires again.
+    const ctx2 = { ...makeCtx(), tools: executor as never };
+    const water3 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    ctx2.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx2.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
+    const third = await water3.handleDirect({ description: 'verify commands' }, ctx2);
+    expect(third.summary).toBe('done');
+    expect(ctx2.llm.calls).toHaveLength(2);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

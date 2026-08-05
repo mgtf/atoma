@@ -906,6 +906,19 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   treated as stale and retried once. Same-generation stamps still
   short-circuit before the Sonnet call, so the anti-thrash guarantee is
   intact. Covered by `skill-promote.test.ts` (both directions).
+- **Anti-redispatch guard: a reproduced dispatch OUTPUT routes to the
+  LLM loop.** A trusted script is deterministic — same workspace, same
+  byte-identical result. When an upstream validator rejects that result
+  on CONTENT, the mechanical contract still passed (exit 0 + envelope),
+  so no directFailure, no demotion, and the skill got CREDITED — and the
+  replan re-matched the same script for the same outcome. Measured
+  (epoch-5 run 5): SIX identical dispatches, two escalations, three Opus
+  plans, $1.63. Replans build FRESH L2/L1 instances and reword subtasks,
+  so the memo lives on the RUN CONTEXT (`ctx.dispatchedScriptSignatures`,
+  lazily initialised) and keys on the OUTPUT SUMMARY: a dispatch whose
+  summary this run has already seen falls through to the validated LLM
+  loop, which can adapt. The redundant script run costs two tool calls
+  and zero LLM. Covered in `skill-direct-dispatch.test.ts`.
 - **Deterministic-failure streak demotes a brittle script (#C4b).**
   `runScriptSkillDirect`'s two CONTRACT failure branches (non-zero exit,
   missing envelope) call `noteDirectFailure`, which bumps

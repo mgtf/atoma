@@ -331,6 +331,16 @@ export interface SkillEventInfo {
 
 export interface RunContext {
   readonly logger: Logger;
+  /**
+   * Run-scoped memo of deterministic-dispatch outputs: skill id → the
+   * summaries its dispatches already returned during THIS run. Lazily
+   * initialised by L2.runSubtask; deliberately on the CONTEXT because it
+   * must survive supervisor replans, which build fresh L2/L1 instances
+   * (epoch-5 run 5: a content-rejected dispatch was re-produced
+   * byte-identically six times across replans — no instance-level state
+   * could have seen it). Mutable by design.
+   */
+  dispatchedScriptSignatures?: Map<string, string[]>;
   readonly signal: AbortSignal;
   readonly llm: LlmClient;
   readonly limits: Limits;

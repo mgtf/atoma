@@ -211,6 +211,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   private registry: AtomRegistry;
   private pendingStrategy: L2Strategy | null = null;
   private triedChildren = new TaskChildrenMemo();
+
   /**
    * Optional skill store — when present, every runSubtask runs a
    * skill-prefilter against the resolved L1's skills before entering
@@ -621,7 +622,32 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             subTask,
             ctx
           );
-          if (direct) return direct;
+          if (direct) {
+            // ANTI-REDISPATCH GUARD (epoch-5 run 5, the $1.63 lesson). A
+            // trusted script is DETERMINISTIC: same workspace → the
+            // byte-identical result. When an upstream validator rejects
+            // that result on CONTENT (mechanically the dispatch
+            // "succeeded", so no directFailure, no demotion — the skill
+            // even got credited), the replan re-matched the same script
+            // and re-produced the same rejected result: measured live,
+            // SIX identical dispatches, two escalations, three Opus plans
+            // in one run. Replans build FRESH L2/L1 instances and reword
+            // subtasks, so the memo lives on the run CONTEXT and keys on
+            // the OUTPUT: a dispatch whose summary this run has already
+            // seen from this skill is a loop, and only the validated LLM
+            // loop can adapt. The redundant script run costs two tool
+            // calls and zero LLM.
+            const memo = (ctx.dispatchedScriptSignatures ??= new Map<string, string[]>());
+            const seen = memo.get(skills.skill.id) ?? [];
+            if (seen.includes(direct.summary)) {
+              ctx.logger.info(
+                `[${this.name}] skill "${skills.skill.id}" dispatch reproduced an output this run already returned — routing through the validated LLM loop (a deterministic re-run cannot answer a content rejection)`
+              );
+            } else {
+              memo.set(skills.skill.id, [...seen.slice(-7), direct.summary]);
+              return direct;
+            }
+          }
         }
 
         l1.injectContext(
