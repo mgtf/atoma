@@ -147,7 +147,7 @@ ledger** (`npm run ledger -- check` flags any counter a write path
 bypassed); skill bodies carry **provenance** (who wrote them, which
 compiler compiled them — surviving counter bumps and resets); budgets
 are **per concern** (deliverable / bookkeeping / verification); tier
-code is verifiably SDK-free; and L2Atom shed 900 lines into
+code is verifiably SDK-free; and L2Atom shed 2,100 lines (3,692 → 1,565, −58%) into lifecycle/verdict/dispatch/probes modules, including
 `groundTruth.ts` (zero-LLM evidence machinery) and `compilePrompt.ts`.
 
 ## 🔧 What hardening looks like here
