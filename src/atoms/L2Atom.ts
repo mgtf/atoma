@@ -42,7 +42,7 @@ import {
   promoteThreshold,
   demoteAfter,
   DIRECT_DISPATCH_DEMOTE_AFTER,
-  POST_APPROVAL_LLM_TIMEOUT_MS,
+  postApprovalSignal,
 } from './cost.js';
 import {
   bucketIdForTools,
@@ -1111,7 +1111,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // response — a truncated draft is a silently lost learning event.
       params: { ...this.params, maxTokens: 1600, temperature: 0 },
       // Post-approval bookkeeping: own budget, never the run deadline.
-      signal: AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS),
+      signal: postApprovalSignal(),
     });
     const drafts = parseSkillDrafts(resp.text);
     if (drafts.length === 0) {
@@ -1398,7 +1398,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // and was killed by the run deadline twice (rehearsal runs 4 and 5).
       params: { ...this.params, maxTokens: 4000, temperature: 0, effort: 'medium' },
       // Post-approval bookkeeping: own budget, never the run deadline.
-      signal: AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS),
+      signal: postApprovalSignal(),
     });
     const raw = (resp.text ?? '').trim();
     if (!raw) return { promotable: false, reason: 'empty model response' };

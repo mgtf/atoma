@@ -107,6 +107,30 @@ export const DIRECT_DISPATCH_DEMOTE_AFTER = 2;
 export const POST_APPROVAL_LLM_TIMEOUT_MS = 240_000;
 
 /**
+ * BUDGETS PER CONCERN (P4). A run carries several kinds of work whose
+ * abort semantics differ, and sharing one deadline caused three live
+ * incidents (a compile killed mid-flight left a run hung with no
+ * endedAt). The taxonomy:
+ *   - DELIVERABLE work (plans, executions, validations, escalation
+ *     retries incl. improveSkillBody) rides ctx.signal — the run
+ *     deadline gates the deliverable.
+ *   - POST-APPROVAL BOOKKEEPING (distillation, compilation) rides
+ *     THIS signal: by the time it fires the deliverable is approved,
+ *     so the run budget protects nothing there and killing the work
+ *     only discards paid-for learning.
+ *   - VERIFICATION probes are local fs/network reads that honour
+ *     ctx.signal (they gate the deliverable's verdict).
+ * Trade-off, explicit: a run may extend past its deadline by at most
+ * POST_APPROVAL_LLM_TIMEOUT_MS while bookkeeping completes. A hard
+ * process kill still reaps everything — this signal only decouples the
+ * SOFT deadline. Always obtain the signal through this helper so the
+ * decoupling stays visible and greppable at every call site.
+ */
+export function postApprovalSignal(): AbortSignal {
+  return AbortSignal.timeout(POST_APPROVAL_LLM_TIMEOUT_MS);
+}
+
+/**
  * Cap on output tokens for supervisor-tier strategy/plan calls (L2.plan /
  * L3.plan on non-fallback path). The response is a JSON pair [strategy, plan]
  * + a list of subtasks with descriptions. Sized to fit a 3-5 phase PHASED
