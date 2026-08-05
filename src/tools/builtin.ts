@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
@@ -168,8 +168,17 @@ export function listFilesTool(opts: BuiltinToolOptions): BuiltinTool {
       const abs = opts.sandbox.resolve(rel);
       const entries = readdirSync(abs).map((name) => {
         const full = `${abs}/${name}`;
-        const st = statSync(full);
-        return { name, kind: st.isDirectory() ? 'dir' : 'file', size: st.size };
+        // lstat, never stat: statSync FOLLOWS symlinks, so a dangling link
+        // in the workspace threw ENOENT and took down the whole listing —
+        // including the read-back probe (the zero-token verification
+        // spine) on an otherwise valid deliverable. A symlink is reported
+        // as its own kind; consumers treat it as opaque.
+        const st = lstatSync(full);
+        return {
+          name,
+          kind: st.isDirectory() ? 'dir' : st.isSymbolicLink() ? 'symlink' : 'file',
+          size: st.size,
+        };
       });
       return { path: rel, entries };
     },
@@ -400,7 +409,12 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
           {
             cwd: opts.sandbox.root,
             stdio: ['ignore', 'pipe', 'pipe'],
-            detached: false,
+            // Own process group, like run_shell (#7c): a server that forks
+            // workers/watchers must not leave grandchildren behind when the
+            // sandbox reaps it — detached:false let a double-forked child
+            // escape BOTH cleanup() and the global exit reaper (the exact
+            // multi-day orphan class #7c closed for run_shell only).
+            detached: true,
             env: sandboxChildEnv(),
           }
         );
@@ -707,7 +721,8 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
       const child = spawn('node', [entryAbs], {
         cwd: opts.sandbox.root,
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: false,
+        // Own process group — same rationale as start_static_server above.
+        detached: true,
         env,
       });
       opts.sandbox.trackChild(child);
@@ -739,9 +754,14 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
             `node server exited early (code=${code}). stderr: ${stderrBuf.slice(0, 400)}`
           );
         });
+        let stdoutBuf = '';
         child.stdout?.on('data', (chunk: Buffer) => {
-          const s = chunk.toString();
-          const match = s.match(/LISTENING_ON_PORT=(\d+)/);
+          // ACCUMULATE before matching: the marker can straddle a chunk
+          // boundary ('LISTENING_ON_PORT=51' + '324'), and a per-chunk
+          // match would then bind fetch_url to a WRONG (dead) port —
+          // worse than a timeout, because it looks like a server bug.
+          stdoutBuf = (stdoutBuf + chunk.toString()).slice(-4096);
+          const match = stdoutBuf.match(/LISTENING_ON_PORT=(\d+)(?!\d)/);
           if (match && match[1]) {
             clearTimeout(timer);
             // Detach the early-exit listener — the server is up now,

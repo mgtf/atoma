@@ -220,6 +220,17 @@ export class ToolSandbox {
     }
     for (const child of [...this.children]) {
       if (!child.killed) {
+        // Group-kill FIRST (negative pid): server tools now spawn
+        // detached (own pgid), so this reaps grandchildren — workers,
+        // watchers, double-forks — that a unit SIGTERM leaves orphaned.
+        // The unit kill stays as fallback for non-detached children.
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, 'SIGTERM');
+          } catch {
+            // no such group / not a group leader — unit kill below
+          }
+        }
         try {
           child.kill('SIGTERM');
         } catch {

@@ -84,3 +84,25 @@ describe('start_static_server — boot contract', () => {
     expect(Date.now() - t0).toBeLessThan(7500);
   }, 15_000);
 });
+
+describe('list_files — dangling symlink tolerance (audit rank-6)', () => {
+  it('reports a dangling symlink as kind:symlink instead of throwing ENOENT', async () => {
+    const { listFilesTool } = await import('../src/tools/builtin.js');
+    const { symlinkSync } = await import('node:fs');
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-lstat-'));
+    writeFileSync(join(dir, 'real.txt'), 'x', 'utf8');
+    symlinkSync(join(dir, 'gone.txt'), join(dir, 'dangling'));
+    const sandbox = new ToolSandbox(dir);
+    const tool = listFilesTool({ sandbox });
+    // statSync followed the link, hit ENOENT, and the whole listing threw —
+    // breaking the read-back probe on an otherwise valid deliverable.
+    const res = (await tool.execute({ path: '.' })) as {
+      entries: { name: string; kind: string }[];
+    };
+    const kinds = Object.fromEntries(res.entries.map((e) => [e.name, e.kind]));
+    expect(kinds['dangling']).toBe('symlink');
+    expect(kinds['real.txt']).toBe('file');
+    await sandbox.cleanup();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
