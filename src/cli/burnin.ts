@@ -287,8 +287,23 @@ async function main(): Promise<void> {
   mkdirSync(dirname(resolve(outPath)), { recursive: true });
   if (!existsSync(resolve(outPath))) {
     writeFileSync(resolve(outPath), CSV_HEADER + '\n', 'utf8');
+  } else {
+    // HEADER MIGRATION (#10): the lifecycle columns (promotions, refusals,
+    // demotions, dispatch_fallbacks) were appended to the row format while
+    // an existing CSV kept its old header — silent mismatch that every new
+    // consumer had to rediscover. Rewrite the header line in place when it
+    // is outdated; data rows are untouched (the viz parser is
+    // position-tolerant for legacy 14-col rows by design).
+    const cur = readFileSync(resolve(outPath), 'utf8');
+    const nl = cur.indexOf('\n');
+    const curHeader = nl === -1 ? cur : cur.slice(0, nl);
+    if (curHeader !== CSV_HEADER && curHeader.startsWith('timestamp,task_id')) {
+      writeFileSync(resolve(outPath), CSV_HEADER + (nl === -1 ? '\n' : cur.slice(nl)), 'utf8');
+      console.log('ℹ results.csv header migrated to the current column set');
+    }
   }
 
+  const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? 'runs');
   console.log(`burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${process.env['ATOMA_LLM'] ?? 'anthropic'}`);
   const summaryRows: { family: string; outcome: string; costUsd: number | null }[] = [];
   let consecutiveConfigFailures = 0;
@@ -299,8 +314,8 @@ async function main(): Promise<void> {
     console.log(`\n▶ ${task.id} (${task.family}) …`);
     const log = await runTask(task, timeoutMs, join(logsDir, `${task.id}-${ts.replace(/[:.]/g, '-')}.log`));
     const stats = parseRunLog(log);
-    const durationS = newestTraceDuration(resolve('runs'), started) ?? Math.round((Date.now() - started) / 1000);
-    const trace = newestTraceName(resolve('runs'), started);
+    const durationS = newestTraceDuration(runsDir, started) ?? Math.round((Date.now() - started) / 1000);
+    const trace = newestTraceName(runsDir, started);
     appendFileSync(resolve(outPath), toCsvRow({ ts, taskId: task.id, family: task.family, stats, durationS, trace }) + '\n', 'utf8');
     summaryRows.push({ family: task.family, outcome: stats.outcome, costUsd: stats.costUsd });
     console.log(

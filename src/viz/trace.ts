@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AtomType } from '../registry/atomRegistry.js';
@@ -470,7 +470,13 @@ export class TraceRecorder {
     if (!this.run) return;
     if (!existsSync(this.runsDir)) mkdirSync(this.runsDir, { recursive: true });
     const file = join(this.runsDir, `${this.run.id}.json`);
-    writeFileSync(file, JSON.stringify(this.run, null, 2));
+    // Atomic-ish persist (#10): a crash mid-write used to leave a TORN
+    // JSON on disk, which the viz index skips forever — the run becomes a
+    // phantom (cost paid, no trace). Write to a temp sibling then rename;
+    // rename is atomic on the same filesystem.
+    const tmp = file + '.tmp';
+    writeFileSync(tmp, JSON.stringify(this.run, null, 2));
+    renameSync(tmp, file);
 
     const indexFile = join(this.runsDir, 'index.json');
     let index: VizRunIndexEntry[] = [];
