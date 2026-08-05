@@ -24,6 +24,7 @@ import {
   parseTwoJson,
   parseVerdict,
   planSchema,
+  extractJson,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { forkBranch } from '../core/branchCtx.js';
@@ -186,16 +187,32 @@ function coerceSkillDraft(obj: Record<string, unknown>): SkillDraft | null {
 }
 
 export function parseSkillDraft(text: string): SkillDraft | null {
+  const obj = extractDraftObject(text);
+  return obj ? coerceSkillDraft(obj) : null;
+}
+
+/**
+ * Shared extraction for the draft parsers, on the house parser instead of
+ * a greedy first-{-to-last-} regex. The regex slice failed exactly where
+ * distillation output gets interesting — a fenced payload followed by any
+ * trailing brace in prose, or a response truncated mid-string — and each
+ * failure silently discarded a PAID Sonnet learning event (debug-log +
+ * skip is the documented policy, but the parser should not manufacture
+ * skips). extractJson is fence-aware, prefers the last candidate, and
+ * repairs truncation.
+ */
+function extractDraftObject(text: string): Record<string, unknown> | null {
   if (!text || text.trim().length === 0) return null;
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  let obj: Record<string, unknown>;
   try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
+    const value = extractJson(text);
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
   } catch {
+    // extractJson throws on JSON-free text; the draft contract is
+    // tolerant — a malformed distillation is debug-log + skip upstream.
     return null;
   }
-  return coerceSkillDraft(obj);
 }
 
 /**
@@ -216,15 +233,8 @@ export function parseSkillDraft(text: string): SkillDraft | null {
  * primary's id is dropped — two skills may not share a folder.
  */
 export function parseSkillDrafts(text: string): SkillDraft[] {
-  if (!text || text.trim().length === 0) return [];
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return [];
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
-  } catch {
-    return [];
-  }
+  const obj = extractDraftObject(text);
+  if (!obj) return [];
   const drafts: SkillDraft[] = [];
   const primary = coerceSkillDraft(obj);
   if (primary) drafts.push(primary);
@@ -1229,6 +1239,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       language: compiled.language,
       scriptBody: compiled.body,
       compiledGeneration: COMPILE_PROMPT_GENERATION,
+      compiledBy: this.model,
     });
     args.ctx.logger.info(
       `[${this.name}] skill "${args.skillId}" promoted to kind:script (${compiled.language}, ${compiled.body.length} chars)`

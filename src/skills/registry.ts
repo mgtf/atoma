@@ -322,6 +322,8 @@ export class SkillRegistry {
     scriptBody: string;
     /** COMPILE_PROMPT_GENERATION that produced scriptBody. */
     compiledGeneration?: string;
+    /** Model id that ran the compile — provenance {mechanism:'compiled'}. */
+    compiledBy?: string;
   }): Skill {
     const dir = this.skillDir(args.l1Name, args.skillId);
     const skillFile = join(dir, 'SKILL.md');
@@ -335,39 +337,56 @@ export class SkillRegistry {
         `promoteToScript: skill ${args.skillId} is already kind:"${frontmatter.kind}"; refusing to overwrite`
       );
     }
+    // CRASH-ORDERED writes (audit finding): the old sequence wrote
+    // SKILL.md kind:script FIRST (via save, counters preserved at 5/0)
+    // and zeroed the counters after — a crash in that window left a
+    // NEVER-EXECUTED script armed for the no-validator deterministic
+    // dispatch (shouldTrustSkill needs only 3/0). New order: fallback
+    // sidecar, then ONE zeroed meta write (compiledGeneration and
+    // provenance included), then SKILL.md LAST as the commit point. A
+    // crash anywhere leaves the llm form — worst case with zeroed
+    // counters, which merely re-earns trust.
     writeFileSync(join(dir, FALLBACK_FILENAME), currentBody.trim() + '\n', 'utf8');
-    const saved = this.save(args.l1Name, {
+    const meta: SkillMeta = {
+      successes: 0,
+      failures: 0,
+      updatedAt: nowIso(),
+      ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}),
+      provenance: {
+        mechanism: 'compiled',
+        ...(args.compiledBy ? { model: args.compiledBy } : {}),
+        at: nowIso(),
+      },
+    };
+    writeFileSync(join(dir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+    const md = renderFrontmatter(
+      {
+        id: frontmatter.id,
+        description: frontmatter.description,
+        whenToUse: frontmatter.whenToUse,
+        kind: 'script',
+        language: args.language,
+      },
+      args.scriptBody
+    );
+    writeFileSync(skillFile, md, 'utf8');
+    appendLedger({
+      kind: 'promote',
+      entity: `${args.l1Name}/${args.skillId}`,
+      detail: { language: args.language, ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}) },
+    });
+    return {
       id: frontmatter.id,
       description: frontmatter.description,
       whenToUse: frontmatter.whenToUse,
       kind: 'script',
       language: args.language,
       body: args.scriptBody,
-    });
-    // `save` preserves counters by contract (C1); the script form must start
-    // from zero — see the rationale above.
-    const meta = this.resetCounters(args.l1Name, frontmatter.id);
-    // Record WHICH compiler produced this body: demotion stamps this value,
-    // so a later compiler generation is never blocked by the failure of a
-    // script it did not produce.
-    appendLedger({
-      kind: 'promote',
-      entity: `${args.l1Name}/${args.skillId}`,
-      detail: { language: args.language, ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}) },
-    });
-    if (args.compiledGeneration && meta) {
-      const metaPath = join(this.skillDir(args.l1Name, frontmatter.id), '_meta.json');
-      writeFileSync(
-        metaPath,
-        JSON.stringify({ ...meta, compiledGeneration: args.compiledGeneration }, null, 2),
-        'utf8'
-      );
-    }
-    return {
-      ...saved,
-      successes: meta?.successes ?? 0,
-      failures: meta?.failures ?? 0,
-      updatedAt: meta?.updatedAt ?? saved.updatedAt,
+      successes: meta.successes,
+      failures: meta.failures,
+      updatedAt: meta.updatedAt,
+      ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
+      ...(meta.provenance ? { provenance: meta.provenance } : {}),
     };
   }
 

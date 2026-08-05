@@ -469,3 +469,27 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(after[0]!.successes).toBe(1); // existing skill was used and approved
   });
 });
+
+describe('draft parsing survives real distillation formatting (audit rank-3)', () => {
+  it('fenced JSON followed by prose containing a brace no longer loses the learn event', () => {
+    // The old first-{-to-last-} regex sliced across the prose brace and
+    // JSON.parse failed — silently discarding a PAID Sonnet distillation.
+    const text = [
+      'Here is the skill:',
+      '```json',
+      '{"id": "verify-cli-invocations", "description": "d", "when_to_use": "w", "body": "1. do"}',
+      '```',
+      'Note: apply `{caution}` when reusing.',
+    ].join('\n');
+    const draft = parseSkillDraft(text);
+    expect(draft).not.toBeNull();
+    expect(draft!.id).toBe('verify-cli-invocations');
+  });
+
+  it('a truncated draft is repaired instead of dropped', () => {
+    const text = '{"id": "probe-http-routes", "description": "d", "when_to_use": "w", "body": "1. boot\n2. fetch';
+    const draft = parseSkillDraft(text);
+    expect(draft).not.toBeNull();
+    expect(draft!.id).toBe('probe-http-routes');
+  });
+});
