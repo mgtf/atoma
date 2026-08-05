@@ -5,7 +5,7 @@ import type {
   Tool,
   ToolInvocationInfo,
 } from './types.js';
-import { truncateToolResultContent } from './llm.js';
+import { offScopeToolMessage, truncateToolResultContent } from './llm.js';
 
 /**
  * `LlmClient` backed by Ollama's chat API. Lets atoma run against a
@@ -188,8 +188,7 @@ export class OllamaLlmClient implements LlmClient {
 
         // Scope gate.
         if (declaredToolNames && !declaredToolNames.has(toolName)) {
-          const declared = [...declaredToolNames].sort().join(', ');
-          const errMsg = `tool "${toolName}" is NOT in your declared tools. You may only invoke: ${declared}. Do not call "${toolName}" again for this task.`;
+          const errMsg = offScopeToolMessage(declaredToolNames, toolName);
           messages.push({
             role: 'tool',
             content: errMsg,

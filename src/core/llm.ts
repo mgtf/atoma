@@ -191,8 +191,7 @@ export class AnthropicLlmClient implements LlmClient {
         const args = (tu.input ?? {}) as Record<string, unknown>;
         const startedAt = Date.now();
         if (declaredToolNames && !declaredToolNames.has(tu.name)) {
-          const declaredList = [...declaredToolNames].sort().join(', ');
-          const errMsg = `tool "${tu.name}" is NOT in your declared tools. You may only invoke: ${declaredList}. Do not call "${tu.name}" again for this task.`;
+          const errMsg = offScopeToolMessage(declaredToolNames, tu.name);
           toolResults.push({
             type: 'tool_result',
             tool_use_id: tu.id,
@@ -344,6 +343,17 @@ function notifyToolInvocation(
   } catch {
     // intentionally empty — observer failure must not poison execution
   }
+}
+
+/**
+ * Off-scope tool-call rejection message (#8a), shared by every transport
+ * loop. ONE wording: the safety contract is provider-neutral, and the
+ * message doubles as model coaching — it must list the declared tools and
+ * forbid the retry in the same terms everywhere.
+ */
+export function offScopeToolMessage(declared: ReadonlySet<string>, requested: string): string {
+  const declaredList = [...declared].sort().join(', ');
+  return `tool "${requested}" is NOT in your declared tools. You may only invoke: ${declaredList}. Do not call "${requested}" again for this task.`;
 }
 
 /**
