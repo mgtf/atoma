@@ -35,7 +35,22 @@ export function modelForTier(tier: 1 | 2 | 3): string {
   return tier === 1 ? PIN_HAIKU : tier === 2 ? PIN_SONNET : FALLBACK_OPUS;
 }
 
-export async function resolveLatestOpus(client: Anthropic): Promise<string> {
+/**
+ * Structural view of the one SDK capability the resolver needs. Declared
+ * here (the provider layer) so callers above this layer — L3Atom — can
+ * type their optional client parameter WITHOUT importing the Anthropic
+ * SDK: tier code stays provider-neutral (P5/P6), and any client exposing
+ * a compatible `models.list` works.
+ */
+export interface ModelListingClient {
+  models: {
+    list(args: { limit: number }): Promise<{
+      data: { id: string; created_at?: string | null }[];
+    }>;
+  };
+}
+
+export async function resolveLatestOpus(client: ModelListingClient): Promise<string> {
   try {
     const page = await client.models.list({ limit: 100 });
     const opus = page.data

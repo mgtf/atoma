@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { Atom, type Supervisor } from '../core/atom.js';
 import type {
   GenerationParams,
@@ -15,7 +14,7 @@ import {
   type AtomRegistry,
   type AtomType,
 } from '../registry/atomRegistry.js';
-import { modelForTier, resolveLatestOpus, FALLBACK_OPUS } from '../core/models.js';
+import { modelForTier, resolveLatestOpus, FALLBACK_OPUS, type ModelListingClient } from '../core/models.js';
 import { L2Atom } from './L2Atom.js';
 import {
   buildTargetContext,
@@ -152,7 +151,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   static async fromType(
     type: AtomType,
     registry: AtomRegistry,
-    client?: Anthropic,
+    client?: ModelListingClient,
     skillRegistry: SkillRegistry | null = null
   ): Promise<L3Atom> {
     if (type.tier !== 3) throw new Error(`L3Atom.fromType requires tier=3`);
