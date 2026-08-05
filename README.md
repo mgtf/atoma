@@ -6,7 +6,7 @@
 
 *A self-optimizing, three-tier LLM agent framework that turns every task it solves<br/>into a cheaper way to solve the next one — all the way down to **zero tokens**.*
 
-![tests](https://img.shields.io/badge/tests-703_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-717_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Ollama_·_Claude_Code-8A2BE2)
 ![cost](https://img.shields.io/badge/warm_run-$0.22_·_138s-gold)
@@ -136,6 +136,20 @@ Recent transport engineering, measured on the same warm task:
 | Demotion stamps the generation that COMPILED the failing script | a fix to the compiler is never blocked by the failure of a pre-fix artifact |
 | Probe manifest health-checked; both shell and http entry shapes specified | the machine interface between prompt-written evidence and compiled readers holds |
 
+## 🧱 Architecture retrofit (2026-08): contracts, ledger, provenance
+
+Seven greenfield principles, retrofitted without a rewrite: a
+`src/contracts/` module now owns every inter-agent shape (manifest
+entries, script envelope, typed witnesses) with prompts *generated from
+schema-validated examples* — the one-sided-contract bug class is closed
+structurally; every lifecycle mutation appends to an **append-only
+ledger** (`npm run ledger -- check` flags any counter a write path
+bypassed); skill bodies carry **provenance** (who wrote them, which
+compiler compiled them — surviving counter bumps and resets); budgets
+are **per concern** (deliverable / bookkeeping / verification); tier
+code is verifiably SDK-free; and L2Atom shed 900 lines into
+`groundTruth.ts` (zero-LLM evidence machinery) and `compilePrompt.ts`.
+
 ## 🔧 What hardening looks like here
 
 Most of the engineering in this repo is not features — it is closing the gap
@@ -264,7 +278,7 @@ One interface (`LlmClient`), three transports, identical safety contracts.
 
 ```bash
 npm install
-npm run typecheck && npm test          # 703 tests, all mocked — no API key needed
+npm run typecheck && npm test          # 717 tests, all mocked — no API key needed
 
 # live, pick your auth:
 ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
@@ -312,5 +326,5 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · zod · 703 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
+<sub>TypeScript · SQLite · zod · 717 tests · three LLM transports · every number above regenerates with <code>npm run burnin</code> — the trained benchmark state lives under the <code>trained-snapshot</code> tag</sub>
 </div>

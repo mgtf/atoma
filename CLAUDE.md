@@ -251,6 +251,21 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   cache-heavy runs; do not reintroduce that. Both `InMemoryMetrics.summary`
   and `RecordingLlmClient` import from this one helper.
 
+## Contracts (single source of truth — add shapes HERE)
+
+`src/contracts/` owns every inter-agent interface: the probe-manifest
+entry shapes + health check + writer/reader prompt generators
+(`probeManifest.ts`), the script stdout envelope + strict parse +
+pre-flight gate + scratch-extension policy (`scriptEnvelope.ts`), and
+typed witnesses (`witness.ts`, populated onto `Result.evidence` by L1).
+The prompt blocks embed EXAMPLE objects parsed through their schemas at
+module load — schema/example drift fails the whole suite. RULE: never
+hand-write a JSON shape in a prompt that code elsewhere parses; render
+it from a contracts example. The probe machinery lives in
+`src/atoms/groundTruth.ts` (zero LLM calls by construction); the compile
+prompt + generation hash in `src/skills/compilePrompt.ts`; L2Atom
+re-exports all the historical names so old imports keep working.
+
 ## Observability
 
 - **`InMemoryMetrics` + `MetricsLlmClient`** (`src/core/metrics.ts`) wrap any
@@ -260,6 +275,18 @@ npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + c
   should be a single-digit count on any mature-type happy path.
 - Cost estimates come from `DEFAULT_PRICES` (approximate USD per M tokens per
   Claude family). Override with a custom `PriceTable` when needed.
+- **Lifecycle ledger** (`src/core/ledger.ts`, `npm run ledger -- tail|check`):
+  every trust/lifecycle mutation appends a JSONL event from the storage
+  choke points (AtomRegistry record*/patch/rollback, SkillRegistry
+  bump/save/promote/demote/refusal/direct-failure/reset). Stage-1
+  DUAL-WRITE: stores stay authoritative; `ledger check` projects
+  counters and flags the IMPOSSIBLE direction (store < ledger = a write
+  path bypassed the choke points). Fail-open — a ledger error can never
+  take down a run. Path: `ATOMA_LEDGER_PATH` (default
+  `./atoma-ledger.jsonl`, gitignored; vitest pins it under node_modules
+  so tests never pollute the real file). Skill bodies also carry
+  `provenance` ({mechanism, model, at} — distilled/revised/compiled) in
+  `_meta.json`, preserved across bumps and resets, replaced on rewrite.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
@@ -733,7 +760,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   The script's stdout MUST be a single JSON line of shape
   `{"output": ..., "summary": "<one sentence with embedded == GROUND
   TRUTH == block>"}`; `compileSkillToScript`'s prompt enforces this,
-  and `parseScriptEnvelope` in `L2Atom.ts` is the strict parse the
+  and `parseScriptEnvelope` in `src/contracts/scriptEnvelope.ts` is the strict parse the
   deterministic path applies (LLM path stays tolerant — the L1 is
   told how to wrap plain stdout).
 - **Pre-flight envelope gate on deterministic dispatch.**
@@ -847,17 +874,19 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   manifest MIXING shell + http entries is VALID (documented contract);
   only structural breakage is reported (bad JSON, version ≠ 1, entries
   not an array or empty, per-entry shape missing its required fields).
-  It knows all THREE shapes — keep it in sync with the writers
-  (GROUND_TRUTH_EVIDENCE_LINES, the http and web canonicals) and the
-  reader (compileSkillToScript): teaching a new shape to one side only
-  turns the health check into a false alarm, which is how iteration 16
-  nearly broke iteration 4.
+  It knows all THREE shapes, and since the contracts extraction the sync
+  is STRUCTURAL: writers, reader and checker all render/check the
+  schema-validated examples in `src/contracts/probeManifest.ts`, and
+  `tests/contracts.test.ts` pins the round-trip (what writers emit, the
+  reader teaches and the checker accepts). Add a shape THERE, nowhere
+  else — the hand-written era produced two one-sided-contract incidents
+  (iteration 16 nearly broke iteration 4).
   GATED on the child having reported probes — a plain file-scribe
   deliverable pays no extra tool call, which keeps the exact-call-count
   assertions in the #F9 tests (a deliberate cost guard) intact.
   Covered by `tests/probe-manifest-validation.test.ts`.
 - **Refusal stamps EXPIRE with the compile-prompt generation.**
-  `COMPILE_PROMPT_GENERATION` (`src/atoms/L2Atom.ts`) is a djb2 hash of
+  `COMPILE_PROMPT_GENERATION` (`src/skills/compilePrompt.ts`) is a djb2 hash of
   `buildCompileSkillPrompt`'s static template rendered with fixed
   placeholders — edit any line of the compile prompt and the id changes.
   `markPromotionRefused` records it; `tryPromoteSkill` IGNORES (and
