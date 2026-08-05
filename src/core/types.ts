@@ -111,6 +111,16 @@ export interface Result {
   readonly toolCallResults?: unknown[];
   readonly trace: TraceEntry[];
   readonly producedBy: { tier: Tier; name: string; viaFallback: boolean };
+  /**
+   * Machine-checkable witnesses extracted from the payload at production
+   * time (see src/contracts/witness.ts). VERIFICATION-FIRST principle: a
+   * result carrying witnesses is structurally stronger evidence than one
+   * carrying narrative alone — validators and projections read this typed
+   * field instead of re-parsing `output`. Optional because fallback paths
+   * and legacy producers may not populate it; absence means "no
+   * machine-checkable evidence", never "verified".
+   */
+  readonly evidence?: readonly import('../contracts/witness.js').Witness[];
 }
 
 export type MutationScope = 'ephemeral' | 'branch' | 'patch';

@@ -4,6 +4,7 @@ import type { AtomType } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
+import { witnessesFromPayload } from '../contracts/witness.js';
 import { SkillRegistry } from '../skills/registry.js';
 
 export class L1Atom extends Atom {
@@ -307,6 +308,10 @@ export class L1Atom extends Atom {
       summary,
       trace: [],
       producedBy: { tier: 1, name: this.name, viaFallback: false },
+      // Typed witnesses, attached at production time: the child's recorded
+      // probes become first-class evidence the upper tiers can weigh
+      // without re-parsing the payload.
+      evidence: witnessesFromPayload({ output }),
     };
   }
 }

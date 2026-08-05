@@ -104,3 +104,38 @@ describe('contracts — schema/validator/prompt agreement', () => {
     });
   });
 });
+
+describe('contracts — typed witnesses (P5)', () => {
+  it('witnessesFromPayload normalises historical probe spellings into tagged witnesses', async () => {
+    const { witnessesFromPayload } = await import('../src/contracts/witness.js');
+    const w = witnessesFromPayload({
+      output: {
+        examples_verified: [
+          { command: 'node cli.js x', exit_code: 0, actual_stdout: 'X', expected_stdout: 'X' },
+        ],
+      },
+    });
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({ source: 'recorded-probe', cmd: 'node cli.js x', exitCode: 0 });
+  });
+
+  it('an L1 result carries its witnesses as first-class evidence', async () => {
+    const { L1Atom } = await import('../src/atoms/L1Atom.js');
+    const { makeCtx, jsonText } = await import('./helpers.js');
+    const atom = new L1Atom({
+      name: 'H', ordinal: 1, systemPrompt: 'x', tools: [], params: {},
+    });
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(
+      jsonText({
+        output: { probes: [{ cmd: 'node x.js', exitCode: 0, stdout: 'ok' }] },
+        summary: 'done',
+      })
+    );
+    const plan = await atom.plan({ description: 't' }, ctx);
+    const result = await atom.execute({ description: 't' }, plan, ctx);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence![0]).toMatchObject({ source: 'recorded-probe', cmd: 'node x.js' });
+  });
+});
