@@ -1483,10 +1483,16 @@ themselves had rendered, so a wording edit could silently disarm the
 trust-fast-path override). L2Atom: 3,692 → ~1,590 lines over the
 campaign.
 
-REMAINING (needs a design pass, not urgent): **supervisor mirror
-helpers** for the duplicated L2/L3 pairs (dispatchSubtasks,
-resolve*ForSubtask + planChildAliases, selfPlan/selfExecute, validator
-plumbing) — shared functions parameterised by tier, NOT a base class.
+Mirror helpers: **dispatchSubtasks is shared** —
+`dispatchWithAggregation` in `src/atoms/dispatch.ts` owns the
+aggregation.mode → dispatch mapping (sequential summary-threading vs
+parallel Promise.all), parameterised by the per-subtask runner; alias
+clearing and child resolution stay with the callers (resolution runs in
+each runner's synchronous prefix — that is what keeps the parallel
+branch race-free). REMAINING (needs a design pass, not urgent): the
+other mirror pairs (resolve*ForSubtask + planChildAliases,
+selfPlan/selfExecute, validator plumbing) — shared functions
+parameterised by tier, NOT a base class.
 
 ## Deferred / explicitly out of scope
 

@@ -75,6 +75,7 @@ export { extractRecordedProbes } from '../contracts/witness.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
 import { SkillLifecycle } from '../skills/lifecycle.js';
 import { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
+import { dispatchWithAggregation } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { skillContextBlock } from '../skills/lifecycle.js';
 export {
@@ -540,31 +541,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ctx: RunContext
   ): Promise<Result[]> {
     this.planChildAliases.clear();
-    if (plan.aggregation.mode === 'sequential') {
-      const out: Result[] = [];
-      let previousSummary: string | undefined;
-      for (let idx = 0; idx < subtasks.length; idx++) {
-        const baseSubtask = subtasks[idx]!;
-        const subtask = previousSummary !== undefined
-          ? {
-              ...baseSubtask,
-              inputs: {
-                ...(baseSubtask.inputs ?? {}),
-                previousStepSummary: previousSummary,
-                previousStepIndex: idx - 1,
-              },
-            }
-          : baseSubtask;
-        const r = await this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx });
-        out.push(r);
-        previousSummary = r.summary;
-      }
-      return out;
-    }
-    return Promise.all(
-      subtasks.map((subtask, idx) =>
-        this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx })
-      )
+    return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) =>
+      this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx })
     );
   }
 

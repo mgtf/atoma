@@ -15,6 +15,7 @@ import {
   type AtomType,
 } from '../registry/atomRegistry.js';
 import { modelForTier, resolveLatestOpus, FALLBACK_OPUS, type ModelListingClient } from '../core/models.js';
+import { dispatchWithAggregation } from './dispatch.js';
 import { L2Atom } from './L2Atom.js';
 import {
   buildTargetContext,
@@ -478,35 +479,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     ctx: RunContext
   ): Promise<Result[]> {
     this.planChildAliases.clear();
-    if (plan.aggregation.mode === 'sequential') {
-      const out: Result[] = [];
-      let previousSummary: string | undefined;
-      for (let idx = 0; idx < subtasks.length; idx++) {
-        const baseSubtask = subtasks[idx]!;
-        const subtask = previousSummary !== undefined
-          ? {
-              ...baseSubtask,
-              inputs: {
-                ...(baseSubtask.inputs ?? {}),
-                previousStepSummary: previousSummary,
-                previousStepIndex: idx - 1,
-              },
-            }
-          : baseSubtask;
-        const hooks = this.makeL2Hooks(ctx, subtask.description);
-        const r = await this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
-        out.push(r);
-        previousSummary = r.summary;
-      }
-      return out;
-    }
-    // Parallel branch (concat / llm-synthesize).
-    return Promise.all(
-      subtasks.map((subtask, idx) => {
-        const hooks = this.makeL2Hooks(ctx, subtask.description);
-        return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
-      })
-    );
+    return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) => {
+      const hooks = this.makeL2Hooks(ctx, subtask.description);
+      return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
+    });
   }
 
   private async runSubtask(args: {
