@@ -756,6 +756,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
    * whether a skill drove the run — that info gates the C3 skill
    * auto-creation path on the onApproved hook.
    */
+  /**
+   * hallucinated-preferredChild → actually-created L1 name, scoped to ONE
+   * plan dispatch (mirror of L3.planChildAliases). Without it, a Sonnet
+   * plan naming a single invented L1 ("Carbon") on N subtasks minted N
+   * same-labelled clones in one dispatch — the catalog-pollution class
+   * (Ammonia/CarbonDioxide/Glucose series) that splits trust counters,
+   * delays the fast-path and fragments skill namespaces. Cleared at each
+   * dispatch; resolution happens in the synchronous prefix of runSubtask,
+   * so the map is race-free even under the parallel branch.
+   */
+  private readonly planChildAliases = new Map<string, string>();
+
   private async dispatchSubtasks(
     subtasks: readonly Plan['subtasks'][number][],
     plan: Plan,
@@ -763,6 +775,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     task: Task,
     ctx: RunContext
   ): Promise<Result[]> {
+    this.planChildAliases.clear();
     if (plan.aggregation.mode === 'sequential') {
       const out: Result[] = [];
       let previousSummary: string | undefined;
@@ -1570,6 +1583,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         }
         return found;
       }
+      // A previous subtask of THIS plan already resolved the same invented
+      // name — reuse its L1 instead of minting a same-labelled clone.
+      const aliased = this.planChildAliases.get(subtask.preferredChild);
+      if (aliased) {
+        const type = this.registry.getByName(aliased);
+        if (type && type.tier === 1) {
+          ctx.logger.info(
+            `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" → reusing ${aliased} created earlier in this plan`
+          );
+          return type;
+        }
+      }
       // Planner hallucination: preferredChild does not exist. Sonnet
       // sometimes invents chemical-element names ("Carbon") that AREN'T
       // in the catalog yet. Rather than crash the whole fan-out (killing
@@ -1580,7 +1605,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ctx.logger.warn(
         `[${this.name}] subtask #${idx} preferredChild "${subtask.preferredChild}" not in registry — auto-creating a fresh L1`
       );
-      return this.createSubtaskL1(subtask, strategy, parentTask);
+      const created = this.createSubtaskL1(subtask, strategy, parentTask);
+      this.planChildAliases.set(subtask.preferredChild, created.name);
+      return created;
     }
     // No preferredChild: the single-subtask path uses the strategy
     // resolved at plan-time. For idx > 0 we still auto-create to

@@ -204,3 +204,42 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     expect(createdL2.description).not.toBe(capabilityDescription(webTools, 1));
   });
 });
+
+  it('L2 mirror: the SAME invented preferredChild on two subtasks creates ONE L1, not clones (audit rank-5)', () => {
+    // L3 got this dedup first; L2 had the identical failure mode
+    // (L3Atom's own comment says "same failure mode as in
+    // L2.resolveL1ForSubtask") but no map — a Sonnet plan naming ONE
+    // invented L1 on N subtasks minted N same-labelled clones in a single
+    // dispatch, splitting trust counters and fragmenting skill namespaces.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const tools = makeTools(['write_file', 'read_file', 'run_shell']);
+    const l2Type = reg.create(2, {
+      description: 'l2', systemPrompt: 'l2', tools, params: {}, createdBy: 'test',
+    });
+    const l2 = L2Atom.fromType(l2Type, reg, tools);
+    const ctx = { logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } };
+    const strategy = {
+      strategy: 'create',
+      seed: { description: 'file writer', tools: [], params: {} },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const any2 = l2 as any;
+    any2.planChildAliases.clear();
+    const first = any2.resolveL1ForSubtask(
+      { description: 'write module A', preferredChild: 'Carbon' },
+      strategy, { description: 'parent' }, 0, ctx
+    );
+    const second = any2.resolveL1ForSubtask(
+      { description: 'write module B', preferredChild: 'Carbon' },
+      strategy, { description: 'parent' }, 1, ctx
+    );
+    expect(second.name).toBe(first.name);
+    expect(reg.listByTier(1)).toHaveLength(1);
+    // A different invented name still gets its own L1.
+    const third = any2.resolveL1ForSubtask(
+      { description: 'write module C', preferredChild: 'Krypton' },
+      strategy, { description: 'parent' }, 2, ctx
+    );
+    expect(third.name).not.toBe(first.name);
+    expect(reg.listByTier(1)).toHaveLength(2);
+  });
