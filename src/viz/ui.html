@@ -66,6 +66,25 @@
   .summary { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
   .summary h2 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; }
   .summary .task { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+  /* RESULT block. A sequential run's summary concatenates every phase and
+     every "== GROUND TRUTH ==" evidence dump into one string — rendered
+     raw it is an unreadable wall. Split into a deliverable line, one card
+     per phase, and monospace evidence blocks. */
+  .result { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .result h3 { margin: 0 0 4px 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+  .result .final { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+  .result .phase { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  .result .phase-head { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+  .result .prose { font-size: 12px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
+  .result .evidence {
+    margin-top: 6px; padding: 8px 10px; border-left: 3px solid var(--ok);
+    background: rgba(0, 0, 0, 0.25); border-radius: 0 6px 6px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+    max-height: 260px; overflow: auto; color: #b9c4d4;
+  }
+  .result .evidence-label { font-size: 10px; letter-spacing: 0.5px; color: var(--ok); text-transform: uppercase; margin-bottom: 3px; }
+  .result .toggle { cursor: pointer; user-select: none; font-size: 11px; color: var(--accent); margin-top: 6px; display: inline-block; }
   .summary .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
   .summary .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
   .summary .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
@@ -182,7 +201,11 @@
   .lane .chip.atom.selected { background: var(--accent); color: #0b0f17; border-color: var(--accent); }
   .lane .chip .v { opacity: 0.55; font-size: 10px; margin-left: 4px; }
 
-  .origin-legend { display: flex; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
+  /* The legend closes the lanes block and the filter pills open the next
+     one — without breathing room below, the two read as one crowded
+     strip. gap is horizontal only, so the wrap needs row-gap too when
+     the legend itself wraps on a narrow pane. */
+  .origin-legend { display: flex; gap: 4px 12px; font-size: 11px; color: var(--muted); margin-top: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
   .origin-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
   .origin-legend .dot.new { background: var(--ok); }
   .origin-legend .dot.patched { background: var(--l2); }
@@ -658,10 +681,110 @@ function renderSummary(run) {
     grid,
     models.length ? h('div', { class: 'filters', style: 'margin-top:10px;' }, models) : null,
     liveBanner,
-    run.result ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Résultat : ' + (run.result.summary ?? '')) : null,
+    run.result ? renderResultBlock(run.result.summary ?? '') : null,
     degradedBanner,
     run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Erreur : ' + run.error) : null,
   ]));
+}
+
+/**
+ * Render the run's result summary as structure instead of a wall.
+ *
+ * A sequential run's summary is built by concatenation: the final phase's
+ * deliverable, then `Trace:` followed by every phase joined with ` | `,
+ * and each phase may embed a verbatim `== GROUND TRUTH ==` evidence dump
+ * (probe stdout/stderr/exit codes, file listings). Rendered as one
+ * paragraph that is unreadable exactly when it matters most — after a
+ * multi-phase build. We split it back apart: the deliverable leads, the
+ * per-phase trace collapses behind a toggle, and evidence renders
+ * monospace so aligned probe output stays aligned.
+ *
+ * Purely presentational and defensive: any shape it cannot parse falls
+ * through to the original text.
+ */
+function renderResultBlock(summary) {
+  const text = String(summary ?? '').trim();
+  const wrap = h('div', { class: 'result' });
+  wrap.appendChild(h('h3', {}, 'Résultat'));
+  if (!text) {
+    wrap.appendChild(h('div', { class: 'meta' }, '—'));
+    return wrap;
+  }
+  // Head = the deliverable statement; the rest is the per-phase trace.
+  const traceSplit = text.split(/\s*(?:\.\s*)?\bTrace\s*:\s*/);
+  const head = traceSplit[0] ?? text;
+  const traceRest = traceSplit.length > 1 ? traceSplit.slice(1).join(' Trace: ') : '';
+
+  for (const node of renderEvidenceSplit(head, 'final')) wrap.appendChild(node);
+
+  if (!traceRest) return wrap;
+  // ` | phase #N (Atom): …` — split on the separator that PRECEDES a
+  // phase marker so a literal pipe inside a summary can't split a phase.
+  const phases = traceRest.split(/\s*\|\s*(?=phase\s*#\d+)/);
+  const body = h('div', { style: 'display:none;' });
+  for (const chunk of phases) {
+    const m = chunk.match(/^phase\s*#(\d+)\s*\(([^)]*)\)\s*:\s*([\s\S]*)$/);
+    const card = h('div', { class: 'phase' });
+    if (m) {
+      card.appendChild(h('div', { class: 'phase-head' }, 'PHASE ' + m[1] + ' · ' + m[2]));
+      for (const node of renderEvidenceSplit(m[3], 'phase')) card.appendChild(node);
+    } else {
+      for (const node of renderEvidenceSplit(chunk, 'phase')) card.appendChild(node);
+    }
+    body.appendChild(card);
+  }
+  const label = phases.length + (phases.length > 1 ? ' phases' : ' phase');
+  const toggle = h('span', { class: 'toggle' }, '▸ détail par phase (' + label + ')');
+  toggle.onclick = () => {
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : 'block';
+    toggle.textContent = (open ? '▸' : '▾') + ' détail par phase (' + label + ')';
+  };
+  wrap.appendChild(toggle);
+  wrap.appendChild(body);
+  return wrap;
+}
+
+/**
+ * Split a chunk on `== GROUND TRUTH ==` markers, returning prose nodes
+ * and monospace evidence nodes. The evidence is the child's verbatim
+ * observation (probe stdout, byte sizes, exit codes) — the one part of a
+ * summary where alignment and line breaks carry meaning.
+ */
+function renderEvidenceSplit(chunk, kind) {
+  const out = [];
+  const parts = String(chunk ?? '').split(/==\s*GROUND\s*TRUTH\s*==/i);
+  const lead = (parts.shift() ?? '').trim();
+  if (lead) {
+    out.push(h('div', { class: kind === 'final' ? 'final' : 'prose' }, lead));
+  }
+  for (const ev of parts) {
+    const body = ev.trim();
+    if (!body) continue;
+    out.push(h('div', { class: 'evidence-label' }, 'ground truth'));
+    out.push(h('div', { class: 'evidence' }, softBreakEvidence(body)));
+  }
+  return out;
+}
+
+/**
+ * Evidence dumps arrive as ONE line — the child writes "Probe 1: … exit
+ * Code: 0 Probe 2: …" and the enumeration is invisible. Break before the
+ * markers children actually use so each probe / file gets its own line.
+ * Conservative on purpose: a marker that never appears changes nothing,
+ * and the text itself is never altered, only wrapped.
+ */
+function softBreakEvidence(text) {
+  return text
+    // "Probe 2:", "probe: GET /health" — one per line.
+    .replace(/\s+(?=[Pp]robe\s*\d*\s*:)/g, '\n')
+    // Bulleted file lists: " - bin/longest.js (584 bytes)".
+    .replace(/\s+-\s+(?=[\w./])/g, '\n  - ')
+    // Section labels children emit inside the block.
+    .replace(/\s+(?=(?:Files created|Files created\/updated|Validation results|schema\/state)\s*:)/g, '\n')
+    // Numbered checks: " 2. Success case (…)".
+    .replace(/\s+(?=\d+\.\s+[A-Z])/g, '\n')
+    .trim();
 }
 
 function statCard(k, v) {
