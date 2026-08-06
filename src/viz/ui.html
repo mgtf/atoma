@@ -226,6 +226,13 @@
   .tools-list { display: flex; gap: 4px; flex-wrap: wrap; }
   .tools-list .chip { font-size: 11px; padding: 2px 8px; }
   .live-dot { color: var(--ok); animation: livePulse 1.2s ease-in-out infinite; margin-right: 4px; }
+  /* "Right now" explanation lines: what the busy slot is actually doing,
+     and the live tool activity inside that same call. */
+  .now-what { margin-top: 6px; font-size: 12.5px; color: var(--text); line-height: 1.45; }
+  .now-activity {
+    margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
   @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
   .interrupted { opacity: 0.75; border-left: 3px solid var(--err); }
 </style>
@@ -393,6 +400,16 @@ const I18N_CATALOGS = {
     'now.title': 'Right now',
     'now.elapsed': '⏱ {{seconds}}s',
     'now.tooLong': ' — unusually long?',
+    'now.doing.plan': '{{actor}} is deciding how to break the task down.',
+    'now.doing.execute': '{{actor}} is doing the work — writing files, running commands, checking the result.',
+    'now.doing.prefilter': '{{actor}} is picking which existing child should handle this.',
+    'now.doing.validatePlan': '{{actor}} is checking {{child}}\'s plan before any work starts.',
+    'now.doing.validateResult': '{{actor}} is checking what {{child}} produced.',
+    'now.doing.fallback': '{{actor}} took over and is doing the work itself (fallback).',
+    'now.doing.unknown': '{{actor}} has a call in flight.',
+    'now.activity': '{{count}} tool calls so far · last: {{tool}} ({{ago}}s ago)',
+    'now.activity.one': '1 tool call so far · last: {{tool}} ({{ago}}s ago)',
+    'now.activity.none': 'no tool call yet — waiting on the model.',
 
     'marker.start': '▶ Run start',
     'marker.end': '■ Run end',
@@ -569,6 +586,16 @@ const I18N_CATALOGS = {
     'now.title': 'En ce moment',
     'now.elapsed': '⏱ {{seconds}}s',
     'now.tooLong': ' — anormalement long ?',
+    'now.doing.plan': '{{actor}} décide comment découper la tâche.',
+    'now.doing.execute': '{{actor}} fait le travail — écrit des fichiers, lance des commandes, vérifie le résultat.',
+    'now.doing.prefilter': '{{actor}} choisit quel enfant existant doit s\'en charger.',
+    'now.doing.validatePlan': '{{actor}} contrôle le plan de {{child}} avant tout travail.',
+    'now.doing.validateResult': '{{actor}} contrôle ce que {{child}} a produit.',
+    'now.doing.fallback': '{{actor}} a repris la main et fait le travail lui-même (fallback).',
+    'now.doing.unknown': '{{actor}} a un appel en vol.',
+    'now.activity': '{{count}} appels outil jusqu\'ici · dernier : {{tool}} (il y a {{ago}}s)',
+    'now.activity.one': '1 appel outil jusqu\'ici · dernier : {{tool}} (il y a {{ago}}s)',
+    'now.activity.none': 'aucun appel outil encore — en attente du modèle.',
 
     'marker.start': '▶ Début du run',
     'marker.end': '■ Fin du run',
@@ -1727,9 +1754,75 @@ function renderNowBanner(run, completedIds, isLive) {
     row.push(h('span', { class: 'meta', style: secs > 120 ? 'color: var(--err); font-weight: 600;' : '' },
       t('now.elapsed', { seconds: secs }) + (secs > 120 ? t('now.tooLong') : '')));
     if (s.branchId) row.push(branchChip(s.branchId));
-    wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, [h('div', { class: 'row' }, row)]));
+    // WHAT it is doing, not just which slot is busy. A bare role chip
+    // ("EXECUTE") told you a call was open and nothing else — on a
+    // multi-minute L1 tool loop that reads as "frozen". Two additions:
+    // a plain sentence for the role, and the LIVE tool activity of THIS
+    // call (tool events carry the llmEventId of the loop that spawned
+    // them, so the correlation is exact rather than chronological).
+    const cell = [
+      h('div', { class: 'row' }, row),
+      h('div', { class: 'now-what' }, describeInFlight(s)),
+    ];
+    const activity = inFlightToolActivity(run, s);
+    if (activity) cell.push(h('div', { class: 'now-activity' }, activity));
+    wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, cell));
   }
   host.appendChild(wrap);
+}
+
+/** One plain sentence naming the work behind the role chip. */
+function describeInFlight(s) {
+  const actor = s.actor?.name ?? '?';
+  const child = s.child?.name;
+  switch (s.role) {
+    case 'plan':
+      return t('now.doing.plan', { actor });
+    case 'execute':
+      return t('now.doing.execute', { actor });
+    case 'prefilter':
+      return t('now.doing.prefilter', { actor });
+    case 'validate-plan':
+      return t('now.doing.validatePlan', { actor, child: child ?? '?' });
+    case 'validate-result':
+      return t('now.doing.validateResult', { actor, child: child ?? '?' });
+    case 'fallback-plan':
+    case 'fallback-execute':
+      return t('now.doing.fallback', { actor });
+    default:
+      return t('now.doing.unknown', { actor });
+  }
+}
+
+/**
+ * Live tool activity INSIDE the in-flight call. `VizToolEvent.llmEventId`
+ * points at the loop that spawned it, so this is the exact set — not a
+ * chronological guess that would mix in a sibling branch's tools.
+ */
+function inFlightToolActivity(run, s) {
+  const tools = run.events.filter((e) => e.kind === 'tool' && e.llmEventId === s.llmEventId);
+  if (tools.length === 0) return t('now.activity.none');
+  const last = tools[tools.length - 1];
+  const ago = Math.max(0, Math.round((Date.now() - last.ts) / 1000));
+  const arg = toolArgSummary(last.name, last.args);
+  return t('now.activity', {
+    count: tools.length,
+    tool: last.name + (arg ? ' ' + arg : ''),
+    ago,
+  });
+}
+
+/** The one argument that identifies what a tool call touched. */
+function toolArgSummary(name, args) {
+  if (!args || typeof args !== 'object') return '';
+  const pick = (k) => (typeof args[k] === 'string' ? args[k] : '');
+  let v =
+    pick('path') || pick('file') || pick('url') || pick('entry') || pick('command') || '';
+  if (name === 'run_shell' && Array.isArray(args.args) && args.args.length) {
+    v = (v + ' ' + args.args.filter((a) => typeof a === 'string').join(' ')).trim();
+  }
+  if (!v) return '';
+  return v.length > 48 ? '…' + v.slice(-47) : v;
 }
 
 function branchChip(branchId) {

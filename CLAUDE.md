@@ -1699,6 +1699,17 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   a global, so a local variable named `t` shadows it — the registry
   render paths were renamed to `type`/`ty`/`tot` for exactly this
   reason.
+- **"Right now" says what the call is DOING.** A bare role chip
+  ("EXECUTE") told you a slot was busy and nothing else — on a
+  multi-minute L1 tool loop that reads as frozen. The banner now adds a
+  plain sentence per role (`now.doing.*`) and the LIVE tool activity of
+  that same call: count, last tool, its identifying argument
+  (path/url/command, tail-truncated at 48 chars) and how long ago. The
+  correlation is EXACT, not chronological — `VizToolEvent.llmEventId`
+  names the loop that spawned each tool, so a sibling branch's calls are
+  never folded in (pinned by a fixture with a decoy tool on another
+  llmEventId). Everything is derived from data already recorded, so it
+  works on any archived trace.
 - **Viz cards surface the DECISION, not just the call.** Prefilter and
   validator cards read the recorded `response` client-side and render the
   outcome inline — `→ réutilise <target>` / `↑ escalade` (+ a confidence
