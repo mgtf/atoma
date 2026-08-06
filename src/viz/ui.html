@@ -167,6 +167,12 @@
   .meta { color: var(--muted); font-size: 11px; }
   .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
   .cost { color: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* Second line of a call card: model, price, tokens, timing. Monospace
+     so the numbers line up across stacked cards when scanning a run. */
+  .event .cost-line {
+    margin-top: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; color: var(--muted);
+  }
   .err-badge { background: rgba(248, 113, 113, 0.15); color: var(--err); border: 1px solid #3b1e1e; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
 
   .section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
@@ -1306,12 +1312,16 @@ function renderEventCard(ev) {
     // recorded response, so every already-archived run gains them too.
     for (const chip of outcomeChips(ev)) row.push(chip);
     if (ev.branchId) row.push(branchChip(ev.branchId));
-    row.push(h('span', { class: 'spacer', style: 'flex:1;' }));
-    row.push(h('span', { class: 'model' }, shortModel(ev.model)));
-    row.push(h('span', { class: 'cost' }, fmtCost(ev.costUsd)));
     if (ev.error) row.push(h('span', { class: 'err-badge' }, 'erreur'));
 
+    // Line 1 = WHAT happened (role, atoms, decision). Line 2 = what it
+    // COST (model, price, tokens, timing). They used to share one flex
+    // row with a spacer pushing the cost right: as soon as the decision
+    // chip made the row overflow, the price alone wrapped to the next
+    // line and the card looked broken. Two deliberate lines never do.
     const meta = [
+      shortModel(ev.model),
+      fmtCost(ev.costUsd),
       `in: ${ev.usage.inputTokens}`,
       `out: ${ev.usage.outputTokens}`,
       ev.usage.cacheReadInputTokens ? `cache: ${ev.usage.cacheReadInputTokens}` : null,
@@ -1324,7 +1334,7 @@ function renderEventCard(ev) {
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [
       h('div', { class: 'row' }, row),
-      h('div', { class: 'meta', style: 'margin-top:4px;' }, meta),
+      h('div', { class: 'meta cost-line' }, meta),
     ]);
   }
   if (ev.kind === 'tool') {
@@ -1381,8 +1391,6 @@ function renderEventCard(ev) {
       style: 'font-weight:600; color:' + (/^reuse/.test(ev.outcome) ? 'var(--ok)' : '#fbbf24') + ';',
     }, /^reuse /.test(ev.outcome) ? '→ réutilise ' + ev.outcome.slice(6) : '↑ escalade'));
     if (ev.branchId) crow.push(branchChip(ev.branchId));
-    crow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
-    crow.push(h('span', { class: 'model' }, shortModel(ev.model)));
     crow.push(h('span', { style: 'color:#67e8f9; font-weight:700;' }, '0 appel · $0.00'));
     return h('div', {
       class: 'event' + selected,
@@ -1390,9 +1398,11 @@ function renderEventCard(ev) {
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [
       h('div', { class: 'row' }, crow),
-      h('div', { class: 'meta', style: 'margin-top:4px;' },
-        'décision rejouée depuis le cache — l\'appel LLM n\'a pas eu lieu'
-        + (ev.reasoning ? ' · ' + ev.reasoning : '')),
+      // Same two-line shape as a real call card: line 2 carries the cost
+      // facts — here, the model whose call was SKIPPED.
+      h('div', { class: 'meta cost-line' },
+        shortModel(ev.model) + '  ·  appel évité'
+        + (ev.reasoning ? '  ·  ' + ev.reasoning : '')),
     ]);
   }
   if (ev.kind === 'skill') {
