@@ -187,6 +187,16 @@ npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-cu
   system prompt into a verdict call. Same rule applies to
   `PREFILTER_SYSTEM_PROMPT` and `SKILL_PREFILTER_SYSTEM_PROMPT` (the skill
   prefilter's dedicated prompt — also constant, see the Skills section).
+- **Bounded remediation feedback.** A rejection's
+  `modifications.additionalContext` is coaching for the NEXT attempt;
+  the `REMEDIATION FEEDBACK CONTRACT` block in `VALIDATION_SYSTEM_PROMPT`
+  asks for ≤~10 short actionable lines naming the exact artefact at
+  fault (SPOQ's measured practice), and `coerceVerdictDefaults`
+  truncates anything past `REMEDIATION_FEEDBACK_MAX_CHARS` (1200) with
+  an explicit marker — head-truncation, the diagnosis leads. Rationale:
+  ballooning diagnostics COACHED RETRIES INTO DEGRADING the artefact on
+  the 2026-07-25 run; the prompt asks, the cap enforces. Covered by
+  `tests/bounded-feedback.test.ts`.
 - Validation params are pinned to `{ temperature: 0, maxTokens: 2048 }`
   (`VALIDATION_PARAMS`, `src/atoms/L2Atom.ts`), prefilter params to
   `{ temperature: 0, maxTokens: 256 }`. Raise either only if you see truncated
@@ -1629,6 +1639,21 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   benefit on a single-observer dev-loop tool — not worth it.
 
 ## Considered and rejected (do not re-propose naively)
+
+- **SPOQ-style Haiku blame-triage on multi-subtask failures.** SPOQ runs
+  a cheap investigator after a failed wave to name the guilty task —
+  valuable THERE because their validation is wave-level. Rejected here
+  (2026-08-06) because atoma validates PER SUBTASK: by the time an
+  aggregate is rejected, each sub-result already carries its own verdict
+  and diagnosis, so a triage call would mostly restate what the
+  validator wrote. The real gap is not identifying the guilty subtask
+  but CONSUMING that knowledge — replans re-run the whole plan; there is
+  no partial-replay that keeps the good phases and redoes the bad one
+  (and the shared sequential workspace makes that non-trivial). Revisit
+  only alongside plan templating / partial replay; the bounded
+  remediation-feedback contract (REMEDIATION_FEEDBACK_MAX_CHARS +
+  the prompt's REMEDIATION FEEDBACK CONTRACT block) is the part of the
+  SPOQ finding that pays for itself today.
 
 - **Trust-gated restore of the L3 skeletal short-circuit.** Tempting on
   mature families (saves the ~$0.07 Opus plan), rejected 2026-08-02 for a

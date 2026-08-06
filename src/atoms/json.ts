@@ -786,6 +786,19 @@ export function isEffectivelyEmptyMods(
  * `z.infer<typeof verdictSchema>`. Applied at the parseWith boundary
  * via `parseVerdict` below instead.
  */
+/**
+ * Hard ceiling on a rejection's `modifications.additionalContext` — the
+ * remediation feedback threaded into the child's next attempt. SPOQ's
+ * measured practice (≤20 actionable lines with file:line refs) applied at
+ * the parse boundary: a wall of diagnostic prose crowds the subtask out
+ * of the retry's context and coaches the child WORSE, not better (the
+ * 2026-07-25 retries degraded the artefact cycle over cycle while the
+ * feedback ballooned). The system prompt asks for bounded feedback; this
+ * cap is the defence in depth when the model ignores it. Head-truncation
+ * with an explicit marker — the concrete diagnosis leads, per the prompt.
+ */
+export const REMEDIATION_FEEDBACK_MAX_CHARS = 1200;
+
 export function coerceVerdictDefaults(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const obj = raw as Record<string, unknown>;
@@ -810,6 +823,17 @@ export function coerceVerdictDefaults(raw: unknown): unknown {
   }
   if (typeof out['reasoning'] !== 'string') {
     out['reasoning'] = 'rejected without reasoning (coerced)';
+  }
+  // Bounded remediation feedback — see REMEDIATION_FEEDBACK_MAX_CHARS.
+  const mods = out['modifications'] as Record<string, unknown>;
+  const ac = mods['additionalContext'];
+  if (typeof ac === 'string' && ac.length > REMEDIATION_FEEDBACK_MAX_CHARS) {
+    out['modifications'] = {
+      ...mods,
+      additionalContext:
+        ac.slice(0, REMEDIATION_FEEDBACK_MAX_CHARS) +
+        ' [... remediation feedback truncated: keep it short and actionable ...]',
+    };
   }
   return out;
 }
