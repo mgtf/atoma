@@ -12,6 +12,7 @@ import {
 } from '../atoms/cost.js';
 import { parseScriptEnvelope, scriptDeclaresEnvelope, scriptExtension } from '../contracts/scriptEnvelope.js';
 import { extractJson } from '../atoms/json.js';
+import { extractResultFilePaths } from '../atoms/groundTruth.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
 import { scriptInterpreter, scriptScratchFilename } from './abi.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody, SCAN_GENERATION } from './scriptScan.js';
@@ -957,6 +958,43 @@ export class SkillLifecycle {
         );
         this.noteDirectFailure(l1Name, skill, ctx);
         return null;
+      }
+      // DELIVERABLE GATE. The envelope parse is the only thing standing
+      // between a script's self-report and a recorded success — and a
+      // script cannot know what subtask it was matched to. MEASURED: the
+      // compiled CLI verifier, handed the subtask "Write a README.md
+      // documenting the CLI usage", replayed the manifest, printed a valid
+      // envelope, exited 0, and wrote NO README — and because this path
+      // returns before superviseLoop, no validator ever saw it, the skill
+      // was credited, and the phantom success entrenched the script. So:
+      // any file the SUBTASK names (not the result — that is the claim we
+      // distrust) must exist afterwards, or the deliverable was not
+      // produced and the validated LLM loop takes over. Costs zero tokens
+      // (local fs reads) and no counter moves either way. Deliberately
+      // strict: a false positive only pays for the LLM loop, a false
+      // negative entrenches a broken script.
+      const namedPaths = extractResultFilePaths({ summary: subTask.description });
+      if (namedPaths.length > 0 && ctx.tools?.has('read_file')) {
+        const missing: string[] = [];
+        for (const path of namedPaths) {
+          if (ctx.signal?.aborted) break;
+          try {
+            const got = await ctx.tools.execute('read_file', { path });
+            const content =
+              got && typeof got === 'object'
+                ? (got as Record<string, unknown>)['content']
+                : got;
+            if (typeof content !== 'string') missing.push(path);
+          } catch {
+            missing.push(path);
+          }
+        }
+        if (missing.length > 0) {
+          ctx.logger.info(
+            `[${this.host.name}] direct dispatch of ${skill.id} produced no ${missing.join(', ')} — the subtask names ${missing.length === 1 ? 'that file' : 'those files'} as its deliverable, so the script did not do this job; routing through the validated LLM loop (no counter moved)`
+          );
+          return null;
+        }
       }
       this.skills?.clearDirectFailures(l1Name, skill.id);
       this.skills?.recordSuccess(l1Name, skill.id);

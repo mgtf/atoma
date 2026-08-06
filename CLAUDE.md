@@ -1059,6 +1059,41 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   block: model-authored artefacts vary in formatting between runs, a
   command's arguments are part of the command, and empty extraction must
   exit non-zero. Covered by `skill-direct-dispatch.test.ts`.
+- **DELIVERABLE GATE on deterministic dispatch — the envelope is no longer
+  the only check.** A compiled script cannot know which subtask it was
+  matched to, and this path returns BEFORE `superviseLoop`, so no
+  validator ever sees its output. MEASURED: the compiled CLI verifier,
+  handed "Write a README.md documenting the CLI usage", replayed the
+  manifest, printed a valid envelope, exited 0 and wrote NO README — and
+  was credited a success, entrenching the script (the documented
+  `document-cli-from-source` class, with no gate at all). Now, after the
+  envelope parses, every file path named in the SUBTASK DESCRIPTION
+  (`extractResultFilePaths` — not the RESULT, that is the claim we
+  distrust) must exist, or the dispatch returns null and the validated
+  LLM loop takes over. Zero tokens (local `read_file`), and NO counter
+  moves: not a success, and NOT a `directFailure` either — the script is
+  not broken, it was matched to the wrong kind of subtask. Deliberately
+  strict (any missing path falls back): a false positive only pays for
+  the LLM loop, a false negative entrenches a phantom success. The gate
+  is inert when the subtask names no file, so verification subtasks keep
+  their exact prior call counts. Covered by
+  `tests/skill-direct-dispatch.test.ts`.
+- **A compiled verifier must PRESERVE each manifest entry's recorded
+  shape.** The CLI verifier rewrote every replayed entry with the
+  observed stdout/stderr — including entries deliberately written
+  WITHOUT them. REPRODUCED: on an HTTP harness entry
+  (`{"cmd":"node test-api.js","exitCode":0}`), run 1 exits 0 and the
+  manifest gains a port-bearing stdout; runs 2+ exit 1 forever, diffing a
+  fresh port against a stale one. Two such failures hit
+  `DIRECT_DISPATCH_DEMOTE_AFTER` and demote the project's ONLY compiled
+  script. An omitted field is a SIGNAL that the value is not comparable.
+  The rule now lives in three places that must stay in sync: the skill
+  body's rewrite step, `manifestWriterLines` (shell AND http) and
+  `manifestReaderLines`, so a recompile cannot regenerate the bug.
+  NOTE: the skill body was edited DIRECTLY on disk, not through
+  `SkillRegistry.save()` — save rebuilds `_meta.json` without
+  `compiledGeneration`, which would break `noteDirectFailure`'s
+  generation scoping and drop the 28 earned successes' provenance.
 - **A `kind: script` skill with no `_fallback.md` is UNDEMOTABLE.**
   `demoteToLlm` returns null when the file is absent, and
   `resetCounters` does not change `kind` — so a broken script authored

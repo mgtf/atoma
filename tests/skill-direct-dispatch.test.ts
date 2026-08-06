@@ -585,3 +585,142 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('deliverable gate — a script cannot report success for a file it never wrote', () => {
+  // MEASURED on the real compiled verifier: handed the subtask "Write a
+  // README.md documenting the CLI usage", it replayed the manifest,
+  // printed a valid envelope, exited 0 and wrote no README. This path
+  // returns BEFORE superviseLoop, so no validator sees it, onFailed is
+  // unreachable, and the phantom success entrenches the script — the
+  // documented `document-cli-from-source` class, with no gate at all.
+  const SEED2 = {
+    description: 'orchestrator',
+    systemPrompt: 'You are an L2.',
+    tools: [],
+    params: {},
+    createdBy: 'test',
+  };
+
+  function fsExecutor(present: Record<string, string>): {
+    executor: ToolExecutor;
+    calls: Array<{ name: string; args: Record<string, unknown> }>;
+  } {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const executor: ToolExecutor = {
+      async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
+        calls.push({ name, args });
+        if (name === 'write_file') return { ok: true, path: args['path'] };
+        if (name === 'run_shell') {
+          return { exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' };
+        }
+        if (name === 'read_file') {
+          const p = String(args['path']);
+          if (p in present) return { content: present[p] };
+          throw new Error(`ENOENT: ${p}`);
+        }
+        throw new Error(`unexpected tool: ${name}`);
+      },
+      has(name: string): boolean {
+        return ['write_file', 'run_shell', 'read_file'].includes(name);
+      },
+    };
+    return { executor, calls };
+  }
+
+  let dir2: string;
+  let skills2: SkillRegistry;
+  let reg2: AtomRegistry;
+  let envBefore2: string | undefined;
+
+  beforeEach(() => {
+    dir2 = mkdtempSync(join(tmpdir(), 'atoma-deliv-gate-'));
+    skills2 = new SkillRegistry(dir2);
+    reg2 = new AtomRegistry(openDb(':memory:'));
+    reg2.create(2, SEED2);
+    reg2.create(1, { ...SEED2, description: 'builder', systemPrompt: 'You are an L1.' });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg2.recordSuccess('Hydrogen');
+    skills2.save('Hydrogen', {
+      id: 'scaffold-config',
+      description: 'write a canonical config file',
+      whenToUse: 'when the subtask asks for the standard config scaffold',
+      kind: 'script',
+      language: 'node',
+      body: SCRIPT_BODY,
+    });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
+      skills2.recordSuccess('Hydrogen', 'scaffold-config');
+    }
+    envBefore2 = process.env['ATOMA_SKILL_DIRECT'];
+    delete process.env['ATOMA_SKILL_DIRECT'];
+  });
+  afterEach(() => {
+    rmSync(dir2, { recursive: true, force: true });
+    if (envBefore2 === undefined) delete process.env['ATOMA_SKILL_DIRECT'];
+    else process.env['ATOMA_SKILL_DIRECT'] = envBefore2;
+  });
+
+  function queuePrefilters(ctx: ReturnType<typeof makeCtx>): void {
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 's' })
+    );
+  }
+
+  it('falls back to the LLM loop when the named deliverable is absent, crediting nothing', async () => {
+    const { executor, calls } = fsExecutor({}); // README.md does NOT exist
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    queuePrefilters(ctx);
+    // The fallback LLM loop then runs normally.
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'wrote it properly' }));
+
+    await water.handleDirect(
+      { description: 'Write a README.md documenting the CLI usage and options.' },
+      ctx
+    );
+
+    // The script DID run (that is how we learn it produced nothing)…
+    expect(calls.some((c) => c.name === 'run_shell')).toBe(true);
+    // …but the deliverable was missing, so the LLM loop took over.
+    expect(ctx.llm.calls.length).toBeGreaterThan(2);
+    // The PHANTOM success never happened: no 'direct' event was emitted.
+    // (The skill may still earn a success afterwards — from the validated
+    // LLM loop it then drove, which is a real one.)
+    expect(events.some((e) => e.op === 'direct')).toBe(false);
+    // And NOT a directFailure either: the script is not broken, it was
+    // matched to the wrong kind of subtask.
+    expect(skills2.loadFor('Hydrogen')[0]!.directFailures ?? 0).toBe(0);
+  });
+
+  it('dispatches normally when the named file IS present', async () => {
+    const { executor } = fsExecutor({ 'config.json': '{}' });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const ctx = { ...base, tools: executor };
+    queuePrefilters(ctx);
+    // No further LLM replies queued: the dispatch must NOT fall through.
+
+    await water.handleDirect({ description: 'Refresh config.json from the template.' }, ctx);
+
+    expect(ctx.llm.calls).toHaveLength(2); // the two prefilters only
+    expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+  });
+
+  it('stays out of the way when the subtask names no file at all', async () => {
+    const { executor } = fsExecutor({});
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const ctx = { ...base, tools: executor };
+    queuePrefilters(ctx);
+
+    await water.handleDirect({ description: 'Re-run the recorded invocations and report.' }, ctx);
+
+    expect(ctx.llm.calls).toHaveLength(2);
+    expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+  });
+});
