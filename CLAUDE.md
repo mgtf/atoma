@@ -670,6 +670,22 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `L1Atom.setActiveSkill(id)` so the supervise-loop hooks know
   which skill drove the run.
 
+- **The adherence gate does NOT cover the mature path — accepted, not
+  overlooked.** Measured on a live two-pass burn-in: pass 2 ran 31 trust
+  fast-paths against 7 validator LLM calls, and ZERO carried the
+  adherence block. The reason is structural, not a defect: the two
+  mechanisms that make a mature store cheap — the trust fast-path and
+  deterministic dispatch — both bypass the LLM validator, and those are
+  exactly the runs where a skill is driving. Where the gate IS asked, the
+  model complies (measured: 4 blocks presented, 4 fields emitted, 100%).
+  DECISION (2026-08-06): accept the ceiling rather than sample it. The
+  residual risk — a skill credited for a run it did not drive, arming the
+  5/0 compile trigger — is already bounded downstream: `promoteToScript`
+  ZEROES the counters, so a compiled script must still earn 3 clean runs
+  through the validated loop before it dispatches unwatched. Paying for
+  an extra validator on trusted runs would tax the exact path the whole
+  cost discipline exists to make free. Revisit only if a compiled script
+  is ever traced back to a skill that never drove a run.
 - **Trust counters per skill (#C2a).** `onApproved` and `onFailed`
   hooks bump `_meta.json.successes` / `_meta.json.failures` on the
   matched skill in addition to the existing atom-type counters. A
