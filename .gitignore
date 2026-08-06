@@ -22,3 +22,4 @@ burnin/logs/
 /skills/
 .claude/settings.local.json
 atoma-ledger.jsonl
+atoma-prefilter-cache.json

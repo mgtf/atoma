@@ -9,6 +9,7 @@ import type {
 } from '../core/types.js';
 import { modelForTier } from '../core/models.js';
 import { parseWith } from './json.js';
+import { prefilterCacheGet, prefilterCacheKey, prefilterCachePut } from './prefilterCache.js';
 
 /**
  * A child type is "trusted" when it has accumulated enough clean successes to
@@ -434,6 +435,7 @@ export async function prefilterStrategy(args: {
   }
   const filteredNames = new Set(filtered.map((c) => c.name));
 
+  const catalogLines = filtered.map((c) => `  - ${c.name}: ${c.description}`);
   const userContent = [
     args.actor
       ? `You are atom "${args.actor.name}" (tier ${args.actor.tier}) running a prefilter catalog lookup.`
@@ -448,25 +450,55 @@ export async function prefilterStrategy(args: {
       : '',
     ``,
     `Catalog:`,
-    filtered.map((c) => `  - ${c.name}: ${c.description}`).join('\n'),
+    catalogLines.join('\n'),
   ]
     .filter((l) => typeof l === 'string')
     .join('\n');
 
+  const model = args.model ?? modelForTier(1);
+  const systemPrompt = args.systemPrompt ?? PREFILTER_SYSTEM_PROMPT;
+  // Decision cache (FrugalGPT completion-cache analog): temperature-0 +
+  // constant prompt makes the decision a pure function of these inputs, so
+  // a repeat pair is served from disk — zero tokens, and under claude-cli
+  // zero subprocess spawn. The key hashes every decision input (NOT the
+  // actor preamble, which is trace attribution); see prefilterCache.ts for
+  // the expiry/eviction bounds. Only PARSED outcomes are cached — the
+  // error-path escalate below never is.
+  const cacheKey = prefilterCacheKey({
+    systemPrompt,
+    model,
+    taskDescription: args.task.description,
+    ...(args.task.constraints ? { constraints: args.task.constraints } : {}),
+    excluded: args.exclude ? [...args.exclude] : [],
+    catalogLines,
+  });
+  const cached = prefilterCacheGet(cacheKey);
+  if (cached) {
+    args.ctx.logger.debug(
+      `[prefilter] decision served from cache (${cached.kind}${cached.kind === 'reuse' ? ` → ${cached.target}` : ''})`
+    );
+    return cached;
+  }
+
   try {
     const resp = await args.ctx.llm.complete({
-      model: args.model ?? modelForTier(1),
-      systemPrompt: args.systemPrompt ?? PREFILTER_SYSTEM_PROMPT,
+      model,
+      systemPrompt,
       userContent,
       params: PREFILTER_PARAMS,
       signal: args.ctx.signal,
     });
     const outcome = parseWith(prefilterResponseSchema, resp.text);
+    // The three parsed-outcome returns below all cache: each is a
+    // deterministic function of the model's parsed answer, so serving it
+    // again for identical inputs is exactly what the live call would do.
     if (outcome.kind === 'reuse' && !filteredNames.has(outcome.target)) {
-      return {
+      const rewritten: PrefilterOutcome = {
         kind: 'escalate',
         reasoning: `prefilter returned unknown or excluded target "${outcome.target}"`,
       };
+      prefilterCachePut(cacheKey, rewritten);
+      return rewritten;
     }
     // Force-match guard: if Haiku self-labels the fit as "low" (or omits
     // the field, normalised to low), treat it as an escalate. This
@@ -479,13 +511,18 @@ export async function prefilterStrategy(args: {
     // guard here catches the cases where it still tries to squeeze a
     // reuse through.
     if (outcome.kind === 'reuse' && outcome.confidence !== 'high') {
-      return {
+      const rewritten: PrefilterOutcome = {
         kind: 'escalate',
         reasoning: `prefilter low-confidence reuse of "${outcome.target}" (${outcome.reasoning}) — treated as escalate`,
       };
+      prefilterCachePut(cacheKey, rewritten);
+      return rewritten;
     }
+    prefilterCachePut(cacheKey, outcome);
     return outcome;
   } catch (err) {
+    // Error-path escalate: NEVER cached — an LLM hiccup must not become a
+    // week of "escalate" answers for this input.
     return {
       kind: 'escalate',
       reasoning: `prefilter failed: ${(err as Error).message}`,

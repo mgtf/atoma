@@ -123,6 +123,24 @@ npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-cu
   reuse pick if its REACHABLE L1 CHILDREN cover the task's needs."
   The block is formatted on a dedicated line (not a parenthetical
   tail) so Haiku parses it as structure rather than flavour text.
+- **Prefilter DECISION CACHE (`src/atoms/prefilterCache.ts`).** Prefilter
+  calls are temperature-0 with CONSTANT prompts, so the decision is a
+  pure function of its inputs — `prefilterStrategy` serves a repeat
+  (task × catalog × exclusions × model × prompt) pair from a file-backed
+  cache: zero tokens, and under claude-cli zero 2-5s subprocess spawns
+  (FrugalGPT's completion cache on atoma's cheapest slot). Correctness
+  lives in the KEY (djb2 over every decision input, NOT the actor
+  attribution preamble): registry evolution changes the catalog text and
+  misses naturally. Bounds: 7-day expiry (model pins are stable strings
+  but served versions shift behind them) + 500-entry oldest-first cap.
+  All three PARSED outcomes cache (including the low-confidence
+  escalate rewrite); the error-path escalate NEVER does — an LLM hiccup
+  must not become a week of escalates. Config: `ATOMA_PREFILTER_CACHE`
+  ('0' disables, other values override the path; default
+  `./atoma-prefilter-cache.json`, gitignored). vitest pins it to '0'
+  globally — mock tests assert exact call counts and a shared cache
+  would make test order change which calls fire; cache tests re-enable
+  per-test. Covered by `tests/prefilter-cache.test.ts`.
 - **Prefilter fast-path in `validatePlan`.** Plans synthesised by the
   prefilter carry an internal `viaPrefilter: true` flag (set in
   `L2.plan` / `L3.plan` on the skeletal-plan literal). Both
