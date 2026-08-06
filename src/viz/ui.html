@@ -206,9 +206,11 @@
     <!-- Runs view -->
     <div id="runsView">
       <div id="runSummary"></div>
-      <div id="nowBanner"></div>
       <div id="lanesWrap"></div>
       <div class="filters" id="filters"></div>
+      <!-- "En ce moment" sits DIRECTLY above the (newest-first) list so the
+           in-flight step and the steps just completed read as one flow. -->
+      <div id="nowBanner"></div>
       <div id="eventsList"></div>
     </div>
     <!-- Registry view -->
@@ -430,17 +432,24 @@ function scheduleLivePoll(runId) {
         const hadDetailBefore = prevSelectedId
           ? state.currentRun.events.some((e) => e.id === prevSelectedId)
           : false;
-        // The left pane rebuilds — keep the user's scroll position so new
-        // events appending at the bottom don't yank the view around.
+        // The left pane rebuilds. Events render NEWEST FIRST, so fresh
+        // cards INSERT AT THE TOP: at scrollTop 0 (following the live run)
+        // stay pinned there — the new step appears in place with no
+        // scrolling; anywhere deeper, compensate by the inserted height so
+        // the card being read doesn't drift under the cursor.
         const leftPane = $('leftPane');
         const leftScroll = leftPane ? leftPane.scrollTop : 0;
+        const heightBefore = leftPane ? leftPane.scrollHeight : 0;
         state.currentRun = fresh;
         state.atomsByName = buildAtomMap(fresh);
         renderSummary(fresh);
         renderLanes(fresh);
         renderFilters();
         renderEvents();
-        if (leftPane) leftPane.scrollTop = leftScroll;
+        if (leftPane) {
+          leftPane.scrollTop =
+            leftScroll > 0 ? leftScroll + (leftPane.scrollHeight - heightBefore) : 0;
+        }
         // Right pane: recorded events are IMMUTABLE, so if the selected
         // event was already rendered, leave the pane completely alone —
         // re-rendering it every poll tick reset the active tab (e.g. the
@@ -752,7 +761,13 @@ function renderEvents() {
     el.appendChild(h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'));
     return;
   }
-  for (const ev of filtered) el.appendChild(renderEventCard(ev));
+  // NEWEST FIRST. The list used to append chronologically, so every
+  // completed step landed at the BOTTOM and following a live run meant
+  // scrolling after each step. Reversed, the flow reads top-down as
+  // "now → just finished → older", and the viewport never moves: the
+  // in-flight banner sits directly above this list, immediately followed
+  // by the most recently completed step.
+  for (const ev of filtered.reverse()) el.appendChild(renderEventCard(ev));
 }
 
 /**
