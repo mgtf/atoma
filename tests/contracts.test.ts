@@ -139,3 +139,27 @@ describe('contracts — typed witnesses (P5)', () => {
     expect(result.evidence![0]).toMatchObject({ source: 'recorded-probe', cmd: 'node x.js' });
   });
 });
+
+describe('http manifest: a SEQUENCE, not a keyed set', () => {
+  // A real CRUD manifest recorded POST /recipes FOUR times (201, 400
+  // malformed, 400 missing-fields, plus a repeat). The writer used to say
+  // "merge by method+path", which would collapse those into one and
+  // silently delete every error case — the opposite of what a replayable
+  // record needs.
+  it('tells the writer to append in order and never merge on the route', () => {
+    const lines = manifestWriterLines('http').join(' ');
+    expect(lines).toMatch(/APPEND in\s+order/);
+    expect(lines).toMatch(/never merge by method\+path/);
+    expect(lines).not.toMatch(/merge by method\+path if/);
+  });
+
+  it('asks for an executable harness as a SHELL entry — the replayable half', () => {
+    // http entries carry no request payload, so a compiled script cannot
+    // replay mutations from them. A harness recorded as {cmd, exitCode} is
+    // replayable by the already-compiled shell path.
+    const lines = manifestWriterLines('http').join(' ');
+    expect(lines).toMatch(/EXECUTABLE probe harness/);
+    expect(lines).toMatch(/"cmd":"node <harness>","exitCode":0/);
+    expect(lines).toMatch(/omit "stdout"/);
+  });
+});

@@ -493,3 +493,38 @@ describe('draft parsing survives real distillation formatting (audit rank-3)', (
     expect(draft!.id).toBe('probe-http-routes');
   });
 });
+
+describe('distillation steers verification recipes at MACHINE input', () => {
+  // A verification recipe whose step 1 reads a free-form README cannot
+  // compile — the compiler refuses it as irreducible judgment, and it is
+  // right to. Measured twice: once on the CLI family (documented in
+  // CLAUDE.md) and once live on Helium/probe-crud-json-api-lifecycle,
+  // which reached 5 successes and was refused with exactly that reason.
+  it('names the manifest as the authority and prose as a mere fallback', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-distill-input-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
+    ctx.llm.enqueueText('not json — skip the distillation itself');
+    await water.handleDirect({ description: 'task' }, ctx);
+
+    const distill = ctx.llm.calls.find((c) => c.userContent.includes('SPLIT OUT MECHANICAL VERIFICATION'));
+    expect(distill).toBeDefined();
+    const p = distill!.userContent;
+    expect(p).toMatch(/INPUT PRECEDENCE/);
+    expect(p).toMatch(/\.atoma-probes\.json/);
+    expect(p).toMatch(/README is at best a named fallback, never the\s+authority/);
+    // The old blanket licence for prose sources must be gone.
+    expect(p).not.toMatch(/invocations documented in the README/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -935,6 +935,40 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   that pretends to validate a page is worse than no script. That refusal
   is the honest ceiling for the web family until (if ever) a
   browser-capable dispatch path exists.
+- **An HTTP manifest is a SEQUENCE; the CRUD family cannot compile from
+  it alone.** Two facts found by the first live HTTP promotion attempt.
+  (a) The writer used to say "merge by method+path" — a real CRUD
+  manifest recorded POST /recipes FOUR times (201, 400 malformed, 400
+  missing-fields, repeat), so merging on the route would collapse the
+  sequence and delete every error case. The http block now says APPEND
+  in order, never merge. (b) `httpEntrySchema` carries NO request
+  payload, so a compiled script cannot replay mutations — replaying only
+  the GETs against a freshly booted server fails by construction. The
+  writer therefore also asks for an EXECUTABLE probe harness recorded as
+  a SHELL entry (`{"cmd":"node <harness>","exitCode":0}`, no `stdout` —
+  the bound port varies), which the already-compiled shell path can
+  replay. Do NOT add a `requestBody` field speculatively: no accumulated
+  manifest carries one, so a script compiled against it would fail on
+  4/6 real archived workspaces and demote itself in two runs.
+- **Distillation steers verification recipes at MACHINE input.** The
+  learn prompt used to list "invocations documented in the README" among
+  the derivable sources; the HTTP verification skill duly learned "step
+  1: from the spec/README, list each route", reached 5✓, and was refused
+  at compile time as irreducible judgment — correctly. The prompt now
+  carries an INPUT PRECEDENCE clause: when the run wrote
+  `.atoma-probes.json`, step 1 MUST read it; prose is a named fallback,
+  never the authority. Pinned by `tests/skill-auto-creation.test.ts`.
+- **Not every skill is compilable, and matching breadth is the tell.**
+  `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
+  on purpose. Its four observed prefilter matches were: one genuine
+  verification, and THREE authoring subtasks ("write README.md", "write
+  probe.js" ×2). A compiled script would print a valid envelope and write
+  no file → validator rejects → `failures = 1` → and `tryPromoteSkill`'s
+  `if (skill.failures > 0) return;` blocks re-promotion permanently,
+  escapable only by the counter-zeroing `skills reset`. Compiling a skill
+  whose matches include file-deliverable tasks is a trap: the success
+  case is self-destructive. Check what a skill is actually MATCHED to
+  (not what its description claims) before wanting it compiled.
 - **The probe manifest is health-checked (`validateProbeManifest`).**
   The manifest is written by PROMPT (L1 evidence contracts) and read by
   COMPILED SCRIPTS with no validator between them — a malformed one
