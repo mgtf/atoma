@@ -235,7 +235,9 @@ describe('SkillRegistry', () => {
     });
     const text = readFileSync(join(dir, 'Hydrogen', 'foo', 'SKILL.md'), 'utf8');
     expect(text).toMatch(/^---/);
-    expect(text).toMatch(/id: foo/);
+    // Spec-canonical key since the Agent Skills alignment: the writer emits
+    // `name:` (parseFrontmatter still reads legacy `id:` stores).
+    expect(text).toMatch(/name: foo/);
     expect(text).toMatch(/kind: llm/);
     expect(text).toMatch(/do the foo/);
   });

@@ -1167,9 +1167,29 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   mirrors build-app (ATOMA_LLM + cross-vendor tier-pin routing). Pure
   helpers covered by `tests/curriculum.test.ts`.
 
+- **Agent Skills base-spec alignment + export.** The frontmatter's
+  canonical key is `name:` (agentskills.io base spec — atoma's id rules
+  already satisfy its constraints); `parseFrontmatter` reads `name` OR
+  legacy `id` (name wins when both appear), `renderFrontmatter` writes
+  `name`, so legacy stores load unchanged and migrate opportunistically
+  on the next body save. Runtime identity stays `Skill.id` — the rename
+  is an on-disk convention, not an API change. `when_to_use` stays a
+  top-level key at home (Claude Code understands it verbatim).
+  `skills export <l1> <id> [--out dir]` (`src/skills/exportSpec.ts`)
+  writes a PORTABLE SKILL.md carrying ONLY `name` + `description`
+  (when_to_use folded in, capped at the spec's 1024) — the sole shape
+  accepted everywhere including the claude.ai upload path, which
+  hard-errors on any key outside the base six. `kind: script` and event
+  skills are REFUSED at export rather than mistranslated (the spec's
+  executable convention is a scripts/ dir, not an envelope-contract
+  body; event skills are coupled to the mid-run matcher). Counters and
+  stamps never ship — trust is runtime-local. Covered by
+  `tests/skill-spec-compliance.test.ts`.
+
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
   `show <l1> <id>`, `stats [--l1] [--sim <0..1>]`, `drop <l1> <id>
-  [--force]`, `merge <l1> <keep> <absorb> [--force]`, `reset <l1> <id>`.
+  [--force]`, `merge <l1> <keep> <absorb> [--force]`,
+  `export <l1> <id> [--out <dir>]`, `reset <l1> <id>`.
   Works against any store via `--dir` or `ATOMA_SKILLS_DIR`. `reset`
   zeroes counters AND clears `promotionRefusedAt` — the sanctioned
   escape hatch for the two promotion dead-ends (`failures > 0` after a

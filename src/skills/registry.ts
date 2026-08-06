@@ -728,12 +728,17 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
     }
     fields[key] = val;
   }
-  const id = fields['id'];
+  // Agent Skills spec compliance: the canonical key is `name`
+  // (agentskills.io base spec — 1-64 chars, kebab, must match the parent
+  // directory, all of which atoma's id rules already guarantee). `id` is
+  // the legacy atoma key, still READ so pre-migration stores keep
+  // loading; the writer emits `name`. Runtime identity stays `Skill.id`.
+  const id = fields['name'] ?? fields['id'];
   const description = fields['description'];
   const whenToUse = fields['when_to_use'];
   const kindRaw = fields['kind'] ?? 'llm';
   const languageRaw = fields['language'];
-  if (!id) throw new Error('SKILL.md frontmatter missing required field: id');
+  if (!id) throw new Error('SKILL.md frontmatter missing required field: name (or legacy id)');
   if (!description) throw new Error('SKILL.md frontmatter missing required field: description');
   if (!whenToUse) throw new Error('SKILL.md frontmatter missing required field: when_to_use');
   if (kindRaw !== 'llm' && kindRaw !== 'script') {
@@ -772,11 +777,16 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
   };
 }
 
-/** Inverse of parseFrontmatter — emits a minimal canonical SKILL.md text. */
+/**
+ * Inverse of parseFrontmatter — emits a minimal canonical SKILL.md text.
+ * Writes the spec-canonical `name` key (parseFrontmatter reads both
+ * `name` and legacy `id`); on-disk stores migrate opportunistically on
+ * the next body save, and readers never care which era wrote the file.
+ */
 export function renderFrontmatter(frontmatter: SkillFrontmatter, body: string): string {
   const lines: string[] = [
     '---',
-    `id: ${frontmatter.id}`,
+    `name: ${frontmatter.id}`,
     `description: ${frontmatter.description}`,
     `when_to_use: ${frontmatter.whenToUse}`,
     `kind: ${frontmatter.kind}`,

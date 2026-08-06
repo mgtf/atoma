@@ -16,7 +16,10 @@
  * the refusal stamp — the skill re-earns promotion from scratch.
  */
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { SkillRegistry } from '../skills/registry.js';
+import { exportSkillToSpec } from '../skills/exportSpec.js';
 import { parseCliArgs } from './args.js';
 import { COMPILE_PROMPT_GENERATION } from '../atoms/L2Atom.js';
 import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
@@ -24,7 +27,7 @@ import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import type { Skill } from '../skills/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'help';
+  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'export' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -32,7 +35,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const { command, positional, flags } = parseCliArgs(argv);
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'help'].includes(command)) {
+  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'export', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -261,6 +264,29 @@ function cmdMerge(registry: SkillRegistry, l1: string, keepId: string, absorbId:
   console.log(`  absorbed skill deleted (its ${absorb.successes}✓/${absorb.failures}✗ die with its body)`);
 }
 
+function cmdExport(registry: SkillRegistry, l1: string, id: string, outDir: string): void {
+  const s = findSkill(registry, l1, id);
+  if (!s) {
+    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    process.exit(1);
+  }
+  const result = exportSkillToSpec(s);
+  if ('error' in result) {
+    console.error(`export refused: ${result.error}`);
+    process.exit(1);
+  }
+  const dir = join(outDir, s.id);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'SKILL.md');
+  writeFileSync(path, result.content, 'utf8');
+  console.log(`exported ${l1}/${id} → ${path}`);
+  console.log(
+    '  base-spec frontmatter (name + description only — portable to any Agent Skills runtime,'
+  );
+  console.log('  including the claude.ai upload path, which rejects non-spec keys).');
+  console.log(`  counters/refusal stamps stay home in _meta.json — trust is runtime-local.`);
+}
+
 function cmdReset(registry: SkillRegistry, l1: string, id: string): void {
   const before = findSkill(registry, l1, id);
   if (!before) {
@@ -300,6 +326,12 @@ function help(unknown?: string): void {
       '                              body + counters untouched; absorbed',
       '                              skill deleted. --force to absorb a',
       '                              skill with recorded successes.',
+      '  export <l1> <skill-id> [--out <dir>]',
+      '                            — write a portable Agent Skills spec',
+      '                              SKILL.md (name + description only) to',
+      '                              <dir>/<skill-id>/ (default',
+      '                              ./skills-export). llm task recipes',
+      '                              only; script/event skills refused.',
       '  reset <l1> <skill-id>     — zero counters AND clear the promotion-',
       '                              refusal stamp. Operator escape hatch for',
       '                              the failures>0 / promotionRefusedAt',
@@ -350,6 +382,14 @@ function main(): void {
         process.exit(2);
       }
       return cmdMerge(registry, l1, keepId, absorbId, 'force' in args.flags);
+    }
+    case 'export': {
+      const [l1, id] = args.positional;
+      if (!l1 || !id) {
+        console.error('usage: export <l1> <skill-id> [--out <dir>]');
+        process.exit(2);
+      }
+      return cmdExport(registry, l1, id, args.flags['out'] ?? './skills-export');
     }
     case 'reset': {
       const [l1, id] = args.positional;
