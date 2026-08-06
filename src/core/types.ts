@@ -334,7 +334,9 @@ export interface SkillEventInfo {
     | 'failure'
     | 'promote'
     | 'demote'
-    | 'direct';
+    | 'direct'
+    | 'quarantine'
+    | 'credit-withheld';
   l1Name: string;
   skillId: string;
   actorName: string;

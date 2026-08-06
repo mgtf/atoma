@@ -604,6 +604,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           ctx.logger.warn(
             `[${this.name}] skill "${skills.skill.id}" QUARANTINED — static scan flagged: ${scanFlags.join(', ')}; running WITHOUT it (review the body, then \`skills reset\` or \`skills drop\`)`
           );
+          ctx.recordSkill?.({
+            op: 'quarantine',
+            l1Name: l1Type.name,
+            skillId: skills.skill.id,
+            actorName: this.name,
+            actorTier: 2,
+            reasoning: `static scan: ${scanFlags.join(', ')} — ni dispatch ni injection, run sans skill`,
+          });
           skills = null;
         }
       }
@@ -1272,6 +1280,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" credit WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
           );
+          ctx.recordSkill?.({
+            op: 'credit-withheld',
+            l1Name: child.name,
+            skillId,
+            actorName: this.name,
+            actorTier: 2,
+            reasoning: 'succès NON crédité — le validateur a observé que le run n\'a pas suivi la recette',
+          });
         } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordSuccess(child.name, skillId);
           ctx.recordSkill?.({
@@ -1345,6 +1361,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" blame WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
           );
+          ctx.recordSkill?.({
+            op: 'credit-withheld',
+            l1Name: child.name,
+            skillId,
+            actorName: this.name,
+            actorTier: 2,
+            reasoning: 'échec NON imputé — le validateur a observé que le run n\'a pas suivi la recette',
+          });
         } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordFailure(child.name, skillId);
           ctx.recordSkill?.({

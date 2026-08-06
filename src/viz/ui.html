@@ -130,6 +130,9 @@
   .role.demote { color: #fca5a5; border-color: #4a1e1e; font-weight: 700; }
   .role.success { color: var(--ok); }
   .role.failure { color: var(--err); }
+  /* Safety / attribution decisions — a blocked or uncredited skill. */
+  .role.quarantine { color: var(--err); border-color: #4a1e1e; font-weight: 700; }
+  .role.credit-withheld { color: #fbbf24; border-color: #3a2f15; }
 
   .tier {
     display: inline-block; padding: 1px 6px; border-radius: 4px;
@@ -594,15 +597,32 @@ function renderSummary(run) {
     promote: skillEvents.filter((e) => e.op === 'promote').length,
     demote: skillEvents.filter((e) => e.op === 'demote').length,
     update: skillEvents.filter((e) => e.op === 'update').length,
+    recovery: skillEvents.filter(
+      (e) => e.op === 'inject' && /^event-trigger/.test(e.reasoning ?? '')
+    ).length,
   };
-  if (tally.learn || tally.promote || tally.demote || tally.update) {
+  if (tally.learn || tally.promote || tally.demote || tally.update || tally.recovery) {
     const bits = [];
     if (tally.learn) bits.push('📖 ' + tally.learn + ' skill(s) appris');
     if (tally.promote) bits.push('⚡ ' + tally.promote + ' compilation(s)');
     if (tally.demote) bits.push('🛡️ ' + tally.demote + ' démotion(s)');
     if (tally.update) bits.push('✏️ ' + tally.update + ' révision(s)');
+    if (tally.recovery) bits.push('⟳ ' + tally.recovery + ' récupération(s) mid-run');
     const card = statCard('Cycle de vie', bits.join(' · '));
     card.style.borderLeft = '3px solid #f0abfc';
+    grid.appendChild(card);
+  }
+  // Guard decisions — the two mechanisms whose whole job is to NOT do
+  // something. Their absence from the timeline used to make a blocked
+  // skill indistinguishable from a skill that never matched.
+  const quarantined = skillEvents.filter((e) => e.op === 'quarantine').length;
+  const withheld = skillEvents.filter((e) => e.op === 'credit-withheld').length;
+  if (quarantined || withheld) {
+    const bits = [];
+    if (quarantined) bits.push('⛔ ' + quarantined + ' skill(s) en quarantaine');
+    if (withheld) bits.push('⊘ ' + withheld + ' crédit(s) retenu(s)');
+    const card = statCard('Garde-fous', bits.join(' · '));
+    card.style.borderLeft = '3px solid #fbbf24';
     grid.appendChild(card);
   }
   const models = (t.perModel ?? []).map((m) =>
@@ -919,6 +939,87 @@ function animateStepEntry(node) {
   anim.addEventListener('cancel', restore, { once: true });
 }
 
+/**
+ * Best-effort JSON extraction from a recorded LLM response — the same
+ * tolerance the runtime parsers apply (fenced block, prose wrapper),
+ * minus the repair machinery: a card that cannot read the payload just
+ * shows no chip, which is the correct degradation for decoration.
+ */
+function peekJson(text) {
+  if (typeof text !== 'string' || text.length === 0) return null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidates = [];
+  if (fenced && fenced[1]) candidates.push(fenced[1]);
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first >= 0 && last > first) candidates.push(text.slice(first, last + 1));
+  for (const c of candidates) {
+    try {
+      const v = JSON.parse(c);
+      if (v && typeof v === 'object') return v;
+    } catch {}
+  }
+  return null;
+}
+
+function outcomeChip(text, color, title) {
+  return h('span', {
+    class: 'meta',
+    style: 'font-weight:600; color:' + color + ';',
+    ...(title ? { title } : {}),
+  }, text);
+}
+
+/**
+ * Decision/verdict chips derived from an LLM event's recorded response.
+ * Purely presentational — no chip is ever the source of truth, the
+ * detail pane still shows the raw payload.
+ */
+function outcomeChips(ev) {
+  const chips = [];
+  const payload = peekJson(ev.response);
+  if (!payload) return chips;
+
+  if (ev.role === 'prefilter') {
+    // Routing decision: reuse <target> (the happy path that skips the
+    // expensive plan call) vs escalate. The confidence rides along —
+    // a "low" reuse is rewritten to escalate upstream, so seeing the
+    // label explains why an apparently-matching catalog still escalated.
+    if (payload.kind === 'reuse' && typeof payload.target === 'string') {
+      chips.push(outcomeChip('→ réutilise ' + payload.target, 'var(--ok)', payload.reasoning || ''));
+      if (payload.confidence && payload.confidence !== 'high') {
+        chips.push(outcomeChip('(confiance ' + payload.confidence + ')', '#fbbf24'));
+      }
+    } else if (payload.kind === 'escalate') {
+      chips.push(outcomeChip('↑ escalade', '#fbbf24', payload.reasoning || ''));
+    }
+    return chips;
+  }
+
+  if (ev.role === 'validate-plan' || ev.role === 'validate-result') {
+    if (payload.approved === true) {
+      chips.push(outcomeChip('✓ approuvé', 'var(--ok)', payload.reasoning || ''));
+    } else if (payload.approved === false) {
+      chips.push(outcomeChip('✕ rejeté', 'var(--err)', payload.reasoning || ''));
+      if (typeof payload.scope === 'string') {
+        chips.push(outcomeChip('scope ' + payload.scope, 'var(--muted)'));
+      }
+    }
+    // ADHERENCE (usage-conditioned skill credit): the validator reports
+    // whether the run actually followed the injected recipe. `false` is
+    // what withholds the skill's counter bump, so it belongs on the card
+    // — otherwise the only visible trace is a counter that didn't move.
+    if (payload.activeSkillFollowed === false) {
+      chips.push(outcomeChip('recette ignorée → crédit retenu', '#fbbf24',
+        'Le validateur a observé que le run n\'a pas suivi la skill injectée : ses compteurs ne bougent pas.'));
+    } else if (payload.activeSkillFollowed === true) {
+      chips.push(outcomeChip('recette suivie', 'var(--muted)',
+        'La skill injectée a bien piloté le run — ses compteurs sont crédités.'));
+    }
+  }
+  return chips;
+}
+
 function runMarkerCard(accentColor, cells) {
   return h('div', { class: 'run-marker', style: 'border-left: 3px solid ' + accentColor + ';' }, [
     h('div', { class: 'row' }, cells),
@@ -1064,6 +1165,11 @@ function renderEventCard(ev) {
       row.push(atomRef(ev.child));
     }
     if (ev.subject) row.push(h('span', { class: 'meta' }, '[' + ev.subject + ']'));
+    // OUTCOME AT A GLANCE. A prefilter card used to show model + tokens
+    // but not the DECISION, and a validator card not the VERDICT — the
+    // two things you actually scan a timeline for. Both are read from the
+    // recorded response, so every already-archived run gains them too.
+    for (const chip of outcomeChips(ev)) row.push(chip);
     if (ev.branchId) row.push(branchChip(ev.branchId));
     row.push(h('span', { class: 'spacer', style: 'flex:1;' }));
     row.push(h('span', { class: 'model' }, shortModel(ev.model)));
@@ -1130,9 +1236,24 @@ function renderEventCard(ev) {
     // visible one-liner — the most important event in the system was the
     // least visible ("je ne vois pas le run à $0 dans la viz").
     const isDirect = ev.op === 'direct';
+    // An EVENT-DRIVEN recovery injection is a different mechanism from a
+    // task-recipe injection: matched mid-run on a failure signature by the
+    // zero-LLM matcher, not by the task prefilter. Same op, so the
+    // provenance is read from the reasoning the injector wrote.
+    const isEventRecovery = ev.op === 'inject' && /^event-trigger/.test(ev.reasoning ?? '');
+    const isBlocked = ev.op === 'quarantine' || ev.op === 'credit-withheld';
+    const label = isDirect
+      ? '⚡ direct'
+      : isEventRecovery
+        ? '⟳ recovery'
+        : ev.op === 'quarantine'
+          ? '⛔ quarantaine'
+          : ev.op === 'credit-withheld'
+            ? '⊘ crédit retenu'
+            : ev.op;
     const srow = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),
-      h('span', { class: 'role ' + ev.op }, isDirect ? '⚡ direct' : ev.op),
+      h('span', { class: 'role ' + ev.op }, label),
     ];
     if (ev.actor) srow.push(atomRef(ev.actor));
     srow.push(h('span', { class: 'arrow' }, '·'));
@@ -1142,14 +1263,36 @@ function renderEventCard(ev) {
         style: 'color: #ffd700; font-weight: 700;',
       }, '0 appel LLM · $0.00'));
     }
+    if (isEventRecovery) {
+      // Surface the containment score the mechanical matcher computed —
+      // it is what decided this injection, and a low-ish one on a
+      // questionable match is the first thing to look at.
+      const m = (ev.reasoning ?? '').match(/^event-trigger \(([\d.]+)\)/);
+      srow.push(h('span', { class: 'meta', style: 'color:#7dd3fc; font-weight:600;' },
+        'déclenchée mid-run' + (m ? ' · score ' + m[1] : '')));
+    }
     if (ev.branchId) srow.push(branchChip(ev.branchId));
+    const accent = isDirect
+      ? 'border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.06);'
+      : ev.op === 'quarantine'
+        ? 'border-left: 3px solid var(--err); background: rgba(248, 113, 113, 0.06);'
+        : ev.op === 'credit-withheld'
+          ? 'border-left: 3px solid #fbbf24;'
+          : isEventRecovery
+            ? 'border-left: 3px solid #7dd3fc;'
+            : '';
     return h('div', {
       class: 'event' + selected,
-      style: isDirect ? 'border-left: 3px solid #ffd700; background: rgba(255, 215, 0, 0.06);' : '',
+      style: accent,
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [
       h('div', { class: 'row' }, srow),
-      ev.reasoning ? h('div', { class: 'meta', style: 'margin-top:4px;' }, ev.reasoning) : null,
+      ev.reasoning
+        ? h('div', {
+            class: 'meta',
+            style: 'margin-top:4px;' + (isBlocked ? ' color: #fbbf24;' : ''),
+          }, ev.reasoning)
+        : null,
     ]);
   }
   // registry

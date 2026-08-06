@@ -164,6 +164,17 @@ export interface VizTrustEvent {
  *                DETERMINISTIC dispatch fast-path (write_file +
  *                run_shell, zero LLM calls — no L1 plan/execute, no
  *                validators). Carries the run outcome as `reasoning`.
+ *   - 'quarantine'      The static scan flagged a matched `kind: script`
+ *                body, so it was neither dispatched NOR injected and the
+ *                run proceeded skill-less. `reasoning` carries the flags.
+ *                Without this event the block is invisible: the run
+ *                simply looks like nothing matched.
+ *   - 'credit-withheld' The adherence gate refused to move this skill's
+ *                counters because the validator observed the run did not
+ *                follow the recipe. `reasoning` says which direction was
+ *                withheld (credit on success, blame on failure) — the
+ *                only visible trace otherwise is a counter that did not
+ *                move, which reads identically to "nothing happened".
  */
 export interface VizSkillEvent {
   id: string;
@@ -178,7 +189,9 @@ export interface VizSkillEvent {
     | 'failure'
     | 'promote'
     | 'demote'
-    | 'direct';
+    | 'direct'
+    | 'quarantine'
+    | 'credit-withheld';
   /** L1 atom-type name the skill is namespaced under. */
   l1Name: string;
   /** Stable kebab-case skill id within that namespace. */

@@ -1652,6 +1652,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   TraceRecorder. `endRun()`'s synchronous `persist()` happens BEFORE
   we clear the timer specifically so the final state wins the race
   over any trailing-edge flush.
+- **Viz cards surface the DECISION, not just the call.** Prefilter and
+  validator cards read the recorded `response` client-side and render the
+  outcome inline — `→ réutilise <target>` / `↑ escalade` (+ a confidence
+  chip when not high), `✓ approuvé` / `✕ rejeté` + scope, and the
+  `activeSkillFollowed` adherence signal (`recette suivie` /
+  `recette ignorée → crédit retenu`). Purely presentational and derived
+  from data already persisted, so EVERY archived run gains them
+  retroactively; `peekJson` degrades to no chip rather than guessing.
+  Two guard mechanisms also emit their own skill events now
+  (`op: 'quarantine'`, `op: 'credit-withheld'`) because their whole job
+  is to NOT act: a statically-scanned script that was blocked, or a
+  counter deliberately not bumped, used to be indistinguishable from
+  "nothing matched" / "nothing happened". Event-driven recovery
+  injections render as `⟳ recovery` with the matcher's containment
+  score (same `op: 'inject'`, provenance read from the reasoning). The
+  run summary gains a `Garde-fous` card tallying both guards, and the
+  lifecycle digest counts mid-run recoveries.
 - Live viz is POLLING, not SSE or WebSocket — but the poll is a DELTA and
   the render is INCREMENTAL, which is where the cost actually was. The UI
   polls `/api/runs/<id>?after=<n>` every 1s while `endedAt` is undefined
