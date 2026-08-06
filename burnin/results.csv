@@ -72,3 +72,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-06T09:25:30.099Z,http-kv,http,delivered,0.2441,207,9,1,0,8,0,0,0,0,0,0,0,2026-08-06T09-25-30-767-e419a764.json
 2026-08-06T09:28:59.780Z,http-healthz,http,delivered,0.131,139,9,1,0,8,0,0,0,0,0,0,0,2026-08-06T09-29-00-452-5ebd3aa0.json
 2026-08-06T09:57:14.850Z,probe-recipe-box-api,http,delivered,0.5421,389,16,1,2,13,0,1,1,0,0,0,0,2026-08-06T09-57-15-467-da79d4ee.json
+2026-08-06T10:23:35.411Z,probe-recipe-box-api,http,delivered,0.3543,355,15,1,2,12,0,0,0,0,2,0,0,2026-08-06T10-23-36-067-7fad4be2.json

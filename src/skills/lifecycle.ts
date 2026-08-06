@@ -25,7 +25,7 @@ import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
  * `network:fetch` on a script whose every request went to the loopback
  * server it had just booted).
  */
-const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
+export const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
 
 /**
  * SKILL LIFECYCLE ENGINE — extracted from L2Atom (structural slice 2).
