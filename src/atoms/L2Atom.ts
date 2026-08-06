@@ -592,6 +592,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx.logger.debug(
           `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
         );
+        // Match-history counter for `skills stats` — recorded at match time
+        // (before the outcome, on BOTH dispatch paths) so the gap against
+        // the trust counters surfaces free-riding matches.
+        this.skillRegistry.markMatched(l1Type.name, skills.skill.id);
         ctx.recordSkill?.({
           op: 'match',
           l1Name: l1Type.name,

@@ -20,10 +20,11 @@ import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
 import { COMPILE_PROMPT_GENERATION } from '../atoms/L2Atom.js';
 import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
+import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import type { Skill } from '../skills/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'reset' | 'help';
+  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -31,7 +32,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const { command, positional, flags } = parseCliArgs(argv);
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'reset', 'help'].includes(command)) {
+  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -104,6 +105,14 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   console.log(`  description : ${s.description}`);
   console.log(`  when to use : ${s.whenToUse}`);
   console.log(`  counters    : ${s.successes} successes / ${s.failures} failures`);
+  if (s.matches) {
+    console.log(
+      `  matched     : ${s.matches}× (last ${s.lastMatchedAt?.slice(0, 19) ?? '?'})` +
+        (s.matches > s.successes + s.failures
+          ? ` — ${s.matches - s.successes - s.failures} free ride(s): matched but did not drive the run`
+          : '')
+    );
+  }
   console.log(`  updated at  : ${s.updatedAt}`);
   if (s.promotionRefusedAt) {
     console.log(`  ⚠ promotion refused at ${s.promotionRefusedAt} — \`reset\` clears the stamp`);
@@ -150,6 +159,108 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   console.log(s.body);
 }
 
+/**
+ * Default matching-surface overlap at which a pair of same-L1 skills is
+ * reported as a merge candidate. AWM's healthy libraries sit under ~0.2
+ * pairwise overlap; 0.5 flags only the clearly redundant.
+ */
+const DEFAULT_SIM_THRESHOLD = 0.5;
+
+function cmdStats(registry: SkillRegistry, l1Filter: string | undefined, simFlag: string | undefined): void {
+  const namespaces = l1Filter ? [l1Filter] : registry.listNamespaces();
+  const byL1 = new Map(namespaces.map((ns) => [ns, registry.loadFor(ns)]));
+  const rows = computeStatsRows(byL1, {
+    trust: trustThreshold(),
+    promote: promoteThreshold(),
+    currentGeneration: COMPILE_PROMPT_GENERATION,
+  });
+  if (rows.length === 0) {
+    console.log(
+      l1Filter
+        ? `(no skills for L1 "${l1Filter}" under ${registry.rootDir})`
+        : `(no skills under ${registry.rootDir})`
+    );
+    return;
+  }
+  console.log(
+    renderTable(
+      ['l1', 'id', 'kind', 'match', 'succ', 'fail', 'rides', 'status'],
+      rows.map((r) => [
+        r.l1,
+        r.id,
+        r.kind,
+        String(r.matches),
+        String(r.successes),
+        String(r.failures),
+        String(r.freeRides),
+        r.status,
+      ])
+    )
+  );
+  console.log('');
+  console.log(
+    'match = prefilter picks · rides = matched but did not drive the run (credit withheld) ·'
+  );
+  console.log('never-matched / matched-never-drove = drop candidates (`skills drop`)');
+
+  const parsed = Number(simFlag);
+  const threshold = Number.isFinite(parsed) && parsed > 0 && parsed <= 1 ? parsed : DEFAULT_SIM_THRESHOLD;
+  const pairs = similarityPairs(byL1, threshold);
+  if (pairs.length > 0) {
+    console.log('');
+    console.log(`== merge candidates (matching-surface overlap ≥ ${threshold}) ==`);
+    for (const p of pairs) {
+      console.log(
+        `  ${p.l1}: "${p.a}" ↔ "${p.b}"  (${p.score.toFixed(2)})  → skills merge ${p.l1} <keep-id> <absorb-id>`
+      );
+    }
+  }
+}
+
+function cmdDrop(registry: SkillRegistry, l1: string, id: string, force: boolean): void {
+  const s = findSkill(registry, l1, id);
+  if (!s) {
+    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    process.exit(1);
+  }
+  if (s.successes > 0 && !force) {
+    console.error(
+      `refusing to drop ${l1}/${id}: it has ${s.successes} recorded success(es) — proven knowledge.\n` +
+        `Pass --force to drop it anyway.`
+    );
+    process.exit(1);
+  }
+  registry.drop(l1, id);
+  console.log(`dropped ${l1}/${id} (was ${s.kind}, ${s.successes}✓/${s.failures}✗, ${s.matches ?? 0} matches)`);
+}
+
+function cmdMerge(registry: SkillRegistry, l1: string, keepId: string, absorbId: string, force: boolean): void {
+  const keep = findSkill(registry, l1, keepId);
+  const absorb = findSkill(registry, l1, absorbId);
+  if (!keep || !absorb) {
+    console.error(
+      `merge needs two existing skills; missing: ${[!keep && keepId, !absorb && absorbId].filter(Boolean).join(', ')} (L1 "${l1}", ${registry.rootDir})`
+    );
+    process.exit(1);
+  }
+  if (absorb.successes > 0 && !force) {
+    console.error(
+      `refusing to absorb ${l1}/${absorbId}: its body has ${absorb.successes} recorded success(es) and would be DELETED.\n` +
+        `If that body is the one worth keeping, merge in the other direction; otherwise pass --force.`
+    );
+    process.exit(1);
+  }
+  const merged = registry.merge(l1, keepId, absorbId);
+  if (!merged) {
+    console.error(`merge failed (identical ids, or a skill vanished mid-operation)`);
+    process.exit(1);
+  }
+  console.log(`merged ${l1}/${absorbId} → ${l1}/${keepId}:`);
+  console.log(`  keeper body/counters untouched (${merged.successes}✓/${merged.failures}✗ preserved)`);
+  console.log(`  when_to_use now: ${merged.whenToUse}`);
+  console.log(`  absorbed skill deleted (its ${absorb.successes}✓/${absorb.failures}✗ die with its body)`);
+}
+
 function cmdReset(registry: SkillRegistry, l1: string, id: string): void {
   const before = findSkill(registry, l1, id);
   if (!before) {
@@ -175,6 +286,20 @@ function help(unknown?: string): void {
       '',
       '  list [--l1 <name>]        — list skills (all namespaces, or one L1)',
       '  show <l1> <skill-id>      — full body + counters + promotion state',
+      '  stats [--l1 <name>] [--sim <0..1>]',
+      '                            — utility view: matches vs driven runs,',
+      '                              free-ride gap, lifecycle status, and',
+      '                              merge candidates by matching-surface',
+      '                              overlap (default threshold 0.5)',
+      '  drop <l1> <skill-id> [--force]',
+      '                            — delete a skill. Refused when it has',
+      '                              recorded successes unless --force.',
+      '  merge <l1> <keep-id> <absorb-id> [--force]',
+      '                            — keeper absorbs the other skill\'s',
+      '                              when_to_use (routing surface); keeper',
+      '                              body + counters untouched; absorbed',
+      '                              skill deleted. --force to absorb a',
+      '                              skill with recorded successes.',
       '  reset <l1> <skill-id>     — zero counters AND clear the promotion-',
       '                              refusal stamp. Operator escape hatch for',
       '                              the failures>0 / promotionRefusedAt',
@@ -200,6 +325,8 @@ function main(): void {
   switch (args.command) {
     case 'list':
       return cmdList(registry, args.flags['l1']);
+    case 'stats':
+      return cmdStats(registry, args.flags['l1'], args.flags['sim']);
     case 'show': {
       const [l1, id] = args.positional;
       if (!l1 || !id) {
@@ -207,6 +334,22 @@ function main(): void {
         process.exit(2);
       }
       return cmdShow(registry, l1, id);
+    }
+    case 'drop': {
+      const [l1, id] = args.positional;
+      if (!l1 || !id) {
+        console.error('usage: drop <l1> <skill-id> [--force]');
+        process.exit(2);
+      }
+      return cmdDrop(registry, l1, id, 'force' in args.flags);
+    }
+    case 'merge': {
+      const [l1, keepId, absorbId] = args.positional;
+      if (!l1 || !keepId || !absorbId) {
+        console.error('usage: merge <l1> <keep-id> <absorb-id> [--force]');
+        process.exit(2);
+      }
+      return cmdMerge(registry, l1, keepId, absorbId, 'force' in args.flags);
     }
     case 'reset': {
       const [l1, id] = args.positional;

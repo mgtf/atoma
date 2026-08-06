@@ -214,6 +214,9 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     const skill = skills.loadFor('Hydrogen')[0]!;
     expect(skill.successes).toBe(0);
     expect(skill.failures).toBe(0);
+    // The match itself IS recorded (markMatched fires at match time), so
+    // the withheld credit shows up as a free-ride gap in `skills stats`.
+    expect(skill.matches).toBe(1);
     // The CHILD did succeed, whatever it was following — type credit is
     // orthogonal to skill credit and must survive the withholding.
     expect(reg.getByName('Hydrogen')!.successes).toBe(1);

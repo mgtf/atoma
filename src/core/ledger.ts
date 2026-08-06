@@ -35,7 +35,13 @@ export type LedgerEventKind =
   | 'promotion-refused'
   | 'direct-failure'
   | 'direct-failures-cleared'
-  | 'counters-reset';
+  | 'counters-reset'
+  // Catalog-hygiene verbs (CLI `skills drop` / `skills merge`). The entity
+  // disappears from the store afterwards; `ledger check` iterates the STORE,
+  // so a dropped entity's stale projection is never compared — no special
+  // handling needed in projectCounters.
+  | 'skill-drop'
+  | 'skill-merge';
 
 export interface LedgerEvent {
   readonly at: string;

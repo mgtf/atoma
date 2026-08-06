@@ -49,6 +49,13 @@ npm run burnin -- tasks.json --family cli --out custom.csv --timeout 900000
 npm run skills -- list --l1 Helium
 npm run skills -- show Helium scaffold-node-ssr-sqlite-api
 npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + clear refusal
+npm run skills -- stats [--l1 Helium] [--sim 0.5]  # utility view: matches vs driven,
+                                      # free-ride gap, lifecycle status, merge candidates
+npm run skills -- drop Helium <id> [--force]       # delete a skill (--force if successes>0)
+npm run skills -- merge Helium <keep> <absorb>     # keeper absorbs when_to_use; absorbed deleted
+
+npm run curriculum -- --dry-run       # show lifecycle targets, no LLM call
+npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-curriculum.json
 ```
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
@@ -1024,12 +1031,62 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   part — "irreducible LLM reasoning" means the skill can never compile,
   a workflow-shape complaint might be fixed by a body revision.
 
+- **Match history + `skills stats` (utility view).** `SkillRegistry.
+  markMatched` bumps `_meta.json.matches` (+`lastMatchedAt`) every time
+  the skill prefilter picks a skill — at MATCH time, before the outcome,
+  on both dispatch paths, no ledger event (a match is not a trust
+  mutation). `skills stats` (helpers in `src/skills/stats.ts`, pure)
+  renders per-skill: matches vs driven runs (successes+failures), the
+  FREE-RIDE gap `matches − driven` (runs the adherence gate refused to
+  credit), a one-cell lifecycle status, and same-L1 MERGE CANDIDATES by
+  token-Jaccard overlap of description+when_to_use (`--sim`, default
+  0.5). `matches` survives bumps and `save()` (it is compared against
+  counters that survive too) but is zeroed by `resetCounters` and
+  `promoteToScript` so the gap arithmetic stays within one trust era.
+  AWM's measured steady state (~7 skills/scope, overlap < 0.2) is the
+  calibration reference. Covered by `tests/skill-stats.test.ts`.
+- **Catalog-hygiene verbs: `skills drop` / `skills merge`.** Both are
+  OPERATOR verbs (CLI-only, never autonomous) with ledger events
+  (`skill-drop`, `skill-merge`; `ledger check` iterates the STORE so a
+  deleted entity's stale projection is never compared). `drop` deletes
+  the folder — refused when `successes > 0` unless `--force` (proven
+  knowledge). `merge <keep> <absorb>` is deliberately MECHANICAL (no
+  LLM): the keeper's `when_to_use` absorbs the other skill's (routing
+  surface widens), keeper body/description/counters/stamps are untouched
+  — trust is body-bound, so an unchanged body keeps its earned trust,
+  and the merge does NOT route through `save()` (which would clear the
+  refusal stamp on a body-change premise). The absorbed skill is deleted
+  and its counters die with its body — summing counters earned by a
+  different body is the corruption "patch resets trust" exists to
+  prevent. Absorbing a skill with successes needs `--force` (or merge
+  the other way).
+- **Curriculum generator (`npm run curriculum`, `src/cli/curriculum.ts`).**
+  Voyager's curriculum mapped onto the lifecycle counters: SELECTION is
+  pure code (`selectCurriculumTargets`), GENERATION is one Sonnet-tier
+  call. Four target categories, priority-ordered: script-maturation
+  (kind:script below trust — each clean validated run nears zero-LLM
+  dispatch), stale-refusal-retry (refusal stamp from an older compiler
+  generation — one success re-attempts), promotion-push (llm skills at
+  1..promote−1 clean successes — armed runs), failed-family-retry
+  (burn-in CSV families with failed rows — Voyager re-proposes
+  failures). Skills with `failures > 0` are SKIPPED (only `skills
+  reset` moves them) as are refused-current-gen ones (more successes
+  can't help). The prompt demands NOVEL small goals matching each
+  target's workflow shape — replaying the original task would inflate
+  trust on memorised specifics, the generalisation rule's evil twin —
+  and forbids naming skills/framework in goals. Output:
+  `burnin/tasks-curriculum.json` (then `npm run burnin -- <file>`);
+  `--dry-run` prints targets with zero LLM calls. Provider selection
+  mirrors build-app (ATOMA_LLM + cross-vendor tier-pin routing). Pure
+  helpers covered by `tests/curriculum.test.ts`.
+
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
-  `show <l1> <id>`, `reset <l1> <id>`. Works against any store via
-  `--dir` or `ATOMA_SKILLS_DIR`. `reset` zeroes counters AND clears
-  `promotionRefusedAt` — the sanctioned escape hatch for the two
-  promotion dead-ends (`failures > 0` after a demotion; a compile
-  refusal on an unchanged body).
+  `show <l1> <id>`, `stats [--l1] [--sim <0..1>]`, `drop <l1> <id>
+  [--force]`, `merge <l1> <keep> <absorb> [--force]`, `reset <l1> <id>`.
+  Works against any store via `--dir` or `ATOMA_SKILLS_DIR`. `reset`
+  zeroes counters AND clears `promotionRefusedAt` — the sanctioned
+  escape hatch for the two promotion dead-ends (`failures > 0` after a
+  demotion; a compile refusal on an unchanged body).
 
 ## LLM interaction conventions
 

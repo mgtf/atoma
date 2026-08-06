@@ -115,6 +115,10 @@ export interface Skill {
   readonly provenance?: SkillProvenance;
   /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
   readonly directFailures?: number;
+  /** Mirrors `SkillMeta.matches`; see there for semantics. */
+  readonly matches?: number;
+  /** Mirrors `SkillMeta.lastMatchedAt`; see there for semantics. */
+  readonly lastMatchedAt?: string;
 }
 
 /**
@@ -192,4 +196,21 @@ export interface SkillMeta {
    * never hits the onFailed demotion path) but fails on every match.
    */
   readonly directFailures?: number;
+  /**
+   * Cumulative skill-prefilter matches — bumped by `markMatched` every
+   * time the prefilter picks this skill for a subtask, BEFORE the run
+   * outcome is known and regardless of dispatch path (injection or
+   * deterministic). The utility signal `skills stats` is built on:
+   * `matches - (successes + failures)` is the FREE-RIDE gap (runs the
+   * skill was matched into but did not demonstrably drive — the
+   * usage-conditioned credit gate withheld the bump), and
+   * `matches === 0` on an old skill means the prefilter never picks it
+   * (utility zero — a drop candidate). Zeroed with the counters on
+   * `resetCounters` and `promoteToScript` so the gap arithmetic stays
+   * coherent within one trust era; preserved across `save()` like the
+   * counters it is compared against.
+   */
+  readonly matches?: number;
+  /** ISO timestamp of the most recent prefilter match. */
+  readonly lastMatchedAt?: string;
 }

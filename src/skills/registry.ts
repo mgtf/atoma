@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { appendLedger } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
@@ -102,6 +102,8 @@ export class SkillRegistry {
           ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
           ...(meta.provenance ? { provenance: meta.provenance } : {}),
           ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
+          ...(meta.matches ? { matches: meta.matches } : {}),
+          ...(meta.lastMatchedAt ? { lastMatchedAt: meta.lastMatchedAt } : {}),
         });
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -168,6 +170,11 @@ export class SkillRegistry {
       failures: existing.failures,
       updatedAt: nowIso(),
       ...(nextProvenance ? { provenance: nextProvenance } : {}),
+      // Match history survives a body rewrite for the same reason the
+      // counters do: the stats gap (matches vs driven) compares against
+      // counters that save() preserves.
+      ...(existing.matches ? { matches: existing.matches } : {}),
+      ...(existing.lastMatchedAt ? { lastMatchedAt: existing.lastMatchedAt } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
     return {
@@ -271,6 +278,94 @@ export class SkillRegistry {
       ...rest
     } = cur;
     writeFileSync(metaPath, JSON.stringify({ ...rest, updatedAt: nowIso() }, null, 2), 'utf8');
+  }
+
+  /**
+   * Record a skill-prefilter match — see `SkillMeta.matches`. Called at
+   * match time (before the run outcome is known) so the stats gap between
+   * matches and driven runs surfaces free-riding and never-picked skills.
+   * NOT a ledger event: a match is neither a trust nor a lifecycle
+   * mutation, and it fires on every skill-driven subtask. No-op for a
+   * missing skill.
+   */
+  markMatched(l1Name: string, skillId: string): void {
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return;
+    const metaPath = join(dir, '_meta.json');
+    const cur = existsSync(metaPath)
+      ? readMeta(metaPath)
+      : { successes: 0, failures: 0, updatedAt: nowIso() };
+    const next: SkillMeta = {
+      ...cur,
+      matches: (cur.matches ?? 0) + 1,
+      lastMatchedAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+  }
+
+  /**
+   * Delete a skill folder outright (CLI `skills drop`). The operator's
+   * catalog-hygiene verb: retire never-matched debris and free-riding
+   * recipes that `skills stats` surfaced. Destructive — the CLI guards
+   * proven skills (successes > 0) behind --force; the registry method
+   * itself only refuses a missing skill (returns false).
+   */
+  drop(l1Name: string, skillId: string): boolean {
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return false;
+    appendLedger({ kind: 'skill-drop', entity: `${l1Name}/${skillId}` });
+    rmSync(dir, { recursive: true, force: true });
+    return true;
+  }
+
+  /**
+   * Consolidate two skills of one L1 (CLI `skills merge`): the KEEPER's
+   * matching surface absorbs the other skill's `when_to_use`, and the
+   * absorbed skill is deleted. Deliberately MECHANICAL, no LLM:
+   *   - the keeper's BODY, description, kind and counters are untouched —
+   *     trust is body-bound, and an unchanged body keeps its earned trust
+   *     (this is also why we do NOT route through save(), which would
+   *     clear the promotion-refusal stamp on the premise of a body change);
+   *   - the absorbed body is deleted, and its counters die with it —
+   *     summing counters earned by a DIFFERENT body would inflate trust,
+   *     the exact corruption "patch resets trust" exists to prevent.
+   * The point of a merge is routing: future subtasks that would have
+   * matched the absorbed skill now reach the keeper. If the absorbed body
+   * is the one worth keeping, merge in the other direction.
+   * Returns the merged keeper, or null when either skill is missing.
+   */
+  merge(l1Name: string, keepId: string, absorbId: string): Skill | null {
+    if (keepId === absorbId) return null;
+    const keepDir = this.skillDir(l1Name, keepId);
+    const absorbDir = this.skillDir(l1Name, absorbId);
+    const keepFile = join(keepDir, 'SKILL.md');
+    if (!existsSync(keepFile) || !existsSync(join(absorbDir, 'SKILL.md'))) return null;
+    const keep = parseFrontmatter(readFileSync(keepFile, 'utf8'));
+    const absorb = parseFrontmatter(readFileSync(join(absorbDir, 'SKILL.md'), 'utf8'));
+    const mergedWhenToUse = keep.frontmatter.whenToUse.includes(absorb.frontmatter.whenToUse)
+      ? keep.frontmatter.whenToUse
+      : `${keep.frontmatter.whenToUse}; also: ${absorb.frontmatter.whenToUse}`;
+    writeFileSync(
+      keepFile,
+      renderFrontmatter({ ...keep.frontmatter, whenToUse: mergedWhenToUse }, keep.body),
+      'utf8'
+    );
+    // Touch updatedAt only — everything else in the keeper's meta
+    // (counters, stamps, provenance, match history) is preserved verbatim.
+    const metaPath = join(keepDir, '_meta.json');
+    const cur = existsSync(metaPath)
+      ? readMeta(metaPath)
+      : { successes: 0, failures: 0, updatedAt: nowIso() };
+    writeFileSync(metaPath, JSON.stringify({ ...cur, updatedAt: nowIso() }, null, 2), 'utf8');
+    appendLedger({
+      kind: 'skill-merge',
+      entity: `${l1Name}/${keepId}`,
+      detail: { absorbed: absorbId },
+    });
+    rmSync(absorbDir, { recursive: true, force: true });
+    const merged = this.loadFor(l1Name).find((s) => s.id === keepId);
+    return merged ?? null;
   }
 
   /**
@@ -525,6 +620,8 @@ export class SkillRegistry {
       ...(cur.compiledGeneration ? { compiledGeneration: cur.compiledGeneration } : {}),
       ...(cur.provenance ? { provenance: cur.provenance } : {}),
       ...(cur.directFailures ? { directFailures: cur.directFailures } : {}),
+      ...(cur.matches ? { matches: cur.matches } : {}),
+      ...(cur.lastMatchedAt ? { lastMatchedAt: cur.lastMatchedAt } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
   }
@@ -581,6 +678,12 @@ function readMeta(path: string): SkillMeta {
         ? { provenance: obj.provenance as SkillProvenance }
         : {}),
       ...(directFailures ? { directFailures } : {}),
+      ...(typeof obj.matches === 'number' && obj.matches > 0
+        ? { matches: Math.floor(obj.matches) }
+        : {}),
+      ...(typeof obj.lastMatchedAt === 'string' && obj.lastMatchedAt.length > 0
+        ? { lastMatchedAt: obj.lastMatchedAt }
+        : {}),
     };
   } catch {
     return { successes: 0, failures: 0, updatedAt: nowIso() };

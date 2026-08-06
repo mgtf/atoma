@@ -13,6 +13,7 @@
     "example:build": "tsx src/examples/build-app.ts",
     "registry": "tsx src/cli/registry.ts",
     "burnin": "tsx src/cli/burnin.ts",
+    "curriculum": "tsx src/cli/curriculum.ts",
     "skills": "tsx src/cli/skills.ts",
     "viz": "tsx src/viz/server.ts",
     "viz:demo": "tsx src/viz/demo.ts",
