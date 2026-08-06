@@ -11,6 +11,7 @@ import type {
   Verdict,
 } from '../core/types.js';
 import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
+import { scanScriptBody } from '../skills/scriptScan.js';
 import {
   stripBranchProvenance,
   type AtomRegistry,
@@ -589,7 +590,23 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     let skillMatchAttempted = false;
     if (this.skillRegistry) {
       skillMatchAttempted = true;
-      const skills = await this.matchSkill(l1Type.name, subTask, ctx);
+      let skills = await this.matchSkill(l1Type.name, subTask, ctx);
+      // STATIC-SCAN QUARANTINE for kind:script matches. Promotion already
+      // refuses flagged compiler output, so this catches hand-authored and
+      // legacy scripts. Quarantine means neither path runs the body: the
+      // deterministic dispatch would execute it directly, and the injected
+      // block instructs the L1 to run it verbatim — falling back to the
+      // LLM loop is NOT a mitigation here. The run proceeds skill-less,
+      // exactly as if nothing had matched.
+      if (skills && skills.skill.kind === 'script') {
+        const scanFlags = scanScriptBody(skills.skill.body);
+        if (scanFlags.length > 0) {
+          ctx.logger.warn(
+            `[${this.name}] skill "${skills.skill.id}" QUARANTINED — static scan flagged: ${scanFlags.join(', ')}; running WITHOUT it (review the body, then \`skills reset\` or \`skills drop\`)`
+          );
+          skills = null;
+        }
+      }
       if (skills) {
         ctx.logger.debug(
           `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`

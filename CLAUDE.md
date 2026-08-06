@@ -1049,6 +1049,29 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   part — "irreducible LLM reasoning" means the skill can never compile,
   a workflow-shape complaint might be fixed by a body revision.
 
+- **Script-skill hardening: static scan + trust boundary (arxiv
+  2604.03081 mitigations).** `scanScriptBody` (`src/skills/scriptScan.ts`)
+  is a TIGHT deny-list over `kind: script` bodies — network egress
+  (fetch/http/net/tls/dns/WebSocket), dynamic code (eval / new
+  Function), credential probes (homedir(), .ssh/.aws/.netrc/.npmrc) —
+  and deliberately NOT child_process, which the probe-manifest contract
+  requires (compiled verification scripts re-run documented commands).
+  Two enforcement points, fail-closed for the script, fail-open for the
+  run: `tryPromoteSkill` refuses a flagged compile output via the
+  existing generation-stamped refusal machinery (reason = the scan
+  verdict; `skills reset` is the operator override after review), and
+  `L2.runSubtask` QUARANTINES a flagged match (hand-authored/legacy
+  scripts) — neither deterministic dispatch NOR injection, because the
+  injected block instructs the L1 to run the body verbatim, so "fall
+  back to the LLM loop" is NOT a mitigation; the run proceeds
+  skill-less. Companion: every injected LEARNED-CONTENT block (llm
+  recipes, event-recovery guidance) opens with
+  `LEARNED_CONTENT_TRUST_BOUNDARY_LINES` (`events.ts`) marking the
+  recipe as bounded-authority DATA — the paper's cheapest effective
+  mitigation (OpenHands' direct-execution rate collapsed once repo
+  content was annotated untrusted). Script blocks skip the boundary
+  text on purpose (their contract is "run verbatim"; the scan is their
+  gate). Covered by `tests/script-scan.test.ts`.
 - **Event-driven recovery skills (#E1) — matched MID-RUN, zero-LLM
   matcher.** A skill whose frontmatter carries `trigger:` is recovery
   GUIDANCE keyed to a failure signature (validator-complaint pattern),

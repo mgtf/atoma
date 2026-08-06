@@ -14,6 +14,8 @@ import { parseScriptEnvelope, scriptDeclaresEnvelope, scriptExtension } from '..
 import { extractJson } from '../atoms/json.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
 import { scriptInterpreter, scriptScratchFilename } from './abi.js';
+import { scanScriptBody } from './scriptScan.js';
+import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 
 /**
  * SKILL LIFECYCLE ENGINE — extracted from L2Atom (structural slice 2).
@@ -241,6 +243,8 @@ export function skillContextBlock(skill: {
   }
   return [
     `== ACTIVE SKILL: ${skill.id} ==`,
+    ...LEARNED_CONTENT_TRUST_BOUNDARY_LINES,
+    ``,
     `Follow this recipe step-by-step for the current subtask. The recipe was`,
     `learned from prior successful runs and is the FASTEST path to a clean`,
     `result. Deviate only when the subtask explicitly asks for something the`,
@@ -693,6 +697,34 @@ export class SkillLifecycle {
         actorName: this.host.name,
         actorTier: 2,
         reasoning: `refused: ${compiled.reason}`,
+      });
+      return;
+    }
+    // STATIC SCAN GATE — a compiled body that reaches for the network,
+    // dynamic code or credential paths is refused BEFORE it ever becomes
+    // a kind:script skill (see src/skills/scriptScan.ts). The refusal
+    // rides the existing anti-thrash stamp: generation-scoped, so an
+    // evolved compiler gets one fresh shot, and `skills reset` remains
+    // the operator override after review.
+    const scanFlags = scanScriptBody(compiled.body);
+    if (scanFlags.length > 0) {
+      const reason = `static scan flagged the compiled body: ${scanFlags.join(', ')}`;
+      args.ctx.logger.warn(
+        `[${this.host.name}] skill "${args.skillId}" promotion BLOCKED — ${reason}`
+      );
+      this.skills.markPromotionRefused(
+        args.l1Name,
+        args.skillId,
+        reason,
+        COMPILE_PROMPT_GENERATION
+      );
+      args.ctx.recordSkill?.({
+        op: 'promote',
+        l1Name: args.l1Name,
+        skillId: args.skillId,
+        actorName: this.host.name,
+        actorTier: 2,
+        reasoning: `refused: ${reason}`,
       });
       return;
     }
