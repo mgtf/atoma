@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "recipe-box-api-nodejs",
+      "family": "http",
+      "goal": "Build a single-file Node.js HTTP server with no external dependencies that exposes a JSON CRUD API for managing a recipe box (title, ingredients, steps) backed by an in-memory store, printing the listening port on startup."
+    },
+    {
+      "id": "verify-bookclub-api-routes",
+      "family": "cli",
+      "goal": "Given an entry file and README describing a book club tracker's create/read/list/delete JSON routes, write and run a script that exercises each route end-to-end and checks the status codes and response bodies match the documented spec."
+    },
+    {
+      "id": "verify-thermostat-widget-state",
+      "family": "web",
+      "goal": "Given an HTML/JS file for a thermostat control widget that exposes a window.__thermostat state object with getters, write a script that mechanically checks the temperature controls and the conditional heating/cooling color styling react correctly to state changes."
+    }
+  ]
+}
