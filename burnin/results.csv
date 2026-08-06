@@ -65,3 +65,9 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-06T08:14:32.046Z,web-stopwatch,web,failed,0.5249,902,17,1,0,16,0,0,0,0,0,0,0,2026-08-06T08-14-32-694-bcaf3bbc.json
 2026-08-06T08:29:35.036Z,http-kv,http,delivered,0.3731,341,21,1,2,18,0,0,2,0,0,0,0,2026-08-06T08-29-35-717-dc8c4a23.json
 2026-08-06T08:35:18.220Z,http-healthz,http,delivered,0.1762,195,13,1,0,12,0,0,0,0,0,0,0,2026-08-06T08-35-18-884-9fb322e2.json
+2026-08-06T09:09:57.827Z,cli-inicheck,cli,delivered,0.2219,180,15,1,0,14,3,0,0,0,0,0,0,2026-08-06T09-09-58-494-a4ddc836.json
+2026-08-06T09:12:58.673Z,cli-jsonpick,cli,delivered,0.1965,195,12,1,0,11,2,0,0,0,0,0,0,2026-08-06T09-12-59-367-69bd96be.json
+2026-08-06T09:16:14.355Z,web-counter,web,delivered,0.1871,203,9,1,0,8,0,0,0,0,0,0,0,2026-08-06T09-16-15-024-b9f9eea2.json
+2026-08-06T09:19:39.247Z,web-stopwatch,web,delivered,0.377,349,14,1,1,12,0,0,0,0,1,0,0,2026-08-06T09-19-39-910-00003464.json
+2026-08-06T09:25:30.099Z,http-kv,http,delivered,0.2441,207,9,1,0,8,0,0,0,0,0,0,0,2026-08-06T09-25-30-767-e419a764.json
+2026-08-06T09:28:59.780Z,http-healthz,http,delivered,0.131,139,9,1,0,8,0,0,0,0,0,0,0,2026-08-06T09-29-00-452-5ebd3aa0.json
