@@ -1031,6 +1031,42 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   part — "irreducible LLM reasoning" means the skill can never compile,
   a workflow-shape complaint might be fixed by a body revision.
 
+- **Event-driven recovery skills (#E1) — matched MID-RUN, zero-LLM
+  matcher.** A skill whose frontmatter carries `trigger:` is recovery
+  GUIDANCE keyed to a failure signature (validator-complaint pattern),
+  not a task recipe. Motivated by CODESKILL's ablation: event-triggered
+  micro-guidance carries the value (+8.3pp alone) vs task-level
+  strategy (+1.7pp). Three rules keep it cheap and safe:
+  (1) `matchSkill` EXCLUDES trigger skills from the task prefilter —
+  Haiku must never "reuse" a recovery hint as the driving recipe.
+  (2) Matching is MECHANICAL (`src/skills/events.ts`): trigger-token
+  CONTAINMENT in the event text (≥ 0.45 AND ≥ 3 shared tokens) — a
+  rejection is when the run is already burning, so the matcher is free;
+  containment (not Jaccard) because triggers are compact and
+  diagnostics long. Fired from `makeL1Hooks` on every rejection
+  (`applyByScope`, all three scopes — fresh patch/branch instances can
+  re-receive since injected context is lost with the old instance, but
+  never twice on one instance) and on the escalation legacy-branch
+  path with `extractBranchDiagnostic` as event text. Injection uses
+  `== EVENT RECOVERY SKILL ==` delimiters (distinct from ACTIVE SKILL:
+  event skills never call `setActiveSkill`, so the adherence/credit
+  machinery does not apply; utility is tracked via `markMatched`
+  alone). Kill switch: `ATOMA_EVENT_SKILLS=0`.
+  (3) Learning fires POST-LOOP in `runSubtask` (`maybeLearnEventSkill`
+  — the hooks never see the trace) on a RECOVERED run only: ≥1
+  rejection in the trace, ultimately approved, NOT a fallback
+  deliverable, and NO event skill was injected (novel event — the C3
+  "we looked and found nothing" rule; an injected skill confounds the
+  recovery). One Sonnet call (`learnEventSkillFromRecovery`), gated by
+  the same `ATOMA_SKILL_LEARN` flag; draft requires `trigger` (parse:
+  `parseEventSkillDraft`, `when_to_use` defaults to the trigger). The
+  trigger must describe the failure CLASS, never the task's theme — a
+  task-themed trigger never matches a future event text. `trigger` +
+  `kind: script` is a structural error at parse AND save (guidance
+  cannot be a script; also keeps such skills out of promotion, which
+  they never reach anyway — they earn no successes). `skills stats`
+  labels them `event-driven` and skips the promotion lifecycle labels.
+  Covered by `tests/event-skills.test.ts`.
 - **Match history + `skills stats` (utility view).** `SkillRegistry.
   markMatched` bumps `_meta.json.matches` (+`lastMatchedAt`) every time
   the skill prefilter picks a skill — at MATCH time, before the outcome,

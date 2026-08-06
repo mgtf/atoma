@@ -1,6 +1,7 @@
 import { Atom, type Peerable, type Supervisor } from '../core/atom.js';
 import type {
   GenerationParams,
+  NegativeVerdict,
   Plan,
   Result,
   RunContext,
@@ -9,6 +10,7 @@ import type {
   Tool,
   Verdict,
 } from '../core/types.js';
+import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
 import {
   stripBranchProvenance,
   type AtomRegistry,
@@ -685,17 +687,42 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // learning path: only fire when the prefilter saw skills but
     // none matched, AND the env flag is on, AND the run succeeded
     // without escalation.
+    //
+    // eventState tracks whether an EVENT-DRIVEN recovery skill got
+    // injected during the loop — read by the post-loop learning gate
+    // (we only distill a recovery pattern for a NOVEL event, mirroring
+    // C3's "we looked and found nothing" rule).
+    const eventState = { injected: false };
     const hooks = this.makeL1Hooks(ctx, subtask.description, {
       l1Name: l1Type.name,
       subTask,
       skillMatchAttempted,
+      eventState,
     });
 
     // Fork a branch-scoped ctx so every LLM/tool/trust event recorded
     // inside this supervise loop carries a unique branchId. Viz renders
     // each branch as its own lane instead of interleaving them.
     const branchCtx = forkBranch(ctx, randomUUID());
-    return superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+    const res = await superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+    // Event-skill distillation (#E1) — a RECOVERED run (rejections in the
+    // trace, ultimately approved, not a fallback deliverable) carries the
+    // failure→fix delta worth keying on the event signature. Opportunistic:
+    // errors are logged and swallowed, the run is already delivered.
+    try {
+      await this.maybeLearnEventSkill({
+        l1Name: l1Type.name,
+        subTask,
+        res,
+        eventSkillInjected: eventState.injected,
+        ctx: branchCtx,
+      });
+    } catch (err) {
+      ctx.logger.warn(
+        `[${this.name}] event-skill learning attempt errored: ${(err as Error).message}`
+      );
+    }
+    return res;
   }
 
 
@@ -742,6 +769,43 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ctx: RunContext;
   }): Promise<string | null> {
     return (await this.lifecycle()?.improveSkillBody(args)) ?? null;
+  }
+
+  /**
+   * Post-loop gate for event-skill distillation (#E1). Fires only when
+   * ALL of: learning is on (same flag as C3), the run RECOVERED (at
+   * least one rejection in the trace, ultimately approved), the
+   * deliverable is NOT a parent-fallback (that recovery pattern is
+   * "give up and do it yourself" — not guidance worth injecting), and
+   * NO event skill was injected during the loop (novel event; if one
+   * WAS injected, the recovery is confounded with the existing skill).
+   */
+  private async maybeLearnEventSkill(args: {
+    l1Name: string;
+    subTask: Task;
+    res: Result;
+    eventSkillInjected: boolean;
+    ctx: RunContext;
+  }): Promise<void> {
+    if (process.env['ATOMA_SKILL_LEARN'] !== '1') return;
+    if (!this.skillRegistry) return;
+    if (args.eventSkillInjected) return;
+    if (args.res.producedBy.viaFallback) return;
+    const hadRejection = args.res.trace.some(
+      (e) =>
+        (e.kind === 'verdict-plan' || e.kind === 'verdict-result') &&
+        (e.payload as { approved?: boolean } | null)?.approved === false
+    );
+    if (!hadRejection) return;
+    const diagnostic = extractBranchDiagnostic(args.res.trace);
+    if (!diagnostic) return;
+    await this.lifecycle()?.learnEventSkillFromRecovery({
+      l1Name: args.l1Name,
+      subTask: args.subTask,
+      diagnostic,
+      recoverySummary: args.res.summary,
+      ctx: args.ctx,
+    });
   }
 
   private async tryPromoteSkill(args: {
@@ -915,12 +979,50 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
        * skills are disabled wholesale.
        */
       skillMatchAttempted: boolean;
+      /** Mutated by the event-skill injector; read by the post-loop learning gate. */
+      eventState: { injected: boolean };
     }
   ): SupervisionHooks<L1Atom> {
+    // EVENT-DRIVEN recovery injection (#E1). On a rejection (or the
+    // escalation branch), match the event text MECHANICALLY (zero LLM —
+    // trigger containment, src/skills/events.ts) against the L1's event
+    // skills and inject the matched guidance into the next attempt.
+    // Namespaced by the ORIGINAL l1 type name so a branched retry keeps
+    // access to the recovery catalog its lineage earned. Tracks the
+    // instance a skill was injected into: a fresh patch/branch instance
+    // loses injected context, so the same skill may re-inject there, but
+    // never stacks twice on one instance.
+    const injectedEventSkills = new Map<string, L1Atom>();
+    const injectEventSkill = (child: L1Atom, eventText: string): void => {
+      if (process.env['ATOMA_EVENT_SKILLS'] === '0' || !this.skillRegistry) return;
+      if (!eventText.trim()) return;
+      const candidates = this.skillRegistry.loadFor(skillCtx.l1Name).filter((s) => s.trigger);
+      const match = matchEventSkill(eventText, candidates);
+      if (!match || injectedEventSkills.get(match.skill.id) === child) return;
+      child.injectContext(eventSkillBlock(match.skill));
+      injectedEventSkills.set(match.skill.id, child);
+      skillCtx.eventState.injected = true;
+      this.skillRegistry.markMatched(skillCtx.l1Name, match.skill.id);
+      ctx.logger.info(
+        `[${this.name}] event skill "${match.skill.id}" injected into ${child.name} (trigger containment ${match.score.toFixed(2)})`
+      );
+      ctx.recordSkill?.({
+        op: 'inject',
+        l1Name: skillCtx.l1Name,
+        skillId: match.skill.id,
+        actorName: this.name,
+        actorTier: 2,
+        reasoning: `event-trigger (${match.score.toFixed(2)}): ${eventText.slice(0, 160)}`,
+      });
+    };
+    const rejectionEventText = (verdict: NegativeVerdict): string =>
+      [verdict.reasoning, verdict.modifications.additionalContext ?? ''].join('\n');
+
     return {
       applyByScope: async (child, verdict) => {
         if (verdict.scope === 'ephemeral') {
           child.applyModifications(verdict.modifications);
+          injectEventSkill(child, rejectionEventText(verdict));
           return child;
         }
         // patch/branch return a FRESH L1Atom.fromType instance — which
@@ -947,7 +1049,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             this.name,
             verdict.reasoning
           );
-          return carrySkill(L1Atom.fromType(patched));
+          const fresh = carrySkill(L1Atom.fromType(patched));
+          injectEventSkill(fresh, rejectionEventText(verdict));
+          return fresh;
         }
         const branched = this.registry.branch(
           child.name,
@@ -956,7 +1060,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           verdict.branchName
         );
         ctx.logger.info(`[${this.name}] branched L1 ${child.name} → ${branched.name}`);
-        return carrySkill(L1Atom.fromType(branched));
+        const freshBranch = carrySkill(L1Atom.fromType(branched));
+        injectEventSkill(freshBranch, rejectionEventText(verdict));
+        return freshBranch;
       },
       branchOnEscalation: async (child, trace, reason) => {
         // Aligned system prompt: start the branch FRESH with the current
@@ -1120,7 +1226,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // actually tried on the current task — purely a lesson for future
         // runs. By handing the new instance back we let the anti-
         // Frankenstein narrow prompt prove itself in-flight.
-        return L1Atom.fromType(branched);
+        const freshBranched = L1Atom.fromType(branched);
+        // Event-driven recovery guidance rides along with the diagnostic:
+        // the branch prompt says WHAT failed, a matched event skill says
+        // what a previous recovery DID about it.
+        injectEventSkill(freshBranched, diagnostic);
+        return freshBranched;
       },
       onApproved: async (child, result, verdict) => {
         this.registry.recordSuccess(child.name);

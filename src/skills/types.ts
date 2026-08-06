@@ -62,6 +62,20 @@ export interface Skill {
    */
   readonly whenToUse: string;
   /**
+   * EVENT-DRIVEN skills only. A compact signature of the mid-run EVENT
+   * this skill answers (a validator-rejection pattern, an escalation
+   * diagnosis) — e.g. "validator rejects result for missing ground-truth
+   * evidence". A skill carrying `trigger` is recovery GUIDANCE, not a
+   * task recipe: it is EXCLUDED from the task-level skill prefilter and
+   * instead matched mechanically (zero LLM — token containment, see
+   * `src/skills/events.ts`) against rejection reasonings and escalation
+   * diagnostics, then injected into the retry/branch cycle. Event skills
+   * are always `kind: 'llm'` (guidance cannot be a script) and never set
+   * `activeSkillId` — the adherence/credit machinery does not apply;
+   * their utility is tracked through `matches` alone.
+   */
+  readonly trigger?: string;
+  /**
    * `'llm'` — the body is markdown instructions baked into the
    * L1's effective system prompt; the L1's normal LLM tool-use
    * loop drives execution. This is the auto-creation default
@@ -133,6 +147,8 @@ export interface SkillFrontmatter {
   readonly kind: SkillKind;
   /** Required iff `kind === 'script'`; rejected for `kind: 'llm'`. */
   readonly language?: SkillLanguage;
+  /** Event signature for event-driven skills — see `Skill.trigger`. Rejected for `kind: 'script'`. */
+  readonly trigger?: string;
 }
 
 export interface SkillMeta {

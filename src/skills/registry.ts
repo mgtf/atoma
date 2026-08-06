@@ -87,6 +87,7 @@ export class SkillRegistry {
           whenToUse: frontmatter.whenToUse,
           kind: frontmatter.kind,
           ...(frontmatter.language !== undefined ? { language: frontmatter.language } : {}),
+          ...(frontmatter.trigger !== undefined ? { trigger: frontmatter.trigger } : {}),
           body,
           ...(fallbackBody ? { fallbackBody } : {}),
           successes: meta.successes,
@@ -126,7 +127,7 @@ export class SkillRegistry {
   save(
     l1Name: string,
     skill: Pick<Skill, 'id' | 'description' | 'whenToUse' | 'kind' | 'body'> &
-      Partial<Pick<Skill, 'language'>>,
+      Partial<Pick<Skill, 'language' | 'trigger'>>,
     provenance?: SkillProvenance
   ): Skill {
     if (skill.kind === 'script' && !skill.language) {
@@ -134,6 +135,9 @@ export class SkillRegistry {
     }
     if (skill.kind === 'llm' && skill.language) {
       throw new Error(`save: kind:"llm" must not declare a language; got "${skill.language}"`);
+    }
+    if (skill.kind === 'script' && skill.trigger) {
+      throw new Error(`save: kind:"script" must not declare a trigger — event skills are guidance, not scripts`);
     }
     const dir = this.skillDir(l1Name, skill.id);
     mkdirSync(dir, { recursive: true });
@@ -144,6 +148,7 @@ export class SkillRegistry {
         whenToUse: skill.whenToUse,
         kind: skill.kind,
         ...(skill.language ? { language: skill.language } : {}),
+        ...(skill.trigger ? { trigger: skill.trigger } : {}),
       },
       skill.body
     );
@@ -747,6 +752,13 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
   } else if (languageRaw) {
     throw new Error(`SKILL.md frontmatter "language" only valid with kind:"script"; got language=${languageRaw} on kind:llm`);
   }
+  // Trigger marks an EVENT-DRIVEN skill (recovery guidance matched against
+  // mid-run events) — guidance cannot be a script, so the combination is a
+  // structural error, not a tolerated variant.
+  const trigger = fields['trigger'];
+  if (trigger && kindRaw === 'script') {
+    throw new Error('SKILL.md frontmatter "trigger" only valid with kind:"llm" — event skills are guidance, not scripts');
+  }
   return {
     frontmatter: {
       id,
@@ -754,6 +766,7 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
       whenToUse,
       kind: kindRaw as SkillKind,
       ...(language ? { language } : {}),
+      ...(trigger ? { trigger } : {}),
     },
     body,
   };
@@ -769,6 +782,7 @@ export function renderFrontmatter(frontmatter: SkillFrontmatter, body: string): 
     `kind: ${frontmatter.kind}`,
   ];
   if (frontmatter.language) lines.push(`language: ${frontmatter.language}`);
+  if (frontmatter.trigger) lines.push(`trigger: ${frontmatter.trigger}`);
   lines.push('---', '', body.trim(), '');
   return lines.join('\n');
 }
