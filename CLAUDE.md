@@ -1652,6 +1652,26 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   TraceRecorder. `endRun()`'s synchronous `persist()` happens BEFORE
   we clear the timer specifically so the final state wins the race
   over any trailing-edge flush.
+- **The viz UI is ENGLISH and fully i18n'd — no bare user-facing string.**
+  Every label goes through `t('some.key', { vars })` against the catalogs
+  at the top of `ui.html`; static chrome uses `data-i18n` /
+  `data-i18n-title` / `data-i18n-placeholder`, filled by
+  `applyStaticI18n()` at boot. The core is ~40 lines, NOT a library, for
+  a structural reason: `ui.html` is served verbatim (`cp` at build) with
+  no bundler, so i18next would mean a CDN (breaking an offline localhost
+  tool) or a vendored 40 KB blob. Its SURFACE is i18next-compatible
+  (dotted keys, `{{var}}`, `.one` count variant, dotted namespaces) so
+  swapping in the real library is a drop-in — catalogs and call sites
+  unchanged. English is the SOURCE and the default: `detectLocale()
+  deliberately ignores navigator.language, so a French browser gets
+  English until the user opts in via the header picker (persisted in
+  localStorage) or `?lang=fr`. A missing key renders as the key itself —
+  loud and greppable. `fr` ships complete (157 keys, strict parity with
+  `en`) which is what proves the plumbing; add a locale by dropping a
+  catalog next to it and it appears in the picker. WATCH OUT: `t` is now
+  a global, so a local variable named `t` shadows it — the registry
+  render paths were renamed to `type`/`ty`/`tot` for exactly this
+  reason.
 - **Viz cards surface the DECISION, not just the call.** Prefilter and
   validator cards read the recorded `response` client-side and render the
   outcome inline — `→ réutilise <target>` / `↑ escalade` (+ a confidence

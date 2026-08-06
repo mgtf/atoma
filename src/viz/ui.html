@@ -38,6 +38,9 @@
     border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
     min-width: 320px; max-width: 640px; font: inherit;
   }
+  /* The language picker is a two-item control — it must NOT inherit the
+     run-selector's 320px min-width. */
+  header select#langSelect { min-width: 0; width: auto; padding: 6px 8px; }
   header .spacer { flex: 1; }
   header button {
     background: var(--panel-2); color: var(--text);
@@ -231,17 +234,18 @@
 <header>
   <h1><span class="dot-l3">●</span><span class="dot-l2">●</span><span class="dot-l1">●</span> &nbsp;Atoma</h1>
   <div class="view-switch" id="viewSwitch">
-    <button data-view="runs" class="active">Runs</button>
-    <button data-view="registry">Registry</button>
-    <button data-view="skills">Skills</button>
-    <button data-view="burnin">Burn-in</button>
+    <button data-view="runs" class="active" data-i18n="nav.runs">Runs</button>
+    <button data-view="registry" data-i18n="nav.registry">Registry</button>
+    <button data-view="skills" data-i18n="nav.skills">Skills</button>
+    <button data-view="burnin" data-i18n="nav.burnin">Burn-in</button>
   </div>
-  <select id="runSelect" title="Sélectionner un run"></select>
-  <select id="registrySelect" title="Sélectionner un registre" style="display:none;"></select>
-  <input id="registrySearch" type="search" placeholder="Filtrer les atomes…" style="display:none;" />
-  <input id="skillsSearch" type="search" placeholder="Filtrer les skills…" style="display:none;" />
+  <select id="runSelect" data-i18n-title="nav.selectRun"></select>
+  <select id="registrySelect" data-i18n-title="nav.selectRegistry" style="display:none;"></select>
+  <input id="registrySearch" type="search" data-i18n-placeholder="nav.filterAtoms" style="display:none;" />
+  <input id="skillsSearch" type="search" data-i18n-placeholder="nav.filterSkills" style="display:none;" />
   <span class="spacer"></span>
-  <button id="refreshBtn" title="Recharger la liste">Rafraîchir</button>
+  <select id="langSelect" data-i18n-title="nav.language"></select>
+  <button id="refreshBtn" data-i18n-title="nav.refresh.title" data-i18n="nav.refresh">Refresh</button>
 </header>
 
 <div class="layout">
@@ -274,11 +278,465 @@
     </div>
   </section>
   <section class="pane" id="rightPane">
-    <div class="empty">Sélectionne un évènement à gauche pour en voir le détail.</div>
+    <div class="empty" data-i18n="pane.selectEvent"></div>
   </section>
 </div>
 
 <script>
+/* ==========================================================================
+ * i18n — minimal core, i18next-COMPATIBLE surface.
+ *
+ * Why not the real library: this file is served VERBATIM by the viz server
+ * (`cp src/viz/ui.html dist/`), with no bundler and no module resolution in
+ * the browser. Pulling i18next would mean either a CDN — breaking the
+ * offline use of a localhost dev tool — or vendoring a ~40 KB UMD blob into
+ * a file we hand-maintain. So the core below is deliberately tiny, but its
+ * SURFACE matches i18next: `t('a.b.c', { count: 3 })`, `{{var}}`
+ * interpolation, `_plural` key suffix, dotted namespaces. Swapping in the
+ * real library later is a drop-in — the catalogs and every call site stay
+ * exactly as they are.
+ *
+ * Adding a locale: drop a catalog next to `fr` and it appears in the picker.
+ * English is the SOURCE and the default: a French browser still gets English
+ * unless the user opts in (persisted in localStorage, or `?lang=fr`).
+ * A missing key renders the key itself — loud on purpose, so a gap is
+ * visible in development instead of silently blanking a label.
+ * ====================================================================== */
+const I18N_CATALOGS = {
+  en: {
+    'lang.name': 'English',
+    'nav.runs': 'Runs',
+    'nav.registry': 'Registry',
+    'nav.skills': 'Skills',
+    'nav.burnin': 'Burn-in',
+    'nav.refresh': 'Refresh',
+    'nav.refresh.title': 'Reload the list',
+    'nav.selectRun': 'Select a run',
+    'nav.selectRegistry': 'Select a registry',
+    'nav.filterAtoms': 'Filter atoms…',
+    'nav.filterSkills': 'Filter skills…',
+    'nav.language': 'Language',
+
+    'common.loading': 'Loading…',
+    'common.none': '— none —',
+    'common.networkError': 'Network error.',
+    'common.duration': 'duration {{value}}',
+    'common.emptyDash': '—',
+
+    'pane.selectEvent': 'Select an event on the left to see its detail.',
+    'pane.selectAtom': 'Select an atom on the left to see its detail.',
+    'pane.selectSkill': 'Select a skill on the left to see its detail.',
+    'pane.selectBurnin': 'Click a table row to open that run\'s trace.',
+
+    'runs.none': 'No run recorded',
+    'runs.notFound': 'Run not found.',
+    'runs.picker': 'Runs (newest → oldest)',
+    'runs.flag.cancelled': '✕ cancelled',
+    'runs.flag.live': '● LIVE',
+    'runs.flag.fallback': '⚠ fallback',
+    'runs.calls': '{{count}} calls',
+
+    'summary.duration': 'Duration',
+    'summary.llmCalls': 'LLM calls',
+    'summary.tokens': 'Tokens (in/out)',
+    'summary.cacheHit': 'Cache hit',
+    'summary.cost': 'Cost',
+    'summary.fallback': 'Fallback',
+    'summary.yes': 'yes',
+    'summary.no': 'no',
+    'summary.freePhases': '⚡ $0.00 phases',
+    'summary.freePhases.value': '{{count}} (deterministic dispatch)',
+    'summary.cachedRouting': '⚡ Cached routing',
+    'summary.cachedRouting.value': '{{count}} decision(s) with no LLM call',
+    'summary.abandoned': '⚠ Abandoned run',
+    'summary.abandoned.value': 'no activity for >5 min, no endedAt',
+    'summary.lifecycle': 'Lifecycle',
+    'summary.lifecycle.learned': '📖 {{count}} skill(s) learned',
+    'summary.lifecycle.promoted': '⚡ {{count}} compilation(s)',
+    'summary.lifecycle.demoted': '🛡️ {{count}} demotion(s)',
+    'summary.lifecycle.revised': '✏️ {{count}} revision(s)',
+    'summary.lifecycle.recovery': '⟳ {{count}} mid-run recovery(ies)',
+    'summary.guards': 'Guardrails',
+    'summary.guards.quarantined': '⛔ {{count}} skill(s) quarantined',
+    'summary.guards.withheld': '⊘ {{count}} credit(s) withheld',
+    'summary.degraded': '⚠ Degraded run — the supervision loop escalated and the parent took over through its fallback. The deliverable is not a true success of the protocol.',
+    'summary.live': '● LIVE — the run is still going, this view refreshes every {{seconds}} s.',
+    'summary.error': 'Error: {{message}}',
+
+    'result.title': 'Result',
+    'result.groundTruth': 'ground truth',
+    'result.byPhase': 'phase breakdown ({{count}} phases)',
+    'result.byPhase.one': 'phase breakdown (1 phase)',
+    'result.phase': 'PHASE {{n}} · {{atom}}',
+
+    'lanes.l3': 'L3 · cells',
+    'lanes.l2': 'L2 · molecules',
+    'lanes.l1': 'L1 · elements',
+    'lanes.legend.new': 'created/branched during this run',
+    'lanes.legend.patched': 'patched during this run',
+    'lanes.legend.existing': 'pre-existing (reused)',
+    'lanes.legend.hint': '— click an atom to see its full prompt',
+
+    'filters.all': 'All',
+    'filters.llm': 'LLM',
+    'filters.tools': 'Tools',
+    'filters.trust': 'Trust',
+    'filters.skills': 'Skills',
+    'filters.cache': 'Cache',
+    'filters.registry': 'Registry',
+    'filters.allRoles': 'All roles',
+    'filters.allBranches': 'all branches',
+    'filters.branch': 'branch {{id}}',
+    'filters.fanoutBranch': 'fan-out branch {{id}}',
+    'filters.noMatch': 'No event matches the filter.',
+
+    'now.title': 'Right now',
+    'now.elapsed': '⏱ {{seconds}}s',
+    'now.tooLong': ' — unusually long?',
+
+    'marker.start': '▶ Run start',
+    'marker.end': '■ Run end',
+    'marker.degraded': '⚠ Run end — degraded (delivered via fallback)',
+    'marker.cancelled': '✕ Run cancelled (user interrupt)',
+    'marker.error': '✕ Run end — error',
+    'marker.abandoned': '⚠ Run abandoned',
+    'marker.abandoned.hint': 'no activity since the last trace — no end recorded',
+
+    'event.interrupted': '✕ interrupted — never completed',
+    'event.error': 'error',
+    'event.trust.fastPath': 'fast-path (no LLM call)',
+    'event.cache.label': '⚡ cache',
+    'event.cache.free': '0 calls · $0.00',
+    'event.cache.skipped': 'call avoided',
+    'event.skill.direct': '⚡ direct',
+    'event.skill.recovery': '⟳ recovery',
+    'event.skill.quarantine': '⛔ quarantine',
+    'event.skill.creditWithheld': '⊘ credit withheld',
+    'event.skill.zeroLlm': '0 LLM calls · $0.00',
+    'event.skill.triggeredMidRun': 'triggered mid-run',
+    'event.skill.score': ' · score {{score}}',
+
+    'outcome.reuse': '→ reuses {{target}}',
+    'outcome.confidence': '(confidence {{level}})',
+    'outcome.escalate': '↑ escalate',
+    'outcome.approved': '✓ approved',
+    'outcome.rejected': '✕ rejected',
+    'outcome.scope': 'scope {{scope}}',
+    'outcome.recipeIgnored': 'recipe ignored → credit withheld',
+    'outcome.recipeIgnored.title': 'The validator observed that the run did not follow the injected skill: its counters stay put.',
+    'outcome.recipeFollowed': 'recipe followed',
+    'outcome.recipeFollowed.title': 'The injected skill did drive the run — its counters are credited.',
+
+    'detail.cache.title': 'Routing decision served from cache',
+    'detail.cache.avoidedModel': 'model avoided: {{model}}',
+    'detail.cache.decision': 'Decision',
+    'detail.cache.reasoning': 'Reasoning (of the original decision)',
+    'detail.cache.explain': 'The prefilter runs at temperature 0 with a constant prompt: for identical inputs (task × catalog × exclusions × model) the decision is a pure function, so it is replayed from disk. Zero tokens, zero latency — and under claude-cli, zero subprocess.',
+    'detail.prompts': 'Prompts & response',
+    'detail.noResponse': '(no response — call errored)',
+    'detail.by': 'by {{name}}',
+
+    'skillOp.match': 'Skill match (Haiku skill-prefilter)',
+    'skillOp.inject': 'Skill body injected into the L1 prompt',
+    'skillOp.learn': 'Skill auto-distilled (Sonnet)',
+    'skillOp.update': 'Skill body revised after failure (Sonnet)',
+    'skillOp.success': 'Success counter incremented',
+    'skillOp.failure': 'Failure counter incremented',
+    'skillOp.promote': 'Skill promoted llm → script (Sonnet compile)',
+    'skillOp.demote': 'Skill demoted script → llm (fallback restored)',
+    'skillOp.direct': 'Script executed via deterministic dispatch (0 LLM calls)',
+    'skillOp.quarantine': 'Skill QUARANTINED by the static scan',
+    'skillOp.creditWithheld': 'Counters NOT changed (recipe not followed)',
+
+    'registry.none': 'No registry configured',
+    'registry.noneFound': 'No SQLite database found. Start the server with `--db path/to/atoma.db`.',
+    'registry.missingFile': 'File missing — no data to show',
+    'registry.createdAt': 'Created at',
+    'registry.createdBy': 'Created by',
+    'registry.updatedAt': 'Updated at',
+    'registry.updatedBy': 'Updated by',
+    'registry.model': 'Model',
+    'registry.successFailure': 'Successes / failures',
+    'registry.attachedSkills': 'Attached skills',
+    'registry.noSkillsForAtom': '— no skill recorded for this atom —',
+    'registry.openSkill': '→ open the full skill',
+    'registry.versionHistory': 'Version history ({{count}} archived)',
+    'registry.origin.created': 'created during this run',
+    'registry.origin.branched': 'branched during this run',
+    'registry.origin.patched': 'patched during this run',
+    'registry.origin.existing': 'pre-existing (reused as-is)',
+    'registry.origin.noSnapshot': 'referenced without snapshot',
+    'registry.noAtomMatch': '— no atom matches —',
+    'registry.legendHint': '— click an atom to see its full prompt + version history',
+
+    'skills.none': 'No skill recorded. Set ATOMA_SKILLS_DIR or run with ATOMA_SKILL_LEARN=1.',
+    'skills.noneYet': 'No skill — the next run with auto-distillation will create one.',
+    'skills.subtitle': 'Recipes persisted under each L1 — Haiku match, injection at plan time, trust counters.',
+    'skills.legendHint': '— click a skill to see its full body',
+    'skills.totalSuccess': 'Total successes',
+    'skills.totalFailure': 'Total failures',
+
+    'burnin.runsAxis': 'runs (chronological order = experience) →',
+    'burnin.delivered': '{{count}} delivered · ',
+  },
+  fr: {
+    'lang.name': 'Français',
+    'nav.runs': 'Runs',
+    'nav.registry': 'Registre',
+    'nav.skills': 'Skills',
+    'nav.burnin': 'Burn-in',
+    'nav.refresh': 'Rafraîchir',
+    'nav.refresh.title': 'Recharger la liste',
+    'nav.selectRun': 'Sélectionner un run',
+    'nav.selectRegistry': 'Sélectionner un registre',
+    'nav.filterAtoms': 'Filtrer les atomes…',
+    'nav.filterSkills': 'Filtrer les skills…',
+    'nav.language': 'Langue',
+
+    'common.loading': 'Chargement…',
+    'common.none': '— aucun —',
+    'common.networkError': 'Erreur réseau.',
+    'common.duration': 'durée {{value}}',
+    'common.emptyDash': '—',
+
+    'pane.selectEvent': 'Sélectionne un évènement à gauche pour en voir le détail.',
+    'pane.selectAtom': 'Sélectionne un atome à gauche pour en voir le détail.',
+    'pane.selectSkill': 'Sélectionne une skill à gauche pour en voir le détail.',
+    'pane.selectBurnin': 'Clique une ligne du tableau pour ouvrir la trace du run correspondant.',
+
+    'runs.none': 'Aucun run enregistré',
+    'runs.notFound': 'Run introuvable.',
+    'runs.picker': 'Runs (récent → ancien)',
+    'runs.flag.cancelled': '✕ annulé',
+    'runs.flag.live': '● LIVE',
+    'runs.flag.fallback': '⚠ fallback',
+    'runs.calls': '{{count}} appels',
+
+    'summary.duration': 'Durée',
+    'summary.llmCalls': 'Appels LLM',
+    'summary.tokens': 'Tokens (in/out)',
+    'summary.cacheHit': 'Cache hit',
+    'summary.cost': 'Coût',
+    'summary.fallback': 'Fallback',
+    'summary.yes': 'oui',
+    'summary.no': 'non',
+    'summary.freePhases': '⚡ Phases $0.00',
+    'summary.freePhases.value': '{{count}} (dispatch déterministe)',
+    'summary.cachedRouting': '⚡ Routage caché',
+    'summary.cachedRouting.value': '{{count}} décision(s) sans appel LLM',
+    'summary.abandoned': '⚠ Run abandonné',
+    'summary.abandoned.value': 'aucune activité depuis >5 min, sans endedAt',
+    'summary.lifecycle': 'Cycle de vie',
+    'summary.lifecycle.learned': '📖 {{count}} skill(s) appris',
+    'summary.lifecycle.promoted': '⚡ {{count}} compilation(s)',
+    'summary.lifecycle.demoted': '🛡️ {{count}} démotion(s)',
+    'summary.lifecycle.revised': '✏️ {{count}} révision(s)',
+    'summary.lifecycle.recovery': '⟳ {{count}} récupération(s) mid-run',
+    'summary.guards': 'Garde-fous',
+    'summary.guards.quarantined': '⛔ {{count}} skill(s) en quarantaine',
+    'summary.guards.withheld': '⊘ {{count}} crédit(s) retenu(s)',
+    'summary.degraded': '⚠ Run dégradé — la boucle de supervision a escaladé et le parent a pris la main via son fallback. Le livrable n\'est pas un vrai succès du protocole.',
+    'summary.live': '● LIVE — le run est encore en cours, cette vue se rafraîchit toutes les {{seconds}} s.',
+    'summary.error': 'Erreur : {{message}}',
+
+    'result.title': 'Résultat',
+    'result.groundTruth': 'ground truth',
+    'result.byPhase': 'détail par phase ({{count}} phases)',
+    'result.byPhase.one': 'détail par phase (1 phase)',
+    'result.phase': 'PHASE {{n}} · {{atom}}',
+
+    'lanes.l3': 'L3 · cellules',
+    'lanes.l2': 'L2 · molécules',
+    'lanes.l1': 'L1 · éléments',
+    'lanes.legend.new': 'créé/branché pendant ce run',
+    'lanes.legend.patched': 'patché pendant ce run',
+    'lanes.legend.existing': 'préexistant (réutilisé)',
+    'lanes.legend.hint': '— clique sur un atome pour voir son prompt complet',
+
+    'filters.all': 'Tous',
+    'filters.llm': 'LLM',
+    'filters.tools': 'Tools',
+    'filters.trust': 'Trust',
+    'filters.skills': 'Skills',
+    'filters.cache': 'Cache',
+    'filters.registry': 'Registry',
+    'filters.allRoles': 'Tous rôles',
+    'filters.allBranches': 'toutes branches',
+    'filters.branch': 'branche {{id}}',
+    'filters.fanoutBranch': 'branche de fan-out {{id}}',
+    'filters.noMatch': 'Aucun évènement ne correspond au filtre.',
+
+    'now.title': 'En ce moment',
+    'now.elapsed': '⏱ {{seconds}}s',
+    'now.tooLong': ' — anormalement long ?',
+
+    'marker.start': '▶ Début du run',
+    'marker.end': '■ Fin du run',
+    'marker.degraded': '⚠ Fin du run — dégradé (livré via fallback)',
+    'marker.cancelled': '✕ Run annulé (interruption utilisateur)',
+    'marker.error': '✕ Fin du run — erreur',
+    'marker.abandoned': '⚠ Run abandonné',
+    'marker.abandoned.hint': 'aucune activité depuis la dernière trace — pas de fin enregistrée',
+
+    'event.interrupted': '✕ interrompu — jamais terminé',
+    'event.error': 'erreur',
+    'event.trust.fastPath': 'fast-path (aucun appel LLM)',
+    'event.cache.label': '⚡ cache',
+    'event.cache.free': '0 appel · $0.00',
+    'event.cache.skipped': 'appel évité',
+    'event.skill.direct': '⚡ direct',
+    'event.skill.recovery': '⟳ recovery',
+    'event.skill.quarantine': '⛔ quarantaine',
+    'event.skill.creditWithheld': '⊘ crédit retenu',
+    'event.skill.zeroLlm': '0 appel LLM · $0.00',
+    'event.skill.triggeredMidRun': 'déclenchée mid-run',
+    'event.skill.score': ' · score {{score}}',
+
+    'outcome.reuse': '→ réutilise {{target}}',
+    'outcome.confidence': '(confiance {{level}})',
+    'outcome.escalate': '↑ escalade',
+    'outcome.approved': '✓ approuvé',
+    'outcome.rejected': '✕ rejeté',
+    'outcome.scope': 'scope {{scope}}',
+    'outcome.recipeIgnored': 'recette ignorée → crédit retenu',
+    'outcome.recipeIgnored.title': 'Le validateur a observé que le run n\'a pas suivi la skill injectée : ses compteurs ne bougent pas.',
+    'outcome.recipeFollowed': 'recette suivie',
+    'outcome.recipeFollowed.title': 'La skill injectée a bien piloté le run — ses compteurs sont crédités.',
+
+    'detail.cache.title': 'Décision de routage servie par le cache',
+    'detail.cache.avoidedModel': 'modèle évité : {{model}}',
+    'detail.cache.decision': 'Décision',
+    'detail.cache.reasoning': 'Raisonnement (de la décision d\'origine)',
+    'detail.cache.explain': 'Le prefilter tourne à température 0 avec un prompt constant : pour des entrées identiques (tâche × catalogue × exclusions × modèle) la décision est une fonction pure, donc rejouée depuis le disque. Zéro token, zéro latence — et sous claude-cli, zéro sous-processus.',
+    'detail.prompts': 'Prompts & réponse',
+    'detail.noResponse': '(aucune réponse — appel en erreur)',
+    'detail.by': 'par {{name}}',
+
+    'skillOp.match': 'Skill match (skill-prefilter Haiku)',
+    'skillOp.inject': 'Skill body injecté dans le prompt L1',
+    'skillOp.learn': 'Skill auto-distillée (Sonnet)',
+    'skillOp.update': 'Skill body révisé après échec (Sonnet)',
+    'skillOp.success': 'Compteur succès incrémenté',
+    'skillOp.failure': 'Compteur échec incrémenté',
+    'skillOp.promote': 'Skill promue llm → script (compile Sonnet)',
+    'skillOp.demote': 'Skill rétrogradée script → llm (fallback restauré)',
+    'skillOp.direct': 'Script exécuté en dispatch déterministe (0 appel LLM)',
+    'skillOp.quarantine': 'Skill mise en QUARANTAINE par le scan statique',
+    'skillOp.creditWithheld': 'Compteurs NON modifiés (recette non suivie)',
+
+    'registry.none': 'Aucun registre configuré',
+    'registry.noneFound': 'Aucune base SQLite trouvée. Lance le serveur avec `--db path/to/atoma.db`.',
+    'registry.missingFile': 'Fichier absent — aucune donnée à afficher',
+    'registry.createdAt': 'Créé le',
+    'registry.createdBy': 'Créé par',
+    'registry.updatedAt': 'Mis à jour',
+    'registry.updatedBy': 'Modifié par',
+    'registry.model': 'Modèle',
+    'registry.successFailure': 'Succès / échecs',
+    'registry.attachedSkills': 'Skills attachées',
+    'registry.noSkillsForAtom': '— aucune skill enregistrée pour cet atome —',
+    'registry.openSkill': '→ ouvrir la skill complète',
+    'registry.versionHistory': 'Historique des versions ({{count}} archivée(s))',
+    'registry.origin.created': 'créé pendant ce run',
+    'registry.origin.branched': 'branché pendant ce run',
+    'registry.origin.patched': 'patché pendant ce run',
+    'registry.origin.existing': 'préexistant (réutilisé tel quel)',
+    'registry.origin.noSnapshot': 'référencé sans snapshot',
+    'registry.noAtomMatch': '— aucun atome ne correspond —',
+    'registry.legendHint': '— clique sur un atome pour voir son prompt complet + l\'historique des versions',
+
+    'skills.none': 'Aucune skill enregistrée. Définis ATOMA_SKILLS_DIR ou lance un run avec ATOMA_SKILL_LEARN=1.',
+    'skills.noneYet': 'Aucune skill — la prochaine run avec auto-distillation en créera.',
+    'skills.subtitle': 'Recettes persistées sous chaque L1 — match Haiku, injection au plan, compteurs de confiance.',
+    'skills.legendHint': '— clique sur une skill pour voir son corps complet',
+    'skills.totalSuccess': 'Total succès',
+    'skills.totalFailure': 'Total échecs',
+
+    'burnin.runsAxis': 'runs (ordre chronologique = expérience) →',
+    'burnin.delivered': '{{count}} livrés · ',
+  },
+};
+
+const I18N_FALLBACK = 'en';
+const LOCALE_STORAGE_KEY = 'atoma.viz.lang';
+
+function detectLocale() {
+  const q = new URLSearchParams(location.search).get('lang');
+  if (q && I18N_CATALOGS[q]) return q;
+  try {
+    const saved = localStorage.getItem(LOCALE_STORAGE_KEY);
+    if (saved && I18N_CATALOGS[saved]) return saved;
+  } catch {}
+  // NOT navigator.language on purpose: English is the product's source
+  // language, so a French browser still gets English until the user opts in.
+  return I18N_FALLBACK;
+}
+
+let LOCALE = detectLocale();
+
+/**
+ * Translate. i18next-compatible: dotted key, `{{var}}` interpolation, and
+ * a `count` of 1 prefers the `<key>.one` variant when the catalog has one.
+ * An unknown key renders as the key — a loud, greppable gap.
+ */
+function t(key, vars) {
+  let entry;
+  if (vars && vars.count === 1 && I18N_CATALOGS[LOCALE][key + '.one'] !== undefined) {
+    entry = I18N_CATALOGS[LOCALE][key + '.one'];
+  } else {
+    entry = I18N_CATALOGS[LOCALE][key];
+    if (entry === undefined) entry = I18N_CATALOGS[I18N_FALLBACK][key];
+  }
+  if (entry === undefined) return key;
+  if (!vars) return entry;
+  return entry.replace(/\{\{(\w+)\}\}/g, (m, name) =>
+    vars[name] !== undefined ? String(vars[name]) : m
+  );
+}
+
+function setLocale(code) {
+  if (!I18N_CATALOGS[code]) return;
+  LOCALE = code;
+  try { localStorage.setItem(LOCALE_STORAGE_KEY, code); } catch {}
+  location.reload(); // simplest correct repaint: every view re-reads t()
+}
+
+/**
+ * Fill the STATIC chrome from the catalog — `data-i18n` for text,
+ * `data-i18n-title` / `data-i18n-placeholder` for those attributes. Same
+ * convention as i18next's DOM helpers, so the markup survives a swap.
+ */
+function applyStaticI18n(root) {
+  const scope = root ?? document;
+  scope.querySelectorAll('[data-i18n]').forEach((el) => {
+    el.textContent = t(el.getAttribute('data-i18n'));
+  });
+  scope.querySelectorAll('[data-i18n-title]').forEach((el) => {
+    el.title = t(el.getAttribute('data-i18n-title'));
+  });
+  scope.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+  document.documentElement.lang = LOCALE;
+}
+
+/** Populate the language picker; hidden when a single locale is shipped. */
+function initLangPicker() {
+  const sel = document.getElementById('langSelect');
+  if (!sel) return;
+  const codes = Object.keys(I18N_CATALOGS);
+  if (codes.length < 2) { sel.style.display = 'none'; return; }
+  sel.innerHTML = '';
+  for (const code of codes) {
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = I18N_CATALOGS[code]['lang.name'] ?? code;
+    if (code === LOCALE) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.onchange = () => setLocale(sel.value);
+}
+
 const state = {
   view: 'runs', // 'runs' | 'registry'
   runs: [],
@@ -360,13 +818,13 @@ function runSelectLabel(r) {
   // deliberate action, not a fault — we set both flags on the index
   // entry but the UI label should reflect the user's intent.
   const flags = r.cancelled
-    ? '  ✕ cancelled'
+    ? '  ' + t('runs.flag.cancelled')
     : r.hasError
       ? '  ✖'
       : r.inFlight
-        ? '  ● LIVE'
+        ? '  ' + t('runs.flag.live')
         : r.degraded
-          ? '  ⚠ fallback'
+          ? '  ' + t('runs.flag.fallback')
           : '';
   return `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
 }
@@ -375,7 +833,7 @@ function populateRunSelect(runs, keepSelection) {
   const sel = $('runSelect');
   sel.innerHTML = '';
   if (runs.length === 0) {
-    sel.appendChild(h('option', {}, 'Aucun run enregistré'));
+    sel.appendChild(h('option', {}, t('runs.none')));
     return;
   }
   for (const r of runs) sel.appendChild(h('option', { value: r.id }, runSelectLabel(r)));
@@ -436,11 +894,11 @@ function scheduleIndexPoll() {
 
 async function selectRun(id) {
   $('runSelect').value = id;
-  $('eventsList').innerHTML = '<div class="loader">Chargement…</div>';
-  $('rightPane').innerHTML = '<div class="empty">Sélectionne un évènement à gauche pour en voir le détail.</div>';
+  $('eventsList').innerHTML = '<div class="loader">' + t('common.loading') + '</div>';
+  $('rightPane').innerHTML = '<div class="empty">' + t('pane.selectEvent') + '</div>';
   const r = await fetch('/api/runs/' + encodeURIComponent(id));
   if (!r.ok) {
-    $('eventsList').innerHTML = '<div class="empty">Run introuvable.</div>';
+    $('eventsList').innerHTML = '<div class="empty">' + t('runs.notFound') + '</div>';
     return;
   }
   state.currentRun = await r.json();
@@ -596,21 +1054,21 @@ function buildAtomMap(run) {
 function renderSummary(run) {
   const el = $('runSummary');
   if (!run) { el.innerHTML = ''; return; }
-  const t = run.totals ?? { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  const tot = run.totals ?? { calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
   el.innerHTML = '';
   const directCount = (run.events ?? []).filter(
     (e) => e.kind === 'skill' && e.op === 'direct'
   ).length;
   const grid = h('div', { class: 'grid' }, [
-    statCard('Durée', fmtMs(run.durationMs)),
-    statCard('Appels LLM', String(t.calls)),
-    statCard('Tokens (in/out)', (t.inputTokens ?? 0) + ' / ' + (t.outputTokens ?? 0)),
-    statCard('Cache hit', String(t.cacheReadInputTokens ?? 0)),
-    statCard('Coût', fmtCost(t.costUsd)),
-    statCard('Fallback', run.result?.producedBy?.viaFallback ? 'oui' : 'non'),
+    statCard(t('summary.duration'), fmtMs(run.durationMs)),
+    statCard(t('summary.llmCalls'), String(tot.calls)),
+    statCard(t('summary.tokens'), (tot.inputTokens ?? 0) + ' / ' + (tot.outputTokens ?? 0)),
+    statCard(t('summary.cacheHit'), String(tot.cacheReadInputTokens ?? 0)),
+    statCard(t('summary.cost'), fmtCost(tot.costUsd)),
+    statCard(t('summary.fallback'), run.result?.producedBy?.viaFallback ? t('summary.yes') : t('summary.no')),
   ]);
   if (directCount > 0) {
-    const card = statCard('⚡ Phases $0.00', directCount + ' (dispatch déterministe)');
+    const card = statCard(t('summary.freePhases'), t('summary.freePhases.value', { count: directCount }));
     card.style.borderLeft = '3px solid #ffd700';
     grid.appendChild(card);
   }
@@ -619,7 +1077,7 @@ function renderSummary(run) {
   // fewer Haiku calls than the last one?" without opening the timeline.
   const cacheHits = (run.events ?? []).filter((e) => e.kind === 'cache').length;
   if (cacheHits > 0) {
-    const card = statCard('⚡ Routage caché', cacheHits + ' décision(s) sans appel LLM');
+    const card = statCard(t('summary.cachedRouting'), t('summary.cachedRouting.value', { count: cacheHits }));
     card.style.borderLeft = '3px solid #22d3ee';
     grid.appendChild(card);
   }
@@ -627,7 +1085,7 @@ function renderSummary(run) {
   // which is invisible in per-event noise: learned recipes, compilations,
   // demotions, and dispatches that fell back to the LLM loop.
   if (isAbandoned(run)) {
-    const card = statCard('⚠ Run abandonné', 'aucune activité depuis >5 min, sans endedAt');
+    const card = statCard(t('summary.abandoned'), t('summary.abandoned.value'));
     card.style.borderLeft = '3px solid var(--err)';
     grid.appendChild(card);
   }
@@ -643,12 +1101,12 @@ function renderSummary(run) {
   };
   if (tally.learn || tally.promote || tally.demote || tally.update || tally.recovery) {
     const bits = [];
-    if (tally.learn) bits.push('📖 ' + tally.learn + ' skill(s) appris');
-    if (tally.promote) bits.push('⚡ ' + tally.promote + ' compilation(s)');
-    if (tally.demote) bits.push('🛡️ ' + tally.demote + ' démotion(s)');
-    if (tally.update) bits.push('✏️ ' + tally.update + ' révision(s)');
-    if (tally.recovery) bits.push('⟳ ' + tally.recovery + ' récupération(s) mid-run');
-    const card = statCard('Cycle de vie', bits.join(' · '));
+    if (tally.learn) bits.push(t('summary.lifecycle.learned', { count: tally.learn }));
+    if (tally.promote) bits.push(t('summary.lifecycle.promoted', { count: tally.promote }));
+    if (tally.demote) bits.push(t('summary.lifecycle.demoted', { count: tally.demote }));
+    if (tally.update) bits.push(t('summary.lifecycle.revised', { count: tally.update }));
+    if (tally.recovery) bits.push(t('summary.lifecycle.recovery', { count: tally.recovery }));
+    const card = statCard(t('summary.lifecycle'), bits.join(' · '));
     card.style.borderLeft = '3px solid #f0abfc';
     grid.appendChild(card);
   }
@@ -659,27 +1117,27 @@ function renderSummary(run) {
   const withheld = skillEvents.filter((e) => e.op === 'credit-withheld').length;
   if (quarantined || withheld) {
     const bits = [];
-    if (quarantined) bits.push('⛔ ' + quarantined + ' skill(s) en quarantaine');
-    if (withheld) bits.push('⊘ ' + withheld + ' crédit(s) retenu(s)');
-    const card = statCard('Garde-fous', bits.join(' · '));
+    if (quarantined) bits.push(t('summary.guards.quarantined', { count: quarantined }));
+    if (withheld) bits.push(t('summary.guards.withheld', { count: withheld }));
+    const card = statCard(t('summary.guards'), bits.join(' · '));
     card.style.borderLeft = '3px solid #fbbf24';
     grid.appendChild(card);
   }
-  const models = (t.perModel ?? []).map((m) =>
+  const models = (tot.perModel ?? []).map((m) =>
     h('span', { class: 'chip muted' }, `${m.model.replace(/^claude-/, '')}  ·  ${m.calls}×  ·  ${fmtCost(m.costUsd)}`)
   );
   const degradedBanner = run.degraded
     ? h('div', {
         class: 'err-badge',
         style: 'margin-top:8px; background: #3b2a10; border-color: #7a5a1e; color: #fbbf24;',
-      }, '⚠ Run dégradé — la boucle de supervision a escaladé et le parent a pris la main via son fallback. Le livrable n\'est pas un vrai succès du protocole.')
+      }, t('summary.degraded'))
     : null;
   const isLive = !run.endedAt;
   const liveBanner = isLive
     ? h('div', {
         class: 'err-badge',
         style: 'margin-top:8px; background: #0f2a18; border-color: #1e7a3a; color: #4ade80;',
-      }, '● LIVE — le run est encore en cours, cette vue se rafraîchit toutes les ' + (LIVE_POLL_MS / 1000) + ' s.')
+      }, t('summary.live', { seconds: LIVE_POLL_MS / 1000 }))
     : null;
   el.appendChild(h('div', { class: 'summary' }, [
     h('h2', {}, (isLive ? '● ' : '') + run.label),
@@ -689,7 +1147,7 @@ function renderSummary(run) {
     liveBanner,
     run.result ? renderResultBlock(run.result.summary ?? '') : null,
     degradedBanner,
-    run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Erreur : ' + run.error) : null,
+    run.error ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, t('summary.error', { message: run.error })) : null,
   ]));
 }
 
@@ -711,9 +1169,9 @@ function renderSummary(run) {
 function renderResultBlock(summary) {
   const text = String(summary ?? '').trim();
   const wrap = h('div', { class: 'result' });
-  wrap.appendChild(h('h3', {}, 'Résultat'));
+  wrap.appendChild(h('h3', {}, t('result.title')));
   if (!text) {
-    wrap.appendChild(h('div', { class: 'meta' }, '—'));
+    wrap.appendChild(h('div', { class: 'meta' }, t('common.emptyDash')));
     return wrap;
   }
   // Head = the deliverable statement; the rest is the per-phase trace.
@@ -732,19 +1190,19 @@ function renderResultBlock(summary) {
     const m = chunk.match(/^phase\s*#(\d+)\s*\(([^)]*)\)\s*:\s*([\s\S]*)$/);
     const card = h('div', { class: 'phase' });
     if (m) {
-      card.appendChild(h('div', { class: 'phase-head' }, 'PHASE ' + m[1] + ' · ' + m[2]));
+      card.appendChild(h('div', { class: 'phase-head' }, t('result.phase', { n: m[1], atom: m[2] })));
       for (const node of renderEvidenceSplit(m[3], 'phase')) card.appendChild(node);
     } else {
       for (const node of renderEvidenceSplit(chunk, 'phase')) card.appendChild(node);
     }
     body.appendChild(card);
   }
-  const label = phases.length + (phases.length > 1 ? ' phases' : ' phase');
-  const toggle = h('span', { class: 'toggle' }, '▸ détail par phase (' + label + ')');
+  const label = t('result.byPhase', { count: phases.length });
+  const toggle = h('span', { class: 'toggle' }, '▸ ' + label);
   toggle.onclick = () => {
     const open = body.style.display !== 'none';
     body.style.display = open ? 'none' : 'block';
-    toggle.textContent = (open ? '▸' : '▾') + ' détail par phase (' + label + ')';
+    toggle.textContent = (open ? '▸ ' : '▾ ') + label;
   };
   wrap.appendChild(toggle);
   wrap.appendChild(body);
@@ -767,7 +1225,7 @@ function renderEvidenceSplit(chunk, kind) {
   for (const ev of parts) {
     const body = ev.trim();
     if (!body) continue;
-    out.push(h('div', { class: 'evidence-label' }, 'ground truth'));
+    out.push(h('div', { class: 'evidence-label' }, t('result.groundTruth')));
     out.push(h('div', { class: 'evidence' }, softBreakEvidence(body)));
   }
   return out;
@@ -829,7 +1287,7 @@ function renderLanes(run) {
       ) + (state.selectedAtomName === name ? ' selected' : '');
       const title = entry
         ? `${origin} · v${entry.snapshot.version} · ✓${entry.snapshot.successes}/✗${entry.snapshot.failures}`
-        : 'référencé sans snapshot';
+        : t('registry.origin.noSnapshot');
       const children = [name];
       if (entry) children.push(h('span', { class: 'v' }, 'v' + entry.snapshot.version));
       const attrs = { class: cls.trim(), title };
@@ -839,19 +1297,19 @@ function renderLanes(run) {
     });
     return h('div', { class: 'lane l' + tier }, [
       h('h4', {}, title + ` (${items.length})`),
-      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, '— aucun —')),
+      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, t('common.none'))),
     ]);
   };
   wrap.appendChild(h('div', { class: 'lanes' }, [
-    lane(3, 'L3 · cellules'),
-    lane(2, 'L2 · molécules'),
-    lane(1, 'L1 · éléments'),
+    lane(3, t('lanes.l3')),
+    lane(2, t('lanes.l2')),
+    lane(1, t('lanes.l1')),
   ]));
   wrap.appendChild(h('div', { class: 'origin-legend' }, [
-    h('span', {}, [h('span', { class: 'dot new' }), 'créé/branché pendant ce run']),
-    h('span', {}, [h('span', { class: 'dot patched' }), 'patché pendant ce run']),
-    h('span', {}, [h('span', { class: 'dot existing' }), 'préexistant (réutilisé)']),
-    h('span', { class: 'meta' }, '— clique sur un atome pour voir son prompt complet'),
+    h('span', {}, [h('span', { class: 'dot new' }), t('lanes.legend.new')]),
+    h('span', {}, [h('span', { class: 'dot patched' }), t('lanes.legend.patched')]),
+    h('span', {}, [h('span', { class: 'dot existing' }), t('lanes.legend.existing')]),
+    h('span', { class: 'meta' }, t('lanes.legend.hint')),
   ]));
 }
 
@@ -869,13 +1327,13 @@ function renderFilters() {
   const el = $('filters');
   el.innerHTML = '';
   const kinds = [
-    ['all', 'Tous'],
-    ['llm', 'LLM'],
-    ['tool', 'Tools'],
-    ['trust', 'Trust'],
-    ['skill', 'Skills'],
-    ['cache', 'Cache'],
-    ['registry', 'Registry'],
+    ['all', t('filters.all')],
+    ['llm', t('filters.llm')],
+    ['tool', t('filters.tools')],
+    ['trust', t('filters.trust')],
+    ['skill', t('filters.skills')],
+    ['cache', t('filters.cache')],
+    ['registry', t('filters.registry')],
   ];
   for (const [k, lbl] of kinds) {
     el.appendChild(h('span', {
@@ -886,7 +1344,7 @@ function renderFilters() {
   const sep = h('span', { class: 'chip muted', style: 'pointer-events: none; background: transparent; border: none;' }, '·');
   el.appendChild(sep);
   const roles = [
-    ['all', 'Tous rôles'],
+    ['all', t('filters.allRoles')],
     ['plan', 'plan'],
     ['execute', 'execute'],
     ['validate-plan', 'validate plan'],
@@ -916,12 +1374,12 @@ function renderFilters() {
       el.appendChild(h('span', {
         class: 'chip' + (state.filters.branchId === 'all' || !state.filters.branchId ? ' active' : ''),
         onclick: () => { state.filters.branchId = 'all'; renderFilters(); renderEvents({ rebuild: true }); },
-      }, 'all branches'));
+      }, t('filters.allBranches')));
       for (const b of branchIds) {
         el.appendChild(h('span', {
           class: 'chip' + (state.filters.branchId === b ? ' active' : ''),
           onclick: () => { state.filters.branchId = b; renderFilters(); renderEvents({ rebuild: true }); },
-          title: 'branch ' + b,
+          title: t('filters.branch', { id: b }),
         }, '⑂' + b.slice(0, 6)));
       }
     }
@@ -989,7 +1447,7 @@ function renderEvents(opts) {
   if (ordered.length === 0) {
     desired.push({
       key: 'empty',
-      node: h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'),
+      node: h('div', { class: 'empty' }, t('filters.noMatch')),
       fresh: true,
     });
   }
@@ -1127,23 +1585,23 @@ function outcomeChips(ev) {
     // a "low" reuse is rewritten to escalate upstream, so seeing the
     // label explains why an apparently-matching catalog still escalated.
     if (payload.kind === 'reuse' && typeof payload.target === 'string') {
-      chips.push(outcomeChip('→ réutilise ' + payload.target, 'var(--ok)', payload.reasoning || ''));
+      chips.push(outcomeChip(t('outcome.reuse', { target: payload.target }), 'var(--ok)', payload.reasoning || ''));
       if (payload.confidence && payload.confidence !== 'high') {
-        chips.push(outcomeChip('(confiance ' + payload.confidence + ')', '#fbbf24'));
+        chips.push(outcomeChip(t('outcome.confidence', { level: payload.confidence }), '#fbbf24'));
       }
     } else if (payload.kind === 'escalate') {
-      chips.push(outcomeChip('↑ escalade', '#fbbf24', payload.reasoning || ''));
+      chips.push(outcomeChip(t('outcome.escalate'), '#fbbf24', payload.reasoning || ''));
     }
     return chips;
   }
 
   if (ev.role === 'validate-plan' || ev.role === 'validate-result') {
     if (payload.approved === true) {
-      chips.push(outcomeChip('✓ approuvé', 'var(--ok)', payload.reasoning || ''));
+      chips.push(outcomeChip(t('outcome.approved'), 'var(--ok)', payload.reasoning || ''));
     } else if (payload.approved === false) {
-      chips.push(outcomeChip('✕ rejeté', 'var(--err)', payload.reasoning || ''));
+      chips.push(outcomeChip(t('outcome.rejected'), 'var(--err)', payload.reasoning || ''));
       if (typeof payload.scope === 'string') {
-        chips.push(outcomeChip('scope ' + payload.scope, 'var(--muted)'));
+        chips.push(outcomeChip(t('outcome.scope', { scope: payload.scope }), 'var(--muted)'));
       }
     }
     // ADHERENCE (usage-conditioned skill credit): the validator reports
@@ -1151,11 +1609,9 @@ function outcomeChips(ev) {
     // what withholds the skill's counter bump, so it belongs on the card
     // — otherwise the only visible trace is a counter that didn't move.
     if (payload.activeSkillFollowed === false) {
-      chips.push(outcomeChip('recette ignorée → crédit retenu', '#fbbf24',
-        'Le validateur a observé que le run n\'a pas suivi la skill injectée : ses compteurs ne bougent pas.'));
+      chips.push(outcomeChip(t('outcome.recipeIgnored'), '#fbbf24', t('outcome.recipeIgnored.title')));
     } else if (payload.activeSkillFollowed === true) {
-      chips.push(outcomeChip('recette suivie', 'var(--muted)',
-        'La skill injectée a bien piloté le run — ses compteurs sont crédités.'));
+      chips.push(outcomeChip(t('outcome.recipeFollowed'), 'var(--muted)', t('outcome.recipeFollowed.title')));
     }
   }
   return chips;
@@ -1170,7 +1626,7 @@ function runMarkerCard(accentColor, cells) {
 function renderRunStartMarker(run) {
   return runMarkerCard('var(--accent)', [
     h('span', { class: 'when' }, fmtTime(Date.parse(run.startedAt))),
-    h('span', {}, '▶ Début du run'),
+    h('span', {}, t('marker.start')),
     run.task?.description
       ? h('span', { class: 'meta' },
           run.task.description.length > 120
@@ -1193,23 +1649,23 @@ function renderRunEndMarker(run, isLive) {
     const last = evs.length ? Math.max(...evs.map((e) => e.ts ?? 0)) : Date.parse(run.startedAt);
     return runMarkerCard('var(--err)', [
       h('span', { class: 'when' }, fmtTime(last)),
-      h('span', {}, '⚠ Run abandonné'),
-      h('span', { class: 'meta' }, 'aucune activité depuis la dernière trace — pas de fin enregistrée'),
+      h('span', {}, t('marker.abandoned')),
+      h('span', { class: 'meta' }, t('marker.abandoned.hint')),
     ]);
   }
   const when = h('span', { class: 'when' }, fmtTime(Date.parse(run.endedAt)));
-  const dur = h('span', { class: 'meta' }, 'durée ' + fmtMs(run.durationMs));
+  const dur = h('span', { class: 'meta' }, t('common.duration', { value: fmtMs(run.durationMs) }));
   if (run.cancelled) {
-    return runMarkerCard('var(--err)', [when, h('span', {}, '✕ Run annulé (interruption utilisateur)'), dur]);
+    return runMarkerCard('var(--err)', [when, h('span', {}, t('marker.cancelled')), dur]);
   }
   if (run.error) {
-    return runMarkerCard('var(--err)', [when, h('span', {}, '✕ Fin du run — erreur'), dur,
+    return runMarkerCard('var(--err)', [when, h('span', {}, t('marker.error')), dur,
       h('span', { class: 'meta' }, String(run.error).slice(0, 120))]);
   }
   if (run.degraded) {
-    return runMarkerCard('#fbbf24', [when, h('span', {}, '⚠ Fin du run — dégradé (livré via fallback)'), dur]);
+    return runMarkerCard('#fbbf24', [when, h('span', {}, t('marker.degraded')), dur]);
   }
-  return runMarkerCard('var(--ok)', [when, h('span', {}, '■ Fin du run'), dur]);
+  return runMarkerCard('var(--ok)', [when, h('span', {}, t('marker.end')), dur]);
 }
 
 /**
@@ -1248,7 +1704,7 @@ function renderNowBanner(run, completedIds, isLive) {
   const wrap = h('div', { class: 'section', style: 'border-left: 3px solid var(--accent); margin-bottom: 8px;' });
   wrap.appendChild(h('h3', {}, [
     h('span', { class: 'live-dot' }, '●'),
-    h('span', {}, ' En ce moment'),
+    h('span', {}, ' ' + t('now.title')),
   ]));
   for (const s of inFlight) {
     const secs = Math.max(0, Math.round((Date.now() - s.ts) / 1000));
@@ -1262,7 +1718,7 @@ function renderNowBanner(run, completedIds, isLive) {
     }
     row.push(h('span', { class: 'meta' }, s.model));
     row.push(h('span', { class: 'meta', style: secs > 120 ? 'color: var(--err); font-weight: 600;' : '' },
-      '⏱ ' + secs + 's' + (secs > 120 ? ' — anormalement long ?' : '')));
+      t('now.elapsed', { seconds: secs }) + (secs > 120 ? t('now.tooLong') : '')));
     if (s.branchId) row.push(branchChip(s.branchId));
     wrap.appendChild(h('div', { class: 'event', style: 'cursor: default;' }, [h('div', { class: 'row' }, row)]));
   }
@@ -1274,7 +1730,7 @@ function branchChip(branchId) {
   // a handful of parallel branches without cluttering the timeline.
   return h('span', {
     class: 'branch-chip',
-    title: 'fan-out branch ' + branchId,
+    title: t('filters.fanoutBranch', { id: branchId }),
   }, '⑂' + branchId.slice(0, 6));
 }
 
@@ -1288,7 +1744,7 @@ function renderEventCard(ev) {
     const row = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),
       h('span', { class: 'role ' + ev.role }, labelRole(ev.role)),
-      h('span', { class: 'meta', style: 'color: var(--err); font-weight: 600;' }, '✕ interrompu — jamais terminé'),
+      h('span', { class: 'meta', style: 'color: var(--err); font-weight: 600;' }, t('event.interrupted')),
     ];
     if (ev.actor) row.splice(2, 0, atomRef(ev.actor));
     row.push(h('span', { class: 'meta' }, ev.model));
@@ -1312,7 +1768,7 @@ function renderEventCard(ev) {
     // recorded response, so every already-archived run gains them too.
     for (const chip of outcomeChips(ev)) row.push(chip);
     if (ev.branchId) row.push(branchChip(ev.branchId));
-    if (ev.error) row.push(h('span', { class: 'err-badge' }, 'erreur'));
+    if (ev.error) row.push(h('span', { class: 'err-badge' }, t('event.error')));
 
     // Line 1 = WHAT happened (role, atoms, decision). Line 2 = what it
     // COST (model, price, tokens, timing). They used to share one flex
@@ -1372,7 +1828,7 @@ function renderEventCard(ev) {
       onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
     }, [
       h('div', { class: 'row' }, trow),
-      h('div', { class: 'meta', style: 'margin-top:4px;' }, 'fast-path (no LLM call)'),
+      h('div', { class: 'meta', style: 'margin-top:4px;' }, t('event.trust.fastPath')),
     ]);
   }
   if (ev.kind === 'cache') {
@@ -1383,15 +1839,15 @@ function renderEventCard(ev) {
     // "free because compiled".
     const crow = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),
-      h('span', { class: 'role cache' }, '⚡ cache'),
+      h('span', { class: 'role cache' }, t('event.cache.label')),
     ];
     if (ev.actor) crow.push(atomRef(ev.actor));
     crow.push(h('span', { class: 'meta' }, 'prefilter'));
     crow.push(h('span', {
       style: 'font-weight:600; color:' + (/^reuse/.test(ev.outcome) ? 'var(--ok)' : '#fbbf24') + ';',
-    }, /^reuse /.test(ev.outcome) ? '→ réutilise ' + ev.outcome.slice(6) : '↑ escalade'));
+    }, /^reuse /.test(ev.outcome) ? t('outcome.reuse', { target: ev.outcome.slice(6) }) : t('outcome.escalate')));
     if (ev.branchId) crow.push(branchChip(ev.branchId));
-    crow.push(h('span', { style: 'color:#67e8f9; font-weight:700;' }, '0 appel · $0.00'));
+    crow.push(h('span', { style: 'color:#67e8f9; font-weight:700;' }, t('event.cache.free')));
     return h('div', {
       class: 'event' + selected,
       style: 'border-left: 3px solid #22d3ee; background: rgba(34, 211, 238, 0.06);',
@@ -1401,7 +1857,7 @@ function renderEventCard(ev) {
       // Same two-line shape as a real call card: line 2 carries the cost
       // facts — here, the model whose call was SKIPPED.
       h('div', { class: 'meta cost-line' },
-        shortModel(ev.model) + '  ·  appel évité'
+        shortModel(ev.model) + '  ·  ' + t('event.cache.skipped')
         + (ev.reasoning ? '  ·  ' + ev.reasoning : '')),
     ]);
   }
@@ -1418,13 +1874,13 @@ function renderEventCard(ev) {
     const isEventRecovery = ev.op === 'inject' && /^event-trigger/.test(ev.reasoning ?? '');
     const isBlocked = ev.op === 'quarantine' || ev.op === 'credit-withheld';
     const label = isDirect
-      ? '⚡ direct'
+      ? t('event.skill.direct')
       : isEventRecovery
-        ? '⟳ recovery'
+        ? t('event.skill.recovery')
         : ev.op === 'quarantine'
-          ? '⛔ quarantaine'
+          ? t('event.skill.quarantine')
           : ev.op === 'credit-withheld'
-            ? '⊘ crédit retenu'
+            ? t('event.skill.creditWithheld')
             : ev.op;
     const srow = [
       h('span', { class: 'when' }, fmtTime(ev.ts)),
@@ -1436,7 +1892,7 @@ function renderEventCard(ev) {
     if (isDirect) {
       srow.push(h('span', {
         style: 'color: #ffd700; font-weight: 700;',
-      }, '0 appel LLM · $0.00'));
+      }, t('event.skill.zeroLlm')));
     }
     if (isEventRecovery) {
       // Surface the containment score the mechanical matcher computed —
@@ -1444,7 +1900,7 @@ function renderEventCard(ev) {
       // questionable match is the first thing to look at.
       const m = (ev.reasoning ?? '').match(/^event-trigger \(([\d.]+)\)/);
       srow.push(h('span', { class: 'meta', style: 'color:#7dd3fc; font-weight:600;' },
-        'déclenchée mid-run' + (m ? ' · score ' + m[1] : '')));
+        t('event.skill.triggeredMidRun') + (m ? t('event.skill.score', { score: m[1] }) : '')));
     }
     if (ev.branchId) srow.push(branchChip(ev.branchId));
     const accent = isDirect
@@ -1526,42 +1982,38 @@ function renderDetail(ev) {
 }
 
 function renderCacheDetail(el, ev) {
-  el.appendChild(h('h2', {}, 'Décision de routage servie par le cache'));
+  el.appendChild(h('h2', {}, t('detail.cache.title')));
   el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' },
-    [ev.actor ? 'par ' + ev.actor.name : null, 'modèle évité : ' + ev.model]
+    [ev.actor ? t('detail.by', { name: ev.actor.name }) : null, t('detail.cache.avoidedModel', { model: ev.model })]
       .filter(Boolean).join('  ·  ')));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, 'Décision'),
+    h('h3', {}, t('detail.cache.decision')),
     h('div', { style: 'font-weight:600;' }, ev.outcome),
-    h('h3', { style: 'margin-top:10px;' }, 'Raisonnement (de la décision d\'origine)'),
+    h('h3', { style: 'margin-top:10px;' }, t('detail.cache.reasoning')),
     h('div', { style: 'white-space:pre-wrap;' }, ev.reasoning || '—'),
   ]));
   el.appendChild(h('div', { class: 'section', style: 'margin-top:8px;' }, [
-    h('div', { class: 'meta' },
-      'Le prefilter tourne à température 0 avec un prompt constant : pour des '
-      + 'entrées identiques (tâche × catalogue × exclusions × modèle) la décision '
-      + 'est une fonction pure, donc rejouée depuis le disque. Zéro token, zéro '
-      + 'latence — et sous claude-cli, zéro sous-processus.'),
+    h('div', { class: 'meta' }, t('detail.cache.explain')),
   ]));
 }
 
 function renderSkillEventDetail(el, ev) {
   const opLabel = {
-    match: 'Skill match (Haiku skill-prefilter)',
-    inject: 'Skill body injecté dans le prompt L1',
-    learn: 'Skill auto-distillée (Sonnet)',
-    update: 'Skill body révisé après échec (Sonnet)',
-    success: 'Compteur succès incrémenté',
-    failure: 'Compteur échec incrémenté',
-    promote: 'Skill promue llm → script (compile Sonnet)',
-    demote: 'Skill rétrogradée script → llm (fallback restauré)',
-    direct: 'Script exécuté en dispatch déterministe (0 appel LLM)',
-    quarantine: 'Skill mise en QUARANTAINE par le scan statique',
-    'credit-withheld': 'Compteurs NON modifiés (recette non suivie)',
+    match: t('skillOp.match'),
+    inject: t('skillOp.inject'),
+    learn: t('skillOp.learn'),
+    update: t('skillOp.update'),
+    success: t('skillOp.success'),
+    failure: t('skillOp.failure'),
+    promote: t('skillOp.promote'),
+    demote: t('skillOp.demote'),
+    direct: t('skillOp.direct'),
+    quarantine: t('skillOp.quarantine'),
+    'credit-withheld': t('skillOp.creditWithheld'),
   }[ev.op] ?? ev.op;
   el.appendChild(h('h2', {}, opLabel));
   const sub = [];
-  if (ev.actor) sub.push('par ' + (ev.actor.name ?? '?'));
+  if (ev.actor) sub.push(t('detail.by', { name: ev.actor.name ?? '?' }));
   sub.push(ev.l1Name + ' / ' + ev.skillId);
   el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' }, sub.join('  ·  ')));
   if (ev.reasoning) {
@@ -1579,7 +2031,7 @@ function renderSkillEventDetail(el, ev) {
       // Defer until skills are loaded.
       setTimeout(() => selectSkill(ev.l1Name, ev.skillId), 0);
     },
-  }, '→ ouvrir la skill complète');
+  }, t('registry.openSkill'));
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, 'Lien'),
     open,
@@ -1635,10 +2087,10 @@ function renderAtomDetail(entry) {
   el.innerHTML = '';
   const s = entry.snapshot;
   const originLabel = {
-    created: 'créé pendant ce run',
-    branched: 'branché pendant ce run',
-    patched: 'patché pendant ce run',
-    existing: 'préexistant (réutilisé tel quel)',
+    created: t('registry.origin.created'),
+    branched: t('registry.origin.branched'),
+    patched: t('registry.origin.patched'),
+    existing: t('registry.origin.existing'),
   }[entry.origin] ?? entry.origin;
 
   el.appendChild(h('div', { class: 'section' }, [
@@ -1647,8 +2099,8 @@ function renderAtomDetail(entry) {
       h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(s.tier), ' ', h('span', { class: 'meta' }, `#${s.ordinal}`)]),
       h('div', { class: 'k' }, 'Version'), h('div', { class: 'v' }, 'v' + s.version),
       h('div', { class: 'k' }, 'Origine'), h('div', { class: 'v' }, originLabel),
-      h('div', { class: 'k' }, 'Créé par'), h('div', { class: 'v' }, `${s.createdBy}  ·  ${s.createdAt}`),
-      h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
+      h('div', { class: 'k' }, t('registry.createdBy')), h('div', { class: 'v' }, `${s.createdBy}  ·  ${s.createdAt}`),
+      h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
       h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(s.params)),
       h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
         (s.tools && s.tools.length)
@@ -1704,11 +2156,11 @@ function renderLlmDetail(el, ev) {
       ...(ev.actor ? [h('div', { class: 'k' }, 'Acteur'), h('div', { class: 'v' }, [atomRef(ev.actor)])] : []),
       ...(ev.child ? [h('div', { class: 'k' }, 'Enfant'), h('div', { class: 'v' }, [atomRef(ev.child)])] : []),
       ...(ev.subject ? [h('div', { class: 'k' }, 'Sujet'), h('div', { class: 'v' }, ev.subject)] : []),
-      h('div', { class: 'k' }, 'Modèle'), h('div', { class: 'v' }, ev.model),
-      h('div', { class: 'k' }, 'Durée'), h('div', { class: 'v' }, fmtMs(ev.durationMs)),
+      h('div', { class: 'k' }, t('registry.model')), h('div', { class: 'v' }, ev.model),
+      h('div', { class: 'k' }, t('summary.duration')), h('div', { class: 'v' }, fmtMs(ev.durationMs)),
       h('div', { class: 'k' }, 'Tokens'), h('div', { class: 'v' },
         `in=${ev.usage.inputTokens}  out=${ev.usage.outputTokens}  cacheRead=${ev.usage.cacheReadInputTokens}  cacheCreate=${ev.usage.cacheCreationInputTokens}`),
-      h('div', { class: 'k' }, 'Coût'), h('div', { class: 'v' }, fmtCost(ev.costUsd)),
+      h('div', { class: 'k' }, t('summary.cost')), h('div', { class: 'v' }, fmtCost(ev.costUsd)),
       h('div', { class: 'k' }, 'Stop reason'), h('div', { class: 'v' }, ev.stopReason ?? '—'),
       ...(ev.error ? [h('div', { class: 'k' }, 'Erreur'), h('div', { class: 'v' }, ev.error)] : []),
     ]),
@@ -1721,7 +2173,7 @@ function renderLlmDetail(el, ev) {
   const entries = [
     ['System prompt', ev.systemPrompt, 'raw'],
     ['User content', ev.userContent, 'raw'],
-    ['Response', ev.response || (ev.error ? '(aucune réponse — appel en erreur)' : ''), 'response'],
+    ['Response', ev.response || (ev.error ? t('detail.noResponse') : ''), 'response'],
   ];
   const renderTab = (txt, kind) => {
     body.innerHTML = '';
@@ -1750,7 +2202,7 @@ function renderLlmDetail(el, ev) {
     tabs.appendChild(tab);
   });
   renderTab(entries[initial][1], entries[initial][2]);
-  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Prompts & réponse'), tabs, body]));
+  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, t('detail.prompts')), tabs, body]));
 }
 
 /**
@@ -1900,8 +2352,8 @@ function renderRegistryDetail(el, ev) {
       h('div', { class: 'kv' }, [
         h('div', { class: 'k' }, 'Description'), h('div', { class: 'v' }, ev.snapshot.description),
         h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(ev.snapshot.params)),
-        h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `${ev.snapshot.successes} / ${ev.snapshot.failures}`),
-        h('div', { class: 'k' }, 'Créé le'), h('div', { class: 'v' }, ev.snapshot.createdAt),
+        h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `${ev.snapshot.successes} / ${ev.snapshot.failures}`),
+        h('div', { class: 'k' }, t('registry.createdAt')), h('div', { class: 'v' }, ev.snapshot.createdAt),
       ]),
       h('h3', { style: 'margin-top:12px;' }, 'System prompt'),
       h('pre', {}, ev.snapshot.systemPrompt),
@@ -1948,12 +2400,12 @@ function switchView(v) {
   $('registrySearch').style.display = isReg ? '' : 'none';
   $('skillsSearch').style.display = isSkills ? '' : 'none';
   const emptyMsg = isRuns
-    ? 'Sélectionne un évènement à gauche pour en voir le détail.'
+    ? t('pane.selectEvent')
     : isReg
-      ? 'Sélectionne un atome à gauche pour en voir le détail.'
+      ? t('pane.selectAtom')
       : isBurnin
-        ? 'Clique une ligne du tableau pour ouvrir la trace du run correspondant.'
-        : 'Sélectionne une skill à gauche pour en voir le détail.';
+        ? t('pane.selectBurnin')
+        : t('pane.selectSkill');
   $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
   if (isReg && state.registries.length === 0) loadRegistries();
   if (isSkills && state.skillNamespaces.length === 0) loadSkills();
@@ -2013,7 +2465,7 @@ function renderBurninSummary(rows) {
     wrap.appendChild(h('div', { class: 'section', style: 'flex:1; min-width:150px; border-left: 3px solid ' + color + '; padding:8px 10px;' }, [
       h('div', { style: 'font-weight:600; color:' + color + ';' }, fam),
       h('div', { class: 'muted', style: 'font-size:11px;' },
-        f.ok + '/' + f.n + ' livrés · ' + f.det + ' phases $0.00 · ' + f.learned + ' skills appris'),
+        t('burnin.delivered', { count: f.ok + '/' + f.n }) + f.det + ' $0.00 phases · ' + f.learned + ' skills learned'),
       h('div', { style: 'font-size:18px; margin-top:2px;' },
         (mean != null ? '$' + mean.toFixed(3) : '—') +
         (f.lastCost != null ? ' ' : '')),
@@ -2055,7 +2507,7 @@ function renderBurninChart(rows) {
         : '<circle cx="' + px + '" cy="' + py + '" r="3.5" fill="' + color + '"><title>' + r.taskId + ' — $' + r.costUsd + (r.deterministicPhases ? ' · ' + r.deterministicPhases + ' phases $0' : '') + '</title></circle>';
     }
   }
-  svg += '<text x="' + (W - PAD) + '" y="' + (H - 6) + '" font-size="9" text-anchor="end" fill="currentColor" fill-opacity="0.5">runs (ordre chronologique = expérience) →</text>';
+  svg += '<text x="' + (W - PAD) + '" y="' + (H - 6) + '" font-size="9" text-anchor="end" fill="currentColor" fill-opacity="0.5">' + t('burnin.runsAxis') + '</text>';
   svg += '</svg>';
   $('burninChart').innerHTML = '<div class="section">' + svg + '</div>';
 }
@@ -2097,7 +2549,7 @@ function renderBurninRows(rows) {
     ])]);
     list.appendChild(line);
   }
-  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, 'Runs (récent → ancien)'), list]));
+  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, t('runs.picker')), list]));
 }
 
 async function loadSkills() {
@@ -2107,7 +2559,7 @@ async function loadSkills() {
   try {
     r = await fetch('/api/skills');
   } catch {
-    $('skillsLanes').innerHTML = '<div class="empty">Erreur réseau.</div>';
+    $('skillsLanes').innerHTML = '<div class="empty">' + t('common.networkError') + '</div>';
     return;
   }
   if (!r.ok) {
@@ -2146,16 +2598,16 @@ function renderSkillsSummary() {
   const grid = h('div', { class: 'grid' }, [
     statCard('Namespaces L1', String(state.skillNamespaces.length)),
     statCard('Skills · total', String(total)),
-    statCard('Total succès', String(totalSucc)),
-    statCard('Total échecs', String(totalFail)),
+    statCard(t('skills.totalSuccess'), String(totalSucc)),
+    statCard(t('skills.totalFailure'), String(totalFail)),
   ]);
   el.appendChild(h('div', { class: 'summary' }, [
     h('h2', {}, 'Skills'),
     h('div', { class: 'task', style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px;' },
-      'Recettes persistées sous chaque L1 — match Haiku, injection au plan, compteurs de confiance.'),
+      t('skills.subtitle')),
     grid,
     state.skillNamespaces.length === 0
-      ? h('div', { class: 'meta', style: 'margin-top:8px;' }, 'Aucune skill enregistrée. Définis ATOMA_SKILLS_DIR ou lance un run avec ATOMA_SKILL_LEARN=1.')
+      ? h('div', { class: 'meta', style: 'margin-top:8px;' }, t('skills.none'))
       : null,
   ]));
 }
@@ -2164,7 +2616,7 @@ function renderSkillsLanes() {
   const el = $('skillsLanes');
   el.innerHTML = '';
   if (state.skillNamespaces.length === 0) {
-    el.appendChild(h('div', { class: 'empty' }, 'Aucune skill — la prochaine run avec auto-distillation en créera.'));
+    el.appendChild(h('div', { class: 'empty' }, t('skills.noneYet')));
     return;
   }
   const q = state.skillsFilter.trim();
@@ -2204,7 +2656,7 @@ function renderSkillsLanes() {
   }
   el.appendChild(lanes);
   el.appendChild(h('div', { class: 'origin-legend', style: 'margin-top:8px;' }, [
-    h('span', { class: 'meta' }, '— clique sur une skill pour voir son corps complet'),
+    h('span', { class: 'meta' }, t('skills.legendHint')),
   ]));
 }
 
@@ -2218,7 +2670,7 @@ async function selectSkill(l1Name, id) {
   try {
     r = await fetch('/api/skills/' + encodeURIComponent(l1Name) + '/' + encodeURIComponent(id));
   } catch {
-    $('rightPane').innerHTML = '<div class="empty">Erreur réseau.</div>';
+    $('rightPane').innerHTML = '<div class="empty">' + t('common.networkError') + '</div>';
     return;
   }
   if (!r.ok) {
@@ -2240,7 +2692,7 @@ function renderSkillDetail(s, l1Name) {
       h('div', { class: 'k' }, 'Description'), h('div', { class: 'v' }, s.description),
       h('div', { class: 'k' }, 'When to use'), h('div', { class: 'v' }, s.whenToUse),
       h('div', { class: 'k' }, 'Compteurs'), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
-      h('div', { class: 'k' }, 'Mis à jour'), h('div', { class: 'v' }, s.updatedAt),
+      h('div', { class: 'k' }, t('registry.updatedAt')), h('div', { class: 'v' }, s.updatedAt),
     ]),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
@@ -2255,9 +2707,9 @@ async function loadRegistries() {
   const sel = $('registrySelect');
   sel.innerHTML = '';
   if (state.registries.length === 0) {
-    sel.appendChild(h('option', {}, 'Aucun registre configuré'));
+    sel.appendChild(h('option', {}, t('registry.none')));
     $('registrySummary').innerHTML = '';
-    $('registryLanes').innerHTML = '<div class="empty">Aucune base SQLite trouvée. Lance le serveur avec `--db path/to/atoma.db`.</div>';
+    $('registryLanes').innerHTML = '<div class="empty">' + t('registry.noneFound') + '</div>';
     return;
   }
   for (const reg of state.registries) {
@@ -2272,7 +2724,7 @@ async function loadRegistries() {
 async function selectRegistry(id) {
   $('registrySelect').value = id;
   $('registryLanes').innerHTML = '<div class="loader">Chargement…</div>';
-  $('rightPane').innerHTML = '<div class="empty">Sélectionne un atome à gauche pour en voir le détail.</div>';
+  $('rightPane').innerHTML = '<div class="empty">' + t('pane.selectAtom') + '</div>';
   const r = await fetch('/api/registry/' + encodeURIComponent(id));
   if (!r.ok) {
     $('registryLanes').innerHTML = '<div class="empty">Registre introuvable.</div>';
@@ -2290,20 +2742,20 @@ function renderRegistrySummary() {
   const reg = state.currentRegistry;
   if (!reg) return;
   const { registry, types } = reg;
-  const totalSuccess = types.reduce((n, t) => n + (t.successes ?? 0), 0);
-  const totalFailure = types.reduce((n, t) => n + (t.failures ?? 0), 0);
+  const totalSuccess = types.reduce((n, ty) => n + (ty.successes ?? 0), 0);
+  const totalFailure = types.reduce((n, ty) => n + (ty.failures ?? 0), 0);
   const grid = h('div', { class: 'grid' }, [
-    statCard('L1 · éléments', String(registry.counts[1] ?? 0)),
-    statCard('L2 · molécules', String(registry.counts[2] ?? 0)),
+    statCard(t('lanes.l1'), String(registry.counts[1] ?? 0)),
+    statCard(t('lanes.l2'), String(registry.counts[2] ?? 0)),
     statCard('L3 · cellules', String(registry.counts[3] ?? 0)),
-    statCard('Total succès', String(totalSuccess)),
-    statCard('Total échecs', String(totalFailure)),
+    statCard(t('skills.totalSuccess'), String(totalSuccess)),
+    statCard(t('skills.totalFailure'), String(totalFailure)),
   ]);
   el.appendChild(h('div', { class: 'summary' }, [
     h('h2', {}, `Registry — ${registry.label}`),
     h('div', { class: 'task', style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px;' }, registry.path),
     grid,
-    !registry.exists ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, 'Fichier absent — aucune donnée à afficher') : null,
+    !registry.exists ? h('div', { class: 'err-badge', style: 'margin-top:8px;' }, t('registry.missingFile')) : null,
   ]));
 }
 
@@ -2313,88 +2765,88 @@ function renderRegistryLanes() {
   if (!state.currentRegistry) return;
   const types = state.currentRegistry.types;
   const q = state.registryFilter.trim();
-  const match = (t) =>
+  const match = (ty) =>
     !q ||
-    t.name.toLowerCase().includes(q) ||
-    t.description.toLowerCase().includes(q) ||
-    t.systemPrompt.toLowerCase().includes(q);
+    ty.name.toLowerCase().includes(q) ||
+    ty.description.toLowerCase().includes(q) ||
+    ty.systemPrompt.toLowerCase().includes(q);
   const byTier = { 1: [], 2: [], 3: [] };
-  for (const t of types) if (match(t)) byTier[t.tier].push(t);
+  for (const ty of types) if (match(ty)) byTier[ty.tier].push(ty);
 
   const lane = (tier, title) => {
     const items = byTier[tier];
-    const chips = items.map((t) => {
-      const cls = 'chip atom' + (state.selectedRegistryAtom === t.name ? ' selected' : '');
-      const ratio = t.successes + t.failures > 0
-        ? ` · ✓${t.successes}/✗${t.failures}`
+    const chips = items.map((ty) => {
+      const cls = 'chip atom' + (state.selectedRegistryAtom === ty.name ? ' selected' : '');
+      const ratio = ty.successes + ty.failures > 0
+        ? ` · ✓${ty.successes}/✗${ty.failures}`
         : '';
-      const title = `v${t.version}${ratio}`;
+      const title = `v${ty.version}${ratio}`;
       return h('span', {
         class: cls,
         title,
-        onclick: () => selectRegistryAtom(t.name),
-      }, [t.name, h('span', { class: 'v' }, 'v' + t.version)]);
+        onclick: () => selectRegistryAtom(ty.name),
+      }, [ty.name, h('span', { class: 'v' }, 'v' + ty.version)]);
     });
     return h('div', { class: 'lane l' + tier }, [
       h('h4', {}, title + ` (${items.length})`),
-      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, q ? '— aucun atome ne correspond —' : '— aucun —')),
+      h('div', {}, items.length ? chips : h('span', { class: 'meta' }, q ? t('registry.noAtomMatch') : t('common.none'))),
     ]);
   };
   el.appendChild(h('div', { class: 'lanes' }, [
-    lane(3, 'L3 · cellules'),
-    lane(2, 'L2 · molécules'),
-    lane(1, 'L1 · éléments'),
+    lane(3, t('lanes.l3')),
+    lane(2, t('lanes.l2')),
+    lane(1, t('lanes.l1')),
   ]));
   el.appendChild(h('div', { class: 'origin-legend' }, [
-    h('span', { class: 'meta' }, '— clique sur un atome pour voir son prompt complet + l\'historique des versions'),
+    h('span', { class: 'meta' }, t('registry.legendHint')),
   ]));
 }
 
 function selectRegistryAtom(name) {
   if (!state.currentRegistry) return;
-  const t = state.currentRegistry.types.find((x) => x.name === name);
-  if (!t) return;
+  const type = state.currentRegistry.types.find((x) => x.name === name);
+  if (!type) return;
   state.selectedRegistryAtom = name;
   renderRegistryLanes();
-  renderRegistryAtomDetail(t);
+  renderRegistryAtomDetail(type);
 }
 
-function renderRegistryAtomDetail(t) {
+function renderRegistryAtomDetail(type) {
   const el = $('rightPane');
   el.innerHTML = '';
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `Atome — ${t.name}`),
+    h('h3', {}, `Atome — ${type.name}`),
     h('div', { class: 'kv' }, [
-      h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(t.tier), ' ', h('span', { class: 'meta' }, `#${t.ordinal}`)]),
-      h('div', { class: 'k' }, 'Version actuelle'), h('div', { class: 'v' }, 'v' + t.version),
-      h('div', { class: 'k' }, 'Créé par'), h('div', { class: 'v' }, `${t.createdBy}  ·  ${t.createdAt}`),
-      h('div', { class: 'k' }, 'Succès / échecs'), h('div', { class: 'v' }, `✓ ${t.successes}  ·  ✗ ${t.failures}`),
-      h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(t.params)),
+      h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(type.tier), ' ', h('span', { class: 'meta' }, `#${type.ordinal}`)]),
+      h('div', { class: 'k' }, 'Version actuelle'), h('div', { class: 'v' }, 'v' + type.version),
+      h('div', { class: 'k' }, t('registry.createdBy')), h('div', { class: 'v' }, `${type.createdBy}  ·  ${type.createdAt}`),
+      h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `✓ ${type.successes}  ·  ✗ ${type.failures}`),
+      h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(type.params)),
       h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
-        (t.tools && t.tools.length)
-          ? h('div', { class: 'tools-list' }, t.tools.map((n) => h('span', { class: 'chip muted' }, n)))
+        (type.tools && type.tools.length)
+          ? h('div', { class: 'tools-list' }, type.tools.map((n) => h('span', { class: 'chip muted' }, n)))
           : h('span', { class: 'meta' }, '— aucun —')),
     ]),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, 'Description'),
-    h('pre', {}, t.description || '(vide)'),
+    h('pre', {}, type.description || '(vide)'),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `System prompt (v${t.version} · courant)`),
-    h('pre', {}, t.systemPrompt || '(vide)'),
+    h('h3', {}, `System prompt (v${type.version} · courant)`),
+    h('pre', {}, type.systemPrompt || '(vide)'),
   ]));
 
-  if (t.history && t.history.length > 0) {
+  if (type.history && type.history.length > 0) {
     const section = h('div', { class: 'section' }, [
-      h('h3', {}, `Historique des versions (${t.history.length} archivée${t.history.length > 1 ? 's' : ''})`),
+      h('h3', {}, t('registry.versionHistory', { count: type.history.length })),
     ]);
     // Render each archived version as a collapsible block (newest first).
-    const entries = t.history.slice().sort((a, b) => b.version - a.version);
+    const entries = type.history.slice().sort((a, b) => b.version - a.version);
     for (const h_ of entries) {
       const body = h('div', { style: 'display:none; margin-top:8px;' }, [
         h('div', { class: 'kv' }, [
-          h('div', { class: 'k' }, 'Modifié par'), h('div', { class: 'v' }, `${h_.modifiedBy}  ·  ${h_.modifiedAt}`),
+          h('div', { class: 'k' }, t('registry.updatedBy')), h('div', { class: 'v' }, `${h_.modifiedBy}  ·  ${h_.modifiedAt}`),
           h('div', { class: 'k' }, 'Raison'), h('div', { class: 'v' }, h_.reason ?? '—'),
           h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(h_.params)),
           h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
@@ -2426,13 +2878,13 @@ function renderRegistryAtomDetail(t) {
   // L1-only: surface the persisted skills attached to this atom-type.
   // Mirrors the Skills tab UI but inline, so users can jump from a
   // registry deep-dive straight to the recipes that augment this L1.
-  if (t.tier === 1) {
+  if (type.tier === 1) {
     const skillsSection = h('div', { class: 'section' }, [
-      h('h3', {}, 'Skills attachées'),
+      h('h3', {}, t('registry.attachedSkills')),
       h('div', { class: 'meta', style: 'margin-bottom:6px;' }, 'Chargement…'),
     ]);
     el.appendChild(skillsSection);
-    fetchAndRenderL1Skills(t.name, skillsSection);
+    fetchAndRenderL1Skills(type.name, skillsSection);
   }
 }
 
@@ -2442,22 +2894,22 @@ async function fetchAndRenderL1Skills(l1Name, section) {
     r = await fetch('/api/skills/' + encodeURIComponent(l1Name));
   } catch {
     section.innerHTML = '';
-    section.appendChild(h('h3', {}, 'Skills attachées'));
-    section.appendChild(h('div', { class: 'meta' }, 'Erreur réseau.'));
+    section.appendChild(h('h3', {}, t('registry.attachedSkills')));
+    section.appendChild(h('div', { class: 'meta' }, t('common.networkError')));
     return;
   }
   // 400/500 -> show error, but a 404 means "no skills for this L1".
   if (!r.ok) {
     section.innerHTML = '';
-    section.appendChild(h('h3', {}, 'Skills attachées'));
+    section.appendChild(h('h3', {}, t('registry.attachedSkills')));
     section.appendChild(h('div', { class: 'meta' }, '— aucune —'));
     return;
   }
   const skills = await r.json();
   section.innerHTML = '';
-  section.appendChild(h('h3', {}, `Skills attachées (${skills.length})`));
+  section.appendChild(h('h3', {}, t('registry.attachedSkills') + ` (${skills.length})`));
   if (skills.length === 0) {
-    section.appendChild(h('div', { class: 'meta' }, '— aucune skill enregistrée pour cet atome —'));
+    section.appendChild(h('div', { class: 'meta' }, t('registry.noSkillsForAtom')));
     return;
   }
   // Cache so the Skills tab doesn't have to refetch when the user
@@ -2483,6 +2935,10 @@ async function fetchAndRenderL1Skills(l1Name, section) {
   }
 }
 
+// i18n first: the static chrome (nav, placeholders, empty panes) must be
+// translated before the first data render paints over it.
+applyStaticI18n();
+initLangPicker();
 loadIndex();
 </script>
 </body>
