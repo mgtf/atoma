@@ -315,6 +315,28 @@ export interface TrustFastPathInfo {
 }
 
 /**
+ * A routing decision served from the prefilter DECISION CACHE instead of
+ * an LLM call. Recorded because the alternative is invisibility: a cache
+ * hit produces no llm event at all, so a run that routed for free reads
+ * as a run that mysteriously made fewer Haiku calls. Same reasoning as
+ * `TrustFastPathInfo` — the cheapest paths must be the ones you can SEE,
+ * otherwise the cost story is unverifiable.
+ */
+export interface CacheHitInfo {
+  /** Which decision was replayed — 'reuse <target>' or 'escalate'. */
+  outcome: string;
+  /** Verbatim reasoning of the cached decision. */
+  reasoning: string;
+  /** Model the ORIGINAL decision was made with (the call we skipped). */
+  model: string;
+  /** Caller attribution, when the prefilter received one. */
+  actorName?: string;
+  actorTier?: Tier;
+  /** Fan-out lane id, echoed from the branch-scoped context. */
+  branchId?: string;
+}
+
+/**
  * Skill-pipeline event surfaced to the trace recorder. Mirrors the shape of
  * `VizSkillEvent` minus the storage-layer fields (id/ts/kind), so call sites
  * in L2Atom.ts emit a typed payload rather than reaching into the viz module
@@ -378,6 +400,12 @@ export interface RunContext {
    * runtime behaviour when undefined.
    */
   readonly recordSkill?: (info: SkillEventInfo) => void;
+  /**
+   * Optional prefilter-cache observer — see `CacheHitInfo`. Same
+   * observer-only contract as `recordTrust` / `recordSkill`: absent, the
+   * cache still serves, it just leaves no trace.
+   */
+  readonly recordCacheHit?: (info: CacheHitInfo) => void;
   /**
    * Fan-out lane identifier (uuid) of the subtask currently executing.
    * Set by L2/L3 when they dispatch `Promise.all` over subtasks — each

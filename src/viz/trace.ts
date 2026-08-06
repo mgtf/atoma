@@ -229,13 +229,34 @@ export interface VizLlmStartEvent {
   branchId?: string;
 }
 
+/**
+ * A prefilter routing decision replayed from the on-disk decision cache
+ * instead of being asked of the model. Its whole point is to be VISIBLE:
+ * the call it replaces leaves no llm event, so without this the timeline
+ * shows a gap and the run looks cheaper for no stated reason. Sibling of
+ * VizTrustEvent — both record "a decision taken without an LLM call".
+ */
+export interface VizCacheEvent {
+  id: string;
+  ts: number;
+  kind: 'cache';
+  /** 'reuse <target>' | 'escalate' — the replayed decision. */
+  outcome: string;
+  reasoning: string;
+  /** Model the ORIGINAL decision used — i.e. the call that did not happen. */
+  model: string;
+  actor?: VizAtomRef;
+  branchId?: string;
+}
+
 export type VizEvent =
   | VizLlmEvent
   | VizLlmStartEvent
   | VizRegistryEvent
   | VizToolEvent
   | VizTrustEvent
-  | VizSkillEvent;
+  | VizSkillEvent
+  | VizCacheEvent;
 
 export interface VizRunIndexEntry {
   id: string;
@@ -474,6 +495,26 @@ export class TraceRecorder {
       skillId: info.skillId,
       actor: { name: info.actorName, tier: info.actorTier },
       ...(info.reasoning !== undefined ? { reasoning: info.reasoning } : {}),
+      ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
+    };
+    this.record(ev);
+  }
+
+  /**
+   * Prefilter decision served from cache — the LLM call that did NOT
+   * happen. Same wrapper pattern as recordTrust / recordSkillEvent.
+   */
+  recordCacheHit(info: import('../core/types.js').CacheHitInfo): void {
+    const ev: VizCacheEvent = {
+      id: randomUUID(),
+      ts: Date.now(),
+      kind: 'cache',
+      outcome: info.outcome,
+      reasoning: info.reasoning,
+      model: info.model,
+      ...(info.actorName && info.actorTier
+        ? { actor: { name: info.actorName, tier: info.actorTier } }
+        : {}),
       ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
     };
     this.record(ev);

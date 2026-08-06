@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     llm,
     limits: DEFAULT_LIMITS,
     recordTrust: (info) => recorder.recordTrust(info),
+    recordCacheHit: (info) => recorder.recordCacheHit(info),
   };
 
   const topic = process.argv[2] ?? 'the ecological impact of vertical farming';

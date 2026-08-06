@@ -1669,6 +1669,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   score (same `op: 'inject'`, provenance read from the reasoning). The
   run summary gains a `Garde-fous` card tallying both guards, and the
   lifecycle digest counts mid-run recoveries.
+- **A prefilter cache hit gets its own event (`kind: 'cache'`).** It
+  REPLACES an LLM call, so with no event the timeline just shows one
+  fewer call and the run reads as cheaper for no stated reason — the
+  same argument that gave the trust fast-path its own event. Emitted by
+  `prefilterStrategy` through the optional `ctx.recordCacheHit`
+  observer (absent → the cache still serves, silently), rendered as a
+  cyan `⚡ cache` card carrying the replayed decision and a
+  `0 appel · $0.00` badge — deliberately the sibling look of the gold
+  `⚡ direct` dispatch, so a glance separates "free because cached" from
+  "free because compiled". `computeTotals` ignores the kind (a hit is
+  NOT a call), a `Cache` filter chip isolates them, and the summary
+  tallies them as `⚡ Routage caché`. CRITICAL: `forkBranch` must
+  forward the hook like `recordTrust`/`recordSkill` — the skill
+  prefilter runs inside forked contexts, so a fork that dropped it
+  would lose most hits (caught by the typecheck when the field did not
+  exist; pinned by a regression test). Covered by
+  `tests/prefilter-cache-event.test.ts`.
 - Live viz is POLLING, not SSE or WebSocket — but the poll is a DELTA and
   the render is INCREMENTAL, which is where the cost actually was. The UI
   polls `/api/runs/<id>?after=<n>` every 1s while `endedAt` is undefined

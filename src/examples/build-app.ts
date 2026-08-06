@@ -333,6 +333,9 @@ async function main(): Promise<void> {
     // Mirror recordTrust for skill-pipeline events so the viz can render
     // a Skills lane (match / inject / learn / update / counter bumps).
     recordSkill: (info) => recorder.recordSkillEvent(info),
+    // Prefilter decisions replayed from the on-disk cache: the LLM call
+    // that did NOT happen still deserves a card.
+    recordCacheHit: (info) => recorder.recordCacheHit(info),
   };
 
   // Constraints are ARTEFACT-NEUTRAL on purpose. The original wording

@@ -474,9 +474,19 @@ export async function prefilterStrategy(args: {
   });
   const cached = prefilterCacheGet(cacheKey);
   if (cached) {
-    args.ctx.logger.debug(
-      `[prefilter] decision served from cache (${cached.kind}${cached.kind === 'reuse' ? ` → ${cached.target}` : ''})`
-    );
+    const outcome = cached.kind === 'reuse' ? `reuse ${cached.target}` : 'escalate';
+    args.ctx.logger.debug(`[prefilter] decision served from cache (${outcome})`);
+    // Observer: a cache hit replaces an LLM call, so without an event of
+    // its own the timeline just shows one fewer call and the run looks
+    // cheaper for no visible reason.
+    // branchId is stamped by forkBranch's wrapper, not read here — same
+    // contract as recordTrust / recordSkill.
+    args.ctx.recordCacheHit?.({
+      outcome,
+      reasoning: cached.reasoning,
+      model,
+      ...(args.actor ? { actorName: args.actor.name, actorTier: args.actor.tier } : {}),
+    });
     return cached;
   }
 

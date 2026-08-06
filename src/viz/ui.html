@@ -133,6 +133,8 @@
   /* Safety / attribution decisions — a blocked or uncredited skill. */
   .role.quarantine { color: var(--err); border-color: #4a1e1e; font-weight: 700; }
   .role.credit-withheld { color: #fbbf24; border-color: #3a2f15; }
+  /* Zero-cost routing: a decision replayed from the prefilter cache. */
+  .role.cache { color: #67e8f9; border-color: #164e63; font-weight: 700; }
 
   .tier {
     display: inline-block; padding: 1px 6px; border-radius: 4px;
@@ -583,6 +585,15 @@ function renderSummary(run) {
     card.style.borderLeft = '3px solid #ffd700';
     grid.appendChild(card);
   }
+  // The OTHER zero-cost path: routing decisions replayed from the
+  // prefilter cache. Counting them here answers "why did this run make
+  // fewer Haiku calls than the last one?" without opening the timeline.
+  const cacheHits = (run.events ?? []).filter((e) => e.kind === 'cache').length;
+  if (cacheHits > 0) {
+    const card = statCard('⚡ Routage caché', cacheHits + ' décision(s) sans appel LLM');
+    card.style.borderLeft = '3px solid #22d3ee';
+    grid.appendChild(card);
+  }
   // Skill LIFECYCLE digest — what this run changed about the system itself,
   // which is invisible in per-event noise: learned recipes, compilations,
   // demotions, and dispatches that fell back to the LLM loop.
@@ -734,6 +745,7 @@ function renderFilters() {
     ['tool', 'Tools'],
     ['trust', 'Trust'],
     ['skill', 'Skills'],
+    ['cache', 'Cache'],
     ['registry', 'Registry'],
   ];
   for (const [k, lbl] of kinds) {
@@ -1230,6 +1242,36 @@ function renderEventCard(ev) {
       h('div', { class: 'meta', style: 'margin-top:4px;' }, 'fast-path (no LLM call)'),
     ]);
   }
+  if (ev.kind === 'cache') {
+    // The routing decision that cost NOTHING: replayed from the on-disk
+    // prefilter cache instead of asked of the model. Styled like the
+    // ⚡ direct dispatch (the other zero-cost path) but in cyan, so a
+    // glance down the timeline separates "free because cached" from
+    // "free because compiled".
+    const crow = [
+      h('span', { class: 'when' }, fmtTime(ev.ts)),
+      h('span', { class: 'role cache' }, '⚡ cache'),
+    ];
+    if (ev.actor) crow.push(atomRef(ev.actor));
+    crow.push(h('span', { class: 'meta' }, 'prefilter'));
+    crow.push(h('span', {
+      style: 'font-weight:600; color:' + (/^reuse/.test(ev.outcome) ? 'var(--ok)' : '#fbbf24') + ';',
+    }, /^reuse /.test(ev.outcome) ? '→ réutilise ' + ev.outcome.slice(6) : '↑ escalade'));
+    if (ev.branchId) crow.push(branchChip(ev.branchId));
+    crow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
+    crow.push(h('span', { class: 'model' }, shortModel(ev.model)));
+    crow.push(h('span', { style: 'color:#67e8f9; font-weight:700;' }, '0 appel · $0.00'));
+    return h('div', {
+      class: 'event' + selected,
+      style: 'border-left: 3px solid #22d3ee; background: rgba(34, 211, 238, 0.06);',
+      onclick: () => { state.selectedEventId = ev.id; renderEvents(); renderDetail(ev); },
+    }, [
+      h('div', { class: 'row' }, crow),
+      h('div', { class: 'meta', style: 'margin-top:4px;' },
+        'décision rejouée depuis le cache — l\'appel LLM n\'a pas eu lieu'
+        + (ev.reasoning ? ' · ' + ev.reasoning : '')),
+    ]);
+  }
   if (ev.kind === 'skill') {
     // The zero-token moment deserves to LOOK like one: a trusted compiled
     // skill executing with no LLM at all used to render as a barely
@@ -1343,9 +1385,31 @@ function renderDetail(ev) {
     renderTrustDetail(el, ev);
   } else if (ev.kind === 'skill') {
     renderSkillEventDetail(el, ev);
+  } else if (ev.kind === 'cache') {
+    renderCacheDetail(el, ev);
   } else {
     renderRegistryDetail(el, ev);
   }
+}
+
+function renderCacheDetail(el, ev) {
+  el.appendChild(h('h2', {}, 'Décision de routage servie par le cache'));
+  el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' },
+    [ev.actor ? 'par ' + ev.actor.name : null, 'modèle évité : ' + ev.model]
+      .filter(Boolean).join('  ·  ')));
+  el.appendChild(h('div', { class: 'section' }, [
+    h('h3', {}, 'Décision'),
+    h('div', { style: 'font-weight:600;' }, ev.outcome),
+    h('h3', { style: 'margin-top:10px;' }, 'Raisonnement (de la décision d\'origine)'),
+    h('div', { style: 'white-space:pre-wrap;' }, ev.reasoning || '—'),
+  ]));
+  el.appendChild(h('div', { class: 'section', style: 'margin-top:8px;' }, [
+    h('div', { class: 'meta' },
+      'Le prefilter tourne à température 0 avec un prompt constant : pour des '
+      + 'entrées identiques (tâche × catalogue × exclusions × modèle) la décision '
+      + 'est une fonction pure, donc rejouée depuis le disque. Zéro token, zéro '
+      + 'latence — et sous claude-cli, zéro sous-processus.'),
+  ]));
 }
 
 function renderSkillEventDetail(el, ev) {
@@ -1359,6 +1423,8 @@ function renderSkillEventDetail(el, ev) {
     promote: 'Skill promue llm → script (compile Sonnet)',
     demote: 'Skill rétrogradée script → llm (fallback restauré)',
     direct: 'Script exécuté en dispatch déterministe (0 appel LLM)',
+    quarantine: 'Skill mise en QUARANTAINE par le scan statique',
+    'credit-withheld': 'Compteurs NON modifiés (recette non suivie)',
   }[ev.op] ?? ev.op;
   el.appendChild(h('h2', {}, opLabel));
   const sub = [];

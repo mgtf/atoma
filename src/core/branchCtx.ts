@@ -1,4 +1,5 @@
 import type {
+  CacheHitInfo,
   LlmClient,
   LlmCompletionRequest,
   RunContext,
@@ -47,6 +48,15 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
         ctx.recordSkill!({ ...info, branchId });
       }
     : undefined;
+  // Prefilter cache hits happen INSIDE subtasks too (the skill prefilter
+  // runs per subtask), so the hook must be forwarded like the other two
+  // — a fork that dropped it would silently lose every cached decision
+  // made under fan-out, which is where most of them happen.
+  const wrappedRecordCacheHit = ctx.recordCacheHit
+    ? (info: CacheHitInfo) => {
+        ctx.recordCacheHit!({ ...info, branchId });
+      }
+    : undefined;
 
   const out: RunContext = {
     logger: ctx.logger,
@@ -56,6 +66,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
     ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
     ...(wrappedRecordSkill !== undefined ? { recordSkill: wrappedRecordSkill } : {}),
+    ...(wrappedRecordCacheHit !== undefined ? { recordCacheHit: wrappedRecordCacheHit } : {}),
     currentBranchId: branchId,
   };
   return out;
