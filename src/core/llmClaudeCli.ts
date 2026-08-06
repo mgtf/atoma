@@ -108,11 +108,32 @@ export function isCliTransportErrorText(text: string): boolean {
   return /^\s*API Error: 5\d\d\b/.test(text);
 }
 
+/**
+ * Ceiling on a SINGLE claude-cli call. Generous on purpose: an L1 tool
+ * loop legitimately runs for minutes (subprocess spawn ~2-5s per turn,
+ * adaptive thinking, up to 24 tool iterations), so this is a hang
+ * detector, not a performance budget — it must never fire on healthy
+ * work. Override with ATOMA_CLI_CALL_TIMEOUT_MS; invalid or non-positive
+ * values fall back to the default rather than disabling the guard (a
+ * typo must not restore the infinite-hang behaviour).
+ */
+export const DEFAULT_CLI_CALL_TIMEOUT_MS = 10 * 60 * 1000;
+
+export function cliCallTimeoutMs(): number {
+  const raw = process.env['ATOMA_CLI_CALL_TIMEOUT_MS'];
+  if (raw === undefined) return DEFAULT_CLI_CALL_TIMEOUT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CLI_CALL_TIMEOUT_MS;
+}
+
 export class ClaudeCliLlmClient implements LlmClient {
   private readonly maxIter: number;
+  private readonly callTimeoutMs: number;
 
-  constructor(opts: { maxToolIterations?: number } = {}) {
+  constructor(opts: { maxToolIterations?: number; callTimeoutMs?: number } = {}) {
     this.maxIter = Math.max(1, opts.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS);
+    this.callTimeoutMs =
+      opts.callTimeoutMs && opts.callTimeoutMs > 0 ? opts.callTimeoutMs : cliCallTimeoutMs();
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -142,6 +163,21 @@ export class ClaudeCliLlmClient implements LlmClient {
         once: true,
       });
     }
+    // PER-CALL DEADLINE. The run-level `AbortSignal.timeout` is ADVISORY:
+    // it can only cancel work that observes it, and a subprocess wedged on
+    // a dropped connection observes nothing — the stream below then never
+    // yields a `result` message and the await never settles. Measured
+    // consequence: a build-app process found alive after 11 DAYS with 2
+    // minutes of CPU, still holding a headless Chrome and an esbuild
+    // service, because one call never came back. So every call gets its
+    // own clock; on expiry we abort the controller (which terminates the
+    // SDK subprocess) and THROW, turning an infinite hang into an ordinary
+    // transport error the supervise loop can escalate on.
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      abort.abort(new Error(`claude-cli call exceeded ${this.callTimeoutMs}ms`));
+    }, this.callTimeoutMs);
 
     const toolOptions = hasTools
       ? buildToolBridge(req.tools!, req)
@@ -171,6 +207,7 @@ export class ClaudeCliLlmClient implements LlmClient {
     });
 
     let lastAssistantText = '';
+    try {
     for await (const msg of stream) {
       if (msg.type === 'assistant') {
         const blocks = msg.message?.content;
@@ -210,6 +247,19 @@ export class ClaudeCliLlmClient implements LlmClient {
       }
     }
     throw new Error('claude-cli query stream ended without a result message');
+    } catch (err) {
+      // The abort surfaces here as whatever the SDK throws on cancellation;
+      // re-label it so the cause is unmistakable in the trace instead of a
+      // generic "aborted" that reads like a user interrupt.
+      if (timedOut) {
+        throw new Error(
+          `claude-cli call timed out after ${this.callTimeoutMs}ms (no result from the subprocess — dropped connection?)`
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

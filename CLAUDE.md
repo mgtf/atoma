@@ -1275,6 +1275,33 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       — `build-app.ts` passes `anthropic: undefined` to
       `L3Atom.fromType`, so L3 uses the `FALLBACK_OPUS` id string
       which the Ollama client then maps to `defaultModel`.
+- **A hung transport cannot outlive its deadline (two guards).** The
+  run-level `AbortSignal.timeout` is ADVISORY — it cancels work that
+  OBSERVES it, and a subprocess wedged on a dropped connection observes
+  nothing: the SDK stream never yields a `result` and the await never
+  settles, so `l3.handle` stays pending and the event loop is held open
+  by the stuck handle. Found live (2026-08-06): a `build-app` process
+  alive after **11 DAYS** with 2 minutes of CPU, still holding a headless
+  Chrome and an esbuild service. Two layers now close it:
+  (1) PER-CALL DEADLINE in `ClaudeCliLlmClient.completeOnce` —
+  `cliCallTimeoutMs()` (default 10 min, `ATOMA_CLI_CALL_TIMEOUT_MS`,
+  invalid/zero/negative falls back to the DEFAULT so a typo cannot
+  disable the guard). On expiry it aborts the controller — which is what
+  terminates the subprocess, not merely stops waiting — and throws a
+  labelled error the supervise loop can escalate on. A caller-supplied
+  abort still wins and is NOT relabelled. Generous on purpose: an L1 tool
+  loop legitimately runs for minutes, this is a hang detector, not a
+  performance budget.
+  (2) LAST-RESORT WATCHDOG in `build-app`: at `timeoutMs + 60s`, if
+  `l3.handle` still has not settled, persist the partial trace
+  (`cancelled: true`) and `process.exit(1)` synchronously — awaiting
+  `sandbox.cleanup()` there would re-enter the same class of hang, and
+  the sandbox's process-level exit handler SIGKILLs tracked children
+  anyway. The burn-in harness already group-kills its children past a
+  hard timer; this brings the same guarantee to MANUALLY launched runs.
+  Covered by `tests/llm-claude-cli-timeout.test.ts`, which drives a
+  never-yielding stream (the exact wedged shape) and also pins that
+  production spawns exactly ONE subprocess per call.
 - **Alternative provider: Claude Code CLI (`src/core/llmClaudeCli.ts`).**
   `ClaudeCliLlmClient` routes every LLM call through the LOCAL Claude
   Code installation via the Claude Agent SDK — subscription auth
@@ -1706,6 +1733,13 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   would lose most hits (caught by the typecheck when the field did not
   exist; pinned by a regression test). Covered by
   `tests/prefilter-cache-event.test.ts`.
+- **The viz "abandoned run" threshold is 12 min, not 5.** Measured on a
+  live claude-cli batch: an L1 execute call sat silent for over 5 minutes
+  while legitimately working (a long tool loop emits no trace event until
+  it returns), so the old 5-minute rule labelled a HEALTHY run abandoned
+  and stopped polling it. The threshold must exceed the longest plausible
+  single call — the per-call transport deadline is 10 min, so past 12 a
+  run is genuinely dead rather than slow.
 - Live viz is POLLING, not SSE or WebSocket — but the poll is a DELTA and
   the render is INCREMENTAL, which is where the cost actually was. The UI
   polls `/api/runs/<id>?after=<n>` every 1s while `endedAt` is undefined

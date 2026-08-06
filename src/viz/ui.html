@@ -1682,7 +1682,14 @@ function renderRunEndMarker(run, isLive) {
  * Verdict is time-based on the LAST recorded event: no activity for
  * ABANDONED_AFTER_MS means abandoned.
  */
-const ABANDONED_AFTER_MS = 5 * 60 * 1000;
+// 12 min, not 5. Measured on a live claude-cli batch: an L1 execute call
+// sat silent for over 5 minutes while legitimately working (subprocess
+// spawn per turn, adaptive thinking, a long tool loop emits no trace
+// event until it returns), so the 5-minute rule labelled a HEALTHY run
+// "abandoned" and stopped polling it. The threshold must exceed the
+// longest plausible single call — the per-call transport deadline is
+// 10 min, so anything past 12 is genuinely dead, not slow.
+const ABANDONED_AFTER_MS = 12 * 60 * 1000;
 
 function isAbandoned(run) {
   if (run.endedAt) return false;

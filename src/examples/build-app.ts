@@ -395,8 +395,39 @@ async function main(): Promise<void> {
       ...registry.listByTier(3),
     ],
   });
+  // LAST-RESORT WATCHDOG. `AbortSignal.timeout` above is ADVISORY — it
+  // cancels work that OBSERVES it, and a transport wedged on a dropped
+  // connection observes nothing, leaving `l3.handle` pending forever with
+  // the event loop held open by the stuck handle. Found live: a run alive
+  // after 11 DAYS (2 min of CPU), still holding a headless Chrome and an
+  // esbuild service. The burn-in harness already group-kills its children
+  // past a hard timer; this brings the same guarantee in-process so a
+  // MANUALLY launched run cannot outlive its deadline either. The grace
+  // period lets the normal abort path finish cleanly first — the watchdog
+  // only fires when that path itself is stuck.
+  const WATCHDOG_GRACE_MS = 60_000;
+  const watchdog = setTimeout(() => {
+    console.error(
+      `\n✗ watchdog: the run is still unfinished ${Math.round((timeoutMs + WATCHDOG_GRACE_MS) / 1000)}s in,` +
+        ` past its ${Math.round(timeoutMs / 1000)}s deadline — the transport is wedged (dropped connection?).` +
+        ` Persisting the partial trace and exiting so nothing is left running.`
+    );
+    try {
+      if (recorder.currentRun !== null) {
+        recorder.endRun({ error: 'watchdog: deadline exceeded, transport wedged', cancelled: true });
+      }
+    } catch {
+      /* never let bookkeeping block the exit */
+    }
+    // Synchronous exit on purpose: awaiting sandbox.cleanup() here would
+    // re-enter the same class of hang the watchdog exists to escape. The
+    // sandbox's process-level exit handler SIGKILLs tracked children.
+    process.exit(1);
+  }, timeoutMs + WATCHDOG_GRACE_MS);
+
   try {
     const result = await l3.handle(task, ctx);
+    clearTimeout(watchdog);
     const persistedRun = recorder.endRun({
       result: {
         summary: result.summary,
@@ -444,6 +475,11 @@ async function main(): Promise<void> {
     // Park forever until a signal comes in.
     await new Promise(() => {});
   } catch (err) {
+    // The run failed on its own terms (abort, transport error, crash):
+    // the watchdog's job is done, and leaving its timer armed would hold
+    // the event loop open for the whole grace period on a run that is
+    // already finished.
+    clearTimeout(watchdog);
     // Format a richer post-mortem when the run aborts. #4 —
     // the default AbortError / timeout message ("This operation was
     // aborted") is unactionable; we dig into the partial run trace
