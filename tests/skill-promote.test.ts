@@ -5,6 +5,15 @@ import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom, COMPILE_PROMPT_GENERATION } from '../src/atoms/L2Atom.js';
+import { SCAN_GENERATION } from '../src/skills/scriptScan.js';
+
+/**
+ * The refusal stamp records BOTH inputs to the refusal decision: the
+ * compile prompt and the static scan. Either changing must expire the
+ * stamp — a scan correction once left a correctly-compiled HTTP prober
+ * parked against a rule that no longer existed.
+ */
+const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
 import {
   shouldTrustSkill,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
@@ -366,7 +375,7 @@ describe('post-approval bookkeeping — decoupled from the run deadline', () => 
   });
 });
 
-describe('refusal stamps expire with the compile-prompt generation', () => {
+describe('refusal stamps expire with the compiler OR the scan generation', () => {
   it('a stamp from an older generation is cleared and the compile retried', async () => {
     // The manual-reset case, automated: when the compile PROMPT evolves (e.g.
     // the probe-manifest contract landed), a stamp written under the old
@@ -400,7 +409,7 @@ describe('refusal stamps expire with the compile-prompt generation', () => {
     expect(ctx.llm.calls).toHaveLength(5); // the 5th IS the retried compile
     const after = skills.loadFor('Hydrogen')[0]!;
     // Re-stamped with the CURRENT generation, so the next success skips.
-    expect(after.promotionRefusedGeneration).toBe(COMPILE_PROMPT_GENERATION);
+    expect(after.promotionRefusedGeneration).toBe(REFUSAL_GENERATION);
     expect(after.promotionRefusedReason).toMatch(/still no/);
     rmSync(dir, { recursive: true, force: true });
   });
@@ -417,7 +426,7 @@ describe('refusal stamps expire with the compile-prompt generation', () => {
       id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
     });
     for (let i = 0; i < 5; i++) skills.recordSuccess('Hydrogen', 'web-build-loop');
-    skills.markPromotionRefused('Hydrogen', 'web-build-loop', 'current verdict', COMPILE_PROMPT_GENERATION);
+    skills.markPromotionRefused('Hydrogen', 'web-build-loop', 'current verdict', REFUSAL_GENERATION);
 
     const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
     const ctx = makeCtx();
@@ -458,7 +467,7 @@ describe('demotion stamps the COMPILING generation, not the current one', () => 
     const stamped = skills.loadFor('Hydrogen')[0]!;
     expect(stamped.promotionRefusedGeneration).toBe('oldgen01');
     // …which differs from today's compiler, so the gate treats it as stale.
-    expect(stamped.promotionRefusedGeneration).not.toBe(COMPILE_PROMPT_GENERATION);
+    expect(stamped.promotionRefusedGeneration).not.toBe(REFUSAL_GENERATION);
     rmSync(dir, { recursive: true, force: true });
   });
 });

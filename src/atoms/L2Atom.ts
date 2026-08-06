@@ -11,7 +11,7 @@ import type {
   Verdict,
 } from '../core/types.js';
 import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
-import { scanScriptBody } from '../skills/scriptScan.js';
+import { hostAllowsLoopbackNetwork, scanScriptBody } from '../skills/scriptScan.js';
 import {
   stripBranchProvenance,
   type AtomRegistry,
@@ -599,7 +599,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // LLM loop is NOT a mitigation here. The run proceeds skill-less,
       // exactly as if nothing had matched.
       if (skills && skills.skill.kind === 'script') {
-        const scanFlags = scanScriptBody(skills.skill.body);
+        const scanFlags = scanScriptBody(skills.skill.body, {
+          allowLoopbackNetwork: hostAllowsLoopbackNetwork(
+            (l1Type.tools ?? []).map((t) => t.name)
+          ),
+        });
         if (scanFlags.length > 0) {
           ctx.logger.warn(
             `[${this.name}] skill "${skills.skill.id}" QUARANTINED — static scan flagged: ${scanFlags.join(', ')}; running WITHOUT it (review the body, then \`skills reset\` or \`skills drop\`)`
@@ -839,6 +843,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     subTask: Task;
     result: Result;
     ctx: RunContext;
+    hostTools?: readonly string[];
   }): Promise<void> {
     await this.lifecycle()?.tryPromoteSkill(args);
   }
@@ -1311,6 +1316,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               subTask: skillCtx.subTask,
               result,
               ctx,
+              hostTools: child.toolNames(),
             });
           } catch (err) {
             ctx.logger.warn(

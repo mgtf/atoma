@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "probe-recipe-box-api",
+      "family": "http",
+      "goal": "Build a small JSON HTTP API for managing a personal recipe box (create, get, list, delete recipes) with a README spec, then write a script that probes each documented route end-to-end and verifies status codes and response bodies match the spec."
+    }
+  ]
+}

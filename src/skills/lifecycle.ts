@@ -14,8 +14,18 @@ import { parseScriptEnvelope, scriptDeclaresEnvelope, scriptExtension } from '..
 import { extractJson } from '../atoms/json.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
 import { scriptInterpreter, scriptScratchFilename } from './abi.js';
-import { scanScriptBody } from './scriptScan.js';
+import { hostAllowsLoopbackNetwork, scanScriptBody, SCAN_GENERATION } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
+
+/**
+ * The refusal stamp must expire when EITHER input to the refusal decision
+ * changes — the compile prompt or the static scan. Stamping the compile
+ * generation alone parked a skill against a scan rule that had since been
+ * corrected (observed: `probe-crud-json-api-lifecycle`, refused for
+ * `network:fetch` on a script whose every request went to the loopback
+ * server it had just booted).
+ */
+const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
 
 /**
  * SKILL LIFECYCLE ENGINE — extracted from L2Atom (structural slice 2).
@@ -628,6 +638,13 @@ export class SkillLifecycle {
     subTask: Task;
     result: Result;
     ctx: RunContext;
+    /**
+     * DECLARED tools of the host L1. The static scan reads them to decide
+     * whether network primitives are legitimate for this skill's family —
+     * an atom handed `fetch_url` / `start_node_server` was built to probe
+     * servers, so a compiled prober using fetch is correct, not suspect.
+     */
+    hostTools?: readonly string[];
   }): Promise<void> {
     if (process.env['ATOMA_SKILL_PROMOTE'] !== '1') return;
     const skills = this.skills.loadFor(args.l1Name);
@@ -636,14 +653,14 @@ export class SkillLifecycle {
     if (skill.kind !== 'llm') return;
     if (skill.failures > 0) return;
     if (skill.successes < promoteThreshold()) return;
-    if (skill.promotionRefusedAt && skill.promotionRefusedGeneration !== COMPILE_PROMPT_GENERATION) {
+    if (skill.promotionRefusedAt && skill.promotionRefusedGeneration !== REFUSAL_GENERATION) {
       // The stamp predates the CURRENT compiler. Its premise ("recompiling
       // this body reproduces the same script") is false once the compile
       // prompt itself changed, so give the evolved compiler exactly one
       // shot — this is what used to require a manual operator reset when a
       // new contract (e.g. the probe manifest) landed.
       args.ctx.logger.info(
-        `[${this.host.name}] skill "${args.skillId}" refusal stamp is from an older compile-prompt generation (${skill.promotionRefusedGeneration ?? 'legacy'} → ${COMPILE_PROMPT_GENERATION}); retrying the compile`
+        `[${this.host.name}] skill "${args.skillId}" refusal stamp is from an older compiler/scan generation (${skill.promotionRefusedGeneration ?? 'legacy'} → ${REFUSAL_GENERATION}); retrying the compile`
       );
       this.skills.clearPromotionRefusal(args.l1Name, args.skillId);
     } else if (skill.promotionRefusedAt) {
@@ -688,7 +705,7 @@ export class SkillLifecycle {
         args.l1Name,
         args.skillId,
         compiled.reason,
-        COMPILE_PROMPT_GENERATION
+        REFUSAL_GENERATION
       );
       args.ctx.recordSkill?.({
         op: 'promote',
@@ -706,7 +723,9 @@ export class SkillLifecycle {
     // rides the existing anti-thrash stamp: generation-scoped, so an
     // evolved compiler gets one fresh shot, and `skills reset` remains
     // the operator override after review.
-    const scanFlags = scanScriptBody(compiled.body);
+    const scanFlags = scanScriptBody(compiled.body, {
+      allowLoopbackNetwork: hostAllowsLoopbackNetwork(args.hostTools ?? []),
+    });
     if (scanFlags.length > 0) {
       const reason = `static scan flagged the compiled body: ${scanFlags.join(', ')}`;
       args.ctx.logger.warn(
@@ -716,7 +735,7 @@ export class SkillLifecycle {
         args.l1Name,
         args.skillId,
         reason,
-        COMPILE_PROMPT_GENERATION
+        REFUSAL_GENERATION
       );
       args.ctx.recordSkill?.({
         op: 'promote',
