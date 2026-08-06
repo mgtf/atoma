@@ -50,6 +50,7 @@ import {
   CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES,
   extractBranchDiagnostic,
   GROUND_TRUTH_EVIDENCE_LINES,
+  lastResultVerdictSkillFollowed,
   resolveCreationDescription,
 } from './capability.js';
 import {
@@ -998,8 +999,23 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // before attempting an update: re-running the same skill
         // body without anything new for the model to act on would
         // just reproduce the previous outcome.
+        //
+        // USAGE-CONDITIONED gate: when the last RESULT validator
+        // affirmatively observed the child IGNORING the recipe, the
+        // diagnosis describes work the skill never drove — a revision
+        // against it would corrupt a recipe that was never tried, and
+        // the save() would clear the promotion-refusal stamp for a body
+        // change the failure never justified. Skip straight to the
+        // legacy registry-branch path (which fixes the ATOM, the thing
+        // that actually failed).
         const activeSkillId = child.activeSkillId();
-        if (activeSkillId && this.skillRegistry && diagnostic.length > 0 && childType) {
+        const skillWasIgnored = lastResultVerdictSkillFollowed(trace) === false;
+        if (activeSkillId && skillWasIgnored) {
+          ctx.logger.info(
+            `[${this.name}] skill ${activeSkillId} revision SKIPPED: validator observed the failing run did not follow the recipe — falling through to the registry-branch path`
+          );
+        }
+        if (activeSkillId && !skillWasIgnored && this.skillRegistry && diagnostic.length > 0 && childType) {
           const skills = this.skillRegistry.loadFor(child.name);
           const oldSkill = skills.find((s) => s.id === activeSkillId);
           if (oldSkill) {
@@ -1102,7 +1118,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // Frankenstein narrow prompt prove itself in-flight.
         return L1Atom.fromType(branched);
       },
-      onApproved: async (child, result) => {
+      onApproved: async (child, result, verdict) => {
         this.registry.recordSuccess(child.name);
         // Skill trust counter bump (C2a). When the supervise loop
         // approves a result and a skill drove the run, record a
@@ -1110,8 +1126,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // runs "trust" the skill more, and (in a follow-up) lets
         // the system identify mature skills worth promoting from
         // hand-written to auto-managed.
+        //
+        // USAGE-CONDITIONED CREDIT: the bump is withheld when the RESULT
+        // validator affirmatively reported the child IGNORED the injected
+        // recipe (`activeSkillFollowed === false`). A run the skill did not
+        // drive proves nothing about the skill, and unearned successes arm
+        // the 5/0 promotion trigger on recipes that never demonstrably
+        // worked. `undefined` (no signal — trust fast-path, legacy verdict,
+        // model omission) keeps the legacy bump: false is an AFFIRMATIVE
+        // observation, absence of evidence is not evidence of free-riding.
         const skillId = child.activeSkillId();
-        if (skillId && this.skillRegistry) {
+        if (skillId && this.skillRegistry && verdict?.activeSkillFollowed === false) {
+          ctx.logger.info(
+            `[${this.name}] skill "${skillId}" credit WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
+          );
+        } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordSuccess(child.name, skillId);
           ctx.recordSkill?.({
             op: 'success',
@@ -1169,10 +1198,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           }
         }
       },
-      onFailed: async (child, _reason) => {
+      onFailed: async (child, _reason, lastResultVerdict) => {
         this.registry.recordFailure(child.name);
+        // USAGE-CONDITIONED BLAME (mirror of onApproved's credit gate, and
+        // the more damaging direction): a failure recorded against a skill
+        // the child visibly ignored is unearned — and `failures > 0` blocks
+        // promotion PERMANENTLY until an operator `skills reset`. Withhold
+        // the blame (and the demotion check, whose premise "the script
+        // proved fragile" is equally false) when the last RESULT validator
+        // affirmatively reported non-adherence. The atom-type failure above
+        // still counts: the CHILD did fail, whatever it was following.
         const skillId = child.activeSkillId();
-        if (skillId && this.skillRegistry) {
+        if (skillId && this.skillRegistry && lastResultVerdict?.activeSkillFollowed === false) {
+          ctx.logger.info(
+            `[${this.name}] skill "${skillId}" blame WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
+          );
+        } else if (skillId && this.skillRegistry) {
           this.skillRegistry.recordFailure(child.name, skillId);
           ctx.recordSkill?.({
             op: 'failure',
@@ -1488,6 +1529,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ground-truth evidence contradicts the RESULT — falling through to a full verdict`
       );
     }
+    // Usage-conditioned skill credit: when a skill drove this run, show the
+    // validator the recipe and ask for the `activeSkillFollowed` adherence
+    // signal alongside the verdict. The onApproved/onFailed hooks gate the
+    // skill's counter bumps on it — a child that ignored the recipe proves
+    // nothing about it, and unearned successes arm the promotion trigger.
+    const activeSkillId = child.activeSkillId();
+    const activeSkill =
+      activeSkillId && this.skillRegistry
+        ? this.skillRegistry.loadFor(child.name).find((s) => s.id === activeSkillId)
+        : undefined;
     return llmVerdict({
       ctx,
       model: this.validationModel,
@@ -1496,6 +1547,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       subject: 'RESULT',
       child,
       ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
+      ...(activeSkill ? { activeSkill: { id: activeSkill.id, body: activeSkill.body } } : {}),
       task,
       payload: { output: result.output, summary: result.summary },
     });

@@ -425,6 +425,29 @@ export function extractBranchDiagnostic(
 }
 
 /**
+ * Scan a supervise-loop trace for the most recent RESULT verdict's
+ * `activeSkillFollowed` adherence signal (usage-conditioned skill credit).
+ * Returns `false` ONLY when the validator affirmatively observed the child
+ * ignoring the injected recipe; `undefined` when no result verdict exists
+ * or the signal was never emitted. Used by the escalation skill-update
+ * path: revising a recipe against a diagnosis about work that did not
+ * follow it corrupts the recipe — and the save() would clear the
+ * promotion-refusal stamp on a body change the failure never justified.
+ */
+export function lastResultVerdictSkillFollowed(
+  trace: readonly { kind: string; payload: unknown }[]
+): boolean | undefined {
+  for (let i = trace.length - 1; i >= 0; i--) {
+    const entry = trace[i];
+    if (!entry || entry.kind !== 'verdict-result') continue;
+    const payload = entry.payload as { activeSkillFollowed?: unknown } | null;
+    const followed = payload?.activeSkillFollowed;
+    return typeof followed === 'boolean' ? followed : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Return the CAPABILITY_BUCKETS id that best describes the given tool set
  * (first bucket whose `required` list is fully covered), or null if no
  * bucket matches. Used by prompt-selection code (e.g. the narrow-branch

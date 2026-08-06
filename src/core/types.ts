@@ -143,13 +143,29 @@ export interface AtomModifications {
   additionalContext?: string;
 }
 
-export type PositiveVerdict = { approved: true; reasoning: string };
+export type PositiveVerdict = {
+  approved: true;
+  reasoning: string;
+  /**
+   * Usage-conditioned skill credit (adherence gate). Set by the RESULT
+   * validator ONLY when the run was driven by an injected skill: `true`
+   * when the child demonstrably followed the recipe, `false` when it
+   * visibly ignored it and solved the task another way. `undefined`
+   * means "unknown" (no skill active, validator omitted it, or the
+   * trust fast-path skipped the LLM) and preserves legacy behaviour —
+   * skill counters only stop moving on an EXPLICIT `false`. Orthogonal
+   * to `approved`: adherence routes credit, it never gates approval.
+   */
+  activeSkillFollowed?: boolean;
+};
 export type NegativeVerdict = {
   approved: false;
   reasoning: string;
   modifications: AtomModifications;
   scope: MutationScope;
   branchName?: string;
+  /** See PositiveVerdict.activeSkillFollowed — same semantics on rejections. */
+  activeSkillFollowed?: boolean;
 };
 export type Verdict = PositiveVerdict | NegativeVerdict;
 

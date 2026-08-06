@@ -789,8 +789,21 @@ export function isEffectivelyEmptyMods(
 export function coerceVerdictDefaults(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
   const obj = raw as Record<string, unknown>;
-  if (obj['approved'] !== false) return raw;
-  const out: Record<string, unknown> = { ...obj };
+  // `activeSkillFollowed` is an OPTIONAL adherence signal — a sloppy
+  // emission ("true" as a string, "unknown", an object) must never fail a
+  // verdict that is otherwise valid. Coerce the two unambiguous string
+  // forms, drop anything else. Applies to BOTH approved and rejected
+  // verdicts, so this runs before the approved-only default filling.
+  const asf = obj['activeSkillFollowed'];
+  const needsAsfCoercion =
+    asf !== undefined && asf !== null && typeof asf !== 'boolean';
+  const out: Record<string, unknown> = needsAsfCoercion || obj['approved'] === false ? { ...obj } : obj;
+  if (needsAsfCoercion) {
+    if (asf === 'true') out['activeSkillFollowed'] = true;
+    else if (asf === 'false') out['activeSkillFollowed'] = false;
+    else delete out['activeSkillFollowed'];
+  }
+  if (out['approved'] !== false) return out;
   if (typeof out['scope'] !== 'string') out['scope'] = 'ephemeral';
   if (!out['modifications'] || typeof out['modifications'] !== 'object') {
     out['modifications'] = {};
@@ -803,7 +816,14 @@ export function coerceVerdictDefaults(raw: unknown): unknown {
 
 export const verdictSchema = z
   .discriminatedUnion('approved', [
-    z.object({ approved: z.literal(true), reasoning: z.string() }),
+    z.object({
+      approved: z.literal(true),
+      reasoning: z.string(),
+      // Adherence signal for skill-driven runs (usage-conditioned credit).
+      // nullish() for the same reason as branchName below; `llmVerdict`
+      // normalises null → undefined at the parse boundary.
+      activeSkillFollowed: z.boolean().nullish(),
+    }),
     z.object({
       approved: z.literal(false),
       reasoning: z.string(),
@@ -815,6 +835,7 @@ export const verdictSchema = z
       // discriminated union; the consumer (`llmVerdict`) normalises to
       // `string | undefined` before returning.
       branchName: z.string().nullish(),
+      activeSkillFollowed: z.boolean().nullish(),
     }),
   ])
   // A rejected verdict targeting the canonical type (`patch` or `branch`)

@@ -239,10 +239,29 @@ export const VALIDATION_SYSTEM_PROMPT = [
   'appended note. In the modifications.descriptionReplace, also give the branch a fresh',
   'description matching its new purpose.',
   '',
+  '== ACTIVE SKILL ADHERENCE (usage-conditioned credit) ==',
+  'Some RESULT verdicts include an "ACTIVE SKILL" block: a persistent recipe',
+  'that was injected into the child\'s system prompt before the run. The',
+  'system keeps per-skill trust counters, and those counters must only move',
+  'when the skill actually DROVE the run — a child that ignored the recipe',
+  'and solved the task its own way proves nothing about the recipe (good OR',
+  'bad), and mis-attributed credit later triggers expensive automation',
+  '(script compilation) on unproven recipes.',
+  'When the ACTIVE SKILL block is present, ALSO emit',
+  '"activeSkillFollowed": true|false in your verdict JSON:',
+  '  - true  → the reported work visibly matches the recipe\'s workflow',
+  '            (its steps, its tool sequence, its verification pattern).',
+  '  - false → the child demonstrably did something ELSE (different',
+  '            workflow, recipe steps absent from the reported evidence).',
+  'Judge from the RESULT evidence you were given; when the evidence is too',
+  'thin to tell, emit true — false is an AFFIRMATIVE observation, not a',
+  'default. This field NEVER changes your approve/reject decision; it only',
+  'routes trust credit. Omit it entirely when no ACTIVE SKILL block is shown.',
+  '',
   '== OUTPUT ==',
   'Verdict shapes:',
-  '  {"approved": true, "reasoning": "..."}',
-  '  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "..."}',
+  '  {"approved": true, "reasoning": "...", "activeSkillFollowed"?: true|false}',
+  '  {"approved": false, "reasoning": "...", "modifications": {...}, "scope": "ephemeral"|"patch"|"branch", "branchName"?: "...", "activeSkillFollowed"?: true|false}',
   'Your entire response MUST start with "{" and be ONLY the JSON object.',
   'BREVITY: keep "reasoning" under 120 words — a crisp diagnosis beats a long',
   'essay. Earlier runs saw verdicts truncated mid-sentence (stop_reason',
@@ -392,6 +411,34 @@ export const VALIDATION_SYSTEM_PROMPT = [
  */
 const VALIDATION_PARAMS: GenerationParams = { temperature: 0, maxTokens: 2048 };
 
+/**
+ * Cap on how much of an active skill's body is shown to the validator for
+ * the adherence check. Recipes front-load their workflow steps, so a head
+ * excerpt preserves what adherence is judged against while bounding the
+ * verdict call's input cost (the block only renders on skill-driven runs).
+ */
+export const ADHERENCE_BODY_MAX_CHARS = 2000;
+
+/**
+ * Render the ACTIVE SKILL adherence block for a RESULT verdict. Exported
+ * for tests; callers go through `llmVerdict`'s `activeSkill` option.
+ */
+export function renderActiveSkillBlock(skill: { id: string; body: string }): string {
+  const body =
+    skill.body.length > ADHERENCE_BODY_MAX_CHARS
+      ? `${skill.body.slice(0, ADHERENCE_BODY_MAX_CHARS)}\n[... skill body truncated for the adherence check ...]`
+      : skill.body;
+  return [
+    `== ACTIVE SKILL (adherence check) ==`,
+    `The child ran with this persistent skill recipe injected into its system prompt.`,
+    `Skill id: ${skill.id}`,
+    `--- recipe ---`,
+    body,
+    `--- end recipe ---`,
+    `Per the ACTIVE SKILL ADHERENCE section: also emit "activeSkillFollowed" in your verdict JSON.`,
+  ].join('\n');
+}
+
 export async function llmVerdict(args: {
   ctx: RunContext;
   model: string;
@@ -420,6 +467,14 @@ export async function llmVerdict(args: {
    * second time (a wasted Puppeteer launch for the web bucket).
    */
   groundTruthBlock?: string;
+  /**
+   * The persistent skill that drove this run, when there is one. RESULT
+   * verdicts render it as an "ACTIVE SKILL" block and ask the validator
+   * for the `activeSkillFollowed` adherence signal (usage-conditioned
+   * credit — see the ACTIVE SKILL ADHERENCE section of the system prompt).
+   * The caller resolves it (it has the SkillRegistry); we just render.
+   */
+  activeSkill?: { id: string; body: string };
 }): Promise<Verdict> {
   // `Subject kind` is repeated as its own field so the validator cannot miss
   // the PLAN-vs-RESULT distinction — the bar is different between the two and
@@ -476,6 +531,12 @@ export async function llmVerdict(args: {
     args.targetContext ? `Delegation target(s):\n${args.targetContext}` : '',
     `${args.subject}: ${JSON.stringify(args.payload)}`,
     groundTruthBlock,
+    // Adherence is a RESULT-phase judgment: a plan merely STATES intent to
+    // follow the recipe, only the executed work can demonstrate it. Plan
+    // verdicts therefore never carry the block even when a skill is active.
+    args.activeSkill && args.subject === 'RESULT'
+      ? renderActiveSkillBlock(args.activeSkill)
+      : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -489,6 +550,10 @@ export async function llmVerdict(args: {
   });
 
   const raw = parseVerdict(resp.text);
-  if (raw.approved) return raw;
-  return { ...raw, branchName: raw.branchName ?? undefined };
+  // Normalise `null` (an LLM emission quirk nullish() tolerates) to
+  // `undefined` at the parse boundary — same treatment as branchName —
+  // so downstream consumers only ever see `boolean | undefined`.
+  const activeSkillFollowed = raw.activeSkillFollowed ?? undefined;
+  if (raw.approved) return { ...raw, activeSkillFollowed };
+  return { ...raw, branchName: raw.branchName ?? undefined, activeSkillFollowed };
 }

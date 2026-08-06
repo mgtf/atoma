@@ -641,6 +641,37 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   skill earns trust independently of its host atom; the same atom
   type can host multiple skills with very different trust profiles.
 
+- **Usage-conditioned skill credit (adherence gate).** Skill counters
+  only move when the skill actually DROVE the run. `L2.validateResult`
+  shows the RESULT validator the active recipe (`renderActiveSkillBlock`
+  in `verdict.ts`, body capped at `ADHERENCE_BODY_MAX_CHARS` = 2000) and
+  the constant `== ACTIVE SKILL ADHERENCE ==` section of
+  `VALIDATION_SYSTEM_PROMPT` asks for an extra verdict field
+  `activeSkillFollowed: true|false`. `superviseLoop` threads the
+  approving verdict into `onApproved` and the cycle's last RESULT
+  verdict into `onFailed`; both hooks WITHHOLD the skill bump (and
+  `onFailed` also the script-demotion check) on an AFFIRMATIVE `false`.
+  The escalation skill-update path is gated the same way via
+  `lastResultVerdictSkillFollowed(trace)` (`capability.ts`) — revising a
+  recipe against a diagnosis about work that never followed it corrupts
+  the recipe, and the `save()` would clear the promotion-refusal stamp.
+  Rationale: counters are TRIGGERS, not stats — unearned successes arm
+  the 5/0 compile trigger on recipes that never demonstrably worked;
+  one unearned failure blocks promotion until an operator
+  `skills reset`. Deliberate asymmetries: `undefined` (trust fast-path
+  skipped the LLM, legacy verdict, model omission) preserves the legacy
+  bump — `false` must be an affirmative observation, and the prompt says
+  so ("when the evidence is too thin to tell, emit true"); adherence is
+  asked on RESULT verdicts only (a plan merely states intent to follow);
+  atom-TYPE counters always move regardless (the child did succeed/fail,
+  whatever it was following); the signal never gates approval itself.
+  The field is `nullish` in `verdictSchema` with tolerant coercion in
+  `coerceVerdictDefaults` ("true"/"false" strings coerced, garbage
+  dropped) so a sloppy emission can never fail an otherwise-valid
+  verdict. Deterministic dispatch (`runScriptSkillDirect`) is untouched:
+  it wrote and executed the script itself, adherence is structural.
+  Covered by `tests/skill-credit-gating.test.ts`.
+
 - **Update on failure (#C2b).** When a run driven by a skill
   ESCALATES, `branchOnEscalation` enters the SKILL UPDATE PATH
   before the legacy registry-branch path:

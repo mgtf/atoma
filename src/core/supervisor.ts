@@ -6,6 +6,7 @@ import type {
   RunContext,
   Task,
   TraceEntry,
+  Verdict,
 } from './types.js';
 
 export interface SupervisionHooks<C extends Atom> {
@@ -45,15 +46,24 @@ export interface SupervisionHooks<C extends Atom> {
    * Optional: invoked exactly once when the loop exits with an approved result.
    * Use it to bump the child type's success counter in the registry so that
    * trusted types can short-circuit future validator calls.
+   *
+   * `verdict` is the approving RESULT verdict, threaded through so hooks can
+   * read per-verdict signals — today `activeSkillFollowed`, the adherence
+   * gate for usage-conditioned skill credit.
    */
-  onApproved?(child: C, result: Result): Promise<void>;
+  onApproved?(child: C, result: Result, verdict?: Verdict): Promise<void>;
 
   /**
    * Optional: invoked exactly once at the moment the loop decides to escalate,
    * BEFORE `branchOnEscalation` fires. Use it to bump the child type's failure
    * counter so trust is revoked.
+   *
+   * `lastResultVerdict` is the most recent RESULT verdict of the failing
+   * cycle, when one exists (plan-phase escalations never produced one). It
+   * carries the same per-verdict signals as `onApproved`'s verdict — a hook
+   * can decline to blame a skill the validator observed being ignored.
    */
-  onFailed?(child: C, reason: string): Promise<void>;
+  onFailed?(child: C, reason: string, lastResultVerdict?: Verdict): Promise<void>;
 }
 
 const now = (): string => new Date().toISOString();
@@ -227,6 +237,11 @@ export async function superviseLoop<C extends Atom>(
   outer: while (true) {
     let planIter = 0;
     let execIter = 0;
+    // Most recent RESULT verdict of THIS cycle, handed to onFailed on
+    // escalation. Declared per outer-iteration on purpose: a branch-retry
+    // installs a fresh child (with its own re-injected skill), so verdicts
+    // about the previous child must not leak into the new cycle's blame.
+    let lastResultVerdict: Verdict | undefined;
     // Separate trackers for plan-rejects and result-rejects: "same gripe three
     // times in a row on the plan" and "same gripe three times in a row on the
     // result" are independent stuck-conditions and should each escalate.
@@ -309,6 +324,7 @@ export async function superviseLoop<C extends Atom>(
         trace.push({ kind: 'execute', ts: now(), atom: current.name, payload: result });
 
         const v2 = await parent.validateResult(current, result, task, ctx);
+        lastResultVerdict = v2;
         trace.push({
           kind: 'verdict-result',
           ts: now(),
@@ -317,7 +333,7 @@ export async function superviseLoop<C extends Atom>(
         });
 
         if (v2.approved) {
-          if (hooks.onApproved) await hooks.onApproved(current, result);
+          if (hooks.onApproved) await hooks.onApproved(current, result, v2);
           return { ...result, trace };
         }
 
@@ -368,7 +384,9 @@ export async function superviseLoop<C extends Atom>(
         payload: { phase: e.phase, failingChild: current.name },
       });
 
-      if (hooks.onFailed) await hooks.onFailed(current, `escalation-${e.phase}`);
+      if (hooks.onFailed) {
+        await hooks.onFailed(current, `escalation-${e.phase}`, lastResultVerdict);
+      }
       const replacement = await hooks.branchOnEscalation(
         current,
         trace,
