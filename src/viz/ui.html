@@ -253,6 +253,15 @@ const state = {
   atomsByName: new Map(),
   selectedEventId: null,
   selectedAtomName: null,
+  /**
+   * eventId → rendered card node, the key to INCREMENTAL rendering: a
+   * poll tick reuses these nodes and builds only genuinely-new ids, so
+   * the DOM stops churning and new steps can animate in. Invalidated by
+   * an explicit `renderEvents({ rebuild: true })` (run switch, filter
+   * change) — the only moments the visible set changes for a reason
+   * other than "a step just happened".
+   */
+  renderedCards: new Map(),
   /** Sticky "Prompts & réponse" tab index — survives event switches and re-renders. */
   detailTabIndex: 1,
   filters: { kind: 'all', role: 'all', branchId: 'all' },
@@ -407,7 +416,8 @@ async function selectRun(id) {
   renderSummary(state.currentRun);
   renderLanes(state.currentRun);
   renderFilters();
-  renderEvents();
+  // A different run: nothing in the card cache is valid — rebuild.
+  renderEvents({ rebuild: true });
   // Kick off live polling if the run is in-flight (no endedAt yet).
   scheduleLivePoll(id);
 }
@@ -427,12 +437,28 @@ function scheduleLivePoll(runId) {
     // User navigated away / picked another run — stop.
     if (!state.currentRun || state.currentRun.id !== runId) return;
     try {
-      const r = await fetch('/api/runs/' + encodeURIComponent(runId));
+      // DELTA FETCH: ask only for events past the ones we already hold.
+      // The server answers with the run header + the tail slice, so a
+      // long live run stops re-shipping its whole payload every second.
+      const have = state.currentRun.events.length;
+      const r = await fetch('/api/runs/' + encodeURIComponent(runId) + '?after=' + have);
       if (!r.ok) {
         scheduleLivePoll(runId);
         return;
       }
-      const fresh = await r.json();
+      const payload = await r.json();
+      // Splice the delta back into a complete run object. `eventsFrom`
+      // is where the server's slice starts: equal to `have` on the normal
+      // path, 0 when the server decided we must resync (shrunken trace).
+      const from = typeof payload.eventsFrom === 'number' ? payload.eventsFrom : 0;
+      const fresh = {
+        ...payload,
+        events: from === 0
+          ? payload.events
+          : state.currentRun.events.slice(0, from).concat(payload.events),
+      };
+      delete fresh.eventsFrom;
+      delete fresh.eventsTotal;
       const changed =
         fresh.events.length !== state.currentRun.events.length ||
         (fresh.endedAt && !state.currentRun.endedAt);
@@ -441,11 +467,11 @@ function scheduleLivePoll(runId) {
         const hadDetailBefore = prevSelectedId
           ? state.currentRun.events.some((e) => e.id === prevSelectedId)
           : false;
-        // The left pane rebuilds. Events render NEWEST FIRST, so fresh
-        // cards INSERT AT THE TOP: at scrollTop 0 (following the live run)
-        // stay pinned there — the new step appears in place with no
-        // scrolling; anywhere deeper, compensate by the inserted height so
-        // the card being read doesn't drift under the cursor.
+        // Events render NEWEST FIRST, so fresh cards INSERT AT THE TOP.
+        // renderEvents() reconciles incrementally (only genuinely new ids
+        // touch the DOM), so at scrollTop 0 — following the live run — the
+        // new card simply unfolds in place. Deeper in the list, compensate
+        // by the inserted height so the card being read doesn't drift.
         const leftPane = $('leftPane');
         const leftScroll = leftPane ? leftPane.scrollTop : 0;
         const heightBefore = leftPane ? leftPane.scrollHeight : 0;
@@ -693,7 +719,7 @@ function renderFilters() {
   for (const [k, lbl] of kinds) {
     el.appendChild(h('span', {
       class: 'chip' + (state.filters.kind === k ? ' active' : ''),
-      onclick: () => { state.filters.kind = k; renderFilters(); renderEvents(); },
+      onclick: () => { state.filters.kind = k; renderFilters(); renderEvents({ rebuild: true }); },
     }, lbl));
   }
   const sep = h('span', { class: 'chip muted', style: 'pointer-events: none; background: transparent; border: none;' }, '·');
@@ -711,7 +737,7 @@ function renderFilters() {
   for (const [k, lbl] of roles) {
     el.appendChild(h('span', {
       class: 'chip' + (state.filters.role === k ? ' active' : ''),
-      onclick: () => { state.filters.role = k; renderFilters(); renderEvents(); },
+      onclick: () => { state.filters.role = k; renderFilters(); renderEvents({ rebuild: true }); },
     }, lbl));
   }
   // Fan-out branch filter — derive the set of branchIds observed in
@@ -728,12 +754,12 @@ function renderFilters() {
       el.appendChild(h('span', { class: 'chip muted', style: 'pointer-events: none; background: transparent; border: none;' }, '·'));
       el.appendChild(h('span', {
         class: 'chip' + (state.filters.branchId === 'all' || !state.filters.branchId ? ' active' : ''),
-        onclick: () => { state.filters.branchId = 'all'; renderFilters(); renderEvents(); },
+        onclick: () => { state.filters.branchId = 'all'; renderFilters(); renderEvents({ rebuild: true }); },
       }, 'all branches'));
       for (const b of branchIds) {
         el.appendChild(h('span', {
           class: 'chip' + (state.filters.branchId === b ? ' active' : ''),
-          onclick: () => { state.filters.branchId = b; renderFilters(); renderEvents(); },
+          onclick: () => { state.filters.branchId = b; renderFilters(); renderEvents({ rebuild: true }); },
           title: 'branch ' + b,
         }, '⑂' + b.slice(0, 6)));
       }
@@ -741,11 +767,29 @@ function renderFilters() {
   }
 }
 
-function renderEvents() {
+/**
+ * Render the events list, INCREMENTALLY when possible.
+ *
+ * The list used to be torn down (`innerHTML = ''`) and rebuilt on every
+ * 1s poll tick. That churned the whole DOM to learn about one new card,
+ * made entry animations impossible (every card was "new" each tick), and
+ * forced scroll gymnastics. Now we reconcile: cards are keyed by event
+ * id, existing nodes are MOVED rather than recreated, and only genuinely
+ * new ids are built — and animated. A filter change or a run switch
+ * bumps `renderGeneration`, which forces a clean rebuild (the keys are
+ * still valid but the visible SET changed for a user-driven reason, and
+ * animating that would be noise).
+ */
+function renderEvents(opts) {
   const el = $('eventsList');
-  el.innerHTML = '';
   const run = state.currentRun;
-  if (!run) return;
+  if (!run) { el.innerHTML = ''; return; }
+  const rebuild = !!(opts && opts.rebuild);
+  if (rebuild) {
+    el.innerHTML = '';
+    state.renderedCards = new Map();
+  }
+  if (!state.renderedCards) state.renderedCards = new Map();
   // Pair llm-start markers with their completions: a start whose
   // llmEventId already exists as a completed 'llm' event is superseded
   // and hidden. Unpaired starts are either IN FLIGHT (live run — shown
@@ -766,25 +810,113 @@ function renderEvents() {
     if (state.filters.branchId && state.filters.branchId !== 'all' && e.branchId !== state.filters.branchId) return false;
     return true;
   });
-  // Run-boundary markers: purely informational, synthesised from the run
-  // metadata (startedAt / endedAt / status flags) — no recorded event
-  // backs them, so they show on every run ever persisted and ignore the
-  // filters. In the newest-first flow the END marker leads and the START
-  // marker closes the list.
+  // NEWEST FIRST. The list used to append chronologically, so every
+  // completed step landed at the BOTTOM and following a live run meant
+  // scrolling after each step. Reversed, the flow reads top-down as
+  // "now → just finished → older", and the viewport never moves: the
+  // in-flight banner sits directly above this list, immediately followed
+  // by the most recently completed step.
+  const ordered = filtered.slice().reverse();
+
+  // Desired child sequence, keyed for reconciliation. Run-boundary markers
+  // are purely informational, synthesised from the run metadata — no
+  // recorded event backs them, so they show on every run ever persisted
+  // and ignore the filters. The END marker leads, the START marker closes.
+  const desired = [];
   const endMarker = renderRunEndMarker(run, isLive);
-  if (endMarker) el.appendChild(endMarker);
-  if (filtered.length === 0) {
-    el.appendChild(h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'));
-  } else {
-    // NEWEST FIRST. The list used to append chronologically, so every
-    // completed step landed at the BOTTOM and following a live run meant
-    // scrolling after each step. Reversed, the flow reads top-down as
-    // "now → just finished → older", and the viewport never moves: the
-    // in-flight banner sits directly above this list, immediately followed
-    // by the most recently completed step.
-    for (const ev of filtered.reverse()) el.appendChild(renderEventCard(ev));
+  if (endMarker) desired.push({ key: 'marker:end', node: endMarker, fresh: true });
+  if (ordered.length === 0) {
+    desired.push({
+      key: 'empty',
+      node: h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'),
+      fresh: true,
+    });
   }
-  el.appendChild(renderRunStartMarker(run));
+  for (const ev of ordered) {
+    const cached = state.renderedCards.get(ev.id);
+    // A rendered card is reused as-is EXCEPT for its selected state, which
+    // is view state rather than event data (recorded events are immutable).
+    if (cached) {
+      const shouldSelect = state.selectedEventId === ev.id;
+      cached.classList.toggle('selected', shouldSelect);
+      desired.push({ key: ev.id, node: cached, fresh: false });
+    } else {
+      desired.push({ key: ev.id, node: renderEventCard(ev), fresh: true });
+    }
+  }
+  desired.push({ key: 'marker:start', node: renderRunStartMarker(run), fresh: true });
+
+  // Reconcile in one pass: walk the desired sequence against the live
+  // children, inserting/moving only where they diverge. Nodes reused from
+  // the cache keep their identity — no flicker, no lost hover, and the
+  // browser animates genuinely-new cards unfolding into place.
+  let cursor = el.firstChild;
+  for (const item of desired) {
+    if (cursor === item.node) {
+      cursor = cursor.nextSibling;
+      continue;
+    }
+    // Animate only cards arriving into an ALREADY-POPULATED list (a live
+    // step landing). A first paint or a rebuild would otherwise fire one
+    // animation per card — 200 cards, 200 animations, for nothing.
+    const shouldAnimate =
+      item.fresh && !rebuild && el.childNodes.length > 0 && item.key !== 'marker:start';
+    el.insertBefore(item.node, cursor);
+    if (shouldAnimate) animateStepEntry(item.node);
+  }
+  // Drop whatever trails the desired sequence (filtered-out cards, the
+  // stale end marker of a run that just went live→ended, the empty state).
+  while (cursor) {
+    const next = cursor.nextSibling;
+    el.removeChild(cursor);
+    cursor = next;
+  }
+  // Refresh the id→node cache from what actually survived this pass.
+  const nextCache = new Map();
+  for (const item of desired) {
+    if (item.key !== 'marker:end' && item.key !== 'marker:start' && item.key !== 'empty') {
+      nextCache.set(item.key, item.node);
+    }
+  }
+  state.renderedCards = nextCache;
+}
+
+/**
+ * Entry animation for a step landing on a live run: the card unfolds from
+ * zero height while fading in from slightly above, so everything below it
+ * is pushed down smoothly instead of jumping.
+ *
+ * Uses the Web Animations API on the card's MEASURED height rather than a
+ * CSS keyframe on max-height: a keyframe needs a fixed upper bound, which
+ * either clips tall cards or (when set generously) makes short ones reach
+ * full size in the first fraction of the animation — the push then looks
+ * abrupt, exactly what this is meant to avoid. Measuring gives every card
+ * the same perceived motion whatever its content.
+ */
+const STEP_ENTER_MS = 420;
+
+function animateStepEntry(node) {
+  if (typeof node.animate !== 'function') return; // ancient browser: no-op
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const target = node.offsetHeight;
+  if (!target) return;
+  const style = window.getComputedStyle(node);
+  const marginBottom = style.marginBottom;
+  const prevOverflow = node.style.overflow;
+  node.style.overflow = 'hidden';
+  const anim = node.animate(
+    [
+      { height: '0px', opacity: 0, transform: 'translateY(-8px)', marginBottom: '0px' },
+      { height: target + 'px', opacity: 1, transform: 'translateY(0)', marginBottom },
+    ],
+    { duration: STEP_ENTER_MS, easing: 'cubic-bezier(0.22, 0.9, 0.35, 1)' }
+  );
+  // Restore the natural box once done — the animation must leave NO
+  // inline geometry behind, or a card that later grows (selection border,
+  // wrapped chips on resize) would stay clipped at its arrival height.
+  const restore = () => { node.style.overflow = prevOverflow; };
+  anim.addEventListener('finish', restore, { once: true });
+  anim.addEventListener('cancel', restore, { once: true });
 }
 
 function runMarkerCard(accentColor, cells) {

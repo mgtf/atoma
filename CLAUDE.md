@@ -1652,11 +1652,24 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   TraceRecorder. `endRun()`'s synchronous `persist()` happens BEFORE
   we clear the timer specifically so the final state wins the race
   over any trailing-edge flush.
-- Live viz is POLLING, not SSE or WebSocket. The UI polls
-  `/api/runs/<id>` every 1s while `endedAt` is undefined, and
-  `/api/runs` every 2s to detect newly-started runs. Adding fs.watch
-  + SSE would roughly double the server surface for marginal latency
-  benefit on a single-observer dev-loop tool — not worth it.
+- Live viz is POLLING, not SSE or WebSocket — but the poll is a DELTA and
+  the render is INCREMENTAL, which is where the cost actually was. The UI
+  polls `/api/runs/<id>?after=<n>` every 1s while `endedAt` is undefined
+  (the server answers with the run header plus only the events past index
+  n, and `eventsFrom` tells the client where the slice starts; the client
+  splices it onto what it holds). Measured on a real 201-event run:
+  808 KB → 29 KB per tick, −96%. Omitting `after` still serves the full
+  run byte-for-byte — first load, ended runs, any other consumer are
+  untouched — and a shrunken trace (`after > total`) resyncs from 0.
+  `renderEvents()` then reconciles by event id: cached nodes are MOVED,
+  only genuinely-new ids are built (and animated via `animateStepEntry`,
+  Web Animations on the card's measured height so the push is smooth at
+  any card size). `renderEvents({ rebuild: true })` forces a clean pass —
+  used on run switch and filter changes, where the visible set changes
+  for a user-driven reason and animating it would be noise. Upgrading
+  the TRANSPORT (fs.watch + SSE) would roughly double the server surface
+  for marginal latency benefit on a single-observer dev-loop tool; the
+  payload and DOM-churn wins above were the part worth taking.
 
 ## Considered and rejected (do not re-propose naively)
 

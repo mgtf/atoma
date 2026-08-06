@@ -489,6 +489,36 @@ const server = createServer((req, res) => {
       return;
     }
     const body = readFileSync(file);
+    // DELTA MODE (?after=<n>): the live poll re-fetched the WHOLE run every
+    // second, so a long run re-shipped a growing payload ~60×/minute to
+    // learn about a handful of new events. With `after`, the response
+    // carries the run header (totals, endedAt, result…) plus ONLY the
+    // events past index n, and `eventsFrom` tells the client where the
+    // slice starts. Absent the param the full run is served byte-for-byte
+    // as before — first load, non-live runs, and any other consumer are
+    // untouched.
+    const afterRaw = url.searchParams.get('after');
+    if (afterRaw !== null) {
+      const after = Number(afterRaw);
+      if (!Number.isInteger(after) || after < 0) {
+        sendJson(res, 400, { error: 'bad after' });
+        return;
+      }
+      const run = safeParseJson<{ events?: unknown[] } | null>(body.toString('utf8'), null);
+      if (!run || !Array.isArray(run.events)) {
+        // Unparseable or shapeless on disk (a torn partial write): fall
+        // back to the full body rather than inventing a delta.
+        send(res, 200, body, 'application/json; charset=utf-8');
+        return;
+      }
+      const total = run.events.length;
+      // A shrunken event list means this is a DIFFERENT run than the one
+      // the client is diffing against (id reuse / rewritten trace) — send
+      // everything and let the client resync from scratch.
+      const from = after <= total ? after : 0;
+      sendJson(res, 200, { ...run, events: run.events.slice(from), eventsFrom: from, eventsTotal: total });
+      return;
+    }
     send(res, 200, body, 'application/json; charset=utf-8');
     return;
   }
