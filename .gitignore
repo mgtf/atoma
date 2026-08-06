@@ -16,6 +16,10 @@ burnin/results.csv
 # Learned runtime state — the framework is the repo, the trained state is
 # data. Skills regrow through use (the trained-snapshot tag preserves the
 # pre-reset store); the registry DBs were always ignored via *.db.
-skills/
+# ANCHORED to the repo root on purpose: the unanchored form `skills/`
+# also matched `src/skills/` and silently kept five SOURCE modules
+# (abi, compilePrompt, lifecycle, stats, events) out of every commit —
+# the remote was unbuildable and local git status showed clean.
+/skills/
 .claude/settings.local.json
 atoma-ledger.jsonl
