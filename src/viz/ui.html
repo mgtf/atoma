@@ -85,6 +85,15 @@
   }
   .event:hover { border-color: var(--accent); }
   .event.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  /* Purely informational run-boundary markers (start / end). Not events,
+     not clickable — a dashed frame keeps them visually apart from cards. */
+  .run-marker {
+    border: 1px dashed var(--border); border-radius: 10px;
+    padding: 7px 12px; margin-bottom: 8px; cursor: default;
+    background: transparent; font-size: 12px; color: var(--muted, #9aa4b2);
+  }
+  .run-marker:hover { border-color: var(--border); }
+  .run-marker .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .event .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .event .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; min-width: 70px; }
   .event .role {
@@ -757,17 +766,76 @@ function renderEvents() {
     if (state.filters.branchId && state.filters.branchId !== 'all' && e.branchId !== state.filters.branchId) return false;
     return true;
   });
+  // Run-boundary markers: purely informational, synthesised from the run
+  // metadata (startedAt / endedAt / status flags) — no recorded event
+  // backs them, so they show on every run ever persisted and ignore the
+  // filters. In the newest-first flow the END marker leads and the START
+  // marker closes the list.
+  const endMarker = renderRunEndMarker(run, isLive);
+  if (endMarker) el.appendChild(endMarker);
   if (filtered.length === 0) {
     el.appendChild(h('div', { class: 'empty' }, 'Aucun évènement ne correspond au filtre.'));
-    return;
+  } else {
+    // NEWEST FIRST. The list used to append chronologically, so every
+    // completed step landed at the BOTTOM and following a live run meant
+    // scrolling after each step. Reversed, the flow reads top-down as
+    // "now → just finished → older", and the viewport never moves: the
+    // in-flight banner sits directly above this list, immediately followed
+    // by the most recently completed step.
+    for (const ev of filtered.reverse()) el.appendChild(renderEventCard(ev));
   }
-  // NEWEST FIRST. The list used to append chronologically, so every
-  // completed step landed at the BOTTOM and following a live run meant
-  // scrolling after each step. Reversed, the flow reads top-down as
-  // "now → just finished → older", and the viewport never moves: the
-  // in-flight banner sits directly above this list, immediately followed
-  // by the most recently completed step.
-  for (const ev of filtered.reverse()) el.appendChild(renderEventCard(ev));
+  el.appendChild(renderRunStartMarker(run));
+}
+
+function runMarkerCard(accentColor, cells) {
+  return h('div', { class: 'run-marker', style: 'border-left: 3px solid ' + accentColor + ';' }, [
+    h('div', { class: 'row' }, cells),
+  ]);
+}
+
+function renderRunStartMarker(run) {
+  return runMarkerCard('var(--accent)', [
+    h('span', { class: 'when' }, fmtTime(Date.parse(run.startedAt))),
+    h('span', {}, '▶ Début du run'),
+    run.task?.description
+      ? h('span', { class: 'meta' },
+          run.task.description.length > 120
+            ? run.task.description.slice(0, 117) + '…'
+            : run.task.description)
+      : null,
+  ]);
+}
+
+/**
+ * End-of-run marker, status-aware: cancelled and errors read red,
+ * fallback-degraded and abandoned read amber, a clean finish reads green.
+ * A LIVE run gets none — the "En ce moment" banner owns its top edge.
+ */
+function renderRunEndMarker(run, isLive) {
+  if (isLive) return null;
+  if (!run.endedAt) {
+    if (!isAbandoned(run)) return null;
+    const evs = run.events ?? [];
+    const last = evs.length ? Math.max(...evs.map((e) => e.ts ?? 0)) : Date.parse(run.startedAt);
+    return runMarkerCard('var(--err)', [
+      h('span', { class: 'when' }, fmtTime(last)),
+      h('span', {}, '⚠ Run abandonné'),
+      h('span', { class: 'meta' }, 'aucune activité depuis la dernière trace — pas de fin enregistrée'),
+    ]);
+  }
+  const when = h('span', { class: 'when' }, fmtTime(Date.parse(run.endedAt)));
+  const dur = h('span', { class: 'meta' }, 'durée ' + fmtMs(run.durationMs));
+  if (run.cancelled) {
+    return runMarkerCard('var(--err)', [when, h('span', {}, '✕ Run annulé (interruption utilisateur)'), dur]);
+  }
+  if (run.error) {
+    return runMarkerCard('var(--err)', [when, h('span', {}, '✕ Fin du run — erreur'), dur,
+      h('span', { class: 'meta' }, String(run.error).slice(0, 120))]);
+  }
+  if (run.degraded) {
+    return runMarkerCard('#fbbf24', [when, h('span', {}, '⚠ Fin du run — dégradé (livré via fallback)'), dur]);
+  }
+  return runMarkerCard('var(--ok)', [when, h('span', {}, '■ Fin du run'), dur]);
 }
 
 /**
