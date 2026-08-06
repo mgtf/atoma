@@ -1066,6 +1066,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   Function), credential probes (homedir(), .ssh/.aws/.netrc/.npmrc) —
   and deliberately NOT child_process, which the probe-manifest contract
   requires (compiled verification scripts re-run documented commands).
+  BUCKET-AWARE since the first live HTTP promotion attempt: the network
+  rules are LIFTED for a skill whose host L1 declares the HTTP pair
+  (`hostAllowsLoopbackNetwork` — `fetch_url` / `start_node_server`),
+  because probing a server it just booted IS that family's verification.
+  Measured: `probe-crud-json-api-lifecycle` reached 5✓, Sonnet compiled
+  it correctly, and the scan refused the result for `network:fetch` on a
+  script whose every request went to loopback (zero non-loopback URLs in
+  the generated body) — CLI-shaped reasoning applied to the one family
+  it cannot fit, which would have blocked the HTTP bucket from EVER
+  producing a compiled script. When lifted, the DESTINATION is still
+  checked: a non-loopback absolute URL literal raises
+  `network:external-url`, and lookalikes (`localhost.evil.com`) do not
+  pass. Non-network rules are never lifted. The refusal stamp records
+  `COMPILE_PROMPT_GENERATION-SCAN_GENERATION`: the scan is an INPUT to
+  the refusal decision, so correcting it must expire the stamps it
+  caused instead of parking a skill against a rule that no longer
+  exists.
   Two enforcement points, fail-closed for the script, fail-open for the
   run: `tryPromoteSkill` refuses a flagged compile output via the
   existing generation-stamped refusal machinery (reason = the scan
