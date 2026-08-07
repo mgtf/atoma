@@ -98,3 +98,6 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T09:16:41.807Z,http-queue-api,http,delivered,0.2815,272,14,1,0,13,0,0,0,0,0,0,0,2026-08-07T09-16-42-437-e1460b49.json
 2026-08-07T09:31:20.270Z,http-timers-api,http,delivered,0.7969,644,36,1,4,31,0,2,2,0,2,0,0,2026-08-07T09-31-20-868-aad710c9.json
 2026-08-07T09:42:06.841Z,http-labels-api,http,delivered,0.4863,464,27,1,1,25,0,0,0,0,0,0,0,2026-08-07T09-42-07-514-732f992f.json
+2026-08-07T10:16:27.466Z,cli-slugify2,cli,delivered,0.3876,277,19,1,2,16,0,0,3,0,0,0,0,2026-08-07T10-16-28-030-e76de6af.json
+2026-08-07T10:21:04.944Z,http-visits-api,http,delivered,0.316,265,16,1,0,15,0,0,0,0,0,0,0,2026-08-07T10-21-05-560-dc88d008.json
+2026-08-07T10:25:32.238Z,files-project-docs,files,delivered,0.1704,146,13,1,1,11,0,1,1,0,0,0,0,2026-08-07T10-25-32-853-bea902ae.json

@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "cli-slugify2",
+      "family": "cli",
+      "goal": "a Node CLI 'slugify' that converts text to URL slugs: reads text as argv[2], prints the slug (lowercase, spaces and punctuation to single dashes, trimmed), exits 1 with a usage message when no argument. Ship package.json and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match."
+    },
+    {
+      "id": "http-visits-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for page-visit counts: POST /visit {page} -> 200 {page,count}, GET /visits -> 200 object, GET /visits/:page -> 200 {page,count} or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "files-project-docs",
+      "family": "files",
+      "goal": "documentation files for a fictional 'orchard' project: a README.md (overview, install, usage sections), a CONTRIBUTING.md (how to open issues and PRs, code style: 2-space indent, semicolons), and a config file orchard.config.json with keys {name:'orchard', version:'0.1.0', watering:{intervalHours:6}}. The JSON must be valid (verify by parsing it with node), and the two markdown files must each be non-empty with at least the named sections."
+    }
+  ]
+}
