@@ -179,6 +179,17 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(compileCall.userContent).toMatch(/"probe": "http"/);
     expect(compileCall.userContent).toMatch(/"probe": "web"/);
     expect(compileCall.userContent).toMatch(/entry ORDER as significant/);
+    // The example subtask/summary blocks are one run's parameters, not the
+    // skill's: the compiler must judge promotability against the recipe,
+    // not against how scriptable this ONE example happens to be (the
+    // matched subtasks at dispatch time share nothing with it).
+    expect(compileCall.userContent).toMatch(/ILLUSTRATIVE context/);
+    expect(compileCall.userContent).toMatch(/how well you could script this one example/);
+    // Decorated cmds + the single comparison tolerance (trailing newline):
+    // both sides of the phantom-mismatch class that demoted a 30-success
+    // verifier ride the reader block into every compiled script.
+    expect(compileCall.userContent).toMatch(/ONLY in trailing newline is a MATCH/);
+    expect(compileCall.userContent).toMatch(/echo of \$\?/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
