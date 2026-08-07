@@ -206,6 +206,10 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // script (the harness does the networking) compiles clean.
     expect(compileCall.userContent).toMatch(/NETWORK POLICY — MANDATORY/);
     expect(compileCall.userContent).toMatch(/spawn\s+it via child_process/);
+    // A computed validity verdict must bind to the exit code — a compiled
+    // markdown verifier printed allValid=false inside a zero-exit envelope
+    // and a sabotaged file passed the deterministic path undetected.
+    expect(compileCall.userContent).toMatch(/a FALSE verdict IS\s+a failure/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).

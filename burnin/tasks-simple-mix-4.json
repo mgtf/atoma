@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "files-faq-pages",
+      "family": "files",
+      "goal": "four markdown FAQ pages in a faq/ directory: account.md, billing.md, shipping.md, returns.md \u2014 each with an H1 title and at least three '## Question' sections each containing a short answer paragraph, plus an index.md linking to all four. Verify by reading each file back and confirming the required heading structure and section counts."
+    },
+    {
+      "id": "http-bookings-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for room bookings: POST /bookings {room,hour 0-23} -> 201 {id} or 409 when the room+hour is taken, GET /bookings -> 200 array, DELETE /bookings/:id -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 409 and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "files-changelog",
+      "family": "files",
+      "goal": "a CHANGELOG.md for a fictional 'lantern' library covering versions 0.1.0, 0.2.0 and 1.0.0 (newest first), each version an '## [x.y.z] - 2026-MM-DD' heading with at least two bullet entries under Added/Fixed subsections, plus a docs/style.md describing the changelog conventions with an H1 and two '## Section' blocks. Verify by reading both files back and confirming the heading structure."
+    }
+  ]
+}

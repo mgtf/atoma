@@ -510,6 +510,12 @@ async function probeFilesGroundTruth(args: {
     'or the recorded probe outputs refute, or a SELF-REPORTED MISMATCH above.',
     'Do NOT reject merely because an excerpt is truncated here, or because the',
     'child described a file more briefly than its contents.',
+    'MANIFEST SCHEMA AUTHORITY: the health-check verdict above is the ONLY',
+    'authority on .atoma-probes.json field names (shell entries: "cmd" +',
+    '"exitCode"). A different schema described in the SUBTASK TEXT is a',
+    'planning artefact, not a requirement — do not demand it (observed: a',
+    'plan-invented "command"/"expectExitCode" schema made validators whipsaw',
+    'a worker through five contradictory rejection cycles).',
   ]
     .filter(Boolean)
     .join('\n');
