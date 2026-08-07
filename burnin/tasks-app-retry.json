@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "app-guest-counter",
+      "family": "app",
+      "goal": "a small guestbook web application, all zero-dependency Node. server.js serves BOTH a JSON API and the UI: API: POST /api/entries {name,message} -> 201 {id} or 400 missing field; GET /api/entries -> 200 array newest-first. In-memory store. GET / serves an embedded UI with the entry form and the list \u2014 wired via fetch. Expose window.__test = {entryCount}. Also write test-api.js, an executable harness that boots server.js itself on PORT=0, covers both routes plus the 400, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json: the harness as a shell entry with stdout omitted, PLUS a web entry {probe:'web', file, interactions (selector-based only), smoke} for the UI. Write a README.md (Overview, Run, API, UI). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

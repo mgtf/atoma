@@ -92,6 +92,34 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     }
   });
 
+  it('mechanical rejection is ONE-SHOT per (subtask, tool) — the retry goes to the LLM validator', async () => {
+    // Measured (guest-counter retry, 2026-08-08): the subtask TEXT itself
+    // carried the tool name (Opus plan prose), the child's plans echoed it,
+    // and three byte-identical mechanical rejections tripped the repeat
+    // tracker into escalation + branch + fallback — $2.03 vs $0.40 siblings.
+    const { water, child } = setup();
+    const ctx = makeCtx();
+    const task = { description: 'author the page; validate with validate_html per the plan' };
+    const offPlan = {
+      reasoning: 'validate_html then assert',
+      proposedAction: 'validate_html per the subtask, then run checks',
+      expectedOutput: 'e',
+    };
+    const first = await water.validatePlan(child, offPlan, task, ctx);
+    expect(first.approved).toBe(false);
+    expect(ctx.llm.calls).toHaveLength(0); // the one free mechanical rejection
+    // Same subtask, the child re-plans still echoing the name: the LLM
+    // validator (toolset line + echo nuance) judges now — no repeat loop.
+    ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'echo of the subtask, intent is in-scope' }));
+    const second = await water.validatePlan(child, offPlan, task, ctx);
+    expect(second.approved).toBe(true);
+    expect(ctx.llm.calls).toHaveLength(1);
+    // A DIFFERENT subtask still gets its own free mechanical rejection.
+    const other = await water.validatePlan(child, offPlan, { description: 'another phase entirely' }, ctx);
+    expect(other.approved).toBe(false);
+    expect(ctx.llm.calls).toHaveLength(1);
+  });
+
   it('pre-check outranks the trust fast-path — a trusted child gets no blind approval', async () => {
     const { water, child, reg } = setup();
     for (let i = 0; i < 3; i++) reg.recordSuccess(child.name);

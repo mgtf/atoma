@@ -381,6 +381,21 @@ export interface RunContext {
    * could have seen it). Mutable by design.
    */
   dispatchedScriptSignatures?: Map<string, string[]>;
+  /**
+   * Run-scoped memo of (subtask, tool) pairs already MECHANICALLY rejected
+   * by the plan toolset pre-check. The mechanical rejection is ONE-SHOT:
+   * its byte-identical reasoning would otherwise trip the repeat-rejection
+   * tracker at exactly 3 and escalate a healthy child whose subtask TEXT
+   * itself carries the tool name (measured: the guest-counter retry — the
+   * Opus plan wrote "boot with start_node_server" into a phase routed to a
+   * file-bucket child; three identical mechanical rejections cascaded into
+   * escalation + branch + parent fallback, a $2.03 run vs $0.40 siblings).
+   * After the one free coached rejection, the LLM validator judges — it
+   * sees the declared toolset and the echo-vs-intent nuance. Lazily
+   * initialised by L2.validatePlan; on the CONTEXT for the same reason as
+   * `dispatchedScriptSignatures` (replans build fresh instances).
+   */
+  mechanicalPlanRejections?: Set<string>;
   readonly signal: AbortSignal;
   readonly llm: LlmClient;
   readonly limits: Limits;

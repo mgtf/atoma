@@ -401,6 +401,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `artefact (node/npm) plus reading files back. NEVER send a non-browser`,
       `artefact into a serve+validate_html loop — the worker would fabricate`,
       `an index.html just to have something to serve.`,
+      `Write subtask descriptions as OUTCOMES, not tool invocations — a`,
+      `description hard-naming a tool binds a child that may not declare`,
+      `it; children know their own tools.`,
       `When a subtask records or replays the probe manifest`,
       `(.atoma-probes.json), say WHAT to record — never SPELL OUT field names`,
       `or an entry schema in the subtask text: the workers carry the`,
@@ -1673,6 +1676,17 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // validator approved, and the verification phase silently never ran).
     const offScope = undeclaredToolMentions(JSON.stringify(plan), child.toolNames(), {
       minNonNegated: 2,
+    }).filter((tool) => {
+      // ONE-SHOT per (subtask, tool): a byte-identical mechanical rejection
+      // repeated 3× trips the repeat tracker and escalates a healthy child
+      // whose subtask text itself carries the tool name (guest-counter
+      // retry, 2026-08-08: $2.03 vs $0.40 siblings). After the free coached
+      // rejection, the LLM validator — which sees the declared toolset and
+      // the echo-vs-intent nuance — takes over.
+      const key = `${tool}|${task.description.slice(0, 120)}`;
+      if (ctx.mechanicalPlanRejections?.has(key)) return false;
+      (ctx.mechanicalPlanRejections ??= new Set()).add(key);
+      return true;
     });
     if (offScope.length > 0) {
       const declared = child.toolNames().join(', ') || '(none)';
