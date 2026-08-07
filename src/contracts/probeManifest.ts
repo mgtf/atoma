@@ -25,6 +25,14 @@ import { z } from 'zod';
 
 export const PROBE_MANIFEST_FILENAME = '.atoma-probes.json';
 
+/**
+ * A shell cmd "decorated" with an exit-code echo (`; echo EXIT=$?`,
+ * `&& echo $?`…). The writer contract forbids recording these; the health
+ * check reports them; the reader contract tells compiled scripts to SKIP
+ * them. Exported so tests pin all three sides to the same signature.
+ */
+export const DECORATED_CMD_RE = /(?:;|&&|\|\|)\s*echo\s+[^;&|]*\$\?\s*$/;
+
 /* ────────────────────────── schemas ────────────────────────── */
 
 /**
@@ -219,6 +227,16 @@ export function validateProbeManifest(raw: string): string[] {
       }
     } else if (kind === 'shell') {
       if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
+      // Semantic corruption, same class as pixel-coordinate interactions:
+      // a cmd decorated with an echo of $? records echo's exit code (always
+      // 0) and a stdout no clean replay reproduces. Observed 2026-08-06:
+      // such a manifest phantom-failed two deterministic dispatches and
+      // auto-demoted a 30-success compiled verifier.
+      if (typeof en['cmd'] === 'string' && DECORATED_CMD_RE.test(en['cmd'])) {
+        problems.push(
+          `entry #${i} (shell): cmd ends with an echo of $? — record the bare command; the exit code belongs in "exitCode" (a decorated cmd records echo's exit code and an unreplayable stdout)`
+        );
+      }
     } else {
       problems.push(
         `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
@@ -293,6 +311,12 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
     `artefact (a CLI, a script) with run_shell, ALSO write_file`,
     `"${PROBE_MANIFEST_FILENAME}" in the workspace root with the same record:`,
     ...exampleLines(EXAMPLE_SHELL_ENTRY),
+    `"cmd" is the BARE command exactly as a user would run it. NEVER append`,
+    `display decorations like \`; echo EXIT=$?\` to the recorded cmd — the`,
+    `exit code belongs in "exitCode". A decorated cmd corrupts the record`,
+    `twice: the recorded exitCode becomes echo's (always 0, so the CLI's real`,
+    `error-case codes are lost), and the recorded stdout embeds the`,
+    `decoration's output, which no clean replay can reproduce.`,
     `Full verbatim stdout/stderr per entry (unlike the in-envelope record,`,
     `size is fine here) — EXCEPT when the output embeds a value that differs`,
     `every run (a bound port, a timestamp, a temp path): then record`,
@@ -335,6 +359,17 @@ export function manifestReaderLines(): string[] {
     `Skip (do not crash on) any entry whose shape you don't recognise, and`,
     `treat entry ORDER as significant — state-dependent HTTP probes (PUT`,
     `then GET) are recorded in the sequence that made them pass.`,
+    `COMPARISON TOLERANCE — exactly one: when comparing recorded vs observed`,
+    `stdout/stderr, a difference ONLY in trailing newline is a MATCH`,
+    `(transcription trims vary between writers); everything else stays`,
+    `byte-for-byte. And exactly one PATHOLOGY to sidestep: a shell entry`,
+    `whose cmd ends in an echo of $? (e.g. \`; echo EXIT=$?\`) is a POLLUTED`,
+    `record — its exitCode is echo's (always 0) and its stdout embeds the`,
+    `decoration — so SKIP it with an explanatory note instead of replaying`,
+    `it (a replay diffs against corrupted expectations and fails a correct`,
+    `artefact). Measured: a 30-success verifier was auto-demoted after two`,
+    `such phantom mismatches. If skipping leaves nothing to verify, exit`,
+    `non-zero saying WHY — never silently pass.`,
     `When the recipe involves re-running / verifying / documenting`,
     `invocations, the script MUST read this manifest as its PRIMARY input`,
     `and fall back to prose parsing only when the manifest is absent. Two`,

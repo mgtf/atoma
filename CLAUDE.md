@@ -923,6 +923,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   NEW generation re-parked the skill against the very compiler that would
   have fixed it. A script produced by compiler A failing tells you nothing
   about compiler B's output. Covered in `skill-promote.test.ts`.
+- **Refusal stamps come in TWO CURRENCIES — compare via
+  `refusalStampIsCurrent`, never `===`.** Compile/scan refusals stamp
+  `REFUSAL_GENERATION` (compile hash + scan hash, dash-joined: either
+  input changing deserves one retry); demotions stamp the compile-only
+  generation that produced the failing script (a runtime failure is
+  falsified only by a different compiler — the scan doesn't shape the
+  emitted body). Both constants and the predicate live in
+  `src/skills/generations.ts` (lifecycle.ts re-exports); the FOUR
+  comparison sites (tryPromoteSkill gate, `skills show`, `skills stats`,
+  curriculum target selection) all take the predicate. History: strict
+  comparison against the combined string treated every demotion stamp as
+  stale — a brittle script compiled by the CURRENT compiler would be
+  recompiled into the same body forever (1 Sonnet + 2 failed dispatches +
+  fallback per lap); the curriculum CLI had the inverse bug (compared
+  against compile-only, so combined stamps never matched and
+  currently-refused skills were listed as retry candidates). Covered in
+  `skill-promote.test.ts` (two-currency describe).
 - **Lifecycle thresholds are operator-configurable at call time.**
   `trustThreshold()` / `promoteThreshold()` / `demoteAfter()` in
   `src/atoms/cost.ts` read `ATOMA_TRUST_THRESHOLD` /
@@ -951,6 +968,22 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   that pretends to validate a page is worse than no script. That refusal
   is the honest ceiling for the web family until (if ever) a
   browser-capable dispatch path exists.
+- **A shell `cmd` is the BARE command — `; echo EXIT=$?` decorations are
+  a contract violation all three sides know about.** Observed
+  (cli-envcheck, 2026-08-06): the build-phase L1 recorded every cmd with
+  the display decoration, so every recorded `exitCode` was echo's
+  (always 0 — the CLI's real error-case codes survived only inside
+  stdout strings) and the replay diffed against corrupted expectations:
+  two phantom mismatches auto-demoted the 30✓ compiled verifier — the
+  demotion machinery working as designed on the wrong root cause. Now:
+  the shell WRITER block forbids recording decorations (exit codes
+  belong in `exitCode`), `validateProbeManifest` reports a decorated cmd
+  (`DECORATED_CMD_RE`, exported) so the read-back probe surfaces it to
+  the validator mid-run, and the READER block tells compiled scripts to
+  SKIP such entries with a note instead of replaying them — plus exactly
+  ONE comparison tolerance: a difference only in trailing newline is a
+  match (transcription trims vary; everything else stays byte-for-byte).
+  Covered by the decorated-cmds describe in `tests/contracts.test.ts`.
 - **An HTTP manifest is a SEQUENCE; the CRUD family cannot compile from
   it alone.** Two facts found by the first live HTTP promotion attempt.
   (a) The writer used to say "merge by method+path" — a real CRUD

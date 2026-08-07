@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  DECORATED_CMD_RE,
   EXAMPLE_HTTP_ENTRY,
   EXAMPLE_SHELL_ENTRY,
   EXAMPLE_WEB_ENTRY,
@@ -161,5 +162,52 @@ describe('http manifest: a SEQUENCE, not a keyed set', () => {
     expect(lines).toMatch(/EXECUTABLE probe harness/);
     expect(lines).toMatch(/"cmd":"node <harness>","exitCode":0/);
     expect(lines).toMatch(/omit "stdout"/);
+  });
+});
+
+describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sides agree', () => {
+  // Observed 2026-08-06 (cli-envcheck run): the build-phase L1 recorded
+  // every cmd with the display decoration. Every exitCode became echo's
+  // (0), the real error-case codes survived only inside stdout strings,
+  // and the replay diffed against corrupted expectations — two phantom
+  // mismatches auto-demoted a 30-success compiled verifier.
+  it('the shell writer forbids recording decorations', () => {
+    const lines = manifestWriterLines('shell').join(' ');
+    expect(lines).toMatch(/BARE command/);
+    expect(lines).toMatch(/NEVER append\s+display decorations/);
+    expect(lines).toMatch(/exit code\s+belongs in "exitCode"/);
+  });
+
+  it('the reader teaches trailing-newline tolerance and the skip-not-replay rule', () => {
+    const lines = manifestReaderLines().join(' ');
+    expect(lines).toMatch(/ONLY in trailing newline is a MATCH/);
+    expect(lines).toMatch(/SKIP it with an explanatory note/);
+    expect(lines).toMatch(/never silently pass/);
+  });
+
+  it('the health check reports a decorated shell cmd (and passes a clean one)', () => {
+    const decorated = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node envcheck.js fixtures/valid.env; echo EXIT=$?', exitCode: 0, stdout: 'OK 6 vars\nEXIT=0' }],
+    });
+    const problems = validateProbeManifest(decorated);
+    expect(problems.some((p) => p.includes('echo of $?'))).toBe(true);
+
+    const clean = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node envcheck.js fixtures/valid.env', exitCode: 0, stdout: 'OK 6 vars\n' }],
+    });
+    expect(validateProbeManifest(clean)).toEqual([]);
+  });
+
+  it('DECORATED_CMD_RE catches the variants and spares legitimate cmds', () => {
+    expect(DECORATED_CMD_RE.test('node x.js; echo EXIT=$?')).toBe(true);
+    expect(DECORATED_CMD_RE.test('node x.js && echo $?')).toBe(true);
+    expect(DECORATED_CMD_RE.test('node x.js || echo rc=$?')).toBe(true);
+    // Legitimate compound commands stay untouched — the signature is the
+    // trailing echo of $?, not the separator.
+    expect(DECORATED_CMD_RE.test('node x.js; echo done')).toBe(false);
+    expect(DECORATED_CMD_RE.test('node build.js && node test.js')).toBe(false);
+    expect(DECORATED_CMD_RE.test('node x.js')).toBe(false);
   });
 });

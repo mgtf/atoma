@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "cli-envcheck",
+      "family": "cli",
+      "goal": "a Node CLI 'envcheck' that validates .env files: reads a path as argv[2], prints 'OK <n> vars' when every line is KEY=value, a comment (#) or blank, exits 1 naming the first offending line otherwise or when the file is missing. Ship package.json, a fixtures/ dir with one valid and one invalid sample, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match."
+    }
+  ]
+}
