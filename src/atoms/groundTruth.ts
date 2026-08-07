@@ -299,6 +299,14 @@ export function extractResultFileClaims(payload: unknown): {
     if (typeof v !== 'string') return;
     const p = v.trim();
     if (!p || p.startsWith('/') || p.includes('..') || /^https?:\/\//i.test(p)) return;
+    // A candidate containing whitespace is a COMMAND, not a path. Observed
+    // (labels run, 2026-08-07): a structured entry field carried
+    // 'node server.js', the probe read a file literally named that, and the
+    // ENOENT rendered as 'MISSING or unreadable' — a fabricated
+    // contradiction the validator is TOLD to reject on. Under-extraction is
+    // the safe direction: the real file was independently probed via the
+    // prose sweep, and list_files covers the workspace either way.
+    if (/\s/.test(p)) return;
     if (/(^|\/)_skill_/.test(p)) return;
     const m = p.match(/\.([A-Za-z][A-Za-z0-9]{0,8})$/);
     if (!m) return;

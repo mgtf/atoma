@@ -110,6 +110,23 @@ describe('extractResultFilePaths', () => {
     ).toEqual(['a.js', 'nested/b.json']);
   });
 
+  it('a COMMAND in a path-flavoured field is not a file claim (whitespace guard)', () => {
+    // Observed live (labels run, 2026-08-07): a structured entry field
+    // carried 'node server.js'; the probe read a file literally named that,
+    // and the ENOENT rendered as a fabricated MISSING contradiction — the
+    // validator (correctly, per its framing) rejected a flawless deliverable.
+    expect(extractResultFilePaths({ output: { entry: 'node server.js' } })).toEqual([]);
+    expect(
+      extractResultFilePaths({ output: { path: 'npm start -- fixtures/valid.env' } })
+    ).toEqual([]);
+    // The real file still surfaces through the prose sweep.
+    const paths = extractResultFilePaths({
+      output: { entry: 'node server.js' },
+      summary: 'entry point server.js verified',
+    });
+    expect(paths).toEqual(['server.js']);
+  });
+
   it('sweeps free text in output and summary', () => {
     const paths = extractResultFilePaths({
       output: 'wrote the files',
