@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-bookmarks-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for bookmarks: POST /bookmarks {url,title} -> 201 {id}, GET /bookmarks -> 200 array, DELETE /bookmarks/:id -> 204 or 404. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 404 and a missing-url case, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-quotes-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for quotes: POST /quotes {text,author} -> 201 {id}, GET /quotes -> 200 array, GET /quotes/random -> 200 one quote or 404 when empty. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the empty-store 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

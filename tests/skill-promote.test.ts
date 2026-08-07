@@ -196,6 +196,10 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // replay then passes against the corrupted record.
     expect(compileCall.userContent).toMatch(/ONLY after every comparison passed/);
     expect(compileCall.userContent).toMatch(/leave the manifest UNCHANGED/);
+    // exitCode/status are numbers: the first compiled replayer routed them
+    // through a string-only normalizer and crashed on (0).replace before
+    // checking anything.
+    expect(compileCall.userContent).toMatch(/"exitCode"\/"status" are NUMBERS/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
