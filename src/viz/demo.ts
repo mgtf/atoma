@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MockLlmClient } from '../core/llm.js';
 import { openDb } from '../registry/db.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
@@ -24,6 +26,14 @@ const logger: Logger = {
 };
 
 async function main(): Promise<void> {
+  // The demo's registry is ephemeral (:memory:) but the lifecycle ledger's
+  // choke points append to the REAL shared JSONL by default — and a demo
+  // built on an EMPTY registry allocates the FIRST taxonomy names
+  // (Hydrogen, Water), which collide with the real canonicals. Three demo
+  // invocations put 6 phantom type-success events in the production ledger
+  // and `ledger check` reported IMPOSSIBLE counters on types the demo
+  // never touched. Same containment as vitest: pin the ledger to scratch.
+  process.env['ATOMA_LEDGER_PATH'] = join(tmpdir(), `atoma-viz-demo-ledger-${process.pid}.jsonl`);
   const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(':memory:');

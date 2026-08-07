@@ -324,7 +324,15 @@ re-exports all the historical names so old imports keep working.
   path bypassed the choke points). Fail-open — a ledger error can never
   take down a run. Path: `ATOMA_LEDGER_PATH` (default
   `./atoma-ledger.jsonl`, gitignored; vitest pins it under node_modules
-  so tests never pollute the real file). Skill bodies also carry
+  so tests never pollute the real file, and `viz:demo` pins it to a tmp
+  file for the same reason — its `:memory:` registry starts EMPTY, so
+  taxonomy naming hands its types the canonical names Hydrogen/Water and
+  the demo's counter bumps would land on the REAL ledger under colliding
+  names; observed as 6 phantom successes and a false IMPOSSIBLE verdict).
+  KNOWN LIMIT: events carry no store identity, so ONE ledger must map to
+  ONE authoritative store — point `check` at the DB the events came from,
+  and give any secondary store (another --db) its own ledger path if its
+  mutations matter. Skill bodies also carry
   `provenance` ({mechanism, model, at} — distilled/revised/compiled) in
   `_meta.json`, preserved across bumps and resets, replaced on rewrite.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
