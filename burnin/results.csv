@@ -101,3 +101,6 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T10:16:27.466Z,cli-slugify2,cli,delivered,0.3876,277,19,1,2,16,0,0,3,0,0,0,0,2026-08-07T10-16-28-030-e76de6af.json
 2026-08-07T10:21:04.944Z,http-visits-api,http,delivered,0.316,265,16,1,0,15,0,0,0,0,0,0,0,2026-08-07T10-21-05-560-dc88d008.json
 2026-08-07T10:25:32.238Z,files-project-docs,files,delivered,0.1704,146,13,1,1,11,0,1,1,0,0,0,0,2026-08-07T10-25-32-853-bea902ae.json
+2026-08-07T10:29:56.869Z,cli-initials,cli,delivered,0.2051,177,15,1,0,14,1,0,0,0,0,0,0,2026-08-07T10-29-57-420-87168456.json
+2026-08-07T10:32:54.396Z,http-notes2-api,http,delivered,0.3372,285,17,1,1,15,1,0,0,0,1,0,0,2026-08-07T10-32-54-975-a1e692b0.json
+2026-08-07T10:37:41.530Z,http-tally-api,http,delivered,0.2192,164,14,1,0,13,1,0,0,0,0,0,0,2026-08-07T10-37-42-119-8940eb61.json
