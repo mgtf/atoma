@@ -1036,6 +1036,18 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   SKIP such entries with a note instead of replaying them — plus exactly
   ONE comparison tolerance: a difference only in trailing newline is a
   match (transcription trims vary; everything else stays byte-for-byte).
+  FIELD-level sibling (`PORT_BEARING_STDOUT_RE`): a recorded stdout
+  embedding `LISTENING_ON_PORT=<n>` is run-varying by construction —
+  the health check reports it, the reader compares exitCode ONLY for
+  that entry (never writing the fresh port back), and the http writer
+  block makes the harness entry MANDATORY-when-a-test-script-exists,
+  stdout omitted. Observed (batch 14): two DIFFERENT writer-compliance
+  failures of this one contract (harness entry omitted entirely; entry
+  recorded WITH port-bearing stdout) each charged the healthy compiled
+  replayer a directFailure — two in a row demoted it, and the demotion
+  stamp (older compiler) correctly granted the recompile that brought
+  it back under the full current contract. The machinery converges,
+  but each lap costs a demotion cycle — hence fixing the WRITER side.
   Covered by the decorated-cmds describe in `tests/contracts.test.ts`.
 - **An HTTP manifest is a SEQUENCE; the CRUD family cannot compile from
   it alone.** Two facts found by the first live HTTP promotion attempt.

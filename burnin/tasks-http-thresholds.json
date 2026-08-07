@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "http-polls2-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for multi-question polls: POST /polls {question,options[]} -> 201 {id}, POST /polls/:id/vote {option} -> 200 or 400 unknown option or 404, GET /polls/:id -> 200 {question,tallies} or 404. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 400 and both 404s, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-contacts-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for contacts: POST /contacts {name,email} -> 201 {id} or 400 invalid email, GET /contacts -> 200 array, PUT /contacts/:id {name?,email?} -> 200 or 404, DELETE /contacts/:id -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and a 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-queue-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for a job queue: POST /jobs {payload} -> 201 {id,status:'queued'}, POST /jobs/next -> 200 {id,payload} claiming the oldest queued job or 204 when empty, GET /jobs/:id -> 200 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 204-empty and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

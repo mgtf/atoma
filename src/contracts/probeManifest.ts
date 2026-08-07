@@ -33,6 +33,19 @@ export const PROBE_MANIFEST_FILENAME = '.atoma-probes.json';
  */
 export const DECORATED_CMD_RE = /(?:;|&&|\|\|)\s*echo\s+[^;&|]*\$\?\s*$/;
 
+/**
+ * A recorded stdout that embeds the HTTP-bucket boot marker. The port is
+ * OS-assigned fresh every run, so byte-comparing such a stdout fails every
+ * replay of a healthy artefact — the writer contract says to omit stdout on
+ * harness entries for exactly this reason. Observed live (contacts run,
+ * 2026-08-07): one port-bearing recorded stdout produced a phantom mismatch
+ * at deterministic dispatch and, combined with an omitted-entry miss the
+ * run before, demoted a healthy compiled verifier. Deliberately pinned to
+ * the project's own contract marker: zero false positives, and the broad
+ * "omit run-varying output" rule stays with the writer prompt.
+ */
+export const PORT_BEARING_STDOUT_RE = /LISTENING_ON_PORT=\d+/;
+
 /* ────────────────────────── schemas ────────────────────────── */
 
 /**
@@ -237,6 +250,11 @@ export function validateProbeManifest(raw: string): string[] {
           `entry #${i} (shell): cmd ends with an echo of $? — record the bare command; the exit code belongs in "exitCode" (a decorated cmd records echo's exit code and an unreplayable stdout)`
         );
       }
+      if (typeof en['stdout'] === 'string' && PORT_BEARING_STDOUT_RE.test(en['stdout'])) {
+        problems.push(
+          `entry #${i} (shell): recorded stdout embeds a run-varying bound port (LISTENING_ON_PORT=…) — record {"cmd","exitCode"} and OMIT stdout for this entry, or every later replay diffs a fresh port against a stale one and fails a healthy artefact`
+        );
+      }
     } else {
       problems.push(
         `entry #${i}: matches no known shape — shell ("cmd" + "exitCode"), http ("method" + "path" + "status") or web ("file" + "smoke")`
@@ -275,12 +293,16 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
       `outcomes (a real CRUD manifest recorded POST /recipes four times: 201,`,
       `400 malformed, 400 missing-fields). Merging on the route would collapse`,
       `the sequence and silently delete the error cases.`,
-      `If the workspace also produced an EXECUTABLE probe harness (a script`,
-      `that boots the server and exits non-zero on any mismatch), record it`,
-      `ADDITIONALLY as a shell entry {"cmd":"node <harness>","exitCode":0} —`,
-      `omit "stdout", the bound port makes it vary run to run. That entry is`,
-      `replayable by a deterministic script; the http entries alone are not,`,
-      `because they carry no request payload.`,
+      `HARNESS ENTRY — MANDATORY WHENEVER A TEST SCRIPT EXISTS. If the`,
+      `workspace holds an EXECUTABLE probe harness (test-api.js or similar —`,
+      `a script that boots the server and exits non-zero on any mismatch),`,
+      `you MUST record it as a shell entry {"cmd":"node <harness>","exitCode":0}`,
+      `IN ADDITION to the http entries — omit "stdout", the bound port makes`,
+      `it vary run to run. This is not optional bookkeeping: the http entries`,
+      `carry no request payload, so WITHOUT the harness entry the manifest is`,
+      `mechanically unreplayable and every later verification pass fails.`,
+      `(Observed: one omission charged a healthy compiled verifier a direct`,
+      `failure at dispatch; a second demoted it.)`,
       `WHY: this file is the machine-readable interface later verification`,
       `passes re-run and diff against — prose in a README cannot be parsed`,
       `reliably, this can.`,
@@ -371,8 +393,12 @@ export function manifestReaderLines(): string[] {
     `decoration — so SKIP it with an explanatory note instead of replaying`,
     `it (a replay diffs against corrupted expectations and fails a correct`,
     `artefact). Measured: a 30-success verifier was auto-demoted after two`,
-    `such phantom mismatches. If skipping leaves nothing to verify, exit`,
-    `non-zero saying WHY — never silently pass.`,
+    `such phantom mismatches. Related pollution, same treatment at the FIELD`,
+    `level: a recorded stdout embedding LISTENING_ON_PORT=<n> is port-bearing`,
+    `(the OS assigns a fresh port every run) — for such an entry compare the`,
+    `exitCode ONLY, note that the recorded stdout was ignored as run-varying,`,
+    `and do NOT write the fresh port back. If skipping leaves nothing to`,
+    `verify, exit non-zero saying WHY — never silently pass.`,
     `When the recipe involves re-running / verifying / documenting`,
     `invocations, the script MUST read this manifest as its PRIMARY input`,
     `and fall back to prose parsing only when the manifest is absent. Two`,

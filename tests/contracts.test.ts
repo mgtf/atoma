@@ -200,6 +200,34 @@ describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sid
     expect(validateProbeManifest(clean)).toEqual([]);
   });
 
+  it('a port-bearing recorded stdout is reported; the reader compares exitCode only', () => {
+    // Observed live (contacts run, 2026-08-07): phase 2 recorded the harness
+    // entry WITH its stdout — embedding the bound port — so the replay
+    // diffed a fresh port against a stale one and phantom-failed a healthy
+    // artefact (second direct failure → demotion of the compiled verifier).
+    const portful = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node test-api.js', exitCode: 0, stdout: '[server] LISTENING_ON_PORT=55257\nAll checks passed' }],
+    });
+    expect(validateProbeManifest(portful).some((p) => p.includes('run-varying bound port'))).toBe(true);
+    // The clean shape the writer contract asks for passes untouched.
+    const clean = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node test-api.js', exitCode: 0 }],
+    });
+    expect(validateProbeManifest(clean)).toEqual([]);
+    // The reader teaches the exitCode-only comparison for that entry shape.
+    const reader = manifestReaderLines().join(' ');
+    expect(reader).toMatch(/LISTENING_ON_PORT=<n> is port-bearing/);
+    expect(reader).toMatch(/compare the\s+exitCode ONLY/);
+    expect(reader).toMatch(/do NOT write the fresh port back/);
+    // And the writer block makes the harness entry non-optional when a
+    // test script exists, naming the demotion this class caused.
+    const writer = manifestWriterLines('http').join(' ');
+    expect(writer).toMatch(/HARNESS ENTRY — MANDATORY WHENEVER A TEST SCRIPT EXISTS/);
+    expect(writer).toMatch(/omit "stdout"/);
+  });
+
   it('DECORATED_CMD_RE catches the variants and spares legitimate cmds', () => {
     expect(DECORATED_CMD_RE.test('node x.js; echo EXIT=$?')).toBe(true);
     expect(DECORATED_CMD_RE.test('node x.js && echo $?')).toBe(true);
