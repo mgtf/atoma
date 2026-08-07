@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-tags-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for tagging: POST /tags {name} -> 201 {id} or 409 duplicate, GET /tags -> 200 array, DELETE /tags/:id -> 204 or 404. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 409 and the 404, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-events-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for an event log: POST /events {type,payload} -> 201 {id,ts}, GET /events -> 200 array oldest-first, GET /events/count -> 200 {count}. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route plus a malformed-JSON 400 case, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

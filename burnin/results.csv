@@ -87,3 +87,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T05:14:12.963Z,http-kvttl-api,http,delivered,0.2902,225,14,1,0,13,0,0,0,0,0,0,0,2026-08-07T05-14-13-640-579c90f9.json
 2026-08-07T05:18:49.060Z,http-bookmarks-api,http,delivered,0.4212,431,15,1,1,13,0,0,0,1,0,0,0,2026-08-07T05-18-49-760-5ec70946.json
 2026-08-07T05:26:02.698Z,http-quotes-api,http,delivered,0.3461,283,14,1,0,13,0,0,0,0,0,0,0,2026-08-07T05-26-03-400-64875bff.json
+2026-08-07T05:55:01.741Z,http-tags-api,http,delivered,0.3297,342,17,1,3,13,0,0,2,0,2,0,0,2026-08-07T05-55-02-410-deb972a5.json
+2026-08-07T06:00:45.513Z,http-events-api,http,delivered,0.4592,368,15,1,1,13,0,0,0,0,0,0,0,2026-08-07T06-00-46-204-77422cdf.json

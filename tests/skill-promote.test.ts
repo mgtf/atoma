@@ -200,6 +200,12 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // through a string-only normalizer and crashed on (0).replace before
     // checking anything.
     expect(compileCall.userContent).toMatch(/"exitCode"\/"status" are NUMBERS/);
+    // The compiler is told the scan's network policy UP FRONT: a Lithium-
+    // hosted replay recipe was compiled with node:http + raw sockets to
+    // re-probe routes itself and got parked by the scan, when a spawn-only
+    // script (the harness does the networking) compiles clean.
+    expect(compileCall.userContent).toMatch(/NETWORK POLICY — MANDATORY/);
+    expect(compileCall.userContent).toMatch(/spawn\s+it via child_process/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
