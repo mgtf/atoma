@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, lstatSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
@@ -102,8 +102,13 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
       const content = readFileSync(abs, 'utf8');
       const occurrences = content.split(oldString).length - 1;
       if (occurrences === 0) {
+        // The procedural half ("read_file and retry") was already here and
+        // the model obeyed it procedurally while re-emitting the same broken
+        // span — 10 of 11 residual failures in the 2026-08 burn-in window
+        // were DOUBLE-ESCAPED old_strings, so the message now names the
+        // diagnosis, not just the procedure.
         throw new Error(
-          `edit_file: old_string not found in "${path}". It must match the file EXACTLY, including whitespace and indentation — read_file the current content and retry with a verbatim span.`
+          `edit_file: old_string not found in "${path}". It must match the file EXACTLY, including whitespace and indentation — read_file the current content and retry with a verbatim span. Common cause: WRONG ESCAPING — old_string must contain the file's RAW bytes (real newlines, real quotes), never two-character \\n or \\" escape sequences. If you re-read the file and it still does not match, your escaping is wrong, not the file.`
         );
       }
       if (occurrences > 1 && !replaceAll) {
@@ -996,8 +1001,16 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       page.on('console', (msg) => {
         const type = msg.type();
         const text = msg.text();
-        if (type === 'error') errors.push(text);
-        else if (type === 'warn') warnings.push(text);
+        // Puppeteer's msg.text() does NOT carry the offending URL (a bare
+        // "Failed to load resource: ... 404" is unattributable — measured:
+        // 25 such errors across 41 traces, zero identifiable). The source
+        // location is the evidence that lets a validator (or an operator
+        // reading the friction report) tell a phantom favicon 404 from a
+        // genuinely missing artefact file.
+        const loc = msg.location()?.url;
+        const attributed = loc ? `${text} [source: ${loc}]` : text;
+        if (type === 'error') errors.push(attributed);
+        else if (type === 'warn') warnings.push(attributed);
       });
       page.on('pageerror', (err: unknown) => {
         errors.push(

@@ -56,6 +56,9 @@ npm run skills -- merge Helium <keep> <absorb>     # keeper absorbs when_to_use;
 
 npm run curriculum -- --dry-run       # show lifecycle targets, no LLM call
 npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-curriculum.json
+
+npm run friction                      # offline tool-loop friction report from runs/
+npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in batch
 ```
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
@@ -338,6 +341,27 @@ re-exports all the historical names so old imports keep working.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **Friction report** (`npm run friction`, helpers in `src/viz/friction.ts`
+  — pure, mirrored on `stats.ts`): aggregates recurring TOOL-LOOP failure
+  signatures from the traces the viz already persists (zero LLM, zero
+  runtime imports — a reader). Exists because recovered in-loop friction is
+  invisible to the learning machinery (no rejection → no event skill, no
+  escalation → no body revision) and invisible failures repeat every run.
+  HARD tier = executor threw; SOFT tier = failure-shaped results and may be
+  task-intrinsic (deliberate error-case probes land there); the
+  `distinctArgs` column unmasks pseudo-recurrence (one error text, N
+  unrelated task-specific args — validate_html's `smoke check failed`).
+  Signatures normalise away everything run-varying (paths→basename, quoted
+  filenames→`"<file.ext>"` keeping the extension, `:LINE`→`:#`, ≥2-digit
+  runs and hex ids→`#`, leading `[harness tags]` stripped). ACTION RULE:
+  a signature earns action only when it recurs across two consecutive
+  batches AND its root cause lives INSIDE the sandbox in artefacts the L1
+  can read; host/repo/harness causes are environment defects — fix
+  structurally. Known blind spots (accepted): claude-cli off-scope calls
+  never reach an executor (no VizToolEvent), deterministic dispatch runs
+  outside LLM loops (its sensor is `directFailures`). Covered by
+  `tests/friction.test.ts`, whose normalisation cases are the adversarial
+  review's literal counter-examples.
 - **Burn-in harness** (`npm run burnin`, `src/cli/burnin.ts`): runs a task
   batch through the real `example:build` path (one clean workspace per task,
   child spawned in its own process group and group-killed after
@@ -1964,6 +1988,35 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   payload and DOM-churn wins above were the part worth taking.
 
 ## Considered and rejected (do not re-propose naively)
+
+- **A RUNTIME friction sensor (mid-loop event-skill matching on tool
+  errors + post-run distillation from repeated tool-error signatures).**
+  Designed and adversarially refuted 2026-08-07. The decisive facts:
+  (a) base rate — of SIX root-caused tool-friction classes to date
+  (EADDRINUSE #7c, buffered python stdout, LISTENING_ON_PORT chunk
+  straddle, symlink lstat, the ESM module-resolution leak, decorated
+  manifest cmds), zero were learnable technique; all six were
+  harness/environment defects fixed structurally. (b) the counterfactual —
+  a sensor live during the ESM window would have distilled its dominant
+  signature (14 events, 10+ approved runs, cross-batch: passes any
+  reasonable threshold) into a PERMANENT event skill teaching a workaround
+  for a bug that died the next day via `ensureModuleResolutionBoundary`;
+  event skills have no decay (never `setActiveSkill`, so no counters — only
+  `skills drop` removes one). (c) economics — recovered friction costs
+  ~≤2k tokens/run at Haiku prices ($0 marginal on claude-cli), below any
+  sensor's complexity budget. (d) match-only is dead code: existing
+  triggers are born from validator-diagnosis prose and the containment
+  matcher can't reach threshold against tool stderr. What was built
+  instead: the offline `npm run friction` report (diagnostic stage — the
+  only stage whose value the data supports) plus targeted static fixes for
+  the measured residual (edit_file escaping diagnosis, validate_html
+  console-error source attribution). REVISIT only if a friction signature
+  recurs across two consecutive batches AND its root cause is shown to
+  live INSIDE the sandbox, in artefacts the L1 can read — a cause in the
+  host, repo or harness is an environment defect and gets a structural
+  fix, never a learned lesson (a one-line-rule A/B test does NOT
+  discriminate: "always write ESM" also fixes an environment bug in a
+  controlled experiment).
 
 - **SPOQ-style Haiku blame-triage on multi-subtask failures.** SPOQ runs
   a cheap investigator after a failed wave to name the guilty task —
