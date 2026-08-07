@@ -386,6 +386,11 @@ export function manifestReaderLines(): string[] {
     `so re-recording it makes the NEXT replay diff a fresh value against a`,
     `stale one and fail on a correct artefact. Measured: a compiled verifier`,
     `did exactly this, passed once, then failed forever — two such failures`,
-    `demote the script.`,
+    `demote the script. AND write/merge ONLY after every comparison passed:`,
+    `on a failing pass leave the manifest UNCHANGED — merging failing`,
+    `observations overwrites the recorded expectations with the regressed`,
+    `values, and the NEXT replay passes against the corrupted record`,
+    `(regression whitewashing — a compiled script shipped with the write`,
+    `ahead of the mismatch gate).`,
   ];
 }

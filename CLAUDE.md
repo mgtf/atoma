@@ -1026,6 +1026,35 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   whose matches include file-deliverable tasks is a trap: the success
   case is self-destructive. Check what a skill is actually MATCHED to
   (not what its description claims) before wanting it compiled.
+- **Make a family compilable via a SIBLING skill, never by overwriting
+  the trusted one's body.** Full trace analysis (10 real matches, not the
+  4 sampled above) split probe-crud's traffic 6/3/1: six live-API
+  exercising subtasks that themselves enumerate per-route expectations
+  (a manifest-replay recipe is structurally CONTRARY to those), three
+  authoring, ONE harness-replay — the only compilable shape. Overwriting
+  the body would have (a) armed `tryPromoteSkill` with 10 inherited
+  successes on a recipe that never demonstrably drove a run (`matches ==
+  successes`: several were free-ride credits), (b) risked `failures = 1`
+  → permanent promotion block if the first post-save match was a live-API
+  subtask, and (c) killed the recipe that serves 60% of the family's real
+  traffic. `Helium/replay-probe-harness` is the sibling: born 0/0,
+  manifest-first, its `when_to_use` names the observed phrasing ("run
+  the test script") and structurally excludes live-API exercising
+  (per-route enumerations) — clauses the prefilter can actually evaluate
+  from the subtask text (it never sees the workspace, so "a manifest
+  exists" is NOT a usable matching condition).
+- **A verifier merges observations into the manifest ONLY after every
+  comparison passed.** On a failing pass the manifest stays UNCHANGED —
+  merging failing observations overwrites recorded expectations with the
+  regressed values and the NEXT replay passes against the corrupted
+  record (regression whitewashing: the value-level sibling of the
+  add-stdout shape bug). The first compiled generation of
+  `verify-cli-argv-exit-codes` shipped with the write ahead of the
+  mismatch gate — found by adversarial review, fixed by direct body edit
+  (counters + `compiledGeneration` preserved), and the rule now rides
+  `manifestReaderLines` into every future compile. Offline-tested both
+  ways: clean replay exit 0 + merge; sabotaged expectation → exit 1 +
+  byte-identical manifest.
 - **The probe manifest is health-checked (`validateProbeManifest`).**
   The manifest is written by PROMPT (L1 evidence contracts) and read by
   COMPILED SCRIPTS with no validator between them — a malformed one

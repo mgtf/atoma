@@ -190,6 +190,12 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // verifier ride the reader block into every compiled script.
     expect(compileCall.userContent).toMatch(/ONLY in trailing newline is a MATCH/);
     expect(compileCall.userContent).toMatch(/echo of \$\?/);
+    // Regression whitewashing: a compiled script that merges observations
+    // into the manifest BEFORE the mismatch gate rewrites the recorded
+    // expectations with the regressed values on a failing pass — the next
+    // replay then passes against the corrupted record.
+    expect(compileCall.userContent).toMatch(/ONLY after every comparison passed/);
+    expect(compileCall.userContent).toMatch(/leave the manifest UNCHANGED/);
     // effort is pinned because the claude-cli transport cannot enforce
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
