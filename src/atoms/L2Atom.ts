@@ -588,6 +588,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // identical to the existing tier prefilter — the only change
     // is the catalog (skills instead of children).
     let skillMatchAttempted = false;
+    // Subtask-scoped match identity — distinct from the INSTANCE tag
+    // (`child.activeSkillId()`): an escalation branch returns a FRESH
+    // instance that carries no tag, and gating the C3 learner on the
+    // instance made every skill-driven-but-escalated run read as "novel"
+    // — each one distilled near-duplicates of the recipe that had
+    // matched (observed: 4 replay-twins in 2 days, all operator-merged).
+    let matchedSkillId: string | undefined;
     if (this.skillRegistry) {
       skillMatchAttempted = true;
       let skills = await this.matchSkill(l1Type.name, subTask, ctx);
@@ -620,6 +627,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         }
       }
       if (skills) {
+        matchedSkillId = skills.skill.id;
         ctx.logger.debug(
           `[${this.name}] skill matched: ${skills.skill.id} (kind=${skills.skill.kind}; ${skills.reasoning})`
         );
@@ -726,6 +734,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       l1Name: l1Type.name,
       subTask,
       skillMatchAttempted,
+      matchedSkillId,
       eventState,
     });
 
@@ -1009,6 +1018,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
        * skills are disabled wholesale.
        */
       skillMatchAttempted: boolean;
+      /**
+       * Id of the skill the prefilter matched for THIS SUBTASK, if any.
+       * Subtask-scoped on purpose: `child.activeSkillId()` is an INSTANCE
+       * tag that an escalation branch (fresh instance) does not carry, so
+       * gating the C3 learner on it alone made every skill-driven-but-
+       * escalated run look novel and distill near-duplicates of the very
+       * recipe that had matched.
+       */
+      matchedSkillId?: string;
       /** Mutated by the event-skill injector; read by the post-loop learning gate. */
       eventState: { injected: boolean };
     }
@@ -1333,6 +1351,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           //     and not every project wants automatic mutation of
           //     its skills folder).
           !skillId &&
+          // Both scopes must be empty: no tag on the approved INSTANCE and
+          // no match recorded for the SUBTASK. After an escalation branch
+          // the instance tag is gone while the subtask fact remains — a run
+          // where a recipe matched is not novel, whatever instance finished
+          // it (learning there distilled near-duplicate skills that then
+          // competed with the matched one in the prefilter).
+          !skillCtx.matchedSkillId &&
           skillCtx.skillMatchAttempted &&
           this.skillRegistry &&
           process.env['ATOMA_SKILL_LEARN'] === '1'

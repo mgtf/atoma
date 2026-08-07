@@ -293,6 +293,61 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     expect(improvePrompt).toMatch(/PLACEHOLDERS/);
   });
 
+  it('does NOT distill a "novel" skill when a recipe matched but an escalation branch delivered', async () => {
+    // Regression (timers run, 2026-08-07): the C3 learner was gated on the
+    // INSTANCE tag (child.activeSkillId()) — an escalation branch returns a
+    // fresh instance with no tag, so a skill-driven-but-escalated run read
+    // as novel and distilled near-duplicates of the very recipe that had
+    // matched (4 replay-twins in 2 days, all operator-merged). The gate now
+    // also checks the SUBTASK-scoped match fact.
+    const envBefore = process.env['ATOMA_SKILL_LEARN'];
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    try {
+      skills.save('Hydrogen', {
+        id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
+      });
+      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const ctx = makeCtx();
+      // Tier prefilter -> Hydrogen; skill prefilter -> web-build-loop.
+      ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+      ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 's' }));
+      // Three identical plan rejections -> escalation.
+      for (let i = 0; i < 3; i++) {
+        ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+        ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'no good', scope: 'ephemeral' }));
+      }
+      // Skill-update path: Sonnet returns the body UNCHANGED -> "not a
+      // revision" -> falls through to the LEGACY branch path (fresh type,
+      // fresh instance, NO active-skill tag — the leak's precondition).
+      ctx.llm.enqueueText('b');
+      // The branched instance gets one clean validated cycle.
+      ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+      ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'plan ok' }));
+      ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built by branch' }));
+      ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'result ok' }));
+      // Defensive extras (harmless if unconsumed).
+      for (let i = 0; i < 4; i++) {
+        ctx.llm.enqueueText(jsonText({ output: 'x', summary: 'extra' }));
+      }
+
+      await water.handleDirect({ description: 'task' }, ctx);
+
+      // The subtask's recipe MATCHED, so the run is not novel — the C3
+      // TASK-skill distillation must not fire. (The EVENT-skill learner —
+      // 'You are distilling a RECOVERED run' — legitimately may: rejections
+      // happened and the run recovered; that channel is gated separately.)
+      expect(
+        ctx.llm.calls.some((c) => c.userContent.startsWith('You are distilling a successful run'))
+      ).toBe(false);
+      expect(skills.loadFor('Hydrogen').filter((s) => !s.trigger).map((s) => s.id)).toEqual([
+        'web-build-loop',
+      ]);
+    } finally {
+      if (envBefore === undefined) delete process.env['ATOMA_SKILL_LEARN'];
+      else process.env['ATOMA_SKILL_LEARN'] = envBefore;
+    }
+  });
+
   it('does NOT bump skill counters when no skill was active (orthogonal pathway)', async () => {
     ensureChildIsTrusted();
     // No skills saved — counters file shouldn't be created at all.
