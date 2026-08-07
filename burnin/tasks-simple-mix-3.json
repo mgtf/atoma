@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "web-dice-roller",
+      "family": "web",
+      "goal": "a single-file HTML dice roller: index.html with a 'Roll' button, a die-face display (1-6), and a roll counter. Expose window.__test = {lastRoll, rollCount} for smoke checks. Serve it and validate: click #roll three times, assert rollCount === 3 and lastRoll between 1 and 6."
+    },
+    {
+      "id": "http-lists-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for shopping lists: POST /lists {name} -> 201 {id}, POST /lists/:id/items {label} -> 201 or 404, GET /lists/:id -> 200 {name,items} or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including both 404s, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "files-recipe-cards",
+      "family": "files",
+      "goal": "three markdown recipe cards in a recipes/ directory: pancakes.md, omelette.md, salad.md \u2014 each with Ingredients and Steps sections (at least 4 ingredients and 3 steps each), plus an index.md linking to all three. Verify by reading each file back and confirming the required sections exist."
+    }
+  ]
+}

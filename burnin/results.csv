@@ -104,3 +104,6 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T10:29:56.869Z,cli-initials,cli,delivered,0.2051,177,15,1,0,14,1,0,0,0,0,0,0,2026-08-07T10-29-57-420-87168456.json
 2026-08-07T10:32:54.396Z,http-notes2-api,http,delivered,0.3372,285,17,1,1,15,1,0,0,0,1,0,0,2026-08-07T10-32-54-975-a1e692b0.json
 2026-08-07T10:37:41.530Z,http-tally-api,http,delivered,0.2192,164,14,1,0,13,1,0,0,0,0,0,0,2026-08-07T10-37-42-119-8940eb61.json
+2026-08-07T10:41:26.081Z,web-dice-roller,web,delivered,0.2769,185,12,1,2,9,0,0,0,0,2,0,0,2026-08-07T10-41-26-648-6ac9cd98.json
+2026-08-07T10:44:32.971Z,http-lists-api,http,delivered,0.231,184,14,1,0,13,1,0,0,0,0,0,0,2026-08-07T10-44-33-560-70f320ca.json
+2026-08-07T10:47:39.524Z,files-recipe-cards,files,delivered,0.2566,201,18,1,1,16,0,1,2,0,0,0,0,2026-08-07T10-47-40-109-afc03a7f.json
