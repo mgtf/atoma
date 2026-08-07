@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "app-bookmarks",
+      "family": "app",
+      "goal": "a small bookmarks manager web application, all zero-dependency Node. server.js serves BOTH a JSON API and the UI: API: POST /api/bookmarks {url,title,tags[]} -> 201 {id} or 400 invalid url; GET /api/bookmarks?tag=x -> 200 filtered array; DELETE /api/bookmarks/:id -> 204 or 404. In-memory store. GET / serves an embedded single-page UI listing bookmarks with a tag filter select, an add form, and a delete button per bookmark \u2014 all wired via fetch. Expose window.__test = {bookmarkCount, visibleCount} in the UI. Also write test-api.js, an executable harness that boots server.js itself on PORT=0, exercises every API route including the 400 and the 404, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). Write a README.md (Overview, Run, API, UI features). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "app-tasks-tags",
+      "family": "app",
+      "goal": "a two-resource web application, all zero-dependency Node. server.js serves BOTH a JSON API and the UI: API: POST /api/tags {name} -> 201 {id}; GET /api/tags -> 200 array; POST /api/tasks {title} -> 201 {id}; POST /api/tasks/:id/tags {tagId} -> 200 updated task or 404 (either missing); GET /api/tasks -> 200 array with each task's tag names resolved. In-memory stores. GET / serves an embedded UI showing both lists, a form to add each, and per-task a select to assign an existing tag \u2014 wired via fetch. Expose window.__test = {taskCount, tagCount}. Also write test-api.js, an executable harness that boots server.js itself on PORT=0, covers every route including both 404 causes, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). Write a README.md (Overview, Run, API, UI features). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "app-guest-counter",
+      "family": "app",
+      "goal": "a small guestbook web application, all zero-dependency Node. server.js serves BOTH a JSON API and the UI: API: POST /api/entries {name,message} -> 201 {id} or 400 missing field; GET /api/entries -> 200 array newest-first. In-memory store. GET / serves an embedded UI with the entry form and the list \u2014 wired via fetch. Expose window.__test = {entryCount}. Also write test-api.js, an executable harness that boots server.js itself on PORT=0, covers both routes plus the 400, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json: the harness as a shell entry with stdout omitted, PLUS a web entry {probe:'web', file, interactions (selector-based only), smoke} for the UI. Write a README.md (Overview, Run, API, UI). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

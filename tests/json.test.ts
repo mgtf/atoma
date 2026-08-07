@@ -120,6 +120,35 @@ describe('nested ``` fence inside a JSON string (evidence-destruction regression
     expect(b).toEqual(plan);
   });
 
+  it('parseTwoJson splits a FUSED one-element strategy+plan array (live Opus emission)', () => {
+    // Observed 2026-08-08 (app-guest-counter): Opus answered the two-payload
+    // request with a VALID one-element array whose single object carried both
+    // the strategy discriminators AND the plan fields — a complete, correct
+    // response that crashed the parse as "missing second JSON".
+    const fused = [
+      {
+        strategy: 'reuse',
+        target: 'Ammonia',
+        reasoning: 'coupled artefacts, sequential build',
+        subtasks: [{ description: 'phase 1' }, { description: 'phase 2' }],
+        aggregation: { mode: 'sequential' },
+        expectedOutput: 'a working guestbook app',
+      },
+    ];
+    const [a, b] = parseTwoJson(JSON.stringify(fused));
+    expect(a).toEqual({ strategy: 'reuse', target: 'Ammonia', reasoning: 'coupled artefacts, sequential build' });
+    expect(b).toEqual({
+      reasoning: 'coupled artefacts, sequential build',
+      subtasks: [{ description: 'phase 1' }, { description: 'phase 2' }],
+      aggregation: { mode: 'sequential' },
+      expectedOutput: 'a working guestbook app',
+    });
+    // A strategy-only single element (no subtasks) is NOT split — the
+    // truncation paths keep their placeholder semantics.
+    const strategyOnly = JSON.stringify([{ strategy: 'reuse', target: 'X', reasoning: 'r' }]);
+    expect(() => parseTwoJson(strategyOnly)).toThrow();
+  });
+
   it('still honours a well-formed fence with no nesting (no behaviour change)', () => {
     expect(extractJson('```json\n{"a":1}\n```')).toEqual({ a: 1 });
     expect(extractJsonEx('```json\n{"a":1}\n```').repaired).toBe(false);

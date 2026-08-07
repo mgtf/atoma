@@ -416,6 +416,29 @@ export function findBalancedEnd(s: string, start: number): number {
  * a single-object array by synthesising a placeholder plan so the supervise
  * loop can still move forward.
  */
+/**
+ * A FUSED strategy+plan emission: Opus occasionally answers the two-payload
+ * request with a ONE-element array whose single object carries BOTH the
+ * strategy discriminators (strategy/target) AND the plan fields (subtasks…)
+ * — observed live 2026-08-08 (app-guest-counter run: a perfectly valid,
+ * complete response that crashed the plan parse as "missing second JSON").
+ * Split it instead of failing: the strategy part keeps its routing keys,
+ * the plan part keeps everything else, and `reasoning` is shared. Only
+ * fires when the object carries `subtasks` — a genuinely plan-less
+ * strategy-only emission still falls through to the truncation paths.
+ */
+function splitFusedStrategyPlan(el: unknown): [unknown, unknown] | null {
+  if (!el || typeof el !== 'object' || Array.isArray(el)) return null;
+  const o = el as Record<string, unknown>;
+  if (!Array.isArray(o['subtasks'])) return null;
+  if (typeof o['strategy'] !== 'string') return null;
+  const { strategy, target, seed, reasoning, ...planRest } = o;
+  return [
+    { strategy, ...(target !== undefined ? { target } : {}), ...(seed !== undefined ? { seed } : {}), reasoning },
+    { reasoning, ...planRest },
+  ];
+}
+
 export function parseTwoJson(text: string): [unknown, unknown] {
   const trimmed = text.trim();
 
@@ -428,6 +451,8 @@ export function parseTwoJson(text: string): [unknown, unknown] {
         try {
           const arr = JSON.parse(trimmed.slice(firstBracket, arrEnd + 1));
           if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
+          const fused = Array.isArray(arr) && arr.length === 1 ? splitFusedStrategyPlan(arr[0]) : null;
+          if (fused) return fused;
         } catch {
           /* fall through */
         }
@@ -439,6 +464,8 @@ export function parseTwoJson(text: string): [unknown, unknown] {
           const arr = JSON.parse(repaired);
           if (Array.isArray(arr) && arr.length >= 2) return [arr[0], arr[1]];
           if (Array.isArray(arr) && arr.length === 1) {
+            const fused = splitFusedStrategyPlan(arr[0]);
+            if (fused) return fused;
             return [
               arr[0],
               {
