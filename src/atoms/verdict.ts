@@ -51,6 +51,18 @@ export const VALIDATION_SYSTEM_PROMPT = [
   '  start_node_server will return, the probe body echoed back). Placeholders or',
   '  references to "the bound URL from start_node_server" are acceptable — the',
   '  executor resolves them at tool-call time.',
+  'TOOLSET SCOPE (hard rule): the "Child\'s DECLARED TOOLS" line in the input',
+  '  is the child\'s ONLY executable surface. A PLAN that proposes CALLING a',
+  '  tool absent from that list is structurally broken — the executor will',
+  '  refuse the call and the work silently will not happen. REJECT it and name',
+  '  the declared list in your feedback so the replan stays in scope. (Echoing',
+  '  a constraint like "no validate_html needed here" is fine — intent to CALL',
+  '  is what violates.) Likewise weigh RESULT claims against that surface: a',
+  '  child cannot have observed browser behaviour without a browser tool —',
+  '  but an HTTP-verified claim ABOUT markup ("the served HTML contains the',
+  '  form", checked via fetch_url) is legitimate; when the evidence is too',
+  '  thin to tell which kind of claim it is, do not reject on this rule',
+  '  alone.',
   '',
   '== PLAN vs RESULT (they have different acceptance bars) ==',
   'The "Subject kind" field in the user message tells you which applies.',
@@ -427,6 +439,79 @@ const VALIDATION_PARAMS: GenerationParams = { temperature: 0, maxTokens: 2048 };
 export const ADHERENCE_BODY_MAX_CHARS = 2000;
 
 /**
+ * The system's tool vocabulary — every builtin an L1 could declare. Used to
+ * detect a plan referencing a tool its child does NOT have: the name must be
+ * in this closed list (so prose words never false-match) and absent from the
+ * child's declared set. Update when `defaultBuiltinTools` gains a tool.
+ */
+export const BUILTIN_TOOL_VOCABULARY: readonly string[] = [
+  'write_file',
+  'edit_file',
+  'read_file',
+  'list_files',
+  'run_shell',
+  'start_static_server',
+  'validate_html',
+  'fetch_url',
+  'start_node_server',
+];
+
+const NEGATION_MARKERS =
+  /\b(no|not|never|without|avoid|skip|unavailable|cannot|can't|don't|doesn't|isn't|won't|do not|instead of|absent|forbidden|lacks?|missing|outside|beyond|excluded?|omit(?:ted)?|defer(?:red)?|left? to)\b/i;
+
+/**
+ * Tools MENTIONED by a plan that the child does not declare — the mechanical
+ * half of the F1 fix (app-task-tracker run, 2026-08-07): an Opus plan told a
+ * phase to validate_html, the phase routed to an HTTP-bucket L1 that cannot
+ * declare it, the L1's plan promised the tool seven times, and the plan
+ * validator approved because nothing showed it the child's toolset. The
+ * downstream cost was a whole verification phase that never happened while
+ * every validator credited it.
+ *
+ * Negation-aware on purpose: subtask texts routinely say "No static server,
+ * no validate_html" and a compliant plan echoes that constraint — an
+ * occurrence with a negation marker within ±40 chars is an acknowledgement,
+ * not an intent. One non-negated mention flags: the false-positive cost is a
+ * single coached replan cycle, the false-negative cost is the phantom
+ * verification this exists to kill.
+ */
+export function undeclaredToolMentions(
+  planText: string,
+  declaredTools: readonly string[],
+  opts: { vocabulary?: readonly string[]; minNonNegated?: number } = {}
+): string[] {
+  const vocabulary = opts.vocabulary ?? BUILTIN_TOOL_VOCABULARY;
+  // The negation window is a heuristic with irreducible two-way error
+  // (adversarial review: "Do not return until validate_html passes" is an
+  // AFFIRMATIVE intent a nearby "not" suppresses; a boundary clause whose
+  // negation sits >40 chars away gets flagged). Call sites pick the
+  // threshold by their cost asymmetry: the PLAN pre-check uses
+  // minNonNegated=2 — a plan that USES a tool names it repeatedly (the
+  // motivating run: seven times) while echoes and deferrals are single —
+  // because its false positive burns a replan cycle of a healthy child;
+  // the draft filters keep 1 because their false positive only skips a
+  // learning event (fail-open, cheap).
+  const minNonNegated = opts.minNonNegated ?? 1;
+  const declared = new Set(declaredTools);
+  const flagged: string[] = [];
+  for (const tool of vocabulary) {
+    if (declared.has(tool)) continue;
+    let idx = planText.indexOf(tool);
+    let nonNegated = 0;
+    while (idx !== -1 && nonNegated < minNonNegated) {
+      const before = planText.slice(Math.max(0, idx - 40), idx);
+      const after = planText.slice(idx + tool.length, idx + tool.length + 40);
+      if (!NEGATION_MARKERS.test(before) && !NEGATION_MARKERS.test(after)) {
+        nonNegated++;
+      }
+      idx = planText.indexOf(tool, idx + tool.length);
+    }
+    if (nonNegated >= minNonNegated) flagged.push(tool);
+  }
+  return flagged;
+}
+
+/**
  * Render the ACTIVE SKILL adherence block for a RESULT verdict. Exported
  * for tests; callers go through `llmVerdict`'s `activeSkill` option.
  */
@@ -532,6 +617,13 @@ export async function llmVerdict(args: {
   const userContent = [
     `Supervisor: "${args.supervisorName}" (tier ${args.supervisorTier})`,
     `Child: "${args.child.name}" (tier ${args.child.tier})`,
+    // The child's executable surface. Without this line the validator had
+    // no way to see a plan promising tools the child cannot call — the
+    // app-task-tracker run's UI-verification phase was approved while
+    // planning seven validate_html calls on an HTTP-bucket child.
+    args.child.tier === 1
+      ? `Child's DECLARED TOOLS (its ONLY executable surface): ${args.child.toolNames().join(', ') || '(none)'}`
+      : '',
     `Subject kind: ${subjectHint}`,
     `Plan kind: ${planKindHint}`,
     `Task: ${args.task.description}`,

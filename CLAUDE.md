@@ -606,6 +606,23 @@ re-exports all the historical names so old imports keep working.
   declaration to enforce). Defence in depth paired with bucket-aware
   prompts: even if future guidance regresses or a model hallucinates
   a tool name, the executor won't silently honour it. Fix #8a.
+- **Plan-side toolset scope (#F1, the #8a sibling upstream).** The
+  app-task-tracker post-mortem found a WHOLE verification phase that
+  silently never ran: the plan demanded `validate_html` on an HTTP-bucket
+  child, no validator could see the child's toolset, and under claude-cli
+  an off-scope attempt leaves no trace. Now: (a) `L2.validatePlan` runs a
+  MECHANICAL pre-check (`undeclaredToolMentions` in `verdict.ts` — closed
+  `BUILTIN_TOOL_VOCABULARY`, negation-aware ±40-char window) BEFORE the
+  trust fast-path; ≥2 non-negated mentions of an undeclared tool
+  auto-reject with coaching, zero LLM (threshold 2 because a plan that
+  USES a tool names it repeatedly — the motivating plan: 7× — while
+  echoes/deferrals are single, and a false positive burns a healthy
+  child's replan cycle); (b) tier-1 verdicts carry a `Child's DECLARED
+  TOOLS` line and `VALIDATION_SYSTEM_PROMPT` a TOOLSET SCOPE rule (with a
+  thin-evidence softener on the RESULT side). Known residuals, accepted:
+  the L3→L2 chain has no mechanical gate (tools live at L1; the plan
+  prompt rules cover L3 prose) and intent phrased without the exact tool
+  name slips the mechanical net (the validator line is the belt there).
 - **Ground-truth probe is a WEB-bucket invariant, not universal.**
   `probeGroundTruth` (in `L2Atom.ts`, invoked from `llmVerdict` on
   RESULT verdicts) only fires when BOTH (a) `ctx.tools` has
@@ -615,10 +632,22 @@ re-exports all the historical names so old imports keep working.
   ran Puppeteer against a JSON API, got "errors", rejected a valid
   result, cascade. `Atom.toolNames()` is the public accessor to the
   declared tool names (the full tools array stays protected). Fix #9.
-- **Two ground-truth probes, MUTUALLY EXCLUSIVE by bucket.**
-  `probeGroundTruth` dispatches: a child declaring `validate_html` gets
-  the web load-and-look probe; every other file-producing child gets
-  `probeFilesGroundTruth` — the supervisor-side READ-BACK probe (#F9).
+- **Two ground-truth probes, MUTUALLY EXCLUSIVE by bucket — with ONE
+  hybrid append.** `probeGroundTruth` dispatches: a child declaring
+  `validate_html` gets the web load-and-look probe; every other
+  file-producing child gets `probeFilesGroundTruth` — the supervisor-side
+  READ-BACK probe (#F9). HYBRID refinement (app-task-tracker post-mortem):
+  when the non-web child's RESULT carries a LOOPBACK URL and a zero-LLM
+  sniff (one fetch_url; requires status 200 + text/html) says the server
+  serves HTML, the browser load-and-look block is APPENDED to the
+  read-back probe — never displacing it (88/166 archived RESULTs carry a
+  URL; a content-triggered swap would have re-opened the #F9 fabrication
+  hole on most of the family). Loopback-only by construction (a RESULT
+  quoting an external docs link must not trigger supervisor egress, let
+  alone Puppeteer on a third-party site rendered as ground truth), and
+  the 200 requirement keeps Express-default HTML 404s from flipping pure
+  JSON APIs into the incident-#9 Puppeteer-noise cascade. Covered by
+  `tests/toolscope-precheck.test.ts`.
   Running both would double the cost and, on a non-web artefact, add
   Puppeteer noise the validator reads as a contradiction.
   The read-back probe re-reads the workspace itself and hands the
@@ -1233,6 +1262,18 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   exactly that state. The pre-flight gate above is what keeps it
   harmless; if you ever author a script skill by hand, either satisfy
   the stdout envelope or drop an `_fallback.md` next to it.
+- **Learned and revised skill bodies must stay in the host's TOOLSET.**
+  Both `learnSkillFromRun` and the escalation revision path filter their
+  output through `undeclaredToolMentions` against the host L1's declared
+  tools (fail-open: skip the draft / treat as no-revision, warn). The
+  distillation prompt also carries the toolset + a HARD RULE (distil what
+  the run's ACTIONS demonstrate, never what the subtask text intended).
+  Why: the app-task-tracker run distilled TWO skills teaching
+  `validate_html` on an HTTP-bucket host that cannot declare it — the
+  plan had demanded it, the run never executed it, and the recipes
+  encoded the phantom; a revision invited by a diagnosis like "the UI was
+  never independently verified" would do the same while `save()` also
+  clears the refusal stamp. Covered in `skill-auto-creation.test.ts`.
 - **Learned and revised skill bodies must GENERALISE.** Both
   `learnSkillFromRun` (distillation) and `improveSkillBody` (revision
   on escalation) carry an explicit rule: use placeholders for anything

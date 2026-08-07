@@ -78,7 +78,7 @@ export {
 export { extractRecordedProbes } from '../contracts/witness.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
 import { SkillLifecycle } from '../skills/lifecycle.js';
-import { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
+import { llmVerdict, undeclaredToolMentions, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { dispatchWithAggregation } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { skillContextBlock } from '../skills/lifecycle.js';
@@ -1197,12 +1197,27 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               // against an identical diagnosis is a guaranteed-identical
               // outcome. Treat it as "no revision available" and let the
               // legacy branch path take over.
-              const revised =
+              let revised =
                 newBody && newBody.trim() !== oldSkill.body.trim() ? newBody : null;
               if (!revised && newBody) {
                 ctx.logger.info(
                   `[${this.name}] skill ${activeSkillId} revision returned an UNCHANGED body (environmental failure?) — skipping the save and the retry`
                 );
+              }
+              // F2's filter applies to REVISIONS too (adversarial-review
+              // finding): a diagnosis like "the UI was never independently
+              // verified" invites Sonnet to append a step using a tool the
+              // host cannot call — and save() would both persist the phantom
+              // and clear the promotion-refusal stamp. Same fail-open shape
+              // as the draft filter: no revision → legacy branch path.
+              if (revised) {
+                const outOfScope = undeclaredToolMentions(revised, child.toolNames());
+                if (outOfScope.length > 0) {
+                  ctx.logger.warn(
+                    `[${this.name}] skill ${activeSkillId} revision rejected: teaches undeclared tool(s) ${outOfScope.join(', ')} — treating as no revision`
+                  );
+                  revised = null;
+                }
               }
               if (revised) {
                 const newBody = revised;
@@ -1649,6 +1664,33 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       return {
         approved: true,
         reasoning: `prefilter fast-path: plan was synthesised by Haiku's capability-match decision on child "${child.name}", no separate validator pass needed`,
+      };
+    }
+    // Mechanical toolset pre-check — BEFORE the trust fast-path on purpose:
+    // a trusted child's off-scope plan would otherwise be approved blind.
+    // Zero LLM cost; the F1 fix's cheap half (app-task-tracker run: a plan
+    // promised validate_html seven times on an HTTP-bucket child, the
+    // validator approved, and the verification phase silently never ran).
+    const offScope = undeclaredToolMentions(JSON.stringify(plan), child.toolNames(), {
+      minNonNegated: 2,
+    });
+    if (offScope.length > 0) {
+      const declared = child.toolNames().join(', ') || '(none)';
+      ctx.logger.warn(
+        `[${this.name}] plan for ${child.name} references undeclared tool(s) ${offScope.join(', ')} — mechanically rejected (0 LLM calls)`
+      );
+      return {
+        approved: false,
+        reasoning: `plan references tool(s) outside the child's declared toolset: ${offScope.join(', ')} — the executor would refuse those calls and the work would silently not happen`,
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            `Your ONLY executable tools are: ${declared}. The previous plan referenced ` +
+            `${offScope.join(', ')}, which you cannot call. Re-plan using declared tools only, ` +
+            `and do not mention undeclared tools at all — not even to defer them. If part of the ` +
+            `task seems to require an undeclared tool, do what IS achievable in scope and state ` +
+            `the limit explicitly in your result instead of promising the unachievable.`,
+        },
       };
     }
     const type = this.registry.getByName(child.name);

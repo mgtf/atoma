@@ -147,6 +147,12 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
       ...seed,
       description: 'web builder',
       systemPrompt: 'You are an L1.',
+      // The F2 toolset filter rejects drafts teaching tools the host cannot
+      // call — fixtures must declare the tools their drafts mention, like
+      // any real L1 would.
+      tools: ['write_file', 'read_file', 'run_shell', 'start_static_server', 'validate_html'].map(
+        (name) => ({ name, description: name, inputSchema: { type: 'object' } })
+      ),
     });
     envBefore = process.env['ATOMA_SKILL_LEARN'];
   });
@@ -254,6 +260,45 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(learnPrompt).toMatch(/SPLIT OUT MECHANICAL VERIFICATION/);
     expect(learnPrompt).toMatch(/"verification" key/);
     expect(learnPrompt).toMatch(/DERIVABLE from the\s+workspace alone/);
+    // The F2 toolset-scope contract.
+    expect(learnPrompt).toMatch(/DECLARED TOOLS \(this atom's ONLY executable surface\)/);
+    expect(learnPrompt).toMatch(/HARD RULE — TOOLSET SCOPE/);
+  });
+
+  it('F2: rejects a draft whose body teaches a tool the host cannot call', async () => {
+    // Regression (app-task-tracker run, 2026-08-07): two skills taught
+    // "validate_html" on an HTTP-bucket atom that cannot declare it — the
+    // plan had demanded it, the run never executed it, and the recipes
+    // encoded the phantom. The mechanical filter is the code half of F2.
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ensureChildIsTrusted();
+    skills.save('Hydrogen', {
+      id: 'unrelated',
+      description: 'something else',
+      whenToUse: 'never matches our task',
+      kind: 'llm',
+      body: 'b',
+    });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built and probed' }));
+    // The draft teaches start_node_server — NOT in this Hydrogen's toolset
+    // (write/read/run_shell/static/validate_html).
+    ctx.llm.enqueueText(
+      JSON.stringify({
+        id: 'phantom-recipe',
+        description: 'boot a node server and probe it',
+        when_to_use: 'server tasks',
+        body: '1. write_file server.js\n2. start_node_server on it\n3. fetch_url every route',
+      })
+    );
+
+    await water.handleDirect({ description: 'build a small web thing' }, ctx);
+    // The phantom draft was skipped; only the scarecrow remains.
+    expect(skills.loadFor('Hydrogen').map((s) => s.id)).toEqual(['unrelated']);
   });
 
   it('saves BOTH skills when the draft carries a verification split', async () => {

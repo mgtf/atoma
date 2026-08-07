@@ -18,6 +18,7 @@ import { scriptInterpreter, scriptScratchFilename } from './abi.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
+import { undeclaredToolMentions } from '../atoms/verdict.js';
 
 // Historical export home — the generation machinery lives in generations.ts
 // (stats/curriculum need the predicate without importing this whole engine).
@@ -304,12 +305,23 @@ export class SkillLifecycle {
       ``,
       `== L1 ATOM ==`,
       `${args.child.name} (tier 1)`,
+      `DECLARED TOOLS (this atom's ONLY executable surface): ${args.child.toolNames().join(', ') || '(none)'}`,
       ``,
       `== SUBTASK THAT WAS COMPLETED ==`,
       args.subTask.description,
       ``,
       `== L1 SUMMARY OF WHAT IT DID ==`,
       args.result.summary,
+      ``,
+      `HARD RULE — TOOLSET SCOPE: every step of every draft must be executable`,
+      `with the DECLARED TOOLS above and nothing else. Distil what the run's`,
+      `ACTIONS demonstrate, never what the subtask text or the summary merely`,
+      `INTENDED: a recipe teaching a tool this atom cannot call is a recipe`,
+      `for a phase that silently never happens (observed: two skills taught`,
+      `"validate_html" on an HTTP-bucket atom that cannot declare it — the`,
+      `plan had demanded it, the run never did it, the recipes encoded the`,
+      `phantom). If the run's real verification happened over fetch_url,`,
+      `teach THAT.`,
       ``,
       `Output ONLY a JSON object — no fences, no preamble. The first character`,
       `must be "{". Required fields:`,
@@ -393,6 +405,19 @@ export class SkillLifecycle {
       if (existing) {
         args.ctx.logger.debug(
           `[${this.host.name}] skill ${draft.id} already exists for ${args.l1Name}, not overwriting`
+        );
+        continue;
+      }
+      // Mechanical toolset filter — the code half of the F2 fix (the prompt
+      // rule above is the persuasion half). A draft teaching a tool the host
+      // cannot call encodes an intention the run never executed; skipping it
+      // is fail-open (a missed skill is cheap, a phantom recipe measured
+      // expensive: it matches, injects an unexecutable step, and farms
+      // counters toward compiling a workflow that never demonstrably ran).
+      const outOfScope = undeclaredToolMentions(draft.body, args.child.toolNames());
+      if (outOfScope.length > 0) {
+        args.ctx.logger.warn(
+          `[${this.host.name}] skill draft "${draft.id}" rejected: body teaches undeclared tool(s) ${outOfScope.join(', ')} (host ${args.l1Name} declares: ${args.child.toolNames().join(', ')})`
         );
         continue;
       }

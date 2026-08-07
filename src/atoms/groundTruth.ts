@@ -161,8 +161,71 @@ export async function probeGroundTruthEx(args: {
   // other file-producing child gets the read-back probe (#F9). Running both
   // would double the cost and, for a non-web artefact, add Puppeteer noise
   // the validator reads as contradiction.
-  if (!tools.has('validate_html') || !args.child.toolNames().includes('validate_html')) {
-    return probeFilesGroundTruth(args);
+  const webProbeEligible =
+    tools.has('validate_html') && args.child.toolNames().includes('validate_html');
+  if (!webProbeEligible) {
+    // HYBRID refinement (#F1b, app-task-tracker run 2026-08-07, REWORKED
+    // after adversarial review): an HTTP-bucket child can legitimately
+    // SERVE html — one server exposing both a JSON API and an embedded UI
+    // at GET /. The original #9 gate (child must declare validate_html)
+    // excluded exactly that case, so the UI's browser behaviour was
+    // validated on self-reporting alone. Three review findings shape the
+    // rework: (a) the read-back probe is NEVER displaced — it carries the
+    // contradiction FACTS (#F9 fabrication guard) the trust fast-path
+    // override depends on, and 88/166 archived RESULTs carry a URL, so a
+    // content-triggered swap would have re-opened the fabrication hole on
+    // most of the family; the browser block is APPENDED to it instead.
+    // (b) the sniff is LOOPBACK-ONLY — a RESULT quoting an external docs
+    // link must not trigger supervisor-side egress, let alone a Puppeteer
+    // navigation of a third-party site presented as ground truth. (c) a
+    // 200 status is required — Express serves its default 404 as
+    // text/html, which would have flipped pure JSON APIs into the exact
+    // incident-#9 Puppeteer-noise cascade the child gate existed to stop.
+    const filesProbe = await probeFilesGroundTruth(args);
+    if (!tools.has('validate_html') || !tools.has('fetch_url')) return filesProbe;
+    const hybridUrl = extractResultUrl(args.payload);
+    if (!hybridUrl || !LOOPBACK_URL_RE.test(hybridUrl)) return filesProbe;
+    let servesHtml = false;
+    try {
+      const res = (await tools.execute('fetch_url', { url: hybridUrl })) as {
+        status?: unknown;
+        headers?: Record<string, unknown>;
+        body?: unknown;
+      };
+      const contentType = String(
+        (res.headers && (res.headers['content-type'] ?? res.headers['Content-Type'])) ?? ''
+      ).toLowerCase();
+      const bodyHead =
+        typeof res.body === 'string' ? res.body.slice(0, 200).trim().toLowerCase() : '';
+      servesHtml =
+        res.status === 200 &&
+        (contentType.includes('text/html') ||
+          bodyHead.startsWith('<!doctype html') ||
+          bodyHead.startsWith('<html'));
+    } catch {
+      // Unreachable URL: the read-back probe + validator already have the
+      // signal they need — the sniff must never fail a run by itself.
+    }
+    if (!servesHtml) return filesProbe;
+    try {
+      const raw = await tools.execute('validate_html', { url: hybridUrl, waitMs: 1500 });
+      const summary = summarizeValidateHtml(raw);
+      return {
+        block: [
+          filesProbe.block,
+          '',
+          '== GROUND-TRUTH EVIDENCE (browser probe — hybrid server) ==',
+          `The child's URL serves HTML, so the supervisor ALSO loaded ${hybridUrl}`,
+          'in a headless browser (the child itself has no browser tool, so its',
+          "RESULT cannot contain first-hand browser observations — weigh any such",
+          'claims against THIS evidence).',
+          summary,
+        ].join('\n'),
+        facts: filesProbe.facts,
+      };
+    } catch {
+      return filesProbe; // browser probe is a bonus here, never a blocker
+    }
   }
   // (Bucket gate handled by the dispatch above: reaching here means BOTH the
   // context and the child declare validate_html, so this really is a web
@@ -205,6 +268,14 @@ export async function probeGroundTruthEx(args: {
     };
   }
 }
+
+/**
+ * Loopback host forms, enumerated (same policy as scriptScan's
+ * EXTERNAL_URL_RE): the hybrid sniff may only ever probe a server the run
+ * itself booted — a lookalike ("localhost.evil.com") must not pass.
+ */
+const LOOPBACK_URL_RE =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
 
 /** Max files the read-back probe will open, and per-file excerpt budget. */
 const FILE_PROBE_MAX_FILES = 6;
