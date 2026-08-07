@@ -27,6 +27,7 @@ export interface VizLlmEvent {
     | 'validate-plan'
     | 'validate-result'
     | 'prefilter'
+    | 'skill'
     | 'fallback-plan'
     | 'fallback-execute'
     | 'unknown';

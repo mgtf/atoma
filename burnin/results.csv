@@ -96,3 +96,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T09:04:32.736Z,http-polls2-api,http,delivered,0.3464,365,14,1,0,13,0,0,0,0,0,0,1,2026-08-07T09-04-33-343-dac901a7.json
 2026-08-07T09:10:39.774Z,http-contacts-api,http,delivered,0.4838,360,16,1,2,13,0,0,0,1,1,1,1,2026-08-07T09-10-40-392-4250801c.json
 2026-08-07T09:16:41.807Z,http-queue-api,http,delivered,0.2815,272,14,1,0,13,0,0,0,0,0,0,0,2026-08-07T09-16-42-437-e1460b49.json
+2026-08-07T09:31:20.270Z,http-timers-api,http,delivered,0.7969,644,36,1,4,31,0,2,2,0,2,0,0,2026-08-07T09-31-20-868-aad710c9.json

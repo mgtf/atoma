@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-timers-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for named countdown timers: POST /timers {name,seconds} -> 201 {id,expiresAt}, GET /timers/:id -> 200 {id,name,remaining} or 404, GET /timers -> 200 array. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 404, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-labels-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for labels: PUT /labels/:key {color} -> 200 {key,color} or 400 invalid color (must be a hex code), GET /labels/:key -> 200 or 404, GET /labels -> 200 object. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

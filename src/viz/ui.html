@@ -406,6 +406,7 @@ const I18N_CATALOGS = {
     'now.doing.validatePlan': '{{actor}} is checking {{child}}\'s plan before any work starts.',
     'now.doing.validateResult': '{{actor}} is checking what {{child}} produced.',
     'now.doing.fallback': '{{actor}} took over and is doing the work itself (fallback).',
+    'now.doing.skill': 'A skill recipe is being distilled, compiled or revised (supervisor-tier call).',
     'now.doing.unknown': '{{actor}} has a call in flight.',
     'now.activity': '{{count}} tool calls so far · last: {{tool}} ({{ago}}s ago)',
     'now.activity.one': '1 tool call so far · last: {{tool}} ({{ago}}s ago)',
@@ -592,6 +593,7 @@ const I18N_CATALOGS = {
     'now.doing.validatePlan': '{{actor}} contrôle le plan de {{child}} avant tout travail.',
     'now.doing.validateResult': '{{actor}} contrôle ce que {{child}} a produit.',
     'now.doing.fallback': '{{actor}} a repris la main et fait le travail lui-même (fallback).',
+    'now.doing.skill': 'Une recette de skill est en cours de distillation, compilation ou révision (appel de niveau superviseur).',
     'now.doing.unknown': '{{actor}} a un appel en vol.',
     'now.activity': '{{count}} appels outil jusqu\'ici · dernier : {{tool}} (il y a {{ago}}s)',
     'now.activity.one': '1 appel outil jusqu\'ici · dernier : {{tool}} (il y a {{ago}}s)',
@@ -1377,6 +1379,7 @@ function renderFilters() {
     ['validate-plan', 'validate plan'],
     ['validate-result', 'validate result'],
     ['prefilter', 'prefilter'],
+    ['skill', 'skill'],
     ['fallback-plan', 'fallback plan'],
     ['fallback-execute', 'fallback execute'],
   ];
@@ -1786,6 +1789,11 @@ function describeInFlight(s) {
       return t('now.doing.validatePlan', { actor, child: child ?? '?' });
     case 'validate-result':
       return t('now.doing.validateResult', { actor, child: child ?? '?' });
+    case 'skill':
+      // No actor: these calls carry no atom preamble (they are the
+      // lifecycle engine's own Sonnet slots), so the line names the
+      // ACTIVITY instead of showing a meaningless '?'.
+      return t('now.doing.skill', {});
     case 'fallback-plan':
     case 'fallback-execute':
       return t('now.doing.fallback', { actor });
@@ -2052,6 +2060,7 @@ function labelRole(r) {
     'validate-plan': 'validate plan',
     'validate-result': 'validate result',
     'prefilter': 'prefilter',
+    'skill': 'skill',
     'fallback-plan': 'fallback plan',
     'fallback-execute': 'fallback exec',
     'unknown': 'unknown',

@@ -73,6 +73,19 @@ function classify(req: LlmCompletionRequest): Classification {
     return actor ? { role: 'prefilter', actor } : { role: 'prefilter' };
   }
 
+  // Skill-lifecycle calls (distill / compile / revise) ride the supervisor's
+  // Sonnet slot but are NOT plans — without this marker check they fell into
+  // the default 'plan' branch with no extractable actor, and the "Right now"
+  // banner rendered `? is deciding how to break the task down` while the
+  // model was actually compiling a skill (observed on a 14s Sonnet call).
+  if (
+    req.userContent.startsWith('You are distilling') ||
+    req.userContent.startsWith('You are revising a SKILL') ||
+    req.userContent.startsWith('You are PROMOTING a SKILL')
+  ) {
+    return actor ? { role: 'skill', actor } : { role: 'skill' };
+  }
+
   if (/FALLBACK/.test(req.userContent)) {
     const role: VizLlmEvent['role'] =
       /reasoning-only|Return JSON:\s*\{"output"/.test(req.userContent)
