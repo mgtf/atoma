@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "files-release-notes",
+      "family": "files",
+      "goal": "release notes for a fictional 'beacon' app: notes/v1.0.md, notes/v1.1.md and notes/v2.0.md \u2014 each with an H1 and at least three '## Section' blocks (Highlights, Fixes, Upgrade notes) containing short paragraphs or bullets, plus notes/index.md linking to all three. Verify by reading each file back and confirming the required heading structure and section counts."
+    },
+    {
+      "id": "http-reminders-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for reminders: POST /reminders {text,at} -> 201 {id}, GET /reminders -> 200 array sorted by at, DELETE /reminders/:id -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}

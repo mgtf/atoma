@@ -115,3 +115,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-07T11:27:29.244Z,http-metrics-api,http,delivered,0.3065,230,15,1,1,13,1,0,0,0,1,0,0,2026-08-07T11-27-29-850-9793c91a.json
 2026-08-07T11:32:08.077Z,files-glossary,files,delivered,0.2041,177,17,1,0,16,0,0,0,0,0,0,0,2026-08-07T11-32-08-614-c1215e6e.json
 2026-08-07T11:35:05.365Z,http-favorites-api,http,delivered,0.2568,193,17,1,1,15,1,0,0,0,1,0,0,2026-08-07T11-35-05-955-e802791a.json
+2026-08-07T11:39:01.781Z,files-release-notes,files,delivered,0.2037,174,12,1,0,11,0,0,0,0,0,0,0,2026-08-07T11-39-02-323-cd932c14.json
+2026-08-07T11:41:56.629Z,http-reminders-api,http,delivered,0.2206,197,14,1,0,13,1,0,0,0,0,0,0,2026-08-07T11-41-57-173-76737e49.json
