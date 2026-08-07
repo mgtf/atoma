@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "http-todo-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for todos: POST /todos {title} -> 201 {id,title,done:false}, GET /todos -> 200 array, PATCH /todos/:id {done} -> 200 or 404, DELETE /todos/:id -> 204 or 404. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 404s and a malformed-JSON case, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-shorturl-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for short links: POST /links {url} -> 201 {code}, GET /links -> 200 object, GET /l/:code -> 302 with Location or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route + the 404 + one invalid-payload case, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-inventory-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for a tiny inventory: PUT /items/:sku {qty} -> 200 {sku,qty}, GET /items/:sku -> 200 or 404, GET /items -> 200 object, DELETE /items/:sku -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including both 404s, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
