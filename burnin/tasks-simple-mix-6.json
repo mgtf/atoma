@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "files-glossary",
+      "family": "files",
+      "goal": "a project glossary: glossary/terms-a-m.md and glossary/terms-n-z.md \u2014 each with an H1 and at least four '## Term' sections containing a one-paragraph definition, plus glossary/index.md linking to both. Verify by reading each file back and confirming the required heading structure and section counts."
+    },
+    {
+      "id": "http-favorites-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for favorites: PUT /favorites/:itemId -> 200 {itemId,favorited:true}, DELETE /favorites/:itemId -> 200 {itemId,favorited:false} or 404 when never favorited, GET /favorites -> 200 array. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
