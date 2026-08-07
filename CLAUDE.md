@@ -739,7 +739,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   recipe against a diagnosis about work that never followed it corrupts
   the recipe, and the `save()` would clear the promotion-refusal stamp.
   Rationale: counters are TRIGGERS, not stats — unearned successes arm
-  the 5/0 compile trigger on recipes that never demonstrably worked;
+  the promote-threshold compile trigger on recipes that never demonstrably worked;
   one unearned failure blocks promotion until an operator
   `skills reset`. Deliberate asymmetries: `undefined` (trust fast-path
   skipped the LLM, legacy verdict, model omission) preserves the legacy
@@ -805,7 +805,9 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   scarecrow skill so the slot actually fires.
 
 - **Promotion llm→script (#C2c).** When a `kind: 'llm'` skill crosses
-  `TRUST_PROMOTE_THRESHOLD_SUCCESSES` (5) with zero recorded failures,
+  `TRUST_PROMOTE_THRESHOLD_SUCCESSES` (3 — was 5; the 2026-08-07
+  threshold experiment showed the count never changed a compile verdict,
+  only delayed it) with zero recorded failures,
   the L2's `onApproved` hook fires `tryPromoteSkill` which (a) loads
   the skill, (b) re-checks eligibility, (c) makes ONE Sonnet compile
   call (`compileSkillToScript`) asking for a deterministic Node
@@ -840,7 +842,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       calls regardless of script length.
     - TRUSTED (`shouldTrustSkill` in `cost.ts`: 3+ successes, 0
       failures — every freshly promoted script qualifies since
-      promotion needs 5/0): `L2.runSubtask` short-circuits into
+      promotion needs promote-threshold/0): `L2.runSubtask` short-circuits into
       `runScriptSkillDirect`, which performs the SAME two tool calls
       itself. ZERO LLM calls — no L1 plan/execute, no validators.
       The exit code + stdout envelope IS the ground truth. ANY
@@ -997,7 +999,8 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `trustThreshold()` / `promoteThreshold()` / `demoteAfter()` in
   `src/atoms/cost.ts` read `ATOMA_TRUST_THRESHOLD` /
   `ATOMA_PROMOTE_THRESHOLD` / `ATOMA_DEMOTE_AFTER`, defaulting to the
-  documented constants (3 / 5 / 2 — still what tests assert). Read at
+  documented constants (3 / 3 / 2 — still what tests assert; promote
+  was 5 until the 2026-08-07 experiment). Read at
   CALL time so a single run can be made more cautious without a rebuild.
   Invalid, zero or negative values fall back to the DEFAULT rather than
   disabling a gate: a typo must never make the system less careful.

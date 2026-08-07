@@ -64,12 +64,23 @@ export function demoteAfter(): number {
  * failure on the script form) restores the original llm body from a
  * sidecar `_fallback.md` and increments `failures`; the `failures > 0`
  * gate then blocks re-promotion until the operator manually resets the
- * counters or deletes the skill. Five was picked to match the trust
- * level we observed on the LoL-SSR run's `scaffold-node-ssr-sqlite-api`
- * skill (5/2 lifetime) — i.e. enough successful runs that the recipe
- * is genuinely repeatable, but not so high that promotion never fires.
+ * counters or deletes the skill. Five was the original pick (matching
+ * the trust level observed on the LoL-SSR run's
+ * `scaffold-node-ssr-sqlite-api` skill, 5/2 lifetime); lowered to THREE
+ * after the 2026-08-07 threshold experiment (batches 14-15, run under
+ * ATOMA_PROMOTE_THRESHOLD=3): across every compile attempt of the
+ * campaign the success count NEVER changed the compiler's verdict —
+ * compilable recipes compiled at their first attempt and irreducible-
+ * reasoning recipes were refused with the same rationale at any count —
+ * so the extra two runs only delayed the outcome (~$0.60-1 + two runs of
+ * latency per lineage) while the downstream gates (compiler refusal,
+ * static scan, generation-stamped anti-thrash, post-promotion counter
+ * RESET + re-earned trust, deliverable gate, demotion streak) carry the
+ * actual safety. The count still matters as a match-surface sample for
+ * LEARNED skills; three matched-and-credited runs proved sufficient to
+ * expose a bad surface in practice (free-ride gap + `skills stats`).
  */
-export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 5;
+export const TRUST_PROMOTE_THRESHOLD_SUCCESSES = 3;
 
 /**
  * Consecutive DETERMINISTIC dispatch failures (non-zero exit or missing
