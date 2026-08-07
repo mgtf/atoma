@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "app-task-tracker",
+      "family": "app",
+      "goal": "a small task-tracker web application, all zero-dependency Node. server.js serves BOTH a JSON API and the UI: API routes: POST /api/tasks {title,priority 1-3} -> 201 {id} or 400 bad priority; GET /api/tasks -> 200 array sorted by priority then id; PATCH /api/tasks/:id {done} -> 200 or 404; DELETE /api/tasks/:id -> 204 or 404. In-memory store. GET / serves an embedded single-page UI (HTML+JS inlined or read from public/index.html) that lists tasks, has a form to add one (title + priority select), a checkbox per task to toggle done (strike-through when done), and a delete button per task \u2014 all wired to the API via fetch. Expose window.__test = {taskCount, doneCount} in the UI for smoke checks. Also write test-api.js, an executable harness that boots server.js itself on PORT=0, exercises every API route including the 400 and both 404s, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). Write a README.md with sections: Overview, Run (node server.js), API (each route), UI features. As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass, and read the README back to confirm every documented route exists in server.js; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
