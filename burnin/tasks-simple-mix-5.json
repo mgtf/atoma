@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "files-team-handbook",
+      "family": "files",
+      "goal": "a small team handbook: handbook/onboarding.md, handbook/meetings.md and handbook/tooling.md \u2014 each with an H1 and at least three '## Section' blocks containing short paragraphs, plus handbook/index.md linking to all three. Verify by reading each file back and confirming the required heading structure and section counts."
+    },
+    {
+      "id": "http-polls3-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for yes/no questions: POST /questions {text} -> 201 {id}, POST /questions/:id/answer {answer:'yes'|'no'} -> 200 tallies or 400 invalid or 404, GET /questions/:id -> 200 {text,yes,no} or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and both 404s, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-metrics-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for named gauges: PUT /gauges/:name {value} -> 200 {name,value}, GET /gauges/:name -> 200 or 404, GET /gauges -> 200 object, DELETE /gauges/:name -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including both 404s, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
