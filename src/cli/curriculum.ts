@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { SkillRegistry } from '../skills/registry.js';
 import { trustThreshold, promoteThreshold } from '../atoms/cost.js';
-import { COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
+import { refusalStampIsCurrent } from '../skills/generations.js';
 import { extractJson } from '../atoms/json.js';
 import { modelForTier } from '../core/models.js';
 import { AnthropicLlmClient } from '../core/llm.js';
@@ -80,7 +80,8 @@ export function selectCurriculumTargets(args: {
   byL1: ReadonlyMap<string, readonly Skill[]>;
   trust: number;
   promote: number;
-  currentGeneration: string;
+  /** Refusal-stamp currency check — pass `refusalStampIsCurrent` (generations.ts). */
+  stampIsCurrent: (gen: string | undefined) => boolean;
   failedFamilies?: readonly { family: string; failed: number; total: number }[];
   cap?: number;
 }): CurriculumTarget[] {
@@ -106,7 +107,7 @@ export function selectCurriculumTargets(args: {
       } else if (
         s.kind === 'llm' &&
         s.promotionRefusedAt &&
-        s.promotionRefusedGeneration !== args.currentGeneration
+        !args.stampIsCurrent(s.promotionRefusedGeneration)
       ) {
         scored.push({
           priority: CATEGORY_PRIORITY['stale-refusal-retry'],
@@ -327,7 +328,7 @@ async function main(): Promise<void> {
     byL1,
     trust: trustThreshold(),
     promote: promoteThreshold(),
-    currentGeneration: COMPILE_PROMPT_GENERATION,
+    stampIsCurrent: refusalStampIsCurrent,
     failedFamilies,
     cap,
   });

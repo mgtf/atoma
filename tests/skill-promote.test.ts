@@ -14,6 +14,7 @@ import { SCAN_GENERATION } from '../src/skills/scriptScan.js';
  * parked against a rule that no longer existed.
  */
 const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
+import { refusalStampIsCurrent } from '../src/skills/generations.js';
 import {
   shouldTrustSkill,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
@@ -438,6 +439,51 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     await water.handleDirect({ description: 'task' }, ctx);
     expect(ctx.llm.calls).toHaveLength(4);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('a DEMOTION stamp under the CURRENT compiler also short-circuits (two currencies)', async () => {
+    // Regression (observed 2026-08-06, cli-envcheck run analysis): demotion
+    // stamps store the compile-only generation while compile/scan refusals
+    // store the combined compile+scan string. A strict comparison against
+    // the combined value treated EVERY demotion stamp as stale — so a script
+    // compiled by the CURRENT compiler that failed 2 deterministic dispatches
+    // would be recompiled by that same compiler into the same body, forever
+    // (1 Sonnet call + 2 failed dispatches + fallback per lap).
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-gen3-'));
+    const skills = new SkillRegistry(dir);
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
+    skills.save('Hydrogen', {
+      id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
+    });
+    for (let i = 0; i < 5; i++) skills.recordSuccess('Hydrogen', 'web-build-loop');
+    // Exactly what tryPromoteSkill's demotion path writes when the failing
+    // script was compiled under the compiler in force NOW.
+    skills.markPromotionRefused('Hydrogen', 'web-build-loop', 'auto-demoted: …', COMPILE_PROMPT_GENERATION);
+
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    // NO compile reply enqueued: the stamp must hold.
+    await water.handleDirect({ description: 'task' }, ctx);
+    expect(ctx.llm.calls).toHaveLength(4);
+    const after = skills.loadFor('Hydrogen')[0]!;
+    expect(after.promotionRefusedAt).toBeTruthy(); // not cleared as "stale"
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refusalStampIsCurrent knows both currencies and rejects everything else', () => {
+    expect(refusalStampIsCurrent(REFUSAL_GENERATION)).toBe(true);
+    expect(refusalStampIsCurrent(COMPILE_PROMPT_GENERATION)).toBe(true);
+    expect(refusalStampIsCurrent('deadbeef')).toBe(false); // older compile gen
+    expect(refusalStampIsCurrent(`deadbeef-${SCAN_GENERATION}`)).toBe(false); // older combined
+    expect(refusalStampIsCurrent(undefined)).toBe(false); // legacy stamp
   });
 });
 

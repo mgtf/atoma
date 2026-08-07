@@ -19,7 +19,7 @@ import type { Skill } from '../src/skills/types.js';
  * matching-surface overlap exposes merge candidates.
  */
 
-const OPTS = { trust: 3, promote: 5, currentGeneration: 'GEN-NOW' };
+const OPTS = { trust: 3, promote: 5, stampIsCurrent: (g: string | undefined) => g === 'GEN-NOW' };
 
 function fakeSkill(over: Partial<Skill>): Skill {
   return {

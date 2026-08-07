@@ -17,7 +17,7 @@ import type { Skill } from '../src/skills/types.js';
  * tolerant parser.
  */
 
-const GEN = { trust: 3, promote: 5, currentGeneration: 'GEN-NOW' };
+const GEN = { trust: 3, promote: 5, stampIsCurrent: (g: string | undefined) => g === 'GEN-NOW' };
 
 function fakeSkill(over: Partial<Skill>): Skill {
   return {

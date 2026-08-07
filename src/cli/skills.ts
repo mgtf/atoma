@@ -25,7 +25,7 @@ import { parseCliArgs } from './args.js';
 // against the compile hash alone made every current stamp look stale, so
 // `stats`/`show` claimed "will retry" for a skill that is in fact parked.
 // One definition, imported by both the runtime and this CLI.
-import { REFUSAL_GENERATION } from '../skills/lifecycle.js';
+import { refusalStampIsCurrent } from '../skills/generations.js';
 import { demoteAfter, promoteThreshold, trustThreshold } from '../atoms/cost.js';
 import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import type { Skill } from '../skills/types.js';
@@ -138,7 +138,7 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   if (s.kind === 'llm') {
     if (s.failures > 0) {
       next.push(`blocked: ${s.failures} failure(s) recorded — \`reset\` to clear`);
-    } else if (s.promotionRefusedAt && s.promotionRefusedGeneration === REFUSAL_GENERATION) {
+    } else if (s.promotionRefusedAt && refusalStampIsCurrent(s.promotionRefusedGeneration)) {
       next.push('blocked: refused by the CURRENT compiler — revise the body or `reset`');
     } else if (s.promotionRefusedAt) {
       next.push('will RETRY compilation (stamp predates the current compiler)');
@@ -179,7 +179,7 @@ function cmdStats(registry: SkillRegistry, l1Filter: string | undefined, simFlag
   const rows = computeStatsRows(byL1, {
     trust: trustThreshold(),
     promote: promoteThreshold(),
-    currentGeneration: REFUSAL_GENERATION,
+    stampIsCurrent: refusalStampIsCurrent,
   });
   if (rows.length === 0) {
     console.log(

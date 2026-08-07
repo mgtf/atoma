@@ -40,7 +40,11 @@ export interface SkillStatsRow {
  */
 export function skillStatus(
   s: Skill,
-  opts: { trust: number; promote: number; currentGeneration: string }
+  // `stampIsCurrent` is a PREDICATE (not a generation string to compare):
+  // refusal stamps come in two currencies — combined compile+scan for
+  // compile/scan refusals, compile-only for demotions — and only
+  // generations.ts knows both. Pass `refusalStampIsCurrent` in production.
+  opts: { trust: number; promote: number; stampIsCurrent: (gen: string | undefined) => boolean }
 ): string {
   const parts: string[] = [];
   const driven = s.successes + s.failures;
@@ -55,7 +59,7 @@ export function skillStatus(
   }
   if (s.kind === 'llm') {
     if (s.failures > 0) parts.push('blocked(reset)');
-    else if (s.promotionRefusedAt && s.promotionRefusedGeneration === opts.currentGeneration)
+    else if (s.promotionRefusedAt && opts.stampIsCurrent(s.promotionRefusedGeneration))
       parts.push('refused(current-gen)');
     else if (s.promotionRefusedAt) parts.push('refusal-stale(will-retry)');
     else if (s.successes >= opts.promote) parts.push('promotion-eligible');
@@ -71,7 +75,7 @@ export function skillStatus(
 
 export function computeStatsRows(
   byL1: ReadonlyMap<string, readonly Skill[]>,
-  opts: { trust: number; promote: number; currentGeneration: string }
+  opts: { trust: number; promote: number; stampIsCurrent: (gen: string | undefined) => boolean }
 ): SkillStatsRow[] {
   const rows: SkillStatsRow[] = [];
   for (const [l1, skills] of byL1) {

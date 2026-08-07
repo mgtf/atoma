@@ -15,18 +15,13 @@ import { extractJson } from '../atoms/json.js';
 import { extractResultFilePaths } from '../atoms/groundTruth.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
 import { scriptInterpreter, scriptScratchFilename } from './abi.js';
-import { hostAllowsLoopbackNetwork, scanScriptBody, SCAN_GENERATION } from './scriptScan.js';
+import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
+import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 
-/**
- * The refusal stamp must expire when EITHER input to the refusal decision
- * changes — the compile prompt or the static scan. Stamping the compile
- * generation alone parked a skill against a scan rule that had since been
- * corrected (observed: `probe-crud-json-api-lifecycle`, refused for
- * `network:fetch` on a script whose every request went to the loopback
- * server it had just booted).
- */
-export const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
+// Historical export home — the generation machinery lives in generations.ts
+// (stats/curriculum need the predicate without importing this whole engine).
+export { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 
 /**
  * SKILL LIFECYCLE ENGINE — extracted from L2Atom (structural slice 2).
@@ -662,12 +657,16 @@ export class SkillLifecycle {
     if (skill.kind !== 'llm') return;
     if (skill.failures > 0) return;
     if (skill.successes < promoteThreshold()) return;
-    if (skill.promotionRefusedAt && skill.promotionRefusedGeneration !== REFUSAL_GENERATION) {
+    if (skill.promotionRefusedAt && !refusalStampIsCurrent(skill.promotionRefusedGeneration)) {
       // The stamp predates the CURRENT compiler. Its premise ("recompiling
       // this body reproduces the same script") is false once the compile
       // prompt itself changed, so give the evolved compiler exactly one
       // shot — this is what used to require a manual operator reset when a
-      // new contract (e.g. the probe manifest) landed.
+      // new contract (e.g. the probe manifest) landed. The predicate knows
+      // both stamp currencies — see generations.ts; strict comparison
+      // against REFUSAL_GENERATION alone treated every demotion stamp
+      // (compile-only currency) as stale, defeating the anti-thrash guard
+      // for freshly-compiled scripts that fail deterministically.
       args.ctx.logger.info(
         `[${this.host.name}] skill "${args.skillId}" refusal stamp is from an older compiler/scan generation (${skill.promotionRefusedGeneration ?? 'legacy'} → ${REFUSAL_GENERATION}); retrying the compile`
       );
