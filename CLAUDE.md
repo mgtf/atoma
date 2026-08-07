@@ -912,6 +912,27 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   directFailures streak demotes it — stragglers are covered. The skill
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
+- **The workspace is FENCED from the repo's module system
+  (`ensureModuleResolutionBoundary`, `src/examples/workspace.ts`).** The
+  inverse leak of the `.mjs` bullet above: Node resolves a `.js` file's
+  module system by walking UP to the nearest package.json, and the
+  workspace lives under the atoma repo (`"type": "module"`) — so a task
+  shipping CommonJS `.js` files WITHOUT a local package.json crashed with
+  "require is not defined in ES module scope", caused by a file OUTSIDE
+  the sandbox jail that no L1 or validator can see. Measured (HTTP
+  burn-in, 2026-08-07): 8/10 runs wrote no local package.json; exactly
+  the ones whose L1 happened to pick the CJS style crashed and converted
+  to ESM in-loop. This class CANNOT self-improve through the skill
+  machinery — runs end approved (no rejection → no event-skill learning,
+  no escalation → no body revision) and each in-loop self-repair is
+  locally correct while leaving nothing durable behind; the needed fact
+  lives outside every observer's world. Hence a structural fix: a
+  sentinel `{}` package.json in the workspace's PARENT (harness-owned
+  `build/`), written by `prepareWorkspace` ONLY when the nearest ancestor
+  manifest above it is `"type": "module"` — innocent layouts are never
+  touched, and a task-authored package.json still wins (closer to the
+  file). Covered by `tests/workspace-boundary.test.ts` with real `node`
+  spawns both directions.
 - **An UNCHANGED skill revision is NOT a revision.** `improveSkillBody`
   is explicitly told to return the body as-is when the failure was
   environmental — but saving it anyway is harmful twice over: `save()`
