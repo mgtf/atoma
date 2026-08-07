@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-ratings-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for ratings: POST /ratings {item,score 1-5} -> 201 {id} or 400 out-of-range, GET /ratings/:item -> 200 {item,average,count} or 404. In-memory store. Also write test-api.js, an executable probe harness that boots the server itself on PORT=0, exercises every route including the 400 and the 404, and exits non-zero on any mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "http-sessions-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for sessions: POST /sessions {user} -> 201 {token}, GET /sessions/:token -> 200 {user} or 404, DELETE /sessions/:token -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including both 404s, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
