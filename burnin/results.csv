@@ -77,3 +77,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-06T11:26:33.597Z,verify-bookclub-api-routes,cli,delivered,0.301,295,16,1,0,15,0,0,0,0,0,0,0,2026-08-06T11-26-34-289-6a97f1e3.json
 2026-08-06T11:31:30.468Z,verify-thermostat-widget-state,web,delivered,0.5164,473,16,1,2,13,0,0,0,0,2,0,0,2026-08-06T11-31-31-178-0c9e787f.json
 2026-08-06T20:43:45.741Z,cli-envcheck,cli,delivered,0.5822,534,28,1,3,24,0,0,0,1,1,1,2,2026-08-06T20-43-46-397-c9a05ab7.json
+2026-08-07T04:41:33.934Z,http-notes-api,http,delivered,0.4032,277,16,1,2,13,0,0,0,0,2,0,0,2026-08-07T04-41-34-602-8850abca.json
+2026-08-07T04:46:13.248Z,http-counter-api,http,delivered,0.3785,255,19,1,1,17,0,1,2,0,0,0,0,2026-08-07T04-46-13-952-4bd31968.json
