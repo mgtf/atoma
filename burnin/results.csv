@@ -132,3 +132,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-08T07:06:09.497Z,smoke-test-habit-tracker-widget,web,failed,0.1664,777,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T07-06-10-146-27ee3414.json
 2026-08-08T07:19:06.968Z,package-doc-todo-cli,cli,delivered,0.3339,293,18,1,0,17,0,0,0,0,0,0,0,2026-08-08T07-19-07-617-e3f52d2d.json
 2026-08-08T07:24:00.452Z,argv-slug-transform-cli,cli,delivered,0.2187,221,17,1,1,15,0,0,0,0,1,0,0,2026-08-08T07-24-01-049-02e23974.json
+2026-08-08T07:36:26.370Z,docs-and-config-static-site,files,delivered,0.2128,206,18,1,0,17,2,0,0,0,0,0,0,2026-08-08T07-36-26-992-3eb36954.json

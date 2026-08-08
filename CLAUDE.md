@@ -362,6 +362,18 @@ re-exports all the historical names so old imports keep working.
   outside LLM loops (its sensor is `directFailures`). Covered by
   `tests/friction.test.ts`, whose normalisation cases are the adversarial
   review's literal counter-examples.
+- **NEVER edit `src/` while a burn-in batch is in flight.** The harness
+  spawns a FRESH `tsx src/examples/build-app.ts` process per task, so
+  each task compiles the source as it stands AT ITS START — an
+  intermediate edit becomes the runtime for every task that follows.
+  Measured (2026-08-08, curriculum batch): a mid-edit state where
+  `bumpDeadline()` was called outside its closure was picked up by the
+  next task and threw `bumpDeadline is not defined` on EVERY tool call,
+  blocking all file I/O; the run limped to a degraded fallback
+  deliverable and its CSV row is noise, not signal. Typecheck catching
+  the error a minute later did not help — the process had already
+  loaded it. Docs (CLAUDE.md), task JSON and the CSV are safe to touch
+  mid-batch; anything under `src/` or `skills/` is not.
 - **Burn-in harness** (`npm run burnin`, `src/cli/burnin.ts`): runs a task
   batch through the real `example:build` path (one clean workspace per task,
   child spawned in its own process group and group-killed after
