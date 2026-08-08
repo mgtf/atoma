@@ -710,7 +710,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             ...(skills.skill.language ? { language: skills.skill.language } : {}),
           })
         );
-        l1.setActiveSkill(skills.skill.id);
+        // Commit A′ of the shared-catalog plan: the owner namespace rides
+        // the instance tag alongside the id. Today owner == l1Type.name;
+        // the visibility lattice (commit B) makes them diverge.
+        l1.setActiveSkill(skills.skill.id, l1Type.name);
         // Match + inject are emitted as a paired event sequence so the
         // viz can render either the match decision alone (rare) or the
         // full inject side-effect (common). Keeping them separate also
@@ -1091,10 +1094,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const carrySkill = (fresh: L1Atom): L1Atom => {
           const skillId = child instanceof L1Atom ? child.activeSkillId() : null;
           if (!skillId) return fresh;
-          const skill = this.skillRegistry?.loadFor(child.name).find((k) => k.id === skillId);
+          // Load from the OWNER namespace, not the (possibly branched)
+          // child's name — a branched child has no folder of its own and
+          // the lookup used to silently miss, cutting the recipe AND the
+          // attribution mid-loop.
+          const ownerNs =
+            (child instanceof L1Atom ? child.activeSkillOwner() : null) ?? child.name;
+          const skill = this.skillRegistry?.loadFor(ownerNs).find((k) => k.id === skillId);
           if (skill) {
             fresh.injectContext(skillContextBlock(skill));
-            fresh.setActiveSkill(skillId);
+            fresh.setActiveSkill(skillId, ownerNs);
           }
           return fresh;
         };
@@ -1175,6 +1184,12 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // legacy registry-branch path (which fixes the ATOM, the thing
         // that actually failed).
         const activeSkillId = child.activeSkillId();
+        // The revision must target the recipe that actually DROVE the run —
+        // the owner namespace. `child.name` diverges from it whenever the
+        // child was branched mid-loop (the lookup used to miss and skip the
+        // revision silently) and, under the shared catalog, whenever the
+        // match came from a donor namespace.
+        const activeSkillNs = child.activeSkillOwner() ?? child.name;
         const skillWasIgnored = lastResultVerdictSkillFollowed(trace) === false;
         if (activeSkillId && skillWasIgnored) {
           ctx.logger.info(
@@ -1182,7 +1197,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
         }
         if (activeSkillId && !skillWasIgnored && this.skillRegistry && diagnostic.length > 0 && childType) {
-          const skills = this.skillRegistry.loadFor(child.name);
+          const skills = this.skillRegistry.loadFor(activeSkillNs);
           const oldSkill = skills.find((s) => s.id === activeSkillId);
           if (oldSkill) {
             try {
@@ -1224,7 +1239,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               }
               if (revised) {
                 const newBody = revised;
-                this.skillRegistry.save(child.name, {
+                this.skillRegistry.save(activeSkillNs, {
                   id: oldSkill.id,
                   description: oldSkill.description,
                   whenToUse: oldSkill.whenToUse,
@@ -1233,11 +1248,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   body: newBody,
                 }, { mechanism: 'revised', model: this.model });
                 ctx.logger.warn(
-                  `[${this.name}] skill ${activeSkillId} on ${child.name} updated after escalation (${reason}); retrying L1 with new body`
+                  `[${this.name}] skill ${activeSkillId} (owner ${activeSkillNs}) updated after escalation (${reason}); retrying L1 with new body`
                 );
                 ctx.recordSkill?.({
                   op: 'update',
-                  l1Name: child.name,
+                  l1Name: activeSkillNs,
                   skillId: activeSkillId,
                   actorName: this.name,
                   actorTier: 2,
@@ -1252,7 +1267,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                     ...(oldSkill.language ? { language: oldSkill.language } : {}),
                   })
                 );
-                fresh.setActiveSkill(activeSkillId);
+                fresh.setActiveSkill(activeSkillId, activeSkillNs);
                 return fresh;
               }
             } catch (err) {
@@ -1322,23 +1337,29 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // model omission) keeps the legacy bump: false is an AFFIRMATIVE
         // observation, absence of evidence is not evidence of free-riding.
         const skillId = child.activeSkillId();
+        // Credit lands on the OWNER namespace — where the folder and the
+        // counters live. Reading the pair from the INSTANCE (not skillCtx)
+        // is the R2 guard: the legacy-branch path returns an untagged
+        // instance, so a run the branch delivered without the recipe
+        // credits nothing.
+        const skillNs = child.activeSkillOwner() ?? child.name;
         if (skillId && this.skillRegistry && verdict?.activeSkillFollowed === false) {
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" credit WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
           );
           ctx.recordSkill?.({
             op: 'credit-withheld',
-            l1Name: child.name,
+            l1Name: skillNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
             reasoning: 'succès NON crédité — le validateur a observé que le run n\'a pas suivi la recette',
           });
         } else if (skillId && this.skillRegistry) {
-          this.skillRegistry.recordSuccess(child.name, skillId);
+          this.skillRegistry.recordSuccess(skillNs, skillId, { via: child.name });
           ctx.recordSkill?.({
             op: 'success',
-            l1Name: child.name,
+            l1Name: skillNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1352,12 +1373,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           // logged + swallowed — promotion is opportunistic.
           try {
             await this.tryPromoteSkill({
-              l1Name: child.name,
+              l1Name: skillNs,
               skillId,
               subTask: skillCtx.subTask,
               result,
               ctx,
-              hostTools: child.toolNames(),
+              // R3: the promotion scan is a property of the ARTEFACT+HOME,
+              // deterministic across crediting hosts — a permissive reader
+              // must not admit a compiled body that its file-scribe owner's
+              // scan would refuse (order-dependent bifurcated trust).
+              hostTools: (this.registry.getByName(skillNs)?.tools ?? []).map((t) => t.name),
             });
           } catch (err) {
             ctx.logger.warn(
@@ -1411,23 +1436,26 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // affirmatively reported non-adherence. The atom-type failure above
         // still counts: the CHILD did fail, whatever it was following.
         const skillId = child.activeSkillId();
+        // Blame lands on the OWNER namespace, symmetric with the credit
+        // side (R2): read the pair from the instance, never from context.
+        const blameNs = child.activeSkillOwner() ?? child.name;
         if (skillId && this.skillRegistry && lastResultVerdict?.activeSkillFollowed === false) {
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" blame WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
           );
           ctx.recordSkill?.({
             op: 'credit-withheld',
-            l1Name: child.name,
+            l1Name: blameNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
             reasoning: 'échec NON imputé — le validateur a observé que le run n\'a pas suivi la recette',
           });
         } else if (skillId && this.skillRegistry) {
-          this.skillRegistry.recordFailure(child.name, skillId);
+          this.skillRegistry.recordFailure(blameNs, skillId, { via: child.name });
           ctx.recordSkill?.({
             op: 'failure',
-            l1Name: child.name,
+            l1Name: blameNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1440,16 +1468,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           // couldn't. The `failures > 0` clause inside tryPromoteSkill
           // then blocks accidental re-promotion until counters are
           // reset by the operator.
-          const matched = this.skillRegistry.loadFor(child.name).find((s) => s.id === skillId);
+          const matched = this.skillRegistry.loadFor(blameNs).find((s) => s.id === skillId);
           if (matched && matched.kind === 'script' && matched.fallbackBody) {
-            const restored = this.skillRegistry.demoteToLlm(child.name, skillId);
+            const restored = this.skillRegistry.demoteToLlm(blameNs, skillId);
             if (restored) {
               ctx.logger.info(
                 `[${this.name}] skill "${skillId}" demoted to kind:llm after script failure`
               );
               ctx.recordSkill?.({
                 op: 'demote',
-                l1Name: child.name,
+                l1Name: blameNs,
                 skillId,
                 actorName: this.name,
                 actorTier: 2,
@@ -1785,7 +1813,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const activeSkillId = child.activeSkillId();
     const activeSkill =
       activeSkillId && this.skillRegistry
-        ? this.skillRegistry.loadFor(child.name).find((s) => s.id === activeSkillId)
+        ? this.skillRegistry
+            .loadFor(child.activeSkillOwner() ?? child.name)
+            .find((s) => s.id === activeSkillId)
         : undefined;
     return llmVerdict({
       ctx,

@@ -576,15 +576,30 @@ export class SkillRegistry {
       .sort((a, b) => a.localeCompare(b));
   }
 
-  /** Bump the success counter for a known skill (no-op if not found). */
-  recordSuccess(l1Name: string, skillId: string): void {
-    appendLedger({ kind: 'skill-success', entity: `${l1Name}/${skillId}` });
+  /**
+   * Bump the success counter for a known skill (no-op if not found).
+   * `opts.via` names the EXECUTING atom when it differs from the owner
+   * namespace (shared-catalog credit) — recorded in the ledger detail so
+   * the cross-namespace channel that arms the no-validator paths stays
+   * auditable ("who supplied the 3 successes"); inert for `ledger check`,
+   * which only projects counters.
+   */
+  recordSuccess(l1Name: string, skillId: string, opts?: { via?: string }): void {
+    appendLedger({
+      kind: 'skill-success',
+      entity: `${l1Name}/${skillId}`,
+      ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
+    });
     this.bump(l1Name, skillId, 'success');
   }
 
   /** Bump the failure counter for a known skill (no-op if not found). */
-  recordFailure(l1Name: string, skillId: string): void {
-    appendLedger({ kind: 'skill-failure', entity: `${l1Name}/${skillId}` });
+  recordFailure(l1Name: string, skillId: string, opts?: { via?: string }): void {
+    appendLedger({
+      kind: 'skill-failure',
+      entity: `${l1Name}/${skillId}`,
+      ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
+    });
     this.bump(l1Name, skillId, 'failure');
   }
 

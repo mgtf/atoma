@@ -342,6 +342,11 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
       expect(skills.loadFor('Hydrogen').filter((s) => !s.trigger).map((s) => s.id)).toEqual([
         'web-build-loop',
       ]);
+      // R2 kill-shot: the legacy branch delivered WITHOUT the recipe — the
+      // untagged fresh instance must credit nothing. (The failure recorded
+      // during the tagged instance's escalation is EARNED and stays.)
+      const after = skills.loadFor('Hydrogen').find((s) => s.id === 'web-build-loop')!;
+      expect(after.successes).toBe(0);
     } finally {
       if (envBefore === undefined) delete process.env['ATOMA_SKILL_LEARN'];
       else process.env['ATOMA_SKILL_LEARN'] = envBefore;

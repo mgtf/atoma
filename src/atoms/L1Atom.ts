@@ -66,15 +66,34 @@ export class L1Atom extends Atom {
    * subtasks can resolve the SAME L1 type but pick DIFFERENT skills.
    */
   private activeSkillIdField: string | null = null;
+  private activeSkillOwnerField: string | null = null;
 
-  /** Mark this instance as currently driven by `skillId`. Pass null to clear. */
-  setActiveSkill(skillId: string | null): void {
+  /**
+   * Mark this instance as currently driven by `skillId`, owned by the
+   * namespace `ownerNs`. The owner pair rides the INSTANCE (not skillCtx)
+   * deliberately: the legacy-branch escalation path returns an untagged
+   * fresh instance, and credit read from anywhere else would pay a skill
+   * for a run the branch delivered without it (the R2 laundering channel
+   * from the bucket-namespace adversarial review). `ownerNs` defaults to
+   * null-with-id-null; callers set both together.
+   */
+  setActiveSkill(skillId: string | null, ownerNs: string | null = null): void {
     this.activeSkillIdField = skillId;
+    this.activeSkillOwnerField = skillId === null ? null : ownerNs;
   }
 
   /** Active skill id for this run, or null if none was matched. */
   activeSkillId(): string | null {
     return this.activeSkillIdField;
+  }
+
+  /**
+   * Namespace that OWNS the active skill (where its folder and counters
+   * live). Under the shared-catalog lattice this can differ from the
+   * executing atom's name; credit/blame/revision must all land here.
+   */
+  activeSkillOwner(): string | null {
+    return this.activeSkillOwnerField;
   }
 
   static fromType(
