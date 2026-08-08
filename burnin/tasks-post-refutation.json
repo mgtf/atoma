@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-alarms-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for alarms: POST /alarms {label,at} -> 201 {id} or 400 missing field, GET /alarms -> 200 array sorted by at, DELETE /alarms/:id -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry with stdout omitted, plus one http entry per verified request). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "cli-csvcols",
+      "family": "cli",
+      "goal": "a Node CLI 'csvcols' that lists a CSV file's column names: reads a path as argv[2], prints one column name per line, exits 1 with a usage message when no argument or the file is missing. Ship package.json, a fixtures/sample.csv, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match; record the verified invocations in .atoma-probes.json as shell entries."
+    }
+  ]
+}
