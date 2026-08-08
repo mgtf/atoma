@@ -228,6 +228,41 @@ describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sid
     expect(writer).toMatch(/omit "stdout"/);
   });
 
+  it('a renamed field is named back: the checker says WHICH rename was made', () => {
+    // Measured twice, both cascades: a run burned FOUR rejection cycles on
+    // {kind, expect} instead of {probe, status}, another FIVE on
+    // "expectExitCode" instead of "exitCode". Stating the absence alone
+    // ("missing numeric status") left the writer guessing; naming the
+    // rename turns a cascade into one coached cycle.
+    const renamedHttp = JSON.stringify({
+      version: 1,
+      entries: [{ kind: 'http', method: 'GET', path: '/timers', expect: 200 }],
+    });
+    const p1 = validateProbeManifest(renamedHttp);
+    expect(p1.some((p) => p.includes('this entry has "expect"'))).toBe(true);
+    expect(p1.some((p) => p.includes('the field is named "status"'))).toBe(true);
+
+    const renamedShell = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node x.js', expectExitCode: 0 }],
+    });
+    const p2 = validateProbeManifest(renamedShell);
+    expect(p2.some((p) => p.includes('this entry has "expectExitCode"'))).toBe(true);
+    expect(p2.some((p) => p.includes('the field is named "exitCode"'))).toBe(true);
+
+    // No alias present → the plain message, no invented hint.
+    const plainMissing = JSON.stringify({
+      version: 1,
+      entries: [{ probe: 'http', method: 'GET', path: '/x' }],
+    });
+    expect(validateProbeManifest(plainMissing).some((p) => p.includes('this entry has'))).toBe(false);
+
+    // And the writer block forbids the renaming in the first place.
+    const writer = manifestWriterLines('http').join(' ');
+    expect(writer).toMatch(/FIELD NAMES ARE EXACT/);
+    expect(writer).toMatch(/"probe", not "kind"/);
+  });
+
   it('DECORATED_CMD_RE catches the variants and spares legitimate cmds', () => {
     expect(DECORATED_CMD_RE.test('node x.js; echo EXIT=$?')).toBe(true);
     expect(DECORATED_CMD_RE.test('node x.js && echo $?')).toBe(true);

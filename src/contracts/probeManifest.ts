@@ -154,6 +154,27 @@ export const EXAMPLE_WEB_ENTRY: WebEntry = webEntrySchema.parse({
 /* ────────────────────── health check ────────────────────── */
 
 /**
+ * Field names a writer plausibly used INSTEAD of the canonical one. The
+ * contract is taught by example, and L1s paraphrase it: two runs were
+ * measured burning four and five rejection cycles respectively on
+ * {kind, expect} and "expectExitCode". Stating the absence alone
+ * ("missing numeric status") left the writer guessing; naming the
+ * rename it actually made turns a cascade into one coached cycle.
+ */
+const CANONICAL_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  status: ['expect', 'expectedStatus', 'expected_status', 'statusCode', 'status_code'],
+  exitCode: ['expectExitCode', 'expected_exit_code', 'expectedExitCode', 'exit_code', 'code'],
+  cmd: ['command', 'invocation'],
+  probe: ['kind', 'type'],
+};
+
+function renameHint(entry: Record<string, unknown>, canonical: string): string {
+  const found = (CANONICAL_ALIASES[canonical] ?? []).filter((a) => entry[a] !== undefined);
+  if (found.length === 0) return '';
+  return ` — this entry has "${found[0]}"; the field is named "${canonical}" (field names are exact, never renamed)`;
+}
+
+/**
  * Shape check for the on-disk probe manifest. The manifest is written by
  * PROMPT (L1 evidence contracts) and read by COMPILED SCRIPTS; this check
  * runs in the read-back probe so breakage surfaces as validator evidence
@@ -218,7 +239,9 @@ export function validateProbeManifest(raw: string): string[] {
     if (kind === 'http') {
       if (typeof en['method'] !== 'string') problems.push(`entry #${i} (http): missing string "method"`);
       if (typeof en['path'] !== 'string') problems.push(`entry #${i} (http): missing string "path"`);
-      if (typeof en['status'] !== 'number') problems.push(`entry #${i} (http): missing numeric "status"`);
+      if (typeof en['status'] !== 'number') {
+        problems.push(`entry #${i} (http): missing numeric "status"${renameHint(en, 'status')}`);
+      }
     } else if (kind === 'web') {
       if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
       if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
@@ -239,7 +262,9 @@ export function validateProbeManifest(raw: string): string[] {
         }
       }
     } else if (kind === 'shell') {
-      if (typeof en['exitCode'] !== 'number') problems.push(`entry #${i} (shell): missing numeric "exitCode"`);
+      if (typeof en['exitCode'] !== 'number') {
+        problems.push(`entry #${i} (shell): missing numeric "exitCode"${renameHint(en, 'exitCode')}`);
+      }
       // Semantic corruption, same class as pixel-coordinate interactions:
       // a cmd decorated with an echo of $? records echo's exit code (always
       // 0) and a stdout no clean replay reproduces. Observed 2026-08-06:
@@ -306,6 +331,12 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
       `mechanically unreplayable and every later verification pass fails.`,
       `(Observed: one omission charged a healthy compiled verifier a direct`,
       `failure at dispatch; a second demoted it.)`,
+      `FIELD NAMES ARE EXACT — do not rename, abbreviate or "improve" them,`,
+      `and do not add a discriminator of your own. It is "probe", not "kind";`,
+      `"status", not "expect"/"expectedStatus"; "cmd", not "command";`,
+      `"exitCode", not "expectExitCode". A renamed field is an UNKNOWN shape`,
+      `to every reader — measured twice: one run burned four rejection`,
+      `cycles on {kind, expect} and another five on "expectExitCode".`,
       `WHY: this file is the machine-readable interface later verification`,
       `passes re-run and diff against — prose in a README cannot be parsed`,
       `reliably, this can.`,

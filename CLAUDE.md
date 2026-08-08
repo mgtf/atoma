@@ -1200,6 +1200,19 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `manifestReaderLines` into every future compile. Offline-tested both
   ways: clean replay exit 0 + merge; sabotaged expectation → exit 1 +
   byte-identical manifest.
+- **Field names in the manifest are EXACT, and a rename is named back.**
+  The contract is taught by rendered examples, and L1s paraphrase it into
+  variants — measured twice, both as rejection cascades on runs that had
+  already produced a CORRECT manifest and then re-authored it wholesale:
+  four cycles on `{kind, expect}` instead of `{probe, status}` (~$0.80
+  run) and five on `expectExitCode` instead of `exitCode` (~$0.63 run).
+  Two-sided fix: the writer block states the names are exact with the
+  observed renames spelled out, and `validateProbeManifest` NAMES the
+  rename it detects (`CANONICAL_ALIASES` → "this entry has \"expect\";
+  the field is named \"status\"") instead of only reporting the absence,
+  which left the writer guessing. Turns a cascade into one coached
+  cycle. Note the compounding cause, fixed separately: both runs had
+  re-authored the whole file instead of read-merge-append.
 - **The probe manifest is health-checked (`validateProbeManifest`).**
   The manifest is written by PROMPT (L1 evidence contracts) and read by
   COMPILED SCRIPTS with no validator between them — a malformed one
