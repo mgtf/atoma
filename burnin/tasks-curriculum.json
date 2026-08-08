@@ -1,9 +1,44 @@
 {
   "tasks": [
     {
-      "id": "probe-recipe-box-api",
+      "id": "verify-json-formatter-cli-exits",
+      "family": "cli",
+      "goal": "Test my JSON-formatting CLI tool against its README's documented invocations to confirm stdout, stderr, and exit codes for valid input, missing argument, and malformed file all match spec."
+    },
+    {
+      "id": "index-recipe-notes-docs",
+      "family": "files",
+      "goal": "Write an index.md that links to the existing recipe note files in my cooking-notes workspace with accurate titles and one-line descriptions for each."
+    },
+    {
+      "id": "build-pomodoro-timer-widget",
+      "family": "web",
+      "goal": "Build a single-file index.html pomodoro timer widget with start/pause/reset buttons whose background color changes between work and break states."
+    },
+    {
+      "id": "smoke-test-pomodoro-widget-state",
+      "family": "web",
+      "goal": "Write a smoke test script that verifies my pomodoro timer widget's window.__pomodoro state object and confirms its buttons and conditional styling behave correctly."
+    },
+    {
+      "id": "package-csv-merge-cli",
+      "family": "cli",
+      "goal": "Add a package.json and README with a Verified invocations section to my already-tested CSV-merging CLI tool."
+    },
+    {
+      "id": "build-slug-generator-cli",
+      "family": "cli",
+      "goal": "Write and verify a no-dependency Node CLI that turns a single argv string into a URL slug, exiting 1 with a stderr usage message if the argument is missing or empty."
+    },
+    {
+      "id": "document-inventory-api-routes",
       "family": "http",
-      "goal": "Build a small JSON HTTP API for managing a personal recipe box (create, get, list, delete recipes) with a README spec, then write a script that probes each documented route end-to-end and verifies status codes and response bodies match the spec."
+      "goal": "Write a README documenting my inventory management HTTP server's routes, request bodies, and status codes exactly as implemented in its source file."
+    },
+    {
+      "id": "write-plugin-docs-and-config",
+      "family": "files",
+      "goal": "Write a README and CONTRIBUTING.md with required headings for my browser-plugin project plus an exact-content .eslintrc config file."
     }
   ]
 }

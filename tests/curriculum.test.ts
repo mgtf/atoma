@@ -128,6 +128,15 @@ describe('curriculum prompt', () => {
     expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/NOVEL theme/);
     expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/NEVER name the skill, the framework/);
     expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/"tasks"/);
+    // Burn-in workspaces start EMPTY: a goal presupposing existing files
+    // ("test MY CLI") leaves the run with nothing to work on. Observed on
+    // the first real generation — 3 of 8 goals said "my <artefact>".
+    // Consuming workflows must ask for the build first, then the target
+    // workflow as a FINAL SEPARATE PHASE (which is also the phase boundary
+    // the skill prefilter needs to match the targeted recipe).
+    expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/SELF-CONTAINED — MANDATORY/);
+    expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/EMPTY workspace/);
+    expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/FINAL SEPARATE\s+PHASE/);
     const user = buildCurriculumUserContent(
       [
         { category: 'promotion-push', l1: 'Hydrogen', skillId: 's', hint: 'HINT-A' },
