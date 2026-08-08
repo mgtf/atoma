@@ -231,8 +231,14 @@ npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in b
   `effort: 'medium'` keeps thinking volume modest. As defence in depth,
   `expectedOutput` and `aggregation` in `planSchema` are now defaulted
   rather than required, so a future cap-overrun degrades to a parseable
-  plan with empty `expectedOutput` and `concat` aggregation rather than
-  taking the whole run down. Fallback/self-exec paths keep the atom's
+  plan rather than taking the whole run down. The aggregation default is
+  `concat` in the shared schema but L3 OVERRIDES it to `sequential` when
+  the field was omitted (`L3Atom.plan`, reading the RAW pair so an
+  explicit `"concat"` stays honoured): measured 83/83 analysable L3 plans
+  emit `sequential`, and `concat` would fan phases out in parallel over a
+  shared workspace, dropping the `previousStepSummary` threading —
+  the highest-blast-radius choice at exactly the moment we know least.
+  Covered by `tests/l3-truncated-plan-aggregation.test.ts`. Fallback/self-exec paths keep the atom's
   full `maxTokens` because they may produce real content.
 - **Aggregation modes — `concat`, `llm-synthesize`, `sequential`.**
   The `aggregation.mode` field on a Plan picks how the supervisor
@@ -2185,10 +2191,79 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   checkpoints. Also the proposed gate was measuring the wrong thing: L2
   trust counts well-scoped SUBTASK executions, not whole-task
   decomposition ability — the same inference error behind the monolithic
-  Pong (see "Prefilter decomposable hint"). If plan cost ever matters at
-  scale, the right shape is PLAN TEMPLATING: memoise the structure of
-  successful plans per (trusted L2 × task shape) and instantiate without
-  Opus — phases survive, skills keep matching, dispatch keeps firing.
+  Pong (see "Prefilter decomposable hint"). The successor idea this entry
+  used to point at — PLAN TEMPLATING — was designed and refuted on
+  2026-08-08; it has its own entry below.
+
+- **PLAN TEMPLATING (memoise successful plans' structure, instantiate
+  without Opus).** Designed and adversarially refuted 2026-08-08 over the
+  85 archived L3 plans (237 subtasks); both passes re-measured
+  independently and agree. Motivation was real: on mature families the L3
+  Opus plan is the last big line item ($0.065/run ≈ 19%, and
+  structurally UNCACHEABLE — 5.3% cache_read, one unique call per run,
+  vs 93.6% cache_read on the execute path that dwarfs it). It is
+  nevertheless the wrong build, for reasons that cannot improve with more
+  data:
+  (a) **The memoisable skeleton carries almost no information.**
+  `aggregation.mode` is `sequential` on 83/83 analysable plans;
+  `preferredChild` is uniform within a plan and EQUALS the Haiku
+  prefilter's target (already free, and itself cached); phase count is 3
+  on 63/83. A static rule — "n=3, sequential, children = prefilter
+  target" — reproduces the whole skeleton on ~77% of runs. A keyed store
+  with expiry, cap and kill switch does not beat `const n = 3`.
+  (b) **The value lives in the subtask TEXT, which is irreducible.**
+  Median 785 chars, 96% name at least one file path, and the majority of
+  replayed path literals are foreign to the next goal (measured on a
+  chronological cache simulation: 65.7% of 274 literals over 72 hits).
+  That text is a CONTRACT read by three mechanisms with no validator
+  downstream: the skill prefilter matches on it, it is the ONLY argv a
+  compiled script receives, and it is the oracle of the deliverable gate.
+  Replaying it re-creates the task-specific-literal defect one tier
+  higher; regenerating it without an LLM collapses the phases into
+  indistinguishable twins — which is the very failure the L3 shortcut was
+  rejected for. "Phases survive, skills keep matching" is not satisfiable
+  without an LLM call.
+  (c) **It would put memoised content at the one point with no validator
+  above it** (no L4; `L3Atom.validatePlan` judges its CHILD's plan). Every
+  other memo in the repo has a downstream gate — envelope + deliverable
+  gate + directFailures for compiled dispatch, the ground-truth probe for
+  the trust fast-path. A stale `preferredChild` would auto-create a fresh
+  L2 clone at 0 successes, disarming the trust fast-path for the whole
+  run: the optimisation failing by making the run MORE expensive.
+  (d) **The corpus was already stale before the design was written.**
+  `ae63e06` (2026-08-08) forbids naming tools in subtask descriptions —
+  and 194/237 (81.9%) of archived subtasks do exactly that. A store filled
+  from this corpus would replay the defect that commit exists to kill.
+  The plan prompt is the project's active correction surface (3 edits in
+  30 days, 2 in 2 days), so a template store's half-life is shorter than
+  its fill time.
+  (e) **Precedent, measured**: the prefilter decision cache — same key
+  family, ~6 chances per run against the plan's 1 — sits at 12 hits /
+  490 entries = 2.4%, with 98% of entries never re-read. And
+  `curriculum.ts` demands NOVEL goals by design, so exact hits are
+  engineered away.
+  REVISIT only if BOTH (i) the prefilter cache's exact-key hit rate
+  exceeds 25% across two consecutive batches, and (ii) the L3 plan prompt
+  goes unedited across that whole window. Today: 2.4% and two edits in
+  two days. Also measured and discarded: hoisting the constant plan
+  preamble under the system cache breakpoint (ephemeral cache is 5 min,
+  mean run ~5 min, one plan call per run — inert or worse, 1.25× write
+  multiplier); and a "cache only aggregation + phase count" variant
+  (memoises a constant and a 77/23 coin flip while removing no call).
+  `ATOMA_MODEL_L3=sonnet` is a sanctioned pin that buys ~$0.024/run for
+  zero lines, but it degrades exactly the decomposition reasoning the
+  tier exists to pay for — treat it as a reversible burn-in A/B whose
+  damage would show up in results.csv (escalations, rejections), never as
+  a default.
+  WHERE THE DATA POINTS INSTEAD: the escalation tail. 4 runs of 78 (5.1%)
+  carry $2.88 = 10.7% of the corpus cost, with 5.75 L1-execute calls per
+  run against 2.49 and 5.0 rejections against 0.20, plus an
+  `L2:fallback-execute` line absent from healthy runs. That is the
+  partial-replay gap the SPOQ entry already names ("replans re-run the
+  whole plan; there is no partial-replay that keeps the good phases and
+  redoes the bad one") — a compressible cost that also buys wall-clock
+  and failed deliverables, and needs no memoised content at the
+  unvalidated point.
 
 ## Structural slices — status
 

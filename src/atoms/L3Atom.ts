@@ -446,7 +446,25 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
     const pair = parseTwoJson(resp.text);
     this.pendingStrategy = l3StrategySchema.parse(pair[0]);
-    return planSchema.parse(pair[1]);
+    const plan = planSchema.parse(pair[1]);
+    // TRUNCATION DEFAULT, L3 flavour. `planSchema` defaults a missing
+    // `aggregation` to `concat` — the right degradation at L2 (concat is a
+    // legitimate L2 mode; 19 observed) but the WRONG one here: at L3 every
+    // analysable archived plan emitted `sequential` (83/83), and `concat`
+    // routes the phases through `Promise.all` (`dispatch.ts`) over a SHARED
+    // workspace while dropping the `previousStepSummary` threading. The
+    // moment the field goes missing is a truncated response — precisely
+    // when we know least — so the fallback must be the low-blast-radius
+    // mode, not the high one. Read from the RAW pair, not the parsed plan:
+    // after `parse` an omitted field is indistinguishable from an explicit
+    // `"concat"`, which stays honoured.
+    const rawPlan = pair[1];
+    const aggregationWasOmitted =
+      typeof rawPlan === 'object' &&
+      rawPlan !== null &&
+      (rawPlan as Record<string, unknown>)['aggregation'] === undefined;
+    if (aggregationWasOmitted) plan.aggregation = { mode: 'sequential' };
+    return plan;
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
