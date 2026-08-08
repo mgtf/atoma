@@ -126,3 +126,9 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-08T06:07:00.179Z,files-runbook,files,delivered,0.3948,415,24,1,1,22,0,0,0,1,0,0,1,2026-08-08T06-07-00-829-376c9f97.json
 2026-08-08T06:32:11.437Z,cli-wordfreq,cli,delivered,0.3166,306,24,1,1,22,0,0,0,0,1,0,0,2026-08-08T06-32-12-004-24d19a7b.json
 2026-08-08T06:37:17.835Z,http-inbox-api,http,delivered,0.3512,292,14,1,0,13,1,0,0,0,0,0,0,2026-08-08T06-37-18-534-e2883a55.json
+2026-08-08T06:50:05.445Z,verify-temp-converter-cli,cli,delivered,0.5802,498,31,1,2,28,0,0,0,1,0,0,0,2026-08-08T06-50-06-059-192dac7a.json
+2026-08-08T06:58:24.019Z,index-recipe-doc-set,files,delivered,0.227,211,21,1,1,19,0,0,0,0,0,0,0,2026-08-08T06-58-24-669-bbbac0ed.json
+2026-08-08T07:01:56.174Z,habit-tracker-widget,web,delivered,0.3449,251,12,1,2,9,0,0,0,0,2,0,0,2026-08-08T07-01-56-818-5a2a1e15.json
+2026-08-08T07:06:09.497Z,smoke-test-habit-tracker-widget,web,failed,0.1664,777,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T07-06-10-146-27ee3414.json
+2026-08-08T07:19:06.968Z,package-doc-todo-cli,cli,delivered,0.3339,293,18,1,0,17,0,0,0,0,0,0,0,2026-08-08T07-19-07-617-e3f52d2d.json
+2026-08-08T07:24:00.452Z,argv-slug-transform-cli,cli,delivered,0.2187,221,17,1,1,15,0,0,0,0,1,0,0,2026-08-08T07-24-01-049-02e23974.json

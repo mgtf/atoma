@@ -109,11 +109,20 @@ export function isCliTransportErrorText(text: string): boolean {
 }
 
 /**
- * Ceiling on a SINGLE claude-cli call. Generous on purpose: an L1 tool
- * loop legitimately runs for minutes (subprocess spawn ~2-5s per turn,
- * adaptive thinking, up to 24 tool iterations), so this is a hang
- * detector, not a performance budget — it must never fire on healthy
- * work. Override with ATOMA_CLI_CALL_TIMEOUT_MS; invalid or non-positive
+ * INACTIVITY ceiling on a claude-cli call — the clock measures SILENCE,
+ * not total duration, and every stream message or tool invocation resets
+ * it. A hang is the absence of progress; a long call is not.
+ *
+ * It started life as a total-duration cap and that was wrong, measured:
+ * a web run doing 12 headless validations (28s each, plus thinking
+ * between rounds) was killed at 10 minutes while it was STILL emitting
+ * tool calls — the last one 2 minutes before the axe. The guard built to
+ * stop an 11-day zombie had started killing healthy work, which is the
+ * one thing a hang detector must never do. Under the inactivity clock
+ * the zombie (no result, no messages, forever) still dies on schedule
+ * while a 24-iteration Puppeteer loop runs as long as it keeps moving.
+ *
+ * Override with ATOMA_CLI_CALL_TIMEOUT_MS; invalid or non-positive
  * values fall back to the default rather than disabling the guard (a
  * typo must not restore the infinite-hang behaviour).
  */
@@ -174,10 +183,17 @@ export class ClaudeCliLlmClient implements LlmClient {
     // SDK subprocess) and THROW, turning an infinite hang into an ordinary
     // transport error the supervise loop can escalate on.
     let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      abort.abort(new Error(`claude-cli call exceeded ${this.callTimeoutMs}ms`));
-    }, this.callTimeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Rearmed on every sign of life (stream message, tool invocation), so
+    // the deadline measures SILENCE rather than elapsed time.
+    const bumpDeadline = (): void => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        timedOut = true;
+        abort.abort(new Error(`claude-cli call idle for ${this.callTimeoutMs}ms`));
+      }, this.callTimeoutMs);
+    };
+    bumpDeadline();
 
     const toolOptions = hasTools
       ? buildToolBridge(req.tools!, req)
@@ -209,6 +225,7 @@ export class ClaudeCliLlmClient implements LlmClient {
     let lastAssistantText = '';
     try {
     for await (const msg of stream) {
+      bumpDeadline();
       if (msg.type === 'assistant') {
         const blocks = msg.message?.content;
         if (Array.isArray(blocks)) {
@@ -253,7 +270,7 @@ export class ClaudeCliLlmClient implements LlmClient {
       // generic "aborted" that reads like a user interrupt.
       if (timedOut) {
         throw new Error(
-          `claude-cli call timed out after ${this.callTimeoutMs}ms (no result from the subprocess — dropped connection?)`
+          `claude-cli call produced no output for ${this.callTimeoutMs}ms (idle — dropped connection?)`
         );
       }
       throw err;

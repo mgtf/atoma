@@ -22,6 +22,29 @@ const { ClaudeCliLlmClient, cliCallTimeoutMs, DEFAULT_CLI_CALL_TIMEOUT_MS } = aw
   '../src/core/llmClaudeCli.js'
 );
 
+/**
+ * A stream that keeps emitting assistant messages SLOWLY, then finishes:
+ * the healthy long call the inactivity clock must never kill (measured: a
+ * web run doing 12 headless validations at 28s each was axed by the old
+ * total-duration cap while still emitting tool calls).
+ */
+function slowButAliveStream(ticks: number, gapMs: number) {
+  return () => ({
+    async *[Symbol.asyncIterator]() {
+      for (let i = 0; i < ticks; i++) {
+        await new Promise((r) => setTimeout(r, gapMs));
+        yield { type: 'assistant', message: { content: [{ type: 'text', text: `tick ${i}` }] } };
+      }
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'done',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      };
+    },
+  });
+}
+
 /** A stream that never produces a message and never ends — the wedge. */
 function neverYieldingStream(onAbort: (reason: unknown) => void) {
   // `opts` is optional-chained on purpose: vitest invokes the recorded
@@ -86,12 +109,12 @@ describe('a wedged call cannot hang forever', () => {
     queryMock.mockImplementation(neverYieldingStream((r) => { abortReason = r; }));
     const client = new ClaudeCliLlmClient({ callTimeoutMs: 60 });
 
-    await expect(client.complete(REQ as never)).rejects.toThrow(/timed out after 60ms/);
+    await expect(client.complete(REQ as never)).rejects.toThrow(/produced no output for 60ms/);
     // The controller must have been aborted — that is what terminates the
     // subprocess. Without it we would stop waiting but leak the process,
     // which is the very leak this guard exists to close.
     expect(abortReason).toBeInstanceOf(Error);
-    expect(String((abortReason as Error).message)).toMatch(/exceeded 60ms/);
+    expect(String((abortReason as Error).message)).toMatch(/idle for 60ms/);
   });
 
   it('names the dropped connection so the trace points at the cause', async () => {
@@ -107,6 +130,18 @@ describe('a wedged call cannot hang forever', () => {
     const p = client.complete({ ...REQ, signal: ac.signal } as never);
     ac.abort(new Error('user interrupt'));
     await expect(p).rejects.toThrow(/user interrupt/);
+  });
+
+  it('a LONG but ACTIVE call survives: the clock measures silence, not duration', async () => {
+    // The regression this design exists for. Total elapsed (5 × 40ms =
+    // 200ms) far exceeds the 60ms deadline, but no single gap does — a
+    // total-duration cap would kill it, an inactivity clock must not.
+    queryMock.mockImplementation(slowButAliveStream(5, 40) as never);
+    const client = new ClaudeCliLlmClient({ callTimeoutMs: 60 });
+    const started = Date.now();
+    const res = await client.complete(REQ as never);
+    expect(res.text).toBe('done');
+    expect(Date.now() - started).toBeGreaterThan(60); // genuinely outlived the deadline
   });
 
   it('does not fire on a healthy call that returns before the deadline', async () => {

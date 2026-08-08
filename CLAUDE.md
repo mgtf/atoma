@@ -1594,15 +1594,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   by the stuck handle. Found live (2026-08-06): a `build-app` process
   alive after **11 DAYS** with 2 minutes of CPU, still holding a headless
   Chrome and an esbuild service. Two layers now close it:
-  (1) PER-CALL DEADLINE in `ClaudeCliLlmClient.completeOnce` —
-  `cliCallTimeoutMs()` (default 10 min, `ATOMA_CLI_CALL_TIMEOUT_MS`,
+  (1) PER-CALL INACTIVITY DEADLINE in `ClaudeCliLlmClient.completeOnce`
+  — `cliCallTimeoutMs()` (default 10 min, `ATOMA_CLI_CALL_TIMEOUT_MS`,
   invalid/zero/negative falls back to the DEFAULT so a typo cannot
-  disable the guard). On expiry it aborts the controller — which is what
-  terminates the subprocess, not merely stops waiting — and throws a
-  labelled error the supervise loop can escalate on. A caller-supplied
-  abort still wins and is NOT relabelled. Generous on purpose: an L1 tool
-  loop legitimately runs for minutes, this is a hang detector, not a
-  performance budget.
+  disable the guard). The clock measures SILENCE: it is rearmed on every
+  stream message, so a long call is fine and only the absence of progress
+  fires. On expiry it aborts the controller — which is what terminates
+  the subprocess, not merely stops waiting — and throws a labelled error
+  the supervise loop can escalate on. A caller-supplied abort still wins
+  and is NOT relabelled. It shipped as a TOTAL-duration cap and that was
+  wrong, measured: a web run doing 12 headless validations (28s each,
+  plus thinking between rounds) was killed at 10 minutes while STILL
+  emitting tool calls — the guard built to stop an 11-day zombie had
+  started killing healthy work, the one thing a hang detector must never
+  do. No executor-side rearm is needed (every tool round emits stream
+  messages, and each builtin has its own sub-minute timeout). Covered by
+  `llm-claude-cli-timeout.test.ts`, whose long-but-active case outlives
+  the deadline on purpose.
   (2) LAST-RESORT WATCHDOG in `build-app`: at `timeoutMs + 60s`, if
   `l3.handle` still has not settled, persist the partial trace
   (`cancelled: true`) and `process.exit(1)` synchronously — awaiting

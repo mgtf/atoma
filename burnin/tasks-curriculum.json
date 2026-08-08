@@ -1,44 +1,44 @@
 {
   "tasks": [
     {
-      "id": "verify-json-formatter-cli-exits",
+      "id": "verify-temp-converter-cli",
       "family": "cli",
-      "goal": "Test my JSON-formatting CLI tool against its README's documented invocations to confirm stdout, stderr, and exit codes for valid input, missing argument, and malformed file all match spec."
+      "goal": "Build a small Node CLI called temp-convert that takes a temperature value and unit as argv arguments, converts between Celsius/Fahrenheit, prints the result, and exits 1 with a usage message on missing or invalid arguments, documenting success, missing-arg, and bad-value invocations with expected exit codes in a README. As a FINAL SEPARATE PHASE, run the documented invocations against the CLI and confirm stdout/stderr/exit codes match the README spec."
     },
     {
-      "id": "index-recipe-notes-docs",
+      "id": "index-recipe-doc-set",
       "family": "files",
-      "goal": "Write an index.md that links to the existing recipe note files in my cooking-notes workspace with accurate titles and one-line descriptions for each."
+      "goal": "Create a small set of markdown files in a workspace: INGREDIENTS.md, STEPS.md, and NUTRITION.md, each describing a fictional recipe for a lentil soup. As a FINAL SEPARATE PHASE, write an INDEX.md file that links to all three documents with accurate titles and one-sentence descriptions."
     },
     {
-      "id": "build-pomodoro-timer-widget",
+      "id": "habit-tracker-widget",
       "family": "web",
-      "goal": "Build a single-file index.html pomodoro timer widget with start/pause/reset buttons whose background color changes between work and break states."
+      "goal": "Build a single-file index.html habit tracker widget with buttons to increment/decrement a daily streak counter, an input to set a goal number, and text/color styling that changes (e.g., green when goal reached, gray otherwise) based on the current streak state."
     },
     {
-      "id": "smoke-test-pomodoro-widget-state",
+      "id": "smoke-test-habit-tracker-widget",
       "family": "web",
-      "goal": "Write a smoke test script that verifies my pomodoro timer widget's window.__pomodoro state object and confirms its buttons and conditional styling behave correctly."
+      "goal": "Build a single-file index.html quiz-timer widget that exposes its state via a window.__quizTimer object with getters for remaining time and running/paused status, with buttons to start, pause, and reset, and styling that changes color as time runs low. As a FINAL SEPARATE PHASE, write and run a mechanical smoke test script that drives the controls and checks the exposed state and styling change correctly."
     },
     {
-      "id": "package-csv-merge-cli",
+      "id": "package-doc-todo-cli",
       "family": "cli",
-      "goal": "Add a package.json and README with a Verified invocations section to my already-tested CSV-merging CLI tool."
+      "goal": "Write and verify a no-dependency Node CLI todo-cli.js that appends a task string from argv to a local todo.txt file and lists all tasks when run with no arguments, confirming exit codes and output manually. As a FINAL SEPARATE PHASE, package this CLI by writing a package.json and a README with a 'Verified invocations' section listing the exact commands and outputs you confirmed."
     },
     {
-      "id": "build-slug-generator-cli",
+      "id": "argv-slug-transform-cli",
       "family": "cli",
-      "goal": "Write and verify a no-dependency Node CLI that turns a single argv string into a URL slug, exiting 1 with a stderr usage message if the argument is missing or empty."
+      "goal": "Write and verify a no-dependency Node CLI slugify.js that reads a title string from process.argv[2], converts it to a lowercase hyphenated slug, prints it, and exits 1 with a stderr usage message if the argument is missing or empty."
     },
     {
-      "id": "document-inventory-api-routes",
+      "id": "document-inventory-api",
       "family": "http",
-      "goal": "Write a README documenting my inventory management HTTP server's routes, request bodies, and status codes exactly as implemented in its source file."
+      "goal": "Write a small Node HTTP server (no dependencies) in server.js implementing routes for a warehouse inventory API: GET /items, POST /items with a JSON body, and DELETE /items/:id, each returning appropriate status codes. As a FINAL SEPARATE PHASE, write a README documenting these routes, their request bodies, and status codes exactly as implemented in server.js, without probing the server live."
     },
     {
-      "id": "write-plugin-docs-and-config",
+      "id": "docs-and-config-static-site",
       "family": "files",
-      "goal": "Write a README and CONTRIBUTING.md with required headings for my browser-plugin project plus an exact-content .eslintrc config file."
+      "goal": "Write a README.md with sections Overview, Installation, and Usage, plus a CONTRIBUTING.md with sections How to Contribute and Code Style, describing a fictional static-site generator tool called Pagelet, and a config file pagelet.config.json containing the exact literal content: {\"outputDir\": \"dist\", \"srcDir\": \"src\", \"port\": 4000}."
     }
   ]
 }
