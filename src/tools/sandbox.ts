@@ -218,6 +218,17 @@ export class ToolSandbox {
     return tail.length > 0 ? join(real, ...tail) : real;
   }
 
+  /**
+   * Pids of the children this sandbox is currently tracking — i.e. the
+   * processes the synchronous `process.on('exit')` handler will SIGKILL.
+   * Exists so the orphan-reaping guarantee is TESTABLE from outside
+   * (`tests/puppeteer-orphan-reaping.test.ts` drives a hard exit and
+   * checks the browser died); nothing in the runtime reads it.
+   */
+  trackedChildPids(): number[] {
+    return this.children.map((c) => c.pid).filter((p): p is number => typeof p === 'number');
+  }
+
   trackChild(child: ChildProcess): void {
     this.children.push(child);
     ALL_TRACKED_CHILDREN.add(child);

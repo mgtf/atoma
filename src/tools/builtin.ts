@@ -898,6 +898,19 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
     sharedBrowser = browser;
+    // TRACK THE BROWSER PROCESS, not just the graceful close. `onCleanup`
+    // hooks are async and only run on the orderly path — a hard exit (the
+    // burn-in harness group-killing a run at its wall-clock budget, the
+    // build-app watchdog, a crash) skips them entirely, and headless Chrome
+    // then survives with its whole helper fleet. Measured 2026-08-08: one
+    // web run killed at its 900s budget after 46 validations left Chrome
+    // behind; 126 puppeteer processes (42 reparented to init, up to 22h
+    // old) had accumulated, loading the machine enough that the next two
+    // runs blew their own budgets — a leak that cascades into failures.
+    // `trackChild` puts it under the same synchronous process.on('exit')
+    // SIGKILL every run_shell / server child already gets.
+    const proc = browser.process();
+    if (proc) opts.sandbox.trackChild(proc);
     opts.sandbox.onCleanup(async () => {
       try {
         await browser.close();

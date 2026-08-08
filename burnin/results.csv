@@ -135,3 +135,10 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-08T07:36:26.370Z,docs-and-config-static-site,files,delivered,0.2128,206,18,1,0,17,2,0,0,0,0,0,0,2026-08-08T07-36-26-992-3eb36954.json
 2026-08-08T09:23:00.844Z,http-alarms-api,http,delivered,0.3692,229,16,1,0,15,1,0,0,0,0,0,0,2026-08-08T09-23-01-398-dbd4b277.json
 2026-08-08T09:26:52.370Z,cli-csvcols,cli,delivered,0.2498,200,19,1,0,18,1,0,0,0,0,0,0,2026-08-08T09-26-53-017-08788d44.json
+2026-08-08T17:52:17.805Z,package-csv-merger-cli,cli,delivered,0.3761,275,19,1,0,18,1,0,0,0,0,0,0,2026-08-08T17-52-18-454-5792bdf6.json
+2026-08-08T17:56:53.828Z,index-recipe-notes-docs,files,delivered,0.1893,175,18,1,0,17,0,0,0,0,0,0,0,2026-08-08T17-56-54-462-3502d37d.json
+2026-08-08T17:59:49.389Z,contributing-and-lint-config,files,delivered,0.2701,253,19,1,1,17,2,0,0,0,1,0,0,2026-08-08T17-59-50-050-52a3b198.json
+2026-08-08T18:04:03.378Z,document-bookmarks-api,http,delivered,0.2527,820,14,1,0,13,0,0,0,0,0,0,0,2026-08-08T18-04-04-037-a8fcb845.json
+2026-08-08T18:17:46.022Z,single-page-tide-tracker,web,failed,0.8205,901,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T18-17-46-663-7f0b7926.json
+2026-08-08T18:32:47.811Z,receipt-splitter-app,app,error,,1172,,0,0,0,0,0,0,0,0,0,0,2026-08-08T18-32-48-479-f54e11dc.json
+2026-08-08T18:52:20.202Z,document-inventory-api,http,failed,0,932,2,1,0,1,0,0,0,0,0,0,0,2026-08-08T18-52-20-859-9af30467.json

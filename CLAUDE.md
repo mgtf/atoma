@@ -1814,6 +1814,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     the fix: a `command` carrying shell metacharacters is named as a
     shell LINE with both correct shapes, and the generic message points
     at `bash -c` for anything else and at `fetch_url` for network.
+  - **Headless Chrome is a TRACKED child, not just a cleanup hook.**
+    `validateHtmlTool` closed its shared browser through
+    `sandbox.onCleanup` — async, and therefore only on the orderly path.
+    A hard exit (burn-in group-killing a run at its wall-clock budget,
+    the build-app watchdog, a crash) skips it and Chrome survives with
+    its helper fleet. Measured 2026-08-08: a web run killed at its 900s
+    budget after 46 validations left its browser behind, and 126
+    puppeteer processes (42 reparented to init, up to 22h old) had
+    accumulated — enough machine load that the NEXT TWO runs blew their
+    own budgets. A leak that cascades into failures, not just waste, and
+    the exact class the #7c http.server reaping already closed for
+    run_shell. `browser.process()` is now registered via `trackChild`,
+    putting it under the same synchronous `process.on('exit')` SIGKILL as
+    every other child; the graceful `browser.close()` hook stays for the
+    orderly path. `trackedChildPids()` exists so the guarantee is
+    testable from outside — `tests/puppeteer-orphan-reaping.test.ts`
+    drives a real hard exit and was verified to FAIL without the fix.
   - **Env allowlist for child processes (#7a).** `sandboxChildEnv(extra?)`
     builds the environment for every spawned child (`run_shell`,
     `start_static_server`, `start_node_server`) from a small allowlist

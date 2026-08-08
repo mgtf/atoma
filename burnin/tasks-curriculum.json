@@ -1,44 +1,39 @@
 {
   "tasks": [
     {
-      "id": "verify-temp-converter-cli",
+      "id": "package-csv-merger-cli",
       "family": "cli",
-      "goal": "Build a small Node CLI called temp-convert that takes a temperature value and unit as argv arguments, converts between Celsius/Fahrenheit, prints the result, and exits 1 with a usage message on missing or invalid arguments, documenting success, missing-arg, and bad-value invocations with expected exit codes in a README. As a FINAL SEPARATE PHASE, run the documented invocations against the CLI and confirm stdout/stderr/exit codes match the README spec."
+      "goal": "Build and test a Node CLI tool 'csv-merger' that merges two CSV files on a shared key column and prints the combined rows, verifying it works on sample fixtures. As a FINAL SEPARATE PHASE, add a package.json and a README with a 'Verified invocations' section documenting the exact commands you ran and their output."
     },
     {
-      "id": "index-recipe-doc-set",
+      "id": "index-recipe-notes-docs",
       "family": "files",
-      "goal": "Create a small set of markdown files in a workspace: INGREDIENTS.md, STEPS.md, and NUTRITION.md, each describing a fictional recipe for a lentil soup. As a FINAL SEPARATE PHASE, write an INDEX.md file that links to all three documents with accurate titles and one-sentence descriptions."
+      "goal": "Create a workspace with three markdown files documenting recipes (soup.md, pasta.md, dessert.md) each with a title and short description. As a FINAL SEPARATE PHASE, write an index.md that links to all three files with accurate titles and descriptions."
     },
     {
-      "id": "habit-tracker-widget",
+      "id": "contributing-and-lint-config",
+      "family": "files",
+      "goal": "Write a README.md with Overview, Installation, and Usage headings, and a CONTRIBUTING.md with Code of Conduct and Pull Request Process headings for a fictional 'weather-fetcher' project, plus an .eslintrc.json config file with an exact literal ruleset: {\"env\": {\"node\": true}, \"rules\": {\"semi\": [\"error\", \"always\"], \"quotes\": [\"error\", \"single\"]}}."
+    },
+    {
+      "id": "document-bookmarks-api",
+      "family": "http",
+      "goal": "Build a small Node HTTP server (server.js) implementing a bookmarks API with routes GET /bookmarks, POST /bookmarks, DELETE /bookmarks/:id, each returning specific JSON bodies and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route, request body, and status code exactly as implemented in server.js."
+    },
+    {
+      "id": "single-page-tide-tracker",
       "family": "web",
-      "goal": "Build a single-file index.html habit tracker widget with buttons to increment/decrement a daily streak counter, an input to set a goal number, and text/color styling that changes (e.g., green when goal reached, gray otherwise) based on the current streak state."
+      "goal": "Build a single-page web app that lets a user log daily tide height readings for a coastal location and displays them as a sortable table with a simple line chart, all in one self-contained HTML file with embedded CSS and JS."
     },
     {
-      "id": "smoke-test-habit-tracker-widget",
-      "family": "web",
-      "goal": "Build a single-file index.html quiz-timer widget that exposes its state via a window.__quizTimer object with getters for remaining time and running/paused status, with buttons to start, pause, and reset, and styling that changes color as time runs low. As a FINAL SEPARATE PHASE, write and run a mechanical smoke test script that drives the controls and checks the exposed state and styling change correctly."
-    },
-    {
-      "id": "package-doc-todo-cli",
-      "family": "cli",
-      "goal": "Write and verify a no-dependency Node CLI todo-cli.js that appends a task string from argv to a local todo.txt file and lists all tasks when run with no arguments, confirming exit codes and output manually. As a FINAL SEPARATE PHASE, package this CLI by writing a package.json and a README with a 'Verified invocations' section listing the exact commands and outputs you confirmed."
-    },
-    {
-      "id": "argv-slug-transform-cli",
-      "family": "cli",
-      "goal": "Write and verify a no-dependency Node CLI slugify.js that reads a title string from process.argv[2], converts it to a lowercase hyphenated slug, prints it, and exits 1 with a stderr usage message if the argument is missing or empty."
+      "id": "receipt-splitter-app",
+      "family": "app",
+      "goal": "Build a small command-line app that splits a restaurant bill among a list of named diners, supporting itemized assignment and even split of shared items, with tax and tip proportionally distributed, and outputs a per-person summary."
     },
     {
       "id": "document-inventory-api",
       "family": "http",
-      "goal": "Write a small Node HTTP server (no dependencies) in server.js implementing routes for a warehouse inventory API: GET /items, POST /items with a JSON body, and DELETE /items/:id, each returning appropriate status codes. As a FINAL SEPARATE PHASE, write a README documenting these routes, their request bodies, and status codes exactly as implemented in server.js, without probing the server live."
-    },
-    {
-      "id": "docs-and-config-static-site",
-      "family": "files",
-      "goal": "Write a README.md with sections Overview, Installation, and Usage, plus a CONTRIBUTING.md with sections How to Contribute and Code Style, describing a fictional static-site generator tool called Pagelet, and a config file pagelet.config.json containing the exact literal content: {\"outputDir\": \"dist\", \"srcDir\": \"src\", \"port\": 4000}."
+      "goal": "Build a Node HTTP server (server.js) implementing a warehouse inventory API with routes GET /items, GET /items/:sku, PUT /items/:sku, POST /items/:sku/restock, each with defined JSON request/response shapes and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route, its request body, response shape, and status codes exactly as implemented in server.js."
     }
   ]
 }
