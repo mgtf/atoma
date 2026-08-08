@@ -235,17 +235,38 @@ function runTask(task: BurninTask, timeoutMs: number, logPath: string): Promise<
         killTimer = setTimeout(killGroup, 1500);
       }
     };
+    /**
+     * GRACEFUL FIRST, then force. SIGKILL is uncatchable, so going straight
+     * to it meant the run's `process.on('exit')` sandbox teardown NEVER ran
+     * on this path — every headless Chrome the run had launched survived,
+     * along with any tracked child. Measured 2026-08-08: 126 puppeteer
+     * processes accumulated (42 reparented to init, oldest 22h), loading
+     * the machine until two later runs blew their own budgets. The run now
+     * gets SIGTERM and a grace window to close its browser the clean way
+     * (Chrome's own teardown reaps its helper fleet, which an abrupt root
+     * kill does not reliably do); SIGKILL follows only if it ignores it.
+     */
+    const KILL_GRACE_MS = 5000;
+    let killEscalation: NodeJS.Timeout | null = null;
     const killGroup = (): void => {
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        /* gone */
-      }
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        /* gone */
-      }
+      const signalGroup = (sig: NodeJS.Signals): void => {
+        try {
+          if (child.pid) process.kill(-child.pid, sig);
+        } catch {
+          /* gone */
+        }
+        try {
+          child.kill(sig);
+        } catch {
+          /* gone */
+        }
+      };
+      signalGroup('SIGTERM');
+      killEscalation = setTimeout(() => signalGroup('SIGKILL'), KILL_GRACE_MS);
+      killEscalation.unref();
+      child.once('exit', () => {
+        if (killEscalation) clearTimeout(killEscalation);
+      });
     };
     let killTimer: NodeJS.Timeout | null = null;
     // Hard stop: task budget + generous teardown margin.

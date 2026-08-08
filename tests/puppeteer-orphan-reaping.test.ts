@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, execSync } from 'node:child_process';
 
 /**
  * Headless Chrome must die with its run, on the HARD exit path too.
@@ -73,4 +73,59 @@ process.exit(0);   // hard exit — the leak's shape
 
     rmSync(dir, { recursive: true, force: true });
   }, 120_000);
+
+  it('the harness kill shape leaks NOTHING: detached child + group SIGTERM', async () => {
+    // The faithful reproduction, and the measured reason the harness now
+    // escalates instead of going straight to SIGKILL. Same shape as
+    // burnin.ts (spawn detached, signal the whole group), A/B'd by hand:
+    //   group SIGKILL  → 9 puppeteer processes leaked   (the old path)
+    //   group SIGTERM  → 0                              (this path)
+    // Nine is exactly what was left behind after the last web batch.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-sigterm-'));
+    const script = join(dir, 'live.mjs');
+    const repo = process.cwd();
+    const count = (): number =>
+      Number(
+        execSync("pgrep -f '\\.cache/puppeteer' | wc -l", { encoding: 'utf8' }).trim()
+      );
+    writeFileSync(
+      script,
+      `
+import { ToolSandbox } from '${repo}/src/tools/sandbox.ts';
+import { validateHtmlTool } from '${repo}/src/tools/builtin.ts';
+const sandbox = new ToolSandbox(${JSON.stringify(dir)});
+await validateHtmlTool({ sandbox }).execute({ url: 'about:blank', waitMs: 10 }).catch(() => {});
+console.log('READY');
+setInterval(() => {}, 1000);   // idle like a delivered run that started a server
+`,
+      'utf8'
+    );
+
+    const before = count();
+    const child = spawn('npx', ['tsx', script], {
+      cwd: repo,
+      detached: true, // exactly how burnin.ts spawns a run
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+    let out = '';
+    child.stdout.on('data', (c: Buffer) => (out += c.toString()));
+    const upBy = Date.now() + 90_000;
+    while (!/READY/.test(out) && Date.now() < upBy) await sleep(200);
+    expect(/READY/.test(out), `child never booted a browser. out=${out}`).toBe(true);
+    expect(count()).toBeGreaterThan(before); // the browser really is up
+
+    process.kill(-child.pid!, 'SIGTERM'); // the harness's first signal
+
+    const deadline = Date.now() + 15_000;
+    while (count() > before && Date.now() < deadline) await sleep(300);
+    const leaked = count() - before;
+    try {
+      process.kill(-child.pid!, 'SIGKILL');
+    } catch {
+      /* already gone */
+    }
+    expect(leaked, `${leaked} puppeteer process(es) survived the graceful kill`).toBe(0);
+    rmSync(dir, { recursive: true, force: true });
+  }, 150_000);
 });

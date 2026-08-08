@@ -1831,6 +1831,19 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     orderly path. `trackedChildPids()` exists so the guarantee is
     testable from outside — `tests/puppeteer-orphan-reaping.test.ts`
     drives a real hard exit and was verified to FAIL without the fix.
+    THAT ALONE WAS NOT ENOUGH, and the second half is the load-bearing
+    one: the burn-in harness went straight to `SIGKILL` on the run's
+    process group, and SIGKILL is uncatchable — no `exit` handler, no
+    reaping, ever, on the path every burn-in run takes. A/B'd on the
+    faithful shape (detached child + group signal): **group SIGKILL
+    leaks 9 puppeteer processes, group SIGTERM leaks 0**, nine being
+    exactly what the last web batch left behind. `burnin.ts` now sends
+    SIGTERM, waits `KILL_GRACE_MS` (5s), and escalates to SIGKILL only
+    if the run ignores it. Deliberately NOT added: a SIGTERM listener in
+    the sandbox — the group signal reaches Chrome directly and it tears
+    its own helpers down, the test passes with and without one, and a
+    listener that `process.exit`s would cut short the very teardown the
+    grace window exists to allow.
   - **Env allowlist for child processes (#7a).** `sandboxChildEnv(extra?)`
     builds the environment for every spawned child (`run_shell`,
     `start_static_server`, `start_node_server`) from a small allowlist

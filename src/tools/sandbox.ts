@@ -106,7 +106,18 @@ function ensureGlobalExitHandler(): void {
   // exited at 42s with exit_code=unknown because we converted a silent
   // rejection into a hard exit). Better to let Node's default policy
   // govern error propagation and scope ourselves to killing children.
-  process.on('exit', () => {
+  // NO SIGTERM listener here, deliberately: measured, the group SIGTERM the
+  // burn-in harness now sends reaches Chrome DIRECTLY (it lives in the same
+  // process group) and Chrome tears its own helper fleet down cleanly — the
+  // reaping test passes with and without a listener. A listener that
+  // `process.exit`s on SIGTERM would be worse than useless: it would cut
+  // short exactly the graceful teardown the grace window exists to allow.
+  process.on('exit', killTrackedChildren);
+}
+
+/** SIGKILL every tracked child (and its group). Idempotent, synchronous. */
+function killTrackedChildren(): void {
+  {
     for (const child of ALL_TRACKED_CHILDREN) {
       // Children spawned `detached: true` lead their own process group
       // (pgid == pid), so a negative-pid kill takes down any grandchildren
@@ -125,7 +136,7 @@ function ensureGlobalExitHandler(): void {
         /* already dead */
       }
     }
-  });
+  }
 }
 
 /**

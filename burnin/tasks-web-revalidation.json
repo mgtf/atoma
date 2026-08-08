@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "web-tide-tracker-retry",
+      "family": "web",
+      "goal": "a single-file index.html tide tracker: a form to log a reading (date + height in metres), a table listing readings sorted by date, and a running average displayed above it. Expose window.__test = {readingCount, average} for smoke checks. Serve it and validate: add two readings via the form, assert readingCount === 2 and the average matches."
+    },
+    {
+      "id": "web-scoreboard",
+      "family": "web",
+      "goal": "a single-file index.html scoreboard: buttons to add a point to team A or team B, a reset button, and a display showing both scores with the leader highlighted. Expose window.__test = {a, b, leader}. Serve it and validate: click #a-point twice and #b-point once, assert a===2, b===1, leader==='A'."
+    }
+  ]
+}

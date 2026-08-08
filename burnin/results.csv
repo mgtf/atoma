@@ -139,3 +139,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-08T17:56:53.828Z,index-recipe-notes-docs,files,delivered,0.1893,175,18,1,0,17,0,0,0,0,0,0,0,2026-08-08T17-56-54-462-3502d37d.json
 2026-08-08T17:59:49.389Z,contributing-and-lint-config,files,delivered,0.2701,253,19,1,1,17,2,0,0,0,1,0,0,2026-08-08T17-59-50-050-52a3b198.json
 2026-08-08T18:04:03.378Z,document-bookmarks-api,http,delivered,0.2527,820,14,1,0,13,0,0,0,0,0,0,0,2026-08-08T18-04-04-037-a8fcb845.json
+2026-08-08T20:18:41.712Z,web-tide-tracker-retry,web,delivered,0.3815,437,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T20-18-42-246-80029c91.json
+2026-08-08T20:26:01.065Z,web-scoreboard,web,delivered,0.2065,224,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T20-26-01-704-97ca81cc.json
