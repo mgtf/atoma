@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "cli-wordfreq",
+      "family": "cli",
+      "goal": "a Node CLI 'wordfreq' that reports word frequencies: reads a file path as argv[2], prints the top 5 words with counts (one 'word: n' line each, most frequent first), exits 1 with a usage message when no argument or the file is missing. Ship package.json, a fixtures/sample.txt, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match; record the verified invocations in .atoma-probes.json as shell entries."
+    },
+    {
+      "id": "http-inbox-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for a message inbox: POST /messages {from,body} -> 201 {id} or 400 missing field, GET /messages -> 200 array newest-first, POST /messages/:id/read -> 200 {id,read:true} or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    }
+  ]
+}
