@@ -693,6 +693,44 @@ the atom-type registry: an atom's IDENTITY (name, system prompt,
 tool signature) lives in `atom_types`; an atom's repertoire of
 LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 
+- **SHARED CATALOG — visibility lattice (commits A′/B/C, 2026-08-08).**
+  Skills are STORED per-L1 (layout below — zero migration; the
+  adversarial design pass rejected bucket directories: the flagship
+  duplicated recipes lived in DIFFERENT buckets, `sanitise` rejects the
+  `+` in bucket ids, and a re-key would have orphaned ~290 ledger
+  events) but VISIBILITY at match time is bucket-shaped: a donor
+  namespace is offered to a reader iff the donor's bucket is EXECUTABLE
+  by the reader — `required(bucket(donorTools)) ⊆ readerTools`
+  (`src/skills/visibility.ts`, pure; `bucketIdForToolNames` /
+  `bucketRequiredToolNames` in capability.ts). Subset test, not bucket
+  equality: http readers execute file-scribe recipes, never the
+  reverse; orphaned namespaces are never donors. Home is FIRST and
+  unfiltered; donors are sorted (the prefilter decision cache hashes
+  catalog text). Donor per-skill filters: `kind: script` requires the
+  invocation ABI (`write_file`+`run_shell`) in the reader — a script
+  body is Node source the text scan cannot read, and without this a
+  web reader could trigger shell execution through trusted dispatch or
+  brick a donor's earned counters with failures from runs it can never
+  drive; `kind: llm` bodies pass `undeclaredToolMentions` against the
+  reader. CREDIT/BLAME land on the OWNER namespace via the
+  `(id, ownerNs)` pair on the L1 INSTANCE (`setActiveSkill(id, owner)`
+  / `activeSkillOwner()`) — never on context state: the legacy-branch
+  escalation path returns an untagged instance, and context-read credit
+  would pay a skill for a run the branch delivered without it. The
+  promotion scan takes the OWNER's tools (deterministic across
+  crediting hosts); match-time quarantine keeps the READER's tools.
+  Ledger bumps carry `detail.via` when the executing atom differs from
+  the owner — the cross-namespace channel arming 3/0 and 5/0 stays
+  auditable. The anti-redispatch memo sweeps the UNION of memoised
+  summaries (twin scripts with different ids would sidestep an id
+  key). The learn no-overwrite guard scans all VISIBLE namespaces.
+  Kill switch: `ATOMA_SKILL_SHARED_CATALOG=0` = exact legacy behaviour,
+  reversible at any instant (nothing on disk changes). Deliberately
+  deferred: event-skill lattice widening (one line at its loadFor,
+  gated on unmeasured evidence), a CLI visibility view (needs --db;
+  add when operator need shows), per-bucket directories (re-propose
+  only if COUNTER-sharing across bodies is ever wanted — which "trust
+  is body-bound" forbids). Covered by `tests/skill-visibility.test.ts`.
 - **Disk layout** (`src/skills/registry.ts`):
   ```
   ./skills/<l1-name>/<skill-id>/SKILL.md     — frontmatter + body
