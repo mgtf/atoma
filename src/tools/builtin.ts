@@ -190,17 +190,96 @@ export function listFilesTool(opts: BuiltinToolOptions): BuiltinTool {
   };
 }
 
+/**
+ * Executables `run_shell` will spawn by default.
+ *
+ * WHAT THIS LIST IS — and is NOT. It is NOT a security boundary: `bash`,
+ * `node -e` and `python3 -c` are all on it, and each is a complete escape
+ * hatch for command selection (verified empirically: `bash -c "head …"`
+ * runs `head` fine, and `curl` is reachable the same way). What actually
+ * contains model-authored shell is elsewhere and unchanged — the env
+ * allowlist that strips ANTHROPIC_API_KEY et al. (#7a), the scratch HOME
+ * that hides ~/.ssh and ~/.aws, the workspace cwd, the process-GROUP
+ * SIGKILL (#7c) and the 30s timeout.
+ *
+ * What the list IS: a STEERING and DECLARATION surface. It is rendered
+ * into the tool description, so its contents tell the model what the
+ * house considers the normal way to work — and each rejection costs a
+ * wasted tool round-trip. Hence the two rules below.
+ *
+ * INCLUDED: the read-only inspection utilities (the `cat`/`ls` class) and
+ * the workspace-shaping ones that merely mirror capabilities the atom
+ * already has through `write_file`/`edit_file`. Adding these buys real
+ * friction relief at zero security cost — `grep` (6 rejections), `head`
+ * (5) and `chmod` (3) were the measured friction across the archived
+ * traces.
+ *
+ * DELIBERATELY EXCLUDED, for reasons that are NOT "it would be
+ * dangerous" (bash already reaches all of them) but about coherence:
+ *   - `curl` / `wget` (3 rejections, deliberately left failing): network
+ *     reach is a DECLARED bucket capability — `fetch_url` is the
+ *     observable path (it emits trace events, honours its own timeout,
+ *     and its presence is what `hostAllowsLoopbackNetwork` keys on). An
+ *     L1 that lacks `fetch_url` is one the plan should not have sent
+ *     after HTTP at all (the F1 toolset-scope work); advertising curl
+ *     here would invite every file-scribe atom to bypass all of that.
+ *   - `git`: the workspace lives INSIDE this repo, and git discovers the
+ *     nearest ancestor `.git` — a stray `git checkout .` or `git clean`
+ *     would operate on the user's uncommitted work, not on the sandbox.
+ *   - `rm`: never appeared in the friction data (scratch cleanup already
+ *     goes through `node -e … rmSync`), and it is the highest-regret
+ *     entry to advertise.
+ */
+export const DEFAULT_SHELL_ALLOWLIST: readonly string[] = [
+  // Interpreters and package tooling (unchanged).
+  'node',
+  'npm',
+  'npx',
+  'python3',
+  'bash',
+  // Read-only inspection — the `cat`/`ls` class.
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'grep',
+  'sort',
+  'uniq',
+  'diff',
+  'find',
+  'cut',
+  'tr',
+  'basename',
+  'dirname',
+  'echo',
+  'printf',
+  'date',
+  'pwd',
+  'env',
+  'which',
+  // Workspace shaping — mirrors what write_file/edit_file already do.
+  'mkdir',
+  'touch',
+  'cp',
+  'mv',
+  'chmod',
+  'sed',
+  'awk',
+];
+
+/**
+ * A `command` that is really a whole shell LINE (pipes, redirections,
+ * `&&` chains, quoted arguments). Measured: an L1 sent
+ * `chmod +x test-api.js && node test-api.js` as the executable name, so
+ * the rejection named a "command" no allowlist could ever contain. The
+ * error message coaches the two correct shapes instead of just listing
+ * the allowlist again.
+ */
+const SHELL_LINE_RE = /[\s|&;><]/;
+
 export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
-  const allowlist = new Set(
-    // `bash` is on the default list specifically so `kind: 'script'`
-    // skills with `language: 'bash'` can be invoked via run_shell.
-    // The skill body still runs inside the ToolSandbox jail (cwd
-    // pinned, no network egress beyond what fetch_url declares), so
-    // adding bash here doesn't broaden the blast radius of run_shell —
-    // a determined LLM could already chain shell-equivalent flows via
-    // node -e or python3 -c.
-    opts.shellAllowlist ?? ['node', 'npm', 'npx', 'python3', 'bash', 'ls', 'cat', 'echo', 'which']
-  );
+  const allowlist = new Set(opts.shellAllowlist ?? DEFAULT_SHELL_ALLOWLIST);
   const timeoutMs = opts.shellTimeoutMs ?? 30_000;
 
   return {
@@ -233,8 +312,13 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
       const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
       const argv = rawArgs.map((a) => String(a));
       if (!allowlist.has(command)) {
+        if (SHELL_LINE_RE.test(command.trim())) {
+          throw new Error(
+            `run_shell: "${command}" is a shell LINE, not an executable. Pass the program alone in "command" and its arguments in "args" (e.g. command: "chmod", args: ["+x", "file.js"]), or run the whole line through bash: command: "bash", args: ["-c", "<the line>"].`
+          );
+        }
         throw new Error(
-          `run_shell: command "${command}" is not in allowlist (${[...allowlist].join(', ')})`
+          `run_shell: command "${command}" is not in allowlist (${[...allowlist].join(', ')}). For anything else, invoke it through bash: command: "bash", args: ["-c", "..."] — except network fetches, which belong to the fetch_url tool.`
         );
       }
       opts.logger?.info(`[tool:run_shell] ${command} ${argv.join(' ')}`);

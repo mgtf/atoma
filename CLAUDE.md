@@ -1748,6 +1748,33 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     global exit handler also tries the negative-pid kill first for the
     crash-exit path. Covered by the #7c tests in
     `sandbox-security.test.ts`.
+  - **The run_shell executable allowlist is STEERING, not a boundary.**
+    `DEFAULT_SHELL_ALLOWLIST` (`src/tools/builtin.ts`) is rendered into
+    the tool description, so its contents tell the model what the house
+    considers normal — but it cannot contain anything: `bash`, `node -e`
+    and `python3 -c` are all on it and each is a complete escape hatch
+    (verified empirically: `bash -c "head …"` runs `head` fine, `curl`
+    is reachable the same way). Containment lives elsewhere and is
+    unchanged: the env allowlist (#7a), the scratch HOME, the workspace
+    cwd, the process-GROUP SIGKILL (#7c), the 30s timeout. So the list is
+    curated for FRICTION, not defence: it carries the read-only
+    inspection utilities (the cat/ls class: grep, head, tail, wc, sort,
+    uniq, diff, find, cut, tr, basename, dirname, printf, date, pwd,
+    env) and the workspace-shaping ones that mirror what write_file /
+    edit_file already do (mkdir, touch, cp, mv, chmod, sed, awk) —
+    `grep` (6 rejections), `head` (5) and `chmod` (3) were the measured
+    friction across archived traces. DELIBERATELY ABSENT, for coherence
+    not danger: `curl`/`wget` (network reach is a DECLARED bucket
+    capability — `fetch_url` is the observable path that emits trace
+    events and that `hostAllowsLoopbackNetwork` keys on; an L1 without
+    it should not have been sent after HTTP at all), `git` (the
+    workspace sits INSIDE this repo and git discovers the nearest
+    ancestor `.git` — a stray `checkout`/`clean` would hit the user's
+    uncommitted work), `rm` (never in the friction data; scratch cleanup
+    already goes through `node -e … rmSync`). A rejection now coaches
+    the fix: a `command` carrying shell metacharacters is named as a
+    shell LINE with both correct shapes, and the generic message points
+    at `bash -c` for anything else and at `fetch_url` for network.
   - **Env allowlist for child processes (#7a).** `sandboxChildEnv(extra?)`
     builds the environment for every spawned child (`run_shell`,
     `start_static_server`, `start_node_server`) from a small allowlist

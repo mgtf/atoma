@@ -10,6 +10,7 @@ import {
   listFilesTool,
   readFileTool,
   runShellTool,
+  DEFAULT_SHELL_ALLOWLIST,
   startNodeServerTool,
   writeFileTool,
 } from '../src/tools/builtin.js';
@@ -152,6 +153,38 @@ describe('runShellTool', () => {
     const sh = runShellTool({ sandbox, shellAllowlist: ['echo'] });
     await expect(sh.execute({ command: 'rm', args: ['-rf', '/'] })).rejects.toThrow(
       /not in allowlist/
+    );
+  });
+
+  it('the default allowlist covers the measured friction, and states where network belongs', async () => {
+    // grep (6 rejections), head (5) and chmod (3) were the measured
+    // friction across archived traces; curl (3) is deliberately still
+    // refused — network reach is a declared bucket capability served by
+    // fetch_url, the observable path.
+    for (const cmd of ['grep', 'head', 'tail', 'wc', 'chmod', 'mkdir', 'sed', 'find']) {
+      expect(DEFAULT_SHELL_ALLOWLIST).toContain(cmd);
+    }
+    for (const cmd of ['curl', 'wget', 'git', 'rm']) {
+      expect(DEFAULT_SHELL_ALLOWLIST).not.toContain(cmd);
+    }
+    const sandbox = new ToolSandbox(mkdtempSync(join(tmpdir(), 'atoma-shell-')));
+    const sh = runShellTool({ sandbox });
+    await expect(sh.execute({ command: 'curl', args: ['http://x'] })).rejects.toThrow(
+      /fetch_url/
+    );
+  });
+
+  it('a shell LINE sent as the executable gets shape coaching, not just the list', async () => {
+    // Measured: an L1 sent `chmod +x test-api.js && node test-api.js` as
+    // the command, so the rejection named something no allowlist could
+    // contain and the retry repeated the shape.
+    const sandbox = new ToolSandbox(mkdtempSync(join(tmpdir(), 'atoma-shell-')));
+    const sh = runShellTool({ sandbox });
+    await expect(
+      sh.execute({ command: 'chmod +x test-api.js && node test-api.js' })
+    ).rejects.toThrow(/is a shell LINE, not an executable/);
+    await expect(sh.execute({ command: 'node index.js | head -3' })).rejects.toThrow(
+      /bash", args: \["-c"/
     );
   });
 });
