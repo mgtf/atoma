@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "http-shelf-api",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON API for a book shelf: POST /books {title,author} -> 201 {id} or 400 missing field, GET /books -> 200 array, DELETE /books/:id -> 204 or 404. In-memory. Also write test-api.js, an executable harness that boots the server itself (PORT=0), covers every route including the 400 and the 404, and exits non-zero on mismatch. Record verified probes in .atoma-probes.json (the harness as a shell entry, stdout omitted). As a FINAL SEPARATE PHASE: run the existing test script end-to-end via run_shell (node test-api.js) and confirm previously recorded probes still pass; the deliverable of that phase is the verified pass/fail outcome plus the probe-manifest update."
+    },
+    {
+      "id": "files-runbook",
+      "family": "files",
+      "goal": "an ops runbook: runbook/deploy.md, runbook/rollback.md and runbook/incident.md \u2014 each with an H1 and at least three '## Step group' sections containing numbered steps, plus runbook/index.md linking to all three. Verify by reading each file back and confirming the required heading structure and section counts."
+    }
+  ]
+}
