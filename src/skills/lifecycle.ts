@@ -895,20 +895,62 @@ export class SkillLifecycle {
    * sees BOTH the capability summary and the activation hint.
    */
   async matchSkill(
-    l1Name: string,
+    namespaces: readonly string[],
+    readerToolNames: readonly string[],
     subTask: Task,
     ctx: RunContext
-  ): Promise<{ skill: Skill; reasoning: string } | null> {
+  ): Promise<{ skill: Skill; ownerNs: string; reasoning: string } | null> {
     // Event-driven skills (trigger set) are recovery guidance matched
     // against MID-RUN events, not task recipes — offering them to the
     // task prefilter would let Haiku "reuse" a rejection-recovery hint
     // as the driving recipe for a whole subtask.
-    const skills = this.skills.loadFor(l1Name).filter((s) => !s.trigger);
-    if (skills.length === 0) return null;
+    //
+    // SHARED CATALOG (commit B): `namespaces` is the visibility-lattice
+    // list — home FIRST (its entries are policed at birth and never
+    // filtered here, keeping the home path byte-identical to the per-L1
+    // world), then executable donor namespaces in deterministic order.
+    const home = namespaces[0]!;
+    const readerSet = new Set(readerToolNames);
+    const tagged: { skill: Skill; ownerNs: string }[] = [];
+    const seenIds = new Set<string>();
+    for (const ns of namespaces) {
+      for (const s of this.skills.loadFor(ns)) {
+        if (s.trigger) continue;
+        if (ns !== home) {
+          // Donor per-skill filters — the lattice's third leg:
+          // (a) kind:script bodies are Node source the text scan cannot
+          //     read; their executability is the invocation ABI itself
+          //     (write scratch file + run it) — review change R1. Without
+          //     this, a web reader lacking run_shell could trigger shell
+          //     execution through trusted dispatch, or brick a donor's
+          //     earned counters by failing runs it can never drive.
+          // (b) kind:llm recipes teaching a tool the reader cannot call
+          //     are phantoms for THIS reader (the F2 machinery, reused).
+          if (s.kind === 'script') {
+            if (!readerSet.has('write_file') || !readerSet.has('run_shell')) continue;
+          } else if (undeclaredToolMentions(s.body, readerToolNames).length > 0) {
+            continue;
+          }
+          // Id collision: home wins; among donors, first in sorted order
+          // wins. Catalog lines keep the bare id (prompt stability), so
+          // duplicates would be ambiguous anyway.
+          if (seenIds.has(s.id)) {
+            ctx.logger.debug(
+              `[${this.host.name}] shared-catalog collision on skill id "${s.id}" — keeping the earlier namespace's entry, dropping ${ns}'s`
+            );
+            continue;
+          }
+        }
+        if (seenIds.has(s.id)) continue;
+        seenIds.add(s.id);
+        tagged.push({ skill: s, ownerNs: ns });
+      }
+    }
+    if (tagged.length === 0) return null;
     const outcome = await prefilterStrategy({
       ctx,
       task: subTask,
-      catalog: skills.map((s) => ({
+      catalog: tagged.map(({ skill: s }) => ({
         name: s.id,
         description: `${s.description}. When to use: ${s.whenToUse}`,
       })),
@@ -916,9 +958,9 @@ export class SkillLifecycle {
       actor: { name: this.host.name, tier: 2 },
     });
     if (!outcome || outcome.kind !== 'reuse') return null;
-    const matched = skills.find((s) => s.id === outcome.target);
+    const matched = tagged.find(({ skill: s }) => s.id === outcome.target);
     if (!matched) return null;
-    return { skill: matched, reasoning: outcome.reasoning };
+    return { skill: matched.skill, ownerNs: matched.ownerNs, reasoning: outcome.reasoning };
   }
 
   /**

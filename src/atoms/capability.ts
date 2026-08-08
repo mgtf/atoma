@@ -461,6 +461,26 @@ export function bucketIdForTools(tools: readonly Tool[]): string | null {
 }
 
 /**
+ * Name-based companion to `bucketIdForTools` — the shared-catalog
+ * visibility resolver only has `Atom.toolNames()` in hand (the full
+ * `tools` array with its executor closures stays protected).
+ */
+export function bucketIdForToolNames(names: readonly string[]): string | null {
+  const set = new Set(names);
+  const match = CAPABILITY_BUCKETS.find((b) => b.required.every((r) => set.has(r)));
+  return match?.id ?? null;
+}
+
+/**
+ * Required tool names of a bucket, for the visibility lattice's
+ * executability test (`required ⊆ readerToolNames`). Null for an unknown
+ * bucket id.
+ */
+export function bucketRequiredToolNames(bucketId: string): readonly string[] | null {
+  return CAPABILITY_BUCKETS.find((b) => b.id === bucketId)?.required ?? null;
+}
+
+/**
  * Description used for the canonical tier-2 "web build orchestrator"
  * seeded by `examples/build-app.ts`. Kept as a named export (not just
  * derived inline) so tests and downstream tooling can reference the

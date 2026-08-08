@@ -99,6 +99,7 @@ export { validateProbeManifest } from '../contracts/probeManifest.js';
 export { scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import type { Skill } from '../skills/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
+import { visibleSkillNamespaces } from '../skills/visibility.js';
 
 
 
@@ -605,7 +606,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     let matchedSkillId: string | undefined;
     if (this.skillRegistry) {
       skillMatchAttempted = true;
-      let skills = await this.matchSkill(l1Type.name, subTask, ctx);
+      // SHARED-CATALOG VISIBILITY (commit B): resolved ONCE per subtask,
+      // here where l1Type and its tools are in hand. Donor namespaces are
+      // those whose bucket the reader can EXECUTE (required ⊆ reader
+      // tools); orphaned namespaces (type gone from the registry) are
+      // never offered. Kill switch: ATOMA_SKILL_SHARED_CATALOG=0.
+      const readerToolNames = (l1Type.tools ?? []).map((t) => t.name);
+      const visibleNs = visibleSkillNamespaces({
+        home: l1Type.name,
+        readerToolNames,
+        namespaces: this.skillRegistry.listNamespaces(),
+        toolNamesFor: (ns: string) => {
+          const t = this.registry.getByName(ns);
+          return t ? (t.tools ?? []).map((x) => x.name) : null;
+        },
+      });
+      let skills = await this.matchSkill(visibleNs, readerToolNames, subTask, ctx);
       // STATIC-SCAN QUARANTINE for kind:script matches. Promotion already
       // refuses flagged compiler output, so this catches hand-authored and
       // legacy scripts. Quarantine means neither path runs the body: the
@@ -642,10 +658,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // Match-history counter for `skills stats` — recorded at match time
         // (before the outcome, on BOTH dispatch paths) so the gap against
         // the trust counters surfaces free-riding matches.
-        this.skillRegistry.markMatched(l1Type.name, skills.skill.id);
+        this.skillRegistry.markMatched(skills.ownerNs, skills.skill.id);
         ctx.recordSkill?.({
           op: 'match',
-          l1Name: l1Type.name,
+          l1Name: skills.ownerNs,
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -670,7 +686,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ) {
           const direct = await this.runScriptSkillDirect(
             skills.skill,
-            l1Type.name,
+            skills.ownerNs,
             subTask,
             ctx
           );
@@ -691,7 +707,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             // calls and zero LLM.
             const memo = (ctx.dispatchedScriptSignatures ??= new Map<string, string[]>());
             const seen = memo.get(skills.skill.id) ?? [];
-            if (seen.includes(direct.summary)) {
+            // R4: sweep the UNION of all memoised summaries, not just this
+            // id's — twin scripts (different ids, same compiledGeneration,
+            // same function) coexist in merged catalogs, and the prefilter
+            // alternating between them would sidestep an id-keyed memo and
+            // re-open the six-identical-dispatches loop through a sibling.
+            const seenAnywhere = [...memo.values()].some((list) => list.includes(direct.summary));
+            if (seenAnywhere) {
               ctx.logger.info(
                 `[${this.name}] skill "${skills.skill.id}" dispatch reproduced an output this run already returned — routing through the validated LLM loop (a deterministic re-run cannot answer a content rejection)`
               );
@@ -710,10 +732,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             ...(skills.skill.language ? { language: skills.skill.language } : {}),
           })
         );
-        // Commit A′ of the shared-catalog plan: the owner namespace rides
-        // the instance tag alongside the id. Today owner == l1Type.name;
-        // the visibility lattice (commit B) makes them diverge.
-        l1.setActiveSkill(skills.skill.id, l1Type.name);
+        // The owner namespace rides the instance tag alongside the id —
+        // under the lattice it can differ from l1Type.name (donor match).
+        l1.setActiveSkill(skills.skill.id, skills.ownerNs);
         // Match + inject are emitted as a paired event sequence so the
         // viz can render either the match decision alone (rare) or the
         // full inject side-effect (common). Keeping them separate also
@@ -794,11 +815,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   private async matchSkill(
-    l1Name: string,
+    namespaces: readonly string[],
+    readerToolNames: readonly string[],
     subTask: Task,
     ctx: RunContext
-  ): Promise<{ skill: Skill; reasoning: string } | null> {
-    return (await this.lifecycle()?.matchSkill(l1Name, subTask, ctx)) ?? null;
+  ): Promise<{ skill: Skill; ownerNs: string; reasoning: string } | null> {
+    return (
+      (await this.lifecycle()?.matchSkill(namespaces, readerToolNames, subTask, ctx)) ?? null
+    );
   }
 
   private async learnSkillFromRun(args: {
