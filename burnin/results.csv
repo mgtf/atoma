@@ -141,3 +141,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-08T18:04:03.378Z,document-bookmarks-api,http,delivered,0.2527,820,14,1,0,13,0,0,0,0,0,0,0,2026-08-08T18-04-04-037-a8fcb845.json
 2026-08-08T20:18:41.712Z,web-tide-tracker-retry,web,delivered,0.3815,437,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T20-18-42-246-80029c91.json
 2026-08-08T20:26:01.065Z,web-scoreboard,web,delivered,0.2065,224,10,1,0,9,0,0,0,0,0,0,0,2026-08-08T20-26-01-704-97ca81cc.json
+2026-08-08T20:49:16.492Z,web-tide-tracker-retry,web,delivered,0.2118,193,9,1,0,8,0,0,0,0,0,0,0,2026-08-08T20-49-17-029-de553f55.json
+2026-08-08T20:52:31.700Z,web-scoreboard,web,delivered,0.1759,191,9,1,0,8,0,0,0,0,0,0,0,2026-08-08T20-52-32-336-eb1ba65f.json
