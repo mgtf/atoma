@@ -604,6 +604,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // — each one distilled near-duplicates of the recipe that had
     // matched (observed: 4 replay-twins in 2 days, all operator-merged).
     let matchedSkillId: string | undefined;
+    let visibleNsForHooks: readonly string[] | undefined;
     if (this.skillRegistry) {
       skillMatchAttempted = true;
       // SHARED-CATALOG VISIBILITY (commit B): resolved ONCE per subtask,
@@ -621,6 +622,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           return t ? (t.tools ?? []).map((x) => x.name) : null;
         },
       });
+      visibleNsForHooks = visibleNs;
       let skills = await this.matchSkill(visibleNs, readerToolNames, subTask, ctx);
       // STATIC-SCAN QUARANTINE for kind:script matches. Promotion already
       // refuses flagged compiler output, so this catches hand-authored and
@@ -767,6 +769,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       subTask,
       skillMatchAttempted,
       matchedSkillId,
+      visibleNamespaces: this.skillRegistry ? visibleNsForHooks : undefined,
       eventState,
     });
 
@@ -831,6 +834,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     result: Result;
     child: L1Atom;
     ctx: RunContext;
+    visibleNamespaces?: readonly string[];
   }): Promise<void> {
     await this.lifecycle()?.learnSkillFromRun(args);
   }
@@ -1062,6 +1066,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
        * recipe that had matched.
        */
       matchedSkillId?: string;
+      /** Visibility-lattice list (home first) — threads to the learn guard (commit C). */
+      visibleNamespaces?: readonly string[];
       /** Mutated by the event-skill injector; read by the post-loop learning gate. */
       eventState: { injected: boolean };
     }
@@ -1441,6 +1447,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               result,
               child,
               ctx,
+              ...(skillCtx.visibleNamespaces
+                ? { visibleNamespaces: skillCtx.visibleNamespaces }
+                : {}),
             });
           } catch (err) {
             ctx.logger.warn(

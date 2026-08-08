@@ -156,6 +156,55 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
     expect(skills.loadFor(l1a!)).toHaveLength(0); // nothing materialised at the reader
   });
 
+  it('commit C: a draft whose id exists at a VISIBLE donor is never re-created at home', async () => {
+    const envBefore = process.env['ATOMA_SKILL_LEARN'];
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    try {
+      const [l1a, l1b] = reg.listByTier(1).map((t) => t.name);
+      // The donor owns 'replay-recorded-probes'; the reader will try to
+      // learn a draft with the SAME id after a novel run.
+      skills.save(l1b!, {
+        id: 'replay-recorded-probes',
+        description: 'replay recorded shell probes',
+        whenToUse: 'manifest exists',
+        kind: 'llm',
+        body: '1. read_file the manifest\n2. run_shell each cmd',
+      });
+      // A scarecrow at home so the skill prefilter fires (and escalates).
+      skills.save(l1a!, {
+        id: 'unrelated',
+        description: 'something else',
+        whenToUse: 'never',
+        kind: 'llm',
+        body: 'b',
+      });
+      for (let i = 0; i < 3; i++) reg.recordSuccess(l1a!);
+      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const ctx = makeCtx();
+      ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1a!, confidence: 'high', reasoning: 't' }));
+      ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+      ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+      ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+      // The C3 learner emits a draft colliding with the donor's id.
+      ctx.llm.enqueueText(
+        JSON.stringify({
+          id: 'replay-recorded-probes',
+          description: 'near-duplicate of the donor recipe',
+          when_to_use: 'manifest exists',
+          body: '1. read_file the manifest\n2. run_shell each recorded cmd',
+        })
+      );
+
+      await water.handleDirect({ description: 'novel-ish verification task' }, ctx);
+      // Not re-created at home; the donor's copy is untouched.
+      expect(skills.loadFor(l1a!).map((s) => s.id)).toEqual(['unrelated']);
+      expect(skills.loadFor(l1b!).map((s) => s.id)).toEqual(['replay-recorded-probes']);
+    } finally {
+      if (envBefore === undefined) delete process.env['ATOMA_SKILL_LEARN'];
+      else process.env['ATOMA_SKILL_LEARN'] = envBefore;
+    }
+  });
+
   it('R1: a donor SCRIPT is invisible to a reader lacking the invocation ABI (run_shell)', async () => {
     const [, l1b] = reg.listByTier(1).map((t) => t.name);
     mkType(1, 'web builder', WEB_TOOLS); // third L1 — the ABI-less reader

@@ -293,6 +293,13 @@ export class SkillLifecycle {
     result: Result;
     child: L1Atom;
     ctx: RunContext;
+    /**
+     * Visibility-lattice list (home first). The no-overwrite guard extends
+     * across it (commit C): an id owned by a VISIBLE donor is never
+     * re-created at home — under the lattice the existing recipe would
+     * have matched, so a same-id draft is a twin in the making.
+     */
+    visibleNamespaces?: readonly string[];
   }): Promise<void> {
     const userContent = [
       `You are distilling a successful run into a reusable SKILL — a markdown`,
@@ -401,10 +408,15 @@ export class SkillLifecycle {
         );
         continue;
       }
-      const existing = this.skills.loadFor(args.l1Name).find((s) => s.id === draft.id);
-      if (existing) {
+      const guardNs = args.visibleNamespaces?.length
+        ? args.visibleNamespaces
+        : [args.l1Name];
+      const existingNs = guardNs.find((ns) =>
+        this.skills.loadFor(ns).some((s) => s.id === draft.id)
+      );
+      if (existingNs) {
         args.ctx.logger.debug(
-          `[${this.host.name}] skill ${draft.id} already exists for ${args.l1Name}, not overwriting`
+          `[${this.host.name}] skill ${draft.id} already exists in visible namespace ${existingNs}, not overwriting`
         );
         continue;
       }
