@@ -130,13 +130,30 @@ describe('event skills are local by construction', () => {
 });
 
 describe('free-ride warning', () => {
-  it('warns when matches outran the runs the skill actually drove', () => {
+  it('warns when matches moved no counter, WITHOUT asserting why', () => {
     const a = assessShareability({
       skill: skill({ successes: 5, failures: 0, matches: 9 }),
       ownerToolNames: FILE_TOOLS,
     });
     expect(a.verdict).toBe('review-required'); // a warning must not block
-    expect(a.warnings.map((w) => w.code)).toContain('trust:free-ride');
+    const w = a.warnings.find((x) => x.code === 'trust:unmatched-credit');
+    expect(w).toBeTruthy();
+    // Checked against the traces: only some gaps have a matching
+    // credit-withheld event, so the text must not claim the gate caused it.
+    expect(w!.detail).not.toMatch(/without driving|withheld|adherence/i);
+    expect(w!.detail).toMatch(/moved no counter/);
+  });
+
+  it('warns LOUDLY when matches trails the runs — the counters span eras', () => {
+    // Real data: build-argv-file-cli reads 10 matches against 23 successes,
+    // impossible within one era. Staying silent let a reviewer read "no
+    // warning" as "the counters agree".
+    const a = assessShareability({
+      skill: skill({ successes: 23, failures: 0, matches: 10 }),
+      ownerToolNames: FILE_TOOLS,
+    });
+    expect(a.warnings.map((w) => w.code)).toContain('trust:counter-eras');
+    expect(a.verdict).toBe('review-required');
   });
 
   it('stays quiet when every match drove a run', () => {

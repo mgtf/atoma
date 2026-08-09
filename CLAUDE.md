@@ -1600,8 +1600,18 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   the originating run (concrete input filename, absolute path, pinned port,
   external host), tool names the OWNING L1 cannot declare, the static scan on
   `kind: script` bodies (with the same loopback allowance the promotion path
-  uses, via `hostAllowsLoopbackNetwork`), and a free-ride WARNING when
-  `matches` outran the runs the skill actually drove. Event skills return
+  uses, via `hostAllowsLoopbackNetwork`), and TWO counter warnings.
+  `trust:unmatched-credit` when `matches` outran the runs driven — worded as
+  an OBSERVATION, never a cause: checked against the traces, `probe-crud`
+  (gap 3) and `document-api-from-server-source` (gap 1) match their recorded
+  `credit-withheld` events exactly, but the two Hydrogen gaps have none, and
+  a run that died before its hook leaves identical arithmetic.
+  `trust:counter-eras` when `matches` falls BELOW the runs driven, which is
+  impossible within one era — measured live: `build-argv-file-cli` reads 10
+  matches against 23 successes, because `matches` was added to the schema
+  after those successes accrued. Silence there was a bug in the first
+  revision: a reviewer reads "no warning" as "the counters agree", which was
+  the opposite of the truth for three of the eight skills with a gap. Event skills return
   `not-shareable` — a trigger is matched against THIS deployment's validator
   wording, so offering one elsewhere is meaningless rather than unsafe.
   IT IS NOT THE GATE, and must never be cited as one: `docs/saas-architecture.md`

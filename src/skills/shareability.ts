@@ -143,15 +143,35 @@ export function assessShareability(input: ShareabilityInput): ShareAssessment {
     for (const f of flags) blockers.push({ code: `scan:${f}`, detail: 'static scan flagged this body' });
   }
 
-  // Trust that outran the runs that earned it. `matches - driven` is the
-  // free-ride gap the adherence gate exists to expose; a skill credited for
-  // runs it did not drive is a weaker candidate than its counters suggest.
+  // How much of this skill's trust is backed by runs it demonstrably drove.
+  //
+  // REPORT THE OBSERVATION, NOT A CAUSE. An earlier wording said "N credited
+  // without driving", which asserts the adherence gate withheld the credit.
+  // Checked against the traces: `probe-crud` (gap 3) and
+  // `document-api-from-server-source` (gap 1) match their recorded
+  // `credit-withheld` events exactly, but the two Hydrogen gaps have none —
+  // a run that died before its hook leaves the same arithmetic. The number
+  // is worth a reviewer's eye; the explanation is not ours to give.
   const driven = (skill.successes ?? 0) + (skill.failures ?? 0);
   const matches = skill.matches ?? 0;
   if (matches > driven && driven > 0) {
     warnings.push({
-      code: 'trust:free-ride',
-      detail: `${matches} matches vs ${driven} driven runs — ${matches - driven} credited without driving`,
+      code: 'trust:unmatched-credit',
+      detail: `${matches} matches vs ${driven} driven runs — ${matches - driven} match(es) moved no counter`,
+    });
+  } else if (matches > 0 && matches < driven) {
+    // SILENCE HERE WAS THE BUG. `matches` cannot legitimately trail the runs
+    // it gated, so the two counters cover different periods: `matches` was
+    // added to the schema after those successes accrued, or a
+    // `promoteToScript` / `resetCounters` zeroed one era and not the other.
+    // Measured today: `build-argv-file-cli` reads 10 matches against 23
+    // successes. Saying nothing let a reviewer read "no warning" as "the
+    // counters agree", which is the opposite of what is true.
+    warnings.push({
+      code: 'trust:counter-eras',
+      detail:
+        `${matches} matches BELOW ${driven} driven runs — impossible within one era, so the ` +
+        `counters span different periods and this ratio cannot be used as evidence`,
     });
   }
 
