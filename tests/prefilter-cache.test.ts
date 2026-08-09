@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   PREFILTER_CACHE_MAX_ENTRIES,
+  prefilterCacheClear,
   prefilterCacheGet,
   prefilterCacheKey,
   prefilterCachePut,
+  prefilterCacheStats,
   resetPrefilterCacheForTests,
 } from '../src/atoms/prefilterCache.js';
 import { prefilterStrategy, PREFILTER_SYSTEM_PROMPT } from '../src/atoms/cost.js';
@@ -49,14 +52,14 @@ describe('prefilterCacheKey', () => {
   });
 });
 
-describe('cache store — file-backed, bounded, disableable', () => {
+describe('cache store — a table in the store, bounded, disableable', () => {
   let dir: string;
   let envBefore: string | undefined;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-pfcache-'));
     envBefore = process.env['ATOMA_PREFILTER_CACHE'];
-    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.json');
+    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.db');
     resetPrefilterCacheForTests();
   });
   afterEach(() => {
@@ -66,15 +69,34 @@ describe('cache store — file-backed, bounded, disableable', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('round-trips an outcome and persists it to disk', () => {
+  it('round-trips an outcome and persists it', () => {
     const key = prefilterCacheKey(BASE);
     expect(prefilterCacheGet(key)).toBeNull();
     prefilterCachePut(key, { kind: 'reuse', target: 'Hydrogen', reasoning: 'fits', confidence: 'high' });
     expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
-    expect(existsSync(join(dir, 'cache.json'))).toBe(true);
-    // A fresh in-memory image (new process simulation) reads the same entry.
+    expect(existsSync(join(dir, 'cache.db'))).toBe(true);
+    // A fresh handle (new process simulation) reads the same entry.
     resetPrefilterCacheForTests();
     expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
+  });
+
+  it('a HIT no longer rewrites the whole store — it increments one row', () => {
+    // The file form re-serialised all 500 entries (217 KB measured) on every
+    // get, purely to bump `hits`. This is the operation it wanted.
+    const key = prefilterCacheKey(BASE);
+    prefilterCachePut(key, { kind: 'reuse', target: 'Hydrogen', reasoning: 'fits', confidence: 'high' });
+    prefilterCacheGet(key);
+    prefilterCacheGet(key);
+    const s = prefilterCacheStats();
+    expect(s.entries).toBe(1);
+    expect(s.hits).toBe(2);
+    expect(s.reused).toBe(1);
+  });
+
+  it('clear empties it and reports what it removed', () => {
+    prefilterCachePut(prefilterCacheKey(BASE), { kind: 'escalate', reasoning: 'x' });
+    expect(prefilterCacheClear()).toBe(1);
+    expect(prefilterCacheStats().entries).toBe(0);
   });
 
   it("'0' disables both directions", () => {
@@ -88,13 +110,33 @@ describe('cache store — file-backed, bounded, disableable', () => {
   it('expires stale entries', () => {
     const key = prefilterCacheKey(BASE);
     prefilterCachePut(key, { kind: 'escalate', reasoning: 'old decision' });
-    // Age the entry on disk past the max age, then force a re-read.
-    const path = join(dir, 'cache.json');
-    const file = JSON.parse(readFileSync(path, 'utf8'));
-    file.entries[key].at = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
-    writeFileSync(path, JSON.stringify(file), 'utf8');
+    // Age the row past the max age, then force a re-read.
+    resetPrefilterCacheForTests();
+    const conn = new Database(join(dir, 'cache.db'));
+    conn
+      .prepare('UPDATE prefilter_cache SET at = ? WHERE key = ?')
+      .run(new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString(), key);
+    conn.close();
     resetPrefilterCacheForTests();
     expect(prefilterCacheGet(key)).toBeNull();
+  });
+
+  it('evicts by WRITE ORDER, not by timestamp — the newest survives a same-ms burst', () => {
+    // A run writes several prefilter decisions inside one millisecond, so
+    // `at` ties and the tie-break decides — arbitrarily — whether the entry
+    // just written is the one thrown away. Ordering by rowid is what makes
+    // "oldest-written first" mean what it says. The file form got this free
+    // from V8's stable sort; SQL had to be told.
+    const keys: string[] = [];
+    for (let i = 0; i <= PREFILTER_CACHE_MAX_ENTRIES + 20; i++) {
+      const k = prefilterCacheKey({ ...BASE, taskDescription: `burst${i}` });
+      keys.push(k);
+      prefilterCachePut(k, { kind: 'escalate', reasoning: `${i}` });
+    }
+    expect(prefilterCacheStats().entries).toBe(PREFILTER_CACHE_MAX_ENTRIES);
+    // Every one of the last 50 written is still there; the first 20 are gone.
+    for (const k of keys.slice(-50)) expect(prefilterCacheGet(k)).not.toBeNull();
+    for (const k of keys.slice(0, 20)) expect(prefilterCacheGet(k)).toBeNull();
   });
 
   it('evicts oldest-written entries past the cap', () => {
@@ -104,8 +146,7 @@ describe('cache store — file-backed, bounded, disableable', () => {
         reasoning: `${i}`,
       });
     }
-    const file = JSON.parse(readFileSync(join(dir, 'cache.json'), 'utf8'));
-    expect(Object.keys(file.entries).length).toBeLessThanOrEqual(PREFILTER_CACHE_MAX_ENTRIES);
+    expect(prefilterCacheStats().entries).toBeLessThanOrEqual(PREFILTER_CACHE_MAX_ENTRIES);
     // The newest entry survived.
     expect(
       prefilterCacheGet(
@@ -122,7 +163,7 @@ describe('prefilterStrategy — cache integration', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-pfcache-e2e-'));
     envBefore = process.env['ATOMA_PREFILTER_CACHE'];
-    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.json');
+    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.db');
     resetPrefilterCacheForTests();
   });
   afterEach(() => {

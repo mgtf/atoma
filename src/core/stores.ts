@@ -111,6 +111,49 @@ export function skillsDirPath(explicit?: string): string {
 }
 
 /**
+ * Lazily-opened store handles for callers that hold no registry of their own
+ * — the skill choke points' ledger appends and the prefilter decision cache.
+ *
+ * Caching matters: both append on hot paths (every counter bump, every
+ * prefilter call), and a connection per operation would turn a burst into a
+ * burst of file opens. WAL makes several handles on one file safe, including
+ * alongside the handle `openDb` gave the registry.
+ *
+ * DDL IS PER (HANDLE, TABLE), not per open. Two subsystems now share one
+ * file, so a handle created by the first must not leave the second's table
+ * missing — and re-running `CREATE TABLE IF NOT EXISTS` on every cache read
+ * would be a needless statement on the hottest path.
+ */
+const handles = new Map<string, { db: Database.Database; applied: Set<string> }>();
+
+export function openStoreHandle(path: string, ddl: string): Database.Database {
+  let h = handles.get(path);
+  if (!h) {
+    const db = new Database(path);
+    db.pragma('journal_mode = WAL');
+    h = { db, applied: new Set() };
+    handles.set(path, h);
+  }
+  if (!h.applied.has(ddl)) {
+    h.db.exec(ddl);
+    h.applied.add(ddl);
+  }
+  return h.db;
+}
+
+/** Drop cached handles. For tests that repoint a store path mid-suite. */
+export function closeStoreHandles(): void {
+  for (const h of handles.values()) {
+    try {
+      h.db.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  handles.clear();
+}
+
+/**
  * One line naming the rename, or null when there is nothing to say.
  *
  * Printed rather than performed: renaming a live SQLite file means moving its

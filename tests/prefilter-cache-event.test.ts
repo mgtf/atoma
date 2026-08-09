@@ -26,7 +26,7 @@ describe('prefilter cache — observer event', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-cache-ev-'));
     envBefore = process.env['ATOMA_PREFILTER_CACHE'];
-    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.json');
+    process.env['ATOMA_PREFILTER_CACHE'] = join(dir, 'cache.db');
     resetPrefilterCacheForTests();
   });
   afterEach(() => {

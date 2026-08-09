@@ -15,6 +15,12 @@ import { legacyStoreNotice, storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
+import {
+  PREFILTER_CACHE_MAX_AGE_MS,
+  PREFILTER_CACHE_MAX_ENTRIES,
+  prefilterCacheClear,
+  prefilterCacheStats,
+} from '../atoms/prefilterCache.js';
 
 interface Args {
   command:
@@ -27,6 +33,7 @@ interface Args {
     | 'remove'
     | 'history'
     | 'rollback'
+    | 'cache'
     | 'help';
   positional: string[];
   flags: Record<string, string>;
@@ -35,7 +42,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const { command, positional, flags } = parseCliArgs(argv);
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'help'].includes(command)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'cache', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -103,6 +110,37 @@ const tableHeaders = [
   'created_at',
   'description',
 ];
+
+/**
+ * The prefilter decision cache — now a table in this store, so the `rm` that
+ * a sibling JSON file offered needs a verb, and the hit rate that CLAUDE.md's
+ * PLAN TEMPLATING entry names as a revisit gate ("exceeds 25% across two
+ * consecutive batches") becomes a query instead of a hand-parsed blob.
+ */
+function cmdCache(clear: boolean): void {
+  if (clear) {
+    console.log(`cleared ${prefilterCacheClear()} cached prefilter decision(s).`);
+    return;
+  }
+  const s = prefilterCacheStats();
+  if (s.entries === 0) {
+    console.log('prefilter cache is empty.');
+    return;
+  }
+  const pct = ((s.reused / s.entries) * 100).toFixed(1);
+  console.log(`prefilter cache: ${s.entries}/${PREFILTER_CACHE_MAX_ENTRIES} entries`);
+  console.log(`  reused        : ${s.reused} (${pct}% of entries ever read back)`);
+  console.log(`  total hits    : ${s.hits}`);
+  console.log(`  written       : ${(s.oldest ?? '').slice(0, 19)} .. ${(s.newest ?? '').slice(0, 19)}`);
+  if (s.entries >= PREFILTER_CACHE_MAX_ENTRIES) {
+    // The cap and the expiry are not independent: at the cap, entries are
+    // evicted by age-of-write long before the 7-day expiry can fire, so the
+    // effective retention is however long 500 entries take to accumulate.
+    console.log(`  NOTE: at the cap — eviction, not the ${PREFILTER_CACHE_MAX_AGE_MS / 86_400_000}-day expiry, is what bounds retention.`);
+  }
+  console.log(`
+  --clear empties it. The cache is disposable: correctness lives in the KEY.`);
+}
 
 function cmdList(registry: AtomRegistry, tier: Tier | undefined): void {
   const tiers: Tier[] = tier ? [tier] : [1, 2, 3];
@@ -355,6 +393,11 @@ function help(): void {
                                 re-earns trust). Prompt/tools/params are
                                 restored exactly; description is not
                                 versioned and is kept as-is.
+  cache [--clear]             — prefilter decision cache (a table in the
+                                same store): size, how many entries were
+                                ever read back, total hits. --clear empties
+                                it; the cache is disposable, correctness
+                                lives in the key.
 
 Common flags:
   --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
@@ -491,6 +534,8 @@ function main(): void {
       }
       return cmdRollback(registry, name, args.flags['to']);
     }
+    case 'cache':
+      return cmdCache('clear' in args.flags);
   }
 }
 

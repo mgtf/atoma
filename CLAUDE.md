@@ -131,9 +131,10 @@ npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in b
 - **Prefilter DECISION CACHE (`src/atoms/prefilterCache.ts`).** Prefilter
   calls are temperature-0 with CONSTANT prompts, so the decision is a
   pure function of its inputs — `prefilterStrategy` serves a repeat
-  (task × catalog × exclusions × model × prompt) pair from a file-backed
-  cache: zero tokens, and under claude-cli zero 2-5s subprocess spawns
-  (FrugalGPT's completion cache on atoma's cheapest slot). Correctness
+  (task × catalog × exclusions × model × prompt) pair from the
+  `prefilter_cache` TABLE in the store: zero tokens, and under claude-cli
+  zero 2-5s subprocess spawns (FrugalGPT's completion cache on atoma's
+  cheapest slot). Correctness
   lives in the KEY (djb2 over every decision input, NOT the actor
   attribution preamble): registry evolution changes the catalog text and
   misses naturally. Bounds: 7-day expiry (model pins are stable strings
@@ -141,11 +142,34 @@ npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in b
   All three PARSED outcomes cache (including the low-confidence
   escalate rewrite); the error-path escalate NEVER does — an LLM hiccup
   must not become a week of escalates. Config: `ATOMA_PREFILTER_CACHE`
-  ('0' disables, other values override the path; default
-  `./atoma-prefilter-cache.json`, gitignored). vitest pins it to '0'
+  ('0' disables, other values override the DB path; default: the one
+  store). vitest pins it to '0'
   globally — mock tests assert exact call counts and a shared cache
   would make test order change which calls fire; cache tests re-enable
   per-test. Covered by `tests/prefilter-cache.test.ts`.
+  IT WAS `./atoma-prefilter-cache.json` until 2026-08-09, and the file form
+  re-serialised the WHOLE cache on every get AND every put — 217 KB rewritten
+  per prefilter call, including on a HIT, purely to increment `hits` — while
+  being last-writer-wins across processes on the whole file, so two concurrent
+  runs discarded each other's entries wholesale. `INSERT OR REPLACE` and
+  `hits = hits + 1` are what it wanted. Eviction orders by ROWID, not by `at`:
+  a run writes several decisions inside one millisecond, so an `at` sort ties
+  and the tie-break decides arbitrarily whether the entry JUST WRITTEN is the
+  one thrown away (the file form got insertion order free from V8's stable
+  sort; SQL had to be told — same reason `lifecycle_events` carries a seq).
+  Pinned by a same-millisecond burst test that fails against the `at` sort.
+  NOT MIGRATED on the move, deliberately: a cache that gets an importer is
+  being treated as data.
+  **AND ITS VALUE IS UNPROVEN — `npm run registry -- cache` is how you check.**
+  Measured at the move: 500 entries (AT the cap, so eviction and not the 7-day
+  expiry is what bounds retention), spanning three days, **9 entries ever read
+  back — 1.8% — for 11 total hits**. That is ~30s of avoided subprocess spawn
+  over three days. The table is kept because the number is now one query
+  instead of a hand-parsed blob, and because CLAUDE.md's PLAN TEMPLATING
+  rejection names this exact hit rate as its revisit gate ("exceeds 25% across
+  two consecutive batches"). If it is still under ~5% after the next few
+  batches, DELETING the cache is the honest call — the measurement exists to
+  be acted on, not admired.
 - **Prefilter fast-path in `validatePlan`.** Plans synthesised by the
   prefilter carry an internal `viaPrefilter: true` flag (set in
   `L2.plan` / `L3.plan` on the skeletal-plan literal). Both

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { storeDbPath } from './stores.js';
+import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
 
 /**
  * APPEND-ONLY LIFECYCLE LEDGER (P2 — event-sourced provenance, stage 1).
@@ -137,37 +137,13 @@ function warnOnce(err: unknown): void {
   console.warn(`[ledger] write failed (further failures silent): ${(err as Error).message}`);
 }
 
-/**
- * Lazily-opened handles for callers with no store of their own, one per path.
- *
- * Caching matters: `SkillRegistry` appends on every counter bump, and opening
- * a SQLite connection per event would turn a burst of skill successes into a
- * burst of file opens. WAL makes the second handle on one file safe.
- */
-const handles = new Map<string, LedgerDb>();
-
+/** Handle for callers with no store of their own (`SkillRegistry`). */
 function handleFor(path: string): LedgerDb {
-  let db = handles.get(path);
-  if (!db) {
-    db = new Database(path);
-    db.pragma('journal_mode = WAL');
-    db.exec(LEDGER_TABLE_DDL);
-    handles.set(path, db);
-  }
-  return db;
+  return openStoreHandle(path, LEDGER_TABLE_DDL);
 }
 
 /** Drop cached handles. For tests that repoint `ATOMA_LEDGER_DB` mid-suite. */
-export function closeLedgerHandles(): void {
-  for (const db of handles.values()) {
-    try {
-      db.close();
-    } catch {
-      /* already closed */
-    }
-  }
-  handles.clear();
-}
+export const closeLedgerHandles = closeStoreHandles;
 
 /**
  * Append one event. Fail-open: never throws.

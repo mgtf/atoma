@@ -25,4 +25,6 @@ burnin/logs/
 # above). Kept ignored: an old checkout or the one-shot importer can still
 # leave one, and `.bak` variants were committed by accident once.
 atoma-ledger.jsonl*
+# Pre-consolidation prefilter cache; it is now a `prefilter_cache` table in
+# the store. Kept ignored so an old checkout cannot commit one.
 atoma-prefilter-cache.json
