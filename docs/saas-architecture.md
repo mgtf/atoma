@@ -149,9 +149,16 @@ spawn('bash', ['-c', 'cat ../../skills_marker.txt; ls ../..'],
   skills_marker.txt
 ```
 
-With the defaults — workspace `./build/app` (`src/run/profiles/build.ts:78-80`),
-skills `./skills` (`src/run/runner.ts:238`), db `./atoma-build.db`
-(`runner.ts:150`) — **every store is two `..` hops from model-authored code.**
+This was measured with the workspace at `./build/app`, i.e. **two `..` hops
+below every store**. PARTIALLY MITIGATED SINCE: the build profile's default
+workspace moved out of the repository to `~/.atoma/workspaces/build`
+(`defaultWorkspaceRoot`, `src/run/profiles/build.ts`), so the same probe now
+lists nothing. Read that as blast-radius reduction, NOT as a fix — an absolute
+path still reaches anything the process owner can read, and the repo path is
+not secret. The invariant below is unchanged and still requires an OS
+boundary; what changed is that the casual traversal no longer lands in the
+stores, and the *accidental* case (generated cleanup code doing `rm -rf ..`)
+no longer lands in the user's git tree.
 CLAUDE.md already concedes the run_shell allowlist is "STEERING, not a boundary"
 and that `bash` / `node -e` / `python3 -c` are complete escape hatches. The env
 allowlist (`sandboxChildEnv`, `sandbox.ts:39-59`) and the scratch HOME close the

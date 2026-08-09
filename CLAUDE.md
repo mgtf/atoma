@@ -2510,8 +2510,12 @@ lives in `docs/saas-architecture.md`. Read its **§5 Invariants** and **§7
 Design rules to apply starting now** before touching skill lifecycle, atom
 identity, counters or any store path. The three findings that matter most
 here and now, all reproduced against the code: (1) `run_shell`'s child gets
-`cwd` and no jail (`builtin.ts:338-344`), so every store is two `..` hops from
-model-authored code — tenant isolation is not implementable in-process;
+`cwd` and no jail (`builtin.ts:338-344`) — tenant isolation is therefore not
+implementable in-process. The build workspace has since MOVED OUT of the repo
+(`~/.atoma/workspaces/build`, `defaultWorkspaceRoot` in
+`src/run/profiles/build.ts`) so the stores are no longer two `..` hops away,
+but that is blast-radius reduction, not a boundary: absolute paths still
+reach everything. Pinned by `tests/workspace-outside-repo.test.ts`;
 (2) `scanScriptBody` is a hygiene filter with a verified bypass
 (`scriptScan.ts:95-97` checks external URLs ONLY on HTTP hosts) and must never
 be cited as a security control; (3) one present-day bug FIXED while writing this (`sanitise` accepted

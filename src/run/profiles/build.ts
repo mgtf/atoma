@@ -6,10 +6,29 @@ import {
   ensureCanonicalHttpL2,
   ensureCanonicalFileScribeL1,
 } from '../../atoms/capability.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { prepareWorkspace } from '../workspace.js';
 import type { AtomType } from '../../registry/atomRegistry.js';
 import type { Task } from '../../core/types.js';
 import type { ProfileSeedContext, TaskProfile } from '../profile.js';
+
+/**
+ * Where build runs get their scratch directory.
+ *
+ * Under the user's home rather than the repo, and STABLE across runs rather
+ * than a fresh temp dir: the workspace holds the deliverable, and a human
+ * inspects it after the run finishes (`prepareWorkspace` archives by rename
+ * for the same reason — a wrong call must stay recoverable). An OS tmpdir
+ * would be swept out from under that.
+ *
+ * Overridable with ATOMA_BUILD_WORKSPACE, which the burn-in harness does not
+ * set — so batches share one workspace and rely on `--clean-workspace`,
+ * exactly as before the move.
+ */
+export function defaultWorkspaceRoot(): string {
+  return join(homedir(), '.atoma', 'workspaces', 'build');
+}
 
 /**
  * The tier-3 seed prompt for the build family.
@@ -77,7 +96,29 @@ export const buildProfile: TaskProfile = {
   },
   defaults: {
     dbPath: './atoma-build.db',
-    workspace: './build/app',
+    // OUTSIDE THE REPO, deliberately. The workspace used to be `./build/app`,
+    // two `..` hops below the atom registry, every skill body, the ledger and
+    // the user's own uncommitted git work — and `run_shell`'s child is NOT
+    // jailed to the workspace, it merely starts there (`builtin.ts` spawns
+    // with `cwd`, nothing more). REPRODUCED: `ls ../../atoma-build.db
+    // ../../skills` from a sandbox listed the registry and every learned
+    // recipe.
+    //
+    // This is a BLAST-RADIUS REDUCTION, NOT A BOUNDARY, and the distinction
+    // matters: an absolute path still reaches anything the user can read.
+    // What it buys is that the casual traversal — a model running `ls ..` to
+    // orient itself, or a stray `rm -rf ..` in generated cleanup code — now
+    // lands in a scratch tree instead of the repository. A real boundary is
+    // an OS one (container/VM) and belongs to deployment; see
+    // docs/saas-architecture.md §3 and invariant T1. Do not describe this
+    // line as isolation.
+    //
+    // It also removes the CAUSE of the ESM module-resolution leak rather
+    // than compensating for it: the workspace no longer sits under a
+    // package.json saying `"type": "module"`, so
+    // `ensureModuleResolutionBoundary` goes inert here (it stays, and still
+    // fires, for anyone who points the workspace back inside a module repo).
+    workspace: defaultWorkspaceRoot(),
   },
 
   // Every line here reflects something this repo MEASURED, not generic
