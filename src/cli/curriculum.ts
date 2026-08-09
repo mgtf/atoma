@@ -282,7 +282,14 @@ function makeClient(): LlmClient {
           baseUrl: process.env['OLLAMA_BASE_URL'],
           defaultModel: process.env['OLLAMA_MODEL'],
         })
-      : provider === 'claude-cli'
+      : // The bare `claude` alias too — build-app.ts has accepted both since
+        // it was written, this copy only ever matched the long form, and the
+        // docstring above claims parity. The failure is SILENT and expensive:
+        // with ATOMA_LLM=claude the curriculum falls through to the Anthropic
+        // branch and hits the dead API key, so the one Sonnet call that
+        // generates the whole task batch fails for a reason that looks like
+        // an auth problem rather than a typo.
+        provider === 'claude-cli' || provider === 'claude'
         ? new ClaudeCliLlmClient()
         : new AnthropicLlmClient(makeAnthropicClient());
   const providers = buildReferencedProviders();
