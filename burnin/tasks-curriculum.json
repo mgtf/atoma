@@ -1,39 +1,29 @@
 {
   "tasks": [
     {
-      "id": "package-csv-merger-cli",
-      "family": "cli",
-      "goal": "Build and test a Node CLI tool 'csv-merger' that merges two CSV files on a shared key column and prints the combined rows, verifying it works on sample fixtures. As a FINAL SEPARATE PHASE, add a package.json and a README with a 'Verified invocations' section documenting the exact commands you ran and their output."
-    },
-    {
-      "id": "index-recipe-notes-docs",
+      "id": "recipe-notes-index",
       "family": "files",
-      "goal": "Create a workspace with three markdown files documenting recipes (soup.md, pasta.md, dessert.md) each with a title and short description. As a FINAL SEPARATE PHASE, write an index.md that links to all three files with accurate titles and descriptions."
+      "goal": "Create three markdown files in a workspace — sourdough-starter.md, weeknight-pasta.md, and slow-cooker-chili.md — each with a short recipe and a one-paragraph description of the dish. As a FINAL SEPARATE PHASE, generate an index.md that links to all three files with accurate titles and one-line descriptions summarizing each recipe."
     },
     {
-      "id": "contributing-and-lint-config",
-      "family": "files",
-      "goal": "Write a README.md with Overview, Installation, and Usage headings, and a CONTRIBUTING.md with Code of Conduct and Pull Request Process headings for a fictional 'weather-fetcher' project, plus an .eslintrc.json config file with an exact literal ruleset: {\"env\": {\"node\": true}, \"rules\": {\"semi\": [\"error\", \"always\"], \"quotes\": [\"error\", \"single\"]}}."
-    },
-    {
-      "id": "document-bookmarks-api",
+      "id": "podcast-api-docs",
       "family": "http",
-      "goal": "Build a small Node HTTP server (server.js) implementing a bookmarks API with routes GET /bookmarks, POST /bookmarks, DELETE /bookmarks/:id, each returning specific JSON bodies and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route, request body, and status code exactly as implemented in server.js."
+      "goal": "Build a small Node.js HTTP API server (server.js) for a podcast catalog with routes GET /episodes, GET /episodes/:id, POST /episodes, and DELETE /episodes/:id, including request bodies and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route exactly as implemented by reading server.js, including request/response shapes and status codes."
     },
     {
-      "id": "single-page-tide-tracker",
+      "id": "tide-chart-webpage",
       "family": "web",
-      "goal": "Build a single-page web app that lets a user log daily tide height readings for a coastal location and displays them as a sortable table with a simple line chart, all in one self-contained HTML file with embedded CSS and JS."
+      "goal": "Build a single-page web app that displays a static tide chart for a fictional coastal town, letting the user pick a date from a dropdown to see high/low tide times and heights rendered as a simple table and chart."
     },
     {
-      "id": "receipt-splitter-app",
+      "id": "expense-splitter-app",
       "family": "app",
-      "goal": "Build a small command-line app that splits a restaurant bill among a list of named diners, supporting itemized assignment and even split of shared items, with tax and tip proportionally distributed, and outputs a per-person summary."
+      "goal": "Build a small command-line expense-splitting app that takes a group of people and a list of shared expenses, then computes who owes whom and how much to settle up evenly."
     },
     {
-      "id": "document-inventory-api",
+      "id": "library-loan-api",
       "family": "http",
-      "goal": "Build a Node HTTP server (server.js) implementing a warehouse inventory API with routes GET /items, GET /items/:sku, PUT /items/:sku, POST /items/:sku/restock, each with defined JSON request/response shapes and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route, its request body, response shape, and status codes exactly as implemented in server.js."
+      "goal": "Build a small HTTP API server for a library loan system with routes to list books, check out a book, return a book, and list overdue loans, including in-memory storage and proper status codes for errors like already-checked-out."
     }
   ]
 }
