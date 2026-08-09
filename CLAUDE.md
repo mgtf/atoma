@@ -2541,12 +2541,28 @@ The worker announces its own tool declarations in a hello line — the IMAGE is
 the authority on what it can do, since a Chromium-less image has no business
 claiming `validate_html`.
 
-NOT WIRED INTO `runTask` YET, deliberately: this is the primitive and its
-proof. Adopting it as the default needs its own measurement — image build
-cost, per-call latency across the pipe, and the effect on the burn-in curve —
-and the stores question first: a containerised run reaches no registry, so
-the control plane must own reading and writing them. That is the same split
-the SaaS document describes; see `docs/saas-architecture.md`.
+WIRED, OPT-IN: `--container` / `ATOMA_CONTAINER=1` selects it in `runTask`
+via `src/run/toolBackend.ts`. The swap touches ONE point because the split
+was already clean — verified, not assumed: `src/tools/*` imports only node
+builtins, puppeteer and its siblings (no store), and nothing in
+`src/atoms|run|skills` reads the workspace except through `ctx.tools`. So the
+"control plane must own the stores" concern raised when the primitive landed
+was already satisfied by the existing architecture.
+
+MEASURED on a real task run both ways (`ATOMA_LLM=claude-cli`, identical
+goal): **per-tool overhead +4ms** (21ms containerised vs 17ms local) and
+**container boot 243ms mean over three cold starts**. Those are the two
+numbers the pipe actually costs. The runs also differed 102s/$0.174/12 calls
+vs 158s/$0.143/18 calls — do NOT read that as a container effect: they took
+different paths (7 vs 12 tool calls) and one A/B cannot separate model
+variance from anything else. Deliverable verified on the host through the
+bind mount (`node index.js hello` → `olleh`), probe manifest written, and the
+trace kept all 7 tool events because `onToolInvocation` fires on the control
+plane.
+STILL NOT THE DEFAULT: that needs the burn-in curve across a batch, not one
+task. Worker stderr is forwarded to the host so `[tool:…]` lines still appear
+live; they match none of `parseRunLog`'s markers and arrive on stderr, so the
+harness is unaffected.
 KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
 `-w /workspace`, so a relative one resolves under the mount and dies with
 MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,

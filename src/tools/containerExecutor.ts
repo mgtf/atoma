@@ -65,10 +65,10 @@ export function workerRunArgs(opts: {
  * why this seam was available at all. The control plane keeps the supervise
  * loop, the LLM calls and every store; only the side-effecting half moves.
  *
- * NOT WIRED INTO A RUN YET, deliberately. This is the isolation primitive and
- * its proof; adopting it as the default for `runTask` is a separate change
- * with its own measurement (image build cost, per-call latency across the
- * pipe, and what it does to the burn-in curve).
+ * OPT-IN, not the default: `runTask` selects it on `--container` /
+ * `ATOMA_CONTAINER=1` (see `src/run/toolBackend.ts`). It is proven — a real
+ * task ran end to end through it — but making it the default is a separate
+ * decision that needs the burn-in curve, not one measurement.
  */
 export class ContainerToolExecutor implements ToolExecutor {
   private child: ChildProcess | null = null;
@@ -89,6 +89,8 @@ export class ContainerToolExecutor implements ToolExecutor {
       callTimeoutMs?: number;
       startTimeoutMs?: number;
       docker?: string;
+      /** Mirror the worker's stderr onto the host's. Default true. */
+      forwardWorkerLogs?: boolean;
     }
   ) {}
 
@@ -107,6 +109,15 @@ export class ContainerToolExecutor implements ToolExecutor {
 
       let stderr = '';
       const startMs = this.opts.startTimeoutMs ?? 60_000;
+      // Forward the worker's own log lines to the host console. Without this
+      // a containerised run prints no `[tool:write_file] …` at all and reads
+      // as if nothing happened between LLM calls — the trace still has every
+      // tool event (onToolInvocation fires on the control plane), but the
+      // operator watching a terminal loses the live signal. Safe for the
+      // burn-in harness, which greps a combined log: the worker's lines
+      // match none of the markers `parseRunLog` looks for, and they arrive
+      // on STDERR so they cannot corrupt the stdio protocol on stdout.
+      const forwardLogs = this.opts.forwardWorkerLogs !== false;
       const timer = setTimeout(() => {
         reject(
           new Error(`worker container did not report ready in ${startMs}ms: ${stderr.slice(-400)}`)
@@ -114,8 +125,10 @@ export class ContainerToolExecutor implements ToolExecutor {
         this.stop();
       }, startMs);
       child.stderr?.on('data', (c: Buffer) => {
-        stderr += c.toString();
+        const text = c.toString();
+        stderr += text;
         if (stderr.length > 20_000) stderr = stderr.slice(-10_000);
+        if (forwardLogs) process.stderr.write(text);
       });
 
       child.stdout?.on('data', (chunk: Buffer) => {

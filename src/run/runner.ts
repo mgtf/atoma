@@ -16,9 +16,7 @@ import { TraceRecorder } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
-import { ToolSandbox } from '../tools/sandbox.js';
-import { InMemoryToolRegistry } from '../tools/registry.js';
-import { defaultBuiltinTools } from '../tools/builtin.js';
+import { containerToolBackend, localToolBackend } from './toolBackend.js';
 import type { Logger, RunContext } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 
@@ -35,6 +33,7 @@ export interface RunnerArgs {
   noPromoteSkills: boolean;
   noDirectSkills: boolean;
   cleanWorkspace: boolean;
+  container: boolean;
 }
 
 /**
@@ -53,15 +52,18 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
   let noPromoteSkills = false;
   let noDirectSkills = false;
   let cleanWorkspace = false;
+  let container = process.env['ATOMA_CONTAINER'] === '1';
   for (const a of argv) {
     if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a === '--no-promote-skills') noPromoteSkills = true;
     else if (a === '--no-direct-skills') noDirectSkills = true;
     else if (a === '--clean-workspace') cleanWorkspace = true;
+    else if (a === '--container') container = true;
+    else if (a === '--no-container') container = false;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace };
+  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container };
 }
 
 /**
@@ -215,14 +217,16 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // leave every tool pointing at the archive.
   profile.prepareWorkspace(workspaceRoot, args.cleanWorkspace);
 
-  const sandbox = new ToolSandbox(workspaceRoot);
-  const toolRegistry = new InMemoryToolRegistry();
-  toolRegistry.registerAll(
-    defaultBuiltinTools({ sandbox, logger: consoleLogger })
-  );
-  const toolDecls = toolRegistry.declarations();
+  // Local by default; `--container` moves the tool layer into a container
+  // with only the workspace mounted and no route out. The swap is possible
+  // at ONE point because `ToolExecutor` is two methods and nothing in the
+  // control plane reads the workspace except through it.
+  const backend = args.container
+    ? await containerToolBackend({ workspaceRoot })
+    : localToolBackend({ workspaceRoot, logger: consoleLogger });
+  const toolDecls = backend.toolDecls;
 
-  console.log(`workspace: ${sandbox.root}`);
+  console.log(`workspace: ${backend.rootLabel}`);
   console.log(`tools: ${toolDecls.map((t) => t.name).join(', ')}\n`);
 
   const seedCtx = { registry, toolDecls, log: (line: string) => console.log(line) };
@@ -266,7 +270,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     signal,
     llm,
     limits: DEFAULT_LIMITS,
-    tools: toolRegistry,
+    tools: backend.executor,
     // Surface trust fast-path decisions in the trace so the viz lane
     // shows "why no L2 LLM call was needed" instead of an empty gap.
     recordTrust: (info) => recorder.recordTrust(info),
@@ -301,7 +305,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     } else {
       recorder.flushPartial();
     }
-    await sandbox.cleanup();
+    await backend.cleanup();
     process.exit(code);
   };
   process.on('SIGINT', () => void shutdown(0));
