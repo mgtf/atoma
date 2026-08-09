@@ -21,6 +21,21 @@ export function workerRunArgs(opts: {
   workspaceHostPath: string;
   memory?: string;
   cpus?: string;
+  /**
+   * EGRESS MODE. When set, the run joins this `--internal` docker network
+   * instead of getting no network at all, and `HTTP_PROXY` points at the one
+   * peer on it. Measured, which is why the shape is this and not `bridge`:
+   *   --network none      control plane blocked, internet blocked
+   *   default bridge      control plane REACHED, internet reached
+   *   --internal network  control plane blocked, internet blocked
+   * The internal network is functionally identical to `none` while still
+   * BEING a network, so a proxy attached to it and to an external one can
+   * carry egress selectively — and `decideEgress` is the whole of what it
+   * carries. Plain `bridge` is never an option: it hands the run the control
+   * plane, the same reachability that made an HTTP-served launch token
+   * worthless.
+   */
+  egress?: { network: string; proxyHost: string; proxyPort: number };
 }): string[] {
   return [
     'run',
@@ -33,7 +48,19 @@ export function workerRunArgs(opts: {
     // resolve. This is the network half of invariant T1
     // (docs/saas-architecture.md) and it costs nothing.
     '--network',
-    'none',
+    opts.egress ? opts.egress.network : 'none',
+    ...(opts.egress
+      ? [
+          '-e',
+          `HTTP_PROXY=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
+          '-e',
+          `HTTPS_PROXY=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
+          '-e',
+          `npm_config_proxy=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
+          '-e',
+          `npm_config_https_proxy=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
+        ]
+      : []),
     // ONLY the workspace. The atom registry, the skill bodies, the ledger and
     // other runs' traces are simply not on this filesystem, so the
     // `../../atoma-build.db` walk that works today finds nothing.
@@ -85,6 +112,8 @@ export class ContainerToolExecutor implements ToolExecutor {
     private readonly opts: {
       workspaceHostPath: string;
       image?: string;
+      /** Opt into proxied egress; omit for the default no-network run. */
+      egress?: { network: string; proxyHost: string; proxyPort: number };
       /** Per-call ceiling. A wedged tool must not hold the run open. */
       callTimeoutMs?: number;
       startTimeoutMs?: number;
@@ -101,6 +130,7 @@ export class ContainerToolExecutor implements ToolExecutor {
       const args = workerRunArgs({
         image: this.opts.image ?? DEFAULT_WORKER_IMAGE,
         workspaceHostPath: this.opts.workspaceHostPath,
+        ...(this.opts.egress ? { egress: this.opts.egress } : {}),
       });
       const child = spawn(this.opts.docker ?? 'docker', args, {
         stdio: ['pipe', 'pipe', 'pipe'],

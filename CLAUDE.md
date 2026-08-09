@@ -2697,9 +2697,26 @@ prompt still instructs `run_shell npm install` as step 3. It is NOT worth
 editing — `patch` zeroes trust counters, so changing that prompt would cost
 Helium its record to fix a case that has never occurred, and the instruction
 is correct in local mode where installation works. The SaaS answer is a
-registry proxy reachable on an internal network rather than blanket egress;
-do not weaken `--network none` to `bridge` to make npm work, since any egress
-returns the exfiltration path the boundary exists to close.
+registry proxy reachable on an internal network rather than blanket egress.
+BUILT since: opt-in proxied egress via the `egress` option on
+`workerRunArgs`. The run joins a `docker network create --internal` net
+instead of `none`, and `HTTP_PROXY` points at the single peer on it —
+`src/tools/egressProxy.ts`, whose entire policy is
+`src/tools/egressPolicy.ts`. NEVER plain `bridge`, measured: `none` blocks
+control plane and internet, `bridge` REACHES both, `--internal` blocks both
+while still being a network a proxy can straddle. PROVEN end to end —
+`npm install leftpad` succeeds from an internal-network container while
+`host.docker.internal` is unreachable directly AND refused by the proxy.
+Policy is DEFAULT DENY over anchored host entries (`registry.npmjs.org`
+exact, `.npmjs.org` for subdomains; the anchoring exists to refuse
+`registry.npmjs.org.evil.com`), IP literals always denied (an allowlist is a
+list of NAMES — a literal is a run probing the proxy's own network), and
+ports 80/443 by default.
+TEST DISCIPLINE, learned here: the control plane must be proven denied by the
+ALLOWLIST independently of the port rule. The first version of these tests
+put every control-plane case on port 4111, so both rules fired and neither
+was isolated — if a deployment ever puts the control plane behind 443, the
+port rule stops helping and the allowlist is alone. A case now pins that.
 KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
 `-w /workspace`, so a relative one resolves under the mount and dies with
 MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,

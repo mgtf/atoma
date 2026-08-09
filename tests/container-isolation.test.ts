@@ -61,6 +61,28 @@ describe('workerRunArgs — the isolation is in the flags, so assert them', () =
     expect(args).toContain('--cpus');
   });
 
+  it('EGRESS MODE swaps none for the internal network and points HTTP_PROXY at the one peer', () => {
+    const a = workerRunArgs({
+      image: 'img',
+      workspaceHostPath: '/host/ws',
+      egress: { network: 'atoma-run-net', proxyHost: 'atoma-proxy', proxyPort: 3128 },
+    });
+    expect(a[a.indexOf('--network') + 1]).toBe('atoma-run-net');
+    const env = a.filter((_x, i) => a[i - 1] === '-e');
+    expect(env).toContain('HTTP_PROXY=http://atoma-proxy:3128');
+    expect(env).toContain('npm_config_https_proxy=http://atoma-proxy:3128');
+    // Still only the workspace, still no capabilities: egress widens the
+    // network and nothing else.
+    expect(a.filter((_x, i) => a[i - 1] === '-v')).toEqual(['/host/ws:/workspace']);
+    expect(a[a.indexOf('--cap-drop') + 1]).toBe('ALL');
+  });
+
+  it('egress mode is OPT-IN — the default is still no network at all', () => {
+    const a = workerRunArgs({ image: 'img', workspaceHostPath: '/host/ws' });
+    expect(a[a.indexOf('--network') + 1]).toBe('none');
+    expect(a.join(' ')).not.toContain('HTTP_PROXY');
+  });
+
   it('never passes --privileged or mounts the docker socket', () => {
     expect(args).not.toContain('--privileged');
     expect(args.join(' ')).not.toContain('docker.sock');
