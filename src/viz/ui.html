@@ -320,6 +320,18 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'ev.reasoning': 'Reasoning / diagnostic',
+    'ev.trustFastPath': 'Trust fast-path',
+    'ev.whyHere': 'Why is this here?',
+    'ev.systemPrompt': 'System prompt',
+    'ev.llmCall': 'LLM call',
+    'ev.stopReason': 'Stop reason',
+    'ev.mergeInstruction': 'Merge instruction',
+    'ev.expectedOutput': 'Expected output',
+    'ev.registryMutation': 'Registry mutation',
+    'burnin.lastRun': 'last run:',
+    'registry.currentVersion': 'Current version',
+    'common.toggle': '▸ show / hide',
     'common.link': 'Link',
     'registry.atom': 'Atom',
     'skill.title': 'Skill',
@@ -534,6 +546,18 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'ev.reasoning': 'Raisonnement / diagnostic',
+    'ev.trustFastPath': 'Voie rapide de confiance',
+    'ev.whyHere': 'Pourquoi est-ce là ?',
+    'ev.systemPrompt': 'Prompt système',
+    'ev.llmCall': 'Appel LLM',
+    'ev.stopReason': 'Raison d\'arrêt',
+    'ev.mergeInstruction': 'Instruction de fusion',
+    'ev.expectedOutput': 'Sortie attendue',
+    'ev.registryMutation': 'Mutation du registre',
+    'burnin.lastRun': 'dernier run :',
+    'registry.currentVersion': 'Version actuelle',
+    'common.toggle': '▸ afficher / masquer',
     'common.link': 'Lien',
     'registry.atom': 'Atome',
     'skill.title': 'Skill',
@@ -2218,7 +2242,7 @@ function renderSkillEventDetail(el, ev) {
   el.appendChild(h('div', { class: 'meta', style: 'margin-bottom:8px;' }, sub.join('  ·  ')));
   if (ev.reasoning) {
     el.appendChild(h('div', { class: 'section' }, [
-      h('h3', {}, 'Reasoning / diagnostic'),
+      h('h3', {}, t('ev.reasoning')),
       h('pre', {}, ev.reasoning),
     ]));
   }
@@ -2239,7 +2263,7 @@ function renderSkillEventDetail(el, ev) {
 }
 
 function renderTrustDetail(el, ev) {
-  el.appendChild(h('h2', {}, 'Trust fast-path — ' + ev.subject));
+  el.appendChild(h('h2', {}, t('ev.trustFastPath') + ' — ' + ev.subject));
   const sub = [];
   if (ev.actor) sub.push('by ' + (ev.actor.name ?? '?'));
   if (ev.child) sub.push('→ ' + (ev.child.name ?? '?'));
@@ -2250,7 +2274,7 @@ function renderTrustDetail(el, ev) {
     h('pre', {}, ev.reasoning || '(no reasoning)'),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, 'Why is this here?'),
+    h('h3', {}, t('ev.whyHere')),
     h('pre', {},
       'The child type has enough clean successes to bypass the validator\n' +
       'LLM call. The supervisor returned a synthetic approval immediately\n' +
@@ -2315,7 +2339,7 @@ function renderAtomDetail(entry) {
   ]));
 
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, 'System prompt'),
+    h('h3', {}, t('ev.systemPrompt')),
     h('pre', {}, s.systemPrompt || t('common.empty')),
   ]));
 
@@ -2351,7 +2375,7 @@ function renderAtomDetail(entry) {
 
 function renderLlmDetail(el, ev) {
   const header = h('div', { class: 'section' }, [
-    h('h3', {}, 'Appel LLM — ' + labelRole(ev.role)),
+    h('h3', {}, t('ev.llmCall') + ' — ' + labelRole(ev.role)),
     h('div', { class: 'kv' }, [
       ...(ev.actor ? [h('div', { class: 'k' }, 'Acteur'), h('div', { class: 'v' }, [atomRef(ev.actor)])] : []),
       ...(ev.child ? [h('div', { class: 'k' }, 'Enfant'), h('div', { class: 'v' }, [atomRef(ev.child)])] : []),
@@ -2361,7 +2385,7 @@ function renderLlmDetail(el, ev) {
       h('div', { class: 'k' }, 'Tokens'), h('div', { class: 'v' },
         `in=${ev.usage.inputTokens}  out=${ev.usage.outputTokens}  cacheRead=${ev.usage.cacheReadInputTokens}  cacheCreate=${ev.usage.cacheCreationInputTokens}`),
       h('div', { class: 'k' }, t('summary.cost')), h('div', { class: 'v' }, fmtCost(ev.costUsd)),
-      h('div', { class: 'k' }, 'Stop reason'), h('div', { class: 'v' }, ev.stopReason ?? '—'),
+      h('div', { class: 'k' }, t('ev.stopReason')), h('div', { class: 'v' }, ev.stopReason ?? '—'),
       ...(ev.error ? [h('div', { class: 'k' }, 'Erreur'), h('div', { class: 'v' }, ev.error)] : []),
     ]),
   ]);
@@ -2371,7 +2395,7 @@ function renderLlmDetail(el, ev) {
   const tabs = h('div', { class: 'tabs' });
   const body = h('div');
   const entries = [
-    ['System prompt', ev.systemPrompt, 'raw'],
+    [t('ev.systemPrompt'), ev.systemPrompt, 'raw'],
     ['User content', ev.userContent, 'raw'],
     ['Response', ev.response || (ev.error ? t('detail.noResponse') : ''), 'response'],
   ];
@@ -2480,9 +2504,9 @@ function renderStrategyPlanPair(strategy, plan, raw) {
       }, aggMode)
     ),
     ...(plan.aggregation && plan.aggregation.instruction
-      ? [h('div', { class: 'k' }, 'Merge instruction'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.aggregation.instruction)]
+      ? [h('div', { class: 'k' }, t('ev.mergeInstruction')), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.aggregation.instruction)]
       : []),
-    h('div', { class: 'k' }, 'Expected output'), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.expectedOutput || '—'),
+    h('div', { class: 'k' }, t('ev.expectedOutput')), h('div', { class: 'v', style: 'white-space:pre-wrap;' }, plan.expectedOutput || '—'),
   ]);
 
   // Subtasks list — the part that was unreadable as raw JSON.
@@ -2529,7 +2553,7 @@ function renderStrategyPlanPair(strategy, plan, raw) {
 
 function renderRegistryDetail(el, ev) {
   const head = h('div', { class: 'section' }, [
-    h('h3', {}, 'Mutation registry — ' + ev.op),
+    h('h3', {}, t('ev.registryMutation') + ' — ' + ev.op),
     h('div', { class: 'kv' }, [
       h('div', { class: 'k' }, 'Nom'), h('div', { class: 'v' }, ev.name),
       ...(ev.tier ? [h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(ev.tier)])] : []),
@@ -2555,7 +2579,7 @@ function renderRegistryDetail(el, ev) {
         h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `${ev.snapshot.successes} / ${ev.snapshot.failures}`),
         h('div', { class: 'k' }, t('registry.createdAt')), h('div', { class: 'v' }, ev.snapshot.createdAt),
       ]),
-      h('h3', { style: 'margin-top:12px;' }, 'System prompt'),
+      h('h3', { style: 'margin-top:12px;' }, t('ev.systemPrompt')),
       h('pre', {}, ev.snapshot.systemPrompt),
     ]));
   }
@@ -2812,7 +2836,7 @@ function renderBurninSummary(rows) {
         (mean != null ? '$' + mean.toFixed(3) : '—') +
         (f.lastCost != null ? ' ' : '')),
       f.lastCost != null
-        ? h('div', { class: 'muted', style: 'font-size:11px;' }, 'dernier run : $' + f.lastCost.toFixed(3))
+        ? h('div', { class: 'muted', style: 'font-size:11px;' }, t('burnin.lastRun') + ' $' + f.lastCost.toFixed(3))
         : h('span', {}, ''),
     ]));
   }
@@ -3198,7 +3222,7 @@ function renderRegistryAtomDetail(type) {
     h('h3', {}, `${t('registry.atom')} — ${type.name}`),
     h('div', { class: 'kv' }, [
       h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(type.tier), ' ', h('span', { class: 'meta' }, `#${type.ordinal}`)]),
-      h('div', { class: 'k' }, 'Version actuelle'), h('div', { class: 'v' }, 'v' + type.version),
+      h('div', { class: 'k' }, t('registry.currentVersion')), h('div', { class: 'v' }, 'v' + type.version),
       h('div', { class: 'k' }, t('registry.createdBy')), h('div', { class: 'v' }, `${type.createdBy}  ·  ${type.createdAt}`),
       h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `✓ ${type.successes}  ·  ✗ ${type.failures}`),
       h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(type.params)),
@@ -3234,7 +3258,7 @@ function renderRegistryAtomDetail(type) {
               ? h('div', { class: 'tools-list' }, h_.tools.map((n) => h('span', { class: 'chip muted' }, n)))
               : h('span', { class: 'meta' }, '— aucun —')),
         ]),
-        h('h3', { style: 'margin-top:10px;' }, 'System prompt'),
+        h('h3', { style: 'margin-top:10px;' }, t('ev.systemPrompt')),
         h('pre', {}, h_.systemPrompt || t('common.empty')),
       ]);
       const header = h('div', {
@@ -3244,7 +3268,7 @@ function renderRegistryAtomDetail(type) {
         h('span', { class: 'role patch' }, 'v' + h_.version),
         h('span', { class: 'meta' }, h_.modifiedAt),
         h('span', { class: 'meta' }, h_.reason ?? '—'),
-        h('span', { class: 'meta', style: 'margin-left:auto;' }, '▸ afficher / masquer'),
+        h('span', { class: 'meta', style: 'margin-left:auto;' }, t('common.toggle')),
       ]);
       header.addEventListener('click', () => {
         body.style.display = body.style.display === 'none' ? '' : 'none';

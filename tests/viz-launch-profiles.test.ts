@@ -151,3 +151,43 @@ describe('no French leaks into the English source', () => {
     expect(offenders, `French outside the fr catalog:\n${offenders.join('\n')}`).toEqual([]);
   });
 });
+
+/**
+ * No bare user-facing string handed to `h()` as a child.
+ *
+ * STRUCTURAL, and that is why it replaced a word-list heuristic. The French
+ * detector above was written first and immediately proved its own limit: a
+ * follow-up sweep found `Appel LLM`, `dernier run`, `Version actuelle` and
+ * `afficher / masquer` — all French, all missed, because a word list is only
+ * as good as the words someone thought of. Position in the call tells the
+ * truth instead: a quoted literal sitting where `h()` expects a CHILD is
+ * rendered text, whatever language it happens to be in.
+ *
+ * Scoped to literals of two or more words so separators (`' — '`, `'·'`) and
+ * single technical tokens (`'args'`, `'error'`) stay out. That leaves a
+ * residue this does NOT catch — one-word labels, template strings, innerHTML
+ * — so it is a floor, not proof of full coverage.
+ */
+describe('no bare user-facing string in the viz', () => {
+  const lines = readFileSync('src/viz/ui.html', 'utf8').split('\n');
+
+  it('every multi-word h() child goes through t()', () => {
+    const enStart = lines.findIndex((l) => /^ {2}en: \{/.test(l));
+    const frStart = lines.findIndex((l) => /^ {2}fr: \{/.test(l));
+    const frEnd = lines.findIndex((l, i) => i > frStart && /^ {2}\},?\s*$/.test(l));
+    const offenders: string[] = [];
+    lines.forEach((line, i) => {
+      if (i >= enStart && i <= frEnd) return; // the catalogs ARE the strings
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      for (const m of line.matchAll(
+        /h\(\s*'[a-z0-9]+'\s*,\s*(?:\{[^}]*\}|\[[^\]]*\])\s*,\s*'([^']{3,90})'/g
+      )) {
+        const txt = m[1]!;
+        if (/t\(/.test(txt)) continue;
+        const words = txt.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? [];
+        if (words.length >= 2) offenders.push(`ui.html:${i + 1}  ${JSON.stringify(txt)}`);
+      }
+    });
+    expect(offenders, `bare strings:\n${offenders.join('\n')}`).toEqual([]);
+  });
+});

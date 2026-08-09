@@ -2294,9 +2294,17 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   cannot see a call site that skips `t()` at all — while the FRENCH-LEAK test
   catches exactly the demonstrated bug, a recognisable French word in a
   literal outside the catalog, which is always wrong and needs no judgment.
-  Neither proves full coverage: a bare ENGLISH string still slips through
-  both, and detecting "any unlocalised string" is a judgment call that would
-  be noisy. Do not upgrade this entry back to "fully" without a checker that
+  A third test then closed the gap the other two left, and its history is the
+  lesson: the French word-list detector was written first and immediately
+  proved its own limit — a follow-up sweep found `Appel LLM`, `dernier run`,
+  `Version actuelle` and `afficher / masquer`, all French, all missed,
+  because a word list is only as good as the words someone thought of. The
+  replacement is STRUCTURAL: a quoted literal of two or more words sitting
+  where `h()` expects a CHILD is rendered text, whatever language it is in.
+  That found 14 more (10 English, 4 French) and they are fixed. Residue it
+  still does NOT catch, stated so nobody reads silence as coverage:
+  one-word labels, template literals, and `innerHTML` assignments. This is a
+  floor, not proof. Do not restore the word "fully" without a checker that
   earns it.
   Every label goes through `t('some.key', { vars })` against the catalogs
   at the top of `ui.html`; static chrome uses `data-i18n` /
