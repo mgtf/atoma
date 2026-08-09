@@ -23,6 +23,28 @@ import type { Task, Tool } from '../core/types.js';
  * earns its keep only by being a faithful cut of measured differences, never
  * by anticipating a second one. See CLAUDE.md, "Considered and rejected".
  */
+/**
+ * What a human needs in order to USE a family: how to phrase a goal for it.
+ *
+ * Lives on the profile rather than in the viz because the viz is generic —
+ * a family nobody described would show up in the picker with no help text,
+ * which is the exact defect this feature exists to prevent. Making it
+ * REQUIRED is the point: it is also the second consumer of `TaskProfile`,
+ * and an interface with one consumer has nothing keeping it honest.
+ *
+ * English is the source, matching the viz i18n convention: the UI prefers a
+ * `launch.help.<id>` catalog key when one exists and falls back to `help`,
+ * so a new profile is always describable without touching ui.html.
+ */
+export interface TaskProfileGuidance {
+  /** Label for the family picker. */
+  readonly label: string;
+  /** A few sentences on how to phrase a goal for this family. */
+  readonly help: string;
+  /** Concrete example goals, click-to-fill in the UI. */
+  readonly examples: readonly string[];
+}
+
 export interface TaskProfile {
   /** Stable id, used in logs and (later) to select a profile. */
   readonly id: string;
@@ -33,6 +55,8 @@ export interface TaskProfile {
   readonly traceLabelPrefix: string;
   /** Goal used when the caller passes none. */
   readonly defaultGoal: string;
+  /** Human-facing description of the family, consumed by the viz Launch tab. */
+  readonly guidance: TaskProfileGuidance;
   /** Env var NAMES this family reads (values resolved by the runner). */
   readonly envVars: {
     readonly dbPath: string;

@@ -4,6 +4,7 @@ import { basename, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -589,6 +590,33 @@ const server = createServer((req, res) => {
     } catch (err) {
       sendJson(res, 500, { error: (err as Error).message });
     }
+    return;
+  }
+
+  if (pathname === '/api/profiles') {
+    // READ-ONLY, and deliberately so: it returns compile-time constants and
+    // the command to copy, NOT a way to start anything. The server stays what
+    // it is — no writeFileSync, no child_process, SQLite readonly — so this
+    // adds zero attack surface. Launching from the browser is a separate,
+    // opt-in decision documented in CLAUDE.md; the reason it is not here is
+    // that a run can call BACK into this server (`fetch_url` has no URL
+    // allowlist by design, and run_shell's is "STEERING, not a boundary"),
+    // so any secret served over HTTP would be readable by the very code it
+    // is meant to gate.
+    //
+    // `defaults.dbPath` / `defaults.workspace` are NOT exposed: the run
+    // resolves `process.env[...] ?? default` against ITS OWN environment, so
+    // publishing the static default would state a fact that may be false.
+    sendJson(res, 200, {
+      launchEnabled: false,
+      profiles: LAUNCHABLE_PROFILES.map(({ profile: p, npmScript }) => ({
+        id: p.id,
+        npmScript,
+        label: p.guidance.label,
+        help: p.guidance.help,
+        examples: [...p.guidance.examples],
+      })),
+    });
     return;
   }
 

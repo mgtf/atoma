@@ -245,6 +245,7 @@
     <button data-view="registry" data-i18n="nav.registry">Registry</button>
     <button data-view="skills" data-i18n="nav.skills">Skills</button>
     <button data-view="burnin" data-i18n="nav.burnin">Burn-in</button>
+    <button data-view="launch" data-i18n="nav.launch">Launch</button>
   </div>
   <select id="runSelect" data-i18n-title="nav.selectRun"></select>
   <select id="registrySelect" data-i18n-title="nav.selectRegistry" style="display:none;"></select>
@@ -283,6 +284,9 @@
       <div id="burninChart"></div>
       <div id="burninRows"></div>
     </div>
+    <div id="launchView" style="display:none;">
+      <div id="launchForm"></div>
+    </div>
   </section>
   <section class="pane" id="rightPane">
     <div class="empty" data-i18n="pane.selectEvent"></div>
@@ -316,6 +320,17 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'nav.launch': 'Launch',
+    'pane.selectLaunch': 'Pick a family to see how to phrase its goal.',
+    'launch.family': 'Task family',
+    'launch.goal': 'Goal',
+    'launch.goal.placeholder': 'Describe one runnable artefact and the behaviour it must have…',
+    'launch.examples': 'Examples (click to fill)',
+    'launch.help': 'How to phrase a good goal',
+    'launch.command': 'Command to run',
+    'launch.copy': 'Copy',
+    'launch.copied': 'Copied',
+    'launch.empty': 'Type a goal to get the command.',
     'nav.refresh': 'Refresh',
     'nav.refresh.title': 'Reload the list',
     'nav.selectRun': 'Select a run',
@@ -504,6 +519,18 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'nav.launch': 'Lancer',
+    'pane.selectLaunch': 'Choisis une famille pour voir comment formuler son objectif.',
+    'launch.family': 'Famille de tâche',
+    'launch.goal': 'Objectif',
+    'launch.goal.placeholder': 'Décris un artefact exécutable et le comportement attendu…',
+    'launch.examples': 'Exemples (clic pour remplir)',
+    'launch.help': 'Comment formuler un bon objectif',
+    'launch.command': 'Commande à lancer',
+    'launch.copy': 'Copier',
+    'launch.copied': 'Copié',
+    'launch.empty': 'Saisis un objectif pour obtenir la commande.',
+    'launch.help.build': 'Décris UN artefact exécutable et le comportement attendu. Précise sa forme — une page index.html unique, un serveur HTTP Node, ou un script CLI / fichier de config / document — puis le comportement concret et les contraintes fermes (taille de grille, routes et codes de statut, arguments et codes de sortie). Reste petit et autonome : le workspace démarre vide, donc tout ce dont le run a besoin doit pouvoir être créé par lui. Ne nomme NI outils, NI phases, NI étapes de vérification — le planificateur les déduit de la nature de l\'artefact, et les expliciter est une cause mesurée de phases gaspillées. La vérification est automatique et suit la forme : une page est chargée dans un navigateur headless, un serveur reçoit de vraies requêtes, une CLI est réellement invoquée.',
     'nav.refresh': 'Rafraîchir',
     'nav.refresh.title': 'Recharger la liste',
     'nav.selectRun': 'Sélectionner un run',
@@ -2515,8 +2542,14 @@ $('skillsSearch').addEventListener('input', (e) => {
   renderSkillsLanes();
 });
 $('refreshBtn').addEventListener('click', () => {
+  // Explicit per-view dispatch. The unguarded `else loadSkills()` this
+  // replaces meant Refresh reloaded the SKILLS list while the Burn-in tab
+  // was open — silent, because it repopulated a pane the user was not
+  // looking at. A new tab inherited the same bug by default.
   if (state.view === 'runs') loadIndex();
   else if (state.view === 'registry') loadRegistries();
+  else if (state.view === 'burnin') loadBurnin();
+  else if (state.view === 'launch') { launchState.profiles = []; loadLaunch(); }
   else loadSkills();
 });
 
@@ -2534,10 +2567,12 @@ function switchView(v) {
   const isReg = v === 'registry';
   const isSkills = v === 'skills';
   const isBurnin = v === 'burnin';
+  const isLaunch = v === 'launch';
   $('runsView').style.display = isRuns ? '' : 'none';
   $('registryView').style.display = isReg ? '' : 'none';
   $('skillsView').style.display = isSkills ? '' : 'none';
   $('burninView').style.display = isBurnin ? '' : 'none';
+  $('launchView').style.display = isLaunch ? '' : 'none';
   $('runSelect').style.display = isRuns ? '' : 'none';
   $('registrySelect').style.display = isReg ? '' : 'none';
   $('registrySearch').style.display = isReg ? '' : 'none';
@@ -2548,11 +2583,145 @@ function switchView(v) {
       ? t('pane.selectAtom')
       : isBurnin
         ? t('pane.selectBurnin')
-        : t('pane.selectSkill');
+        : isLaunch
+          ? t('pane.selectLaunch')
+          : t('pane.selectSkill');
   $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
   if (isReg && state.registries.length === 0) loadRegistries();
   if (isSkills && state.skillNamespaces.length === 0) loadSkills();
   if (isBurnin) loadBurnin();
+  if (isLaunch) loadLaunch();
+}
+
+// ── Launch view ──────────────────────────────────────────────────────────
+// Pick a task family, read how to phrase a goal for it, and get the exact
+// command to run. It does NOT start anything, and that is a deliberate
+// design decision rather than an unfinished one: a run can call BACK into
+// this server (fetch_url has no URL allowlist by design, and run_shell's
+// allowlist is documented as "STEERING, not a boundary"), so a launch token
+// served over HTTP would be readable by the very code it exists to gate.
+// The server therefore stays a pure observer — no writeFileSync, no
+// child_process, SQLite readonly.
+let launchState = { profiles: [], selected: null };
+
+async function loadLaunch() {
+  const host = $('launchForm');
+  if (launchState.profiles.length > 0) { renderLaunch(); return; }
+  host.textContent = '';
+  host.appendChild(h('div', { class: 'empty' }, t('common.loading')));
+  try {
+    const r = await fetch('/api/profiles');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    launchState.profiles = data.profiles ?? [];
+    launchState.selected = launchState.profiles[0]?.id ?? null;
+    renderLaunch();
+  } catch (err) {
+    host.textContent = '';
+    host.appendChild(h('div', { class: 'empty' }, t('common.networkError') + ' — ' + err.message));
+  }
+}
+
+function currentLaunchProfile() {
+  return launchState.profiles.find((p) => p.id === launchState.selected) ?? null;
+}
+
+function launchCommand(profile, goal) {
+  if (!profile) return '';
+  const g = (goal ?? '').trim();
+  if (!g) return '';
+  // Display only — this is text to paste into a shell, never an argv we
+  // build. Double quotes inside the goal are escaped so the pasted line
+  // stays one argument.
+  return 'npm run ' + profile.npmScript + ' -- "' + g.replace(/"/g, '\\"') + '"';
+}
+
+function renderLaunch() {
+  const host = $('launchForm');
+  host.textContent = '';
+  const profile = currentLaunchProfile();
+  if (!profile) {
+    host.appendChild(h('div', { class: 'empty' }, t('common.none')));
+    return;
+  }
+
+  const select = h('select', { id: 'launchFamily' },
+    launchState.profiles.map((p) =>
+      h('option', p.id === launchState.selected ? { value: p.id, selected: 'selected' } : { value: p.id }, p.label)
+    )
+  );
+  select.addEventListener('change', () => {
+    launchState.selected = select.value;
+    renderLaunch();
+  });
+
+  // Prefer a translated help text when the catalog carries one for this
+  // family; t() returns the key itself when missing, which is the signal to
+  // fall back to the profile's own English string from the server.
+  const helpKey = 'launch.help.' + profile.id;
+  const translated = t(helpKey);
+  const helpText = translated === helpKey ? profile.help : translated;
+
+  const textarea = h('textarea', {
+    id: 'launchGoal',
+    rows: '5',
+    placeholder: t('launch.goal.placeholder'),
+    style: 'width:100%; box-sizing:border-box; font:inherit; padding:8px; resize:vertical;',
+  });
+
+  const cmdBox = h('code', {
+    id: 'launchCmd',
+    style: 'display:block; white-space:pre-wrap; word-break:break-all; padding:8px; opacity:0.85;',
+  }, t('launch.empty'));
+
+  const copyBtn = h('button', { id: 'launchCopy', disabled: 'disabled' }, t('launch.copy'));
+  copyBtn.addEventListener('click', () => {
+    const cmd = launchCommand(profile, textarea.value);
+    if (!cmd) return;
+    navigator.clipboard?.writeText(cmd);
+    copyBtn.textContent = t('launch.copied');
+    setTimeout(() => { copyBtn.textContent = t('launch.copy'); }, 1200);
+  });
+
+  const sync = () => {
+    const cmd = launchCommand(profile, textarea.value);
+    cmdBox.textContent = cmd || t('launch.empty');
+    if (cmd) copyBtn.removeAttribute('disabled');
+    else copyBtn.setAttribute('disabled', 'disabled');
+  };
+  textarea.addEventListener('input', sync);
+
+  const examples = h('div', { class: 'section' }, [
+    h('div', { class: 'meta' }, t('launch.examples')),
+    ...profile.examples.map((ex) => {
+      const item = h('div', {
+        class: 'meta',
+        style: 'cursor:pointer; padding:4px 0; text-decoration:underline dotted;',
+      }, ex);
+      item.addEventListener('click', () => { textarea.value = ex; sync(); });
+      return item;
+    }),
+  ]);
+
+  host.appendChild(h('div', { class: 'section' }, [
+    h('div', { class: 'meta' }, t('launch.family')),
+    select,
+  ]));
+  host.appendChild(h('div', { class: 'section' }, [
+    h('div', { class: 'meta' }, t('launch.help')),
+    h('p', { style: 'margin:6px 0 0; line-height:1.5;' }, helpText),
+  ]));
+  host.appendChild(h('div', { class: 'section' }, [
+    h('div', { class: 'meta' }, t('launch.goal')),
+    textarea,
+  ]));
+  host.appendChild(examples);
+  host.appendChild(h('div', { class: 'section' }, [
+    h('div', { class: 'meta' }, t('launch.command')),
+    cmdBox,
+    copyBtn,
+  ]));
+  sync();
 }
 
 // ── Burn-in view ─────────────────────────────────────────────────────────
@@ -2645,9 +2814,21 @@ function renderBurninChart(rows) {
     }
     for (const [px, py, r] of pts) {
       const failed = r.outcome !== 'delivered';
+      // ESCAPED: this SVG is assigned via innerHTML, and `taskId` reaches it
+      // straight from burnin/results.csv. `npm run burnin` does not validate
+      // the ids in its task file, so an id carrying `</title><img src=x
+      // onerror=…>` would execute in the viz origin.
+      // NOT an LLM-injection path: `curriculum.ts` slugifies generated ids to
+      // [a-z0-9-] before writing them, so the model cannot reach here. The
+      // realistic vector is a hand-written tasks-*.json, i.e. self-inflicted
+      // — which is why this is a cheap correctness fix, not an incident.
+      // `escapeHtml` was already defined in this file, just never used here.
+      const tid = escapeHtml(r.taskId);
+      const outcome = escapeHtml(r.outcome);
+      const cost = escapeHtml(r.costUsd);
       svg += failed
-        ? '<circle cx="' + px + '" cy="' + py + '" r="4" fill="none" stroke="#ef4444" stroke-width="2"><title>' + r.taskId + ' — ' + r.outcome + ' $' + r.costUsd + '</title></circle>'
-        : '<circle cx="' + px + '" cy="' + py + '" r="3.5" fill="' + color + '"><title>' + r.taskId + ' — $' + r.costUsd + (r.deterministicPhases ? ' · ' + r.deterministicPhases + ' phases $0' : '') + '</title></circle>';
+        ? '<circle cx="' + px + '" cy="' + py + '" r="4" fill="none" stroke="#ef4444" stroke-width="2"><title>' + tid + ' — ' + outcome + ' $' + cost + '</title></circle>'
+        : '<circle cx="' + px + '" cy="' + py + '" r="3.5" fill="' + color + '"><title>' + tid + ' — $' + cost + (r.deterministicPhases ? ' · ' + escapeHtml(r.deterministicPhases) + ' phases $0' : '') + '</title></circle>';
     }
   }
   svg += '<text x="' + (W - PAD) + '" y="' + (H - 6) + '" font-size="9" text-anchor="end" fill="currentColor" fill-opacity="0.5">' + t('burnin.runsAxis') + '</text>';

@@ -80,6 +80,33 @@ export const buildProfile: TaskProfile = {
     workspace: './build/app',
   },
 
+  // Every line here reflects something this repo MEASURED, not generic
+  // prompt advice. "Do not name tools": ae63e06 forbids naming tools in
+  // subtask descriptions after 194/237 archived subtasks did it, and the
+  // clock-cli run wasted half its calls on a serve+validate phase the goal
+  // had implied. "Self-contained": the curriculum generator carries the same
+  // MANDATORY rule — the workspace starts empty, so a goal referring to data
+  // that is not created by the run has nothing to work against. "Say the
+  // shape": the three artefact shapes are exactly the ones the plan prompt's
+  // VERIFICATION MATCHES THE ARTEFACT block knows how to probe.
+  guidance: {
+    label: 'Build an app',
+    help:
+      'Describe ONE runnable artefact and the behaviour it must have. Say which shape it takes — '
+      + 'a single index.html page, a Node HTTP server, or a CLI script / config / doc file — then the '
+      + 'concrete behaviour and any hard constraint (grid size, routes and status codes, argv and exit '
+      + 'codes). Keep it small and self-contained: the workspace starts empty, so everything the run '
+      + 'needs must be something it can create. Do NOT name tools, phases or verification steps — the '
+      + 'planner chooses those from the artefact\'s nature, and spelling them out is a measured source '
+      + 'of wasted phases. Verification is automatic and matches the shape: a page gets loaded in a '
+      + 'headless browser, a server gets real requests, a CLI gets really invoked.',
+    examples: [
+      'Build a single-page pomodoro timer in one index.html: 25/5 minute cycles, start/pause/reset buttons, a visible countdown and a completed-cycle counter.',
+      'Build a Node HTTP JSON API for a bookmarks list: GET /bookmarks, POST /bookmarks taking url and title (400 when a field is missing), DELETE /bookmarks/:id returning 404 for an unknown id.',
+      'Build a Node CLI taking a CSV file path as its argument and printing per-column min, max and mean, exiting non-zero with a usage message when the path is missing or unreadable.',
+    ],
+  },
+
   prepareWorkspace(root: string, clean: boolean): void {
     prepareWorkspace(root, clean);
   },

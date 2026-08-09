@@ -2191,6 +2191,43 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   TraceRecorder. `endRun()`'s synchronous `persist()` happens BEFORE
   we clear the timer specifically so the final state wins the race
   over any trailing-edge flush.
+- **The Launch tab describes families; it does NOT start them, on purpose.**
+  `GET /api/profiles` returns each `LAUNCHABLE_PROFILES` entry's
+  `guidance` ({label, help, examples}) plus its npm script, and the tab
+  renders a family picker, the per-family help and a command to COPY. The
+  server stays a pure observer — zero `writeFileSync`, zero `child_process`,
+  SQLite readonly — so the feature adds no attack surface at all.
+  WHY NOT A LAUNCH BUTTON: a run can call BACK into the viz. `fetch_url` has
+  no URL allowlist *by design* (`builtin.ts`: "network is intentionally
+  open") and sets arbitrary request headers, and `run_shell`'s allowlist is
+  documented above as STEERING, not a boundary. So the adversary is not a
+  remote page, it is the run itself — and any launch token served over HTTP
+  is readable by the very code it exists to gate. A real launch endpoint
+  therefore needs a secret that never touches HTTP or disk (printed once in
+  the viz terminal banner), plus a method check (`server.ts` never reads
+  `req.method` — the house style would have shipped a GET-triggerable
+  endpoint), strict `content-type`, a global Host allowlist placed BEFORE
+  every branch (a per-branch check leaves the read surface open to DNS
+  rebinding), an exact-Origin check with the port compared (a run's own
+  served artefact is same-host), argv-array spawn with the goal LAST (a goal
+  starting with `--` would be read as a flag by `parseRunnerArgs` —
+  `--clean-workspace` archives the workspace), and the SIGTERM→5s→SIGKILL
+  group kill (`burnin.ts`; group SIGKILL alone leaks 9 puppeteer processes).
+  That is phase 2, opt-in behind `--allow-launch`, loopback-only. Roughly 80%
+  of the value — knowing how to phrase a goal — needs none of it.
+  ALSO NOTE: `runTask` ends in `await new Promise(() => {})` so the started
+  server stays reachable; a browser-launched run has no Ctrl-C and needs the
+  group kill to end at all.
+  Covered by `tests/viz-launch-profiles.test.ts`, which also pins the first
+  en/fr PARITY test (the rule was purely disciplinary until now) and forbids
+  the guidance from naming a builtin tool — teaching a user to name tools in
+  a goal would reintroduce, in the human's own words, the defect `ae63e06`
+  removed from subtask descriptions.
+- **`TaskProfileGuidance` is REQUIRED on a profile.** It is the second
+  consumer of `TaskProfile` (the runner is the first), which is most of its
+  architectural value: an interface with one consumer has nothing keeping it
+  honest. Optional would let a future family ship undescribed — the exact
+  defect the tab exists to prevent.
 - **The viz UI is ENGLISH and fully i18n'd — no bare user-facing string.**
   Every label goes through `t('some.key', { vars })` against the catalogs
   at the top of `ui.html`; static chrome uses `data-i18n` /
