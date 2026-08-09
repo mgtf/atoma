@@ -896,6 +896,11 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
     const browser = await puppeteer.launch({
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      // Puppeteer defaults this to 180s, so a single wedged CDP command
+      // stalls for three minutes. Observed: one call spent 546s mostly
+      // inside `Input.dispatchMouseEvent timed out`. Local pages answer in
+      // milliseconds — this turns a wedge into a prompt, reportable failure.
+      protocolTimeout: CDP_PROTOCOL_TIMEOUT_MS,
     });
     sharedBrowser = browser;
     // TRACK THE BROWSER PROCESS, not just the graceful close. `onCleanup`
@@ -948,8 +953,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           },
           waitMs: {
             type: 'number',
-            description:
-              'Additional time to wait after DOM ready to catch async errors (rAF, fetch chains, late scripts). Default 500ms — bump this explicitly when the app does non-trivial work on load.',
+            description: `Additional time to wait after DOM ready to catch async errors (rAF, fetch chains, late scripts). Default 500ms, capped at ${MAX_WAIT_MS}ms — bump this explicitly when the app does non-trivial work on load.`,
           },
           interactions: {
             type: 'array',
@@ -982,8 +986,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
                 },
                 holdMs: {
                   type: 'number',
-                  description:
-                    'keypress-only. Time in ms between keydown and keyup. Default 120ms.',
+                  description: `keypress-only. Time in ms between keydown and keyup. Default 120ms, CAPPED at ${MAX_HOLD_MS}ms. The browser runs in real time and cannot fast-forward, so holding a key can NEVER advance an in-page timer or animation — to test time-dependent behaviour, expose a hook from the app (e.g. window.__test.advance(ms)) and drive it from \`smoke\`.`,
                 },
               },
               required: ['type'],
@@ -1005,10 +1008,11 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       // DOMContentLoaded handlers run and any same-tick rAF fire.
       // Heavier apps (fetch chains during onload) can still bump this
       // explicitly via the `waitMs` arg.
-      const waitMs =
+      const requestedWaitMs =
         typeof args['waitMs'] === 'number' && Number.isFinite(args['waitMs'])
           ? Math.max(0, Math.floor(args['waitMs'] as number))
           : 500;
+      const waitMs = Math.min(requestedWaitMs, MAX_WAIT_MS);
       const interactions = parseInteractions(args['interactions']);
       const smoke =
         typeof args['smoke'] === 'string' && args['smoke'].trim().length > 0
@@ -1095,6 +1099,11 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       const failedRequests: Array<{ url: string; reason: string }> = [];
       const interactionLog: string[] = [];
 
+      // Console errors are held STRUCTURED (text + source url) until the
+      // end of the call: the favicon filter below decides on the source,
+      // and re-parsing our own rendered `[source: ...]` suffix would be a
+      // string round-trip we can simply not do.
+      const consoleErrors: Array<{ text: string; loc?: string }> = [];
       page.on('console', (msg) => {
         const type = msg.type();
         const text = msg.text();
@@ -1105,9 +1114,8 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         // reading the friction report) tell a phantom favicon 404 from a
         // genuinely missing artefact file.
         const loc = msg.location()?.url;
-        const attributed = loc ? `${text} [source: ${loc}]` : text;
-        if (type === 'error') errors.push(attributed);
-        else if (type === 'warn') warnings.push(attributed);
+        if (type === 'error') consoleErrors.push(loc ? { text, loc } : { text });
+        else if (type === 'warn') warnings.push(loc ? `${text} [source: ${loc}]` : text);
       });
       page.on('pageerror', (err: unknown) => {
         errors.push(
@@ -1137,7 +1145,17 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 });
         if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
 
-        for (const it of interactions) {
+        // Bound the PHASE, not the count: a game replay legitimately needs a
+        // long sequence, but 31 interactions once cost 546s (most of it
+        // inside a wedged CDP command) and still failed.
+        const budgetMs = interactionPhaseBudgetMs();
+        const interactionDeadline = Date.now() + budgetMs;
+        let skippedInteractions = 0;
+        for (const [idx, it] of interactions.entries()) {
+          if (Date.now() > interactionDeadline) {
+            skippedInteractions = interactions.length - idx;
+            break;
+          }
           try {
             if (it.type === 'click' || it.type === 'rightclick') {
               const coords = await resolveInteractionCoords(page, it);
@@ -1156,10 +1174,22 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               interactionLog.push(`keyup ${it.key}`);
             } else if (it.type === 'keypress') {
               if (!it.key) throw new Error('keypress requires "key"');
-              const holdMs =
+              const requestedHoldMs =
                 typeof it.holdMs === 'number' && Number.isFinite(it.holdMs)
                   ? Math.max(0, Math.floor(it.holdMs))
                   : 120;
+              const holdMs = Math.min(requestedHoldMs, MAX_HOLD_MS);
+              if (holdMs < requestedHoldMs) {
+                // Say WHY and give the technique that works — a silent clamp
+                // turns a long dead end into a short mystery.
+                warnings.push(
+                  `holdMs ${requestedHoldMs} clamped to ${MAX_HOLD_MS}: a headless browser runs in ` +
+                    `real time and cannot fast-forward, so holding a key cannot advance an in-page ` +
+                    `timer. To test time-dependent behaviour, expose a hook from the app ` +
+                    `(e.g. window.__test.advance(ms), or accept a duration via ?query) and drive it ` +
+                    `from \`smoke\` instead.`
+                );
+              }
               const key = it.key as import('puppeteer').KeyInput;
               await page.keyboard.down(key);
               await new Promise((r) => setTimeout(r, holdMs));
@@ -1173,6 +1203,19 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               `interaction ${it.type} failed: ${(err as Error).message}`
             );
           }
+        }
+
+        if (skippedInteractions > 0) {
+          // An ERROR, not a warning: the sequence the caller asked for did
+          // not fully run, so whatever the smoke observes is not the state
+          // it was written against.
+          errors.push(
+            `interaction budget exhausted after ${budgetMs}ms: ` +
+              `${skippedInteractions} of ${interactions.length} interactions were SKIPPED, so the ` +
+              `page is not in the state your smoke expects. Split this into several validate_html ` +
+              `calls, or drive the app through an exposed window.__test hook instead of replaying ` +
+              `every input.`
+          );
         }
 
         let smokeResult: unknown;
@@ -1199,27 +1242,45 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           stuck.record(smoke, smokeOk);
         }
 
+        // Does the DOCUMENT declare an icon? Read it AFTER interactions so a
+        // page that installs its <link rel="icon"> dynamically still counts.
+        const declaresIcon = await page
+          .evaluate(`!!document.querySelector('link[rel~="icon"]')`)
+          .then((v) => v === true)
+          .catch(() => false);
+        const pageErrors = mergeConsoleErrors(consoleErrors, url, declaresIcon);
+        const realFailedRequests = failedRequests.filter(
+          (r) => !isSpeculativeFaviconRequest(r.url, url, declaresIcon)
+        );
+        const allErrors = [...pageErrors, ...errors];
+
         const title = await page.title();
         return {
-          ok: errors.length === 0 && failedRequests.length === 0 && smokeOk,
+          ok: allErrors.length === 0 && realFailedRequests.length === 0 && smokeOk,
           url,
           title,
-          errors,
+          errors: allErrors,
           warnings,
-          failedRequests,
+          failedRequests: realFailedRequests,
           interactionLog,
           ...(smoke ? { smokeResult } : {}),
         };
       } catch (err) {
+        // Navigation failed, so the icon-link probe is unavailable; treating
+        // the document as declaring none only ever suppresses a favicon 404,
+        // which is never the cause of a navigation failure.
         return {
           ok: false,
           url,
           errors: [
+            ...mergeConsoleErrors(consoleErrors, url, false),
             ...errors,
             `navigation failed: ${(err as Error).message}`,
           ],
           warnings,
-          failedRequests,
+          failedRequests: failedRequests.filter(
+            (r) => !isSpeculativeFaviconRequest(r.url, url, false)
+          ),
           interactionLog,
         };
       } finally {
@@ -1308,6 +1369,124 @@ async function resolveInteractionCoords(
  * interleaves.
  */
 export const SMOKE_STUCK_WINDOW = 10;
+
+/**
+ * Upper bound on a single `keypress` hold, in ms.
+ *
+ * A headless browser runs in REAL TIME and cannot fast-forward. Measured
+ * 2026-08-09 on a Quiz Timer task: the model asked for
+ * `keypress (270500ms)` — 4.5 minutes of held key — trying to advance an
+ * in-page countdown to zero. The tool obeyed, the call took 273s, and the
+ * run's wall-clock tripled. It is never a real interaction: no user holds a
+ * key for minutes, and the app under test cannot be steered that way. So the
+ * hold is clamped and the caller is TOLD, with the technique that does work
+ * (expose a hook and drive the clock from `smoke`) — a clamp the model
+ * cannot see just turns a 273s dead end into a 3s mystery.
+ */
+export const MAX_HOLD_MS = 3_000;
+
+/**
+ * Upper bound on the post-load settle `waitMs`. Same class as MAX_HOLD_MS —
+ * unbounded model-supplied durations convert arithmetic slips straight into
+ * dead wall-clock. The largest legitimate value observed across 208 archived
+ * calls is 6000ms, so this leaves real headroom.
+ */
+export const MAX_WAIT_MS = 15_000;
+
+/**
+ * Wall-clock ceiling for the whole interaction phase of ONE call.
+ *
+ * Measured 2026-08-09: a single call carrying 31 interactions ran 546
+ * seconds and STILL failed (`Input.dispatchMouseEvent timed out`). Batching
+ * interactions is legitimate — a game replay needs a sequence — so the count
+ * is not capped; what must be bounded is the TIME. On expiry the remaining
+ * interactions are skipped and reported as an error, because a partially
+ * executed sequence makes the smoke result untrustworthy.
+ */
+export const INTERACTION_PHASE_BUDGET_MS = 45_000;
+
+/**
+ * The interaction-phase budget, read at CALL time so a single run can be
+ * tightened without a rebuild (`ATOMA_VALIDATE_INTERACTION_BUDGET_MS`).
+ * Mirrors `trustThreshold()` / `cliCallTimeoutMs()`: an invalid, zero or
+ * negative value falls back to the DEFAULT rather than disabling the guard —
+ * a typo must never make the system less careful.
+ */
+export function interactionPhaseBudgetMs(): number {
+  const raw = process.env['ATOMA_VALIDATE_INTERACTION_BUDGET_MS'];
+  if (raw === undefined) return INTERACTION_PHASE_BUDGET_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return INTERACTION_PHASE_BUDGET_MS;
+  return Math.floor(n);
+}
+
+/**
+ * Per-CDP-command timeout for the shared browser.
+ *
+ * Puppeteer's default is 180s, so ONE wedged `Input.dispatchMouseEvent`
+ * costs three minutes before it reports. Local pages answer in
+ * milliseconds; 30s is far beyond any healthy command while turning a wedge
+ * into a prompt failure instead of a stall.
+ */
+export const CDP_PROTOCOL_TIMEOUT_MS = 30_000;
+
+/**
+ * Is this failing request Chrome's OWN speculative favicon fetch?
+ *
+ * Chrome requests `/favicon.ico` on every navigation when the document
+ * declares no icon link — nothing in the page asked for it, and
+ * `start_static_server` has no such file, so it 404s. That 404 arrives as a
+ * console error, and `validate_html` computes `ok` from `errors.length ===
+ * 0`, so a PERFECTLY WORKING PAGE was reported broken.
+ *
+ * Measured over 208 archived calls: 23 carried the favicon 404 and **10
+ * returned `ok: false` with it as their ONLY error** — 13% of every failure
+ * the tool reported. The model usually reasoned past it ("browser
+ * auto-fetch, not a task failure"), which is tokens spent overriding our own
+ * false negative, and it cannot be relied on to always do so.
+ *
+ * Deliberately NARROW: it suppresses the request only when it is same-origin
+ * AND the document declares no icon link. A page that ships
+ * `<link rel="icon" href="favicon.ico">` and 404s is a REAL broken artefact
+ * and keeps failing the check.
+ */
+export function isSpeculativeFaviconRequest(
+  requestUrl: string,
+  pageUrl: string,
+  documentDeclaresIcon: boolean
+): boolean {
+  if (documentDeclaresIcon) return false;
+  let req: URL;
+  let page: URL;
+  try {
+    req = new URL(requestUrl);
+    page = new URL(pageUrl);
+  } catch {
+    return false;
+  }
+  if (req.origin !== page.origin) return false;
+  return req.pathname === '/favicon.ico';
+}
+
+/**
+ * Render captured console errors into the reported `errors` list, dropping
+ * Chrome's own speculative favicon fetch (see `isSpeculativeFaviconRequest`).
+ *
+ * An entry with no source location is ALWAYS kept: absent evidence that it is
+ * the favicon, the honest default is to report it.
+ */
+export function mergeConsoleErrors(
+  captured: ReadonlyArray<{ text: string; loc?: string }>,
+  pageUrl: string,
+  documentDeclaresIcon: boolean
+): string[] {
+  const out: string[] = [];
+  for (const e of captured) {
+    if (e.loc && isSpeculativeFaviconRequest(e.loc, pageUrl, documentDeclaresIcon)) continue;
+    out.push(e.loc ? `${e.text} [source: ${e.loc}]` : e.text);
+  }
+  return out;
+}
 
 /**
  * Minimum cumulative failures of the same normalised smoke inside the

@@ -1939,6 +1939,43 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   runs saw the model interleave a sanity smoke between real retries to
   defeat a consecutive-only detector. Both shortcuts return the same
   `SMOKE_DESIGN_GUIDANCE` text as a hint.
+- **`validate_html` bounds every model-supplied duration — an unbounded
+  tool parameter converts a model slip straight into dead wall-clock.**
+  Audit of the 208 archived calls in the last 40 runs: **3 calls (1.4%)
+  consumed 831s of the 1186s total browser wall-clock**. One held a key for
+  `holdMs: 270500` (4.5 min) trying to advance an in-page countdown; one
+  batched 31 interactions and spent 546s inside a wedged
+  `Input.dispatchMouseEvent`, failing anyway. Four guards, all measured:
+  `MAX_HOLD_MS` (3s) and `MAX_WAIT_MS` (15s) clamp durations, and the
+  hold clamp pushes a WARNING naming the technique that works (expose
+  `window.__test.advance(ms)`, drive it from `smoke`) — a silent clamp
+  turns a 273s dead end into a 3s mystery; `interactionPhaseBudgetMs()`
+  (45s, `ATOMA_VALIDATE_INTERACTION_BUDGET_MS`, invalid/zero/negative
+  falls back to the DEFAULT) bounds the interaction PHASE, not the count
+  — a game replay legitimately needs a long sequence — and the skipped
+  tail is reported as an ERROR because a truncated sequence leaves the
+  page in a state the smoke was not written against; `protocolTimeout`
+  is pinned to 30s at launch because Puppeteer's default is 180s, so ONE
+  wedged CDP command stalls three minutes. The bounds are also stated in
+  the tool DECLARATION so the model learns them up front instead of by
+  hitting them. Covered by `tests/validate-html-bounds.test.ts`, each
+  case verified to FAIL against the pre-fix tool.
+- **Chrome's own favicon 404 must not fail a healthy page.** Chrome
+  requests `/favicon.ico` on every navigation when the document declares no
+  icon link; `start_static_server` has no such file, so it 404s into the
+  console-error channel — and `ok` is computed from `errors.length === 0`.
+  Measured: 23 of 208 calls carried it and **10 returned `ok: false` with
+  it as their ONLY error — 13% of every failure the tool reported**, on
+  pages that worked. (The model usually reasoned past it, "browser
+  auto-fetch, not a task failure": tokens spent overriding our own false
+  negative.) `isSpeculativeFaviconRequest` is deliberately NARROW —
+  suppression requires same-origin AND `!document.querySelector('link[rel~="icon"]')`,
+  evaluated AFTER interactions so a dynamically-installed link counts. A
+  page that SHIPS `<link rel="icon">` and 404s is a real broken artefact
+  and still fails. Console errors are held STRUCTURED (`{text, loc}`) until
+  the end of the call so the filter decides on the source rather than
+  re-parsing our own rendered `[source: …]` suffix; an error with NO source
+  is always kept (absent evidence, report it).
 - **Tool-use loop**: when `req.executor` is present, `AnthropicLlmClient.complete`
   runs up to `DEFAULT_MAX_TOOL_ITERATIONS` (24) rounds of tool_use →
   tool_result → LLM, with a graceful "tool budget exhausted" final
