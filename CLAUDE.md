@@ -1571,6 +1571,33 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   `promoteToScript` so the gap arithmetic stays within one trust era.
   AWM's measured steady state (~7 skills/scope, overlap < 0.2) is the
   calibration reference. Covered by `tests/skill-stats.test.ts`.
+- **When is an event skill DEAD? When its root cause was fixed
+  STRUCTURALLY.** Event skills never earn counters (they never
+  `setActiveSkill`), so nothing retires them and `matches: 0` alone proves
+  nothing — a recovery recipe may simply be waiting for its incident.
+  The decidable criterion is different: a trigger describes a failure CLASS,
+  and if that class was eliminated in the harness rather than survived by
+  technique, the trigger can never usefully match again. Applied 2026-08-09,
+  which dropped exactly two of ten:
+  `recover-es6-import-in-commonjs-node-entry` (the ESM module-resolution leak,
+  closed twice over — `ensureModuleResolutionBoundary` and then the workspace
+  moving out of the repo) and `recover-tool-error-declared-total-block`
+  (learned from a `bumpDeadline is not defined` mid-batch edit that existed
+  for about twenty minutes — the exact "permanent skill teaching a workaround
+  for a bug that died the next day" failure the rejected friction-sensor
+  entry warns about).
+  The other eight were KEPT because their causes are MITIGATED, not
+  eliminated: the port case of run-varying stdout is handled but timestamps
+  are not; renamed manifest keys are now named back by the validator but can
+  still be emitted; the aggregation default covers an OMITTED field but not an
+  explicit wrong `concat`. Partial is not dead.
+- **Do NOT `skills reset` `write-server-route-test-harness`** (17 matches,
+  16✓/2✗, `blocked(reset)`). It reads like the obvious hygiene action and is
+  a trap twice over: `reset` zeroes the 16 earned successes as well as the
+  failures, and the skill AUTHORS a file, which is the `probe-crud` class — a
+  compiled script that prints a valid envelope while writing nothing gets
+  rejected, sets `failures = 1`, and re-blocks promotion permanently. Paying
+  16 successes to re-enter the same trap is the wrong trade.
 - **Catalog-hygiene verbs: `skills drop` / `skills merge`.** Both are
   OPERATOR verbs (CLI-only, never autonomous) with ledger events
   (`skill-drop`, `skill-merge`; `ledger check` iterates the STORE so a
