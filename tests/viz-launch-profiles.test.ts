@@ -113,3 +113,41 @@ describe('the generated command quotes the goal', () => {
     );
   });
 });
+
+/**
+ * No FRENCH string outside the French catalog.
+ *
+ * The parity test above proves both catalogs hold the same KEYS. It cannot
+ * see a call site that skips `t()` entirely, and that is not hypothetical:
+ * `'Compteurs'` and `'(vide)'` sat hardcoded in the English source long
+ * enough to ship, so the English UI showed French. A sweep then found 15 such
+ * literals — `Lien`, `Atome — …`, `(vide)` ×7, `Chargement…` ×5.
+ *
+ * Detecting "any unlocalised string" needs judgment and would be noisy. This
+ * detects the DEMONSTRATED bug class instead, with no judgment required: a
+ * recognisably French word in a literal outside the `fr:` block is always
+ * wrong, whatever the surrounding code does.
+ */
+describe('no French leaks into the English source', () => {
+  const raw = readFileSync('src/viz/ui.html', 'utf8');
+  const lines = raw.split('\n');
+
+  it('finds no French literal outside the fr catalog', () => {
+    const frStart = lines.findIndex((l) => /^ {2}fr: \{/.test(l));
+    const frEnd = lines.findIndex((l, i) => i > frStart && /^ {2}\},?\s*$/.test(l));
+    expect(frStart, 'fr catalog not found').toBeGreaterThan(-1);
+    expect(frEnd).toBeGreaterThan(frStart);
+
+    const FRENCH =
+      /\b(Atome|Lien|Compteurs|vide|Aucune?|D\u00e9tails|R\u00e9sultat|Co\u00fbt|Dur\u00e9e|Appels|Mod\u00e8le|R\u00e9ponse|Requ\u00eate|Erreur|R\u00e9sum\u00e9|\u00c9tape|Cr\u00e9\u00e9|Raison|Chargement|Recherche|Filtrer|Afficher|Masquer|Fermer)\b/;
+    const offenders: string[] = [];
+    lines.forEach((line, i) => {
+      if (i >= frStart && i <= frEnd) return; // the fr catalog is meant to be French
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return; // comments may discuss it
+      for (const m of line.matchAll(/['`]([^'`\n]{2,80})['`]/g)) {
+        if (FRENCH.test(m[1]!)) offenders.push(`ui.html:${i + 1}  ${JSON.stringify(m[1])}`);
+      }
+    });
+    expect(offenders, `French outside the fr catalog:\n${offenders.join('\n')}`).toEqual([]);
+  });
+});

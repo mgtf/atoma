@@ -2284,7 +2284,20 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   architectural value: an interface with one consumer has nothing keeping it
   honest. Optional would let a future family ship undescribed — the exact
   defect the tab exists to prevent.
-- **The viz UI is ENGLISH and fully i18n'd — no bare user-facing string.**
+- **The viz UI is ENGLISH and i18n'd — and the claim is now partly ENFORCED,
+  because it was not true.** This entry used to read "fully i18n'd — no bare
+  user-facing string". A sweep on 2026-08-09 found **15 FRENCH literals
+  hardcoded outside the `fr:` catalog** (`Lien`, `Atome — …`, `(vide)` ×7,
+  `Chargement…` ×5), so the ENGLISH UI had been rendering French. All 15 now
+  go through `t()`. Two tests hold the line, and the split between them is
+  the point: the PARITY test proves both catalogs carry the same keys — it
+  cannot see a call site that skips `t()` at all — while the FRENCH-LEAK test
+  catches exactly the demonstrated bug, a recognisable French word in a
+  literal outside the catalog, which is always wrong and needs no judgment.
+  Neither proves full coverage: a bare ENGLISH string still slips through
+  both, and detecting "any unlocalised string" is a judgment call that would
+  be noisy. Do not upgrade this entry back to "fully" without a checker that
+  earns it.
   Every label goes through `t('some.key', { vars })` against the catalogs
   at the top of `ui.html`; static chrome uses `data-i18n` /
   `data-i18n-title` / `data-i18n-placeholder`, filled by

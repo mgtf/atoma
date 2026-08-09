@@ -320,6 +320,8 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'common.link': 'Link',
+    'registry.atom': 'Atom',
     'skill.title': 'Skill',
     'skill.namespace': 'L1 namespace',
     'skill.kind': 'Kind',
@@ -532,6 +534,8 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'common.link': 'Lien',
+    'registry.atom': 'Atome',
     'skill.title': 'Skill',
     'skill.namespace': 'Espace L1',
     'skill.kind': 'Genre',
@@ -2229,7 +2233,7 @@ function renderSkillEventDetail(el, ev) {
     },
   }, t('registry.openSkill'));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, 'Lien'),
+    h('h3', {}, t('common.link')),
     open,
   ]));
 }
@@ -2290,7 +2294,7 @@ function renderAtomDetail(entry) {
   }[entry.origin] ?? entry.origin;
 
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `Atome — ${s.name}`),
+    h('h3', {}, `${t('registry.atom')} — ${s.name}`),
     h('div', { class: 'kv' }, [
       h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(s.tier), ' ', h('span', { class: 'meta' }, `#${s.ordinal}`)]),
       h('div', { class: 'k' }, 'Version'), h('div', { class: 'v' }, 'v' + s.version),
@@ -2307,12 +2311,12 @@ function renderAtomDetail(entry) {
 
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, 'Description'),
-    h('pre', {}, s.description || '(vide)'),
+    h('pre', {}, s.description || t('common.empty')),
   ]));
 
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, 'System prompt'),
-    h('pre', {}, s.systemPrompt || '(vide)'),
+    h('pre', {}, s.systemPrompt || t('common.empty')),
   ]));
 
   if (entry.events && entry.events.length > 0) {
@@ -2381,7 +2385,7 @@ function renderLlmDetail(el, ev) {
       body.appendChild(node);
       return;
     }
-    body.appendChild(h('pre', {}, txt || '(vide)'));
+    body.appendChild(h('pre', {}, txt || t('common.empty')));
   };
   // Sticky tab: remember which tab the user reads (e.g. "Response") so
   // opening another event — or any future re-render — lands on the same
@@ -2412,7 +2416,7 @@ function renderLlmDetail(el, ev) {
  * Returns a single element to insert into the body.
  */
 function renderStructuredResponse(txt) {
-  if (!txt || !txt.trim()) return h('pre', {}, '(vide)');
+  if (!txt || !txt.trim()) return h('pre', {}, t('common.empty'));
   const parsed = tryParseJson(txt);
   if (parsed === undefined) return h('pre', {}, txt);
   // Strategy + plan pair detection.
@@ -2759,7 +2763,7 @@ function renderLaunch() {
 const FAMILY_COLORS = { cli: '#34d399', web: '#60a5fa', http: '#c084fc' };
 
 async function loadBurnin() {
-  $('burninSummary').innerHTML = '<div class="loader">Chargement…</div>';
+  $('burninSummary').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
   let payload;
   try {
     const r = await fetch('/api/burnin');
@@ -2903,7 +2907,7 @@ function renderBurninRows(rows) {
 }
 
 async function loadSkills() {
-  $('skillsLanes').innerHTML = '<div class="loader">Chargement…</div>';
+  $('skillsLanes').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
   $('skillsSummary').innerHTML = '';
   let r;
   try {
@@ -3015,7 +3019,7 @@ async function selectSkill(l1Name, id) {
   // If we're on another tab, switch first so the user actually sees the detail.
   if (state.view !== 'skills') switchView('skills');
   renderSkillsLanes();
-  $('rightPane').innerHTML = '<div class="loader">Chargement…</div>';
+  $('rightPane').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
   let r;
   try {
     r = await fetch('/api/skills/' + encodeURIComponent(l1Name) + '/' + encodeURIComponent(id));
@@ -3099,7 +3103,7 @@ async function loadRegistries() {
 
 async function selectRegistry(id) {
   $('registrySelect').value = id;
-  $('registryLanes').innerHTML = '<div class="loader">Chargement…</div>';
+  $('registryLanes').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
   $('rightPane').innerHTML = '<div class="empty">' + t('pane.selectAtom') + '</div>';
   const r = await fetch('/api/registry/' + encodeURIComponent(id));
   if (!r.ok) {
@@ -3191,7 +3195,7 @@ function renderRegistryAtomDetail(type) {
   const el = $('rightPane');
   el.innerHTML = '';
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `Atome — ${type.name}`),
+    h('h3', {}, `${t('registry.atom')} — ${type.name}`),
     h('div', { class: 'kv' }, [
       h('div', { class: 'k' }, 'Tier'), h('div', { class: 'v' }, [tierBadge(type.tier), ' ', h('span', { class: 'meta' }, `#${type.ordinal}`)]),
       h('div', { class: 'k' }, 'Version actuelle'), h('div', { class: 'v' }, 'v' + type.version),
@@ -3206,11 +3210,11 @@ function renderRegistryAtomDetail(type) {
   ]));
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, 'Description'),
-    h('pre', {}, type.description || '(vide)'),
+    h('pre', {}, type.description || t('common.empty')),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
     h('h3', {}, `System prompt (v${type.version} · courant)`),
-    h('pre', {}, type.systemPrompt || '(vide)'),
+    h('pre', {}, type.systemPrompt || t('common.empty')),
   ]));
 
   if (type.history && type.history.length > 0) {
@@ -3231,7 +3235,7 @@ function renderRegistryAtomDetail(type) {
               : h('span', { class: 'meta' }, '— aucun —')),
         ]),
         h('h3', { style: 'margin-top:10px;' }, 'System prompt'),
-        h('pre', {}, h_.systemPrompt || '(vide)'),
+        h('pre', {}, h_.systemPrompt || t('common.empty')),
       ]);
       const header = h('div', {
         class: 'row',
@@ -3257,7 +3261,7 @@ function renderRegistryAtomDetail(type) {
   if (type.tier === 1) {
     const skillsSection = h('div', { class: 'section' }, [
       h('h3', {}, t('registry.attachedSkills')),
-      h('div', { class: 'meta', style: 'margin-bottom:6px;' }, 'Chargement…'),
+      h('div', { class: 'meta', style: 'margin-bottom:6px;' }, t('common.loading')),
     ]);
     el.appendChild(skillsSection);
     fetchAndRenderL1Skills(type.name, skillsSection);
