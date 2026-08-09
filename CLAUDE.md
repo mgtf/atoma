@@ -378,9 +378,16 @@ re-exports all the historical names so old imports keep working.
   was fixed (24 occurrences across 16 pre-fix runs, 0 in the post-fix run).
   And the rule below — "act only on a signature recurring across two
   CONSECUTIVE batches" — cannot be evaluated from a report with no dates. The
-  `last` column (`today` / `1d` / `Nd`) makes it checkable at a glance; it is
-  what surfaced the live `edit_file` signature above from under a pile of
-  already-fixed noise.
+  `last` column makes it checkable at a glance; it is what surfaced the live
+  `edit_file` signature above from under a pile of already-fixed noise.
+  SUB-DAY RESOLUTION is not cosmetic — the column shipped with day
+  granularity and misled its author within the hour. The favicon rows read
+  `today` and therefore looked live, when in fact every one came from runs
+  started at 04:39–05:10 and the fix had landed at 09:01; the post-fix run
+  had zero. On the day a fix lands, "today" cannot separate "before it" from
+  "just now", which is precisely when the distinction decides whether you act.
+  `ageLabel` now reports minutes, then hours, then days, and is pinned by
+  `tests/friction-age.test.ts`.
 - **Friction report** (`npm run friction`, helpers in `src/viz/friction.ts`
   — pure, mirrored on `stats.ts`): aggregates recurring TOOL-LOOP failure
   signatures from the traces the viz already persists (zero LLM, zero

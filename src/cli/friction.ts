@@ -66,12 +66,19 @@ function familyMapFromCsv(csvPath: string): Map<string, string> {
  * CLAUDE.md's action rule ("recurring across two CONSECUTIVE batches")
  * checkable from the report instead of by hand.
  */
-function ageLabel(ms: number): string {
+export function ageLabel(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '?';
-  const days = Math.floor((Date.now() - ms) / 86_400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return '1d';
-  return `${days}d`;
+  const mins = Math.floor((Date.now() - ms) / 60_000);
+  // SUB-DAY resolution, learned the hard way on this column's first real use:
+  // a plain "today" made the favicon 404 — fixed at 09:01 that same morning —
+  // read as a live signature, because the runs that produced it started at
+  // 04:39. On the day a fix lands, day granularity cannot separate "before
+  // the fix" from "just now", which is precisely when the distinction
+  // matters. Hours below a day; days above.
+  if (mins < 60) return `${Math.max(mins, 1)}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function renderRows(rows: FrictionRow[], title: string, note: string): void {
