@@ -588,8 +588,28 @@ lands before the SaaS, key it on `(provider, subject)`.
   dependency fails under `--network none` (`EAI_AGAIN`); a no-dependency
   install succeeds. Not yet a problem — the corpus is zero-dependency by
   design and the batch made no npm calls — but arbitrary customer tasks will
-  need it. The answer is a registry proxy on an internal network, NOT relaxing
-  the network mode.
+  need it. MEASURED, so the shape is not re-derived later:
+
+  | container network | control plane | internet | own loopback |
+  |---|---|---|---|
+  | `--network none` (today) | blocked | blocked | works |
+  | default `bridge` | **REACHED** | reached | works |
+  | `docker network create --internal` | blocked | blocked | works |
+
+  The default bridge is disqualified outright: it hands the run the control
+  plane, which is the same reachability that made an HTTP-served launch token
+  worthless. But an `--internal` network is functionally identical to `none`
+  while being a NETWORK — so a proxy container attached to both it and an
+  external network can grant egress selectively, with an allowlist that by
+  construction cannot be asked for the control plane. That is the shape to
+  build when it is needed: run container on `--internal`, proxy as the only
+  reachable peer, `HTTP_PROXY`/`npm config` pointed at it.
+
+  NOT BUILT, because nothing needs it yet: zero npm calls in the first
+  containerised batch, and zero non-loopback `fetch_url` across every
+  archived trace. TRIGGER: the first task family that genuinely requires an
+  external fetch or a third-party dependency. Until then it is a proxy to
+  run, an allowlist to curate and a new failure mode, bought with no demand.
 
 ### Open questions for the owner
 
