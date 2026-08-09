@@ -102,11 +102,26 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
       const content = readFileSync(abs, 'utf8');
       const occurrences = content.split(oldString).length - 1;
       if (occurrences === 0) {
-        // The procedural half ("read_file and retry") was already here and
-        // the model obeyed it procedurally while re-emitting the same broken
-        // span — 10 of 11 residual failures in the 2026-08 burn-in window
-        // were DOUBLE-ESCAPED old_strings, so the message now names the
-        // diagnosis, not just the procedure.
+        // Naming the diagnosis was not enough. This message already told the
+        // model its escaping was probably wrong, and the model kept
+        // re-emitting the same broken span: measured 2026-08-09 over the last
+        // 40 runs, 9 of 10 `old_string not found` failures carried
+        // two-character `\\n` sequences instead of real newlines, across six
+        // runs on two consecutive days.
+        //
+        // So when the defect is PROVABLE for this specific call — unescaping
+        // the argument finds exactly one match — stop describing the class
+        // and hand back the verbatim span to copy. A diagnosis the model must
+        // act on from memory is weaker than the bytes it needs.
+        const unescaped = unescapeJsonish(oldString);
+        if (unescaped !== oldString && content.split(unescaped).length - 1 === 1) {
+          throw new Error(
+            `edit_file: old_string not found in "${path}" — you DOUBLE-ESCAPED it. ` +
+              `Your argument contains the two characters backslash-n (and/or backslash-quote) where the file has real newlines and quotes. ` +
+              `Un-escaping your argument matches exactly one span, so re-send old_string as these RAW bytes, copied verbatim:\n` +
+              `---8<---\n${unescaped.slice(0, EDIT_SPAN_ECHO_CHARS)}${unescaped.length > EDIT_SPAN_ECHO_CHARS ? '\n… (truncated — copy the full span from read_file)' : ''}\n--->8---`
+          );
+        }
         throw new Error(
           `edit_file: old_string not found in "${path}". It must match the file EXACTLY, including whitespace and indentation — read_file the current content and retry with a verbatim span. Common cause: WRONG ESCAPING — old_string must contain the file's RAW bytes (real newlines, real quotes), never two-character \\n or \\" escape sequences. If you re-read the file and it still does not match, your escaping is wrong, not the file.`
         );
@@ -230,6 +245,27 @@ export function listFilesTool(opts: BuiltinToolOptions): BuiltinTool {
  *     goes through `node -e … rmSync`), and it is the highest-regret
  *     entry to advertise.
  */
+/**
+ * Cap on the span echoed back by `edit_file`'s double-escape diagnosis. Long
+ * enough for a real function body, short enough not to re-dump a file the
+ * model already has.
+ */
+export const EDIT_SPAN_ECHO_CHARS = 600;
+
+/**
+ * Undo ONE level of JSON-ish string escaping.
+ *
+ * Only the sequences actually observed in the failures — `\\n`, `\\t`,
+ * `\\r`, `\\"`, `\\\\`. Deliberately not a JSON parser: the argument is a
+ * fragment, not a document, and a parser would reject it or mangle a lone
+ * backslash that was legitimately in the file.
+ */
+export function unescapeJsonish(s: string): string {
+  return s.replace(/\\(n|t|r|"|\\)/g, (_m, c: string) =>
+    c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '"' ? '"' : '\\'
+  );
+}
+
 export const DEFAULT_SHELL_ALLOWLIST: readonly string[] = [
   // Interpreters and package tooling (unchanged).
   'node',

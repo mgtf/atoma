@@ -42,6 +42,8 @@ export interface FrictionEvent {
   /** Discriminator argument, for pseudo-recurrence detection. */
   readonly argKey: string;
   readonly runApproved: boolean;
+  /** When it happened (ms). Feeds the row's recency, see `lastSeen`. */
+  readonly at: number;
 }
 
 export interface FrictionRow {
@@ -62,6 +64,19 @@ export interface FrictionRow {
   readonly sample: string;
   /** Tokens a future event-skill trigger would need — for manual inspection. */
   readonly triggerTokens: string[];
+  /**
+   * When this signature was FIRST and LAST seen (ms).
+   *
+   * Without them the report is a lifetime tally, so a defect fixed weeks ago
+   * keeps topping the list and crowds out live signal — measured on the
+   * favicon 404, which dominated the first four rows the morning AFTER it was
+   * fixed (24 occurrences across 16 pre-fix runs, 0 after). Worse, CLAUDE.md's
+   * own action rule is "act only on a signature recurring across two
+   * CONSECUTIVE batches", which recency is required to evaluate at all: the
+   * rule was there, the data to apply it was not.
+   */
+  readonly firstSeen: number;
+  readonly lastSeen: number;
 }
 
 const RAW_CAP = 2000;
@@ -187,6 +202,7 @@ export function extractFrictionEvents(run: VizRun, runFile: string): FrictionEve
       signature: frictionSignature(te.name, raw),
       argKey: argKeyFor(te.name, te.args ?? {}),
       runApproved: approved,
+      at: typeof te.ts === 'number' ? te.ts : Date.parse(run.startedAt),
     });
   }
   return out;
@@ -219,6 +235,8 @@ export function computeFrictionRows(
       runs: runs.size,
       approvedRuns: approvedRuns.size,
       distinctArgs: new Set(evs.map((e) => e.argKey)).size,
+      firstSeen: Math.min(...evs.map((e) => e.at)),
+      lastSeen: Math.max(...evs.map((e) => e.at)),
       families,
       sample: first.raw.slice(0, 160),
       triggerTokens: [...eventTokens(signature)].slice(0, 12),

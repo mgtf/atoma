@@ -59,21 +59,36 @@ function familyMapFromCsv(csvPath: string): Map<string, string> {
   return map;
 }
 
+/**
+ * How long ago, compactly. The report is a lifetime tally, so without this a
+ * defect fixed weeks ago keeps topping the list: the favicon 404 held the
+ * first four rows the morning AFTER it was fixed. It is also what makes
+ * CLAUDE.md's action rule ("recurring across two CONSECUTIVE batches")
+ * checkable from the report instead of by hand.
+ */
+function ageLabel(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '?';
+  const days = Math.floor((Date.now() - ms) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return '1d';
+  return `${days}d`;
+}
+
 function renderRows(rows: FrictionRow[], title: string, note: string): void {
   console.log(`\n== ${title} ==${rows.length === 0 ? ' (none)' : ''}`);
   if (note) console.log(note);
   if (rows.length === 0) return;
   const widths = { runs: 4, events: 6, args: 4, tool: 18 };
   console.log(
-    `${'runs'.padStart(widths.runs)}  ${'events'.padStart(widths.events)}  ${'args'.padStart(widths.args)}  ${'tool'.padEnd(widths.tool)}  signature / sample`
+    `${'runs'.padStart(widths.runs)}  ${'events'.padStart(widths.events)}  ${'args'.padStart(widths.args)}  ${'last'.padStart(6)}  ${'tool'.padEnd(widths.tool)}  signature / sample`
   );
   for (const r of rows) {
     const sig = r.signature.slice(r.signature.indexOf('|') + 1);
     console.log(
-      `${String(r.runs).padStart(widths.runs)}  ${String(r.events).padStart(widths.events)}  ${String(r.distinctArgs).padStart(widths.args)}  ${r.tool.padEnd(widths.tool)}  ${sig.slice(0, 90)}`
+      `${String(r.runs).padStart(widths.runs)}  ${String(r.events).padStart(widths.events)}  ${String(r.distinctArgs).padStart(widths.args)}  ${ageLabel(r.lastSeen).padStart(6)}  ${r.tool.padEnd(widths.tool)}  ${sig.slice(0, 90)}`
     );
     console.log(
-      `${''.padStart(widths.runs + widths.events + widths.args + 6)}  ${r.tool === '' ? '' : ''}↳ ${r.sample.slice(0, 100).replace(/\s+/g, ' ')}  [families: ${r.families.join(',')}] [approved runs: ${r.approvedRuns}/${r.runs}]`
+      `${''.padStart(widths.runs + widths.events + widths.args + 14)}  ${r.tool === '' ? '' : ''}↳ ${r.sample.slice(0, 100).replace(/\s+/g, ' ')}  [families: ${r.families.join(',')}] [approved runs: ${r.approvedRuns}/${r.runs}]`
     );
   }
 }

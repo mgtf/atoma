@@ -357,6 +357,30 @@ re-exports all the historical names so old imports keep working.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **`edit_file` proves the double-escape instead of describing it.** The
+  `old_string not found` message already named WRONG ESCAPING as the common
+  cause, and the model kept re-sending the same broken span. Measured over the
+  last 40 runs (2026-08-09): **9 of 10 such failures carried two-character
+  `\n` sequences** where the file has real newlines — six runs across two
+  consecutive days, which is exactly the recurrence CLAUDE.md requires before
+  acting. So when the defect is PROVABLE for the call in hand — un-escaping
+  the argument (`unescapeJsonish`, only the observed sequences, deliberately
+  not a JSON parser) matches EXACTLY ONCE — the error now hands back the
+  verbatim bytes to copy, bounded by `EDIT_SPAN_ECHO_CHARS` (600). Two matches
+  means we cannot prove which span was meant, so it falls back to the generic
+  message rather than dressing a guess as a diagnosis. The lesson generalises:
+  a diagnosis the model must act on from memory is weaker than the bytes it
+  needs. Covered by `tests/edit-file-double-escape.test.ts`, whose fixtures
+  are taken from real failing calls.
+- **The friction report carries RECENCY (`lastSeen`), or its own action rule
+  is unusable.** The report is a lifetime tally, so a fixed defect keeps
+  topping it: the favicon 404 held the first four rows the morning AFTER it
+  was fixed (24 occurrences across 16 pre-fix runs, 0 in the post-fix run).
+  And the rule below — "act only on a signature recurring across two
+  CONSECUTIVE batches" — cannot be evaluated from a report with no dates. The
+  `last` column (`today` / `1d` / `Nd`) makes it checkable at a glance; it is
+  what surfaced the live `edit_file` signature above from under a pile of
+  already-fixed noise.
 - **Friction report** (`npm run friction`, helpers in `src/viz/friction.ts`
   — pure, mirrored on `stats.ts`): aggregates recurring TOOL-LOOP failure
   signatures from the traces the viz already persists (zero LLM, zero
