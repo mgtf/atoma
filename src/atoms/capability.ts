@@ -253,7 +253,7 @@ export function looksTaskThemed(desc: string): boolean {
  *
  * Call sites: `L2Atom.createSubtaskL1`, `L3Atom.createSubtaskL2`, the
  * escalation-branch paths in both, and the canonical-bootstrap in
- * `examples/build-app.ts`.
+ * the build profile (`src/run/profiles/build.ts`).
  */
 export function resolveCreationDescription(
   suggested: string | undefined,
@@ -482,7 +482,7 @@ export function bucketRequiredToolNames(bucketId: string): readonly string[] | n
 
 /**
  * Description used for the canonical tier-2 "web build orchestrator"
- * seeded by `examples/build-app.ts`. Kept as a named export (not just
+ * seeded by the build profile. Kept as a named export (not just
  * derived inline) so tests and downstream tooling can reference the
  * exact string. It's the same value you'd get from
  * `capabilityDescription(tools, 2)` when `tools` includes the

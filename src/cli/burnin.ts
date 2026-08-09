@@ -1,6 +1,6 @@
 /**
  * atoma burn-in harness — run a batch of tasks through the REAL build
- * pipeline (`npm run example:build`, one clean workspace per task), extract
+ * pipeline (`npm run run:build`, one clean workspace per task), extract
  * per-run economics, and append them to a CSV so the cost-decay curve is a
  * regenerable measurement instead of a session anecdote.
  *
@@ -213,12 +213,12 @@ function newestTraceName(runsDir: string, since: number): string {
   }
 }
 
-/** Run one task through `npm run example:build`; group-killed on completion. */
+/** Run one task through `npm run run:build`; group-killed on completion. */
 function runTask(task: BurninTask, timeoutMs: number, logPath: string): Promise<string> {
   return new Promise((resolveRun) => {
     const child = spawn(
       'npm',
-      ['run', 'example:build', '--', '--clean-workspace', task.goal],
+      ['run', 'run:build', '--', '--clean-workspace', task.goal],
       {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],

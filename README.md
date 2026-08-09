@@ -281,8 +281,8 @@ npm install
 npm run typecheck && npm test          # 717 tests, all mocked — no API key needed
 
 # live, pick your auth:
-ANTHROPIC_API_KEY=... npm run example:build "a Node CLI that converts CSV to JSON…"
-ATOMA_LLM=claude-cli  npm run example:build "…"    # Claude subscription, no key
+ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON…"
+ATOMA_LLM=claude-cli  npm run run:build "…"    # Claude subscription, no key
 
 npm run viz          # replay any run — or watch a live one, in-flight calls included
 npm run registry -- list             # inspect the persisted atom taxonomy
@@ -311,8 +311,9 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
 - `src/viz/` — run recorder + self-contained web visualizer (`npm run viz`)
 - `src/run/` — the generic runner (`runTask`), the `TaskProfile` contract and
   the per-family profiles under `src/run/profiles/`
-- `src/examples/` — `build-app.ts`, the build-family entrypoint (a thin shell
-  over `runTask`)
+- `src/cli/` — every entrypoint: `build-app.ts` (run a task) plus the
+  operator tools (`registry`, `skills`, `burnin`, `curriculum`, `ledger`,
+  `friction`)
 - `tests/` — vitest unit + integration tests (mock LLM, no network)
 
 ## 🗺️ Where this goes

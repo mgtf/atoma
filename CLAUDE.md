@@ -29,7 +29,7 @@ npm install
 npm run typecheck                     # tsc --noEmit (strict mode)
 npm test                              # vitest run — all mocked, no API key needed
 npm run build                         # emits to dist/
-npm run example:build "<goal>"        # live build-an-app example
+npm run run:build "<goal>"            # live: run a task through the pipeline
 
 npm run registry -- list              # inspect persisted atom types + counters
 npm run registry -- list --tier 2
@@ -380,7 +380,7 @@ re-exports all the historical names so old imports keep working.
   correctly stays quiet while the model streams, and the run budget is
   the backstop for "too slow".
 - **NEVER edit `src/` while a burn-in batch is in flight.** The harness
-  spawns a FRESH `tsx src/examples/build-app.ts` process per task, so
+  spawns a FRESH `tsx src/cli/build-app.ts` process per task, so
   each task compiles the source as it stands AT ITS START — an
   intermediate edit becomes the runtime for every task that follows.
   Measured (2026-08-08, curriculum batch): a mid-edit state where
@@ -392,7 +392,7 @@ re-exports all the historical names so old imports keep working.
   loaded it. Docs (CLAUDE.md), task JSON and the CSV are safe to touch
   mid-batch; anything under `src/` or `skills/` is not.
 - **Burn-in harness** (`npm run burnin`, `src/cli/burnin.ts`): runs a task
-  batch through the real `example:build` path (one clean workspace per task,
+  batch through the real `run:build` path (one clean workspace per task,
   child spawned in its own process group and group-killed after
   `✓ build finished` — delivered runs that started a server idle on purpose)
   and appends per-run economics to `burnin/results.csv`: cost, duration,
@@ -475,7 +475,8 @@ re-exports all the historical names so old imports keep working.
   A `TaskProfile` (`src/run/profile.ts`) contributes ONLY what a task family
   changes: workspace prep, the tier-3 seed, the canonical catalog seeding,
   the Task constraints, and the env-var names for store/workspace/budget.
-  `src/examples/build-app.ts` is now a 20-line shell over the pair.
+  `src/cli/build-app.ts` is now a 20-line shell over the pair, and
+  `src/examples/` is GONE — the folder name was the last of the lie.
   WHY: the 541-line example WAS the product — the burn-in harness spawns it
   per task, its stdout is the source of `burnin/results.csv`, and this file
   documented it as load-bearing in a dozen places. The cost of that was
@@ -913,7 +914,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   Falls back to the legacy branch path on Sonnet error / empty
   response — skill update is OPPORTUNISTIC, never mandatory.
 
-- **Auto-creation (#C3).** ON by default in `npm run example:build`.
+- **Auto-creation (#C3).** ON by default in `npm run run:build`.
   Pass `--no-learn-skills` (or set `ATOMA_SKILL_LEARN=0`) to disable
   for a single run. The lib (`L2Atom.onApproved`) still reads
   `ATOMA_SKILL_LEARN === '1'` at hook time — `runTask` writes
@@ -1078,7 +1079,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   demoted by the original incident was reset (sanctioned path) to
   re-earn compilation under the fixed runtime.
 - **The workspace is FENCED from the repo's module system
-  (`ensureModuleResolutionBoundary`, `src/examples/workspace.ts`).** The
+  (`ensureModuleResolutionBoundary`, `src/run/workspace.ts`).** The
   inverse leak of the `.mjs` bullet above: Node resolves a `.js` file's
   module system by walking UP to the nearest package.json, and the
   workspace lives under the atoma repo (`"type": "module"`) — so a task
@@ -1621,7 +1622,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   provider, otherwise the whole string is a model id for the default
   client (Ollama tags legitimately contain colons — `qwen3:8b` must not
   parse as provider "qwen3"). `buildReferencedProviders`
-  (`src/examples/providers.ts`) constructs only the providers actually
+  (`src/run/providers.ts`) constructs only the providers actually
   referenced by tier pins: zai (Anthropic-COMPATIBLE endpoint
   `https://api.z.ai/api/anthropic`, served by the existing
   `AnthropicLlmClient` with `ZAI_API_KEY`/`ZAI_BASE_URL` — same trick
@@ -1752,7 +1753,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       counts; on a subscription nothing is billed per token. Each
       `complete()` spawns a CLI subprocess — runs are slower than the
       direct API (~2-5s overhead per call).
-- **Example auth (`src/examples/auth.ts`).** `makeAnthropicClient`
+- **Run auth (`src/run/auth.ts`).** `makeAnthropicClient`
   builds the direct-API client from the SDK's native credential chain:
   ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → `ant auth login` OAuth
   profile (zero-arg `new Anthropic()`, SDK ≥0.93). `ATOMA_AUTH=cli`

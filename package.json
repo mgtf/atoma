@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "example:build": "tsx src/examples/build-app.ts",
+    "run:build": "tsx src/cli/build-app.ts",
     "registry": "tsx src/cli/registry.ts",
     "burnin": "tsx src/cli/burnin.ts",
     "curriculum": "tsx src/cli/curriculum.ts",

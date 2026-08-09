@@ -67,7 +67,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
 /**
  * Run one task end to end, for any family.
  *
- * Extracted verbatim from `examples/build-app.ts`, which had become the
+ * Extracted verbatim from the old `examples/build-app.ts`, which had become the
  * product while living in `examples/` — the burn-in harness spawns it per
  * task, CLAUDE.md documents it as load-bearing in a dozen places, and the
  * only other entrypoint had silently drifted away from every safety
