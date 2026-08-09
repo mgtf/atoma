@@ -9,6 +9,7 @@ import {
   REFUSAL_REASON_MAX_CHARS,
 } from '../src/skills/registry.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
+import { closeLedgerHandles, readLedger } from '../src/core/ledger.js';
 
 /**
  * Tests for the SKILLS foundation (commit 1):
@@ -580,5 +581,72 @@ describe('L1Atom.skills() integration', () => {
     expect(reg.loadFor('Helium')).toEqual([]);
     // Hydrogen still has its skill on disk.
     expect(existsSync(join(dir, 'Hydrogen', 'x', 'SKILL.md'))).toBe(true);
+  });
+});
+
+/**
+ * A counter we cannot read is not a counter at zero.
+ *
+ * Every `_meta.json` write is a whole-object non-atomic `writeFileSync`, so a
+ * crash mid-write leaves a torn file. `readMeta` used to answer 0/0 for that,
+ * SILENTLY, and the next bump persisted `0 + 1` — months of earned trust
+ * replaced by a plausible number with no error and no trace. This is the
+ * concrete data-loss mode of a sidecar store, and the strongest present-day
+ * argument for eventually moving skill counters into the transactional store.
+ */
+describe('a torn _meta.json never becomes a confident zero', () => {
+  let dir: string;
+  let savedLedger: string | undefined;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'atoma-tornmeta-'));
+    // Own ledger: the suite-wide default is shared, so a delta count taken
+    // against it could be moved by another test file's writes.
+    savedLedger = process.env['ATOMA_LEDGER_DB'];
+    process.env['ATOMA_LEDGER_DB'] = join(dir, 'store.db');
+    closeLedgerHandles();
+  });
+  afterEach(() => {
+    closeLedgerHandles();
+    if (savedLedger === undefined) delete process.env['ATOMA_LEDGER_DB'];
+    else process.env['ATOMA_LEDGER_DB'] = savedLedger;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function seedAt(successes: number): { reg: SkillRegistry; metaPath: string } {
+    const reg = new SkillRegistry(dir);
+    reg.save('Hydrogen', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    for (let i = 0; i < successes; i++) reg.recordSuccess('Hydrogen', 'earned');
+    return { reg, metaPath: join(dir, 'Hydrogen', 'earned', '_meta.json') };
+  }
+
+  it('refuses the bump instead of overwriting the earned counters with 1', () => {
+    const { reg, metaPath } = seedAt(9);
+    expect(reg.loadFor('Hydrogen')[0]!.successes).toBe(9);
+    // Torn write: valid prefix, no closing brace — what a crash leaves.
+    writeFileSync(metaPath, '{"successes": 9, "failures": 0, "updat', 'utf8');
+    reg.recordSuccess('Hydrogen', 'earned');
+    // The file is UNCHANGED, so the 9 are still recoverable by hand.
+    expect(readFileSync(metaPath, 'utf8')).toBe('{"successes": 9, "failures": 0, "updat');
+  });
+
+  it('and records no ledger event for a bump that never landed', () => {
+    const { reg, metaPath } = seedAt(3);
+    writeFileSync(metaPath, 'not json at all', 'utf8');
+    const before = readLedger().length;
+    reg.recordSuccess('Hydrogen', 'earned');
+    reg.recordFailure('Hydrogen', 'earned');
+    expect(readLedger().length).toBe(before);
+  });
+
+  it('an ABSENT sidecar still initialises at zero — hand-written skills keep working', () => {
+    const reg = new SkillRegistry(dir);
+    mkdirSync(join(dir, 'Hydrogen', 'byhand'), { recursive: true });
+    writeFileSync(
+      join(dir, 'Hydrogen', 'byhand', 'SKILL.md'),
+      '---\nname: byhand\ndescription: d\nwhen_to_use: w\nkind: llm\n---\nbody\n',
+      'utf8'
+    );
+    reg.recordSuccess('Hydrogen', 'byhand');
+    expect(reg.loadFor('Hydrogen').find((s) => s.id === 'byhand')!.successes).toBe(1);
   });
 });

@@ -629,9 +629,17 @@ export class SkillRegistry {
     // see persistent counters. Without this, hand-authored skills
     // never accumulate trust — observed when seeding a kind:script
     // skill via cat heredoc and watching its counter stay empty.
-    const cur = existsSync(metaPath)
-      ? readMeta(metaPath)
-      : { successes: 0, failures: 0, updatedAt: nowIso() };
+    let cur: SkillMeta = { successes: 0, failures: 0, updatedAt: nowIso() };
+    if (existsSync(metaPath)) {
+      const read = readMetaChecked(metaPath);
+      // A counter we cannot read is not a counter at zero. Writing `0 + 1`
+      // over a torn sidecar is worse than not writing at all: it looks
+      // healthy forever. Refusing costs one uncounted run and keeps the file
+      // recoverable — and `bump` returning false means no ledger event
+      // either, so the projection does not claim a bump that never landed.
+      if (read.corrupt) return false;
+      cur = read.meta;
+    }
     const next: SkillMeta = {
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),
@@ -734,9 +742,37 @@ function readMeta(path: string): SkillMeta {
         ? { lastMatchedAt: obj.lastMatchedAt }
         : {}),
     };
-  } catch {
+  } catch (err) {
+    // LOUD, and the caller is told. This used to return a silent 0/0, which
+    // is the concrete data-loss mode of a sidecar store: every write is a
+    // whole-object non-atomic `writeFileSync`, so a crash mid-write leaves a
+    // torn file, the next read calls it 0/0, and the next bump confidently
+    // persists `0 + 1` — months of earned trust replaced by a plausible
+    // number, no error, no trace. `readMetaChecked` lets the counter path
+    // refuse instead of overwriting; recovery is then a hand edit, or
+    // `npm run ledger -- check`, which can still project what the counters
+    // should be.
+    corruptMetaPaths.add(path);
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[skills] unreadable ${path} (${(err as Error).message}) — counters left ALONE rather than reset. Repair it by hand or check \`npm run ledger -- tail\`.`
+    );
     return { successes: 0, failures: 0, updatedAt: nowIso() };
   }
+}
+
+/**
+ * Paths whose last read failed to parse. A set rather than a return flag so
+ * the ten existing `readMeta` call sites keep their shape; the counter path
+ * consults it through `readMetaChecked`.
+ */
+const corruptMetaPaths = new Set<string>();
+
+/** `readMeta`, plus whether the file was unreadable rather than absent. */
+function readMetaChecked(path: string): { meta: SkillMeta; corrupt: boolean } {
+  corruptMetaPaths.delete(path);
+  const meta = readMeta(path);
+  return { meta, corrupt: corruptMetaPaths.has(path) };
 }
 
 /**

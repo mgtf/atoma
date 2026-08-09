@@ -898,7 +898,45 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   / `recordFailure` never touch human-authored content. The id is
   validated via `isSafeSkillId` (kebab-case, 3–60 chars) so a
   malicious id can't escape the namespace via `..`. `SkillRegistry`
-  override path: `ATOMA_SKILLS_DIR` env var (default `./skills`).
+  override path: `skillsDirPath()` / `ATOMA_SKILLS_DIR` (default `./skills`).
+
+- **Skills stay ON DISK — considered against moving them into the store,
+  2026-08-09, and deferred with a trigger.** The atom registry and the ledger
+  were consolidated into one `atoma.db` the same day, so the question is live:
+  why not the third store too? Four reasons, in descending weight.
+  (a) **`SKILL.md` IS the interchange format, not a serialisation of one.** It
+  is the Agent Skills base spec — `skills export` emits it, Claude Code reads
+  it verbatim, and `parseFrontmatter` already migrates `id:` → `name:`
+  opportunistically. As rows it becomes invisible: reading one recipe would
+  need an export step, and `grep -r` over the catalog — how the hygiene pass
+  and the shareability review are actually done — stops existing.
+  (b) **Editing a body by hand is a SANCTIONED path used twice**, both times
+  deliberately bypassing `save()` to preserve `compiledGeneration` and 28
+  earned successes (`readme-from-verified-runs`, `verify-cli-argv-exit-codes`).
+  In a DB that is either a new CLI verb or sqlite3 surgery on a text blob.
+  (c) **The only driver is SaaS, which is not built.** `docs/saas-architecture.md`
+  wants globally-shared bodies, and a DB is the right answer THERE. Building
+  it now is the speculative generality this file refuses everywhere else, and
+  it would put 24 recipes carrying real trust (23✓, 16✓) through a migration
+  to serve zero present users.
+  (d) The **rejected middle path** — counters in the DB, bodies on disk — is
+  strictly worse: it turns `promoteToScript`'s three-file write into a
+  genuinely distributed transaction, and helps SaaS not at all, since bodies
+  are what get shared.
+  WHAT THE MOVE WOULD REALLY HAVE FIXED, now fixed in place instead: a torn
+  `_meta.json` used to read as a SILENT 0/0, and the next bump persisted
+  `0 + 1` — every write is a whole-object non-atomic `writeFileSync`, so a
+  crash mid-write replaced months of earned trust with a plausible number, no
+  error, no trace. `readMetaChecked` now makes `bump` REFUSE (leaving the file
+  recoverable and, since `bump` returns false, filing no ledger event for a
+  bump that never landed) and warns loudly. That was the concrete data-loss
+  mode; the remaining sidecar weakness is `promoteToScript`'s three-file
+  sequence, which has never been observed to tear.
+  REVISIT when a SECOND tenant exists, or when a body write is observed to
+  tear in practice. NOT for tidiness: the honest cost of the split today is
+  one sentence in `ledger check`'s output (`--skills-dir` still has to name
+  the right tree — the one half of the ledger's old KNOWN LIMIT that stays
+  conventional) and a second thing to back up.
 
 - **Match → inject (#C2a).** `L2.runSubtask` runs a Haiku skill-
   prefilter against the resolved L1's persistent skill catalog
