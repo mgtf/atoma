@@ -1,29 +1,19 @@
 {
   "tasks": [
     {
-      "id": "recipe-notes-index",
-      "family": "files",
-      "goal": "Create three markdown files in a workspace — sourdough-starter.md, weeknight-pasta.md, and slow-cooker-chili.md — each with a short recipe and a one-paragraph description of the dish. As a FINAL SEPARATE PHASE, generate an index.md that links to all three files with accurate titles and one-line descriptions summarizing each recipe."
-    },
-    {
-      "id": "podcast-api-docs",
-      "family": "http",
-      "goal": "Build a small Node.js HTTP API server (server.js) for a podcast catalog with routes GET /episodes, GET /episodes/:id, POST /episodes, and DELETE /episodes/:id, including request bodies and status codes. As a FINAL SEPARATE PHASE, write a README.md documenting every route exactly as implemented by reading server.js, including request/response shapes and status codes."
-    },
-    {
-      "id": "tide-chart-webpage",
+      "id": "recipe-box-single-page",
       "family": "web",
-      "goal": "Build a single-page web app that displays a static tide chart for a fictional coastal town, letting the user pick a date from a dropdown to see high/low tide times and heights rendered as a simple table and chart."
+      "goal": "Build a single-page web app that stores a personal recipe box in localStorage, letting users add recipes with ingredients and steps, search by ingredient, and mark favorites."
     },
     {
-      "id": "expense-splitter-app",
-      "family": "app",
-      "goal": "Build a small command-line expense-splitting app that takes a group of people and a list of shared expenses, then computes who owes whom and how much to settle up evenly."
-    },
-    {
-      "id": "library-loan-api",
+      "id": "book-lending-tracker-api",
       "family": "http",
-      "goal": "Build a small HTTP API server for a library loan system with routes to list books, check out a book, return a book, and list overdue loans, including in-memory storage and proper status codes for errors like already-checked-out."
+      "goal": "Build a small HTTP API for tracking book loans among friends, with endpoints to register books, record loans/returns, and list overdue items, backed by a local SQLite file."
+    },
+    {
+      "id": "habit-streak-tracker-app",
+      "family": "app",
+      "goal": "Build a small desktop-style app for tracking daily habit streaks, letting users add habits, check them off each day, and view current streak counts."
     }
   ]
 }

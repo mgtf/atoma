@@ -385,6 +385,18 @@ re-exports all the historical names so old imports keep working.
   DUAL-WRITE: counters stay authoritative; `ledger check` projects them and
   flags the IMPOSSIBLE direction (store < ledger = a write path bypassed the
   choke points). Fail-open — a ledger error can never take down a run.
+  VALIDATED BY REAL RUNS, 2026-08-10: five burn-in runs on the consolidated
+  store wrote 41 events from inside the registry's own transactions, and
+  `ledger check` is green with ZERO drift. Two of them were `cli`, chosen
+  because that is the only family whose L1 (`Lithium`) owns compiled scripts
+  — so it is the only way to exercise DETERMINISTIC DISPATCH, the path that
+  writes counters with no validator above it and was therefore the most
+  exposed to this change. It fired 4 times, credited the two script skills
+  and left the atom-type counters alone, exactly as the contract says. The
+  first three runs could not have tested it: the curriculum targeted
+  web/http/app and every compiled script lives in the CLI/docs bucket, so
+  `deterministic=0` there was structural, not a regression — worth knowing
+  before reading a batch's zero as a symptom.
   IT WAS A SIBLING `atoma-ledger.jsonl` until 2026-08-09. Moving it INTO the
   store fixed two things a guard could not:
   (1) THE PAIRING IS PHYSICAL FOR ATOM TYPES. `AtomRegistry` writes through

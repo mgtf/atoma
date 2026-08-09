@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "cli-inicheck",
+      "family": "cli",
+      "goal": "a Node CLI 'inicheck' that validates INI files: reads a path as argv[2], prints 'OK <n> sections' to stdout when every line is a [section], key=value, comment (;) or blank, exits 1 with a clear stderr error naming the first offending line otherwise or when the file is missing. Ship package.json, a fixtures/ dir with one valid and one invalid sample, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "cli-jsonpick",
+      "family": "cli",
+      "goal": "a Node CLI 'jsonpick' that extracts a value from a JSON file: reads a path as argv[2] and a dot-path as argv[3] (e.g. a.b.0.c), prints the value as JSON to stdout, exits 1 with a clear stderr error on a missing file, invalid JSON, or an unresolvable path. Ship package.json, a fixtures/ dir with a nested sample, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    }
+  ]
+}

@@ -150,3 +150,8 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-09T15:04:48.108Z,tide-chart-webpage,web,delivered,0.4209,345,14,1,0,13,0,0,0,0,0,0,0,2026-08-09T15-04-48-948-d45a4a6e.json
 2026-08-09T15:10:35.914Z,expense-splitter-app,app,delivered,0.1865,207,12,1,0,11,1,0,0,0,0,0,0,2026-08-09T15-10-36-743-69273860.json
 2026-08-09T15:14:05.184Z,library-loan-api,http,failed,0.3201,333,13,1,0,12,0,0,0,0,0,0,0,2026-08-09T15-14-05-953-bd1458f3.json
+2026-08-09T21:37:50.397Z,recipe-box-single-page,web,delivered,0.6747,556,14,1,0,13,0,0,0,0,0,0,0,2026-08-09T21-37-50-998-1eda9d57.json
+2026-08-09T21:47:09.083Z,book-lending-tracker-api,http,delivered,0.6064,369,14,1,0,13,0,0,0,0,0,0,0,2026-08-09T21-47-09-699-b52a2833.json
+2026-08-09T21:53:20.437Z,habit-streak-tracker-app,app,delivered,0.658,784,14,1,0,13,0,0,0,0,0,0,0,2026-08-09T21-53-21-057-dba82da6.json
+2026-08-09T22:11:21.803Z,cli-inicheck,cli,delivered,0.2587,179,15,1,0,14,2,0,0,0,0,0,0,2026-08-09T22-11-22-356-fcaf2c37.json
+2026-08-09T22:14:21.027Z,cli-jsonpick,cli,delivered,0.2379,175,15,1,0,14,2,0,0,0,0,0,0,2026-08-09T22-14-21-526-0c8909e7.json
