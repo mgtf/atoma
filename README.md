@@ -309,7 +309,10 @@ npm run burnin -- my-tasks.json --family cli --timeout 900000
   `list_files`, `run_shell`, `start_static_server`, `validate_html`, `fetch_url`,
   `start_node_server`)
 - `src/viz/` — run recorder + self-contained web visualizer (`npm run viz`)
-- `src/examples/` — `research-brief.ts` and `build-app.ts` (end-to-end build demo)
+- `src/run/` — the generic runner (`runTask`), the `TaskProfile` contract and
+  the per-family profiles under `src/run/profiles/`
+- `src/examples/` — `build-app.ts`, the build-family entrypoint (a thin shell
+  over `runTask`)
 - `tests/` — vitest unit + integration tests (mock LLM, no network)
 
 ## 🗺️ Where this goes

@@ -29,7 +29,6 @@ npm install
 npm run typecheck                     # tsc --noEmit (strict mode)
 npm test                              # vitest run — all mocked, no API key needed
 npm run build                         # emits to dist/
-npm run example:research "<topic>"    # live, requires ANTHROPIC_API_KEY
 npm run example:build "<goal>"        # live build-an-app example
 
 npm run registry -- list              # inspect persisted atom types + counters
@@ -468,7 +467,50 @@ re-exports all the historical names so old imports keep working.
   subtask description at creation time. Legacy registry entries from
   before this rule may still carry task-themed descriptions; leave them
   alone, they'll lose the prefilter race naturally.
-- **Canonical bootstrap in `examples/build-app.ts`.** On every run we
+- **The RUNNER is generic, the PROFILE is the family (`src/run/`).**
+  `runTask(profile, argv)` in `src/run/runner.ts` owns everything
+  family-independent: provider selection + cross-vendor routing, sandbox and
+  builtins, trace recording, the skill-lifecycle flags, the run budget and
+  abort signal, signal handling, the last-resort watchdog, the post-mortem.
+  A `TaskProfile` (`src/run/profile.ts`) contributes ONLY what a task family
+  changes: workspace prep, the tier-3 seed, the canonical catalog seeding,
+  the Task constraints, and the env-var names for store/workspace/budget.
+  `src/examples/build-app.ts` is now a 20-line shell over the pair.
+  WHY: the 541-line example WAS the product — the burn-in harness spawns it
+  per task, its stdout is the source of `burnin/results.csv`, and this file
+  documented it as load-bearing in a dozen places. The cost of that was
+  measured twice: `research-brief.ts` silently lacked every safety guarantee
+  added to the build path (no `ATOMA_LLM` branch, no tools, no watchdog, no
+  signal handling) and shared `atoma-ledger.jsonl` with a DIFFERENT store,
+  violating the ledger's one-store rule; and `curriculum.ts`'s copy of the
+  provider switch had drifted (it never matched the bare `claude` alias).
+  DESIGNED AGAINST N=1 ON PURPOSE: the interface is a faithful cut of an
+  anatomy pass over the old file, not an anticipation of a second family —
+  adding knobs "while we are here" is the speculative generality this file
+  refuses everywhere else.
+  TWO THINGS THE MOVE COULD HAVE BROKEN, both now pinned by
+  `tests/run-profile-build.test.ts`: (a) the tier-3 seed — `seedL3` re-aligns
+  the persisted prompt whenever the constant changes and `patch` ZEROES trust,
+  so one drifted character would have been the project's first tier-3 patch
+  and cost Neuron its record, with Methane (133/0) and Water (36/0) behind the
+  same pass; the test hashes the constant AND compares it against the live
+  store (through a COPY — `openDb` runs `exec(SCHEMA)` + migrations, so
+  pointing a test at the real registry would have `npm test` writing to it);
+  (b) the console output, which `parseRunLog` reads to build the 146-row cost
+  curve — the runner owns exactly three of its markers (`✓ build finished`,
+  `--- run failed ---`, `TIMEOUT after`). Verified beyond the tests by running
+  the pre- and post-refactor entrypoints side by side against a throwaway copy
+  of the store: byte-identical stdout, byte-identical registry versions.
+  `parseRunnerArgs` deliberately does NOT use `src/cli/args.ts` — `parseCliArgs`
+  treats `--clean-workspace` as a flag-WITH-VALUE and would swallow the goal,
+  silently falling every burn-in task back to the default Minesweeper goal.
+  WHEN A SECOND PROFILE IS JUSTIFIED: a family that is NOT artefact-producing
+  appears on two consecutive batches AND needs a tool bucket `pickTools`
+  cannot make. Today 8/8 burn-in families write files. Note also that a new
+  family needs a VERIFICATION story before it needs a profile — without
+  mechanisable ground truth there are no honest trust counters, hence no
+  fast-path, no promotion, no deterministic dispatch.
+- **Canonical bootstrap in `src/run/profiles/build.ts`.** On every run we
   call five idempotent seeders from `src/atoms/capability.ts`:
   `ensureCanonicalL1` / `ensureCanonicalL2` (web build bucket,
   marked `bootstrap-canonical`), `ensureCanonicalHttpL1` /
@@ -491,7 +533,7 @@ re-exports all the historical names so old imports keep working.
   conditional — the patch no-op guard keeps unchanged runs free and
   counter-preserving; a genuinely changed seed prompt re-aligns the
   persisted row and legitimately resets trust), or create otherwise.
-  `build-app.ts` applies the same conditional-refresh pattern to the
+  the build profile applies the same conditional-refresh pattern to the
   Neuron L3 seed prompt.
 - **Verification is READ-ONLY by design: the supervisor never replays the
   child's commands.** It may run FIXED, idempotent probes it owns
@@ -570,7 +612,7 @@ re-exports all the historical names so old imports keep working.
 - **Bucket-scoped tool filtering in the canonical helpers.** Each
   `ensureCanonical*` pipes its caller-supplied toolset through
   `pickTools(tools, scope)` before creating/patching so a kitchen-
-  sink caller (build-app.ts passes all 8 tools) still produces a
+  sink caller (the runner passes all 9 tools) still produces a
   narrow canonical: the web L1 gets {write_file, read_file,
   list_files, start_static_server, validate_html}; the HTTP L1 gets
   {write_file, read_file, list_files, run_shell, fetch_url,
@@ -874,7 +916,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - **Auto-creation (#C3).** ON by default in `npm run example:build`.
   Pass `--no-learn-skills` (or set `ATOMA_SKILL_LEARN=0`) to disable
   for a single run. The lib (`L2Atom.onApproved`) still reads
-  `ATOMA_SKILL_LEARN === '1'` at hook time — `build-app.ts` writes
+  `ATOMA_SKILL_LEARN === '1'` at hook time — `runTask` writes
   that env var to '1' by default before invoking `l3.handle`, and to
   '0' when `--no-learn-skills` is passed. Marginal cost is ~1 Sonnet
   call (~$0.003) per novel-task success — kept on by default because
@@ -921,7 +963,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   (`npm run skills -- reset <l1> <id>` — also clears the
   `promotionRefusedAt` compile-refusal stamp, the other permanent
   dead-end). Gated by `ATOMA_SKILL_PROMOTE` env var:
-  ON by default in `build-app.ts` (toggle with `--no-promote-skills`),
+  ON by default in `runTask` (toggle with `--no-promote-skills`),
   OFF in the lib so unit-test runs don't make stray Sonnet calls.
   Marginal cost is ~1 Sonnet call (~$0.01) per promotion event.
   `_fallback.md` is INTENTIONALLY left in place after demotion so a
@@ -951,7 +993,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       counter itself (the loop's onApproved never runs) and leaves
       atom-type counters untouched (the L1 model never executed).
       Kill switch: `ATOMA_SKILL_DIRECT=0` (or `--no-direct-skills`
-      in `build-app.ts`); default ON.
+      in `runTask`); default ON.
   **The envelope parse is the ONLY gate on this path** (it returns before
   the supervise loop, so no validator sees the result and `onFailed` —
   hence `demoteToLlm` — is unreachable from it). The exit code alone is
@@ -1626,7 +1668,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       tools-disabled round-trip with a `TOOL BUDGET EXHAUSTED` user
       message to force a final text reply.
     - L3's `resolveLatestOpus` network call is SKIPPED under Ollama
-      — `build-app.ts` passes `anthropic: undefined` to
+      — `runTask` passes `anthropic: undefined` to
       `L3Atom.fromType`, so L3 uses the `FALLBACK_OPUS` id string
       which the Ollama client then maps to `defaultModel`.
 - **A hung transport cannot outlive its deadline (two guards).** The
@@ -1654,7 +1696,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   messages, and each builtin has its own sub-minute timeout). Covered by
   `llm-claude-cli-timeout.test.ts`, whose long-but-active case outlives
   the deadline on purpose.
-  (2) LAST-RESORT WATCHDOG in `build-app`: at `timeoutMs + 60s`, if
+  (2) LAST-RESORT WATCHDOG in `runTask`: at `timeoutMs + 60s`, if
   `l3.handle` still has not settled, persist the partial trace
   (`cancelled: true`) and `process.exit(1)` synchronously — awaiting
   `sandbox.cleanup()` there would re-enter the same class of hang, and
@@ -1679,7 +1721,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       verbatim and the L1/L2 gradient below survives.
       `ATOMA_CLAUDE_MODEL` (ALL tiers onto one model) is DEBUG-ONLY: it
       deliberately flattens the cost gradient the whole project exists
-      to exploit, and the build-app banner shouts when it is set.
+      to exploit, and the runner banner shouts when it is set.
     - Tools are bridged through an IN-PROCESS MCP server whose
       handlers call `req.executor` directly — sandbox, truncation
       (`truncateToolResultContent`), and `onToolInvocation` all
@@ -1830,7 +1872,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     `validateHtmlTool` closed its shared browser through
     `sandbox.onCleanup` — async, and therefore only on the orderly path.
     A hard exit (burn-in group-killing a run at its wall-clock budget,
-    the build-app watchdog, a crash) skips it and Chrome survives with
+    the runner watchdog, a crash) skips it and Chrome survives with
     its helper fleet. Measured 2026-08-08: a web run killed at its 900s
     budget after 46 validations left its browser behind, and 126
     puppeteer processes (42 reparented to init, up to 22h old) had

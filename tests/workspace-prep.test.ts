@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { prepareWorkspace } from '../src/examples/workspace.js';
+import { prepareWorkspace } from '../src/run/workspace.js';
 
 describe('prepareWorkspace — stale build workspace handling', () => {
   let base: string;

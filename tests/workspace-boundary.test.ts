@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { ensureModuleResolutionBoundary } from '../src/examples/workspace.js';
+import { ensureModuleResolutionBoundary } from '../src/run/workspace.js';
 
 /**
  * The environment leak this closes: the workspace lives under the atoma
