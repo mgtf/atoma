@@ -340,7 +340,18 @@ re-exports all the historical names so old imports keep working.
   KNOWN LIMIT: events carry no store identity, so ONE ledger must map to
   ONE authoritative store — point `check` at the DB the events came from,
   and give any secondary store (another --db) its own ledger path if its
-  mutations matter. Skill bodies also carry
+  mutations matter. GUARDED since 2026-08-09 for the case that actually bit:
+  `ledgerWritesAllowed` makes `AtomRegistry` skip the append when its DB is
+  `:memory:` AND no `ATOMA_LEDGER_PATH` was named, because an in-memory
+  registry is by construction not the authoritative store. Two throwaway
+  `tsx` scripts had appended four phantom `type-success` events for Helium to
+  the real file, and `ledger check` then reported
+  `IMPOSSIBLE  Helium: store 2 < ledger 6` — permanently, on the one tool
+  whose entire value is being believed. vitest was never the problem (it pins
+  the path, which is also why an EXPLICIT path always wins the guard); ad-hoc
+  scripts are, and they are what nobody remembers to configure. The four
+  lines were removed by hand and the check is green again. Covered by
+  `tests/ledger-ephemeral-guard.test.ts`. Skill bodies also carry
   `provenance` ({mechanism, model, at} — distilled/revised/compiled) in
   `_meta.json`, preserved across bumps and resets, replaced on rewrite.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into

@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { appendLedger } from '../core/ledger.js';
+import { appendLedger, ledgerWritesAllowed } from '../core/ledger.js';
 import type {
   AtomModifications,
   GenerationParams,
@@ -209,6 +209,18 @@ export function rebrandPersona(systemPrompt: string, newName: string): string {
 export class AtomRegistry {
   constructor(private readonly db: DB) {}
 
+  /**
+   * Append a lifecycle event — unless this registry is an in-memory fixture
+   * with no explicitly configured ledger, in which case the events would
+   * land in whatever file the real store is paired with. See
+   * `ledgerWritesAllowed`: four phantom successes from a throwaway script
+   * turned `ledger check` permanently red before this existed.
+   */
+  private note(event: Parameters<typeof appendLedger>[0]): void {
+    if (!ledgerWritesAllowed(this.db.name)) return;
+    appendLedger(event);
+  }
+
   listByTier(tier: Tier): AtomType[] {
     const rows = this.db
       .prepare('SELECT * FROM atom_types WHERE tier = ? ORDER BY ordinal ASC')
@@ -379,7 +391,7 @@ export class AtomRegistry {
           current.tier,
           current.ordinal
         );
-    appendLedger({ kind: 'counters-reset', entity: name, detail: { reason: 'patch' } });
+    this.note({ kind: 'counters-reset', entity: name, detail: { reason: 'patch' } });
 
       return { ...merged, version: nextVersion, successes: 0, failures: 0 };
     })();
@@ -510,7 +522,7 @@ export class AtomRegistry {
           current.tier,
           current.ordinal
         );
-    appendLedger({ kind: 'counters-reset', entity: name, detail: { reason: 'rollback' } });
+    this.note({ kind: 'counters-reset', entity: name, detail: { reason: 'rollback' } });
       const restored = this.getByName(name);
       if (!restored) throw new RegistryNotFoundError(name);
       return restored;
@@ -675,7 +687,7 @@ export class AtomRegistry {
    * short-circuit the validator LLM call.
    */
   recordSuccess(name: string): void {
-    appendLedger({ kind: 'type-success', entity: name });
+    this.note({ kind: 'type-success', entity: name });
     this.db
       .prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?')
       .run(name);
@@ -687,7 +699,7 @@ export class AtomRegistry {
    * successes accumulate.
    */
   recordFailure(name: string): void {
-    appendLedger({ kind: 'type-failure', entity: name });
+    this.note({ kind: 'type-failure', entity: name });
     this.db
       .prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?')
       .run(name);

@@ -51,6 +51,33 @@ export interface LedgerEvent {
   readonly detail?: Record<string, unknown>;
 }
 
+/**
+ * Is the ledger writable by THIS process, or would it pollute someone else's?
+ *
+ * The ledger's one hard rule is that ONE ledger maps to ONE authoritative
+ * store (see the KNOWN LIMIT in CLAUDE.md): events carry no store identity,
+ * so `ledger check` compares a projection against whichever store you point
+ * it at. An in-memory registry is by construction NOT that store — it is a
+ * test fixture or a throwaway script — so its events belong nowhere near the
+ * default file.
+ *
+ * MEASURED THE HARD WAY: two ad-hoc `tsx` scripts on 2026-08-09 opened
+ * `:memory:` registries, called `recordSuccess('Helium')`, and appended four
+ * phantom successes to the real ledger. `ledger check` then reported
+ * `IMPOSSIBLE  Helium: store 2 < ledger 6` — a permanent false alarm on an
+ * integrity checker, which is the fastest way to teach an operator to ignore
+ * one. vitest pins ATOMA_LEDGER_PATH so tests were never the problem; ad-hoc
+ * scripts are, and they are exactly what nobody remembers to configure.
+ *
+ * An EXPLICIT `ATOMA_LEDGER_PATH` always wins: a caller that named a file
+ * has taken responsibility for the pairing, which is precisely what the
+ * test suite and `viz:demo` do.
+ */
+export function ledgerWritesAllowed(dbPath: string | undefined): boolean {
+  if (process.env['ATOMA_LEDGER_PATH'] !== undefined) return true;
+  return dbPath !== undefined && dbPath !== ':memory:' && !dbPath.startsWith('file::memory:');
+}
+
 export function ledgerPath(): string {
   return resolve(process.env['ATOMA_LEDGER_PATH'] ?? './atoma-ledger.jsonl');
 }
