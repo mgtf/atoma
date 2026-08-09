@@ -16,9 +16,11 @@
  * the refusal stamp — the skill re-earns promotion from scratch.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
 import { parseCliArgs } from './args.js';
 // The refusal stamp records compiler AND scan generation — comparing
@@ -31,7 +33,7 @@ import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import type { Skill } from '../skills/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'export' | 'help';
+  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'export' | 'review' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -39,7 +41,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const { command, positional, flags } = parseCliArgs(argv);
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'export', 'help'].includes(command)) {
+  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'export', 'review', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -348,6 +350,69 @@ function help(unknown?: string): void {
   );
 }
 
+/**
+ * Would each body survive being offered to another organisation?
+ *
+ * The MECHANICAL half of the review gate `docs/saas-architecture.md` §4.2
+ * requires; the human half is not automatable and the output says so on every
+ * row. Run before a skill is ever offered outside the org that learned it —
+ * and run NOW, with one org, because the point is to stop the catalog filling
+ * with recipes nobody judged by this criterion.
+ */
+function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string): void {
+  // The owning L1's declared tools decide what a body may legitimately name.
+  const dbPath =
+    dbFlag ??
+    process.env['ATOMA_DB_PATH'] ??
+    (existsSync('./atoma-build.db') ? './atoma-build.db' : './atoma.db');
+  const toolsByAtom = new Map<string, string[]>();
+  if (existsSync(dbPath)) {
+    const db = new Database(dbPath, { readonly: true });
+    try {
+      for (const r of db.prepare('SELECT name, tools_json FROM atom_types').all() as {
+        name: string;
+        tools_json: string;
+      }[]) {
+        try {
+          toolsByAtom.set(r.name, (JSON.parse(r.tools_json) as { name: string }[]).map((t) => t.name));
+        } catch {
+          /* unreadable row — treated as unknown tools below */
+        }
+      }
+    } finally {
+      db.close();
+    }
+  } else {
+    console.log(`(no atom store at ${dbPath} — tool-scope findings skipped)\n`);
+  }
+
+  const namespaces = registry.listNamespaces().filter((n: string) => !l1Filter || n === l1Filter);
+  const tally = { blocked: 0, review: 0, local: 0 };
+  for (const ns of namespaces) {
+    const owner = toolsByAtom.get(ns);
+    for (const skill of registry.loadFor(ns)) {
+      const a = assessShareability({ skill, ownerToolNames: owner ?? [] });
+      if (a.verdict === 'blocked') tally.blocked++;
+      else if (a.verdict === 'not-shareable') tally.local++;
+      else tally.review++;
+
+      const mark = a.verdict === 'blocked' ? '✗' : a.verdict === 'not-shareable' ? '·' : '○';
+      console.log(`${mark} ${ns}/${skill.id}  [${skill.kind}]  ${a.verdict}`);
+      for (const b of a.blockers) console.log(`    BLOCKER ${b.code} — ${b.detail}`);
+      for (const w of a.warnings) console.log(`    warn    ${w.code} — ${w.detail}`);
+      if (a.verdict === 'review-required') console.log(`    human: ${a.humanMustCheck}`);
+    }
+  }
+  console.log(
+    `\n${tally.blocked} blocked · ${tally.review} clean but AWAITING HUMAN REVIEW · ${tally.local} local-only`
+  );
+  console.log(
+    'A clean row means a reviewer\'s time will not be wasted — never that the body is approved.\n' +
+      'Both kinds need a human: script bodies are executed in another tenant\'s sandbox with no\n' +
+      'validator; llm bodies are injected into another tenant\'s system prompt.'
+  );
+}
+
 function main(): void {
   const args = parseArgs(process.argv);
   if (args.command === 'help') {
@@ -363,6 +428,8 @@ function main(): void {
       return cmdList(registry, args.flags['l1']);
     case 'stats':
       return cmdStats(registry, args.flags['l1'], args.flags['sim']);
+    case 'review':
+      return cmdReview(registry, args.flags['l1'], args.flags['db']);
     case 'show': {
       const [l1, id] = args.positional;
       if (!l1 || !id) {

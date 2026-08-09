@@ -1594,10 +1594,36 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   stamps never ship — trust is runtime-local. Covered by
   `tests/skill-spec-compliance.test.ts`.
 
+- **`skills review` — the mechanical half of the cross-org review gate.**
+  `assessShareability` (`src/skills/shareability.ts`, pure) answers "would a
+  reviewer reject this body outright?" for every skill: leakage literals from
+  the originating run (concrete input filename, absolute path, pinned port,
+  external host), tool names the OWNING L1 cannot declare, the static scan on
+  `kind: script` bodies (with the same loopback allowance the promotion path
+  uses, via `hostAllowsLoopbackNetwork`), and a free-ride WARNING when
+  `matches` outran the runs the skill actually drove. Event skills return
+  `not-shareable` — a trigger is matched against THIS deployment's validator
+  wording, so offering one elsewhere is meaningless rather than unsafe.
+  IT IS NOT THE GATE, and must never be cited as one: `docs/saas-architecture.md`
+  §4.2 requires a HUMAN to read both kinds — script bodies because they are
+  executed in another tenant's sandbox with no validator, llm bodies because
+  they are injected into another tenant's system prompt. A clean verdict means
+  a reviewer's time will not be wasted, never "approved". Same rule as R5 on
+  `scanScriptBody`.
+  BUILT BEFORE THERE IS A SECOND ORG on purpose: the gate cannot fire today,
+  but the criterion applied today is what stops the catalog filling with
+  recipes nobody judged by it — a recipe distilled, promoted and trusted for
+  months is far more expensive to reject later. Current catalog: **0 blocked,
+  16 awaiting human review, 10 local-only.** That clean sweep is why
+  `tests/skill-shareability.test.ts` drives every blocker from a real incident
+  this repo met (the `node index.js sample.txt` literal, the app-task-tracker
+  `validate_html`-on-an-HTTP-host distillation, the probe-crud loopback
+  near-miss) — a detector that never fires proves nothing.
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
   `show <l1> <id>`, `stats [--l1] [--sim <0..1>]`, `drop <l1> <id>
   [--force]`, `merge <l1> <keep> <absorb> [--force]`,
-  `export <l1> <id> [--out <dir>]`, `reset <l1> <id>`.
+  `export <l1> <id> [--out <dir>]`, `review [--l1 <name>] [--db <path>]`,
+  `reset <l1> <id>`.
   Works against any store via `--dir` or `ATOMA_SKILLS_DIR`. `reset`
   zeroes counters AND clears `promotionRefusedAt` — the sanctioned
   escape hatch for the two promotion dead-ends (`failures > 0` after a
