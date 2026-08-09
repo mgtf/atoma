@@ -1961,10 +1961,23 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   prompt, so removing them would invalidate the ENTIRE prompt cache on
   the largest request of the loop. `tool_choice` changes don't touch the
   tools/system cache tiers.
-- **Shared smoke-test guidance.** `SMOKE_DESIGN_GUIDANCE` in
-  `src/atoms/L2Atom.ts` teaches L1 the IIFE contract, the
-  `window.__test` hook pattern for state-heavy apps, and the smoke-loop
-  discipline. It is appended by BOTH `buildNarrowL1Prompt` (escalation-branch
+- **Shared smoke-test guidance.** `SMOKE_DESIGN_GUIDANCE` (now in
+  `src/atoms/prompts.ts`) teaches L1 the IIFE contract, the COST rule
+  (one object smoke, see below), the `window.__test` hook pattern for
+  state-heavy apps, and the smoke-loop discipline.
+  The COST rule was added 2026-08-09 after a clean-machine measurement:
+  a habit-tracker run made **66 validate_html calls carrying 64 distinct
+  smokes, 45 of them PASSING** — one element verified per browser
+  round-trip, ~9 minutes of pure page loads, $0.95 for a single-page
+  widget. Nothing in the guidance said a call was expensive, and the
+  existing loop-discipline rules only fire on REPEATED failures, which
+  never happened (the smokes were all different). The rule tells the L1
+  to return a structured OBJECT answering every question at once: a
+  returned object is truthy so the check passes, and the whole object
+  comes back in `smokeResult`. It also cures the "smoke check failed:
+  false" opacity for free — that message is just `JSON.stringify` of the
+  smoke's return value, so a bare boolean carries no diagnosis while an
+  object comes back with its values. It is appended by BOTH `buildNarrowL1Prompt` (escalation-branch
   path) AND `createSubtaskL1` (fresh-L1-on-fanout path). Adding new L1
   creation sites? Append this block too, or new L1s will miss the
   discipline and thrash on smoke design.

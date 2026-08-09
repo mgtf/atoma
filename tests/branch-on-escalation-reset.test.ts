@@ -6,6 +6,7 @@ import { L2Atom, buildNarrowL1Prompt } from '../src/atoms/L2Atom.js';
 import { L3Atom, buildNarrowL2Prompt } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
 import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
+import { SMOKE_DESIGN_GUIDANCE } from '../src/atoms/prompts.js';
 import { EscalationSignal } from '../src/core/errors.js';
 import { makeCtx, jsonText } from './helpers.js';
 import type { Atom, Supervisor } from '../src/core/atom.js';
@@ -130,6 +131,21 @@ describe('buildNarrowL1Prompt', () => {
 });
 
 describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guidance', () => {
+  it('the smoke guidance leads with COST: one object smoke, not one assertion per call', () => {
+    // Measured (habit-tracker, 2026-08-09, clean machine): 66
+    // validate_html calls carrying 64 distinct smokes, 45 of them
+    // PASSING — one element verified per browser round-trip, ~9 minutes
+    // of page loads. Nothing in the guidance mentioned that a call is
+    // expensive, and the existing loop-discipline rules only fire on
+    // REPEATED failures, which never happened. The same rule also cures
+    // the "smoke check failed: false" opacity: a bare boolean carries no
+    // diagnosis, a returned object comes back with its values.
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/MOST EXPENSIVE tool/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/structured OBJECT/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/a returned OBJECT is truthy/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/If you are past\s+five/);
+  });
+
   it('new L1s that inherit validate_html from the L2 toolset get SMOKE_DESIGN_GUIDANCE', async () => {
     // Regression: earlier the smoke guidance only lived in
     // buildNarrowL1Prompt (the escalation-branch path), so freshly-
