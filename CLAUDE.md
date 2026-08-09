@@ -2559,8 +2559,21 @@ variance from anything else. Deliverable verified on the host through the
 bind mount (`node index.js hello` → `olleh`), probe manifest written, and the
 trace kept all 7 tool events because `onToolInvocation` fires on the control
 plane.
-STILL NOT THE DEFAULT: that needs the burn-in curve across a batch, not one
-task. Worker stderr is forwarded to the host so `[tool:…]` lines still appear
+NOT THE DEFAULT, AND THE QUESTION IS CLOSED — a burn-in batch to decide it
+was CONSIDERED AND REJECTED (2026-08-09): there are only two cases and
+neither is waiting on the number. Local dev is single-tenant, so the
+isolation protects the operator from nobody while costing a 1.5 GB image to
+maintain; a SaaS deployment containerises ALWAYS, by construction, not by
+flipping a default. An hour of runs to arbitrate between two options that are
+not in play is the spend this file refuses everywhere else.
+The REAL risk of an opt-in second path is that it ROTS — measured twice in
+this repo: `research-brief.ts` drifted away from every safety guarantee the
+build path gained, and `curriculum.ts`'s copy of the provider switch stopped
+matching the original. The insurance is keeping the path exercised, not
+running batches: `tests/container-isolation.test.ts` covers the tool layer
+against a live container, `tests/tool-backend-selection.test.ts` covers the
+selection (including that a new flag is never mistaken for the goal — the
+`--clean-workspace` class of bug). Worker stderr is forwarded to the host so `[tool:…]` lines still appear
 live; they match none of `parseRunLog`'s markers and arrive on stderr, so the
 harness is unaffected.
 KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
