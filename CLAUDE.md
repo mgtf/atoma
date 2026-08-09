@@ -2696,15 +2696,36 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   tier exists to pay for — treat it as a reversible burn-in A/B whose
   damage would show up in results.csv (escalations, rejections), never as
   a default.
-  WHERE THE DATA POINTS INSTEAD: the escalation tail. 4 runs of 78 (5.1%)
-  carry $2.88 = 10.7% of the corpus cost, with 5.75 L1-execute calls per
-  run against 2.49 and 5.0 rejections against 0.20, plus an
-  `L2:fallback-execute` line absent from healthy runs. That is the
-  partial-replay gap the SPOQ entry already names ("replans re-run the
-  whole plan; there is no partial-replay that keeps the good phases and
-  redoes the bad one") — a compressible cost that also buys wall-clock
-  and failed deliverables, and needs no memoised content at the
-  unvalidated point.
+  WHERE THE DATA POINTED, AND WHY THAT READING IS NOW WITHDRAWN: this entry
+  used to send the next session after the escalation tail — "4 runs of 78
+  (5.1%) carry $2.88 = 10.7% of the corpus cost… the partial-replay gap the
+  SPOQ entry already names". Re-measured on 2026-08-10 at 151 runs, the
+  recommendation does not survive its own evidence, in three ways worth
+  recording because each is a way to misread a burn-in curve.
+  (a) **The lifetime figure is a RECENCY TRAP.** It now reads 43/151 (28.5%)
+  carrying 38.9% of cost, which looks like the problem tripled. Split
+  chronologically it is 52% → 20% → 13.7%, and 1 of the last 30. The
+  escalation rate is COLLAPSING as the catalog matures — the tail is the
+  learning curve being paid down, not a defect accumulating. This is exactly
+  the error the friction report's `lastSeen` column was added to prevent
+  ("a lifetime tally, so a fixed defect keeps topping it"), repeated in a
+  different report. Any claim taken off `results.csv` needs the
+  chronological split; the mean over all runs hides the trend that decides
+  whether to act.
+  (b) **The correlation inverts if you state it strongly.** ZERO of the 43
+  escalating runs failed, against 6 of 108 non-escalating — which reads as
+  "escalation prevents failure" and is not what happened. Failures have a
+  median of 6 LLM calls against 15 for delivered runs: they die BEFORE the
+  escalation machinery can engage. Escalation is what happens to runs that
+  keep going, so conditioning on it selects survivors.
+  (c) **The residual failure mode is not reasoning, it is WEDGING.** The 6
+  failures are slower and quieter than healthy runs — median 555s against
+  265s, on fewer calls — with one at 1283s having made ZERO LLM calls and one
+  stopped by the 900s budget. That is the class the per-call inactivity
+  deadline and the watchdog already target, not one partial replay would fix.
+  Partial replay stays a real gap (the SPOQ entry still names it), but it is
+  no longer the measured top line, and nothing should be built on the
+  withdrawn numbers.
 
 ## Structural slices — status
 
