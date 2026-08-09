@@ -368,6 +368,18 @@ re-exports all the historical names so old imports keep working.
   outside LLM loops (its sensor is `directFailures`). Covered by
   `tests/friction.test.ts`, whose normalisation cases are the adversarial
   review's literal counter-examples.
+- **A burn-in batch needs the machine to itself.** Beyond the source-edit
+  rule below, do not run heavy work (test suites, Puppeteer-spawning
+  experiments, another batch) alongside one: measurements taken on a
+  loaded machine are not comparable with the rest of the curve. Measured
+  twice on 2026-08-08 — 126 leaked Chrome processes turned a 193s task
+  into 437s and took two later runs down with them; and a web batch
+  launched while the local test suite was running produced two runs whose
+  Opus plan call alone ran 932s and blew the 900s budget with nothing to
+  show. Both sets of rows were purged as noise. Corollary for reading
+  traces: a slow call is not a hung one — the inactivity deadline
+  correctly stays quiet while the model streams, and the run budget is
+  the backstop for "too slow".
 - **NEVER edit `src/` while a burn-in batch is in flight.** The harness
   spawns a FRESH `tsx src/examples/build-app.ts` process per task, so
   each task compiles the source as it stands AT ITS START — an

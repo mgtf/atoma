@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "web-habit-grid-unspec",
+      "family": "web",
+      "goal": "a single-page habit tracker in one self-contained HTML file: a 7-day grid where each cell can be toggled done, a weekly completion percentage that updates live, and colour styling that changes as the percentage crosses 50% and 100%."
+    },
+    {
+      "id": "web-budget-split-unspec",
+      "family": "web",
+      "goal": "a single-page expense splitter in one self-contained HTML file: add named people and amounts they paid, then display who owes whom to settle up, recomputing live as entries change."
+    }
+  ]
+}
