@@ -34,6 +34,7 @@ export interface RunnerArgs {
   noDirectSkills: boolean;
   cleanWorkspace: boolean;
   container: boolean;
+  egress: boolean;
 }
 
 /**
@@ -53,6 +54,8 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
   let noDirectSkills = false;
   let cleanWorkspace = false;
   let container = process.env['ATOMA_CONTAINER'] === '1';
+  // Egress implies a container: there is nothing to proxy without one.
+  let egress = process.env['ATOMA_EGRESS'] === '1';
   for (const a of argv) {
     if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a === '--no-promote-skills') noPromoteSkills = true;
@@ -60,10 +63,13 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     else if (a === '--clean-workspace') cleanWorkspace = true;
     else if (a === '--container') container = true;
     else if (a === '--no-container') container = false;
+    else if (a === '--egress') { egress = true; container = true; }
+    else if (a === '--no-egress') egress = false;
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container };
+  if (egress) container = true;
+  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container, egress };
 }
 
 /**
@@ -222,7 +228,11 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // at ONE point because `ToolExecutor` is two methods and nothing in the
   // control plane reads the workspace except through it.
   const backend = args.container
-    ? await containerToolBackend({ workspaceRoot })
+    ? await containerToolBackend({
+        workspaceRoot,
+        egress: args.egress,
+        runId: `${profile.id}-${process.pid}`,
+      })
     : localToolBackend({ workspaceRoot, logger: consoleLogger });
   const toolDecls = backend.toolDecls;
 

@@ -2712,6 +2712,30 @@ exact, `.npmjs.org` for subdomains; the anchoring exists to refuse
 `registry.npmjs.org.evil.com`), IP literals always denied (an allowlist is a
 list of NAMES — a literal is a run probing the proxy's own network), and
 ports 80/443 by default.
+ORCHESTRATED, not just available: `--egress` (or `ATOMA_EGRESS=1`) on
+`run:build` implies `--container` and brings up a PER-RUN sidecar
+(`src/tools/egressSidecar.ts`) — its own `--internal` network plus its own
+proxy, both named after the run and torn down with it. PER-RUN is a
+correctness requirement, not tidiness: REPRODUCED that two containers sharing
+one `--internal` network reach each other's servers
+(`REACHED: TENANT_A_WORKSPACE_SECRET`), so a shared network hands one tenant's
+workspace to the next.
+FOUR BUGS the end-to-end proof caught that no unit test could, all now fixed
+and each invisible from the layer above:
+  1. `docker run -d` returns before the process inside listens, so the run's
+     first request hit a dead proxy. There is a readiness wait now — and it
+     reads BOTH streams, because `docker logs` mirrors stderr separately and
+     the proxy logs there (stdout is the worker's stdio protocol). Reading
+     only stdout made readiness never arrive.
+  2. `network rm` raced the `--rm` worker's teardown; exactly one network
+     leaked per run. Retried now.
+  3. The env allowlist (#7a) STRIPPED `HTTP_PROXY` before npm saw it — two of
+     this repo's own safety mechanisms cancelling out. The proxy variables are
+     allowlisted; no credential was added.
+  4. The image carries compiled `dist/`, so a host-side fix does nothing until
+     `npm run build:worker`. Same staleness trap as the `edit_file` fix; verify
+     with a hash, never a grep.
+Every one of them presented as "npm install failed" with an empty stderr.
 TEST DISCIPLINE, learned here: the control plane must be proven denied by the
 ALLOWLIST independently of the port rule. The first version of these tests
 put every control-plane case on port 4111, so both rules fired and neither

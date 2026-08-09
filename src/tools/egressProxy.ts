@@ -106,8 +106,12 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<RunningEgres
 // Container entry point.
 if (process.argv[1] && /egressProxy\.(ts|js)$/.test(process.argv[1])) {
   const raw = process.env['ATOMA_EGRESS_ALLOWLIST'];
+  const ports = process.env['ATOMA_EGRESS_PORTS'];
   void startEgressProxy({
     port: Number(process.env['ATOMA_EGRESS_PORT'] ?? 3128),
     ...(raw ? { allowlist: raw.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
+    ...(ports
+      ? { allowedPorts: ports.split(',').map((p) => Number(p.trim())).filter(Number.isInteger) }
+      : {}),
   });
 }

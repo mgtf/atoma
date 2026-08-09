@@ -29,6 +29,29 @@ const CHILD_ENV_ALLOWLIST: readonly string[] = [
   'LOGNAME',
   'NODE_ENV',
   'npm_config_cache',
+  // PROXY CONFIG — plumbing, not a secret.
+  //
+  // The containerised run reaches the outside world through one allowlisting
+  // proxy and nothing else, and `docker run -e HTTP_PROXY=…` puts the address
+  // in the CONTAINER's environment. But `run_shell` builds its child's
+  // environment from THIS list rather than inheriting, so the setting was
+  // stripped before npm ever saw it — two of this repo's own safety
+  // mechanisms cancelling out. Found end to end: `npm install` exited 1 with
+  // empty stdout AND stderr, and `echo "$HTTP_PROXY"` in the same sandbox
+  // printed nothing.
+  //
+  // Passing these through leaks nothing: the value is an internal hostname
+  // the run is already on a network with, and NO_PROXY only ever narrows what
+  // the proxy is asked for. The credential-exfiltration class #7a exists
+  // against is untouched — no token, key or path is added here.
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'npm_config_proxy',
+  'npm_config_https_proxy',
 ];
 
 /**

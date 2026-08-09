@@ -1,7 +1,8 @@
 import { ToolSandbox } from '../tools/sandbox.js';
 import { InMemoryToolRegistry } from '../tools/registry.js';
 import { defaultBuiltinTools } from '../tools/builtin.js';
-import { ContainerToolExecutor } from '../tools/containerExecutor.js';
+import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
+import { startEgressSidecar } from '../tools/egressSidecar.js';
 import type { Logger, Tool, ToolExecutor } from '../core/types.js';
 
 /**
@@ -53,20 +54,55 @@ export function localToolBackend(opts: { workspaceRoot: string; logger: Logger }
 export async function containerToolBackend(opts: {
   workspaceRoot: string;
   image?: string;
+  /**
+   * Opt into PROXIED egress. Off by default: with it off the run gets
+   * `--network none` and cannot fetch anything, which is right until a task
+   * genuinely needs a dependency. On, the run joins a per-run `--internal`
+   * network whose only peer is an allowlisting proxy.
+   */
+  egress?: boolean;
+  egressAllowlist?: readonly string[];
+  /** Names the per-run network and proxy, so two runs never share either. */
+  runId?: string;
 }): Promise<ToolBackend> {
+  const image = opts.image ?? DEFAULT_WORKER_IMAGE;
+  // PER RUN, not shared. Reproduced: two containers on one --internal network
+  // reach each other's servers (`REACHED: TENANT_A_WORKSPACE_SECRET`), so a
+  // shared network would hand one tenant's workspace to the next.
+  const sidecar = opts.egress
+    ? await startEgressSidecar({
+        runId: opts.runId ?? String(process.pid),
+        image,
+        ...(opts.egressAllowlist ? { allowlist: opts.egressAllowlist } : {}),
+      })
+    : null;
   const exec = new ContainerToolExecutor({
     workspaceHostPath: opts.workspaceRoot,
-    ...(opts.image ? { image: opts.image } : {}),
+    image,
+    ...(sidecar
+      ? { egress: { network: sidecar.network, proxyHost: sidecar.proxyHost, proxyPort: sidecar.proxyPort } }
+      : {}),
   });
-  await exec.start();
+  try {
+    await exec.start();
+  } catch (err) {
+    await sidecar?.stop();
+    throw err;
+  }
   return {
     executor: exec,
     toolDecls: exec.toolDeclarations(),
     // The host path is what a human opens; /workspace is only the container's
     // view of the same bytes through the bind mount.
-    rootLabel: `${opts.workspaceRoot} (in container, mounted at /workspace)`,
+    rootLabel:
+      `${opts.workspaceRoot} (in container, mounted at /workspace` +
+      `${sidecar ? ', proxied egress' : ', no network'})`,
     cleanup: async () => {
       exec.stop();
+      // The sidecar outlives the worker container by design — the worker is
+      // `--rm`, the network is not — so it must be torn down explicitly or
+      // every run leaks a network and a proxy.
+      await sidecar?.stop();
     },
   };
 }

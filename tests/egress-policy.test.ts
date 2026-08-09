@@ -147,3 +147,57 @@ describe('decideEgress — default deny', () => {
     }
   });
 });
+
+/**
+ * The env allowlist must carry the proxy configuration.
+ *
+ * Two of this repo's safety mechanisms cancelled each other out here.
+ * `docker run -e HTTP_PROXY=…` puts the proxy address in the CONTAINER's
+ * environment, but `run_shell` builds its child's environment from
+ * `CHILD_ENV_ALLOWLIST` rather than inheriting (#7a, so a child cannot read
+ * an API key) — which stripped the setting before npm ever saw it. The
+ * symptom was `npm install` exiting 1 with EMPTY stdout and stderr, three
+ * layers from the cause.
+ *
+ * Passing these through leaks nothing: the value is an internal hostname the
+ * run already shares a network with, and NO_PROXY only narrows what the proxy
+ * is asked for.
+ */
+describe('the sandbox env allowlist carries proxy configuration', () => {
+  it('passes HTTP(S)_PROXY, NO_PROXY and the npm equivalents to the child', async () => {
+    const { sandboxChildEnv } = await import('../src/tools/sandbox.js');
+    const saved: Record<string, string | undefined> = {};
+    const vars = {
+      HTTP_PROXY: 'http://atoma-proxy:3128',
+      HTTPS_PROXY: 'http://atoma-proxy:3128',
+      NO_PROXY: 'localhost',
+      npm_config_proxy: 'http://atoma-proxy:3128',
+      npm_config_https_proxy: 'http://atoma-proxy:3128',
+    };
+    for (const [k, v] of Object.entries(vars)) {
+      saved[k] = process.env[k];
+      process.env[k] = v;
+    }
+    try {
+      const env = sandboxChildEnv();
+      for (const [k, v] of Object.entries(vars)) expect(env[k], `${k} was stripped`).toBe(v);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  it('still strips a credential — #7a is untouched', async () => {
+    const { sandboxChildEnv } = await import('../src/tools/sandbox.js');
+    const saved = process.env['ANTHROPIC_API_KEY'];
+    process.env['ANTHROPIC_API_KEY'] = 'sk-should-never-reach-a-child';
+    try {
+      expect(sandboxChildEnv()['ANTHROPIC_API_KEY']).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env['ANTHROPIC_API_KEY'];
+      else process.env['ANTHROPIC_API_KEY'] = saved;
+    }
+  });
+});
