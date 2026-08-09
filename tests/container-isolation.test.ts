@@ -12,7 +12,7 @@ import { drainLines, encodeMessage, isWorkerHello } from '../src/tools/container
  * `run_shell`'s child is spawned with `cwd` and nothing more, so in a single
  * process the atom registry, every skill body and the ledger are one
  * filesystem walk from model-authored code — reproduced earlier as
- * `ls ../../atoma-build.db ../../skills` listing all of them. Moving the tool
+ * `ls ../../atoma.db ../../skills` listing all of them. Moving the tool
  * layer into a container with only the workspace mounted and no route out is
  * what makes that walk find nothing.
  *
@@ -121,7 +121,7 @@ describeDocker('a containerised run cannot reach the stores', () => {
     // exactly the shape that leaks in-process.
     dir = mkdtempSync(join(tmpdir(), 'atoma-container-'));
     workspace = join(dir, 'ws');
-    writeFileSync(join(dir, 'atoma-build.db'), 'TENANT_REGISTRY_SECRET');
+    writeFileSync(join(dir, 'atoma.db'), 'TENANT_REGISTRY_SECRET');
     writeFileSync(join(dir, 'atoma-ledger.jsonl'), 'TENANT_LEDGER_SECRET');
     require('node:fs').mkdirSync(join(dir, 'skills', 'Helium'), { recursive: true });
     writeFileSync(join(dir, 'skills', 'Helium', 'SKILL.md'), 'TENANT_SKILL_SECRET');
@@ -154,7 +154,7 @@ describeDocker('a containerised run cannot reach the stores', () => {
   it('CANNOT read the sibling stores — the walk that works in-process', async () => {
     const r = (await exec.execute('run_shell', {
       command: 'ls',
-      args: ['-1', '../atoma-build.db', '../skills'],
+      args: ['-1', '../atoma.db', '../skills'],
     })) as { stdout?: string; stderr?: string };
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     expect(out).not.toContain('TENANT');
@@ -164,7 +164,7 @@ describeDocker('a containerised run cannot reach the stores', () => {
   it('CANNOT read them via an absolute host path either', async () => {
     const r = (await exec.execute('run_shell', {
       command: 'cat',
-      args: [join(dir, 'atoma-build.db')],
+      args: [join(dir, 'atoma.db')],
     })) as { stdout?: string; stderr?: string };
     expect(`${r.stdout ?? ''}${r.stderr ?? ''}`).not.toContain('TENANT_REGISTRY_SECRET');
   }, 60_000);

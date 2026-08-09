@@ -11,6 +11,7 @@
  */
 
 import { openDb } from '../registry/db.js';
+import { legacyStoreNotice, storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
@@ -41,7 +42,10 @@ function parseArgs(argv: string[]): Args {
 }
 
 function dbPathFrom(flags: Record<string, string>): string {
-  return flags['db'] ?? process.env['ATOMA_DB_PATH'] ?? './atoma.db';
+  const p = storeDbPath(flags['db']);
+  const notice = legacyStoreNotice(p);
+  if (notice) console.error(notice);
+  return p;
 }
 
 function tierFrom(flags: Record<string, string>): Tier | undefined {
@@ -115,17 +119,9 @@ function cmdShow(registry: AtomRegistry, name: string, dbPath: string): void {
   const type = registry.getByName(name);
   if (!type) {
     console.error(`no atom type named "${name}" in ${dbPath}`);
-    // Surface a short hint: which other DB file exists in cwd and how to
-    // point the CLI at it. The two default DBs (atoma.db and
-    // atoma-build.db) host different domains (research vs build-app),
-    // and forgetting --db is by far the most common CLI friction.
-    const defaults = ['./atoma.db', './atoma-build.db'];
-    const others = defaults.filter((p) => p !== dbPath);
-    if (others.length > 0) {
-      console.error(
-        `  hint: try \`--db ${others.join(' | --db ')}\`, or run \`list\` first to see what's in each DB.`
-      );
-    }
+    // The "did you mean the other DB?" hint is gone with the second DB: there
+    // is one store now (src/core/stores.ts). `list` is the remaining answer.
+    console.error(`  hint: run \`list\` to see what this store holds.`);
     process.exit(1);
   }
   console.log(`${type.name}  (tier ${type.tier}, ordinal ${type.ordinal}, v${type.version})`);

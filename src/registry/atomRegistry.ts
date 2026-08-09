@@ -1,5 +1,5 @@
 import type { DB } from './db.js';
-import { appendLedger, ledgerWritesAllowed } from '../core/ledger.js';
+import { appendLedger } from '../core/ledger.js';
 import type {
   AtomModifications,
   GenerationParams,
@@ -210,15 +210,22 @@ export class AtomRegistry {
   constructor(private readonly db: DB) {}
 
   /**
-   * Append a lifecycle event — unless this registry is an in-memory fixture
-   * with no explicitly configured ledger, in which case the events would
-   * land in whatever file the real store is paired with. See
-   * `ledgerWritesAllowed`: four phantom successes from a throwaway script
-   * turned `ledger check` permanently red before this existed.
+   * Append a lifecycle event TO THIS REGISTRY'S OWN STORE.
+   *
+   * Passing `this.db` is what makes the ledger inseparable from the counters
+   * it describes, and it replaces a guard with a structure:
+   *   - an in-memory fixture now gets an in-memory ledger, so the accident
+   *     that motivated `ledgerWritesAllowed` — two throwaway `tsx` scripts
+   *     bumping `Helium` on a `:memory:` registry and appending four phantom
+   *     successes to the real file, leaving `ledger check` permanently red —
+   *     is no longer reachable at all rather than merely refused;
+   *   - `patch` and `rollback` already run inside `db.transaction`, so their
+   *     events now roll back WITH the write. Appending to a separate file
+   *     meant a failed patch left a phantom `counters-reset` behind, which
+   *     `check` reads as ledger > store: the IMPOSSIBLE direction.
    */
   private note(event: Parameters<typeof appendLedger>[0]): void {
-    if (!ledgerWritesAllowed(this.db.name)) return;
-    appendLedger(event);
+    appendLedger(event, this.db);
   }
 
   listByTier(tier: Tier): AtomType[] {
@@ -687,10 +694,17 @@ export class AtomRegistry {
    * short-circuit the validator LLM call.
    */
   recordSuccess(name: string): void {
-    this.note({ kind: 'type-success', entity: name });
-    this.db
-      .prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?')
-      .run(name);
+    // ONE TRANSACTION, and that is the point of the ledger living here. The
+    // append used to precede the UPDATE as two writes to two files, so a
+    // crash between them left the store one BELOW the ledger — precisely the
+    // direction `ledger check` reports as proof that a write path bypassed
+    // the choke points. Runs do get killed mid-flight (burn-in group-kills at
+    // the wall-clock budget), so the integrity checker could be made to lie
+    // by timing alone.
+    this.db.transaction(() => {
+      this.note({ kind: 'type-success', entity: name });
+      this.db.prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?').run(name);
+    })();
   }
 
   /**
@@ -699,10 +713,10 @@ export class AtomRegistry {
    * successes accumulate.
    */
   recordFailure(name: string): void {
-    this.note({ kind: 'type-failure', entity: name });
-    this.db
-      .prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?')
-      .run(name);
+    this.db.transaction(() => {
+      this.note({ kind: 'type-failure', entity: name });
+      this.db.prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?').run(name);
+    })();
   }
 
   /**
@@ -910,6 +924,19 @@ export class AtomRegistry {
            WHERE tier = ? AND ordinal = ?`
         )
         .run(sumSucc, sumFail, winner.tier, winner.ordinal);
+      // A COUNTER MUTATION THE LEDGER USED TO MISS ENTIRELY. `mergeInto` moves
+      // the losers' trust onto the winner and deletes their rows, so before
+      // this the winner simply grew by an unexplained amount — which `check`
+      // classifies as `store > ledger`, the direction it treats as benign
+      // pre-ledger history. A bypass of the choke point that the checker is
+      // structurally blind to is the one failure the ledger cannot afford;
+      // the delta is recorded so the projection stays exact instead of
+      // merely not-alarming.
+      this.note({
+        kind: 'type-merge',
+        entity: winnerName,
+        detail: { absorbed: loserNames, successes: sumSucc, failures: sumFail },
+      });
       const refreshed = this.getByName(winnerName);
       if (!refreshed) throw new Error('mergeInto: winner vanished after merge');
       return refreshed;

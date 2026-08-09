@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { importLegacyLedger, LEDGER_TABLE_DDL } from '../core/ledger.js';
 
 export type DB = Database.Database;
 
@@ -50,9 +51,16 @@ export function openDb(path: string): DB {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  // The lifecycle ledger is a table in this same file, so that an event and
+  // the counter it records can share a transaction and so that an in-memory
+  // registry cannot append to the real store. See src/core/ledger.ts.
+  db.exec(LEDGER_TABLE_DDL);
   // Forward migration for DBs that predate the counter columns. Safe to run
   // every open: no-op when the columns are already present.
   addColumnIfMissing(db, 'atom_types', 'successes', 'successes INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing(db, 'atom_types', 'failures', 'failures INTEGER NOT NULL DEFAULT 0');
+  // Carry a pre-consolidation atoma-ledger.jsonl across, once, if one sits
+  // next to this file and the table is still empty. No-op for `:memory:`.
+  importLegacyLedger(db, path);
   return db;
 }

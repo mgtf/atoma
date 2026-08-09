@@ -585,30 +585,44 @@ export class SkillRegistry {
    * which only projects counters.
    */
   recordSuccess(l1Name: string, skillId: string, opts?: { via?: string }): void {
+    if (!this.bump(l1Name, skillId, 'success')) return;
     appendLedger({
       kind: 'skill-success',
       entity: `${l1Name}/${skillId}`,
       ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
     });
-    this.bump(l1Name, skillId, 'success');
   }
 
   /** Bump the failure counter for a known skill (no-op if not found). */
   recordFailure(l1Name: string, skillId: string, opts?: { via?: string }): void {
+    if (!this.bump(l1Name, skillId, 'failure')) return;
     appendLedger({
       kind: 'skill-failure',
       entity: `${l1Name}/${skillId}`,
       ...(opts?.via && opts.via !== l1Name ? { detail: { via: opts.via } } : {}),
     });
-    this.bump(l1Name, skillId, 'failure');
   }
 
-  private bump(l1Name: string, skillId: string, kind: 'success' | 'failure'): void {
+  /**
+   * RECORD AFTER THE WRITE, not before — `bump` reports whether it happened.
+   *
+   * The append used to come first, and `bump` silently no-ops when the skill
+   * has no `SKILL.md` (a dropped recipe still named by an in-flight run, a
+   * frontmatter `name` that disagrees with its folder). That combination
+   * writes an event for a counter that never moved, leaving the store BELOW
+   * the ledger — which is the one direction `check` reports as IMPOSSIBLE,
+   * i.e. as proof that a write path bypassed the choke points. The atom side
+   * had the same shape and gets its guarantee from a transaction; a
+   * filesystem store cannot, so it gets ordering instead.
+   *
+   * @returns true when a counter was actually written.
+   */
+  private bump(l1Name: string, skillId: string, kind: 'success' | 'failure'): boolean {
     const dir = this.skillDir(l1Name, skillId);
     // No skill on disk at all — no SKILL.md, no skill folder. The
     // bump silently no-ops; the supervise loop must not create a
     // counter for a skill that doesn't exist.
-    if (!existsSync(join(dir, 'SKILL.md'))) return;
+    if (!existsSync(join(dir, 'SKILL.md'))) return false;
     const metaPath = join(dir, '_meta.json');
     // Hand-written skills come WITHOUT a sidecar meta file. The
     // first counter bump initialises one at zero so future loads
@@ -644,6 +658,7 @@ export class SkillRegistry {
       ...(cur.lastMatchedAt ? { lastMatchedAt: cur.lastMatchedAt } : {}),
     };
     writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    return true;
   }
 }
 

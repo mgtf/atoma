@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
 import { parseCliArgs } from './args.js';
@@ -48,7 +49,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 function dirFrom(flags: Record<string, string>): string {
-  return flags['dir'] ?? process.env['ATOMA_SKILLS_DIR'] ?? './skills';
+  return skillsDirPath(flags['dir']);
 }
 
 function padCell(s: string, w: number): string {
@@ -361,10 +362,7 @@ function help(unknown?: string): void {
  */
 function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string): void {
   // The owning L1's declared tools decide what a body may legitimately name.
-  const dbPath =
-    dbFlag ??
-    process.env['ATOMA_DB_PATH'] ??
-    (existsSync('./atoma-build.db') ? './atoma-build.db' : './atoma.db');
+  const dbPath = storeDbPath(dbFlag);
   const toolsByAtom = new Map<string, string[]>();
   if (existsSync(dbPath)) {
     const db = new Database(dbPath, { readonly: true });

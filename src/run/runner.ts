@@ -10,6 +10,7 @@ import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
+import { legacyStoreNotice, skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TraceRecorder } from '../viz/trace.js';
@@ -154,9 +155,19 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     );
   }
 
-  // Store + workspace are per-FAMILY so two families never share a registry
-  // (and, with it, a taxonomy namespace and the ledger's one-store rule).
+  // The WORKSPACE is per-family; the STORE is not. A catalog of atom types
+  // and skills is deliberately cross-family — `resolveCreationDescription`
+  // strips task themes from descriptions precisely so a type earns reuse
+  // outside the family that spawned it — so partitioning the registry by
+  // family fought the one property it exists to have. The profile still names
+  // the env var (a family COULD point elsewhere); today they all name
+  // `ATOMA_DB_PATH`. See src/core/stores.ts for the four drifted copies this
+  // replaced.
   const dbPath = process.env[profile.envVars.dbPath] ?? profile.defaults.dbPath;
+  // Loudest possible place for the migration ramp: a run is what earns the
+  // counters, so a run opening the pre-consolidation store must say so.
+  const storeNotice = legacyStoreNotice(dbPath);
+  if (storeNotice) console.log(storeNotice);
   const workspaceRoot = resolve(
     process.env[profile.envVars.workspace] ?? profile.defaults.workspace
   );
@@ -249,8 +260,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // accessor from this registry on demand; L2 runs a Haiku
   // skill-prefilter against the matched L1's skills before entering
   // each supervise loop.
-  const skillsDir = process.env['ATOMA_SKILLS_DIR'] ?? './skills';
-  const skillRegistry = new SkillRegistry(skillsDir);
+  const skillRegistry = new SkillRegistry(skillsDirPath());
   console.log(`skills root: ${skillRegistry.rootDir}`);
 
   const l3 = await L3Atom.fromType(l3Type, registry, anthropic, skillRegistry);

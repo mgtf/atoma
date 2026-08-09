@@ -32,6 +32,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { SkillRegistry } from '../skills/registry.js';
+import { skillsDirPath } from '../core/stores.js';
 import { trustThreshold, promoteThreshold } from '../atoms/cost.js';
 import { refusalStampIsCurrent } from '../skills/generations.js';
 import { extractJson } from '../atoms/json.js';
@@ -325,7 +326,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   let outPath = 'burnin/tasks-curriculum.json';
   let csvPath = 'burnin/results.csv';
-  let skillsDir = process.env['ATOMA_SKILLS_DIR'] ?? './skills';
+  let skillsDir = skillsDirPath();
   let cap = DEFAULT_TARGET_CAP;
   let dryRun = false;
   for (let i = 0; i < argv.length; i++) {

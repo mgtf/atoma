@@ -9,6 +9,7 @@ import {
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { prepareWorkspace } from '../workspace.js';
+import { DEFAULT_DB_PATH } from '../../core/stores.js';
 import type { AtomType } from '../../registry/atomRegistry.js';
 import type { Task } from '../../core/types.js';
 import type { ProfileSeedContext, TaskProfile } from '../profile.js';
@@ -90,12 +91,20 @@ export const buildProfile: TaskProfile = {
   defaultGoal:
     'Build a minimal WebGL Minesweeper game (10x10 grid, 10 mines). Implement everything in a single index.html that loads and runs standalone. Left-click reveals a cell, right-click flags. Then start a local static server and return the URL.',
   envVars: {
-    dbPath: 'ATOMA_BUILD_DB_PATH',
+    // THE STORE IS NOT PER-FAMILY, so its env var is not either. This said
+    // `ATOMA_BUILD_DB_PATH` while every CLI read `ATOMA_DB_PATH`, and the
+    // mismatch is what grew four different `existsSync('./atoma-build.db')`
+    // probes across the CLIs and the viz. The workspace and the budget DO
+    // stay per-family: those genuinely differ between task families, a
+    // catalog of atom types and skills deliberately does not (see
+    // `resolveCreationDescription`, which strips task themes precisely so a
+    // type earns reuse outside the family that spawned it).
+    dbPath: 'ATOMA_DB_PATH',
     workspace: 'ATOMA_BUILD_WORKSPACE',
     timeoutMs: 'ATOMA_BUILD_TIMEOUT_MS',
   },
   defaults: {
-    dbPath: './atoma-build.db',
+    dbPath: DEFAULT_DB_PATH,
     // OUTSIDE THE REPO, deliberately. The workspace used to be `./build/app`,
     // two `..` hops below the atom registry, every skill body, the ledger and
     // the user's own uncommitted git work — and `run_shell`'s child is NOT

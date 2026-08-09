@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
+import { storeDbPath } from '../src/core/stores.js';
 import { defaultBuiltinTools } from '../src/tools/builtin.js';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import { buildProfile, NEURON_SYSTEM_PROMPT, NEURON_DESCRIPTION } from '../src/run/profiles/build.js';
@@ -52,9 +53,17 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     // it at the live store would have `npm test` writing to the developer's
     // own registry (and dropping -wal/-shm beside it). A read-only guard must
     // not mutate what it is guarding.
-    if (!existsSync('./atoma-build.db')) return;
+    // THROUGH THE SHARED RESOLVER, not a literal. This read `'./atoma-build.db'`
+    // directly, and the guard above is an `existsSync` early-return — so the
+    // store consolidation would have made the whole check go dark SILENTLY,
+    // still green, still reported as passing, while the Neuron baseline
+    // (Methane 133✓ and Water 36✓ ride the same seeder) stopped being
+    // verified at all. A test whose subject can vanish must name it the way
+    // production does.
+    const store = storeDbPath();
+    if (!existsSync(store)) return;
     const copy = join(mkdtempSync(join(tmpdir(), 'atoma-db-copy-')), 'build.db');
-    copyFileSync('./atoma-build.db', copy);
+    copyFileSync(store, copy);
     try {
       const reg = new AtomRegistry(openDb(copy));
       const neuron = reg.listByTier(3).find((t) => t.name === 'Neuron');

@@ -4,6 +4,7 @@ import { basename, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 
@@ -108,25 +109,26 @@ function loadBurnin(): {
   }
   return { rows, csvPath: BURNIN_CSV };
 }
-const SKILLS_DIR = resolve(cli.skillsDir ?? process.env['ATOMA_SKILLS_DIR'] ?? './skills');
+const SKILLS_DIR = resolve(skillsDirPath(cli.skillsDir));
 const skillRegistry = new SkillRegistry(SKILLS_DIR);
 
 /**
- * Resolve the list of DB paths we'll serve. Priority:
- *   1. explicit `--db` flags (can repeat)
- *   2. env vars `ATOMA_DB_PATH` and `ATOMA_BUILD_DB_PATH` (used by the examples)
- *   3. `./atoma.db` and `./atoma-build.db` if present in cwd
- * Duplicates (same resolved path) are collapsed; missing files are kept in the
- * list so the UI can still show them as empty / show a helpful error.
+ * Resolve the list of DB paths we'll serve: the explicit `--db` flags if any
+ * (the flag repeats, so an archived store can be inspected alongside a live
+ * one), otherwise the one store `storeDbPath()` resolves.
+ *
+ * IT USED TO GUESS TWO. The candidate list carried `./atoma.db` and
+ * `./atoma-build.db` plus an `ATOMA_BUILD_DB_PATH` env branch, so the UI
+ * rendered a store picker over one populated DB and one that had held zero
+ * rows since `research-brief.ts` was deleted — presenting an artefact of a
+ * dead split as a choice the operator had to understand. The list survives
+ * because `--db` legitimately repeats; the guessing does not.
+ *
+ * Duplicates (same resolved path) are collapsed; a missing file is kept in the
+ * list so the UI can still show it as empty rather than vanishing.
  */
 function resolveDbs(): { id: string; label: string; path: string; exists: boolean }[] {
-  const candidates: string[] = [];
-  for (const p of cli.dbs) candidates.push(p);
-  for (const env of ['ATOMA_DB_PATH', 'ATOMA_BUILD_DB_PATH']) {
-    const v = process.env[env];
-    if (v) candidates.push(v);
-  }
-  candidates.push('./atoma.db', './atoma-build.db');
+  const candidates: string[] = cli.dbs.length > 0 ? [...cli.dbs] : [storeDbPath()];
   const seen = new Set<string>();
   const out: { id: string; label: string; path: string; exists: boolean }[] = [];
   for (const c of candidates) {

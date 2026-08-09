@@ -3,83 +3,97 @@
  * atoma ledger CLI — inspect the append-only lifecycle ledger and check
  * the mutable stores against it.
  *
- *   npm run ledger -- tail [n]          # last n events (default 20)
+ *   npm run ledger -- tail [n] [--db p]   # last n events (default 20)
  *   npm run ledger -- check [--db p] [--skills-dir p]
  *
- * `check` recomputes per-entity success/failure counters from the ledger
- * and diffs them against the live stores (SQLite atom_types + skills
- * _meta.json). HONEST CAVEAT, printed with the report: the comparison is
- * only exact when the ledger has existed since the stores' last reset —
- * pre-ledger history is invisible to the projection, so entities older
- * than the ledger show as EXPECTED drift (store > ledger). The check's
- * real target is the impossible direction: a store counter BELOW the
- * ledger's projection, or entities mutating without any ledger trace —
- * both mean a write path bypassed the choke points.
+ * `check` recomputes per-entity success/failure counters from the ledger and
+ * diffs them against the live stores. HONEST CAVEAT, printed with the report:
+ * the comparison is only exact when the ledger has existed since the stores'
+ * last reset — pre-ledger history is invisible to the projection, so entities
+ * older than the ledger show as EXPECTED drift (store > ledger). The check's
+ * real target is the impossible direction: a store counter BELOW the ledger's
+ * projection, or entities mutating without any ledger trace — both mean a
+ * write path bypassed the choke points.
+ *
+ * ONE HANDLE for the events and the atom counters, because they are now the
+ * same file. That closes half of the ledger's old KNOWN LIMIT by
+ * construction: you can no longer project one store's history against a
+ * different store's counters, which is exactly how this command once reported
+ * `IMPOSSIBLE  Helium: store 2 < ledger 6` for a week. The SKILL half of the
+ * pairing is still conventional — bodies and counters live under
+ * `--skills-dir` — so that flag still has to name the right tree.
  */
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
-import { ledgerPath, projectCounters, readLedger } from '../core/ledger.js';
+import { ledgerDbPath, projectCounters, readLedger } from '../core/ledger.js';
+import { skillsDirPath, storeDbPath, legacyStoreNotice } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 
 function main(): void {
   const argv = process.argv.slice(2);
   const cmd = argv[0] ?? 'tail';
+  const flag = (name: string): string | undefined => {
+    const i = argv.indexOf(`--${name}`);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
+
+  if (cmd !== 'tail' && cmd !== 'check') {
+    console.log('usage: ledger tail [n] [--db path] | ledger check [--db path] [--skills-dir path]');
+    process.exit(cmd === 'help' ? 0 : 1);
+  }
+
+  const dbPath = flag('db') ?? ledgerDbPath();
+  const notice = legacyStoreNotice(storeDbPath(flag('db')));
+  if (notice) console.log(notice);
+  if (!existsSync(dbPath)) {
+    console.log(`(no store at ${dbPath} — nothing to read)`);
+    return;
+  }
+  const db = new Database(dbPath);
+  const events = readLedger(db);
+
   if (cmd === 'tail') {
     const n = Number(argv[1]) > 0 ? Number(argv[1]) : 20;
-    const events = readLedger();
     if (events.length === 0) {
-      console.log(`(ledger empty or missing at ${ledgerPath()})`);
+      console.log(`(ledger empty in ${dbPath})`);
       return;
     }
     for (const ev of events.slice(-n)) {
       const detail = ev.detail ? `  ${JSON.stringify(ev.detail)}` : '';
       console.log(`${ev.at}  ${ev.kind.padEnd(24)}  ${ev.entity}${detail}`);
     }
-    console.log(`\n${events.length} event(s) total — ${ledgerPath()}`);
+    console.log(`\n${events.length} event(s) total — ${dbPath}`);
     return;
   }
-  if (cmd !== 'check') {
-    console.log('usage: ledger tail [n] | ledger check [--db path] [--skills-dir path]');
-    process.exit(cmd === 'help' ? 0 : 1);
-  }
 
-  const flag = (name: string): string | undefined => {
-    const i = argv.indexOf(`--${name}`);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
-  const events = readLedger();
   const projected = projectCounters(events);
-  console.log(`ledger: ${events.length} event(s) at ${ledgerPath()}\n`);
+  console.log(`ledger: ${events.length} event(s) in ${dbPath}\n`);
 
   let impossible = 0;
   let expectedDrift = 0;
 
-  // Atom types (SQLite).
-  const dbPath = flag('db') ?? process.env['ATOMA_DB_PATH'] ?? (existsSync('./atoma-build.db') ? './atoma-build.db' : './atoma.db');
-  if (existsSync(dbPath)) {
-    const db = new Database(dbPath, { readonly: true });
-    const rows = db
-      .prepare('SELECT name, successes, failures FROM atom_types')
-      .all() as { name: string; successes: number; failures: number }[];
-    for (const r of rows) {
-      const p = projected.get(r.name) ?? { successes: 0, failures: 0 };
-      if (r.successes < p.successes || r.failures < p.failures) {
-        impossible++;
-        console.log(
-          `✗ IMPOSSIBLE  type ${r.name}: store ${r.successes}✓/${r.failures}✗ < ledger ${p.successes}✓/${p.failures}✗ — a write path bypassed recordSuccess/recordFailure or the store was hand-edited`
-        );
-      } else if (r.successes > p.successes || r.failures > p.failures) {
-        expectedDrift++;
-      }
+  // Atom types — the SAME file the events came from, so this half of the
+  // comparison cannot be mispaired.
+  const rows = db
+    .prepare('SELECT name, successes, failures FROM atom_types')
+    .all() as { name: string; successes: number; failures: number }[];
+  for (const r of rows) {
+    const p = projected.get(r.name) ?? { successes: 0, failures: 0 };
+    if (r.successes < p.successes || r.failures < p.failures) {
+      impossible++;
+      console.log(
+        `✗ IMPOSSIBLE  type ${r.name}: store ${r.successes}✓/${r.failures}✗ < ledger ${p.successes}✓/${p.failures}✗ — a write path bypassed recordSuccess/recordFailure or the store was hand-edited`
+      );
+    } else if (r.successes > p.successes || r.failures > p.failures) {
+      expectedDrift++;
     }
-    db.close();
-    console.log(`types checked: ${rows.length} (db: ${dbPath})`);
-  } else {
-    console.log(`(no registry db at ${dbPath} — types skipped)`);
   }
+  console.log(`types checked: ${rows.length} (db: ${dbPath})`);
+  db.close();
 
-  // Skills (_meta.json).
-  const skills = new SkillRegistry(flag('skills-dir') ?? process.env['ATOMA_SKILLS_DIR'] ?? './skills');
+  // Skills (_meta.json) — still a separate store, so this pairing is still
+  // the caller's responsibility.
+  const skills = new SkillRegistry(skillsDirPath(flag('skills-dir')));
   let skillCount = 0;
   for (const ns of skills.listNamespaces()) {
     for (const sk of skills.loadFor(ns)) {

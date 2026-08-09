@@ -21,5 +21,8 @@ burnin/logs/
 # the remote was unbuildable and local git status showed clean.
 /skills/
 .claude/settings.local.json
-atoma-ledger.jsonl
+# Pre-consolidation ledger; the ledger is now a table in the store (*.db
+# above). Kept ignored: an old checkout or the one-shot importer can still
+# leave one, and `.bak` variants were committed by accident once.
+atoma-ledger.jsonl*
 atoma-prefilter-cache.json

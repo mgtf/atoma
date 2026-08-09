@@ -37,8 +37,11 @@ npm run registry -- show Hydrogen
 npm run registry -- top --by failure  # sort by failures; also success|ratio
 npm run registry -- history Hydrogen  # archived versions: prompt head, tools, who/when/why
 npm run registry -- rollback Hydrogen --to 2   # restore v2 content as a NEW live version
-npm run registry -- remove Glucose --db ./atoma-build.db  # delete dynamic-creation debris
-npm run registry -- --db ./atoma-build.db list   # override DB path
+npm run registry -- remove Glucose      # delete dynamic-creation debris
+npm run registry -- --db ./archived.db list      # override the one store (rarely needed)
+
+npm run ledger -- tail 20             # the lifecycle_events table, newest last
+npm run ledger -- check               # project counters, flag the IMPOSSIBLE direction
 
 npm run skills -- list                # all skills: kind, counters, refusal stamps
 
@@ -323,37 +326,75 @@ re-exports all the historical names so old imports keep working.
   should be a single-digit count on any mature-type happy path.
 - Cost estimates come from `DEFAULT_PRICES` (approximate USD per M tokens per
   Claude family). Override with a custom `PriceTable` when needed.
+- **ONE STORE (`src/core/stores.ts`).** `./atoma.db` holds atom types, their
+  version history AND the lifecycle ledger; `./skills/` holds recipe bodies.
+  `storeDbPath()` / `skillsDirPath()` are the ONLY resolvers — there used to
+  be four copies of the DB rule and they had drifted, because the runner wrote
+  `ATOMA_BUILD_DB_PATH` / `./atoma-build.db` while every CLI read
+  `ATOMA_DB_PATH` / `./atoma.db`. Each of `cli/registry`, `cli/skills`,
+  `cli/ledger` and `viz/server` had grown its own `existsSync('./atoma-build.db')`
+  probe to paper over the mismatch, no two written alike, and the viz served
+  BOTH files as separate stores in its picker. Same lesson as `usedOrdinals`:
+  the drift between two copies of one rule WAS the bug. The split itself dated
+  from `research-brief.ts`, deleted when the runner became generic, and its
+  store had sat at 0 rows since — while the accidental empty `./atoma.db`
+  (created by any bare `npm run registry -- list`) was what every CLI opened
+  by default. Per-FAMILY stores were also the wrong axis: atom types and
+  skills are deliberately cross-family (`resolveCreationDescription` strips
+  task themes precisely so a type earns reuse elsewhere). A second store means
+  TENANCY, which is deployment, not a task family.
+  MIGRATION RAMP, not a fallback: `storeDbPath` returns `./atoma-build.db`
+  only when it has atom types and `./atoma.db` does not. It fires on EMPTY,
+  not merely on ABSENT — the first version tested absence, the empty
+  `./atoma.db` defeated it, and `tests/run-profile-build.test.ts` failed with
+  "no Neuron in the build store", i.e. the silent-loss scenario arriving on
+  the one path that still checks. Probing is READONLY and total (a corrupt
+  sibling must not throw out of a path resolver). `legacyStoreNotice` prints
+  the `mv` so the ramp cannot quietly become permanent. Covered by
+  `tests/store-path.test.ts`, three of whose cases fail against the
+  absence-only predicate.
 - **Lifecycle ledger** (`src/core/ledger.ts`, `npm run ledger -- tail|check`):
-  every trust/lifecycle mutation appends a JSONL event from the storage
-  choke points (AtomRegistry record*/patch/rollback, SkillRegistry
+  every trust/lifecycle mutation appends an event to the `lifecycle_events`
+  TABLE IN THE STORE, from the storage choke points (AtomRegistry
+  record*/patch/rollback/mergeInto, SkillRegistry
   bump/save/promote/demote/refusal/direct-failure/reset). Stage-1
-  DUAL-WRITE: stores stay authoritative; `ledger check` projects
-  counters and flags the IMPOSSIBLE direction (store < ledger = a write
-  path bypassed the choke points). Fail-open — a ledger error can never
-  take down a run. Path: `ATOMA_LEDGER_PATH` (default
-  `./atoma-ledger.jsonl`, gitignored; vitest pins it under node_modules
-  so tests never pollute the real file, and `viz:demo` pins it to a tmp
-  file for the same reason — its `:memory:` registry starts EMPTY, so
-  taxonomy naming hands its types the canonical names Hydrogen/Water and
-  the demo's counter bumps would land on the REAL ledger under colliding
-  names; observed as 6 phantom successes and a false IMPOSSIBLE verdict).
-  KNOWN LIMIT: events carry no store identity, so ONE ledger must map to
-  ONE authoritative store — point `check` at the DB the events came from,
-  and give any secondary store (another --db) its own ledger path if its
-  mutations matter. GUARDED since 2026-08-09 for the case that actually bit:
-  `ledgerWritesAllowed` makes `AtomRegistry` skip the append when its DB is
-  `:memory:` AND no `ATOMA_LEDGER_PATH` was named, because an in-memory
-  registry is by construction not the authoritative store. Two throwaway
-  `tsx` scripts had appended four phantom `type-success` events for Helium to
-  the real file, and `ledger check` then reported
-  `IMPOSSIBLE  Helium: store 2 < ledger 6` — permanently, on the one tool
-  whose entire value is being believed. vitest was never the problem (it pins
-  the path, which is also why an EXPLICIT path always wins the guard); ad-hoc
-  scripts are, and they are what nobody remembers to configure. The four
-  lines were removed by hand and the check is green again. Covered by
-  `tests/ledger-ephemeral-guard.test.ts`. Skill bodies also carry
-  `provenance` ({mechanism, model, at} — distilled/revised/compiled) in
-  `_meta.json`, preserved across bumps and resets, replaced on rewrite.
+  DUAL-WRITE: counters stay authoritative; `ledger check` projects them and
+  flags the IMPOSSIBLE direction (store < ledger = a write path bypassed the
+  choke points). Fail-open — a ledger error can never take down a run.
+  IT WAS A SIBLING `atoma-ledger.jsonl` until 2026-08-09. Moving it INTO the
+  store fixed two things a guard could not:
+  (1) THE PAIRING IS PHYSICAL FOR ATOM TYPES. `AtomRegistry` writes through
+  its OWN handle, so a `:memory:` registry gets a `:memory:` ledger and the
+  events have nowhere else to go. This replaced `ledgerWritesAllowed`, now
+  DELETED along with its test — a guard whose condition can no longer arise
+  is a test that proves nothing; the property is pinned by "an in-memory
+  registry cannot reach the configured store" in `tests/ledger.test.ts`. It
+  had bitten TWICE: two throwaway `tsx` scripts left
+  `IMPOSSIBLE  Helium: store 2 < ledger 6` permanently, and `viz:demo`'s
+  empty `:memory:` registry took the canonical names Hydrogen/Water and put 6
+  phantom successes in the real ledger.
+  (2) THE COUNTER AND ITS EVENT SHARE A TRANSACTION. `recordSuccess` appended
+  BEFORE the `UPDATE`, so a crash between the two left store < ledger — the
+  integrity checker could be made to lie by an ill-timed SIGKILL, and runs do
+  get SIGKILLed. `patch`/`rollback` events now roll back with their write too.
+  The skill side cannot have a transaction (filesystem store), so it gets
+  ORDERING: `bump` returns whether a counter moved and the append follows it,
+  closing the same window for a `recordSuccess` on a skill with no SKILL.md.
+  TWO BYPASSES FOUND while doing this, both now recorded: `mergeInto` moved
+  the losers' counters onto the winner with NO event at all (`check` read the
+  jump as benign `store > ledger` drift — a mutation the checker was
+  structurally blind to), and the skill no-op window above. `type-merge`
+  carries the delta so the projection stays exact rather than merely quiet.
+  Path: `ATOMA_LEDGER_DB` (defaults to the store; vitest and `viz:demo` pin it
+  to scratch — still needed because SkillRegistry has NO store handle and
+  resolves a default). `openDb` imports a sibling `atoma-ledger.jsonl` once
+  into an empty table (949 events carried across, verified per-kind against
+  the archived original), leaving the file in place. REMAINING HONEST GAP: the
+  SKILL half of the pairing is still conventional — `check` takes a
+  `--skills-dir` — which is the main structural argument for eventually moving
+  skill bodies in too. Skill bodies also carry `provenance` ({mechanism,
+  model, at} — distilled/revised/compiled) in `_meta.json`, preserved across
+  bumps and resets, replaced on rewrite.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
