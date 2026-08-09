@@ -2213,6 +2213,24 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   would lose most hits (caught by the typecheck when the field did not
   exist; pinned by a regression test). Covered by
   `tests/prefilter-cache-event.test.ts`.
+- **`isRunLive` / `isIndexEntryLive` are the ONLY live predicates — the
+  copies used to disagree.** A run killed hard (uncatchable SIGKILL, crash)
+  keeps `endedAt` undefined FOREVER, so "live" is not `!run.endedAt`; it is
+  that AND not abandoned. Polling and the events pane applied the abandoned
+  rule, the header badge, the "right now" banner and the sidebar flag did
+  not — so the run of `2026-08-08T18:32` rendered `⚠ Run abandoned` in its
+  events and a green `● LIVE — polling every 1s` in its header at the same
+  time, 11 hours after its last event, advertising a poll that had already
+  stopped. A UI contradicting itself about its own behaviour is worse than
+  one merely wrong. The LIST needs its own predicate because index entries
+  carry no events: `VizRunIndexEntry.lastEventAt` (stamped on in-flight
+  entries only, newest event by max not last-written) is what makes the
+  verdict possible there, and entries predating the field fall back to
+  `startedAt` — the same fallback `isAbandoned` uses for an event-less run,
+  which is why the historical zombie resolves correctly without a
+  migration. Reading `inFlight` raw also kept `anyInflight` true forever,
+  re-rendering the run list every tick. Covered by
+  `tests/trace-abandoned.test.ts`.
 - **The viz "abandoned run" threshold is 12 min, not 5.** Measured on a
   live claude-cli batch: an L1 execute call sat silent for over 5 minutes
   while legitimately working (a long tool loop emits no trace event until

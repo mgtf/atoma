@@ -340,6 +340,7 @@ const I18N_CATALOGS = {
     'runs.picker': 'Runs (newest → oldest)',
     'runs.flag.cancelled': '✕ cancelled',
     'runs.flag.live': '● LIVE',
+    'runs.flag.abandoned': '⚠ abandoned',
     'runs.flag.fallback': '⚠ fallback',
     'runs.calls': '{{count}} calls',
 
@@ -356,7 +357,7 @@ const I18N_CATALOGS = {
     'summary.cachedRouting': '⚡ Cached routing',
     'summary.cachedRouting.value': '{{count}} decision(s) with no LLM call',
     'summary.abandoned': '⚠ Abandoned run',
-    'summary.abandoned.value': 'no activity for >5 min, no endedAt',
+    'summary.abandoned.value': 'no activity for >12 min, no endedAt',
     'summary.lifecycle': 'Lifecycle',
     'summary.lifecycle.learned': '📖 {{count}} skill(s) learned',
     'summary.lifecycle.promoted': '⚡ {{count}} compilation(s)',
@@ -527,6 +528,7 @@ const I18N_CATALOGS = {
     'runs.picker': 'Runs (récent → ancien)',
     'runs.flag.cancelled': '✕ annulé',
     'runs.flag.live': '● LIVE',
+    'runs.flag.abandoned': '⚠ abandonné',
     'runs.flag.fallback': '⚠ fallback',
     'runs.calls': '{{count}} appels',
 
@@ -543,7 +545,7 @@ const I18N_CATALOGS = {
     'summary.cachedRouting': '⚡ Routage caché',
     'summary.cachedRouting.value': '{{count}} décision(s) sans appel LLM',
     'summary.abandoned': '⚠ Run abandonné',
-    'summary.abandoned.value': 'aucune activité depuis >5 min, sans endedAt',
+    'summary.abandoned.value': 'aucune activité depuis >12 min, sans endedAt',
     'summary.lifecycle': 'Cycle de vie',
     'summary.lifecycle.learned': '📖 {{count}} skill(s) appris',
     'summary.lifecycle.promoted': '⚡ {{count}} compilation(s)',
@@ -850,11 +852,13 @@ function runSelectLabel(r) {
     ? '  ' + t('runs.flag.cancelled')
     : r.hasError
       ? '  ✖'
-      : r.inFlight
+      : isIndexEntryLive(r)
         ? '  ' + t('runs.flag.live')
-        : r.degraded
-          ? '  ' + t('runs.flag.fallback')
-          : '';
+        : r.inFlight
+          ? '  ' + t('runs.flag.abandoned')
+          : r.degraded
+            ? '  ' + t('runs.flag.fallback')
+            : '';
   return `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
 }
 
@@ -903,7 +907,10 @@ function scheduleIndexPoll() {
       }
       const fresh = await r.json();
       const topChanged = (fresh[0]?.id ?? null) !== (state.runs[0]?.id ?? null);
-      const anyInflight = fresh.some((r) => r.inFlight);
+      // Only a GENUINELY live entry justifies re-rendering the list every
+      // tick. A run that died without its closing stamp keeps `inFlight`
+      // forever, and reading it raw kept the index re-polling for hours.
+      const anyInflight = fresh.some((r) => isIndexEntryLive(r));
       const newCount = fresh.length !== state.runs.length;
       state.runs = fresh;
       if (topChanged || newCount || anyInflight) {
@@ -1035,7 +1042,7 @@ function refreshNowBanner() {
   const run = state.currentRun;
   if (!run) return;
   const completedIds = new Set(run.events.filter((e) => e.kind === 'llm').map((e) => e.id));
-  renderNowBanner(run, completedIds, !run.endedAt);
+  renderNowBanner(run, completedIds, isRunLive(run));
 }
 
 /**
@@ -1161,7 +1168,7 @@ function renderSummary(run) {
         style: 'margin-top:8px; background: #3b2a10; border-color: #7a5a1e; color: #fbbf24;',
       }, t('summary.degraded'))
     : null;
-  const isLive = !run.endedAt;
+  const isLive = isRunLive(run);
   const liveBanner = isLive
     ? h('div', {
         class: 'err-badge',
@@ -1445,7 +1452,7 @@ function renderEvents(opts) {
   // in the "en ce moment" banner) or INTERRUPTED (ended run — shown
   // inline, the signature of a killed subprocess / network blip).
   const completedIds = new Set(run.events.filter((e) => e.kind === 'llm').map((e) => e.id));
-  const isLive = !run.endedAt && !isAbandoned(run);
+  const isLive = isRunLive(run);
   renderNowBanner(run, completedIds, isLive);
   const filtered = run.events.filter((e) => {
     if (e.kind === 'llm-start') {
@@ -1727,6 +1734,33 @@ function isAbandoned(run) {
   if (evs.length === 0) return Date.now() - Date.parse(run.startedAt) > ABANDONED_AFTER_MS;
   const last = Math.max(...evs.map((e) => e.ts ?? 0));
   return Date.now() - last > ABANDONED_AFTER_MS;
+}
+
+/**
+ * THE single live predicate. Every "is this run happening now?" decision
+ * must come through here.
+ *
+ * It used to be open-coded, and the copies disagreed: polling and the
+ * events pane subtracted abandoned runs, the header badge and the "right
+ * now" banner did not. A run wedged on 2026-08-08 then rendered "⚠ Run
+ * abandoned" in its events and a green "● LIVE — polling every 1s" in its
+ * header at the same time, the badge advertising a poll that had already
+ * stopped. A UI that contradicts itself about its own behaviour is worse
+ * than one that is merely wrong.
+ */
+function isRunLive(run) {
+  return !run.endedAt && !isAbandoned(run);
+}
+
+/**
+ * Same verdict from an INDEX entry, which carries no events. Falls back to
+ * `startedAt` for entries written before `lastEventAt` existed — matching
+ * `isAbandoned`'s own fallback for an event-less run.
+ */
+function isIndexEntryLive(entry) {
+  if (entry.endedAt || !entry.inFlight) return false;
+  const last = entry.lastEventAt ?? Date.parse(entry.startedAt);
+  return Date.now() - last <= ABANDONED_AFTER_MS;
 }
 
 function renderNowBanner(run, completedIds, isLive) {

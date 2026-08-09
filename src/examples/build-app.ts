@@ -415,9 +415,19 @@ async function main(): Promise<void> {
     try {
       if (recorder.currentRun !== null) {
         recorder.endRun({ error: 'watchdog: deadline exceeded, transport wedged', cancelled: true });
+      } else {
+        console.error('   (no current run to close — the trace was already finalised)');
       }
-    } catch {
-      /* never let bookkeeping block the exit */
+    } catch (err) {
+      // NEVER let bookkeeping block the exit — but say what went wrong.
+      // This catch used to be silent, and it cost a real investigation:
+      // the run of 2026-08-08T18:32 was left without `endedAt` (so the viz
+      // showed it LIVE for 11 hours) and the log recorded only that the
+      // watchdog had fired, with no way to tell a skipped close from a
+      // failed one. The whole job of this path is to leave evidence behind.
+      console.error(
+        `   ✗ watchdog could not close the trace: ${(err as Error).message}`
+      );
     }
     // Synchronous exit on purpose: awaiting sandbox.cleanup() here would
     // re-enter the same class of hang the watchdog exists to escape. The

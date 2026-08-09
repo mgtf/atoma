@@ -285,6 +285,20 @@ export interface VizRunIndexEntry {
    */
   inFlight?: boolean;
   /**
+   * Timestamp (ms) of the LAST recorded event, on in-flight entries only.
+   *
+   * `inFlight` alone cannot distinguish "running right now" from "died
+   * without its closing stamp" — a hard kill (uncatchable SIGKILL, a crash)
+   * leaves the trace with no `endedAt` FOREVER, and the run list, which
+   * holds no events, had no way to tell. Measured on the run of
+   * 2026-08-08T18:32: silent for 11 hours and still flagged LIVE in the
+   * sidebar, which also kept `anyInflight` true so the index re-polled
+   * endlessly. Entries written before this field existed fall back to
+   * `startedAt`, which is the same fallback `isAbandoned` already uses for
+   * an event-less run.
+   */
+  lastEventAt?: number;
+  /**
    * True when the run was terminated by an explicit user signal (Ctrl-C
    * → SIGINT, or programmatic cancellation) BEFORE the L3 produced a
    * result. Set by `endRun({ cancelled: true })`. Distinguishes a
@@ -554,8 +568,15 @@ export class TraceRecorder {
     if (this.run.degraded) entry.degraded = true;
     if (this.run.cancelled) entry.cancelled = true;
     // Inflight flag: partial persists during the run carry it; the
-    // final endRun persist (which sets endedAt) clears it.
-    if (this.run.endedAt === undefined) entry.inFlight = true;
+    // final endRun persist (which sets endedAt) clears it. `lastEventAt`
+    // rides along so a consumer holding only the index can tell a live run
+    // from one that died without its closing stamp.
+    if (this.run.endedAt === undefined) {
+      entry.inFlight = true;
+      let last = 0;
+      for (const e of this.run.events) if (typeof e.ts === 'number' && e.ts > last) last = e.ts;
+      if (last > 0) entry.lastEventAt = last;
+    }
     if (this.run.totals) {
       entry.costUsd = this.run.totals.costUsd;
       entry.calls = this.run.totals.calls;
