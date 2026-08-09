@@ -1,0 +1,8 @@
+{
+  "name": "atoma-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "puppeteer": "^24.41.0"
+  }
+}

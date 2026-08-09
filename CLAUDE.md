@@ -2501,6 +2501,57 @@ parameterised by tier, NOT a base class.
 - Multi-process registry (SQLite local only).
 - Streaming, OpenTelemetry, dashboards beyond the in-process metrics summary.
 
+## Runtime isolation — the containerised tool worker
+
+`npm run build:worker` builds `atoma-worker:latest` from
+`docker/worker.Dockerfile`; `ContainerToolExecutor`
+(`src/tools/containerExecutor.ts`) is a drop-in `ToolExecutor` whose tools run
+inside it. The seam was already there: `ToolExecutor` is two methods
+(`execute`, `has`), so only the side-effecting half moves — the supervise
+loop, the LLM calls, the atom registry and the skill store stay on the
+control plane.
+
+WHY THIS SHAPE. `run_shell`'s child is spawned with `cwd` and nothing more,
+so in a single process every store is one filesystem walk away (reproduced:
+`ls ../../atoma-build.db ../../skills` listed the registry and all three skill
+namespaces). Only the workspace is mounted, so the walk finds nothing.
+
+THREE PROPERTIES, each verified against a real container before the code was
+written, and each pinned by `tests/container-isolation.test.ts`:
+  - `--network none` leaves the container its OWN loopback, so
+    `start_node_server` + `fetch_url` still verify an HTTP deliverable from
+    inside — while `host.docker.internal` does not even resolve. That is the
+    network half of invariant T1 for free, and the reason "no network" is not
+    crippling here.
+  - only `<workspace>:/workspace` is mounted; the stores are absent from the
+    filesystem rather than merely hard to reach, so an ABSOLUTE host path
+    fails too.
+  - `--cap-drop ALL`, `--security-opt no-new-privileges`, non-root user,
+    memory and cpu bounds.
+The negative control was run explicitly: with the parent mounted and the
+network on, the same probes read `TENANT_REGISTRY_SECRET` and resolve the
+host. The tests discriminate.
+
+TRANSPORT is JSON LINES OVER STDIO (`src/tools/containerProtocol.ts`,
+imported by both sides — one definition, same rule as `src/contracts/`), NOT
+HTTP on a port: a port is something the run could reach, which is the whole
+thing being removed. Consequence: **stdout is the protocol**, so the worker
+logs to stderr and a builtin that printed to stdout would corrupt the stream.
+The worker announces its own tool declarations in a hello line — the IMAGE is
+the authority on what it can do, since a Chromium-less image has no business
+claiming `validate_html`.
+
+NOT WIRED INTO `runTask` YET, deliberately: this is the primitive and its
+proof. Adopting it as the default needs its own measurement — image build
+cost, per-call latency across the pipe, and the effect on the burn-in curve —
+and the stores question first: a containerised run reaches no registry, so
+the control plane must own reading and writing them. That is the same split
+the SaaS document describes; see `docs/saas-architecture.md`.
+KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
+`-w /workspace`, so a relative one resolves under the mount and dies with
+MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,
+almost entirely Chromium.
+
 ## SaaS / multi-tenancy — `docs/saas-architecture.md`
 
 Nothing multi-tenant is BUILT (zero tenancy primitives in `src/`; the viz

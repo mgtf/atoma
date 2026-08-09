@@ -1,0 +1,183 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { ContainerToolExecutor, workerRunArgs } from '../src/tools/containerExecutor.js';
+import { drainLines, encodeMessage, isWorkerHello } from '../src/tools/containerProtocol.js';
+
+/**
+ * The isolation primitive, proven against a real container.
+ *
+ * `run_shell`'s child is spawned with `cwd` and nothing more, so in a single
+ * process the atom registry, every skill body and the ledger are one
+ * filesystem walk from model-authored code — reproduced earlier as
+ * `ls ../../atoma-build.db ../../skills` listing all of them. Moving the tool
+ * layer into a container with only the workspace mounted and no route out is
+ * what makes that walk find nothing.
+ *
+ * These tests DRIVE THE REAL THING: a built image, a real `docker run`, real
+ * tool calls over the stdio protocol. A mocked version would prove nothing —
+ * the claim under test is a property of the container, not of our code.
+ *
+ * Skipped (not failed) when Docker or the image is missing: a contributor
+ * without Docker still gets a green suite, and CI gets the guarantee.
+ */
+
+function dockerReady(): boolean {
+  try {
+    execFileSync('docker', ['image', 'inspect', 'atoma-worker:latest'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HAVE_DOCKER = dockerReady();
+const describeDocker = HAVE_DOCKER ? describe : describe.skip;
+
+describe('workerRunArgs — the isolation is in the flags, so assert them', () => {
+  const args = workerRunArgs({ image: 'img', workspaceHostPath: '/host/ws' });
+
+  it('gives the container no route out', () => {
+    // The network half of invariant T1. Loopback survives (verified live), so
+    // start_node_server + fetch_url still work against the run's own server.
+    expect(args).toContain('--network');
+    expect(args[args.indexOf('--network') + 1]).toBe('none');
+  });
+
+  it('mounts the workspace and nothing else', () => {
+    const mounts = args.filter((a, i) => args[i - 1] === '-v');
+    expect(mounts).toEqual(['/host/ws:/workspace']);
+  });
+
+  it('drops capabilities and forbids regaining privilege', () => {
+    expect(args[args.indexOf('--cap-drop') + 1]).toBe('ALL');
+    expect(args[args.indexOf('--security-opt') + 1]).toBe('no-new-privileges');
+  });
+
+  it('bounds memory and cpu', () => {
+    expect(args).toContain('--memory');
+    expect(args).toContain('--cpus');
+  });
+
+  it('never passes --privileged or mounts the docker socket', () => {
+    expect(args).not.toContain('--privileged');
+    expect(args.join(' ')).not.toContain('docker.sock');
+  });
+});
+
+describe('drainLines — a tool result can span chunks', () => {
+  it('reassembles across arbitrary chunk boundaries', () => {
+    const whole = encodeMessage({ id: 1, ok: true, result: { a: 'x'.repeat(50) } });
+    let buf = '';
+    const got: unknown[] = [];
+    for (const ch of whole.match(/[\s\S]{1,7}/g) ?? []) {
+      buf += ch;
+      const { messages, rest } = drainLines(buf);
+      buf = rest;
+      got.push(...messages);
+    }
+    expect(got).toHaveLength(1);
+    expect((got[0] as { result: { a: string } }).result.a).toHaveLength(50);
+  });
+
+  it('drops a non-JSON line instead of throwing', () => {
+    const { messages } = drainLines('garbage from some dependency\n{"id":2,"ok":true}\n');
+    expect(messages).toHaveLength(1);
+    expect(isWorkerHello(messages[0])).toBe(false);
+  });
+});
+
+describeDocker('a containerised run cannot reach the stores', () => {
+  let dir: string;
+  let workspace: string;
+  let exec: ContainerToolExecutor;
+
+  beforeAll(async () => {
+    // Mimic the real layout: a workspace with the stores as SIBLINGS, i.e.
+    // exactly the shape that leaks in-process.
+    dir = mkdtempSync(join(tmpdir(), 'atoma-container-'));
+    workspace = join(dir, 'ws');
+    writeFileSync(join(dir, 'atoma-build.db'), 'TENANT_REGISTRY_SECRET');
+    writeFileSync(join(dir, 'atoma-ledger.jsonl'), 'TENANT_LEDGER_SECRET');
+    require('node:fs').mkdirSync(join(dir, 'skills', 'Helium'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'Helium', 'SKILL.md'), 'TENANT_SKILL_SECRET');
+    require('node:fs').mkdirSync(workspace, { recursive: true });
+    exec = new ContainerToolExecutor({ workspaceHostPath: workspace, startTimeoutMs: 90_000 });
+    await exec.start();
+  }, 120_000);
+
+  afterAll(() => {
+    exec?.stop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('announces its tools', () => {
+    const names = exec.toolDeclarations().map((t) => t.name);
+    expect(names).toContain('write_file');
+    expect(names).toContain('run_shell');
+    expect(exec.has('read_file')).toBe(true);
+    expect(exec.has('no_such_tool')).toBe(false);
+  });
+
+  it('does real work inside the workspace', async () => {
+    await exec.execute('write_file', { path: 'hello.txt', content: 'from the container' });
+    const read = (await exec.execute('read_file', { path: 'hello.txt' })) as { content?: string };
+    expect(read.content).toContain('from the container');
+    // …and it landed on the HOST, through the mount.
+    expect(readFileSync(join(workspace, 'hello.txt'), 'utf8')).toContain('from the container');
+  }, 60_000);
+
+  it('CANNOT read the sibling stores — the walk that works in-process', async () => {
+    const r = (await exec.execute('run_shell', {
+      command: 'ls',
+      args: ['-1', '../atoma-build.db', '../skills'],
+    })) as { stdout?: string; stderr?: string };
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    expect(out).not.toContain('TENANT');
+    expect(out.toLowerCase()).toMatch(/no such file|cannot access|not found/);
+  }, 60_000);
+
+  it('CANNOT read them via an absolute host path either', async () => {
+    const r = (await exec.execute('run_shell', {
+      command: 'cat',
+      args: [join(dir, 'atoma-build.db')],
+    })) as { stdout?: string; stderr?: string };
+    expect(`${r.stdout ?? ''}${r.stderr ?? ''}`).not.toContain('TENANT_REGISTRY_SECRET');
+  }, 60_000);
+
+  it('CANNOT reach the control plane over the network', async () => {
+    // The other half of T1: a run that could POST to the viz could launch
+    // runs, and a run that could reach the internet could exfiltrate.
+    const r = (await exec.execute('run_shell', {
+      command: 'bash',
+      args: ['-c', 'getent hosts host.docker.internal || echo UNRESOLVABLE'],
+    })) as { stdout?: string };
+    expect(r.stdout ?? '').toContain('UNRESOLVABLE');
+  }, 60_000);
+
+  it('CAN still serve and probe its OWN loopback — the http bucket survives', async () => {
+    // The property that makes --network none acceptable rather than
+    // crippling: verification of an HTTP deliverable happens inside.
+    await exec.execute('write_file', {
+      path: 'server.js',
+      content: [
+        "const http = require('http');",
+        'const s = http.createServer((q, r) => r.end(JSON.stringify({ ok: true })));',
+        's.listen(0, "127.0.0.1", () => console.log("LISTENING_ON_PORT=" + s.address().port));',
+      ].join('\n'),
+    });
+    const started = (await exec.execute('start_node_server', { entry: 'server.js' })) as {
+      ok?: boolean;
+      url?: string;
+    };
+    expect(started.ok, `server did not boot: ${JSON.stringify(started)}`).toBe(true);
+    const probed = (await exec.execute('fetch_url', { url: started.url })) as {
+      status?: number;
+      body?: string;
+    };
+    expect(probed.status).toBe(200);
+    expect(probed.body).toContain('"ok":true');
+  }, 90_000);
+});
