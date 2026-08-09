@@ -230,6 +230,34 @@ export class AtomRegistry {
     return row ? rowToType(row) : null;
   }
 
+  /**
+   * Ordinals that may NOT be handed out at this tier: live rows UNION the
+   * version history.
+   *
+   * The history term is what honours a `remove` tombstone. `create` had it
+   * and `branch` did not, so the two allocators disagreed and a branch after
+   * a removal re-issued the dead atom's ordinal — and therefore its taxonomy
+   * NAME. REPRODUCED: create/create/remove(Helium)/branch handed the branch
+   * "Helium" back, while `create` correctly skipped to Lithium. The new atom
+   * then inherits the dead one's identity in archived run traces AND its
+   * skill namespace (`skills/Helium/` still holds the removed atom's learned
+   * recipes and their earned counters), which is exactly what the tombstone
+   * exists to prevent.
+   *
+   * Shared rather than duplicated so the two call sites cannot drift apart
+   * again — the drift is the whole bug.
+   */
+  private usedOrdinals(tier: Tier): Set<number> {
+    const rows = this.db
+      .prepare(
+        `SELECT ordinal FROM atom_types WHERE tier = ?
+         UNION
+         SELECT DISTINCT ordinal FROM atom_type_versions WHERE tier = ?`
+      )
+      .all(tier, tier) as { ordinal: number }[];
+    return new Set(rows.map((r) => r.ordinal));
+  }
+
   create(tier: Tier, seed: CreateSeed): AtomType {
     return this.db.transaction((): AtomType => {
       // Allocation considers live rows ∪ version-history rows: an atom
@@ -238,14 +266,7 @@ export class AtomRegistry {
       // taxonomy NAME) is never re-issued — a reused name would let a
       // future atom silently inherit the dead atom's identity in old
       // run traces and skill namespaces.
-      const usedRows = this.db
-        .prepare(
-          `SELECT ordinal FROM atom_types WHERE tier = ?
-           UNION
-           SELECT DISTINCT ordinal FROM atom_type_versions WHERE tier = ?`
-        )
-        .all(tier, tier) as { ordinal: number }[];
-      const used = new Set(usedRows.map((r) => r.ordinal));
+      const used = this.usedOrdinals(tier);
       const { ordinal, name } = nextAvailable(tier, used);
       const now = new Date().toISOString();
       // Align the persona baked into the seed prompt with the taxonomy name
@@ -507,10 +528,7 @@ export class AtomRegistry {
       if (!source) throw new RegistryNotFoundError(fromName);
       const merged = applyMods(source, mods);
 
-      const usedRows = this.db
-        .prepare('SELECT ordinal FROM atom_types WHERE tier = ?')
-        .all(source.tier) as { ordinal: number }[];
-      const used = new Set(usedRows.map((r) => r.ordinal));
+      const used = this.usedOrdinals(source.tier);
 
       let ordinal: number;
       let name: string;

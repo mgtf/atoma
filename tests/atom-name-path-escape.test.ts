@@ -127,3 +127,53 @@ describe('the skill store cannot be written outside its root', () => {
     expect(existsSync(join(root, branched.name, 'learned', 'SKILL.md'))).toBe(true);
   });
 });
+
+/**
+ * `remove` leaves a `[removed]` tombstone in `atom_type_versions` precisely so
+ * the dead atom's ordinal — and therefore its taxonomy NAME — is never handed
+ * out again: a reused name silently inherits the dead atom's identity in
+ * archived run traces AND its skill namespace, where the removed atom's
+ * learned recipes and their earned counters are still sitting on disk.
+ *
+ * `create` honoured that (live ∪ history); `branch` read live rows only. So
+ * the two allocators disagreed, and REPRODUCED: create, create, remove the
+ * second, then branch — `create` correctly skipped to Lithium while `branch`
+ * handed back "Helium".
+ */
+describe('ordinal allocation honours the removal tombstone', () => {
+  const seed = { description: 'd', systemPrompt: 'p', tools: [], params: {}, createdBy: 'user' };
+
+  function twoAtomsOneRemoved(): { reg: AtomRegistry; alive: string; dead: string } {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const alive = reg.create(1, seed).name;
+    const dead = reg.create(1, seed).name;
+    reg.remove(dead, { force: true });
+    return { reg, alive, dead };
+  }
+
+  it('branch does NOT resurrect a removed atom name', () => {
+    const { reg, alive, dead } = twoAtomsOneRemoved();
+    const branched = reg.branch(alive, {}, 'tester');
+    expect(branched.name).not.toBe(dead);
+  });
+
+  it('create and branch agree on the next name', () => {
+    // The drift between the two allocators WAS the bug; pin the agreement.
+    const a = twoAtomsOneRemoved();
+    const viaCreate = a.reg.create(1, seed).name;
+    const b = twoAtomsOneRemoved();
+    const viaBranch = b.reg.branch(b.alive, {}, 'tester').name;
+    expect(viaBranch).toBe(viaCreate);
+  });
+
+  it('the dead name stays retired across several later branches', () => {
+    const { reg, alive, dead } = twoAtomsOneRemoved();
+    const names = [
+      reg.branch(alive, {}, 'tester').name,
+      reg.branch(alive, {}, 'tester').name,
+      reg.branch(alive, {}, 'tester').name,
+    ];
+    expect(names).not.toContain(dead);
+    expect(new Set(names).size).toBe(3);
+  });
+});

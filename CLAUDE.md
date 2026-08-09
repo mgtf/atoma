@@ -2518,11 +2518,11 @@ be cited as a security control; (3) one present-day bug FIXED while writing this
 `..`, and an LLM-authored `verdict.branchName` reached it — reproduced writing
 a SKILL.md outside the skills root; now guarded at both layers by
 `isSafeAtomName` and an explicit traversal check, see
-`tests/atom-name-path-escape.test.ts`), and one STILL OPEN: `branch` reads
-live ordinals only
-(`atomRegistry.ts:497-499`) where `create` UNIONs history (`228-234`), so a
-post-`remove` branch resurrects a dead atom's name, skill namespace and
-counters. Load-bearing conclusion: skill/atom BODIES may globalise (under
+`tests/atom-name-path-escape.test.ts`), and a second, also FIXED: `branch`
+allocated ordinals from live rows only where `create` UNIONs the version
+history, so a post-`remove` branch resurrected the dead atom's name — and with
+it its skill namespace and earned counters. Both allocators now share
+`usedOrdinals`, because the DRIFT between two copies of one rule was the bug. Load-bearing conclusion: skill/atom BODIES may globalise (under
 review); trust COUNTERS never do — for a `kind: script` skill, injection IS
 execution (`lifecycle.ts:210-245`, which deliberately omits the trust-boundary
 lines the llm branch carries).
