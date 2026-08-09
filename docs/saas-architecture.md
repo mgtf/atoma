@@ -568,6 +568,29 @@ lands before the SaaS, key it on `(provider, subject)`.
   do both at once or not at all.
 - **Project level** — recommended but optional; keep the column nullable.
 
+### Measured since this document was written
+
+- **Runtime isolation exists and costs nothing measurable.** A containerised
+  tool worker (`src/tools/containerExecutor.ts`, `docker/worker.Dockerfile`)
+  runs the tool layer with only the workspace mounted and `--network none`.
+  First full batch under it: 4/5 delivered, mean $0.367 / 305s against
+  $0.370 / 311s over the 141 prior runs — indistinguishable. All four
+  families passed, including Chromium-in-container and the zero-LLM
+  deterministic dispatch. The one failure was a tier-1 JSON parse error with
+  zero network or worker errors, i.e. not attributable to the boundary.
+- **Loopback survives, egress does not — and that asymmetry is the point.**
+  A server booted inside is probed from inside (20 `fetch_url` calls in one
+  run), while `host.docker.internal` does not resolve. That is invariant T1's
+  network half, and it is also what makes the Launch-tab token problem
+  disappear in SaaS: a run that cannot reach the control plane needs no
+  out-of-band secret to be kept away from it.
+- **Dependency installation is the live constraint.** `npm install` of a real
+  dependency fails under `--network none` (`EAI_AGAIN`); a no-dependency
+  install succeeds. Not yet a problem — the corpus is zero-dependency by
+  design and the batch made no npm calls — but arbitrary customer tasks will
+  need it. The answer is a registry proxy on an internal network, NOT relaxing
+  the network mode.
+
 ### Open questions for the owner
 
 1. **Who reviews globalised bodies, and at what latency?** T3 makes review the

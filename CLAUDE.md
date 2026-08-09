@@ -2684,6 +2684,22 @@ selection (including that a new flag is never mistaken for the goal — the
 `--clean-workspace` class of bug). Worker stderr is forwarded to the host so `[tool:…]` lines still appear
 live; they match none of `parseRunLog`'s markers and arrive on stderr, so the
 harness is unaffected.
+DEPENDENCY INSTALLATION IS THE REAL LIMIT, measured rather than assumed:
+under `--network none`, `npm install` with an actual dependency fails with
+`EAI_AGAIN registry.npmjs.org`; with a `package.json` carrying NO dependencies
+it succeeds in ~100ms ("up to date"); with no package.json at all it fails
+with ENOENT, which it does with or without a network. So the constraint is
+narrow — a run cannot FETCH a dependency — and it did not bite in the first
+containerised batch, which made ZERO npm calls across five tasks because the
+families are zero-dependency by design (`build-zero-dep-http-json-api` at
+46✓). Note the mismatch that therefore stays latent: the persisted Helium
+prompt still instructs `run_shell npm install` as step 3. It is NOT worth
+editing — `patch` zeroes trust counters, so changing that prompt would cost
+Helium its record to fix a case that has never occurred, and the instruction
+is correct in local mode where installation works. The SaaS answer is a
+registry proxy reachable on an internal network rather than blanket egress;
+do not weaken `--network none` to `bridge` to make npm work, since any egress
+returns the exfiltration path the boundary exists to close.
 KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
 `-w /workspace`, so a relative one resolves under the mount and dies with
 MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,
