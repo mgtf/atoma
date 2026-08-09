@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
+import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -439,10 +440,34 @@ function listSkillsForL1(l1Name: string): SkillSummary[] {
   }));
 }
 
+/**
+ * Tools the named atom declares, read from whichever exposed registry holds
+ * it. Needed to judge a skill body's scope; absent DB → empty, which makes
+ * the shareability check skip its tool findings rather than invent them.
+ */
+function toolNamesForAtom(atomName: string): string[] {
+  for (const reg of listRegistries()) {
+    if (!reg.exists) continue;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(reg.path, { readonly: true, fileMustExist: true });
+      const row = db.prepare('SELECT tools_json FROM atom_types WHERE name = ?').get(atomName) as
+        | { tools_json: string }
+        | undefined;
+      if (row) return (JSON.parse(row.tools_json) as { name: string }[]).map((t) => t.name);
+    } catch {
+      /* unreadable registry — try the next one */
+    } finally {
+      db?.close();
+    }
+  }
+  return [];
+}
+
 function getSkillById(
   l1Name: string,
   skillId: string
-): (SkillSummary & { body: string }) | null {
+): (SkillSummary & { body: string; shareability: ShareAssessment }) | null {
   const skills = skillRegistry.loadFor(l1Name);
   const found = skills.find((s) => s.id === skillId);
   if (!found) return null;
@@ -456,6 +481,11 @@ function getSkillById(
     failures: found.failures,
     updatedAt: found.updatedAt,
     body: found.body,
+    // The cross-org review criterion, at the point where a human actually
+    // reads a skill. Same data as `npm run skills -- review`; surfacing the
+    // verdict here follows the viz's own rule that a card should show the
+    // DECISION, not just the artefact.
+    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtom(l1Name) }),
   };
 }
 

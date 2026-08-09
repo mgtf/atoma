@@ -320,6 +320,19 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'skill.title': 'Skill',
+    'skill.namespace': 'L1 namespace',
+    'skill.kind': 'Kind',
+    'skill.description': 'Description',
+    'skill.whenToUse': 'When to use',
+    'skill.counters': 'Counters',
+    'skill.body': 'Body',
+    'skill.body.recipe': 'Body — markdown recipe',
+    'common.empty': '(empty)',
+    'skill.share.title': 'Cross-organisation review',
+    'skill.share.blocked': '✗ Blocked — a reviewer would reject this as it stands',
+    'skill.share.review-required': '○ Nothing mechanical found — a human must still read it',
+    'skill.share.not-shareable': '· Local only — coupled to this deployment, not a portable recipe',
     'nav.launch': 'Launch',
     'pane.selectLaunch': 'Pick a family to see how to phrase its goal.',
     'launch.family': 'Task family',
@@ -519,6 +532,19 @@ const I18N_CATALOGS = {
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
     'nav.burnin': 'Burn-in',
+    'skill.title': 'Skill',
+    'skill.namespace': 'Espace L1',
+    'skill.kind': 'Genre',
+    'skill.description': 'Description',
+    'skill.whenToUse': 'Quand l\'utiliser',
+    'skill.counters': 'Compteurs',
+    'skill.body': 'Corps',
+    'skill.body.recipe': 'Corps — recette markdown',
+    'common.empty': '(vide)',
+    'skill.share.title': 'Revue inter-organisations',
+    'skill.share.blocked': '✗ Bloqué — un relecteur le refuserait en l\'état',
+    'skill.share.review-required': '○ Rien de mécanique détecté — un humain doit quand même le lire',
+    'skill.share.not-shareable': '· Local uniquement — couplé à ce déploiement, pas une recette portable',
     'nav.launch': 'Lancer',
     'pane.selectLaunch': 'Choisis une famille pour voir comment formuler son objectif.',
     'launch.family': 'Famille de tâche',
@@ -3009,20 +3035,46 @@ function renderSkillDetail(s, l1Name) {
   const el = $('rightPane');
   el.innerHTML = '';
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `Skill — ${s.id}`),
+    h('h3', {}, `${t('skill.title')} — ${s.id}`),
     h('div', { class: 'kv' }, [
-      h('div', { class: 'k' }, 'L1 namespace'), h('div', { class: 'v' }, l1Name),
-      h('div', { class: 'k' }, 'Kind'), h('div', { class: 'v' }, s.kind + (s.language ? ` · ${s.language}` : '')),
-      h('div', { class: 'k' }, 'Description'), h('div', { class: 'v' }, s.description),
-      h('div', { class: 'k' }, 'When to use'), h('div', { class: 'v' }, s.whenToUse),
-      h('div', { class: 'k' }, 'Compteurs'), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
+      h('div', { class: 'k' }, t('skill.namespace')), h('div', { class: 'v' }, l1Name),
+      h('div', { class: 'k' }, t('skill.kind')), h('div', { class: 'v' }, s.kind + (s.language ? ` · ${s.language}` : '')),
+      h('div', { class: 'k' }, t('skill.description')), h('div', { class: 'v' }, s.description),
+      h('div', { class: 'k' }, t('skill.whenToUse')), h('div', { class: 'v' }, s.whenToUse),
+      h('div', { class: 'k' }, t('skill.counters')), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
       h('div', { class: 'k' }, t('registry.updatedAt')), h('div', { class: 'v' }, s.updatedAt),
     ]),
   ]));
+  if (s.shareability) el.appendChild(renderShareability(s.shareability));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, s.kind === 'script' ? `Body — ${s.language} script` : 'Body — markdown recipe'),
-    h('pre', {}, s.body || '(vide)'),
+    h('h3', {}, s.kind === 'script' ? `${t('skill.body')} — ${s.language} script` : t('skill.body.recipe')),
+    h('pre', {}, s.body || t('common.empty')),
   ]));
+}
+
+/**
+ * The cross-organisation review verdict, shown where a human actually reads
+ * a skill. Deliberately states what a REVIEWER still has to do: a clean
+ * result means their time will not be wasted, never that the body is
+ * approved (docs/saas-architecture.md §4.2 — both kinds need human eyes).
+ */
+function renderShareability(a) {
+  const tone =
+    a.verdict === 'blocked' ? '#ef4444' : a.verdict === 'not-shareable' ? '#94a3b8' : '#4ade80';
+  const rows = [
+    h('h3', {}, t('skill.share.title')),
+    h('div', { style: `font-weight:600; color:${tone};` }, t('skill.share.' + a.verdict)),
+  ];
+  for (const b of a.blockers) {
+    rows.push(h('div', { class: 'err-badge', style: 'margin-top:6px;' }, `${b.code} — ${b.detail}`));
+  }
+  for (const w of a.warnings) {
+    rows.push(h('div', { class: 'meta', style: 'margin-top:6px;' }, `⚠ ${w.code} — ${w.detail}`));
+  }
+  if (a.verdict === 'review-required') {
+    rows.push(h('div', { class: 'meta', style: 'margin-top:8px;' }, a.humanMustCheck));
+  }
+  return h('div', { class: 'section' }, rows);
 }
 
 async function loadRegistries() {

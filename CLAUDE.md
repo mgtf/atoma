@@ -1629,6 +1629,15 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   this repo met (the `node index.js sample.txt` literal, the app-task-tracker
   `validate_html`-on-an-HTTP-host distillation, the probe-crud loopback
   near-miss) — a detector that never fires proves nothing.
+  ALSO SURFACED IN THE VIZ: `/api/skills/<l1>/<id>` carries the assessment and
+  the Skills pane renders it, so the criterion sits where a human actually
+  reads a body rather than only in a command nobody runs — the same rule as
+  "viz cards surface the DECISION, not just the call". Fixing that renderer
+  also routed its remaining bare strings through `t()`; two of them
+  (`'Compteurs'`, `'(vide)'`) were hardcoded FRENCH in the English source, so
+  the English UI had been showing French. Note what that says about the
+  parity test added the same day: it proves both catalogs hold the same keys,
+  never that a call site uses them.
 - **Skills CLI** (`npm run skills -- ...`): `list [--l1 <name>]`,
   `show <l1> <id>`, `stats [--l1] [--sim <0..1>]`, `drop <l1> <id>
   [--force]`, `merge <l1> <keep> <absorb> [--force]`,
