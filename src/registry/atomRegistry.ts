@@ -11,6 +11,19 @@ import { nextAvailableElement } from './taxonomies/elements.js';
 import { nextAvailableMolecule } from './taxonomies/molecules.js';
 import { nextAvailableCell } from './taxonomies/cells.js';
 
+/**
+ * Is this string safe to use as an atom NAME?
+ *
+ * Atom names are path components (the skill store namespaces by them), so
+ * the answer is not "is it pretty" but "can it escape a directory". Rejects
+ * anything outside [A-Za-z0-9._-], plus the all-dots strings (`.`, `..`)
+ * that pass a charset test and still traverse. Exported so the same rule can
+ * be asserted from tests.
+ */
+export function isSafeAtomName(s: string): boolean {
+  return /^[A-Za-z0-9._-]{1,64}$/.test(s) && !/^\.+$/.test(s);
+}
+
 export interface AtomType {
   readonly tier: Tier;
   readonly ordinal: number;
@@ -501,6 +514,18 @@ export class AtomRegistry {
 
       let ordinal: number;
       let name: string;
+      // An atom NAME is also a path component: the skill store namespaces by
+      // it (`skills/<atom-name>/<skill-id>/`). `overrideName` is
+      // LLM-authored — it arrives as `verdict.branchName` from an L2/L3
+      // validator — so accepting it verbatim let a verdict of `".."` name an
+      // atom `..` and write a skill outside the skills root (reproduced).
+      // `sanitise` in the skill registry is the inner guard; this is the
+      // outer one, at the boundary where model output first becomes an
+      // identity. Falling back to the taxonomy rather than throwing keeps
+      // `branch` total, as the auto-suffix logic below already assumes.
+      if (overrideName !== undefined && !isSafeAtomName(overrideName)) {
+        overrideName = undefined;
+      }
       if (overrideName) {
         // LLM-suggested branch names can collide across supervise-loop
         // iterations (validator can happily emit the same `branchName` a

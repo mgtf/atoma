@@ -647,9 +647,23 @@ export class SkillRegistry {
   }
 }
 
-/** Reject anything not [a-z0-9._-] so a skill name can't escape its namespace. */
+/**
+ * Reject anything that could escape the skills root.
+ *
+ * The charset test alone did NOT do that: `.` and `..` are made entirely of
+ * accepted characters, so `join(rootDir, '..', id)` walked straight out of
+ * the namespace the function exists to enforce. REPRODUCED end to end — an
+ * L2/L3 validator verdict carries an LLM-authored `branchName`
+ * (`verdictSchema.branchName`), `L2Atom`/`L3Atom` pass it to
+ * `AtomRegistry.branch` as `overrideName`, it becomes the atom NAME, and the
+ * atom name is this component. A verdict emitting `".."` therefore wrote a
+ * SKILL.md one directory above the skills root.
+ *
+ * Traversal is now rejected explicitly rather than as a side effect of the
+ * charset, so the guarantee survives any future widening of the charset.
+ */
 function sanitise(s: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(s)) {
+  if (!/^[A-Za-z0-9._-]+$/.test(s) || /^\.+$/.test(s)) {
     throw new Error(`unsafe skill path component: ${s}`);
   }
   return s;

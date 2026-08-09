@@ -2501,6 +2501,32 @@ parameterised by tier, NOT a base class.
 - Multi-process registry (SQLite local only).
 - Streaming, OpenTelemetry, dashboards beyond the in-process metrics summary.
 
+## SaaS / multi-tenancy — `docs/saas-architecture.md`
+
+Nothing multi-tenant is BUILT (zero tenancy primitives in `src/`; the viz
+server has no auth at all). But the target state — per-entity runs, globally
+shared skills and atoms — constrains design work TODAY, so the formal target
+lives in `docs/saas-architecture.md`. Read its **§5 Invariants** and **§7
+Design rules to apply starting now** before touching skill lifecycle, atom
+identity, counters or any store path. The three findings that matter most
+here and now, all reproduced against the code: (1) `run_shell`'s child gets
+`cwd` and no jail (`builtin.ts:338-344`), so every store is two `..` hops from
+model-authored code — tenant isolation is not implementable in-process;
+(2) `scanScriptBody` is a hygiene filter with a verified bypass
+(`scriptScan.ts:95-97` checks external URLs ONLY on HTTP hosts) and must never
+be cited as a security control; (3) one present-day bug FIXED while writing this (`sanitise` accepted
+`..`, and an LLM-authored `verdict.branchName` reached it — reproduced writing
+a SKILL.md outside the skills root; now guarded at both layers by
+`isSafeAtomName` and an explicit traversal check, see
+`tests/atom-name-path-escape.test.ts`), and one STILL OPEN: `branch` reads
+live ordinals only
+(`atomRegistry.ts:497-499`) where `create` UNIONs history (`228-234`), so a
+post-`remove` branch resurrects a dead atom's name, skill namespace and
+counters. Load-bearing conclusion: skill/atom BODIES may globalise (under
+review); trust COUNTERS never do — for a `kind: script` skill, injection IS
+execution (`lifecycle.ts:210-245`, which deliberately omits the trust-boundary
+lines the llm branch carries).
+
 ## Plan file
 
 The original greenfield plan (`docs/architecture-plan.md`) was removed in the

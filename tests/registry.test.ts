@@ -3,6 +3,7 @@ import {
   AtomRegistry,
   normalizeNameKey,
   stripBranchProvenance,
+  isSafeAtomName,
 } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 
@@ -221,17 +222,35 @@ describe('AtomRegistry', () => {
       expect(a.name).toBe('Minesweeper-WebGL');
 
       // Different casing / separator → same normalized key → must be suffixed.
+      // NOTE: this case used to read 'minesweeper webgl', with a SPACE. That
+      // name is now refused by `isSafeAtomName` and the branch falls back to
+      // the taxonomy — deliberately. An atom name is also the skill store's
+      // namespace directory, and `SkillRegistry.loadFor('minesweeper webgl')`
+      // THROWS ("unsafe skill path component"), so the registry was minting
+      // names that crashed the skill machinery on first touch. The
+      // semantic-duplicate behaviour under test here is unchanged; only the
+      // fixture had to become a name the whole system can represent.
       const b = r.branch(
         'Hydrogen',
         { systemPromptAppend: 'b' },
         'tester',
-        'minesweeper webgl'
+        'minesweeper_webgl'
       );
       // Falls through the entire `-N` ladder until the normalized key is free.
-      expect(b.name.startsWith('minesweeper webgl-')).toBe(true);
-      expect(b.name).not.toBe('minesweeper webgl');
+      expect(b.name.startsWith('minesweeper_webgl-')).toBe(true);
+      expect(b.name).not.toBe('minesweeper_webgl');
       // The normalized key is guaranteed distinct from the first branch.
       expect(normalizeNameKey(b.name)).not.toBe(normalizeNameKey(a.name));
+    });
+
+    it('refuses an overrideName the skill store could not namespace by', () => {
+      // A name with a space passed every registry check and then threw in
+      // SkillRegistry.sanitise the moment any skill was loaded for it. The
+      // two layers now agree on what a name may be.
+      r.create(1, baseSeed);
+      const b = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'minesweeper webgl');
+      expect(b.name).not.toContain(' ');
+      expect(isSafeAtomName(b.name)).toBe(true);
     });
 
     it('branch on a genuinely different name is untouched', () => {
