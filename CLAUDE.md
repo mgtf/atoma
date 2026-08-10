@@ -1409,39 +1409,63 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   carries an INPUT PRECEDENCE clause: when the run wrote
   `.atoma-probes.json`, step 1 MUST read it; prose is a named fallback,
   never the authority. Pinned by `tests/skill-auto-creation.test.ts`.
-- **A MONOLITHIC RECIPE STARVES ITS OWN COMPILABLE SIBLING. The learn-time
-  build/verify split is necessary and NOT sufficient.** Measured by the
-  2026-08-10 controlled benchmark (`benchmark/RESULT.md`), 19 runs from an
-  empty store: `harden-cli-errors-and-document` took **10 matches of 10** and
-  every credit, while the two genuinely mechanical recipes the SAME learn step
-  produced — `replay-cli-probe-manifest` and
-  `verify-cli-against-probes-manifest` — were matched exactly ONCE each, in
-  run 1, and never again. They sit two successes short of the threshold and
-  cannot advance: nothing generates matches for them. Result:
-  **deterministic dispatch fired ZERO times across all 19 runs**, and the
-  benchmark's entire 35% saving came from the trust fast-path and recipe
-  injection instead.
-  WHY IT HAPPENS. The monolithic recipe spans build AND verify (step 1 edits
-  source — irreducible; steps 2-5 are pure manifest verification —
-  compilable), so it matches the verification phase too, and matching it is
-  what withholds the compilable sibling's credit. The split described above
-  DID occur; the prefilter simply prefers the recipe that covers more of the
-  subtask. Both compile attempts on the monolith were REFUSED, correctly and
-  with good reasoning — so the family accumulates trust it can never convert.
-  THE TELL, and it is cheap: `skills stats` showing one recipe with `matches
-  ≈ runs × k` beside siblings frozen at 1. Do not read a refused monolith as
-  "this family is not compilable"; read it as "the compilable half is being
-  out-competed".
-  DELIBERATELY NOT FIXED YET — the fix is a design question, not a patch, and
-  guessing would be worse than the defect. The candidates each have a known
-  cost: excluding build-flavoured recipes from verification-phase matching
-  needs a phase notion the prefilter does not have; making the learn step
-  refuse to emit a monolith when it also emits a split sibling risks losing
-  the recipe that serves the family's real traffic (the `probe-crud` lesson
-  above); a compile-refusal could demote the monolith's `when_to_use` to stop
-  it claiming verification phases, which is the cheapest and the most likely
-  right answer. Whatever is tried, re-run `npm run benchmark` — it is the only
-  harness that measures whether dispatch actually engaged.
+- **`when_to_use` IS MATCHED AGAINST THE SUBTASK TEXT ALONE — a condition
+  about DISK STATE is unevaluable, and that is what keeps verification
+  recipes from compiling.** The prefilter is a cheap model shown the next
+  subtask's wording and the recipe's one-line `when_to_use`. It never sees the
+  workspace. So "a probe manifest already exists in the workspace" is not a
+  weak matching condition, it is an impossible one.
+  MEASURED, 2026-08-10 benchmark, 19 runs from an empty store — the split is
+  clean and it is the same host atom on both sides:
+
+  | phrased as | matches |
+  |---|---|
+  | `replay-cli-probe-manifest` — "a probe manifest already exists in the workspace" | 2 |
+  | `verify-cli-against-probes-manifest` — "an entry script and fixture exist on disk" | 2 |
+  | `verify-cli-argv-exit-codes` — "README/**task** lists concrete invocations…" | 9 |
+  | `package-and-document-cli` — "**Task asks to** add package.json + README…" | 5 |
+  | `replay-recorded-shell-probes` — 3 text-evaluable clauses + an explicit exclusion | 22 |
+
+  Recipes that describe WHAT THE TASK ASKS FOR get picked; recipes that
+  describe THE STATE OF THE DISK do not. Consequence in the benchmark:
+  deterministic dispatch fired ZERO times across 19 runs and the whole 35%
+  saving came from the trust fast-path and recipe reuse instead.
+  IT IS A RATE PROBLEM, NOT A BLOCK. An earlier revision of this entry said
+  the starved siblings "cannot advance… not in ten runs and not in a hundred".
+  That was wrong and the data says so: by the end of the benchmark both sat at
+  2 matches / 2 successes — `promotion-in-1`, ONE success short — and the
+  mature catalog holds five compiled scripts that reached dispatch through
+  exactly this shape. The defect delays compilation by roughly 5-10 runs; it
+  does not prevent it. The benchmark simply stopped before the payoff.
+  ALSO WRONG IN THAT REVISION, recorded because it is the more seductive
+  story: the cause is NOT a monolithic recipe out-competing its sibling for
+  the same phase. The siblings were never in the running at all. Nothing needs
+  to be taken away from the build recipe.
+  FIXED AT THE GENERATOR (2026-08-10). `learnSkillFromRun`'s prompt now carries
+  a HARD RULE stating that `when_to_use` is matched against subtask text alone,
+  with the measured table above, plus a repeat of it inside the
+  verification-split block — a verification recipe acts on a previous phase's
+  artefacts and is the one most tempted to describe itself by them (both
+  casualties were verification recipes). Pinned by
+  `tests/skill-auto-creation.test.ts`.
+  THE LESSON UNDERNEATH, which is the part worth carrying: this rule was
+  ALREADY in this file, written up for `replay-probe-harness` — "the prefilter
+  never sees the workspace, so 'a manifest exists' is NOT a usable matching
+  condition". It had been applied BY HAND to one skill and never fed back into
+  the generator, so the generator kept producing unmatchable recipes for
+  months. A lesson documented but not wired into the thing that generates the
+  artefact is a lesson that gets re-learned at full price.
+  DETECTION, so a recurrence is seen rather than inferred from a cost curve:
+  `skills stats` flags `under-matched(when_to_use?)` on a non-event recipe
+  below the promote threshold whose matches are ≤ 1/5 of its busiest sibling's,
+  when that sibling has ≥ 10 (`isUnderMatched`, `src/skills/stats.ts`). A
+  RATIO, because 2 matches is healthy in a young catalog and pathological
+  beside a sibling at 15. Verified to discriminate: it flags exactly the two
+  known casualties in the archived benchmark catalog and fires zero times
+  across the 24-skill mature catalog.
+  STILL UNVERIFIED: whether the prompt fix actually raises the match rate. That
+  needs a fresh `npm run benchmark` from an empty store — the only harness that
+  measures whether dispatch engaged.
 - **Not every skill is compilable, and matching breadth is the tell.**
   `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
   on purpose. Its four observed prefilter matches were: one genuine

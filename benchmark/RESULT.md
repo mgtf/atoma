@@ -67,12 +67,14 @@ The entire 35% came from two mechanisms:
 The zero-token compiled-script path — the project's most striking claim — never
 engaged, and the reason is a structural defect this benchmark surfaced:
 
+Final counters, from the archived catalog:
+
 | recipe | matches | successes | outcome |
 |---|---|---|---|
-| `harden-cli-errors-and-document` | 10 | 10 | **compile refused** |
-| `build-parser-stats-cli-fixture` | 10 | 9 | **compile refused** |
-| `replay-cli-probe-manifest` | 1 | 1 | frozen below threshold |
-| `verify-cli-against-probes-manifest` | 1 | 1 | frozen below threshold |
+| `harden-cli-errors-and-document` | 15 | 15 | **compile refused** (irreducible) |
+| `build-parser-stats-cli-fixture` | 14 | 14 | **compile refused** (irreducible) |
+| `replay-cli-probe-manifest` | 2 | 2 | `promotion-in-1` — one success short |
+| `verify-cli-against-probes-manifest` | 2 | 2 | `promotion-in-1` — one success short |
 
 Both refusals are correct and well-argued. Verbatim, from the second:
 
@@ -81,21 +83,43 @@ Both refusals are correct and well-argued. Verbatim, from the second:
 > irreducible per-task design/reasoning act that cannot be replaced by a fixed
 > deterministic script without hardcoding one particular grammar."*
 
-The defect is what happens next. `harden-cli-errors-and-document` is
-**monolithic**: step 1 edits source code (irreducible), steps 2–5 are pure
-mechanical verification (compilable). It wins the prefilter match on
-verification phases and takes the credit, leaving the two genuinely compilable
-recipes matched exactly once each — in the first run — and never again. They
-are frozen two successes short of the threshold and will not advance, not in
-ten runs and not in a hundred.
+The defect is what happens next — and the first reading of it, published here
+before the catalog was inspected, was wrong in an instructive way.
 
-`CLAUDE.md`'s "verification split at learn time" exists to prevent exactly
-this. The split *happened* — both pure-verification recipes were created — but
-nothing stops the monolithic recipe from out-competing them at match time.
+**It is not that the monolith out-competes its sibling for the same phase.**
+The compilable siblings were never in the running. Their `when_to_use` — the
+one line the prefilter matches against — described DISK STATE: *"a probe
+manifest already exists in the workspace"*, *"an entry script and fixture exist
+on disk"*. The prefilter is a cheap model shown the next subtask's wording and
+that line. **It never sees the workspace.** Those conditions are not weak, they
+are unevaluable.
 
-**This is the actionable finding of the benchmark**, and it is worth more than
-the headline number: on this family the compilation path is blocked by recipe
-competition, not by the compiler.
+The split is clean across the same host atom:
+
+| `when_to_use` phrased as | matches |
+|---|---|
+| "a probe manifest already exists in the workspace" | 2 |
+| "an entry script and fixture exist on disk" | 2 |
+| "README/**task** lists concrete invocations with expected exit codes" | 9 |
+| "**Task asks to** add package.json + README to an already-tested CLI" | 5 |
+| three text-evaluable clauses + an explicit exclusion | 22 |
+
+Recipes describing what the TASK ASKS FOR get picked. Recipes describing the
+state of the disk do not.
+
+**And it is a rate problem, not a block.** By the end of the 19 runs both
+casualties sat at 2 matches / 2 successes — `promotion-in-1`, one success short
+of compiling. The mature catalog this benchmark replaced holds five compiled
+scripts that reached zero-cost dispatch through exactly this shape. So the
+honest statement is that the defect *delays* compilation by roughly 5-10 runs,
+and the benchmark stopped before the payoff — not that the path was blocked.
+
+**Fixed at the generator**, 2026-08-10: the distillation prompt now states that
+`when_to_use` is matched against subtask text alone, carries the table above,
+and repeats the rule inside the verification-split block. `skills stats` gained
+an `under-matched(when_to_use?)` flag that fires on exactly these two recipes
+and on none of the mature catalog's 24. Whether the fix raises the match rate
+in practice is **not yet verified** — that needs a fresh benchmark run.
 
 ## Threats to validity, as registered
 

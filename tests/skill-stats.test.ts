@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillRegistry } from '../src/skills/registry.js';
 import {
+  UNDER_MATCHED_RATIO,
+  UNDER_MATCHED_SIBLING_FLOOR,
   computeStatsRows,
+  isUnderMatched,
   jaccard,
   matchSurfaceTokens,
   similarityPairs,
@@ -230,5 +233,64 @@ describe('similarityPairs — merge candidates', () => {
       ['Lithium', [nearDupB]],
     ]);
     expect(similarityPairs(split, 0.5)).toHaveLength(0);
+  });
+});
+
+describe('under-matched — a compilable recipe the prefilter rarely picks', () => {
+  const PROMOTE = 3;
+  const busy = fakeSkill({ id: 'build-sibling', matches: 15, successes: 15 });
+  const check = (s: Skill, sibs: Skill[]) => isUnderMatched(s, sibs, PROMOTE);
+
+  it('flags the real measured case: 2 matches beside a sibling at 15', () => {
+    // The exact numbers from the 2026-08-10 benchmark casualties.
+    const victim = fakeSkill({ id: 'verify-from-disk-state', matches: 2, successes: 2 });
+    expect(check(victim, [victim, busy])).toBe(true);
+  });
+
+  it('does NOT flag a quiet namespace — nothing has run yet is not a rate problem', () => {
+    const a = fakeSkill({ id: 'a', matches: 0 });
+    const b = fakeSkill({ id: 'b', matches: 4 });
+    expect(check(a, [a, b])).toBe(false);
+  });
+
+  it('does NOT flag a recipe that already cleared the promote threshold', () => {
+    // Past it the match rate no longer gates anything — it can compile.
+    const mature = fakeSkill({ id: 'm', matches: 2, successes: PROMOTE });
+    expect(check(mature, [mature, busy])).toBe(false);
+  });
+
+  it('does NOT flag a merely-less-popular recipe (5 vs 15 is a third, not a seventh)', () => {
+    const healthy = fakeSkill({ id: 'h', matches: 5, successes: 2 });
+    expect(check(healthy, [healthy, busy])).toBe(false);
+  });
+
+  it('does NOT flag an event skill: it is matched mechanically, not by the prefilter', () => {
+    const ev = fakeSkill({ id: 'recover-x', matches: 0, trigger: 'a failure signature' });
+    expect(check(ev, [ev, busy])).toBe(false);
+  });
+
+  it('does not let a busy EVENT sibling manufacture a phantom rate problem', () => {
+    const victim = fakeSkill({ id: 'v', matches: 0 });
+    const evBusy = fakeSkill({ id: 'e', matches: 50, trigger: 'sig' });
+    expect(check(victim, [victim, evBusy])).toBe(false);
+  });
+
+  it('never compares a skill against itself', () => {
+    const solo = fakeSkill({ id: 'solo', matches: UNDER_MATCHED_SIBLING_FLOOR, successes: 0 });
+    expect(check(solo, [solo])).toBe(false);
+  });
+
+  it('the ratio constant is what decides the boundary', () => {
+    const atBoundary = fakeSkill({ id: 'b1', matches: 15 / UNDER_MATCHED_RATIO, successes: 0 });
+    const justOver = fakeSkill({ id: 'b2', matches: 15 / UNDER_MATCHED_RATIO + 1, successes: 0 });
+    expect(check(atBoundary, [atBoundary, busy])).toBe(true);
+    expect(check(justOver, [justOver, busy])).toBe(false);
+  });
+
+  it('surfaces the flag in the rendered status row, and only on the victim', () => {
+    const victim = fakeSkill({ id: 'v', matches: 2, successes: 2 });
+    const rows = computeStatsRows(new Map([['Lithium', [victim, busy]]]), OPTS);
+    expect(rows.find((r) => r.id === 'v')!.status).toContain('under-matched');
+    expect(rows.find((r) => r.id === 'build-sibling')!.status).not.toContain('under-matched');
   });
 });

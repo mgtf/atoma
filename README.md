@@ -8,7 +8,7 @@
 expensive reasoning once, then progressively compiles the repeatable parts of the work
 into steps that run with no model call at all.*
 
-![tests](https://img.shields.io/badge/tests-1042_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1051_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-−35%25_over_10_runs-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_2-gold)
@@ -87,10 +87,12 @@ The last row is the one that matters most: on a task it had never seen, atoma re
 had learned instead of learning again. That separates generalisation from memorisation.
 
 **What produced the saving was earned trust and recipe reuse — not compilation.** Zero
-deterministic phases fired in all nineteen runs, because the two compilable recipes were
-crowded out at match time by a monolithic one that cannot compile. That defect, and the
-verbatim reasoning of the compiler's refusals, are in
-[the full result](benchmark/RESULT.md). It is the most useful thing this benchmark produced.
+deterministic phases fired in all nineteen runs. The reason turned out to be a one-line
+defect worth more than the headline number: the compilable recipes described themselves by
+what was on disk ("a probe manifest already exists"), and the matcher only ever sees the
+task's wording — so they were picked twice in nineteen runs and ended one success short of
+compiling. Diagnosed, fixed at the generator, and written up in
+[the full result](benchmark/RESULT.md).
 
 Honest limits, stated in the protocol before the data existed: one task family (atoma's best
 case), n of 5 and 10, wall clock biased against atoma by a per-call subprocess tax on this
@@ -164,7 +166,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1042 tests, fully mocked — no API key needed
+npm run typecheck && npm test     # 1051 tests, fully mocked — no API key needed
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -182,7 +184,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1042 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1051 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed

@@ -73,6 +73,54 @@ export function skillStatus(
   return parts.join(' ');
 }
 
+/**
+ * UNDER-MATCHED — a compilable recipe the prefilter picks so much more rarely
+ * than its siblings that it will not reach the promote threshold in any
+ * reasonable number of runs.
+ *
+ * MEASURED, 2026-08-10 benchmark, 19 runs from an empty store: two
+ * verification recipes drew 2 matches each while their build siblings drew 14
+ * and 15 — roughly a seventh of the rate. They ended one success short of
+ * compiling, so deterministic dispatch never armed and the run's whole cost
+ * saving came from elsewhere. The cause was their `when_to_use`, phrased as
+ * DISK STATE ("a probe manifest already exists in the workspace") — something
+ * the prefilter cannot evaluate, since it only ever sees the subtask text. The
+ * distillation prompt now forbids that phrasing.
+ *
+ * IT IS A RATE PROBLEM, NOT A BLOCK, and the flag is worded accordingly. The
+ * same shape resolves itself given enough runs — the mature catalog holds five
+ * compiled scripts that got there — so this is "you will wait a long time for
+ * the zero-cost path", not "it can never happen".
+ *
+ * Deliberately measured rather than heuristic: no attempt to judge the wording.
+ * A RATIO, because the absolute count says nothing — 2 matches is healthy in a
+ * young catalog and pathological beside a sibling at 15. Three conditions, each
+ * removing a class of false positive:
+ *   - the namespace is genuinely busy (a quiet catalog is not starving);
+ *   - the recipe is still below the promote threshold (past it, rate no longer
+ *     matters — it can compile);
+ *   - it is not event-driven (those match mechanically, so `matches` measures
+ *     something else entirely).
+ */
+export const UNDER_MATCHED_RATIO = 5;
+export const UNDER_MATCHED_SIBLING_FLOOR = 10;
+
+export function isUnderMatched(
+  s: Skill,
+  siblings: readonly Skill[],
+  promoteThreshold: number
+): boolean {
+  if (s.trigger) return false;
+  // Already compilable (or compiled): the match rate has done its job.
+  if (s.successes >= promoteThreshold) return false;
+  const busiestSibling = Math.max(
+    0,
+    ...siblings.filter((o) => o.id !== s.id && !o.trigger).map((o) => o.matches ?? 0)
+  );
+  if (busiestSibling < UNDER_MATCHED_SIBLING_FLOOR) return false;
+  return (s.matches ?? 0) * UNDER_MATCHED_RATIO <= busiestSibling;
+}
+
 export function computeStatsRows(
   byL1: ReadonlyMap<string, readonly Skill[]>,
   opts: { trust: number; promote: number; stampIsCurrent: (gen: string | undefined) => boolean }
@@ -81,6 +129,7 @@ export function computeStatsRows(
   for (const [l1, skills] of byL1) {
     for (const s of skills) {
       const driven = s.successes + s.failures;
+      const status = skillStatus(s, opts);
       rows.push({
         l1,
         id: s.id,
@@ -89,7 +138,9 @@ export function computeStatsRows(
         successes: s.successes,
         failures: s.failures,
         freeRides: Math.max(0, (s.matches ?? 0) - driven),
-        status: skillStatus(s, opts),
+        status: isUnderMatched(s, skills, opts.promote)
+          ? `${status} under-matched(when_to_use?)`.trim()
+          : status,
       });
     }
   }

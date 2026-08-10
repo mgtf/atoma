@@ -263,6 +263,22 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     // The F2 toolset-scope contract.
     expect(learnPrompt).toMatch(/DECLARED TOOLS \(this atom's ONLY executable surface\)/);
     expect(learnPrompt).toMatch(/HARD RULE — TOOLSET SCOPE/);
+
+    // `when_to_use` is matched against the SUBTASK TEXT ALONE. Measured on the
+    // 2026-08-10 benchmark: the two verification recipes phrased as disk state
+    // ("a probe manifest already exists in the workspace") drew 2 prefilter
+    // matches over 19 runs against their build siblings' 14 and 15, and ended
+    // one success short of compiling — so the zero-cost dispatch path never
+    // armed. The prefilter never sees the workspace, so that phrasing is not
+    // merely weak, it is unevaluable. This is the single line that produced
+    // the whole defect, and the rule must not drift back out of the prompt.
+    expect(learnPrompt).toMatch(/MATCHED AGAINST THE SUBTASK TEXT ALONE/);
+    expect(learnPrompt).toMatch(/never sees the workspace/i);
+    expect(learnPrompt).toMatch(/DISK\s+STATE/);
+    // …and the split block must repeat it, because a verification recipe acts
+    // on a previous phase's artefacts and is the one most tempted to describe
+    // itself by them. Both measured casualties were verification recipes.
+    expect(learnPrompt).toMatch(/WHERE THIS SPLIT USUALLY DIES/);
   });
 
   it('F2: rejects a draft whose body teaches a tool the host cannot call', async () => {
