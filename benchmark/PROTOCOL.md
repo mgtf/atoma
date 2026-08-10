@@ -150,3 +150,24 @@ treatment run existed.
 
 First measurement, control arm run 1: **10/10**. The baseline is expensive and
 correct, so the treatment arm has to be cheaper *and* correct to support H1.
+
+## Amendment — 2026-08-10, after control run 5 and treatment run 2
+
+**Corrected a false negative in the correctness checker.** Check C2 required a
+standard deviation and accepted only the spellings `stddev`, `std_dev` and
+`standard`. Treatment run 2 printed `stdev: 8.16` — one `d` — and was scored
+9/10 for a requirement it had in fact met. The regex now accepts the common
+spellings.
+
+Recorded prominently because **the correction favours the treatment arm**,
+which is the direction in which a change to a measuring instrument deserves
+the most scrutiny. Two facts limit it: the miss was a demonstrable spelling
+gap, verifiable by running the artefact (its output is quoted in the commit);
+and re-scoring every control deliverable with the corrected checker left all
+five unchanged at 10/10, so the fix did not lift the baseline's ceiling or
+narrow the gap by inflating one side.
+
+Standing rule this establishes for the rest of the protocol: when a check
+fails, the artefact is inspected before the failure is recorded. An instrument
+that penalises a correct deliverable for its choice of abbreviation is
+measuring the instrument.

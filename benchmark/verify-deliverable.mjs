@@ -95,7 +95,17 @@ if (!entry) {
     add('C4b', '--format json emits parseable JSON', js.code === 0 && parsed !== null, `exit=${js.code}`);
 
     const blob = JSON.stringify(parsed ?? {}).toLowerCase() + basic.stdout.toLowerCase();
-    add('C2', 'numeric column reports mean, median and stddev', /mean/.test(blob) && /median/.test(blob) && /(stddev|std_dev|standard)/.test(blob));
+    // The standard-deviation spelling is deliberately permissive. The first
+    // revision accepted only stddev/std_dev/standard and scored a deliverable
+    // 9/10 for printing `stdev: 8.16` — a false negative created by the
+    // checker, not a missing requirement. A measuring instrument that
+    // penalises a correct artefact for its choice of abbreviation measures
+    // the instrument.
+    add(
+      'C2',
+      'numeric column reports mean, median and standard deviation',
+      /mean/.test(blob) && /median/.test(blob) && /(std\s*_?\s*dev|stdev|standard[_ ]?deviation|σ)/.test(blob)
+    );
     add('C3', 'text column reports distinct count and top values', /distinct|unique/.test(blob) && /(top|most)/.test(blob));
     add('C2b', 'reports missing values', /missing|nulls?\b|empty/.test(blob));
 
