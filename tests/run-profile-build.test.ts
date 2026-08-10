@@ -79,7 +79,7 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     // The idempotence that keeps trust alive across runs.
     const reg = new AtomRegistry(openDb(':memory:'));
     const sandbox = new ToolSandbox('/tmp');
-    const tools = defaultBuiltinTools({ sandbox });
+    const tools = defaultBuiltinTools({ sandbox }).map((t) => t.declaration);
     const log = (): void => undefined;
     const ctx = { registry: reg, toolDecls: tools, log };
 
@@ -105,7 +105,9 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
 
   it('seeds the three L1 buckets and the two L2 orchestrators', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    const tools = defaultBuiltinTools({ sandbox: new ToolSandbox('/tmp') });
+    const tools = defaultBuiltinTools({ sandbox: new ToolSandbox('/tmp') }).map(
+      (t) => t.declaration
+    );
     const ctx = { registry: reg, toolDecls: tools, log: (): void => undefined };
     buildProfile.seedL3(ctx);
     buildProfile.seedCatalog(ctx);

@@ -82,10 +82,15 @@ function makeFakeSdk(queue: Reply[]): {
   return { sdk, calls };
 }
 
+// The fakes below accept ANY tool name, so `has` honestly answers true for
+// everything. The tool-use loop never calls it (the declared-tools gate is
+// what filters names) — it is part of the `ToolExecutor` contract, nothing
+// more.
 const echoExecutor: ToolExecutor = {
   async execute(name: string): Promise<string> {
     return `ok:${name}`;
   },
+  has: () => true,
 };
 
 const echoTool = {
@@ -202,6 +207,7 @@ describe('AnthropicLlmClient tool-iteration budget', () => {
       async execute(): Promise<unknown> {
         throw new Error('boom');
       },
+      has: () => true,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = new AnthropicLlmClient(sdk as any);
@@ -287,6 +293,7 @@ describe('tool_result truncation', () => {
       async execute(): Promise<string> {
         return bigOutput;
       },
+      has: () => true,
     };
     const { sdk, calls } = makeFakeSdk([
       { kind: 'tool_use', toolName: 'echo' },

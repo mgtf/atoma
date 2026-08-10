@@ -8,16 +8,7 @@ import {
   looksTaskThemed,
   resolveCreationDescription,
 } from '../src/atoms/capability.js';
-import type { Tool } from '../src/core/types.js';
-
-function makeTools(names: readonly string[]): Tool[] {
-  return names.map((name) => ({
-    name,
-    description: `${name} tool`,
-    parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' }),
-  }));
-}
+import { makeTools } from './helpers/factories.js';
 
 describe('capabilityDescription', () => {
   it('picks the web-artefact-build+validate bucket when write + serve + validate are present (tier 1 = builder)', () => {

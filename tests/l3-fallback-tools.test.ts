@@ -3,8 +3,14 @@ import { L3Atom } from '../src/atoms/L3Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
+import { MockLlmClient } from '../src/core/llm.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 import type { RunContext, Tool, ToolExecutor } from '../src/core/types.js';
+
+/** `makeCtx()` hands back a MockLlmClient; annotating plain `RunContext` would
+ *  widen `llm` to the interface and lose `enqueueText` / `calls`. */
+type MockCtx = RunContext & { llm: MockLlmClient };
 
 /**
  * Regression tests for L3 fallback tool access.
@@ -60,20 +66,17 @@ describe('L3 fallback execute — tool access', () => {
     const l3 = makeL3WithTools([sampleTool]);
     l3.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
     // Fallback execute skips plan validation, so one LLM reply is enough.
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ output: 'done', summary: 'ok' })
-    );
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await l3.execute(
       { description: 'build index.html' },
-      { reasoning: 'r', proposedAction: 'write_file', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'write_file', expectedOutput: 'e' }),
       ctx
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { tools?: Tool[]; executor?: ToolExecutor };
+    const call = ctx.llm.calls[0]!;
     expect(call.tools).toEqual([sampleTool]);
     expect(call.executor).toBe(executor);
   });
@@ -86,7 +89,7 @@ describe('L3 fallback execute — tool access', () => {
 
     await l3.execute(
       { description: 'reason' },
-      { reasoning: 'r', proposedAction: 'think', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'think', expectedOutput: 'e' }),
       ctx
     );
 
@@ -100,15 +103,12 @@ describe('L3 fallback execute — tool access', () => {
     const l3 = makeL3WithTools([sampleTool]);
     l3.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' })
-    );
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }));
 
     await l3.plan({ description: 'build' }, ctx);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { userContent: string };
+    const call = ctx.llm.calls[0]!;
     expect(call.userContent).toMatch(/HAVE tool access/);
     expect(call.userContent).toContain('- write_file:');
   });
@@ -117,19 +117,16 @@ describe('L3 fallback execute — tool access', () => {
     const l3 = makeL3WithTools([sampleTool, validatorTool]);
     l3.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ output: 'done', summary: 'ok' })
-    );
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await l3.execute(
       { description: 'build' },
-      { reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }),
       ctx
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { maxToolIterations?: number };
+    const call = ctx.llm.calls[0]!;
     // Mirrors L1's 40-iteration budget for the validate → fix → re-validate
     // loop so fallback builds can actually converge.
     expect(call.maxToolIterations).toBe(40);

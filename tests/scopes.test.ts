@@ -6,6 +6,7 @@ import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js'
 import { Atom, type Supervisor } from '../src/core/atom.js';
 import type { Plan, Result, RunContext, Task, Tier, Verdict } from '../src/core/types.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 class FakeL2 extends Atom implements Supervisor<L1Atom> {
   readonly tier: Tier = 2;
@@ -28,7 +29,7 @@ class FakeL2 extends Atom implements Supervisor<L1Atom> {
   }
   async plan(_t: Task, _ctx: RunContext): Promise<Plan> {
     this.selfPlans++;
-    return { reasoning: 'self', proposedAction: 'self', expectedOutput: 'o' };
+    return makePlan({ reasoning: 'self', proposedAction: 'self', expectedOutput: 'o' });
   }
   async execute(_t: Task, _p: Plan, _ctx: RunContext): Promise<Result> {
     this.selfExecs++;

@@ -7,6 +7,7 @@ import { L3Atom } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
 import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 import type { Plan, Task } from '../src/core/types.js';
 
 /**
@@ -261,11 +262,11 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
  * (`registry.patch|branch`) — the same two seams the L2 → L1 tests cover.
  */
 
-const dummyPlan: Plan = {
+const dummyPlan: Plan = makePlan({
   reasoning: 'prefilter selected something',
   proposedAction: 'delegate leaf task to L1 "Hydrogen"',
   expectedOutput: 'a working artifact',
-};
+});
 const dummyTask: Task = { description: 'build something end-to-end' };
 
 describe('prompt-update pipeline — L3 → L2 (mirror)', () => {

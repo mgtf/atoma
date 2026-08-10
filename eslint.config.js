@@ -10,7 +10,7 @@
  * entirely async orchestration, so that is exactly its bug class: a floating
  * promise in a supervise loop is a run that silently does not wait.
  *
- * Scope covers `tests/` too, via `tsconfig.eslint.json`. The build tsconfig
+ * Scope covers `tests/` too, via `tsconfig.all.json`. The build tsconfig
  * excludes tests (they are never emitted), and without a lint-only project the
  * type-aware rules would skip the entire suite without saying so.
  */
@@ -28,7 +28,7 @@ export default tseslint.config(
     languageOptions: {
       globals: globals.node,
       parserOptions: {
-        project: ['./tsconfig.eslint.json'],
+        project: ['./tsconfig.all.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },

@@ -5,6 +5,7 @@ import { buildTargetContext, llmVerdict } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 /**
  * Regression tests for delegation-target context injection.
@@ -206,11 +207,11 @@ describe('L2Atom.validatePlan — end-to-end target injection', () => {
 
     await l2.validatePlan(
       l1,
-      {
+      makePlan({
         reasoning: 'r',
         proposedAction: 'delegate leaf task to L1 "Hydrogen"',
         expectedOutput: 'e',
-      },
+      }),
       { description: 't' },
       ctx
     );

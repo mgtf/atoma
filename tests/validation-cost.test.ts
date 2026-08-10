@@ -7,6 +7,7 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import { VALIDATION_SYSTEM_PROMPT } from '../src/atoms/L2Atom.js';
 import { PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 function newRegistry(): AtomRegistry {
   return new AtomRegistry(openDb(':memory:'));
@@ -33,7 +34,7 @@ describe('validation cost discipline', () => {
 
     await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 'task' },
       ctx
     );
@@ -85,7 +86,7 @@ describe('validation cost discipline', () => {
 
     await l3.validatePlan(
       l2,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );
@@ -119,7 +120,7 @@ describe('validation cost discipline', () => {
 
     await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 'task' },
       ctx
     );

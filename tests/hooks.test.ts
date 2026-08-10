@@ -10,12 +10,13 @@ import type {
 } from '../src/core/types.js';
 import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js';
 import { makeCtx } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 class C extends Atom {
   readonly tier: Tier = 1;
   readonly model = 'fake';
   async plan(_t: Task, _ctx: RunContext): Promise<Plan> {
-    return { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' };
+    return makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' });
   }
   async execute(_t: Task, _p: Plan, _ctx: RunContext): Promise<Result> {
     return {
@@ -41,7 +42,7 @@ class P extends Atom implements Supervisor<C> {
     const v = this.r.shift(); if (!v) throw new Error('no rv'); return v;
   }
   async plan(): Promise<Plan> {
-    return { reasoning: 'self', proposedAction: 'self', expectedOutput: 'o' };
+    return makePlan({ reasoning: 'self', proposedAction: 'self', expectedOutput: 'o' });
   }
   async execute(): Promise<Result> {
     return {

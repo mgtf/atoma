@@ -147,7 +147,11 @@ describe('ordinal allocation honours the removal tombstone', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const alive = reg.create(1, seed).name;
     const dead = reg.create(1, seed).name;
-    reg.remove(dead, { force: true });
+    // `remove` takes the name alone — the `--force` gate is the CLI's
+    // (src/cli/registry.ts), not the registry's. An extra `{force: true}`
+    // argument used to sit here; JS ignored it, so dropping it changes
+    // nothing this test exercises.
+    reg.remove(dead);
     return { reg, alive, dead };
   }
 

@@ -7,6 +7,7 @@ import { L3Atom } from '../src/atoms/L3Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
 import { makeCtx } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 import type { TrustFastPathInfo } from '../src/core/types.js';
 
 const seed = {
@@ -31,7 +32,7 @@ describe('trust fast-path in validators', () => {
 
     const verdict = await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );
@@ -78,7 +79,7 @@ describe('trust fast-path in validators', () => {
 
     const v = await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );
@@ -99,7 +100,7 @@ describe('trust fast-path in validators', () => {
 
     await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );
@@ -137,7 +138,7 @@ describe('trust fast-path in validators', () => {
 
     await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );
@@ -158,7 +159,7 @@ describe('trust fast-path in validators', () => {
     const ctx = makeCtx();
     const vp = await l3.validatePlan(
       l2,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );

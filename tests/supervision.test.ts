@@ -17,6 +17,7 @@ import {
   type SupervisionHooks,
 } from '../src/core/supervisor.js';
 import { makeCtx } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 class FakeChild extends Atom {
   readonly tier: Tier = 1;
@@ -36,11 +37,11 @@ class FakeChild extends Atom {
 
   async plan(_task: Task, _ctx: RunContext): Promise<Plan> {
     this.planCount++;
-    return {
+    return makePlan({
       reasoning: 'r',
       proposedAction: `${this.label}#plan:${this.planCount}`,
       expectedOutput: 'out',
-    };
+    });
   }
 
   async execute(_task: Task, _plan: Plan, _ctx: RunContext): Promise<Result> {
@@ -93,7 +94,7 @@ class FakeParent extends Atom implements Supervisor<FakeChild> {
 
   async plan(_t: Task, _ctx: RunContext): Promise<Plan> {
     this.selfPlans++;
-    return { reasoning: 'parent', proposedAction: 'self', expectedOutput: 'o' };
+    return makePlan({ reasoning: 'parent', proposedAction: 'self', expectedOutput: 'o' });
   }
 
   async execute(_t: Task, _p: Plan, _ctx: RunContext): Promise<Result> {

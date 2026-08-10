@@ -9,23 +9,14 @@ import { superviseLoop, type SupervisionHooks } from '../src/core/supervisor.js'
 import { SMOKE_DESIGN_GUIDANCE } from '../src/atoms/prompts.js';
 import { EscalationSignal } from '../src/core/errors.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makeTools } from './helpers/factories.js';
 import type { Atom, Supervisor } from '../src/core/atom.js';
 import type {
   Plan,
   Result,
   Tier,
-  Tool,
   Verdict,
 } from '../src/core/types.js';
-
-function makeTools(names: readonly string[]): Tool[] {
-  return names.map((name) => ({
-    name,
-    description: `${name} tool`,
-    parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' }),
-  }));
-}
 
 const WEB_TOOLS = makeTools([
   'write_file',
@@ -199,12 +190,19 @@ describe('buildNarrowL2Prompt', () => {
  * without a real L2.plan/execute. We queue verdicts to force the loop to
  * exhaust its plan iterations, then assert what branchOnEscalation wrote.
  */
-class FakeL2 extends (class extends (Object as unknown as new () => Atom) {})
+/**
+ * `Atom` is abstract, so the empty class expression that used to sit between
+ * FakeL2 and this cast had to implement `tier`/`model`/`plan`/`execute`
+ * itself (TS2656) — FakeL2 declares them one level down. The intermediate
+ * class added nothing else, so it is gone; FakeL2 extends the cast directly
+ * and supplies every abstract member.
+ */
+class FakeL2 extends (Object as unknown as new () => Atom)
   implements Supervisor<L1Atom> {
   readonly tier: Tier = 2;
   readonly model = 'sonnet';
-  readonly name = 'Water';
-  readonly ordinal = 1;
+  override readonly name = 'Water';
+  override readonly ordinal = 1;
   private pv: Verdict[] = [];
 
   constructor() {
@@ -222,16 +220,16 @@ class FakeL2 extends (class extends (Object as unknown as new () => Atom) {})
     return { approved: true, reasoning: 'ok' };
   }
   // Unused Atom fields; declared to satisfy the Supervisor<L1Atom> compile surface.
-  isFallbackMode(): boolean {
+  override isFallbackMode(): boolean {
     return false;
   }
-  setFallbackMode(_on: boolean): void {
+  override setFallbackMode(_on: boolean): void {
     /* no-op */
   }
-  injectContext(_text: string): void {
+  override injectContext(_text: string): void {
     /* no-op */
   }
-  applyModifications(): void {
+  override applyModifications(): void {
     /* no-op */
   }
   async plan(): Promise<Plan> {

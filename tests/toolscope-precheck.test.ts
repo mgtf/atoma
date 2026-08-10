@@ -6,6 +6,8 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import { undeclaredToolMentions, BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { probeGroundTruth } from '../src/atoms/groundTruth.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
+import type { ToolExecutor } from '../src/core/types.js';
 
 /**
  * F1(a) — the mechanical toolset pre-check (app-task-tracker run,
@@ -64,7 +66,11 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
       createdBy: 't',
     });
     const water = L2Atom.fromType(reg.getByName('Water')!, reg, []);
-    const child = L1Atom.fromType(t, reg);
+    // `fromType`'s second parameter is the MODEL id, not the registry — the
+    // arg passed here was a copy-paste of the L2 signature above and is
+    // unused on every path this file exercises (the verdict runs on the
+    // supervisor's validationModel, the probes run on ctx.tools).
+    const child = L1Atom.fromType(t);
     return { water, child, reg };
   }
 
@@ -73,14 +79,14 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const ctx = makeCtx();
     const verdict = await water.validatePlan(
       child,
-      {
+      makePlan({
         // Two non-negated mentions — a plan that USES a tool names it
         // repeatedly (the motivating run: seven times); the pre-check
         // threshold is 2 so single echoes never auto-reject.
         reasoning: 'serve then validate_html with interactions',
         proposedAction: 'start_node_server, then validate_html the URL covering each control',
         expectedOutput: 'zero console errors',
-      },
+      }),
       { description: 'build the UI phase' },
       ctx
     );
@@ -100,11 +106,11 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const { water, child } = setup();
     const ctx = makeCtx();
     const task = { description: 'author the page; validate with validate_html per the plan' };
-    const offPlan = {
+    const offPlan = makePlan({
       reasoning: 'validate_html then assert',
       proposedAction: 'validate_html per the subtask, then run checks',
       expectedOutput: 'e',
-    };
+    });
     const first = await water.validatePlan(child, offPlan, task, ctx);
     expect(first.approved).toBe(false);
     expect(ctx.llm.calls).toHaveLength(0); // the one free mechanical rejection
@@ -126,7 +132,11 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const ctx = makeCtx();
     const verdict = await water.validatePlan(
       child,
-      { reasoning: 'validate_html pass required', proposedAction: 'validate_html the page', expectedOutput: 'e' },
+      makePlan({
+        reasoning: 'validate_html pass required',
+        proposedAction: 'validate_html the page',
+        expectedOutput: 'e',
+      }),
       { description: 't' },
       ctx
     );
@@ -138,7 +148,7 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const { child } = setup();
     const ctx = makeCtx();
     const calls: string[] = [];
-    ctx.tools = {
+    (ctx as { tools?: ToolExecutor }).tools = {
       has: (n: string) => ['validate_html', 'fetch_url', 'read_file', 'list_files'].includes(n),
       execute: async (n: string) => {
         calls.push(n);
@@ -173,7 +183,7 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const { child } = setup();
     const ctx = makeCtx();
     const calls: string[] = [];
-    ctx.tools = {
+    (ctx as { tools?: ToolExecutor }).tools = {
       has: (n: string) => ['validate_html', 'fetch_url', 'read_file', 'list_files'].includes(n),
       execute: async (n: string) => {
         calls.push(n);
@@ -195,7 +205,7 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const { child } = setup();
     const ctx = makeCtx();
     const calls: string[] = [];
-    ctx.tools = {
+    (ctx as { tools?: ToolExecutor }).tools = {
       has: (n: string) => ['validate_html', 'fetch_url', 'read_file', 'list_files'].includes(n),
       execute: async (n: string) => {
         calls.push(n);
@@ -219,7 +229,7 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     const { child } = setup();
     const ctx = makeCtx();
     const calls: string[] = [];
-    ctx.tools = {
+    (ctx as { tools?: ToolExecutor }).tools = {
       has: (n: string) => ['validate_html', 'fetch_url', 'read_file', 'list_files'].includes(n),
       execute: async (n: string) => {
         calls.push(n);
@@ -245,11 +255,11 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'fine' }));
     const verdict = await water.validatePlan(
       child,
-      {
+      makePlan({
         reasoning: 'probe over HTTP',
         proposedAction: 'start_node_server then fetch_url every route; no validate_html needed',
         expectedOutput: 'all routes verified',
-      },
+      }),
       { description: 't' },
       ctx
     );

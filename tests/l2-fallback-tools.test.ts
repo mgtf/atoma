@@ -2,8 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
+import { MockLlmClient } from '../src/core/llm.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 import type { RunContext, Tool, ToolExecutor } from '../src/core/types.js';
+
+/** `makeCtx()` hands back a MockLlmClient; annotating plain `RunContext` would
+ *  widen `llm` to the interface and lose `enqueueText` / `calls`. */
+type MockCtx = RunContext & { llm: MockLlmClient };
 
 /**
  * Regression tests for L2 fallback tool access — companion to the L3
@@ -53,19 +59,16 @@ describe('L2 fallback execute — tool access', () => {
     const l2 = makeL2WithTools([writeTool]);
     l2.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ output: 'done', summary: 'ok' })
-    );
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await l2.execute(
       { description: 'build' },
-      { reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }),
       ctx
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { tools?: Tool[]; executor?: ToolExecutor };
+    const call = ctx.llm.calls[0]!;
     expect(call.tools).toEqual([writeTool]);
     expect(call.executor).toBe(executor);
   });
@@ -78,7 +81,7 @@ describe('L2 fallback execute — tool access', () => {
 
     await l2.execute(
       { description: 'reason' },
-      { reasoning: 'r', proposedAction: 'think', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'think', expectedOutput: 'e' }),
       ctx
     );
 
@@ -92,19 +95,16 @@ describe('L2 fallback execute — tool access', () => {
     const l2 = makeL2WithTools([writeTool, validatorTool]);
     l2.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ output: 'done', summary: 'ok' })
-    );
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await l2.execute(
       { description: 'build' },
-      { reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }),
       ctx
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { maxToolIterations?: number };
+    const call = ctx.llm.calls[0]!;
     expect(call.maxToolIterations).toBe(40);
   });
 
@@ -112,15 +112,12 @@ describe('L2 fallback execute — tool access', () => {
     const l2 = makeL2WithTools([writeTool]);
     l2.setFallbackMode(true);
     const executor = new RecordingExecutor();
-    const ctx: RunContext = { ...makeCtx(), tools: executor };
-    (ctx.llm as { enqueueText: (s: string) => void }).enqueueText(
-      jsonText({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' })
-    );
+    const ctx: MockCtx = { ...makeCtx(), tools: executor };
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }));
 
     await l2.plan({ description: 'build' }, ctx);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (ctx.llm as any).calls[0] as { userContent: string };
+    const call = ctx.llm.calls[0]!;
     expect(call.userContent).toMatch(/HAVE tool access/);
     expect(call.userContent).toContain('- write_file:');
   });

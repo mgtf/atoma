@@ -5,6 +5,7 @@ import { VALIDATION_SYSTEM_PROMPT, llmVerdict } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 /**
  * Regression tests for the validator prompt rework.
@@ -165,7 +166,7 @@ describe('L2/L3 validators wire the rewritten prompt into every call', () => {
 
     await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       { description: 'task' },
       ctx
     );

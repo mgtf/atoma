@@ -14,6 +14,7 @@ Project-level notes for Claude Code. Read this before making changes.
 | LLM interaction conventions | providers, per-tier models, JSON parsing, prompt caching |
 | Testing conventions | how to add tests that actually catch the bug class |
 | Linting | what ESLint is calibrated to, and the rules deliberately OFF |
+| The test suite is type-checked now | the 96 errors nothing was looking at, and the factories that stop them coming back |
 | Tools | sandbox, the 9 builtins, their contracts |
 | Things that look wrong but aren't | **read before "fixing" something odd** |
 | Considered and rejected | **read before proposing an optimization** |
@@ -2166,14 +2167,49 @@ WHAT IT FOUND ON FIRST CONTACT (three real defects, all in `src/`):
   `export { X } from './y.js'`, which is INDEPENDENT of the `import { X }`
   above it — the import was genuinely dead and the re-export keeps working.
 
-KNOWN GAP, not closed: `tsconfig.json` excludes `tests/`, so **the test suite
-has never been type-checked** — vitest transpiles with esbuild, which does not
-typecheck. `npx tsc -p tsconfig.eslint.json --noEmit` reports **52 errors**
-there (partial mocks that do not implement their interface, missing `override`
-modifiers). The tests pass at runtime and the errors look benign, but nobody
-has read them. `tsconfig.eslint.json` exists so lint at least sees those files
-— and it is what caught a syntax error in `container-isolation.test.ts` that
-`npm run typecheck` structurally cannot see. Fixing the 52 is its own task.
+## The test suite is type-checked now (it never was)
+
+`tsconfig.json` excludes `tests/` and vitest transpiles with esbuild, which
+does not typecheck — so for the life of this project **nothing ever
+type-checked the test suite**. When `tsconfig.all.json` first put it under the
+compiler it reported **96 errors across 29 files**. All fixed, 2026-08-10, with
+1042/1042 still passing and zero changes under `src/`.
+
+`npm run typecheck` now runs BOTH projects: `tsconfig.json` (the build config —
+still the one that validates rootDir and declaration emit) and
+`tsconfig.all.json` (every file the repo owns). The guard is verified, not
+assumed: injecting `const x: number = 'str'` into a test makes `typecheck` exit
+2 while `vitest` passes it silently — which is precisely the hole that existed.
+
+WHAT THE 96 WERE, because the shape is the lesson: two stale literal shapes
+accounted for most of them. `Tool` was being hand-built as
+`{name, description, parameters, execute}` when the contract has long been
+`{name, description, inputSchema}` — a DECLARATION, with the executor living on
+`BuiltinTool`. And `Plan` was built as `{reasoning, proposedAction,
+expectedOutput}`, the pre-fan-out shape, missing the now-required `subtasks`
+and `aggregation`. Both drifted for months because nothing looked, and the
+tests kept passing because the code under test only reads `.name` off a tool.
+**A test asserting against a shape the code no longer produces is not testing
+what it claims.**
+
+`tests/helpers/factories.ts` (`makeTool`, `makeTools`, `makePlan`) exists so the
+next contract change breaks one factory instead of silently leaving thirty
+tests green against a dead shape. Use it rather than hand-writing either shape.
+
+The rest were: missing `override` modifiers, `find()`/index results used
+without a null check under `noUncheckedIndexedAccess`, `BuiltinTool[]` passed
+where `readonly Tool[]` was wanted (needs `.map(t => t.declaration)`), and
+assignments to readonly `RunContext` fields.
+
+TWO CLAIMS FROM THAT PASS THAT DID NOT SURVIVE CHECKING, recorded because the
+second is the kind of thing that gets acted on:
+- `ToolExecutor.has()` was reported as required-but-never-called dead API. It
+  is called FOUR times, all in `src/atoms/groundTruth.ts` (165, 185, 481, 566),
+  and they are the bucket gate for the ground-truth probe — invariant #9. Do
+  not remove it.
+- `AtomRegistry.remove`'s protection was reported as surprising. It is
+  CLI-only and always was; see the `remove` entry under "Things that look wrong
+  but aren't".
 
 ## Tools (L1 side-effects)
 

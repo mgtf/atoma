@@ -5,6 +5,7 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 import type { Result, RunContext, Tool, ToolExecutor } from '../src/core/types.js';
 
 /**
@@ -179,7 +180,7 @@ describe('trust fast-path × ground-truth probe', () => {
     const { l2, l1, ctx, exec } = setup({ 'README.md': '# hi' });
     const verdict = await l2.validatePlan(
       l1,
-      { reasoning: 'r', proposedAction: 'write README.md', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'write README.md', expectedOutput: 'e' }),
       { description: 't' },
       ctx
     );

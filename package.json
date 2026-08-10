@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/viz/ui.html dist/viz/ui.html",
     "build:worker": "npm run build && docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.all.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "check": "npm run typecheck && npm run lint && npm test",

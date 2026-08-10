@@ -3,17 +3,8 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
-import type { Tool } from '../src/core/types.js';
 import { capabilityDescription } from '../src/atoms/capability.js';
-
-function makeTools(names: readonly string[]): Tool[] {
-  return names.map((name) => ({
-    name,
-    description: `${name} tool`,
-    parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' }),
-  }));
-}
+import { makeTools } from './helpers/factories.js';
 
 describe('L2Atom.createSubtaskL1 — capability-first description', () => {
   it('drops a task-themed seed.description in favour of the canonical capability label', () => {
@@ -216,7 +207,9 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     const l2Type = reg.create(2, {
       description: 'l2', systemPrompt: 'l2', tools, params: {}, createdBy: 'test',
     });
-    const l2 = L2Atom.fromType(l2Type, reg, tools);
+    // NOTE: the atom's toolset comes from `l2Type.tools`; `fromType`'s third
+    // parameter is the L2 PEER list, which this test does not exercise.
+    const l2 = L2Atom.fromType(l2Type, reg);
     const ctx = { logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } };
     const strategy = {
       strategy: 'create',

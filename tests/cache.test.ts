@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { AnthropicLlmClient } from '../src/core/llm.js';
+import type { ToolExecutor } from '../src/core/types.js';
 
 describe('AnthropicLlmClient prompt caching', () => {
   it('marks system prompt with cache_control=ephemeral by default', async () => {
@@ -99,10 +100,11 @@ describe('AnthropicLlmClient prompt caching', () => {
         usage: { input_tokens: 200, output_tokens: 10 },
       });
 
-    const executor = {
+    const executor: ToolExecutor = {
       execute: async (_name: string, _args: Record<string, unknown>): Promise<unknown> => ({
         ok: true,
       }),
+      has: () => true,
     };
 
     const llm = new AnthropicLlmClient({ messages: { create } } as any);
@@ -169,8 +171,9 @@ describe('AnthropicLlmClient prompt caching', () => {
         usage: { input_tokens: 10, output_tokens: 10 },
       });
 
-    const executor = {
+    const executor: ToolExecutor = {
       execute: async () => ({ ok: true }),
+      has: () => true,
     };
     const llm = new AnthropicLlmClient({ messages: { create } } as any);
     await llm.complete({

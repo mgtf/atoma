@@ -9,16 +9,7 @@ import {
   ensureCanonicalL1,
   ensureCanonicalL2,
 } from '../src/atoms/capability.js';
-import type { Tool } from '../src/core/types.js';
-
-function makeTools(names: readonly string[]): Tool[] {
-  return names.map((name) => ({
-    name,
-    description: `${name} tool`,
-    parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' }),
-  }));
-}
+import { makeTools } from './helpers/factories.js';
 
 const WEB_TOOLS = makeTools([
   'write_file',

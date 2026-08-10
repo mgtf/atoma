@@ -8,6 +8,7 @@ import { openDb } from '../src/registry/db.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 /**
  * Regression test for the earlier bug where `ctx.signal` never reached the
@@ -46,7 +47,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     });
     await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(ctx.llm.calls[0]!.signal).toBe(ctx.signal);

@@ -80,11 +80,15 @@ describe('tool-use loop — declared-tools scope enforcement (#8a)', () => {
     ]);
 
     let executorInvoked = false;
+    // `has` answers true for everything on purpose: these fakes stand in for
+    // the shared InMemoryToolRegistry, which WOULD run any registered name.
+    // The gate under test is the declared-tools check, not the executor.
     const executor: ToolExecutor = {
       async execute(): Promise<string> {
         executorInvoked = true;
         return 'should-never-happen';
       },
+      has: () => true,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -142,6 +146,7 @@ describe('tool-use loop — declared-tools scope enforcement (#8a)', () => {
         executorInvokedWith = name;
         return 'ok';
       },
+      has: () => true,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = new AnthropicLlmClient(sdk as any);
@@ -166,7 +171,10 @@ describe('tool-use loop — declared-tools scope enforcement (#8a)', () => {
       { kind: 'tool_use', toolName: 'ghost', input: {} },
       { kind: 'text', text: 'giving up' },
     ]);
-    const executor: ToolExecutor = { async execute(): Promise<string> { return 'x'; } };
+    const executor: ToolExecutor = {
+      async execute(): Promise<string> { return 'x'; },
+      has: () => true,
+    };
     let seen: { error?: string } | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = new AnthropicLlmClient(sdk as any);
@@ -208,6 +216,7 @@ describe('tool-use loop — declared-tools scope enforcement (#8a)', () => {
         executorInvokedWith = name;
         return 'ok';
       },
+      has: () => true,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = new AnthropicLlmClient(sdk as any);

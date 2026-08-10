@@ -11,16 +11,7 @@ import {
   ensureCanonicalL1,
   PROBE_MANIFEST_FILENAME,
 } from '../src/atoms/capability.js';
-import type { Tool } from '../src/core/types.js';
-
-function makeTools(names: readonly string[]): Tool[] {
-  return names.map((name) => ({
-    name,
-    description: `${name} tool`,
-    parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' }),
-  }));
-}
+import { makeTools } from './helpers/factories.js';
 
 const KITCHEN_SINK = makeTools([
   'write_file',

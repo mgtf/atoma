@@ -1,0 +1,22 @@
+{
+  "//": "EVERY file this repo owns \u2014 src, tests, the benchmark scripts and the configs. TWO consumers: `npm run typecheck` (so the test suite is actually type-checked; the build tsconfig excludes tests/ and vitest transpiles with esbuild, which does not typecheck \u2014 that gap let 96 type errors accumulate unseen) and ESLint's type-aware rules. NOTE `extends` INHERITS the build config's exclude, which silently wins over include; the explicit exclude below is what actually brings tests into scope.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "benchmark/**/*.mjs",
+    "eslint.config.js",
+    "*.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

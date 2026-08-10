@@ -93,8 +93,10 @@ describe('forkBranch propagates recordSkill', () => {
     const baseCtx: RunContext = {
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
       signal: new AbortController().signal,
-      llm: { complete: async () => ({ text: '', usage: { inputTokens: 0, outputTokens: 0 } }) },
-      limits: { maxRecursion: 1, maxRetries: 1, maxConcurrency: 1 },
+      llm: {
+        complete: async () => ({ text: '', stopReason: null, usage: { inputTokens: 0, outputTokens: 0 } }),
+      },
+      limits: { maxPlanIterations: 1, maxExecIterations: 1 },
       recordSkill: (info) => seen.push(info),
     };
     const branchCtx = forkBranch(baseCtx, 'branch-uuid-abc');
@@ -123,8 +125,10 @@ describe('forkBranch propagates recordSkill', () => {
     const baseCtx: RunContext = {
       logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
       signal: new AbortController().signal,
-      llm: { complete: async () => ({ text: '', usage: { inputTokens: 0, outputTokens: 0 } }) },
-      limits: { maxRecursion: 1, maxRetries: 1, maxConcurrency: 1 },
+      llm: {
+        complete: async () => ({ text: '', stopReason: null, usage: { inputTokens: 0, outputTokens: 0 } }),
+      },
+      limits: { maxPlanIterations: 1, maxExecIterations: 1 },
     };
     const branchCtx = forkBranch(baseCtx, 'branch-x');
     expect(branchCtx.recordSkill).toBeUndefined();

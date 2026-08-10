@@ -192,6 +192,7 @@ describe('OllamaLlmClient', () => {
         executorCalls.push({ name, args });
         return { ok: true, path: (args as { path?: string }).path ?? '?' };
       },
+      has: () => true,
     };
     const seenInvocations: Array<{ name: string; args: unknown; result?: unknown }> = [];
 
@@ -267,6 +268,7 @@ describe('OllamaLlmClient', () => {
         executorInvoked = true;
         return 'never';
       },
+      has: () => true,
     };
     const seen: Array<{ name: string; error?: string; result?: unknown }> = [];
 

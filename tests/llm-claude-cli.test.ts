@@ -66,7 +66,7 @@ describe('cliEffortFor — the one generation lever the CLI transport has', () =
 });
 
 describe('cliThinkingFor — API-parity thinking gate for the haiku tier', () => {
-  let envBefore;
+  let envBefore: string | undefined;
   beforeEach(() => {
     envBefore = process.env['ATOMA_CLAUDE_MODEL'];
     delete process.env['ATOMA_CLAUDE_MODEL'];

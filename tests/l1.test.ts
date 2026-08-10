@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { makeCtx, jsonText } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 describe('L1Atom', () => {
   const base = {
@@ -68,7 +69,7 @@ describe('L1Atom', () => {
     const atom = new L1Atom(base);
     const result = await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.output).toBe('4');
@@ -95,7 +96,7 @@ All gameplay controls wired up. No console errors.`;
     const atom = new L1Atom(base);
     const result = await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.output).toBe(narrative.trim());
@@ -115,7 +116,7 @@ All gameplay controls wired up. No console errors.`;
     const atom = new L1Atom(base);
     const result = await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.output).toEqual({ url: 'http://localhost:8000/' });
@@ -179,7 +180,7 @@ All gameplay controls wired up. No console errors.`;
     });
     const result = await atom.execute(
       { description: 'build a game' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.summary).toMatch(/\[INTERNAL VALIDATION FAILED/);
@@ -218,7 +219,7 @@ All gameplay controls wired up. No console errors.`;
     });
     const result = await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.summary).not.toMatch(/INTERNAL VALIDATION FAILED/);
@@ -231,7 +232,7 @@ All gameplay controls wired up. No console errors.`;
     const atom = new L1Atom(base); // tools: []
     const result = await atom.execute(
       { description: 'x' },
-      { reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
       ctx
     );
     expect(result.summary).not.toMatch(/INTERNAL VALIDATION FAILED/);

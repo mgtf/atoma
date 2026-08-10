@@ -82,12 +82,12 @@ describe('RecordingLlmClient — in-flight llm-start markers', () => {
       expect(start).toBeDefined();
       expect(done).toBeDefined();
       // Pairing contract the UI relies on to hide superseded starts.
-      expect(start.llmEventId).toBe(done.id);
+      expect(start!.llmEventId).toBe(done!.id);
       // Classification is available at start time — same role/actor.
-      expect(start.role).toBe('execute');
-      expect(start.actor).toEqual({ name: 'Fluorine', tier: 1 });
+      expect(start!.role).toBe('execute');
+      expect(start!.actor).toEqual({ name: 'Fluorine', tier: 1 });
       // Start precedes completion in the event stream.
-      expect(events.indexOf(start)).toBeLessThan(events.indexOf(done));
+      expect(events.indexOf(start!)).toBeLessThan(events.indexOf(done!));
     } finally {
       recorder.endRun();
       rmSync(dir, { recursive: true, force: true });
@@ -109,9 +109,9 @@ describe('RecordingLlmClient — in-flight llm-start markers', () => {
       const events = recorder.currentRun!.events;
       const start = events.find((e) => e.kind === 'llm-start');
       const done = events.find((e) => e.kind === 'llm');
-      expect(start.llmEventId).toBe(done.id);
-      expect(done.stopReason).toBe('error');
-      expect(done.error).toBe('socket hang up');
+      expect(start!.llmEventId).toBe(done!.id);
+      expect(done!.stopReason).toBe('error');
+      expect(done!.error).toBe('socket hang up');
     } finally {
       recorder.endRun();
       rmSync(dir, { recursive: true, force: true });
