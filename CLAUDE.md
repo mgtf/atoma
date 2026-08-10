@@ -160,16 +160,42 @@ npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in b
   Pinned by a same-millisecond burst test that fails against the `at` sort.
   NOT MIGRATED on the move, deliberately: a cache that gets an importer is
   being treated as data.
-  **AND ITS VALUE IS UNPROVEN — `npm run registry -- cache` is how you check.**
-  Measured at the move: 500 entries (AT the cap, so eviction and not the 7-day
-  expiry is what bounds retention), spanning three days, **9 entries ever read
-  back — 1.8% — for 11 total hits**. That is ~30s of avoided subprocess spawn
-  over three days. The table is kept because the number is now one query
-  instead of a hand-parsed blob, and because CLAUDE.md's PLAN TEMPLATING
-  rejection names this exact hit rate as its revisit gate ("exceeds 25% across
-  two consecutive batches"). If it is still under ~5% after the next few
-  batches, DELETING the cache is the honest call — the measurement exists to
-  be acted on, not admired.
+  **IT IS ALREADY AT ITS CEILING, AND THE CEILING IS 1.7%. DO NOT TRY TO
+  TUNE IT.** Live rate at the move: 500 entries (AT the cap, so eviction and
+  not the 7-day expiry bounds retention), 9 ever read back — 1.8% — for 11
+  hits; then 0 hits over the next five runs. That reads like a tuning problem
+  and is not one. Replaying the REAL key (preamble stripped, as
+  `prefilterCacheKey` does) over all 748 prefilter calls in the 118 archived
+  traces: **735 distinct inputs**, 12 within-run repeats in 3 runs, 1
+  across-run. A cache that were infinite, never expired and never missed
+  would avoid **13/748 = 1.7%** of calls — worth $0.0003/run, ~0.1% of a mean
+  run, ~40s of claude-cli subprocess spawn across the whole corpus. The live
+  1.8% IS the ceiling; raising the cap or the expiry cannot move a number
+  that is bounded by input uniqueness.
+  WHY IT CANNOT REPEAT: the key contains the TASK DESCRIPTION, and no two
+  prefilter calls in the system ever see the same one. A run's ~6 calls are
+  one per decomposed subtask, and subtask text is freshly authored prose from
+  a non-deterministic plan call; top-level goals are novel by construction
+  (the curriculum demands it). Decomposition is the production of distinct
+  texts, so the cache is keyed on the one input guaranteed to be unique.
+  KEPT ANYWAY (operator decision, 2026-08-10): it costs an indexed SELECT and
+  it is honest about itself via `registry cache`. The reason NOT to delete a
+  mechanism this weak is thin, so the reason not to TRUST it is written here
+  instead — if you are wondering why prefilters cost what they do, the cache
+  is not the answer and never was.
+  THE OBVIOUS IDEA FOR RAISING IT IS THE DANGEROUS ONE. Fuzzy or embedding
+  ("semantic cache") matching would hit far more often, and it trades the
+  cache's single safety property — exactness — at the one point in the
+  pipeline with nothing above it: a prefilter-synthesised plan carries
+  `viaPrefilter: true`, which makes `validatePlan` return approved WITHOUT an
+  LLM call. A near-match returning the wrong child would therefore reach
+  execution unvalidated. Any future attempt has to solve that first, not the
+  hit rate.
+  REVISIT only if the key stops containing free-form task text, or if real
+  (non-burn-in) usage turns out to be repeat-heavy — a human relaunching an
+  identical goal after a failure is the one shape that would hit. Do NOT
+  revisit on more burn-in batches: they engineer novelty by design, so they
+  can only re-measure the same ceiling.
 - **Prefilter fast-path in `validatePlan`.** Plans synthesised by the
   prefilter carry an internal `viaPrefilter: true` flag (set in
   `L2.plan` / `L3.plan` on the skeletal-plan literal). Both
@@ -2698,7 +2724,17 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   REVISIT only if BOTH (i) the prefilter cache's exact-key hit rate
   exceeds 25% across two consecutive batches, and (ii) the L3 plan prompt
   goes unedited across that whole window. Today: 2.4% and two edits in
-  two days. Also measured and discarded: hoisting the constant plan
+  two days.
+  CONDITION (i) IS NOW KNOWN UNSATISFIABLE, which closes this permanently
+  and for a better reason than the one above. Replaying the real key over
+  all 748 archived prefilter calls found 735 DISTINCT inputs: a perfect
+  cache would avoid 1.7%, so 25% is not a threshold the system can reach.
+  The cause generalises straight to plan templating — both memoise
+  content keyed on free-form, model-authored task text, and that text is
+  unique by construction because decomposition is the production of
+  distinct prose. The prefilter cache was cited here as weak PRECEDENT;
+  it turns out to be a measured PROOF of the same mechanism, one tier
+  down and with six chances per run instead of one. Also measured and discarded: hoisting the constant plan
   preamble under the system cache breakpoint (ephemeral cache is 5 min,
   mean run ~5 min, one plan call per run — inert or worse, 1.25× write
   multiplier); and a "cache only aggregation + phase count" variant
