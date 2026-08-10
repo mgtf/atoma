@@ -193,3 +193,52 @@ marks** across all three revisions of the instrument, so no loosening has ever
 lifted the control arm's score or narrowed the gap by inflating one side.
 
 Final correctness: **19/19 deliverables at full marks on both arms.**
+
+---
+
+## ROUND 2 — pre-registration, 2026-08-10, written before any round-2 run
+
+Round 1 found that deterministic dispatch never engaged: the compilable
+recipes' `when_to_use` described DISK STATE, which the prefilter cannot
+evaluate because it only sees the subtask text. They drew 2 matches in 19 runs
+against their siblings' 14-15 and ended one success short of compiling. The
+distillation prompt was fixed to forbid that phrasing. Round 2 tests whether
+the fix does anything.
+
+**H2 — the fix raises the match rate enough to reach compilation.** Starting
+again from an empty registry and empty skill store, on the SAME primary task,
+at least one recipe compiles to `kind: script` and at least one run records a
+deterministic phase (`det > 0`) within 14 atoma runs.
+
+Round 1's comparison values, fixed here so they cannot be reinterpreted later:
+`det = 0` across all 19 runs; compilable recipes at 2 matches each; build
+siblings at 14 and 15; both casualties ending at `promotion-in-1`.
+
+**Secondary, and the more informative measure:** the match count of the
+verification recipes relative to their busiest sibling. Round 1 was a ratio of
+about 1:7. If the phrasing rule works, that ratio narrows even in runs where
+compilation does not quite land.
+
+**H2 is refuted if** no recipe compiles within 14 runs AND the verification
+recipes' match ratio is no better than round 1's ~1:7. Publishing a refutation
+matters more here than in round 1: it would mean the diagnosis was wrong, and
+the diagnosis is what the fix was built on.
+
+**Scale.** 3 baseline (a drift check only — the frontier arm does not learn and
+was measured at n=5 in round 1; three runs are enough to catch gross model or
+machine drift that would confound a round-to-round comparison), 14 atoma
+(round 1 ended one success short at 10, so the extra four give compilation room
+to land or to visibly fail to), 2 held-out atoma (generalisation still holds?).
+No held-out baseline: round 1 measured it at n=2 with a 2.5× spread, and
+re-measuring a weak estimate adds nothing.
+
+**Output.** `benchmark/results-round2.csv`, via the new `--out` flag. Round 1's
+`results.csv` is left untouched — it is the record `RESULT.md` cites, and the
+two rounds are compared against each other rather than pooled.
+
+**Confounder acknowledged in advance.** Round 2 runs on a different day against
+a subscription-served model that can shift behind its alias. The 3 baseline
+runs are the only guard, and they are a weak one. If round 2's baseline mean
+departs sharply from round 1's $0.8198, the round-to-round atoma comparison is
+not trustworthy and the report must say so rather than attribute the difference
+to the fix.

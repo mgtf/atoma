@@ -272,7 +272,10 @@ async function main(): Promise<void> {
   const logsDir = join(outDir, 'logs');
   const scratchDir = join(outDir, '.scratch');
   const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? './runs');
-  const csvPath = join(outDir, 'results.csv');
+  // A second round must not append into the first round's file: the two are
+  // compared against each other, and RESULT.md cites results.csv by name.
+  const outIdx = argv.indexOf('--out');
+  const csvPath = outIdx >= 0 ? resolve(argv[outIdx + 1]!) : join(outDir, 'results.csv');
 
   const total =
     cfg.baselineRuns + cfg.atomaRuns + cfg.heldOutBaselineRuns + cfg.heldOutAtomaRuns;
