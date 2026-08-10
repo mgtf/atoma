@@ -4,6 +4,11 @@ import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import type { Tool, Logger } from '../core/types.js';
 import { sandboxChildEnv, type ToolSandbox } from './sandbox.js';
+import {
+  DECORATED_CMD_RE,
+  PORT_BEARING_STDOUT_RE,
+  PROBE_MANIFEST_FILENAME,
+} from '../contracts/probeManifest.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
 export interface BuiltinToolOptions {
@@ -1755,6 +1760,153 @@ function expectString(args: Record<string, unknown>, key: string): string {
 }
 
 /** Convenience: build the full default toolset. */
+
+/**
+ * Render `command` + `args` back into ONE replayable shell string.
+ *
+ * Quoting is not cosmetic here: the manifest's `cmd` is re-executed verbatim
+ * by compiled verifiers, and a previous compiled script's command regex
+ * dropped quotes — amputating `node index.js "Hello World"` to
+ * `node index.js` and failing a correct deliverable.
+ */
+export function renderProbeCmd(command: string, argv: readonly string[]): string {
+  const quote = (a: string): string =>
+    a.length > 0 && /^[A-Za-z0-9_./:=@,+-]+$/.test(a) ? a : `"${a.replace(/(["\\$`])/g, '\\$1')}"`;
+  return [command, ...argv.map(quote)].join(' ').trim();
+}
+
+/**
+ * Merge one shell entry into a probe manifest, by `cmd`.
+ *
+ * Shell entries MERGE (an invocation re-run after a fix should replace its
+ * stale record, not accumulate duplicates); http entries APPEND in order,
+ * which is why this helper is shell-only. Pure, so the merge semantics are
+ * testable without a filesystem.
+ */
+export function mergeShellProbe(
+  existingRaw: string | null,
+  entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string }
+): string {
+  let doc: { version: number; entries: Record<string, unknown>[] } = { version: 1, entries: [] };
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw) as typeof doc;
+      if (parsed && Array.isArray(parsed.entries)) doc = { version: 1, entries: parsed.entries };
+    } catch {
+      // A corrupt manifest is replaced rather than appended to: half a JSON
+      // document is not a record anyone can replay.
+    }
+  }
+  const i = doc.entries.findIndex((e) => e['cmd'] === entry.cmd);
+  if (i >= 0) doc.entries[i] = entry;
+  else doc.entries.push(entry);
+  return JSON.stringify(doc, null, 2) + '\n';
+}
+
+/**
+ * RECORD_PROBE — run a command AND write its real result into the probe
+ * manifest, in one step.
+ *
+ * WHY IT EXISTS. The manifest was introduced to replace model-authored prose
+ * with a machine-readable record — and was then itself written by the model,
+ * which pasted observed output into a `write_file`. Measured on the 2026-08-10
+ * round-2 benchmark: the model ABRIDGES long output. In every failing replay
+ * the recorded stdout was a strict PREFIX of the real one (371 chars against
+ * 2008; 65 against 1029), so a compiled verifier comparing byte-for-byte could
+ * never match, and two such false mismatches auto-demoted a working script.
+ * `validateProbeManifest` checks structure, not completeness, so nothing
+ * noticed. Asking the prompt harder does not fix a transcription problem: the
+ * harness already HAS the exact bytes, so it should be the one writing them.
+ *
+ * The division of labour is deliberate. The MODEL still decides which
+ * invocations are evidence — auto-recording every `run_shell` would fill the
+ * manifest with `mkdir` and `ls` noise. The MACHINE decides what the record
+ * says.
+ *
+ * Composed on `run_shell` rather than re-implementing it: the process-group
+ * kill, the credential-stripped environment and the timeout are load-bearing
+ * and must not exist twice.
+ */
+export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
+  const shell = runShellTool(opts);
+  return {
+    declaration: {
+      name: 'record_probe',
+      description: [
+        `Run a command AND record its real exit code and output into ${PROBE_MANIFEST_FILENAME}.`,
+        'Use this INSTEAD of run_shell for every invocation that is evidence the deliverable works',
+        '(the documented examples, the error cases). Never transcribe output into the manifest by',
+        'hand — this tool writes exactly what the command produced. Entries merge by command, so',
+        're-running one after a fix replaces its record.',
+      ].join(' '),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'Program to invoke, as for run_shell.' },
+          args: { type: 'array', items: { type: 'string' }, description: 'Positional arguments.' },
+          note: { type: 'string', description: 'Optional one-line reason this invocation is evidence.' },
+        },
+        required: ['command'],
+      },
+    },
+    async execute(args) {
+      const command = expectString(args, 'command');
+      const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
+      const argv = rawArgs.map((a) => String(a));
+      const cmd = renderProbeCmd(command, argv);
+
+      // The contract forbids `; echo EXIT=$?` decorations: they make the
+      // recorded exitCode echo's (always 0) and hide the real one inside
+      // stdout. Refused mechanically here rather than asked for in a prompt —
+      // a decorated cmd once auto-demoted a 30-success compiled verifier.
+      // Check the ARGS too, not only the rendered line. `bash -c "… ; echo
+      // EXIT=$?"` hides the decoration inside a quoted argument, and
+      // DECORATED_CMD_RE is anchored at end-of-string, so the closing quote
+      // defeats it. Caught by its own test.
+      if (DECORATED_CMD_RE.test(cmd) || argv.some((a) => DECORATED_CMD_RE.test(a))) {
+        throw new Error(
+          `record_probe: "${cmd}" carries an exit-code echo. Drop it — this tool records the real ` +
+            'exit code in the entry\'s "exitCode" field.'
+        );
+      }
+
+      const result = (await shell.execute(args)) as {
+        exitCode: number;
+        stdout?: string;
+        stderr?: string;
+        error?: string;
+      };
+
+      const stdout = result.stdout ?? '';
+      const stderr = result.stderr ?? '';
+      const entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string } = {
+        cmd,
+        exitCode: result.exitCode,
+      };
+      // A bound port is different on every run, so recording it guarantees a
+      // future replay mismatch. Omitting stdout is the documented signal that
+      // only the exit code is comparable for this entry.
+      if (!PORT_BEARING_STDOUT_RE.test(stdout)) entry.stdout = stdout;
+      if (stderr) entry.stderr = stderr;
+      if (typeof args['note'] === 'string' && args['note'].trim()) entry.note = args['note'].trim();
+
+      const path = opts.sandbox.resolve(PROBE_MANIFEST_FILENAME);
+      const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
+      writeFileSync(path, mergeShellProbe(existing, entry), 'utf8');
+      opts.logger?.info(
+        `[tool:record_probe] ${cmd} -> exit ${result.exitCode}, recorded in ${PROBE_MANIFEST_FILENAME}`
+      );
+
+      return {
+        ...result,
+        recorded: true,
+        manifest: PROBE_MANIFEST_FILENAME,
+        recordedStdoutOmitted: entry.stdout === undefined,
+      };
+    },
+  };
+}
+
 export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
   return [
     writeFileTool(opts),
@@ -1762,6 +1914,7 @@ export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
     readFileTool(opts),
     listFilesTool(opts),
     runShellTool(opts),
+    recordProbeTool(opts),
     startStaticServerTool(opts),
     validateHtmlTool(opts),
     fetchUrlTool(opts),

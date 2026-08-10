@@ -2374,13 +2374,47 @@ second is the kind of thing that gets acted on:
     reject every legitimate path. Not-yet-created tail segments (a deep
     new file `write_file` will `mkdir -p`) are re-appended after the
     realpath so writes still validate.
+- **`record_probe` — the manifest is written by the MACHINE, not transcribed
+  by the model.** The probe manifest exists to replace model-authored prose
+  with a machine-readable record ("free-form model-authored markdown is not a
+  parseable interface; a machine-written JSON record is") — and was then
+  itself written by the model, which pasted observed output into a
+  `write_file`. MEASURED on the 2026-08-10 round-2 benchmark: the model
+  ABRIDGES long output. Hand-replaying eight archived workspaces, six were
+  perfect and two failed almost entirely, and in every failing case the
+  recorded stdout was a strict PREFIX of the real one (371 chars against 2008;
+  65 against 1029). A compiled verifier comparing byte-for-byte can never
+  match that, so two false mismatches auto-demoted a working script one run
+  after its first successful zero-token dispatch. `validateProbeManifest`
+  checks structure, not completeness, so nothing noticed — and the
+  intermittency (most workspaces fine) is why it looked like flakiness.
+  `record_probe(command, args, note?)` runs the command AND writes the real
+  exit code and complete output into the manifest, merging by cmd. THE
+  DIVISION OF LABOUR IS THE DESIGN: the model still chooses WHICH invocations
+  are evidence — auto-recording every `run_shell` would bury the record in
+  `mkdir` and `ls` noise — while the machine decides what the record says.
+  COMPOSED on `runShellTool` rather than reimplementing it: the process-group
+  kill, the credential-stripped env and the timeout are load-bearing and must
+  not exist twice. It also refuses an exit-code echo decoration mechanically
+  (checking the ARGS as well as the rendered line — `bash -c "... ; echo
+  EXIT=$?"` hides it inside a quoted arg, and `DECORATED_CMD_RE` is anchored
+  at end-of-string, so the closing quote defeated the first version), and
+  omits stdout when it embeds `LISTENING_ON_PORT` — both contracts that used
+  to live only in a prompt. In every scope that owns a shell, and NOT in any
+  bucket `required` list, so capability labels are unchanged (same rule as
+  `edit_file`). PROVEN on the data that exposed the defect: re-recording the
+  two failing workspaces' commands through it drops them from 4/6 and 9/10
+  replay mismatches to ZERO of 16. Covered by `tests/record-probe.test.ts`,
+  whose first case is a 2000-character output recorded byte-identically.
+  NOT YET measured in a live run — the next benchmark round is what would
+  show whether a compiled script now survives instead of demoting.
 - **`InMemoryToolRegistry`** (`src/tools/registry.ts`) — maps tool name →
   executor fn. Implements `ToolExecutor` (`src/core/types.ts`), plugged into
   `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
 - **`defaultBuiltinTools({ sandbox, logger })`** (`src/tools/builtin.ts`)
   returns: `write_file`, `edit_file`, `read_file`, `list_files`,
-  `run_shell`, `start_static_server`, `validate_html`, `fetch_url`,
-  `start_node_server`. **`edit_file`** is a targeted str_replace edit —
+  `run_shell`, `record_probe`, `start_static_server`, `validate_html`,
+  `fetch_url`, `start_node_server`. **`edit_file`** is a targeted str_replace edit —
   the cost-discipline counterpart to `write_file`: revision cycles used
   to re-emit ENTIRE files (full content billed as output tokens on each
   retouch — the dominant spend of long L1 tool loops), and `edit_file`

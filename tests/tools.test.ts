@@ -203,6 +203,7 @@ describe('InMemoryToolRegistry', () => {
         'fetch_url',
         'list_files',
         'read_file',
+        'record_probe',
         'run_shell',
         'start_node_server',
         'start_static_server',
