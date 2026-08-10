@@ -122,3 +122,24 @@ failure. Each has a cost, and guessing is what this file exists to avoid.
   ranges — the drift estimate is itself weak.
 - One task family, atoma's best case, as in round 1.
 - `det` fired once. A single event is an existence proof, not a rate.
+
+## Evidence, and a gap in it
+
+Surviving and committed: [`results-round2.csv`](results-round2.csv) (19 rows),
+`results-round2-scores.json`, `driver-round2.log`, and
+`round2-logs.tar.gz` (per-run stdout, which carries each run's cost table and
+lifecycle markers). The 18 deliverable workspaces are on disk under
+`~/.atoma/workspaces/build.prev36..53` — that is where the manifest-truncation
+analysis above was done, and it is reproducible from them.
+
+**Lost, through my own error while restoring the store: the 19 JSON run traces
+and round 2's skill catalogue, including the compiled script body.** The
+restore deleted `runs/` and `skills/` before archiving them. Round 1's traces
+were committed as `traces.tar.gz` precisely because gitignoring them is what
+made the *previous* benchmark unreproducible — and then the same directory was
+deleted a round later without being archived.
+
+Every claim in this document remains derivable from what survives. What is gone
+is the per-LLM-call detail and the ability to read what the compiler actually
+emitted. Anyone repeating this: archive `runs/` and `skills/` **before**
+touching them, not after.
