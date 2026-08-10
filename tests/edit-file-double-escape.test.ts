@@ -80,7 +80,7 @@ describe('edit_file diagnoses a provable double-escape', () => {
     await sandbox.cleanup();
   });
 
-  it('falls back to the generic message when un-escaping does not resolve it', async () => {
+  it('falls back to a non-double-escape message when un-escaping does not resolve it', async () => {
     const sandbox = workspace({ 'index.html': css });
     let err = '';
     try {
@@ -92,7 +92,11 @@ describe('edit_file diagnoses a provable double-escape', () => {
     } catch (e) {
       err = (e as Error).message;
     }
-    expect(err).toMatch(/must match the file EXACTLY/);
+    // The span resembles nothing in the file, so there are no real bytes to
+    // hand back and re-reading IS the right advice. What must not happen is a
+    // double-escape claim the evidence does not support.
+    expect(err).toMatch(/no region of the file resembles it/);
+    expect(err).toMatch(/read_file/);
     expect(err).not.toMatch(/DOUBLE-ESCAPED/);
     await sandbox.cleanup();
   });

@@ -471,6 +471,36 @@ re-exports all the historical names so old imports keep working.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **`edit_file`: the double-escape was only 14% of it — MEASURE BEFORE
+  BELIEVING THIS ENTRY.** The bullet below was written from a 40-run sample
+  and is correct about the mechanism it names, but a full pass over 122
+  archived traces (2026-08-10) found **50 `old_string not found` failures and
+  the double-escape branch fires on SEVEN**. In the other 43 the argument
+  un-escapes to something still absent: the model is not mis-escaping a span
+  it holds, it is reconstructing one it half-remembers.
+  THE DOMINANT CAUSE IS ONE FILE. **31 of the 50 — 62% of every edit_file
+  failure in the corpus — are `.atoma-probes.json`**, and the reason is
+  structural rather than sloppiness: it is a JSON record the model must MERGE
+  into, and compiled verification scripts rewrite it behind the model's back
+  (`node _skill_*.mjs` merging its observations), so a span remembered from an
+  earlier tool call is stale BY CONSTRUCTION. Two changes retire that class:
+  `record_probe` removes the need to hand-write the manifest at all, and
+  `edit_file` now REFUSES that path outright with a message naming the tool.
+  Made impossible rather than diagnosed — a better error would still cost a
+  wasted round-trip.
+  FOR THE REMAINING 17, the same principle the double-escape fix established
+  now covers the general case: hand back BYTES, not instructions.
+  `findNearestSpan` tries a whitespace-insensitive match (unique only — an
+  ambiguous hit would echo a span the model did not mean), then the longest
+  leading slice of the argument that actually occurs, and echoes the file's
+  real content for that region. Only when nothing resembles the span does the
+  message fall back to "re-read the file", which is then the honest advice.
+  WHAT COULD NOT BE VALIDATED, recorded so nobody quotes a number that does
+  not exist: these 50 historical calls are NOT replayable as a regression
+  suite. The file state at the time depended on shell side effects the trace
+  does not record, and a replay attempt reported an implausible 50/50 before
+  being discarded. `tests/edit-file-nearest-span.test.ts` therefore constructs
+  cases matching the observed failure SHAPES rather than lifting them.
 - **`edit_file` proves the double-escape instead of describing it.** The
   `old_string not found` message already named WRONG ESCAPING as the common
   cause, and the model kept re-sending the same broken span. Measured over the

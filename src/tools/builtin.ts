@@ -105,6 +105,26 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
         throw new Error(`edit_file: no such file "${path}" — use write_file to create it first`);
       }
       const content = readFileSync(abs, 'utf8');
+      // THE PROBE MANIFEST IS NOT EDITABLE BY HAND. Measured across 122
+      // archived traces: 31 of the 50 `old_string not found` failures were on
+      // this one file — 62% of every edit_file failure in the corpus. The
+      // cause is structural, not sloppiness: the manifest is a JSON document
+      // the model must MERGE into, and compiled verification scripts rewrite
+      // it behind the model's back (`node _skill_*.mjs` merges its
+      // observations back in), so a span remembered from an earlier tool call
+      // is stale by construction. Refused here rather than diagnosed, because
+      // `record_probe` now does the merge correctly and a better error message
+      // would still cost a wasted round-trip.
+      if (path === PROBE_MANIFEST_FILENAME) {
+        throw new Error(
+          `edit_file: refuse to hand-edit "${PROBE_MANIFEST_FILENAME}". It is a merged record that ` +
+            `compiled verification scripts also rewrite, so any span you remember from earlier is ` +
+            `likely stale — this was 62% of all edit_file failures before the tool existed. ` +
+            `Use record_probe to run a command AND record its real result, or write_file the whole ` +
+            `document after read_file if you must repair its structure.`
+        );
+      }
+
       const occurrences = content.split(oldString).length - 1;
       if (occurrences === 0) {
         // Naming the diagnosis was not enough. This message already told the
@@ -127,8 +147,22 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
               `---8<---\n${unescaped.slice(0, EDIT_SPAN_ECHO_CHARS)}${unescaped.length > EDIT_SPAN_ECHO_CHARS ? '\n… (truncated — copy the full span from read_file)' : ''}\n--->8---`
           );
         }
+        // The span un-escapes to nothing that exists either: the model is
+        // reconstructing a half-remembered region, not mis-escaping a real
+        // one. Hand back what IS there rather than sending it to read_file.
+        const near = findNearestSpan(content, oldString);
+        if (near) {
+          throw new Error(
+            `edit_file: old_string not found in "${path}". ` +
+              (near.how === 'whitespace'
+                ? 'It matches exactly one region ignoring whitespace, so your indentation or line breaks differ from the file. '
+                : 'The closest region in the file starts where your span starts and then diverges. ') +
+              `Here are the file's REAL bytes for that region — re-send old_string copied verbatim from between the markers:\n` +
+              `---8<---\n${near.span.slice(0, EDIT_SPAN_ECHO_CHARS)}${near.span.length > EDIT_SPAN_ECHO_CHARS ? '\n… (truncated — read_file for the rest)' : ''}\n--->8---`
+          );
+        }
         throw new Error(
-          `edit_file: old_string not found in "${path}". It must match the file EXACTLY, including whitespace and indentation — read_file the current content and retry with a verbatim span. Common cause: WRONG ESCAPING — old_string must contain the file's RAW bytes (real newlines, real quotes), never two-character \\n or \\" escape sequences. If you re-read the file and it still does not match, your escaping is wrong, not the file.`
+          `edit_file: old_string not found in "${path}", and no region of the file resembles it — nothing here starts the way your span does. Either you are editing the wrong file, or the content changed since you last read it: list_files then read_file "${path}" and work from what it actually contains. Note that old_string must hold the file's RAW bytes (real newlines, real quotes), never two-character \\n or \\" escape sequences.`
         );
       }
       if (occurrences > 1 && !replaceAll) {
@@ -265,6 +299,70 @@ export const EDIT_SPAN_ECHO_CHARS = 600;
  * fragment, not a document, and a parser would reject it or mangle a lone
  * backslash that was legitimately in the file.
  */
+export const EDIT_NEAREST_ANCHOR_MIN = 24;
+
+/**
+ * Find the real bytes the model was probably aiming at when `old_string` is
+ * not in the file.
+ *
+ * WHY THIS EXISTS. Measured over 122 archived traces: 50 `edit_file` failures,
+ * and the double-escape branch above explains only SEVEN of them. In the other
+ * 43 the argument un-escapes to something still absent — the model is not
+ * mis-escaping a span it has, it is reconstructing one it half-remembers,
+ * usually from a file it wrote several tool calls earlier. Telling it to
+ * "read_file and retry" costs a full round-trip and it frequently comes back
+ * with the same invented span.
+ *
+ * Two attempts, cheapest first, both returning REAL bytes from the file:
+ *   1. WHITESPACE-INSENSITIVE match. If the span exists modulo runs of
+ *      whitespace and matches exactly once, the intent is unambiguous and the
+ *      only thing wrong was indentation — the single most common way a
+ *      remembered span drifts.
+ *   2. LONGEST-PREFIX ANCHOR. Otherwise, find the longest leading slice of the
+ *      argument that does occur, and return the file's actual content from
+ *      there. That is the region the model was editing, in its true form.
+ *
+ * Deliberately returns bytes and never applies an edit: the argument proves
+ * where the model was looking, not what it meant to write there.
+ */
+export function findNearestSpan(
+  content: string,
+  oldString: string
+): { span: string; how: 'whitespace' | 'anchor' } | null {
+  const squash = (t: string): string => t.replace(/\s+/g, ' ').trim();
+  const needle = squash(oldString);
+  if (needle.length === 0) return null;
+
+  // 1. Whitespace-insensitive, and only when it is UNIQUE — an ambiguous hit
+  // would hand back a span the model did not mean.
+  const squashedContent = squash(content);
+  if (squashedContent.split(needle).length - 1 === 1) {
+    // Walk the real content to recover the true bytes of that region.
+    const words = needle.split(' ');
+    const first = words[0]!;
+    const last = words[words.length - 1]!;
+    const start = content.indexOf(first);
+    if (start >= 0) {
+      const end = content.indexOf(last, start + first.length);
+      if (end >= 0) return { span: content.slice(start, end + last.length), how: 'whitespace' };
+    }
+  }
+
+  // 2. Longest leading slice that actually occurs. Binary search rather than a
+  // scan: old_string can be kilobytes and this runs on a failure path.
+  const probe = unescapeJsonish(oldString);
+  let lo = 0;
+  let hi = Math.min(probe.length, 4000);
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (content.includes(probe.slice(0, mid))) lo = mid;
+    else hi = mid - 1;
+  }
+  if (lo < EDIT_NEAREST_ANCHOR_MIN) return null;
+  const at = content.indexOf(probe.slice(0, lo));
+  return { span: content.slice(at, at + Math.min(probe.length + 80, EDIT_SPAN_ECHO_CHARS)), how: 'anchor' };
+}
+
 export function unescapeJsonish(s: string): string {
   return s.replace(/\\(n|t|r|"|\\)/g, (_m, c: string) =>
     c === 'n' ? '\n' : c === 't' ? '\t' : c === 'r' ? '\r' : c === '"' ? '"' : '\\'
