@@ -124,3 +124,29 @@ JSON trace per run under `runs/`.
 
 The machine must be otherwise idle — this repository has measured twice that
 a loaded machine distorts run durations badly enough to invalidate rows.
+
+---
+
+## Amendment — 2026-08-10, after 2 control runs, before any treatment run
+
+**Added: mechanical correctness scoring of every deliverable.**
+`benchmark/verify-deliverable.mjs` executes each artefact against the numbered
+requirements in `experiment.json` — runs the CLI, checks exit codes, parses
+`--format json`, verifies a quoted comma stays one field, confirms the README
+documents the flags — and emits a score.
+
+Why it was added mid-protocol: the harness records "delivered" when a run
+prints its completion banner, which says the run finished, not that the thing
+works. Comparing the cost of a working CLI against the cost of a broken one
+would be worse than not measuring. This matters most for the control arm,
+which self-certifies: nothing in its path checks the deliverable
+independently.
+
+This does not change H1, the primary metric or the falsification condition. It
+adds a **gate**: a run whose deliverable scores below the other arm's is
+reported, and a cost advantage bought by shipping less is not a cost
+advantage. The scorer is identical for both arms and was written before any
+treatment run existed.
+
+First measurement, control arm run 1: **10/10**. The baseline is expensive and
+correct, so the treatment arm has to be cheaper *and* correct to support H1.
