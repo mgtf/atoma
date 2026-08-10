@@ -25,7 +25,7 @@ export const TRUST_THRESHOLD_SUCCESSES = 3;
  * Operator overrides for the three lifecycle thresholds, read at CALL time
  * so a single run can be made more (or less) cautious without a rebuild:
  *   ATOMA_TRUST_THRESHOLD   → successes before validators are skipped (3)
- *   ATOMA_PROMOTE_THRESHOLD → successes before llm→script compilation (5)
+ *   ATOMA_PROMOTE_THRESHOLD → successes before llm→script compilation (3)
  *   ATOMA_DEMOTE_AFTER      → deterministic failures before demotion (2)
  * Invalid or non-positive values fall back to the default rather than
  * disabling a safety gate — a typo must never make the system LESS careful.
@@ -174,7 +174,7 @@ export function shouldTrustType(type: AtomType): boolean {
  * deterministic dispatch of `kind: 'script'` skills in `L2.runSubtask`:
  * a trusted script runs via write_file + run_shell with ZERO LLM calls
  * (no L1 plan/execute, no validators). Note that promotion already
- * requires TRUST_PROMOTE_THRESHOLD_SUCCESSES (5) clean runs, so every
+ * requires TRUST_PROMOTE_THRESHOLD_SUCCESSES (3) clean runs, so every
  * freshly promoted script qualifies immediately; hand-written scripts
  * must first earn 3 clean runs through the normal LLM loop.
  */

@@ -2983,6 +2983,23 @@ The original greenfield plan (`docs/architecture-plan.md`) was removed in the
 reference. Recover it from git history if the genesis rationale is ever
 needed. Before major refactors, this file is what you consult.
 
+## Outward-facing docs
+
+`README.md` is the EXECUTIVE pitch (consultancies, CTOs, decision-makers) and
+`docs/how-it-works.md` the high-level technical tour it links to — components,
+flows, six rendered diagrams. Both are English; keep them so. THE RULE THAT
+MATTERS: every number in them must be reproducible from a repo artefact TODAY.
+A 2026-08-10 audit of the previous README found 6 of 10 headline claims stale or
+unsupported, including all three badges — no full run has ever cost $0.00 (the
+zero applies to PHASES; cheapest run is $0.126), the "$0.22 · 138s warm run" pair
+appears in no CSV row or trace, and the head-to-head-vs-Opus-direct table had no
+surviving baseline artefact of any kind (the benchmark commit shipped README-only;
+`runs/` is gitignored and predates nothing before 2026-08-05). They were removed
+rather than softened. The trap is structural, not carelessness: the burn-in curve
+keeps moving and the curriculum escalates difficulty on purpose, so a figure
+pasted from a good session rots within days. Cite medians over a stated n, name
+the window, and prefer a claim that regenerates with `npm run burnin`.
+
 ## Language
 
 The user (`mateo@enoxsolutions.com`) communicates in French. Respond in French;
