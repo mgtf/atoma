@@ -69,7 +69,7 @@ on their own.
 ## The controlled experiment
 
 The same task, given to atoma ten times and to a single frontier agent five times — same
-sandbox, same nine tools, same budget, same token accounting. atoma started from an **empty
+sandbox, same tools, same budget, same token accounting. atoma started from an **empty
 registry and empty skill store**, as after `git clone`. The hypothesis, the metric and the
 falsification conditions were [registered before the first run](benchmark/PROTOCOL.md).
 
@@ -191,9 +191,9 @@ What exists: the full three-tier loop, the learning and compilation lifecycle, s
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
 integrity checking, a web console, and a measurement harness.
 
-What does not: any notion of tenants, users or authentication; a hosted service; a published
-license (the repository currently carries none — treat it as all-rights-reserved until one is
-added). The target multi-tenant design is written up in
+What does not: any notion of tenants, users or authentication, and no hosted service. This is a
+private repository, shared deliberately rather than published. The target multi-tenant design is
+written up in
 [`docs/saas-architecture.md`](docs/saas-architecture.md) and explicitly marked as not built.
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**

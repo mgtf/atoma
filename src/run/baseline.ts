@@ -4,7 +4,7 @@ import type { Result, RunContext, Task, Tool } from '../core/types.js';
 /**
  * SINGLE-AGENT FRONTIER BASELINE — the control arm of the cost experiment.
  *
- * WHAT IT IS: one frontier-model agent, given the same nine tools, the same
+ * WHAT IT IS: one frontier-model agent, given the same toolset, the same
  * sandbox, the same task text and the same run budget as atoma, running a
  * plain tool-use loop until it declares itself done. No tiering, no
  * supervision, no learned recipes, no independent verification — it
@@ -52,6 +52,14 @@ export const BASELINE_ATOM_NAME = 'BaselineFrontierDirect';
  * It DOES state the environment honestly (available tools, sandboxed cwd,
  * no network assumptions) because a baseline that fails from not knowing
  * what a tool is called measures our prompt, not the model.
+ *
+ * `record_probe` IS IN THE CONTROL ARM'S TOOLSET AND DELIBERATELY UNMENTIONED
+ * HERE — do not "fix" that. Both arms are handed the same tools; what differs
+ * is architecture. But `record_probe` writes atoma's probe manifest, which is
+ * a learned convention of the treatment arm, and describing it here would
+ * teach the control group a practice it is supposed to lack. The baseline has
+ * the capability and no reason to reach for it, exactly as it has
+ * `validate_html` on a CLI task.
  */
 export const BASELINE_SYSTEM_PROMPT = [
   'You are a senior software engineer working directly in a sandboxed project directory.',

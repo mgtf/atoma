@@ -81,7 +81,7 @@ graph TB
 
     subgraph EXEC[" 🔒 Execution and isolation "]
         direction LR
-        TOOLS["<b>9 builtin tools</b><br/>files · shell · servers<br/>fetch · headless browser"]
+        TOOLS["<b>10 builtin tools</b><br/>files · shell · record_probe<br/>servers · fetch · browser"]
         SANDBOX["<b>ToolSandbox</b><br/>path jail · env allowlist<br/>process-group kill"]
         CONT["<b>Container executor</b><br/><i>opt-in</i>"]
         EGRESS["<b>Egress proxy</b><br/><i>opt-in · default-deny</i>"]
@@ -152,7 +152,7 @@ graph TB
 | | Lifecycle ledger | Append-only record of every trust change, written inside the same transaction as the change |
 | | Routing cache | Memoises identical routing decisions (see §7 for why it is deliberately weak) |
 | **Execution** | ToolSandbox | Path jail, credential-stripped child environment, throwaway HOME, process-group kill |
-| | 9 builtin tools | Write, edit, read, list files; run a shell command; start a static or Node server; fetch a URL; drive a headless browser |
+| | 10 builtin tools | Write, edit, read, list files; run a shell command; run-and-record a verification probe; start a static or Node server; fetch a URL; drive a headless browser |
 | | Container executor | *Opt-in.* Tools run in a disposable container with only the workspace mounted and no network route |
 | | Egress proxy | *Opt-in.* Per-run private network with a default-deny, anchored host allowlist |
 | **Verification** | Ground-truth probes | Zero-token evidence gathering: re-read files, load the page, cross-check the worker's own record |
@@ -424,8 +424,7 @@ Recorded so nobody has to discover it in a demo:
 - **No tenancy of any kind.** No users, no organisations, no authentication. The web console
   binds to localhost and has no auth at all. The target design exists in
   [`saas-architecture.md`](saas-architecture.md) and is explicitly marked as not built.
-- **No hosted service, and no license file** — treat the repository as all-rights-reserved until
-  one is added.
+- **No hosted service.** This is a private repository, not a published project.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
   the compiler correctly refuses to compile web-validation recipes. Every compiled script in the
   catalogue belongs to the command-line and documentation bucket; other families borrow them
