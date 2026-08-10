@@ -16,6 +16,7 @@ Project-level notes for Claude Code. Read this before making changes.
 | Tools | sandbox, the 9 builtins, their contracts |
 | Things that look wrong but aren't | **read before "fixing" something odd** |
 | Considered and rejected | **read before proposing an optimization** |
+| The controlled benchmark | the atoma-vs-frontier A/B: what it proved, and what it did NOT |
 
 ## What this is
 
@@ -61,6 +62,12 @@ npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-cu
 
 npm run friction                      # offline tool-loop friction report from runs/
 npm run friction -- --last 50 --tier hard   # zero LLM; run after each burn-in batch
+
+ATOMA_LLM=claude-cli npm run benchmark -- --dry-run   # the controlled A/B; spends nothing
+ATOMA_LLM=claude-cli npm run benchmark                # ~2h, machine to itself
+node benchmark/score-all.mjs                          # execute + score every deliverable
+node benchmark/plot.mjs                               # regenerate docs/benchmark-cost-curve.svg
+npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no tiering
 ```
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
@@ -1398,6 +1405,39 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   carries an INPUT PRECEDENCE clause: when the run wrote
   `.atoma-probes.json`, step 1 MUST read it; prose is a named fallback,
   never the authority. Pinned by `tests/skill-auto-creation.test.ts`.
+- **A MONOLITHIC RECIPE STARVES ITS OWN COMPILABLE SIBLING. The learn-time
+  build/verify split is necessary and NOT sufficient.** Measured by the
+  2026-08-10 controlled benchmark (`benchmark/RESULT.md`), 19 runs from an
+  empty store: `harden-cli-errors-and-document` took **10 matches of 10** and
+  every credit, while the two genuinely mechanical recipes the SAME learn step
+  produced — `replay-cli-probe-manifest` and
+  `verify-cli-against-probes-manifest` — were matched exactly ONCE each, in
+  run 1, and never again. They sit two successes short of the threshold and
+  cannot advance: nothing generates matches for them. Result:
+  **deterministic dispatch fired ZERO times across all 19 runs**, and the
+  benchmark's entire 35% saving came from the trust fast-path and recipe
+  injection instead.
+  WHY IT HAPPENS. The monolithic recipe spans build AND verify (step 1 edits
+  source — irreducible; steps 2-5 are pure manifest verification —
+  compilable), so it matches the verification phase too, and matching it is
+  what withholds the compilable sibling's credit. The split described above
+  DID occur; the prefilter simply prefers the recipe that covers more of the
+  subtask. Both compile attempts on the monolith were REFUSED, correctly and
+  with good reasoning — so the family accumulates trust it can never convert.
+  THE TELL, and it is cheap: `skills stats` showing one recipe with `matches
+  ≈ runs × k` beside siblings frozen at 1. Do not read a refused monolith as
+  "this family is not compilable"; read it as "the compilable half is being
+  out-competed".
+  DELIBERATELY NOT FIXED YET — the fix is a design question, not a patch, and
+  guessing would be worse than the defect. The candidates each have a known
+  cost: excluding build-flavoured recipes from verification-phase matching
+  needs a phase notion the prefilter does not have; making the learn step
+  refuse to emit a monolith when it also emits a split sibling risks losing
+  the recipe that serves the family's real traffic (the `probe-crud` lesson
+  above); a compile-refusal could demote the monolith's `when_to_use` to stop
+  it claiming verification phases, which is the cheapest and the most likely
+  right answer. Whatever is tried, re-run `npm run benchmark` — it is the only
+  harness that measures whether dispatch actually engaged.
 - **Not every skill is compilable, and matching breadth is the tell.**
   `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
   on purpose. Its four observed prefilter matches were: one genuine
@@ -2999,6 +3039,52 @@ rather than softened. The trap is structural, not carelessness: the burn-in curv
 keeps moving and the curriculum escalates difficulty on purpose, so a figure
 pasted from a good session rots within days. Cite medians over a stated n, name
 the window, and prefer a claim that regenerates with `npm run burnin`.
+
+## The controlled benchmark (`benchmark/`)
+
+The head-to-head the audit found missing, built properly on 2026-08-10.
+`PROTOCOL.md` is a PRE-REGISTRATION — hypothesis, primary metric and
+falsification condition committed before the first run, amended only by dated
+notes. `RESULT.md` is the outcome. **19 runs from an empty registry and empty
+skill store**, control arm first.
+
+RESULT: break-even at run **2**; 10 atoma runs cost **$5.31 vs $8.20**
+(−35.2%); warm run $0.4945 vs $0.8198 (1.66×); **19/19 deliverables at full
+marks on both arms**; on a novel same-family task the baseline paid $1.18 and
+atoma $0.40 **having learned zero new recipes** (generalisation, not
+memorisation — though that baseline is n=2 spanning 2.5×, so it is indicative).
+
+WHAT IT ACTUALLY PROVED, and this is the part to carry forward: the saving came
+from the **trust fast-path and recipe reuse**, NOT from compilation —
+deterministic dispatch fired ZERO times (see the monolith-starves-its-sibling
+entry in Skills). Mechanisms 1 and 2 carried the result alone.
+
+THE CONTROL ARM IS ONE LINE. `--baseline` (`src/run/baseline.ts`) swaps only
+the `l3.handle` call in `runTask` for a single frontier agent holding the same
+nine tools. Everything that could bias a cost comparison — sandbox, budget,
+price table, token accounting, cache behaviour, watchdog — is literally the
+same code, not "matched". It seeds nothing and is additionally pointed at a
+throwaway store, so it cannot mutate the treatment arm's state (verified: the
+registry reads empty after a baseline run). Do NOT refactor it into its own
+CLI; that is the `research-brief.ts` drift this repo has already paid for
+twice.
+
+TRACES ARE COMMITTED (`benchmark/traces.tar.gz`). `runs/` is gitignored, and
+that is exactly why the PREVIOUS benchmark became unreproducible. Any future
+benchmark must preserve its traces the same way, and must archive the store it
+starts from — `~/.atoma/archive/{pre,post}-benchmark-<date>/` holds both ends
+of this one.
+
+INSTRUMENT DISCIPLINE, learned here: `verify-deliverable.mjs` EXECUTES each
+artefact rather than trusting the "delivered" banner, which only means the run
+finished. It was corrected twice, both times in atoma's favour, both times on
+verified false negatives (`stdev` with one `d`; `Elapsed Time` for a time
+span) — because the checks had been drafted from the control arm's vocabulary.
+The rule that came out of it: when a check fails, READ THE ARTEFACT before
+recording the failure; and when you loosen one check, loosen the whole
+vocabulary including checks nobody is failing, then confirm the OTHER arm's
+scores did not move. All seven control deliverables held full marks across all
+three revisions of the instrument.
 
 ## Language
 
