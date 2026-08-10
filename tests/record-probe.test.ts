@@ -3,7 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ToolSandbox } from '../src/tools/sandbox.js';
-import { mergeShellProbe, recordProbeTool, renderProbeCmd } from '../src/tools/builtin.js';
+import {
+  mergeShellProbe,
+  recordProbeTool,
+  renderProbeCmd,
+  splitCommandLine,
+} from '../src/tools/builtin.js';
 import {
   PROBE_MANIFEST_FILENAME,
   validateProbeManifest,
@@ -187,5 +192,92 @@ describe('mergeShellProbe — pure merge semantics', () => {
     const out = JSON.parse(mergeShellProbe(withHttp, e('node a.js', 'x')));
     expect(out.entries).toHaveLength(2);
     expect(out.entries[0].probe).toBe('http');
+  });
+});
+
+describe('record_probe accepts a whole command line — the round-3 defect', () => {
+  let root: string;
+  let sandbox: ToolSandbox;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-probe-line-'));
+    sandbox = new ToolSandbox(root);
+  });
+  afterEach(async () => {
+    await sandbox.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const manifest = (): { entries: Record<string, unknown>[] } =>
+    JSON.parse(readFileSync(join(root, PROBE_MANIFEST_FILENAME), 'utf8'));
+
+  it('records the BARE line, never a bash -c wrapper', async () => {
+    // Round 3: the first version demanded {command,args}, so the model worked
+    // around the rejection with `bash -c "node x.js a"`. Every entry gained a
+    // wrapper, and the compiled verifier's `node <entry>\s*(.*)$` regex then
+    // captured the closing quote — running `node x.js a"` and reporting a
+    // mismatch until the script demoted itself.
+    writeFileSync(join(root, 'x.js'), "console.log('ok ' + process.argv[2]);");
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ cmd: 'node x.js sample.csv' });
+    const e = manifest().entries[0]!;
+    expect(e['cmd']).toBe('node x.js sample.csv');
+    expect(String(e['cmd'])).not.toContain('bash');
+    expect(String(e['cmd'])).not.toContain('"');
+    expect(String(e['stdout'])).toContain('ok sample.csv');
+  });
+
+  it('the recorded cmd survives the extraction regex that broke in round 3', async () => {
+    writeFileSync(join(root, 'x.js'), 'console.log(process.argv.slice(2).join("|"));');
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ cmd: 'node x.js a b' });
+    const cmd = String(manifest().entries[0]!['cmd']);
+    const m = cmd.match(new RegExp('node\\s+x\\.js\\s*(.*)$'));
+    expect(m?.[1]).toBe('a b'); // and NOT 'a b"'
+  });
+
+  it('still runs a line that genuinely needs a shell, and records it bare', async () => {
+    writeFileSync(join(root, 'x.js'), "console.error('boom'); process.exit(3);");
+    const t = recordProbeTool({ sandbox });
+    const res = (await t.execute({ cmd: 'node x.js 2>&1' })) as { ranThroughShell: boolean };
+    expect(res.ranThroughShell).toBe(true);
+    expect(manifest().entries[0]!['cmd']).toBe('node x.js 2>&1');
+  });
+
+  it('honours quoted arguments containing spaces', async () => {
+    writeFileSync(join(root, 'x.js'), 'console.log(process.argv[2]);');
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ cmd: 'node x.js "Hello World"' });
+    expect(String(manifest().entries[0]!['stdout']).trim()).toBe('Hello World');
+  });
+
+  it('keeps the {command,args} shape working for existing callers', async () => {
+    writeFileSync(join(root, 'x.js'), "console.log('legacy');");
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ command: 'node', args: ['x.js'] });
+    expect(manifest().entries[0]!['cmd']).toBe('node x.js');
+  });
+
+  it('does not create two entries for the same invocation', async () => {
+    writeFileSync(join(root, 'x.js'), "console.log('one');");
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ cmd: 'node x.js' });
+    await t.execute({ command: 'node', args: ['x.js'] });
+    expect(manifest().entries).toHaveLength(1);
+  });
+});
+
+describe('splitCommandLine', () => {
+  it('keeps a quoted argument whole', () => {
+    expect(splitCommandLine('node x.js "Hello World" --flag')).toEqual([
+      'node', 'x.js', 'Hello World', '--flag',
+    ]);
+  });
+  it('handles single quotes', () => {
+    expect(splitCommandLine("node x.js 'a b'")).toEqual(['node', 'x.js', 'a b']);
+  });
+  it('collapses repeated whitespace', () => {
+    expect(splitCommandLine('node   x.js    a')).toEqual(['node', 'x.js', 'a']);
+  });
+  it('preserves an intentionally empty argument', () => {
+    expect(splitCommandLine('node x.js ""')).toEqual(['node', 'x.js', '']);
   });
 });

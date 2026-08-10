@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * Round-over-round comparison, answering the pre-registered H2 and nothing
+ * Round-over-round comparison of the pre-registered questions, and nothing
  * else.
  *
- *   node benchmark/compare-rounds.mjs [round1.csv] [round2.csv]
+ *   node benchmark/compare-rounds.mjs [round1.csv] [round2.csv] [...]
  *
- * H2: after the `when_to_use` fix, at least one recipe compiles and at least
- * one run records a deterministic phase within 14 atoma runs. Round 1 had
- * det=0 across all 19.
+ * H2 (round 2): after the `when_to_use` fix, at least one recipe compiles and
+ * at least one run records a deterministic phase. Round 1 had none of either.
+ * H3 (round 3): after record_probe, the compiled script SURVIVES — two or more
+ * successful dispatches and no demotion.
  *
  * The DRIFT CHECK is printed first and deliberately so. Round 2 ran on a
  * different day against a subscription-served model that can shift behind its
@@ -16,8 +17,12 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 
-const f1 = process.argv[2] ?? 'benchmark/results.csv';
-const f2 = process.argv[3] ?? 'benchmark/results-round2.csv';
+// Any number of rounds, oldest first. Defaults to every round on disk.
+const files = process.argv.slice(2).length
+  ? process.argv.slice(2)
+  : ['benchmark/results.csv', 'benchmark/results-round2.csv', 'benchmark/results-round3.csv'].filter(
+      (f) => existsSync(f)
+    );
 
 function load(path) {
   if (!existsSync(path)) return [];
@@ -37,6 +42,8 @@ function load(path) {
       learned: Number(c[13] ?? 0),
       promotions: Number(c[14] ?? 0),
       refusals: Number(c[15] ?? 0),
+      demotions: Number(c[16] ?? 0),
+      dispatchFallbacks: Number(c[17] ?? 0),
     }));
 }
 
@@ -47,73 +54,50 @@ function slice(rows, arm, taskId) {
   return rows.filter((r) => r.arm === arm && r.taskId === taskId && r.outcome === 'delivered');
 }
 
-const r1 = load(f1);
-const r2 = load(f2);
-if (r2.length === 0) {
-  console.error(`round 2 not started yet: ${f2}`);
-  process.exit(1);
-}
+const rounds = files.map((f, i) => ({ label: `manche ${i + 1}`, file: f, rows: load(f) })).filter((r) => r.rows.length);
 
-const b1 = slice(r1, 'baseline', 'csvstat');
-const b2 = slice(r2, 'baseline', 'csvstat');
-const a1 = slice(r1, 'atoma', 'csvstat');
-const a2 = slice(r2, 'atoma', 'csvstat');
-
-console.log('== DRIFT CHECK (read this before the rest) ==');
-const bm1 = mean(b1.map((r) => r.cost));
-const bm2 = mean(b2.map((r) => r.cost));
-console.log(`  control arm  round 1 n=${b1.length} ${usd(bm1)}   round 2 n=${b2.length} ${usd(bm2)}`);
-if (bm1 !== null && bm2 !== null) {
-  const drift = (bm2 - bm1) / bm1;
+console.log('== DRIFT CHECK (à lire avant le reste) ==');
+let ref = null;
+for (const r of rounds) {
+  const b = mean(slice(r.rows, 'baseline', 'csvstat').map((x) => x.cost));
+  if (ref === null) ref = b;
+  const drift = ref !== null && b !== null ? ((b - ref) / ref) * 100 : null;
   console.log(
-    `  drift ${(drift * 100).toFixed(1)}%  ->  ${
-      Math.abs(drift) > 0.25
-        ? 'LARGE. The round-to-round atoma comparison below is NOT safely attributable to the fix.'
-        : 'within tolerance; the comparison below is usable.'
-    }`
+    `  ${r.label}: témoin n=${slice(r.rows, 'baseline', 'csvstat').length} ${usd(b)}` +
+      (drift !== null && drift !== 0 ? `   dérive ${drift > 0 ? '+' : ''}${drift.toFixed(1)}% vs manche 1` : '')
+  );
+}
+console.log('  -> une dérive notable rend la comparaison de COÛTS entre manches non attribuable.');
+
+console.log('\n== la question centrale : le chemin zéro-token ==');
+for (const r of rounds) {
+  const a = slice(r.rows, 'atoma', 'csvstat');
+  const detRuns = a.filter((x) => x.det > 0).length;
+  const detPhases = a.reduce((s2, x) => s2 + x.det, 0);
+  const promos = a.reduce((s2, x) => s2 + x.promotions, 0);
+  const demos = a.reduce((s2, x) => s2 + (x.demotions ?? 0), 0);
+  const fb = a.reduce((s2, x) => s2 + (x.dispatchFallbacks ?? 0), 0);
+  console.log(
+    `  ${r.label}: n=${a.length}  compilations=${promos}  dispatches=${detPhases} (sur ${detRuns} runs)  ` +
+      `échecs de contrat=${fb}  rétrogradations=${demos}`
   );
 }
 
-console.log('\n== H2: did compilation and deterministic dispatch happen? ==');
-for (const [label, rows] of [
-  ['round 1', a1],
-  ['round 2', a2],
-]) {
-  const detRuns = rows.filter((r) => r.det > 0).length;
-  const detPhases = rows.reduce((s, r) => s + r.det, 0);
-  const promos = rows.reduce((s, r) => s + r.promotions, 0);
-  const refus = rows.reduce((s, r) => s + r.refusals, 0);
+console.log('\n== économie (à ne comparer qu\'à témoin stable) ==');
+for (const r of rounds) {
+  const a = slice(r.rows, 'atoma', 'csvstat');
+  const costs = a.map((x) => x.cost);
+  const b = mean(slice(r.rows, 'baseline', 'csvstat').map((x) => x.cost));
+  const total = costs.reduce((x, y) => x + y, 0);
   console.log(
-    `  ${label}: n=${rows.length}  runs with det>0 = ${detRuns}  total det phases = ${detPhases}  ` +
-      `compilations = ${promos}  compile refusals = ${refus}`
+    `  ${r.label}: moyenne ${usd(mean(costs))}  chaud ${usd(mean(costs.slice(1)))}  ` +
+      `total ${usd(total)}` + (b !== null ? `  vs témoin-équivalent ${usd(b * costs.length)}` : '')
   );
-}
-const h2 = a2.some((r) => r.det > 0) && a2.reduce((s, r) => s + r.promotions, 0) > 0;
-console.log(
-  `\n  ${h2 ? 'H2 SUPPORTED' : 'H2 NOT SUPPORTED within the runs performed'} — ` +
-    'at least one compilation AND at least one deterministic phase was the registered bar.'
-);
-
-console.log('\n== economics ==');
-for (const [label, rows, base] of [
-  ['round 1', a1, bm1],
-  ['round 2', a2, bm2],
-]) {
-  const costs = rows.map((r) => r.cost);
-  const warm = mean(costs.slice(1));
-  const total = costs.reduce((a, b) => a + b, 0);
-  console.log(
-    `  ${label}: mean ${usd(mean(costs))}  warm ${usd(warm)}  total ${usd(total)}` +
-      (base !== null ? `  vs baseline-equivalent ${usd(base * rows.length)}` : '')
-  );
-  console.log(`     series: ${costs.map((c) => c.toFixed(3)).join(' ')}`);
-  console.log(`     calls : ${rows.map((r) => r.llmCalls ?? '—').join(' ')}`);
+  console.log(`     série : ${costs.map((c) => c.toFixed(3)).join(' ')}`);
 }
 
-const ho1 = slice(r1, 'atoma', 'logdigest');
-const ho2 = slice(r2, 'atoma', 'logdigest');
-if (ho1.length || ho2.length) {
-  console.log('\n== held-out task (generalisation) ==');
-  console.log(`  round 1 atoma n=${ho1.length} ${usd(mean(ho1.map((r) => r.cost)))}`);
-  console.log(`  round 2 atoma n=${ho2.length} ${usd(mean(ho2.map((r) => r.cost)))}`);
+console.log('\n== tâche témoin (généralisation) ==');
+for (const r of rounds) {
+  const h = slice(r.rows, 'atoma', 'logdigest');
+  if (h.length) console.log(`  ${r.label}: n=${h.length}  ${usd(mean(h.map((x) => x.cost)))}`);
 }

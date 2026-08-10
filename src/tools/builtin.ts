@@ -1867,6 +1867,45 @@ function expectString(args: Record<string, unknown>, key: string): string {
  * dropped quotes — amputating `node index.js "Hello World"` to
  * `node index.js` and failing a correct deliverable.
  */
+/** Shell metacharacters that genuinely need an interpreter. */
+const NEEDS_SHELL_RE = /[|&;<>()$`]|\d>&\d/;
+
+/**
+ * Split a plain command line into argv, honouring quotes.
+ *
+ * `record_probe` accepts a whole line because that is what the manifest STORES
+ * and what a model reaches for — the first version demanded run_shell's
+ * {command, args} shape, and round 3 measured the consequence: the model
+ * worked around the rejection with `bash -c "…"`, every manifest entry gained
+ * a wrapper, and the compiled verifier's argument regex then captured the
+ * wrapper's closing quote (`node csvstat.js sample.csv"`), failing a correct
+ * artefact until the script demoted itself.
+ */
+export function splitCommandLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quote: '"' | "'" | null = null;
+  let any = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (quote) {
+      if (c === quote) quote = null;
+      else cur += c;
+      any = true;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      any = true;
+    } else if (/\s/.test(c)) {
+      if (any) { out.push(cur); cur = ''; any = false; }
+    } else {
+      cur += c;
+      any = true;
+    }
+  }
+  if (any) out.push(cur);
+  return out;
+}
+
 export function renderProbeCmd(command: string, argv: readonly string[]): string {
   const quote = (a: string): string =>
     a.length > 0 && /^[A-Za-z0-9_./:=@,+-]+$/.test(a) ? a : `"${a.replace(/(["\\$`])/g, '\\$1')}"`;
@@ -1940,18 +1979,48 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
       inputSchema: {
         type: 'object',
         properties: {
-          command: { type: 'string', description: 'Program to invoke, as for run_shell.' },
-          args: { type: 'array', items: { type: 'string' }, description: 'Positional arguments.' },
+          cmd: {
+            type: 'string',
+            description:
+              'The whole command line exactly as a user would type it, e.g. "node cli.js data.csv --format json". PREFERRED — this is what gets recorded and replayed.',
+          },
+          command: { type: 'string', description: 'Alternative to cmd: program alone, as for run_shell.' },
+          args: { type: 'array', items: { type: 'string' }, description: 'Positional arguments, with "command".' },
           note: { type: 'string', description: 'Optional one-line reason this invocation is evidence.' },
         },
-        required: ['command'],
       },
     },
     async execute(args) {
-      const command = expectString(args, 'command');
-      const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
-      const argv = rawArgs.map((a) => String(a));
-      const cmd = renderProbeCmd(command, argv);
+      // Two accepted shapes. `cmd` (a whole line) is the one the manifest
+      // stores and the one models reach for; {command,args} stays for
+      // callers written against run_shell. Whichever arrives, the RECORDED
+      // cmd is the bare command — never a `bash -c` wrapper, which round 3
+      // measured corrupting a compiled verifier's argument extraction.
+      const rawLine = typeof args['cmd'] === 'string' ? args['cmd'].trim() : '';
+      let command: string;
+      let argv: string[];
+      let cmd: string;
+      let viaShell = false;
+      if (rawLine) {
+        cmd = rawLine;
+        if (NEEDS_SHELL_RE.test(rawLine)) {
+          // Genuinely needs an interpreter (pipe, redirect, &&). Run it
+          // through bash, but record the line the user wrote.
+          command = 'bash';
+          argv = ['-c', rawLine];
+          viaShell = true;
+        } else {
+          const parts = splitCommandLine(rawLine);
+          command = parts[0] ?? '';
+          argv = parts.slice(1);
+          if (!command) throw new Error('record_probe: "cmd" is empty.');
+        }
+      } else {
+        command = expectString(args, 'command');
+        const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
+        argv = rawArgs.map((a) => String(a));
+        cmd = renderProbeCmd(command, argv);
+      }
 
       // The contract forbids `; echo EXIT=$?` decorations: they make the
       // recorded exitCode echo's (always 0) and hide the real one inside
@@ -1968,7 +2037,7 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
         );
       }
 
-      const result = (await shell.execute(args)) as {
+      const result = (await shell.execute({ command, args: argv })) as {
         exitCode: number;
         stdout?: string;
         stderr?: string;
@@ -2000,6 +2069,7 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
         recorded: true,
         manifest: PROBE_MANIFEST_FILENAME,
         recordedStdoutOmitted: entry.stdout === undefined,
+        ranThroughShell: viaShell,
       };
     },
   };

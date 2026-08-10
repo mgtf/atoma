@@ -2436,8 +2436,29 @@ second is the kind of thing that gets acted on:
   two failing workspaces' commands through it drops them from 4/6 and 9/10
   replay mismatches to ZERO of 16. Covered by `tests/record-probe.test.ts`,
   whose first case is a 2000-character output recorded byte-identically.
-  NOT YET measured in a live run — the next benchmark round is what would
-  show whether a compiled script now survives instead of demoting.
+  MEASURED IN ROUND 3, AND IT EXPOSED A DEFECT THE TOOL ITSELF SHIPPED. The
+  manifest came out CLEAN (14 entries, full outputs, no truncation) and the
+  replay failed anyway. Cause: the first version demanded run_shell's
+  {command, args} shape, so a model passing a whole line was REFUSED and worked
+  around it with `bash -c "node x.js a"`. Every entry gained a wrapper, and the
+  compiled verifier — which does read the manifest — derives arguments with
+  `node <entry>\s*(.*)$`, capturing the wrapper's closing quote and running
+  `node x.js a"`. Two false mismatches, script demoted, zero successful
+  dispatches. THE TOOL WHOSE JOB IS RECORDING A COMMAND REFUSED THE SHAPE IN
+  WHICH IT RECORDS IT. It now accepts `cmd` as a whole line — the shape the
+  manifest stores and the one models reach for — records it bare, and adds a
+  shell only when the line genuinely needs one (pipe, redirect, &&).
+  {command, args} still works. Pinned by a test that replays the exact
+  extraction regex that broke.
+  A METHOD NOTE WORTH MORE THAN THE FIX: the first diagnosis of this was WRONG
+  and nearly became a feature. Grepping the first trace event whose text
+  matched the error string returned the run SUMMARY, not the script, and led to
+  "the compiled script parses prose instead of reading the manifest" — which
+  would have justified a static guard against a non-existent problem. The
+  script body is recorded verbatim by the dispatch's own
+  `write_file _skill_*.mjs` event; read THAT. Note also that `demoteToLlm`
+  overwrites SKILL.md from `_fallback.md`, so the failing artefact is destroyed
+  on disk exactly when you want to inspect it — the trace is the only copy.
 - **`InMemoryToolRegistry`** (`src/tools/registry.ts`) — maps tool name →
   executor fn. Implements `ToolExecutor` (`src/core/types.ts`), plugged into
   `RunContext.tools` and forwarded to the LLM via `LlmCompletionRequest.executor`.
