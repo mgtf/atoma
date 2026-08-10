@@ -1,4 +1,4 @@
-import type { GenerationParams, Plan, RunContext, Task, Tier, Verdict } from '../core/types.js';
+import type { GenerationParams, RunContext, Task, Tier, Verdict } from '../core/types.js';
 import type { Atom } from '../core/atom.js';
 import { parseVerdict } from './json.js';
 import { probeGroundTruth } from './groundTruth.js';

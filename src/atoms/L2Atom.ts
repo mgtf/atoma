@@ -25,9 +25,7 @@ import {
   parsePayloadTolerant,
   parsePlanWithFallback,
   parseTwoJson,
-  parseVerdict,
   planSchema,
-  extractJson,
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { forkBranch } from '../core/branchCtx.js';
@@ -39,14 +37,8 @@ import {
   shouldTrustSkill,
   shouldTrustType,
   trustedApproval,
-  SKILL_PREFILTER_SYSTEM_PROMPT,
   STRATEGY_MAX_TOKENS,
   TaskChildrenMemo,
-  TRUST_PROMOTE_THRESHOLD_SUCCESSES,
-  promoteThreshold,
-  demoteAfter,
-  DIRECT_DISPATCH_DEMOTE_AFTER,
-  postApprovalSignal,
 } from './cost.js';
 import {
   bucketIdForTools,
@@ -56,18 +48,7 @@ import {
   lastResultVerdictSkillFollowed,
   resolveCreationDescription,
 } from './capability.js';
-import {
-  PROBE_MANIFEST_FILENAME,
-  manifestReaderLines,
-  validateProbeManifest,
-} from '../contracts/probeManifest.js';
-import {
-  parseScriptEnvelope,
-  scriptDeclaresEnvelope,
-  scriptExtension,
-} from '../contracts/scriptEnvelope.js';
-import { extractRecordedProbes } from '../contracts/witness.js';
-import { checkGroundTruth, probeGroundTruth, type GroundTruthCheck } from './groundTruth.js';
+import { checkGroundTruth, type GroundTruthCheck } from './groundTruth.js';
 export {
   checkGroundTruth,
   extractResultFileClaims,
@@ -76,9 +57,8 @@ export {
   type GroundTruthCheck,
 } from './groundTruth.js';
 export { extractRecordedProbes } from '../contracts/witness.js';
-import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
 import { SkillLifecycle } from '../skills/lifecycle.js';
-import { llmVerdict, undeclaredToolMentions, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
+import { llmVerdict, undeclaredToolMentions} from './verdict.js';
 import { dispatchWithAggregation } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
 import { skillContextBlock } from '../skills/lifecycle.js';
@@ -983,8 +963,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     parentTask: Task
   ): AtomType {
     const seed: NonNullable<typeof strategy.seed> =
-      strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
-    const mergedTools = mergeTools(this.tools, (seed.tools ?? []) as Tool[]);
+      strategy.seed ?? ({ tools: [], params: {} });
+    const mergedTools = mergeTools(this.tools, (seed.tools ?? []));
     // IMPORTANT: the registry description is the prefilter key on future
     // runs. Early versions echoed the full task narrative here ("L1 for
     // subtask: build a chess puzzle with 8x8 board + drag-and-drop + …"),
@@ -1036,7 +1016,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ...(hasValidateHtml ? [``, SMOKE_DESIGN_GUIDANCE] : []),
       ].join('\n'),
       tools: mergedTools,
-      params: (seed.params ?? this.params) as GenerationParams,
+      params: (seed.params ?? this.params),
       createdBy: this.name,
     });
   }

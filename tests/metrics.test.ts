@@ -240,9 +240,9 @@ describe('partial usage survives a mid-loop death (audit rank-12)', () => {
         throw err;
       },
     };
-    const client = new MetricsLlmClient(dying as never, metrics);
+    const client = new MetricsLlmClient(dying, metrics);
     await expect(
-      client.complete({ model: 'claude-haiku-4-5', systemPrompt: 's', userContent: 'u' } as never)
+      client.complete({ model: 'claude-haiku-4-5', systemPrompt: 's', userContent: 'u' })
     ).rejects.toThrow(/deadline abort/);
     const sum = metrics.summary();
     // The paid-for tokens are in the totals instead of zeros.

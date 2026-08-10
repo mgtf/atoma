@@ -7,10 +7,9 @@ import {
   postApprovalSignal,
   prefilterStrategy,
   promoteThreshold,
-  shouldTrustSkill,
   SKILL_PREFILTER_SYSTEM_PROMPT,
 } from '../atoms/cost.js';
-import { parseScriptEnvelope, scriptDeclaresEnvelope, scriptExtension } from '../contracts/scriptEnvelope.js';
+import { parseScriptEnvelope, scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import { extractJson } from '../atoms/json.js';
 import { extractResultFilePaths } from '../atoms/groundTruth.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
@@ -73,17 +72,17 @@ export interface SkillDraft {
 }
 
 function coerceSkillDraft(obj: Record<string, unknown>): SkillDraft | null {
-  const id = typeof obj['id'] === 'string' ? (obj['id'] as string).trim() : null;
+  const id = typeof obj['id'] === 'string' ? (obj['id']).trim() : null;
   const description =
-    typeof obj['description'] === 'string' ? (obj['description'] as string).trim() : null;
+    typeof obj['description'] === 'string' ? (obj['description']).trim() : null;
   const whenToUseRaw =
     typeof obj['when_to_use'] === 'string'
-      ? (obj['when_to_use'] as string)
+      ? (obj['when_to_use'])
       : typeof obj['whenToUse'] === 'string'
-        ? (obj['whenToUse'] as string)
+        ? (obj['whenToUse'])
         : null;
   const whenToUse = whenToUseRaw ? whenToUseRaw.trim() : null;
-  const body = typeof obj['body'] === 'string' ? (obj['body'] as string).trim() : null;
+  const body = typeof obj['body'] === 'string' ? (obj['body']).trim() : null;
   if (!id || !description || !whenToUse || !body) return null;
   return { id, description, whenToUse, body };
 }
@@ -148,7 +147,7 @@ export interface EventSkillDraft extends SkillDraft {
 export function parseEventSkillDraft(text: string): EventSkillDraft | null {
   const obj = extractDraftObject(text);
   if (!obj) return null;
-  const trigger = typeof obj['trigger'] === 'string' ? (obj['trigger'] as string).trim() : null;
+  const trigger = typeof obj['trigger'] === 'string' ? (obj['trigger']).trim() : null;
   if (!trigger) return null;
   const base = coerceSkillDraft({
     ...obj,
@@ -206,7 +205,6 @@ export function skillContextBlock(skill: {
     if (!skill.language) {
       throw new Error(`skillContextBlock: kind:"script" requires language`);
     }
-    const ext = scriptExtension(skill.language);
     const interpreter = scriptInterpreter(skill.language ?? 'node');
     const filename = scriptScratchFilename(skill.id, skill.language ?? 'node');
     return [

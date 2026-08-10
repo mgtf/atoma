@@ -160,7 +160,7 @@ describe('manifest health check fires for HTTP children (audit rank-8)', () => {
     const tools = {
       has: (n: string) => ['read_file', 'list_files'].includes(n),
       execute: async (name: string, argsIn: Record<string, unknown>) => {
-        executed.push(`${name}:${String(argsIn['path'] ?? '')}`);
+        executed.push(`${name}:${(argsIn['path'] as string | undefined) ?? ''}`);
         if (name === 'read_file' && argsIn['path'] === '.atoma-probes.json') {
           return { content: JSON.stringify({ version: 2, entries: [] }) }; // malformed on purpose
         }

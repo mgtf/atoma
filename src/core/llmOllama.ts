@@ -171,7 +171,7 @@ export class OllamaLlmClient implements LlmClient {
 
       // Preserve the assistant turn verbatim so a subsequent `tool` turn
       // can refer to it by tool_call_id (when Ollama provides one).
-      messages.push(msg as OllamaMessage);
+      messages.push(msg);
 
       for (const tc of toolCalls) {
         const toolName = tc.function?.name;

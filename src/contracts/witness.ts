@@ -70,7 +70,7 @@ export function extractRecordedProbes(payload: unknown): RecordedProbe[] {
       if (expected !== undefined) probe.expected = expected;
       const actual = pickString(e, ['actualStdout', 'actual_stdout', 'actual']);
       if (actual !== undefined) probe.actual = actual;
-      if (typeof e['match'] === 'boolean') probe.match = e['match'] as boolean;
+      if (typeof e['match'] === 'boolean') probe.match = e['match'];
       const note = pickString(e, ['note', 'case', 'description']);
       if (note !== undefined) probe.note = note;
       out.push(probe);

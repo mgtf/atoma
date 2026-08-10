@@ -144,6 +144,14 @@ export class AnthropicLlmClient implements LlmClient {
         if (iter === 0 && samplingOk && isSamplingParamDeprecatedError(err)) {
           response = await sendRequest({ includeSampling: false });
         } else {
+          // KEEP THE `throw`. `only-throw-error` flags it because `raise`
+          // returns `never` rather than an Error — but removing it breaks the
+          // BUILD: TypeScript's never-returning-function control-flow analysis
+          // does not apply to `raise` here, so a bare call leaves `response`
+          // "used before being assigned" on three lines below. The lint rule
+          // and the type checker disagree, and the type checker is the one
+          // that has to be satisfied.
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
           throw raise(err);
         }
       }

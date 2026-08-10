@@ -43,7 +43,7 @@ function makeExecutor(runShellResult: unknown): {
     async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
       calls.push({ name, args });
       if (name === 'write_file') {
-        return { ok: true, path: args['path'], bytes: String(args['content'] ?? '').length };
+        return { ok: true, path: args['path'], bytes: ((args['content'] as string | undefined) ?? '').length };
       }
       if (name === 'run_shell') return runShellResult;
       throw new Error(`unexpected tool: ${name}`);

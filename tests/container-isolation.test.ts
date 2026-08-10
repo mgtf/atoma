@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ContainerToolExecutor, workerRunArgs } from '../src/tools/containerExecutor.js';
@@ -123,9 +123,9 @@ describeDocker('a containerised run cannot reach the stores', () => {
     workspace = join(dir, 'ws');
     writeFileSync(join(dir, 'atoma.db'), 'TENANT_REGISTRY_SECRET');
     writeFileSync(join(dir, 'atoma-ledger.jsonl'), 'TENANT_LEDGER_SECRET');
-    require('node:fs').mkdirSync(join(dir, 'skills', 'Helium'), { recursive: true });
+    mkdirSync(join(dir, 'skills', 'Helium'), { recursive: true });
     writeFileSync(join(dir, 'skills', 'Helium', 'SKILL.md'), 'TENANT_SKILL_SECRET');
-    require('node:fs').mkdirSync(workspace, { recursive: true });
+    mkdirSync(workspace, { recursive: true });
     exec = new ContainerToolExecutor({ workspaceHostPath: workspace, startTimeoutMs: 90_000 });
     await exec.start();
   }, 120_000);

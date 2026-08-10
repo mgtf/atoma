@@ -38,9 +38,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   };
   const wrappedRecordTrust = ctx.recordTrust
     ? (info: TrustFastPathInfo) => {
-        ctx.recordTrust!({ ...info, branchId } as TrustFastPathInfo & {
-          branchId: string;
-        });
+        ctx.recordTrust!({ ...info, branchId });
       }
     : undefined;
   const wrappedRecordSkill = ctx.recordSkill

@@ -252,7 +252,7 @@ function formatArgs(args: Record<string, unknown>): string {
     if (v === null) return `${k}=null`;
     // Arrays / objects: signal presence and size, not full dump.
     if (Array.isArray(v)) return `${k}=[${v.length}]`;
-    if (typeof v === 'object') return `${k}={${Object.keys(v as object).length}}`;
+    if (typeof v === 'object') return `${k}={${Object.keys(v).length}}`;
     return `${k}=?`;
   });
   return `{${pairs.join(', ')}}`;

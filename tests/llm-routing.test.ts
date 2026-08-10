@@ -71,7 +71,7 @@ describe('RoutingLlmClient — mixed-case provider keys (audit rank-2)', () => {
       },
     });
     const router = new RoutingLlmClient(mk('default') as never, { ZAI: mk('zai') as never });
-    await router.complete({ model: 'zai:glm-4.5-air', systemPrompt: 's', userContent: 'u' } as never);
+    await router.complete({ model: 'zai:glm-4.5-air', systemPrompt: 's', userContent: 'u' });
     // Old behavior: prefix matched `known` (lowercased) but the map lookup
     // missed the original-case key → the "unreachable" throw fired.
     expect(calls).toEqual(['zai:glm-4.5-air']);

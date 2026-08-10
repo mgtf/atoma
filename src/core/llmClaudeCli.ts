@@ -318,7 +318,7 @@ function buildToolBridge(
       t.name,
       {
         description: t.description,
-        inputSchema: jsonSchemaToZodShape(t.inputSchema as Record<string, unknown>),
+        inputSchema: jsonSchemaToZodShape(t.inputSchema),
       },
       async (args: Record<string, unknown>) => {
         const startedAt = Date.now();

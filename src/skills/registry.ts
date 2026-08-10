@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { appendLedger } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
-import type { Skill, SkillFrontmatter, SkillKind, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
+import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
 
 /**
  * Sidecar filename holding the original `kind: 'llm'` body of a skill
@@ -107,7 +107,7 @@ export class SkillRegistry {
           ...(meta.lastMatchedAt ? { lastMatchedAt: meta.lastMatchedAt } : {}),
         });
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn(
           `[SkillRegistry] skipping ${skillFile}: ${(err as Error).message}`
         );
@@ -732,7 +732,7 @@ function readMeta(path: string): SkillMeta {
       typeof obj.provenance === 'object' &&
       !Array.isArray(obj.provenance) &&
       typeof (obj.provenance as unknown as Record<string, unknown>)['mechanism'] === 'string'
-        ? { provenance: obj.provenance as SkillProvenance }
+        ? { provenance: obj.provenance }
         : {}),
       ...(directFailures ? { directFailures } : {}),
       ...(typeof obj.matches === 'number' && obj.matches > 0
@@ -753,7 +753,7 @@ function readMeta(path: string): SkillMeta {
     // `npm run ledger -- check`, which can still project what the counters
     // should be.
     corruptMetaPaths.add(path);
-    // eslint-disable-next-line no-console
+     
     console.warn(
       `[skills] unreadable ${path} (${(err as Error).message}) — counters left ALONE rather than reset. Repair it by hand or check \`npm run ledger -- tail\`.`
     );
@@ -849,7 +849,7 @@ export function parseFrontmatter(text: string): { frontmatter: SkillFrontmatter;
       id,
       description,
       whenToUse,
-      kind: kindRaw as SkillKind,
+      kind: kindRaw,
       ...(language ? { language } : {}),
       ...(trigger ? { trigger } : {}),
     },

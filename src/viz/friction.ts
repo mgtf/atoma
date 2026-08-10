@@ -141,16 +141,41 @@ function softFailureText(name: string, result: unknown): string | null {
   return null;
 }
 
+/**
+ * Stringify one tool argument for use as a discriminator.
+ *
+ * NOT `String(v)`. These args are model-authored, so a field the contract says
+ * is a string can arrive as an object — and `String({})` is `'[object
+ * Object]'` for every one of them. That collapses N unrelated failures into a
+ * single signature and makes `distinctArgs` report 1, which is precisely the
+ * pseudo-recurrence that column exists to expose.
+ */
+function argScalar(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') {
+    try {
+      return JSON.stringify(v) ?? '';
+    } catch {
+      return '[uncoercible]';
+    }
+  }
+  // `String()` on a symbol throws under some transpiles and stringifies
+  // exotics unhelpfully; the primitives are the only shapes worth keeping.
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'bigint') return String(v);
+  return '[' + typeof v + ']';
+}
+
 /** The argument that discriminates same-text failures from one another. */
 function argKeyFor(name: string, args: Record<string, unknown>): string {
-  if (name === 'validate_html') return String(args['smoke'] ?? args['url'] ?? '');
+  if (name === 'validate_html') return argScalar(args['smoke'] ?? args['url']);
   if (name === 'run_shell') {
-    const cmd = String(args['command'] ?? '');
-    const rest = Array.isArray(args['args']) ? args['args'].map(String).join(' ') : '';
+    const cmd = argScalar(args['command']);
+    const rest = Array.isArray(args['args']) ? args['args'].map(argScalar).join(' ') : '';
     return `${cmd} ${rest}`.trim();
   }
   if (name === 'edit_file' || name === 'read_file' || name === 'write_file') {
-    return String(args['path'] ?? '');
+    return argScalar(args['path']);
   }
   return JSON.stringify(args).slice(0, 200);
 }

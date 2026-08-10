@@ -106,7 +106,7 @@ describe('writeFileTool + readFileTool', () => {
   it('rejects non-string arguments', async () => {
     const w = writeFileTool({ sandbox });
     await expect(
-      w.execute({ path: 'ok.txt', content: 42 as unknown as string })
+      w.execute({ path: 'ok.txt', content: 42 })
     ).rejects.toThrow(/must be a string/);
   });
 });

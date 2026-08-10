@@ -280,7 +280,7 @@ describe('SkillRegistry', () => {
       body: 'b',
     });
     // Silence the console.warn for the duration of the call.
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
+     
     const orig = console.warn;
     console.warn = (): void => {};
     try {

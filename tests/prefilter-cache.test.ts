@@ -12,7 +12,7 @@ import {
   prefilterCacheStats,
   resetPrefilterCacheForTests,
 } from '../src/atoms/prefilterCache.js';
-import { prefilterStrategy, PREFILTER_SYSTEM_PROMPT } from '../src/atoms/cost.js';
+import { prefilterStrategy} from '../src/atoms/cost.js';
 import { makeCtx, jsonText } from './helpers.js';
 
 /**

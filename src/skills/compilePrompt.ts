@@ -1,4 +1,4 @@
-import { PROBE_MANIFEST_FILENAME, manifestReaderLines } from '../contracts/probeManifest.js';
+import {  manifestReaderLines } from '../contracts/probeManifest.js';
 
 /**
  * The compile-prompt TEMPLATE, extracted so its GENERATION can be hashed.

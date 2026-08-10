@@ -607,8 +607,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     parentTask: Task
   ): AtomType {
     const seed: NonNullable<typeof strategy.seed> =
-      strategy.seed ?? ({ tools: [], params: {} } as NonNullable<typeof strategy.seed>);
-    const mergedTools = mergeTools(this.tools, (seed.tools ?? []) as Tool[]);
+      strategy.seed ?? ({ tools: [], params: {} });
+    const mergedTools = mergeTools(this.tools, (seed.tools ?? []));
     // Registry description is a CAPABILITY label, not a task narrative —
     // see `src/atoms/capability.ts` for why. Same motivation as
     // `L2Atom.createSubtaskL1`: prevent per-task L2 singletons from
@@ -624,7 +624,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
           `Parent task (for context only): ${parentTask.description}`,
         ].join('\n'),
       tools: mergedTools,
-      params: (seed.params ?? this.params) as GenerationParams,
+      params: (seed.params ?? this.params),
       createdBy: this.name,
     });
   }

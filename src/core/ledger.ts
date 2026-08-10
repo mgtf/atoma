@@ -133,7 +133,7 @@ let warnedOnce = false;
 function warnOnce(err: unknown): void {
   if (warnedOnce) return;
   warnedOnce = true;
-  // eslint-disable-next-line no-console
+   
   console.warn(`[ledger] write failed (further failures silent): ${(err as Error).message}`);
 }
 

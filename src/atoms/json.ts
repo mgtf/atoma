@@ -62,7 +62,7 @@ export function repairPrematureClose(raw: string): string | null {
         const nonWs = after.match(/^\s*(.)/);
         if (nonWs && nonWs[1] === ',') {
           const afterComma = after.replace(/^\s*,\s*/, '');
-          if (afterComma.length > 0 && !/^[\s\}\]]+$/.test(afterComma)) {
+          if (afterComma.length > 0 && !/^[\s}\]]+$/.test(afterComma)) {
             depth++; // undo: we're dropping the bracket, so we're still open
             dropped = true;
             continue; // skip emitting ch; next iterations handle ws + comma
@@ -174,10 +174,6 @@ export function extractJsonEx(text: string): ExtractOutcome {
   } catch {
     return tryParseJsonEx(trimmed.slice(start));
   }
-}
-
-function tryParseJson(raw: string): unknown {
-  return tryParseJsonEx(raw).value;
 }
 
 function tryParseJsonEx(raw: string): ExtractOutcome {

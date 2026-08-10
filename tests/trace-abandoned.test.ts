@@ -37,9 +37,9 @@ function readIndex(dir: string): VizRunIndexEntry[] {
 describe('index entries carry lastEventAt while in flight', () => {
   it('stamps the newest event time on an in-flight entry', () => {
     const { rec, dir } = newRecorder();
-    rec.beginRun({ description: 'wedged' } as never, 'build-app: wedged', {
+    rec.beginRun({ description: 'wedged' }, 'build-app: wedged', {
       initialTypes: [],
-    } as never);
+    });
     rec.record({ id: 'a', ts: 1_000, kind: 'llm-start', model: 'm' } as never);
     rec.record({ id: 'b', ts: 5_000, kind: 'llm-start', model: 'm' } as never);
     // Out-of-order arrival must not win — we want the NEWEST, not the last.
@@ -53,9 +53,9 @@ describe('index entries carry lastEventAt while in flight', () => {
 
   it('omits it once the run is closed — a finished run is judged by endedAt', () => {
     const { rec, dir } = newRecorder();
-    rec.beginRun({ description: 'clean' } as never, 'build-app: clean', {
+    rec.beginRun({ description: 'clean' }, 'build-app: clean', {
       initialTypes: [],
-    } as never);
+    });
     rec.record({ id: 'a', ts: 1_000, kind: 'llm-start', model: 'm' } as never);
     rec.endRun({ result: { summary: 'done', output: 'x', producedBy: {} as never } });
 
@@ -67,9 +67,9 @@ describe('index entries carry lastEventAt while in flight', () => {
 
   it('an event-less in-flight run leaves it absent, so consumers fall back to startedAt', () => {
     const { rec, dir } = newRecorder();
-    rec.beginRun({ description: 'empty' } as never, 'build-app: empty', {
+    rec.beginRun({ description: 'empty' }, 'build-app: empty', {
       initialTypes: [],
-    } as never);
+    });
     rec.flushPartial();
 
     const entry = readIndex(dir)[0]!;

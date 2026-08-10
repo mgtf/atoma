@@ -13,6 +13,7 @@ Project-level notes for Claude Code. Read this before making changes.
 | Skills | the learn → compile → dispatch lifecycle and every guard on it |
 | LLM interaction conventions | providers, per-tier models, JSON parsing, prompt caching |
 | Testing conventions | how to add tests that actually catch the bug class |
+| Linting | what ESLint is calibrated to, and the rules deliberately OFF |
 | Tools | sandbox, the 9 builtins, their contracts |
 | Things that look wrong but aren't | **read before "fixing" something odd** |
 | Considered and rejected | **read before proposing an optimization** |
@@ -28,6 +29,8 @@ is an LLM-backed agent. See `README.md` for the external pitch.
 ```bash
 npm install
 npm run typecheck                     # tsc --noEmit (strict mode)
+npm run lint                          # eslint, type-aware (see the Linting section)
+npm run check                         # typecheck + lint + test
 npm test                              # vitest run — all mocked, no API key needed
 npm run build                         # emits to dist/
 npm run run:build "<goal>"            # live: run a task through the pipeline
@@ -2105,6 +2108,72 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   they'd pull in LLM parsing and hide loop bugs.
 - When adding a new mechanism, write at minimum one direct supervisor-loop test
   and one registry state-assertion test.
+
+## Linting (`npm run lint`, `eslint.config.js`)
+
+ESLint 9 flat config + typescript-eslint, **type-aware on purpose**. `tsc`
+already covers what the type system can prove, so a syntax-only linter would
+add ceremony and find nothing; the rules earning their place are the ones the
+compiler cannot express — a promise nobody awaited, an `await` on a
+non-thenable, an async callback passed where void is expected. This codebase is
+almost entirely async orchestration, so that is its bug class. (Measured on the
+first run: **zero** floating-promise and zero misused-promise hits. The async
+discipline was already clean; the rule stays as a ratchet.)
+
+`npm run check` = typecheck + lint + test.
+
+CALIBRATED OFF, WITH MEASUREMENTS — do not re-enable without re-measuring:
+- `require-await` — **128 hits, every one structural**: a hook or mock that
+  must be `async` to satisfy an interface returning a Promise
+  (`SupervisionHooks.applyByScope`, `LlmClient.complete` in the test doubles)
+  while one branch happens not to await. The rule cannot see the contract.
+- the `no-unsafe-*` family — LLM output is parsed as `any` and narrowed by a
+  zod schema; the schema is the real guard. Making these errors would mean
+  asserting types we deliberately do not trust yet.
+- `restrict-template-expressions` — counters, model ids and costs are
+  interpolated everywhere and the stringification is intended.
+- `no-explicit-any` is a WARNING, and is NOT disabled for tests. The suite
+  already carries ~40 hand-written disable comments for it, which means its
+  author wanted it on with local opt-outs; switching it off silently kills 40
+  deliberate annotations.
+
+`reportUnusedDisableDirectives` is on, and it earns its keep: it found 45 dead
+directives, 39 of which came back to life the moment `no-explicit-any` was left
+enabled for tests. A disable comment for a rule that no longer fires reads as a
+live caveat.
+
+THE TRAP THIS SETUP ALREADY SPRUNG, recorded so nobody repeats it:
+`only-throw-error` flags `throw raise(err)` in `src/core/llm.ts` because
+`raise` returns `never`, not an Error. Removing the `throw` **breaks the
+build** — TypeScript's never-returning-function control-flow analysis does not
+apply to `raise` there, so a bare call leaves `response` "used before being
+assigned" on three lines below. The lint rule and the type checker disagree and
+the type checker wins; the site carries a disable comment explaining exactly
+that. Always run `npm run typecheck && npm test` after acting on a lint
+finding — `--fix` is not free.
+
+WHAT IT FOUND ON FIRST CONTACT (three real defects, all in `src/`):
+- `viz/friction.ts` stringified model-authored tool args with `String(v)`, so
+  any object argument became `'[object Object]'` — collapsing N unrelated
+  failures into one signature and making `distinctArgs` report 1. That column
+  exists precisely to expose pseudo-recurrence, so the bug disabled the
+  diagnostic it lives in. Now `argScalar`.
+- `atoms/groundTruth.ts` coerced a `content-type` header of `unknown` type the
+  same way; an object would have made the html sniff silently always-false.
+- ~29 dead imports and two dead private helpers (`tryParseJson`, an unused
+  `ext`) left over from the L2Atom extraction campaign. Note the shape that
+  made them safe to remove: the compat layer re-exports via
+  `export { X } from './y.js'`, which is INDEPENDENT of the `import { X }`
+  above it — the import was genuinely dead and the re-export keeps working.
+
+KNOWN GAP, not closed: `tsconfig.json` excludes `tests/`, so **the test suite
+has never been type-checked** — vitest transpiles with esbuild, which does not
+typecheck. `npx tsc -p tsconfig.eslint.json --noEmit` reports **52 errors**
+there (partial mocks that do not implement their interface, missing `override`
+modifiers). The tests pass at runtime and the errors look benign, but nobody
+has read them. `tsconfig.eslint.json` exists so lint at least sees those files
+— and it is what caught a syntax error in `container-isolation.test.ts` that
+`npm run typecheck` structurally cannot see. Fixing the 52 is its own task.
 
 ## Tools (L1 side-effects)
 

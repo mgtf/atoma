@@ -20,9 +20,22 @@ import type { ToolExecutor } from '../src/core/types.js';
  * Ollama responses.
  */
 
-type FetchArgs = [RequestInfo | URL, RequestInit?];
+type FetchArgs = Parameters<typeof fetch>;
 
-type Stub = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type Stub = (...args: FetchArgs) => Promise<Response>;
+
+/**
+ * The fetch input can be a string, a URL or a Request. Typing the stub
+ * properly (it used to be `RequestInfo`, a DOM type absent from this project's
+ * `lib`, which silently degraded to `any`) made that visible — `String()` on a
+ * Request would assert against '[object Object]' and pass for the wrong
+ * reason.
+ */
+function urlOf(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
 
 function installFetchStub(stub: Stub): () => void {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,7 +94,7 @@ describe('OllamaLlmClient', () => {
 
     expect(calls).toHaveLength(1);
     const [url, init] = calls[0]!;
-    expect(String(url)).toBe('http://localhost:11434/api/chat');
+    expect(urlOf(url)).toBe('http://localhost:11434/api/chat');
     const body = JSON.parse(init!.body as string);
     expect(body.model).toBe('glm-5.1:cloud');
     expect(body.messages).toEqual([
@@ -348,7 +361,7 @@ describe('OllamaLlmClient', () => {
       defaultModel: 'llama3.3:70b',
     });
     await client.complete({ model: 'claude-opus-5', systemPrompt: 's', userContent: 'u' });
-    expect(String(calls[0]![0])).toBe('http://remote:9999/api/chat');
+    expect(urlOf(calls[0]![0])).toBe('http://remote:9999/api/chat');
     const body = JSON.parse(calls[0]![1]!.body as string);
     expect(body.model).toBe('llama3.3:70b');
   });

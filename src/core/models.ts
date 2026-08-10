@@ -1,4 +1,3 @@
-import type Anthropic from '@anthropic-ai/sdk';
 
 // Current-generation pins (2026-07): Opus 5 costs the same as 4.7
 // ($5/$25) with better decomposition; Sonnet 5 is near-Opus on agentic

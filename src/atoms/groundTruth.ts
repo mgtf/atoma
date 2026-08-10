@@ -192,8 +192,18 @@ export async function probeGroundTruthEx(args: {
         headers?: Record<string, unknown>;
         body?: unknown;
       };
-      const contentType = String(
-        (res.headers && (res.headers['content-type'] ?? res.headers['Content-Type'])) ?? ''
+      // Defensive coercion: a header value is normally a string, but the
+      // shape here is `unknown` and Node hands some headers back as arrays.
+      // `String([...])` at least joins; `String({})` would silently produce
+      // '[object Object]' and make the html sniff below always false.
+      const rawContentType =
+        (res.headers && (res.headers['content-type'] ?? res.headers['Content-Type'])) ?? '';
+      const contentType = (
+        Array.isArray(rawContentType)
+          ? rawContentType.join(',')
+          : typeof rawContentType === 'string'
+            ? rawContentType
+            : ''
       ).toLowerCase();
       const bodyHead =
         typeof res.body === 'string' ? res.body.slice(0, 200).trim().toLowerCase() : '';
@@ -421,7 +431,7 @@ export function extractResultFileClaims(payload: unknown): {
   // MENTIONED: prose sweep. Informational only — never a contradiction.
   const freeText: string[] = [];
   if (typeof output === 'string') freeText.push(output);
-  if (typeof obj['summary'] === 'string') freeText.push(obj['summary'] as string);
+  if (typeof obj['summary'] === 'string') freeText.push(obj['summary']);
   for (const text of freeText) {
     for (const m of text.matchAll(/[\w./-]*[\w-]\.[A-Za-z][A-Za-z0-9]{0,8}\b/g)) {
       mention(m[0]);
@@ -558,7 +568,7 @@ async function probeFilesGroundTruth(args: {
       const raw = (await tools.execute('list_files', { path: '.' })) as {
         entries?: Array<{ name?: string; kind?: string; size?: number }>;
       } | null;
-      const entries = Array.isArray(raw?.entries) ? raw!.entries! : [];
+      const entries = Array.isArray(raw?.entries) ? raw.entries : [];
       listing = entries
         .map((e) => `${e.name}${e.kind === 'dir' ? '/' : ''} (${e.size ?? '?'}b)`)
         .join(', ');

@@ -87,7 +87,7 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
     async execute(args) {
       const path = expectString(args, 'path');
       const oldString = expectString(args, 'old_string');
-      const newString = typeof args['new_string'] === 'string' ? (args['new_string'] as string) : '';
+      const newString = typeof args['new_string'] === 'string' ? (args['new_string']) : '';
       const replaceAll = args['replace_all'] === true;
       if (oldString.length === 0) {
         throw new Error('edit_file: old_string must be non-empty (to create a file, use write_file)');
@@ -485,7 +485,7 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
     async execute(args) {
       const requestedPort =
         typeof args['port'] === 'number' && Number.isFinite(args['port'])
-          ? Math.floor(args['port'] as number)
+          ? Math.floor(args['port'])
           : 0;
 
       // Try the caller's requested port first; if it's taken, kill the
@@ -708,11 +708,11 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
     },
     async execute(args) {
       const url = expectString(args, 'url');
-      const methodRaw = typeof args['method'] === 'string' ? args['method']!.toUpperCase() : 'GET';
+      const methodRaw = typeof args['method'] === 'string' ? args['method'].toUpperCase() : 'GET';
       const method = methodRaw;
       const timeoutMs =
         typeof args['timeoutMs'] === 'number' && Number.isFinite(args['timeoutMs'])
-          ? (args['timeoutMs'] as number)
+          ? (args['timeoutMs'])
           : DEFAULT_TIMEOUT_MS;
 
       const rawHeaders =
@@ -1046,7 +1046,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       // explicitly via the `waitMs` arg.
       const requestedWaitMs =
         typeof args['waitMs'] === 'number' && Number.isFinite(args['waitMs'])
-          ? Math.max(0, Math.floor(args['waitMs'] as number))
+          ? Math.max(0, Math.floor(args['waitMs']))
           : 500;
       const waitMs = Math.min(requestedWaitMs, MAX_WAIT_MS);
       const interactions = parseInteractions(args['interactions']);
@@ -1352,19 +1352,19 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
       continue;
     const parsed: ParsedInteraction = { type: t };
     if (typeof rec['selector'] === 'string' && rec['selector']) {
-      parsed.selector = rec['selector'] as string;
+      parsed.selector = rec['selector'];
     }
     if (typeof rec['x'] === 'number' && Number.isFinite(rec['x'])) {
-      parsed.x = rec['x'] as number;
+      parsed.x = rec['x'];
     }
     if (typeof rec['y'] === 'number' && Number.isFinite(rec['y'])) {
-      parsed.y = rec['y'] as number;
+      parsed.y = rec['y'];
     }
     if (typeof rec['key'] === 'string' && rec['key']) {
-      parsed.key = rec['key'] as string;
+      parsed.key = rec['key'];
     }
     if (typeof rec['holdMs'] === 'number' && Number.isFinite(rec['holdMs'])) {
-      parsed.holdMs = rec['holdMs'] as number;
+      parsed.holdMs = rec['holdMs'];
     }
     out.push(parsed);
   }

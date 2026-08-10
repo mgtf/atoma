@@ -56,7 +56,7 @@ describe('backend selection', () => {
 
 describe('the two backends expose the same shape', () => {
   it('local declares the full builtin set and a real root', async () => {
-    const b = localToolBackend({ workspaceRoot: ws(), logger: console as never });
+    const b = localToolBackend({ workspaceRoot: ws(), logger: console });
     const names = b.toolDecls.map((t) => t.name);
     // The container backend is asserted against a live worker elsewhere; this
     // pins that both sides agree on WHAT a backend must provide.

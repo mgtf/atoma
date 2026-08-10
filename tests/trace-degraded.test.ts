@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { join, tmpdir } from 'node:path';
+import { join} from 'node:path';
 import { tmpdir as osTmpdir } from 'node:os';
 import { TraceRecorder, type VizRunIndexEntry } from '../src/viz/trace.js';
 import type { Task } from '../src/core/types.js';

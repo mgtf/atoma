@@ -1,0 +1,22 @@
+{
+  "//": "Lint-only project. The build tsconfig excludes tests/ (never emitted) — and `extends` INHERITS that exclude, which silently wins over any include here, so every test file reported \"not found\" and the type-aware rules skipped the whole suite. The empty exclude below is what actually brings tests into scope.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "benchmark/**/*.mjs",
+    "eslint.config.js",
+    "*.config.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

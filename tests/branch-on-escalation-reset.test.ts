@@ -13,8 +13,6 @@ import type { Atom, Supervisor } from '../src/core/atom.js';
 import type {
   Plan,
   Result,
-  RunContext,
-  Task,
   Tier,
   Tool,
   Verdict,
@@ -25,7 +23,7 @@ function makeTools(names: readonly string[]): Tool[] {
     name,
     description: `${name} tool`,
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' as unknown }),
+    execute: async () => ({ ok: true as const, output: 'noop' }),
   }));
 }
 

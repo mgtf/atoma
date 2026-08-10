@@ -57,6 +57,9 @@ function neverYieldingStream(onAbort: (reason: unknown) => void) {
         await new Promise<never>((_, reject) => {
           ctrl?.signal.addEventListener('abort', () => {
             onAbort(ctrl.signal.reason);
+            // Faithful to production: an aborted stream rejects with the
+            // signal's own reason, whatever the caller set it to.
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
             reject(ctrl.signal.reason ?? new Error('aborted'));
           });
         });
@@ -127,7 +130,7 @@ describe('a wedged call cannot hang forever', () => {
     queryMock.mockImplementation(neverYieldingStream(() => {}));
     const client = new ClaudeCliLlmClient({ callTimeoutMs: 10_000 });
     const ac = new AbortController();
-    const p = client.complete({ ...REQ, signal: ac.signal } as never);
+    const p = client.complete({ ...REQ, signal: ac.signal });
     ac.abort(new Error('user interrupt'));
     await expect(p).rejects.toThrow(/user interrupt/);
   });
@@ -139,7 +142,7 @@ describe('a wedged call cannot hang forever', () => {
     queryMock.mockImplementation(slowButAliveStream(5, 40) as never);
     const client = new ClaudeCliLlmClient({ callTimeoutMs: 60 });
     const started = Date.now();
-    const res = await client.complete(REQ as never);
+    const res = await client.complete(REQ);
     expect(res.text).toBe('done');
     expect(Date.now() - started).toBeGreaterThan(60); // genuinely outlived the deadline
   });
@@ -157,7 +160,7 @@ describe('a wedged call cannot hang forever', () => {
       },
     }));
     const client = new ClaudeCliLlmClient({ callTimeoutMs: 5000 });
-    const r = await client.complete(REQ as never);
+    const r = await client.complete(REQ);
     expect(r.text).toBe('PONG');
     // Exactly ONE subprocess per call — a retry loop or a double spawn
     // here would cost twice the tokens and twice the wall time.

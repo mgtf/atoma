@@ -8,6 +8,9 @@
     "build": "tsc -p tsconfig.json && cp src/viz/ui.html dist/viz/ui.html",
     "build:worker": "npm run build && docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check": "npm run typecheck && npm run lint && npm test",
     "test": "vitest run",
     "test:watch": "vitest",
     "run:build": "tsx src/cli/build-app.ts",
@@ -31,10 +34,14 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.7.4",
+    "eslint": "^9.39.5",
+    "globals": "^17.9.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
+    "typescript-eslint": "^8.66.0",
     "vitest": "^2.1.1"
   },
   "engines": {

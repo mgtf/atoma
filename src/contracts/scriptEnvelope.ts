@@ -26,7 +26,7 @@ export type ScriptEnvelope = { output: unknown; summary: string };
 export const EXAMPLE_ENVELOPE: ScriptEnvelope = scriptEnvelopeSchema.parse({
   output: '<the deliverable value>',
   summary: '<one sentence>\n== GROUND TRUTH ==\n<evidence lines>',
-}) as ScriptEnvelope;
+});
 
 /**
  * Strict parse of the script-skill stdout contract: the LAST non-empty

@@ -111,7 +111,7 @@ let warnedOnce = false;
 function warnOnce(err: unknown): void {
   if (warnedOnce) return;
   warnedOnce = true;
-  // eslint-disable-next-line no-console
+   
   console.warn(`[prefilterCache] disabled after error (further failures silent): ${(err as Error).message}`);
 }
 

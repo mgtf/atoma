@@ -512,7 +512,7 @@ const server = createServer((req, res) => {
 
   if (pathname.startsWith('/api/runs/')) {
     const id = decodeURIComponent(pathname.slice('/api/runs/'.length));
-    if (!/^[A-Za-z0-9_.:\-]+$/.test(id)) {
+    if (!/^[A-Za-z0-9_.:-]+$/.test(id)) {
       sendJson(res, 400, { error: 'bad id' });
       return;
     }
@@ -608,7 +608,7 @@ const server = createServer((req, res) => {
 
   if (pathname.startsWith('/api/registry/')) {
     const id = decodeURIComponent(pathname.slice('/api/registry/'.length));
-    if (!/^[A-Za-z0-9_.\-]+$/.test(id)) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(id)) {
       sendJson(res, 400, { error: 'bad id' });
       return;
     }

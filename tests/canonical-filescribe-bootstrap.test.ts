@@ -18,7 +18,7 @@ function makeTools(names: readonly string[]): Tool[] {
     name,
     description: `${name} tool`,
     parameters: { type: 'object', properties: {}, required: [] },
-    execute: async () => ({ ok: true as const, output: 'noop' as unknown }),
+    execute: async () => ({ ok: true as const, output: 'noop' }),
   }));
 }
 

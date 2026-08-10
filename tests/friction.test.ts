@@ -29,7 +29,7 @@ function run(events: Record<string, unknown>[], over: Partial<VizRun> = {}): Viz
     endedAt: '2026-08-07T00:01:00Z',
     events: events as never,
     ...over,
-  } as VizRun;
+  };
 }
 
 describe('frictionSignature — the refutation counter-examples', () => {

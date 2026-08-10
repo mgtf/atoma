@@ -62,7 +62,7 @@ function tierFrom(flags: Record<string, string>): Tier | undefined {
     console.error(`invalid --tier (got "${flags['tier']}", expected 1/2/3)`);
     process.exit(2);
   }
-  return t as Tier;
+  return t;
 }
 
 function padCell(s: string, w: number): string {
