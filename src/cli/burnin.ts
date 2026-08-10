@@ -184,7 +184,7 @@ export function summarize(
   return lines.join('\n');
 }
 
-function newestTraceDuration(runsDir: string, since: number): number | null {
+export function newestTraceDuration(runsDir: string, since: number): number | null {
   try {
     const files = readdirSync(runsDir)
       .filter((f) => f.endsWith('.json') && f !== 'index.json')
@@ -200,7 +200,7 @@ function newestTraceDuration(runsDir: string, since: number): number | null {
   }
 }
 
-function newestTraceName(runsDir: string, since: number): string {
+export function newestTraceName(runsDir: string, since: number): string {
   try {
     const files = readdirSync(runsDir)
       .filter((f) => f.endsWith('.json') && f !== 'index.json')
@@ -213,17 +213,40 @@ function newestTraceName(runsDir: string, since: number): string {
   }
 }
 
-/** Run one task through `npm run run:build`; group-killed on completion. */
-function runTask(task: BurninTask, timeoutMs: number, logPath: string): Promise<string> {
+/**
+ * Run one goal through `npm run run:build` in its own process group;
+ * group-killed once it reports completion (a delivered run parks alive by
+ * design so a started server stays reachable).
+ *
+ * EXPORTED so the benchmark driver reuses this exact process discipline
+ * rather than growing a second copy of it. The kill sequence below is not
+ * incidental — it was measured, and a naive re-implementation leaks nine
+ * browser processes per web run.
+ *
+ * `extraArgs` are appended AFTER the flags and BEFORE the goal, because
+ * `parseRunnerArgs` takes the first non-flag argument as the goal.
+ */
+export function spawnRun(opts: {
+  readonly goal: string;
+  readonly timeoutMs: number;
+  readonly logPath: string;
+  readonly extraArgs?: readonly string[];
+  readonly extraEnv?: Readonly<Record<string, string>>;
+}): Promise<string> {
+  const { goal, timeoutMs, logPath } = opts;
   return new Promise((resolveRun) => {
     const child = spawn(
       'npm',
-      ['run', 'run:build', '--', '--clean-workspace', task.goal],
+      ['run', 'run:build', '--', '--clean-workspace', ...(opts.extraArgs ?? []), goal],
       {
         cwd: process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
-        env: { ...process.env, ATOMA_BUILD_TIMEOUT_MS: String(timeoutMs) },
+        env: {
+          ...process.env,
+          ATOMA_BUILD_TIMEOUT_MS: String(timeoutMs),
+          ...(opts.extraEnv ?? {}),
+        },
       }
     );
     let log = '';
@@ -333,7 +356,11 @@ async function main(): Promise<void> {
     const ts = new Date().toISOString();
     const started = Date.now();
     console.log(`\n▶ ${task.id} (${task.family}) …`);
-    const log = await runTask(task, timeoutMs, join(logsDir, `${task.id}-${ts.replace(/[:.]/g, '-')}.log`));
+    const log = await spawnRun({
+      goal: task.goal,
+      timeoutMs,
+      logPath: join(logsDir, `${task.id}-${ts.replace(/[:.]/g, '-')}.log`),
+    });
     const stats = parseRunLog(log);
     const durationS = newestTraceDuration(runsDir, started) ?? Math.round((Date.now() - started) / 1000);
     const trace = newestTraceName(runsDir, started);

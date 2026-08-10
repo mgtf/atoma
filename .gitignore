@@ -28,3 +28,7 @@ atoma-ledger.jsonl*
 # Pre-consolidation prefilter cache; it is now a `prefilter_cache` table in
 # the store. Kept ignored so an old checkout cannot commit one.
 atoma-prefilter-cache.json
+# Benchmark: logs and throwaway control-arm stores are runtime data; the CSV,
+# the protocol and the computed result are the evidence and stay committed.
+benchmark/logs/
+benchmark/.scratch/

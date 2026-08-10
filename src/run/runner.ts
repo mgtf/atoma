@@ -18,7 +18,8 @@ import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/repor
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
-import type { Logger, RunContext } from '../core/types.js';
+import { runFrontierBaseline } from './baseline.js';
+import type { Logger, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 
 export const consoleLogger: Logger = {
@@ -36,6 +37,12 @@ export interface RunnerArgs {
   cleanWorkspace: boolean;
   container: boolean;
   egress: boolean;
+  /**
+   * Control arm of the cost experiment: one frontier agent with the same
+   * tools, sandbox, budget and accounting, instead of the three-tier
+   * cascade. See `src/run/baseline.ts` for why it lives here.
+   */
+  baseline: boolean;
 }
 
 /**
@@ -57,8 +64,11 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
   let container = process.env['ATOMA_CONTAINER'] === '1';
   // Egress implies a container: there is nothing to proxy without one.
   let egress = process.env['ATOMA_EGRESS'] === '1';
+  let baseline = process.env['ATOMA_BASELINE'] === '1';
   for (const a of argv) {
-    if (a === '--no-learn-skills') noLearnSkills = true;
+    if (a === '--baseline') baseline = true;
+    else if (a === '--no-baseline') baseline = false;
+    else if (a === '--no-learn-skills') noLearnSkills = true;
     else if (a === '--no-promote-skills') noPromoteSkills = true;
     else if (a === '--no-direct-skills') noDirectSkills = true;
     else if (a === '--clean-workspace') cleanWorkspace = true;
@@ -70,7 +80,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     else if (goal === undefined) goal = a;
   }
   if (egress) container = true;
-  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container, egress };
+  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container, egress, baseline };
 }
 
 /**
@@ -250,21 +260,40 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   console.log(`workspace: ${backend.rootLabel}`);
   console.log(`tools: ${toolDecls.map((t) => t.name).join(', ')}\n`);
 
-  const seedCtx = { registry, toolDecls, log: (line: string) => console.log(line) };
-  const l3Type = profile.seedL3(seedCtx);
-  profile.seedCatalog(seedCtx);
+  // WHO HANDLES THE TASK — the single line that differs between the two arms
+  // of the cost experiment. Everything above and below is shared verbatim, so
+  // no difference in sandbox, tools, budget, cache behaviour, token
+  // accounting or price table can leak into the comparison.
+  let handle: (t: Task, c: RunContext) => Promise<Result>;
 
-  // Skill store — shared by every atom in the run. Skills are
-  // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills) so
-  // they survive across invocations. L1 atoms hydrate their `skills()`
-  // accessor from this registry on demand; L2 runs a Haiku
-  // skill-prefilter against the matched L1's skills before entering
-  // each supervise loop.
-  const skillRegistry = new SkillRegistry(skillsDirPath());
-  console.log(`skills root: ${skillRegistry.rootDir}`);
+  if (args.baseline) {
+    // CONTROL ARM. No taxonomy to seed and nothing to learn — and a control
+    // that mutated the treatment arm's registry or skill store would
+    // invalidate the experiment, so we touch neither.
+    console.log(
+      `\n⚖ BASELINE MODE — one ${modelForTier(3)} agent, no tiering, no learned recipes,` +
+        ` no independent verification (it self-certifies).`
+    );
+    console.log('  Registry and skill store are NOT seeded and NOT written.\n');
+    handle = (t, c) => runFrontierBaseline(t, c, toolDecls);
+  } else {
+    const seedCtx = { registry, toolDecls, log: (line: string) => console.log(line) };
+    const l3Type = profile.seedL3(seedCtx);
+    profile.seedCatalog(seedCtx);
 
-  const l3 = await L3Atom.fromType(l3Type, registry, anthropic, skillRegistry);
-  console.log(`L3 ${l3.name} using model ${l3.model}`);
+    // Skill store — shared by every atom in the run. Skills are
+    // filesystem-backed under ATOMA_SKILLS_DIR (default ./skills) so
+    // they survive across invocations. L1 atoms hydrate their `skills()`
+    // accessor from this registry on demand; L2 runs a Haiku
+    // skill-prefilter against the matched L1's skills before entering
+    // each supervise loop.
+    const skillRegistry = new SkillRegistry(skillsDirPath());
+    console.log(`skills root: ${skillRegistry.rootDir}`);
+
+    const l3 = await L3Atom.fromType(l3Type, registry, anthropic, skillRegistry);
+    console.log(`L3 ${l3.name} using model ${l3.model}`);
+    handle = (t, c) => l3.handle(t, c);
+  }
 
   // Default budget is transport-aware: the claude-cli path adds 2-5s of
   // subprocess overhead to EVERY call, so a 3-phase cold start (~23 LLM
@@ -379,7 +408,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   }, timeoutMs + WATCHDOG_GRACE_MS);
 
   try {
-    const result = await l3.handle(task, ctx);
+    const result = await handle(task, ctx);
     clearTimeout(watchdog);
     const persistedRun = recorder.endRun({
       result: {

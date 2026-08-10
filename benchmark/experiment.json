@@ -1,0 +1,19 @@
+{
+  "_comment": "Pre-registered configuration. See PROTOCOL.md. Do not edit between the control and treatment arms of a run — the whole point is that both arms receive byte-identical goal text.",
+
+  "primary": {
+    "id": "csvstat",
+    "goal": "Build a Node.js command-line tool named csvstat that reads a CSV file and prints a per-column statistical report. Requirements: (1) infer each column's type as numeric, date or text; (2) for numeric columns report count, missing, min, max, mean, median and standard deviation; (3) for text columns report count, missing, number of distinct values and the three most frequent values with their counts; (4) support --format table|json defaulting to table, --columns a,b,c to restrict the report to named columns, and --help; (5) exit with code 2 and a clear message on stderr when the file does not exist or the CSV is malformed, and exit 0 on success; (6) handle quoted fields containing commas. Use no third-party dependencies. Also write a README.md documenting every flag with at least one worked example invocation and its output."
+  },
+
+  "heldOut": {
+    "id": "logdigest",
+    "goal": "Build a Node.js command-line tool named logdigest that reads a newline-delimited log file and prints a summary report. Requirements: (1) count total lines and lines per log level (ERROR, WARN, INFO, DEBUG) detected case-insensitively; (2) report the five most frequent message templates, where a template is the message with numbers and quoted strings replaced by placeholders; (3) report the time span between the first and last parseable ISO-8601 timestamp; (4) support --format table|json defaulting to table, --level to filter to one level, --top N to change how many templates are shown, and --help; (5) exit with code 2 and a clear message on stderr when the file does not exist or is unreadable, and exit 0 on success. Use no third-party dependencies. Also write a README.md documenting every flag with at least one worked example invocation and its output."
+  },
+
+  "baselineRuns": 5,
+  "atomaRuns": 10,
+  "heldOutBaselineRuns": 2,
+  "heldOutAtomaRuns": 2,
+  "timeoutMs": 900000
+}
