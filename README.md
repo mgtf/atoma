@@ -8,10 +8,10 @@
 expensive reasoning once, then progressively compiles the repeatable parts of the work
 into steps that run with no model call at all.*
 
-![tests](https://img.shields.io/badge/tests-1030_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1042_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![runs](https://img.shields.io/badge/measured_runs-156-blue)
-![delivery](https://img.shields.io/badge/delivery_rate-96%25-success)
+![benchmark](https://img.shields.io/badge/vs_frontier_direct-−35%25_over_10_runs-success)
+![breakeven](https://img.shields.io/badge/break--even-run_2-gold)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Claude_subscription_·_Ollama_·_Z.ai-8A2BE2)
 
 **[→ How it works, in detail](docs/how-it-works.md)**
@@ -27,8 +27,9 @@ uncomfortable shape:
 
 - **It does not improve.** The thousandth invoice-parser looks exactly as expensive as the first.
   Nothing the system learned on task 999 makes task 1000 cheaper.
-- **It is unpredictable.** The same task, run twice on a frontier model, can differ 3–5× in cost
-  depending on how long the model chooses to think. That is hard to put in a client proposal.
+- **It is unpredictable.** Identical runs of the same task on a frontier model differed by 1.5×
+  across five measurements here, and by 2.5× on a second task — depending on how long the model
+  chooses to think. That is hard to put in a client proposal.
 - **It cannot prove its work.** The agent that did the job is usually also the one that certifies
   it. For anything billable, self-certification is not evidence.
 
@@ -52,23 +53,55 @@ automatically. Nothing is permanently trusted.
 
 **3. What proves repeatable gets compiled away.**
 When the system solves a novel task, it writes down the pattern as a reusable recipe. A recipe
-that keeps working gets compiled into a deterministic script — and from then on that step of
-the work runs with **zero model calls**. Crucially, the compiler *refuses* patterns that need
-judgment, and records why:
+that keeps working is compiled into a deterministic script that then runs with **zero model
+calls**. The compiler *refuses* patterns that need judgment, and records why — verbatim, from a
+run in the benchmark below:
 
-> *"…designing bespoke CLI business logic from a free-form natural-language spec is an
-> irreducible LLM reasoning step, not a deterministic recipe."*
-> — verbatim refusal from a live run, persisted to disk
+> *"designing a hand-written state-machine parser and type-inference/stats engine tailored to
+> whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
+> cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-Creative work stays on the expensive path. Mechanical work stops costing money. The system
-knows the difference and writes down its reasoning.
+Creative work stays on the expensive path; mechanical work stops costing money. **This third
+mechanism is also the least proven of the three** — in the controlled experiment below it never
+engaged, for a reason the experiment diagnosed. Mechanisms 1 and 2 carried the measured result
+on their own.
 
-## What the numbers actually say
+## The controlled experiment
 
-Every figure below is recomputed from `burnin/results.csv` — 156 real runs of real deliverables,
+The same task, given to atoma ten times and to a single frontier agent five times — same
+sandbox, same nine tools, same budget, same token accounting. atoma started from an **empty
+registry and empty skill store**, as after `git clone`. The hypothesis, the metric and the
+falsification conditions were [registered before the first run](benchmark/PROTOCOL.md).
+
+![cost curve](docs/benchmark-cost-curve.svg)
+
+| Same task, repeated | frontier direct | atoma |
+|---|---|---|
+| Cost per run | $0.8198 | **$0.4945** once warm — 1.66× cheaper |
+| Cumulative over 10 runs | $8.1982 | **$5.3138 — −35.2%** |
+| **Break-even** | — | **run 2** |
+| Deliverable correctness | 10/10 × 5 | **10/10 × 10** |
+| A *novel* task in the same family | $1.1810 | **$0.3961**, and **zero new recipes needed** |
+
+The last row is the one that matters most: on a task it had never seen, atoma reused what it
+had learned instead of learning again. That separates generalisation from memorisation.
+
+**What produced the saving was earned trust and recipe reuse — not compilation.** Zero
+deterministic phases fired in all nineteen runs, because the two compilable recipes were
+crowded out at match time by a monolithic one that cannot compile. That defect, and the
+verbatim reasoning of the compiler's refusals, are in
+[the full result](benchmark/RESULT.md). It is the most useful thing this benchmark produced.
+
+Honest limits, stated in the protocol before the data existed: one task family (atoma's best
+case), n of 5 and 10, wall clock biased against atoma by a per-call subprocess tax on this
+transport, and costs that are API-price equivalents rather than invoices.
+
+## The longer-run picture
+
+Beyond the controlled experiment, `burnin/results.csv` holds 156 runs across 8 task families,
 regenerable with `npm run burnin`. **Claims that could not be reproduced from stored artefacts
-have been removed from this README**, including a head-to-head benchmark whose baseline runs no
-longer exist.
+have been removed from this README**, including an earlier head-to-head table whose baseline
+runs no longer existed.
 
 | | |
 |---|---|
@@ -84,20 +117,22 @@ longer exist.
 
 ### Three honest readings
 
-**The zero-cost mechanism is real, but it applies to *phases*, not whole runs.** No complete run
-has ever cost $0.00, and none can today: every run still pays for one top-level planning call.
-What genuinely reaches zero is the verification and packaging work — 45 runs contain at least
-one phase that executed with no model call at all.
+**The batch average across those 156 runs does not fall, and that is expected.** It is not the
+same measurement as the experiment above. Cost falls on a *repeated* task; the batch curve is
+flat-to-rising because the task generator deliberately proposes harder, novel work each round.
+Cost per unit of difficulty falls; cost per run does not, because the runs keep getting harder
+on purpose. Read the controlled experiment for the amortisation claim and this corpus for
+breadth — not the other way round.
 
-**The batch average does not fall over time, and that is expected.** Runs get cheaper on a
-*fixed* task as the system matures — re-running six identical HTTP tasks after compilation cut
-their average 27%. But the overall curve is flat-to-rising, because the task generator
-deliberately proposes harder, novel work each round. Cost per unit of *difficulty* falls; cost
-per *run* does not, because the runs keep getting harder on purpose.
+**The zero-cost mechanism applies to *phases*, and it is not what makes atoma cheaper.** No
+complete run has ever cost $0.00, and none can today: every run still pays for one top-level
+planning call. Across the corpus, 45 of 156 runs contain at least one phase that executed with
+no model call at all — but in the controlled experiment above, *none* did, and atoma was still
+35% cheaper. The saving came from earned trust and recipe reuse.
 
-**Failure handling improved measurably; raw cost did not.** The rate at which runs need
-corrective intervention fell from roughly half of early runs to one in the last thirty. That is
-a learning curve being paid down, and it is the clearest evidence the loop works.
+**Failure handling improved measurably.** The rate at which runs need corrective intervention
+fell from roughly half of the early runs to one in the last thirty. That is a learning curve
+being paid down.
 
 ## What it builds today
 
@@ -129,7 +164,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1030 tests, fully mocked — no API key needed
+npm run typecheck && npm test     # 1042 tests, fully mocked — no API key needed
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -147,7 +182,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1030 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1042 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed

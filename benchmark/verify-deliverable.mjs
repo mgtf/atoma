@@ -106,8 +106,8 @@ if (!entry) {
       'numeric column reports mean, median and standard deviation',
       /mean/.test(blob) && /median/.test(blob) && /(std\s*_?\s*dev|stdev|standard[_ ]?deviation|σ)/.test(blob)
     );
-    add('C3', 'text column reports distinct count and top values', /distinct|unique/.test(blob) && /(top|most)/.test(blob));
-    add('C2b', 'reports missing values', /missing|nulls?\b|empty/.test(blob));
+    add('C3', 'text column reports distinct count and top values', /distinct|unique|cardinality/.test(blob) && /(top|most|frequent|common)/.test(blob));
+    add('C2b', 'reports missing values', /missing|nulls?\b|empty|blank|n\/a/.test(blob));
 
     const cols = run(entry, [csv, '--columns', 'score', '--format', 'json'], dir);
     let colsParsed = null;
@@ -152,8 +152,8 @@ if (!entry) {
 
     const blob = (JSON.stringify(parsed ?? {}) + basic.stdout).toLowerCase();
     add('C1b', 'counts levels case-insensitively (2 errors)', /"?error"?\s*[:=]?\s*"?2/.test(blob) || /error\D{0,12}2\b/.test(blob));
-    add('C2', 'reports message templates', /template|pattern/.test(blob));
-    add('C3', 'reports a time span', /span|duration|first|last|range/.test(blob));
+    add('C2', 'reports message templates', /template|pattern|signature/.test(blob));
+    add('C3', 'reports a time span', /span|duration|elapsed|first|last|range|between|earliest|latest/.test(blob));
 
     const missing = run(entry, [join(scratch, 'nope.log')], dir);
     add('C5', 'missing file exits 2 with a stderr message', missing.code === 2 && missing.stderr.trim().length > 0, `exit=${missing.code}`);

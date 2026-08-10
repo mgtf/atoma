@@ -60,8 +60,8 @@ const nStar = breakEven === -1 ? null : breakEven + 1;
 
 // ── layout ──────────────────────────────────────────────────────────────────
 const W = 920,
-  H = 380,
-  PAD = { t: 54, r: 24, b: 46, l: 62 },
+  H = 424,
+  PAD = { t: 80, r: 24, b: 72, l: 62 },
   GAP = 56;
 const panelW = (W - PAD.l - PAD.r - GAP) / 2;
 const panelH = H - PAD.t - PAD.b;
@@ -74,7 +74,7 @@ function panel(x0, title, series, yMax, xCount) {
   const sy = (v) => PAD.t + panelH - (v / yMax) * panelH;
   const out = [];
   out.push(
-    `<text x="${x0}" y="${PAD.t - 26}" class="ttl">${esc(title)}</text>`
+    `<text x="${x0}" y="${PAD.t - 18}" class="ttl">${esc(title)}</text>`
   );
   // grid + y labels
   for (let g = 0; g <= 4; g++) {

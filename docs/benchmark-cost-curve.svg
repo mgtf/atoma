@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 424" width="920" height="424" font-family="ui-sans-serif,system-ui,sans-serif">
+<style>
+  .ttl{font-size:14px;font-weight:600;fill:#0f172a}
+  .ax{font-size:11px;fill:#64748b}
+  .lg{font-size:12px;fill:#334155}
+  .mark{font-size:11px;fill:#0f766e;font-weight:600}
+  .grid{stroke:#e2e8f0;stroke-width:1}
+  .sub{font-size:11px;fill:#64748b}
+  @media (prefers-color-scheme: dark){
+    .ttl{fill:#e2e8f0}.ax{fill:#94a3b8}.lg{fill:#cbd5e1}.grid{stroke:#334155}.sub{fill:#94a3b8}
+    svg{background:transparent}
+  }
+</style>
+<text x="62" y="22" class="ttl">atoma vs single frontier agent — same task, repeated</text>
+<text x="62" y="38" class="sub">baseline n=5 (mean $0.82) · atoma n=10 · cumulative break-even at run 2</text>
+<text x="62" y="62" class="ttl">Cost per run</text>
+<line x1="62" y1="352" x2="451" y2="352" class="grid"/>
+<text x="54" y="356" class="ax" text-anchor="end">$0.00</text>
+<line x1="62" y1="284" x2="451" y2="284" class="grid"/>
+<text x="54" y="288" class="ax" text-anchor="end">$0.28</text>
+<line x1="62" y1="216" x2="451" y2="216" class="grid"/>
+<text x="54" y="220" class="ax" text-anchor="end">$0.55</text>
+<line x1="62" y1="148" x2="451" y2="148" class="grid"/>
+<text x="54" y="152" class="ax" text-anchor="end">$0.83</text>
+<line x1="62" y1="80" x2="451" y2="80" class="grid"/>
+<text x="54" y="84" class="ax" text-anchor="end">$1.10</text>
+<text x="62" y="370" class="ax" text-anchor="middle">1</text>
+<text x="105.22222222222223" y="370" class="ax" text-anchor="middle">2</text>
+<text x="148.44444444444446" y="370" class="ax" text-anchor="middle">3</text>
+<text x="191.66666666666666" y="370" class="ax" text-anchor="middle">4</text>
+<text x="234.88888888888889" y="370" class="ax" text-anchor="middle">5</text>
+<text x="278.1111111111111" y="370" class="ax" text-anchor="middle">6</text>
+<text x="321.3333333333333" y="370" class="ax" text-anchor="middle">7</text>
+<text x="364.55555555555554" y="370" class="ax" text-anchor="middle">8</text>
+<text x="407.77777777777777" y="370" class="ax" text-anchor="middle">9</text>
+<text x="451" y="370" class="ax" text-anchor="middle">10</text>
+<text x="256.5" y="390" class="ax" text-anchor="middle">run</text>
+<polyline points="62,149.5725522769464 105.22222222222223,149.5725522769464 148.44444444444446,149.5725522769464 191.66666666666666,149.5725522769464 234.88888888888889,149.5725522769464 278.1111111111111,149.5725522769464 321.3333333333333,149.5725522769464 364.55555555555554,149.5725522769464 407.77777777777777,149.5725522769464 451,149.5725522769464" fill="none" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4"/>
+<circle cx="62" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="105.22222222222223" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="148.44444444444446" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="191.66666666666666" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="234.88888888888889" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="278.1111111111111" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="321.3333333333333" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="364.55555555555554" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="407.77777777777777" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<circle cx="451" cy="149.5725522769464" r="3.5" fill="#b91c1c"/>
+<polyline points="62,138.83660362114585 105.22222222222223,208.5659481565199 148.44444444444446,204.9362691031559 191.66666666666666,214.6401049397005 234.88888888888889,231.33169024632684 278.1111111111111,272.7643531820059 321.3333333333333,238.27005632792748 364.55555555555554,232.0971327677846 407.77777777777777,235.20828624209662 451,231.28230685784573" fill="none" stroke="#047857" stroke-width="2.5" />
+<circle cx="62" cy="138.83660362114585" r="3.5" fill="#047857"/>
+<circle cx="105.22222222222223" cy="208.5659481565199" r="3.5" fill="#047857"/>
+<circle cx="148.44444444444446" cy="204.9362691031559" r="3.5" fill="#047857"/>
+<circle cx="191.66666666666666" cy="214.6401049397005" r="3.5" fill="#047857"/>
+<circle cx="234.88888888888889" cy="231.33169024632684" r="3.5" fill="#047857"/>
+<circle cx="278.1111111111111" cy="272.7643531820059" r="3.5" fill="#047857"/>
+<circle cx="321.3333333333333" cy="238.27005632792748" r="3.5" fill="#047857"/>
+<circle cx="364.55555555555554" cy="232.0971327677846" r="3.5" fill="#047857"/>
+<circle cx="407.77777777777777" cy="235.20828624209662" r="3.5" fill="#047857"/>
+<circle cx="451" cy="231.28230685784573" r="3.5" fill="#047857"/>
+<text x="507" y="62" class="ttl">Cumulative cost</text>
+<line x1="507" y1="352" x2="896" y2="352" class="grid"/>
+<text x="499" y="356" class="ax" text-anchor="end">$0.00</text>
+<line x1="507" y1="284" x2="896" y2="284" class="grid"/>
+<text x="499" y="288" class="ax" text-anchor="end">$2.25</text>
+<line x1="507" y1="216" x2="896" y2="216" class="grid"/>
+<text x="499" y="220" class="ax" text-anchor="end">$4.51</text>
+<line x1="507" y1="148" x2="896" y2="148" class="grid"/>
+<text x="499" y="152" class="ax" text-anchor="end">$6.76</text>
+<line x1="507" y1="80" x2="896" y2="80" class="grid"/>
+<text x="499" y="84" class="ax" text-anchor="end">$9.02</text>
+<text x="507" y="370" class="ax" text-anchor="middle">1</text>
+<text x="550.2222222222222" y="370" class="ax" text-anchor="middle">2</text>
+<text x="593.4444444444445" y="370" class="ax" text-anchor="middle">3</text>
+<text x="636.6666666666666" y="370" class="ax" text-anchor="middle">4</text>
+<text x="679.8888888888889" y="370" class="ax" text-anchor="middle">5</text>
+<text x="723.1111111111111" y="370" class="ax" text-anchor="middle">6</text>
+<text x="766.3333333333333" y="370" class="ax" text-anchor="middle">7</text>
+<text x="809.5555555555555" y="370" class="ax" text-anchor="middle">8</text>
+<text x="852.7777777777778" y="370" class="ax" text-anchor="middle">9</text>
+<text x="896" y="370" class="ax" text-anchor="middle">10</text>
+<text x="701.5" y="390" class="ax" text-anchor="middle">run</text>
+<polyline points="507,327.27272727272725 550.2222222222222,302.54545454545456 593.4444444444445,277.8181818181818 636.6666666666666,253.0909090909091 679.8888888888889,228.36363636363637 723.1111111111111,203.63636363636365 766.3333333333333,178.9090909090909 809.5555555555555,154.1818181818182 852.7777777777778,129.45454545454544 896,104.72727272727275" fill="none" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4"/>
+<circle cx="507" cy="327.27272727272725" r="3.5" fill="#b91c1c"/>
+<circle cx="550.2222222222222" cy="302.54545454545456" r="3.5" fill="#b91c1c"/>
+<circle cx="593.4444444444445" cy="277.8181818181818" r="3.5" fill="#b91c1c"/>
+<circle cx="636.6666666666666" cy="253.0909090909091" r="3.5" fill="#b91c1c"/>
+<circle cx="679.8888888888889" cy="228.36363636363637" r="3.5" fill="#b91c1c"/>
+<circle cx="723.1111111111111" cy="203.63636363636365" r="3.5" fill="#b91c1c"/>
+<circle cx="766.3333333333333" cy="178.9090909090909" r="3.5" fill="#b91c1c"/>
+<circle cx="809.5555555555555" cy="154.1818181818182" r="3.5" fill="#b91c1c"/>
+<circle cx="852.7777777777778" cy="129.45454545454544" r="3.5" fill="#b91c1c"/>
+<circle cx="896" cy="104.72727272727275" r="3.5" fill="#b91c1c"/>
+<polyline points="507,325.96129083767835 550.2222222222222,308.44028290023755 593.4444444444445,290.4758960392636 636.6666666666666,273.69686915753124 679.8888888888889,258.9567820874205 723.1111111111111,249.2778503485244 766.3333333333333,235.38531074448716 809.5555555555555,220.7387253521283 852.7777777777778,206.47217903708355 896,191.72605960066625" fill="none" stroke="#047857" stroke-width="2.5" />
+<circle cx="507" cy="325.96129083767835" r="3.5" fill="#047857"/>
+<circle cx="550.2222222222222" cy="308.44028290023755" r="3.5" fill="#047857"/>
+<circle cx="593.4444444444445" cy="290.4758960392636" r="3.5" fill="#047857"/>
+<circle cx="636.6666666666666" cy="273.69686915753124" r="3.5" fill="#047857"/>
+<circle cx="679.8888888888889" cy="258.9567820874205" r="3.5" fill="#047857"/>
+<circle cx="723.1111111111111" cy="249.2778503485244" r="3.5" fill="#047857"/>
+<circle cx="766.3333333333333" cy="235.38531074448716" r="3.5" fill="#047857"/>
+<circle cx="809.5555555555555" cy="220.7387253521283" r="3.5" fill="#047857"/>
+<circle cx="852.7777777777778" cy="206.47217903708355" r="3.5" fill="#047857"/>
+<circle cx="896" cy="191.72605960066625" r="3.5" fill="#047857"/>
+<line x1="550.2222222222222" y1="80" x2="550.2222222222222" y2="352" stroke="#0f766e" stroke-width="1.5" stroke-dasharray="3 3"/><text x="556.2222222222222" y="94" class="mark">break-even N*=2</text>
+<g transform="translate(62,416)">
+  <line x1="0" y1="-4" x2="22" y2="-4" stroke="#b91c1c" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="28" y="0" class="lg">frontier direct</text>
+  <line x1="140" y1="-4" x2="162" y2="-4" stroke="#047857" stroke-width="2.5"/>
+  <text x="168" y="0" class="lg">atoma</text>
+</g>
+</svg>

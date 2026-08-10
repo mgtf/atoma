@@ -32,3 +32,4 @@ atoma-prefilter-cache.json
 # the protocol and the computed result are the evidence and stay committed.
 benchmark/logs/
 benchmark/.scratch/
+benchmark/driver.log

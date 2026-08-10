@@ -171,3 +171,25 @@ Standing rule this establishes for the rest of the protocol: when a check
 fails, the artefact is inspected before the failure is recorded. An instrument
 that penalises a correct deliverable for its choice of abbreviation is
 measuring the instrument.
+
+## Amendment — 2026-08-10, after all 19 runs, before the write-up
+
+**Broadened the wording vocabulary of four checks.** Treatment run 18 was
+scored 7/8 for failing "reports a time span" while printing
+`Elapsed Time: 180.00 seconds` — a correct span (10:00:00 → 10:03:00), missed
+because the regex accepted only span/duration/first/last/range.
+
+This is the SECOND correction in the same direction, which is itself worth
+recording: both false negatives were on treatment deliverables, because the
+control arm happened to use the conventional vocabulary the checks were
+drafted from. Loosening a check only where one arm trips is how an instrument
+drifts. So rather than patch the failing check alone, the vocabulary of FOUR
+checks was broadened at once — distinct/unique/cardinality,
+missing/null/empty/blank, template/pattern/signature, and the time-span set —
+including checks that were not failing for anyone.
+
+Re-scored afterwards: **all seven control deliverables unchanged at full
+marks** across all three revisions of the instrument, so no loosening has ever
+lifted the control arm's score or narrowed the gap by inflating one side.
+
+Final correctness: **19/19 deliverables at full marks on both arms.**
