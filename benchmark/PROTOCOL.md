@@ -242,3 +242,48 @@ runs are the only guard, and they are a weak one. If round 2's baseline mean
 departs sharply from round 1's $0.8198, the round-to-round atoma comparison is
 not trustworthy and the report must say so rather than attribute the difference
 to the fix.
+
+---
+
+## ROUND 3 — pre-registration, 2026-08-10, written before any round-3 run
+
+Round 2 reached compilation and one zero-LLM dispatch, then the compiled script
+took two contract failures and auto-demoted. The cause was characterised after
+the fact: the probe manifest recorded TRUNCATED stdout (a strict prefix of the
+real output), so a byte-for-byte replay could never match. Two fixes shipped
+since:
+
+- `record_probe` — a builtin that runs a command AND writes its real exit code
+  and complete output into the manifest, so the record is machine-written
+  rather than transcribed by the model. Proven offline: re-recording the two
+  failing round-2 workspaces drops them from 4/6 and 9/10 replay mismatches to
+  0 of 16.
+- `edit_file` now REFUSES `.atoma-probes.json`, naming `record_probe` instead.
+  31 of the 50 `edit_file` failures across 122 archived traces were that one
+  file.
+
+**H3 — a compiled script now SURVIVES instead of demoting.** From an empty
+registry and empty skill store, on the same primary task, within 14 atoma runs:
+at least one recipe compiles, AND the resulting script records **two or more
+successful deterministic dispatches**, AND is **not demoted**.
+
+Round 2's values, fixed here so they cannot be reinterpreted afterwards: one
+compilation (run 5), one successful dispatch (run 10), two contract failures
+(runs 9 and 11), demotion at run 12. Deterministic phases: 1 across 19 runs.
+
+**Secondary, and the direct test of `record_probe`:** the number of
+`edit_file` failures on `.atoma-probes.json`, which should be ZERO by
+construction, and the number of dispatch contract failures
+(`dispatch_fallbacks`), which round 2 recorded at 3.
+
+**H3 is refuted if** the compiled script demotes again, or never reaches two
+successful dispatches, within 14 runs. That would mean the truncation was not
+the binding constraint — the offline proof would still stand, and the real
+cause would be something the archived workspaces do not show.
+
+**Scale.** 3 baseline (drift check only), 14 atoma, 2 held-out atoma. Output:
+`benchmark/results-round3.csv`.
+
+**Same confounder as round 2**, and now with a measured precedent: round 2's
+control arm ran 23.7% above round 1's. Cross-round *cost* comparison stays
+untrustworthy; H3 is a within-round question and is unaffected.
