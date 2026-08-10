@@ -33,7 +33,9 @@ const anchorIdx = argv.indexOf('--anchor');
 const ANCHOR = anchorIdx >= 0 ? Number(argv[anchorIdx + 1]) : 16;
 
 const WS = join(homedir(), '.atoma', 'workspaces');
-const rows = readFileSync('benchmark/results.csv', 'utf8')
+const csvIdx = argv.indexOf('--csv');
+const csvPath = csvIdx >= 0 ? argv[csvIdx + 1] : 'benchmark/results.csv';
+const rows = readFileSync(csvPath, 'utf8')
   .trim()
   .split('\n')
   .slice(1)
@@ -85,7 +87,7 @@ rows.forEach((r, i) => {
   });
 });
 
-writeFileSync('benchmark/scores.json', JSON.stringify(out, null, 2), 'utf8');
+writeFileSync(csvPath.replace(/\.csv$/, '-scores.json'), JSON.stringify(out, null, 2), 'utf8');
 
 const pad = (s, n) => String(s).padEnd(n);
 console.log(pad('run', 4) + pad('arm', 10) + pad('task', 11) + pad('cost', 9) + pad('score', 8) + pad('dir', 16) + 'failed checks');
@@ -112,4 +114,4 @@ for (const arm of ['baseline', 'atoma']) {
 if (mismatches > 0) {
   console.log(`\n⚠ ${mismatches} run(s) mapped to a directory that does not look like their task — check --anchor.`);
 }
-console.log('\nwrote benchmark/scores.json');
+console.log(`\nwrote ${csvPath.replace(/\.csv$/, '-scores.json')}`);

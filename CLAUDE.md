@@ -1463,9 +1463,36 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   beside a sibling at 15. Verified to discriminate: it flags exactly the two
   known casualties in the archived benchmark catalog and fires zero times
   across the 24-skill mature catalog.
-  STILL UNVERIFIED: whether the prompt fix actually raises the match rate. That
-  needs a fresh `npm run benchmark` from an empty store — the only harness that
-  measures whether dispatch engaged.
+  VERIFIED, ROUND 2 (`benchmark/ROUND2.md`, 19 runs from an empty store): the
+  registered bar was met — 1 compilation and 1 zero-LLM phase, against 0 and 0
+  in round 1 — but the attribution is PARTIAL and the honest reading is worth
+  more than the win. The recipe that compiled is a DOCUMENTATION recipe at 11
+  matches, not either of the two verification recipes the fix targeted, which
+  ended at 0 and 2 matches out of 16 despite both being reformulated. So
+  text-evaluable phrasing is NECESSARY BUT NOT SUFFICIENT. The likelier
+  remaining cause is visible in the plans: this task decomposes into build and
+  document and rarely produces a standalone re-verification phase at all, so
+  there is little demand to match. A second contributor: the two verification
+  recipes overlap at 0.52 and split what little there is. The
+  `under-matched(when_to_use?)` flag still fires on both, and its question mark
+  now earns its place — phrasing is no longer the obvious answer.
+  ECONOMICS DID NOT MOVE. atoma's mean was $0.5314 in round 1 and $0.5358 in
+  round 2. The apparent jump from −35% to −47% saving is ENTIRELY control-arm
+  drift (+23.7%, a different day on a subscription-served model) — the drift
+  check registered in advance is what caught it. One dispatch in fourteen runs
+  does not shift a mean.
+  AND IT REVEALED THE NEXT DEFECT, which is now the binding constraint: the
+  compiled script armed, fired once at $0.1913 / 7 calls, then took two contract
+  failures and auto-demoted. Root cause, measured by hand-replaying archived
+  manifests: THE MANIFEST RECORDS TRUNCATED STDOUT. In every failing case the
+  recorded output is a strict PREFIX of the real one (371 chars against 2008;
+  65 against 1029), so a byte-for-byte replay can never match, and
+  `validateProbeManifest` checks structure rather than completeness so nothing
+  notices. Most workspaces are clean — 6 of 8 replay perfectly — which is why
+  the script dispatches successfully sometimes and demotes anyway. Unfixed: the
+  choice between teaching the writer harder, recording a length/hash so
+  truncation is detectable, and making the reader treat "recorded is a strict
+  prefix of actual" as a truncated record rather than a failure.
 - **Not every skill is compilable, and matching breadth is the tell.**
   `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
   on purpose. Its four observed prefilter matches were: one genuine
