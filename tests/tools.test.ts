@@ -189,6 +189,71 @@ describe('runShellTool', () => {
   });
 });
 
+describe('run_shell accepts a whole command line', () => {
+  // Round 4: 6 of 90 run_shell calls were rejected as "a shell LINE, not an
+  // executable" — the model passing `grep -n "a phrase" file` as one string.
+  // record_probe had already been fixed for exactly this; leaving run_shell
+  // behind made the two tools disagree about what a command looks like.
+  it('splits a plain line and still enforces the allowlist', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-'));
+    try {
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const res = (await sh.execute({ cmd: 'echo hello world' })) as {
+        exitCode: number;
+        stdout: string;
+      };
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.trim()).toBe('hello world');
+      await expect(sh.execute({ cmd: 'curl http://x' })).rejects.toThrow(/fetch_url/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('routes a line with a pipe through bash instead of refusing it', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-pipe-'));
+    try {
+      writeFileSync(join(root, 'f.txt'), 'alpha\nbeta\ngamma\n');
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const res = (await sh.execute({ cmd: 'cat f.txt | grep beta' })) as {
+        exitCode: number;
+        stdout: string;
+      };
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.trim()).toBe('beta');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a quoted phrase together — the exact round-4 rejection', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-q-'));
+    try {
+      writeFileSync(join(root, 'f.txt'), 'Check for unterminated quotes\nother\n');
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const res = (await sh.execute({ cmd: 'grep -n "Check for unterminated" f.txt' })) as {
+        exitCode: number;
+        stdout: string;
+      };
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout).toContain('Check for unterminated');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still accepts the {command,args} shape', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-legacy-'));
+    try {
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const res = (await sh.execute({ command: 'echo', args: ['legacy'] })) as { stdout: string };
+      expect(res.stdout.trim()).toBe('legacy');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('InMemoryToolRegistry', () => {
   it('registers tools and executes them by name', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-reg-'));

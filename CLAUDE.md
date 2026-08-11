@@ -471,6 +471,35 @@ re-exports all the historical names so old imports keep working.
 - **Registry CLI** (`npm run registry -- ...`): inspect counters, drill into
   any type including version history, sort by success/failure/ratio. Works
   against any SQLite DB via `--db` or `ATOMA_DB_PATH`.
+- **TOOL-ERROR LEDGER, measured on the 13 round-4 traces (the latest with every
+  fix in place). Read this before "fixing" a tool error.**
+
+  | tool | calls | errors | |
+  |---|---|---|---|
+  | `record_probe` | 194 | **0** | the whole-line API closed it |
+  | `read_file` / `write_file` / `list_files` | 232 | **0** | |
+  | `run_shell` | 90 | 6 (7%) | all "is a shell LINE" — FIXED, see below |
+  | `edit_file` | 35 | 9 (26%) | 7 double-escapes, and they persist |
+
+  `run_shell` NOW ACCEPTS A WHOLE LINE (`cmd`), exactly as `record_probe` does.
+  All six failures were the model passing `grep -n "a phrase" file` as one
+  string. `record_probe` had already been fixed for this and leaving
+  `run_shell` behind made the two tools disagree about what a command looks
+  like — worse than either choice alone. A line needing a shell routes through
+  bash (allowlisted, and documented as a sanctioned escape hatch); a plain one
+  is split and still allowlist-checked. `{command, args}` still works.
+
+  THE DOUBLE-ESCAPE IS NOT AUTO-CORRECTED, AND THAT IS A MEASURED DECISION.
+  `new_string` carries the same escaping in **7 of 7** cases, so fixing only
+  `old_string` writes literal backslash-n INTO the file and fails the next edit
+  against it — the message now shows BOTH un-escaped spans. Applying them
+  automatically was rejected: **6 of those 7 `new_string`s MIX real newlines
+  with escaped ones**, so a blanket un-escape would corrupt any file that
+  legitimately contains `"\n"` — a JS source file, for instance. Only 1 of 7
+  was provably safe. A retry costs one round-trip (~10s, see the output-token
+  entry); corruption costs the deliverable. Revisit only if the mixed fraction
+  falls, which would make the un-escape provable.
+
 - **`edit_file`: the double-escape was only 14% of it — MEASURE BEFORE
   BELIEVING THIS ENTRY.** The bullet below was written from a 40-run sample
   and is correct about the mechanism it names, but a full pass over 122

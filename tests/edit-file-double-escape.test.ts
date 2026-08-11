@@ -126,3 +126,43 @@ describe('edit_file diagnoses a provable double-escape', () => {
     await sandbox.cleanup();
   });
 });
+
+describe('the double-escape message covers new_string too', () => {
+  it('shows the un-escaped new_string, because fixing only old_string writes \\n into the file', async () => {
+    // Round 4: new_string was escaped the same way in 7 of 7 measured cases.
+    // Not auto-applied — 6 of those 7 MIX real newlines with escaped ones, so
+    // un-escaping could corrupt a file that legitimately contains "\\n".
+    const sandbox = workspace({ 'f.txt': 'line one\nline two\n' });
+    let err = '';
+    try {
+      await editTool(sandbox).execute({
+        path: 'f.txt',
+        old_string: 'line one\\nline two',
+        new_string: 'alpha\\nbeta',
+      });
+    } catch (e) {
+      err = (e as Error).message;
+    }
+    expect(err).toMatch(/DOUBLE-ESCAPED/);
+    expect(err).toMatch(/new_string is escaped the same way/);
+    expect(err).toContain('alpha\nbeta');
+    await sandbox.cleanup();
+  });
+
+  it('says nothing about new_string when it is already raw', async () => {
+    const sandbox = workspace({ 'f.txt': 'line one\nline two\n' });
+    let err = '';
+    try {
+      await editTool(sandbox).execute({
+        path: 'f.txt',
+        old_string: 'line one\\nline two',
+        new_string: 'plain replacement',
+      });
+    } catch (e) {
+      err = (e as Error).message;
+    }
+    expect(err).toMatch(/DOUBLE-ESCAPED/);
+    expect(err).not.toMatch(/new_string is escaped/);
+    await sandbox.cleanup();
+  });
+});

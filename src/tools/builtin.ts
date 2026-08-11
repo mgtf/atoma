@@ -144,7 +144,18 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
             `edit_file: old_string not found in "${path}" — you DOUBLE-ESCAPED it. ` +
               `Your argument contains the two characters backslash-n (and/or backslash-quote) where the file has real newlines and quotes. ` +
               `Un-escaping your argument matches exactly one span, so re-send old_string as these RAW bytes, copied verbatim:\n` +
-              `---8<---\n${unescaped.slice(0, EDIT_SPAN_ECHO_CHARS)}${unescaped.length > EDIT_SPAN_ECHO_CHARS ? '\n… (truncated — copy the full span from read_file)' : ''}\n--->8---`
+              `---8<---\n${unescaped.slice(0, EDIT_SPAN_ECHO_CHARS)}${unescaped.length > EDIT_SPAN_ECHO_CHARS ? '\n… (truncated — copy the full span from read_file)' : ''}\n--->8---` +
+              // new_string is escaped the same way in EVERY measured case (7 of 7
+              // on round 4), and fixing only old_string writes literal
+              // backslash-n INTO the file — which fails the next edit against it.
+              // Shown, not applied: 6 of those 7 MIX real newlines with escaped
+              // ones, so an automatic un-escape could corrupt a source file that
+              // legitimately contains "\\n". A retry costs one round-trip;
+              // corruption costs the deliverable.
+              (unescapeJsonish(newString) !== newString
+                ? `\nAND new_string is escaped the same way — it must be RAW too, or you will write the two characters backslash-n into the file:\n` +
+                  `---8<---\n${unescapeJsonish(newString).slice(0, EDIT_SPAN_ECHO_CHARS)}\n--->8---`
+                : '')
           );
         }
         // The span un-escapes to nothing that exists either: the model is
@@ -432,24 +443,51 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
       inputSchema: {
         type: 'object',
         properties: {
+          cmd: {
+            type: 'string',
+            description:
+              'The whole command line, as you would type it: "node cli.js data.csv --format json". Pipes and redirects are fine — they run through bash.',
+          },
           command: {
             type: 'string',
             description:
-              'Program to invoke (must be in the allowlist). E.g. "node", "npm", "python3".',
+              'Alternative to cmd: the program alone (must be in the allowlist). E.g. "node", "npm", "python3".',
           },
           args: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Positional arguments. E.g. ["--version"].',
+            description: 'Positional arguments, used with "command". E.g. ["--version"].',
           },
         },
-        required: ['command'],
       },
     },
     async execute(args) {
-      const command = expectString(args, 'command');
-      const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
-      const argv = rawArgs.map((a) => String(a));
+      // ACCEPTS A WHOLE LINE. Measured on round 4: 6 of run_shell's 90 calls
+      // were rejected as "a shell LINE, not an executable" — the model passing
+      // `grep -n "some phrase" file` as one string. record_probe had the same
+      // friction and was fixed; leaving run_shell behind made the two tools
+      // disagree about the shape of a command, which is worse than either
+      // choice. A line needing a shell is routed through bash (already on the
+      // allowlist and documented as a sanctioned escape hatch); a plain one is
+      // split and still checked against the allowlist.
+      const line = typeof args['cmd'] === 'string' ? args['cmd'].trim() : '';
+      let command: string;
+      let argv: string[];
+      if (line) {
+        if (NEEDS_SHELL_RE.test(line)) {
+          command = 'bash';
+          argv = ['-c', line];
+        } else {
+          const parts = splitCommandLine(line);
+          command = parts[0] ?? '';
+          argv = parts.slice(1);
+          if (!command) throw new Error('run_shell: "cmd" is empty.');
+        }
+      } else {
+        command = expectString(args, 'command');
+        const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
+        argv = rawArgs.map((a) => String(a));
+      }
       if (!allowlist.has(command)) {
         if (SHELL_LINE_RE.test(command.trim())) {
           throw new Error(
