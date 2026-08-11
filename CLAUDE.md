@@ -3701,5 +3701,5 @@ three revisions of the instrument.
 
 ## Language
 
-The user (`mateo@enoxsolutions.com`) communicates in French. Respond in French;
+The user (`mgf@iotanet.net`) communicates in French. Respond in French;
 keep code, comments, and commit messages in English.
