@@ -287,3 +287,44 @@ cause would be something the archived workspaces do not show.
 **Same confounder as round 2**, and now with a measured precedent: round 2's
 control arm ran 23.7% above round 1's. Cross-round *cost* comparison stays
 untrustworthy; H3 is a within-round question and is unaffected.
+
+---
+
+## ROUND 4 — pre-registration, 2026-08-11, written before any round-4 run
+
+Round 3 refuted H3, and the cause was a defect `record_probe` itself shipped:
+it refused a whole command line, the model worked around it with `bash -c`, and
+the compiled verifier's argument extraction then captured the wrapper's closing
+quote. Fixed since — `record_probe` accepts `cmd` as a full line and records it
+bare. Round 4 asks the same question against the fixed tool.
+
+**H4 — a compiled script survives dispatch.** From an empty registry and empty
+skill store, on the same primary task: at least one recipe compiles, and the
+resulting script records **two or more successful deterministic dispatches**
+without being demoted.
+
+Round 3's values, fixed here: compiled at run 5, armed at run 8, ZERO
+successful dispatches, two contract failures, demoted at run 10.
+
+**DELIBERATE DEVIATION — thresholds lowered to 2.** `ATOMA_PROMOTE_THRESHOLD=2`
+and `ATOMA_TRUST_THRESHOLD=2` (defaults are 3 and 3), set per-run via the
+existing call-time env hooks, no code change. Rationale: rounds 2 and 3 spent
+eight of fourteen runs merely REACHING the first dispatch attempt, leaving too
+little room to observe what this experiment is actually about — whether
+dispatch is stable. At 2/2 the first attempt should land around run 5, giving
+four or five dispatch opportunities instead of one or two.
+
+**What this deviation costs, stated up front.** Less evidence before trusting:
+a script arms on two clean runs rather than three. That makes round 4 a test of
+DISPATCH STABILITY, not of the lifecycle's calibration, and its run-index
+timings are NOT comparable with rounds 1-3. The demotion rule is unchanged (two
+contract failures), so the safety net is exactly as tight as before.
+
+**H4 is refuted if** the script demotes again, or never reaches two successful
+dispatches. A third consecutive refutation would mean the zero-token path has a
+cause none of the three fixes has touched, and the honest move would be to stop
+patching and re-derive it from the traces.
+
+**Scale.** 2 baseline (drift check, and weaker than before at n=2 — the
+insulation result already has three rounds behind it), 9 atoma, 1 held-out.
+Output: `benchmark/results-round4.csv`.

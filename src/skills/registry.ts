@@ -14,6 +14,19 @@ import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance
 export const FALLBACK_FILENAME = '_fallback.md';
 
 /**
+ * The compiled body a demotion just retired, kept for post-mortems.
+ *
+ * `demoteToLlm` overwrites SKILL.md from `_fallback.md`, so before this the
+ * failing artefact was DESTROYED at exactly the moment someone wants to read
+ * it. Round 3's root cause (a compiled verifier deriving arguments from a
+ * `bash -c` wrapped cmd and capturing the closing quote) was only diagnosable
+ * because the dispatch's `write_file _skill_*.mjs` happened to be in the run
+ * trace — luck, not design. Overwritten by the next demotion on purpose: the
+ * most recent failure is the one being investigated.
+ */
+export const DEMOTED_SCRIPT_FILENAME = '_demoted-script.md';
+
+/**
  * Upper bound on the persisted `promotionRefusedReason`. Sonnet's refusal
  * explanations are one or two sentences; the cap only exists so a runaway
  * response can't balloon a `_meta.json` that every `loadFor` reads.
@@ -515,6 +528,14 @@ export class SkillRegistry {
     if (!existsSync(fallbackPath)) return null;
     const fallbackBody = readFileSync(fallbackPath, 'utf8').trim();
     if (!fallbackBody) return null;
+    // Preserve the script being retired BEFORE save() overwrites it. Never
+    // fatal: a post-mortem aid must not be able to block the safety action it
+    // documents.
+    try {
+      writeFileSync(join(dir, DEMOTED_SCRIPT_FILENAME), text, 'utf8');
+    } catch {
+      /* best effort — demotion proceeds regardless */
+    }
     appendLedger({ kind: 'demote', entity: `${l1Name}/${skillId}` });
     return this.save(l1Name, {
       id: frontmatter.id,

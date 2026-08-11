@@ -590,3 +590,40 @@ describe('compiledGeneration + provenance survive the counter lifecycle (audit r
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('a demotion preserves the script it retires', () => {
+  it('writes the compiled body to _demoted-script.md before restoring the fallback', () => {
+    // Round 3's root cause was only diagnosable because the dispatch's
+    // write_file happened to be in the run trace. demoteToLlm overwrites
+    // SKILL.md from _fallback.md, destroying the failing artefact exactly
+    // when it needs reading.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-demote-keep-'));
+    try {
+      const reg = new SkillRegistry(dir);
+      reg.save('Lithium', {
+        id: 'x-skill',
+        description: 'd',
+        whenToUse: 'w',
+        kind: 'llm',
+        body: 'original recipe steps',
+      });
+      reg.promoteToScript({
+        l1Name: 'Lithium',
+        skillId: 'x-skill',
+        scriptBody: 'console.log("COMPILED BODY MARKER");',
+        language: 'node',
+        compiledGeneration: 'gen-1',
+      });
+      reg.demoteToLlm('Lithium', 'x-skill');
+
+      const kept = readFileSync(join(dir, 'Lithium', 'x-skill', '_demoted-script.md'), 'utf8');
+      expect(kept).toContain('COMPILED BODY MARKER');
+      // …and the demotion itself still did its job.
+      const back = reg.loadFor('Lithium').find((s) => s.id === 'x-skill')!;
+      expect(back.kind).toBe('llm');
+      expect(back.body).toContain('original recipe steps');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
