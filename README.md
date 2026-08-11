@@ -8,9 +8,9 @@
 expensive reasoning once, then progressively compiles the repeatable parts of the work
 into steps that run with no model call at all.*
 
-![tests](https://img.shields.io/badge/tests-1051_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1093_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![benchmark](https://img.shields.io/badge/vs_frontier_direct-−35%25_over_10_runs-success)
+![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.5–3.3×_over_4_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_2-gold)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Claude_subscription_·_Ollama_·_Z.ai-8A2BE2)
 
@@ -51,7 +51,7 @@ Every reusable component carries a success/failure record. Once one has a clean 
 the system stops paying a model to review its output. One failure revokes that status
 automatically. Nothing is permanently trusted.
 
-**3. What proves repeatable gets compiled away.**
+**3. What proves repeatable gets compiled away — the least proven of the three.**
 When the system solves a novel task, it writes down the pattern as a reusable recipe. A recipe
 that keeps working is compiled into a deterministic script that then runs with **zero model
 calls**. The compiler *refuses* patterns that need judgment, and records why — verbatim, from a
@@ -61,42 +61,47 @@ run in the benchmark below:
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-Creative work stays on the expensive path; mechanical work stops costing money. **This third
-mechanism is also the least proven of the three** — in the controlled experiment below it never
-engaged, for a reason the experiment diagnosed. Mechanisms 1 and 2 carried the measured result
-on their own.
+Creative work stays on the expensive path; mechanical work stops costing money. **Four controlled
+rounds did not show this paying off**: the compiled path fired once in 52 runs, because
+from-scratch builds do not produce the re-verification phase a compiled verifier serves. It is
+built, it is guarded, and it is unproven. Mechanisms 1 and 2 carried every measured result.
 
 ## The controlled experiment
 
-The same task, given to atoma ten times and to a single frontier agent five times — same
-sandbox, same tools, same budget, same token accounting. atoma started from an **empty
-registry and empty skill store**, as after `git clone`. The hypothesis, the metric and the
-falsification conditions were [registered before the first run](benchmark/PROTOCOL.md).
+The same task, from an **empty registry and empty skill store**, given to atoma
+and to a single frontier agent — same sandbox, same tools, same budget, same token
+accounting, [registered before each run](benchmark/PROTOCOL.md). Repeated four times.
 
 ![cost curve](docs/benchmark-cost-curve.svg)
 
-| Same task, repeated | frontier direct | atoma |
+| | frontier direct | atoma |
 |---|---|---|
-| Cost per run | $0.8198 | **$0.4945** once warm — 1.66× cheaper |
-| Cumulative over 10 runs | $8.1982 | **$5.3138 — −35.2%** |
-| **Break-even** | — | **run 2** |
-| Deliverable correctness | 10/10 × 5 | **10/10 × 10** |
-| A *novel* task in the same family | $1.1810 | **$0.3961**, and **zero new recipes needed** |
+| Cost per run, round by round | $0.82 · $1.01 · $1.68 · $1.10 | **$0.53 · $0.54 · $0.51 · $0.47** |
+| Ratio, each against its own same-day control | — | 1.54× · 1.89× · **3.33×** · 2.35× |
+| Break-even on a repeated task | — | **run 2** |
+| Deliverable correctness (executing scorer) | 19/19 | **19/19** |
+| A *novel* task in the same family | $1.18 | **$0.35–0.55, zero new recipes needed** |
 
-The last row is the one that matters most: on a task it had never seen, atoma reused what it
-had learned instead of learning again. That separates generalisation from memorisation.
+**The frontier baseline is volatile; atoma is not.** Its cost swung by 2× across
+four rounds a week apart, while atoma's stayed inside $0.47–0.54. atoma exposes one
+frontier call in about fifteen — a single-agent baseline is exposed end to end, so
+frontier variance passes straight through it. That was never the hypothesis: it fell
+out of a confounder the protocol registered in advance, and it is the most
+reproducible result of the four.
 
-**What produced the saving was earned trust and recipe reuse — not compilation.** Zero
-deterministic phases fired in all nineteen runs. The reason turned out to be a one-line
-defect worth more than the headline number: the compilable recipes described themselves by
-what was on disk ("a probe manifest already exists"), and the matcher only ever sees the
-task's wording — so they were picked twice in nineteen runs and ended one success short of
-compiling. Diagnosed, fixed at the generator, and written up in
-[the full result](benchmark/RESULT.md).
+**What four rounds did NOT establish, stated with the same prominence.** The
+compiled-script path — the mechanism that would make a step cost nothing — has fired
+**once in 52 runs**. Three rounds each found and fixed a real defect behind that, and
+the fourth came out clean: no failures, no demotions, the right recipe compiled. It
+was then never selected. The cause is in how tasks decompose, not in the machinery:
+a from-scratch build produces *build → record → document* and never a
+*re-verification* phase, which is what a compiled verifier is for. That is
+maintenance work. [The full analysis is here](benchmark/ROUND4.md).
 
-Honest limits, stated in the protocol before the data existed: one task family (atoma's best
-case), n of 5 and 10, wall clock biased against atoma by a per-call subprocess tax on this
-transport, and costs that are API-price equivalents rather than invoices.
+So the saving measured here comes from **tiered dispatch and earned trust**, not from
+compilation.
+
+## The longer-run picture
 
 ## The longer-run picture
 
@@ -166,7 +171,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1051 tests, fully mocked — no API key needed
+npm run typecheck && npm test     # 1093 tests, fully mocked — no API key needed
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -184,7 +189,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1051 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1093 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed

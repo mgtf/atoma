@@ -1,0 +1,50 @@
+
+> atoma@0.1.0 benchmark
+> tsx src/cli/benchmark.ts --out benchmark/results-round4.csv
+
+== atoma cost-amortisation benchmark ==
+
+provider     : claude-cli
+primary task : csvstat
+held-out task: logdigest
+plan         : 2 baseline + 9 atoma on the primary, then 0 + 1 on the held-out = 12 runs
+budget/run   : 900s
+output       : /Users/mgtf/dev/atoma/benchmark/results-round4.csv
+
+
+── A. control arm — frontier direct, primary task ──
+▶ baseline-csvstat-01 … ✓ delivered  $1.3646  303s  llm=1  det=0  learned=0
+▶ baseline-csvstat-02 … ✓ delivered  $0.8305  226s  llm=1  det=0  learned=0
+
+── B. treatment arm — atoma, primary task (state accumulates) ──
+▶ atoma-csvstat-01 … ✓ delivered  $0.5332  369s  llm=21  det=0  learned=3
+▶ atoma-csvstat-02 … ✓ delivered  $0.4049  305s  llm=14  det=0  learned=0
+▶ atoma-csvstat-03 … ✓ delivered  $0.4029  344s  llm=14  det=0  learned=0
+▶ atoma-csvstat-04 … ✓ delivered  $0.4525  371s  llm=15  det=0  learned=0
+▶ atoma-csvstat-05 … ✓ delivered  $0.6868  449s  llm=15  det=0  learned=0
+▶ atoma-csvstat-06 … ✓ delivered  $0.3220  285s  llm=13  det=0  learned=0
+▶ atoma-csvstat-07 … ✓ delivered  $0.5094  450s  llm=13  det=0  learned=0
+▶ atoma-csvstat-08 … ✓ delivered  $0.5034  519s  llm=13  det=0  learned=0
+▶ atoma-csvstat-09 … ✓ delivered  $0.3955  322s  llm=14  det=0  learned=0
+
+── D. treatment arm — held-out task (memorisation control) ──
+▶ atoma-logdigest-01 … ✓ delivered  $0.5480  442s  llm=14  det=0  learned=0
+
+== PRE-REGISTERED RESULT ==
+
+baseline (frontier direct) n=2: mean $1.0976, median $1.0976
+  runs: 1.365, 0.831
+atoma n=9: mean $0.4678, mean excluding run 1 $0.4597
+  runs: 0.533, 0.405, 0.403, 0.453, 0.687, 0.322, 0.509, 0.503, 0.396
+
+H1 SUPPORTED: cumulative break-even at run N* = 1.
+cumulative delta after 9 runs: $5.6674 (positive = atoma cheaper in total)
+trend across the atoma series: first half $0.4484 → second half $0.4834
+
+-- held-out task (novel, same family): memorisation control --
+  baseline n=0: mean —
+  atoma    n=1: mean $0.5480
+  If atoma is cheap here too, the learning generalised to the family.
+  If it is back at baseline cost, it had memorised the primary task.
+
+rows appended to /Users/mgtf/dev/atoma/benchmark/results-round4.csv

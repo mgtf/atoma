@@ -3281,7 +3281,61 @@ keeps moving and the curriculum escalates difficulty on purpose, so a figure
 pasted from a good session rots within days. Cite medians over a stated n, name
 the window, and prefer a claim that regenerates with `npm run burnin`.
 
-## The controlled benchmark (`benchmark/`)
+## The controlled benchmark (`benchmark/`) — four rounds, and what they settled
+
+`PROTOCOL.md` pre-registers every round; `RESULT.md`, `ROUND2/3/4.md` are the
+outcomes. All four start from an EMPTY registry and empty skill store.
+
+**WHAT IS ESTABLISHED (four independent rounds).** atoma costs $0.531 / $0.536
+/ $0.506 / $0.468 per run while the single-frontier-agent control arm swings
+$0.82 → $1.01 → $1.68 → $1.10. The frontier is VOLATILE, not drifting, and
+atoma DAMPS that variance because it exposes one frontier call in about
+fifteen where the baseline is exposed end to end. Ratios 1.54× / 1.89× / 3.33×
+/ 2.35×, each against its own same-day control — CROSS-round cost comparison is
+invalid and the drift check exists to keep saying so. Generalisation reproduced
+four times: a never-seen same-family task costs $0.35-0.55 with ZERO new
+recipes learned. Deliverable correctness 19/19, 19/19, 19/19 by an executing
+scorer.
+
+**WHAT IS NOT ESTABLISHED, after three attempts to make it work.** The
+zero-token compiled-script path has fired ONCE in 52 atoma runs. Rounds 2-4
+each fixed a real broken link — `when_to_use` phrased as unevaluable disk
+state; the manifest recording TRUNCATED stdout; `record_probe` refusing a whole
+command line so the model wrapped everything in `bash -c` and broke the
+verifier's argument extraction — and round 4 came out with zero contract
+failures, zero demotions, the compiler correctly refusing both irreducible
+recipes and correctly compiling the pure verifier. It was then **never
+matched**: 0 of 9 runs.
+THE CAUSE IS THE DECOMPOSITION, NOT THE SKILL MACHINERY. Re-derived from the
+plan responses: this family decomposes into build → RECORD → document. The
+compiled verifier advertises for "re-verify that previously recorded
+invocations STILL produce the same exit codes" — a re-check, which only means
+something if the artefact changed after recording. That is MAINTENANCE work. A
+from-scratch build never contains it. The zero-token path aims at a phase shape
+these tasks do not produce, so no fourth patch of the same kind will help.
+NEXT IS A CHOICE, NOT A FIX: either benchmark a maintenance family, where the
+re-verification phase actually exists, or accept the scope and state in the
+README that the saving comes from tiering and earned trust (which four rounds
+support) rather than from compilation (which none demonstrated).
+
+**METHOD NOTES THAT COST REAL TIME.**
+- Round 3's first published diagnosis was WRONG and nearly became a feature: a
+  grep for the first trace event matching the error text returned the run
+  SUMMARY, not the script, and pointed at "the compiled script parses prose".
+  The dispatched body is recorded verbatim by the dispatch's own
+  `write_file _skill_*.mjs` event — read THAT.
+- `skills stats` computes status with the CURRENT env thresholds. Reading it
+  without the round's `ATOMA_PROMOTE_THRESHOLD` shows statuses for the
+  defaults, which misled a mid-round check.
+- Archive `runs/` and `skills/` BEFORE restoring a store, not after. Round 2's
+  19 traces were destroyed by doing it in the wrong order — in the very session
+  that committed round 1's traces because gitignoring them had made an earlier
+  benchmark unreproducible.
+- Thresholds are call-time env vars (`ATOMA_PROMOTE_THRESHOLD`,
+  `ATOMA_TRUST_THRESHOLD`), so a round can be shortened without a code change;
+  round 4 used 2/2 and reached first compilation at run 5 instead of 8.
+
+## The controlled benchmark — mechanics
 
 The head-to-head the audit found missing, built properly on 2026-08-10.
 `PROTOCOL.md` is a PRE-REGISTRATION — hypothesis, primary metric and
