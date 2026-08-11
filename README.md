@@ -8,7 +8,7 @@
 frontier reasoning on the decomposition alone and pushes the rest — routing, execution,
 verification — down to models that cost a fraction as much.*
 
-![tests](https://img.shields.io/badge/tests-1139_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1145_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
@@ -207,9 +207,10 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1139 tests, no API key needed
-                                  # (model calls are mocked; a few tests spawn a real
-                                  #  headless browser and local servers)
+npm run typecheck && npm test     # 1139 tests, no API key needed. Model calls are mocked,
+                                  # but the suite drives a real headless browser and real
+                                  # local servers. 6 further tests need Docker and the
+                                  # worker image (npm run build:worker) — they skip without.
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -227,7 +228,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1139 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1145 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
