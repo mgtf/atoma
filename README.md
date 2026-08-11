@@ -8,7 +8,7 @@
 frontier reasoning on the decomposition alone and pushes the rest — routing, execution,
 verification — down to models that cost a fraction as much.*
 
-![tests](https://img.shields.io/badge/tests-1145_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1204_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
@@ -207,7 +207,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1139 tests, no API key needed. Model calls are mocked,
+npm run typecheck && npm test     # 1198 tests, no API key needed. Model calls are mocked,
                                   # but the suite drives a real headless browser and real
                                   # local servers. 6 further tests need Docker and the
                                   # worker image (npm run build:worker) — they skip without.
@@ -226,9 +226,35 @@ traces are runtime data, deliberately not committed. What you clone is the frame
 experience is earned on your own machine, which is what makes the cost curve verifiable rather
 than asserted.
 
+## Drive it from the agent you already use (MCP)
+
+atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server, so an existing agent can
+hand it a task and read back what the system has learned. One line registers it:
+
+```bash
+claude mcp add atoma -- npx tsx "$PWD/src/mcp/server.ts"   # then start a new session
+```
+
+**Thirteen tools.** One starts a run and returns immediately with an id to poll; one cancels a run;
+the other eleven are read-only — the atom catalogue with its earned trust, the recipe library and
+its lifecycle, the audit ledger's integrity projection, run traces, and the tool-friction report.
+The caller pays for one tool call and atoma does the tiering.
+
+**It speaks over standard input, and refusing a port is the security argument rather than a
+limitation.** A run reaches the shell and the network by design, so the party a launch endpoint
+would have to defend against is *the run itself* — which is why the web console describes task
+families but deliberately will not start one, and why the list of controls that would make an HTTP
+endpoint safe is written down instead of implemented. A server on stdio hands the run no socket, so
+the question does not arise.
+
+Two properties are declared to the host rather than left to be discovered: starting a run is
+**destructive** — it archives the shared workspace unless told otherwise, and it mutates the
+catalogue, the recipe store and the ledger — and runs are **serialised**, because concurrent runs
+share one workspace and would yield plausible-looking wrong economics instead of an error.
+
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1145 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1204 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
