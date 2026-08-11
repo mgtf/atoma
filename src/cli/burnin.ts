@@ -225,6 +225,35 @@ export function newestTraceName(runsDir: string, since: number): string {
  *
  * `extraArgs` are appended AFTER the flags and BEFORE the goal, because
  * `parseRunnerArgs` takes the first non-flag argument as the goal.
+ *
+ * THE LAST FOUR OPTIONS WERE ADDED FOR THE MCP SERVER, and each closes a real
+ * gap rather than adding a knob — every default reproduces the previous
+ * behaviour exactly, so burnin and the benchmark are byte-for-byte unaffected.
+ *   - `cwd`: was hardcoded to `process.cwd()`. An MCP host launches its server
+ *     with an arbitrary working directory, where `npm run run:build` fails with
+ *     a missing-script error that reads as outcome 'error'.
+ *   - `signal`: the ONLY way to cancel from outside. The promise resolves on
+ *     the child's exit and the child was otherwise unreachable, so a caller
+ *     that owns a run's lifecycle (the MCP server does) had no handle to stop
+ *     it with. Aborting group-kills through the SAME graceful sequence, so a
+ *     cancelled run still closes its trace and reaps its browser.
+ *   - `onChunk`: progress for a caller that cannot show the child's stdout.
+ *     Deliberately a callback and not a stream: the accumulated `log` is
+ *     unbounded, and a consumer that wants to bound it must see the pieces.
+ *   - `cleanWorkspace`: `--clean-workspace` was unconditional, which is right
+ *     for measurement (every batch row starts from the same state) and
+ *     surprising in an interactive host, where it ARCHIVES the deliverable the
+ *     caller may have just asked about. Default stays true.
+ * Two settle bugs were fixed here at the same time, both of which presented as
+ * a promise that never resolves — tolerable in a batch script that a human
+ * watches, a hung tool call in a server:
+ *   - `writeFileSync(logPath, …)` runs INSIDE the exit handler BEFORE
+ *     `resolveRun`, so a missing log directory threw there and killed the
+ *     settle. It is now mkdir'd up front and the write cannot block the
+ *     resolve.
+ *   - there was no `'error'` listener at all, so a spawn that fails outright
+ *     (npm not on PATH, bad cwd) resolved never. It now settles with a
+ *     synthetic log, which `parseRunLog` reads as outcome 'error'.
  */
 export function spawnRun(opts: {
   readonly goal: string;
@@ -232,14 +261,36 @@ export function spawnRun(opts: {
   readonly logPath: string;
   readonly extraArgs?: readonly string[];
   readonly extraEnv?: Readonly<Record<string, string>>;
+  /** Working directory for `npm run`. Defaults to `process.cwd()`. */
+  readonly cwd?: string;
+  /** Abort to group-kill the run through the graceful sequence. */
+  readonly signal?: AbortSignal;
+  /** Called with each stdout/stderr chunk as it arrives. */
+  readonly onChunk?: (chunk: string) => void;
+  /** Pass `--clean-workspace`. Defaults to true (the measurement default). */
+  readonly cleanWorkspace?: boolean;
 }): Promise<string> {
   const { goal, timeoutMs, logPath } = opts;
   return new Promise((resolveRun) => {
+    // Ahead of the spawn: the write below happens on the settle path, and a
+    // throw there is what used to strand the promise.
+    try {
+      mkdirSync(dirname(resolve(logPath)), { recursive: true });
+    } catch {
+      /* the write is guarded too — a log we cannot keep must not lose the run */
+    }
     const child = spawn(
       'npm',
-      ['run', 'run:build', '--', '--clean-workspace', ...(opts.extraArgs ?? []), goal],
+      [
+        'run',
+        'run:build',
+        '--',
+        ...(opts.cleanWorkspace === false ? [] : ['--clean-workspace']),
+        ...(opts.extraArgs ?? []),
+        goal,
+      ],
       {
-        cwd: process.cwd(),
+        cwd: opts.cwd ?? process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
         env: {
@@ -251,7 +302,9 @@ export function spawnRun(opts: {
     );
     let log = '';
     const onChunk = (c: Buffer): void => {
-      log += c.toString();
+      const text = c.toString();
+      log += text;
+      opts.onChunk?.(text);
       // A delivered run that started a server idles forever by design —
       // terminate once the completion banner is in (metrics print before it).
       if (/✓ build finished/.test(log) && !killTimer) {
@@ -294,14 +347,37 @@ export function spawnRun(opts: {
     let killTimer: NodeJS.Timeout | null = null;
     // Hard stop: task budget + generous teardown margin.
     const hardTimer = setTimeout(killGroup, timeoutMs + 180_000);
+    // Cancellation rides the SAME graceful sequence as every other stop: an
+    // abort must not become the bare group SIGKILL the sequence exists to
+    // avoid (uncatchable ⇒ the run's teardown never runs ⇒ leaked browsers).
+    if (opts.signal) {
+      if (opts.signal.aborted) killGroup();
+      else opts.signal.addEventListener('abort', killGroup, { once: true });
+    }
     child.stdout?.on('data', onChunk);
     child.stderr?.on('data', onChunk);
-    child.once('exit', () => {
+    // 'error' and 'exit' can BOTH fire (a spawn error still emits close/exit
+    // in some failure modes), and resolving twice would silently drop the
+    // second settle's log. First one wins.
+    let settled = false;
+    const settle = (finalLog: string): void => {
+      if (settled) return;
+      settled = true;
       clearTimeout(hardTimer);
       if (killTimer) clearTimeout(killTimer);
-      writeFileSync(logPath, log, 'utf8');
-      resolveRun(log);
+      try {
+        writeFileSync(logPath, finalLog, 'utf8');
+      } catch {
+        /* an unwritable log must not strand the caller — see the docstring */
+      }
+      resolveRun(finalLog);
+    };
+    child.once('error', (err: Error) => {
+      // No process ever ran, so there is nothing to parse: hand back a log
+      // whose shape `parseRunLog` classifies as 'error'.
+      settle(`${log}\n--- spawn failed --- ${err.message}\n`);
     });
+    child.once('exit', () => settle(log));
   });
 }
 

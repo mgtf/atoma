@@ -25,6 +25,7 @@ throughout.
 | Linting | what ESLint is calibrated to, and the rules deliberately OFF |
 | The test suite is type-checked now | the 96 errors nothing was looking at, and the factories that stop them coming back |
 | Tools | sandbox, the 9 builtins, their contracts |
+| MCP server (stdio) | exposing atoma to Claude Code and other MCP hosts |
 | Things that look wrong but aren't | **read before "fixing" something odd** |
 | Considered and rejected | **read before proposing an optimization** |
 | The controlled benchmark | the atoma-vs-frontier A/B: what it proved, and what it did NOT |
@@ -3481,6 +3482,144 @@ KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
 `-w /workspace`, so a relative one resolves under the mount and dies with
 MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,
 almost entirely Chromium.
+
+## atoma as an MCP server (stdio) — `src/mcp/`
+
+`npx tsx src/mcp/server.ts` speaks MCP on stdio: **13 tools**, one of which
+mutates (`atoma_run_start`) and twelve of which are pure readers over the
+persisted state (families, registry list/show, skills list/stats/review, ledger
+check, runs list, one trace, the friction report, plus run status/cancel).
+Registered with `claude mcp add atoma -s local -- npx tsx <abs>/src/mcp/server.ts`;
+verified `✓ Connected` by Claude Code's own client.
+
+**WHY STDIO IS THE WHOLE SAFETY ARGUMENT, AND WHY YOU MUST NOT ADD A PORT.**
+The viz Launch-tab entry above lists what a launch endpoint would need — a
+secret that never touches HTTP, a global Host allowlist ahead of every branch,
+an exact-Origin check with the port, the DNS-rebinding surface — and every item
+exists because the viz listens on a port THE RUN ITSELF CAN REACH (`fetch_url`
+has no URL allowlist by design; `run_shell`'s allowlist is STEERING, not a
+boundary). The adversary is the run, not a remote page. A stdio server hands
+the run no socket, which DISSOLVES that threat model instead of mitigating it —
+so ~80% of the value the Launch tab deferred to "phase 2" arrives here for
+free. The corollary is a rule: no HTTP transport, no debug endpoint, no metrics
+port in `src/mcp/`. Any of them re-opens the exact hole and the paragraph above
+stops applying.
+
+**A RUN IS A CHILD PROCESS — four independent blockers, each verified in the
+source, any one of them fatal.** (1) `runTask` NEVER SETTLES: `runner.ts` ends
+its success path on `await new Promise(() => {})` so a delivered run's server
+stays reachable, unconditional and present on the `--baseline` path too. (2) It
+EXITS THE PROCESS on every other path — failure branch, watchdog, bad `--seed`,
+bad timeout, and `makeAnthropicClient` with no credential all `process.exit`.
+(3) It FLOODS STDOUT: `consoleLogger.info`/`.debug` are `console.log`/`.debug`,
+hardcoded into both `ctx.logger` and the tool backend with no seam, plus ~38
+direct `console.log` in the runner including the whole `--- result ---` block
+with unbounded model-authored output. (4) It MUTATES PROCESS GLOBALS: writes
+the three skill-lifecycle env vars, deletes `ANTHROPIC_API_KEY`, and registers
+SIGINT/SIGTERM handlers per call without removing them.
+
+**STDOUT PURITY IS STRUCTURAL, NOT DISCIPLINARY.** The SDK's only stdout write
+is `JSON.stringify(msg) + '\n'` and the peer's frame reader THROWS on a
+non-JSON line — stricter than atoma's own container protocol, which
+deliberately drops them (`drainLines`). `claimStdoutForProtocol` therefore
+captures the real `process.stdout.write` for the transport and then redirects
+`process.stdout.write` to stderr, so every `console.log` in this repo and in
+every dependency is neutralised rather than trusted. BOTH DIRECTIONS ARE
+PINNED: injecting `console.log` BEFORE the claim fails the subprocess test
+naming the offending line; injecting it AFTER is swallowed and the test still
+passes. Same rule already written down for the container worker.
+
+**`spawnRun` WAS EXTENDED, NOT FORKED**, because it is the one sanctioned run
+driver and its kill sequence was measured (a naive re-implementation leaks nine
+browser processes per web run) — and it has no unit test, so a second copy
+would rot like `research-brief.ts` and `curriculum.ts` did. Four additions, all
+defaulting to today's behaviour: `cwd` (was hardcoded `process.cwd()`; an MCP
+host launches with an arbitrary one and `npm run run:build` would fail as a
+missing script), `signal` (the ONLY way to cancel — the child was otherwise
+unreachable, and an abort routes into the SAME SIGTERM → 5s grace → SIGKILL
+sequence, so a cancelled run still closes its trace), `onChunk` (progress for a
+caller who cannot see the child's stdout), `cleanWorkspace` (unconditional
+before, which is right for measurement and surprising in an interactive host
+where it ARCHIVES the deliverable just asked about). TWO SETTLE BUGS fixed
+there at the same time, both of which presented as a promise that never
+resolves — a hung tool call in a server, merely odd in a batch script: the
+`writeFileSync(logPath, …)` inside the exit handler ran BEFORE `resolveRun`, so
+a missing log dir stranded the promise; and there was no `'error'` listener at
+all, so a spawn that fails outright resolved never.
+
+**ONE `process.chdir(repoRoot())` REPLACES A CLASS OF PATH DRIFT.** `./atoma.db`,
+`./runs` and `./skills` are cwd-relative and the runner resolves only the
+workspace against anything. An unpinned server would silently create and mature
+a BRAND NEW empty store — losing every earned counter — and its readers would
+report on a different store than its runs write. Working from the repo root
+makes `storeDbPath()` / `skillsDirPath()` correct verbatim, with no second copy
+of the path rules (four divergent copies of that rule WAS the bug once). The
+root comes from `import.meta.url` and is confirmed by `package.json`'s presence,
+so `src/mcp/` and `dist/mcp/` both work.
+
+**RUNS ARE SERIALISED AND A SECOND START IS REFUSED.** Three independent
+single-tenancy facts make concurrency produce plausible-looking WRONG numbers
+rather than an error: one shared workspace archived wholesale, trace attribution
+by newest-mtime-since, and the machine-to-itself requirement for comparable
+economics. The burn-in harness gets this free from its sequential loop; a server
+has to enforce it.
+
+**THE PROVIDER IS PINNED, AND THE NESTED PATH WAS VERIFIED RATHER THAN
+ASSUMED.** The child gets `ATOMA_LLM=claude-cli` unless the host set one,
+because the Claude Code environment carries an `ANTHROPIC_API_KEY` that the
+auth chain prefers FIRST (the documented "#1 auth trap") and in this project it
+is dead — a run reaching the direct-API path dies in ~15s and reads as
+`looksLikeConfigFailure`. The open question was whether claude-cli works at all
+when atoma is itself a child of Claude Code (`ClaudeCliLlmClient` spawns
+ANOTHER Claude Code, inheriting `CLAUDECODE` / `CLAUDE_CODE_SESSION_ID`).
+MEASURED 2026-08-11: it does — one Haiku call from a Claude-Code-spawned child
+returned in 3.0s with usage reported, and a full live run through the server
+reached `[Ammonia] skill matched: build-argv-transform-cli` at 34s and
+`[tool:run_shell] node reverse.js` at 66s before being cancelled. Cancellation
+left ZERO leftover processes and zero leaked Chrome.
+
+**A CANCELLED RUN READS `outcome: "error"`, AND THAT IS THE PARSER BEING
+HONEST.** It prints neither completion nor failure banner, so `parseRunLog`
+falls through to 'error' with null economics. The record's own `status` stays
+`cancelled` (authoritative) and carries a hint saying so, or a host reports "the
+run errored" to a user who cancelled on purpose. The config-failure heuristic is
+SKIPPED for cancellations for the same reason: it fires on "died fast, spent
+nothing", which is exactly what a cancellation looks like, and a false
+misconfiguration alarm sends the reader hunting a dead API key that is not
+there.
+
+**DELIBERATELY NOT EXPOSED**, each for a stated reason: `--seed` (it `cpSync`s
+an arbitrary host directory into the workspace — allowlist a root first if a
+maintenance family ever needs it); `prefilterCacheClear`; raw argv or a
+free-form flag string (the flag set is CLOSED and mirrors `parseRunnerArgs`,
+pinned by a test that greps the runner source, and the goal always goes LAST so
+it can never be read as a flag); trace EVENT PAYLOADS (megabytes of
+model-authored prompts and tool results — `npm run viz` is where a human reads
+those); and the burn-in CSV summary, because its row parser is private inside
+`src/viz/server.ts`, a module that BINDS A PORT AT IMPORT — surfacing it means
+extracting that parser to a pure module first, which is a widening of the diff
+for a reader the viz already renders well.
+
+**TWO READER PAYLOADS CARRY THEIR CAVEATS IN-BAND** because they are easy to
+misread as verdicts, and this file records both misreadings happening:
+`atoma_skills_review` says it is a MECHANICAL pre-screen and never a sharing
+approval (§4.2 of the SaaS doc requires a human to read both kinds of body),
+and `atoma_skills_stats` echoes the trust/promote thresholds in force, since
+they are read at CALL time and a mid-benchmark check was already misled by
+reading them without a round's env vars.
+
+**TESTS ARE THE ANTI-ROT INSURANCE**, not a batch of live runs
+(`tests/mcp-server.test.ts`, 18 cases): the emitted flags must exist in the
+runner source; a goal starting with `--` is refused (it would be discarded and
+the family's DEFAULT goal would run — so `--clean-workspace <words>` would
+archive the caller's workspace AND build the wrong thing); unknown and
+traversal-shaped family ids are refused through `findLaunchable`; the timeout is
+validated before spawning (the runner `exit(2)`s on a bad one); serialisation,
+abort delivery, the pinned provider and cwd are asserted through an INJECTED
+driver so no test ever spawns a run; `runTrace` cannot leave the runs dir; the
+instructions never name a builtin tool (the ae63e06 rule, checked against
+`BUILTIN_TOOL_VOCABULARY`); and one test drives a REAL subprocess to prove
+stdout carries nothing but frames.
 
 ## SaaS / multi-tenancy — `docs/saas-architecture.md`
 
