@@ -2,16 +2,16 @@
 
 # ⚛️ atoma
 
-### An AI agent platform whose cost per task goes **down** with use.
+### An AI agent platform that pays for the frontier model **once per task**, not once per step.
 
-*Most agent systems run every task on the most expensive model, forever. atoma spends
-expensive reasoning once, then progressively compiles the repeatable parts of the work
-into steps that run with no model call at all.*
+*Most agent systems run every step of every task on the most expensive model. atoma spends
+frontier reasoning on the decomposition alone and pushes the rest — routing, execution,
+verification — down to models that cost a fraction as much.*
 
-![tests](https://img.shields.io/badge/tests-1104_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1139_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.5–3.3×_over_4_rounds-success)
-![breakeven](https://img.shields.io/badge/break--even-run_2-gold)
+![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
+![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Claude_subscription_·_Ollama_·_Z.ai-8A2BE2)
 
 **[→ How it works, in detail](docs/how-it-works.md)**
@@ -27,8 +27,8 @@ uncomfortable shape:
 
 - **It does not improve.** The thousandth invoice-parser looks exactly as expensive as the first.
   Nothing the system learned on task 999 makes task 1000 cheaper.
-- **It is unpredictable.** Identical runs of the same task on a frontier model differed by 1.5×
-  across five measurements here, and by 2.5× on a second task — depending on how long the model
+- **It is unpredictable.** On the same task, on the same model, a single frontier agent's cost
+  varied by **2.1×** between rounds measured 22 hours apart — depending on how long the model
   chooses to think. That is hard to put in a client proposal.
 - **It cannot prove its work.** The agent that did the job is usually also the one that certifies
   it. For anything billable, self-certification is not evidence.
@@ -36,96 +36,124 @@ uncomfortable shape:
 For a consultancy or a product team, this makes agent automation a variable cost that scales
 linearly with delivery — the opposite of the software economics that justified building it.
 
+## Where the money actually goes
+
+One measured run of the same maintenance task, both arms, [round 8](benchmark/ROUND8.md):
+
+| | frontier calls | **frontier cost** | cheap-model cost | total |
+|---|---|---|---|---|
+| single frontier agent | 1 | **$0.820** | — | $0.820 |
+| atoma, warm | 1 | **$0.027** | $0.192 | $0.219 |
+
+The baseline does the whole job inside one frontier call: read the files, edit, run five
+verification commands, rewrite the docs. Every tool result stays in the conversation and is
+re-billed at frontier rates on every subsequent turn.
+
+atoma pays the frontier model **only to decompose the goal** — one call, $0.027 — and hands the
+execution to a cheap model. **A ~30× reduction on the expensive line item** is where the saving
+comes from. Everything below is that fact, measured repeatedly.
+
 ## The approach
 
-Three mechanisms, each ordinary on its own. The compounding is the point.
+Three mechanisms. The first two carry the result; the third is real but has not yet paid.
 
 **1. The cheapest model that can answer, answers.**
-Work is split across three tiers: an expensive model decomposes the goal into phases, a
-mid-tier model routes each phase, and a cheap model does the actual file-writing and
-command-running. This is structural, not a guideline — only the bottom tier is even given
-tools. A yes/no check never runs on a reasoning model.
+An expensive model decomposes the goal into phases, a mid-tier model routes each phase, and a
+cheap model does the file-writing and command-running. This is structural, not a guideline —
+only the bottom tier is given tools on the supervised path. A yes/no check never runs on a
+reasoning model.
 
 **2. Components earn trust, and can lose it.**
-Every reusable component carries a success/failure record. Once one has a clean track record,
-the system stops paying a model to review its output. One failure revokes that status
-automatically. Nothing is permanently trusted.
+Every reusable component carries a success/failure record. Once one has a clean track record the
+system stops paying a model to review its output — but it still runs a zero-token ground-truth
+probe against the artefact first, because the component nobody watches is exactly the one that
+needs watching. One failure revokes trust automatically.
 
-**3. What proves repeatable gets compiled away.**
-When the system solves a novel task, it writes down the pattern as a reusable recipe. A recipe
-that keeps working is compiled into a deterministic script that then runs with **zero model
-calls**. The compiler *refuses* patterns that need judgment, and records why — verbatim, from a
-run in the benchmark below:
+**3. What proves repeatable gets compiled away — a correct mechanism that does not yet pay.**
+When the system solves a novel task it writes the pattern down as a recipe; a recipe that keeps
+working is compiled into a script that runs with zero model calls. The compiler *refuses*
+patterns needing judgment, and records why — verbatim, from a benchmark run:
 
 > *"designing a hand-written state-machine parser and type-inference/stats engine tailored to
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-Creative work stays on the expensive path; mechanical work stops costing money. **This pays off
-on maintenance work and barely at all on from-scratch builds** — five controlled rounds pinned
-that down, and the reason is that a build never produces the re-verification phase a compiled
-script serves. On the tasks where it applies it cut cost about 2×; on the ones where it does not,
-mechanisms 1 and 2 carry the result alone.
+**Eight controlled rounds have not shown this mechanism paying.** It fired once in 52 runs across
+four build rounds, then 10 / 1 / 1 / 0 across four maintenance rounds — and the round where it
+fired ten times shipped seven wrong deliverables. Each fix since made it more correct and none
+made it cheaper; the best remaining idea was designed, measured at a **$0.03/run ceiling** and
+[refused](docs/hybrid-skills-design.md). It is kept because it is sound and cheap to carry, not
+because it is load-bearing. Mechanisms 1 and 2 are the product.
 
 ## The controlled experiment
 
-The same task, from an **empty registry and empty skill store**, given to atoma
-and to a single frontier agent — same sandbox, same tools, same budget, same token
-accounting, [registered before each run](benchmark/PROTOCOL.md). Repeated four times.
+The same task, from an **empty registry and empty skill store**, given to atoma and to a single
+frontier agent — same sandbox, same tools, same budget, same token accounting,
+[registered before each run](benchmark/PROTOCOL.md). Eight rounds: four on a from-scratch build,
+four on a maintenance task.
 
-![cost curve](docs/benchmark-cost-curve.svg)
+![cost curve, round 1](docs/benchmark-cost-curve.svg)
+<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..8}.csv`.</sub>
+
+Mean cost per run on each round's main task, each against **its own same-day control**:
+
+| | R1 | R2 | R3 | R4 | | R5 | R6 | R7 | R8 |
+|---|---|---|---|---|---|---|---|---|---|
+| | *build task* | | | | | *maintenance task* | | | |
+| frontier direct | $0.82 | $1.01 | $1.68 | $1.10 | | $0.71 | $0.58 | $0.58 | $0.82 |
+| **atoma** | **$0.53** | **$0.54** | **$0.51** | **$0.47** | | **$0.20** | **$0.28** | **$0.59** | **$0.31** |
+| ratio | 1.54× | 1.89× | 3.33× | 2.35× | | 3.57× | 2.05× | **1.00×** | 2.62× |
+| control arm *n* | 5 | 3 | 3 | 2 | | 2 | 2 | 2 | **1** |
+
+**Read the two weak rounds, not just the strong ones.** Round 7 shows **no saving at all** — a
+badly-distilled recipe demanded evidence the worker could not produce and the validators enforced
+it, costing $0.33/run in escalation churn until it was
+[diagnosed and fixed](benchmark/ROUND7.md). Round 8's control arm is a **single observation**: its
+second run lost its LLM connection, so its cost is unrecoverable (the deliverable was correct).
+Round 5's 3.57× is the round whose deliverables were later found wrong — see below.
+
+**The frontier baseline is volatile; atoma is not.** Across the four build rounds the control
+swung **2.1×** ($0.82 → $1.68) while atoma stayed inside **$0.47–0.54**. atoma exposes one
+frontier call in roughly fifteen, so frontier variance is diluted; a single-agent baseline is
+exposed end to end and passes it straight through. That was never the hypothesis — it fell out of
+a confounder the protocol registered in advance, and it is the most reproducible result of the
+eight.
 
 | | frontier direct | atoma |
 |---|---|---|
-| Cost per run, round by round | $0.82 · $1.01 · $1.68 · $1.10 | **$0.53 · $0.54 · $0.51 · $0.47** |
-| Ratio, each against its own same-day control | — | 1.54× · 1.89× · **3.33×** · 2.35× |
-| Break-even on a repeated task | — | **run 2** |
-| Deliverable correctness (executing scorer) | 19/19 | **19/19** |
-| A *novel* task in the same family | $1.18 | **$0.35–0.55, zero new recipes needed** |
-| A *maintenance* task, where compilation applies | $0.58 | **$0.28 — 2.05×, with deliverables verified correct** |
+| A *novel* task in the same family | $1.18 <sub>(n=2, spanning 2.5×)</sub> | **$0.18–0.55, zero new recipes learned** |
+| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8)</sub> | 7/7 · 3/3 · 3/3 · 2/2 | **12/12 · 16/16 · 16/16 · 7/7** |
 
-**The frontier baseline is volatile; atoma is not.** Its cost swung by 2× across
-four rounds a week apart, while atoma's stayed inside $0.47–0.54. atoma exposes one
-frontier call in about fifteen — a single-agent baseline is exposed end to end, so
-frontier variance passes straight through it. That was never the hypothesis: it fell
-out of a confounder the protocol registered in advance, and it is the most
-reproducible result of the four.
+Generalisation is the claim that has held most consistently: **eleven held-out runs across eight
+rounds, all in the same family as the trained task, all needing zero new recipes.** The frontier
+comparison for it rests on two observations from round 1 and should be read as indicative.
 
-**The compiled-script path works — on maintenance, not on from-scratch builds.** Across
-four build rounds it fired **once in 52 runs**; the cause was the task shape, not the
-machinery. A build decomposes into *build → record → document* and never produces the
-*re-verification* phase a compiled verifier serves — that is maintenance work. Given a
-maintenance task it fires from run 2 and holds, cutting cost about **2×** against a
-same-day control. [Round 4](benchmark/ROUND4.md) diagnosed it,
-[round 5](benchmark/ROUND5.md) demonstrated it, [round 6](benchmark/ROUND6.md) priced it
-honestly.
+Correctness is scored by [an executing scorer run outside both arms](benchmark/verify-maint.mjs)
+— it runs the artefact rather than reading claims about it. **Rounds 4–7 have no committed
+scorer output**, so their correctness figures are not reproducible from this repo; rounds 1–3 and
+8 are. That gap is recorded rather than papered over.
 
-**That last part is worth reading, because the first number was wrong.** Round 5
-measured 4.7× — and an independent scorer, run outside both arms, found 7 of 9
-deliverables shipping a README that contradicted the artefact it documented. The
-compiled verifier had been handed an *"update README.md"* subtask, replayed its manifest,
-reported success and written nothing; the guard meant to catch that only checked whether
-named files *exist*, which is inert when every file was seeded. With the guard fixed,
-correctness went to 5 of 6 and the ratio fell to **2.05×**. Half of the original headline
-was work that had not happened.
-
-## The longer-run picture
+**One headline in this table used to be wrong, and how it was caught matters more than the
+number.** Round 5 measured 4.7× — and the independent scorer found **7 of 9 deliverables shipping
+a README that contradicted the artefact it documented**. A compiled verifier had been handed an
+*"update README.md"* subtask, replayed its manifest, reported success and written nothing; the
+guard meant to catch that only checked whether named files *exist*, which is inert when every
+file was seeded. With the guard fixed, correctness went to 5 of 6 and the ratio fell to 2.05×.
+Half the original headline was work that had not happened. The pipeline's own "delivered" banner
+never noticed.
 
 ## The longer-run picture
 
 Beyond the controlled experiment, `burnin/results.csv` holds 156 runs across 8 task families,
-regenerable with `npm run burnin`. **Claims that could not be reproduced from stored artefacts
-have been removed from this README**, including an earlier head-to-head table whose baseline
-runs no longer existed.
+regenerable with `npm run burnin`.
 
 | | |
 |---|---|
 | Runs recorded | **156** across 8 task families |
 | Delivered successfully | **150 — 96.2%** |
 | Cost per delivered run | median **$0.33**, mean $0.37 |
-| A "warm" run (a mature pattern where a compiled script fires) | median **$0.26 · 227s** — 45 such runs |
-| Cheapest run recorded | **$0.126 · 132s** |
-| Runs containing at least one zero-model-call phase | **45 of 156** |
+| Cheapest *delivered* run | **$0.126 · 132s** |
+| Runs containing at least one zero-model-call phase | **45 of 156** — median $0.26 · 227s |
 | Expensive-model calls per run | **1** on the normal path (148 of 150 delivered runs) |
 | Input tokens served from prompt cache, at 10% of list price | **90%** — median 0.8M tokens/run |
 | Learned recipes in the catalogue | **24**, of which **5 compiled to deterministic scripts** |
@@ -135,19 +163,18 @@ runs no longer existed.
 **The batch average across those 156 runs does not fall, and that is expected.** It is not the
 same measurement as the experiment above. Cost falls on a *repeated* task; the batch curve is
 flat-to-rising because the task generator deliberately proposes harder, novel work each round.
-Cost per unit of difficulty falls; cost per run does not, because the runs keep getting harder
-on purpose. Read the controlled experiment for the amortisation claim and this corpus for
-breadth — not the other way round.
+Read the controlled experiment for the amortisation claim and this corpus for breadth — not the
+other way round.
 
 **The zero-cost mechanism applies to *phases*, and it is not what makes atoma cheaper.** No
 complete run has ever cost $0.00, and none can today: every run still pays for one top-level
-planning call. Across the corpus, 45 of 156 runs contain at least one phase that executed with
-no model call at all — but in the controlled experiment above, *none* did, and atoma was still
-35% cheaper. The saving came from earned trust and recipe reuse.
+planning call. 45 of 156 corpus runs contain a phase that executed with no model call — but those
+runs' mean cost is $0.37, identical to the corpus mean, and in the controlled rounds the compiled
+path fired 14 times in 8 rounds, 10 of them in the single round whose deliverables were wrong.
+The saving comes from tiering and earned trust.
 
-**Failure handling improved measurably.** The rate at which runs need corrective intervention
-fell from roughly half of the early runs to one in the last thirty. That is a learning curve
-being paid down.
+**Failure handling improved measurably.** Runs needing corrective intervention fell from **28 of
+the first 52** to **zero in the last thirty**. That is a learning curve being paid down.
 
 ## What it builds today
 
@@ -163,14 +190,15 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 - **Every claim is auditable.** Each run leaves a full JSON trace: every model call with its
   prompt, response and token count, every file written, every trust decision. A built-in web
   console replays any run end to end.
-- **Verification does not trust the worker.** Before accepting a result, the supervisor re-reads
-  the files from disk, loads the page in a real browser, or re-runs the recorded commands. This
-  costs no tokens, and it runs *even on the most-trusted path* — on the principle that the
-  component nobody watches any more is exactly the one that needs watching.
+- **Verification does not trust the worker.** Before accepting a result the supervisor re-reads
+  the files from disk, checks quoted content against what the file actually contains, loads the
+  page in a real browser, and cross-checks the machine-readable record of the commands the worker
+  ran. It never re-runs those commands itself — that was considered and rejected, and the reason
+  is written down. This costs no tokens and it runs *even on the most-trusted path*.
 - **The engineering record is unusually explicit.** `CLAUDE.md` documents not only what the
   system does but which observed failure motivated each mechanism, and a "considered and
   rejected" section records optimisations that were designed, measured, and refused. Reversals
-  are recorded rather than quietly deleted.
+  are recorded rather than quietly deleted — including several in the benchmark above.
 - **Vendor-flexible.** The same code runs against the Anthropic API, a Claude subscription, local
   models via Ollama, or Z.ai — and can mix vendors per tier, e.g. a cheap third-party model for
   the execution tier while planning stays on a frontier model.
@@ -179,7 +207,9 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1104 tests, fully mocked — no API key needed
+npm run typecheck && npm test     # 1139 tests, no API key needed
+                                  # (model calls are mocked; a few tests spawn a real
+                                  #  headless browser and local servers)
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -197,7 +227,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1104 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1139 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
@@ -214,5 +244,6 @@ written up in
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 20+ · every number above regenerates with <code>npm run burnin</code></sub>
+<sub>TypeScript · SQLite · Node 20+ · the corpus table regenerates with <code>npm run burnin</code>;
+the controlled rounds are in <code>benchmark/</code></sub>
 </div>

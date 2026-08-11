@@ -40,9 +40,12 @@ graph TB
 
 Two consequences fall out of that split:
 
-- **Cost is bounded by structure, not discipline.** A supervisor physically cannot run a tool
-  loop; it has no executor. Search the codebase for where the tool executor is handed over and
-  it appears in exactly one place — the bottom tier's execute step.
+- **Cost is bounded by structure, not discipline.** On the SUPERVISED path only the bottom tier
+  is handed a tool executor, so a supervisor cannot run a tool loop. The one exception is
+  deliberate and labelled as such in the code: when supervision has failed outright, a supervisor
+  takes over as executor for a last-resort turn — the comment there reads "we break the 'L3 never
+  touches tools' rule here intentionally". Grepping for the hand-off returns the bottom tier's
+  execute step, that fallback, and the harness that wires the tool backend.
 - **Every hand-off is supervised.** The link from L3 to L2 and the link from L2 to L1 run the
   *same* protocol: plan → judge the plan → execute → judge the result. It is one implementation,
   never duplicated inside the agent classes.
@@ -157,8 +160,8 @@ graph TB
 | | Egress proxy | *Opt-in.* Per-run private network with a default-deny, anchored host allowlist |
 | **Verification** | Ground-truth probes | Zero-token evidence gathering: re-read files, load the page, cross-check the worker's own record |
 | | Probe manifest | `.atoma-probes.json` — machine-readable record of every verified invocation |
-| | Static script scan | Deny-list over compiled script bodies before they are ever trusted |
-| | Deliverable gate | On the unsupervised path, every file the task asked for must actually exist |
+| | Static script scan | Deny-list over compiled script bodies before they are ever trusted. A hygiene filter with a known bypass — never cite it as a security control |
+| | Deliverable gate | On the unsupervised path, every file the task asked for must exist — and, when the subtask used a mutating verb, must not be byte-identical afterwards. Existence alone was inert on maintenance work, where every file is seeded |
 | **Observability** | Cost metering | One formula, used by both the run summary and the console, so they cannot disagree |
 | | Trace recorder | Full JSON per run: every call, tool invocation, registry change and skill decision |
 | | Web console | Replays any run; shows in-flight calls live |
@@ -194,9 +197,9 @@ sequenceDiagram
             L2->>L2: mid-tier plan → subtasks
         end
         L2->>L2: check the skill library for a matching recipe
-        alt trusted compiled script
+        alt trusted compiled script whose write targets match the subtask
             L2->>W: write script · run it · parse one strict JSON line
-            Note over L2,W: zero model calls
+            Note over L2,W: zero model calls — falls through to the path below if the<br/>envelope is off-contract or a named file is left untouched
         else
             L2->>L1: subtask, with the recipe injected if one matched
             L1->>L1: plan in prose — no tools attached yet
@@ -236,9 +239,14 @@ mistakes it for a normal delivery.
 
 ---
 
-## 4. Flow — how a task becomes free
+## 4. Flow — how a repeatable phase gets compiled away
 
-This is the mechanism the whole system exists for.
+The most speculative of the three mechanisms, and the one that has not yet paid: across eight
+controlled rounds the compiled path fired 14 times, 10 of them in a single round whose
+deliverables turned out wrong. The lifecycle below is sound and every step is guarded; what is
+missing is demand for it on the task families measured so far. See
+[`hybrid-skills-design.md`](hybrid-skills-design.md) for the most recent attempt to change
+that — designed, measured and refused.
 
 ```mermaid
 graph LR
@@ -247,7 +255,10 @@ graph LR
     C -->|"1 compile call"| D{"Is this<br/>mechanical?"}
     D -->|"no — judgment required"| X["🚫 Compilation refused<br/><i>reason persisted to disk</i>"]
     D -->|"yes"| E["⚡ Compiled script<br/><i>counters reset to zero</i>"]
-    E -->|"3 more validated runs"| F["🏁 Deterministic dispatch<br/><b>0 model calls</b>"]
+    E -->|"3 more validated runs"| M{"Does it write the files<br/>this subtask names?"}
+    M -->|"no — withheld at match time"| C
+    M -->|"yes"| F["🏁 Deterministic dispatch<br/><b>0 model calls</b>"]
+    F -->|"named file left byte-identical,<br/>or envelope off-contract"| C
     F -->|"2 contract failures"| G["🛡️ Automatic demotion<br/>back to the recipe"]
     G -.->|"body revised"| C
     style F fill:#000,color:#ffd700
@@ -258,18 +269,26 @@ graph LR
 The loop is **asymmetric on purpose**. Promotion has to be earned twice — once by the recipe,
 then again by the compiled script, whose counters are reset at compile time precisely because
 the script is a brand-new artefact that has never executed. Demotion takes two failures. A
-wrong script cannot entrench itself; a right one converges to free.
+wrong script cannot entrench itself. A right one runs free *when it is matched to work it can
+actually do* — and that, not correctness, is the binding constraint: in round 8 a fully trusted,
+correct compiled script was withheld 14 times, every refusal justified, and dispatched zero
+times.
 
 **Splitting build from verify is what makes anything compilable at all.** A monolithic
 "build and check it" recipe always gets refused, because the build half is irreducible
-reasoning. Distilling the verification half separately is where every compiled script in the
-catalogue came from — currently 5 of 24 recipes.
+reasoning. Distilling the verification half separately is where most compiled scripts come from —
+**3 of the 5** in a 24-recipe catalogue. The other two compile straight from authoring recipes
+whose output is fully determined by the workspace: assembling a package.json and README for an
+already-tested CLI, and writing an index that links files already present.
 
-**Field-proven, unattended.** When a workspace's module semantics broke a compiled verifier, the
-entire safety stack ran by itself across two runs — dispatch, contract failure, failure streak,
-demotion to the recipe, an anti-recompile stamp with the reason recorded — **with zero failed
-deliverables**. Every run still shipped via the supervised path while the system quarantined its
-own broken optimisation.
+**Field-proven, unattended — with a caveat about the evidence.** When a workspace's module
+semantics broke a compiled verifier, the entire safety stack ran by itself across two runs —
+dispatch, contract failure, failure streak, demotion to the recipe, an anti-recompile stamp with
+the reason recorded — and every run still shipped via the supervised path while the system
+quarantined its own broken optimisation. Only the outcome is reproducible from a committed
+artefact: all eight runs of that batch read `delivered` in `burnin/results.csv`. The demotion
+chain itself predates both the trace archive and the CSV columns that would show it, and
+survives only as a narrative in `CLAUDE.md`.
 
 ---
 
@@ -380,7 +399,8 @@ machine. The shell executable list is **steering, not a boundary**: `bash`, `nod
   network route, all privileges dropped, and memory and CPU ceilings. The registry, the recipes
   and other runs' traces are simply *absent from that filesystem* — the path walk that works
   locally finds nothing. The container keeps its own loopback, so starting a server and probing
-  it still works. Measured overhead: **~4ms per tool call, ~243ms container boot**.
+  it still works. Measured overhead: **~4ms per tool call, ~243ms container boot** — recorded in `CLAUDE.md`
+  from one session of three cold starts; no committed artefact regenerates it.
 - `--egress` adds a per-run private network and a gate process with a default-deny, anchored host
   allowlist — raw IP addresses always refused, lookalike hosts refused by construction.
 
@@ -408,7 +428,7 @@ Per run, on a mature family:
 | Mid-tier plans | mid | **0 on the happy path** | Skipped entirely when the routing scan finds a clear match |
 | Reviews | cheap | 0 on trusted components | Replaced by the zero-token probe |
 | Execution | cheap | the bulk of tokens | Long tool loops, ~90% served from prompt cache at 10% of list price |
-| Compiled phases | — | **0 calls** | Two tool calls and a strict JSON parse |
+| Compiled phases | — | **0 calls**, but rare | Two tool calls and a strict JSON parse. Present in 45 of 156 corpus runs; in the controlled rounds it fired once in 53 build runs and 12 times in 27 maintenance runs |
 
 **Prompt caching is load-bearing and monitored.** The system-level prompt is deliberately long
 enough to clear the provider's minimum cacheable size; trimming it below that threshold silently
@@ -445,3 +465,5 @@ Recorded so nobody has to discover it in a demo:
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
 | Are the economics real? | `burnin/results.csv`, regenerable with `npm run burnin` |
+| …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
+| Do the deliverables actually work? | `benchmark/verify-maint.mjs` executes them; `benchmark/results-round8-scores.json` is its output. Rounds 4-7 have no committed scorer output |
