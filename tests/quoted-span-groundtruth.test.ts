@@ -168,6 +168,38 @@ describe('the QUOTED SPAN check in the read-back probe', () => {
     expect(res.block).not.toContain('NOT FOUND');
   });
 
+  it("never contradicts on a diff's OLD side — it is SUPPOSED to be gone", async () => {
+    // MEASURED, round 8: "OLD: const chars = text.length;" raised two
+    // contradictions on correct deliverables. Both were absorbed because the
+    // forced LLM verdict approved, but a signal whose stated design is "never
+    // fabricate a contradiction" fabricated four in nine runs.
+    const res = await checkGroundTruth({
+      ctx: ctxWith({ 'wclite.js': EDITED_FILE }),
+      subject: 'RESULT',
+      payload: {
+        output: { files: ['wclite.js'] },
+        summary: `Edit applied (line 42 of wclite.js):\nOLD: ${PRE_EDIT}\nNEW: ${EDIT}`,
+      },
+      child: fileChild(),
+    });
+    expect(res.contradiction).toBe(false);
+  });
+
+  it('never contradicts on a "== HEADER ==" line — structure, not content', async () => {
+    // The other two of round 8's four: the evidence block's own header was
+    // captured as a span, and it carries an '=' so the code-shape test passed.
+    const res = await checkGroundTruth({
+      ctx: ctxWith({ 'wclite.js': EDITED_FILE }),
+      subject: 'RESULT',
+      payload: {
+        output: { files: ['wclite.js'] },
+        summary: 'Line 42 of wclite.js:\n== GROUND TRUTH ==\nverified',
+      },
+      child: fileChild(),
+    });
+    expect(res.contradiction).toBe(false);
+  });
+
   it('stays SILENT about a span attributed to a file it could not read', async () => {
     const res = await checkGroundTruth({
       ctx: ctxWith({ 'other.js': EDITED_FILE }),

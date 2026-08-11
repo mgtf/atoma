@@ -3533,6 +3533,39 @@ THE ONE CLEAN RESULT: correctness 2 of 9 → 5 of 6 → 6 of 6 across rounds 5-7
 while dispatch volume went 10 → 1 → 1. The gate works; the trade is currently
 priced badly.
 
+**ROUND 8 CLOSED THE CASCADE AND CONFIRMED THE STANDING POSITION ON
+COMPILATION.** All four registered conditions met: already-satisfied
+rejections 5 → **0**, no run above $0.59 (round 7: $1.09 and $1.38), the
+predicate fired **14 times with 0 gate fallbacks** (round 7: 0 and 5), and
+correctness held at 6 of 6. Validator rejections of EVERY kind went 10 → 0,
+and with them the branches and fallbacks. atoma mean $0.3132 against round 7's
+$0.5854; held-out task $0.2667 with zero new recipes, the sixth consecutive
+reproduction of generalisation. The control arm is n=1 (its second run passed
+the 900s budget at 963s, though its workspace scored 7/7), which is exactly
+why cost was excluded from the registered conditions in advance.
+DISPATCHES WENT 1 → **0**, and not because the predicate misfired — all 14
+refusals were correct, on a manifest-only writer offered for README/source
+subtasks. The compiled script reached 3✓ only at the round's end and never met
+a re-verification subtask while trusted. So across rounds 5-8 the zero-token
+path fired 10 / 1 / 1 / 0, and only the first of those had (broken)
+deliverables behind it. **Every fix to it has been real and has made the
+mechanism more correct; none has made it pay.** Treat "compilation contributes
+the saving" as unsupported after four attempts, and the saving as coming from
+tiering, earned trust and recipe reuse — which eight rounds do support.
+THE ROUND ALSO FOUND A DEFECT IN ITS OWN FIX: of 10 QUOTED SPAN verdicts, the
+4 NOT FOUNDs were ALL false positives — a diff's `OLD:` side (absent because
+the edit succeeded) and the `== GROUND TRUTH ==` header (which passes the
+code-shape test because it contains `=`). None caused a wrong rejection, since
+a contradiction only forces a full LLM verdict and all four were approved, but
+a signal whose stated design is never to fabricate a contradiction fabricated
+four in nine runs. Both classes are now excluded.
+AND IT CLOSED A REPRODUCIBILITY HOLE THREE ROUNDS OLD: rounds 5-7 each
+reported correctness from a scorer that was never committed.
+`benchmark/verify-maint.mjs` is that scorer, executing rather than reading
+claims. Its workspace mapping must be VERIFIED, never assumed — an off-by-one
+anchor once produced a false 83.3%; here `build.prev114` carries the held-out
+semantics, which fixes the anchor.
+
 **WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
 work.** The
 zero-token compiled-script path has fired ONCE in 52 atoma runs. Rounds 2-4

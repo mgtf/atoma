@@ -309,6 +309,11 @@ const FILE_PROBE_EXCERPT_CHARS = 400;
  * workspace — and short enough spans are where a false NOT-FOUND would come
  * from, which is the one direction this check must never fail in.
  */
+/** A diff's removed side, in the shapes children actually emit. */
+const DIFF_OLD_SIDE_RE = /^\s*(OLD|BEFORE|AVANT|-{1,3})\s*[:|-]/i;
+/** A "== HEADER ==" line: structure, never file content. */
+const SECTION_HEADER_RE = /^\s*={2,}[^=]*={2,}\s*$/;
+
 const QUOTED_SPAN_MIN_CHARS = 16;
 const QUOTED_SPAN_MAX = 6;
 const QUOTED_SPAN_ECHO_CHARS = 160;
@@ -491,7 +496,17 @@ export function extractQuotedSpans(payload: unknown): Array<{ path?: string; spa
  * still helps, a miss stays silent.
  */
 function spanCanContradict(span: string): boolean {
-  return /[=;{}]|\(\)/.test(span);
+  if (!/[=;{}]|\(\)/.test(span)) return false;
+  // A diff's OLD side is SUPPOSED to be absent — the edit removed it.
+  // Measured in round 8: "OLD: const chars = text.length;" raised two
+  // contradictions on correct deliverables. Both were absorbed (the forced
+  // LLM verdict approved), but a signal defined as "never fabricate a
+  // contradiction" that fabricates four is not doing its job.
+  if (DIFF_OLD_SIDE_RE.test(span)) return false;
+  // A section header is structure, not content. "== GROUND TRUTH ==" carries
+  // an '=' so the code-shape test passes it; it raised the other two.
+  if (SECTION_HEADER_RE.test(span)) return false;
+  return true;
 }
 
 function spanOccursIn(content: string, span: string): boolean {

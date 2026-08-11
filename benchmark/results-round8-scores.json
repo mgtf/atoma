@@ -1,0 +1,70 @@
+{
+  "anchor": 114,
+  "mapping": "run k → build.prev(114+k), k=1..8; run 9 → build/",
+  "verifiedBy": "prev114 carries the held-out semantics (chars 36, \"not a regular file\") and is therefore the pre-round-8 leftover",
+  "scores": [
+    {
+      "run": "baseline-01",
+      "dir": "build.prev115",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "baseline-02",
+      "dir": "build.prev116",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-01",
+      "dir": "build.prev117",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-02",
+      "dir": "build.prev118",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-03",
+      "dir": "build.prev119",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-04",
+      "dir": "build.prev120",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-05",
+      "dir": "build.prev121",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-06",
+      "dir": "build.prev122",
+      "score": 7,
+      "total": 7,
+      "full": true
+    },
+    {
+      "run": "atoma-heldout",
+      "dir": "build",
+      "score": 7,
+      "total": 7,
+      "full": true
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+
+> atoma@0.1.0 benchmark
+> tsx src/cli/benchmark.ts --out benchmark/results-round8.csv
+
+== atoma cost-amortisation benchmark ==
+
+provider     : claude-cli
+primary task : wclite-maint
+held-out task: wclite-maint-2
+workspace seed : benchmark/seeds/wclite
+plan         : 2 baseline + 6 atoma on the primary, then 0 + 1 on the held-out = 9 runs
+budget/run   : 900s
+output       : /Users/mgtf/dev/atoma/benchmark/results-round8.csv
+
+
+── A. control arm — frontier direct, primary task ──
+▶ baseline-wclite-maint-01 … ✓ delivered  $0.8197  140s  llm=1  det=0  learned=0
+▶ baseline-wclite-maint-02 … ✗ error  —  963s  llm=—  det=0  learned=0
+
+── B. treatment arm — atoma, primary task (state accumulates) ──
+▶ atoma-wclite-maint-01 … ✓ delivered  $0.5879  424s  llm=24  det=0  learned=2
+▶ atoma-wclite-maint-02 … ✓ delivered  $0.2774  226s  llm=14  det=0  learned=0
+▶ atoma-wclite-maint-03 … ✓ delivered  $0.2545  260s  llm=16  det=0  learned=1
+▶ atoma-wclite-maint-04 … ✓ delivered  $0.2306  173s  llm=11  det=0  learned=0
+▶ atoma-wclite-maint-05 … ✓ delivered  $0.2191  196s  llm=13  det=0  learned=0
+▶ atoma-wclite-maint-06 … ✓ delivered  $0.3100  261s  llm=14  det=0  learned=0
+
+── D. treatment arm — held-out task (memorisation control) ──
+▶ atoma-wclite-maint-2-01 … ✓ delivered  $0.2667  213s  llm=14  det=0  learned=0
+
+== PRE-REGISTERED RESULT ==
+
+baseline (frontier direct) n=1: mean $0.8197, median $0.8197
+  runs: 0.820
+atoma n=6: mean $0.3132, mean excluding run 1 $0.2583
+  runs: 0.588, 0.277, 0.255, 0.231, 0.219, 0.310
+
+H1 SUPPORTED: cumulative break-even at run N* = 1.
+cumulative delta after 6 runs: $3.0387 (positive = atoma cheaper in total)
+trend across the atoma series: first half $0.3733 → second half $0.2532
+
+-- held-out task (novel, same family): memorisation control --
+  baseline n=0: mean —
+  atoma    n=1: mean $0.2667
+  If atoma is cheap here too, the learning generalised to the family.
+  If it is back at baseline cost, it had memorised the primary task.
+
+rows appended to /Users/mgtf/dev/atoma/benchmark/results-round8.csv
