@@ -64,7 +64,7 @@ run in the benchmark below:
 Creative work stays on the expensive path; mechanical work stops costing money. **This pays off
 on maintenance work and barely at all on from-scratch builds** — five controlled rounds pinned
 that down, and the reason is that a build never produces the re-verification phase a compiled
-script serves. On the tasks where it applies it cut cost 4.7×; on the ones where it does not,
+script serves. On the tasks where it applies it cut cost about 2×; on the ones where it does not,
 mechanisms 1 and 2 carry the result alone.
 
 ## The controlled experiment
@@ -82,7 +82,7 @@ accounting, [registered before each run](benchmark/PROTOCOL.md). Repeated four t
 | Break-even on a repeated task | — | **run 2** |
 | Deliverable correctness (executing scorer) | 19/19 | **19/19** |
 | A *novel* task in the same family | $1.18 | **$0.35–0.55, zero new recipes needed** |
-| A *maintenance* task, where compilation applies | $0.71 | **$0.15 — 4.7×, 10 zero-token dispatches** |
+| A *maintenance* task, where compilation applies | $0.58 | **$0.28 — 2.05×, with deliverables verified correct** |
 
 **The frontier baseline is volatile; atoma is not.** Its cost swung by 2× across
 four rounds a week apart, while atoma's stayed inside $0.47–0.54. atoma exposes one
@@ -92,20 +92,22 @@ out of a confounder the protocol registered in advance, and it is the most
 reproducible result of the four.
 
 **The compiled-script path works — on maintenance, not on from-scratch builds.** Across
-four build rounds it fired **once in 52 runs**; the cause turned out to be the task
-shape, not the machinery. A build decomposes into *build → record → document* and never
-produces the *re-verification* phase a compiled verifier serves — that is maintenance
-work. Given a maintenance task, it fires at run 2 and holds: **10 zero-token dispatches
-in 8 runs, no failures, no demotions, $0.15 per run against a $0.71 control — 4.7×**.
-[Round 4](benchmark/ROUND4.md) diagnosed it; [round 5](benchmark/ROUND5.md) confirmed it.
+four build rounds it fired **once in 52 runs**; the cause was the task shape, not the
+machinery. A build decomposes into *build → record → document* and never produces the
+*re-verification* phase a compiled verifier serves — that is maintenance work. Given a
+maintenance task it fires from run 2 and holds, cutting cost about **2×** against a
+same-day control. [Round 4](benchmark/ROUND4.md) diagnosed it,
+[round 5](benchmark/ROUND5.md) demonstrated it, [round 6](benchmark/ROUND6.md) priced it
+honestly.
 
-**And an independent scorer found what that saving cost.** In 7 of 9 maintenance
-deliverables the README still described the old behaviour: the compiled verifier had
-been handed an *"update README.md"* subtask, replayed its manifest, reported success and
-written nothing — and the guard that should have caught it only checks whether named
-files *exist*, which is inert when every file was seeded. Fixed by comparing file
-contents before and after, not yet re-measured. Part of that 4.7× was bought with work
-that did not happen, and it took a scorer outside both arms to see it.
+**That last part is worth reading, because the first number was wrong.** Round 5
+measured 4.7× — and an independent scorer, run outside both arms, found 7 of 9
+deliverables shipping a README that contradicted the artefact it documented. The
+compiled verifier had been handed an *"update README.md"* subtask, replayed its manifest,
+reported success and written nothing; the guard meant to catch that only checked whether
+named files *exist*, which is inert when every file was seeded. With the guard fixed,
+correctness went to 5 of 6 and the ratio fell to **2.05×**. Half of the original headline
+was work that had not happened.
 
 ## The longer-run picture
 

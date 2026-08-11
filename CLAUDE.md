@@ -3355,6 +3355,30 @@ run-wide, so "delivered" proved almost nothing and the EXECUTING correctness
 scorer was the only thing between a 4.69× headline and a wrong one. Never
 report a cost win from a low-threshold round without scoring the artefacts.
 
+**ROUND 6 CORRECTED ROUND 5's HEADLINE, and the correction is the finding.**
+Round 5's 4.69× was measured with `TRUST=1`, i.e. with the atom-type
+validators skipped run-wide, and 7 of 9 deliverables shipped a README
+contradicting their own artefact. Round 6 restored `TRUST=3`, kept
+`PROMOTE=1`, and added the before/after gate: correctness went to **5 of 6**,
+dispatches went **10 → 1**, and the ratio settled at **2.05×**. So the honest
+figure on maintenance, with deliverables that are actually right, is about
+**2×** — roughly half of what round 5 advertised. It took an EXECUTING scorer
+outside both arms to see that; the pipeline's own "delivered" said nothing.
+`promote=1` did survive with validators on (compiled run 1, armed run 3, no
+demotion) — that knob is defensible on two rounds. `trust=1` is not, and the
+two must never be moved together again.
+THE GATE IS CATCHING DOWNSTREAM WHAT BELONGS UPSTREAM. Its five fallbacks were
+a read-only verifier matched to three README subtasks and once to the CODE
+EDIT subtask. Its `when_to_use` is a correct verification clause, so phrasing
+is not the cause this time: `SKILL_PREFILTER_SYSTEM_PROMPT` deliberately drops
+the "no force-matching a single candidate" rule the atom prefilter carries,
+and with one compiled script in the catalogue that permissiveness routes
+everything to it. THE FIX THIS POINTS TO, not built: refuse the MATCH when a
+`kind: script` body never writes and `subtaskMutatesFiles(subtask)` is true —
+both halves already exist. Cheaper than refusing the dispatch and more precise.
+Weigh first the case the permissive prompt was written for: a single-recipe
+catalogue that never matches learns nothing.
+
 **WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
 work.** The
 zero-token compiled-script path has fired ONCE in 52 atoma runs. Rounds 2-4
