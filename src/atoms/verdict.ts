@@ -508,6 +508,28 @@ export const ADHERENCE_BODY_MAX_CHARS = 2000;
  * detect a plan referencing a tool its child does NOT have: the name must be
  * in this closed list (so prose words never false-match) and absent from the
  * child's declared set. Update when `defaultBuiltinTools` gains a tool.
+ *
+ * IT DECOUPLED ONCE, AND THE ORDER HERE MIRRORS `defaultBuiltinTools` SO THE
+ * NEXT DRIFT IS VISIBLE. `record_probe` shipped into every shell-owning scope
+ * (`HTTP_L1_TOOL_SCOPE`, `FILESCRIBE_L1_TOOL_SCOPE`) and was never added
+ * here, so for its whole life the scanner could not see it: the name has to
+ * be IN this list to be flagged at all, which made `record_probe` the one
+ * builtin no call site could ever report as undeclared. The reachable half
+ * of that gap was the SHARED-CATALOG donor filter — the `file-scribe` bucket
+ * requires only `write_file`, so a file-scribe recipe is VISIBLE to a
+ * web-bucket reader (which has `write_file` and no shell), and a recipe
+ * naming `record_probe` — legitimate on its own host — was offered to a
+ * reader that cannot execute it. The plan-side #F1 pre-check had the same
+ * blind spot for a web child. Never a permission hole: the executor gate in
+ * `llm.ts` rejects any tool_use absent from `req.tools` whatever this list
+ * says, so the cost of the miss was a wasted cycle, not an unsanctioned call.
+ *
+ * Adding it is FALSE-POSITIVE-SAFE for the one text that names it most, and
+ * that is not a coincidence to rely on twice: `manifestWriterLines` carries
+ * "no record_probe in your declared tools" and the scanner is negation-aware,
+ * so the contract's own hand-write branch stays unflagged. The affirmative
+ * mentions ("USE record_probe") live in system prompts, which are never
+ * scanned — only plans and skill bodies are.
  */
 export const BUILTIN_TOOL_VOCABULARY: readonly string[] = [
   'write_file',
@@ -515,6 +537,7 @@ export const BUILTIN_TOOL_VOCABULARY: readonly string[] = [
   'read_file',
   'list_files',
   'run_shell',
+  'record_probe',
   'start_static_server',
   'validate_html',
   'fetch_url',

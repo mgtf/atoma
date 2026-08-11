@@ -1,10 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { undeclaredToolMentions, BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { probeGroundTruth } from '../src/atoms/groundTruth.js';
+import { defaultBuiltinTools } from '../src/tools/builtin.js';
+import { ToolSandbox } from '../src/tools/sandbox.js';
+import { manifestWriterLines } from '../src/contracts/probeManifest.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 import type { ToolExecutor } from '../src/core/types.js';
@@ -19,6 +25,9 @@ import type { ToolExecutor } from '../src/core/types.js';
  */
 
 const HTTP_TOOLS = ['write_file', 'read_file', 'run_shell', 'fetch_url', 'start_node_server'];
+/** The web scope: no shell, hence no `record_probe` (capability.ts). */
+const WEB_TOOLS = ['write_file', 'read_file', 'list_files', 'start_static_server', 'validate_html'];
+const FILESCRIBE_TOOLS = ['write_file', 'read_file', 'list_files', 'run_shell', 'record_probe'];
 
 describe('undeclaredToolMentions', () => {
   it('flags a non-negated mention of an undeclared tool', () => {
@@ -51,6 +60,56 @@ describe('undeclaredToolMentions', () => {
   it('the vocabulary is the closed builtin list', () => {
     expect(BUILTIN_TOOL_VOCABULARY).toContain('validate_html');
     expect(BUILTIN_TOOL_VOCABULARY).toContain('start_node_server');
+  });
+
+  /**
+   * The docstring said "Update when `defaultBuiltinTools` gains a tool" and
+   * nothing enforced it, so `record_probe` shipped into every shell-owning
+   * scope and never entered the vocabulary — leaving it the one builtin the
+   * scanner could not flag, since a name absent from the closed list is
+   * unreachable by construction. Disciplinary rules decouple; this one is
+   * structural now. Order is compared too: both sides are literal lists, so
+   * a mirrored order costs nothing and makes the drift readable in the diff.
+   */
+  it('mirrors defaultBuiltinTools exactly — the sync is enforced, not documented', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-vocab-'));
+    try {
+      const declared = defaultBuiltinTools({ sandbox: new ToolSandbox(dir) }).map(
+        (t) => t.declaration.name
+      );
+      expect(BUILTIN_TOOL_VOCABULARY).toEqual(declared);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The reachable half of the gap this closed. `record_probe` is excluded
+   * from the web scope (no shell, browser-shaped evidence), so a web-bucket
+   * reader genuinely cannot run it — and the `file-scribe` bucket requires
+   * only `write_file`, which a web reader HAS, so the shared-catalog
+   * visibility lattice offers it file-scribe recipes. A donor recipe naming
+   * `record_probe` is legitimate on its own host and unusable here.
+   */
+  it('flags record_probe against a child that owns no shell', () => {
+    expect(
+      undeclaredToolMentions('run each invocation through record_probe to fill the manifest', WEB_TOOLS)
+    ).toEqual(['record_probe']);
+    expect(undeclaredToolMentions('record_probe the CLI calls', FILESCRIBE_TOOLS)).toEqual([]);
+  });
+
+  /**
+   * Adding the name had to be false-positive-safe for the text that names it
+   * most. The contract itself tells a child WITHOUT the tool to hand-write
+   * the entry, and that branch must not read as an off-scope intent. The
+   * fixture is the REAL contract line rather than a paraphrase: if a future
+   * rewording drops the negation, this fails instead of silently coaching
+   * against a sanctioned path.
+   */
+  it("does NOT flag the contract's own hand-write branch", () => {
+    const handWriteLine = manifestWriterLines('shell').find((l) => l.includes('by hand'));
+    expect(handWriteLine, 'the shell writer block no longer names the hand-write branch').toBeTruthy();
+    expect(undeclaredToolMentions(handWriteLine!, WEB_TOOLS)).toEqual([]);
   });
 });
 

@@ -920,6 +920,35 @@ re-exports all the historical names so old imports keep working.
   the L3→L2 chain has no mechanical gate (tools live at L1; the plan
   prompt rules cover L3 prose) and intent phrased without the exact tool
   name slips the mechanical net (the validator line is the belt there).
+  **THE CLOSED VOCABULARY DECOUPLED FROM `defaultBuiltinTools`, AND IT IS
+  ENFORCED NOW.** `record_probe` shipped into every shell-owning scope and
+  was never added to `BUILTIN_TOOL_VOCABULARY` — and a name absent from the
+  closed list is unreachable by construction, so for its whole life it was
+  the one builtin NO call site could report as undeclared. The docstring
+  already said "Update when `defaultBuiltinTools` gains a tool"; a
+  disciplinary rule with nothing enforcing it decoupled, exactly as the
+  en/fr parity rule had. A test now compares the two lists (order included
+  — both are literal, so a mirrored order costs nothing and makes the drift
+  readable in the diff). NEVER a permission hole: the executor gate in
+  `llm.ts` rejects any tool_use absent from `req.tools` whatever this list
+  says, so a miss cost a wasted cycle, not an unsanctioned call. The
+  REACHABLE half was the SHARED-CATALOG donor filter, not the plan
+  pre-check: `file-scribe` requires only `write_file`, so the visibility
+  lattice offers file-scribe recipes to a WEB reader (which has
+  `write_file` and no shell), and a donor naming `record_probe` —
+  legitimate on its own host — was offered to a reader that cannot execute
+  it. Inert on the live catalog when it landed (no body names the tool
+  today; `skills review` reads 0 blocked / 15 / 9 either way), so the value
+  is forward-looking. Adding the name is false-positive-safe for the text
+  that names it most, which is worth knowing before rewording it: the
+  contract's own `no record_probe in your declared tools` hand-write branch
+  is suppressed by the negation window, and the affirmative mentions live
+  in system prompts, which are never scanned. NOTE while you are here:
+  `createSubtaskL1` appends `GROUND_TRUTH_EVIDENCE_LINES` — hence the
+  record_probe block — UNCONDITIONALLY, where `SMOKE_DESIGN_GUIDANCE` is
+  gated on `validate_html`. Not changed: the contract carries its own
+  no-tool branch, and re-cutting a canonical prompt path costs trust
+  counters for a case that hand-writing already covers.
 - **Ground-truth probe is a WEB-bucket invariant, not universal.**
   `probeGroundTruth` (in `L2Atom.ts`, invoked from `llmVerdict` on
   RESULT verdicts) only fires when BOTH (a) `ctx.tools` has
