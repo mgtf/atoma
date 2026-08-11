@@ -8,7 +8,7 @@
 expensive reasoning once, then progressively compiles the repeatable parts of the work
 into steps that run with no model call at all.*
 
-![tests](https://img.shields.io/badge/tests-1093_passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-1104_passing-brightgreen)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.5–3.3×_over_4_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_2-gold)
@@ -51,7 +51,7 @@ Every reusable component carries a success/failure record. Once one has a clean 
 the system stops paying a model to review its output. One failure revokes that status
 automatically. Nothing is permanently trusted.
 
-**3. What proves repeatable gets compiled away — the least proven of the three.**
+**3. What proves repeatable gets compiled away.**
 When the system solves a novel task, it writes down the pattern as a reusable recipe. A recipe
 that keeps working is compiled into a deterministic script that then runs with **zero model
 calls**. The compiler *refuses* patterns that need judgment, and records why — verbatim, from a
@@ -61,10 +61,11 @@ run in the benchmark below:
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-Creative work stays on the expensive path; mechanical work stops costing money. **Four controlled
-rounds did not show this paying off**: the compiled path fired once in 52 runs, because
-from-scratch builds do not produce the re-verification phase a compiled verifier serves. It is
-built, it is guarded, and it is unproven. Mechanisms 1 and 2 carried every measured result.
+Creative work stays on the expensive path; mechanical work stops costing money. **This pays off
+on maintenance work and barely at all on from-scratch builds** — five controlled rounds pinned
+that down, and the reason is that a build never produces the re-verification phase a compiled
+script serves. On the tasks where it applies it cut cost 4.7×; on the ones where it does not,
+mechanisms 1 and 2 carry the result alone.
 
 ## The controlled experiment
 
@@ -81,6 +82,7 @@ accounting, [registered before each run](benchmark/PROTOCOL.md). Repeated four t
 | Break-even on a repeated task | — | **run 2** |
 | Deliverable correctness (executing scorer) | 19/19 | **19/19** |
 | A *novel* task in the same family | $1.18 | **$0.35–0.55, zero new recipes needed** |
+| A *maintenance* task, where compilation applies | $0.71 | **$0.15 — 4.7×, 10 zero-token dispatches** |
 
 **The frontier baseline is volatile; atoma is not.** Its cost swung by 2× across
 four rounds a week apart, while atoma's stayed inside $0.47–0.54. atoma exposes one
@@ -89,17 +91,21 @@ frontier variance passes straight through it. That was never the hypothesis: it 
 out of a confounder the protocol registered in advance, and it is the most
 reproducible result of the four.
 
-**What four rounds did NOT establish, stated with the same prominence.** The
-compiled-script path — the mechanism that would make a step cost nothing — has fired
-**once in 52 runs**. Three rounds each found and fixed a real defect behind that, and
-the fourth came out clean: no failures, no demotions, the right recipe compiled. It
-was then never selected. The cause is in how tasks decompose, not in the machinery:
-a from-scratch build produces *build → record → document* and never a
-*re-verification* phase, which is what a compiled verifier is for. That is
-maintenance work. [The full analysis is here](benchmark/ROUND4.md).
+**The compiled-script path works — on maintenance, not on from-scratch builds.** Across
+four build rounds it fired **once in 52 runs**; the cause turned out to be the task
+shape, not the machinery. A build decomposes into *build → record → document* and never
+produces the *re-verification* phase a compiled verifier serves — that is maintenance
+work. Given a maintenance task, it fires at run 2 and holds: **10 zero-token dispatches
+in 8 runs, no failures, no demotions, $0.15 per run against a $0.71 control — 4.7×**.
+[Round 4](benchmark/ROUND4.md) diagnosed it; [round 5](benchmark/ROUND5.md) confirmed it.
 
-So the saving measured here comes from **tiered dispatch and earned trust**, not from
-compilation.
+**And an independent scorer found what that saving cost.** In 7 of 9 maintenance
+deliverables the README still described the old behaviour: the compiled verifier had
+been handed an *"update README.md"* subtask, replayed its manifest, reported success and
+written nothing — and the guard that should have caught it only checks whether named
+files *exist*, which is inert when every file was seeded. Fixed by comparing file
+contents before and after, not yet re-measured. Part of that 4.7× was bought with work
+that did not happen, and it took a scorer outside both arms to see it.
 
 ## The longer-run picture
 
@@ -171,7 +177,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1093 tests, fully mocked — no API key needed
+npm run typecheck && npm test     # 1104 tests, fully mocked — no API key needed
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -189,7 +195,7 @@ than asserted.
 
 ## Status
 
-**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1093 tests,
+**Working research system, honestly labelled.** ~25,000 lines of strict TypeScript, 1104 tests,
 seven runtime dependencies, Node 20+.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed

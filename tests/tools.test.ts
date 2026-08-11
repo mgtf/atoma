@@ -161,7 +161,7 @@ describe('runShellTool', () => {
     // friction across archived traces; curl (3) is deliberately still
     // refused — network reach is a declared bucket capability served by
     // fetch_url, the observable path.
-    for (const cmd of ['grep', 'head', 'tail', 'wc', 'chmod', 'mkdir', 'sed', 'find']) {
+    for (const cmd of ['grep', 'head', 'tail', 'wc', 'chmod', 'mkdir', 'sed', 'find', 'od']) {
       expect(DEFAULT_SHELL_ALLOWLIST).toContain(cmd);
     }
     for (const cmd of ['curl', 'wget', 'git', 'rm']) {

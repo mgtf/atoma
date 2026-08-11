@@ -3326,7 +3326,37 @@ four times: a never-seen same-family task costs $0.35-0.55 with ZERO new
 recipes learned. Deliverable correctness 19/19, 19/19, 19/19 by an executing
 scorer.
 
-**WHAT IS NOT ESTABLISHED, after three attempts to make it work.** The
+**THE ZERO-TOKEN PATH WORKS ON MAINTENANCE, NOT ON BUILDS (round 5 settled
+it).** Four build rounds produced ONE dispatch in 52 runs. Round 5, on a
+MAINTENANCE task (a seeded CLI + README + manifest, one behaviour change, then
+re-verify the rest): **10 dispatches in 8 runs, zero contract failures, zero
+demotions, $0.1509/run against a $0.7069 same-day control — 4.69×**. The split
+was exactly as designed: editing source stayed on the LLM path and the compiler
+REFUSED to compile it; re-running recorded invocations compiled and dispatched
+free. So the mechanism was never broken — a from-scratch build decomposes into
+build → record → document and never produces the re-verification phase a
+compiled verifier serves.
+AND IT BOUGHT PART OF THAT SAVING WITH WORK IT DID NOT DO. An independent
+scorer found **7 of 9 deliverables shipping a README that contradicted its own
+artefact** (`chars 36` documented, 35 produced). The compiled verifier had been
+matched to "update README.md so that only the invocations whose behaviour
+legitimately changed are corrected", replayed its manifest, printed a valid
+envelope and wrote nothing. THE DELIVERABLE GATE COULD NOT SEE IT: it checks
+that named files EXIST, and on a maintenance task every file exists already
+because it was seeded. A gate designed against build tasks is inert as soon as
+nothing is missing. Fixed — `subtaskMutatesFiles` + a before/after content
+snapshot in `runScriptSkillDirect`, rejecting a dispatch that leaves a named
+file byte-identical when the subtask used a mutating verb; a pure
+re-verification subtask writes nothing by design and is deliberately NOT gated.
+NOT RE-MEASURED: whether the gate converts those seven runs into correct
+deliverables at some cost in dispatch rate is a round-6 question.
+THE LESSON THAT GENERALISES: at 1/1 thresholds the validators are skipped
+run-wide, so "delivered" proved almost nothing and the EXECUTING correctness
+scorer was the only thing between a 4.69× headline and a wrong one. Never
+report a cost win from a low-threshold round without scoring the artefacts.
+
+**WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
+work.** The
 zero-token compiled-script path has fired ONCE in 52 atoma runs. Rounds 2-4
 each fixed a real broken link — `when_to_use` phrased as unevaluable disk
 state; the manifest recording TRUNCATED stdout; `record_probe` refusing a whole

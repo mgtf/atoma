@@ -1,3 +1,4 @@
+import { subtaskMutatesFiles } from '../src/skills/lifecycle.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -697,6 +698,48 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(skills2.loadFor('Hydrogen')[0]!.directFailures ?? 0).toBe(0);
   });
 
+  it('falls back when the named file already existed and is byte-identical afterwards', async () => {
+    // MEASURED, 2026-08-11 maintenance round: every file was seeded before the
+    // run, so the existence check above is inert — the compiled verifier took
+    // "update README.md …", printed a valid envelope, wrote nothing, and was
+    // CREDITED. Seven of nine deliverables shipped a README asserting
+    // `chars 36` about a CLI that prints 35.
+    const { executor } = fsExecutor({ 'README.md': 'chars 36\n' }); // never rewritten
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'f' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+
+    await water
+      .handleDirect({ description: 'update README.md with the new behaviour' }, ctx)
+      .catch(() => undefined);
+
+    // The dispatch ran but was not credited: the LLM loop took over.
+    expect(events.some((e) => e.op === 'direct')).toBe(false);
+    expect(ctx.llm.calls.length).toBeGreaterThan(2);
+  });
+
+  it('does NOT gate a pure re-verification subtask, which writes nothing by design', async () => {
+    // Rejecting these would send healthy dispatches back to the LLM loop.
+    const { executor } = fsExecutor({ 'README.md': 'chars 36\n' });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'f' }));
+
+    await water.handleDirect(
+      { description: 'Re-execute every invocation documented in README.md and report whether each still matches' },
+      ctx
+    );
+
+    expect(events.some((e) => e.op === 'direct')).toBe(true);
+  });
+
   it('dispatches normally when the named file IS present', async () => {
     const { executor } = fsExecutor({ 'config.json': '{}' });
     const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
@@ -723,4 +766,36 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(ctx.llm.calls).toHaveLength(2);
     expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
+});
+
+describe('subtaskMutatesFiles — does the subtask ask for a file to CHANGE', () => {
+  it('recognises the phrasing that shipped stale documentation', () => {
+    // Verbatim from the 2026-08-11 maintenance round: the compiled verifier
+    // took this subtask, printed a valid envelope, wrote nothing, and left a
+    // README asserting `chars 36` about a CLI that now prints 35.
+    expect(
+      subtaskMutatesFiles(
+        'Using the verdicts from the previous phase, update README.md so that only the invocations whose behaviour legitimately changed are corrected'
+      )
+    ).toBe(true);
+  });
+
+  it('recognises the other mutating verbs', () => {
+    for (const v of ['rewrite', 'edit', 'fix', 'amend', 'revise', 'append', 'regenerate']) {
+      expect(subtaskMutatesFiles(`${v} the README.md accordingly`)).toBe(true);
+    }
+  });
+
+  it('does NOT fire on a pure re-verification, which legitimately writes nothing', () => {
+    // Rejecting these would send healthy dispatches back to the LLM loop.
+    expect(
+      subtaskMutatesFiles(
+        'Re-execute every invocation documented in README.md against the edited CLI and report whether each still matches'
+      )
+    ).toBe(false);
+    expect(subtaskMutatesFiles('confirm the recorded exit codes still hold')).toBe(false);
+    expect(subtaskMutatesFiles('replay the probe manifest and diff the outputs')).toBe(false);
+  });
+
+
 });

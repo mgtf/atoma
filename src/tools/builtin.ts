@@ -393,6 +393,13 @@ export const DEFAULT_SHELL_ALLOWLIST: readonly string[] = [
   'head',
   'tail',
   'wc',
+  // `od` joins on the CLASS rule, not on frequency: the list admits read-only
+  // inspection utilities and a hex/octal dump is squarely one. Observed once
+  // (round 5) with the model reaching for it despite the allowlist being
+  // rendered in the tool description it had just read — which is the evidence
+  // that the friction is real rather than a naming slip. `bash -c "od …"`
+  // already worked, so this removes a wasted round-trip, not a boundary.
+  'od',
   'grep',
   'sort',
   'uniq',

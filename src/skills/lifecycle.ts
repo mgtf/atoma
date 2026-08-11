@@ -261,6 +261,30 @@ export function skillContextBlock(skill: {
   ].join('\n');
 }
 
+/**
+ * Verbs that make a named file an OUTPUT of the subtask rather than an input.
+ *
+ * The deliverable gate below checks EXISTENCE, which is inert on a maintenance
+ * task: every file already exists, so a script that writes nothing passes.
+ * MEASURED on the 2026-08-11 maintenance round — the compiled verifier was
+ * matched to "update README.md so that only the invocations whose behaviour
+ * legitimately changed are corrected", printed a valid envelope, exited 0, and
+ * left the README asserting `chars 36` while the CLI it documents now prints
+ * 35. Seven of nine deliverables shipped documentation that contradicted their
+ * own artefact, and the gate could not see it.
+ *
+ * Kept to unambiguous mutating verbs: a subtask that only asks to RE-RUN or
+ * CHECK something legitimately writes nothing, and rejecting that would send
+ * healthy dispatches back to the LLM loop for no reason.
+ */
+const MUTATING_VERB_RE =
+  /\b(update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|fixing|amend|amending|revise|revising|write|writing|add|adding|append|appending|regenerate|regenerating)\b/i;
+
+/** True when the subtask asks for a named file to be CHANGED, not merely read. */
+export function subtaskMutatesFiles(description: string): boolean {
+  return MUTATING_VERB_RE.test(description);
+}
+
 export class SkillLifecycle {
   constructor(
     private readonly host: SkillLifecycleHost,
@@ -1037,6 +1061,23 @@ export class SkillLifecycle {
     }
     const filename = scriptScratchFilename(skill.id, skill.language);
     const interpreter = scriptInterpreter(skill.language);
+    // Snapshot the named files BEFORE the script runs. On a maintenance task
+    // every one of them already exists, so the existence check below cannot
+    // tell "wrote the update" from "wrote nothing" — only a before/after
+    // comparison can. Zero tokens; local reads.
+    const mutating = subtaskMutatesFiles(subTask.description);
+    const before = new Map<string, string>();
+    if (mutating && ctx.tools?.has('read_file')) {
+      for (const path of extractResultFilePaths({ summary: subTask.description })) {
+        try {
+          const got = await ctx.tools.execute('read_file', { path });
+          const c = got && typeof got === 'object' ? (got as Record<string, unknown>)['content'] : got;
+          if (typeof c === 'string') before.set(path, c);
+        } catch {
+          /* absent now — the existence check after the run covers it */
+        }
+      }
+    }
     try {
       await ctx.tools!.execute('write_file', { path: filename, content: skill.body });
       const res = (await ctx.tools!.execute('run_shell', {
@@ -1093,6 +1134,25 @@ export class SkillLifecycle {
           } catch {
             missing.push(path);
           }
+        }
+        // A file that already existed and is byte-identical afterwards was
+        // not produced by this dispatch. See MUTATING_VERB_RE.
+        const untouched: string[] = [];
+        for (const [path, prev] of before) {
+          if (missing.includes(path)) continue;
+          try {
+            const got = await ctx.tools.execute('read_file', { path });
+            const c = got && typeof got === 'object' ? (got as Record<string, unknown>)['content'] : got;
+            if (typeof c === 'string' && c === prev) untouched.push(path);
+          } catch {
+            /* unreadable now — the existence check already owns that case */
+          }
+        }
+        if (untouched.length > 0) {
+          ctx.logger.debug(
+            `[${this.host.name}] direct dispatch of ${skill.id}: subtask asks to change ${untouched.join(', ')} but the file is byte-identical afterwards — falling back to the LLM loop`
+          );
+          return null;
         }
         if (missing.length > 0) {
           ctx.logger.info(

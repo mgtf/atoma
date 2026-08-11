@@ -176,6 +176,7 @@
     margin-top: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 11px; color: var(--muted);
   }
+  .tool-arg { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; opacity: .85; }
   .err-badge { background: rgba(248, 113, 113, 0.15); color: var(--err); border: 1px solid #3b1e1e; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
 
   .section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
@@ -469,6 +470,7 @@ const I18N_CATALOGS = {
     'event.cache.label': '⚡ cache',
     'event.cache.free': '0 calls · $0.00',
     'event.cache.skipped': 'call avoided',
+    'event.prefilter.cheapTier': 'cheap tier by design',
     'event.skill.direct': '⚡ direct',
     'event.skill.recovery': '⟳ recovery',
     'event.skill.quarantine': '⛔ quarantine',
@@ -696,6 +698,7 @@ const I18N_CATALOGS = {
     'event.cache.label': '⚡ cache',
     'event.cache.free': '0 appel · $0.00',
     'event.cache.skipped': 'appel évité',
+    'event.prefilter.cheapTier': 'tier bon marché, par conception',
     'event.skill.direct': '⚡ direct',
     'event.skill.recovery': '⟳ recovery',
     'event.skill.quarantine': '⛔ quarantaine',
@@ -1998,8 +2001,20 @@ function renderEventCard(ev) {
     // row with a spacer pushing the cost right: as soon as the decision
     // chip made the row overflow, the price alone wrapped to the next
     // line and the card looked broken. Two deliberate lines never do.
+    // WHY THE MODEL CAN LOOK "WRONG" FOR THE TIER, and why it is not.
+    // The atom badge says which ATOM made the call; the model says which
+    // MODEL served it. For a prefilter these deliberately disagree: an L2
+    // atom routes on the L1-tier model (modelForTier(1), cost.ts), because
+    // "prefilter first, reason second" is the whole cost discipline — Sonnet
+    // is only engaged if the cheap scan declines. Reported live as confusing,
+    // and it was the display, not the routing: the card now says so.
+    const cheapScan =
+      ev.role === 'prefilter' && /haiku/i.test(ev.model || '')
+        ? t('event.prefilter.cheapTier')
+        : null;
     const meta = [
       shortModel(ev.model),
+      cheapScan,
       fmtCost(ev.costUsd),
       `in: ${ev.usage.inputTokens}`,
       `out: ${ev.usage.outputTokens}`,
@@ -2023,6 +2038,12 @@ function renderEventCard(ev) {
     ];
     if (ev.actor) trow.push(atomRef(ev.actor));
     trow.push(h('span', { class: 'name' }, ev.name));
+    // WHICH file / url / command. A row reading only "read_file" forces a
+    // click to learn anything, and a run makes dozens of them — the argument
+    // is what makes the timeline scannable. Same extractor as the live
+    // "right now" banner, so the two can never disagree.
+    const targ = toolArgSummary(ev.name, ev.args);
+    if (targ) trow.push(h('span', { class: 'tool-arg' }, targ));
     if (ev.branchId) trow.push(branchChip(ev.branchId));
     trow.push(h('span', { class: 'spacer', style: 'flex:1;' }));
     if (ev.error) trow.push(h('span', { class: 'err-badge' }, 'error'));

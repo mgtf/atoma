@@ -20,7 +20,14 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'runs/**', 'build/**', 'skills/**'],
+    ignores: [
+      'dist/**', 'node_modules/**', 'coverage/**', 'runs/**', 'build/**', 'skills/**',
+      // Benchmark SEED fixtures are deliverables-under-test copied into a run's
+      // workspace, not project source. They deliberately look like a third-party
+      // CLI (their own package.json, their own module system) and belong to no
+      // tsconfig — linting them type-aware fails on "not found in any project".
+      'benchmark/seeds/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
