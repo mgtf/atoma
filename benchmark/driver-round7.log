@@ -1,0 +1,48 @@
+
+> atoma@0.1.0 benchmark
+> tsx src/cli/benchmark.ts --out benchmark/results-round7.csv
+
+== atoma cost-amortisation benchmark ==
+
+provider     : claude-cli
+primary task : wclite-maint
+held-out task: wclite-maint-2
+workspace seed : benchmark/seeds/wclite
+plan         : 2 baseline + 6 atoma on the primary, then 0 + 1 on the held-out = 9 runs
+budget/run   : 900s
+output       : /Users/mgtf/dev/atoma/benchmark/results-round7.csv
+
+
+── A. control arm — frontier direct, primary task ──
+▶ baseline-wclite-maint-01 … ✓ delivered  $0.6807  97s  llm=1  det=0  learned=0
+▶ baseline-wclite-maint-02 … ✓ delivered  $0.4864  129s  llm=1  det=0  learned=0
+
+── B. treatment arm — atoma, primary task (state accumulates) ──
+▶ atoma-wclite-maint-01 … ✓ delivered  $1.0919  807s  llm=43  det=0  learned=2
+▶ atoma-wclite-maint-02 … ✓ delivered  $0.1992  284s  llm=13  det=0  learned=0
+▶ atoma-wclite-maint-03 … ✓ delivered  $1.3776  823s  llm=43  det=0  learned=0
+▶ atoma-wclite-maint-04 … ✓ delivered  $0.3391  316s  llm=18  det=0  learned=1
+▶ atoma-wclite-maint-05 … ✓ delivered  $0.1870  206s  llm=14  det=1  learned=0
+▶ atoma-wclite-maint-06 … ✓ delivered  $0.3173  353s  llm=16  det=0  learned=0
+
+── D. treatment arm — held-out task (memorisation control) ──
+▶ atoma-wclite-maint-2-01 … ✓ delivered  $0.3072  300s  llm=17  det=0  learned=0
+
+== PRE-REGISTERED RESULT ==
+
+baseline (frontier direct) n=2: mean $0.5836, median $0.5836
+  runs: 0.681, 0.486
+atoma n=6: mean $0.5854, mean excluding run 1 $0.4840
+  runs: 1.092, 0.199, 1.378, 0.339, 0.187, 0.317
+
+H1 NOT SUPPORTED within the runs performed: cumulative atoma cost never fell below the baseline.
+cumulative delta after 6 runs: $-0.0108 (positive = atoma cheaper in total)
+trend across the atoma series: first half $0.8896 → second half $0.2811
+
+-- held-out task (novel, same family): memorisation control --
+  baseline n=0: mean —
+  atoma    n=1: mean $0.3072
+  If atoma is cheap here too, the learning generalised to the family.
+  If it is back at baseline cost, it had memorised the primary task.
+
+rows appended to /Users/mgtf/dev/atoma/benchmark/results-round7.csv

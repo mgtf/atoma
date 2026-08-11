@@ -3387,8 +3387,32 @@ matches its recipe wherever the recipe fits. `kind: llm` recipes are untouched
 (injection is guidance; the L1 writes). The write detector errs toward "writes"
 deliberately — only a body with NO write API at all is filtered, because
 over-filtering removes the very dispatches this protects.
-NOT YET MEASURED. Round 7 asks whether dispatches recover toward round 5's ten
-while correctness holds at round 6's 5-of-6.
+MEASURED IN ROUND 7, AND IT IS INERT. `scriptWritesFiles` fired ZERO times
+across the round: the compiled verifier contains
+`fs.writeFileSync(manifestPath, …)` — it merges observations back into the
+probe manifest — so the predicate calls it a writer and never filters it.
+Almost every compiled verifier writes its own manifest, so the test is inert on
+the whole class it was built for. Dispatches stayed at 1, gate fallbacks stayed
+at 5, exactly as in round 6.
+I HAD REGISTERED THIS FAILURE MODE BEFORE LAUNCHING and shipped anyway; naming
+a flaw in advance is not closing it. THE RIGHT PREDICATE is not "does this body
+write?" but "does it write the file the SUBTASK NAMES?" — compare the paths in
+the subtask against the path literals in the body. Statically decidable, and it
+leaves the deliverable gate as the last resort.
+AND ROUND 7 SURFACED A BIGGER COST THAN THE ONE IT WAS CHASING. Cost rose to
+1.00× the control — for the first time in seven rounds even H1 failed — driven
+by 13 escalations against round 6's zero. Validators rejected results as
+"non-JSON prose lacking line numbers … DESPITE EXPLICIT SKILL STEPS REQUIRING
+THEM", triggering three atom branches. **A recipe distilled in run 1 demanded a
+format the L1 could not produce, and the validator enforced it**: a
+badly-distilled recipe can cost more than the compiled path saves. Unrelated to
+the filter (which never ran), unexplained, and it makes round 7's cost column
+noise. Understand this before measuring the dispatch mechanism again — two
+rounds have gone to a mechanism worth ~$0.10/run while this cost ~$0.30/run in
+one round.
+THE ONE CLEAN RESULT: correctness 2 of 9 → 5 of 6 → 6 of 6 across rounds 5-7,
+while dispatch volume went 10 → 1 → 1. The gate works; the trade is currently
+priced badly.
 
 **WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
 work.** The

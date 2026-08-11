@@ -1,0 +1,10 @@
+timestamp,arm,task_id,run_index,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace
+2026-08-11T10:45:22.637Z,baseline,wclite-maint,1,delivered,0.6807,97,1,1,0,0,0,0,0,0,0,0,0,2026-08-11T10-45-23-284-d041698d.json
+2026-08-11T10:46:59.807Z,baseline,wclite-maint,2,delivered,0.4864,129,1,1,0,0,0,0,0,0,0,0,0,2026-08-11T10-47-00-443-806f9804.json
+2026-08-11T10:49:09.507Z,atoma,wclite-maint,1,delivered,1.0919,807,43,1,6,36,0,4,2,1,1,0,0,2026-08-11T10-49-10-133-92937e9a.json
+2026-08-11T11:02:36.917Z,atoma,wclite-maint,2,delivered,0.1992,284,13,1,0,12,0,0,0,0,0,0,0,2026-08-11T11-02-37-541-e6b2ac0c.json
+2026-08-11T11:07:21.234Z,atoma,wclite-maint,3,delivered,1.3776,823,43,3,4,36,0,8,0,0,0,0,1,2026-08-11T11-07-21-894-17c31c88.json
+2026-08-11T11:21:04.807Z,atoma,wclite-maint,4,delivered,0.3391,316,18,1,1,16,0,1,1,0,0,0,1,2026-08-11T11-21-05-441-846cb7c5.json
+2026-08-11T11:26:21.412Z,atoma,wclite-maint,5,delivered,0.187,206,14,1,0,13,1,0,0,0,0,0,1,2026-08-11T11-26-22-054-aa83ca4b.json
+2026-08-11T11:29:48.150Z,atoma,wclite-maint,6,delivered,0.3173,353,16,1,0,15,0,0,0,0,0,0,2,2026-08-11T11-29-48-812-58abfbf5.json
+2026-08-11T11:35:41.440Z,atoma,wclite-maint-2,1,delivered,0.3072,300,17,1,0,16,0,0,0,0,0,0,2,2026-08-11T11-35-42-096-2bd73e75.json
