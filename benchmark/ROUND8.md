@@ -57,12 +57,27 @@ atoma mean **$0.3132** (n=6), against $0.5854 in round 7 and $0.2825 in round
 6. Within-round trend $0.3733 → $0.2532. Held-out task **$0.2667 with zero new
 recipes learned** — generalisation reproduced for the sixth consecutive round.
 
-**The control arm is n=1.** Its second run exceeded the 900 s budget (963 s)
-and was recorded as an error, so its cost is unrecoverable — though its
-workspace scored 7/7, so the run produced a correct deliverable and was killed
-during or after it. A ratio against a single control observation ($0.8197,
-giving 2.62×) is not worth defending, which is precisely why cost was excluded
-from the registered conditions in advance.
+**The control arm is n=1, and the reason is an infrastructure fault rather
+than anything about the arm.** Its second run lost its LLM connection: the
+last-resort watchdog fired at 960 s with *"the transport is wedged (dropped
+connection?)"*, which is the mechanism built for exactly this and it worked.
+The run was NOT slow and did NOT fail at the task — the log shows the edit
+applied, all five documented invocations re-recorded through `record_probe`,
+and the README rewritten, and its workspace scores 7/7. Only the accounting
+was lost.
+
+Why it was lost completely is a property of the control arm's SHAPE, worth
+recording because it will recur: the baseline is ONE long-lived LLM call
+wrapping the whole run, and usage is booked when a call returns. The partial
+trace shows **1 call started, 0 completed, 20 tool events** — so a single
+dropped connection takes the entire run's cost with it. An atoma run of the
+same task makes 11-24 shorter calls, each booked on return, so the same fault
+would cost one call's worth of accounting. That is a measurement asymmetry,
+not a merit: the frontier agent's deliverable was complete and correct.
+
+A ratio against a single control observation ($0.8197, giving 2.62×) is not
+worth defending either way, which is precisely why cost was excluded from the
+registered conditions in advance.
 
 ## Correctness, and a reproducibility gap closed
 
@@ -102,7 +117,8 @@ regression tests verified to fail without the guards.
 ## Threats to validity
 
 - Six atoma runs, one task, one compiled script, one L1.
-- The control arm is a single usable observation.
+- The control arm is a single usable observation, lost to a dropped
+  connection rather than to anything the run did.
 - Condition 1 going 5 → 0 is consistent with the fix, but a round whose plans
   happened not to duplicate the edit phase would also show 0. The mechanism is
   visible in the traces (6 QUOTED SPAN FOUND lines), which is why that

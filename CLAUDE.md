@@ -3540,9 +3540,17 @@ predicate fired **14 times with 0 gate fallbacks** (round 7: 0 and 5), and
 correctness held at 6 of 6. Validator rejections of EVERY kind went 10 → 0,
 and with them the branches and fallbacks. atoma mean $0.3132 against round 7's
 $0.5854; held-out task $0.2667 with zero new recipes, the sixth consecutive
-reproduction of generalisation. The control arm is n=1 (its second run passed
-the 900s budget at 963s, though its workspace scored 7/7), which is exactly
-why cost was excluded from the registered conditions in advance.
+reproduction of generalisation. The control arm is n=1 for an
+INFRASTRUCTURE reason, not a slowness one: the second run's LLM connection
+dropped and the last-resort watchdog fired at 960s ("the transport is
+wedged"), AFTER the work was done — its workspace scores 7/7. Note WHY the
+whole observation was lost, because the shape will recur: the baseline is ONE
+long-lived call and usage is booked on return, so the partial trace reads
+1 call started / 0 completed / 20 tool events. An atoma run of the same task
+makes 11-24 shorter calls and the same fault would cost one of them. A
+measurement asymmetry, not a merit — the frontier deliverable was correct.
+This is exactly why cost was excluded from the registered conditions in
+advance.
 DISPATCHES WENT 1 → **0**, and not because the predicate misfired — all 14
 refusals were correct, on a manifest-only writer offered for README/source
 subtasks. The compiled script reached 3✓ only at the round's end and never met
