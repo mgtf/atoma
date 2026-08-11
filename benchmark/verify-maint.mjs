@@ -90,5 +90,39 @@ if (spec === 'wclite-maint') {
   check('chars-unchanged', chars.status === 0 && /\b36\b/.test(chars.stdout), chars.stdout.trim());
 }
 
+
+// ── THE MANIFEST, which the goal text names explicitly ─────────────────────
+// Added 2026-08-11 after an adversarial reviewer pointed out the scorer never
+// opened it: "update the README AND THE MANIFEST only for what legitimately
+// changed" is half the instruction, and manifest destruction, a whitewashed
+// regression or a stale merge all scored full marks without this.
+const manifestPath = join(dir, '.atoma-probes.json');
+let manifest = null;
+try {
+  manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+} catch {
+  /* handled below */
+}
+check('manifest-parses', manifest && manifest.version === 1 && Array.isArray(manifest.entries), manifest ? 'shape' : 'illisible');
+if (manifest && Array.isArray(manifest.entries)) {
+  // The seed documents five invocations; a run may ADD entries, never lose them.
+  check('manifest-entries-preserved', manifest.entries.length >= 5, `${manifest.entries.length} entrées`);
+
+  // The strong clause: every recorded entry must still replay identically. The
+  // goal says to update the manifest for what legitimately changed, so a stale
+  // recorded stdout is a real defect — it is the manifest equivalent of the
+  // stale README that made round 5's 2-of-9.
+  let stale = [];
+  for (const e of manifest.entries.slice(0, 12)) {
+    if (typeof e?.cmd !== 'string' || e.stdout === undefined) continue;
+    const argv = e.cmd.replace(/^node\s+wclite\.js\s*/, '').trim();
+    const args = argv ? argv.split(/\s+/) : [];
+    const got = run(args);
+    const same = got.status === (e.exitCode ?? 0) && String(got.stdout) === String(e.stdout);
+    if (!same) stale.push(e.cmd);
+  }
+  check('manifest-matches-live', stale.length === 0, stale.length ? `périmé: ${stale.join('; ')}` : 'toutes les entrées rejouent à l identique');
+}
+
 const score = checks.filter((c) => c.ok).length;
 console.log(JSON.stringify({ dir, spec, score, total: checks.length, full: score === checks.length, checks }, null, 2));

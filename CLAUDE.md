@@ -2993,6 +2993,46 @@ second is the kind of thing that gets acted on:
 
 ## Considered and rejected (do not re-propose naively)
 
+- **HYBRID SKILLS — one recipe carrying a mechanical half (script, run by the
+  harness) and a judgment half (llm), so the script stops competing with the
+  recipe for a match and becomes a tool it uses.** Designed and refuted
+  2026-08-11, same day; full write-up and measurements in
+  `docs/hybrid-skills-design.md` §9. Two of three independent reviewers
+  returned do-not-build. The decisive facts, all measured on the round-8
+  traces:
+  (a) **THE ARITHMETIC WAS WRONG BY 4-5×, IN THE UNIT THAT MATTERS.** The design
+  assumed one LLM round-trip per `record_probe`. The model emits probes as
+  PARALLEL tool_use blocks in a single assistant turn (`src/core/llm.ts`
+  collects every block from one response before the next round-trip), so 120
+  probes occupy **26 turns, not 120**, and the corpus already runs at 20.9
+  round-trips/run — BELOW the design's own target. Evidence: probe→probe gap
+  median 283 ms (n=99) against 3690 ms (n=169) for every other adjacent tool
+  pair. If you count tool CALLS, you are not measuring what the model pays for.
+  (b) **THE PROBES ARE EVIDENCE PRODUCTION, NOT INFORMATION INTAKE.** 96 of 120
+  re-derive a value the same L1 had already read verbatim from the manifest.
+  They exist because the L1's own contract demands first-hand provenance
+  ("USE record_probe, DO NOT TRANSCRIBE BY HAND"), so injecting the same facts
+  cannot remove them. The natural experiment already exists and already failed:
+  `previousStepSummary` threads facts between sequential phases today and the
+  L1 probes anyway. **The redundancy is the ground-truth discipline being
+  honoured, not waste** — and the only lever on it is the record_probe
+  contract, which is the #F9 fabrication hole.
+  (c) **THE PRIZE IS ~$0.02-0.036/RUN** (7-12%), because probe results are ~44
+  tokens each against 5.6M cache-read tokens at a 93.5% cache rate. Round 7's
+  badly-distilled recipe cost $0.30/run — ten times more — from one line of a
+  `when_to_use`. A new skill kind touches ~13 files.
+  (d) The safety premise ("the normal validator still judges the final result")
+  is **false on the majority path**: 30 of 43 round-8 RESULT validations took
+  the trust fast-path with zero LLM calls, four of six runs made none at all,
+  and the guards the design removed are what covers that path.
+  REVISIT only after running the cheap premise test first: hand-inject a
+  `== MECHANICAL RESULTS ==` block into one L1 subtask prompt and count whether
+  probes drop. One run. If they do not drop, no dispatch-path work can help.
+  THE STANDING CONCLUSION this closes: five attempts, and the best remaining
+  idea has a measured ceiling of ~$0.03/run. The saving comes from tiering,
+  earned trust and recipe reuse. Compilation is a correct mechanism that does
+  not pay on the families measured so far — stop spending rounds on it.
+
 - **A RUNTIME friction sensor (mid-loop event-skill matching on tool
   errors + post-run distillation from repeated tool-error signatures).**
   Designed and adversarially refuted 2026-08-07. The decisive facts:

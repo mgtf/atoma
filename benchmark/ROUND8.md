@@ -85,6 +85,15 @@ registered conditions in advance.
 [`verify-maint.mjs`](verify-maint.mjs) — which executes the CLI rather than
 reading claims about it.
 
+**Re-scored under a TIGHTER instrument after the fact, and the result held.**
+An adversarial reviewer pointed out the scorer never opened
+`.atoma-probes.json`, which the goal text explicitly names — so manifest
+destruction, a whitewashed regression or a stale merge all scored full marks.
+Three clauses were added (parses, entries preserved, every recorded entry still
+replays byte-identically) and all nine deliverables score **10 of 10**. The
+clauses discriminate: sabotaging a copy's manifest stdout drops it to 9/10,
+deleting entries to 8/10.
+
 That scorer is new, and it should have existed three rounds ago: rounds 5, 6
 and 7 each reported a correctness figure from a scorer that was never
 committed, so none of those numbers is reproducible from the repo. It is the
