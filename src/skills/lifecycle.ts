@@ -1,6 +1,12 @@
 import type { GenerationParams, Result, RunContext, Task } from '../core/types.js';
 import type { L1Atom } from '../atoms/L1Atom.js';
 import type { Skill } from './types.js';
+import {
+  scriptCanServeSubtask,
+  scriptWriteTargets,
+  subtaskMutatesFiles,
+  subtaskNamedPaths,
+} from './scriptTargets.js';
 import { SkillRegistry } from './registry.js';
 import {
   demoteAfter,
@@ -8,6 +14,7 @@ import {
   prefilterStrategy,
   promoteThreshold,
   SKILL_PREFILTER_SYSTEM_PROMPT,
+  shouldTrustSkill,
 } from '../atoms/cost.js';
 import { parseScriptEnvelope, scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import { extractJson } from '../atoms/json.js';
@@ -261,45 +268,15 @@ export function skillContextBlock(skill: {
   ].join('\n');
 }
 
-/**
- * Verbs that make a named file an OUTPUT of the subtask rather than an input.
- *
- * The deliverable gate below checks EXISTENCE, which is inert on a maintenance
- * task: every file already exists, so a script that writes nothing passes.
- * MEASURED on the 2026-08-11 maintenance round — the compiled verifier was
- * matched to "update README.md so that only the invocations whose behaviour
- * legitimately changed are corrected", printed a valid envelope, exited 0, and
- * left the README asserting `chars 36` while the CLI it documents now prints
- * 35. Seven of nine deliverables shipped documentation that contradicted their
- * own artefact, and the gate could not see it.
- *
- * Kept to unambiguous mutating verbs: a subtask that only asks to RE-RUN or
- * CHECK something legitimately writes nothing, and rejecting that would send
- * healthy dispatches back to the LLM loop for no reason.
- */
-const MUTATING_VERB_RE =
-  /\b(update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|fixing|amend|amending|revise|revising|write|writing|add|adding|append|appending|regenerate|regenerating)\b/i;
-
-/** True when the subtask asks for a named file to be CHANGED, not merely read. */
-export function subtaskMutatesFiles(description: string): boolean {
-  return MUTATING_VERB_RE.test(description);
-}
-
-/**
- * Node filesystem APIs that WRITE. Used to tell a read-only compiled verifier
- * from one that produces a deliverable.
- *
- * Generous on purpose: anything resembling a write counts, so the only recipes
- * filtered out are the ones with no write surface at all. Over-filtering would
- * remove the dispatches this exists to protect.
- */
-const SCRIPT_WRITE_RE =
-  /\b(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|copyFile|copyFileSync|rename|renameSync|mkdir|mkdirSync|rm|rmSync|unlink|unlinkSync|truncate|truncateSync|outputFile|write)\s*\(/;
-
-/** Does this compiled script body write anything to disk? */
-export function scriptWritesFiles(body: string): boolean {
-  return SCRIPT_WRITE_RE.test(body);
-}
+// The mutating-verb vocabulary and the per-destination capability test live in
+// ./scriptTargets.js. Re-exported here under their historical names so existing
+// imports keep working — same compat pattern as L2Atom's re-exports.
+export {
+  subtaskMutatesFiles,
+  scriptCanServeSubtask,
+  scriptWriteTargets,
+  subtaskNamedPaths,
+} from './scriptTargets.js';
 
 export class SkillLifecycle {
   constructor(
@@ -990,7 +967,6 @@ export class SkillLifecycle {
     // world), then executable donor namespaces in deterministic order.
     const home = namespaces[0]!;
     const readerSet = new Set(readerToolNames);
-    const mutatingSubtask = subtaskMutatesFiles(subTask.description);
     const tagged: { skill: Skill; ownerNs: string }[] = [];
     const seenIds = new Set<string>();
     for (const ns of namespaces) {
@@ -1038,9 +1014,29 @@ export class SkillLifecycle {
         // catalogue still matches its recipe wherever the recipe fits.
         // kind:llm recipes are untouched — injection is guidance and the L1
         // does its own writing.
-        if (mutatingSubtask && s.kind === 'script' && !scriptWritesFiles(s.body)) {
+                  //
+          // ROUND 7 measured the first version of this test firing ZERO times: it
+          // asked "does the body write at all?", and every compiled verifier writes
+          // its own probe manifest. It now compares the DESTINATIONS the body can be
+          // proven to write against the files the subtask names.
+          //
+          // TRUSTED-ONLY, and that gate is load-bearing rather than cautious.
+          // Simulated over rounds 6-7: filtering EVERY script match refuses 10 of 11
+          // and takes dispatches from 1 to ZERO in both rounds — the three successes
+          // that carry a script to TRUST=3 are earned on the documentation phases
+          // this predicate refuses, so filtering them starves the counter that arms
+          // dispatch. Restricted to the trusted branch it is break-even on dispatches
+          // (1 → 1) and removes all five gate fallbacks in each round. The principle
+          // behind the measurement: the filter exists to save a WASTED DISPATCH, so
+          // where no dispatch is possible there is nothing to save and refusing costs
+          // only credit.
+          if (
+            s.kind === 'script' &&
+            shouldTrustSkill(s) &&
+            !scriptCanServeSubtask(s.body, subTask.description)
+          ) {
           ctx.logger.debug(
-            `[${this.host.name}] skill "${s.id}" not offered: its compiled body never writes, and this subtask asks for a file to change`
+            `[${this.host.name}] skill "${s.id}" not offered: its compiled body writes [${[...scriptWriteTargets(s.body).paths].join(", ") || "nothing"}], and this subtask asks to change [${subtaskNamedPaths(subTask.description).join(", ")}]`
           );
           continue;
         }

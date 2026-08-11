@@ -920,6 +920,74 @@ re-exports all the historical names so old imports keep working.
   ran Puppeteer against a JSON API, got "errors", rejected a valid
   result, cascade. `Atom.toolNames()` is the public accessor to the
   declared tool names (the full tools array stays protected). Fix #9.
+- **QUOTED SPAN verification — the read-back probe checks the child's quote
+  against the WHOLE file.** The excerpt rendered into the evidence block is a
+  fixed 400-char HEAD (`FILE_PROBE_EXCERPT_CHARS`), so on any larger file the
+  block is structurally SILENT about the region a child is most likely to
+  quote. MEASURED (round 7): the `wclite.js` line the children cited sat at
+  byte 1000 of 1312, 2.5x beyond the window — so an honest quote and a
+  fabricated one were the same bytes to the validator, and it refused all of
+  them. Four rejections, three atom branches, $1.38 on one run, on a
+  deliverable that was correct throughout.
+  `extractQuotedSpans` pulls spans the RESULT ATTRIBUTES to a file
+  ("Line 24 of x.js:", "x.js line 19 implementation:") plus unattributed
+  quoted/code spans; the probe emits `QUOTED SPAN … — FOUND` or
+  `— NOT FOUND`, and a NOT FOUND on an ATTRIBUTED span sets
+  `facts.quotedSpanNotFound` → a contradiction, which overrides the trust
+  fast-path. It costs zero tokens and zero extra tool calls: the content was
+  already read.
+  THREE GUARDS, each measured against the real payloads, all in the same
+  direction — a false NOT-FOUND would fabricate a contradiction on a correct
+  deliverable, which is the one outcome this must not have.
+  (a) Only ATTRIBUTED spans can contradict; an unattributed span is
+  corroboration-only, because "absent from the files I happened to read" says
+  nothing about a file the child never named.
+  (b) Only CODE-SHAPED spans can contradict (`spanCanContradict`): an
+  attributed pattern matched the PROSE after a label
+  ("wclite.js line 21 verified: --chars: 35, --lines: 3…"), which is absent
+  from the file by construction — that was a live false positive, caught
+  before shipping.
+  (c) Comparison is exact, then whitespace-collapsed — a child re-typing a
+  line normalises indentation, and failing over a tab is not a defect worth
+  reporting.
+  TWO IMPLEMENTATION TRAPS, both hit: walking the payload's STRING VALUES is
+  NOT equivalent to stringify-then-unescape, because source code routinely
+  contains a literal backslash-n (the trailing-newline regex at issue) which
+  JSON escapes to a double backslash — a blanket unescape cut the span in
+  half. And `summary` must be walked FIRST: a payload whose `output` held 45
+  strings pushed it past the budget and the quote went unchecked. Result on
+  the 8 archived round-7 rejections: 7 corroborated, 0 false positives.
+  Covered by `tests/quoted-span-groundtruth.test.ts`, whose two subtlest
+  guards were verified to FAIL when neutralised.
+- **ALREADY-SATISFIED WORK IS COMPLIANCE (`VALIDATION_SYSTEM_PROMPT`).** A
+  sequential plan shares one workspace, so a subtask may ask for a change an
+  earlier phase already made. The subtask text is a snapshot of intent written
+  before any phase ran; the validator had no rule for this and sided with the
+  text, rejecting honest convergence as evasion. The class is RARE — 5
+  occurrences in 302 archived runs, all in 2 runs of one round — and
+  EXPENSIVE: it carried the whole distance between round 7's 1.00x and the
+  2.24x its other four runs read.
+  The rule approves only on evidence the child did NOT author (a QUOTED SPAN
+  FOUND line, or a read-back excerpt showing the end state) and rejects a bare
+  assertion. FOUR THINGS IT MUST KEEP DOING, each from an adversarial finding:
+  it NAMES the narration rule it qualifies ("does NOT relax the narration rule
+  above") — an unreconciled clause loses to the older CRITICAL-marked,
+  example-anchored one, and the reject half would then win alone, making the
+  incident WORSE; it never claims anything general about probes (a transcribed
+  probe is indistinguishable from one never run); it states that a TRUNCATED
+  EXCERPT IS SILENT, NEVER REFUTING (one cascade head was a rejection for
+  "the excerpt is truncated — cannot verify"); and its coaching asks for
+  `record_probe` + a re-read, NEVER for a quoted string — additionalContext is
+  injected verbatim into the retry, so asking for a string coaches the next
+  attempt to produce it. Anchored by Worked Examples 9 and 10, both directions.
+  ALSO FIXED THERE: the embedded-ground-truth EXCEPTION was written for HTTP
+  children while `GROUND_TRUTH_EVIDENCE_LINES` makes the block MANDATORY for
+  every non-web L1 — so a CLI child obeying its own contract met a carve-out
+  that did not cover it. Widened to name file/CLI children explicitly.
+  CONSEQUENCE, not a defect: an already-satisfied phase legitimately skips a
+  recipe's steps, so `activeSkillFollowed: false` is EXPECTED there and skill
+  credit is withheld by design. Do not read flat skill counters on a
+  maintenance round as an adherence-gate bug.
 - **Two ground-truth probes, MUTUALLY EXCLUSIVE by bucket — with ONE
   hybrid append.** `probeGroundTruth` dispatches: a child declaring
   `validate_html` gets the web load-and-look probe; every other
@@ -3387,6 +3455,41 @@ matches its recipe wherever the recipe fits. `kind: llm` recipes are untouched
 (injection is guidance; the L1 writes). The write detector errs toward "writes"
 deliberately — only a body with NO write API at all is filtered, because
 over-filtering removes the very dispatches this protects.
+FIXED (2026-08-11) — `scriptCanServeSubtask` in `src/skills/scriptTargets.ts`
+replaces the any-write test with a per-DESTINATION one: resolve the path
+literals reachable as the DESTINATION argument of a write API
+(`path.join(cwd, 'x.json')` is the dominant shape, 9 of 10 corpus bodies), and
+refuse the match only when the subtask NAMES files the body provably never
+writes. Verified against every archived compiled body: 9 resolved, 1 opaque
+(a glob), and `package-and-document-cli` correctly identified as a genuine
+multi-file writer while the five verifiers resolve to `.atoma-probes.json`
+alone. ALL, not ANY — one round-6 fallback named the manifest ALONGSIDE two
+files the verifier can never write, so a non-empty intersection would let it
+through (ALL refuses 14/14 archived gate fallbacks, ANY 12/14).
+UNPROVABLE ⇒ OFFER, always: a false refusal is permanent and costs a
+zero-token dispatch AND the credit that arms maturation, while a false offer
+costs two tool calls before the deliverable gate — which caught 14 of them
+across rounds 6-7 without one wrong deliverable. Accepted residual, stated so
+nobody "fixes" it: a write via subprocess (`sed -i`) is invisible to the scan.
+Do NOT answer that by treating every spawning body as opaque — all ten corpus
+bodies spawn to replay the CLI, so that rule would make the predicate inert
+again, which is exactly this round's mistake.
+IT APPLIES ONLY ON THE TRUSTED BRANCH, and that gate is load-bearing rather
+than cautious. Simulated over rounds 6-7: filtering EVERY script match refuses
+10 of 11 and takes dispatches from 1 to **ZERO** in both rounds — the three
+successes that carry a script to TRUST=3 are earned on the documentation
+phases this predicate refuses, so filtering them starves the counter that arms
+dispatch. Restricted to trusted matches it is break-even on dispatches (1 → 1)
+and removes all five gate fallbacks per round. The principle the measurement
+exposed: the filter exists to save a WASTED DISPATCH, so where no dispatch is
+possible there is nothing to save and refusing costs only credit.
+THE TWO LAYERS HOLD OPPOSITE DISPOSITIONS ON PURPOSE — do not harmonise them.
+The validator may APPROVE an unchanged file when the evidence exhibits the end
+state; deterministic dispatch returns before any validator and exhibits
+nothing, so an unchanged mutating-subtask file there is still a fallback.
+Covered by `tests/script-write-targets.test.ts` (fixture: the real round-7
+body, which WRITES the manifest and only READS the README — the exact miss).
+
 MEASURED IN ROUND 7, AND IT IS INERT. `scriptWritesFiles` fired ZERO times
 across the round: the compiled verifier contains
 `fs.writeFileSync(manifestPath, …)` — it merges observations back into the
@@ -3401,15 +3504,31 @@ the subtask against the path literals in the body. Statically decidable, and it
 leaves the deliverable gate as the last resort.
 AND ROUND 7 SURFACED A BIGGER COST THAN THE ONE IT WAS CHASING. Cost rose to
 1.00× the control — for the first time in seven rounds even H1 failed — driven
-by 13 escalations against round 6's zero. Validators rejected results as
-"non-JSON prose lacking line numbers … DESPITE EXPLICIT SKILL STEPS REQUIRING
-THEM", triggering three atom branches. **A recipe distilled in run 1 demanded a
-format the L1 could not produce, and the validator enforced it**: a
-badly-distilled recipe can cost more than the compiled path saves. Unrelated to
-the filter (which never ran), unexplained, and it makes round 7's cost column
-noise. Understand this before measuring the dispatch mechanism again — two
-rounds have gone to a mechanism worth ~$0.10/run while this cost ~$0.30/run in
-one round.
+by 13 escalations against round 6's zero.
+THE FIRST DIAGNOSIS PUBLISHED HERE WAS WRONG, and the way it was wrong is the
+part to carry: it blamed "a recipe distilled in run 1 [that] demanded a format
+the L1 could not produce", naming the event skill
+`recover-non-json-prose-missing-evidence` — whose body does demand line
+numbers. Offline replay of the traces shows that skill was **learned in run 1
+and never injected once** (0 matches). It cannot have caused anything. The
+diagnosis had been built by reading one validator complaint and inferring a
+cause instead of checking whether the named mechanism ever ran — the same
+error as round 3's, one round later.
+THE REAL CAUSE is a validator semantics gap on IDEMPOTENT work: an earlier
+sequential phase applied the edit, a later phase whose subtask text still said
+"apply ONE minimal edit" correctly reported it done, and the validator rejected
+the honest report — four more times — because the task text mandates an edit.
+It was NOT short of evidence: all 8 rejections carried a ground-truth block,
+and one quoted the edited line verbatim with six verified invocations. Fixed by
+the QUOTED SPAN check + the ALREADY-SATISFIED rule (see the two entries in
+Architecture invariants).
+AND THE COST COLUMN IS READABLE AFTER ALL. The damage is confined to 2 of 6
+runs ($1.09 and $1.38 against a $0.26 mean); the other four read **$0.2607/run,
+2.24× the control** — reproducing round 6's 2.05× almost exactly, with the
+held-out task at 1.90×. The cascade alone accounts for $0.325/run. Note the
+exclusion is legitimate ONLY because the mechanism was identified, is absent
+from 302 other runs, and is unrelated to the change under test; n=4 is thin and
+the exclusion was decided after seeing the data.
 THE ONE CLEAN RESULT: correctness 2 of 9 → 5 of 6 → 6 of 6 across rounds 5-7,
 while dispatch volume went 10 → 1 → 1. The gate works; the trade is currently
 priced badly.

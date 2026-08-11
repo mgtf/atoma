@@ -1,4 +1,4 @@
-import { scriptWritesFiles, subtaskMutatesFiles } from '../src/skills/lifecycle.js';
+import { subtaskMutatesFiles } from '../src/skills/lifecycle.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -592,6 +592,23 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
 });
 
 describe('deliverable gate — a script cannot report success for a file it never wrote', () => {
+  // NOTE ON LAYERING (2026-08-11): the match-time capability test now refuses a
+  // script whose PROVABLE write destinations miss the files a mutating subtask
+  // names, so the provable case never reaches dispatch at all. This describe
+  // therefore uses a body whose destination is UNPROVABLE — a runtime variable
+  // — which is exactly the residual the gate is the last resort for. The two
+  // layers hold OPPOSITE dispositions on purpose: refuse the match when the
+  // mismatch is proven, dispatch-then-gate when it is not.
+  //
+  // The match-filter half is covered by unit tests in
+  // tests/script-write-targets.test.ts, not end-to-end here. An end-to-end
+  // version was written and DELETED: when the filter empties the catalogue
+  // matchSkill short-circuits with no LLM call, so the mock's fixed enqueue
+  // order shifts and the run dies on schema validation instead of on the
+  // behaviour under test. It passed with the filter neutralised — i.e. it
+  // proved nothing. Reinstate it only with a harness that can assert on the
+  // catalogue itself rather than on a response queue.
+  const OPAQUE_SCRIPT_BODY = `import fs from 'node:fs';\nconst target = process.argv[3];\nfs.writeFileSync(target, 'x');\nconsole.log(JSON.stringify({ output: { built: true }, summary: 'script ran clean' }));`;
   // MEASURED on the real compiled verifier: handed the subtask "Write a
   // README.md documenting the CLI usage", it replayed the manifest,
   // printed a valid envelope, exited 0 and wrote no README. This path
@@ -650,7 +667,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
       whenToUse: 'when the subtask asks for the standard config scaffold',
       kind: 'script',
       language: 'node',
-      body: SCRIPT_BODY,
+      body: OPAQUE_SCRIPT_BODY,
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
       skills2.recordSuccess('Hydrogen', 'scaffold-config');
@@ -834,36 +851,4 @@ describe('subtaskMutatesFiles — does the subtask ask for a file to CHANGE', ()
   });
 
 
-});
-
-describe('scriptWritesFiles — can this compiled body produce a deliverable', () => {
-  it('recognises the write APIs a compiled script actually uses', () => {
-    for (const call of [
-      'fs.writeFileSync(p, out)',
-      'writeFile(p, out, cb)',
-      'fs.appendFileSync(p, line)',
-      'fs.mkdirSync(dir, { recursive: true })',
-      'fs.copyFileSync(a, b)',
-      'fs.renameSync(a, b)',
-    ]) {
-      expect(scriptWritesFiles(`import fs from 'node:fs';\n${call};`)).toBe(true);
-    }
-  });
-
-  it('reports a pure verifier as non-writing', () => {
-    // Shape of the round-6 script: reads the manifest, replays, compares,
-    // prints an envelope. It cannot serve an "update README.md" subtask.
-    const body = [
-      "import fs from 'node:fs';",
-      "const m = JSON.parse(fs.readFileSync('.atoma-probes.json', 'utf8'));",
-      'for (const e of m.entries) { execSync(e.cmd); }',
-      "console.log(JSON.stringify({ output: {}, summary: 'ok' }));",
-    ].join('\n');
-    expect(scriptWritesFiles(body)).toBe(false);
-  });
-
-  it('errs toward "writes" so the filter can only remove clearly read-only bodies', () => {
-    // Over-filtering would remove the dispatches this exists to protect.
-    expect(scriptWritesFiles('stream.write(chunk)')).toBe(true);
-  });
 });
