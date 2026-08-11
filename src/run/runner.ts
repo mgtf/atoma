@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { modelForTier } from '../core/models.js';
@@ -43,6 +44,13 @@ export interface RunnerArgs {
    * cascade. See `src/run/baseline.ts` for why it lives here.
    */
   baseline: boolean;
+  /**
+   * Directory copied into the workspace AFTER it is prepared. A maintenance
+   * task needs an artefact to maintain, and every run starts from an archived
+   * empty workspace — without a seed the task degrades into a build task,
+   * which is the shape we already measured four times.
+   */
+  seed?: string;
 }
 
 /**
@@ -65,7 +73,10 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
   // Egress implies a container: there is nothing to proxy without one.
   let egress = process.env['ATOMA_EGRESS'] === '1';
   let baseline = process.env['ATOMA_BASELINE'] === '1';
-  for (const a of argv) {
+  let seed: string | undefined = process.env['ATOMA_SEED'] || undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === '--seed') { seed = argv[++i]; continue; }
     if (a === '--baseline') baseline = true;
     else if (a === '--no-baseline') baseline = false;
     else if (a === '--no-learn-skills') noLearnSkills = true;
@@ -80,7 +91,11 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     else if (goal === undefined) goal = a;
   }
   if (egress) container = true;
-  return { goal, noLearnSkills, noPromoteSkills, noDirectSkills, cleanWorkspace, container, egress, baseline };
+  return {
+    goal, noLearnSkills, noPromoteSkills, noDirectSkills,
+    cleanWorkspace, container, egress, baseline,
+    ...(seed ? { seed } : {}),
+  };
 }
 
 /**
@@ -243,6 +258,18 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // its root at construction, so archiving the directory afterwards would
   // leave every tool pointing at the archive.
   profile.prepareWorkspace(workspaceRoot, args.cleanWorkspace);
+  // Seed AFTER preparation — prepareWorkspace archives the whole directory, so
+  // copying first would archive the fixture along with the previous run.
+  if (args.seed) {
+    const from = resolve(args.seed);
+    if (!existsSync(from)) {
+      console.error(`--seed: no such directory: ${from}`);
+      process.exit(2);
+    }
+    mkdirSync(workspaceRoot, { recursive: true });
+    cpSync(from, workspaceRoot, { recursive: true });
+    console.log(`workspace seeded from ${from} (${readdirSync(workspaceRoot).length} entries)`);
+  }
 
   // Local by default; `--container` moves the tool layer into a container
   // with only the workspace mounted and no route out. The swap is possible

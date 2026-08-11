@@ -46,6 +46,12 @@ export type Arm = 'baseline' | 'atoma';
 export interface BenchmarkTask {
   readonly id: string;
   readonly goal: string;
+  /**
+   * Directory copied into the workspace after it is cleaned. A MAINTENANCE
+   * task needs an artefact to maintain; without this the task degrades into
+   * the build shape rounds 1-4 already measured.
+   */
+  readonly seed?: string;
 }
 
 export interface BenchmarkConfig {
@@ -236,7 +242,10 @@ async function runOne(
     goal: task.goal,
     timeoutMs: cfg.timeoutMs,
     logPath: join(logsDir, `${label}.log`),
-    extraArgs: arm === 'baseline' ? ['--baseline'] : [],
+    extraArgs: [
+      ...(arm === 'baseline' ? ['--baseline'] : []),
+      ...(task.seed ? ['--seed', task.seed] : []),
+    ],
     extraEnv,
   });
 
@@ -283,6 +292,7 @@ async function main(): Promise<void> {
   console.log(`provider     : ${process.env['ATOMA_LLM'] ?? 'anthropic (default)'}`);
   console.log(`primary task : ${cfg.primary.id}`);
   console.log(`held-out task: ${cfg.heldOut.id}`);
+  if (cfg.primary.seed) console.log(`workspace seed : ${cfg.primary.seed}`);
   console.log(
     `plan         : ${cfg.baselineRuns} baseline + ${cfg.atomaRuns} atoma on the primary, ` +
       `then ${cfg.heldOutBaselineRuns} + ${cfg.heldOutAtomaRuns} on the held-out = ${total} runs`

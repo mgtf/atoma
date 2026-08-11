@@ -328,3 +328,56 @@ patching and re-derive it from the traces.
 **Scale.** 2 baseline (drift check, and weaker than before at n=2 — the
 insulation result already has three rounds behind it), 9 atoma, 1 held-out.
 Output: `benchmark/results-round4.csv`.
+
+---
+
+## ROUND 5 — pre-registration, 2026-08-11, written before any round-5 run
+
+Rounds 1-4 all used from-scratch BUILD tasks. Round 4 established why the
+zero-token path never fires there: those tasks decompose into
+build → record → document, and a compiled verifier serves a RE-VERIFICATION
+phase, which only exists when an artefact changed after it was recorded. That
+is maintenance work. Four rounds measured the absence of a phase; this one
+supplies it.
+
+**H5 — where the re-verification phase exists, the zero-token path fires and
+holds.** From an empty registry and empty skill store, on a MAINTENANCE task:
+a verification recipe compiles, and the resulting script records **two or more
+successful deterministic dispatches** without being demoted.
+
+Round 4's values, fixed here: 1 compilation, 0 dispatches, 0 contract failures,
+0 demotions, and the compiled verifier matched 0 times in 9 runs.
+
+**WHAT MAKES IT A MAINTENANCE TASK.** A new `--seed` flag copies
+`benchmark/seeds/wclite` into each run's freshly-cleaned workspace: a working
+CLI, a README documenting five invocations, and a `.atoma-probes.json`
+recording what each produced. The goal asks for ONE small behaviour change and
+then a re-verification of everything else against those records. Without the
+seed the task would degrade into the build shape already measured four times.
+
+**THE OBVIOUS OBJECTION, stated rather than waited for.** This task contains a
+re-verification phase by construction, and a verification recipe is exactly
+what should match it — am I engineering the result? Partly, and deliberately:
+the finding under test is *"the phase does not exist in build tasks"*, so the
+test is whether the machinery works **when it does exist**. What is NOT
+engineered is the recipe (the store starts empty, so it is distilled from
+run 1), whether the compiler accepts it, whether the prefilter re-matches it,
+or whether dispatch survives. Those four are the hypothesis.
+
+**Thresholds at 1/1** (`ATOMA_PROMOTE_THRESHOLD=1`, `ATOMA_TRUST_THRESHOLD=1`),
+continuing round 4's deviation and going one further, so a dispatch can happen
+by run 3 in an 8-run arm. Cost, stated up front: a recipe compiles on ONE
+success and a script arms on ONE, so this measures dispatch STABILITY with
+almost no evidence behind the promotion — and the trust threshold also governs
+the atom-type fast-path, so validators are skipped after a single success
+across the whole run. A "delivered" outcome is correspondingly weaker evidence;
+the executing correctness scorer is the real gate. The demotion rule is
+unchanged at two contract failures.
+
+**H5 is refuted if** no verification recipe compiles, or the compiled script
+fails to reach two successful dispatches. A refutation here would be the
+strongest negative result of the series: it would mean the zero-token path does
+not work even on the phase shape it was designed for.
+
+**Scale.** 2 baseline (reference only, n=2), 8 atoma, 1 second maintenance task
+as the generalisation control. Output: `benchmark/results-round5.csv`.

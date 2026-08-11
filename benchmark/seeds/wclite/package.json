@@ -1,0 +1,6 @@
+{
+  "name": "wclite",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": { "wclite": "./wclite.js" }
+}

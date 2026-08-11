@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "cmd": "node wclite.js sample.txt",
+      "exitCode": 0,
+      "stdout": "lines 3\nwords 6\nchars 36\n"
+    },
+    {
+      "cmd": "node wclite.js --lines sample.txt",
+      "exitCode": 0,
+      "stdout": "3\n"
+    },
+    {
+      "cmd": "node wclite.js --words sample.txt",
+      "exitCode": 0,
+      "stdout": "6\n"
+    },
+    {
+      "cmd": "node wclite.js --help",
+      "exitCode": 0,
+      "stdout": "Usage: node wclite.js [--lines|--words|--chars] <file>\n  --lines   count lines only\n  --words   count words only\n  --chars   count characters only\n  (no flag) print all three\n"
+    },
+    {
+      "cmd": "node wclite.js missing.txt",
+      "exitCode": 2,
+      "stdout": ""
+    }
+  ]
+}

@@ -1,15 +1,17 @@
 {
-  "_comment": "Pre-registered configuration. See PROTOCOL.md. Do not edit between the control and treatment arms of a run \u2014 the whole point is that both arms receive byte-identical goal text.",
+  "_comment": "ROUND 5 \u2014 maintenance family. See PROTOCOL.md. The seed is what makes this a maintenance task rather than a build task: every run starts from a working CLI, its README and its recorded probe manifest.",
   "primary": {
-    "id": "csvstat",
-    "goal": "Build a Node.js command-line tool named csvstat that reads a CSV file and prints a per-column statistical report. Requirements: (1) infer each column's type as numeric, date or text; (2) for numeric columns report count, missing, min, max, mean, median and standard deviation; (3) for text columns report count, missing, number of distinct values and the three most frequent values with their counts; (4) support --format table|json defaulting to table, --columns a,b,c to restrict the report to named columns, and --help; (5) exit with code 2 and a clear message on stderr when the file does not exist or the CSV is malformed, and exit 0 on success; (6) handle quoted fields containing commas. Use no third-party dependencies. Also write a README.md documenting every flag with at least one worked example invocation and its output."
+    "id": "wclite-maint",
+    "seed": "benchmark/seeds/wclite",
+    "goal": "The workspace already contains a working wclite CLI (wclite.js), its README.md documenting five verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: --chars must now count characters EXCLUDING trailing newlines at the end of the file. Apply that change to wclite.js. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI, do not add features, and leave every other documented behaviour exactly as it is."
   },
   "heldOut": {
-    "id": "logdigest",
-    "goal": "Build a Node.js command-line tool named logdigest that reads a newline-delimited log file and prints a summary report. Requirements: (1) count total lines and lines per log level (ERROR, WARN, INFO, DEBUG) detected case-insensitively; (2) report the five most frequent message templates, where a template is the message with numbers and quoted strings replaced by placeholders; (3) report the time span between the first and last parseable ISO-8601 timestamp; (4) support --format table|json defaulting to table, --level to filter to one level, --top N to change how many templates are shown, and --help; (5) exit with code 2 and a clear message on stderr when the file does not exist or is unreadable, and exit 0 on success. Use no third-party dependencies. Also write a README.md documenting every flag with at least one worked example invocation and its output."
+    "id": "wclite-maint-2",
+    "seed": "benchmark/seeds/wclite",
+    "goal": "The workspace already contains a working wclite CLI (wclite.js), its README.md documenting five verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: passing a directory instead of a file must exit 2 with the message 'wclite: not a regular file: <path>' rather than the current read error. Apply that change to wclite.js. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI and do not add features."
   },
   "baselineRuns": 2,
-  "atomaRuns": 9,
+  "atomaRuns": 8,
   "heldOutBaselineRuns": 0,
   "heldOutAtomaRuns": 1,
   "timeoutMs": 900000
