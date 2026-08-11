@@ -421,3 +421,37 @@ only, never on TRUST.
 Maintenance runs are ~180s, so this is roughly 35 minutes. With promote=1,
 compilation should land by run 2, leaving four runs of dispatch to observe.
 Output: `benchmark/results-round6.csv`.
+
+---
+
+## ROUND 7 — pre-registration, 2026-08-11, written before any round-7 run
+
+Round 6 restored correctness (2 of 9 → 5 of 6) by gating dispatches that left a
+named file untouched, and paid for it in volume: dispatches 10 → 1, ratio
+4.69× → 2.05×. Every one of the five gate catches was the same shape — a
+read-only compiled verifier matched to a subtask that had to WRITE. The fix
+since: `matchSkill` filters the catalogue, so a `kind: script` with no write
+surface is never offered for a subtask carrying a mutating verb.
+
+**H7 — filtering upstream recovers the volume without giving back the
+correctness.** Same maintenance task, same thresholds (`PROMOTE=1`,
+`TRUST=3`), three conditions:
+
+1. **Dispatches recover: ≥ 5** (round 6: 1; round 5: 10).
+2. **Correctness holds: ≥ 5 of 6** on the independent scorer (round 6: 5 of 6;
+   round 5: 2 of 9).
+3. **Gate fallbacks fall to 0 or 1** (round 6: 5). This is the direct test of
+   the filter: a catch that still happens is a write-subtask the filter failed
+   to keep away from a read-only script.
+
+**H7 is refuted if** dispatches stay at round 6's level — the filter would then
+not be the binding constraint — or if correctness drops back, which would mean
+volume was recovered by letting the wrong dispatches through again.
+
+**The failure mode to watch, since it is the one the filter could introduce:**
+dispatches could recover while correctness drops, if the write detector is so
+generous that read-only scripts still slip through. `scriptWritesFiles` errs
+toward "writes" by design, so this is the plausible way the fix goes wrong.
+
+**Scale.** 2 baseline, 6 atoma, 1 held-out — same as round 6 so the two are
+directly comparable. Output: `benchmark/results-round7.csv`.
