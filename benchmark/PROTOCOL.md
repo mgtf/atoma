@@ -455,3 +455,64 @@ toward "writes" by design, so this is the plausible way the fix goes wrong.
 
 **Scale.** 2 baseline, 6 atoma, 1 held-out — same as round 6 so the two are
 directly comparable. Output: `benchmark/results-round7.csv`.
+
+## ROUND 8 — pre-registration, 2026-08-11, written before any round-8 run
+
+Round 7 refuted H7 on all three conditions, and the post-mortem found the
+reason was not the filter. Two separate defects, both now fixed:
+
+- **The filter never ran.** `scriptWritesFiles` asked "does this body write?"
+  and every compiled verifier writes its own probe manifest, so it fired ZERO
+  times. Replaced by `scriptCanServeSubtask`, a per-DESTINATION test, applied
+  only on the TRUSTED branch (simulation: filtering every match takes
+  dispatches from 1 to zero, because the successes that arm dispatch are
+  earned on the documentation phases the predicate refuses).
+- **A validator semantics gap paid for the whole cost column.** An earlier
+  sequential phase applied the edit; a later phase reported it done and was
+  rejected four more times because its subtask text says "apply ONE minimal
+  edit". Two of six runs, $0.325/run. Fixed by the QUOTED SPAN check in the
+  read-back probe plus the ALREADY-SATISFIED rule.
+
+**H8 — with the cascade closed and the predicate live, the maintenance
+family reads its true economics, and the dispatch path is no worse.** Same
+task, same thresholds (`PROMOTE=1`, `TRUST=3`), four conditions:
+
+1. **Zero already-satisfied rejections.** The count of validator rejections
+   whose reasoning turns on the child reporting work already done. Round 7: 5,
+   across 2 runs. This is the primary metric — it is the mechanism under test.
+2. **No cascade run.** No atoma run above **$0.90**. Round 7's two affected
+   runs cost $1.09 and $1.38 against a $0.26 mean for the rest; the threshold
+   sits well above the healthy spread and well below both.
+3. **The predicate actually fires: ≥ 3 refusals**, and **gate fallbacks ≤ 1**
+   (round 7: 0 and 5). Registered because "it fired zero times" is exactly how
+   the previous fix failed, and a fix that cannot be observed is not a fix.
+4. **Correctness holds: ≥ 5 of 6** on the independent executing scorer
+   (round 7: 6 of 6).
+
+**H8 is refuted if** condition 1 or 4 fails. Conditions 2 and 3 are
+diagnostic: 2 failing without 1 failing means the cascade has another cause I
+have not found, and 3 failing means the predicate is still mis-placed rather
+than wrong.
+
+**Cost is NOT a registered condition, deliberately.** The control arm has
+swung $0.82 → $1.68 across rounds on a subscription-served model, and round
+7's own conclusion was that a single mechanism moved the mean by $0.325. A
+ratio computed on 6 runs cannot separate the fix from that. It is reported.
+
+**The failure mode to watch, since it is the one THIS fix could introduce:**
+correctness dropping while everything else improves. The already-satisfied
+rule tells the validator that a completed end state is compliant even when
+the subtask is phrased as an instruction to produce it — which is exactly
+what a child that skipped its work would claim. The rule demands supervisor
+evidence (a QUOTED SPAN FOUND line) rather than the child's own quote, and an
+adversarial pass was run against a fabricated payload before shipping, but
+the honest test is the scorer. **A correctness drop refutes the fix outright,
+whatever the cost column says** — that is the lesson round 5 taught at the
+price of seven wrong deliverables.
+
+**Also observed, not decided on:** how often `QUOTED SPAN … — FOUND` appears
+in the traces at all. If it never appears, condition 1 passing would be luck
+rather than mechanism.
+
+**Scale.** 2 baseline, 6 atoma, 1 held-out — same as rounds 6 and 7 so all
+three compare directly. Output: `benchmark/results-round8.csv`.
