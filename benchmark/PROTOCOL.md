@@ -381,3 +381,43 @@ not work even on the phase shape it was designed for.
 
 **Scale.** 2 baseline (reference only, n=2), 8 atoma, 1 second maintenance task
 as the generalisation control. Output: `benchmark/results-round5.csv`.
+
+---
+
+## ROUND 6 — pre-registration, 2026-08-11, written before any round-6 run
+
+Round 5 got the zero-token path working on maintenance (10 dispatches, 0
+failures, 4.69×) and simultaneously shipped 7 of 9 deliverables with a README
+contradicting its own artefact. Two things follow, and round 5 cannot separate
+them because both knobs moved together.
+
+**THE KNOBS ARE SEPARATE AND THIS ROUND SEPARATES THEM.**
+`ATOMA_PROMOTE_THRESHOLD=1` makes a recipe compile after one success — round 5
+suggests that is fine, since the resulting script produced ten clean
+dispatches. `ATOMA_TRUST_THRESHOLD=1` ALSO skips the atom-type validators
+run-wide after one success, and that is the plausible reason nothing caught the
+stale README: a RESULT validator runs the zero-token ground-truth probe, which
+re-reads claimed files. Round 6 keeps **PROMOTE=1** and restores **TRUST=3**.
+
+**H6, three parts, all within-round:**
+1. **The gate fix works.** Deliverable correctness returns to 9/9 on the
+   independent scorer, against round 5's 7 of 9 with a stale README.
+2. **`promote=1` survives with validators on.** At least one recipe compiles
+   and the script reaches two or more successful dispatches without demotion.
+3. **The fix does not simply kill dispatch.** Deterministic phases stay above
+   zero. If correctness returns only because every dispatch now falls back, the
+   gate is too strict and that is a refutation of the fix, not a success.
+
+Part 3 is the one worth stating loudly: the cheapest way to pass part 1 is to
+never dispatch, and that would be the wrong answer.
+
+**Not a default change yet.** One round and one compiled recipe is anecdote by
+this project's own rule. If round 6 reproduces round 5's dispatch behaviour
+with validators on and correctness restored, that is two rounds and the case
+for lowering the shipped default becomes arguable — on the PROMOTE threshold
+only, never on TRUST.
+
+**Scale.** 2 baseline (drift), 6 atoma, 1 held-out — deliberately short.
+Maintenance runs are ~180s, so this is roughly 35 minutes. With promote=1,
+compilation should land by run 2, leaving four runs of dispatch to observe.
+Output: `benchmark/results-round6.csv`.

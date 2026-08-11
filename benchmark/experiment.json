@@ -11,7 +11,7 @@
     "goal": "The workspace already contains a working wclite CLI (wclite.js), its README.md documenting five verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: passing a directory instead of a file must exit 2 with the message 'wclite: not a regular file: <path>' rather than the current read error. Apply that change to wclite.js. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI and do not add features."
   },
   "baselineRuns": 2,
-  "atomaRuns": 8,
+  "atomaRuns": 6,
   "heldOutBaselineRuns": 0,
   "heldOutAtomaRuns": 1,
   "timeoutMs": 900000
