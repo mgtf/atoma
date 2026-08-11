@@ -43,20 +43,76 @@ seven rounds even H1 failed: cumulative atoma cost never dropped below the
 baseline.
 
 The proximate cause is 13 escalations against round 6's zero, including two
-runs at 43 LLM calls. The validators were rejecting results as *"non-JSON prose
-lacking line numbers, old/new text, or probe results **despite explicit skill
-steps requiring them**"*, which triggered three atom branches
-(Methane → Ammonia, CarbonDioxide → Sucrose, Sucrose → Ethanol).
+runs at 43 LLM calls.
 
-So a recipe distilled in run 1 demanded a structured format the L1 then failed
-to produce, and the validator enforced it. **A badly-distilled recipe can cost
-more than the compiled path saves** — a mechanism this series had not shown
-before, and one that has nothing to do with the filter (which never ran).
+> **Correction (offline trace analysis, 2026-08-11).** The paragraph that stood
+> here blamed a badly-distilled recipe that "demanded a structured format the
+> L1 then failed to produce". **That diagnosis is wrong**, and it was built the
+> same way round 3's was: by reading one validator complaint and inferring a
+> cause instead of checking whether the named mechanism ever ran. The recipe it
+> accused — the event skill `recover-non-json-prose-missing-evidence`, whose
+> body does demand line numbers and old/new text — was **learned in run 1 and
+> never injected once** (0 matches across the round). It cannot have caused
+> anything. The real cause is below.
 
-What this means for the numbers: **round 7's economics are not interpretable.**
-A factor able to double the cost of a round, unrelated to the change under
-test, makes the cost column noise. The correctness column is still readable,
-and it is the round's one clean result.
+### The real cause: already-satisfied work read as non-compliance
+
+The cost is concentrated in **two of the six runs** — $1.0919 and $1.3776
+against a $0.26 mean for the other four. Those two carry 10 of the round's
+rejections, all three branches and both fallbacks. Their dominant rejection
+motif, verbatim:
+
+> *[3]* "Child claims line 20 'already correctly' excludes trailing newlines… No edit was applied"
+> *[4]* "child claims no edit is needed because line 24 already excludes trailing newlines"
+> *[5]* "Child claims 'no edit needed'… However, **the task presupposes an edit is required**"
+> *[6]* "Child reports no edit was needed, contradicting the task's mandate"
+
+**An earlier phase had already applied the edit.** A later phase, whose subtask
+text still read *"apply ONE minimal edit to wclite.js"*, correctly found the
+work done and said so — and the validator rejected the honest report four more
+times because the subtask text mandates an edit. Under `sequential` aggregation
+the workspace is shared, so this is structural: the subtask description is a
+snapshot of intent written before any phase ran, and the validator reads it as
+the contract.
+
+The validator was **not** short of evidence. All 8 rejections carried a
+ground-truth block, and the one behind rejection [4] quoted the file itself:
+
+```
+Line 24 of wclite.js:
+const chars = text.replace(/\n+$/, '').length;
+… All 6 documented invocations verified … --chars sample.txt → exit 0, 35
+```
+
+That is the edit, applied, with the correct post-edit output. It was rejected
+anyway. One rejection also reasons that a shell probe running the file from
+disk "may reflect a transient in-memory state" — not a judgment call but a
+factual error about what `node wclite.js` does.
+
+`VALIDATION_SYSTEM_PROMPT` has **no rule covering work that is already
+satisfied** (no match for already-done / no-op / idempotent anywhere in
+`verdict.ts`). Absent one, honest convergence is indistinguishable from evasion
+and the task text wins.
+
+### How rare, measured
+
+Across **302 archived runs** in seven corpora — including the 121-run main
+corpus with 58 rejections — this rejection class appears **5 times, all in
+round 7, in 2 runs**. Rounds 4, 5 and 6 recorded zero rejections of any kind.
+So it is not "maintenance always does this": it is plan variance, and it is
+rare and expensive rather than common and cheap.
+
+### What it does to the numbers
+
+Excluding the two affected runs, round 7 reads **$0.2607 per run, 2.24× the
+control** — reproducing round 6's 2.05× almost exactly, with the held-out
+generalisation task at 1.90×. The cascade alone accounts for **$0.325 per run**,
+which is the entire distance between 1.00× and 2.24×.
+
+That is a stronger statement than "not interpretable": the round's economics
+are interpretable once a *named, rare, unrelated* mechanism is accounted for.
+It does not rehabilitate H7 — dispatches still stayed at 1 and the filter still
+never fired — but the cost column is no longer noise.
 
 ## What is actually established
 
@@ -67,17 +123,35 @@ confirmation that the deliverable gate does its job. Correctness has now gone
 
 ## Next, in order
 
-1. **Fix the predicate**: named-path comparison instead of any-write detection.
-2. **Understand the escalation cascade** before measuring anything else. A
-   distilled recipe that sets a format the L1 cannot meet is a self-inflicted
-   cost, and until it is understood every future round's cost column is
-   suspect.
-3. Only then re-run. Two rounds have now been spent on a mechanism worth about
-   $0.10 per run; the escalation cascade cost $0.30 per run in a single round.
+1. **An already-satisfied verdict rule.** The validator must be able to approve
+   a phase whose work is already done — but only when the child EXHIBITS the
+   end state (quotes the line, shows the probe), never on assertion alone. That
+   distinction is exactly what separated the two cases here, and the evidence
+   needed to draw it already reaches the validator. Worth $0.325 per run on
+   this family, in the one prompt that is constant and cached.
+   The wording has to be tight: this same prompt is what catches fabricated
+   deliverables, and "already done" is precisely what a lazy child would claim.
+2. **Fix the predicate**: named-path comparison instead of any-write detection.
+   Unchanged in substance, demoted in priority — it is worth about $0.10 per
+   run against the cascade's $0.325.
+3. Only then re-run.
+
+Deliberately NOT proposed: a plan-side rule against assigning one mutation to
+two phases. It treats a symptom of plan variance, the plan prompt is this
+project's most-edited surface, and it does nothing when variance produces the
+shape anyway. The verdict rule is the safety net regardless of plan quality.
 
 ## Threats to validity
 
 - Six atoma runs, one task, one compiled recipe.
-- The escalation cascade is unattributed. It could be model variance of a size
-  not previously seen, or a property of what run 1 happened to distil.
+- The 2.24× figure comes from excluding two of six runs. That is legitimate
+  only because the excluded mechanism was identified, is absent from 302 other
+  runs, and is unrelated to the change under test — but n=4 is thin, and the
+  exclusion was decided after seeing the data.
 - The correctness scorer is bespoke to this task.
+- Three hypotheses were refuted during this analysis before the fourth held
+  (a fragile-evidence recipe, a self-referential trigger loop, a missing
+  evidence block). The first two failed on "the mechanism never ran"; the third
+  on reading `e.prompt` where the field is `e.userContent`. Each was checked
+  against the traces rather than argued, which is the only reason the fourth is
+  worth anything.

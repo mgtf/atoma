@@ -94,6 +94,11 @@ export interface GroundTruthFacts {
   probeToolFailure: boolean;
   /** The child's own probe record contains a mismatch. */
   selfReportedMismatch: boolean;
+  /**
+   * The RESULT quoted a span it ATTRIBUTED to a file, and that file does not
+   * contain it. Rendered as `path: QUOTED SPAN … — NOT FOUND`.
+   */
+  quotedSpanNotFound: string[];
 }
 
 export function emptyGroundTruthFacts(): GroundTruthFacts {
@@ -102,6 +107,7 @@ export function emptyGroundTruthFacts(): GroundTruthFacts {
     emptyClaimedFiles: [],
     probeToolFailure: false,
     selfReportedMismatch: false,
+    quotedSpanNotFound: [],
   };
 }
 
@@ -126,7 +132,13 @@ export async function checkGroundTruth(args: {
     // The child's own probe record says an expectation did not hold. Nothing
     // read this before, so a self-reported mismatch could sail through the
     // trust fast-path unexamined.
-    facts.selfReportedMismatch;
+    facts.selfReportedMismatch ||
+    // The RESULT quoted file content that the file does not contain. This is
+    // the hardest evidence the probe can produce short of a missing file:
+    // both sides were read by the supervisor, so it is a fact, not a
+    // judgment. It is what makes an "already satisfied" claim checkable —
+    // without it a fabricated quote is indistinguishable from a real one.
+    facts.quotedSpanNotFound.length > 0;
   return { block, contradiction };
 }
 
@@ -292,6 +304,56 @@ const FILE_PROBE_MAX_FILES = 6;
 const FILE_PROBE_EXCERPT_CHARS = 400;
 
 /**
+ * QUOTED SPAN check bounds. A span must be long enough that finding it is
+ * evidence rather than coincidence — `const x = 1` occurs in half the
+ * workspace — and short enough spans are where a false NOT-FOUND would come
+ * from, which is the one direction this check must never fail in.
+ */
+const QUOTED_SPAN_MIN_CHARS = 16;
+const QUOTED_SPAN_MAX = 6;
+const QUOTED_SPAN_ECHO_CHARS = 160;
+
+/**
+ * Spans a RESULT ATTRIBUTES to a named file. Attribution is the whole point:
+ * an unattributed backtick span cannot produce a contradiction, because "this
+ * string is in no file I read" is not evidence of anything when the child
+ * never said which file it came from.
+ *
+ * The shapes are the ones the evidence contract actually induces — children
+ * are told to quote read_file excerpts, and they render them as
+ * `Line 24 of wclite.js:` followed by the line, or inline as
+ * `line 24 of wclite.js now reads: …`. Both were observed verbatim in the
+ * round-7 traces.
+ */
+/**
+ * ATTRIBUTED shapes — a span tied to a named file. Only these can produce a
+ * NOT-FOUND contradiction, because only here did the child say WHICH file the
+ * content came from. Both were observed verbatim in the round-7 traces
+ * ("Line 24 of wclite.js:\nconst chars = …", "wclite.js line 19
+ * implementation:\nconst chars = …").
+ */
+const QUOTED_SPAN_ATTRIBUTED_RES: RegExp[] = [
+  // "Line 24 of wclite.js:" / "line 24 of wclite.js now reads:" then the span
+  /(?:line|ligne)\s+\d+\s+(?:of|de)\s+([\w./-]+\.[A-Za-z]\w*)[^\n:]*:?[^\S\n]*\n[^\S\n]*(\S[^\n]*)/gi,
+  /(?:line|ligne)\s+\d+\s+(?:of|de)\s+([\w./-]+\.[A-Za-z]\w*)\s+(?:now\s+)?(?:reads|is|contains)\s*:?[^\S\n]*`?([^\n`]+)/gi,
+  // "wclite.js line 19 implementation:" / "wclite.js line 20 persisted:" — the
+  // path leads. Same content, different word order; children use both freely.
+  /([\w./-]+\.[A-Za-z]\w*)\s+(?:line|ligne)\s+\d+[^\n:]*:[^\S\n]*\n?[^\S\n]*`?([^\n`]+)/gi,
+];
+
+/**
+ * UNATTRIBUTED shapes — a span the child quoted without saying where from.
+ * These are checked against every file the probe read and can only ever
+ * produce positive corroboration (FOUND); a miss stays SILENT, because "this
+ * string is in none of the files I happened to read" is not evidence.
+ */
+const QUOTED_SPAN_FREE_RES: RegExp[] = [
+  /`([^`\n]+)`/g, // backtick-quoted
+  /^[^\S\n]*(?:OLD|NEW|AVANT|APRES|APRÈS)\s*:[^\S\n]*(\S[^\n]*)/gim, // diff-style
+  /(?:^|:)[^\S\n]*((?:const|let|var|function|return|import|export|class|def)\s[^\n]*)/gim, // a code line, at line start or after a label
+];
+
+/**
  * File extensions the FREE-TEXT sweep will accept. A closed allowlist, not a
  * shape heuristic, because dotted identifiers are everywhere in these
  * summaries and any "looks like name.ext" rule swallows them: the slug-cli
@@ -344,6 +406,98 @@ const NON_FILE_PROSE_TOKENS = new Set([
 export function extractResultFilePaths(payload: unknown): string[] {
   const claims = extractResultFileClaims(payload);
   return [...claims.structured, ...claims.mentioned].slice(0, FILE_PROBE_MAX_FILES);
+}
+
+/**
+ * Spans of file content the RESULT quotes AND attributes to a named file.
+ *
+ * WHY THIS EXISTS: the read-back probe renders a 400-char HEAD of each file,
+ * so on anything larger it is silent about the region children actually quote
+ * — the round-7 wclite.js line sat at byte 1000 of 1312. A child reporting
+ * "no edit needed, line 24 already reads X" was therefore judged on its own
+ * word, and the validator (correctly, given what it could see) refused to take
+ * it. Checking the quote against the whole file turns that standoff into a
+ * fact.
+ *
+ * Deliberately ATTRIBUTED-only and length-bounded: the failure mode to avoid
+ * is a false NOT-FOUND, which would fabricate a contradiction on a correct
+ * deliverable — the exact defect `PROBEABLE_EXTENSIONS` exists to prevent one
+ * layer up. Exported for tests.
+ */
+export function extractQuotedSpans(payload: unknown): Array<{ path?: string; span: string }> {
+  // Walk the payload's STRING VALUES rather than stringifying it. A
+  // stringify-then-unescape pass looks equivalent and is not: source code
+  // routinely contains a literal backslash-n — the regex stripping trailing
+  // newlines, which is the exact span at issue in round 7 — and JSON escapes
+  // that to a DOUBLE backslash, so a blanket unescape cuts the span in half.
+  // Measured: it truncated the one span the first draft managed to extract.
+  // Walking sidesteps escaping entirely.
+  const texts: string[] = [];
+  // 'summary' FIRST: the evidence contract puts the == GROUND TRUTH == block
+  // there, and walking key order instead starved it — measured, a payload whose
+  // 'output' held 45 strings pushed summary past the budget and the quote went
+  // unchecked on a run that had one.
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const s = (payload as Record<string, unknown>)['summary'];
+    if (typeof s === 'string') texts.push(s);
+  }
+  const walk = (v: unknown, depth = 0): void => {
+    if (depth > 6 || texts.length > 200) return;
+    if (typeof v === 'string') { if (!texts.includes(v)) texts.push(v); }
+    else if (Array.isArray(v)) v.forEach((x) => walk(x, depth + 1));
+    else if (v && typeof v === 'object') Object.values(v).forEach((x) => walk(x, depth + 1));
+  };
+  walk(payload);
+
+  const out: Array<{ path?: string; span: string }> = [];
+  const seen = new Set<string>();
+  const push = (span: string, path?: string): void => {
+    const cleaned = span.trim().replace(/^[`"']+/, '').replace(/[`"',.]+$/, '').trim();
+    if (cleaned.length < QUOTED_SPAN_MIN_CHARS) return;
+    const key = `${path ?? '*'} ${cleaned}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(path ? { path, span: cleaned } : { span: cleaned });
+  };
+  for (const text of texts) {
+    for (const re of QUOTED_SPAN_ATTRIBUTED_RES) {
+      re.lastIndex = 0;
+      for (const m of text.matchAll(re)) push(m[2] ?? '', m[1]);
+    }
+    for (const re of QUOTED_SPAN_FREE_RES) {
+      re.lastIndex = 0;
+      for (const m of text.matchAll(re)) push(m[1] ?? '');
+    }
+  }
+  // Attributed spans first: they are the only ones that can set a
+  // contradiction, so the per-call budget must not be spent on backticks.
+  return out.sort((a, b) => (a.path ? 0 : 1) - (b.path ? 0 : 1));
+}
+
+/**
+ * Does `content` contain `span`? Exact first, then with runs of whitespace
+ * collapsed — a child re-typing a line commonly normalises indentation, and
+ * rejecting a correct deliverable over a tab is the failure this check must
+ * not have. Same tolerance principle as the probe manifest's
+ * trailing-newline rule: one narrow, named allowance, nothing else.
+ */
+/**
+ * May this span set a CONTRADICTION if absent? Only if it looks like CODE.
+ * Measured on the round-7 payloads: an attributed pattern matched the PROSE
+ * after a label ("wclite.js line 21 verified: --chars: 35, --lines: 3, ...")
+ * which is absent from the file by construction — a false contradiction on a
+ * correct deliverable, the one outcome this check must never produce. Prose
+ * spans are not discarded, they are downgraded to corroboration-only: a hit
+ * still helps, a miss stays silent.
+ */
+function spanCanContradict(span: string): boolean {
+  return /[=;{}]|\(\)/.test(span);
+}
+
+function spanOccursIn(content: string, span: string): boolean {
+  if (content.includes(span)) return true;
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim();
+  return flat(content).includes(flat(span));
 }
 
 /**
@@ -529,6 +683,13 @@ async function probeFilesGroundTruth(args: {
   } catch {
     // Absent manifest is normal for non-runnable deliverables — say nothing.
   }
+  // Full contents, kept for the QUOTED SPAN pass below. The excerpt rendered
+  // into the block is a fixed 400-char HEAD, so on any file longer than that
+  // the block is structurally SILENT about the region a child is most likely
+  // to quote — measured: the wclite.js line the round-7 children cited sits at
+  // byte 1000 of 1312, 2.5x beyond the window. Reading the file and then
+  // throwing the rest away is what made a quoted line unverifiable.
+  const contents = new Map<string, string>();
   for (const [path, isClaim] of [
     ...claims.structured.map((p) => [p, true] as const),
     ...claims.mentioned.map((p) => [p, false] as const),
@@ -542,6 +703,7 @@ async function probeFilesGroundTruth(args: {
           : typeof raw === 'string'
             ? raw
             : JSON.stringify(raw);
+      contents.set(path, content);
       const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
       if (content.trim().length === 0 && isClaim) facts.emptyClaimedFiles.push(path);
       lines.push(
@@ -560,6 +722,44 @@ async function probeFilesGroundTruth(args: {
       }
     }
   }
+  // QUOTED SPAN verification. The evidence contract asks children to quote the
+  // content they are reporting on, and on an ALREADY-SATISFIED phase that
+  // quote is the whole case: "no edit needed, line 24 already reads X". Until
+  // now nothing checked it, so a fabricated quote and a true one were the same
+  // bytes to the validator. Both sides are in the supervisor's hands here, so
+  // the comparison is a FACT rather than a judgment — the only kind of signal
+  // allowed to set a contradiction.
+  let spanChecks = 0;
+  for (const { path, span } of extractQuotedSpans(args.payload)) {
+    if (spanChecks >= QUOTED_SPAN_MAX) break;
+    const shown = span.length > QUOTED_SPAN_ECHO_CHARS ? `${span.slice(0, QUOTED_SPAN_ECHO_CHARS)}…` : span;
+    if (path !== undefined && spanCanContradict(span)) {
+      // ATTRIBUTED: the child named the file, so a miss is a real contradiction.
+      const content = contents.get(path);
+      if (content === undefined) continue; // file not read: silent, never a contradiction
+      spanChecks++;
+      if (spanOccursIn(content, span)) {
+        lines.push(`- ${path}: QUOTED SPAN ${JSON.stringify(shown)} — FOUND in the current file`);
+      } else {
+        facts.quotedSpanNotFound.push(path);
+        lines.push(
+          `- ${path}: QUOTED SPAN ${JSON.stringify(shown)} — NOT FOUND. The supervisor read the` +
+            ' WHOLE file and this content is not in it: the RESULT is quoting something that file does not contain.'
+        );
+      }
+      continue;
+    }
+    // UNATTRIBUTED (or attributed-but-prose): corroboration only. A hit is useful evidence; a miss is
+    // SILENT, because "absent from the files I happened to read" says nothing
+    // about a file the child never named. Failing this way round is the whole
+    // safety argument — a false NOT-FOUND would fabricate a contradiction on a
+    // correct deliverable, which is the one outcome this check must not have.
+    const hit = [...contents.entries()].find(([, c]) => spanOccursIn(c, span));
+    if (!hit) continue;
+    spanChecks++;
+    lines.push(`- ${hit[0]}: QUOTED SPAN ${JSON.stringify(shown)} — FOUND in the current file`);
+  }
+
   if (lines.length === 0 && recorded.lines.length === 0) return empty;
 
   let listing = '';
