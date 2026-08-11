@@ -665,7 +665,7 @@ export const aggregationSpecSchema = z.object({
   // Sonnet / Opus frequently emit `"instruction": null` when the chosen
   // aggregation mode is "concat" (no merge instruction needed) — a
   // plain `.optional()` rejects null and crashes the whole plan parse.
-  // Same pattern as verdictSchema.branchName (see CLAUDE.md "Things that
+  // Same pattern as verdictSchema.branchName (see AGENTS.md "Things that
   // look wrong but aren't"): accept null at the parse boundary and
   // normalise to undefined via transform so the rest of the code sees
   // the clean `string | undefined` shape.

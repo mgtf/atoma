@@ -1,8 +1,17 @@
-# CLAUDE.md
+# AGENTS.md
 
-Project-level notes for Claude Code. Read this before making changes.
+Project-level notes for coding agents. Read this before making changes.
 
-## Map (1400 lines — jump, don't scroll)
+THIS IS THE SINGLE SOURCE OF TRUTH for the project's rules and engineering
+record. Codex reads this file natively; Claude Code reads the sibling
+`CLAUDE.md`, which is a one-line import of this one for exactly that reason.
+Add rules HERE — a rule written in the sibling is invisible to every other
+agent, which is the failure the indirection exists to prevent. This file was
+itself named `CLAUDE.md` until 2026-08-11; run `git log --follow AGENTS.md` for
+the history before the rename, and note that entries below say "this file"
+throughout.
+
+## Map (3800 lines — jump, don't scroll)
 
 | Section | When you need it |
 |---|---|
@@ -535,7 +544,7 @@ re-exports all the historical names so old imports keep working.
   cause, and the model kept re-sending the same broken span. Measured over the
   last 40 runs (2026-08-09): **9 of 10 such failures carried two-character
   `\n` sequences** where the file has real newlines — six runs across two
-  consecutive days, which is exactly the recurrence CLAUDE.md requires before
+  consecutive days, which is exactly the recurrence AGENTS.md requires before
   acting. So when the defect is PROVABLE for the call in hand — un-escaping
   the argument (`unescapeJsonish`, only the observed sequences, deliberately
   not a JSON parser) matches EXACTLY ONCE — the error now hands back the
@@ -604,7 +613,7 @@ re-exports all the historical names so old imports keep working.
   blocking all file I/O; the run limped to a degraded fallback
   deliverable and its CSV row is noise, not signal. Typecheck catching
   the error a minute later did not help — the process had already
-  loaded it. Docs (CLAUDE.md), task JSON and the CSV are safe to touch
+  loaded it. Docs (AGENTS.md), task JSON and the CSV are safe to touch
   mid-batch; anything under `src/` or `skills/` is not.
 - **Burn-in harness** (`npm run burnin`, `src/cli/burnin.ts`): runs a task
   batch through the real `run:build` path (one clean workspace per task,
@@ -2103,11 +2112,12 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   referenced by tier pins: zai (Anthropic-COMPATIBLE endpoint
   `https://api.z.ai/api/anthropic`, served by the existing
   `AnthropicLlmClient` with `ZAI_API_KEY`/`ZAI_BASE_URL` — same trick
-  Claude Code users employ for GLM), anthropic, ollama, claude-cli.
+  Claude Code users employ for GLM), anthropic, ollama, claude-cli, codex.
   Observability decorators wrap the ROUTER, so calls record once and the
   recorded model id keeps its prefix — the vendor stays visible in
   traces and cost tables. `DEFAULT_PRICES` has an APPROXIMATE `/glm/i`
-  row; override with a custom PriceTable for billing-grade numbers.
+  row plus per-slug GPT-5.6 rows; override with a custom PriceTable for
+  billing-grade numbers.
   Covered by `tests/llm-routing.test.ts`. The 5-series pins reject
   sampling params (the client omits `temperature`/`top_p` via
   `modelSupportsSamplingParams`) and run adaptive thinking by default —
@@ -2230,6 +2240,86 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       counts; on a subscription nothing is billed per token. Each
       `complete()` spawns a CLI subprocess — runs are slower than the
       direct API (~2-5s overhead per call).
+- **Alternative provider: Codex CLI on a ChatGPT subscription
+  (`src/core/llmCodexCli.ts`) — TIERS 2/3 ONLY, and the restriction is
+  STRUCTURAL.** Reached through a tier pin's provider prefix
+  (`ATOMA_MODEL_L3=codex:gpt-5.6-sol`); auth is whatever `codex login`
+  holds, and an ABSENT `OPENAI_API_KEY`/`CODEX_API_KEY` is precisely what
+  makes it reuse the subscription.
+  **L1 IS REFUSED BY A THROW, NOT BY CONVENTION.** Codex offers no way to
+  disable its OWN built-in tools while keeping external ones
+  (openai/codex#6049, open since 2025-10, PR #5001 closed, community
+  contributions not accepted), so the trick that makes `ClaudeCliLlmClient`
+  safe at L1 — `tools: []` plus an in-process MCP bridge, hence every side
+  effect through `req.executor` — has NO equivalent here. A toolset would
+  mean the model acting on the filesystem outside `ToolSandbox`: no jail,
+  no #8a scope gate, no `record_probe`, no probe manifest, no
+  `VizToolEvent`s, and none of the 93.5% cache_read the execute path lives
+  on. `complete` therefore throws (naming a working L1 pin) rather than
+  degrading silently — a wrong tier pin must fail at the first call, not
+  produce an unobservable run. It costs nothing architecturally: L2/L3
+  never pass `tools` or an `executor`, so their calls are pure text
+  completions.
+  WHY A SUBPROCESS AND NOT `@openai/codex-sdk`: the CLI exposes MORE
+  isolation than the SDK's `ThreadOptions` (`--ephemeral`,
+  `--ignore-user-config`, `--ignore-rules` have no counterpart there) for
+  ZERO new npm dependencies — and `@anthropic-ai/claude-agent-sdk` already
+  forced a `--legacy-peer-deps` install over the zod3/zod4 split.
+  `buildCodexArgs` is where the isolation lives and is what the tests pin:
+  `-s read-only` (L2/L3 emit text; a plan call that can edit disk can
+  corrupt what it is planning for) and `-C <empty dir outside the repo>` —
+  THE load-bearing one, since Codex keeps its own shell/read tools, so the
+  cwd is what bounds their reach and keeps `atoma.db`/`skills/` off the map
+  (the same reasoning that moved the build workspace out of the repo).
+  MEASURED 2026-08-11, codex-cli 0.147.0: **ZERO parasitic tool turns** on
+  a real L3 plan prompt (one `agent_message`), output already
+  `parseTwoJson`-shaped, ~15s wall, and usage complete on `turn.completed`
+  INCLUDING **74% cache reads** — the "no prompt caching" assumption was
+  wrong. ~9.7k input tokens of irreducible harness overhead per call
+  (Codex's own tool declarations — #6049 is what prevents removing them);
+  `-c model_instructions_file=` carries the ATOM's system prompt and
+  removes a further ~3.5k. `experimental_instructions_file` and
+  `base_instructions_file` are silently IGNORED — only the first key works.
+  MODEL SLUGS ARE NOT MODEL FAMILIES. A ChatGPT account serves
+  `gpt-5.6-sol` / `-terra` / `-luna` / `gpt-5.5` / `gpt-5.4` /
+  `gpt-5.4-mini` (read `~/.codex/models_cache.json`); bare **`gpt-5`
+  hard-400s** ("not supported when using Codex with a ChatGPT account"),
+  so `resolveCodexModel` rewrites it, maps Anthropic tier defaults by
+  POWER, and passes an unknown slug through verbatim so a new release needs
+  no code change. Effort maps straight across (Codex accepts
+  low|medium|high|xhigh|max) and is the one real cost lever — `maxTokens`
+  is advisory-only here, as under claude-cli.
+  USAGE CONVENTIONS DISAGREE, AND THE DIFFERENCE IS BILLABLE. OpenAI counts
+  `cached_input_tokens` INSIDE `input_tokens`; Anthropic's three counters
+  are DISJOINT and `estimateCostUsd` is built on that. Verified rather than
+  assumed: two identical calls both reported `input=9768 cached=6912`, so
+  `mapCodexUsage` SUBTRACTS the cached portions (clamped at zero). This is
+  NOT the forbidden subtraction that once produced negative costs — that
+  one subtracted from already-disjoint counters. Reasoning tokens are added
+  to output (measured 186 output / 41 reasoning, reported separately);
+  ignoring them would make a high-effort plan read as nearly free.
+  PRICED ON PURPOSE, even though a subscription bills nothing per token:
+  unmatched models fall to 0/0/0, and "free" Codex calls would make any
+  tiering comparison flattering and false — the spend has moved to another
+  subscription, not vanished. Note the honest consequence: `gpt-5.6-sol` at
+  $5/$30 is DEARER on output than Opus 5's $5/$25, so pinning L3 here is a
+  SUBSCRIPTION saving, not an API one. Same per-call inactivity deadline as
+  claude-cli (`ATOMA_CODEX_CALL_TIMEOUT_MS`, silence-measuring, rearmed by
+  every JSONL event) — and its test found a real bug: a failed spawn leaves
+  no pid, so a kill-only deadline killed nothing and hung forever, the
+  exact 11-day-zombie shape the guard exists to remove. The deadline now
+  settles the wait itself. NOT YET MEASURED: decomposition QUALITY on real
+  L3 prompts across a burn-in batch — one hand-built prompt is not
+  evidence. Covered by `tests/llm-codex-cli.test.ts` (38 cases).
+  DO NOT CONFUSE THE TWO USES OF CODEX IN THIS REPO. The interactive
+  assistant (`codex` in the repo root) DOES read this file natively —
+  verified: it names it and quotes its first line with zero tool calls.
+  The atoma TRANSPORT never sees it, by construction: `--ignore-user-config`
+  plus an empty cwd outside the repo. That is deliberate — an atom's prompt
+  is the atom's, and leaking the project's engineering record into a
+  routing decision would be the `settingSources: []` bleed that the
+  claude-cli transport exists to prevent. So a rule added here changes what
+  the assistant knows and changes NOTHING about how atoma runs.
 - **Run auth (`src/run/auth.ts`).** `makeAnthropicClient`
   builds the direct-API client from the SDK's native credential chain:
   ANTHROPIC_API_KEY → ANTHROPIC_AUTH_TOKEN → `ant auth login` OAuth

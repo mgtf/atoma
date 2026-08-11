@@ -48,6 +48,27 @@ export const DEFAULT_PRICES: PriceTable = [
   // model vary widely (Air/Flash tiers are far cheaper than flagships);
   // override with a custom PriceTable for billing-grade accounting.
   { match: /glm/i,    prices: { input: 0.6, output: 2.2, cachedInput: 0.11 } },
+  // OpenAI GPT-5.6 family, reached through the `codex:` provider prefix
+  // (e.g. "codex:gpt-5.6-sol") — matched WITH or WITHOUT the prefix, like
+  // the GLM row. API list prices as of 2026-08-11; cached input is 10% of
+  // base across the family. Order matters: the specific slugs must precede
+  // the generic /gpt-5/i fallback, since `pricesFor` takes the FIRST match.
+  //
+  // WHY PRICE THEM AT ALL WHEN THE SUBSCRIPTION BILLS NOTHING PER TOKEN.
+  // Because leaving them unmatched means `pricesFor` returns 0/0/0 and
+  // every Codex call reads as FREE — which would make any tiering
+  // comparison flattering and false, since the spend has merely moved to
+  // another subscription. Same convention as the claude-cli transport:
+  // what the tokens WOULD cost at API prices. Note the honest consequence
+  // for L3 — gpt-5.6-sol at $5/$30 is DEARER on output than Opus 5's
+  // $5/$25, so pinning L3 here is a subscription saving, not an API one.
+  { match: /gpt-5\.6-sol/i,   prices: { input: 5,   output: 30,  cachedInput: 0.5 } },
+  { match: /gpt-5\.6-terra/i, prices: { input: 2,   output: 12,  cachedInput: 0.2 } },
+  { match: /gpt-5\.6-luna/i,  prices: { input: 0.2, output: 1.2, cachedInput: 0.02 } },
+  // APPROXIMATE mid-family fallback for the older/smaller slugs
+  // (gpt-5.5, gpt-5.4, gpt-5.4-mini). Override with a custom PriceTable
+  // for billing-grade accounting.
+  { match: /gpt-5/i,          prices: { input: 2,   output: 12,  cachedInput: 0.2 } },
 ];
 
 export function pricesFor(model: string, table: PriceTable = DEFAULT_PRICES): ModelPrices {

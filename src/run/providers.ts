@@ -3,6 +3,7 @@ import type { LlmClient } from '../core/types.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
+import { CodexCliLlmClient } from '../core/llmCodexCli.js';
 import { makeAnthropicClient } from './auth.js';
 import { modelForTier } from '../core/models.js';
 
@@ -46,6 +47,13 @@ const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
       defaultModel: process.env['OLLAMA_MODEL'],
     }),
   'claude-cli': () => new ClaudeCliLlmClient(),
+  // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
+  // ONLY. It cannot host a tool loop (openai/codex#6049: Codex's own
+  // built-in tools cannot be disabled, so calls would bypass ToolSandbox
+  // and the #8a scope gate), and CodexCliLlmClient.complete throws when
+  // handed tools rather than degrading silently. Needs no key: an ABSENT
+  // OPENAI_API_KEY is what makes it reuse the subscription login.
+  codex: () => new CodexCliLlmClient(),
 };
 
 /** Provider names a tier pin may reference via the `provider:` prefix. */

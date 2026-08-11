@@ -13,7 +13,7 @@ import { extractRecordedProbes, type RecordedProbe } from '../contracts/witness.
  * probes, read claimed files back from the workspace, health-check the
  * probe manifest, and report whether the evidence CONTRADICTS the claims.
  * Zero LLM calls anywhere in this module — that is its entire point.
- * Behaviour-preserving move; the history lives in CLAUDE.md (#F9, #9,
+ * Behaviour-preserving move; the history lives in AGENTS.md (#F9, #9,
  * the manifest health check, the two-probe mutual exclusion).
  */
 

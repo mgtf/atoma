@@ -196,7 +196,7 @@ export function trustedApproval(type: AtomType): PositiveVerdict {
  * atom doing the cheapest decision: "is there a clear catalog match?"
  *
  * Note on stability: this string is a cache key for Haiku. Trimming it below
- * the 4096-token threshold silently disables caching (see CLAUDE.md). When
+ * the 4096-token threshold silently disables caching (see AGENTS.md). When
  * adding rules here, prefer appending terse lines over rewriting — the total
  * mass preserves cache hits across runs.
  */

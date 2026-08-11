@@ -56,7 +56,7 @@ export interface RunnerArgs {
 /**
  * Argv parsing for a run.
  *
- * DELIBERATELY NOT `src/cli/args.ts`. CLAUDE.md names `parseCliArgs` the
+ * DELIBERATELY NOT `src/cli/args.ts`. AGENTS.md names `parseCliArgs` the
  * single source of truth for CLI flags, and this looks like a duplicate worth
  * collapsing — it is not. `parseCliArgs` treats `--clean-workspace` as a
  * flag-WITH-VALUE and would swallow the goal that follows it, so every
@@ -103,7 +103,7 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
  *
  * Extracted verbatim from the old `examples/build-app.ts`, which had become the
  * product while living in `examples/` — the burn-in harness spawns it per
- * task, CLAUDE.md documents it as load-bearing in a dozen places, and the
+ * task, AGENTS.md documents it as load-bearing in a dozen places, and the
  * only other entrypoint had silently drifted away from every safety
  * guarantee added here (watchdog, signal handling, provider routing).
  *

@@ -15,7 +15,7 @@
 > citation or an empirical reproduction; where a claim was tested and *failed*,
 > that is recorded rather than smoothed over.
 >
-> Referenced from `CLAUDE.md`. Read §5 (Invariants) and §7 (Rules starting now)
+> Referenced from `AGENTS.md`. Read §5 (Invariants) and §7 (Rules starting now)
 > before proposing anything that touches skills, atom identity, or the stores.
 
 ---
@@ -159,7 +159,7 @@ not secret. The invariant below is unchanged and still requires an OS
 boundary; what changed is that the casual traversal no longer lands in the
 stores, and the *accidental* case (generated cleanup code doing `rm -rf ..`)
 no longer lands in the user's git tree.
-CLAUDE.md already concedes the run_shell allowlist is "STEERING, not a boundary"
+AGENTS.md already concedes the run_shell allowlist is "STEERING, not a boundary"
 and that `bash` / `node -e` / `python3 -c` are complete escape hatches. The env
 allowlist (`sandboxChildEnv`, `sandbox.ts:39-59`) and the scratch HOME close the
 env-var and dotfile exfiltration paths; **nothing closes the sibling-directory
@@ -218,7 +218,7 @@ for `shouldTrustSkill` (`src/atoms/cost.ts:181-183`) → `runScriptSkillDirect`,
 which is `write_file` + `run_shell` with **zero LLM calls and no validator**
 (`lifecycle.ts:1015-1021`). The adherence gate does not obstruct this: credit is
 withheld only on an affirmative `activeSkillFollowed === false`
-(`L2Atom.ts:1376`), and CLAUDE.md's own measurement is 31 trust fast-paths
+(`L2Atom.ts:1376`), and AGENTS.md's own measurement is 31 trust fast-paths
 against 7 validator calls with **zero** carrying the adherence block.
 
 **(e) The static scan is not a gate — empirically defeated, not argued down.**
@@ -354,7 +354,7 @@ Two caveats to carry forward, both currently unaddressed:
   writes that **empty** map back: one interrupted write wipes the platform cache,
   and write volume is attacker-controllable. Capacity is 500 entries with
   oldest-first eviction (`prefilterCache.ts:41,161-170`); single-tenant measured
-  hit rate is already 2.4% (12/490 per CLAUDE.md). The current implementation
+  hit rate is already 2.4% (12/490 per AGENTS.md). The current implementation
   cannot be the shared one — it needs a real keyed store with atomic per-entry
   writes.
 
@@ -428,7 +428,7 @@ sidecar field the other wrote.
 *Prevents:* the one-store rule's known limit becoming universal. The failure is
 already observed in miniature: `viz:demo`'s `:memory:` registry allocates the
 same canonical names and its bumps landed on the real ledger — "6 phantom
-successes and a false IMPOSSIBLE verdict" (CLAUDE.md; pin at `viz/demo.ts:36`).
+successes and a false IMPOSSIBLE verdict" (AGENTS.md; pin at `viz/demo.ts:36`).
 Multi-tenant reproduces that at scale, and `ledger check`'s only actionable
 signal ("store < ledger = a write path bypassed the choke points") reads
 IMPOSSIBLE for every entity.
@@ -461,7 +461,7 @@ distilled, reviewed body crosses the org boundary.
 | A4 | **`sanitise` must reject `.` and `..`**; `branch` must validate `overrideName`. One-line fixes, present-day bugs. | `skills/registry.ts:650-656`, `atomRegistry.ts:504-523` |
 | A5 | **`branch` must UNION `atom_type_versions`** like `create` does. | `atomRegistry.ts:497-499` vs `228-234` |
 | A6 | **Per-run outbound credentials**; remove `process.exit(1)` from the auth path; drop `claude-cli` as a served transport. | `run/auth.ts:25-55` |
-| A7 | **Concurrency on the atom DB.** `openDb` runs DDL on *every* open (`db.exec(SCHEMA)` + two `PRAGMA table_info` + conditional `ALTER TABLE`, `db.ts:39-56`), so every connection takes a write lock at startup. `db.transaction()` is BEGIN DEFERRED, so two concurrent `create` calls compute the same first gap and the loser gets `SQLITE_BUSY_SNAPSHOT` (not covered by the 5000 ms default busy timeout) or a UNIQUE violation — with no retry anywhere in `src/`. This fires on the hottest path: the five canonical seeders run on **every** run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — CLAUDE.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `db.ts:39-56`, `atomRegistry.ts:220-276` |
+| A7 | **Concurrency on the atom DB.** `openDb` runs DDL on *every* open (`db.exec(SCHEMA)` + two `PRAGMA table_info` + conditional `ALTER TABLE`, `db.ts:39-56`), so every connection takes a write lock at startup. `db.transaction()` is BEGIN DEFERRED, so two concurrent `create` calls compute the same first gap and the loser gets `SQLITE_BUSY_SNAPSHOT` (not covered by the 5000 ms default busy timeout) or a UNIQUE violation — with no retry anywhere in `src/`. This fires on the hottest path: the five canonical seeders run on **every** run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — AGENTS.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `db.ts:39-56`, `atomRegistry.ts:220-276` |
 | A8 | **Skill store leaves the filesystem.** Every persistence call is a bare `writeFileSync` with no tmp+rename — save (155, 184), markPromotionRefused (232), markDirectFailure (258), clearPromotionRefusal (285), markMatched (309), merge (354, 365), clearDirectFailures (388), promoteToScript (449, 461, 472), resetCounters (558), bump (646) — while the safe pattern exists in the repo (`viz/trace.ts:547-548`). Writers preserve *different* sidecar subsets (T6). | `skills/registry.ts` (lines listed) |
 
 ### 6.B Needed for shared learning to be safe
@@ -563,7 +563,7 @@ lands before the SaaS, key it on `(provider, subject)`.
   low-severity oracle. Accept the oracle explicitly instead, unless a customer
   raises it.
 - **Bucket-directory re-key of the skill store** — already rejected once on its
-  own merits (CLAUDE.md: duplicated recipes in different buckets, `sanitise`
+  own merits (AGENTS.md: duplicated recipes in different buckets, `sanitise`
   rejects `+`, ~290 orphaned ledger events). B1's surrogate re-key supersedes it;
   do both at once or not at all.
 - **Project level** — recommended but optional; keep the column nullable.
@@ -624,7 +624,7 @@ lands before the SaaS, key it on `(provider, subject)`.
 3. **Does a paying org get its dynamic atoms globalised?** §2 says entity-scoped
    with a promotion path, on catalog-cost grounds ($0.065/run Opus plan, one
    unique uncacheable call). If the answer is "everything is global", the plan
-   prompt grows without bound and that cost is the one line item CLAUDE.md
+   prompt grows without bound and that cost is the one line item AGENTS.md
    already identifies as structurally incompressible.
 4. **SQLite or Postgres?** A7 is a fork in the road. Hardening SQLite is
    cheaper now; every subsequent concurrency question is more expensive.

@@ -12,7 +12,7 @@ import { eventTokens } from '../skills/events.js';
  * friction classes to date, zero were learnable technique — all six were
  * harness/environment defects fixed structurally, and a sensor live during
  * the ESM-leak window would have distilled a permanent workaround skill for
- * a bug that died the next day (see CLAUDE.md, "Considered and rejected").
+ * a bug that died the next day (see AGENTS.md, "Considered and rejected").
  *
  * What survives is the DIAGNOSTIC stage: this module reads the traces the
  * viz already persists (every tool invocation, untruncated — the runtime
@@ -70,7 +70,7 @@ export interface FrictionRow {
    * Without them the report is a lifetime tally, so a defect fixed weeks ago
    * keeps topping the list and crowds out live signal — measured on the
    * favicon 404, which dominated the first four rows the morning AFTER it was
-   * fixed (24 occurrences across 16 pre-fix runs, 0 after). Worse, CLAUDE.md's
+   * fixed (24 occurrences across 16 pre-fix runs, 0 after). Worse, AGENTS.md's
    * own action rule is "act only on a signature recurring across two
    * CONSECUTIVE batches", which recency is required to evaluate at all: the
    * rule was there, the data to apply it was not.

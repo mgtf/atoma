@@ -55,7 +55,7 @@ describe('launchable profiles are all describable', () => {
 });
 
 /**
- * The viz i18n parity rule was purely disciplinary until now: CLAUDE.md
+ * The viz i18n parity rule was purely disciplinary until now: AGENTS.md
  * states en/fr must stay in strict parity, and nothing enforced it. A missing
  * key renders as the key itself — loud, but only if someone happens to open
  * that pane in that locale.

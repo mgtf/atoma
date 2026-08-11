@@ -32,7 +32,7 @@ import type { Limits } from './types.js';
  * `L3Atom.execute` consume-and-null `pendingStrategy` and silently fall back
  * to `selfExecute` when it is missing, which would collapse the tier (Opus
  * with a tool loop) while stamping `viaFallback: false`. See the F8 notes in
- * CLAUDE.md before attempting it.
+ * AGENTS.md before attempting it.
  */
 export const DEFAULT_LIMITS: Limits = {
   maxPlanIterations: 3,

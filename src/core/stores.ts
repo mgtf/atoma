@@ -33,7 +33,7 @@ import { existsSync } from 'node:fs';
 /** The store. Trust counters, version history and the lifecycle ledger. */
 export const DEFAULT_DB_PATH = './atoma.db';
 
-/** Learned recipe bodies. Still filesystem-backed — see CLAUDE.md for why. */
+/** Learned recipe bodies. Still filesystem-backed — see AGENTS.md for why. */
 export const DEFAULT_SKILLS_DIR = './skills';
 
 /**

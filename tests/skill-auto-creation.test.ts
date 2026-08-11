@@ -559,7 +559,7 @@ describe('distillation steers verification recipes at MACHINE input', () => {
   // A verification recipe whose step 1 reads a free-form README cannot
   // compile — the compiler refuses it as irreducible judgment, and it is
   // right to. Measured twice: once on the CLI family (documented in
-  // CLAUDE.md) and once live on Helium/probe-crud-json-api-lifecycle,
+  // AGENTS.md) and once live on Helium/probe-crud-json-api-lifecycle,
   // which reached 5 successes and was refused with exactly that reason.
   it('names the manifest as the authority and prose as a mere fallback', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-distill-input-'));

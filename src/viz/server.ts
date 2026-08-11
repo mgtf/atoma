@@ -630,7 +630,7 @@ const server = createServer((req, res) => {
     // the command to copy, NOT a way to start anything. The server stays what
     // it is — no writeFileSync, no child_process, SQLite readonly — so this
     // adds zero attack surface. Launching from the browser is a separate,
-    // opt-in decision documented in CLAUDE.md; the reason it is not here is
+    // opt-in decision documented in AGENTS.md; the reason it is not here is
     // that a run can call BACK into this server (`fetch_url` has no URL
     // allowlist by design, and run_shell's is "STEERING, not a boundary"),
     // so any secret served over HTTP would be readable by the very code it

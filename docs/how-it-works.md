@@ -6,7 +6,7 @@ diligence — enough depth to judge the design, not enough to need the source op
 
 [← back to the README](../README.md) · for the multi-tenant target state, see
 [`saas-architecture.md`](saas-architecture.md) · for the engineering rationale behind
-individual mechanisms, see `CLAUDE.md` at the repository root.
+individual mechanisms, see `AGENTS.md` at the repository root.
 
 ---
 
@@ -288,7 +288,7 @@ the reason recorded — and every run still shipped via the supervised path whil
 quarantined its own broken optimisation. Only the outcome is reproducible from a committed
 artefact: all eight runs of that batch read `delivered` in `burnin/results.csv`. The demotion
 chain itself predates both the trace archive and the CSV columns that would show it, and
-survives only as a narrative in `CLAUDE.md`.
+survives only as a narrative in `AGENTS.md`.
 
 ---
 
@@ -391,7 +391,7 @@ Stated plainly, because the distinction between default and opt-in matters.
 workspace as its working directory and nothing more, so an absolute path reaches the rest of the
 machine. The shell executable list is **steering, not a boundary**: `bash`, `node -e` and
 `python3 -c` are all on it and each is a complete escape hatch. This is stated in the code and in
-`CLAUDE.md` rather than papered over.
+`AGENTS.md` rather than papered over.
 
 **Opt-in, and this is what actually closes that gap:**
 
@@ -399,7 +399,7 @@ machine. The shell executable list is **steering, not a boundary**: `bash`, `nod
   network route, all privileges dropped, and memory and CPU ceilings. The registry, the recipes
   and other runs' traces are simply *absent from that filesystem* — the path walk that works
   locally finds nothing. The container keeps its own loopback, so starting a server and probing
-  it still works. Measured overhead: **~4ms per tool call, ~243ms container boot** — recorded in `CLAUDE.md`
+  it still works. Measured overhead: **~4ms per tool call, ~243ms container boot** — recorded in `AGENTS.md`
   from one session of three cold starts; no committed artefact regenerates it.
 - `--egress` adds a per-run private network and a gate process with a default-deny, anchored host
   allowlist — raw IP addresses always refused, lookalike hosts refused by construction.
@@ -460,8 +460,8 @@ Recorded so nobody has to discover it in a demo:
 
 | Question | Where |
 |---|---|
-| Why does mechanism X exist? | `CLAUDE.md` — each entry names the observed failure that motivated it |
-| What was tried and rejected? | `CLAUDE.md` § *Considered and rejected* — with the measurements that settled it |
+| Why does mechanism X exist? | `AGENTS.md` — each entry names the observed failure that motivated it |
+| What was tried and rejected? | `AGENTS.md` § *Considered and rejected* — with the measurements that settled it |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
 | Are the economics real? | `burnin/results.csv`, regenerable with `npm run burnin` |

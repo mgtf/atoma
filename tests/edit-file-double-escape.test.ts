@@ -12,7 +12,7 @@ import { defaultBuiltinTools, unescapeJsonish } from '../src/tools/builtin.js';
  * and re-sent the same broken span. Measured over the last 40 runs on
  * 2026-08-09: 9 of 10 `old_string not found` failures carried two-character
  * `\n` sequences where the file has real newlines — six runs across two
- * consecutive days, which is exactly the threshold CLAUDE.md sets for acting
+ * consecutive days, which is exactly the threshold AGENTS.md sets for acting
  * on a friction signature.
  *
  * So when the defect is PROVABLE for the call in hand — un-escaping the

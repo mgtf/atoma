@@ -63,7 +63,7 @@ function familyMapFromCsv(csvPath: string): Map<string, string> {
  * How long ago, compactly. The report is a lifetime tally, so without this a
  * defect fixed weeks ago keeps topping the list: the favicon 404 held the
  * first four rows the morning AFTER it was fixed. It is also what makes
- * CLAUDE.md's action rule ("recurring across two CONSECUTIVE batches")
+ * AGENTS.md's action rule ("recurring across two CONSECUTIVE batches")
  * checkable from the report instead of by hand.
  */
 export function ageLabel(ms: number): string {
@@ -152,7 +152,7 @@ function main(): void {
     );
   }
   console.log(
-    '\nact only on a signature recurring across two consecutive batches WHOSE ROOT CAUSE LIVES INSIDE THE SANDBOX;\nhost/repo/harness causes are environment defects — fix them structurally (see CLAUDE.md).'
+    '\nact only on a signature recurring across two consecutive batches WHOSE ROOT CAUSE LIVES INSIDE THE SANDBOX;\nhost/repo/harness causes are environment defects — fix them structurally (see AGENTS.md).'
   );
 }
 
