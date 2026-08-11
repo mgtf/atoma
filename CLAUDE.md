@@ -3373,11 +3373,22 @@ EDIT subtask. Its `when_to_use` is a correct verification clause, so phrasing
 is not the cause this time: `SKILL_PREFILTER_SYSTEM_PROMPT` deliberately drops
 the "no force-matching a single candidate" rule the atom prefilter carries,
 and with one compiled script in the catalogue that permissiveness routes
-everything to it. THE FIX THIS POINTS TO, not built: refuse the MATCH when a
-`kind: script` body never writes and `subtaskMutatesFiles(subtask)` is true —
-both halves already exist. Cheaper than refusing the dispatch and more precise.
-Weigh first the case the permissive prompt was written for: a single-recipe
-catalogue that never matches learns nothing.
+everything to it. FIXED AT MATCH TIME (2026-08-11): `matchSkill` filters the
+CATALOGUE before the prefilter sees it — a `kind: script` whose body has no
+write surface (`scriptWritesFiles`) is not offered for a subtask carrying a
+mutating verb (`subtaskMutatesFiles`). Filtering beats rejecting: the prefilter
+can pick a different candidate and no dispatch is wasted.
+THE COUNTER-ARGUMENT I RAISED WHEN PROPOSING THIS DOES NOT APPLY, and the
+retraction is the part worth keeping. I said it had to be weighed against the
+case the permissive prompt was written for — a one-recipe catalogue that never
+matches. It does not: this is a CAPABILITY test, not a confidence one. It never
+reinstates the single-candidate prohibition, and a one-recipe catalogue still
+matches its recipe wherever the recipe fits. `kind: llm` recipes are untouched
+(injection is guidance; the L1 writes). The write detector errs toward "writes"
+deliberately — only a body with NO write API at all is filtered, because
+over-filtering removes the very dispatches this protects.
+NOT YET MEASURED. Round 7 asks whether dispatches recover toward round 5's ten
+while correctness holds at round 6's 5-of-6.
 
 **WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
 work.** The
