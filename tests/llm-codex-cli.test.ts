@@ -198,16 +198,23 @@ describe('buildCodexArgs — the isolation guarantees live here', () => {
     expect(args[args.length - 1]).toBe('-');
   });
 
-  it('omits the effort override when the caller pinned none', () => {
-    const bare = buildCodexArgs({ model: 'm', cwd: '/c', instructionsFile: '/i' });
-    expect(bare.join(' ')).not.toContain('model_reasoning_effort');
-  });
-
   it('passes a pinned effort through — the one real cost lever here', () => {
     // maxTokens is advisory-only on this transport, as under claude-cli.
     expect(args).toContain('model_reasoning_effort=medium');
     expect(codexEffortFor(req({ params: { effort: 'low' } }))).toBe('low');
-    expect(codexEffortFor(req())).toBeUndefined();
+  });
+
+  it('FLOORS an unpinned call at medium instead of taking the provider default', () => {
+    // atoma pins effort: 'medium' on L2/L3 plan and nowhere else, because on
+    // Anthropic an unpinned call inherits the MODEL's default — 'high' on
+    // Opus 5 / Sonnet 5 — so the pin exists to bring plan calls DOWN.
+    // gpt-5.6-sol defaults the other way, to 'low'. Passing nothing through
+    // therefore inverts the intent rather than reproducing it, and it lands
+    // on selfPlan/selfExecute: the FALLBACK turns the loop reaches only after
+    // L1 and L2 have both failed, i.e. where the run has least margin.
+    expect(codexEffortFor(req())).toBe('medium');
+    const bare = buildCodexArgs({ model: 'm', cwd: '/c', instructionsFile: '/i' });
+    expect(bare.join(' ')).not.toContain('model_reasoning_effort');
   });
 });
 
