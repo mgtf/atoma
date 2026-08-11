@@ -285,6 +285,22 @@ export function subtaskMutatesFiles(description: string): boolean {
   return MUTATING_VERB_RE.test(description);
 }
 
+/**
+ * Node filesystem APIs that WRITE. Used to tell a read-only compiled verifier
+ * from one that produces a deliverable.
+ *
+ * Generous on purpose: anything resembling a write counts, so the only recipes
+ * filtered out are the ones with no write surface at all. Over-filtering would
+ * remove the dispatches this exists to protect.
+ */
+const SCRIPT_WRITE_RE =
+  /\b(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|copyFile|copyFileSync|rename|renameSync|mkdir|mkdirSync|rm|rmSync|unlink|unlinkSync|truncate|truncateSync|outputFile|write)\s*\(/;
+
+/** Does this compiled script body write anything to disk? */
+export function scriptWritesFiles(body: string): boolean {
+  return SCRIPT_WRITE_RE.test(body);
+}
+
 export class SkillLifecycle {
   constructor(
     private readonly host: SkillLifecycleHost,
@@ -974,6 +990,7 @@ export class SkillLifecycle {
     // world), then executable donor namespaces in deterministic order.
     const home = namespaces[0]!;
     const readerSet = new Set(readerToolNames);
+    const mutatingSubtask = subtaskMutatesFiles(subTask.description);
     const tagged: { skill: Skill; ownerNs: string }[] = [];
     const seenIds = new Set<string>();
     for (const ns of namespaces) {
@@ -1005,6 +1022,28 @@ export class SkillLifecycle {
           }
         }
         if (seenIds.has(s.id)) continue;
+        // CAPABILITY FILTER — a read-only script cannot serve a write subtask.
+        // MEASURED, round 6: the compiled verifier was matched to three
+        // "update README.md" subtasks and once to the CODE EDIT subtask, and
+        // its `when_to_use` is a correct verification clause, so phrasing was
+        // not the cause. SKILL_PREFILTER_SYSTEM_PROMPT deliberately drops the
+        // "no force-matching a single candidate" rule the atom prefilter
+        // carries (a young catalogue usually holds one recipe), and with one
+        // compiled script that permissiveness routes everything to it. The
+        // deliverable gate then caught it AFTER a wasted dispatch — five
+        // times in six runs, taking dispatches from 10 to 1.
+        //
+        // This is a CAPABILITY test, not a confidence one: it does not
+        // reinstate the single-candidate prohibition, and a one-recipe
+        // catalogue still matches its recipe wherever the recipe fits.
+        // kind:llm recipes are untouched — injection is guidance and the L1
+        // does its own writing.
+        if (mutatingSubtask && s.kind === 'script' && !scriptWritesFiles(s.body)) {
+          ctx.logger.debug(
+            `[${this.host.name}] skill "${s.id}" not offered: its compiled body never writes, and this subtask asks for a file to change`
+          );
+          continue;
+        }
         seenIds.add(s.id);
         tagged.push({ skill: s, ownerNs: ns });
       }

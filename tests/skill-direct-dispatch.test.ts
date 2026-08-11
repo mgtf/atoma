@@ -1,4 +1,4 @@
-import { subtaskMutatesFiles } from '../src/skills/lifecycle.js';
+import { scriptWritesFiles, subtaskMutatesFiles } from '../src/skills/lifecycle.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,7 +31,11 @@ const seed = {
   createdBy: 'test',
 };
 
-const SCRIPT_BODY = `console.log(JSON.stringify({ output: { built: true }, summary: 'script ran clean' }));`;
+// The body WRITES (fs.writeFileSync). That matters since the capability
+// filter added for round 7: a compiled script with no write surface is no
+// longer offered for a subtask that asks a file to change, so a non-writing
+// body here would never reach the deliverable gate these tests exercise.
+const SCRIPT_BODY = `import fs from 'node:fs';\nfs.writeFileSync('out.txt', 'x');\nconsole.log(JSON.stringify({ output: { built: true }, summary: 'script ran clean' }));`;
 
 const ENVELOPE_LINE = JSON.stringify({ output: { built: true }, summary: 'script ran clean' });
 
@@ -698,6 +702,38 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(skills2.loadFor('Hydrogen')[0]!.directFailures ?? 0).toBe(0);
   });
 
+  it('never OFFERS a read-only script for a write subtask — the round-7 filter', async () => {
+    // Round 6: the compiled verifier was matched to three "update README.md"
+    // subtasks and once to the code-edit subtask; the gate then caught it
+    // after a wasted dispatch, five times in six runs, taking dispatches from
+    // 10 to 1. Filtering the catalogue is cheaper and more precise than
+    // rejecting the result.
+    skills2.save('Hydrogen', {
+      id: 'readonly-verifier',
+      description: 'replay recorded invocations',
+      whenToUse: 'confirm a CLI still behaves as recorded',
+      kind: 'script',
+      language: 'node',
+      body: "import fs from 'node:fs';\nJSON.parse(fs.readFileSync('.atoma-probes.json','utf8'));\nconsole.log('{}');",
+    });
+    const { executor, calls } = fsExecutor({ 'README.md': 'old\n' });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const ctx = { ...base, tools: executor };
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    // The skill prefilter must not even be offered the read-only script; if
+    // it were, this queued reply would name it and a dispatch would follow.
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'nothing fits' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+
+    await water
+      .handleDirect({ description: 'update README.md to describe the new behaviour' }, ctx)
+      .catch(() => undefined);
+
+    // No scratch script was ever written: the dispatch never started.
+    expect(calls.some((c) => ((c.args['path'] as string | undefined) ?? '').startsWith('_skill_'))).toBe(false);
+  });
+
   it('falls back when the named file already existed and is byte-identical afterwards', async () => {
     // MEASURED, 2026-08-11 maintenance round: every file was seeded before the
     // run, so the existence check above is inert — the compiled verifier took
@@ -798,4 +834,36 @@ describe('subtaskMutatesFiles — does the subtask ask for a file to CHANGE', ()
   });
 
 
+});
+
+describe('scriptWritesFiles — can this compiled body produce a deliverable', () => {
+  it('recognises the write APIs a compiled script actually uses', () => {
+    for (const call of [
+      'fs.writeFileSync(p, out)',
+      'writeFile(p, out, cb)',
+      'fs.appendFileSync(p, line)',
+      'fs.mkdirSync(dir, { recursive: true })',
+      'fs.copyFileSync(a, b)',
+      'fs.renameSync(a, b)',
+    ]) {
+      expect(scriptWritesFiles(`import fs from 'node:fs';\n${call};`)).toBe(true);
+    }
+  });
+
+  it('reports a pure verifier as non-writing', () => {
+    // Shape of the round-6 script: reads the manifest, replays, compares,
+    // prints an envelope. It cannot serve an "update README.md" subtask.
+    const body = [
+      "import fs from 'node:fs';",
+      "const m = JSON.parse(fs.readFileSync('.atoma-probes.json', 'utf8'));",
+      'for (const e of m.entries) { execSync(e.cmd); }',
+      "console.log(JSON.stringify({ output: {}, summary: 'ok' }));",
+    ].join('\n');
+    expect(scriptWritesFiles(body)).toBe(false);
+  });
+
+  it('errs toward "writes" so the filter can only remove clearly read-only bodies', () => {
+    // Over-filtering would remove the dispatches this exists to protect.
+    expect(scriptWritesFiles('stream.write(chunk)')).toBe(true);
+  });
 });
