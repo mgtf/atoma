@@ -18,6 +18,12 @@ verification — down to models that cost a fraction as much.*
 
 </div>
 
+<p align="center">
+  <img src="docs/atoma-run-audit.png" alt="atoma run visualizer showing cost, cache usage, three-tier routing, validation verdicts, ground-truth evidence and the full execution timeline">
+</p>
+
+<p align="center"><em>One run, fully inspectable: every model call, routing decision, tool action, cache hit, trust shortcut, validation verdict and cost estimate remains attributable.</em></p>
+
 ---
 
 ## The problem this addresses
