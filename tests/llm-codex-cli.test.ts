@@ -279,6 +279,27 @@ describe('isCodexTransientError', () => {
 });
 
 describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
+  it('cannot be unlocked by an ambient workspace variable', async () => {
+    const before = process.env['ATOMA_CODEX_L1_WORKSPACE'];
+    process.env['ATOMA_CODEX_L1_WORKSPACE'] = '/tmp/unsafe-codex-l1';
+    let spawns = 0;
+    const client = new CodexCliLlmClient({
+      spawnFn: () => {
+        spawns++;
+        return fakeChild({ lines: OK_LINES });
+      },
+    });
+    try {
+      await expect(client.complete(req({ tools: makeTools(['write_file']) }))).rejects.toThrow(
+        /tiers 2 and 3 only/
+      );
+      expect(spawns).toBe(0);
+    } finally {
+      if (before === undefined) delete process.env['ATOMA_CODEX_L1_WORKSPACE'];
+      else process.env['ATOMA_CODEX_L1_WORKSPACE'] = before;
+    }
+  });
+
   it('throws when handed tools: Codex cannot disable its own built-ins (#6049)', async () => {
     // The refusal is the whole safety story of this provider. Silently
     // serving a tool-bearing request would let the model act on the

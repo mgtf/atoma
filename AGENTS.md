@@ -2342,6 +2342,16 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   produce an unobservable run. It costs nothing architecturally: L2/L3
   never pass `tools` or an `executor`, so their calls are pure text
   completions.
+  AN EXPERIMENTAL L1 ENV HATCH EXISTED BRIEFLY AND IS DELETED. Commit
+  `494e5fd` let `ATOMA_CODEX_L1_WORKSPACE` bypass the throw and switch Codex
+  to `workspace-write`. That was not a cautious version of the same contract:
+  it discarded ToolSandbox, credential stripping, process-group reaping,
+  `record_probe`, the scope gate, output truncation and every VizToolEvent,
+  then asked the model to reproduce the missing guarantees by hand. Validating
+  the path more carefully cannot restore mechanisms the transport does not
+  expose. The hatch was removed rather than documented as a supported mode,
+  and a test sets the old env var deliberately and proves that zero subprocess
+  spawns before the structural refusal.
   WHY A SUBPROCESS AND NOT `@openai/codex-sdk`: the CLI exposes MORE
   isolation than the SDK's `ThreadOptions` (`--ephemeral`,
   `--ignore-user-config`, `--ignore-rules` have no counterpart there) for

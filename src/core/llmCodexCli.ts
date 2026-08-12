@@ -16,9 +16,9 @@ import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './t
  * isolation than the SDK's ThreadOptions does — `--ephemeral`,
  * `--ignore-user-config`, `--ignore-rules` have no ThreadOptions
  * counterpart — and it costs ZERO new npm dependencies. That matters here
- * specifically: `@anthropic-ai/claude-agent-sdk` already forced a
- * `--legacy-peer-deps` install over the zod3/zod4 split, and a second
- * agent SDK is a second chance to wedge the dependency tree.
+ * specifically: `@anthropic-ai/claude-agent-sdk` already requires a targeted
+ * peer override over the zod3/zod4 split, and a second agent SDK is a second
+ * chance to wedge the dependency tree.
  *
  * === TIERS 2 AND 3 ONLY — L1 IS REFUSED, AND THE REFUSAL IS STRUCTURAL ===
  *
@@ -52,68 +52,6 @@ import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './t
  *     Codex's "personality" preamble with the atom's own prompt.
  *   - 13.7s for an L3 plan, comparable to the claude-cli transport.
  */
-
-/**
- * TIER-1 ESCAPE HATCH — opt-in, experimental, and NOT a supported mode.
- *
- * `ATOMA_CODEX_L1_WORKSPACE=<abs path>` lets this transport serve tier 1 by
- * pointing Codex at a REAL workspace and letting it use its OWN built-in
- * tools there, confined by Codex's `workspace-write` sandbox rather than by
- * `ToolSandbox`. It exists to answer one question — can an all-Codex tier
- * stack deliver at all? — and the honest answer to "why is this not the
- * default" is the list of things it gives up:
- *
- *   - NO `ToolSandbox`: no path jail of ours, no credential-stripped env, no
- *     process-group reaping. Codex's own sandbox is the only boundary, and it
- *     is a different boundary with different holes.
- *   - NO `record_probe`, so nothing MACHINE-writes `.atoma-probes.json`. The
- *     contract that exists precisely because model-transcribed evidence gets
- *     abridged (measured: 371 chars recorded against 2008 real) is gone; the
- *     appended block below asks the model to write the manifest by hand,
- *     which is the very thing `record_probe` was built to stop.
- *   - NO `VizToolEvent`s: the trace shows an L1 call with zero tool activity,
- *     so the friction report, the tool-error ledger and the viz all go blind.
- *   - NO #8a scope gate and no output truncation.
- *
- * The supervisor-side guarantees SURVIVE, which is what makes the experiment
- * readable at all: the ground-truth probe re-reads the workspace with
- * atoma's own tools, so the deliverable is still checked.
- */
-export function codexL1Workspace(): string | undefined {
-  const v = process.env['ATOMA_CODEX_L1_WORKSPACE']?.trim();
-  return v && v.length > 0 ? v : undefined;
-}
-
-/**
- * Appended to the atom's system prompt when the escape hatch serves tier 1.
- * Codex arrives holding its own shell and patch tools and NONE of atoma's,
- * so the atom prompt's tool names are all dead references — this block says
- * so, and re-states by hand the two contracts `record_probe` and the tool
- * bridge would otherwise enforce.
- */
-export const CODEX_L1_CONTRACT: string = [
-  '',
-  '== EXECUTION CONTRACT (this transport) ==',
-  'You are running through the Codex CLI with your OWN shell and file-editing',
-  'tools, inside a sandbox rooted at the working directory. The tool names',
-  'mentioned above (write_file, read_file, run_shell, record_probe, …) are NOT',
-  'available to you: use your own tools to achieve the same effects. Work only',
-  'inside the working directory.',
-  '',
-  'TWO CONTRACTS YOU MUST HONOUR BY HAND, because the harness normally enforces',
-  'them for you and cannot here:',
-  '1. PROBE MANIFEST. After verifying invocations, write or merge',
-  '   ".atoma-probes.json" in the working directory:',
-  '   {"version":1,"entries":[{"cmd":"<bare command>","exitCode":<n>,',
-  '   "stdout":"<COMPLETE verbatim output>","stderr":"<verbatim>"}]}',
-  '   The output must be COMPLETE, never abridged or summarised — a truncated',
-  '   record is worse than none, because later verification diffs against it.',
-  '   Do not decorate cmd with "; echo EXIT=$?" — exit codes go in exitCode.',
-  '2. RESULT ENVELOPE. Your final message must be a single JSON object',
-  '   {"output": …, "summary": "…"} whose summary embeds a verbatim',
-  '   "== GROUND TRUTH ==" block: the stdout and exit status of every command',
-  '   you ran, and the key lines of every file you wrote.',
-].join('\n');
 
 /** Codex model slugs a ChatGPT subscription actually serves (2026-08-11). */
 export const CODEX_MODEL_FRONTIER = 'gpt-5.6-sol';
@@ -269,12 +207,9 @@ export function isCodexTransientError(message: string): boolean {
  *                          the operator's own config.toml must not bleed
  *                          into an atom's prompt or model choice.
  *   --ignore-rules         same, for execpolicy .rules files.
- *   -s <mode>              read-only by DEFAULT: L2/L3 produce TEXT, and a
- *                          plan call that could edit the disk is a plan call
- *                          that can corrupt the workspace it is planning for.
- *                          The tier-1 escape hatch (see the class docstring)
- *                          switches this to workspace-write, which is Codex's
- *                          OWN OS sandbox confining writes to -C.
+ *   -s read-only           L2/L3 produce TEXT, and a plan call that could
+ *                          edit the disk is a plan call that can corrupt the
+ *                          workspace it is planning for.
  *   -C <empty dir>         THE LOAD-BEARING ONE. Codex still holds its own
  *                          shell/read tools (#6049), so the cwd bounds what
  *                          it can reach at all. An empty dir outside the
@@ -293,8 +228,6 @@ export function buildCodexArgs(opts: {
   cwd: string;
   instructionsFile: string;
   effort?: string;
-  /** 'read-only' unless the tier-1 escape hatch is armed. */
-  sandbox?: 'read-only' | 'workspace-write';
 }): string[] {
   return [
     'exec',
@@ -303,7 +236,7 @@ export function buildCodexArgs(opts: {
     '--ignore-user-config',
     '--ignore-rules',
     '-s',
-    opts.sandbox ?? 'read-only',
+    'read-only',
     '-C',
     opts.cwd,
     '--skip-git-repo-check',
@@ -391,7 +324,7 @@ export class CodexCliLlmClient implements LlmClient {
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
     // See the class docstring: this transport cannot enforce atoma's tool
     // contracts (openai/codex#6049), so it refuses tiers that need them.
-    if ((req.executor !== undefined || (req.tools?.length ?? 0) > 0) && !codexL1Workspace()) {
+    if (req.executor !== undefined || (req.tools?.length ?? 0) > 0) {
       throw new Error(
         'codex provider serves tiers 2 and 3 only: it cannot host a tool loop because Codex ' +
           'offers no way to disable its own built-in tools (openai/codex#6049), so tool calls ' +
@@ -418,24 +351,13 @@ export class CodexCliLlmClient implements LlmClient {
     if (req.signal?.aborted) throw req.signal.reason ?? new Error('aborted');
 
     const jail = this.ensureJail();
-    // A tool-bearing request only reaches here when the tier-1 escape hatch is
-    // armed (complete() throws otherwise). It then runs in the REAL workspace
-    // under Codex's own workspace-write sandbox, with the missing-contract
-    // block appended — see codexL1Workspace's docstring for what that costs.
-    const toolTier = req.executor !== undefined || (req.tools?.length ?? 0) > 0;
-    const l1Workspace = toolTier ? codexL1Workspace() : undefined;
     const instructionsFile = path.join(jail.root, `instructions-${process.hrtime.bigint()}.txt`);
-    writeFileSync(
-      instructionsFile,
-      l1Workspace ? `${req.systemPrompt}\n${CODEX_L1_CONTRACT}` : req.systemPrompt,
-      'utf8'
-    );
+    writeFileSync(instructionsFile, req.systemPrompt, 'utf8');
 
     const args = buildCodexArgs({
       model: resolveCodexModel(req.model),
-      cwd: l1Workspace ?? jail.cwd,
+      cwd: jail.cwd,
       instructionsFile,
-      ...(l1Workspace ? { sandbox: 'workspace-write' as const } : {}),
       effort: codexEffortFor(req),
     });
 
