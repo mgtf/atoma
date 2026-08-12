@@ -54,10 +54,15 @@ export { ToolSandbox } from './tools/sandbox.js';
 export { InMemoryToolRegistry } from './tools/registry.js';
 export {
   writeFileTool,
+  editFileTool,
   readFileTool,
   listFilesTool,
   runShellTool,
+  recordProbeTool,
   startStaticServerTool,
+  validateHtmlTool,
+  fetchUrlTool,
+  startNodeServerTool,
   defaultBuiltinTools,
   type BuiltinTool,
   type BuiltinToolOptions,

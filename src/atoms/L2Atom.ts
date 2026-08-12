@@ -651,8 +651,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         });
 
         // Deterministic dispatch (#C4). A TRUSTED `kind: 'script'` skill
-        // (3+ clean runs, zero failures — every freshly promoted script
-        // qualifies since promotion requires 5/0) is executed DIRECTLY
+        // (3+ clean runs AFTER promotion, zero failures — promotion resets
+        // the markdown recipe's counters so the new script earns trust)
+        // is executed DIRECTLY
         // via write_file + run_shell: zero LLM calls, no L1 plan/execute,
         // no validators. The script's exit code + envelope contract
         // ({"output", "summary"} as the last stdout line) IS the ground
@@ -1404,10 +1405,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           //   - L2 attempted a skill match for this subtask;
           //   - no skill matched (the run was novel);
           //   - the run was approved (i.e. it's a clean reusable pattern);
-          //   - the env flag ATOMA_SKILL_LEARN is on (off by default
-          //     because each learning event costs one Sonnet call,
-          //     and not every project wants automatic mutation of
-          //     its skills folder).
+          //   - the env flag ATOMA_SKILL_LEARN is on. Direct library use is
+          //     opt-in; runTask sets it on by default unless disabled because
+          //     forgetting the flag was the measured dominant failure mode.
           !skillId &&
           // Both scopes must be empty: no tag on the approved INSTANCE and
           // no match recorded for the SUBTASK. After an escalation branch
