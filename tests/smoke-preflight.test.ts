@@ -5,6 +5,7 @@ import {
   makeSmokeStuckTracker,
   SMOKE_STUCK_WINDOW,
   SMOKE_STUCK_THRESHOLD,
+  uniqueNormalizedIdSelector,
 } from '../src/tools/builtin.js';
 
 /**
@@ -85,10 +86,29 @@ describe('isSmokeOk — structured assertions are not truthy by accident', () =>
     );
   });
 
-  it('lets explicit ok encode expected-false diagnostic state', () => {
-    expect(isSmokeOk({ ok: true, reset: { hasStreak3Class: false } })).toBe(true);
+  it('does not let ok:true override a nested false assertion', () => {
+    expect(isSmokeOk({ ok: true, reset: { hasStreak3Class: false } })).toBe(false);
+    expect(
+      isSmokeOk({
+        ok: true,
+        reset: { className: 'streak-0', excludesMilestoneClass: true },
+      })
+    ).toBe(true);
     expect(isSmokeOk({ ok: false, values: { rendered: true } })).toBe(false);
-    expect(isSmokeOk({ streak: 3, className: 'streak-3' })).toBe(true);
+    expect(isSmokeOk({ streak: 3, className: 'streak-3' })).toBe(false);
+  });
+});
+
+describe('uniqueNormalizedIdSelector', () => {
+  it('repairs only one unambiguous id spelling variant', () => {
+    expect(uniqueNormalizedIdSelector('#increment-btn', ['incrementBtn', 'resetBtn'])).toBe(
+      '#incrementBtn'
+    );
+    expect(uniqueNormalizedIdSelector('#reset_btn', ['incrementBtn', 'resetBtn'])).toBe(
+      '#resetBtn'
+    );
+    expect(uniqueNormalizedIdSelector('.increment-btn', ['incrementBtn'])).toBeNull();
+    expect(uniqueNormalizedIdSelector('#a-b', ['ab', 'a_b'])).toBeNull();
   });
 });
 

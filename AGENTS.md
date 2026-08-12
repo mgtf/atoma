@@ -1088,6 +1088,25 @@ re-exports all the historical names so old imports keep working.
   `{ok: <all milestone+reset assertions>, milestone, reset}`. Expected-false
   diagnostics remain expressible under an explicit true aggregate. A further
   rerun is required; delivered+friction-zero did not close this evidence gap.
+- **THIRTEENTH LIVE ITERATION, 2026-08-12 — `ok:true` cannot overrule its own
+  false assertions.** The next exact widget rerun delivered in
+  303s/13 calls/$0.1362 estimated (trace
+  `2026-08-12T19-47-01-991-f7837f7c`) and had no hard tool error or leaked
+  child, but two soft failures remained. The initial artefact repeated the
+  getter collision on a different field (`statusText`), and the verification
+  phase again guessed `#increment-btn`/`#reset-btn`. More importantly, its
+  final recorded smoke set `ok:true` while EVERY nested transition assertion
+  (`beginner`, `building`, `hot`, `onFire`) was false; the aggregate checked
+  only initial/reset state and ignored the milestone object. Explicit `ok`
+  alone therefore remained forgeable by omission.
+  The smoke contract now treats EVERY boolean field as an assertion: any false
+  value fails even beside `ok:true`. Expected-false state must be returned as a
+  raw value plus a positively named true comparison. Selector resolution
+  accepts a guessed id spelling only when removing hyphen/underscore and case
+  yields exactly ONE real DOM id, recording a warning and the exact resolved
+  selector; ambiguous/non-id selectors still fail. Widget guidance now
+  requires enumerating every class getter and proving no assignment/increment
+  targets that getter name before serving. Another exact rerun is required.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

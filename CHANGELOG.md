@@ -71,6 +71,11 @@
 - Structured web smokes require explicit `ok:true`; without it, any nested
   false boolean fails validation instead of passing because the object itself
   is truthy.
+- `ok:true` cannot override a false nested smoke assertion; expected-false
+  state must be represented as raw values plus positive comparisons.
+- Interaction IDs tolerate only a unique case/kebab/snake spelling match to an
+  existing DOM id, while widget guidance checks every getter name for illegal
+  writes before serving.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

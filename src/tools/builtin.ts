@@ -1435,8 +1435,17 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               const coords = await resolveInteractionCoords(page, it);
               const button = it.type === 'rightclick' ? 'right' : 'left';
               await page.mouse.click(coords.x, coords.y, { button });
+              if (coords.resolvedSelector && coords.resolvedSelector !== it.selector) {
+                warnings.push(
+                  `interaction selector ${it.selector} uniquely normalized to ${coords.resolvedSelector}; copy the exact id from source next time`
+                );
+              }
               interactionLog.push(
-                `${it.type} at (${coords.x}, ${coords.y})${it.selector ? ` on ${it.selector}` : ''}`
+                `${it.type} at (${coords.x}, ${coords.y})${
+                  coords.resolvedSelector ?? it.selector
+                    ? ` on ${coords.resolvedSelector ?? it.selector}`
+                    : ''
+                }`
               );
             } else if (it.type === 'keydown') {
               if (!it.key) throw new Error('keydown requires "key"');
@@ -1612,20 +1621,48 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
 async function resolveInteractionCoords(
   page: import('puppeteer').Page,
   it: ParsedInteraction
-): Promise<{ x: number; y: number }> {
+): Promise<{ x: number; y: number; resolvedSelector?: string }> {
   if (it.selector) {
-    const el = await page.$(it.selector);
+    let resolvedSelector = it.selector;
+    let el = await page.$(resolvedSelector);
+    if (!el) {
+      const ids = await page.$$eval('[id]', (nodes) =>
+        nodes.map((node) => (node as { id: string }).id)
+      );
+      const fallback = uniqueNormalizedIdSelector(it.selector, ids);
+      if (fallback) {
+        resolvedSelector = fallback;
+        el = await page.$(`[id=${JSON.stringify(fallback.slice(1))}]`);
+      }
+    }
     if (!el) throw new Error(`selector ${it.selector} not found`);
     const box = await el.boundingBox();
-    if (!box) throw new Error(`selector ${it.selector} has no bounding box`);
+    if (!box) throw new Error(`selector ${resolvedSelector} has no bounding box`);
     const offsetX = typeof it.x === 'number' ? it.x : box.width / 2;
     const offsetY = typeof it.y === 'number' ? it.y : box.height / 2;
-    return { x: box.x + offsetX, y: box.y + offsetY };
+    return {
+      x: box.x + offsetX,
+      y: box.y + offsetY,
+      ...(resolvedSelector !== it.selector ? { resolvedSelector } : {}),
+    };
   }
   if (typeof it.x !== 'number' || typeof it.y !== 'number') {
     throw new Error('interaction without selector needs absolute x and y');
   }
   return { x: it.x, y: it.y };
+}
+
+/** Resolve only an unambiguous kebab/snake/case variant of an existing id. */
+export function uniqueNormalizedIdSelector(
+  requested: string,
+  ids: readonly string[]
+): string | null {
+  if (!requested.startsWith('#')) return null;
+  const normalize = (value: string): string =>
+    value.replace(/^#/, '').replace(/[-_]/g, '').toLowerCase();
+  const target = normalize(requested);
+  const matches = ids.filter((id) => normalize(id) === target);
+  return matches.length === 1 ? `#${matches[0]}` : null;
 }
 
 /**
@@ -1855,13 +1892,11 @@ export function isSmokeOk(result: unknown): boolean {
   if (typeof result === 'boolean') return result;
   if (typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    if ('ok' in r) return r['ok'] === true;
-    // Structured diagnostics used to pass merely because the object itself is
-    // truthy, even when it said `{hasStreak3Class:false}`. Without an explicit
-    // aggregate `ok`, a false boolean anywhere means at least one reported
-    // claim failed. Callers with expected-false state must compute `ok`
-    // explicitly and may still return all diagnostic fields.
-    return !containsFalseBoolean(result);
+    // Every boolean in a smoke object is an ASSERTION, never raw diagnostic
+    // state. This closes both bypasses observed live: no aggregate `ok`, and
+    // `ok:true` beside nested false transition checks. Expected-false state
+    // must be reported as raw values and folded into a positive assertion.
+    return r['ok'] === true && !containsFalseBoolean(result);
   }
   return Boolean(result);
 }
