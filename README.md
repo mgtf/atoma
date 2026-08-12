@@ -230,6 +230,8 @@ the isolated backend and proxied egress paths.
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release is narrower:
 MCP plus its build-run path, installable with production dependencies only.
+See [`CHANGELOG.md`](CHANGELOG.md) and the
+[`v0.1.0 release soak`](docs/release-soak-v0.1.0.md).
 
 A fresh clone starts with **no learned state at all** — the catalogue, the recipes and the
 traces are runtime data, deliberately not committed. What you clone is the framework; the

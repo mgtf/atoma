@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(root, 'dist/mcp/stdio.js');
+const releaseVersion = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
 if (!existsSync(entry)) {
   throw new Error(`compiled MCP entry missing: ${entry} (run npm run build first)`);
 }
@@ -63,7 +64,7 @@ try {
     params: {
       protocolVersion: '2025-06-18',
       capabilities: {},
-      clientInfo: { name: 'atoma-release-smoke', version: '0.1.0' },
+      clientInfo: { name: 'atoma-release-smoke', version: releaseVersion },
     },
   });
   const initialized = await waitForFrame(1);

@@ -97,6 +97,11 @@ repeats it, creates a production-dependency archive and re-tests that extracted
 archive before publishing a private GitHub Release. The archive carries no
 store, skills, traces, workspace or credentials. Source-only operator,
 benchmark and development CLIs are not claimed as part of the compiled archive.
+Checksums are generated FROM INSIDE the release directory so they contain the
+downloadable basename, then verified before extraction — v0.1.0 initially
+published its workflow-internal `release/…` path and the first external soak
+caught it. The full live result is in `docs/release-soak-v0.1.0.md`; v0.1.1 is
+the packaging correction.
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
 

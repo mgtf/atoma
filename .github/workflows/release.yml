@@ -31,12 +31,13 @@ jobs:
           cp -R dist docker scripts "release/${root}/"
           cp package.json package-lock.json README.md AGENTS.md CLAUDE.md CHANGELOG.md "release/${root}/"
           tar -C release -czf "release/${root}.tar.gz" "${root}"
-          sha256sum "release/${root}.tar.gz" > "release/${root}.tar.gz.sha256"
+          (cd release && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
       - name: Verify extracted production install
         run: |
           set -euo pipefail
           root="atoma-${GITHUB_REF_NAME}"
+          (cd release && sha256sum -c "${root}.tar.gz.sha256")
           mkdir -p /tmp/atoma-release
           tar -C /tmp/atoma-release -xzf "release/${root}.tar.gz"
           cd "/tmp/atoma-release/${root}"

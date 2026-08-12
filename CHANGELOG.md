@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.1 — 2026-08-12
+
+Corrective release after installing and exercising the published v0.1.0 archive.
+
+### Fixed
+
+- Release checksums now contain the downloadable archive basename instead of
+  the workflow-internal `release/` path; the workflow verifies the checksum
+  before extracting the archive.
+- The compiled MCP smoke derives its client version from `package.json`.
+
+### Release soak
+
+- Installed the release with production dependencies only.
+- Started the compiled MCP server and completed a real zero-dependency CLI task.
+- Delivered in 437 seconds, 16 LLM calls and $0.2863 API-price equivalent.
+- Independently verified `reverse.js`, its missing-argument exit contract,
+  README, package metadata and probe manifest.
+- Confirmed two learned skills, eight persisted atom types and a clean
+  seven-event lifecycle ledger with zero counter drift.
+
 ## v0.1.0 — 2026-08-12
 
 First reproducible local release of atoma.
