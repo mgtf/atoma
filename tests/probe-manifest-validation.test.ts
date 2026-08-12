@@ -180,5 +180,9 @@ describe('manifest health check fires for HTTP children (audit rank-8)', () => {
     expect(executed).toContain('read_file:.atoma-probes.json');
     expect(res.block).toMatch(/MALFORMED/);
     expect(res.block).toMatch(/expected "version": 1/);
+    // Structural breakage does not prove the deliverable wrong, but it must
+    // bypass the no-validator trust path so a reviewer sees the evidence.
+    expect(res.contradiction).toBe(false);
+    expect(res.requiresReview).toBe(true);
   });
 });

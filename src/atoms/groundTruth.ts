@@ -26,6 +26,12 @@ import { extractRecordedProbes, type RecordedProbe } from '../contracts/witness.
  * calls that belong to the LLM validator, and tripping on them would make the
  * trust fast-path fire false alarms on working deliverables.
  *
+ * `requiresReview` is the broader trust-fast-path gate. It includes every
+ * contradiction plus mechanically broken evidence interfaces (currently a
+ * malformed probe manifest). A malformed manifest does NOT prove the
+ * deliverable wrong, so it must not be mislabeled as a contradiction — but it
+ * also cannot be rubber-stamped by the exact path that skips the validator.
+ *
  * Used by `checkGroundTruth`, which the trust fast-path consults before
  * rubber-stamping a trusted child (the probe costs no tokens, so there is no
  * reason for the cheapest path to be the blindest one).
@@ -33,6 +39,7 @@ import { extractRecordedProbes, type RecordedProbe } from '../contracts/witness.
 export interface GroundTruthCheck {
   readonly block: string;
   readonly contradiction: boolean;
+  readonly requiresReview: boolean;
 }
 
 /**
@@ -94,6 +101,8 @@ export interface GroundTruthFacts {
   probeToolFailure: boolean;
   /** The child's own probe record contains a mismatch. */
   selfReportedMismatch: boolean;
+  /** The machine-readable probe manifest exists but violates its contract. */
+  manifestMalformed: boolean;
   /**
    * The RESULT quoted a span it ATTRIBUTED to a file, and that file does not
    * contain it. Rendered as `path: QUOTED SPAN … — NOT FOUND`.
@@ -107,6 +116,7 @@ export function emptyGroundTruthFacts(): GroundTruthFacts {
     emptyClaimedFiles: [],
     probeToolFailure: false,
     selfReportedMismatch: false,
+    manifestMalformed: false,
     quotedSpanNotFound: [],
   };
 }
@@ -122,7 +132,7 @@ export async function checkGroundTruth(args: {
   child: Atom;
 }): Promise<GroundTruthCheck> {
   const { block, facts } = await probeGroundTruthEx(args);
-  if (!block) return { block: '', contradiction: false };
+  if (!block) return { block: '', contradiction: false, requiresReview: false };
   // Decided from the probes' STRUCTURED facts — never by re-parsing the
   // rendered block (a wording edit used to silently disarm this check).
   const contradiction =
@@ -139,7 +149,11 @@ export async function checkGroundTruth(args: {
     // judgment. It is what makes an "already satisfied" claim checkable —
     // without it a fabricated quote is indistinguishable from a real one.
     facts.quotedSpanNotFound.length > 0;
-  return { block, contradiction };
+  return {
+    block,
+    contradiction,
+    requiresReview: contradiction || facts.manifestMalformed,
+  };
 }
 
 /** Compat wrapper: the rendered block only (llmVerdict's evidence input). */
@@ -689,6 +703,7 @@ async function probeFilesGroundTruth(args: {
           : '';
     if (text.trim().length > 0) {
       const problems = validateProbeManifest(text);
+      facts.manifestMalformed = problems.length > 0;
       lines.push(
         problems.length === 0
           ? `${PROBE_MANIFEST_FILENAME}: well-formed (machine-readable probe record present)`

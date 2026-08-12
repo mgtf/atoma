@@ -1788,9 +1788,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // on the json-cli run: Lithium at 6/0 and Ammonia at 8/0 meant ZERO
     // validation calls for the whole run, so the read-back probe never fired
     // and a RESULT claiming "exit code 1" shipped while the CLI actually
-    // exits 0. On a contradiction we hand the decision to the LLM validator
-    // (passing the block along so the probe doesn't run twice) rather than
-    // rejecting outright — a path-extraction heuristic must never fail a run
+    // exits 0. Hard contradictions AND mechanically broken evidence
+    // interfaces hand the decision to the LLM validator (passing the block
+    // along so the probe doesn't run twice) rather than rejecting outright —
+    // a path-extraction heuristic or malformed manifest must never fail a run
     // on its own.
     let trustedProbe: GroundTruthCheck | null = null;
     if (type && shouldTrustType(type)) {
@@ -1800,7 +1801,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         payload: result,
         child,
       });
-      if (!trustedProbe.contradiction) {
+      if (!trustedProbe.requiresReview) {
         const approval = trustedApproval(type);
         ctx.recordTrust?.({
           supervisorName: this.name,
@@ -1814,8 +1815,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         });
         return approval;
       }
+      const reviewReason = trustedProbe.contradiction
+        ? 'ground-truth evidence contradicts the RESULT'
+        : 'the probe manifest is malformed';
       ctx.logger.warn(
-        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ground-truth evidence contradicts the RESULT — falling through to a full verdict`
+        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ${reviewReason} — falling through to a full verdict`
       );
     }
     // Usage-conditioned skill credit: when a skill drove this run, show the

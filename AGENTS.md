@@ -240,18 +240,24 @@ npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no t
   more. Observed on the json-cli run: Lithium at 6✓ and Ammonia at 8✓ meant
   ZERO validation calls for the entire run, the read-back probe never fired,
   and a RESULT claiming "exit code 1" shipped while the CLI actually exits 0.
-  `checkGroundTruth` returns `{block, contradiction}`; `contradiction` is set
-  only on HARD evidence (claimed path MISSING or EMPTY; web URL unreachable)
-  — never on console errors or `ok: false`, which are judgment calls that
-  would make the fast-path fire false alarms on working deliverables. On a
-  contradiction the supervisor logs an OVERRIDDEN warning and falls through
-  to a full `llmVerdict`, passing the already-computed block via
+  `checkGroundTruth` returns `{block, contradiction, requiresReview}`;
+  `contradiction` is set only on HARD evidence (claimed path MISSING or EMPTY;
+  web URL unreachable) — never on console errors or `ok: false`, which are
+  judgment calls that would make the fast-path fire false alarms on working
+  deliverables. `requiresReview` includes every contradiction plus a
+  mechanically MALFORMED probe manifest. Malformation does NOT prove the
+  deliverable wrong, so it stays distinct from `contradiction`; but it cannot
+  be auto-approved by the exact path that skips the validator, or a trusted
+  type keeps earning credit while leaving the deterministic verifier's input
+  broken. On either signal the supervisor logs an OVERRIDDEN warning and falls
+  through to a full `llmVerdict`, passing the already-computed block via
   `groundTruthBlock` so the probe does not run twice. It never rejects on its
-  own: a path-extraction heuristic must not fail a run by itself. When the
-  RESULT names no files the probe returns `''` and makes no tool calls at
-  all, so trusted subtasks returning plain summaries stay exactly as cheap
-  as before. Covered by `tests/trust-fastpath-groundtruth.test.ts`, whose
-  first case asserts ZERO LLM calls — that is the cost-discipline guard. Counters live on `atom_types`; they are bumped by the
+  own: a path-extraction heuristic or health check must not fail a run by
+  itself. When the RESULT names no files the probe returns `''` and makes no
+  tool calls at all, so trusted subtasks returning plain summaries stay
+  exactly as cheap as before. Covered by
+  `tests/trust-fastpath-groundtruth.test.ts`, whose clean-manifest cases assert
+  ZERO LLM calls — that is the cost-discipline guard. Counters live on `atom_types`; they are bumped by the
   supervise loop's `onApproved` / `onFailed` hooks that L2 and L3 wire to
   `registry.recordSuccess` / `registry.recordFailure`.
 - **Patch resets trust.** `AtomRegistry.patch` zeroes `successes` and
@@ -1722,6 +1728,13 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   manifest MIXING shell + http entries is VALID (documented contract);
   only structural breakage is reported (bad JSON, version ≠ 1, entries
   not an array or empty, per-entry shape missing its required fields).
+  A reported breakage sets `GroundTruthFacts.manifestMalformed`, which makes
+  `checkGroundTruth.requiresReview` override the trust fast-path without
+  pretending the deliverable itself is mechanically contradicted. Before
+  this structured signal, `MALFORMED` existed only in the rendered block:
+  untrusted results showed it to Haiku, while trusted types returned approval
+  before any validator saw the block — the health check was silently inert on
+  the path that most needed it.
   It knows all THREE shapes, and since the contracts extraction the sync
   is STRUCTURAL: writers, reader and checker all render/check the
   schema-validated examples in `src/contracts/probeManifest.ts`, and

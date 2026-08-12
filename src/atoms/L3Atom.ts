@@ -927,13 +927,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // Mirror of L2.validateResult: the trust fast-path skips the LLM
     // validator but NOT the ground-truth probe — it costs no tokens, and a
     // trusted type is exactly the one nobody watches any more. A contradiction
-    // hands the decision to the LLM validator (with the block passed along so
-    // the probe doesn't run twice), never to an outright reject.
+    // or mechanically broken evidence interface hands the decision to the LLM
+    // validator (with the block passed along so the probe doesn't run twice),
+    // never to an outright reject.
     const payload = { output: result.output, summary: result.summary };
     let trustedProbe: GroundTruthCheck | null = null;
     if (type && shouldTrustType(type)) {
       trustedProbe = await checkGroundTruth({ ctx, subject: 'RESULT', payload, child });
-      if (!trustedProbe.contradiction) {
+      if (!trustedProbe.requiresReview) {
         const approval = trustedApproval(type);
         ctx.recordTrust?.({
           supervisorName: this.name,
@@ -947,8 +948,11 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         });
         return approval;
       }
+      const reviewReason = trustedProbe.contradiction
+        ? 'ground-truth evidence contradicts the RESULT'
+        : 'the probe manifest is malformed';
       ctx.logger.warn(
-        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ground-truth evidence contradicts the RESULT — falling through to a full verdict`
+        `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ${reviewReason} — falling through to a full verdict`
       );
     }
     return llmVerdict({

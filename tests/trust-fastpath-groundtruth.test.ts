@@ -110,6 +110,65 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls.filter((c) => c === 'read_file')).toHaveLength(2);
   });
 
+  it('preserves the fast-path when a required probe manifest is well-formed', async () => {
+    const { l2, l1, ctx, exec } = setup({
+      'index.js': 'console.log("ok")',
+      '.atoma-probes.json': JSON.stringify({
+        version: 1,
+        entries: [{ cmd: 'node index.js', exitCode: 0, stdout: 'ok\n', stderr: '' }],
+      }),
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: {
+          files: ['index.js'],
+          probes: [{ cmd: 'node index.js', exitCode: 0, stdout: 'ok\n', stderr: '' }],
+        },
+        summary: 'wrote and verified index.js',
+      }),
+      { description: 'write index.js' },
+      ctx
+    );
+
+    expect(verdict.approved).toBe(true);
+    expect(ctx.llm.calls).toHaveLength(0);
+    // One manifest read + one claimed-file read. A clean health check remains
+    // zero-token and does not run twice.
+    expect(exec.calls.filter((c) => c === 'read_file')).toHaveLength(2);
+  });
+
+  it('forces a full verdict for a MALFORMED manifest without rejecting mechanically', async () => {
+    const { l2, l1, ctx, exec } = setup({
+      'index.js': 'console.log("ok")',
+      '.atoma-probes.json': JSON.stringify({ version: 2, entries: [] }),
+    });
+    ctx.llm.enqueueText(
+      jsonText({ approved: true, reasoning: 'the deliverable works, but repair the manifest' })
+    );
+
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: {
+          files: ['index.js'],
+          probes: [{ cmd: 'node index.js', exitCode: 0, stdout: 'ok\n', stderr: '' }],
+        },
+        summary: 'wrote and verified index.js',
+      }),
+      { description: 'write index.js' },
+      ctx
+    );
+
+    expect(verdict.approved).toBe(true);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/\.atoma-probes\.json: MALFORMED/);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/expected "version": 1/);
+    // The already-computed block is threaded into llmVerdict, so the manifest
+    // and claimed file are each read once.
+    expect(exec.calls.filter((c) => c === 'read_file')).toHaveLength(2);
+  });
+
   it('falls through to a full LLM verdict when a claimed file is MISSING', async () => {
     const { l2, l1, ctx, exec } = setup({ 'index.js': 'console.log("x")' });
     ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'README.md does not exist', scope: 'ephemeral' }));
