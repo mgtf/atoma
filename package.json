@@ -27,7 +27,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@anthropic-ai/sdk": "^0.115.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^11.3.0",
     "jsonrepair": "^3.14.0",
     "puppeteer": "^24.41.0",
@@ -36,18 +36,20 @@
   "overrides": {
     "@anthropic-ai/claude-agent-sdk": {
       "zod": "$zod"
-    }
+    },
+    "esbuild": "$esbuild"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.7.4",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "globals": "^17.9.0",
-    "tsx": "^4.19.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.6.2",
     "typescript-eslint": "^8.66.0",
-    "vitest": "^2.1.1"
+    "vitest": "^4.1.10"
   },
   "engines": {
     "node": "^20.19.0 || ^22.13.0 || >=24"

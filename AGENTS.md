@@ -2513,6 +2513,12 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   (`^20.19 || ^22.13 || >=24`) rather than the old `>=20`, which emitted
   EBADENGINE on a supported-looking Node 22.12 install. No provider credential
   is present and every LLM call in the suite is mocked.
+  The dependency tree is audit-clean as of 2026-08-12. Runtime fixes came via
+  MCP SDK 1.30 and patched transitive Hono/ws/fast-uri/basic-ftp releases;
+  dev fixes required Vitest 4 / Vite 8 and esbuild 0.28. `tsx` still requested
+  the vulnerable 0.27 line, so the root esbuild dependency plus `$esbuild`
+  override keeps all three consumers on one patched binary. `npm ci`,
+  `npm audit` and the full suite were rerun after the major test-runner update.
 
 ## Linting (`npm run lint`, `eslint.config.js`)
 
