@@ -1037,6 +1037,19 @@ re-exports all the historical names so old imports keep working.
   for each occurrence plus the explicit replace_all path — the same
   bytes-not-instructions rule that fixed old_string-not-found. Offline
   regression covers both directions before another live run.
+- **TENTH LIVE ITERATION, 2026-08-12 — the HTTP error closure reproduced.**
+  The exact recipe CRUD task re-ran after the capability-level correction and
+  delivered in 352s/13 calls/$0.2015 estimated (trace
+  `2026-08-12T19-17-26-480-9e46a3b5`) versus 379s/19 immediately before it.
+  The exhaustive event audit found ZERO tool/LLM errors, rejections, trust
+  overrides, fallbacks or withheld credits; friction was 0. The L1 made normal
+  fetch_url calls without explicitly requesting recording, yet the final
+  manifest contained 33 ordered entries, all valid HTTP shape. Independent
+  execution passed empty-list 200, semantic-invalid 400, create 201,
+  read/delete 200 and post-delete 404; README carried both `<port>`
+  placeholders and no numeric loopback port. No child process remained. This
+  is the required distinction between a guard that rejects five bad calls and
+  a design that makes those calls unreachable.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
