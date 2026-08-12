@@ -224,6 +224,15 @@ export function validateProbeManifest(raw: string): string[] {
       return;
     }
     const en = e as Record<string, unknown>;
+    if (
+      Object.prototype.hasOwnProperty.call(en, 'probe') &&
+      en['probe'] !== 'http' &&
+      en['probe'] !== 'web'
+    ) {
+      problems.push(
+        `entry #${i}: "probe" must be the literal "http" or "web", got ${JSON.stringify(en['probe'])} — scenario labels belong in the smoke/note, not in the discriminator`
+      );
+    }
     const kind =
       en['probe'] === 'http'
         ? 'http'
@@ -358,6 +367,10 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
       `interactions and the smoke expression are stable — recording those`,
       `three makes a later pass able to re-serve the artefact and replay the`,
       `exact same validation. Prose in a README cannot be replayed; this can.`,
+      `The discriminator is EXACT: "probe" MUST be the literal "web". Never`,
+      `put a scenario label there (for example "reset_after_increments");`,
+      `the smoke/interactions already distinguish scenarios, and every reader`,
+      `dispatches on the literal value.`,
       `INTERACTIONS MUST BE SELECTOR-BASED — MANDATORY. Record`,
       `{"type": "click", "selector": "#start"}, NEVER pixel coordinates`,
       `({"x":304,"y":392}), even though validate_html accepts them: coordinates`,

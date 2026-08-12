@@ -1,19 +1,44 @@
 {
   "tasks": [
     {
-      "id": "single-page-recipe-cost-calculator",
-      "family": "web",
-      "goal": "Build a single-page web app that lets a user enter recipe ingredients with quantities and unit costs, then displays the total cost and cost-per-serving live as values change."
+      "id": "csv-json-cli-package-doc",
+      "family": "cli",
+      "goal": "Build a Node CLI tool that converts a CSV file to JSON via command-line arguments and manually verify a few sample invocations. As a FINAL SEPARATE PHASE, add a package.json and a README documenting those exact verified invocations under a 'Verified invocations' section."
     },
     {
-      "id": "habit-tracker-http-api",
+      "id": "zero-dep-library-inventory-api",
       "family": "http",
-      "goal": "Build a small HTTP API for tracking daily habits, supporting creating habits, logging completions by date, and retrieving a per-habit completion streak."
+      "goal": "Write and boot a zero-dependency Node HTTP JSON API for managing a small library's book inventory (add, list, update, delete books) using only the built-in http module, with an in-memory store and a startup port log line."
     },
     {
-      "id": "expense-splitter-cli-app",
-      "family": "app",
-      "goal": "Build a command-line expense-splitting application that lets a group add shared expenses and computes who owes whom to settle balances evenly."
+      "id": "recipe-api-lifecycle-probe",
+      "family": "http",
+      "goal": "Build a single-file Node JSON CRUD API for a recipe collection (create, read, list, delete recipes) with a README spec of its routes. As a FINAL SEPARATE PHASE, mechanically exercise every documented route end-to-end and confirm status codes and response bodies match the spec."
+    },
+    {
+      "id": "mood-tracker-widget-html",
+      "family": "web",
+      "goal": "Build a self-contained index.html mood-tracker widget with buttons to log a mood and a display area whose background color and message change conditionally based on the currently selected mood state."
+    },
+    {
+      "id": "habit-widget-state-smoke-test",
+      "family": "web",
+      "goal": "Build a self-contained HTML/JS habit-streak widget with increment/reset controls and conditional styling that exposes its internal state via a window.__habitWidget object with getters. As a FINAL SEPARATE PHASE, mechanically verify the controls and styling by reading and exercising that exposed state object."
+    },
+    {
+      "id": "argv-temp-converter-cli",
+      "family": "cli",
+      "goal": "Write and verify a no-dependency Node CLI that reads a single temperature argument like '30C' or '86F' from process.argv[2], converts it to the other scale, and exits 1 with a stderr usage message when the argument is missing or malformed."
+    },
+    {
+      "id": "task-list-api-doc-from-source",
+      "family": "http",
+      "goal": "Build a single-file Node HTTP JSON API server for managing a personal task list (create, list, update status, delete tasks). As a FINAL SEPARATE PHASE, write a README documenting every route, request body, and status code exactly as implemented in the server's source code, without probing it live."
+    },
+    {
+      "id": "data-pipeline-docs-and-config",
+      "family": "files",
+      "goal": "Write a README.md and CONTRIBUTING.md for a hypothetical 'data-pipeline' command-line project with specified required headings (Overview, Installation, Usage, Contributing Guidelines, Code of Conduct), plus a config.json file containing an exact specified literal set of pipeline stage names and settings."
     }
   ]
 }

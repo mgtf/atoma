@@ -26,6 +26,11 @@
   `node` was corrected and had its trust counters reset.
 - HTTP probe guidance now forbids recording a long-running server process as a
   shell probe; endpoint observations or a finite harness are the evidence.
+- HTTP builders now distinguish JSON syntax from semantic field validation and
+  probe a blank/wrong-type payload; durable docs use `<port>` placeholders
+  rather than the current process's bound port.
+- Probe-manifest validation now rejects custom `probe` scenario labels instead
+  of inferring a valid web shape from the presence of `smoke`.
 
 ## v0.1.2 — 2026-08-12
 

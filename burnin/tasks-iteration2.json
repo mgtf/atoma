@@ -1,0 +1,19 @@
+{
+  "tasks": [
+    {
+      "id": "csv-json-cli-package-doc",
+      "family": "cli",
+      "goal": "Build a Node CLI tool that converts a CSV file to JSON via command-line arguments and manually verify a few sample invocations. As a FINAL SEPARATE PHASE, add a package.json and a README documenting those exact verified invocations under a 'Verified invocations' section."
+    },
+    {
+      "id": "recipe-api-lifecycle-probe",
+      "family": "http",
+      "goal": "Build a single-file Node JSON CRUD API for a recipe collection (create, read, list, delete recipes) with a README spec of its routes. As a FINAL SEPARATE PHASE, mechanically exercise every documented route end-to-end and confirm status codes and response bodies match the spec."
+    },
+    {
+      "id": "habit-widget-state-smoke-test",
+      "family": "web",
+      "goal": "Build a self-contained HTML/JS habit-streak widget with increment/reset controls and conditional styling that exposes its internal state via a window.__habitWidget object with getters. As a FINAL SEPARATE PHASE, mechanically verify the controls and styling by reading and exercising that exposed state object."
+    }
+  ]
+}

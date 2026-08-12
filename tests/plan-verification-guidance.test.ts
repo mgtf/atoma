@@ -59,6 +59,9 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
     expect(planPrompt).toMatch(/"harden index\.js"/);
     expect(planPrompt).toMatch(/read-only verifier.*replay old probes/s);
+    expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
+    expect(planPrompt).toMatch(/http:\/\/localhost:<port>/);
+    expect(planPrompt).toMatch(/LISTENING_ON_PORT=<port>/);
   });
 
   it('the L2 Sonnet plan prompt carries the same rule (short form)', async () => {
@@ -88,5 +91,6 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/fabricate/);
     expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
     expect(planPrompt).toMatch(/exact intended output path/);
+    expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
   });
 });

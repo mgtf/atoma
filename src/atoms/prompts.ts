@@ -121,3 +121,14 @@ export const MUTATING_SUBTASK_FILE_GUIDANCE = [
   `filenames; choose them in the first build phase and repeat them in every`,
   `later phase that must mutate those files.`,
 ].join('\n');
+
+/** Durable HTTP docs must not capture the one port assigned to this run. */
+export const HTTP_PORTABLE_DOC_GUIDANCE = [
+  `HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable`,
+  `example commands, write \`http://localhost:<port>\`, never the numeric port`,
+  `assigned to the current server process. That number dies with the process.`,
+  `The stdout marker is portable the same way: document`,
+  `\`LISTENING_ON_PORT=<port>\`, never a captured value such as`,
+  `\`LISTENING_ON_PORT=59420\`.`,
+  `The live bound URL belongs in run evidence/results only, not documentation.`,
+].join('\n');

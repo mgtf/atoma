@@ -159,3 +159,8 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T11:15:14.753Z,habit-tracker-http-api,http,delivered,0.3848,328,16,1,0,15,0,0,0,0,0,0,0,2026-08-12T11-15-15-409-ed36af8c.json
 2026-08-12T11:20:45.302Z,expense-splitter-cli-app,app,delivered,0.2233,177,13,1,0,12,2,0,0,0,0,0,0,2026-08-12T11-20-46-005-04669100.json
 2026-08-12T11:30:56.264Z,inventory-reorder-cli-regression,app,delivered,0.4522,316,22,1,1,20,0,0,0,0,1,0,0,2026-08-12T11-30-56-844-9376913b.json
+2026-08-12T11:41:10.396Z,csv-json-cli-package-doc,cli,delivered,0.224,162,12,1,0,11,0,0,0,0,0,0,0,2026-08-12T11-41-10-936-6c6fd129.json
+2026-08-12T11:43:53.213Z,recipe-api-lifecycle-probe,http,delivered,0.4231,288,21,1,3,17,0,0,0,0,3,0,0,2026-08-12T11-43-53-850-5ab42e5c.json
+2026-08-12T11:48:43.370Z,habit-widget-state-smoke-test,web,delivered,0.2943,219,12,1,2,9,0,0,0,0,2,0,0,2026-08-12T11-48-44-036-ee273111.json
+2026-08-12T11:58:56.299Z,event-registration-api-regression,http,delivered,0.4953,364,18,1,0,17,0,0,0,0,0,0,0,2026-08-12T11-58-56-882-370b3313.json
+2026-08-12T12:05:02.489Z,mood-tracker-widget-regression,web,delivered,0.3288,285,14,1,0,13,0,0,0,0,0,0,0,2026-08-12T12-05-03-167-4f1ddc20.json

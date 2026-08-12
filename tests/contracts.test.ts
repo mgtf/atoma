@@ -80,6 +80,32 @@ describe('contracts — schema/validator/prompt agreement', () => {
     expect(validateProbeManifest(bad)).toHaveLength(3); // method+path+status missing
   });
 
+  it('rejects scenario labels masquerading as the web probe discriminator', () => {
+    // Live habit-widget manifest used `probe: "reset_after_increments"`.
+    // The smoke fallback inferred the web shape and silently accepted it,
+    // even though every schema and replay reader dispatches on literal "web".
+    const manifest = JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          probe: 'reset_after_increments',
+          file: 'index.html',
+          interactions: [{ type: 'click', selector: '#reset' }],
+          smoke: 'true',
+          expected: true,
+          consoleErrors: 0,
+          failedRequests: 0,
+        },
+      ],
+    });
+    expect(validateProbeManifest(manifest)).toEqual([
+      expect.stringMatching(/"probe" must be the literal "http" or "web"/),
+    ]);
+    expect(manifestWriterLines('web').join(' ')).toMatch(
+      /"probe" MUST be the literal "web"/
+    );
+  });
+
   it('schemas reject what the contract forbids', () => {
     // Coordinate-only interactions violate the replayability requirement.
     expect(

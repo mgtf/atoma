@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "event-registration-api-regression",
+      "family": "http",
+      "goal": "Build a zero-dependency Node HTTP JSON API for event registrations with create, list, update and delete routes, plus a README route specification. As a FINAL SEPARATE PHASE, exercise the documented lifecycle and confirm it matches the specification."
+    },
+    {
+      "id": "mood-tracker-widget-regression",
+      "family": "web",
+      "goal": "Build a self-contained index.html mood tracker with several mood buttons, conditional message and color styling, and an exposed window.__moodTracker state API. As a FINAL SEPARATE PHASE, mechanically verify representative controls, state transitions and reset behavior."
+    }
+  ]
+}

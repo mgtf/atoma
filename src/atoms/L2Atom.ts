@@ -69,7 +69,11 @@ export {
   skillContextBlock,
   type SkillDraft,
 } from '../skills/lifecycle.js';
-import { MUTATING_SUBTASK_FILE_GUIDANCE, SMOKE_DESIGN_GUIDANCE } from './prompts.js';
+import {
+  HTTP_PORTABLE_DOC_GUIDANCE,
+  MUTATING_SUBTASK_FILE_GUIDANCE,
+  SMOKE_DESIGN_GUIDANCE,
+} from './prompts.js';
 export { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 // Compatibility re-exports: tests and the skills CLI historically import
 // these from L2Atom; the definitions now live in src/contracts/ and
@@ -382,6 +386,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `artefact (node/npm) plus reading files back. NEVER send a non-browser`,
       `artefact into a serve+validate_html loop — the worker would fabricate`,
       `an index.html just to have something to serve.`,
+      HTTP_PORTABLE_DOC_GUIDANCE,
       `Write subtask descriptions as OUTCOMES, not tool invocations — a`,
       `description hard-naming a tool binds a child that may not declare`,
       `it; children know their own tools.`,

@@ -35,6 +35,10 @@ describe('ensureCanonicalHttpL1 / ensureCanonicalHttpL2 — bootstrap', () => {
     expect(l1.createdBy).toBe(CANONICAL_HTTP_BOOTSTRAP_MARKER);
     expect(l1.description).toMatch(/Node HTTP server builder/);
     expect(l1.systemPrompt).toMatch(/LISTENING_ON_PORT/);
+    expect(l1.systemPrompt).toMatch(/JSON\.parse IS SYNTAX, NOT REQUEST VALIDATION/);
+    expect(l1.systemPrompt).toMatch(/syntactically-valid, semantically-invalid payload/);
+    expect(l1.systemPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
+    expect(l1.systemPrompt).toMatch(/LISTENING_ON_PORT=<port>/);
     // The HTTP L1 must NOT advertise web tools.
     expect(l1.tools.map((t) => t.name)).not.toContain('start_static_server');
     expect(l1.tools.map((t) => t.name)).not.toContain('validate_html');

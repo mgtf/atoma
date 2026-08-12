@@ -48,7 +48,7 @@ import {
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
-import { MUTATING_SUBTASK_FILE_GUIDANCE } from './prompts.js';
+import { HTTP_PORTABLE_DOC_GUIDANCE, MUTATING_SUBTASK_FILE_GUIDANCE } from './prompts.js';
 import type { SkillRegistry } from '../skills/registry.js';
 
 /**
@@ -329,6 +329,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `    validation phase is the norm here.`,
       `  - HTTP server / API: start_node_server + fetch_url probes against`,
       `    the endpoints. No browser, no validate_html.`,
+      HTTP_PORTABLE_DOC_GUIDANCE,
       `  - CLI tool / scripts / config / docs: run_shell executing the`,
       `    artefact (node index.js, npm start) and checking stdout / exit`,
       `    code; read files back for docs. NO static server, NO`,

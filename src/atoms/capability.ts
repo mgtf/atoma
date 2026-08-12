@@ -1,6 +1,7 @@
 import type { Tier, Tool } from '../core/types.js';
 import { manifestWriterLines } from '../contracts/probeManifest.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
+import { HTTP_PORTABLE_DOC_GUIDANCE } from './prompts.js';
 
 /**
  * CAPABILITY-FIRST DESCRIPTIONS
@@ -585,6 +586,17 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `     write_file for a small fix), kill+respawn via a second`,
   `     start_node_server call. Up to 4 iterations.`,
   `  7. return JSON {"output": <url or summary>, "summary": "<one sentence>"}`,
+  ``,
+  `JSON.parse IS SYNTAX, NOT REQUEST VALIDATION. For every documented body`,
+  `field, enforce the semantic contract the task/spec states: trim and reject`,
+  `blank required strings, check array element types, require finite numbers`,
+  `and their stated ranges, and reject calendar-invalid dates when a date field`,
+  `is part of the domain. Do not invent constraints absent from the task, but`,
+  `do probe at least one syntactically-valid, semantically-invalid payload for`,
+  `each write-route shape. Two consecutive live APIs accepted blank names and`,
+  `wrong field types while claiming validation; parsing JSON alone caused both.`,
+  ``,
+  HTTP_PORTABLE_DOC_GUIDANCE,
   ``,
   `HARD RULE on the LISTENING_ON_PORT marker: your server MUST print the`,
   `literal line "LISTENING_ON_PORT=<N>" on stdout after it has successfully`,

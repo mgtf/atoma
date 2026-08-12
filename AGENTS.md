@@ -756,6 +756,42 @@ re-exports all the historical names so old imports keep working.
   burn-in SIGTERM grace fix of 2026-08-08. They were removed; all four new runs
   left zero workspace servers and zero tracked Chromium processes. Treat that
   as historical cleanup, not a live regression unless a future batch leaks one.
+- **SECOND LIVE ITERATION, 2026-08-12 — two watch items resolved by data.**
+  A lifecycle-targeted batch ran CLI packaging ($0.2240/12 calls), recipe API
+  lifecycle ($0.4231/21, including 3 stale-refusal compile calls), and exposed
+  widget smoke ($0.2943/12), traces `2026-08-12T11-41-10-936-6c6fd129`,
+  `2026-08-12T11-43-53-850-5ab42e5c`,
+  `2026-08-12T11-48-44-036-ee273111`. All three delivered with ZERO friction
+  events; the earlier Control+a/selector errors therefore did not recur and
+  earn no change. Independent scoring again mattered. The packaging artefact
+  was correctly named `csv2json` and moved the corrected live script to 2/0.
+  The recipe API still accepted a blank title and numeric array member — the
+  second consecutive batch with syntactically valid but semantically invalid
+  HTTP payloads accepted — and its README pasted the bound port into durable
+  examples. The widget worked, but all five manifest entries used scenario
+  labels (`probe:"reset_after_increments"`) instead of the literal
+  `probe:"web"`; `validateProbeManifest` inferred the web shape from `smoke`
+  and returned clean, contradicting the schema.
+  The resulting corrections are structural: canonical HTTP prompts and both
+  live HTTP recipes now state that JSON parsing is not field validation and
+  require a wrong-type/blank-field probe; all HTTP planning/worker paths require
+  `<port>` placeholders (including `LISTENING_ON_PORT=<port>`) in durable docs;
+  the manifest checker rejects any explicit non-http/non-web `probe` value and
+  the web writer plus live smoke recipe name the literal.
+  Fresh regressions then delivered an event-registration API
+  ($0.4953/18, `2026-08-12T11-58-56-882-370b3313`) and mood tracker
+  ($0.3288/14, `2026-08-12T12-05-03-167-4f1ddc20`). External probes confirmed
+  blank/wrong-type registrations return 400, every durable URL uses `<port>`,
+  the mood state/reset behavior works, and its manifest passes the tightened
+  checker. The README's illustrative stdout block still pasted
+  `LISTENING_ON_PORT=59420`; the shared guidance now names marker placeholders
+  explicitly too, but that last wording has NOT been re-measured. Two recovered
+  one-off friction events (missing README before it was authored; one malformed
+  smoke variable) do not recur and earn no change.
+  All five runs left zero workspace servers/Chromium children; ledger remained
+  exact. The live package script was also replayed offline: semantic
+  `reorder.js` produced package/bin `reorder`, while generic `index.js` refused
+  before writing package.json — the intended validated-LLM fallback.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
