@@ -42,7 +42,7 @@ import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
 import { makeAnthropicClient } from '../run/auth.js';
-import { buildReferencedProviders } from '../run/providers.js';
+import { buildReferencedProviders, resolveBaseProviderKind } from '../run/providers.js';
 import type { LlmClient } from '../core/types.js';
 import type { Skill } from '../skills/types.js';
 import type { BurninTask } from './burnin.js';
@@ -276,21 +276,14 @@ export function parseCurriculumTasks(text: string, families: readonly string[]):
 
 /** Same provider switch as build-app (ATOMA_LLM), + cross-vendor routing parity. */
 function makeClient(): LlmClient {
-  const provider = (process.env['ATOMA_LLM'] ?? 'anthropic').toLowerCase();
+  const provider = resolveBaseProviderKind(process.env['ATOMA_LLM']);
   const base: LlmClient =
     provider === 'ollama'
       ? new OllamaLlmClient({
           baseUrl: process.env['OLLAMA_BASE_URL'],
           defaultModel: process.env['OLLAMA_MODEL'],
         })
-      : // The bare `claude` alias too — build-app.ts has accepted both since
-        // it was written, this copy only ever matched the long form, and the
-        // docstring above claims parity. The failure is SILENT and expensive:
-        // with ATOMA_LLM=claude the curriculum falls through to the Anthropic
-        // branch and hits the dead API key, so the one Sonnet call that
-        // generates the whole task batch fails for a reason that looks like
-        // an auth problem rather than a typo.
-        provider === 'claude-cli' || provider === 'claude'
+      : provider === 'claude-cli'
         ? new ClaudeCliLlmClient()
         : new AnthropicLlmClient(makeAnthropicClient());
   const providers = buildReferencedProviders();

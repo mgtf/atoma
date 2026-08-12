@@ -16,6 +16,28 @@ import { modelForTier } from '../core/models.js';
  */
 export const ZAI_DEFAULT_BASE_URL = 'https://api.z.ai/api/anthropic';
 
+export type BaseProviderKind = 'anthropic' | 'ollama' | 'claude-cli';
+
+/**
+ * One definition for the process-wide provider selector used by the runner
+ * and curriculum CLI. Cross-vendor `provider:model` tier pins are separate.
+ */
+export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
+  const provider = (raw ?? 'anthropic').trim().toLowerCase();
+  if (provider === 'anthropic') return 'anthropic';
+  if (provider === 'ollama') return 'ollama';
+  if (provider === 'claude-cli' || provider === 'claude') return 'claude-cli';
+  if (provider === 'codex') {
+    throw new Error(
+      'ATOMA_LLM=codex is not supported because Codex is structurally refused at L1; ' +
+        'pin supervisor tiers instead (for example ATOMA_MODEL_L3=codex:gpt-5.6-sol)'
+    );
+  }
+  throw new Error(
+    `unknown ATOMA_LLM provider "${raw}" (expected anthropic, ollama, claude-cli, or claude)`
+  );
+}
+
 /**
  * Providers that a `provider:model` tier pin can reference
  * (e.g. ATOMA_MODEL_L1=zai:glm-4.5-air). Each entry builds its client

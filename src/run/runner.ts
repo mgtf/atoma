@@ -4,7 +4,7 @@ import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
-import { buildReferencedProviders } from './providers.js';
+import { buildReferencedProviders, resolveBaseProviderKind } from './providers.js';
 import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
@@ -123,11 +123,11 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // (`resolveLatestOpus`) is also skipped — L3 falls back to its
   // FALLBACK_OPUS model id string, which the OllamaLlmClient then
   // silently substitutes with its configured default model.
-  const provider = (process.env['ATOMA_LLM'] ?? 'anthropic').toLowerCase();
+  const provider = resolveBaseProviderKind(process.env['ATOMA_LLM']);
   const useOllama = provider === 'ollama';
   // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
   // Code installation (Claude Agent SDK) — subscription auth, no API key.
-  const useClaudeCli = provider === 'claude-cli' || provider === 'claude';
+  const useClaudeCli = provider === 'claude-cli';
 
   const args = parseRunnerArgs(argv);
   const goal = args.goal ?? profile.defaultGoal;

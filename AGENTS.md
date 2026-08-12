@@ -2160,6 +2160,14 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   clients' ids as-is. An explicit `ATOMA_MODEL_L3` also SKIPS
   `resolveLatestOpus`'s network call. Covered by
   `tests/model-tiers.test.ts`.
+- **The process-wide `ATOMA_LLM` selector has ONE parser:
+  `resolveBaseProviderKind` in `src/run/providers.ts`.** Runner and curriculum
+  both consume it, including the bare `claude` alias. Before this, curriculum's
+  copy missed that alias and silently fell into the Anthropic API path, turning
+  a provider typo into a dead-key error. Unknown values now fail loudly.
+  `ATOMA_LLM=codex` is rejected with guidance: Codex cannot serve L1, so it is
+  reachable only through L2/L3 `provider:model` tier pins. Pure tests pin every
+  alias and both rejection messages.
 - **Cross-VENDOR tier routing (`RoutingLlmClient`,
   `src/core/llmRouting.ts`).** A tier pin may carry a `provider:` prefix
   — `ATOMA_MODEL_L1=zai:glm-4.5-air` routes every L1 call to Z.ai while
