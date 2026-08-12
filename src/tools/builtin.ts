@@ -1850,15 +1850,27 @@ export function makeSmokeStuckTracker(
   };
 }
 
-function isSmokeOk(result: unknown): boolean {
+export function isSmokeOk(result: unknown): boolean {
   if (result === undefined || result === null) return false;
   if (typeof result === 'boolean') return result;
   if (typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    if ('ok' in r) return Boolean(r['ok']);
-    return true;
+    if ('ok' in r) return r['ok'] === true;
+    // Structured diagnostics used to pass merely because the object itself is
+    // truthy, even when it said `{hasStreak3Class:false}`. Without an explicit
+    // aggregate `ok`, a false boolean anywhere means at least one reported
+    // claim failed. Callers with expected-false state must compute `ok`
+    // explicitly and may still return all diagnostic fields.
+    return !containsFalseBoolean(result);
   }
   return Boolean(result);
+}
+
+function containsFalseBoolean(value: unknown, depth = 0): boolean {
+  if (value === false) return true;
+  if (depth >= 5 || value === null || typeof value !== 'object') return false;
+  const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+  return children.some((child) => containsFalseBoolean(child, depth + 1));
 }
 
 /**

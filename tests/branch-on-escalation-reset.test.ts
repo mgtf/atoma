@@ -131,7 +131,8 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     // diagnosis, a returned object comes back with its values.
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/MOST EXPENSIVE tool/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/structured OBJECT/);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/a returned OBJECT is truthy/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/explicit aggregate `ok`/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/any false boolean.*treated as failure/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/If you are past\s+five/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/copy the exact.*byte-for-byte/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/"#increment-btn".*"incrementBtn"/s);

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   detectSmokeStatementError,
+  isSmokeOk,
   makeSmokeStuckTracker,
   SMOKE_STUCK_WINDOW,
   SMOKE_STUCK_THRESHOLD,
@@ -73,6 +74,21 @@ describe('detectSmokeStatementError', () => {
   it('empty or whitespace-only smoke returns null (execute path treats it as absent)', () => {
     expect(detectSmokeStatementError('')).toBeNull();
     expect(detectSmokeStatementError('    ')).toBeNull();
+  });
+});
+
+describe('isSmokeOk — structured assertions are not truthy by accident', () => {
+  it('requires explicit ok when diagnostic booleans include a failure', () => {
+    expect(isSmokeOk({ hasStreak3Class: false, hasStreak0Class: true })).toBe(false);
+    expect(isSmokeOk({ milestone: { classMatches: false }, reset: { classMatches: true } })).toBe(
+      false
+    );
+  });
+
+  it('lets explicit ok encode expected-false diagnostic state', () => {
+    expect(isSmokeOk({ ok: true, reset: { hasStreak3Class: false } })).toBe(true);
+    expect(isSmokeOk({ ok: false, values: { rendered: true } })).toBe(false);
+    expect(isSmokeOk({ streak: 3, className: 'streak-3' })).toBe(true);
   });
 });
 

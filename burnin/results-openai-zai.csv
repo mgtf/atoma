@@ -11,3 +11,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T19:04:07.577Z,recipe-api-lifecycle-probe,http,delivered,0.2307,379,19,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-04-08-195-d26c6387.json,ollama+zai+codex,19,0
 2026-08-12T19:17:25.936Z,recipe-api-lifecycle-probe,http,delivered,0.2015,352,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-17-26-480-9e46a3b5.json,ollama+zai+codex,13,0
 2026-08-12T19:24:49.354Z,habit-widget-state-smoke-test,web,delivered,0.1355,244,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-24-49-947-76e5a9c3.json,ollama+zai+codex,13,0
+2026-08-12T19:38:25.281Z,habit-widget-state-smoke-test,web,delivered,0.1025,181,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-38-25-791-d9beb151.json,ollama+zai+codex,13,0

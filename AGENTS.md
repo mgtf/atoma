@@ -1072,6 +1072,22 @@ re-exports all the historical names so old imports keep working.
   writable backing field, unique method/getter names, and a smoke IIFE that
   captures milestone state BEFORE reset plus final reset state. A rerun is
   required before this class is closed.
+- **TWELFTH LIVE ITERATION, 2026-08-12 — zero friction is necessary, not
+  sufficient evidence.** The exact widget rerun delivered in
+  181s/13 calls/$0.1025 estimated (trace
+  `2026-08-12T19-38-25-791-d9beb151`), with ZERO tool/LLM errors, rejections,
+  fallbacks, friction or leaked children. The source used one `_streak` backing
+  field and no duplicate class method; independent browser execution passed
+  streak 0 → 3 (`streak-3`, changed color) → reset 0. But both validate_html
+  calls and the manifest observed only the post-reset state. Their diagnostic
+  object literally returned `hasStreak3Class:false` and was accepted because
+  the old `isSmokeOk` treated every object without an `ok` field as truthy.
+  The internal banner therefore over-claimed conditional-style verification.
+  `isSmokeOk` now requires explicit `ok === true`; when omitted, any false
+  boolean recursively fails the smoke. Guidance and live recipes require
+  `{ok: <all milestone+reset assertions>, milestone, reset}`. Expected-false
+  diagnostics remain expressible under an explicit true aggregate. A further
+  rerun is required; delivered+friction-zero did not close this evidence gap.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
@@ -3383,11 +3399,13 @@ second is the kind of thing that gets acted on:
   widget. Nothing in the guidance said a call was expensive, and the
   existing loop-discipline rules only fire on REPEATED failures, which
   never happened (the smokes were all different). The rule tells the L1
-  to return a structured OBJECT answering every question at once: a
-  returned object is truthy so the check passes, and the whole object
-  comes back in `smokeResult`. It also cures the "smoke check failed:
-  false" opacity for free — that message is just `JSON.stringify` of the
-  smoke's return value, so a bare boolean carries no diagnosis while an
+  to return a structured OBJECT answering every question at once, with an
+  explicit aggregate `ok`, and the whole object comes back in `smokeResult`.
+  It shipped with "any object is truthy" semantics; a live widget then passed
+  while reporting `hasStreak3Class:false`, claiming an intermediate state it
+  had never observed. Now `ok === true` is authoritative; without `ok`, any
+  false boolean anywhere makes the smoke fail. This also cures the "smoke
+  check failed: false" opacity — a bare boolean carries no diagnosis while an
   object comes back with its values. It is appended by BOTH `buildNarrowL1Prompt` (escalation-branch
   path) AND `createSubtaskL1` (fresh-L1-on-fanout path). Adding new L1
   creation sites? Append this block too, or new L1s will miss the
