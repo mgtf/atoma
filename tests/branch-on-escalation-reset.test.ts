@@ -144,6 +144,8 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/increments.*then resets.*reset state/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/interactions: \[\]/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/class\/style\/color.*labels alone are insufficient/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/for \(let i = 0; i < thresholdFromSource/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/Never query an id or expect a label you did not read/);
   });
 
   it('new L1s that inherit validate_html from the L2 toolset get SMOKE_DESIGN_GUIDANCE', async () => {

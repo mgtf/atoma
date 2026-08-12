@@ -87,6 +87,9 @@
   must be a JSON-encoded string, matching the schema and replay contract.
 - Conditional styling evidence must cover both milestone and reset/final
   classes, styles or colors and bind those checks into the aggregate `ok`.
+- Web builders/verifiers use one source-derived state-journey template with
+  empty external interactions and looped milestone transitions, avoiding
+  guessed labels and unrolled validation thrash.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

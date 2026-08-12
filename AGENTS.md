@@ -1183,6 +1183,25 @@ re-exports all the historical names so old imports keep working.
   styling tied to `reset`/`final`, with style terms present in the aggregate
   `ok` clause and returned values. Reset-only evidence is explicitly tested as
   missing. Another exact rerun is required.
+- **EIGHTEENTH LIVE ITERATION, 2026-08-12 — correctness closed, technique still
+  thrashed.** The bidirectional-styling rerun delivered in
+  447s/13 calls/$0.1850 estimated (trace
+  `2026-08-12T20-47-20-062-26329238`). Final browser and durable evidence were
+  fully correct and replayable: initial/reset class, milestone-7 `fire`,
+  milestone-14 `on-fire`, milestone-30 `legendary`, aggregate `ok:true`,
+  JSON-encoded expected, no duplicate methods, no console errors and no leaked
+  child. The recovery skill injected as designed. But nine soft validation
+  failures preceded it: three reset-erasure preflights, guessed IDs/labels,
+  wrong expected maxStreak, and several strict-false assertion failures. The
+  guards prevented false delivery; the L1 technique still wasted 7.5 minutes.
+  Shared guidance and both live widget recipes now provide one canonical
+  state-journey template rather than prose: re-read current source; copy exact
+  IDs/thresholds/labels/classes; `interactions: []`; reset; capture initial;
+  loop to the source-derived threshold; capture milestone class/style; reset;
+  capture final; return one aggregate `ok`. Loops replace 30 unrolled
+  increments. Another fresh web task is preferable to repeating the same theme
+  again: the contract is proven, while technique generalisation needs a novel
+  widget.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
