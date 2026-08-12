@@ -41,6 +41,11 @@ describe('contracts — schema/validator/prompt agreement', () => {
     expect(
       smokeOkIncludesStyling('({ok: milestoneCount === 4, milestoneClass})')
     ).toBe(false);
+    expect(
+      smokeOkIncludesStyling(
+        '(() => { const checks = { goalClassApplied: milestone.className !== initial.className }; return { ok: Object.values(checks).every(Boolean), checks }; })()'
+      )
+    ).toBe(true);
   });
 
   it('every schema-validated EXAMPLE round-trips the health check clean', () => {

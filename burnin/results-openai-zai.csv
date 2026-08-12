@@ -21,3 +21,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T20:58:22.486Z,hydration-widget-state-journey,web,failed,0.4571,818,26,0,0,0,0,4,0,0,0,0,0,2026-08-12T20-58-23-018-be9ebaee.json,ollama+zai+codex,26,0
 2026-08-12T21:23:21.771Z,hydration-widget-state-journey,web,delivered,0.2758,615,27,0,0,0,0,2,0,0,0,0,0,2026-08-12T21-23-22-302-aa3d6345.json,ollama+zai+codex,27,1
 2026-08-12T21:37:35.369Z,hydration-widget-state-journey,web,delivered,0.2723,459,16,0,0,0,0,0,0,0,0,0,0,2026-08-12T21-37-35-921-44f459ec.json,ollama+zai+codex,16,0
+2026-08-12T21:53:19.913Z,hydration-widget-state-journey,web,delivered,0.2101,447,19,0,0,0,0,0,0,0,0,0,0,2026-08-12T21-53-20-432-ac34eced.json,ollama+zai+codex,19,0

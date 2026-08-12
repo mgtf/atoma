@@ -129,7 +129,11 @@ export function smokeOkClause(smoke: string): string {
 }
 
 export function smokeOkIncludesStyling(smoke: string): boolean {
-  return WEB_STYLE_TERM_RE.test(smokeOkClause(smoke));
+  if (WEB_STYLE_TERM_RE.test(smokeOkClause(smoke))) return true;
+  return (
+    /Object\.values\(checks\)\.every\(Boolean\)/.test(smoke) &&
+    /\bchecks\s*=\s*\{[\s\S]*(?:class|style|colou?r|getComputedStyle)/i.test(smoke)
+  );
 }
 
 export function smokeResultIncludesStyling(result: unknown): boolean {

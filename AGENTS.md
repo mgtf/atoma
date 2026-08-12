@@ -1262,6 +1262,20 @@ re-exports all the historical names so old imports keep working.
   return a `checks` object with one positively named boolean per requirement
   and derive `ok` through `Object.values(checks).every(Boolean)`, so the first
   failed result names the exact comparison instead of inviting blind CSS edits.
+- **TWENTY-SECOND LIVE ITERATION, 2026-08-12 — the diagnostic pattern exposed
+  a parser blind spot.** Hydration with named checks delivered in
+  447s/19 calls/$0.2101 estimated (trace
+  `2026-08-12T21-53-20-432-ac34eced`). Final behavior and durable evidence were
+  fully correct, replayable and leak-free; friction fell 11 → 6. Five of those
+  six were FALSE framework rejections: the style-binding guard inspected only
+  the literal `ok:` clause, so it missed class/style assertions inside
+  `checks` when `ok` was correctly derived as
+  `Object.values(checks).every(Boolean)`. The sixth was the familiar first-pass
+  reset-erasure preflight.
+  The shared `smokeOkIncludesStyling` contract now recognises either direct
+  style comparisons in `ok` OR the canonical checks/every indirection when the
+  checks object contains class/style/color assertions. Both validate_html and
+  L2 consume the same helper; a regression test pins the exact live shape.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
