@@ -495,6 +495,39 @@ describe('file read-back probe (#F9)', () => {
     expect(exec.calls.some((c) => c.name === 'read_file')).toBe(false);
   });
 
+  it('health-checks a reported web manifest alongside browser re-validation', async () => {
+    const exec = new FsExecutor(
+      {
+        '.atoma-probes.json': JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              probe: 'web',
+              file: 'index.html',
+              smoke: '({ok:true})',
+              expected: { ok: true },
+            },
+          ],
+        }),
+      },
+      ['read_file', 'validate_html']
+    );
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: {
+          url: 'http://localhost:1234/',
+          probes: [{ probe: 'web', smoke: '({ok:true})' }],
+        },
+        summary: 'validated the page',
+      },
+      child: webChild(),
+    });
+    expect(checked.requiresReview).toBe(true);
+    expect(checked.block).toMatch(/expected.*JSON-encoded string/);
+  });
+
   it('does NOT fire for a child that cannot write files', async () => {
     const reasoner = new L1Atom({
       name: 'Boron',

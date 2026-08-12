@@ -254,6 +254,11 @@ export function validateProbeManifest(raw: string): string[] {
     } else if (kind === 'web') {
       if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
       if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
+      if ('expected' in en && typeof en['expected'] !== 'string') {
+        problems.push(
+          `entry #${i} (web): "expected" must be a JSON-encoded string, got ${typeof en['expected']}`
+        );
+      }
       const inter = en['interactions'];
       if (Array.isArray(inter)) {
         const coordOnly = inter.filter(
@@ -373,6 +378,8 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
       `put a scenario label there (for example "reset_after_increments");`,
       `the smoke/interactions already distinguish scenarios, and every reader`,
       `dispatches on the literal value.`,
+      `"expected" is a STRING containing JSON.stringify(smokeResult), never the`,
+      `object itself. The checker and replay reader require that encoded form.`,
       `INTERACTIONS MUST BE SELECTOR-BASED — MANDATORY. Record`,
       `{"type": "click", "selector": "#start"}, NEVER pixel coordinates`,
       `({"x":304,"y":392}), even though validate_html accepts them: coordinates`,

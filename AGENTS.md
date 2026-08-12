@@ -1146,6 +1146,27 @@ re-exports all the historical names so old imports keep working.
   interactions (with a warning), and suffixed `afterIncrement*` snapshot names
   are recognised. The recovery skill is kept: its trigger and body describe the
   exact generic failure class and it did not cause the rejection.
+- **SIXTEENTH LIVE ITERATION, 2026-08-12 — browser evidence was correct while
+  its durable encoding was not.** The styling-gated rerun delivered in
+  267s/13 calls/$0.1125 estimated (trace
+  `2026-08-12T20-26-07-137-fbe59762`). One initial reset-erasure preflight
+  fired, then the retry produced the exact required evidence:
+  `milestoneStreak=3`, `milestoneClass="streak-display streak-3"`,
+  `resetStreak=0`, `resetClass="streak-display streak-0"`, all inside the
+  aggregate `ok`; independent browser execution matched it, source had no
+  duplicate class method and no child leaked. The remaining durable defect was
+  outside the result: `.atoma-probes.json` stored `expected` as an OBJECT,
+  while `webEntrySchema` and the replay prompt require a JSON-ENCODED STRING.
+  `validateProbeManifest` failed to check that optional field, and the web
+  ground-truth branch never health-checked the manifest, so both advertised
+  one-definition guarantees were false in this direction.
+  The checker now enforces the schema's expected type. A web RESULT reporting
+  probes triggers a local manifest health read alongside (not instead of) the
+  browser re-validation; malformed/missing manifests override trust for review.
+  Web writer guidance and the live recipe explicitly require
+  `expected: JSON.stringify(smokeResult)`. The recipe now also says
+  `interactions: []` as a hard rule for self-driving milestone/reset smokes.
+  Another exact rerun is required for zero friction plus replayable evidence.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

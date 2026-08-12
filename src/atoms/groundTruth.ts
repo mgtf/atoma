@@ -283,6 +283,52 @@ export async function probeGroundTruthEx(args: {
   // read the errors as a contradiction, and cascaded into escalations.)
   const url = extractResultUrl(args.payload);
   if (!url) return empty;
+  const webFacts = emptyGroundTruthFacts();
+  const manifestLines: string[] = [];
+  const output =
+    args.payload && typeof args.payload === 'object'
+      ? (args.payload as Record<string, unknown>)['output']
+      : undefined;
+  const reportedWebProbes =
+    output &&
+    typeof output === 'object' &&
+    !Array.isArray(output) &&
+    Array.isArray((output as Record<string, unknown>)['probes']) &&
+    ((output as Record<string, unknown>)['probes'] as unknown[]).some(
+      (probe) =>
+        probe !== null &&
+        typeof probe === 'object' &&
+        (probe as Record<string, unknown>)['probe'] === 'web'
+    );
+  if (reportedWebProbes && tools.has('read_file')) {
+    try {
+      const rawManifest = await tools.execute('read_file', {
+        path: PROBE_MANIFEST_FILENAME,
+      });
+      const text =
+        rawManifest &&
+        typeof rawManifest === 'object' &&
+        typeof (rawManifest as Record<string, unknown>)['content'] === 'string'
+          ? ((rawManifest as Record<string, unknown>)['content'] as string)
+          : typeof rawManifest === 'string'
+            ? rawManifest
+            : '';
+      const problems = text.trim()
+        ? validateProbeManifest(text)
+        : [`${PROBE_MANIFEST_FILENAME}: missing or empty`];
+      webFacts.manifestMalformed = problems.length > 0;
+      manifestLines.push(
+        problems.length === 0
+          ? `${PROBE_MANIFEST_FILENAME}: well-formed web probe record present`
+          : `${PROBE_MANIFEST_FILENAME}: MALFORMED — ${problems.slice(0, 4).join('; ')}`
+      );
+    } catch {
+      webFacts.manifestMalformed = true;
+      manifestLines.push(
+        `${PROBE_MANIFEST_FILENAME}: MALFORMED — result reports a web probe but the manifest is missing`
+      );
+    }
+  }
 
   try {
     // Minimal load-and-look probe: no interactions, no smoke. The goal is
@@ -298,9 +344,10 @@ export async function probeGroundTruthEx(args: {
         `Supervisor independently re-ran validate_html on ${url}.`,
         'This is OBJECTIVE evidence — weight it above the child\'s self-reported claims.',
         'If this evidence contradicts the child\'s RESULT, REJECT the verdict.',
+        ...manifestLines,
         summary,
       ].join('\n'),
-      facts: emptyGroundTruthFacts(),
+      facts: webFacts,
     };
   } catch (err) {
     // Probe failures are themselves signal (e.g. URL unreachable → the
@@ -313,7 +360,7 @@ export async function probeGroundTruthEx(args: {
         `  ${(err as Error).message}`,
         'This strongly suggests the child\'s deliverable is not actually running.',
       ].join('\n'),
-      facts: { ...emptyGroundTruthFacts(), probeToolFailure: true },
+      facts: { ...webFacts, probeToolFailure: true },
     };
   }
 }

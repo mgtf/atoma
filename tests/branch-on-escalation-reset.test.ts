@@ -142,6 +142,7 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/get name\(\).*this\.name =/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/statusText.*not writable state/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/increments.*then resets.*reset state/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/interactions: \[\]/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/class\/style\/color.*labels alone are insufficient/s);
   });
 

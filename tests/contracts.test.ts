@@ -92,7 +92,7 @@ describe('contracts — schema/validator/prompt agreement', () => {
           file: 'index.html',
           interactions: [{ type: 'click', selector: '#reset' }],
           smoke: 'true',
-          expected: true,
+          expected: 'true',
           consoleErrors: 0,
           failedRequests: 0,
         },
@@ -104,6 +104,31 @@ describe('contracts — schema/validator/prompt agreement', () => {
     expect(manifestWriterLines('web').join(' ')).toMatch(
       /"probe" MUST be the literal "web"/
     );
+  });
+
+  it('rejects a non-encoded web expected value just like the schema does', () => {
+    const manifest = JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          probe: 'web',
+          file: 'index.html',
+          smoke: '({ok:true})',
+          expected: { ok: true },
+        },
+      ],
+    });
+    expect(validateProbeManifest(manifest)).toEqual([
+      expect.stringMatching(/"expected" must be a JSON-encoded string/),
+    ]);
+    expect(
+      webEntrySchema.safeParse({
+        probe: 'web',
+        file: 'index.html',
+        smoke: '({ok:true})',
+        expected: { ok: true },
+      }).success
+    ).toBe(false);
   });
 
   it('schemas reject what the contract forbids', () => {
