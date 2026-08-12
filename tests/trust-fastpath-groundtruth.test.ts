@@ -119,6 +119,25 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual([]); // rejection precedes even the trust probe
   });
 
+  it('rejects a tolerant non-JSON result before a trusted type can approve it', async () => {
+    const { l2, l1, ctx, exec } = setup({ 'server.js': 'console.log("done")' });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: 'The verification is complete.',
+        summary: 'fallback produced non-JSON output (29 chars)',
+        toolCallResults: [{ name: 'read_file', ok: true }],
+      }),
+      { description: 'verify server.js' },
+      { ...ctx, requireObservedToolAction: true }
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/required final.*JSON envelope/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual([]);
+  });
+
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {
     const { l2, l1, ctx, exec } = setup({
       'README.md': '# json-cli\n\n## Install\n\n## Usage\n',

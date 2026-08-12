@@ -52,6 +52,27 @@
 - Mutation detection now covers planner vocabulary, preserves full target
   paths, treats negation clause-locally, and routes ungated mutations through
   the validated LLM path.
+- Deterministic verification no longer mistakes contingent repair guidance,
+  negated creation, or nominal phrases such as "document probe" for a required
+  file mutation; unconditional writes remain protected by the deliverable gate.
+- HTTP evidence can be machine-recorded through `fetch_url {record:true}`;
+  `record_probe` refuses long-running servers and curl/wget before spawning,
+  eliminating dead-port manifests and hand-written HTTP clients.
+- Post-approval learning/compilation is capped at 120 seconds, and transport
+  failures receive a generation-scoped stamp so they cannot block every later
+  run; all observed successful calls remain within the new bound.
+- L3 planning now chooses semantic CLI entry filenames for packaging phases,
+  and the live argv-CLI recipe keeps package/module semantics coherent and
+  stays inside its subtask’s output scope.
+- Script-skill scaffolding is never re-probed after deletion; web recipes copy
+  selectors exactly from source; source-based API documentation never boots or
+  curls the server and always uses portable port placeholders.
+- Unambiguous pseudo-final `return`/XML-corrupted `output` tool calls are
+  normalized into assistant JSON without an error round-trip; other attempts
+  receive explicit coaching, and tolerantly wrapped non-JSON L1 results are
+  rejected before trust can approve them.
+- Intentional empty negative-test fixtures no longer masquerade as broken
+  deliverables when a recorded non-zero probe corroborates their purpose.
 - Production L1 results with no successful transport-observed action are
   rejected before trust or validator shortcuts; failed structured tool results
   cannot seed task or recovery skills.

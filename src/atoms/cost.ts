@@ -105,18 +105,26 @@ export const DIRECT_DISPATCH_DEMOTE_AFTER = 2;
  * Own abort budget for POST-APPROVAL bookkeeping LLM calls (skill
  * distillation in `learnSkillFromRun`, llm→script compilation in
  * `compileSkillToScript`) — deliberately DECOUPLED from the run's
- * deadline signal. By the time these calls fire, the deliverable is
- * already approved: killing a compile to protect the run budget
- * protects nothing, and it kept happening — three separate incidents
+ * deadline signal. By the time these calls fire, the CURRENT CHILD RESULT
+ * is approved; aborting its bookkeeping with the shared signal corrupted
+ * learning state, and it kept happening — three separate incidents
  * of the run deadline landing mid-compile under the claude-cli
  * transport, the last one leaving a run HUNG with no endedAt after
  * the aborted subprocess (http-ping closer, 2026-08-03). The
- * trade-off is explicit: a run may extend past its deadline by at
- * most this budget while bookkeeping completes. `improveSkillBody`
+ * trade-off is explicit: a run may extend past its deadline while
+ * bookkeeping completes. The original 240s ceiling was too permissive:
+ * two Codex compile calls produced ZERO tokens and consumed the full 240s;
+ * one starved a later sequential phase and made a correct HTTP build miss
+ * its 900s run budget. Across all 50 completed post-approval calls in the
+ * trace corpus, the slowest successful one took 100.3s. A 120s ceiling
+ * preserves every observed success with ~20% headroom while bounding a
+ * silent compiler failure at half the old cost.
+ *
+ * `improveSkillBody`
  * deliberately KEEPS the run signal — it gates an escalation retry,
  * i.e. the deliverable itself.
  */
-export const POST_APPROVAL_LLM_TIMEOUT_MS = 240_000;
+export const POST_APPROVAL_LLM_TIMEOUT_MS = 120_000;
 
 /**
  * BUDGETS PER CONCERN (P4). A run carries several kinds of work whose
@@ -127,9 +135,9 @@ export const POST_APPROVAL_LLM_TIMEOUT_MS = 240_000;
  *     retries incl. improveSkillBody) rides ctx.signal — the run
  *     deadline gates the deliverable.
  *   - POST-APPROVAL BOOKKEEPING (distillation, compilation) rides
- *     THIS signal: by the time it fires the deliverable is approved,
- *     so the run budget protects nothing there and killing the work
- *     only discards paid-for learning.
+ *     THIS signal: the current child result is approved, but an outer
+ *     sequential plan may still have work. Its independent cap prevents
+ *     a silent compiler from consuming the remaining deliverable budget.
  *   - VERIFICATION probes are local fs/network reads that honour
  *     ctx.signal (they gate the deliverable's verdict).
  * Trade-off, explicit: a run may extend past its deadline by at most

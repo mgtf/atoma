@@ -90,10 +90,51 @@ const PASSIVE_MUTATION_SOURCE =
   '(?:built|created|documented|hardened|updated|rewritten|edited|corrected|' +
   'fixed|amended|revised|written|added|appended|regenerated|refreshed)';
 const MUTATING_VERB_RE = new RegExp(`\\b${MUTATING_ACTION_SOURCE}\\b`, 'i');
+const FAILURE_CONDITION_SOURCE =
+  "(?:fails?|failed|failure|mismatches?|invalid|does\\s+not\\s+pass|doesn't\\s+pass)";
+const TRAILING_CONDITIONAL_REPAIR_RE = new RegExp(
+  `\\b${MUTATING_ACTION_SOURCE}\\b[^.;!?]{0,80}?\\b(?:re-?run|retry|repeat)\\b` +
+    `[^.;!?]{0,80}?\\bif\\b[^.;!?]{0,80}?\\b${FAILURE_CONDITION_SOURCE}\\b`,
+  'gi'
+);
+const LEADING_CONDITIONAL_REPAIR_RE = new RegExp(
+  `\\b(?:if|when)\\b[^.;!?]{0,80}?\\b${FAILURE_CONDITION_SOURCE}\\b` +
+    `[^.;!?]{0,80}?\\b${MUTATING_ACTION_SOURCE}\\b`,
+  'gi'
+);
+const NEGATED_MUTATION_RE = new RegExp(
+  `\\b(?:no|without|never)\\s+(?:need\\s+to\\s+)?\\b${MUTATING_ACTION_SOURCE}\\b`,
+  'gi'
+);
+const AUXILIARY_NEGATED_MUTATION_RE = new RegExp(
+  `\\b(?:do|does|must|should)\\s+not\\s+(?:need\\s+to\\s+)?` +
+    `\\b${MUTATING_ACTION_SOURCE}\\b`,
+  'gi'
+);
+const NOMINAL_DOCUMENT_RE =
+  /\bdocument(?=\s+(?:probe|check|verification|inspection|structure|format|analysis)\b)/gi;
 
 /** True when the subtask asks for a named file to be CHANGED, not merely read. */
 export function subtaskMutatesFiles(description: string): boolean {
-  return MUTATING_VERB_RE.test(description);
+  // A verification phase often ends with contingent remediation guidance:
+  // "fix then re-run if any requirement fails". That does NOT require a
+  // successful verifier to mutate anything. Treating its `fix` as an
+  // unconditional write disabled deterministic verification on a live run,
+  // after which the L1 needlessly re-ran the script through record_probe.
+  //
+  // Both word orders are recognised. The bounded single-clause patterns are
+  // deliberately narrow: "fix README.md then re-run" remains mutating, as
+  // does any independent update clause elsewhere in the description.
+  const unconditional = description
+    .replace(TRAILING_CONDITIONAL_REPAIR_RE, '')
+    .replace(LEADING_CONDITIONAL_REPAIR_RE, '')
+    .replace(NEGATED_MUTATION_RE, '')
+    .replace(AUXILIARY_NEGATED_MUTATION_RE, '')
+    // `document` is deliberately a mutating verb ("document the API"), but
+    // also a noun modifier. The live plan said "shell-based document probe";
+    // counting that noun disabled a read-only dispatch.
+    .replace(NOMINAL_DOCUMENT_RE, '');
+  return MUTATING_VERB_RE.test(unconditional);
 }
 
 export interface ScriptWriteTargets {

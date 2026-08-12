@@ -277,6 +277,8 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(learnPrompt).toMatch(/BODY MUST GENERALISE/);
     expect(learnPrompt).toMatch(/PLACEHOLDERS/);
     expect(learnPrompt).toMatch(/Never copy a concrete filename/);
+    expect(learnPrompt).toMatch(/SUBTASK'S output scope/);
+    expect(learnPrompt).toMatch(/"type":"module" requires ESM imports/);
     // The verification-split contract: mechanical verification distills as a
     // SEPARATE skill — the compilable half of a build+verify run.
     expect(learnPrompt).toMatch(/SPLIT OUT MECHANICAL VERIFICATION/);

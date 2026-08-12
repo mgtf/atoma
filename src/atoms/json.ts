@@ -524,6 +524,8 @@ export function parseTwoJson(text: string): [unknown, unknown] {
  * as output. Used by L2/L3 fallback self-exec where Opus/Sonnet sometimes
  * ignore the JSON envelope and dump content directly.
  */
+export const NON_JSON_PAYLOAD_SUMMARY_PREFIX = 'fallback produced non-JSON output';
+
 export function parsePayloadTolerant(text: string): {
   output: unknown;
   summary: string;
@@ -535,7 +537,7 @@ export function parsePayloadTolerant(text: string): {
     const trimmed = text.trim();
     return {
       output: trimmed,
-      summary: `fallback produced non-JSON output (${trimmed.length} chars)`,
+      summary: `${NON_JSON_PAYLOAD_SUMMARY_PREFIX} (${trimmed.length} chars)`,
     };
   }
 }

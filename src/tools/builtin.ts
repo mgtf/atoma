@@ -68,7 +68,7 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
     declaration: {
       name: 'edit_file',
       description:
-        'Replace an exact text span inside an existing workspace file. PREFER this over write_file when MODIFYING a file — you only emit the changed text, not the whole content. `old_string` must match exactly (including whitespace) and be unique in the file; set replace_all=true to substitute every occurrence. Use relative paths only.',
+        'Replace an exact text span inside an existing workspace file. PREFER this over write_file when MODIFYING a file — you only emit the changed text, not the whole content. `old_string` must match exactly (including whitespace) and be unique in the file; set replace_all=true to substitute every occurrence. Do not call edit_file when old_string and new_string are identical: no change is needed. Use relative paths only.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -847,6 +847,7 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
         'Issue an HTTP(S) request to any URL (localhost for probing your own server, or external APIs).',
         'Returns { status, headers, body }. Body is a UTF-8 string — parse JSON yourself if you need it.',
         'Use this AFTER start_node_server to verify the endpoints you just wrote actually answer correctly.',
+        `Set record=true when the request is evidence; the tool appends the exact observation to ${PROBE_MANIFEST_FILENAME}.`,
       ].join(' '),
       inputSchema: {
         type: 'object',
@@ -868,6 +869,15 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
           timeoutMs: {
             type: 'number',
             description: `Request timeout. Defaults to ${DEFAULT_TIMEOUT_MS}.`,
+          },
+          record: {
+            type: 'boolean',
+            description:
+              `When true, append the exact observed method/path/status/body to ${PROBE_MANIFEST_FILENAME}. Use this for endpoint requests that are verification evidence instead of curl, node -e, or hand-written manifest JSON.`,
+          },
+          note: {
+            type: 'string',
+            description: 'Optional one-line reason this HTTP request is evidence.',
           },
         },
         required: ['url'],
@@ -916,12 +926,42 @@ export function fetchUrlTool(opts: BuiltinToolOptions): BuiltinTool {
         res.headers.forEach((value, key) => {
           respHeaders[key] = value;
         });
-        return {
+        const result = {
           ok: res.ok,
           status: res.status,
           headers: respHeaders,
           body: text,
         };
+        if (args['record'] === true) {
+          const parsedUrl = new URL(url);
+          const entry: {
+            probe: 'http';
+            method: string;
+            path: string;
+            status: number;
+            body?: string;
+            note?: string;
+          } = {
+            probe: 'http',
+            method,
+            path: `${parsedUrl.pathname}${parsedUrl.search}` || '/',
+            status: res.status,
+            body: text.slice(0, 200),
+          };
+          if (typeof args['note'] === 'string' && args['note'].trim()) {
+            entry.note = args['note'].trim();
+          }
+          const manifestPath = opts.sandbox.resolve(PROBE_MANIFEST_FILENAME);
+          const existing = existsSync(manifestPath)
+            ? readFileSync(manifestPath, 'utf8')
+            : null;
+          writeFileSync(manifestPath, appendHttpProbe(existing, entry), 'utf8');
+          opts.logger?.info(
+            `[tool:fetch_url] recorded ${method} ${entry.path} -> ${res.status} in ${PROBE_MANIFEST_FILENAME}`
+          );
+          return { ...result, recorded: true, manifest: PROBE_MANIFEST_FILENAME };
+        }
+        return result;
       } catch (err) {
         const e = err as Error & { name?: string };
         if (e.name === 'AbortError') {
@@ -2022,6 +2062,41 @@ export function mergeShellProbe(
 }
 
 /**
+ * Append one HTTP observation to a probe manifest. Unlike shell commands,
+ * HTTP entries are a stateful sequence: POST /items may legitimately appear
+ * several times with 201, 400 and 409, so they never merge by route.
+ */
+export function appendHttpProbe(
+  existingRaw: string | null,
+  entry: {
+    probe: 'http';
+    method: string;
+    path: string;
+    status: number;
+    body?: string;
+    note?: string;
+  }
+): string {
+  let doc: { version: number; entries: Record<string, unknown>[] } = {
+    version: 1,
+    entries: [],
+  };
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw) as typeof doc;
+      if (parsed && Array.isArray(parsed.entries)) {
+        doc = { version: 1, entries: parsed.entries };
+      }
+    } catch {
+      // A corrupt manifest is replaced rather than extended with more
+      // plausible-looking data.
+    }
+  }
+  doc.entries.push(entry);
+  return JSON.stringify(doc, null, 2) + '\n';
+}
+
+/**
  * RECORD_PROBE — run a command AND write its real result into the probe
  * manifest, in one step.
  *
@@ -2057,7 +2132,9 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
         'hand — this tool writes exactly what the command produced. Entries merge by command, so',
         're-running one after a fix replaces its record. If a corrected probe needs a DIFFERENT',
         'command, pass supersedes with the exact accidental command to remove only that stale entry',
-        'after the replacement command has run.',
+        'after the replacement command has run. FINITE CLI/script commands only: never start a',
+        'server here and never use curl/wget; use start_node_server followed by fetch_url with',
+        'record=true for HTTP evidence.',
       ].join(' '),
       inputSchema: {
         type: 'object',
@@ -2123,6 +2200,47 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
           `record_probe: "${cmd}" carries an exit-code echo. Drop it — this tool records the real ` +
             'exit code in the entry\'s "exitCode" field.'
         );
+      }
+
+      const shellProgram =
+        command === 'bash' && argv[0] === '-c' && typeof argv[1] === 'string'
+          ? argv[1]
+          : cmd;
+      if (
+        /^(?:curl|wget)\b/i.test(command) ||
+        /(?:^|[;&|]\s*)(?:curl|wget)\b/i.test(shellProgram)
+      ) {
+        throw new Error(
+          `record_probe: "${cmd}" is an HTTP request disguised as a shell probe. ` +
+            'Use fetch_url with record=true so the machine records method/path/status/body.'
+        );
+      }
+
+      // A server process is not a finite probe. This exact mistake recurred
+      // across three HTTP runs: record_probe waited 30 seconds, killed the
+      // healthy server, and persisted exit=1 plus a dead port. Detect the
+      // project's explicit boot contract before spawning and route the model
+      // to the lifecycle + machine-recorded HTTP path.
+      if (command === 'node' && argv.length === 1 && /\.m?js$/i.test(argv[0] ?? '')) {
+        try {
+          const source = readFileSync(opts.sandbox.resolve(argv[0]!), 'utf8');
+          if (/LISTENING_ON_PORT/.test(source) && /\.listen\s*\(/.test(source)) {
+            throw new Error(
+              `record_probe: "${cmd}" starts a long-running server, not a finite probe. ` +
+                'Use start_node_server, then fetch_url with record=true for each endpoint request.'
+            );
+          }
+        } catch (err) {
+          if (
+            err instanceof Error &&
+            err.message.startsWith('record_probe:') &&
+            err.message.includes('long-running server')
+          ) {
+            throw err;
+          }
+          // Missing/unreadable commands stay with run_shell, whose error is
+          // the authoritative execution result.
+        }
       }
 
       const result = (await shell.execute({ command, args: argv })) as {

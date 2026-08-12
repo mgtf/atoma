@@ -16,6 +16,7 @@ import { SCAN_GENERATION } from '../src/skills/scriptScan.js';
 const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATION}`;
 import { refusalStampIsCurrent } from '../src/skills/generations.js';
 import {
+  POST_APPROVAL_LLM_TIMEOUT_MS,
   shouldTrustSkill,
   TRUST_PROMOTE_THRESHOLD_SUCCESSES,
   TRUST_THRESHOLD_SUCCESSES,
@@ -48,6 +49,14 @@ const seed = {
   params: {},
   createdBy: 'test',
 };
+
+describe('post-approval bookkeeping budget', () => {
+  it('bounds silent learning/compile calls below every observed successful duration', () => {
+    // Corpus at the 2026-08-12 regression: 50/50 completed post-approval
+    // calls finished within 100.3s; the only two 240s calls emitted no tokens.
+    expect(POST_APPROVAL_LLM_TIMEOUT_MS).toBe(120_000);
+  });
+});
 
 describe('L2 onApproved — skill promotion (#C2c)', () => {
   let dir: string;
@@ -320,6 +329,42 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(after.promotionRefusedAt).toBe(stamped.promotionRefusedAt);
   });
 
+  it('stamps a compile transport error so it cannot consume every later run', async () => {
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx1 = makeCtx();
+    ctx1.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx1.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fit' })
+    );
+    ctx1.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx1.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    ctx1.llm.enqueue(() => {
+      throw new Error('The operation was aborted due to timeout');
+    });
+    await water.handleDirect({ description: 'first run' }, ctx1);
+
+    const stamped = skills.loadFor('Hydrogen').find((s) => s.id === 'web-build-loop')!;
+    expect(stamped.promotionRefusedAt).toBeTruthy();
+    expect(stamped.promotionRefusedReason).toMatch(/compile attempt errored.*timeout/);
+    expect(stamped.promotionRefusedGeneration).toBe(REFUSAL_GENERATION);
+
+    const water2 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx2 = makeCtx();
+    ctx2.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx2.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fit' })
+    );
+    ctx2.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx2.llm.enqueueText(jsonText({ output: 'ok', summary: 'built again' }));
+    await water2.handleDirect({ description: 'second run' }, ctx2);
+    expect(ctx2.llm.calls).toHaveLength(4); // no repeated compile call
+  });
+
   it('does NOT promote when Sonnet returns malformed JSON', async () => {
     process.env['ATOMA_SKILL_PROMOTE'] = '1';
     const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
@@ -372,10 +417,10 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
 describe('post-approval bookkeeping — decoupled from the run deadline', () => {
   it('the compile call carries its OWN signal, not the run signal', async () => {
-    // Three separate live incidents of the run deadline landing mid-compile
-    // under claude-cli, the last leaving a run hung with no endedAt. By
-    // compile time the deliverable is approved — the run budget protects
-    // nothing there.
+    // Three live incidents showed that sharing the run signal can strand a
+    // half-finished compile. The current SUBTASK is approved here, so the call
+    // keeps its own signal; other outer sequential phases may still remain,
+    // which is why that independent signal is now bounded to 120s.
     process.env['ATOMA_SKILL_PROMOTE'] = '1';
     const dir = mkdtempSync(join(tmpdir(), 'atoma-decouple-'));
     const skills = new SkillRegistry(dir);

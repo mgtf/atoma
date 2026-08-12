@@ -683,9 +683,8 @@ async function probeFilesGroundTruth(args: {
   if (!args.child.toolNames().includes('write_file')) return empty;
   const claims = extractResultFileClaims(args.payload);
   const witnessed = recordedProbesFromWitnesses(args.evidence);
-  const recorded = renderRecordedProbes(
-    witnessed.length > 0 ? witnessed : extractRecordedProbes(args.payload)
-  );
+  const probes = witnessed.length > 0 ? witnessed : extractRecordedProbes(args.payload);
+  const recorded = renderRecordedProbes(probes);
   facts.selfReportedMismatch = recorded.selfReportedFailure;
   if (
     claims.structured.length === 0 &&
@@ -754,12 +753,29 @@ async function probeFilesGroundTruth(args: {
             : JSON.stringify(raw);
       contents.set(path, content);
       const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
-      if (content.trim().length === 0 && isClaim) facts.emptyClaimedFiles.push(path);
+      const intentionalEmptyFixture =
+        content.length === 0 &&
+        probes.some(
+          (probe) =>
+            typeof probe.exitCode === 'number' &&
+            probe.exitCode !== 0 &&
+            probe.cmd.includes(path) &&
+            /\b(?:empty|blank|zero[- ]byte)\b/i.test(`${probe.cmd} ${probe.note ?? ''}`)
+        );
+      if (content.trim().length === 0 && isClaim && !intentionalEmptyFixture) {
+        facts.emptyClaimedFiles.push(path);
+      }
       if (
-        httpChild &&
         /\.(?:md|markdown|txt)$/i.test(path) &&
         DURABLE_HTTP_PORT_LITERAL_RE.test(content)
       ) {
+        // Content, not the writer's bucket, establishes that this is durable
+        // HTTP documentation. Live failure: an HTTP L2 delegated README.md to
+        // the file-scribe L1, so `httpChild` was false here and the defect was
+        // only caught one tier later. That re-ran the whole L2 phase and
+        // exhausted the run budget. Requiring review is still conservative:
+        // the validator may approve when the task explicitly asks for a fixed
+        // numeric port.
         facts.durablePortLiteralFiles.push(path);
         lines.push(
           `- ${path}: DURABLE HTTP DOC CONTAINS A NUMERIC LOOPBACK PORT — requires review. ` +
@@ -768,7 +784,11 @@ async function probeFilesGroundTruth(args: {
       }
       lines.push(
         `- ${path}: EXISTS (${content.length} chars)` +
-          (content.trim().length === 0 && isClaim ? ' — WARNING: file is EMPTY' : '') +
+          (content.trim().length === 0 && isClaim && !intentionalEmptyFixture
+            ? ' — WARNING: file is EMPTY'
+            : intentionalEmptyFixture
+              ? ' — empty negative-test fixture corroborated by a recorded non-zero probe'
+              : '') +
           `\n    excerpt: ${JSON.stringify(excerpt)}${content.length > excerpt.length ? ' …(truncated)' : ''}`
       );
     } catch (err) {

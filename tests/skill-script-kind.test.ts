@@ -182,6 +182,7 @@ describe('skillContextBlock — kind: script (phase 2)', () => {
     expect(out).toMatch(/run_shell.*command: "node"/);
     expect(out).toMatch(/console\.log\("hi"\)/);
     expect(out).toMatch(/Do NOT improvise additional tool calls/);
+    expect(out).toMatch(/NEVER call record_probe.*ephemeral/s);
   });
 
   it('uses python3 + .py for kind: script + language: python', () => {

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { AnthropicLlmClient } from '../src/core/llm.js';
+import {
+  AnthropicLlmClient,
+  coercePseudoFinalToolCall,
+  offScopeToolMessage,
+} from '../src/core/llm.js';
 import type { ToolExecutor } from '../src/core/types.js';
 
 /**
@@ -19,6 +23,39 @@ interface SdkCall {
   };
   hadTools: boolean;
 }
+
+describe('offScopeToolMessage final-answer coaching', () => {
+  it('tells pseudo return/output tools to emit assistant JSON text', () => {
+    for (const name of ['return', 'output</arg_key>']) {
+      expect(offScopeToolMessage(new Set(['write_file']), name)).toMatch(
+        /stop calling tools.*assistant text/
+      );
+    }
+    expect(offScopeToolMessage(new Set(['write_file']), 'validate_html')).not.toMatch(
+      /assistant text/
+    );
+  });
+
+  it('normalises only the two observed unambiguous pseudo-final shapes', () => {
+    expect(
+      JSON.parse(
+        coercePseudoFinalToolCall('return', {
+          output: '{"url":"http://localhost:1234"}',
+          summary: 'verified',
+        })!
+      )
+    ).toEqual({ output: { url: 'http://localhost:1234' }, summary: 'verified' });
+    expect(
+      JSON.parse(
+        coercePseudoFinalToolCall(
+          'output</arg_key>\n<arg_value>{"files":["README.md"]}</arg_value>',
+          { summary: 'written' }
+        )!
+      )
+    ).toEqual({ output: { files: ['README.md'] }, summary: 'written' });
+    expect(coercePseudoFinalToolCall('validate_html', { summary: 'no' })).toBeNull();
+  });
+});
 
 type Reply =
   | { kind: 'tool_use'; toolName: string; input?: Record<string, unknown> }
@@ -71,6 +108,46 @@ function makeFakeSdk(queue: Reply[]): {
 }
 
 describe('tool-use loop — declared-tools scope enforcement (#8a)', () => {
+  it('accepts a pseudo-final return as text without an error round-trip', async () => {
+    const { sdk, calls } = makeFakeSdk([
+      {
+        kind: 'tool_use',
+        toolName: 'return',
+        input: { output: '{"ok":true}', summary: 'verified' },
+      },
+    ]);
+    let executorInvoked = false;
+    const executor: ToolExecutor = {
+      async execute(): Promise<string> {
+        executorInvoked = true;
+        return 'unexpected';
+      },
+      has: () => true,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+    const response = await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [
+        {
+          name: 'write_file',
+          description: 'write',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      executor,
+    });
+
+    expect(executorInvoked).toBe(false);
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(response.text)).toEqual({
+      output: { ok: true },
+      summary: 'verified',
+    });
+  });
+
   it('rejects an off-scope tool_use with an is_error tool_result and does NOT invoke the executor', async () => {
     const { sdk, calls } = makeFakeSdk([
       // LLM tries to call validate_html, but only "fetch_url" is declared.

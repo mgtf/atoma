@@ -259,6 +259,8 @@ export class L1Atom extends Atom {
       ``,
       `When and only when the work is truly done, produce the final result as JSON:`,
       `{"output": <any>, "summary": "<one sentence>"}`,
+      `This final JSON is ASSISTANT TEXT, not a tool call. There is no "return"`,
+      `or "output" tool: stop calling tools and emit the JSON object directly.`,
     ]
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');

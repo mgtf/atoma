@@ -126,6 +126,7 @@ export class AnthropicLlmClient implements LlmClient {
 
     const budget = Math.max(1, req.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS);
     let finalResponse: Anthropic.Messages.Message | null = null;
+    let syntheticFinalText: string | null = null;
 
     for (let iter = 0; iter < budget; iter++) {
       // Short-circuit the tool loop between iterations as soon as the caller
@@ -168,9 +169,6 @@ export class AnthropicLlmClient implements LlmClient {
         break;
       }
 
-      // Append the assistant turn verbatim so tool_use ids line up.
-      messages.push({ role: 'assistant', content: response.content });
-
       const toolUses = response.content.filter(
         (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
       );
@@ -194,6 +192,21 @@ export class AnthropicLlmClient implements LlmClient {
         req.tools && req.tools.length > 0
           ? new Set(req.tools.map((t) => t.name))
           : null;
+      if (toolUses.length === 1 && declaredToolNames && !declaredToolNames.has(toolUses[0]!.name)) {
+        const pseudoFinal = coercePseudoFinalToolCall(
+          toolUses[0]!.name,
+          (toolUses[0]!.input ?? {}) as Record<string, unknown>
+        );
+        if (pseudoFinal) {
+          syntheticFinalText = pseudoFinal;
+          finalResponse = response;
+          break;
+        }
+      }
+
+      // Append the assistant turn verbatim so tool_use ids line up.
+      messages.push({ role: 'assistant', content: response.content });
+
       const toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
       for (const tu of toolUses) {
         const args = (tu.input ?? {}) as Record<string, unknown>;
@@ -318,14 +331,16 @@ export class AnthropicLlmClient implements LlmClient {
       );
     }
 
-    const text = finalResponse.content
-      .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('\n');
+    const text =
+      syntheticFinalText ??
+      finalResponse.content
+        .filter((b): b is Anthropic.Messages.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n');
 
     return {
       text,
-      stopReason: finalResponse.stop_reason,
+      stopReason: syntheticFinalText ? 'end_turn' : finalResponse.stop_reason,
       usage: {
         inputTokens: agg.inputTokens,
         outputTokens: agg.outputTokens,
@@ -361,7 +376,46 @@ function notifyToolInvocation(
  */
 export function offScopeToolMessage(declared: ReadonlySet<string>, requested: string): string {
   const declaredList = [...declared].sort().join(', ');
-  return `tool "${requested}" is NOT in your declared tools. You may only invoke: ${declaredList}. Do not call "${requested}" again for this task.`;
+  const finalAnswerHint =
+    /^(?:return|output(?:\b|<|_))/i.test(requested)
+      ? ' To finish, stop calling tools and emit {"output":...,"summary":"..."} directly as assistant text.'
+      : '';
+  return `tool "${requested}" is NOT in your declared tools. You may only invoke: ${declaredList}. Do not call "${requested}" again for this task.${finalAnswerHint}`;
+}
+
+/**
+ * Some OpenAI-compatible transports encode the final result as a synthetic
+ * `return`/`output` tool call even though no such tool was declared. Rejecting
+ * it costs another model round and has twice degraded a valid result into
+ * non-JSON prose. Normalise only the two observed, unambiguous shapes; every
+ * other off-scope call still follows the safety rejection path.
+ */
+export function coercePseudoFinalToolCall(
+  requested: string,
+  args: Record<string, unknown>
+): string | null {
+  const summary = typeof args['summary'] === 'string' ? args['summary'] : null;
+  if (!summary) return null;
+  if (requested === 'return' && 'output' in args) {
+    let output = args['output'];
+    if (typeof output === 'string') {
+      try {
+        output = JSON.parse(output);
+      } catch {
+        // Plain string output is valid Result.output.
+      }
+    }
+    return JSON.stringify({ output, summary });
+  }
+  const embedded = /^output<\/arg_key>\s*<arg_value>([\s\S]+)<\/arg_value>$/.exec(
+    requested
+  );
+  if (!embedded?.[1]) return null;
+  try {
+    return JSON.stringify({ output: JSON.parse(embedded[1]), summary });
+  } catch {
+    return null;
+  }
 }
 
 /**

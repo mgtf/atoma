@@ -3,6 +3,7 @@ import {
   scriptWriteTargets,
   subtaskNamedPaths,
   subtaskNamedFilePaths,
+  subtaskMutatesFiles,
   subtaskMutationTargets,
   subtaskMutationTargetPaths,
   scriptCanServeSubtask,
@@ -145,6 +146,41 @@ describe('subtaskMutationTargets — outputs, not every mentioned file', () => {
   });
 });
 
+describe('subtaskMutatesFiles — contingent repair is not an output requirement', () => {
+  const liveVerificationTask =
+    'As a final separate phase, mechanically inspect docs/security.md and ' +
+    'docs/reliability.md and verify their exact structures; fix then re-run ' +
+    'if any requirement fails.';
+
+  it('keeps the live final-verification phrasing read-only on success', () => {
+    expect(subtaskMutatesFiles(liveVerificationTask)).toBe(false);
+    expect(
+      subtaskMutatesFiles(
+        'Verify docs/security.md; if the check fails, fix the file and retry.'
+      )
+    ).toBe(false);
+    expect(
+      subtaskMutatesFiles(
+        "Mechanically verify docs/security.md with a shell-based document probe, " +
+          "and report the result without creating browser or server artefacts."
+      )
+    ).toBe(false);
+  });
+
+  it('still recognises unconditional repair and independent update clauses', () => {
+    expect(subtaskMutatesFiles('fix docs/security.md then re-run the check')).toBe(true);
+    expect(subtaskMutatesFiles('document the API in docs/security.md')).toBe(true);
+    expect(subtaskMutatesFiles('create docs/security.md without creating index.html')).toBe(
+      true
+    );
+    expect(
+      subtaskMutatesFiles(
+        'update docs/security.md; verify it and fix then re-run if validation fails'
+      )
+    ).toBe(true);
+  });
+});
+
 describe('scriptCanServeSubtask — the match-time decision', () => {
   it('REFUSES the manifest-only verifier for a README update — the round-6/7 fallback', () => {
     expect(
@@ -166,6 +202,16 @@ describe('scriptCanServeSubtask — the match-time decision', () => {
       scriptCanServeSubtask(
         REAL_VERIFIER,
         'Re-execute every invocation documented in the README and report which produced output identical to the recorded run'
+      )
+    ).toBe(true);
+  });
+
+  it('OFFERS a verifier when repair is contingent on a failed check', () => {
+    expect(
+      scriptCanServeSubtask(
+        REAL_VERIFIER,
+        'Mechanically verify docs/security.md and docs/reliability.md; ' +
+          'fix then re-run if any requirement fails.'
       )
     ).toBe(true);
   });

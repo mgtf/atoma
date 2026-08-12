@@ -336,6 +336,32 @@ describe('file read-back probe (#F9)', () => {
     expect(content).toMatch(/README\.md: EXISTS.*WARNING: file is EMPTY/s);
   });
 
+  it('does not call an intentional empty negative-test fixture a broken deliverable', async () => {
+    const exec = new FsExecutor({ 'samples/empty.csv': '' });
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: {
+          files: ['samples/empty.csv'],
+          probes: [
+            {
+              cmd: 'node csv2json.js samples/empty.csv',
+              exitCode: 1,
+              stderr: 'Error: CSV file is empty\n',
+              note: 'expected empty-file error',
+            },
+          ],
+        },
+        summary: 'verified the empty CSV error case',
+      },
+      child: fileChild(),
+    });
+    expect(checked.contradiction).toBe(false);
+    expect(checked.block).toMatch(/empty negative-test fixture corroborated/);
+    expect(checked.block).not.toMatch(/WARNING: file is EMPTY/);
+  });
+
   it('tells the validator NOT to reject over truncation or terse descriptions', async () => {
     // Guard against re-creating the over-demanding validator behaviour the
     // audit found: evidence being partial must not itself be grounds to fail.
@@ -409,6 +435,27 @@ describe('file read-back probe (#F9)', () => {
         summary: 'documented the API',
       },
       child: httpChild(),
+    });
+    expect(checked.contradiction).toBe(false);
+    expect(checked.requiresReview).toBe(true);
+    expect(checked.block).toMatch(/DURABLE HTTP DOC CONTAINS A NUMERIC LOOPBACK PORT/);
+  });
+
+  it('catches a dynamic port at the file-scribe boundary, before the HTTP parent', async () => {
+    // Live failure: Methane delegated README.md to Lithium. Gating this check
+    // on the CHILD owning HTTP tools let the port through L2; L3 caught it
+    // only after the whole phase had completed and a retry exhausted 900s.
+    const exec = new FsExecutor({
+      'README.md': '# API\nRun against http://localhost:64871/recipes\n',
+    });
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: { files: ['README.md'] },
+        summary: 'documented the API from the server source',
+      },
+      child: fileChild(),
     });
     expect(checked.contradiction).toBe(false);
     expect(checked.requiresReview).toBe(true);

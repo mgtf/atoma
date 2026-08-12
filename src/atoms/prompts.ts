@@ -64,6 +64,13 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `validate, fix what the values revealed, re-validate. If you are past`,
   `five, you are enumerating instead of asserting: collapse your`,
   `remaining checks into ONE object smoke and read the result.`,
+  `For every interaction selector, READ the current HTML and copy the exact`,
+  `id/class byte-for-byte. Never infer kebab-case from a camelCase property`,
+  `or invent a plausible selector: "#increment-btn" does not match`,
+  `id="incrementBtn", and one guessed selector invalidates the whole replay.`,
+  `Derive expected labels, classes and state thresholds from the same source.`,
+  `Do not invent plausible states ("On Fire", "Keep Going") when the artefact`,
+  `actually defines different values ("Beginner", "Building").`,
   ``,
   `== STATE-HEAVY APPS: expose a __test hook, do NOT simulate inputs ==`,
   `For games with rules (chess, minesweeper, roguelikes), for`,
@@ -120,6 +127,11 @@ export const MUTATING_SUBTASK_FILE_GUIDANCE = [
   `conflict with the rule against hard-naming tools. The plan owns stable`,
   `filenames; choose them in the first build phase and repeat them in every`,
   `later phase that must mutate those files.`,
+  `For a CLI that a later phase will package or name, choose a SEMANTIC entry`,
+  `filename derived from its behavior (for example "csv2json.js"), never a`,
+  `generic launcher such as "index.js", "main.js", "cli.js" or "app.js".`,
+  `A generic path leaves deterministic packaging no honest product/bin name`,
+  `and forces the full LLM fallback even when every invocation is verified.`,
 ].join('\n');
 
 /** Durable HTTP docs must not capture the one port assigned to this run. */

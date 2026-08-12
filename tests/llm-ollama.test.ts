@@ -308,6 +308,49 @@ describe('OllamaLlmClient', () => {
     expect(toolMsg.content).toMatch(/NOT in your declared tools/);
   });
 
+  it('normalises a pseudo-final return without a second Ollama round-trip', async () => {
+    restore = installFetchStub(async (_i, init) => {
+      calls.push([_i, init]);
+      return jsonResponse({
+        model: 'x',
+        message: {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'tc-final',
+              function: {
+                name: 'return',
+                arguments: { output: '{"ok":true}', summary: 'verified' },
+              },
+            },
+          ],
+        },
+        done: false,
+      });
+    });
+    const client = new OllamaLlmClient();
+    const response = await client.complete({
+      model: 'x',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [
+        {
+          name: 'write_file',
+          description: 'write',
+          inputSchema: { type: 'object', properties: {} },
+        },
+      ],
+      executor: { execute: async () => 'unexpected', has: () => true },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(response.text)).toEqual({
+      output: { ok: true },
+      summary: 'verified',
+    });
+  });
+
   it('throws with a descriptive error when Ollama returns a non-200', async () => {
     restore = installFetchStub(async () => {
       return new Response('model not found', { status: 404 });

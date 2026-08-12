@@ -59,6 +59,9 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
     expect(planPrompt).toMatch(/"harden index\.js"/);
     expect(planPrompt).toMatch(/read-only verifier.*replay old probes/s);
+    expect(planPrompt).toMatch(/SEMANTIC entry/);
+    expect(planPrompt).toMatch(/"csv2json\.js"/);
+    expect(planPrompt).toMatch(/generic launcher.*"index\.js"/s);
     expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
     expect(planPrompt).toMatch(/http:\/\/localhost:<port>/);
     expect(planPrompt).toMatch(/LISTENING_ON_PORT=<port>/);

@@ -237,6 +237,10 @@ export function skillContextBlock(skill: {
       `       "summary": "ran ${skill.id}; stdout: <first 200 chars>"}.`,
       `     - On error (non-zero exit / stderr non-empty): return the`,
       `       stderr in summary so the supervisor can diagnose.`,
+      `     - NEVER call record_probe on "${filename}". It is ephemeral`,
+      `       scaffolding that step 5 deletes, not a user invocation or durable`,
+      `       deliverable. The script's exact stdout envelope is already the`,
+      `       evidence this skill path returns.`,
       `  5. DELETE the scratch file once you have its output:`,
       `     run_shell { command: "node", args: ["-e",`,
       `       "require(\\"fs\\").rmSync(process.argv[1],{force:true})",`,
@@ -402,6 +406,11 @@ export class SkillLifecycle {
       `output out of the run above. Where a step needs a task-specific value, say`,
       `how to DERIVE it ("read the entry file's usage string to get its real`,
       `arguments"), not what it happened to be this time.`,
+      `Keep every step inside the SUBTASK'S output scope: never teach a build`,
+      `recipe to create package.json or README.md when those files belong to a`,
+      `later packaging phase. For Node artefacts, package and source module`,
+      `semantics must agree — "type":"module" requires ESM imports; CommonJS`,
+      `require() requires omitting that field. Never teach a mixed pair.`,
       `Observed failure: a documentation recipe learned on a file-analyzer task`,
       `kept the literal step "run node index.js sample.txt", so a later`,
       `Caesar-cipher CLI shipped a README documenting an invocation that just`,
@@ -795,9 +804,30 @@ export class SkillLifecycle {
         ctx: args.ctx,
       });
     } catch (err) {
+      const reason = `compile attempt errored: ${(err as Error).message}`;
       args.ctx.logger.warn(
-        `[${this.host.name}] skill compile errored: ${(err as Error).message}; leaving as kind:llm`
+        `[${this.host.name}] skill compile errored: ${(err as Error).message}; leaving as kind:llm and stamping this compiler generation to prevent retry thrash`
       );
+      // A transport failure used to leave the skill unstamped, so every later
+      // success retried the same compile. Two Codex calls then consumed the
+      // full 240s post-approval budget with zero tokens, one starving the
+      // remaining sequential phase until the run failed. Treat the failed
+      // attempt as generation-scoped: a body/compiler change gets a fresh
+      // chance, and `skills reset` remains the explicit immediate retry.
+      this.skills.markPromotionRefused(
+        args.l1Name,
+        args.skillId,
+        reason,
+        REFUSAL_GENERATION
+      );
+      args.ctx.recordSkill?.({
+        op: 'promote',
+        l1Name: args.l1Name,
+        skillId: args.skillId,
+        actorName: this.host.name,
+        actorTier: 2,
+        reasoning: `refused: ${reason}`,
+      });
       return;
     }
     if (!compiled.promotable) {

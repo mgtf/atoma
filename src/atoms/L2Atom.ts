@@ -22,6 +22,7 @@ import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
   l2StrategySchema,
+  NON_JSON_PAYLOAD_SUMMARY_PREFIX,
   parsePayloadTolerant,
   parsePlanWithFallback,
   parseTwoJson,
@@ -1803,6 +1804,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         modifications: {
           additionalContext:
             'No successful tool action was observed. Actually perform the subtask with your declared tools, verify the artefact, and only then return the result JSON. Do not describe intended work as completed.',
+        },
+      };
+    }
+    if (result.summary.startsWith(NON_JSON_PAYLOAD_SUMMARY_PREFIX)) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name} used the tolerant non-JSON wrapper — mechanically rejected before trust/LLM validation`
+      );
+      return {
+        approved: false,
+        reasoning:
+          'the L1 completed tool work but did not emit the required final {"output","summary"} JSON envelope',
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'Your tool work may already be complete. Do not call a return/output tool and do not narrate the result as prose. Emit one final JSON object directly as assistant text: {"output": <actual result>, "summary": "<evidence-backed summary>"}.',
         },
       };
     }

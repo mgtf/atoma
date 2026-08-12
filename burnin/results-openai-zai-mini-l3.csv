@@ -1,0 +1,5 @@
+timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills
+2026-08-12T17:23:35.995Z,security-reliability-guides-direct,files,delivered,0.0492,86,9,0,0,0,1,0,0,0,0,0,0,2026-08-12T17-23-36-529-3e02f6fd.json,ollama+zai+codex,9,0
+2026-08-12T17:25:34.302Z,csv-json-cli-package-doc,cli,delivered,0.1197,254,17,0,0,0,1,0,0,0,0,0,0,2026-08-12T17-25-34-844-babada5a.json,ollama+zai+codex,17,0
+2026-08-12T17:29:48.763Z,recipe-api-lifecycle-probe,http,failed,0.2649,901,20,0,0,0,0,0,0,0,1,0,0,2026-08-12T17-29-49-282-7b582f95.json,ollama+zai+codex,20,0
+2026-08-12T17:44:50.303Z,habit-widget-state-smoke-test,web,delivered,0.232,496,19,0,0,0,0,1,0,0,2,0,0,2026-08-12T17-44-50-954-4949938c.json,ollama+zai+codex,19,0

@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "security-reliability-guides-direct",
+      "family": "files",
+      "goal": "Create docs/security.md and docs/reliability.md. Each file must start with one H1, include a prose-only '## Context' section, and include a '## Checklist' section containing at least three concrete bullet points. As a FINAL SEPARATE PHASE, mechanically verify those exact structures."
+    }
+  ]
+}

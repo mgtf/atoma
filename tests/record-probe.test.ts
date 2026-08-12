@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import {
+  appendHttpProbe,
   commandLineNeedsShell,
+  fetchUrlTool,
   mergeShellProbe,
   recordProbeTool,
   renderProbeCmd,
@@ -146,6 +149,94 @@ describe('record_probe', () => {
     const t = recordProbeTool({ sandbox, shellAllowlist: ['echo'] });
     await expect(t.execute({ command: 'node', args: ['x.js'] })).rejects.toThrow(/not in allowlist/);
   });
+
+  it('refuses a long-running server before spending the shell timeout', async () => {
+    writeFileSync(
+      join(root, 'server.js'),
+      "require('http').createServer((_q,r)=>r.end('ok')).listen(0,()=>console.log('LISTENING_ON_PORT=1'));"
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 50 });
+    await expect(t.execute({ cmd: 'node server.js' })).rejects.toThrow(
+      /start_node_server.*fetch_url.*record=true/
+    );
+    expect(() => manifest()).toThrow();
+  });
+
+  it('routes HTTP evidence to fetch_url even when curl is hidden in bash', async () => {
+    const t = recordProbeTool({ sandbox });
+    await expect(t.execute({ cmd: 'curl http://localhost:3000/health' })).rejects.toThrow(
+      /fetch_url with record=true/
+    );
+    await expect(
+      t.execute({
+        command: 'bash',
+        args: ['-c', 'sleep 1 && curl http://localhost:3000/health'],
+      })
+    ).rejects.toThrow(/fetch_url with record=true/);
+  });
+});
+
+describe('fetch_url record=true — machine-written HTTP evidence', () => {
+  let root: string;
+  let sandbox: ToolSandbox;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-http-probe-'));
+    sandbox = new ToolSandbox(root);
+  });
+  afterEach(async () => {
+    await sandbox.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('appends ordered success and error responses without curl or transcription', async () => {
+    const server = createServer((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.statusCode = req.url === '/missing' ? 404 : 200;
+      res.end(JSON.stringify({ path: req.url }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind');
+    try {
+      const tool = fetchUrlTool({ sandbox });
+      await tool.execute({
+        url: `http://127.0.0.1:${address.port}/ok`,
+        record: true,
+        note: 'happy path',
+      });
+      await tool.execute({
+        url: `http://127.0.0.1:${address.port}/missing`,
+        record: true,
+        note: 'expected missing case',
+      });
+      const raw = readFileSync(join(root, PROBE_MANIFEST_FILENAME), 'utf8');
+      const doc = JSON.parse(raw) as { entries: Record<string, unknown>[] };
+      expect(doc.entries).toEqual([
+        {
+          probe: 'http',
+          method: 'GET',
+          path: '/ok',
+          status: 200,
+          body: '{"path":"/ok"}',
+          note: 'happy path',
+        },
+        {
+          probe: 'http',
+          method: 'GET',
+          path: '/missing',
+          status: 404,
+          body: '{"path":"/missing"}',
+          note: 'expected missing case',
+        },
+      ]);
+      expect(validateProbeManifest(raw)).toEqual([]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((err) => (err ? reject(err) : resolve()))
+      );
+    }
+  });
 });
 
 describe('renderProbeCmd — the recorded command must be replayable', () => {
@@ -220,6 +311,28 @@ describe('mergeShellProbe — pure merge semantics', () => {
     const out = JSON.parse(mergeShellProbe(withHttp, e('node a.js', 'x')));
     expect(out.entries).toHaveLength(2);
     expect(out.entries[0].probe).toBe('http');
+  });
+});
+
+describe('appendHttpProbe — sequence semantics', () => {
+  it('always appends repeated routes because state and status may differ', () => {
+    const first = appendHttpProbe(null, {
+      probe: 'http',
+      method: 'POST',
+      path: '/items',
+      status: 201,
+      body: '{"id":1}',
+    });
+    const out = JSON.parse(
+      appendHttpProbe(first, {
+        probe: 'http',
+        method: 'POST',
+        path: '/items',
+        status: 400,
+        body: '{"error":"blank"}',
+      })
+    ) as { entries: Record<string, unknown>[] };
+    expect(out.entries.map((entry) => entry['status'])).toEqual([201, 400]);
   });
 });
 

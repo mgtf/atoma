@@ -681,6 +681,21 @@ re-exports all the historical names so old imports keep working.
   outside LLM loops (its sensor is `directFailures`). Covered by
   `tests/friction.test.ts`, whose normalisation cases are the adversarial
   review's literal counter-examples.
+- **POST-RUN ERROR CLOSURE — no next live run before this is complete.**
+  After EVERY burn-in/manual product run, inspect the trace, raw task log and
+  friction report and enumerate: every L1 tool executor error, failure-shaped
+  tool result, LLM error/timeout, validator rejection, trust override,
+  deterministic fallback, malformed/tolerantly-wrapped result and lifecycle
+  call that failed. Classify each item explicitly. A deliberate negative probe
+  (CLI exit 1 expected by the test, HTTP 400/404 expected by the spec) is
+  successful evidence, not an error to erase. Every REAL error must be fixed at
+  its owning layer — artefact/recipe/prompt/tool/runtime — and covered offline
+  before another live run starts; a green delivery banner does not close errors
+  recovered inside the loop. The two-consecutive-batch rule above still governs
+  adding a BROAD generic runtime mechanism from a noisy signature; it does not
+  license leaving a concrete recipe/tool contract defect unfixed. If no safe
+  generic correction is justified, record the exact one-off classification and
+  targeted correction rather than silently moving on.
 - **A burn-in batch needs the machine to itself.** Beyond the source-edit
   rule below, do not run heavy work (test suites, Puppeteer-spawning
   experiments, another batch) alongside one: measurements taken on a
@@ -933,6 +948,74 @@ re-exports all the historical names so old imports keep working.
   `burnin/results-openai-zai.csv`; all calls appear under `other_calls` and the
   displayed cost is explicitly an estimate, not ChatGPT subscription or Z.ai
   billing.
+- **SEVENTH LIVE ITERATION, 2026-08-12 — classify the work before trying to
+  parallelise it.** The four fresh markdown runs each had two L1 execute calls
+  and a sequential L3 plan: author the files, THEN verify those same files.
+  Running those phases concurrently would be a race, not an optimisation. The
+  intended zero-LLM verifier had already reached 4/0 trust, yet a same-task
+  measurement still took 275s / 12 calls / $0.1153 estimated and reported
+  `deterministic=0`. The direct-dispatch log proved why: the runtime mutation
+  guard read the verification planner's contingent "fix then re-run if any
+  requirement fails" as an unconditional mutation. After that wording was
+  covered, the next plan independently said "shell-based document probe" and
+  "without creating browser or server artefacts"; the lexical detector read
+  `document` as a verb and ignored the negation, blocking dispatch again.
+  `subtaskMutatesFiles` now removes bounded conditional-repair clauses,
+  negated mutation verbs and nominal `document probe/check/...` uses before
+  applying the unconditional mutation vocabulary. Real writes remain gated:
+  "fix README.md", "document the API", and an independent update clause all
+  still classify as mutating. The third same-task run took the intended
+  deterministic path: 100s / 9 calls / $0.0860 estimated, one zero-LLM phase,
+  no friction, and both output files independently scored correct. That is
+  −64% wall time and −25% estimated cost from removing a false fallback, with
+  no unsafe concurrency and no change to the dependent phase boundary.
+- **EIGHTH LIVE ITERATION, 2026-08-12 — recovered errors are still product
+  defects.** A same-stack L3 power probe produced more signal than its headline
+  cost comparison. With L3=`gpt-5.4-mini`: simple markdown delivered in
+  86s/9 calls/$0.0492 estimated with one deterministic phase; CLI delivered in
+  254s/17/$0.1197; HTTP failed at 901s/20/$0.2649; web delivered in
+  496s/19/$0.2320. Independent execution passed every delivered artefact. The
+  completed strong-L3 controls then delivered CLI in 293s/12/$0.1456 and HTTP
+  in 663s/10/$0.1805; the web control was intentionally interrupted and its
+  partial trace retained. Traces, in order:
+  `2026-08-12T17-23-36-529-3e02f6fd`,
+  `2026-08-12T17-25-34-844-babada5a`,
+  `2026-08-12T17-29-49-282-7b582f95`,
+  `2026-08-12T17-44-50-954-4949938c`,
+  `2026-08-12T18-02-39-916-e520457c`,
+  `2026-08-12T18-07-33-202-0d89591c`, and partial
+  `2026-08-12T18-18-38-877-38767f20`.
+  The model comparison is NOT clean enough for a default change: the first
+  arm warmed stale lifecycle stamps. Plan anatomy is still decisive. Mini
+  split CLI/HTTP/web into 3 phases each; strong used 2 in every corresponding
+  plan (including the interrupted web trace). The extra phases shared one
+  evolving artefact, so concurrency would be a race; coalescing coupled work
+  is the optimisation. Mini's CLI did one thing better: it chose semantic
+  `csv2json.js`, enabling direct packaging. Strong chose generic `index.js`;
+  the packaging script correctly refused to invent a product name and paid
+  the LLM fallback. Planning guidance now requires semantic CLI entry names.
+  THE LARGEST DEFECT WAS OUTSIDE PLANNING. Mini HTTP spent 275.7s in two
+  post-approval compile calls; strong HTTP spent exactly 240.0s in one. Two
+  calls returned zero tokens at the old 240s ceiling, and the mini run then
+  lacked budget for its final phase. Across all 50 completed post-approval
+  calls in the trace corpus, the slowest success was 100.3s. The cap is now
+  120s, and transport errors receive a current-generation refusal stamp so
+  they cannot consume every subsequent run; the two live casualties were
+  stamped explicitly.
+  TOOL closure found repeated harness gaps rather than harmless model noise:
+  HTTP L1s recorded long-running `node server.js` commands (30s timeout +
+  dead port), then improvised curl/node-e clients (`http.delete`, malformed JS,
+  sleep/pkill). `fetch_url {record:true}` now machine-appends ordered HTTP
+  observations; `record_probe` refuses servers and curl before spawning.
+  File-scribe API docs forbid live probing and numeric ports, the CRUD recipe
+  excludes health-only checks, web smoke guidance copies exact selectors, and
+  script-skill scaffolding is explicitly never re-probed after deletion.
+  The two observed unambiguous pseudo-final tools (`return` and the
+  XML-corrupted output shape) are normalised directly into assistant JSON
+  without an error round-trip; other off-scope calls still reject with exact
+  final-answer coaching. Tolerant non-JSON L1 results are mechanically rejected
+  before trust. Intentional empty negative-test fixtures are no longer
+  contradictions when a recorded non-zero probe corroborates them.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
@@ -3087,6 +3170,16 @@ second is the kind of thing that gets acted on:
   cmd>"` now removes that one stale shell entry only AFTER the replacement
   command ran. It cannot touch HTTP/web entries or bulk-delete history; covered
   in pure merge, local tool and real container tests.
+  HTTP EVIDENCE IS NOT A SHELL PROBE. Three consecutive HTTP runs ignored the
+  prompt-only rule, recorded `node server.js` (30s timeout + dead port), then
+  improvised curl/node-e requests including `http.delete` and malformed
+  JavaScript. The division is now executable: `record_probe` refuses a Node
+  entry carrying the LISTENING_ON_PORT/listen contract and refuses curl/wget
+  even behind bash; `fetch_url {record:true}` appends the exact ordered
+  method/path/status/body observation to the same manifest. This preserves
+  bucket scope (`fetch_url` exists only on HTTP-capable readers), records
+  expected 400/404 responses as evidence, and removes model transcription
+  from the HTTP shape too.
   A METHOD NOTE WORTH MORE THAN THE FIX: the first diagnosis of this was WRONG
   and nearly became a feature. Grepping the first trace event whose text
   matched the error string returned the run SUMMARY, not the script, and led to
@@ -3117,7 +3210,8 @@ second is the kind of thing that gets acted on:
   keyboard events (`keydown`, `keyup`, `keypress` with `holdMs`) for
   platformer-style input. The HTTP pair (`fetch_url` +
   `start_node_server`) powers the Node bucket: `fetch_url` is a
-  general HTTP probe (GET + POST JSON, 10s default timeout), and
+  general HTTP probe (GET + POST JSON, 10s default timeout) whose optional
+  `record:true` machine-writes ordered HTTP manifest evidence, and
   `start_node_server` spawns `node <entry>` with `PORT=0` in env and
   parses a `LISTENING_ON_PORT=<N>` line from stdout to discover the
   bound port (see HTTP bucket contract above).

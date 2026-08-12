@@ -5,7 +5,11 @@ import type {
   Tool,
   ToolInvocationInfo,
 } from './types.js';
-import { offScopeToolMessage, truncateToolResultContent } from './llm.js';
+import {
+  coercePseudoFinalToolCall,
+  offScopeToolMessage,
+  truncateToolResultContent,
+} from './llm.js';
 
 /**
  * `LlmClient` backed by Ollama's chat API. Lets atoma run against a
@@ -186,6 +190,24 @@ export class OllamaLlmClient implements LlmClient {
         finalText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
         stopReason = json.done_reason ?? (json.done ? 'stop' : null);
         break;
+      }
+
+      if (toolCalls.length === 1 && declaredToolNames) {
+        const only = toolCalls[0]!;
+        const toolName = only.function?.name;
+        const rawArgs = only.function?.arguments;
+        const args: Record<string, unknown> =
+          typeof rawArgs === 'string'
+            ? (safeParseJson(rawArgs) as Record<string, unknown>) ?? {}
+            : (rawArgs ?? {});
+        if (typeof toolName === 'string' && !declaredToolNames.has(toolName)) {
+          const pseudoFinal = coercePseudoFinalToolCall(toolName, args);
+          if (pseudoFinal) {
+            finalText = pseudoFinal;
+            stopReason = 'stop';
+            break;
+          }
+        }
       }
 
       // Preserve the assistant turn verbatim so a subsequent `tool` turn

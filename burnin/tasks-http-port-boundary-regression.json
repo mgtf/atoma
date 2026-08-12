@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "health-api-portable-doc-boundary",
+      "family": "http",
+      "goal": "Build a small zero-dependency Node JSON API in index.js with GET /health returning {\"ok\":true}, using process.env.PORT and emitting LISTENING_ON_PORT=<N> when bound. Add README.md documenting how to run it and the route. As a FINAL SEPARATE PHASE, mechanically probe the documented route and confirm the README matches the observed behavior."
+    }
+  ]
+}
