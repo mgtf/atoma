@@ -94,6 +94,9 @@
 - Web builders/verifiers use one source-derived state-journey template with
   empty external interactions and looped milestone transitions, avoiding
   guessed labels and unrolled validation thrash.
+- Self-driving smoke detection recognizes goal/threshold and numbered
+  after-transition snapshot names, dropping conflicting external interactions
+  for novel widgets as well as the original habit case.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

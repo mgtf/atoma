@@ -147,6 +147,11 @@ describe('detectResetErasedIntermediateEvidence', () => {
         '(() => { widget.increment(); const afterIncrementStreak = widget.streak; widget.reset(); return { ok: afterIncrementStreak === 1 }; })()'
       )
     ).toBe(true);
+    expect(
+      smokeDrivesIntermediateState(
+        '(() => { widget.addGlass(); const goalReached = widget.goalReached; widget.reset(); return { ok: goalReached }; })()'
+      )
+    ).toBe(true);
   });
 });
 

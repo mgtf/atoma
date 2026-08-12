@@ -1227,6 +1227,25 @@ re-exports all the historical names so old imports keep working.
   same contract helpers. The live build recipe's two targeted revisions were
   kept (observable styling + exact style snapshots); its 2 failures are honest
   history, not reset away.
+- **TWENTIETH LIVE ITERATION, 2026-08-12 — novel-widget delivery recovered,
+  with technique cost still visible.** The hydration rerun delivered in
+  615s/27 calls/$0.2758 estimated (trace
+  `2026-08-12T21-23-22-302-aa3d6345`) with two escalations instead of failing
+  at fallback. The new L1-model fallback route was not needed at the end, but
+  the structural Codex blocker is closed. Independent browser scoring passed
+  count 0 → goal 4 with `goal-reached` → reset 0, zero console errors; the
+  manifest was valid, JSON-encoded and proved `hasGoalClass:true` at milestone
+  and false after reset. A legitimate
+  `recover-missing-conditional-style-evidence` event skill was learned and
+  kept.
+  Friction fell 22 → 4: two reset-erasure preflights and two honest
+  source-expectation mismatches ("Keep drinking" vs actual "4 glasses to go",
+  empty class vs actual base class). The false-boolean framework cascade
+  disappeared. `smokeDrivesIntermediateState` now recognises
+  `goalReached`/`thresholdReached` and `after4`/`afterFour` snapshot names, so
+  self-driving hydration smokes automatically discard conflicting external
+  interactions earlier. Remaining label/class mismatches are true first-pass
+  validation findings corrected from source, not silent approvals.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

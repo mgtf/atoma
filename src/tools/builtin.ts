@@ -1687,10 +1687,10 @@ export function detectResetErasedIntermediateEvidence(
 
 export function smokeDrivesIntermediateState(smoke: string): boolean {
   return (
-    /(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three)\w*|history|transition)/i.test(
+    /(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three|Four|\d+|Threshold)\w*|goalReached|thresholdReached|history|transition)/i.test(
       smoke
     ) &&
-    /\.(?:increment|advance|click)\s*\(/i.test(smoke) &&
+    /\.(?:increment|advance|click|add(?:Glass)?|increase)\s*\(/i.test(smoke) &&
     /\.(?:reset|clear)\s*\(/i.test(smoke)
   );
 }
