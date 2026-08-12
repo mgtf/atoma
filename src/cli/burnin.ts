@@ -226,12 +226,14 @@ export function newestTraceName(runsDir: string, since: number): string {
  * `extraArgs` are appended AFTER the flags and BEFORE the goal, because
  * `parseRunnerArgs` takes the first non-flag argument as the goal.
  *
- * THE LAST FIVE OPTIONS WERE ADDED FOR THE MCP SERVER, and each closes a real
+ * THE LAST SIX OPTIONS WERE ADDED FOR THE MCP SERVER, and each closes a real
  * gap rather than adding a knob — every default reproduces the previous
  * behaviour exactly, so burnin and the benchmark are byte-for-byte unaffected.
  *   - `cwd`: was hardcoded to `process.cwd()`. An MCP host launches its server
  *     with an arbitrary working directory, where `npm run run:build` fails with
  *     a missing-script error that reads as outcome 'error'.
+ *   - `npmScript`: lets the profile registry remain the authority on how a
+ *     family launches. Burn-in defaults to run:build exactly as before.
  *   - `signal`: the ONLY way to cancel from outside. The promise resolves on
  *     the child's exit and the child was otherwise unreachable, so a caller
  *     that owns a run's lifecycle (the MCP server does) had no handle to stop
@@ -280,6 +282,8 @@ export function spawnRun(opts: {
   readonly logPath: string;
   readonly extraArgs?: readonly string[];
   readonly extraEnv?: Readonly<Record<string, string>>;
+  /** npm script to execute. Defaults to run:build. */
+  readonly npmScript?: string;
   /** Working directory for `npm run`. Defaults to `process.cwd()`. */
   readonly cwd?: string;
   /** Abort to group-kill the run through the graceful sequence. */
@@ -304,7 +308,7 @@ export function spawnRun(opts: {
       'npm',
       [
         'run',
-        'run:build',
+        opts.npmScript ?? 'run:build',
         '--',
         ...(opts.cleanWorkspace === false ? [] : ['--clean-workspace']),
         ...(opts.extraArgs ?? []),

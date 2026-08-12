@@ -3692,10 +3692,12 @@ passes. Same rule already written down for the container worker.
 **`spawnRun` WAS EXTENDED, NOT FORKED**, because it is the one sanctioned run
 driver and its kill sequence was measured (a naive re-implementation leaks nine
 browser processes per web run) — and it has no unit test, so a second copy
-would rot like `research-brief.ts` and `curriculum.ts` did. Five additions, all
+would rot like `research-brief.ts` and `curriculum.ts` did. Six additions, all
 defaulting to today's behaviour: `cwd` (was hardcoded `process.cwd()`; an MCP
 host launches with an arbitrary one and `npm run run:build` would fail as a
-missing script), `signal` (the ONLY way to cancel — the child was otherwise
+missing script), `npmScript` (resolved from the same `LAUNCHABLE_PROFILES`
+entry the family picker reads; a second family cannot silently launch
+`run:build`), `signal` (the ONLY way to cancel — the child was otherwise
 unreachable, and an abort routes into the SAME SIGTERM → 5s grace → SIGKILL
 sequence, so a cancelled run still closes its trace), `onChunk` (progress for a
 caller who cannot see the child's stdout), `onSpawn` (the detached process-group

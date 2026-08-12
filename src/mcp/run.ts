@@ -48,7 +48,7 @@ import {
   spawnRun,
   type RunStats,
 } from '../cli/burnin.js';
-import { findLaunchable } from '../run/profiles/index.js';
+import { findLaunchable, LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { runsDirPath } from './readers.js';
 import {
   acquireRunLease,
@@ -177,7 +177,11 @@ export const RUN_FLAGS: readonly string[] = [
   '--egress',
 ];
 
-export function validateStartInput(input: StartRunInput): { family: string; timeoutMs: number } {
+export function validateStartInput(input: StartRunInput): {
+  family: string;
+  npmScript: string;
+  timeoutMs: number;
+} {
   const goal = (input.goal ?? '').trim();
   if (goal.length === 0) throw new RunRejected('goal is empty');
   if (goal.startsWith('--')) {
@@ -188,16 +192,17 @@ export function validateStartInput(input: StartRunInput): { family: string; time
   const familyId = input.family ?? 'build';
   // `findLaunchable` is the ONLY family resolver, and it already refuses
   // traversal-shaped ids.
-  if (!findLaunchable(familyId)) {
+  const launchable = findLaunchable(familyId);
+  if (!launchable) {
     throw new RunRejected(
-      `unknown family "${familyId}" — known: ${['build'].join(', ')} (call atoma_families)`
+      `unknown family "${familyId}" — known: ${LAUNCHABLE_PROFILES.map((p) => p.profile.id).join(', ')} (call atoma_families)`
     );
   }
   const timeoutMs = input.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || Math.floor(timeoutMs) !== timeoutMs) {
     throw new RunRejected(`timeoutMs must be a positive integer in ms (got ${String(input.timeoutMs)})`);
   }
-  return { family: familyId, timeoutMs };
+  return { family: familyId, npmScript: launchable.npmScript, timeoutMs };
 }
 
 function publish(r: RunRecord): RunRecordPublic {
@@ -272,7 +277,7 @@ export function startRun(
       `a run is already in flight (${inFlight.runId}, started ${inFlight.startedAt}). atoma serialises runs: the build workspace is shared, trace attribution is newest-file-wins, and concurrent runs make the cost numbers incomparable. Wait for it or call atoma_run_cancel.`
     );
   }
-  const { family, timeoutMs } = validateStartInput(input);
+  const { family, npmScript, timeoutMs } = validateStartInput(input);
   const goal = input.goal.trim();
   const root = repoRoot();
   const startedAtMs = Date.now();
@@ -315,6 +320,7 @@ export function startRun(
       timeoutMs,
       logPath,
       cwd: root,
+      npmScript,
       signal: record.abort.signal,
       cleanWorkspace: input.keepWorkspace !== true,
       extraArgs: buildRunArgs(input),

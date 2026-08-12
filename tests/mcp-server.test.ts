@@ -107,7 +107,10 @@ describe('MCP run tool — argv assembly and validation', () => {
   });
 
   it('resolves the family through findLaunchable, so unknown and traversal ids are refused', () => {
-    expect(validateStartInput({ goal: 'g' }).family).toBe('build');
+    expect(validateStartInput({ goal: 'g' })).toMatchObject({
+      family: 'build',
+      npmScript: 'run:build',
+    });
     expect(validateStartInput({ goal: 'g', family: 'build' }).family).toBe('build');
     expect(() => validateStartInput({ goal: 'g', family: 'nope' })).toThrow(/unknown family/);
     expect(() => validateStartInput({ goal: 'g', family: '../etc/passwd' })).toThrow(
@@ -229,10 +232,12 @@ describe('MCP run tool — serialisation', () => {
   it('pins the provider on the child rather than inheriting a dead API key', () => {
     let env: Readonly<Record<string, string>> | undefined;
     let cwd: string | undefined;
+    let npmScript: string | undefined;
     let clean: boolean | undefined;
     const capture: RunDriver = (opts) => {
       env = opts.extraEnv;
       cwd = opts.cwd;
+      npmScript = opts.npmScript;
       clean = opts.cleanWorkspace;
       return new Promise<string>(() => {});
     };
@@ -244,6 +249,7 @@ describe('MCP run tool — serialisation', () => {
     // cwd must be the repo, not whatever directory the host launched us in,
     // or `npm run run:build` fails with a missing-script error.
     expect(cwd).toBe(repoRoot());
+    expect(npmScript).toBe('run:build');
     expect(clean).toBe(true);
   });
 
