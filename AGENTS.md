@@ -706,8 +706,13 @@ re-exports all the historical names so old imports keep working.
   `✓ build finished` — delivered runs that started a server idle on purpose)
   and appends per-run economics to `burnin/results.csv`: cost, duration,
   calls per model tier, deterministic phases, escalations, learned skills,
-  trace filename. Every batch extends the cost-decay curve AND matures the
-  skill/trust counters — the harness IS usage. Task file:
+  trace filename. `provider` and `other_calls` are appended columns: historical
+  Claude rows leave them blank/zero, while cross-provider rows no longer hide
+  Codex/GLM calls outside O/S/H (the live hybrid read 5 total as O0/S0/H3
+  before this). Non-Anthropic batches state that `cost_usd` is an estimated
+  API-price equivalent, not local/subscription billing. Every batch extends
+  the cost-decay curve AND matures the skill/trust counters — the harness IS
+  usage. Task file:
   `burnin/tasks-default.json` (`{tasks: [{id, family, goal}]}`); logs under
   `burnin/logs/` (gitignored), CSV committed. Rendered by the viz's
   **Burn-in** tab (`/api/burnin` reads the CSV, override with
@@ -870,7 +875,9 @@ re-exports all the historical names so old imports keep working.
   further Ollama attempts are stopped until a stronger tool-capable model or
   cloud entitlement exists; failed provider rows remain isolated in
   `burnin/results-ollama.csv` / `burnin/results-hybrid.csv`, never the Claude
-  curve.
+  curve. After removing the quota-denial noise, the main curve's latest 10 are
+  10/10 delivered at $0.2945 mean / $0.2943 median, one escalation and one
+  deterministic phase (latest 20: 20/20 at $0.3576 mean, seven deterministic).
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

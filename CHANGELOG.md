@@ -44,6 +44,8 @@
   atoma's real L1 prompts.
 - Task and event skill distillation now require a successful tool action
   observed by the transport; narrative-only results cannot teach recipes.
+- Burn-in CSV rows now append the base provider and non-Claude-family call
+  count, keeping routed Codex/Ollama calls visible without rewriting history.
 
 ## v0.1.2 — 2026-08-12
 

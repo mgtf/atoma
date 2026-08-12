@@ -44,6 +44,7 @@ describe('burnin parseRunLog', () => {
     expect(s.opusCalls).toBe(1);
     expect(s.haikuCalls).toBe(9);
     expect(s.sonnetCalls).toBe(0);
+    expect(s.otherCalls).toBe(0);
     expect(s.deterministicPhases).toBe(2);
     expect(s.learnedSkills).toBe(0);
     expect(s.promotions).toBe(0);
@@ -55,6 +56,21 @@ describe('burnin parseRunLog', () => {
     expect(s.outcome).toBe('failed');
     expect(s.costUsd).toBeCloseTo(0.8523, 4);
     expect(s.sonnetCalls).toBe(2);
+  });
+
+  it('keeps cross-provider calls visible instead of losing them from O/S/H', () => {
+    const s = parseRunLog(
+      [
+        'codex:gpt-5.6-sol          1      10  20  0  0.05',
+        'codex:gpt-5.4-mini         1      10  20  0  0.04',
+        'claude-haiku-4-5-20251001  3      10  20  0  0.01',
+        'TOTAL                      5      30  60  0  0.10',
+        '--- run failed ---',
+      ].join('\n')
+    );
+    expect(s.llmCalls).toBe(5);
+    expect(s.haikuCalls).toBe(3);
+    expect(s.otherCalls).toBe(2);
   });
 
   it('counts lifecycle events: promotion, refusal, demotion, dispatch fallback', () => {
@@ -126,10 +142,12 @@ describe('burnin CSV + summary', () => {
       stats: parseRunLog(DELIVERED_LOG),
       durationS: 201,
       trace: 'r.json',
+      provider: 'claude-cli',
     });
     expect(row.split(',')).toHaveLength(CSV_HEADER.split(',').length);
     expect(row).toContain('delivered');
     expect(row).toContain('0.2256');
+    expect(row).toContain(',r.json,claude-cli,0');
   });
 
   it('summarize aggregates per family with delivery rate and mean cost', () => {

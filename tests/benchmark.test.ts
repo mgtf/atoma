@@ -16,6 +16,7 @@ const stats = (over: Partial<RunStats> = {}): RunStats => ({
   opusCalls: 1,
   sonnetCalls: 0,
   haikuCalls: 13,
+  otherCalls: 0,
   deterministicPhases: 0,
   escalations: 0,
   learnedSkills: 0,

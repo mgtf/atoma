@@ -43,6 +43,8 @@ export interface RunStats {
   readonly opusCalls: number;
   readonly sonnetCalls: number;
   readonly haikuCalls: number;
+  /** Calls whose model id is outside the historical Claude family columns. */
+  readonly otherCalls: number;
   readonly deterministicPhases: number;
   readonly escalations: number;
   readonly learnedSkills: number;
@@ -93,13 +95,18 @@ export function parseRunLog(log: string): RunStats {
     if (Number.isFinite(cost)) costUsd = cost;
   }
 
+  const opusCalls = modelCalls(log, /claude-opus/);
+  const sonnetCalls = modelCalls(log, /claude-sonnet/);
+  const haikuCalls = modelCalls(log, /claude-haiku/);
   return {
     outcome,
     costUsd,
     llmCalls,
-    opusCalls: modelCalls(log, /claude-opus/),
-    sonnetCalls: modelCalls(log, /claude-sonnet/),
-    haikuCalls: modelCalls(log, /claude-haiku/),
+    opusCalls,
+    sonnetCalls,
+    haikuCalls,
+    otherCalls:
+      llmCalls === null ? 0 : Math.max(0, llmCalls - opusCalls - sonnetCalls - haikuCalls),
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
     escalations: (log.match(/escalat/gi) ?? []).length,
     learnedSkills: (log.match(/learned new skill/g) ?? []).length,
@@ -117,6 +124,7 @@ export function toCsvRow(args: {
   readonly stats: RunStats;
   readonly durationS: number | null;
   readonly trace: string;
+  readonly provider?: string;
 }): string {
   const s = args.stats;
   const cells = [
@@ -138,12 +146,14 @@ export function toCsvRow(args: {
     s.demotions,
     s.dispatchFallbacks,
     args.trace,
+    args.provider ?? '',
+    s.otherCalls,
   ];
   return cells.map((c) => String(c)).join(',');
 }
 
 export const CSV_HEADER =
-  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace';
+  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls';
 
 /**
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
@@ -524,7 +534,13 @@ async function main(): Promise<void> {
   }
 
   const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? 'runs');
-  console.log(`burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${process.env['ATOMA_LLM'] ?? 'anthropic'}`);
+  const provider = process.env['ATOMA_LLM'] ?? 'anthropic';
+  console.log(`burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${provider}`);
+  if (provider !== 'anthropic') {
+    console.log(
+      'cost basis: estimated API-price equivalent from recorded model tiers — not local/subscription billing'
+    );
+  }
   const summaryRows: { family: string; outcome: string; costUsd: number | null }[] = [];
   let consecutiveConfigFailures = 0;
 
@@ -548,11 +564,24 @@ async function main(): Promise<void> {
       );
       process.exit(1);
     }
-    appendFileSync(resolve(outPath), toCsvRow({ ts, taskId: task.id, family: task.family, stats, durationS, trace }) + '\n', 'utf8');
+    appendFileSync(
+      resolve(outPath),
+      toCsvRow({
+        ts,
+        taskId: task.id,
+        family: task.family,
+        stats,
+        durationS,
+        trace,
+        provider,
+      }) + '\n',
+      'utf8'
+    );
     summaryRows.push({ family: task.family, outcome: stats.outcome, costUsd: stats.costUsd });
     console.log(
       `  ${stats.outcome === 'delivered' ? '✓' : '✗'} ${stats.outcome}  $${stats.costUsd ?? '?'}  ${durationS}s  ` +
-        `llm=${stats.llmCalls ?? '?'} (O${stats.opusCalls}/S${stats.sonnetCalls}/H${stats.haikuCalls})  ` +
+        `llm=${stats.llmCalls ?? '?'} (O${stats.opusCalls}/S${stats.sonnetCalls}/H${stats.haikuCalls}` +
+        `${stats.otherCalls > 0 ? `/+${stats.otherCalls}` : ''})  ` +
         `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}` +
         (stats.promotions ? `  ⚡promoted=${stats.promotions}` : '') +
         (stats.demotions ? `  🛡️demoted=${stats.demotions}` : '') +
