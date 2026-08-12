@@ -75,6 +75,29 @@ describe('edit_file', () => {
     expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('baz bar baz');
   });
 
+  it('returns an unchanged no-op without throwing or claiming a replacement', async () => {
+    write('a.txt', 'same\n');
+    const tool = editFileTool({ sandbox });
+    const result = (await tool.execute({
+      path: 'a.txt',
+      old_string: 'same',
+      new_string: 'same',
+    })) as { ok: boolean; unchanged: boolean; replacements: number };
+    expect(result).toMatchObject({ ok: true, unchanged: true, replacements: 0 });
+    expect(readFileSync(join(dir, 'a.txt'), 'utf8')).toBe('same\n');
+  });
+
+  it('does not let an identical no-op claim success on a missing span or file', async () => {
+    write('a.txt', 'different\n');
+    const tool = editFileTool({ sandbox });
+    await expect(
+      tool.execute({ path: 'a.txt', old_string: 'same', new_string: 'same' })
+    ).rejects.toThrow(/old_string not found/);
+    await expect(
+      tool.execute({ path: 'missing.txt', old_string: 'same', new_string: 'same' })
+    ).rejects.toThrow(/no such file/);
+  });
+
   it('errors on a missing file (points at write_file)', async () => {
     const tool = editFileTool({ sandbox });
     await expect(

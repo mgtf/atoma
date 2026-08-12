@@ -175,6 +175,16 @@ describe('makeSmokeStuckTracker', () => {
 });
 
 describe('makeSmokeStuckTracker — isOscillating (#2)', () => {
+  it('does not confuse normal fix-and-retry across page revisions with oscillation', () => {
+    const t = makeSmokeStuckTracker();
+    const smoke = 'window.__widget.value === 3';
+    t.record(smoke, false, '<html>broken v1</html>');
+    t.record(smoke, false, '<html>broken v1</html>');
+    t.record(smoke, true, '<html>fixed v2</html>');
+    expect(t.isOscillating(smoke, '<html>fixed v2</html>')).toBe(false);
+    expect(t.isStuck(smoke, '<html>fixed v2</html>')).toBe(false);
+  });
+
   it('fires when the same smoke has BOTH passes and fails in the window (min 3 occurrences)', () => {
     const t = makeSmokeStuckTracker();
     const smoke = 'document.title === "ready"';
@@ -187,20 +197,15 @@ describe('makeSmokeStuckTracker — isOscillating (#2)', () => {
     expect(t.isOscillating(smoke)).toBe(true);
   });
 
-  it('does NOT fire on a clean "N failures then a single pass" pattern (the normal fix-and-retry loop)', () => {
-    // Two fails, then a pass, is the NORMAL convergence pattern — NOT
-    // oscillation. The detector should only fire when the SAME smoke
-    // shows instability within a short window, meaning 2+ occurrences
-    // of each polarity.
+  it('fires on fail/fail/pass when no changed page revision explains the pass', () => {
+    // Without a revision discriminator these are evaluations against the
+    // same source, so mixed polarity is suspect. Normal fix-and-retry is the
+    // distinct-revision case pinned above.
     const t = makeSmokeStuckTracker();
     const smoke = 'x > 0';
     t.record(smoke, false);
     t.record(smoke, false);
     t.record(smoke, true);
-    // Has BOTH polarities AND 3 occurrences — DOES fire. That's
-    // actually the reasonable coverage: a smoke that fails twice and
-    // then passes on the third try is plausibly progress, but it can
-    // also be noise. We lean conservative and surface the warning.
     expect(t.isOscillating(smoke)).toBe(true);
   });
 

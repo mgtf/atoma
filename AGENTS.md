@@ -1050,6 +1050,28 @@ re-exports all the historical names so old imports keep working.
   placeholders and no numeric loopback port. No child process remained. This
   is the required distinction between a guard that rejects five bad calls and
   a design that makes those calls unreachable.
+- **ELEVENTH LIVE ITERATION, 2026-08-12 — a green final state can still have
+  unproven intermediate behavior.** The strong-L3 habit widget delivered in
+  244s/13 calls/$0.1355 estimated (trace
+  `2026-08-12T19-24-49-947-76e5a9c3`), versus 496s/19 under mini L3, and left
+  no browser process. Exact selectors were fixed (`#incrementBtn`,
+  `#resetBtn`), but post-run closure found three real errors: the initial class
+  assigned `this.streak` while defining getter-only `get streak()`, one
+  identical edit_file no-op, and a false "smoke non-deterministic" rejection.
+  The latter mixed outcomes from BEFORE and AFTER the source edit because the
+  tracker keyed only on smoke text. The final artefact independently passed
+  increment-to-3, `streak-3`, color change, reset-to-0 and zero console errors,
+  but carried a duplicate method definition and its one manifest entry observed
+  only the state AFTER reset — it did not prove the intermediate styling it
+  claimed.
+  Corrections: stuck/oscillation history now keys on smoke + loaded response
+  source revision, so fix-and-retry is normal convergence while real same-page
+  flakiness still trips. Identical edit_file calls return an explicit
+  `unchanged` no-op (which does NOT count as a successful action) rather than a
+  hard tool error. Shared web guidance and both live widget recipes require one
+  writable backing field, unique method/getter names, and a smoke IIFE that
+  captures milestone state BEFORE reset plus final reset state. A rerun is
+  required before this class is closed.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

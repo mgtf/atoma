@@ -87,6 +87,9 @@ describe('L1Atom', () => {
     expect(toolInvocationSucceeded({ ...baseInfo, result: { ok: true } })).toBe(true);
     expect(toolInvocationSucceeded({ ...baseInfo, result: { path: 'x.txt' } })).toBe(true);
     expect(toolInvocationSucceeded({ ...baseInfo, result: { ok: false } })).toBe(false);
+    expect(
+      toolInvocationSucceeded({ ...baseInfo, result: { ok: true, unchanged: true } })
+    ).toBe(false);
     expect(toolInvocationSucceeded({ ...baseInfo, result: { error: 'failed' } })).toBe(false);
     expect(toolInvocationSucceeded({ ...baseInfo, result: { exitCode: 1 } })).toBe(false);
     expect(toolInvocationSucceeded({ ...baseInfo, error: 'executor threw' })).toBe(false);

@@ -136,6 +136,8 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/copy the exact.*byte-for-byte/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/"#increment-btn".*"incrementBtn"/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/"On Fire".*"Beginner"/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/getter-only property/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/increments.*then resets.*reset state/s);
   });
 
   it('new L1s that inherit validate_html from the L2 toolset get SMOKE_DESIGN_GUIDANCE', async () => {

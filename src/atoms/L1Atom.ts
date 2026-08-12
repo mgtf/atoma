@@ -44,6 +44,7 @@ export function toolInvocationSucceeded(info: ToolInvocationInfo): boolean {
   if (info.error !== undefined) return false;
   if (!info.result || typeof info.result !== 'object') return true;
   const result = info.result as Record<string, unknown>;
+  if (result['unchanged'] === true) return false;
   if ('ok' in result && result['ok'] !== true) return false;
   if (typeof result['error'] === 'string' && result['error'].length > 0) return false;
   if (typeof result['exitCode'] === 'number' && result['exitCode'] !== 0) return false;

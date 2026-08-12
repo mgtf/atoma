@@ -97,9 +97,7 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
       if (oldString.length === 0) {
         throw new Error('edit_file: old_string must be non-empty (to create a file, use write_file)');
       }
-      if (oldString === newString) {
-        throw new Error('edit_file: old_string and new_string are identical — nothing to do');
-      }
+      const identical = oldString === newString;
       const abs = opts.sandbox.resolve(path);
       if (!existsSync(abs)) {
         throw new Error(`edit_file: no such file "${path}" — use write_file to create it first`);
@@ -175,6 +173,16 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
         throw new Error(
           `edit_file: old_string not found in "${path}", and no region of the file resembles it — nothing here starts the way your span does. Either you are editing the wrong file, or the content changed since you last read it: list_files then read_file "${path}" and work from what it actually contains. Note that old_string must hold the file's RAW bytes (real newlines, real quotes), never two-character \\n or \\" escape sequences.`
         );
+      }
+      if (identical) {
+        return {
+          ok: true,
+          unchanged: true,
+          path,
+          replacements: 0,
+          matches: occurrences,
+          message: 'old_string and new_string are identical — no file change was applied',
+        };
       }
       if (occurrences > 1 && !replaceAll) {
         const contexts = duplicateMatchContexts(content, oldString);
@@ -1316,54 +1324,6 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         }
       }
 
-      // Same-smoke-stuck short-circuit. If the model has been retrying
-      // the exact same smoke assertion against the same app and it keeps
-      // failing, more Puppeteer rounds won't help — the assertion is
-      // structurally unreachable (needs inputs the model can't
-      // reproduce, or references a state that the app never enters).
-      // Observed in production: 15+ consecutive calls on a chess puzzle
-      // asserting `statusText.includes('Checkmate')` after random
-      // clicks that couldn't produce a mate. We surface a coaching
-      // error instead of running Puppeteer yet again.
-      if (smoke !== undefined && stuck.isStuck(smoke)) {
-        return {
-          ok: false,
-          url,
-          errors: [
-            `smoke stuck: this assertion has failed at least ${SMOKE_STUCK_THRESHOLD} times within the last ${SMOKE_STUCK_WINDOW} calls. ` +
-              SMOKE_STUCK_HINT,
-          ],
-          warnings: [],
-          failedRequests: [],
-          interactionLog: [],
-          smokeResult: { error: 'stuck', hint: SMOKE_STUCK_HINT },
-        };
-      }
-
-      // Oscillation short-circuit (#2). If the SAME smoke has both
-      // passed and failed in the window, the assertion itself is
-      // non-deterministic — a sporadic pass is not a real signal, and
-      // the L1 is likely going to declare victory on one of those
-      // passes while the supervisor's ground-truth probe sees a fail
-      // state (observed on the backgammon timeout run: internal smoke
-      // oscillated ok/fail while the supervisor kept rejecting with a
-      // 404 it couldn't escape from). We stop the loop and surface a
-      // coaching error distinct from the isStuck one.
-      if (smoke !== undefined && stuck.isOscillating(smoke)) {
-        return {
-          ok: false,
-          url,
-          errors: [
-            `smoke non-deterministic: this assertion produced BOTH passes AND failures within the last ${SMOKE_STUCK_WINDOW} calls against the same page. ` +
-              SMOKE_OSCILLATION_HINT,
-          ],
-          warnings: [],
-          failedRequests: [],
-          interactionLog: [],
-          smokeResult: { error: 'oscillating', hint: SMOKE_OSCILLATION_HINT },
-        };
-      }
-
       const browser = await getBrowser();
       const page = await browser.newPage();
       const errors: string[] = [];
@@ -1414,8 +1374,50 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
         // run of pure overhead. Callers can still ask for more settle
         // time via `waitMs` when they know the page kicks off async
         // work (e.g. fetch during onload).
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+        const navigation = await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 15_000,
+        });
         if (waitMs > 0) await new Promise((r) => setTimeout(r, waitMs));
+        let pageRevision: string;
+        try {
+          pageRevision = (await navigation?.text()) ?? (await page.content());
+        } catch {
+          pageRevision = await page.content();
+        }
+
+        // The detector is scoped to the loaded SOURCE revision. The same
+        // smoke failing before an edit and passing after it is normal
+        // convergence, not oscillation — a live widget run proved the old
+        // smoke-only key false-blocked a repaired page.
+        if (smoke !== undefined && stuck.isStuck(smoke, pageRevision)) {
+          return {
+            ok: false,
+            url,
+            errors: [
+              `smoke stuck: this assertion has failed at least ${SMOKE_STUCK_THRESHOLD} times within the last ${SMOKE_STUCK_WINDOW} calls against this exact page revision. ` +
+                SMOKE_STUCK_HINT,
+            ],
+            warnings: [],
+            failedRequests: [],
+            interactionLog: [],
+            smokeResult: { error: 'stuck', hint: SMOKE_STUCK_HINT },
+          };
+        }
+        if (smoke !== undefined && stuck.isOscillating(smoke, pageRevision)) {
+          return {
+            ok: false,
+            url,
+            errors: [
+              `smoke non-deterministic: this assertion produced BOTH passes AND failures within the last ${SMOKE_STUCK_WINDOW} calls against this exact page revision. ` +
+                SMOKE_OSCILLATION_HINT,
+            ],
+            warnings: [],
+            failedRequests: [],
+            interactionLog: [],
+            smokeResult: { error: 'oscillating', hint: SMOKE_OSCILLATION_HINT },
+          };
+        }
 
         // Bound the PHASE, not the count: a game replay legitimately needs a
         // long sequence, but 31 interactions once cost 546s (most of it
@@ -1511,7 +1513,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             errors.push(`smoke evaluation threw: ${(err as Error).message}`);
           }
           // Record outcome for the stuck-detector above.
-          stuck.record(smoke, smokeOk);
+          stuck.record(smoke, smokeOk, pageRevision);
         }
 
         // Does the DOCUMENT declare an icon? Read it AFTER interactions so a
@@ -1769,12 +1771,12 @@ export const SMOKE_STUCK_THRESHOLD = 3;
 /**
  * Bounded tracker for "the same smoke assertion keeps failing across
  * a short history window". Returns a small imperative handle:
- *   - `record(smoke, ok)` — register the outcome of the most recent
- *     Puppeteer evaluation. Whitespace is normalised so minor
+ *   - `record(smoke, ok, revision?)` — register the outcome against the
+ *     loaded source revision. Whitespace is normalised so minor smoke
  *     formatting tweaks still count as the same assertion.
- *   - `isStuck(smoke)` — returns true when the LAST `windowSize`
+ *   - `isStuck(smoke, revision?)` — returns true when the LAST `windowSize`
  *     recorded outcomes contain at least `failureThreshold` FAILURES
- *     that share the same normalised smoke body as the argument.
+ *     that share the same normalised smoke body AND page revision.
  *     Interleaving an unrelated passing smoke between attempts does
  *     NOT reset the count — the model cannot game the detector by
  *     spacing out retries.
@@ -1787,8 +1789,8 @@ export function makeSmokeStuckTracker(
     | { windowSize: number; failureThreshold: number }
     | number = { windowSize: SMOKE_STUCK_WINDOW, failureThreshold: SMOKE_STUCK_THRESHOLD }
 ): {
-  record: (smoke: string, ok: boolean) => void;
-  isStuck: (smoke: string) => boolean;
+  record: (smoke: string, ok: boolean, revision?: string) => void;
+  isStuck: (smoke: string, revision?: string) => boolean;
   /**
    * Inconsistency detector (#2): returns true when the same normalised
    * smoke assertion has BOTH passed AND failed within the window. That
@@ -1804,7 +1806,7 @@ export function makeSmokeStuckTracker(
    * model knows to swap to a deterministic `window.__test` hook
    * rather than keep retrying.
    */
-  isOscillating: (smoke: string) => boolean;
+  isOscillating: (smoke: string, revision?: string) => boolean;
 } {
   // Backwards-compatible: a number is interpreted as windowSize with
   // failureThreshold defaulting to the module constant. Tests and
@@ -1813,27 +1815,27 @@ export function makeSmokeStuckTracker(
     typeof opts === 'number'
       ? { windowSize: opts, failureThreshold: SMOKE_STUCK_THRESHOLD }
       : opts;
-  const history: Array<{ normalized: string; ok: boolean }> = [];
+  const history: Array<{ normalized: string; revision: string; ok: boolean }> = [];
   const normalize = (s: string): string => s.replace(/\s+/g, ' ').trim();
   return {
-    record(smoke, ok): void {
-      history.push({ normalized: normalize(smoke), ok });
+    record(smoke, ok, revision = ''): void {
+      history.push({ normalized: normalize(smoke), revision, ok });
       if (history.length > windowSize) history.shift();
     },
-    isStuck(smoke): boolean {
+    isStuck(smoke, revision = ''): boolean {
       const target = normalize(smoke);
       let failures = 0;
       for (const h of history) {
-        if (h.normalized === target && !h.ok) failures++;
+        if (h.normalized === target && h.revision === revision && !h.ok) failures++;
       }
       return failures >= failureThreshold;
     },
-    isOscillating(smoke): boolean {
+    isOscillating(smoke, revision = ''): boolean {
       const target = normalize(smoke);
       let passes = 0;
       let fails = 0;
       for (const h of history) {
-        if (h.normalized !== target) continue;
+        if (h.normalized !== target || h.revision !== revision) continue;
         if (h.ok) passes++;
         else fails++;
       }

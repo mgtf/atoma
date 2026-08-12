@@ -61,6 +61,13 @@
 - Ambiguous `edit_file` matches now return bounded line-numbered context for
   each real occurrence, so the model can choose `replace_all` or a uniquely
   scoped span instead of repeating the same rejected edit.
+- Identical `edit_file` spans return an explicit unchanged no-op without a hard
+  tool failure and do not count as a successful observed action.
+- Web smoke stuck/oscillation history is scoped to the loaded source revision,
+  so a smoke that passes after the page was fixed is not mislabeled flaky.
+- Web guidance keeps exposed getters on one writable backing field, rejects
+  duplicate class methods, and captures intermediate milestone state before a
+  reset instead of claiming it from final-state-only evidence.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.
