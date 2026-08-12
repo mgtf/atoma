@@ -14,3 +14,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T19:38:25.281Z,habit-widget-state-smoke-test,web,delivered,0.1025,181,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-38-25-791-d9beb151.json,ollama+zai+codex,13,0
 2026-08-12T19:47:01.482Z,habit-widget-state-smoke-test,web,delivered,0.1362,303,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-47-01-991-f7837f7c.json,ollama+zai+codex,13,0
 2026-08-12T19:58:02.732Z,habit-widget-state-smoke-test,web,delivered,0.1056,210,13,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-58-03-242-94cd8ff0.json,ollama+zai+codex,13,0
+2026-08-12T20:08:44.670Z,habit-widget-state-smoke-test,web,delivered,0.167,434,14,0,0,0,0,0,0,0,0,0,0,2026-08-12T20-08-45-202-347ddfaa.json,ollama+zai+codex,14,1

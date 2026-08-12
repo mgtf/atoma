@@ -1125,6 +1125,27 @@ re-exports all the historical names so old imports keep working.
   reset (explicit app history is also acceptable). This prevents spending a
   browser round on evidence that is structurally incapable of proving the
   intermediate state. A further exact rerun is required.
+- **FIFTEENTH LIVE ITERATION, 2026-08-12 — the trust fix worked, then exposed
+  the next missing dimension.** The exact web rerun delivered in
+  434s/14 calls/$0.1670 estimated (trace
+  `2026-08-12T20-08-45-202-347ddfaa`) after the internal-failure gate forced a
+  real retry; one legitimate event skill was learned:
+  `recover-final-browser-validation-failed`. The final manifest now contained
+  honest initial → increment-3 → reset snapshots with `ok:true`, and no process
+  leaked. Five recovered validate_html failures explain the wall time: three
+  reset-erasure preflights, one real false assertion, and one nested-false
+  rejection. The preflight initially failed to recognise
+  `afterIncrementStreak` because its snapshot regex required a word boundary;
+  external interactions also polluted the "initial" state before a smoke that
+  already drove its own transitions.
+  More importantly, the final snapshots proved counters/status but omitted the
+  conditional CSS class/color the task explicitly required. L1 can no longer
+  rely on trust for that omission: L2 now mechanically requires a recorded web
+  probe whose smoke AND smokeResult carry class/style/color evidence whenever
+  the subtask names styling. Self-driving smokes automatically ignore external
+  interactions (with a warning), and suffixed `afterIncrement*` snapshot names
+  are recognised. The recovery skill is kept: its trigger and body describe the
+  exact generic failure class and it did not cause the rejection.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

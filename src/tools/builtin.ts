@@ -1293,11 +1293,16 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           ? Math.max(0, Math.floor(args['waitMs']))
           : 500;
       const waitMs = Math.min(requestedWaitMs, MAX_WAIT_MS);
-      const interactions = parseInteractions(args['interactions']);
+      let interactions = parseInteractions(args['interactions']);
       const smoke =
         typeof args['smoke'] === 'string' && args['smoke'].trim().length > 0
           ? args['smoke']
           : undefined;
+      const ignoredInteractions =
+        smoke !== undefined && smokeDrivesIntermediateState(smoke)
+          ? interactions.length
+          : 0;
+      if (ignoredInteractions > 0) interactions = [];
 
       // Cheap pre-flight check on the smoke snippet. The tool wraps it as
       // `(() => { try { const __r = (${smoke}); return __r; } ... })()`
@@ -1342,6 +1347,11 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
       const interactionLog: string[] = [];
+      if (ignoredInteractions > 0) {
+        warnings.push(
+          `${ignoredInteractions} external interaction(s) ignored because the smoke IIFE drives and snapshots its own state transitions`
+        );
+      }
 
       // Console errors are held STRUCTURED (text + source url) until the
       // end of the call: the favicon filter below decides on the source,
@@ -1655,17 +1665,21 @@ export function detectResetErasedIntermediateEvidence(
     (label, index) => beforeReset.indexOf(label) !== index
   );
   if (!repeated) return null;
-  const preservesIntermediate =
-    /\b(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three)|history|transition)\b/i.test(
-      smoke
-    ) &&
-    /\.(?:increment|advance|click)\s*\(/i.test(smoke) &&
-    /\.(?:reset|clear)\s*\(/i.test(smoke);
-  if (preservesIntermediate) return null;
+  if (smokeDrivesIntermediateState(smoke)) return null;
   return (
     'interactions repeat a state-changing control and then reset BEFORE smoke runs, ' +
     'so the intermediate state has been erased. Drive the exposed API inside one smoke IIFE, ' +
     'capture a milestone/beforeReset snapshot, reset, capture the final snapshot, and include both in ok.'
+  );
+}
+
+export function smokeDrivesIntermediateState(smoke: string): boolean {
+  return (
+    /(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three)\w*|history|transition)/i.test(
+      smoke
+    ) &&
+    /\.(?:increment|advance|click)\s*\(/i.test(smoke) &&
+    /\.(?:reset|clear)\s*\(/i.test(smoke)
   );
 }
 

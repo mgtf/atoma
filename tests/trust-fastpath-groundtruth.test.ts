@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
-import { L2Atom } from '../src/atoms/L2Atom.js';
+import { L2Atom, webStylingEvidenceMissing } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
@@ -98,6 +98,46 @@ function result(payload: {
       : {}),
   };
 }
+
+describe('webStylingEvidenceMissing', () => {
+  it('requires class/style/color values when the task claims conditional styling', () => {
+    const task = { description: 'verify controls and conditional styling' };
+    expect(
+      webStylingEvidenceMissing(
+        task,
+        result({
+          output: {
+            probes: [
+              {
+                probe: 'web',
+                smoke: '({ok: widget.streak === 0, streak: widget.streak})',
+                smokeResult: { ok: true, streak: 0 },
+              },
+            ],
+          },
+          summary: 'verified',
+        })
+      )
+    ).toBe(true);
+    expect(
+      webStylingEvidenceMissing(
+        task,
+        result({
+          output: {
+            probes: [
+              {
+                probe: 'web',
+                smoke: '({ok: milestone.className === "streak-3", className: milestone.className})',
+                smokeResult: { ok: true, milestoneClass: 'streak-3', resetClass: 'streak-0' },
+              },
+            ],
+          },
+          summary: 'verified',
+        })
+      )
+    ).toBe(false);
+  });
+});
 
 describe('trust fast-path × ground-truth probe', () => {
   it('rejects a production L1 result when the transport observed no successful action', async () => {

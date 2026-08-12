@@ -6,6 +6,7 @@ import {
   makeSmokeStuckTracker,
   SMOKE_STUCK_WINDOW,
   SMOKE_STUCK_THRESHOLD,
+  smokeDrivesIntermediateState,
   uniqueNormalizedIdSelector,
 } from '../src/tools/builtin.js';
 
@@ -137,6 +138,14 @@ describe('detectResetErasedIntermediateEvidence', () => {
         '(() => { widget.increment(); const milestone = widget.streak; widget.reset(); return { ok: milestone === 1 && widget.streak === 0, milestone }; })()'
       )
     ).toBeNull();
+  });
+
+  it('recognises suffixed afterIncrement snapshot names from real smokes', () => {
+    expect(
+      smokeDrivesIntermediateState(
+        '(() => { widget.increment(); const afterIncrementStreak = widget.streak; widget.reset(); return { ok: afterIncrementStreak === 1 }; })()'
+      )
+    ).toBe(true);
   });
 });
 

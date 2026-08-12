@@ -190,6 +190,35 @@ export function buildNarrowL1Prompt(
   return [...header, ...bucketBody].join('\n');
 }
 
+export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
+  if (!/\b(?:conditional\s+styl|styling|style|class|colou?r)\b/i.test(task.description)) {
+    return false;
+  }
+  if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) {
+    return true;
+  }
+  const probes = (result.output as Record<string, unknown>)['probes'];
+  if (!Array.isArray(probes)) return true;
+  return !probes.some((probe) => {
+    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return false;
+    const entry = probe as Record<string, unknown>;
+    const smoke = typeof entry['smoke'] === 'string' ? entry['smoke'] : '';
+    const smokeResult =
+      entry['smokeResult'] && typeof entry['smokeResult'] === 'object'
+        ? JSON.stringify(entry['smokeResult'])
+        : '';
+    const okAt = smoke.search(/\bok\s*:/i);
+    const okEnd = okAt >= 0 ? smoke.indexOf(',', okAt) : -1;
+    const okClause =
+      okAt >= 0 ? smoke.slice(okAt, okEnd > okAt ? okEnd : okAt + 1200) : '';
+    return (
+      /(?:class|style|colou?r|getComputedStyle)/i.test(smoke) &&
+      /(?:class|style|colou?r)/i.test(smokeResult) &&
+      /(?:class|style|colou?r|getComputedStyle)/i.test(okClause)
+    );
+  });
+}
+
 
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
@@ -1834,6 +1863,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         modifications: {
           additionalContext:
             'Your last validate_html result was not ok. Read its exact errors/smokeResult, fix the artefact or the assertion, and re-run validation until ok:true before returning the final JSON.',
+        },
+      };
+    }
+    if (
+      child.toolNames().includes('validate_html') &&
+      webStylingEvidenceMissing(task, result)
+    ) {
+      return {
+        approved: false,
+        reasoning:
+          'the task requires conditional styling, but the recorded browser probe contains no class/style/color milestone evidence',
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'Return milestone and reset snapshots containing the actual class/style/color values, and make ok assert the expected transition. State counters or labels alone do not verify conditional styling.',
         },
       };
     }

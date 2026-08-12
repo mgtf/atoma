@@ -80,6 +80,9 @@
   before a trusted type can bypass validation.
 - `validate_html` rejects repeated-change-then-reset sequences whose smoke
   cannot observe or reconstruct the erased intermediate state.
+- Self-driving smoke IIFEs ignore external interactions that would corrupt
+  their initial state, and styling tasks require recorded milestone/reset
+  class, style or color evidence before trust.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.
