@@ -11,6 +11,14 @@ import {
 /** Image tag the worker Dockerfile builds to. */
 export const DEFAULT_WORKER_IMAGE = 'atoma-worker:latest';
 
+/** Match bind-mount ownership on native Linux; Docker Desktop also accepts it. */
+export function hostContainerUser(): string | undefined {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  if (uid === undefined || gid === undefined || uid === 0) return undefined;
+  return `${uid}:${gid}`;
+}
+
 /**
  * `docker run` arguments that carry the isolation. Exported so a test can
  * assert them rather than trusting a comment — every one of them was
@@ -21,6 +29,8 @@ export function workerRunArgs(opts: {
   workspaceHostPath: string;
   memory?: string;
   cpus?: string;
+  /** Numeric uid:gid allowed to write the host-owned bind mount. */
+  user?: string;
   /**
    * EGRESS MODE. When set, the run joins this `--internal` docker network
    * instead of getting no network at all, and `HTTP_PROXY` points at the one
@@ -75,6 +85,7 @@ export function workerRunArgs(opts: {
     'ALL',
     '--security-opt',
     'no-new-privileges',
+    ...(opts.user ? ['--user', opts.user, '-e', 'HOME=/tmp/atoma-home'] : []),
     // Bounds, so a runaway build cannot take the host down with it. A run
     // already has a wall-clock budget; this is the resource equivalent.
     '--memory',
@@ -118,6 +129,8 @@ export class ContainerToolExecutor implements ToolExecutor {
       callTimeoutMs?: number;
       startTimeoutMs?: number;
       docker?: string;
+      /** Override for tests/deployments; defaults to the host uid:gid. */
+      containerUser?: string;
       /** Mirror the worker's stderr onto the host's. Default true. */
       forwardWorkerLogs?: boolean;
     }
@@ -127,9 +140,11 @@ export class ContainerToolExecutor implements ToolExecutor {
   start(): Promise<void> {
     if (this.readyPromise) return this.readyPromise;
     this.readyPromise = new Promise<void>((resolve, reject) => {
+      const user = this.opts.containerUser ?? hostContainerUser();
       const args = workerRunArgs({
         image: this.opts.image ?? DEFAULT_WORKER_IMAGE,
         workspaceHostPath: this.opts.workspaceHostPath,
+        ...(user ? { user } : {}),
         ...(this.opts.egress ? { egress: this.opts.egress } : {}),
       });
       const child = spawn(this.opts.docker ?? 'docker', args, {

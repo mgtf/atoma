@@ -56,6 +56,17 @@ describe('workerRunArgs — the isolation is in the flags, so assert them', () =
     expect(args[args.indexOf('--security-opt') + 1]).toBe('no-new-privileges');
   });
 
+  it('can match the non-root host uid so the bind mount stays writable', () => {
+    const a = workerRunArgs({
+      image: 'img',
+      workspaceHostPath: '/host/ws',
+      user: '1001:1001',
+    });
+    expect(a[a.indexOf('--user') + 1]).toBe('1001:1001');
+    expect(a).toContain('HOME=/tmp/atoma-home');
+    expect(a).not.toContain('0:0');
+  });
+
   it('bounds memory and cpu', () => {
     expect(args).toContain('--memory');
     expect(args).toContain('--cpus');

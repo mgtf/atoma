@@ -3475,6 +3475,14 @@ written, and each pinned by `tests/container-isolation.test.ts`:
     fails too.
   - `--cap-drop ALL`, `--security-opt no-new-privileges`, non-root user,
     memory and cpu bounds.
+  NATIVE-LINUX BIND OWNERSHIP IS PART OF THE CONTRACT. Docker Desktop made the
+  image's fixed uid 10001 appear able to write a host workspace owned by the
+  developer; the first fresh-image Linux CI correctly returned EACCES for
+  `hello.txt` and `server.js`. `docker run` now uses the control-plane
+  process's non-root uid:gid (and a writable scratch HOME), so the worker can
+  write the one mounted directory without becoming root. The Dockerfile USER
+  remains the fallback when no host uid is available. A flag-shape test pins
+  `--user`, and the fresh-image CI proves the real bind.
 The negative control was run explicitly: with the parent mounted and the
 network on, the same probes read `TENANT_REGISTRY_SECRET` and resolve the
 host. The tests discriminate.
