@@ -6,6 +6,7 @@ import {
   DEFAULT_PRICES,
 } from '../src/core/metrics.js';
 import { MockLlmClient } from '../src/core/llm.js';
+import type { LlmClient } from '../src/core/types.js';
 
 describe('pricesFor', () => {
   it('classifies Opus, Sonnet, Haiku model IDs', () => {
@@ -206,7 +207,9 @@ describe('MetricsLlmClient', () => {
   });
 
   it('records a failure event and re-throws when the inner client errors', async () => {
-    const inner: any = { complete: vi.fn().mockRejectedValue(new Error('network')) };
+    const inner: LlmClient = {
+      complete: vi.fn().mockRejectedValue(new Error('network')),
+    };
     const recorder = new InMemoryMetrics();
     const wrapped = new MetricsLlmClient(inner, recorder);
     await expect(

@@ -11,6 +11,11 @@
 - `npm run doctor:dev` exposes the same checks from TypeScript source; release
   checks and extracted archives smoke the compiled command.
 
+### Changed
+
+- The final eight active `no-explicit-any` warnings in test doubles now use
+  the real SDK and framework interfaces, leaving CI free of lint annotations.
+
 ## v0.1.2 — 2026-08-12
 
 Corrective release after extending acceptance to Docker, proxied egress and

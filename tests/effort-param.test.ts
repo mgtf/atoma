@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type Anthropic from '@anthropic-ai/sdk';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 
 /**
@@ -13,7 +14,10 @@ function fakeSdk() {
     stop_reason: 'end_turn',
     usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
   });
-  return { create, client: { messages: { create } } as any };
+  return {
+    create,
+    client: { messages: { create } } as unknown as Anthropic,
+  };
 }
 
 describe('output_config.effort gating', () => {

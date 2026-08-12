@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
+import type Anthropic from '@anthropic-ai/sdk';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import type { ToolExecutor } from '../src/core/types.js';
+
+function fakeAnthropicClient(create: unknown): Anthropic {
+  return { messages: { create } } as unknown as Anthropic;
+}
 
 describe('AnthropicLlmClient prompt caching', () => {
   it('marks system prompt with cache_control=ephemeral by default', async () => {
@@ -14,7 +19,7 @@ describe('AnthropicLlmClient prompt caching', () => {
         cache_read_input_tokens: 0,
       },
     });
-    const fakeClient = { messages: { create } } as any;
+    const fakeClient = fakeAnthropicClient(create);
     const llm = new AnthropicLlmClient(fakeClient);
     await llm.complete({
       model: 'x',
@@ -39,7 +44,7 @@ describe('AnthropicLlmClient prompt caching', () => {
         cache_read_input_tokens: 0,
       },
     });
-    const llm = new AnthropicLlmClient({ messages: { create } } as any);
+    const llm = new AnthropicLlmClient(fakeAnthropicClient(create));
     await llm.complete({
       model: 'x',
       systemPrompt: 's',
@@ -60,7 +65,7 @@ describe('AnthropicLlmClient prompt caching', () => {
       stop_reason: 'end_turn',
       usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     });
-    const llm = new AnthropicLlmClient({ messages: { create } } as any);
+    const llm = new AnthropicLlmClient(fakeAnthropicClient(create));
     await llm.complete({
       model: 'x',
       systemPrompt: 's',
@@ -107,7 +112,7 @@ describe('AnthropicLlmClient prompt caching', () => {
       has: () => true,
     };
 
-    const llm = new AnthropicLlmClient({ messages: { create } } as any);
+    const llm = new AnthropicLlmClient(fakeAnthropicClient(create));
     await llm.complete({
       model: 'x',
       systemPrompt: 's',
@@ -175,7 +180,7 @@ describe('AnthropicLlmClient prompt caching', () => {
       execute: async () => ({ ok: true }),
       has: () => true,
     };
-    const llm = new AnthropicLlmClient({ messages: { create } } as any);
+    const llm = new AnthropicLlmClient(fakeAnthropicClient(create));
     await llm.complete({
       model: 'x',
       systemPrompt: 's',

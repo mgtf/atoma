@@ -6,11 +6,12 @@ import {
   FALLBACK_OPUS,
   PIN_SONNET,
   PIN_HAIKU,
+  type ModelListingClient,
 } from '../src/core/models.js';
 
 function fakeClient(opts: {
   listImpl: () => Promise<{ data: Array<{ id: string; created_at: string }> }>;
-}): any {
+}): ModelListingClient {
   return {
     models: {
       list: (_params?: unknown) => opts.listImpl(),

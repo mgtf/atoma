@@ -2603,7 +2603,10 @@ CALIBRATED OFF, WITH MEASUREMENTS — do not re-enable without re-measuring:
 - `no-explicit-any` is a WARNING, and is NOT disabled for tests. The suite
   already carries ~40 hand-written disable comments for it, which means its
   author wanted it on with local opt-outs; switching it off silently kills 40
-  deliberate annotations.
+  deliberate annotations. CI is warning-free as of 2026-08-12: the final eight
+  active warnings were SDK/framework mocks that now use `Anthropic`,
+  `LlmClient` and `ModelListingClient` (with an `unknown` bridge where a
+  deliberately partial SDK object is the test subject).
 
 `reportUnusedDisableDirectives` is on, and it earns its keep: it found 45 dead
 directives, 39 of which came back to life the moment `no-explicit-any` was left
