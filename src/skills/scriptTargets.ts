@@ -82,12 +82,13 @@ const NON_EMPTY_STEM_RE = /[A-Za-z0-9_-]\.[A-Za-z][A-Za-z0-9]{0,8}$/;
  * without an import cycle; lifecycle.ts re-exports it under its historical name.
  */
 const MUTATING_ACTION_SOURCE =
-  '(?:update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|' +
+  '(?:build|building|create|creating|document|documenting|harden|hardening|' +
+  'update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|' +
   'fixing|amend|amending|revise|revising|write|writing|add|adding|append|' +
   'appending|regenerate|regenerating|refresh|refreshing)';
 const PASSIVE_MUTATION_SOURCE =
-  '(?:updated|rewritten|edited|corrected|fixed|amended|revised|written|added|' +
-  'appended|regenerated|refreshed)';
+  '(?:built|created|documented|hardened|updated|rewritten|edited|corrected|' +
+  'fixed|amended|revised|written|added|appended|regenerated|refreshed)';
 const MUTATING_VERB_RE = new RegExp(`\\b${MUTATING_ACTION_SOURCE}\\b`, 'i');
 
 /** True when the subtask asks for a named file to be CHANGED, not merely read. */
@@ -197,14 +198,13 @@ export function scriptWriteTargets(body: string): ScriptWriteTargets {
  * where the subtask says `docs/x`; the extractor's 6-path cap can truncate,
  * which under-extracts, and under-extracting is the safe direction here.
  */
-export function subtaskNamedPaths(description: string): string[] {
+export function subtaskNamedFilePaths(description: string): string[] {
   const lower = description.toLowerCase();
   const negatedBefore =
-    /(?:\b(?:no|not|never|without)\b|\b(?:do|does|must|should)\s+not\b|\bdon't\b)[^,;.!?\n]{0,32}$/i;
+    /(?:\b(?:no|without)\s+(?:(?:a|an|the|any)\s+)?|\b(?:do|does|must|should)\s+not\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bnever\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bdon't\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?)$/i;
   return [
     ...new Set(
       extractResultFilePaths({ summary: description })
-        .map((p) => path.basename(p))
         .filter((named) => {
           const needle = named.toLowerCase();
           let at = lower.indexOf(needle);
@@ -217,6 +217,11 @@ export function subtaskNamedPaths(description: string): string[] {
         })
     ),
   ];
+}
+
+/** Basenames for static script-capability comparison. */
+export function subtaskNamedPaths(description: string): string[] {
+  return [...new Set(subtaskNamedFilePaths(description).map((p) => path.basename(p)))];
 }
 
 /**
@@ -233,6 +238,15 @@ export function subtaskNamedPaths(description: string): string[] {
  * dispatch forever.
  */
 export function subtaskMutationTargets(description: string): string[] {
+  return [
+    ...new Set(
+      subtaskMutationTargetPaths(description).map((target) => path.basename(target))
+    ),
+  ];
+}
+
+/** Full workspace-relative output paths for the runtime before/after gate. */
+export function subtaskMutationTargetPaths(description: string): string[] {
   const lower = description.toLowerCase();
   const targets: string[] = [];
   const inputMarker =
@@ -243,7 +257,7 @@ export function subtaskMutationTargets(description: string): string[] {
     'i'
   );
 
-  for (const named of subtaskNamedPaths(description)) {
+  for (const named of subtaskNamedFilePaths(description)) {
     const needle = named.toLowerCase();
     let at = lower.indexOf(needle);
     while (at >= 0) {

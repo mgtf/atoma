@@ -502,7 +502,7 @@ re-exports all the historical names so old imports keep working.
 - **Lifecycle ledger** (`src/core/ledger.ts`, `npm run ledger -- tail|check`):
   every trust/lifecycle mutation appends an event to the `lifecycle_events`
   TABLE IN THE STORE, from the storage choke points (AtomRegistry
-  record*/patch/rollback/mergeInto, SkillRegistry
+  record*/patch/rollback/mergeInto/compensateCounters, SkillRegistry
   bump/save/promote/demote/refusal/direct-failure/reset). Stage-1
   DUAL-WRITE: counters stay authoritative; `ledger check` projects them and
   flags the IMPOSSIBLE direction (store < ledger = a write path bypassed the
@@ -883,6 +883,31 @@ re-exports all the historical names so old imports keep working.
   curve. After removing the quota-denial noise, the main curve's latest 10 are
   10/10 delivered at $0.2945 mean / $0.2943 median, one escalation and one
   deterministic phase (latest 20: 20/20 at $0.3576 mean, seven deterministic).
+- **ADVERSARIAL FOLLOW-UP ON THE LIVE ITERATIONS, 2026-08-12.** Seven edge
+  cases survived the first fixes; all reproduced before changing code.
+  (1) The planner taught "harden" while the mutation detector omitted
+  build/create/document/harden; its vocabulary now covers every prompt example.
+  (2) A mutating subtask with no provable output target now falls back BEFORE
+  script execution — otherwise there is no deliverable gate to justify credit.
+  (3) Runtime before/after reads preserve full paths (`docs/README.md`);
+  basenames remain only for static script-capability comparison.
+  (4) Negation is clause-local: "no index.html" is excluded, "no console
+  errors in index.html" still targets the file, and any positive mention wins.
+  (5) L1 tool observations classify `{ok:false}`, structured `error`, and
+  non-zero exit codes as failed actions rather than treating "did not throw" as
+  success. Production L1 results always carry the bounded action list; L2
+  mechanically rejects a result with zero successful observed actions BEFORE
+  trust or LLM validation. Legacy/test producers may omit the field.
+  (6) Provider-limit detection yields to `✓ build finished`, so arbitrary
+  artefact text cannot suppress a delivered CSV row; provider labels are
+  canonicalized through `resolveBaseProviderKind` and include routed providers.
+  (7) `record_probe` accepts `supersedes:"<exact old cmd>"`, removing one
+  accidental stale probe only after its corrected replacement ran.
+  The hybrid experiment's one false Lithium success and one false Ammonia
+  success were removed with transactional negative-only
+  `compensateCounters`; two ledger events keep projection exact. Burn-in now
+  records task-skill and event-skill learning separately. Targeted suites cover
+  all seven directions, including the exact live phrases.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

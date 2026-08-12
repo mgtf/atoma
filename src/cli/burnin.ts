@@ -29,11 +29,31 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
+import {
+  referencedProviderNames,
+  resolveBaseProviderKind,
+} from '../run/providers.js';
 
 export interface BurninTask {
   readonly id: string;
   readonly family: string;
   readonly goal: string;
+}
+
+export function burninProviderInfo(
+  env: NodeJS.ProcessEnv = process.env
+): { base: string; routes: string[]; label: string; estimatedCost: boolean } {
+  const base = resolveBaseProviderKind(env['ATOMA_LLM']);
+  const routes = referencedProviderNames(env).filter((provider) => provider !== base);
+  return {
+    base,
+    routes,
+    label: [base, ...routes].join('+'),
+    // Direct Anthropic-only is the one configuration whose estimated API
+    // pricing roughly matches the billing path. Subscription/local/routed
+    // providers need the explicit equivalence caveat.
+    estimatedCost: base !== 'anthropic' || routes.length > 0,
+  };
 }
 
 export interface RunStats {
@@ -47,7 +67,10 @@ export interface RunStats {
   readonly otherCalls: number;
   readonly deterministicPhases: number;
   readonly escalations: number;
+  /** Task-level recipes (`learned new skill`). */
   readonly learnedSkills: number;
+  /** Mid-run recovery recipes (`learned event skill`). */
+  readonly learnedEventSkills: number;
   /** llm→script compilations that succeeded in this run. */
   readonly promotions: number;
   /** compile attempts the compiler REFUSED as irreducible. */
@@ -110,6 +133,7 @@ export function parseRunLog(log: string): RunStats {
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
     escalations: (log.match(/escalat/gi) ?? []).length,
     learnedSkills: (log.match(/learned new skill/g) ?? []).length,
+    learnedEventSkills: (log.match(/learned event skill/g) ?? []).length,
     promotions: (log.match(/promoted to kind:script/g) ?? []).length,
     refusals: (log.match(/not promotable:/g) ?? []).length,
     demotions: (log.match(/demoted to llm after/g) ?? []).length,
@@ -148,12 +172,13 @@ export function toCsvRow(args: {
     args.trace,
     args.provider ?? '',
     s.otherCalls,
+    s.learnedEventSkills,
   ];
   return cells.map((c) => String(c)).join(',');
 }
 
 export const CSV_HEADER =
-  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls';
+  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills';
 
 /**
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
@@ -186,6 +211,9 @@ export function looksLikeConfigFailure(stats: RunStats, durationS: number | null
  * this batch.
  */
 export function looksLikeProviderLimitFailure(log: string): boolean {
+  // Model-authored artefacts can print arbitrary text, including "upgrade for
+  // access". A delivered marker is authoritative and must win over content.
+  if (/✓ build finished/.test(log)) return false;
   return [
     /you(?:'|’)ve hit your (?:weekly|monthly|usage) limit\b/i,
     /\b(?:weekly|monthly|usage) limit\b[^\n]{0,120}\bresets?\b/i,
@@ -534,9 +562,11 @@ async function main(): Promise<void> {
   }
 
   const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? 'runs');
-  const provider = process.env['ATOMA_LLM'] ?? 'anthropic';
-  console.log(`burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${provider}`);
-  if (provider !== 'anthropic') {
+  const provider = burninProviderInfo();
+  console.log(
+    `burn-in: ${tasks.length} task(s), timeout ${timeoutMs}ms each, provider ${provider.label}`
+  );
+  if (provider.estimatedCost) {
     console.log(
       'cost basis: estimated API-price equivalent from recorded model tiers — not local/subscription billing'
     );
@@ -573,7 +603,7 @@ async function main(): Promise<void> {
         stats,
         durationS,
         trace,
-        provider,
+        provider: provider.label,
       }) + '\n',
       'utf8'
     );
@@ -583,6 +613,7 @@ async function main(): Promise<void> {
         `llm=${stats.llmCalls ?? '?'} (O${stats.opusCalls}/S${stats.sonnetCalls}/H${stats.haikuCalls}` +
         `${stats.otherCalls > 0 ? `/+${stats.otherCalls}` : ''})  ` +
         `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}` +
+        (stats.learnedEventSkills ? `  recovery-learned=${stats.learnedEventSkills}` : '') +
         (stats.promotions ? `  ⚡promoted=${stats.promotions}` : '') +
         (stats.demotions ? `  🛡️demoted=${stats.demotions}` : '') +
         (stats.dispatchFallbacks ? `  ↩fallback=${stats.dispatchFallbacks}` : '')

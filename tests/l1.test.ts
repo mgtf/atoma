@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { L1Atom } from '../src/atoms/L1Atom.js';
+import { L1Atom, toolInvocationSucceeded } from '../src/atoms/L1Atom.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 
@@ -74,6 +74,17 @@ describe('L1Atom', () => {
     );
     expect(result.output).toBe('4');
     expect(result.producedBy).toEqual({ tier: 1, name: 'Hydrogen', viaFallback: false });
+    expect(result.toolCallResults).toEqual([]);
+  });
+
+  it('distinguishes successful actions from structured soft failures', () => {
+    const baseInfo = { name: 'x', args: {}, durationMs: 1, startedAt: 1 };
+    expect(toolInvocationSucceeded({ ...baseInfo, result: { ok: true } })).toBe(true);
+    expect(toolInvocationSucceeded({ ...baseInfo, result: { path: 'x.txt' } })).toBe(true);
+    expect(toolInvocationSucceeded({ ...baseInfo, result: { ok: false } })).toBe(false);
+    expect(toolInvocationSucceeded({ ...baseInfo, result: { error: 'failed' } })).toBe(false);
+    expect(toolInvocationSucceeded({ ...baseInfo, result: { exitCode: 1 } })).toBe(false);
+    expect(toolInvocationSucceeded({ ...baseInfo, error: 'executor threw' })).toBe(false);
   });
 
   it('tolerates narrative prose output instead of crashing the run', async () => {

@@ -1989,7 +1989,8 @@ export function renderProbeCmd(command: string, argv: readonly string[]): string
  */
 export function mergeShellProbe(
   existingRaw: string | null,
-  entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string }
+  entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string },
+  supersedes?: string
 ): string {
   let doc: { version: number; entries: Record<string, unknown>[] } = { version: 1, entries: [] };
   if (existingRaw) {
@@ -2000,6 +2001,9 @@ export function mergeShellProbe(
       // A corrupt manifest is replaced rather than appended to: half a JSON
       // document is not a record anyone can replay.
     }
+  }
+  if (supersedes && supersedes !== entry.cmd) {
+    doc.entries = doc.entries.filter((e) => e['cmd'] !== supersedes);
   }
   const i = doc.entries.findIndex((e) => e['cmd'] === entry.cmd);
   if (i >= 0) doc.entries[i] = entry;
@@ -2041,7 +2045,9 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
         'Use this INSTEAD of run_shell for every invocation that is evidence the deliverable works',
         '(the documented examples, the error cases). Never transcribe output into the manifest by',
         'hand — this tool writes exactly what the command produced. Entries merge by command, so',
-        're-running one after a fix replaces its record.',
+        're-running one after a fix replaces its record. If a corrected probe needs a DIFFERENT',
+        'command, pass supersedes with the exact accidental command to remove only that stale entry',
+        'after the replacement command has run.',
       ].join(' '),
       inputSchema: {
         type: 'object',
@@ -2054,6 +2060,11 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
           command: { type: 'string', description: 'Alternative to cmd: program alone, as for run_shell.' },
           args: { type: 'array', items: { type: 'string' }, description: 'Positional arguments, with "command".' },
           note: { type: 'string', description: 'Optional one-line reason this invocation is evidence.' },
+          supersedes: {
+            type: 'string',
+            description:
+              'Optional exact old cmd to remove after this command runs; use only when correcting an accidental probe whose command changed.',
+          },
         },
       },
     },
@@ -2126,7 +2137,11 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
 
       const path = opts.sandbox.resolve(PROBE_MANIFEST_FILENAME);
       const existing = existsSync(path) ? readFileSync(path, 'utf8') : null;
-      writeFileSync(path, mergeShellProbe(existing, entry), 'utf8');
+      const supersedes =
+        typeof args['supersedes'] === 'string' && args['supersedes'].trim()
+          ? args['supersedes'].trim()
+          : undefined;
+      writeFileSync(path, mergeShellProbe(existing, entry, supersedes), 'utf8');
       opts.logger?.info(
         `[tool:record_probe] ${cmd} -> exit ${result.exitCode}, recorded in ${PROBE_MANIFEST_FILENAME}`
       );
@@ -2137,6 +2152,7 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
         manifest: PROBE_MANIFEST_FILENAME,
         recordedStdoutOmitted: entry.stdout === undefined,
         ranThroughShell: viaShell,
+        ...(supersedes ? { superseded: supersedes } : {}),
       };
     },
   };

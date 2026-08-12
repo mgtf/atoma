@@ -5,8 +5,9 @@ import {
   scriptCanServeSubtask,
   scriptWriteTargets,
   subtaskMutatesFiles,
+  subtaskMutationTargetPaths,
   subtaskMutationTargets,
-  subtaskNamedPaths,
+  subtaskNamedFilePaths,
 } from './scriptTargets.js';
 import { SkillRegistry } from './registry.js';
 import {
@@ -1120,7 +1121,15 @@ export class SkillLifecycle {
     // tell "wrote the update" from "wrote nothing" — only a before/after
     // comparison can. Zero tokens; local reads.
     const mutating = subtaskMutatesFiles(subTask.description);
-    const mutationTargets = mutating ? subtaskMutationTargets(subTask.description) : [];
+    const mutationTargetPaths = mutating
+      ? subtaskMutationTargetPaths(subTask.description)
+      : [];
+    if (mutating && mutationTargetPaths.length === 0) {
+      ctx.logger.debug(
+        `[${this.host.name}] direct dispatch of ${skill.id} skipped: subtask is mutating but names no provable output path — running the LLM loop so success cannot be credited without a gate`
+      );
+      return null;
+    }
     const before = new Map<string, string>();
     if (mutating && ctx.tools?.has('read_file')) {
       // Snapshot OUTPUTS only. A mutating subtask routinely names inputs too:
@@ -1130,7 +1139,7 @@ export class SkillLifecycle {
       // wasting the dispatch and paying for the whole LLM loop. Match-time
       // filtering already uses this same target extractor; the downstream
       // gate must not disagree.
-      for (const path of mutationTargets) {
+      for (const path of mutationTargetPaths) {
         try {
           const got = await ctx.tools.execute('read_file', { path });
           const c = got && typeof got === 'object' ? (got as Record<string, unknown>)['content'] : got;
@@ -1187,8 +1196,8 @@ export class SkillLifecycle {
       // rejected a script that had correctly produced package.json + README.
       // Read-only verification still requires every named file to exist.
       const namedPaths = mutating
-        ? mutationTargets
-        : subtaskNamedPaths(subTask.description);
+        ? mutationTargetPaths
+        : subtaskNamedFilePaths(subTask.description);
       if (namedPaths.length > 0 && ctx.tools?.has('read_file')) {
         const missing: string[] = [];
         for (const path of namedPaths) {

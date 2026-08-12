@@ -48,6 +48,18 @@
   observed by the transport; narrative-only results cannot teach recipes.
 - Burn-in CSV rows now append the base provider and non-Claude-family call
   count, keeping routed Codex/Ollama calls visible without rewriting history.
+- Mutation detection now covers planner vocabulary, preserves full target
+  paths, treats negation clause-locally, and routes ungated mutations through
+  the validated LLM path.
+- Production L1 results with no successful transport-observed action are
+  rejected before trust or validator shortcuts; failed structured tool results
+  cannot seed task or recovery skills.
+- Atom counters support negative-only, transactional compensation with ledger
+  projection, allowing false experimental trust to be removed audibly.
+- `record_probe` can explicitly supersede one accidental command when a
+  corrected probe uses a different command.
+- Burn-in quota detection ignores delivered artefact text, canonicalizes base
+  and routed providers, and records event-skill learning separately.
 
 ## v0.1.2 — 2026-08-12
 

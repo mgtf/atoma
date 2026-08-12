@@ -402,6 +402,13 @@ export interface RunContext {
   /** Optional: tool executor used by atoms when the LLM emits tool_use blocks. */
   readonly tools?: ToolExecutor;
   /**
+   * Product-run integrity gate: when true, a production L1 Result that carries
+   * an observed-action list but no successful action is mechanically rejected
+   * before trust/LLM validation. Optional keeps direct library and legacy test
+   * producers backward-compatible.
+   */
+  readonly requireObservedToolAction?: boolean;
+  /**
    * Optional trust-fast-path observer. When set, L2/L3 validators call this
    * instead of silently returning `trustedApproval` — the recorder can then
    * emit a `VizTrustEvent` so the UI lane still shows the decision.

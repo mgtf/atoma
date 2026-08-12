@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   scriptWriteTargets,
   subtaskNamedPaths,
+  subtaskNamedFilePaths,
   subtaskMutationTargets,
+  subtaskMutationTargetPaths,
   scriptCanServeSubtask,
 } from '../src/skills/scriptTargets.js';
 
@@ -107,10 +109,28 @@ describe('subtaskNamedPaths', () => {
     expect(
       subtaskNamedPaths('Verify README.md exists; do not rewrite README.md.')
     ).toEqual(['README.md']);
+    // "No" governs console errors here, not the file.
+    expect(subtaskNamedPaths('Verify no console errors in index.html.')).toEqual([
+      'index.html',
+    ]);
+  });
+
+  it('preserves full paths for runtime reads while capability checks use basenames', () => {
+    expect(subtaskNamedFilePaths('update docs/README.md')).toEqual(['docs/README.md']);
+    expect(subtaskNamedPaths('update docs/README.md')).toEqual(['README.md']);
+    expect(subtaskMutationTargetPaths('update docs/README.md')).toEqual([
+      'docs/README.md',
+    ]);
+    expect(subtaskMutationTargets('update docs/README.md')).toEqual(['README.md']);
   });
 });
 
 describe('subtaskMutationTargets — outputs, not every mentioned file', () => {
+  it('covers every mutating verb used by the shared planner guidance', () => {
+    for (const verb of ['build', 'create', 'document', 'harden']) {
+      expect(subtaskMutationTargets(`${verb} index.js`)).toEqual(['index.js']);
+    }
+  });
   it('separates a destination from the source file it is derived from', () => {
     expect(subtaskMutationTargets('update README.md from package.json')).toEqual(['README.md']);
     expect(subtaskMutationTargets('using package.json, rewrite README.md')).toEqual(['README.md']);

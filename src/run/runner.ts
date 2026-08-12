@@ -348,6 +348,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     llm,
     limits: DEFAULT_LIMITS,
     tools: backend.executor,
+    requireObservedToolAction: true,
     // Surface trust fast-path decisions in the trace so the viz lane
     // shows "why no L2 LLM call was needed" instead of an empty gap.
     recordTrust: (info) => recorder.recordTrust(info),

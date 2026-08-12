@@ -68,6 +68,7 @@ function loadBurnin(): {
     deterministicPhases: number;
     escalations: number;
     learnedSkills: number;
+    learnedEventSkills: number;
     promotions: number;
     refusals: number;
     demotions: number;
@@ -102,6 +103,7 @@ function loadBurnin(): {
       deterministicPhases: num(c[10]) ?? 0,
       escalations: num(c[11]) ?? 0,
       learnedSkills: num(c[12]) ?? 0,
+      learnedEventSkills: num(c[20]) ?? 0,
       // Lifecycle columns appended later — older rows simply lack them.
       promotions: num(c[13]) ?? 0,
       refusals: num(c[14]) ?? 0,

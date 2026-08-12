@@ -20,6 +20,7 @@ const stats = (over: Partial<RunStats> = {}): RunStats => ({
   deterministicPhases: 0,
   escalations: 0,
   learnedSkills: 0,
+  learnedEventSkills: 0,
   promotions: 0,
   refusals: 0,
   demotions: 0,

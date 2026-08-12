@@ -60,6 +60,7 @@ export type LedgerEventKind =
   | 'direct-failure'
   | 'direct-failures-cleared'
   | 'counters-reset'
+  | 'type-counter-compensation'
   // Catalog-hygiene verbs (CLI `skills drop` / `skills merge`). The entity
   // disappears from the store afterwards; `ledger check` iterates the STORE,
   // so a dropped entity's stale projection is never compared — no special
@@ -322,6 +323,13 @@ export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCou
         const d = ev.detail ?? {};
         if (typeof d['successes'] === 'number') c.successes += d['successes'];
         if (typeof d['failures'] === 'number') c.failures += d['failures'];
+        break;
+      }
+      case 'type-counter-compensation': {
+        c.successes +=
+          typeof ev.detail?.['successes'] === 'number' ? ev.detail['successes'] : 0;
+        c.failures +=
+          typeof ev.detail?.['failures'] === 'number' ? ev.detail['failures'] : 0;
         break;
       }
       default:

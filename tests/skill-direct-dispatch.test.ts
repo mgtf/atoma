@@ -39,6 +39,26 @@ const SCRIPT_BODY = `import fs from 'node:fs';\nfs.writeFileSync('out.txt', 'x')
 
 const ENVELOPE_LINE = JSON.stringify({ output: { built: true }, summary: 'script ran clean' });
 
+function enqueueExecutedResult(
+  ctx: RunContext & { llm: MockLlmClient },
+  payload: unknown
+): void {
+  ctx.llm.enqueue((req) => {
+    req.onToolInvocation?.({
+      name: 'write_file',
+      args: { path: 'artefact.txt' },
+      result: { ok: true },
+      durationMs: 1,
+      startedAt: Date.now(),
+    });
+    return {
+      text: jsonText(payload),
+      stopReason: 'end_turn',
+      usage: { inputTokens: 10, outputTokens: 10 },
+    };
+  });
+}
+
 function makeExecutor(runShellResult: unknown): {
   executor: ToolExecutor;
   calls: Array<{ name: string; args: Record<string, unknown> }>;
@@ -186,7 +206,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     );
     // L1.plan + L1.execute — the normal skilled path.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
 
@@ -213,7 +233,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'saved by the loop', summary: 'llm path ok' }));
+    enqueueExecutedResult(ctx, { output: 'saved by the loop', summary: 'llm path ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
 
@@ -264,7 +284,10 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
         jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
       );
       ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-      ctx.llm.enqueueText(jsonText({ output: 'saved by the loop', summary: `llm ok (${runLabel})` }));
+      enqueueExecutedResult(ctx, {
+        output: 'saved by the loop',
+        summary: `llm ok (${runLabel})`,
+      });
       const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
       expect(result.summary).toBe(`llm ok (${runLabel})`);
       if (runLabel === 'first') {
@@ -332,7 +355,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     );
     // The LLM loop must take over.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done properly', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done properly', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
@@ -354,7 +377,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     await water.handleDirect({ description: 'scaffold the config' }, ctx);
     // And crucially: no success was credited to the skill by the direct path.
@@ -377,7 +400,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
@@ -420,7 +443,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
@@ -449,7 +472,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
@@ -470,7 +493,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
@@ -571,7 +594,10 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'adapted', summary: 'did it differently this time' }));
+    enqueueExecutedResult(ctx, {
+      output: 'adapted',
+      summary: 'did it differently this time',
+    });
     const second = await water2.handleDirect(
       { description: 're-run EVERY command in the README verbatim' },
       ctx
@@ -703,7 +729,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     queuePrefilters(ctx);
     // The fallback LLM loop then runs normally.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'wrote it properly' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'wrote it properly' });
 
     await water.handleDirect(
       { description: 'Write a README.md documenting the CLI usage and options.' },
@@ -808,6 +834,51 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(ctx.llm.calls).toHaveLength(2);
     expect(events.some((e) => e.op === 'direct')).toBe(true);
     expect(files['pathcase.js']).toBe('source stays unchanged\n');
+  });
+
+  it('preserves full output paths instead of accepting a root basename write', async () => {
+    const files = {
+      'docs/README.md': 'stale nested docs\n',
+      'README.md': 'stale root docs\n',
+    };
+    const { executor } = fsExecutor(files, (present) => {
+      // Wrong destination: a basename-only gate used to accept this.
+      present['README.md'] = 'new root docs\n';
+    });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    queuePrefilters(ctx);
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    enqueueExecutedResult(ctx, { output: 'fixed', summary: 'updated the nested docs' });
+
+    await water.handleDirect({ description: 'update docs/README.md with current usage' }, ctx);
+
+    expect(events.some((e) => e.op === 'direct')).toBe(false);
+    expect(ctx.llm.calls.length).toBeGreaterThan(2);
+    expect(files['docs/README.md']).toBe('stale nested docs\n');
+  });
+
+  it('falls back before dispatch when a mutating task names no output path', async () => {
+    const { executor, calls } = fsExecutor({});
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const ctx = { ...base, tools: executor };
+    queuePrefilters(ctx);
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'hardened it' });
+
+    await water.handleDirect({ description: 'harden the existing CLI' }, ctx);
+
+    expect(
+      calls.some(
+        (call) =>
+          typeof call.args['path'] === 'string' &&
+          call.args['path'].startsWith('_skill_')
+      )
+    ).toBe(false);
+    expect(ctx.llm.calls.length).toBeGreaterThan(2);
   });
 
   it('does NOT gate a pure re-verification subtask, which writes nothing by design', async () => {

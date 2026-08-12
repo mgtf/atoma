@@ -2835,12 +2835,13 @@ async function loadBurnin() {
 function renderBurninSummary(rows) {
   const byFam = new Map();
   for (const r of rows) {
-    const f = byFam.get(r.family) || { n: 0, ok: 0, cost: 0, costN: 0, det: 0, learned: 0, lastCost: null };
+    const f = byFam.get(r.family) || { n: 0, ok: 0, cost: 0, costN: 0, det: 0, learned: 0, recovery: 0, lastCost: null };
     f.n++;
     if (r.outcome === 'delivered') f.ok++;
     if (r.costUsd != null) { f.cost += r.costUsd; f.costN++; f.lastCost = r.costUsd; }
     f.det += r.deterministicPhases;
     f.learned += r.learnedSkills;
+    f.recovery += r.learnedEventSkills || 0;
     byFam.set(r.family, f);
   }
   const el = $('burninSummary');
@@ -2852,7 +2853,7 @@ function renderBurninSummary(rows) {
     wrap.appendChild(h('div', { class: 'section', style: 'flex:1; min-width:150px; border-left: 3px solid ' + color + '; padding:8px 10px;' }, [
       h('div', { style: 'font-weight:600; color:' + color + ';' }, fam),
       h('div', { class: 'muted', style: 'font-size:11px;' },
-        t('burnin.delivered', { count: f.ok + '/' + f.n }) + f.det + ' $0.00 phases · ' + f.learned + ' skills learned'),
+        t('burnin.delivered', { count: f.ok + '/' + f.n }) + f.det + ' $0.00 phases · ' + f.learned + '/' + f.recovery + ' skills/recoveries'),
       h('div', { style: 'font-size:18px; margin-top:2px;' },
         (mean != null ? '$' + mean.toFixed(3) : '—') +
         (f.lastCost != null ? ' ' : '')),
@@ -2944,6 +2945,7 @@ function renderBurninRows(rows) {
         (r.otherCalls ? '/+' + r.otherCalls : '') +
         (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
         (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '') +
+        (r.learnedEventSkills ? ' · ⟳+' + r.learnedEventSkills : '') +
         (r.promotions ? ' · ⚙️compile×' + r.promotions : '') +
         (r.demotions ? ' · 🛡️demote×' + r.demotions : '') +
         (r.dispatchFallbacks ? ' · ↩' + r.dispatchFallbacks : '')),

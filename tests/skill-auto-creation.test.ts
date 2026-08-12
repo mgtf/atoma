@@ -303,33 +303,6 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(learnPrompt).toMatch(/WHERE THIS SPLIT USUALLY DIES/);
   });
 
-  it('does not distil narrative success when no tool action was observed', async () => {
-    process.env['ATOMA_SKILL_LEARN'] = '1';
-    ensureChildIsTrusted();
-    skills.save('Hydrogen', {
-      id: 'unrelated',
-      description: 'something else',
-      whenToUse: 'never matches our task',
-      kind: 'llm',
-      body: 'b',
-    });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    const ctx = makeCtx();
-    ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
-    );
-    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
-    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    // No onToolInvocation callback: this is the exact low-capability-provider
-    // shape that fabricated a result and taught two recipes from zero actions.
-    ctx.llm.enqueueText(jsonText({ output: 'claimed', summary: 'I built and verified it' }));
-
-    await water.handleDirect({ description: 'build an artefact' }, ctx);
-
-    expect(skills.loadFor('Hydrogen').map((skill) => skill.id)).toEqual(['unrelated']);
-    expect(ctx.llm.calls).toHaveLength(4); // no Sonnet distillation call
-  });
-
   it('F2: rejects a draft whose body teaches a tool the host cannot call', async () => {
     // Regression (app-task-tracker run, 2026-08-07): two skills taught
     // "validate_html" on an HTTP-bucket atom that cannot declare it — the

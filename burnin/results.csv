@@ -1,4 +1,4 @@
-timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls
+timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills
 2026-08-02T06:03:11.934Z,e4-upper,cli,delivered,0.2854,209,16,1,1,14,0,0,2,2026-08-02T06-03-12-585-7cf24eb2.json
 2026-08-02T06:06:42.074Z,e4-linecount,cli,delivered,0.2461,229,14,1,0,13,0,0,0,2026-08-02T06-06-42-766-43645e12.json
 2026-08-02T06:10:31.809Z,e4-revlines,cli,delivered,0.2091,225,10,1,0,9,0,0,0,2026-08-02T06-10-32-483-ae0c6e18.json

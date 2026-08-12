@@ -1,11 +1,29 @@
 import { Atom } from '../core/atom.js';
-import type { Plan, Result, RunContext, Task, Tier } from '../core/types.js';
+import type {
+  Plan,
+  Result,
+  RunContext,
+  Task,
+  Tier,
+  ToolInvocationInfo,
+} from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload } from '../contracts/witness.js';
 import { SkillRegistry } from '../skills/registry.js';
+
+/** A transport-level success, not merely "the executor did not throw". */
+export function toolInvocationSucceeded(info: ToolInvocationInfo): boolean {
+  if (info.error !== undefined) return false;
+  if (!info.result || typeof info.result !== 'object') return true;
+  const result = info.result as Record<string, unknown>;
+  if ('ok' in result && result['ok'] !== true) return false;
+  if (typeof result['error'] === 'string' && result['error'].length > 0) return false;
+  if (typeof result['exitCode'] === 'number' && result['exitCode'] !== 0) return false;
+  return true;
+}
 
 export class L1Atom extends Atom {
   readonly tier: Tier = 1;
@@ -258,13 +276,13 @@ export class L1Atom extends Atom {
     // transparently on the FIRST pass, before spiralling.
     let lastValidateHtml: { ok: boolean; summary: string } | null = null;
     const observedToolCalls: Array<{ name: string; ok: boolean }> = [];
-    const onToolInvocation = (info: import('../core/types.js').ToolInvocationInfo): void => {
+    const onToolInvocation = (info: ToolInvocationInfo): void => {
       // Bounded, content-free action witness for skill auto-distillation.
       // A low-capability provider produced zero tool events, claimed it had
       // built a CLI, and two recipes were learned from that fiction. Names +
       // success bits prove an action happened without retaining tool payloads.
       if (observedToolCalls.length < 64) {
-        observedToolCalls.push({ name: info.name, ok: info.error === undefined });
+        observedToolCalls.push({ name: info.name, ok: toolInvocationSucceeded(info) });
       }
       if (info.name !== 'validate_html') return;
       const r = info.result as Record<string, unknown> | undefined;
@@ -335,7 +353,10 @@ export class L1Atom extends Atom {
       summary,
       trace: [],
       producedBy: { tier: 1, name: this.name, viaFallback: false },
-      ...(observedToolCalls.length > 0 ? { toolCallResults: observedToolCalls } : {}),
+      // Always present for production L1 results: [] is positive evidence
+      // that the transport observed NO tool action. Legacy/test producers may
+      // omit the field and remain backward-compatible at upper tiers.
+      toolCallResults: observedToolCalls,
       // Typed witnesses, attached at production time: the child's recorded
       // probes become first-class evidence the upper tiers can weigh
       // without re-parsing the payload.

@@ -109,6 +109,34 @@ describe('lifecycle ledger', () => {
     expect(projected.failures).toBe(0);
   });
 
+  it('counter compensation removes false trust and stays ledger-exact', () => {
+    const db = openDb(':memory:');
+    const reg = new AtomRegistry(db);
+    const t = reg.create(1, {
+      description: 'x', systemPrompt: 'p', tools: [], params: {}, createdBy: 'test',
+    });
+    reg.recordSuccess(t.name);
+    reg.recordSuccess(t.name);
+    const corrected = reg.compensateCounters(t.name, {
+      successes: -1,
+      reason: 'provider experiment approved narrative with zero tool actions',
+    });
+
+    expect(corrected.successes).toBe(1);
+    expect(projectCounters(readLedger(db)).get(t.name)).toEqual({
+      successes: 1,
+      failures: 0,
+    });
+    expect(readLedger(db).at(-1)).toMatchObject({
+      kind: 'type-counter-compensation',
+      entity: t.name,
+      detail: { successes: -1 },
+    });
+    expect(() =>
+      reg.compensateCounters(t.name, { successes: 1, reason: 'inflate' })
+    ).toThrow(/negative integer delta/);
+  });
+
   it('an in-memory registry cannot reach the configured store — the incident, structurally closed', () => {
     // Two throwaway `tsx` scripts once opened `:memory:` registries, bumped
     // `Helium`, and left `ledger check` reporting `IMPOSSIBLE  Helium:

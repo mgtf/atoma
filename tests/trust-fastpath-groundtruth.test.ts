@@ -85,6 +85,7 @@ function result(payload: {
   output: unknown;
   summary: string;
   evidence?: Result['evidence'];
+  toolCallResults?: Result['toolCallResults'];
 }): Result {
   return {
     output: payload.output,
@@ -92,10 +93,32 @@ function result(payload: {
     trace: [],
     producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
     ...(payload.evidence ? { evidence: payload.evidence } : {}),
+    ...(payload.toolCallResults !== undefined
+      ? { toolCallResults: payload.toolCallResults }
+      : {}),
   };
 }
 
 describe('trust fast-path × ground-truth probe', () => {
+  it('rejects a production L1 result when the transport observed no successful action', async () => {
+    const { l2, l1, ctx, exec } = setup({ 'index.js': 'console.log("real")' });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['index.js'] },
+        summary: 'claimed it built index.js',
+        toolCallResults: [],
+      }),
+      { description: 'build index.js' },
+      { ...ctx, requireObservedToolAction: true }
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/without any successful tool action/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual([]); // rejection precedes even the trust probe
+  });
+
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {
     const { l2, l1, ctx, exec } = setup({
       'README.md': '# json-cli\n\n## Install\n\n## Usage\n',

@@ -87,6 +87,21 @@ describe('record_probe', () => {
     expect(String(entries[0]!['stdout'])).toContain('after');
   });
 
+  it('can supersede one accidental probe when the corrected command differs', async () => {
+    writeFileSync(join(root, 'old.js'), "console.log('broken probe'); process.exit(1);");
+    writeFileSync(join(root, 'fixed.js'), "console.log('verified');");
+    const t = recordProbeTool({ sandbox });
+    await t.execute({ cmd: 'node old.js', note: 'accidental attempt' });
+    const result = (await t.execute({
+      cmd: 'node fixed.js',
+      supersedes: 'node old.js',
+      note: 'corrected finite probe',
+    })) as { superseded?: string };
+
+    expect(result.superseded).toBe('node old.js');
+    expect(manifest().entries.map((entry) => entry['cmd'])).toEqual(['node fixed.js']);
+  });
+
   it('preserves entries written by earlier phases', async () => {
     writeFileSync(
       join(root, PROBE_MANIFEST_FILENAME),
@@ -178,6 +193,18 @@ describe('mergeShellProbe — pure merge semantics', () => {
     const first = mergeShellProbe(null, e('node a.js', 'a'));
     const out = JSON.parse(mergeShellProbe(first, e('node b.js', 'b')));
     expect(out.entries).toHaveLength(2);
+  });
+
+  it('removes only an explicitly superseded cmd before appending the replacement', () => {
+    const first = mergeShellProbe(null, e('node accidental.js', 'bad'));
+    const withKeep = mergeShellProbe(first, e('node keep.js', 'keep'));
+    const out = JSON.parse(
+      mergeShellProbe(withKeep, e('node corrected.js', 'good'), 'node accidental.js')
+    );
+    expect(out.entries.map((entry: { cmd: string }) => entry.cmd)).toEqual([
+      'node keep.js',
+      'node corrected.js',
+    ]);
   });
 
   it('replaces a corrupt manifest rather than appending to half a document', () => {

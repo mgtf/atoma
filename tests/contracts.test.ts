@@ -218,6 +218,7 @@ describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sid
     expect(lines).toMatch(/BARE command/);
     expect(lines).toMatch(/NEVER append\s+display decorations/);
     expect(lines).toMatch(/exit code\s+belongs in "exitCode"/);
+    expect(lines).toMatch(/supersedes:"<exact old cmd>"/);
   });
 
   it('the reader teaches trailing-newline tolerance and the skip-not-replay rule', () => {

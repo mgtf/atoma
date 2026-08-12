@@ -189,41 +189,39 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
     else process.env['ATOMA_SKILL_LEARN'] = envBefore;
   });
 
+  function enqueueExecution(ctx: ReturnType<typeof makeCtx>, payload: unknown): void {
+    ctx.llm.enqueue((req) => {
+      req.onToolInvocation?.({
+        name: 'write_file',
+        args: { path: 'artefact.txt' },
+        result: { ok: true },
+        durationMs: 1,
+        startedAt: Date.now(),
+      });
+      return {
+        text: jsonText(payload),
+        stopReason: 'end_turn',
+        usage: { inputTokens: 10, outputTokens: 10 },
+      };
+    });
+  }
+
   /** One rejected cycle then one approved cycle, both plan-approved. */
   function enqueueRecoveredRun(
     ctx: ReturnType<typeof makeCtx>,
-    rejectionReasoning: string,
-    observedActions = true
+    rejectionReasoning: string
   ): void {
-    const enqueueExecution = (payload: unknown): void => {
-      ctx.llm.enqueue((req) => {
-        req.onToolInvocation?.({
-          name: 'write_file',
-          args: { path: 'artefact.txt' },
-          result: { ok: true },
-          durationMs: 1,
-          startedAt: Date.now(),
-        });
-        return {
-          text: jsonText(payload),
-          stopReason: 'end_turn',
-          usage: { inputTokens: 10, outputTokens: 10 },
-        };
-      });
-    };
     // Cycle 1: plan → approve → execute → REJECT.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'plan ok' }));
-    if (observedActions) enqueueExecution({ output: 'draft', summary: 'first attempt' });
-    else ctx.llm.enqueueText(jsonText({ output: 'draft', summary: 'first attempt' }));
+    enqueueExecution(ctx, { output: 'draft', summary: 'first attempt' });
     ctx.llm.enqueueText(
       jsonText({ approved: false, reasoning: rejectionReasoning, scope: 'ephemeral' })
     );
     // Cycle 2: plan → approve → execute → APPROVE.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r2', proposedAction: 'a2', expectedOutput: 'e2' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'plan ok' }));
-    if (observedActions) enqueueExecution({ output: 'fixed', summary: 'second attempt with evidence' });
-    else ctx.llm.enqueueText(jsonText({ output: 'fixed', summary: 'second attempt with evidence' }));
+    enqueueExecution(ctx, { output: 'fixed', summary: 'second attempt with evidence' });
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok now' }));
   }
 
@@ -319,30 +317,6 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
     expect(eventLearnCall!.userContent).toMatch(/MUST GENERALISE/);
   });
 
-  it('does not distil task or recovery skills from narrative-only recovery', async () => {
-    process.env['ATOMA_SKILL_LEARN'] = '1';
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    const ctx = makeCtx();
-    ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
-    );
-    enqueueRecoveredRun(
-      ctx,
-      'RESULT is missing every required output file',
-      false
-    );
-
-    await water.handleDirect({ description: 'build a page' }, ctx);
-
-    expect(skills.loadFor('Hydrogen')).toEqual([]);
-    expect(ctx.llm.calls.some((call) => call.userContent.includes('distilling a successful run'))).toBe(
-      false
-    );
-    expect(
-      ctx.llm.calls.some((call) => call.userContent.includes('EVENT-DRIVEN recovery skill'))
-    ).toBe(false);
-  });
-
   it('does NOT distill on a clean run, and NOT when an event skill was injected', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     // Case 1: clean run (no rejection) — only the C3 task-skill call fires.
@@ -354,7 +328,7 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
       );
       ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
       ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
-      ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+      enqueueExecution(ctx, { output: 'done', summary: 'ok' });
       ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
       ctx.llm.enqueueText('not json, skip the task-skill distillation');
       await water.handleDirect({ description: 'task one' }, ctx);

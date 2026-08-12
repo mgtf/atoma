@@ -720,6 +720,52 @@ export class AtomRegistry {
   }
 
   /**
+   * Operator-only correction for counters credited to an invalid observation.
+   *
+   * Negative deltas only: this escape hatch can remove false trust, never mint
+   * it. The correction and its ledger event share the registry transaction so
+   * `ledger check` remains exact. Used after a provider experiment approved
+   * narrative with zero tool actions and credited Lithium + Ammonia once each.
+   */
+  compensateCounters(
+    name: string,
+    args: { successes?: number; failures?: number; reason: string }
+  ): AtomType {
+    const successes = args.successes ?? 0;
+    const failures = args.failures ?? 0;
+    if (
+      !Number.isInteger(successes) ||
+      !Number.isInteger(failures) ||
+      successes > 0 ||
+      failures > 0 ||
+      (successes === 0 && failures === 0)
+    ) {
+      throw new Error('counter compensation requires at least one negative integer delta');
+    }
+    if (args.reason.trim().length === 0) {
+      throw new Error('counter compensation requires a reason');
+    }
+    return this.db.transaction(() => {
+      const current = this.getByName(name);
+      if (!current) throw new RegistryNotFoundError(name);
+      if (current.successes + successes < 0 || current.failures + failures < 0) {
+        throw new Error(`counter compensation would make ${name} negative`);
+      }
+      this.note({
+        kind: 'type-counter-compensation',
+        entity: name,
+        detail: { successes, failures, reason: args.reason.trim() },
+      });
+      this.db
+        .prepare(
+          'UPDATE atom_types SET successes = successes + ?, failures = failures + ? WHERE name = ?'
+        )
+        .run(successes, failures, name);
+      return this.getByName(name)!;
+    })();
+  }
+
+  /**
    * Return the set of normalized name keys already present at a given tier.
    * Used by `branch` to detect semantic duplicates (case/punctuation variants)
    * without forcing callers to materialise the full row list.

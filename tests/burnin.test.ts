@@ -5,6 +5,7 @@ import {
   summarize,
   looksLikeConfigFailure,
   looksLikeProviderLimitFailure,
+  burninProviderInfo,
   CSV_HEADER,
 } from '../src/cli/burnin.js';
 
@@ -82,6 +83,7 @@ describe('burnin parseRunLog', () => {
         'ℹ skill "y" not promotable: irreducible reasoning',
         '⚠ script skill "z" demoted to llm after 2 consecutive deterministic failures',
         '[A] direct dispatch of z failed (exit=1) — falling back to the LLM loop',
+        'ℹ [A] learned event skill "recover-x" for Lithium',
         'TOTAL  9  1  2  3  0.5000  ',
         '✓ build finished',
       ].join('\n')
@@ -90,6 +92,7 @@ describe('burnin parseRunLog', () => {
     expect(s.refusals).toBe(1);
     expect(s.demotions).toBe(1);
     expect(s.dispatchFallbacks).toBe(1);
+    expect(s.learnedEventSkills).toBe(1);
   });
 
   it('a killed/empty log degrades to error with null economics, not a crash', () => {
@@ -130,6 +133,34 @@ describe('burnin looksLikeConfigFailure — abort-the-batch guard', () => {
       true
     );
     expect(looksLikeProviderLimitFailure('HTTP 429 rate limit; retry after 5 seconds')).toBe(false);
+    expect(
+      looksLikeProviderLimitFailure(
+        'artefact output: Upgrade for access\n✓ build finished. Any server is reachable'
+      )
+    ).toBe(false);
+  });
+});
+
+describe('burnin provider attribution', () => {
+  it('canonicalizes aliases and includes routed providers', () => {
+    expect(burninProviderInfo({ ATOMA_LLM: 'ANTHROPIC' })).toEqual({
+      base: 'anthropic',
+      routes: [],
+      label: 'anthropic',
+      estimatedCost: false,
+    });
+    expect(
+      burninProviderInfo({
+        ATOMA_LLM: 'claude',
+        ATOMA_MODEL_L2: 'codex:gpt-5.4-mini',
+        ATOMA_MODEL_L3: 'codex:gpt-5.6-sol',
+      })
+    ).toEqual({
+      base: 'claude-cli',
+      routes: ['codex'],
+      label: 'claude-cli+codex',
+      estimatedCost: true,
+    });
   });
 });
 

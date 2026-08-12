@@ -1787,6 +1787,25 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
+    if (
+      ctx.requireObservedToolAction === true &&
+      result.toolCallResults !== undefined &&
+      !resultHasSuccessfulToolAction(result)
+    ) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name} reports no successful observed tool action — mechanically rejected before trust/LLM validation`
+      );
+      return {
+        approved: false,
+        reasoning:
+          'the L1 result was produced without any successful tool action observed by the transport, so its file/execution claims are unsupported narrative',
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'No successful tool action was observed. Actually perform the subtask with your declared tools, verify the artefact, and only then return the result JSON. Do not describe intended work as completed.',
+        },
+      };
+    }
     const type = this.registry.getByName(child.name);
     // The trust fast-path skips the LLM validator — but it must NOT skip the
     // ground-truth probe. The probe costs zero tokens (local fs / one page
