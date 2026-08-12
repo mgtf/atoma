@@ -2469,6 +2469,16 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   they'd pull in LLM parsing and hide loop bugs.
 - When adding a new mechanism, write at minimum one direct supervisor-loop test
   and one registry state-assertion test.
+- **CI proves a CLEAN CHECKOUT, not the developer machine.**
+  `.github/workflows/ci.yml` has two jobs. `core` runs `npm ci` then
+  `npm run check` with no registry, skills, runs or prebuilt worker image —
+  this is the path that catches a hidden install flag and an import that reads
+  ignored runtime data. `worker`, only after core is green, builds
+  `atoma-worker:latest` from the current commit and runs the real container
+  isolation suite; a stale local image cannot satisfy it. The jobs pin Node
+  22.13 because the current lint dependency requires ≥22.13 on the 22.x line
+  even though the runtime itself accepts Node 20+. No provider credential is
+  present and every LLM call in the suite is mocked.
 
 ## Linting (`npm run lint`, `eslint.config.js`)
 
