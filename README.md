@@ -225,13 +225,15 @@ A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
 skills directory together. Docker is optional: `npm run build:worker` enables
-the isolated backend and proxied egress paths.
+the isolated backend and proxied egress paths from compiled `dist/`.
+Contributors changing source use `npm run build:worker:dev`.
 
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release is narrower:
 MCP plus its build-run path, installable with production dependencies only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
-[`v0.1.0 release soak`](docs/release-soak-v0.1.0.md).
+[`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
+[`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md).
 
 A fresh clone starts with **no learned state at all** — the catalogue, the recipes and the
 traces are runtime data, deliberately not committed. What you clone is the framework; the

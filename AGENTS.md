@@ -94,14 +94,21 @@ npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no t
 readiness: full check, npm audit, build, then a quota-free JSON-RPC smoke
 against the compiled server. Tag workflow `.github/workflows/release.yml`
 repeats it, creates a production-dependency archive and re-tests that extracted
-archive before publishing a private GitHub Release. The archive carries no
-store, skills, traces, workspace or credentials. Source-only operator,
-benchmark and development CLIs are not claimed as part of the compiled archive.
+archive before publishing a private GitHub Release. It also builds the worker
+from packaged `dist/` and runs a quota-free container/egress smoke: an
+allowlisted registry request must succeed while the control plane stays
+unreachable. `npm run build:worker` is the RELEASE command and consumes
+existing `dist/`; `npm run build:worker:dev` is the SOURCE command that
+compiles first. They were one command until the v0.1.1 acceptance matrix tried
+it from the archive and got TS5058 because `tsconfig.json` is deliberately not
+packaged. The archive carries no store, skills, traces, workspace or
+credentials. Source-only operator, benchmark and development CLIs are not
+claimed as part of the compiled archive.
 Checksums are generated FROM INSIDE the release directory so they contain the
 downloadable basename, then verified before extraction — v0.1.0 initially
 published its workflow-internal `release/…` path and the first external soak
-caught it. The full live result is in `docs/release-soak-v0.1.0.md`; v0.1.1 is
-the packaging correction.
+caught it. Live results are in `docs/release-soak-v0.1.0.md` and
+`docs/release-acceptance-v0.1.1.md`; v0.1.2 is the worker-packaging correction.
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
 
@@ -3494,8 +3501,8 @@ parameterised by tier, NOT a base class.
 
 ## Runtime isolation — the containerised tool worker
 
-`npm run build:worker` builds `atoma-worker:latest` from
-`docker/worker.Dockerfile`; `ContainerToolExecutor`
+`npm run build:worker` builds `atoma-worker:latest` from existing `dist/`;
+`npm run build:worker:dev` compiles source first. `ContainerToolExecutor`
 (`src/tools/containerExecutor.ts`) is a drop-in `ToolExecutor` whose tools run
 inside it. The seam was already there: `ToolExecutor` is two methods
 (`execute`, `has`), so only the side-effecting half moves — the supervise
@@ -3629,8 +3636,8 @@ SEVEN lifecycle bugs are now fixed, each invisible from the layer above:
      this repo's own safety mechanisms cancelling out. The proxy variables are
      allowlisted; no credential was added.
   4. The image carries compiled `dist/`, so a host-side fix does nothing until
-     `npm run build:worker`. Same staleness trap as the `edit_file` fix; verify
-     with a hash, never a grep.
+     `npm run build:worker:dev`. Same staleness trap as the `edit_file` fix;
+     verify with a hash, never a grep.
   5. The runner watchdog exits synchronously by design, so async
      `backend.cleanup()` never ran there and leaked the proxy/network. Active
      sidecars now live in a module registry with a synchronous process-exit

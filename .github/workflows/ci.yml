@@ -38,7 +38,7 @@ jobs:
           node-version: 22.13.0
           cache: npm
       - run: npm ci
-      - run: npm run build:worker
+      - run: npm run build:worker:dev
       - run: test -f dist/tools/worker.js && test -f dist/contracts/probeManifest.js
       - run: npx vitest run tests/container-isolation.test.ts
         env:

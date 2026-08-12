@@ -1,12 +1,13 @@
 {
   "name": "atoma",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Three-tier LLM agent orchestration with persisted types, earned trust, and symmetric supervision",
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/viz/ui.html dist/viz/ui.html",
-    "build:worker": "npm run build && docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",
+    "build:worker": "docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",
+    "build:worker:dev": "npm run build && npm run build:worker",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.all.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -16,6 +17,7 @@
     "mcp": "node dist/mcp/stdio.js",
     "mcp:dev": "tsx src/mcp/stdio.ts",
     "release:check": "npm run check && npm audit && npm run build && node scripts/release-smoke.mjs",
+    "release:container-smoke": "node scripts/release-container-smoke.mjs",
     "run:build": "node dist/cli/build-app.js",
     "run:build:dev": "tsx src/cli/build-app.ts",
     "registry": "tsx src/cli/registry.ts",

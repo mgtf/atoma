@@ -43,6 +43,8 @@ jobs:
           cd "/tmp/atoma-release/${root}"
           npm ci --omit=dev
           node scripts/release-smoke.mjs
+          npm run build:worker
+          npm run release:container-smoke
           set +e
           ATOMA_BUILD_TIMEOUT_MS=invalid npm run run:build -- "compiled release preflight"
           code=$?

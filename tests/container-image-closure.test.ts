@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
  * it SKIPS when the image is absent, and it passes against a STALE image
  * built before the import existed. That is the staleness trap this file
  * already records for the egress-proxy fix: "the image carries compiled
- * dist/, so a host-side fix does nothing until `npm run build:worker`".
+ * dist/, so a host-side fix does nothing until `npm run build:worker:dev`".
  *
  * So this test never touches Docker and never skips. It walks the worker's
  * REAL import graph and asserts the Dockerfile and the image's package.json
@@ -107,6 +107,7 @@ const workerPkg = JSON.parse(
 ) as { dependencies?: Record<string, string> };
 const rootPkg = JSON.parse(readFileSync(resolve(REPO, 'package.json'), 'utf8')) as {
   dependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
 };
 
 describe('worker image closure — everything the worker imports must be in the image', () => {
@@ -145,5 +146,14 @@ describe('worker image closure — everything the worker imports must be in the 
       .filter(([name, range]) => rootPkg.dependencies?.[name] !== range)
       .map(([name, range]) => `${name}: worker ${range} vs root ${rootPkg.dependencies?.[name]}`);
     expect(drifted).toEqual([]);
+  });
+
+  it('builds the worker from packaged dist without requiring source files', () => {
+    expect(rootPkg.scripts?.['build:worker']).toBe(
+      'docker build -f docker/worker.Dockerfile -t atoma-worker:latest .'
+    );
+    expect(rootPkg.scripts?.['build:worker:dev']).toBe(
+      'npm run build && npm run build:worker'
+    );
   });
 });

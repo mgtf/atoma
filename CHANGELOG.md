@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.1.2 — 2026-08-12
+
+Corrective release after extending acceptance to Docker, proxied egress and
+MCP cancellation from the published v0.1.1 archive.
+
+### Fixed
+
+- `npm run build:worker` now consumes the compiled `dist/` shipped in release
+  archives instead of trying to rebuild omitted TypeScript source.
+- `npm run build:worker:dev` preserves the source-checkout compile-and-build
+  workflow, and fresh-worker CI uses that explicit path.
+- The release workflow now builds the worker from the extracted
+  production-only archive and runs a quota-free container/egress smoke.
+
+### Release acceptance
+
+- A containerised HTTP task delivered in 387 seconds, 14 LLM calls and
+  $0.2705 API-price equivalent; its server, Unicode echo contract and recorded
+  harness were independently executed.
+- Allowlisted egress returned HTTP 200 while the Docker control plane remained
+  unreachable.
+- MCP cancellation retained the serialization lease until the process group
+  exited, then left no worker container, private network or release-rooted
+  process.
+- The broader first HTTP attempt exhausted its 600-second budget despite a
+  correct final artefact; it remains recorded as a failed diagnostic, not an
+  acceptance success.
+- Full evidence: [`docs/release-acceptance-v0.1.1.md`](docs/release-acceptance-v0.1.1.md).
+
 ## v0.1.1 — 2026-08-12
 
 Corrective release after installing and exercising the published v0.1.0 archive.
