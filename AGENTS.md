@@ -2310,6 +2310,18 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       counts; on a subscription nothing is billed per token. Each
       `complete()` spawns a CLI subprocess — runs are slower than the
       direct API (~2-5s overhead per call).
+- **Project-level Claude Code settings NEVER pre-authorize shell execution.**
+  `.claude/settings.json` is committed and therefore crosses the trust
+  boundary to every collaborator who opens the repository. It used to carry
+  `Bash(*)` followed by dozens of narrower Bash rules; the first entry made
+  every later one decorative and allowed deletion, network access, secret
+  reads and destructive Git without another confirmation. Even an apparently
+  narrow `Bash(bash *)`, `Bash(node *)` or `Bash(python *)` is the same complete
+  escape hatch. Shell preferences belong in ignored
+  `.claude/settings.local.json`, never in the project file. A test rejects any
+  committed `Bash(` grant and pins the local-file ignore. This applies to the
+  INTERACTIVE assistant; the atoma claude-cli transport already ignores
+  project settings via `settingSources: []`.
 - **Alternative provider: Codex CLI on a ChatGPT subscription
   (`src/core/llmCodexCli.ts`) — TIERS 2/3 ONLY, and the restriction is
   STRUCTURAL.** Reached through a tier pin's provider prefix
