@@ -187,6 +187,24 @@ describeDocker('a containerised run cannot reach the stores', () => {
       cmd: 'node probe.js',
       stdout: 'CONTAINER_PROBE_OK\n',
     });
+    await exec.execute('write_file', {
+      path: 'probe-fixed.js',
+      content: "console.log('CONTAINER_PROBE_FIXED');",
+    });
+    const replaced = (await exec.execute('record_probe', {
+      cmd: 'node probe-fixed.js',
+      supersedes: 'node probe.js',
+    })) as { superseded?: string };
+    expect(replaced.superseded).toBe('node probe.js');
+    const after = JSON.parse(
+      readFileSync(join(workspace, '.atoma-probes.json'), 'utf8')
+    ) as { entries: Array<{ cmd: string; stdout?: string }> };
+    expect(after.entries).toEqual([
+      expect.objectContaining({
+        cmd: 'node probe-fixed.js',
+        stdout: 'CONTAINER_PROBE_FIXED\n',
+      }),
+    ]);
   }, 60_000);
 
   it('CANNOT read the sibling stores — the walk that works in-process', async () => {

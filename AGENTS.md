@@ -3015,8 +3015,8 @@ second is the kind of thing that gets acted on:
   after its first successful zero-token dispatch. `validateProbeManifest`
   checks structure, not completeness, so nothing noticed — and the
   intermittency (most workspaces fine) is why it looked like flakiness.
-  `record_probe(command, args, note?)` runs the command AND writes the real
-  exit code and complete output into the manifest, merging by cmd. THE
+  `record_probe(command, args, note?, supersedes?)` runs the command AND writes
+  the real exit code and complete output into the manifest, merging by cmd. THE
   DIVISION OF LABOUR IS THE DESIGN: the model still chooses WHICH invocations
   are evidence — auto-recording every `run_shell` would bury the record in
   `mkdir` and `ls` noise — while the machine decides what the record says.
@@ -3056,6 +3056,12 @@ second is the kind of thing that gets acted on:
   conservative classifier; unnecessary bash is cheap, execution/replay drift
   is not. Unterminated quotes are rejected instead of silently becoming
   different argv.
+  A later docs run exposed the deletion half of the same API: an accidental
+  broken grep and its corrected DIFFERENT command both remained durable, so a
+  future replayer would faithfully rerun the mistake. `supersedes:"<exact old
+  cmd>"` now removes that one stale shell entry only AFTER the replacement
+  command ran. It cannot touch HTTP/web entries or bulk-delete history; covered
+  in pure merge, local tool and real container tests.
   A METHOD NOTE WORTH MORE THAN THE FIX: the first diagnosis of this was WRONG
   and nearly became a feature. Grepping the first trace event whose text
   matched the error string returned the run SUMMARY, not the script, and led to
