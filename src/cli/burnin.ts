@@ -233,7 +233,8 @@ export function newestTraceName(runsDir: string, since: number): string {
  *     with an arbitrary working directory, where `npm run run:build` fails with
  *     a missing-script error that reads as outcome 'error'.
  *   - `npmScript`: lets the profile registry remain the authority on how a
- *     family launches. Burn-in defaults to run:build exactly as before.
+ *     family launches. Burn-in defaults to run:build:dev so each batch child
+ *     compiles the source as it stands at that task's start.
  *   - `signal`: the ONLY way to cancel from outside. The promise resolves on
  *     the child's exit and the child was otherwise unreachable, so a caller
  *     that owns a run's lifecycle (the MCP server does) had no handle to stop
@@ -324,7 +325,7 @@ export function spawnRun(opts: {
   readonly logPath: string;
   readonly extraArgs?: readonly string[];
   readonly extraEnv?: Readonly<Record<string, string>>;
-  /** npm script to execute. Defaults to run:build. */
+  /** npm script to execute. Defaults to the source-level run:build:dev. */
   readonly npmScript?: string;
   /** Working directory for `npm run`. Defaults to `process.cwd()`. */
   readonly cwd?: string;
@@ -350,7 +351,7 @@ export function spawnRun(opts: {
       'npm',
       [
         'run',
-        opts.npmScript ?? 'run:build',
+        opts.npmScript ?? 'run:build:dev',
         '--',
         ...(opts.cleanWorkspace === false ? [] : ['--clean-workspace']),
         ...(opts.extraArgs ?? []),

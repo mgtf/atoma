@@ -204,13 +204,13 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
   mix vendors per tier, e.g. a cheap third-party model for execution while planning stays on a
   frontier model.
 
-## Evaluate it in ten minutes
+## Install and evaluate it locally
 
 ```bash
-npm install
-npm run typecheck && npm test     # no API key needed; model calls are mocked.
-                                  # The suite still drives a real browser and local servers.
-                                  # Docker integration is enforced by its own CI job.
+git clone https://github.com/mgtf/atoma.git
+cd atoma
+npm ci
+npm run release:check             # typecheck + lint + tests + audit + build + dist MCP smoke
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -220,6 +220,16 @@ npm run viz                       # replay that run: every call, every cost, eve
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above
 ```
+
+A local release keeps its learned state beside the checkout: `atoma.db`,
+`skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
+the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
+skills directory together. Docker is optional: `npm run build:worker` enables
+the isolated backend and proxied egress paths.
+
+The full source checkout supports every operator, benchmark and development
+command. The compiled archive attached to each GitHub Release is narrower:
+MCP plus its build-run path, installable with production dependencies only.
 
 A fresh clone starts with **no learned state at all** — the catalogue, the recipes and the
 traces are runtime data, deliberately not committed. What you clone is the framework; the
@@ -232,8 +242,12 @@ atoma exposes itself as an [MCP](https://modelcontextprotocol.io) server, so an 
 hand it a task and read back what the system has learned. One line registers it:
 
 ```bash
-claude mcp add atoma -s local -- npx tsx "$PWD/src/mcp/stdio.ts"   # then start a new session
+npm run build
+claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"   # then start a new session
 ```
+
+`npm run mcp:dev` keeps the source-level `tsx` entrypoint available to contributors;
+the supported release path uses compiled `dist/`.
 
 **Thirteen tools.** One starts a run and returns immediately with an id to poll; one cancels a run;
 the other eleven are read-only — the atom catalogue with its earned trust, the recipe library and

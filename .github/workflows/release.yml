@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm ci
+      - run: npm run release:check
+
+      - name: Build release archive
+        run: |
+          set -euo pipefail
+          root="atoma-${GITHUB_REF_NAME}"
+          mkdir -p "release/${root}"
+          cp -R dist docker scripts "release/${root}/"
+          cp package.json package-lock.json README.md AGENTS.md CLAUDE.md CHANGELOG.md "release/${root}/"
+          tar -C release -czf "release/${root}.tar.gz" "${root}"
+          sha256sum "release/${root}.tar.gz" > "release/${root}.tar.gz.sha256"
+
+      - name: Verify extracted production install
+        run: |
+          set -euo pipefail
+          root="atoma-${GITHUB_REF_NAME}"
+          mkdir -p /tmp/atoma-release
+          tar -C /tmp/atoma-release -xzf "release/${root}.tar.gz"
+          cd "/tmp/atoma-release/${root}"
+          npm ci --omit=dev
+          node scripts/release-smoke.mjs
+          set +e
+          ATOMA_BUILD_TIMEOUT_MS=invalid npm run run:build -- "compiled release preflight"
+          code=$?
+          set -e
+          test "$code" -eq 2
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          root="atoma-${GITHUB_REF_NAME}"
+          gh release create "${GITHUB_REF_NAME}" \
+            "release/${root}.tar.gz" \
+            "release/${root}.tar.gz.sha256" \
+            --verify-tag \
+            --title "atoma ${GITHUB_REF_NAME}" \
+            --notes-file CHANGELOG.md

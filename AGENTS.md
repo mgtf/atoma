@@ -44,7 +44,11 @@ npm run lint                          # eslint, type-aware (see the Linting sect
 npm run check                         # typecheck + lint + test
 npm test                              # vitest run — all mocked, no API key needed
 npm run build                         # emits to dist/
-npm run run:build "<goal>"            # live: run a task through the pipeline
+npm run release:check                 # check + audit + build + compiled MCP smoke
+npm run run:build "<goal>"            # supported compiled release path (build first)
+npm run run:build:dev "<goal>"        # source-level development path
+npm run mcp                           # compiled dist/mcp/stdio.js
+npm run mcp:dev                       # source-level MCP entrypoint
 
 npm run registry -- list              # inspect persisted atom types + counters
 npm run registry -- list --tier 2
@@ -83,6 +87,16 @@ node benchmark/score-all.mjs                          # execute + score every de
 node benchmark/plot.mjs                               # regenerate docs/benchmark-cost-curve.svg
 npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no tiering
 ```
+
+**LOCAL RELEASE CONTRACT (v0.1).** The supported source path is `npm ci` →
+`npm run release:check`; the supported compiled MCP path is
+`node dist/mcp/stdio.js`. `release:check` is the one definition of release
+readiness: full check, npm audit, build, then a quota-free JSON-RPC smoke
+against the compiled server. Tag workflow `.github/workflows/release.yml`
+repeats it, creates a production-dependency archive and re-tests that extracted
+archive before publishing a private GitHub Release. The archive carries no
+store, skills, traces, workspace or credentials. Source-only operator,
+benchmark and development CLIs are not claimed as part of the compiled archive.
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
 
@@ -3675,12 +3689,14 @@ the worker never loads them.
 
 ## atoma as an MCP server (stdio) — `src/mcp/`
 
-`npx tsx src/mcp/stdio.ts` speaks MCP on stdio: **13 tools**, two of which
+`npm run mcp:dev` (source) / `npm run mcp` (compiled release) speak MCP on
+stdio: **13 tools**, two of which
 mutate (`atoma_run_start`, `atoma_run_cancel`) and eleven of which are pure
 readers over the persisted state (families, registry list/show, skills
 list/stats/review, ledger check, runs list, one trace, the friction report,
 plus run status).
-Registered with `claude mcp add atoma -s local -- npx tsx <abs>/src/mcp/stdio.ts`;
+Supported registration after `npm run build`:
+`claude mcp add atoma -s local -- node <abs>/dist/mcp/stdio.js`;
 verified `✓ Connected` by Claude Code's own client.
 
 **WHY STDIO IS THE WHOLE SAFETY ARGUMENT, AND WHY YOU MUST NOT ADD A PORT.**
