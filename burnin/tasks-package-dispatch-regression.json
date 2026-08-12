@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "sentenceclip-cli-package-dispatch",
+      "family": "cli",
+      "goal": "Build a no-dependency Node CLI in sentenceclip.js that truncates one phrase argument to a requested maximum length and rejects missing or invalid input. Verify representative invocations. As a FINAL SEPARATE PHASE, add package.json and README.md with those exact verified invocations."
+    }
+  ]
+}

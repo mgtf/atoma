@@ -31,6 +31,9 @@
   rather than the current process's bound port.
 - Probe-manifest validation now rejects custom `probe` scenario labels instead
   of inferring a valid web shape from the presence of `smoke`.
+- The deterministic deliverable gate now compares only proven output targets
+  for mutating tasks, so unchanged input files and explicitly negated files no
+  longer force a correct script back through the LLM loop.
 
 ## v0.1.2 — 2026-08-12
 

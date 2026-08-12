@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "slug-map-cli-package",
+      "family": "cli",
+      "goal": "Build a no-dependency Node CLI in slug-map.js that converts one title argument into a lowercase URL slug and rejects missing input. Verify representative invocations. As a FINAL SEPARATE PHASE, add package.json and README.md with those exact verified invocations."
+    },
+    {
+      "id": "pathcase-cli-package",
+      "family": "cli",
+      "goal": "Build a no-dependency Node CLI in pathcase.js that converts one phrase argument into snake_case and rejects missing input. Verify representative invocations. As a FINAL SEPARATE PHASE, add package.json and README.md with those exact verified invocations."
+    }
+  ]
+}

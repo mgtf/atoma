@@ -1102,9 +1102,17 @@ export class SkillLifecycle {
     // tell "wrote the update" from "wrote nothing" — only a before/after
     // comparison can. Zero tokens; local reads.
     const mutating = subtaskMutatesFiles(subTask.description);
+    const mutationTargets = mutating ? subtaskMutationTargets(subTask.description) : [];
     const before = new Map<string, string>();
     if (mutating && ctx.tools?.has('read_file')) {
-      for (const path of extractResultFilePaths({ summary: subTask.description })) {
+      // Snapshot OUTPUTS only. A mutating subtask routinely names inputs too:
+      // "write package.json and README.md pointing at pathcase.js". The live
+      // package script correctly changed both outputs, then the old all-named
+      // gate rejected it because pathcase.js (an input) stayed byte-identical,
+      // wasting the dispatch and paying for the whole LLM loop. Match-time
+      // filtering already uses this same target extractor; the downstream
+      // gate must not disagree.
+      for (const path of mutationTargets) {
         try {
           const got = await ctx.tools.execute('read_file', { path });
           const c = got && typeof got === 'object' ? (got as Record<string, unknown>)['content'] : got;
@@ -1155,7 +1163,14 @@ export class SkillLifecycle {
       // (local fs reads) and no counter moves either way. Deliberately
       // strict: a false positive only pays for the LLM loop, a false
       // negative entrenches a broken script.
-      const namedPaths = extractResultFilePaths({ summary: subTask.description });
+      // Mutating tasks distinguish outputs from inputs/negations. The live
+      // titlecase packaging phase named titlecase.js as an input and said
+      // "no index.html"; the all-named existence gate demanded both and
+      // rejected a script that had correctly produced package.json + README.
+      // Read-only verification still requires every named file to exist.
+      const namedPaths = mutating
+        ? mutationTargets
+        : extractResultFilePaths({ summary: subTask.description });
       if (namedPaths.length > 0 && ctx.tools?.has('read_file')) {
         const missing: string[] = [];
         for (const path of namedPaths) {

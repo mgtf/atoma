@@ -1,4 +1,4 @@
-import { subtaskMutatesFiles } from '../src/skills/lifecycle.js';
+import { subtaskMutatesFiles, subtaskMutationTargets } from '../src/skills/lifecycle.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -623,7 +623,10 @@ describe('deliverable gate — a script cannot report success for a file it neve
     createdBy: 'test',
   };
 
-  function fsExecutor(present: Record<string, string>): {
+  function fsExecutor(
+    present: Record<string, string>,
+    onRunShell?: (files: Record<string, string>) => void
+  ): {
     executor: ToolExecutor;
     calls: Array<{ name: string; args: Record<string, unknown> }>;
   } {
@@ -633,6 +636,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
         calls.push({ name, args });
         if (name === 'write_file') return { ok: true, path: args['path'] };
         if (name === 'run_shell') {
+          onRunShell?.(present);
           return { exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' };
         }
         if (name === 'read_file') {
@@ -773,6 +777,37 @@ describe('deliverable gate — a script cannot report success for a file it neve
     // The dispatch ran but was not credited: the LLM loop took over.
     expect(events.some((e) => e.op === 'direct')).toBe(false);
     expect(ctx.llm.calls.length).toBeGreaterThan(2);
+  });
+
+  it('does not require a named INPUT file to change when every output changed', async () => {
+    // Live packaging run: "write package.json and README.md ... pointing at
+    // pathcase.js". The deterministic script changed both outputs, but the
+    // old gate snapshot every named path and rejected it because pathcase.js
+    // correctly stayed byte-identical. Match-time target extraction already
+    // distinguishes inputs; the after-dispatch gate must use the same rule.
+    const files = {
+      'pathcase.js': 'source stays unchanged\n',
+      'package.json': '{"name":"old"}\n',
+      'README.md': 'old docs\n',
+    };
+    const { executor } = fsExecutor(files, (present) => {
+      present['package.json'] = '{"name":"pathcase"}\n';
+      present['README.md'] = 'new docs\n';
+    });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    queuePrefilters(ctx);
+
+    const description =
+      'write package.json for pathcase.js and write README.md using the verified invocations; no server, no browser, no index.html';
+    expect(subtaskMutationTargets(description)).toEqual(['package.json', 'README.md']);
+    await water.handleDirect({ description }, ctx);
+
+    expect(ctx.llm.calls).toHaveLength(2);
+    expect(events.some((e) => e.op === 'direct')).toBe(true);
+    expect(files['pathcase.js']).toBe('source stays unchanged\n');
   });
 
   it('does NOT gate a pure re-verification subtask, which writes nothing by design', async () => {

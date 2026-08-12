@@ -792,6 +792,30 @@ re-exports all the historical names so old imports keep working.
   exact. The live package script was also replayed offline: semantic
   `reorder.js` produced package/bin `reorder`, while generic `index.js` refused
   before writing package.json — the intended validated-LLM fallback.
+- **THIRD LIVE ITERATION, 2026-08-12 — the dispatch gate had two definitions
+  of "target".** Four fresh CLI packaging runs matured and exercised the
+  corrected `package-and-document-cli` script: slug-map $0.2846/18 calls,
+  pathcase $0.1715/12, titlecase $0.2014/12 and sentenceclip $0.1777/15
+  (traces `2026-08-12T12-16-38-476-e3ccbb3c`,
+  `2026-08-12T12-20-12-070-7c28e336`,
+  `2026-08-12T12-26-57-476-ab29b9b8`,
+  `2026-08-12T12-30-54-526-cc0bab45`). The first run carried the script past
+  trust. On pathcase, deterministic execution correctly wrote package.json
+  and README.md, but the post-dispatch byte gate rejected it because
+  pathcase.js — named as an INPUT — was unchanged. After snapshotting only
+  `subtaskMutationTargets`, titlecase still false-fell back because its task
+  explicitly said "no index.html" and the existence gate used EVERY named
+  path, including negations. The match-time filter had already solved both:
+  it reasons over proven OUTPUT targets. The downstream gate now uses the same
+  target set for mutating tasks; read-only tasks keep the all-named existence
+  rule. A regression test carries the exact package/README/input/no-index
+  sentence so the two copies cannot diverge again.
+  Sentenceclip then produced the first clean deterministic packaging dispatch:
+  `deterministic=1`, no fallback, semantic package/bin `sentenceclip`, exact
+  recorded examples, independent happy/error scorer green, zero friction and
+  zero leaked children. This is the zero-token path paying on the maintenance
+  phase it was built for; the run still made 15 LLM calls for planning and the
+  novel CLI build, so it is a PHASE saving, never a zero-cost run.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

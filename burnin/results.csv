@@ -164,3 +164,7 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T11:48:43.370Z,habit-widget-state-smoke-test,web,delivered,0.2943,219,12,1,2,9,0,0,0,0,2,0,0,2026-08-12T11-48-44-036-ee273111.json
 2026-08-12T11:58:56.299Z,event-registration-api-regression,http,delivered,0.4953,364,18,1,0,17,0,0,0,0,0,0,0,2026-08-12T11-58-56-882-370b3313.json
 2026-08-12T12:05:02.489Z,mood-tracker-widget-regression,web,delivered,0.3288,285,14,1,0,13,0,0,0,0,0,0,0,2026-08-12T12-05-03-167-4f1ddc20.json
+2026-08-12T12:16:37.833Z,slug-map-cli-package,cli,delivered,0.2846,213,18,1,1,16,0,0,0,0,1,0,0,2026-08-12T12-16-38-476-e3ccbb3c.json
+2026-08-12T12:20:11.416Z,pathcase-cli-package,cli,delivered,0.1715,123,12,1,0,11,0,0,0,0,0,0,1,2026-08-12T12-20-12-070-7c28e336.json
+2026-08-12T12:26:56.907Z,titlecase-cli-package-dispatch,cli,delivered,0.2014,127,12,1,0,11,0,0,0,0,0,0,0,2026-08-12T12-26-57-476-ab29b9b8.json
+2026-08-12T12:30:53.951Z,sentenceclip-cli-package-dispatch,cli,delivered,0.1777,139,15,1,0,14,1,0,0,0,0,0,0,2026-08-12T12-30-54-526-cc0bab45.json
