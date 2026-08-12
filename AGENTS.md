@@ -1246,6 +1246,22 @@ re-exports all the historical names so old imports keep working.
   self-driving hydration smokes automatically discard conflicting external
   interactions earlier. Remaining label/class mismatches are true first-pass
   validation findings corrected from source, not silent approvals.
+- **TWENTY-FIRST LIVE ITERATION, 2026-08-12 — one guessed RGB caused eleven
+  self-inflicted repairs.** A third hydration run delivered in
+  459s/16 calls/$0.2723 estimated (trace
+  `2026-08-12T21-37-35-921-44f459ec`) with no escalation, valid durable
+  milestone/reset evidence and independently correct behavior. Friction was
+  nevertheless 11 identical smoke failures. The smoke expected green
+  `rgb(39,174,96)` for the glass counter while the actual computed threshold
+  color was blue `rgb(52,152,219)`. Instead of accepting observed behavior or
+  comparing initial→milestone, the L1 repeatedly rewrote CSS, inline styles,
+  specificity and timers around the unchanged guessed literal.
+  The canonical state-journey template and both live web recipes now compare
+  computed style against the captured initial value unless source explicitly
+  proves an exact computed value; guessed RGB literals are forbidden. Smokes
+  return a `checks` object with one positively named boolean per requirement
+  and derive `ok` through `Object.values(checks).every(Boolean)`, so the first
+  failed result names the exact comparison instead of inviting blind CSS edits.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

@@ -97,6 +97,9 @@
 - Self-driving smoke detection recognizes goal/threshold and numbered
   after-transition snapshot names, dropping conflicting external interactions
   for novel widgets as well as the original habit case.
+- State-journey smokes compare computed style against captured initial values
+  instead of guessed RGB literals and return named `checks` to expose the exact
+  failed assertion on the first browser pass.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.
