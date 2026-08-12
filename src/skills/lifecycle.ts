@@ -6,6 +6,7 @@ import {
   scriptWriteTargets,
   subtaskMutatesFiles,
   subtaskMutationTargets,
+  subtaskNamedPaths,
 } from './scriptTargets.js';
 import { SkillRegistry } from './registry.js';
 import {
@@ -18,7 +19,6 @@ import {
 } from '../atoms/cost.js';
 import { parseScriptEnvelope, scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import { extractJson } from '../atoms/json.js';
-import { extractResultFilePaths } from '../atoms/groundTruth.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
 import { scriptInterpreter, scriptScratchFilename } from './abi.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
@@ -1188,7 +1188,7 @@ export class SkillLifecycle {
       // Read-only verification still requires every named file to exist.
       const namedPaths = mutating
         ? mutationTargets
-        : extractResultFilePaths({ summary: subTask.description });
+        : subtaskNamedPaths(subTask.description);
       if (namedPaths.length > 0 && ctx.tools?.has('read_file')) {
         const missing: string[] = [];
         for (const path of namedPaths) {

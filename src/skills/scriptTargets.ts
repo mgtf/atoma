@@ -198,7 +198,25 @@ export function scriptWriteTargets(body: string): ScriptWriteTargets {
  * which under-extracts, and under-extracting is the safe direction here.
  */
 export function subtaskNamedPaths(description: string): string[] {
-  return [...new Set(extractResultFilePaths({ summary: description }).map((p) => path.basename(p)))];
+  const lower = description.toLowerCase();
+  const negatedBefore =
+    /(?:\b(?:no|not|never|without)\b|\b(?:do|does|must|should)\s+not\b|\bdon't\b)[^,;.!?\n]{0,32}$/i;
+  return [
+    ...new Set(
+      extractResultFilePaths({ summary: description })
+        .map((p) => path.basename(p))
+        .filter((named) => {
+          const needle = named.toLowerCase();
+          let at = lower.indexOf(needle);
+          while (at >= 0) {
+            const before = description.slice(Math.max(0, at - 64), at);
+            if (!negatedBefore.test(before)) return true;
+            at = lower.indexOf(needle, at + needle.length);
+          }
+          return false;
+        })
+    ),
+  ];
 }
 
 /**

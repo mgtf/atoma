@@ -98,6 +98,16 @@ describe('subtaskNamedPaths', () => {
   it('reduces to basenames so a path.join body still matches a docs/ subtask', () => {
     expect(subtaskNamedPaths('rewrite docs/INDEX.md')).toEqual(['INDEX.md']);
   });
+
+  it('drops files mentioned only in a negated requirement', () => {
+    expect(
+      subtaskNamedPaths('Verify config.json; no server, no browser, no index.html.')
+    ).toEqual(['config.json']);
+    // A positive mention elsewhere wins over a later negation.
+    expect(
+      subtaskNamedPaths('Verify README.md exists; do not rewrite README.md.')
+    ).toEqual(['README.md']);
+  });
 });
 
 describe('subtaskMutationTargets — outputs, not every mentioned file', () => {

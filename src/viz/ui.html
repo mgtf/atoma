@@ -2939,7 +2939,9 @@ function renderBurninRows(rows) {
       h('span', { class: 'muted', style: 'font-size:11px;' },
         r.ts.slice(0, 16).replace('T', ' ') + ' · $' + (r.costUsd != null ? r.costUsd.toFixed(3) : '?') +
         ' · ' + (r.durationS != null ? r.durationS + 's' : '?') +
+        (r.provider ? ' · ' + r.provider : '') +
         ' · O' + r.opusCalls + '/S' + r.sonnetCalls + '/H' + r.haikuCalls +
+        (r.otherCalls ? '/+' + r.otherCalls : '') +
         (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
         (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '') +
         (r.promotions ? ' · ⚙️compile×' + r.promotions : '') +

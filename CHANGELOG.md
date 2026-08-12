@@ -10,6 +10,7 @@
   container or egress mode is selected.
 - `npm run doctor:dev` exposes the same checks from TypeScript source; release
   checks and extracted archives smoke the compiled command.
+- `.nvmrc` pins the same Node 22.13.0 runtime used by CI and release jobs.
 
 ### Changed
 
@@ -33,7 +34,8 @@
   of inferring a valid web shape from the presence of `smoke`.
 - The deterministic deliverable gate now compares only proven output targets
   for mutating tasks, so unchanged input files and explicitly negated files no
-  longer force a correct script back through the LLM loop.
+  longer force a correct script back through the LLM loop; read-only gates also
+  ignore file paths mentioned solely under a negation.
 - Skill compilation now preserves the scope of quantified requirements: a
   minimum bullet count attached to `## Steps` is not applied to prose-only
   sibling sections.

@@ -209,6 +209,7 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 ```bash
 git clone https://github.com/mgtf/atoma.git
 cd atoma
+nvm install && nvm use            # or provide an equivalent supported Node version
 npm ci
 npm run release:check             # checks + audit + build + compiled MCP/doctor smokes
 npm run doctor                    # quota-free Node, provider and optional Docker preflight

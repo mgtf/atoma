@@ -842,6 +842,22 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
+  it('does not require a file mentioned only in a read-only negation', async () => {
+    const { executor } = fsExecutor({ 'config.json': '{}' });
+    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
+    queuePrefilters(ctx);
+
+    await water.handleDirect({
+      description: 'Verify config.json against the template; no browser and no index.html.',
+    }, ctx);
+
+    expect(ctx.llm.calls).toHaveLength(2);
+    expect(events.some((e) => e.op === 'direct')).toBe(true);
+  });
+
   it('stays out of the way when the subtask names no file at all', async () => {
     const { executor } = fsExecutor({});
     const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);

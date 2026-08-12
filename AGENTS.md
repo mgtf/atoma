@@ -38,6 +38,7 @@ is an LLM-backed agent. See `README.md` for the external pitch.
 ## Commands
 
 ```bash
+nvm use                               # .nvmrc = the same Node version as CI
 npm install
 npm run typecheck                     # tsc --noEmit (strict mode)
 npm run lint                          # eslint, type-aware (see the Linting section)
@@ -712,7 +713,7 @@ re-exports all the historical names so old imports keep working.
   before this). Non-Anthropic batches state that `cost_usd` is an estimated
   API-price equivalent, not local/subscription billing. Every batch extends
   the cost-decay curve AND matures the skill/trust counters — the harness IS
-  usage. Task file:
+  usage; the viz row renders both provider and `+other` calls. Task file:
   `burnin/tasks-default.json` (`{tasks: [{id, family, goal}]}`); logs under
   `burnin/logs/` (gitignored), CSV committed. Rendered by the viz's
   **Burn-in** tab (`/api/burnin` reads the CSV, override with
@@ -813,8 +814,10 @@ re-exports all the historical names so old imports keep working.
   path, including negations. The match-time filter had already solved both:
   it reasons over proven OUTPUT targets. The downstream gate now uses the same
   target set for mutating tasks; read-only tasks keep the all-named existence
-  rule. A regression test carries the exact package/README/input/no-index
-  sentence so the two copies cannot diverge again.
+  rule after dropping paths mentioned ONLY under a negation. Regression tests
+  carry both exact shapes: package/README/input/no-index for mutation, and
+  "Verify config.json; no index.html" for read-only dispatch. A positive
+  mention elsewhere still wins over a later "do not rewrite" clause.
   Sentenceclip then produced the first clean deterministic packaging dispatch:
   `deterministic=1`, no fallback, semantic package/bin `sentenceclip`, exact
   recorded examples, independent happy/error scorer green, zero friction and
@@ -2575,10 +2578,12 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   carries an absolute checkout path plus a command the client executes, so it
   is ignored and never committed. Codex CLI stores active registrations in
   `~/.codex/config.toml`; use `codex mcp add atoma -- node <abs>/dist/mcp/stdio.js`.
-  The working operator registration uses that compiled path. Do not point it
-  at `src/mcp/server.ts` — `stdio.ts` is the bootstrap that claims stdout
-  before loading the application graph, while `server.ts` alone neither
-  claims the protocol stream early enough nor boots a transport.
+  The working operator registration uses that compiled path; verified through
+  a read-only `codex exec` call that invoked `atoma_families` exactly once and
+  returned `1 build` without shell/file access. Do not point it at
+  `src/mcp/server.ts` — `stdio.ts` is the bootstrap that claims stdout before
+  loading the application graph, while `server.ts` alone neither claims the
+  protocol stream early enough nor boots a transport.
 - **Alternative provider: Codex CLI on a ChatGPT subscription
   (`src/core/llmCodexCli.ts`) — TIERS 2/3 ONLY, and the restriction is
   STRUCTURAL.** Reached through a tier pin's provider prefix
