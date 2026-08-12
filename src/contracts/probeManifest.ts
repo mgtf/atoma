@@ -310,7 +310,14 @@ export function validateProbeManifest(raw: string): string[] {
       }
       const inter = en['interactions'];
       if (Array.isArray(inter)) {
-        const allowedTypes = new Set(['click', 'rightclick', 'keydown', 'keyup', 'keypress']);
+        const allowedTypes = new Set([
+          'click',
+          'rightclick',
+          'type',
+          'keydown',
+          'keyup',
+          'keypress',
+        ]);
         inter.forEach((action, actionIndex) => {
           if (!action || typeof action !== 'object' || Array.isArray(action)) {
             problems.push(`entry #${i} (web): interaction #${actionIndex} is not an object`);
@@ -329,6 +336,13 @@ export function validateProbeManifest(raw: string): string[] {
           ) {
             problems.push(
               `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a selector`
+            );
+          } else if (
+            a['type'] === 'type' &&
+            (typeof a['selector'] !== 'string' || typeof a['text'] !== 'string')
+          ) {
+            problems.push(
+              `entry #${i} (web): interaction #${actionIndex} type requires string selector and text`
             );
           } else if (
             (a['type'] === 'keydown' || a['type'] === 'keyup' || a['type'] === 'keypress') &&

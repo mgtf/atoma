@@ -86,7 +86,11 @@ describe('validateProbeManifest', () => {
               file: 'index.html',
               smoke: 'window.__x === true',
               expected: 'true',
-              interactions: [{ type: 'click', selector: '#a' }, { type: 'keydown', key: 'Enter' }],
+              interactions: [
+                { type: 'type', selector: '#name', text: 'Test User' },
+                { type: 'click', selector: '#a' },
+                { type: 'keydown', key: 'Enter' },
+              ],
             },
           ],
         })

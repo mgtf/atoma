@@ -128,6 +128,10 @@
 - Full-stack plans route real-browser and finite-harness verification through
   separate sequential web/HTTP phases instead of simulating one capability
   inside the other.
+- Capability routing ignores appended global literal-contract blocks and
+  classifies only the subtask's own phase scope.
+- `validate_html` supports selector-based `{type:"type", text}` form entry;
+  `keypress` remains a single-key action.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

@@ -71,10 +71,16 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `validate, fix what the values revealed, re-validate. If you are past`,
   `five, you are enumerating instead of asserting: collapse your`,
   `remaining checks into ONE object smoke and read the result.`,
+  `If previousStepSummary supplies a live loopback URL from a Node server,`,
+  `validate that URL directly. Do NOT start_static_server on server.js or the`,
+  `workspace root: it serves a directory listing, not the embedded dynamic UI.`,
   `For every interaction selector, READ the current HTML and copy the exact`,
   `id/class byte-for-byte. Never infer kebab-case from a camelCase property`,
   `or invent a plausible selector: "#increment-btn" does not match`,
   `id="incrementBtn", and one guessed selector invalidates the whole replay.`,
+  `For form text, use interaction {type:"type", selector:"#field", text:"..."}.`,
+  `keypress accepts ONE key name (Enter, ArrowRight, "a"), never a full string`,
+  `such as "Test User"; submit only after typing every required field.`,
   `Derive expected labels, classes and state thresholds from the same source.`,
   `Do not invent plausible states ("On Fire", "Keep Going") when the artefact`,
   `actually defines different values ("Beginner", "Building").`,
@@ -203,6 +209,11 @@ export const LITERAL_CONTRACT_PRESERVATION_GUIDANCE = [
 ].join('\n');
 
 const LITERAL_CONTRACT_MARKER = '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==';
+
+export function stripLiteralContractBlock(description: string): string {
+  const marker = description.indexOf(LITERAL_CONTRACT_MARKER);
+  return marker >= 0 ? description.slice(0, marker).trim() : description;
+}
 
 export function extractLiteralContractClauses(description: string): string {
   const inherited = description.indexOf(LITERAL_CONTRACT_MARKER);

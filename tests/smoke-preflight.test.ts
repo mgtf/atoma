@@ -5,6 +5,7 @@ import {
   detectBrittleComputedStyleLiteral,
   isSmokeOk,
   makeSmokeStuckTracker,
+  parseInteractions,
   SMOKE_STUCK_WINDOW,
   SMOKE_STUCK_THRESHOLD,
   smokeDrivesIntermediateState,
@@ -86,6 +87,20 @@ describe('detectSmokeStatementError', () => {
   it('empty or whitespace-only smoke returns null (execute path treats it as absent)', () => {
     expect(detectSmokeStatementError('')).toBeNull();
     expect(detectSmokeStatementError('    ')).toBeNull();
+  });
+});
+
+describe('parseInteractions', () => {
+  it('preserves selector-based text entry as a first-class browser action', () => {
+    expect(
+      parseInteractions([
+        { type: 'type', selector: '#name', text: 'Test User' },
+        { type: 'keypress', key: 'Enter' },
+      ])
+    ).toEqual([
+      { type: 'type', selector: '#name', text: 'Test User' },
+      { type: 'keypress', key: 'Enter' },
+    ]);
   });
 });
 

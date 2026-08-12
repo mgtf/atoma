@@ -1240,15 +1240,15 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           interactions: {
             type: 'array',
             description:
-              'Sequence of user interactions to simulate AFTER the page loads. Mouse events (click/rightclick) or keyboard events (keydown/keyup/keypress). Use keypress with holdMs to simulate holding a key for a duration — essential for platformer-style inputs like "move right for 500ms while jumping".',
+              'Sequence of user interactions to simulate AFTER the page loads. Mouse events (click/rightclick), selector-based text entry (type), or keyboard events (keydown/keyup/keypress). Use type with selector+text for forms; keypress accepts one key name, not a whole string.',
             items: {
               type: 'object',
               properties: {
                 type: {
                   type: 'string',
-                  enum: ['click', 'rightclick', 'keydown', 'keyup', 'keypress'],
+                  enum: ['click', 'rightclick', 'type', 'keydown', 'keyup', 'keypress'],
                   description:
-                    'Event kind. "keypress" = keydown then keyup after holdMs.',
+                    'Event kind. "type" enters a text string into selector; "keypress" = one keydown then keyup after holdMs.',
                 },
                 selector: {
                   type: 'string',
@@ -1265,6 +1265,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
                   type: 'string',
                   description:
                     'Keyboard-only. Key name e.g. "ArrowRight", "ArrowLeft", "Space", "w", "ArrowUp", "Enter".',
+                },
+                text: {
+                  type: 'string',
+                  description: 'type-only. Full text to enter in the selected form field.',
                 },
                 holdMs: {
                   type: 'number',
@@ -1483,6 +1487,20 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
                     : ''
                 }`
               );
+            } else if (it.type === 'type') {
+              if (!it.selector) throw new Error('type requires "selector"');
+              if (it.text === undefined) throw new Error('type requires "text"');
+              const coords = await resolveInteractionCoords(page, it);
+              await page.mouse.click(coords.x, coords.y);
+              await page.keyboard.type(it.text);
+              if (coords.resolvedSelector && coords.resolvedSelector !== it.selector) {
+                warnings.push(
+                  `interaction selector ${it.selector} uniquely normalized to ${coords.resolvedSelector}; copy the exact id from source next time`
+                );
+              }
+              interactionLog.push(
+                `type ${JSON.stringify(it.text)} into ${coords.resolvedSelector ?? it.selector}`
+              );
             } else if (it.type === 'keydown') {
               if (!it.key) throw new Error('keydown requires "key"');
               await page.keyboard.down(it.key as import('puppeteer').KeyInput);
@@ -1620,15 +1638,16 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
 }
 
 export interface ParsedInteraction {
-  type: 'click' | 'rightclick' | 'keydown' | 'keyup' | 'keypress';
+  type: 'click' | 'rightclick' | 'type' | 'keydown' | 'keyup' | 'keypress';
   selector?: string;
   x?: number;
   y?: number;
   key?: string;
+  text?: string;
   holdMs?: number;
 }
 
-function parseInteractions(raw: unknown): ParsedInteraction[] {
+export function parseInteractions(raw: unknown): ParsedInteraction[] {
   if (!Array.isArray(raw)) return [];
   const out: ParsedInteraction[] = [];
   for (const item of raw) {
@@ -1638,6 +1657,7 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
     if (
       t !== 'click' &&
       t !== 'rightclick' &&
+      t !== 'type' &&
       t !== 'keydown' &&
       t !== 'keyup' &&
       t !== 'keypress'
@@ -1655,6 +1675,9 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
     }
     if (typeof rec['key'] === 'string' && rec['key']) {
       parsed.key = rec['key'];
+    }
+    if (typeof rec['text'] === 'string') {
+      parsed.text = rec['text'];
     }
     if (typeof rec['holdMs'] === 'number' && Number.isFinite(rec['holdMs'])) {
       parsed.holdMs = rec['holdMs'];

@@ -82,6 +82,7 @@ import {
   MUTATING_SUBTASK_FILE_GUIDANCE,
   preservePlanLiteralContracts,
   SMOKE_DESIGN_GUIDANCE,
+  stripLiteralContractBlock,
 } from './prompts.js';
 export { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 // Compatibility re-exports: tests and the skills CLI historically import
@@ -313,11 +314,12 @@ export function requiredCommandManifestMismatch(
 }
 
 export function taskRequiresRealBrowser(description: string): boolean {
+  const phaseDescription = stripLiteralContractBlock(description);
   return (
-    /\b(?:real browser|browser validation|validate_html)\b/i.test(description) ||
-    (/\bselector-based\b/i.test(description) &&
+    /\b(?:real browser|browser validation|validate_html)\b/i.test(phaseDescription) ||
+    (/\bselector-based\b/i.test(phaseDescription) &&
       /\b(?:window\.__test|console(?:\.error|\s+errors?)|failed requests?)\b/i.test(
-        description
+        phaseDescription
       ))
   );
 }

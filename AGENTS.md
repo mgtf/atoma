@@ -1468,6 +1468,31 @@ re-exports all the historical names so old imports keep working.
   for self-booting harnesses (never require/listen/proxy-to-zero), while the
   harness recipe uses record_probe, forbids hand-editing the manifest, and
   refuses to fake browser evidence when validate_html is absent.
+- **THIRTY-SECOND LIVE ITERATION, 2026-08-12 — contract preservation polluted
+  phase routing.** The corrected guestbook rerun failed at 900s/12 calls/
+  $0.6049 estimated with no escalation and no counters moved (trace
+  `2026-08-12T23-40-11-988-b6a6f68f`). The raw L3 plan was materially better:
+  exact API/harness contracts and a separate browser phase. But
+  `preservePlanLiteralContracts` appended global web clauses to the build
+  phase; `taskRequiresRealBrowser` scanned the enriched whole description,
+  overrode Helium to Hydrogen, and the static-web L1 repeatedly launched
+  `python -m http.server` over the workspace. Every browser saw "Directory
+  listing for /", never the embedded UI from server.js: twelve predictable
+  validate_html failures consumed three L1 cycles (350s + 297s + 190s) and the
+  budget.
+  Routing now classifies ONLY the phase text before
+  `== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==`; the preserved block still
+  reaches workers/validators but cannot change the capability bucket. Web
+  guidance also says that when previousStepSummary carries a live Node-server
+  URL, validate it directly — never start_static_server on server.js or the
+  workspace root.
+  The last attempt exposed a separate browser-tool gap: it passed
+  `keypress:"Test User"`, but keypress accepts one key name and Puppeteer
+  correctly rejected it. validate_html now supports selector-based
+  `{type:"type",selector,text}` via real mouse focus + keyboard typing; the
+  declaration, parser, manifest health and prompt all share it. This lets a
+  real form test type name/message before clicking submit instead of faking the
+  state through smoke or unrolling one keypress per character.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

@@ -185,6 +185,11 @@ describe('cross-bucket browser routing', () => {
 
   it('redirects a browser prefilter away from an HTTP-only L1', async () => {
     expect(taskRequiresRealBrowser('validate the UI in a real browser')).toBe(true);
+    expect(
+      taskRequiresRealBrowser(
+        'Create server.js and probe its API.\n\n== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\nRecord a selector-based web probe for window.__test.'
+      )
+    ).toBe(false);
     const registry = new AtomRegistry(openDb(':memory:'));
     registry.create(2, seed);
     registry.create(1, {
