@@ -8,6 +8,8 @@ import {
   DECORATED_CMD_RE,
   PORT_BEARING_STDOUT_RE,
   PROBE_MANIFEST_FILENAME,
+  smokeOkIncludesStyling,
+  smokeResultIncludesStyling,
 } from '../contracts/probeManifest.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
@@ -1533,6 +1535,16 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               `(() => { try { const __r = (${smoke}); return __r; } catch (e) { return { ok: false, error: String(e) }; } })()`
             );
             smokeOk = isSmokeOk(smokeResult);
+            if (
+              smokeOk &&
+              smokeResultIncludesStyling(smokeResult) &&
+              !smokeOkIncludesStyling(smoke)
+            ) {
+              smokeOk = false;
+              errors.push(
+                'smoke check failed: class/style/color values were returned but the aggregate ok expression does not assert them'
+              );
+            }
             if (!smokeOk) {
               errors.push(
                 `smoke check failed: ${JSON.stringify(smokeResult).slice(0, 500)}`
@@ -1957,20 +1969,15 @@ export function isSmokeOk(result: unknown): boolean {
   if (typeof result === 'boolean') return result;
   if (typeof result === 'object') {
     const r = result as Record<string, unknown>;
-    // Every boolean in a smoke object is an ASSERTION, never raw diagnostic
-    // state. This closes both bypasses observed live: no aggregate `ok`, and
-    // `ok:true` beside nested false transition checks. Expected-false state
-    // must be reported as raw values and folded into a positive assertion.
-    return r['ok'] === true && !containsFalseBoolean(result);
+    // Explicit `ok` is authoritative. Raw state legitimately contains false
+    // booleans (`initial.thresholdReached=false`); treating every boolean as
+    // an assertion caused 22 false smoke failures on a correct novel widget.
+    // Task-specific mechanical gates (e.g. styling evidence at both ends)
+    // ensure `ok` cannot omit the required dimensions.
+    if ('ok' in r) return r['ok'] === true;
+    return false;
   }
   return Boolean(result);
-}
-
-function containsFalseBoolean(value: unknown, depth = 0): boolean {
-  if (value === false) return true;
-  if (depth >= 5 || value === null || typeof value !== 'object') return false;
-  const children = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
-  return children.some((child) => containsFalseBoolean(child, depth + 1));
 }
 
 /**

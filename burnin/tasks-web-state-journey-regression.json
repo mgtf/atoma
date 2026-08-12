@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "hydration-widget-state-journey",
+      "family": "web",
+      "goal": "Build a self-contained HTML/JS hydration-goal widget with Add Glass and Reset controls. Its visual styling must change when the count reaches 4 glasses, and it must expose state plus increment/reset methods through window.__hydrationWidget. As a FINAL SEPARATE PHASE, mechanically verify the controls, the intermediate threshold styling, and the reset styling by exercising the exposed API in a real browser."
+    }
+  ]
+}

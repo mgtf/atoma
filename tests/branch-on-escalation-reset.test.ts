@@ -132,8 +132,9 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/MOST EXPENSIVE tool/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/structured OBJECT/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/explicit aggregate `ok`/);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/every boolean.*true/s);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/`ok:true` beside.*false.*FAILS/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/explicit `ok === true`.*authoritative/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/Raw state fields may legitimately be false/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/omit `ok`.*object fail/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/If you are past\s+five/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/copy the exact.*byte-for-byte/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/"#increment-btn".*"incrementBtn"/s);

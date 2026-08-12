@@ -3,6 +3,7 @@ import { L2Atom } from '../src/atoms/L2Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { MockLlmClient } from '../src/core/llm.js';
+import { modelForTier } from '../src/core/models.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 import type { RunContext, Tool, ToolExecutor } from '../src/core/types.js';
@@ -69,6 +70,7 @@ describe('L2 fallback execute — tool access', () => {
     );
 
     const call = ctx.llm.calls[0]!;
+    expect(call.model).toBe(modelForTier(1));
     expect(call.tools).toEqual([writeTool]);
     expect(call.executor).toBe(executor);
   });

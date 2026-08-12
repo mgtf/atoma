@@ -343,9 +343,12 @@ registry path and control-plane denial.
   outputs in practice — a Verdict / Prefilter is a small JSON object. (This
   bullet said 512 for months; the code has been 2048 since verdicts started
   carrying reasoning long enough to act on.)
-- L3/L2 never pass `tools` or an `executor` on their own LLM calls. Only L1 gets
-  tool declarations and a tool loop; that's the whole point of the tier split.
-  Grep `executor:` to confirm it only appears in `L1Atom.execute`.
+- L3/L2 never pass `tools` or an `executor` on normal plan/validation calls.
+  Their explicit LAST-RESORT `selfExecute` fallback is the sole exception:
+  supervision has failed and a side-effecting task still needs a deliverable.
+  That tool-bearing call MUST use `modelForTier(1)`, never the supervisor model;
+  Codex tiers 2/3 are text-only and structurally refuse tool loops. The object
+  remains L2/L3 for trace provenance, while the transport role is L1.
 - **Happy path tier-by-tier.** L2 happy path (mature L1 child, prefilter
   matches with `!decomposable`) is 100% Haiku — prefilter picks, trust fast-
   path skips validators, L1 does the work. **L3 always pays for one Opus
@@ -1202,6 +1205,28 @@ re-exports all the historical names so old imports keep working.
   increments. Another fresh web task is preferable to repeating the same theme
   again: the contract is proven, while technique generalisation needs a novel
   widget.
+- **NINETEENTH LIVE ITERATION, 2026-08-12 — the first novel widget falsified
+  "every false boolean is an assertion".** A hydration-goal generalisation run
+  failed after 818s/26 calls/$0.4571 estimated, four escalations and 22 soft
+  browser failures (trace `2026-08-12T20-58-23-018-be9ebaee`). Independent
+  execution nevertheless passed count 0 → threshold 4 with `goal-reached` class
+  → reset 0, zero console errors; its final manifest was well-formed and
+  replayable. Most failures were framework-induced: legitimate raw state such
+  as `initial.thresholdReached=false` was treated as a failed assertion even
+  when the aggregate `ok` compared it correctly. The last escalation then
+  invoked Water's tool-bearing fallback on the L2 Codex model, which
+  structurally refuses tool loops, turning a correct workspace into outcome
+  failed.
+  Explicit `ok` is authoritative again; objects without it still fail on false
+  booleans. The task-aware L2 styling gate, now requiring both transition ends,
+  carries the omitted-dimension safety property without confusing raw state and
+  assertions. Tool-bearing L2/L3 fallback calls route through `modelForTier(1)`
+  while retaining supervisor provenance, so Codex can plan but never receives
+  tools. `validate_html` now rejects, in the SAME L1 loop, a smoke that returns
+  class/style/color data without binding those values into `ok`; L2 reuses the
+  same contract helpers. The live build recipe's two targeted revisions were
+  kept (observable styling + exact style snapshots); its 2 failures are honest
+  history, not reset away.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
@@ -3517,8 +3542,9 @@ second is the kind of thing that gets acted on:
   explicit aggregate `ok`, and the whole object comes back in `smokeResult`.
   It shipped with "any object is truthy" semantics; a live widget then passed
   while reporting `hasStreak3Class:false`, claiming an intermediate state it
-  had never observed. Now `ok === true` is authoritative; without `ok`, any
-  false boolean anywhere makes the smoke fail. This also cures the "smoke
+  had never observed. Now structured results require `ok === true`; an object
+  without `ok` fails. Raw expected-false state is allowed when the aggregate
+  compares it. This also cures the "smoke
   check failed: false" opacity — a bare boolean carries no diagnosis while an
   object comes back with its values. It is appended by BOTH `buildNarrowL1Prompt` (escalation-branch
   path) AND `createSubtaskL1` (fresh-L1-on-fanout path). Adding new L1
@@ -3540,9 +3566,10 @@ second is the kind of thing that gets acted on:
   **F8 — why "just re-execute without re-planning" is not a free fix:**
   `L2Atom.execute` / `L3Atom.execute` consume-and-null `pendingStrategy`, then
   silently `return this.selfExecute(...)` when it is missing. Re-executing a
-  tier-2 child without an intervening `plan()` therefore collapses the tier
-  (Sonnet at L2, **Opus with a 40-iteration tool loop** at L3), wires `tools`
-  + `executor` above tier 1 in violation of the tier split, and stamps
+  tier-2 child without an intervening `plan()` therefore collapses the
+  supervision protocol into the last-resort executor (the model is now safely
+  routed through L1 when tools are present; it historically ran Sonnet/Opus),
+  wires `tools` + `executor` from a supervisor object, and stamps
   `viaFallback: false` — so the collapse is invisible in the trace, the
   metrics and the viz, while `onApproved` still credits a success. `L1Atom`
   *is* safe (its `execute` builds everything from the `plan` argument), but

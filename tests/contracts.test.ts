@@ -10,6 +10,8 @@ import {
   validateProbeManifest,
   httpEntrySchema,
   shellEntrySchema,
+  smokeOkIncludesStyling,
+  smokeResultIncludesStyling,
   webEntrySchema,
 } from '../src/contracts/probeManifest.js';
 import {
@@ -27,6 +29,20 @@ import {
  * accept.
  */
 describe('contracts — schema/validator/prompt agreement', () => {
+  it('binds returned styling values into the aggregate smoke verdict', () => {
+    expect(
+      smokeResultIncludesStyling({ ok: true, milestoneClass: 'goal-reached' })
+    ).toBe(true);
+    expect(
+      smokeOkIncludesStyling(
+        '({ok: milestoneClass === "goal-reached", milestoneClass})'
+      )
+    ).toBe(true);
+    expect(
+      smokeOkIncludesStyling('({ok: milestoneCount === 4, milestoneClass})')
+    ).toBe(false);
+  });
+
   it('every schema-validated EXAMPLE round-trips the health check clean', () => {
     // The exact drift class that "nearly broke iteration 4": a shape taught
     // to writers that the checker reports as MALFORMED.

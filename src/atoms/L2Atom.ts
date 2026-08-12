@@ -50,6 +50,10 @@ import {
   resolveCreationDescription,
 } from './capability.js';
 import { checkGroundTruth, type GroundTruthCheck } from './groundTruth.js';
+import {
+  smokeOkIncludesStyling,
+  smokeResultIncludesStyling,
+} from '../contracts/probeManifest.js';
 export {
   checkGroundTruth,
   extractResultFileClaims,
@@ -209,14 +213,10 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
       entry['smokeResult'] && typeof entry['smokeResult'] === 'object'
         ? JSON.stringify(entry['smokeResult'])
         : '';
-    const okAt = smoke.search(/\bok\s*:/i);
-    const okEnd = okAt >= 0 ? smoke.indexOf(',', okAt) : -1;
-    const okClause =
-      okAt >= 0 ? smoke.slice(okAt, okEnd > okAt ? okEnd : okAt + 1200) : '';
     const hasStyling =
       /(?:class|style|colou?r|getComputedStyle)/i.test(smoke) &&
-      /(?:class|style|colou?r)/i.test(smokeResult) &&
-      /(?:class|style|colou?r|getComputedStyle)/i.test(okClause);
+      smokeResultIncludesStyling(entry['smokeResult']) &&
+      smokeOkIncludesStyling(smoke);
     if (!hasStyling) continue;
     const evidenceText = `${smoke}\n${smokeResult}`;
     if (/(?:milestone|afterIncrement|afterClick|streak.?3)/i.test(evidenceText)) {
@@ -1724,7 +1724,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
     const resp = await ctx.llm.complete({
-      model: this.model,
+      // Tool-bearing fallback is an L1 execution role even though the
+      // supervising object is L2. Codex routes are text-only at tiers 2/3 and
+      // structurally refuse tool loops, which turned the final recovery path
+      // into an instant provider error on a live web run.
+      model: hasTools ? modelForTier(1) : this.model,
       systemPrompt: this.effectiveSystemPrompt(),
       userContent,
       ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),

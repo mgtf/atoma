@@ -88,8 +88,8 @@ describe('isSmokeOk — structured assertions are not truthy by accident', () =>
     );
   });
 
-  it('does not let ok:true override a nested false assertion', () => {
-    expect(isSmokeOk({ ok: true, reset: { hasStreak3Class: false } })).toBe(false);
+  it('lets explicit ok compare expected-false raw state', () => {
+    expect(isSmokeOk({ ok: true, reset: { thresholdReached: false } })).toBe(true);
     expect(
       isSmokeOk({
         ok: true,
@@ -97,6 +97,7 @@ describe('isSmokeOk — structured assertions are not truthy by accident', () =>
       })
     ).toBe(true);
     expect(isSmokeOk({ ok: false, values: { rendered: true } })).toBe(false);
+    expect(isSmokeOk({ reset: { thresholdReached: false } })).toBe(false);
     expect(isSmokeOk({ streak: 3, className: 'streak-3' })).toBe(false);
   });
 });

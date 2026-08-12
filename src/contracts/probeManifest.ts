@@ -119,6 +119,27 @@ export type HttpEntry = z.infer<typeof httpEntrySchema>;
 export type WebEntry = z.infer<typeof webEntrySchema>;
 export type ManifestEntry = ShellEntry | HttpEntry | WebEntry;
 
+const WEB_STYLE_TERM_RE = /(?:class|style|colou?r|getComputedStyle)/i;
+
+export function smokeOkClause(smoke: string): string {
+  const okAt = smoke.search(/\bok\s*:/i);
+  if (okAt < 0) return '';
+  const okEnd = smoke.indexOf(',', okAt);
+  return smoke.slice(okAt, okEnd > okAt ? okEnd : okAt + 1200);
+}
+
+export function smokeOkIncludesStyling(smoke: string): boolean {
+  return WEB_STYLE_TERM_RE.test(smokeOkClause(smoke));
+}
+
+export function smokeResultIncludesStyling(result: unknown): boolean {
+  return (
+    result !== null &&
+    typeof result === 'object' &&
+    WEB_STYLE_TERM_RE.test(JSON.stringify(result))
+  );
+}
+
 /* ─────────────────── schema-validated examples ─────────────────── */
 /**
  * The examples embedded in every prompt block below. Parsed through their

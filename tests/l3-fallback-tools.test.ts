@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { FALLBACK_OPUS } from '../src/core/models.js';
+import { FALLBACK_OPUS, modelForTier } from '../src/core/models.js';
 import { MockLlmClient } from '../src/core/llm.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
@@ -77,6 +77,7 @@ describe('L3 fallback execute — tool access', () => {
     );
 
     const call = ctx.llm.calls[0]!;
+    expect(call.model).toBe(modelForTier(1));
     expect(call.tools).toEqual([sampleTool]);
     expect(call.executor).toBe(executor);
   });

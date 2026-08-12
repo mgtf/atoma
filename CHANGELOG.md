@@ -68,11 +68,11 @@
 - Web guidance keeps exposed getters on one writable backing field, rejects
   duplicate class methods, and captures intermediate milestone state before a
   reset instead of claiming it from final-state-only evidence.
-- Structured web smokes require explicit `ok:true`; without it, any nested
-  false boolean fails validation instead of passing because the object itself
-  is truthy.
-- `ok:true` cannot override a false nested smoke assertion; expected-false
-  state must be represented as raw values plus positive comparisons.
+- Structured web smokes require explicit `ok:true`; objects without it fail
+  validation instead of passing merely because the object itself is truthy.
+- With explicit `ok:true`, expected-false raw state remains valid when the
+  aggregate compares it; task-aware evidence gates enforce required styling
+  dimensions without treating diagnostics as assertions.
 - Interaction IDs tolerate only a unique case/kebab/snake spelling match to an
   existing DOM id, while widget guidance checks every getter name for illegal
   writes before serving.
@@ -87,6 +87,10 @@
   must be a JSON-encoded string, matching the schema and replay contract.
 - Conditional styling evidence must cover both milestone and reset/final
   classes, styles or colors and bind those checks into the aggregate `ok`.
+- `validate_html` reports styling values omitted from `ok` inside the same
+  tool-loop, before an expensive supervisor rejection.
+- Tool-bearing L2/L3 last-resort fallbacks use the L1 model route, preventing
+  text-only Codex tiers from receiving an unsupported tool loop.
 - Web builders/verifiers use one source-derived state-journey template with
   empty external interactions and looped milestone transitions, avoiding
   guessed labels and unrolled validation thrash.
