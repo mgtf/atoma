@@ -577,6 +577,14 @@ re-exports all the historical names so old imports keep working.
   "just now", which is precisely when the distinction decides whether you act.
   `ageLabel` now reports minutes, then hours, then days, and is pinned by
   `tests/friction-age.test.ts`.
+  THE CLI MODULE IS IMPORT-SAFE. That same test imports `ageLabel` from
+  `src/cli/friction.ts`; the file used to call `main()` unconditionally, so a
+  fresh checkout — where `runs/` is absent by design — hit `process.exit(1)`
+  during test collection. The developer machine's ignored `runs/` directory
+  masked the failure and made 1200+ tests look reproducible when they were
+  not. The entrypoint now uses the same direct-execution guard as burnin and
+  curriculum, and a subprocess test imports it with `ATOMA_RUNS_DIR` pointed
+  at a missing path.
 - **Friction report** (`npm run friction`, helpers in `src/viz/friction.ts`
   — pure, mirrored on `stats.ts`): aggregates recurring TOOL-LOOP failure
   signatures from the traces the viz already persists (zero LLM, zero

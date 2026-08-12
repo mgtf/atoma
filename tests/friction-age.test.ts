@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ageLabel } from '../src/cli/friction.js';
 
 /**
@@ -33,5 +36,28 @@ describe('ageLabel', () => {
   it('degrades rather than lying when the timestamp is unusable', () => {
     expect(ageLabel(0)).toBe('?');
     expect(ageLabel(Number.NaN)).toBe('?');
+  });
+});
+
+describe('friction CLI module boundary', () => {
+  it('is import-safe when a fresh checkout has no runs directory', () => {
+    const missingRuns = join(tmpdir(), `atoma-no-runs-${process.pid}-${Date.now()}`);
+    const child = spawnSync(
+      'npx',
+      [
+        'tsx',
+        '-e',
+        "import('./src/cli/friction.ts').then(() => process.stdout.write('IMPORTED'))",
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, ATOMA_RUNS_DIR: missingRuns },
+        encoding: 'utf8',
+      }
+    );
+
+    expect(child.status, child.stderr).toBe(0);
+    expect(child.stdout).toBe('IMPORTED');
+    expect(child.stderr).toBe('');
   });
 });

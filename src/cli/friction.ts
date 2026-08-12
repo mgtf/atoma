@@ -156,4 +156,10 @@ function main(): void {
   );
 }
 
-main();
+// Import-safe: tests reuse `ageLabel`, and a fresh checkout deliberately has
+// no `runs/` directory. Running the CLI at module import used to call
+// process.exit(1) before the test suite collected a single case; a developer's
+// local runtime data masked it by making the directory exist.
+if (process.argv[1] && /friction\.(ts|js)$/.test(process.argv[1])) {
+  main();
+}
