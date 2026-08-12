@@ -127,6 +127,24 @@ describe('webStylingEvidenceMissing', () => {
             probes: [
               {
                 probe: 'web',
+                smoke:
+                  '({ok: resetClass === "streak-0", resetClass: widget.className})',
+                smokeResult: { ok: true, resetClass: 'streak-0' },
+              },
+            ],
+          },
+          summary: 'verified reset only',
+        })
+      )
+    ).toBe(true);
+    expect(
+      webStylingEvidenceMissing(
+        task,
+        result({
+          output: {
+            probes: [
+              {
+                probe: 'web',
                 smoke: '({ok: milestone.className === "streak-3", className: milestone.className})',
                 smokeResult: { ok: true, milestoneClass: 'streak-3', resetClass: 'streak-0' },
               },

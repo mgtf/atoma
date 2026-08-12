@@ -1167,6 +1167,22 @@ re-exports all the historical names so old imports keep working.
   `expected: JSON.stringify(smokeResult)`. The recipe now also says
   `interactions: []` as a hard rule for self-driving milestone/reset smokes.
   Another exact rerun is required for zero friction plus replayable evidence.
+- **SEVENTEENTH LIVE ITERATION, 2026-08-12 — "has styling evidence" needs both
+  ends of the transition.** The durable-manifest rerun delivered in
+  274s/13 calls/$0.1134 estimated (trace
+  `2026-08-12T20-38-59-976-accb5809`). Its manifest was structurally clean:
+  literal web discriminator and JSON-encoded expected string. The build phase
+  independently proved streak-3 class then reset class, and browser scoring
+  confirmed the artefact. Two recovered soft failures remained (one
+  reset-erasure preflight, one guessed status label). More subtly, the FINAL
+  result/manifest entry retained only reset-state class evidence; L2's new gate
+  accepted it because it searched for any class/style token rather than BOTH
+  milestone and reset.
+  `webStylingEvidenceMissing` now accumulates the two required directions across
+  recorded probes: styling tied to `milestone`/`afterIncrement`/streak-3 AND
+  styling tied to `reset`/`final`, with style terms present in the aggregate
+  `ok` clause and returned values. Reset-only evidence is explicitly tested as
+  missing. Another exact rerun is required.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

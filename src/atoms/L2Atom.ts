@@ -199,8 +199,10 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
   }
   const probes = (result.output as Record<string, unknown>)['probes'];
   if (!Array.isArray(probes)) return true;
-  return !probes.some((probe) => {
-    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return false;
+  let milestoneStyling = false;
+  let resetStyling = false;
+  for (const probe of probes) {
+    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) continue;
     const entry = probe as Record<string, unknown>;
     const smoke = typeof entry['smoke'] === 'string' ? entry['smoke'] : '';
     const smokeResult =
@@ -211,12 +213,18 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
     const okEnd = okAt >= 0 ? smoke.indexOf(',', okAt) : -1;
     const okClause =
       okAt >= 0 ? smoke.slice(okAt, okEnd > okAt ? okEnd : okAt + 1200) : '';
-    return (
+    const hasStyling =
       /(?:class|style|colou?r|getComputedStyle)/i.test(smoke) &&
       /(?:class|style|colou?r)/i.test(smokeResult) &&
-      /(?:class|style|colou?r|getComputedStyle)/i.test(okClause)
-    );
-  });
+      /(?:class|style|colou?r|getComputedStyle)/i.test(okClause);
+    if (!hasStyling) continue;
+    const evidenceText = `${smoke}\n${smokeResult}`;
+    if (/(?:milestone|afterIncrement|afterClick|streak.?3)/i.test(evidenceText)) {
+      milestoneStyling = true;
+    }
+    if (/(?:reset|final)/i.test(evidenceText)) resetStyling = true;
+  }
+  return !(milestoneStyling && resetStyling);
 }
 
 

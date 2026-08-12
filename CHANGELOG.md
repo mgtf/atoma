@@ -85,6 +85,8 @@
   class, style or color evidence before trust.
 - Web manifest health is checked alongside browser re-validation; `expected`
   must be a JSON-encoded string, matching the schema and replay contract.
+- Conditional styling evidence must cover both milestone and reset/final
+  classes, styles or colors and bind those checks into the aggregate `ok`.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.
