@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DEFAULT_EGRESS_ALLOWLIST } from './egressPolicy.js';
 
@@ -50,6 +50,67 @@ async function quiet(args: string[]): Promise<void> {
     /* teardown is best-effort: a missing object is the desired end state */
   }
 }
+
+export type SyncDockerRunner = (args: string[]) => string;
+
+function quietSync(args: string[]): string {
+  try {
+    return execFileSync('docker', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Registry of per-run Docker objects that must survive no control-plane exit.
+ * Injectable sync runner keeps the hard-exit command sequence unit-testable
+ * without requiring Docker.
+ */
+export class EgressExitRegistry {
+  private readonly active = new Map<string, string>(); // network → proxy
+
+  track(network: string, proxyHost: string): void {
+    this.active.set(network, proxyHost);
+  }
+
+  untrack(network: string): void {
+    this.active.delete(network);
+  }
+
+  cleanup(runSync: SyncDockerRunner): void {
+    for (const [network, proxyHost] of this.active) {
+      runSync(['rm', '-f', proxyHost]);
+      const attached = runSync([
+        'network',
+        'inspect',
+        '--format',
+        '{{range .Containers}}{{.Name}} {{end}}',
+        network,
+      ]);
+      for (const name of attached.split(/\s+/).filter(Boolean)) {
+        runSync(['rm', '-f', name]);
+      }
+      runSync(['network', 'rm', network]);
+    }
+    this.active.clear();
+  }
+}
+
+const exitRegistry = new EgressExitRegistry();
+
+/**
+ * Hard-exit cleanup for the runner watchdog / process crash.
+ *
+ * Async `stop()` cannot run from `process.on('exit')`. Each network belongs to
+ * exactly one run, so it is safe to force-remove every container still
+ * attached before removing the network. This is the Docker-side sibling of
+ * ToolSandbox's synchronous child reaper.
+ */
+process.on('exit', () => exitRegistry.cleanup(quietSync));
 
 
 /**
@@ -104,6 +165,9 @@ export async function startEgressSidecar(opts: {
   await quiet(['network', 'rm', network]);
 
   await docker(['network', 'create', '--internal', network]);
+  // Register immediately after the first durable object exists. A hard exit
+  // anywhere in proxy startup must still remove the network.
+  exitRegistry.track(network, proxyHost);
   try {
     await docker([
       'run',
@@ -139,6 +203,7 @@ export async function startEgressSidecar(opts: {
   } catch (err) {
     await quiet(['rm', '-f', proxyHost]);
     await quiet(['network', 'rm', network]);
+    exitRegistry.untrack(network);
     throw err;
   }
 
@@ -158,12 +223,14 @@ export async function startEgressSidecar(opts: {
       for (let i = 0; i < 25; i++) {
         try {
           await docker(['network', 'rm', network]);
+          exitRegistry.untrack(network);
           return;
         } catch {
           await new Promise((r) => setTimeout(r, 200));
         }
       }
       await quiet(['network', 'rm', network]);
+      exitRegistry.untrack(network);
     },
   };
 }

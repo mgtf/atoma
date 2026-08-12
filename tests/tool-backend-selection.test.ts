@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRunnerArgs } from '../src/run/runner.js';
@@ -28,6 +29,14 @@ function ws(): string {
   const d = mkdtempSync(join(tmpdir(), 'atoma-backend-'));
   dirs.push(d);
   return d;
+}
+
+function runBuild(args: string[], env: Record<string, string>): SpawnSyncReturns<string> {
+  return spawnSync('npx', ['tsx', 'src/cli/build-app.ts', ...args], {
+    cwd: process.cwd(),
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+  });
 }
 
 describe('backend selection', () => {
@@ -68,5 +77,37 @@ describe('the two backends expose the same shape', () => {
     expect(b.executor.has('read_file')).toBe(true);
     await b.cleanup();
     await b.cleanup(); // must be safe twice — shutdown paths can both fire
+  });
+});
+
+describe('runner preflight precedes destructive setup', () => {
+  it('rejects an invalid timeout before starting container egress', () => {
+    const child = runBuild(['a goal'], {
+      ATOMA_BUILD_TIMEOUT_MS: 'not-a-number',
+      ATOMA_EGRESS: '1',
+      ATOMA_LLM: 'claude-cli',
+    });
+    expect(child.status, String(child.stderr)).toBe(2);
+    expect(String(child.stderr)).toMatch(/invalid ATOMA_BUILD_TIMEOUT_MS/);
+    expect(String(child.stdout)).not.toMatch(/workspace:|proxied egress/);
+  });
+
+  it('rejects a missing seed before archiving the existing workspace', () => {
+    const workspace = ws();
+    const sentinel = join(workspace, 'keep.txt');
+    writeFileSync(sentinel, 'keep', 'utf8');
+    const missingSeed = join(workspace, 'does-not-exist');
+    const child = runBuild(
+      ['--clean-workspace', '--seed', missingSeed, 'maintain the seeded artefact'],
+      {
+        ATOMA_BUILD_WORKSPACE: workspace,
+        ATOMA_LLM: 'claude-cli',
+      }
+    );
+
+    expect(child.status, String(child.stderr)).toBe(2);
+    expect(String(child.stderr)).toMatch(/--seed: no such directory/);
+    expect(existsSync(sentinel)).toBe(true);
+    expect(existsSync(`${workspace}.prev1`)).toBe(false);
   });
 });

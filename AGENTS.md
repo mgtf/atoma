@@ -3549,8 +3549,7 @@ correctness requirement, not tidiness: REPRODUCED that two containers sharing
 one `--internal` network reach each other's servers
 (`REACHED: TENANT_A_WORKSPACE_SECRET`), so a shared network hands one tenant's
 workspace to the next.
-FOUR BUGS the end-to-end proof caught that no unit test could, all now fixed
-and each invisible from the layer above:
+SIX lifecycle bugs are now fixed, each invisible from the layer above:
   1. `docker run -d` returns before the process inside listens, so the run's
      first request hit a dead proxy. There is a readiness wait now — and it
      reads BOTH streams, because `docker logs` mirrors stderr separately and
@@ -3564,6 +3563,16 @@ and each invisible from the layer above:
   4. The image carries compiled `dist/`, so a host-side fix does nothing until
      `npm run build:worker`. Same staleness trap as the `edit_file` fix; verify
      with a hash, never a grep.
+  5. The runner watchdog exits synchronously by design, so async
+     `backend.cleanup()` never ran there and leaked the proxy/network. Active
+     sidecars now live in a module registry with a synchronous process-exit
+     reaper: proxy first, every container attached to the per-run network,
+     then the network. The command plan is unit-tested without Docker.
+  6. Timeout and seed validation happened after side effects. A bad timeout
+     could start the sidecar before exiting, and a missing `--seed` archived
+     the existing workspace before reporting the typo. Both are preflighted
+     before workspace preparation, store opens or backend startup; real
+     subprocess tests pin the ordering.
 Every one of them presented as "npm install failed" with an empty stderr.
 TEST DISCIPLINE, learned here: the control plane must be proven denied by the
 ALLOWLIST independently of the port rule. The first version of these tests

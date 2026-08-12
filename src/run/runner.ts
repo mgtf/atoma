@@ -131,6 +131,29 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
 
   const args = parseRunnerArgs(argv);
   const goal = args.goal ?? profile.defaultGoal;
+  // Validate every fallible launch argument BEFORE mutating the workspace,
+  // opening stores or starting the container/egress backend. The old order
+  // archived a valid deliverable before discovering a missing seed, and
+  // could leave a proxy sidecar behind before rejecting a bad timeout.
+  const timeoutRaw = process.env[profile.envVars.timeoutMs];
+  const timeoutMs = Number(timeoutRaw ?? (useClaudeCli ? 15 * 60 * 1000 : 10 * 60 * 1000));
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    console.error(
+      `invalid ${profile.envVars.timeoutMs}="${timeoutRaw}" (expected positive integer in ms)`
+    );
+    process.exit(2);
+  }
+  const seedRoot = args.seed ? resolve(args.seed) : undefined;
+  if (seedRoot && !existsSync(seedRoot)) {
+    console.error(`--seed: no such directory: ${seedRoot}`);
+    process.exit(2);
+  }
+  console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
+  const signal = AbortSignal.timeout(timeoutMs);
+  // Every LLM call + supervise-loop hop hangs an `abort` listener on this
+  // signal; on long runs Node trips its default 10-listener warning.
+  setMaxListeners(0, signal);
+
   // Auto-distillation is ON by default. Priority is CLI flag > env var >
   // default-on. The L2 onApproved hook reads ATOMA_SKILL_LEARN === '1' at
   // call time, so we just set the env var here and the lib stays unchanged.
@@ -260,15 +283,10 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   profile.prepareWorkspace(workspaceRoot, args.cleanWorkspace);
   // Seed AFTER preparation — prepareWorkspace archives the whole directory, so
   // copying first would archive the fixture along with the previous run.
-  if (args.seed) {
-    const from = resolve(args.seed);
-    if (!existsSync(from)) {
-      console.error(`--seed: no such directory: ${from}`);
-      process.exit(2);
-    }
+  if (seedRoot) {
     mkdirSync(workspaceRoot, { recursive: true });
-    cpSync(from, workspaceRoot, { recursive: true });
-    console.log(`workspace seeded from ${from} (${readdirSync(workspaceRoot).length} entries)`);
+    cpSync(seedRoot, workspaceRoot, { recursive: true });
+    console.log(`workspace seeded from ${seedRoot} (${readdirSync(workspaceRoot).length} entries)`);
   }
 
   // Local by default; `--container` moves the tool layer into a container
@@ -321,25 +339,6 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     console.log(`L3 ${l3.name} using model ${l3.model}`);
     handle = (t, c) => l3.handle(t, c);
   }
-
-  // Default budget is transport-aware: the claude-cli path adds 2-5s of
-  // subprocess overhead to EVERY call, so a 3-phase cold start (~23 LLM
-  // calls) that fits comfortably in 600s on the direct API dies at the
-  // deadline on the CLI (measured twice on the same task before this).
-  const timeoutRaw = process.env[profile.envVars.timeoutMs];
-  const timeoutMs = Number(timeoutRaw ?? (useClaudeCli ? 15 * 60 * 1000 : 10 * 60 * 1000));
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    console.error(
-      `invalid ${profile.envVars.timeoutMs}="${timeoutRaw}" (expected positive integer in ms)`
-    );
-    process.exit(2);
-  }
-  console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
-  const signal = AbortSignal.timeout(timeoutMs);
-  // Every LLM call + supervise-loop hop hangs an `abort` listener on this
-  // signal; on long runs Node trips its default 10-listener warning. Lift
-  // the cap — none of these are true leaks, they all clear on settle.
-  setMaxListeners(0, signal);
 
   const ctx: RunContext = {
     logger: consoleLogger,
