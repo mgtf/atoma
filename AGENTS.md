@@ -11,7 +11,7 @@ itself named `CLAUDE.md` until 2026-08-11; run `git log --follow AGENTS.md` for
 the history before the rename, and note that entries below say "this file"
 throughout.
 
-## Map (~4100 lines — jump, don't scroll)
+## Map (~4500 lines — jump, don't scroll)
 
 | Section | When you need it |
 |---|---|
