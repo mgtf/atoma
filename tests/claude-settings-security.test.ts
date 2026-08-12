@@ -27,4 +27,9 @@ describe('Claude Code project permissions', () => {
     const ignore = readFileSync(resolve('.gitignore'), 'utf8');
     expect(ignore).toMatch(/^\.claude\/settings\.local\.json$/m);
   });
+
+  it('keeps local Codex MCP commands out of version control', () => {
+    const ignore = readFileSync(resolve('.gitignore'), 'utf8');
+    expect(ignore).toMatch(/^\.codex\/config\.toml$/m);
+  });
 });

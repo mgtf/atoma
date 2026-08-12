@@ -854,6 +854,8 @@ re-exports all the historical names so old imports keep working.
   rows were removed. `looksLikeProviderLimitFailure` now recognises definitive
   weekly/monthly/quota/credit/subscription denials from the raw child log and
   aborts BEFORE appending the first row; transient 429 text stays excluded.
+  Replayed against the real GLM subscription 403 after the fix: exit 1,
+  header-only CSV (one line), no phantom row.
   Provider experiments then used separate CSVs. Ollama Cloud GLM 5.1 returned
   403 subscription-required. Local DeepSeek 7.6B returned an incomplete,
   structurally wrong plan; local 32B ran ~10 minutes at 70% machine memory and
@@ -2569,6 +2571,14 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   committed `Bash(` grant and pins the local-file ignore. This applies to the
   INTERACTIVE assistant; the atoma claude-cli transport already ignores
   project settings via `settingSources: []`.
+- **Codex MCP registration is local configuration too.** `.codex/config.toml`
+  carries an absolute checkout path plus a command the client executes, so it
+  is ignored and never committed. Codex CLI stores active registrations in
+  `~/.codex/config.toml`; use `codex mcp add atoma -- node <abs>/dist/mcp/stdio.js`.
+  The working operator registration uses that compiled path. Do not point it
+  at `src/mcp/server.ts` — `stdio.ts` is the bootstrap that claims stdout
+  before loading the application graph, while `server.ts` alone neither
+  claims the protocol stream early enough nor boots a transport.
 - **Alternative provider: Codex CLI on a ChatGPT subscription
   (`src/core/llmCodexCli.ts`) — TIERS 2/3 ONLY, and the restriction is
   STRUCTURAL.** Reached through a tier pin's provider prefix
