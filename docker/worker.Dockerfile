@@ -1,7 +1,7 @@
 # Tool worker for one atoma run.
 #
 # Holds ONLY the tool layer: a ToolSandbox rooted at the mounted /workspace
-# plus the nine builtins. The supervise loop, the LLM calls, the atom
+# plus the ten builtins. The supervise loop, the LLM calls, the atom
 # registry and the skill store stay on the control plane, which talks to this
 # over stdio (see src/tools/containerProtocol.ts).
 #
@@ -26,16 +26,26 @@ ENV PUPPETEER_SKIP_DOWNLOAD=1 \
 
 WORKDIR /app
 
-# puppeteer is the tool layer's ONLY external dependency — everything else it
-# needs is a node builtin. Installing just that keeps the image small and
-# keeps the SQLite driver, the LLM SDKs and the MCP bridge out of the
-# container entirely: the worker has no business holding them.
+# puppeteer and zod are the tool layer's ONLY external dependencies —
+# everything else it needs is a node builtin. Installing just those keeps the
+# image small and keeps the SQLite driver, the LLM SDKs and the MCP bridge out
+# of the container entirely: the worker has no business holding them.
+# zod arrives through `record_probe`: builtin.ts imports the probe-manifest
+# contract, whose schemas are the reason the manifest has ONE definition. Keep
+# the range in step with the root package.json — the compiled dist/contracts
+# is shared, so a drifted major would break inside the image only.
 COPY docker/worker-package.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund
 
 # Compiled output only (npm run build). Source and tests stay out.
+# dist/contracts is NOT optional: dist/tools/builtin.js imports
+# contracts/probeManifest.js, so an image without it dies at startup with
+# ERR_MODULE_NOT_FOUND — and `tests/container-image-closure.test.ts` walks the
+# worker's real import graph so a new cross-directory import cannot ship
+# without landing here too.
 COPY dist/tools ./dist/tools
 COPY dist/core ./dist/core
+COPY dist/contracts ./dist/contracts
 
 # A non-root user: `--cap-drop ALL` and `no-new-privileges` are set by the
 # caller, and this closes the last easy privilege the container had.

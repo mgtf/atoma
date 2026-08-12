@@ -2261,11 +2261,26 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
       subprocess env DROPS any exported ANTHROPIC_API_KEY so a stale
       key can't shadow the CLI's OAuth login.
     - `@anthropic-ai/claude-agent-sdk` peers on zod@^4 while atoma is
-      on zod@3 — installed with `--legacy-peer-deps`, and the bridge
-      deliberately avoids the SDK's zod4-only `tool()` helper by
-      registering tools on a raw `McpServer` (zod3-compatible) via
-      `jsonSchemaToZodShape`. Don't switch to `tool()` without
-      migrating the repo to zod 4.
+      on zod@3, and the bridge deliberately avoids the SDK's zod4-only
+      `tool()` helper by registering tools on a raw `McpServer`
+      (zod3-compatible) via `jsonSchemaToZodShape`. Don't switch to
+      `tool()` without migrating the repo to zod 4.
+      THE CONFLICT IS RESOLVED IN `package.json`, NOT IN THE OPERATOR'S
+      FINGERS. It needed `npm install --legacy-peer-deps` until
+      2026-08-12 — which meant the ONE command every doc and this file's
+      own Commands section print, `npm install`, exited ERESOLVE for
+      anyone starting from a clean checkout. A flag you must know but
+      that nothing tells you is not a workaround, it is a broken
+      install. The `overrides` entry pins the SDK's `zod` peer to `$zod`
+      (the root's own range), which is TARGETED where the flag was
+      global: `--legacy-peer-deps` waves through EVERY peer conflict in
+      the tree, including the next one, unseen. Verified to change
+      nothing else — the resolved tree is byte-identical to what the
+      flag produced (zod 3.25.76 flat, no nested copy, SDK unmoved), and
+      `npm ci` / `npm install` both succeed from a clean room.
+      Note npm does NOT record this override in `package-lock.json`
+      (nothing in the resolution moved), so the lockfile is no evidence
+      it is there — read `package.json`.
     - Costs printed by metrics are API-price equivalents of the token
       counts; on a subscription nothing is billed per token. Each
       `complete()` spawns a CLI subprocess — runs are slower than the
@@ -2294,7 +2309,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   isolation than the SDK's `ThreadOptions` (`--ephemeral`,
   `--ignore-user-config`, `--ignore-rules` have no counterpart there) for
   ZERO new npm dependencies — and `@anthropic-ai/claude-agent-sdk` already
-  forced a `--legacy-peer-deps` install over the zod3/zod4 split.
+  cost the project a peer-dependency override over the zod3/zod4 split.
   `buildCodexArgs` is where the isolation lives and is what the tests pin:
   `-s read-only` (L2/L3 emit text; a plan call that can edit disk can
   corrupt what it is planning for) and `-C <empty dir outside the repo>` —
@@ -3482,6 +3497,39 @@ KNOWN GAPS: the `Dockerfile` CMD must stay an ABSOLUTE path (the caller sets
 `-w /workspace`, so a relative one resolves under the mount and dies with
 MODULE_NOT_FOUND — cost one build cycle to find), and the image is 1.56 GB,
 almost entirely Chromium.
+**THE IMAGE MUST CONTAIN THE WORKER'S WHOLE IMPORT CLOSURE, AND A TEST NOW
+SAYS SO.** `record_probe` landed, `builtin.ts` gained an import of
+`../contracts/probeManifest.js` — the schemas that exist precisely so the
+manifest has ONE definition — and the Dockerfile still copied only
+`dist/tools` and `dist/core`, with `zod` (that contract's only dependency)
+absent from `docker/worker-package.json`. A clean rebuild therefore produced
+an image that died at startup with ERR_MODULE_NOT_FOUND. Fixed by
+`COPY dist/contracts` plus the `zod` dependency; verified by running the real
+image, where `record_probe` now records a command byte-identically through
+those schemas.
+NOTHING CAUGHT IT, AND THE REASON IS THE POINT: `container-isolation.test.ts`
+drives a REAL container — right for a claim about the container — but it
+SKIPS when the image is absent and PASSES against a stale one built before
+the import existed. That is the same staleness trap recorded above for the
+egress-proxy fix ("verify with a hash, never a grep"), arriving from the
+other direction. So the insurance is STATIC and never skips:
+`tests/container-image-closure.test.ts` walks the worker's real import graph
+from `src/tools/worker.ts` and asserts every `src/` directory it reaches is
+COPY'd and every npm package it reaches is declared, plus that shared ranges
+match the root manifest (the image installs its own tree but runs the SAME
+compiled `dist/`, so a drifted major would break inside the container only).
+Verified to FAIL against the pre-fix Dockerfile and manifest, naming both
+fixes. It drops `import type` (tsc erases it) and counts a value-syntax
+import even if it binds only types — over-counting costs one COPY line,
+under-counting costs a broken image.
+NOTED WHILE MEASURING, deliberately NOT changed: the value closure is
+`{tools, contracts}`, so `COPY dist/core` is currently DEAD — `core/types.js`
+is reached only by `import type`. The closure test asserts required ⊆ copied
+and tolerates the extra, because narrowing the COPY set is a separate change
+with its own risk and was not what was broken. Note the copied `dist/core`
+also carries modules importing `better-sqlite3` and the SDK, which the image
+does not install; they are inert only because ESM resolves per import and
+the worker never loads them.
 
 ## atoma as an MCP server (stdio) — `src/mcp/`
 

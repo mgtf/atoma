@@ -33,6 +33,11 @@
     "puppeteer": "^24.41.0",
     "zod": "^3.23.8"
   },
+  "overrides": {
+    "@anthropic-ai/claude-agent-sdk": {
+      "zod": "$zod"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/better-sqlite3": "^7.6.11",
