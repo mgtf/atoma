@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateProbeManifest } from '../src/atoms/L2Atom.js';
+import { validateProbeManifest } from '../src/contracts/probeManifest.js';
 
 /**
  * The probe manifest is written by PROMPT (L1 evidence contracts) and read
