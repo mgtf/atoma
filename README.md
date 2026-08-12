@@ -8,7 +8,7 @@
 frontier reasoning on the decomposition alone and pushes the rest — routing, execution,
 verification — down to models that cost a fraction as much.*
 
-![tests](https://img.shields.io/badge/tests-1251_passing-brightgreen)
+[![CI](https://github.com/mgtf/atoma/actions/workflows/ci.yml/badge.svg)](https://github.com/mgtf/atoma/actions/workflows/ci.yml)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
@@ -208,10 +208,9 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 
 ```bash
 npm install
-npm run typecheck && npm test     # 1243 tests, no API key needed. Model calls are mocked,
-                                  # but the suite drives a real headless browser and real
-                                  # local servers. 8 further tests need Docker and the
-                                  # worker image (npm run build:worker) — they skip without.
+npm run typecheck && npm test     # no API key needed; model calls are mocked.
+                                  # The suite still drives a real browser and local servers.
+                                  # Docker integration is enforced by its own CI job.
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -257,8 +256,8 @@ process group is confirmed gone and the trace has closed.
 
 ## Status
 
-**Working research system, honestly labelled.** ~29,000 lines of strict TypeScript, 1251 tests,
-seven runtime dependencies, Node 20.19+, 22.13+, or 24+.
+**Working research system, honestly labelled.** Strict TypeScript on Node 20.19+,
+22.13+, or 24+, with hermetic and fresh-worker CI.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
