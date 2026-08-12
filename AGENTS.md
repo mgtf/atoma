@@ -916,6 +916,23 @@ re-exports all the historical names so old imports keep working.
   `compensateCounters`; two ledger events keep projection exact. Burn-in now
   records task-skill and event-skill learning separately. Targeted suites cover
   all seven directions, including the exact live phrases.
+- **SIXTH LIVE ITERATION, 2026-08-12 — non-Anthropic production gradient
+  works.** With Claude quota exhausted, the validated replacement is
+  L3=`codex:gpt-5.6-sol`, L2=`codex:gpt-5.4-mini` through ChatGPT subscription
+  (`OPENAI_API_KEY` deliberately absent), and L1=`zai:glm-4.5-air` for cheap
+  prefilters, validators and the tool loop. Base Ollama is only the unused
+  fallback because every tier is explicitly routed. The first CLI smoke
+  delivered in 213s / 17 calls / $0.1479 estimated API-equivalent; independent
+  execution confirmed exact line/word/non-whitespace counts plus missing-file
+  failures. A four-task markdown batch then delivered 4/4 at $0.0964–$0.1282,
+  every one independently scored for exact headings and item counts. No
+  escalation, learning or leaked process occurred; friction was zero except
+  the corrected markdown verifier legitimately rejecting one initial file that
+  used the wrong list shape, after which the LLM fixed it. The verifier is now
+  trusted again at 4/0. Results live separately in
+  `burnin/results-openai-zai.csv`; all calls appear under `other_calls` and the
+  displayed cost is explicitly an estimate, not ChatGPT subscription or Z.ai
+  billing.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

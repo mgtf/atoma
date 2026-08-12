@@ -64,6 +64,9 @@
 - `run_shell` accepts an unambiguous whole line placed in `command` when
   `args` is empty, using the same parser and allowlist as the preferred `cmd`
   form.
+- The fallback non-Anthropic operating profile is now live-validated:
+  Codex subscription on L3/L2 with `glm-4.5-air` on Z.ai for L1; five
+  independently scored runs delivered without Anthropic calls.
 
 ## v0.1.2 — 2026-08-12
 
