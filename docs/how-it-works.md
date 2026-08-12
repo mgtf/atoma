@@ -41,11 +41,12 @@ graph TB
 Two consequences fall out of that split:
 
 - **Cost is bounded by structure, not discipline.** On the SUPERVISED path only the bottom tier
-  is handed a tool executor, so a supervisor cannot run a tool loop. The one exception is
-  deliberate and labelled as such in the code: when supervision has failed outright, a supervisor
-  takes over as executor for a last-resort turn — the comment there reads "we break the 'L3 never
-  touches tools' rule here intentionally". Grepping for the hand-off returns the bottom tier's
-  execute step, that fallback, and the harness that wires the tool backend.
+  is handed atoma's tool executor, so supervisors cannot mutate the workspace through the
+  framework. The one application-level exception is deliberate and labelled in code: after
+  supervision has failed outright, a supervisor takes over for a last-resort turn. The Codex CLI
+  transport is a narrower provider caveat: Codex cannot disable its own built-ins, so L2/L3 run
+  read-only in an empty directory and may still perform internal read-only tool turns; Codex is
+  structurally refused at L1.
 - **Every hand-off is supervised.** The link from L3 to L2 and the link from L2 to L1 run the
   *same* protocol: plan → judge the plan → execute → judge the result. It is one implementation,
   never duplicated inside the agent classes.
@@ -59,6 +60,7 @@ graph TB
     subgraph ENTRY[" 🚪 Entry points "]
         direction LR
         RUN["<b>run:build</b><br/>one goal"]
+        MCP["<b>MCP stdio</b><br/>start · poll · cancel<br/>read learned state"]
         BURN["<b>burnin</b><br/>batch measurement"]
         CURR["<b>curriculum</b><br/>propose next tasks"]
         OPS["<b>registry · skills · ledger</b><br/><b>friction · viz</b><br/>operator tooling"]
@@ -68,7 +70,7 @@ graph TB
         direction LR
         RUNNER["<b>Runner</b><br/><i>family-independent</i><br/>budget · signals · watchdog"]
         PROFILE["<b>TaskProfile</b><br/><i>the only per-family part</i><br/>workspace · seeds · constraints"]
-        PROVIDERS["<b>Provider routing</b><br/>Anthropic · Claude subscription<br/>Ollama · Z.ai — mixable per tier"]
+        PROVIDERS["<b>Provider routing</b><br/>Anthropic · Claude · Ollama<br/>Z.ai · Codex — mixable per tier"]
         BACKEND["<b>Tool backend</b><br/>local sandbox <i>default</i><br/>container <i>opt-in</i>"]
     end
 
@@ -116,6 +118,8 @@ graph TB
     end
 
     BURN -.->|"fresh process per task"| RUN
+    MCP -.->|"starts a serialised child"| RUN
+    MCP -.-> MEM
     RUN ==> RUNNER
     RUNNER ==> L3B
     L3B ==> L2B ==> L1B
@@ -143,9 +147,10 @@ graph TB
 
 | Layer | Component | What it does |
 |---|---|---|
+| **Entry** | MCP over stdio | Thirteen tools: start, poll and cancel one cross-process-serialised run; read registry, skills, ledger, traces and friction |
 | **Runtime** | Runner | Everything family-independent: provider choice, sandbox, budget, abort signals, watchdog, trace, post-mortem |
 | | TaskProfile | The *only* per-family part: workspace prep, seed agents, task constraints |
-| | Provider routing | One interface, four transports; a tier can be pinned to a different vendor than its neighbours |
+| | Provider routing | Five provider routes over four transports; a tier can be pinned to a different vendor than its neighbours. Codex is L2/L3 only |
 | **Orchestration** | L3 / L2 / L1 atoms | Decompose · route and judge · execute |
 | | Supervise loop | The single plan→judge→execute→judge protocol, shared by both hand-offs |
 | | Prefilter | A cheap-model scan answering "does something we already have fit this?" before any expensive call |
@@ -464,6 +469,7 @@ Recorded so nobody has to discover it in a demo:
 | What was tried and rejected? | `AGENTS.md` § *Considered and rejected* — with the measurements that settled it |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
+| How does another agent drive atoma? | `claude mcp add atoma -- npx tsx "$PWD/src/mcp/server.ts"` — stdio only, 13 tools |
 | Are the economics real? | `burnin/results.csv`, regenerable with `npm run burnin` |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/verify-maint.mjs` executes them; `benchmark/results-round8-scores.json` is its output. Rounds 4-7 have no committed scorer output |

@@ -1,13 +1,12 @@
 # atoma as a multi-tenant SaaS — target architecture
 
-> **STATUS: TARGET, NOT BUILT.** Nothing described here exists in the repo today.
-> There is no tenancy primitive of any kind: `grep -rniE '\b(tenant|orgId|userId|principal|oauth)\b' src/ --include=*.ts`
-> returns 5 hits, all unrelated (Z.ai routing, prose, atoma's *outbound* auth).
-> The only actor concept is `created_by`, a free-text string whose human-facing
-> values across the whole repo are `'user'` (`src/run/profiles/build.ts:122`) and
-> `'viz-demo'` (`src/viz/demo.ts:49`). The viz server has no authentication at all
-> — `src/viz/server.ts:626` is a bare `server.listen(...)` and `/api/runs`
-> (`server.ts:476-479`) serves the entire runs directory.
+> **STATUS: TENANCY TARGET, NOT BUILT.** There is still no organisation,
+> principal, membership, tenant-scoped store or authenticated control plane in
+> `src/`. The viz server listens without authentication and serves the shared
+> runs directory. Some deployment prerequisites described below now DO exist
+> as opt-in local primitives — container isolation, per-run egress proxying,
+> one consolidated store and an MCP stdio control surface — and are labelled
+> accordingly. They are substrate, not tenancy.
 >
 > **Purpose of this document.** It exists so that design work done *before* the
 > SaaS is built does not dig the hole deeper. Section 7 is the operative part for
@@ -58,13 +57,12 @@ foreign key, those need principals too. One table with a `kind` column keeps the
 ledger's actor field uniform instead of inventing a second actor concept.
 
 **Project is recommended, not required.** The single-org level satisfies the
-stated requirement. The reason to add it anyway: the runner *already* partitions
-stores by family — "Store + workspace are per-FAMILY so two families never share
-a registry (and, with it, a taxonomy namespace and the ledger's one-store rule)"
-(`src/run/runner.ts:149-150`, implemented through `profile.envVars.dbPath`,
-`src/run/profiles/build.ts:74-81`). Project is where that axis generalises. If
-deferred, keep the column nullable — re-keying the skill store twice is the
-expensive mistake.
+stated requirement. The atom registry is deliberately ONE cross-family store
+now; family partitioning fought reuse and was removed. Workspaces and run
+budgets remain profile-specific, so Project is still the natural optional axis
+for grouping artefacts, policy and billing without splitting globally reusable
+bodies. If deferred, keep the column nullable — re-keying persisted trust and
+skill references twice is the expensive mistake.
 
 ### Identity: link on subject, never on email
 
@@ -308,26 +306,23 @@ after review. What does not survive is *"and the next org gets the zero-token
 dispatch for free"* — because that specific transfer is the transfer of arbitrary
 code execution rights into another tenant's sandbox.
 
-### 4.3 Namespace capture (present-day bug, worsened by tenancy)
+### 4.3 Namespace capture — present-day incidents closed
 
-Two confirmed defects, both fixed by the same change (§6.1):
+Two confirmed defects shaped T4/T5 and are now fixed in the local system:
 
-- **`sanitise` accepts `..` and `.`** — `/^[A-Za-z0-9._-]+$/`
-  (`src/skills/registry.ts:650-656`, verified). `isSafeSkillId`
-  (`lifecycle.ts:53-54`) does reject them, but is never applied to `l1Name`, and
-  `l1Name` originates from `AtomRegistry.branch`'s **LLM-authored** `overrideName`
-  (`src/registry/atomRegistry.ts:504-523`), which gets no charset validation
-  before becoming a filesystem path component — only auto-suffix de-duplication.
-  `join('/srv/skills','..','x')` → `/srv/x`.
-- **`branch` resurrects removed identities.** `create` allocates ordinals from
-  live ∪ history with an explicit comment saying why
-  (`atomRegistry.ts:222-234`: "a reused name would let a future atom silently
-  inherit the dead atom's identity in old run traces and skill namespaces").
-  `branch` reads **live rows only** — `SELECT ordinal FROM atom_types WHERE tier = ?`,
-  no UNION (`atomRegistry.ts:497-499`, verified). After any `registry remove`, the
-  next `branch` re-issues the dead atom's ordinal *and* name with no constraint
-  violation, and the new atom inherits the dead one's skill-namespace directory
-  and its earned counters. Under global skills that inheritance is platform-wide.
+- **Path traversal.** `sanitise` once accepted the all-dot strings `.` and
+  `..`, while an LLM-authored `overrideName` became a skill path component.
+  `sanitise` now rejects all-dot components and `AtomRegistry.branch` applies
+  the same `isSafeAtomName` boundary before persistence.
+- **Removed-identity resurrection.** `create` allocated ordinals from live ∪
+  history while `branch` read live rows only, so a post-remove branch could
+  reissue a dead taxonomy name and inherit its skill namespace. Both paths now
+  call one `usedOrdinals` helper over live ∪ version-history rows.
+
+The local exploit is closed and regression-tested. The SaaS conclusion remains:
+a validated taxonomy name is still doing triple duty as display label,
+identity and filesystem namespace. B1 replaces that coupling with a surrogate
+id before names become tenant-visible.
 
 ### 4.4 Prefilter cache — the one store where global sharing is correct
 
@@ -337,7 +332,7 @@ requires the requester to already possess every input byte-for-byte, so there is
 **no content leak**, and with catalogs genuinely shared a shared decision is
 correct by construction.
 
-Two caveats to carry forward, both currently unaddressed:
+One privacy caveat remains:
 
 - **Existence oracle (low severity, accept explicitly or salt).** A hit is
   observable: zero latency (no claude-cli subprocess spawn), logged
@@ -347,16 +342,13 @@ Two caveats to carry forward, both currently unaddressed:
   the UI card removes the weak signal and leaves the reliable one (timing). The
   honest options are to accept it or to salt the key per org — which forfeits the
   sharing benefit entirely.
-- **Availability (must fix).** `prefilterCacheGet` does `entry.hits++` then
-  `persist()` on every **hit** (`prefilterCache.ts:141-154`) — a pure read
-  rewrites the whole file. A torn `writeFileSync` makes `loadFile`'s `JSON.parse`
-  throw, which falls back to `{version:1, entries:{}}` and the next `persist()`
-  writes that **empty** map back: one interrupted write wipes the platform cache,
-  and write volume is attacker-controllable. Capacity is 500 entries with
-  oldest-first eviction (`prefilterCache.ts:41,161-170`); single-tenant measured
-  hit rate is already 2.4% (12/490 per AGENTS.md). The current implementation
-  cannot be the shared one — it needs a real keyed store with atomic per-entry
-  writes.
+
+The old availability blocker is closed. The cache moved from a whole-file JSON
+rewrite to the `prefilter_cache` table in the consolidated SQLite store:
+`INSERT OR REPLACE` writes one decision, `hits = hits + 1` updates one row, and
+rowid-ordered eviction is transactional. A SaaS deployment still moves that
+table to its platform store, but no cache-file migration or atomicity redesign
+remains.
 
 ---
 
@@ -455,14 +447,14 @@ distilled, reviewed body crosses the org boundary.
 
 | # | Change | Evidence |
 |---|---|---|
-| A1 | **Per-run OS isolation** (container/microVM, workspace as only writable mount, default-deny egress, `fetch_url` destination allowlist). | §3; `builtin.ts:338-344`, `builtin.ts:629-632` |
-| A2 | **Authentication + authorization on the viz server.** Today: no auth, `/api/runs` serves the whole directory. | `viz/server.ts:626`, `476-479`, `481-524` |
-| A3 | **Org scoping on runs and traces.** `VizRun` (`viz/trace.ts:384-398`) carries id/label/task/startedAt/events — no field to partition on. | `viz/trace.ts:384-398` |
-| A4 | **`sanitise` must reject `.` and `..`**; `branch` must validate `overrideName`. One-line fixes, present-day bugs. | `skills/registry.ts:650-656`, `atomRegistry.ts:504-523` |
-| A5 | **`branch` must UNION `atom_type_versions`** like `create` does. | `atomRegistry.ts:497-499` vs `228-234` |
+| A1 | **Make per-run OS isolation mandatory.** The container worker and per-run default-deny egress proxy exist opt-in; SaaS must remove the local backend choice and apply destination policy to every network-capable tool. | §3; `tools/containerExecutor.ts`, `tools/egressSidecar.ts` |
+| A2 | **Authentication + authorization on the viz/control plane.** Today the local viz has no auth and exposes the shared run corpus. | `viz/server.ts` |
+| A3 | **Org scoping on runs and traces.** `VizRun` carries no organisation discriminator. | `viz/trace.ts` |
+| A4 | **DONE locally:** `sanitise` rejects all-dot traversal and `branch` validates `overrideName`. Preserve these guards through the surrogate-id migration. | §4.3; `atom-name-path-escape.test.ts` |
+| A5 | **DONE locally:** `create` and `branch` share `usedOrdinals` over live ∪ history. | §4.3; `registry-remove.test.ts` |
 | A6 | **Per-run outbound credentials**; remove `process.exit(1)` from the auth path; drop `claude-cli` as a served transport. | `run/auth.ts:25-55` |
 | A7 | **Concurrency on the atom DB.** `openDb` runs DDL on *every* open (`db.exec(SCHEMA)` + two `PRAGMA table_info` + conditional `ALTER TABLE`, `db.ts:39-56`), so every connection takes a write lock at startup. `db.transaction()` is BEGIN DEFERRED, so two concurrent `create` calls compute the same first gap and the loser gets `SQLITE_BUSY_SNAPSHOT` (not covered by the 5000 ms default busy timeout) or a UNIQUE violation — with no retry anywhere in `src/`. This fires on the hottest path: the five canonical seeders run on **every** run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — AGENTS.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `db.ts:39-56`, `atomRegistry.ts:220-276` |
-| A8 | **Skill store leaves the filesystem.** Every persistence call is a bare `writeFileSync` with no tmp+rename — save (155, 184), markPromotionRefused (232), markDirectFailure (258), clearPromotionRefusal (285), markMatched (309), merge (354, 365), clearDirectFailures (388), promoteToScript (449, 461, 472), resetCounters (558), bump (646) — while the safe pattern exists in the repo (`viz/trace.ts:547-548`). Writers preserve *different* sidecar subsets (T6). | `skills/registry.ts` (lines listed) |
+| A8 | **Skill counters leave the filesystem.** `readMetaChecked` now refuses a torn sidecar instead of silently resetting trust, but whole-object filesystem writes still cannot provide atomic multi-writer counters or a transaction with body promotion. | `skills/registry.ts`; T6 |
 
 ### 6.B Needed for shared learning to be safe
 
@@ -473,7 +465,7 @@ distilled, reviewed body crosses the org boundary.
 | B3 | **Scope column on atom types**: `'platform'` (canonicals) vs `org_id` (dynamic), with an explicit promotion path. | §2 catalog-cost row |
 | B4 | **Review workflow + approval record** for org→platform body promotion, separate gates for `llm` and `script`. | T3 |
 | B5 | **Ledger event gains `store_id` + `org_id`**; `projectCounters` groups by them; `warnedOnce` (`ledger.ts:58`) stops being a module singleton — in a long-lived server the first tenant's failure silences the warning for everyone. | T7 |
-| B6 | **Prefilter cache becomes a real keyed store** with atomic per-entry writes; reads stop writing. | §4.4 |
+| B6 | **DONE locally:** prefilter decisions are rows with atomic per-entry writes. Move the table unchanged to the platform store. | §4.4 |
 | B7 | **Compose tenancy with the existing bucket lattice, do not replace it.** `visibleSkillNamespaces` (`skills/visibility.ts:38-72`) is a pure function over `{home, readerToolNames, namespaces, toolNamesFor}` — org filtering belongs in the `namespaces` argument, upstream, leaving the executability subset test intact. Note its ordering constraint: donors are `.sort()`ed because "the prefilter decision cache hashes the catalog text; an unstable order would produce permanent misses". Any tenancy filter must be deterministic for the same reason. | `skills/visibility.ts:38-72` |
 | B8 | **Home-namespace donor filters.** Today home entries skip the script-ABI filter and `undeclaredToolMentions` (`lifecycle.ts:931,941-945`) on the premise that home is self-authored. Under a shared canonical registry, home is *not* self-authored. Either apply the filters uniformly, or make home genuinely per-org (which B1+B3 do). | `lifecycle.ts:931-945` |
 
@@ -484,14 +476,12 @@ distilled, reviewed body crosses the org boundary.
   writes into the workspace's *parent* (`workspace.ts:40-70`), shared by every
   run. Per-run containers (A1) resolve this incidentally.
 - Runs index: shared `index.json` with a single assumed writer.
-- Ledger has no rotation, no cap, no compaction; `readLedger` slurps the whole
-  file (`ledger.ts:80`).
+- Lifecycle events have no retention or compaction; integrity projection reads
+  the full table.
 - Burn-in CSV has no tenant column and is committed to git.
-- Store paths are resolved cwd-relative at 4+ independent sites and never
-  centralised (`runner.ts:150`, `cli/registry.ts:44`, `cli/ledger.ts:58`,
-  `viz/server.ts:124`). A server that ever `chdir`s writes to different files
-  mid-process — `ledgerPath()` (`ledger.ts:54-56`) is re-resolved on **every**
-  append.
+- Store paths now have one resolver, but their defaults remain cwd-relative.
+  The local MCP server deliberately `chdir`s to the repo root; a hosted process
+  must pass explicit tenant/platform store handles instead of relying on cwd.
 
 ---
 
@@ -584,32 +574,26 @@ lands before the SaaS, key it on `(provider, subject)`.
   network half, and it is also what makes the Launch-tab token problem
   disappear in SaaS: a run that cannot reach the control plane needs no
   out-of-band secret to be kept away from it.
-- **Dependency installation is the live constraint.** `npm install` of a real
-  dependency fails under `--network none` (`EAI_AGAIN`); a no-dependency
-  install succeeds. Not yet a problem — the corpus is zero-dependency by
-  design and the batch made no npm calls — but arbitrary customer tasks will
-  need it. MEASURED, so the shape is not re-derived later:
+- **Dependency installation is blocked by default and available through the
+  opt-in egress path.** `npm install` of a real dependency fails under
+  `--network none` (`EAI_AGAIN`); a no-dependency install succeeds. The
+  orchestrated `--egress` mode now provides the narrow path arbitrary customer
+  tasks need:
 
   | container network | control plane | internet | own loopback |
   |---|---|---|---|
-  | `--network none` (today) | blocked | blocked | works |
+  | `--network none` (container default) | blocked | blocked | works |
   | default `bridge` | **REACHED** | reached | works |
-  | `docker network create --internal` | blocked | blocked | works |
+  | per-run `--internal` + proxy (`--egress`) | blocked directly | allowlisted via proxy | works |
 
   The default bridge is disqualified outright: it hands the run the control
   plane, which is the same reachability that made an HTTP-served launch token
-  worthless. But an `--internal` network is functionally identical to `none`
-  while being a NETWORK — so a proxy container attached to both it and an
-  external network can grant egress selectively, with an allowlist that by
-  construction cannot be asked for the control plane. That is the shape to
-  build when it is needed: run container on `--internal`, proxy as the only
-  reachable peer, `HTTP_PROXY`/`npm config` pointed at it.
-
-  NOT BUILT, because nothing needs it yet: zero npm calls in the first
-  containerised batch, and zero non-loopback `fetch_url` across every
-  archived trace. TRIGGER: the first task family that genuinely requires an
-  external fetch or a third-party dependency. Until then it is a proxy to
-  run, an allowlist to curate and a new failure mode, bought with no demand.
+  worthless. The built path gives every run its OWN `--internal` network and
+  proxy sidecar; sharing that network was reproduced leaking one run's server
+  to another. The proxy is the only peer, `HTTP_PROXY` carries package-manager
+  traffic, anchored host rules reject lookalikes and IP literals, and teardown
+  removes both containers and the network. SaaS makes this topology mandatory
+  rather than exposing the local `--container` / `--egress` choice.
 
 ### Open questions for the owner
 

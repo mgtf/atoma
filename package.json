@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Three-tier LLM agent framework with persisted atom/molecule/cell taxonomy and symmetric supervision",
+  "description": "Three-tier LLM agent orchestration with persisted types, earned trust, and symmetric supervision",
   "scripts": {
     "build": "tsc -p tsconfig.json && cp src/viz/ui.html dist/viz/ui.html",
     "build:worker": "npm run build && docker build -f docker/worker.Dockerfile -t atoma-worker:latest .",

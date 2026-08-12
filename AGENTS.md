@@ -11,7 +11,7 @@ itself named `CLAUDE.md` until 2026-08-11; run `git log --follow AGENTS.md` for
 the history before the rename, and note that entries below say "this file"
 throughout.
 
-## Map (3800 lines — jump, don't scroll)
+## Map (~4100 lines — jump, don't scroll)
 
 | Section | When you need it |
 |---|---|
@@ -24,7 +24,7 @@ throughout.
 | Testing conventions | how to add tests that actually catch the bug class |
 | Linting | what ESLint is calibrated to, and the rules deliberately OFF |
 | The test suite is type-checked now | the 96 errors nothing was looking at, and the factories that stop them coming back |
-| Tools | sandbox, the 9 builtins, their contracts |
+| Tools | sandbox, the 10 builtins, their contracts |
 | MCP server (stdio) | exposing atoma to Claude Code and other MCP hosts |
 | Things that look wrong but aren't | **read before "fixing" something odd** |
 | Considered and rejected | **read before proposing an optimization** |
@@ -856,7 +856,7 @@ re-exports all the historical names so old imports keep working.
 - **Bucket-scoped tool filtering in the canonical helpers.** Each
   `ensureCanonical*` pipes its caller-supplied toolset through
   `pickTools(tools, scope)` before creating/patching so a kitchen-
-  sink caller (the runner passes all 9 tools) still produces a
+  sink caller (the runner passes all 10 tools) still produces a
   narrow canonical: the web L1 gets {write_file, read_file,
   list_files, start_static_server, validate_html}; the HTTP L1 gets
   {write_file, read_file, list_files, run_shell, fetch_url,
@@ -956,8 +956,8 @@ re-exports all the historical names so old imports keep working.
   lattice offers file-scribe recipes to a WEB reader (which has
   `write_file` and no shell), and a donor naming `record_probe` —
   legitimate on its own host — was offered to a reader that cannot execute
-  it. Inert on the live catalog when it landed (no body names the tool
-  today; `skills review` reads 0 blocked / 15 / 9 either way), so the value
+  it. Inert on the live catalog when it landed (no body named the tool),
+  so the value
   is forward-looking. Adding the name is false-positive-safe for the text
   that names it most, which is worth knowing before rewording it: the
   contract's own `no record_probe in your declared tools` hand-write branch
@@ -1311,8 +1311,9 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   fenced JSON, prose-with-JSON). Guards: malformed JSON → debug
   log + skip; `isSafeSkillId` rejects unsafe ids; an existing skill
   with the same id is NEVER overwritten (counter-preserving).
-  Costs one Sonnet call per learning event; off by default
-  precisely so projects don't pay for it on every run.
+  Costs one Sonnet call per learning event. The LIBRARY hook is off unless
+  `ATOMA_SKILL_LEARN=1`; `runTask` deliberately sets it to 1 by default, while
+  direct library consumers and tests pay nothing unless they opt in.
 
 - **Skill-prefilter fires when at least one skill exists.**
   `matchSkill` short-circuits without an LLM call when the registry
@@ -2108,8 +2109,10 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   BUILT BEFORE THERE IS A SECOND ORG on purpose: the gate cannot fire today,
   but the criterion applied today is what stops the catalog filling with
   recipes nobody judged by it — a recipe distilled, promoted and trusted for
-  months is far more expensive to reject later. Current catalog: **0 blocked,
-  16 awaiting human review, 10 local-only.** That clean sweep is why
+  months is far more expensive to reject later. The current runtime snapshot
+  is intentionally not committed; `npm run skills -- review` is the authority
+  on its blocked / review-required / local-only counts. The detector is pinned
+  by real incidents:
   `tests/skill-shareability.test.ts` drives every blocker from a real incident
   this repo met (the `node index.js sample.txt` literal, the app-task-tracker
   `validate_html`-on-an-HTTP-host distillation, the probe-crud loopback

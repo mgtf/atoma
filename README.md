@@ -12,7 +12,7 @@ verification — down to models that cost a fraction as much.*
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
 ![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
-![providers](https://img.shields.io/badge/LLM_providers-Anthropic_·_Claude_subscription_·_Ollama_·_Z.ai-8A2BE2)
+![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
 **[→ How it works, in detail](docs/how-it-works.md)**
 
@@ -200,8 +200,9 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
   rejected" section records optimisations that were designed, measured, and refused. Reversals
   are recorded rather than quietly deleted — including several in the benchmark above.
 - **Vendor-flexible.** The same code runs against the Anthropic API, a Claude subscription, local
-  models via Ollama, or Z.ai — and can mix vendors per tier, e.g. a cheap third-party model for
-  the execution tier while planning stays on a frontier model.
+  models via Ollama, Z.ai, or a ChatGPT subscription through Codex for supervisor tiers — and can
+  mix vendors per tier, e.g. a cheap third-party model for execution while planning stays on a
+  frontier model.
 
 ## Evaluate it in ten minutes
 
