@@ -1301,7 +1301,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           ? args['smoke']
           : undefined;
       const ignoredInteractions =
-        smoke !== undefined && smokeDrivesIntermediateState(smoke)
+        smoke !== undefined && smokeDrivesOwnState(smoke)
           ? interactions.length
           : 0;
       if (ignoredInteractions > 0) interactions = [];
@@ -1702,8 +1702,14 @@ export function smokeDrivesIntermediateState(smoke: string): boolean {
     /(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three|Four|\d+|Threshold)\w*|goalReached|thresholdReached|history|transition)/i.test(
       smoke
     ) &&
-    /\.(?:increment|advance|click|add(?:Glass)?|increase)\s*\(/i.test(smoke) &&
+    smokeDrivesOwnState(smoke) &&
     /\.(?:reset|clear)\s*\(/i.test(smoke)
+  );
+}
+
+export function smokeDrivesOwnState(smoke: string): boolean {
+  return /\.(?:increment|advance|click|add(?:Glass)?|increase|reset|clear)\s*\(/i.test(
+    smoke
   );
 }
 
@@ -2063,6 +2069,13 @@ export function detectSmokeStatementError(raw: string): string | null {
     if (re.test(trimmed)) {
       return `smoke starts with top-level \`${keyword}\` — that is a STATEMENT, not an expression.`;
     }
+  }
+  if (
+    /^(?:\(\s*\(\s*\)\s*=>|\(\s*function\b)/.test(trimmed) &&
+    /\}\s*\)\s*$/.test(trimmed) &&
+    !/\}\s*\)\s*\(\s*\)\s*$/.test(trimmed)
+  ) {
+    return 'smoke defines an IIFE body but never invokes it — append `()` so the expression returns the validation result.';
   }
   // Multi-line snippets that separate statements with `;` at the top
   // level (e.g. `const x = 1; x > 0`) are also statements. Heuristic:

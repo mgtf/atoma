@@ -1293,6 +1293,21 @@ re-exports all the historical names so old imports keep working.
   The live recipes carry the same rule plus named checks. This is a mechanical
   closure for the exact eleven-repeat signature, not another request to "try
   harder".
+- **TWENTY-FOURTH LIVE ITERATION, 2026-08-12 — the RGB loop closed; three
+  protocol mistakes remained.** Hydration after the literal-RGB preflight
+  delivered in 459s/23 calls/$0.2477 estimated, two escalations (trace
+  `2026-08-12T22-23-10-308-077293c`). Final artefact and manifest again passed
+  independent state/style/replay checks; friction fell 11 → 3. The remaining
+  failures were: external four-click interactions PLUS a smoke that added four
+  more glasses (observed count 8), one reset-erasure preflight, and an arrow
+  IIFE body returned without the final invocation `()`.
+  L1 now treats any smoke that calls a known state-mutating method
+  (increment/addGlass/increase/reset/clear/advance/click) as authoritative and
+  ignores external interactions, not only smokes carrying a recognised
+  milestone name. Smoke lexical preflight rejects an arrow/function IIFE body
+  that is never invoked and gives the exact `append ()` correction before
+  Puppeteer. These are generic protocol closures; no hydration-specific
+  expected value was added.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

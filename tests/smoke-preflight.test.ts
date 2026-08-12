@@ -8,6 +8,7 @@ import {
   SMOKE_STUCK_WINDOW,
   SMOKE_STUCK_THRESHOLD,
   smokeDrivesIntermediateState,
+  smokeDrivesOwnState,
   uniqueNormalizedIdSelector,
 } from '../src/tools/builtin.js';
 
@@ -42,6 +43,13 @@ describe('detectSmokeStatementError', () => {
     ).toBeNull();
     // Trailing semicolon on an IIFE is fine — the `;` is AFTER the expression.
     expect(detectSmokeStatementError('(() => true)();')).toBeNull();
+  });
+
+  it('rejects an IIFE body that was never invoked', () => {
+    expect(detectSmokeStatementError('(() => { return { ok: true }; })')).toMatch(
+      /never invokes.*append `\(\)`/
+    );
+    expect(detectSmokeStatementError('(() => { return { ok: true }; })()')).toBeNull();
   });
 
   it('rejects top-level const / let / var — the most common model mistake', () => {
@@ -171,6 +179,11 @@ describe('detectResetErasedIntermediateEvidence', () => {
     expect(
       smokeDrivesIntermediateState(
         '(() => { widget.addGlass(); const goalReached = widget.goalReached; widget.reset(); return { ok: goalReached }; })()'
+      )
+    ).toBe(true);
+    expect(
+      smokeDrivesOwnState(
+        '(() => { widget.addGlass(); return { ok: widget.glassCount === 1 }; })()'
       )
     ).toBe(true);
   });
