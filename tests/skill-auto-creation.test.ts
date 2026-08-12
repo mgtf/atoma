@@ -13,9 +13,8 @@ import { makeCtx, jsonText } from './helpers.js';
  * Tests for C3 — when an L1 successfully completes a NOVEL task
  * (skill prefilter ran but found nothing) AND the env flag
  * ATOMA_SKILL_LEARN=1 is set, L2 distills the run into a new skill
- * via Sonnet and persists it. Off by default so projects don't pay
- * for a Sonnet learn-call on every run, and so the skills folder
- * doesn't grow uncontrolled.
+ * via Sonnet and persists it. Direct library consumers opt in explicitly;
+ * runTask sets the flag on by default unless its CLI/env kill switch is used.
  */
 
 const seed = {

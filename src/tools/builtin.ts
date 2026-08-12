@@ -979,7 +979,7 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
           env: {
             type: 'object',
             description:
-              'Extra environment variables passed to the child process (merged over PORT=0 and the parent env).',
+              'Task-owned environment variables passed to the child over PORT=0 and the credential-stripped sandbox allowlist.',
           },
         },
         required: ['entry'],

@@ -1279,8 +1279,8 @@ export class SkillLifecycle {
       `[${this.host.name}] script skill "${skill.id}" demoted to llm after ${streak} consecutive deterministic failures (fallback recipe restored)`
     );
     // Stamp the refusal too, or the demotion OSCILLATES: the restored llm
-    // form re-earns 5/0, the compile re-runs on the same body, produces the
-    // same structurally brittle script, and the cycle repeats forever — one
+    // form re-earns the promotion threshold, compile re-runs on the same body,
+    // produces the same structurally brittle script, and the cycle repeats — one
     // Sonnet call plus two wasted dispatches per lap. The stamp parks
     // re-compilation until the BODY changes (save() clears it), which is the
     // only event that could change the compile's outcome. NOTE: demoteToLlm

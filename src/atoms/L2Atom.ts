@@ -1343,7 +1343,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // validator affirmatively reported the child IGNORED the injected
         // recipe (`activeSkillFollowed === false`). A run the skill did not
         // drive proves nothing about the skill, and unearned successes arm
-        // the 5/0 promotion trigger on recipes that never demonstrably
+        // the promotion trigger on recipes that never demonstrably
         // worked. `undefined` (no signal — trust fast-path, legacy verdict,
         // model omission) keeps the legacy bump: false is an AFFIRMATIVE
         // observation, absence of evidence is not evidence of free-riding.
