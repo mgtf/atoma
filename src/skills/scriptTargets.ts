@@ -81,8 +81,14 @@ const NON_EMPTY_STEM_RE = /[A-Za-z0-9_-]\.[A-Za-z][A-Za-z0-9]{0,8}$/;
  * Lives HERE rather than in lifecycle.ts so the capability test can use it
  * without an import cycle; lifecycle.ts re-exports it under its historical name.
  */
-const MUTATING_VERB_RE =
-  /\b(update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|fixing|amend|amending|revise|revising|write|writing|add|adding|append|appending|regenerate|regenerating)\b/i;
+const MUTATING_ACTION_SOURCE =
+  '(?:update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|' +
+  'fixing|amend|amending|revise|revising|write|writing|add|adding|append|' +
+  'appending|regenerate|regenerating|refresh|refreshing)';
+const PASSIVE_MUTATION_SOURCE =
+  '(?:updated|rewritten|edited|corrected|fixed|amended|revised|written|added|' +
+  'appended|regenerated|refreshed)';
+const MUTATING_VERB_RE = new RegExp(`\\b${MUTATING_ACTION_SOURCE}\\b`, 'i');
 
 /** True when the subtask asks for a named file to be CHANGED, not merely read. */
 export function subtaskMutatesFiles(description: string): boolean {
@@ -196,6 +202,46 @@ export function subtaskNamedPaths(description: string): string[] {
 }
 
 /**
+ * The subset of named paths a mutating verb can be PROVEN to target.
+ *
+ * Not every file in a mutating subtask is an output: "update README.md from
+ * package.json" names one destination and one input. Requiring the script to
+ * write BOTH permanently refuses a correct README generator. We therefore
+ * recognise only high-confidence grammar: a mutating verb in the same short
+ * clause immediately before the path, or a passive mutation immediately after
+ * it. Input markers (`from`, `using`, `read`, `based on`...) win. Ambiguity
+ * under-extracts, which is the safe direction here — an unnecessary offer
+ * still meets the downstream deliverable gate; a false refusal loses the
+ * dispatch forever.
+ */
+export function subtaskMutationTargets(description: string): string[] {
+  const lower = description.toLowerCase();
+  const targets: string[] = [];
+  const inputMarker =
+    /(?:\b(?:from|using|read|inspect|parse|source)\s+|\bbased\s+on\s+)(?:the\s+)?(?:(?:current|existing|source)\s+)?(?:[\w.-]+\/)*$/i;
+  const verbBefore = new RegExp(`\\b${MUTATING_ACTION_SOURCE}\\b[^,;.!?\\n]{0,64}$`, 'i');
+  const verbAfter = new RegExp(
+    `^\\s*(?:(?:(?:must|should)\\s+be|needs?\\s+to\\s+be|is\\s+to\\s+be|is|be|to\\s+be)\\s+)?(?:${MUTATING_ACTION_SOURCE}|${PASSIVE_MUTATION_SOURCE})\\b`,
+    'i'
+  );
+
+  for (const named of subtaskNamedPaths(description)) {
+    const needle = named.toLowerCase();
+    let at = lower.indexOf(needle);
+    while (at >= 0) {
+      const before = description.slice(Math.max(0, at - 96), at);
+      const after = description.slice(at + named.length, at + named.length + 64);
+      if (!inputMarker.test(before) && (verbBefore.test(before) || verbAfter.test(after))) {
+        targets.push(named);
+        break;
+      }
+      at = lower.indexOf(needle, at + needle.length);
+    }
+  }
+  return targets;
+}
+
+/**
  * Match-time capability test. `false` = do not offer this script for this
  * subtask.
  *
@@ -207,10 +253,10 @@ export function subtaskNamedPaths(description: string): string[] {
  */
 export function scriptCanServeSubtask(body: string, description: string): boolean {
   if (!subtaskMutatesFiles(description)) return true; // nothing to protect
-  const named = subtaskNamedPaths(description);
-  if (named.length === 0) return true; // no target named
+  const targets = subtaskMutationTargets(description);
+  if (targets.length === 0) return true; // no target proven
   const { paths, opaque } = scriptWriteTargets(body);
   if (opaque) return true; // not provable
-  return named.every((n) => paths.has(n));
+  return targets.every((n) => paths.has(n));
 }
 

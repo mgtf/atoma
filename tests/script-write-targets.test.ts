@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   scriptWriteTargets,
   subtaskNamedPaths,
+  subtaskMutationTargets,
   scriptCanServeSubtask,
 } from '../src/skills/scriptTargets.js';
 
@@ -99,6 +100,21 @@ describe('subtaskNamedPaths', () => {
   });
 });
 
+describe('subtaskMutationTargets — outputs, not every mentioned file', () => {
+  it('separates a destination from the source file it is derived from', () => {
+    expect(subtaskMutationTargets('update README.md from package.json')).toEqual(['README.md']);
+    expect(subtaskMutationTargets('using package.json, rewrite README.md')).toEqual(['README.md']);
+    expect(subtaskMutationTargets('read package.json and write README.md')).toEqual(['README.md']);
+  });
+
+  it('recognises passive and multi-target mutation grammar', () => {
+    expect(subtaskMutationTargets('README.md must be updated')).toEqual(['README.md']);
+    expect(
+      subtaskMutationTargets('update README.md, refresh .atoma-probes.json and edit wclite.js')
+    ).toEqual(['README.md', '.atoma-probes.json', 'wclite.js']);
+  });
+});
+
 describe('scriptCanServeSubtask — the match-time decision', () => {
   it('REFUSES the manifest-only verifier for a README update — the round-6/7 fallback', () => {
     expect(
@@ -132,6 +148,19 @@ describe('scriptCanServeSubtask — the match-time decision', () => {
       fs.writeFileSync(pkg, JSON.stringify(manifest));
     `;
     expect(scriptCanServeSubtask(writer, 'add package.json and write README.md')).toBe(true);
+  });
+
+  it('does not require a documentation generator to overwrite its input file', () => {
+    const readPackageWriteReadme = `
+      const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+      fs.writeFileSync('README.md', render(pkg));
+    `;
+    expect(
+      scriptCanServeSubtask(
+        readPackageWriteReadme,
+        'update README.md from the current package.json'
+      )
+    ).toBe(true);
   });
 
   it('requires ALL named files, not merely one — the round-6 three-file fallback', () => {

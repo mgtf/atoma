@@ -793,7 +793,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(events.some((e) => e.op === 'direct')).toBe(true);
   });
 
-  it('dispatches normally when the named file IS present', async () => {
+  it('dispatches normally for a read-only check when the named file is present', async () => {
     const { executor } = fsExecutor({ 'config.json': '{}' });
     const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
     const base = makeCtx();
@@ -801,7 +801,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     queuePrefilters(ctx);
     // No further LLM replies queued: the dispatch must NOT fall through.
 
-    await water.handleDirect({ description: 'Refresh config.json from the template.' }, ctx);
+    await water.handleDirect({ description: 'Verify config.json against the template.' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2); // the two prefilters only
     expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
@@ -834,7 +834,7 @@ describe('subtaskMutatesFiles — does the subtask ask for a file to CHANGE', ()
   });
 
   it('recognises the other mutating verbs', () => {
-    for (const v of ['rewrite', 'edit', 'fix', 'amend', 'revise', 'append', 'regenerate']) {
+    for (const v of ['rewrite', 'edit', 'fix', 'amend', 'revise', 'append', 'regenerate', 'refresh']) {
       expect(subtaskMutatesFiles(`${v} the README.md accordingly`)).toBe(true);
     }
   });

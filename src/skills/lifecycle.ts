@@ -5,7 +5,7 @@ import {
   scriptCanServeSubtask,
   scriptWriteTargets,
   subtaskMutatesFiles,
-  subtaskNamedPaths,
+  subtaskMutationTargets,
 } from './scriptTargets.js';
 import { SkillRegistry } from './registry.js';
 import {
@@ -276,6 +276,7 @@ export {
   scriptCanServeSubtask,
   scriptWriteTargets,
   subtaskNamedPaths,
+  subtaskMutationTargets,
 } from './scriptTargets.js';
 
 export class SkillLifecycle {
@@ -1036,7 +1037,7 @@ export class SkillLifecycle {
             !scriptCanServeSubtask(s.body, subTask.description)
           ) {
           ctx.logger.debug(
-            `[${this.host.name}] skill "${s.id}" not offered: its compiled body writes [${[...scriptWriteTargets(s.body).paths].join(", ") || "nothing"}], and this subtask asks to change [${subtaskNamedPaths(subTask.description).join(", ")}]`
+            `[${this.host.name}] skill "${s.id}" not offered: its compiled body writes [${[...scriptWriteTargets(s.body).paths].join(", ") || "nothing"}], and this subtask asks to change [${subtaskMutationTargets(subTask.description).join(", ")}]`
           );
           continue;
         }

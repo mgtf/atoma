@@ -3906,13 +3906,19 @@ FIXED (2026-08-11) — `scriptCanServeSubtask` in `src/skills/scriptTargets.ts`
 replaces the any-write test with a per-DESTINATION one: resolve the path
 literals reachable as the DESTINATION argument of a write API
 (`path.join(cwd, 'x.json')` is the dominant shape, 9 of 10 corpus bodies), and
-refuse the match only when the subtask NAMES files the body provably never
-writes. Verified against every archived compiled body: 9 resolved, 1 opaque
+refuse the match only when the subtask PROVABLY TARGETS files the body never
+writes. "Named" alone was too broad: `update README.md from package.json`
+names an output and an input, so requiring a correct documentation generator
+to overwrite package.json is a permanent false refusal. High-confidence
+mutation grammar (`update X`, `X must be rewritten`) now identifies targets;
+`from` / `using` / `read` / `based on` mark inputs, and ambiguity
+under-extracts into OFFER per the rule below. Verified against every archived compiled body: 9 resolved, 1 opaque
 (a glob), and `package-and-document-cli` correctly identified as a genuine
 multi-file writer while the five verifiers resolve to `.atoma-probes.json`
-alone. ALL, not ANY — one round-6 fallback named the manifest ALONGSIDE two
-files the verifier can never write, so a non-empty intersection would let it
-through (ALL refuses 14/14 archived gate fallbacks, ANY 12/14).
+alone. ALL, not ANY, over the proven TARGETS — one round-6 fallback targeted
+the manifest ALONGSIDE two files the verifier can never write, so a non-empty
+intersection would let it through (ALL refuses 14/14 archived gate fallbacks,
+ANY 12/14).
 UNPROVABLE ⇒ OFFER, always: a false refusal is permanent and costs a
 zero-token dispatch AND the credit that arms maturation, while a false offer
 costs two tool calls before the deliverable gate — which caught 14 of them
