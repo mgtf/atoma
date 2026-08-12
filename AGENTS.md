@@ -129,7 +129,10 @@ Claude CLI auth is checked with `ANTHROPIC_API_KEY` removed, matching the
 transport exactly; Anthropic uses the same zero-request SDK constructor as the
 runtime; Ollama calls only `/api/version`; Codex uses login status unless an API
 credential is explicitly configured; Z.ai checks its key and endpoint shape.
-No command output that could contain a credential is rendered. Exit codes:
+An exported Anthropic key that a configured route will ignore, and the
+debug-only `ATOMA_CLAUDE_MODEL` override that flattens the tier gradient, are
+both explicit warnings. No command output that could contain a credential is
+rendered. Exit codes:
 0 ready, 1 missing required prerequisite, 2 invalid doctor arguments. A green
 provider check proves a credential source/login is PRESENT, not that a remote
 service will accept the next request — proving that would spend quota and make

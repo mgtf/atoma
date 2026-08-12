@@ -474,6 +474,32 @@ export async function diagnoseDoctor(args: {
         }
   );
 
+  const anthropicKeyIgnored =
+    nonEmpty(env['ANTHROPIC_API_KEY']) &&
+    (providers.includes('claude-cli') ||
+      (providers.includes('anthropic') &&
+        (env['ATOMA_AUTH'] ?? '').trim().toLowerCase() === 'cli'));
+  if (anthropicKeyIgnored) {
+    checks.push({
+      id: 'provider-key-precedence',
+      label: 'Provider key precedence',
+      status: 'warn',
+      detail: 'ANTHROPIC_API_KEY is set but ignored on at least one configured route',
+      remedy:
+        'This is intentional for claude-cli and ATOMA_AUTH=cli; remove the variable if the warning is unexpected.',
+    });
+  }
+  if (providers.includes('claude-cli') && nonEmpty(env['ATOMA_CLAUDE_MODEL'])) {
+    checks.push({
+      id: 'claude-model-override',
+      label: 'Claude model override',
+      status: 'warn',
+      detail: 'ATOMA_CLAUDE_MODEL flattens every Claude CLI tier onto one model',
+      remedy:
+        'Unset it for the normal L1/L2/L3 cost gradient; prefer ATOMA_MODEL_L3 for a tier-specific override.',
+    });
+  }
+
   for (const provider of providers) {
     checks.push(await checkProvider(provider, env, deps));
   }

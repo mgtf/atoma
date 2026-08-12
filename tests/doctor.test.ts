@@ -98,6 +98,9 @@ describe('atoma doctor', () => {
 
     expect(report.ready).toBe(true);
     expect(observedEnv?.['ANTHROPIC_API_KEY']).toBeUndefined();
+    expect(
+      report.checks.find((check) => check.id === 'provider-key-precedence')?.status
+    ).toBe('warn');
     expect(report.checks.find((check) => check.id === 'docker')?.status).toBe('warn');
   });
 
@@ -209,6 +212,23 @@ describe('atoma doctor', () => {
     expect(report.checks.find((check) => check.id === 'provider-config')).toMatchObject({
       status: 'fail',
       detail: expect.stringContaining('cannot use codex'),
+    });
+  });
+
+  it('warns when the Claude debug override flattens the tier gradient', async () => {
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: {
+        ATOMA_LLM: 'claude-cli',
+        ATOMA_CLAUDE_MODEL: 'sonnet',
+      },
+      dependencies: dependencies(),
+    });
+
+    expect(report.ready).toBe(true);
+    expect(report.checks.find((check) => check.id === 'claude-model-override')).toMatchObject({
+      status: 'warn',
+      detail: expect.stringContaining('flattens every Claude CLI tier'),
     });
   });
 
