@@ -115,6 +115,8 @@
   ran; ignored script recipes cannot earn credit through type trust.
 - OpenAI-compatible pseudo-final `json` calls carrying a complete nested
   `{output,summary}` Result are normalized without an off-scope tool round-trip.
+- CLI build recipes retain every fixture referenced by a recorded probe so
+  later packaging and replay phases cannot inherit broken evidence.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

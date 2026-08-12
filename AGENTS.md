@@ -1356,6 +1356,25 @@ re-exports all the historical names so old imports keep working.
   both trust and full-verdict paths. The false 1/0 was reset to 0/0. The
   missing-envelope recovery skill was kept: unlike the other findings, it
   describes the real first-attempt failure and its cause remains possible.
+- **TWENTY-SEVENTH LIVE ITERATION, 2026-08-12 — the semantic guard and script
+  witness both fired in production.** Exact word-frequency replay delivered in
+  198s/12 calls/$0.1634 estimated, no escalation or new learning (trace
+  `2026-08-12T22-54-55-383-94ebee07`). Independent scoring passed a real JSON
+  object, preserved `café`, handled blank/missing/unreadable inputs, and npm
+  test executed a probe-proven command. The package script again ignored its
+  injected executable body and manually authored equivalent output; the new
+  transport witness therefore emitted `credit-withheld`, leaving its counters
+  at 0/0 with one visible free ride — exactly the intended result.
+  Two apparent failures had different truth. `run_shell node word-frequency.js`
+  exiting 1 was the deliberately tested missing-argument contract, not product
+  friction. The hard `run_shell rm` rejection exposed a real workflow mistake:
+  the build phase recorded `test/punctuation.txt`, then tried `rm`, succeeded
+  through bash, and left the packaging phase to hit a missing-fixture probe
+  before recreating it. The argv recipe now states that any fixture named by a
+  recorded probe is durable machine evidence for later packaging/replay and
+  must not be deleted. The allowlist still excludes rm: allowing the command
+  would have made this run worse by silently deleting required evidence; the
+  rejected call was a useful guard, not a missing capability.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
