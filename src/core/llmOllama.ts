@@ -40,13 +40,26 @@ export interface OllamaLlmClientOptions {
   baseUrl?: string;
   /** Default: `glm-5.1:cloud`. */
   defaultModel?: string;
+  /** Request context window. Default: 32768; override with OLLAMA_CONTEXT_LENGTH. */
+  contextLength?: number;
   /** Default: 24 (mirrors AnthropicLlmClient's DEFAULT_MAX_TOOL_ITERATIONS). */
   maxToolIterations?: number;
 }
 
 export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
 export const OLLAMA_DEFAULT_MODEL = 'glm-5.1:cloud';
+export const OLLAMA_DEFAULT_CONTEXT_LENGTH = 32_768;
 const DEFAULT_MAX_TOOL_ITERATIONS = 24;
+
+/** Atoma's real prompts exceed Ollama's 4096 server default before tool use. */
+export function ollamaContextLength(
+  raw: string | undefined = process.env['OLLAMA_CONTEXT_LENGTH']
+): number {
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 8_192
+    ? parsed
+    : OLLAMA_DEFAULT_CONTEXT_LENGTH;
+}
 
 interface OllamaMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -93,11 +106,13 @@ export function resolveOllamaModel(reqModel: string, defaultModel: string): stri
 export class OllamaLlmClient implements LlmClient {
   private readonly baseUrl: string;
   private readonly defaultModel: string;
+  private readonly contextLength: number;
   private readonly maxIter: number;
 
   constructor(opts: OllamaLlmClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? OLLAMA_DEFAULT_BASE_URL).replace(/\/$/, '');
     this.defaultModel = opts.defaultModel ?? OLLAMA_DEFAULT_MODEL;
+    this.contextLength = opts.contextLength ?? ollamaContextLength();
     this.maxIter = opts.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   }
 
@@ -117,7 +132,11 @@ export class OllamaLlmClient implements LlmClient {
     const declaredToolNames =
       req.tools && req.tools.length > 0 ? new Set(req.tools.map((t) => t.name)) : null;
 
-    const options: Record<string, unknown> = {};
+    // Ollama's server default is 4096 even when the model advertises a much
+    // larger window. A live hybrid run failed before L1 with
+    // "request (7520 tokens) exceeds ... 4096". Atoma's constant prompts make
+    // 8K+ a baseline requirement, so every request pins an honest window.
+    const options: Record<string, unknown> = { num_ctx: this.contextLength };
     if (req.params?.temperature !== undefined) options['temperature'] = req.params.temperature;
     if (req.params?.maxTokens !== undefined) options['num_predict'] = req.params.maxTokens;
     if (req.params?.topP !== undefined) options['top_p'] = req.params.topP;

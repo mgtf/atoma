@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "ollama-line-stats-cli",
+      "family": "ollama-cli",
+      "goal": "Build a no-dependency Node CLI in linestats.js that reads a text file path argument and prints JSON with line, word and non-whitespace character counts. Include a fixture, verify the exact counts, and reject missing or unreadable files."
+    }
+  ]
+}

@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parseRunLog, toCsvRow, summarize, looksLikeConfigFailure, CSV_HEADER } from '../src/cli/burnin.js';
+import {
+  parseRunLog,
+  toCsvRow,
+  summarize,
+  looksLikeConfigFailure,
+  looksLikeProviderLimitFailure,
+  CSV_HEADER,
+} from '../src/cli/burnin.js';
 
 // Trimmed from a real delivered run (colstat, run 9): the exact formatSummary
 // shape the harness parses in production.
@@ -91,6 +98,22 @@ describe('burnin looksLikeConfigFailure — abort-the-batch guard', () => {
   it('does NOT flag a fast cheap DELIVERED run (mature families are supposed to be fast)', () => {
     const s = parseRunLog(DELIVERED_LOG);
     expect(looksLikeConfigFailure(s, 12)).toBe(false);
+  });
+
+  it('detects a definitive weekly limit even after calls already spent tokens', () => {
+    const log =
+      'TOTAL 11 15183 3933 102347 0.1513\n' +
+      "no JSON found in response: You've hit your weekly limit · resets Aug 13 at 10pm";
+    expect(looksLikeProviderLimitFailure(log)).toBe(true);
+  });
+
+  it('detects quota/credit exhaustion but not a transient rate-limit message', () => {
+    expect(looksLikeProviderLimitFailure('quota has been exceeded for this account')).toBe(true);
+    expect(looksLikeProviderLimitFailure('credit balance is too low')).toBe(true);
+    expect(looksLikeProviderLimitFailure('this model requires a subscription, upgrade for access')).toBe(
+      true
+    );
+    expect(looksLikeProviderLimitFailure('HTTP 429 rate limit; retry after 5 seconds')).toBe(false);
   });
 });
 

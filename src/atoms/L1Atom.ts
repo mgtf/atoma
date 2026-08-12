@@ -257,7 +257,15 @@ export class L1Atom extends Atom {
     // the summary so the supervisor validator sees the contradiction
     // transparently on the FIRST pass, before spiralling.
     let lastValidateHtml: { ok: boolean; summary: string } | null = null;
+    const observedToolCalls: Array<{ name: string; ok: boolean }> = [];
     const onToolInvocation = (info: import('../core/types.js').ToolInvocationInfo): void => {
+      // Bounded, content-free action witness for skill auto-distillation.
+      // A low-capability provider produced zero tool events, claimed it had
+      // built a CLI, and two recipes were learned from that fiction. Names +
+      // success bits prove an action happened without retaining tool payloads.
+      if (observedToolCalls.length < 64) {
+        observedToolCalls.push({ name: info.name, ok: info.error === undefined });
+      }
       if (info.name !== 'validate_html') return;
       const r = info.result as Record<string, unknown> | undefined;
       if (!r || typeof r !== 'object') return;
@@ -327,6 +335,7 @@ export class L1Atom extends Atom {
       summary,
       trace: [],
       producedBy: { tier: 1, name: this.name, viaFallback: false },
+      ...(observedToolCalls.length > 0 ? { toolCallResults: observedToolCalls } : {}),
       // Typed witnesses, attached at production time: the child's recorded
       // probes become first-class evidence the upper tiers can weigh
       // without re-parsing the payload.

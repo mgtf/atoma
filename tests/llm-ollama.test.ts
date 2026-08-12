@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { OllamaLlmClient } from '../src/core/llmOllama.js';
+import {
+  OLLAMA_DEFAULT_CONTEXT_LENGTH,
+  OllamaLlmClient,
+  ollamaContextLength,
+} from '../src/core/llmOllama.js';
 import type { ToolExecutor } from '../src/core/types.js';
 
 /**
@@ -331,10 +335,14 @@ describe('OllamaLlmClient', () => {
       params: { temperature: 0, maxTokens: 500 },
     });
     const body = JSON.parse(calls[0]![1]!.body as string);
-    expect(body.options).toEqual({ temperature: 0, num_predict: 500 });
+    expect(body.options).toEqual({
+      num_ctx: OLLAMA_DEFAULT_CONTEXT_LENGTH,
+      temperature: 0,
+      num_predict: 500,
+    });
   });
 
-  it('omits the options field when params carry nothing we map', async () => {
+  it('always pins a context large enough for atoma prompts', async () => {
     restore = installFetchStub(async (_i, init) => {
       calls.push([_i, init]);
       return jsonResponse({
@@ -346,7 +354,10 @@ describe('OllamaLlmClient', () => {
     const client = new OllamaLlmClient();
     await client.complete({ model: 'x', systemPrompt: 's', userContent: 'u' });
     const body = JSON.parse(calls[0]![1]!.body as string);
-    expect(body).not.toHaveProperty('options');
+    expect(body.options).toEqual({ num_ctx: OLLAMA_DEFAULT_CONTEXT_LENGTH });
+    expect(ollamaContextLength('16384')).toBe(16_384);
+    expect(ollamaContextLength('4096')).toBe(OLLAMA_DEFAULT_CONTEXT_LENGTH);
+    expect(ollamaContextLength('invalid')).toBe(OLLAMA_DEFAULT_CONTEXT_LENGTH);
   });
 
   it('respects a custom baseUrl + defaultModel', async () => {
@@ -361,10 +372,12 @@ describe('OllamaLlmClient', () => {
     const client = new OllamaLlmClient({
       baseUrl: 'http://remote:9999/',
       defaultModel: 'llama3.3:70b',
+      contextLength: 65_536,
     });
     await client.complete({ model: 'claude-opus-5', systemPrompt: 's', userContent: 'u' });
     expect(urlOf(calls[0]![0])).toBe('http://remote:9999/api/chat');
     const body = JSON.parse(calls[0]![1]!.body as string);
     expect(body.model).toBe('llama3.3:70b');
+    expect(body.options.num_ctx).toBe(65_536);
   });
 });

@@ -1,0 +1,24 @@
+{
+  "tasks": [
+    {
+      "id": "oncall-deploy-guides",
+      "family": "files",
+      "goal": "Create docs/oncall.md and docs/deploy.md. Each file must start with one H1, include a '## Overview' section, and include a '## Checklist' section containing at least two concrete bullet points. As a FINAL SEPARATE PHASE, mechanically verify those exact structures."
+    },
+    {
+      "id": "cache-queue-guides",
+      "family": "files",
+      "goal": "Create docs/cache.md and docs/queue.md. Each file must start with one H1, include a prose-only '## When to use' section, and include a '## Steps' section containing at least four concrete bullet points. As a FINAL SEPARATE PHASE, mechanically verify those exact structures."
+    },
+    {
+      "id": "incident-playbooks",
+      "family": "files",
+      "goal": "Create playbooks/api-incident.md and playbooks/worker-incident.md. Each file must start with one H1, include a prose-only '## Signals' section, and include a '## Actions' section containing at least three numbered items. As a FINAL SEPARATE PHASE, mechanically verify those exact structures."
+    },
+    {
+      "id": "api-worker-check-guides",
+      "family": "files",
+      "goal": "Create docs/api-checks.md and docs/worker-checks.md. Each file must start with one H1, include a prose-only '## Context' section, and include a '## Checks' section containing at least two numbered items. As a FINAL SEPARATE PHASE, mechanically verify those exact structures."
+    }
+  ]
+}

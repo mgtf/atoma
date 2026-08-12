@@ -279,6 +279,18 @@ export {
   subtaskMutationTargets,
 } from './scriptTargets.js';
 
+/** Internal action witness populated by L1's transport observer, not model text. */
+export function resultHasSuccessfulToolAction(
+  result: Pick<Result, 'toolCallResults'>
+): boolean {
+  return (result.toolCallResults ?? []).some(
+    (entry) =>
+      entry !== null &&
+      typeof entry === 'object' &&
+      (entry as Record<string, unknown>)['ok'] === true
+  );
+}
+
 export class SkillLifecycle {
   constructor(
     private readonly host: SkillLifecycleHost,
@@ -317,6 +329,12 @@ export class SkillLifecycle {
      */
     visibleNamespaces?: readonly string[];
   }): Promise<void> {
+    if (!resultHasSuccessfulToolAction(args.result)) {
+      args.ctx.logger.debug(
+        `[${this.host.name}] skill auto-creation skipped: approved result carried no successful observed tool action — narrative intent is not a demonstrated workflow`
+      );
+      return;
+    }
     const userContent = [
       `You are distilling a successful run into a reusable SKILL — a markdown`,
       `recipe attached to a tier-1 element so future runs on a similar task can`,

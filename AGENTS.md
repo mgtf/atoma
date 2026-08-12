@@ -840,6 +840,37 @@ re-exports all the historical names so old imports keep working.
   in the ambiguous first task; no consecutive-batch signature, no harness
   change. Both runs left zero leaked children and ledger projection stayed
   exact.
+- **FIFTH LIVE ITERATION, 2026-08-12 — provider failures are not product
+  failures, and narrative is not an action.** Claude subscription hit its
+  explicit weekly limit during task 1 of a four-task markdown batch. Because
+  earlier calls had already spent $0.1513, and each later task paid a
+  prefilter/plan before receiving the same denial, the old fast+zero-spend
+  heuristic appended FOUR environmental failures instead of aborting. Those
+  rows were removed. `looksLikeProviderLimitFailure` now recognises definitive
+  weekly/monthly/quota/credit/subscription denials from the raw child log and
+  aborts BEFORE appending the first row; transient 429 text stays excluded.
+  Provider experiments then used separate CSVs. Ollama Cloud GLM 5.1 returned
+  403 subscription-required. Local DeepSeek 7.6B returned an incomplete,
+  structurally wrong plan; local 32B ran ~10 minutes at 70% machine memory and
+  lost the fetch without one response. A hybrid with Codex subscription on
+  L2/L3 and DeepSeek 7.6B on L1 first hard-400ed because Ollama silently ran
+  its 131K-capable model with `num_ctx=4096` while the real L1 prompt was 7520
+  tokens. Ollama requests now pin 32768 by default
+  (`OLLAMA_CONTEXT_LENGTH`, minimum 8192). The re-run reached 17 calls and
+  proved Codex routing, but the 7.6B L1 made ZERO tool calls, fabricated work,
+  and eventually failed missing-file validation.
+  That failed subtask still distilled two task recipes and one event recovery
+  from prose alone — exactly contrary to the learn prompt's "ACTIONS
+  demonstrate" rule. L1 now attaches a bounded `{name,ok}` list from the
+  transport's real tool observer to `Result.toolCallResults`; task-skill and
+  event-skill distillation both require at least one successful observed
+  action. The three 0/0 provider-failure skills were dropped. Mock tests invoke
+  the observer explicitly, and narrative-only recovered runs pin that neither
+  learning path fires. No available local model completed the pipeline, so
+  further Ollama attempts are stopped until a stronger tool-capable model or
+  cloud entitlement exists; failed provider rows remain isolated in
+  `burnin/results-ollama.csv` / `burnin/results-hybrid.csv`, never the Claude
+  curve.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
@@ -2407,6 +2438,11 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
     - `cache_control` is Anthropic-specific; Ollama silently ignores
       it. `usage.cacheReadInputTokens` stays 0 — cache metrics are
       meaningless for this path.
+    - Every request pins `num_ctx=32768` by default (override
+      `OLLAMA_CONTEXT_LENGTH`, minimum 8192). Ollama otherwise starts even
+      131K-capable models at its 4096 server default; a live hybrid run reached
+      L1 with a 7520-token prompt and hard-400ed before one tool call. Atoma's
+      constant system prompts make 4K structurally unusable, not merely small.
     - The declared-tools scope gate (#8a) is mirrored in the Ollama
       tool-use loop: off-scope `tool_calls` get a `role: "tool"`
       error appended and `onToolInvocation` fires with `error`, with

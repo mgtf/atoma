@@ -25,6 +25,26 @@ const seed = {
   createdBy: 'test',
 };
 
+function enqueueExecutedResult(
+  ctx: ReturnType<typeof makeCtx>,
+  payload: unknown
+): void {
+  ctx.llm.enqueue((req) => {
+    req.onToolInvocation?.({
+      name: 'write_file',
+      args: { path: 'artefact.txt' },
+      result: { ok: true },
+      durationMs: 1,
+      startedAt: Date.now(),
+    });
+    return {
+      text: jsonText(payload),
+      stopReason: 'end_turn',
+      usage: { inputTokens: 10, outputTokens: 10 },
+    };
+  });
+}
+
 describe('parseSkillDraft / isSafeSkillId', () => {
   it('parses a minimal valid draft (snake_case when_to_use)', () => {
     const text = JSON.stringify({
@@ -188,7 +208,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     // L1.plan + L1.execute (success).
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'built' }));
+    enqueueExecutedResult(ctx, { output: 'http://localhost:8000/', summary: 'built' });
 
     await water.handleDirect({ description: 'build a thing' }, ctx);
     // Still ONE pre-existing skill (no auto-creation).
@@ -224,7 +244,10 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     // L1.plan + L1.execute (success).
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'built a clean web app' }));
+    enqueueExecutedResult(ctx, {
+      output: 'http://localhost:8000/',
+      summary: 'built a clean web app',
+    });
     // C3 Sonnet learn call → emits skill draft JSON.
     ctx.llm.enqueueText(
       JSON.stringify({
@@ -280,6 +303,33 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(learnPrompt).toMatch(/WHERE THIS SPLIT USUALLY DIES/);
   });
 
+  it('does not distil narrative success when no tool action was observed', async () => {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ensureChildIsTrusted();
+    skills.save('Hydrogen', {
+      id: 'unrelated',
+      description: 'something else',
+      whenToUse: 'never matches our task',
+      kind: 'llm',
+      body: 'b',
+    });
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    // No onToolInvocation callback: this is the exact low-capability-provider
+    // shape that fabricated a result and taught two recipes from zero actions.
+    ctx.llm.enqueueText(jsonText({ output: 'claimed', summary: 'I built and verified it' }));
+
+    await water.handleDirect({ description: 'build an artefact' }, ctx);
+
+    expect(skills.loadFor('Hydrogen').map((skill) => skill.id)).toEqual(['unrelated']);
+    expect(ctx.llm.calls).toHaveLength(4); // no Sonnet distillation call
+  });
+
   it('F2: rejects a draft whose body teaches a tool the host cannot call', async () => {
     // Regression (app-task-tracker run, 2026-08-07): two skills taught
     // "validate_html" on an HTTP-bucket atom that cannot declare it — the
@@ -299,7 +349,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built and probed' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'built and probed' });
     // The draft teaches start_node_server — NOT in this Hydrogen's toolset
     // (write/read/run_shell/static/validate_html).
     ctx.llm.enqueueText(
@@ -333,7 +383,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built and verified a CLI' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'built and verified a CLI' });
     // Learn call → primary + verification split.
     ctx.llm.enqueueText(
       JSON.stringify({
@@ -377,7 +427,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
     ctx.llm.enqueueText(
       JSON.stringify({
         id: 'good-primary',
@@ -417,7 +467,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     // L1.plan + L1.execute success.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
     // Sonnet emits a draft with the SAME id — should be skipped.
     ctx.llm.enqueueText(
       JSON.stringify({
@@ -454,7 +504,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
     // Sonnet emits a malicious id.
     ctx.llm.enqueueText(
       JSON.stringify({
@@ -488,7 +538,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
     // Sonnet returns prose without a JSON object.
     ctx.llm.enqueueText('I would learn a skill but cannot generalise this run.');
 
@@ -517,7 +567,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
       jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
-    ctx.llm.enqueueText(jsonText({ output: 'ok', summary: 'built' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
     // No Sonnet learn call expected — skill was matched, so the
     // run is NOT novel by the C3 definition.
 
@@ -572,7 +622,7 @@ describe('distillation steers verification recipes at MACHINE input', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
-    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+    enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
     ctx.llm.enqueueText('not json — skip the distillation itself');
     await water.handleDirect({ description: 'task' }, ctx);

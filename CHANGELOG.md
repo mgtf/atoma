@@ -37,6 +37,13 @@
 - Skill compilation now preserves the scope of quantified requirements: a
   minimum bullet count attached to `## Steps` is not applied to prose-only
   sibling sections.
+- Burn-in aborts before appending a row when logs explicitly report exhausted
+  weekly/monthly quota, credit, or model subscription entitlement.
+- Ollama requests pin a 32K context by default (configurable through
+  `OLLAMA_CONTEXT_LENGTH`) because the server's 4K default is smaller than
+  atoma's real L1 prompts.
+- Task and event skill distillation now require a successful tool action
+  observed by the transport; narrative-only results cannot teach recipes.
 
 ## v0.1.2 — 2026-08-12
 

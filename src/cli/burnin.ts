@@ -160,6 +160,33 @@ export function looksLikeConfigFailure(stats: RunStats, durationS: number | null
   return fast && spentNothing;
 }
 
+/**
+ * Definitive provider entitlement/quota failures named in the child log.
+ *
+ * Unlike the fast+zero-spend heuristic above, a limit can arrive AFTER useful
+ * calls already spent tokens — observed live when Claude's weekly limit hit
+ * during task 1 of 4. That first row cost $0.1513/96s; later tasks each made a
+ * prefilter/plan call before receiving the same denial, so neither "zero cost"
+ * nor "two consecutive identical shapes" fired and all four environmental
+ * failures polluted results.csv. An explicit provider denial is conclusive on
+ * the first occurrence and must abort before appending any row.
+ *
+ * Deliberately excludes transient 429/rate-limit text: backoff/retry belongs
+ * to transports, while weekly/credit/quota exhaustion cannot recover inside
+ * this batch.
+ */
+export function looksLikeProviderLimitFailure(log: string): boolean {
+  return [
+    /you(?:'|’)ve hit your (?:weekly|monthly|usage) limit\b/i,
+    /\b(?:weekly|monthly|usage) limit\b[^\n]{0,120}\bresets?\b/i,
+    /\b(?:insufficient|exceeded|exhausted)[ _-]?quota\b/i,
+    /\bquota (?:has been )?(?:exceeded|exhausted)\b/i,
+    /\bcredit balance is too low\b/i,
+    /\bmodel requires a subscription\b/i,
+    /\bupgrade for access\b/i,
+  ].some((pattern) => pattern.test(log));
+}
+
 export function summarize(
   rows: { family: string; outcome: string; costUsd: number | null }[]
 ): string {
@@ -513,6 +540,14 @@ async function main(): Promise<void> {
     const stats = parseRunLog(log);
     const durationS = newestTraceDuration(runsDir, started) ?? Math.round((Date.now() - started) / 1000);
     const trace = newestTraceName(runsDir, started);
+    if (looksLikeProviderLimitFailure(log) && !argv.includes('--force')) {
+      console.error(
+        `\n✗ provider quota/entitlement denial detected after ${task.id}; batch ABORTED before appending\n` +
+          `  this environmental failure to ${outPath}. The trace and task log remain available for diagnosis.\n` +
+          `  Restore provider access or select another provider, then re-run (--force to retain denial rows).`
+      );
+      process.exit(1);
+    }
     appendFileSync(resolve(outPath), toCsvRow({ ts, taskId: task.id, family: task.family, stats, durationS, trace }) + '\n', 'utf8');
     summaryRows.push({ family: task.family, outcome: stats.outcome, costUsd: stats.costUsd });
     console.log(

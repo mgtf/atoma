@@ -57,7 +57,7 @@ export {
   type GroundTruthCheck,
 } from './groundTruth.js';
 export { extractRecordedProbes } from '../contracts/witness.js';
-import { SkillLifecycle } from '../skills/lifecycle.js';
+import { SkillLifecycle, resultHasSuccessfulToolAction } from '../skills/lifecycle.js';
 import { llmVerdict, undeclaredToolMentions} from './verdict.js';
 import { dispatchWithAggregation } from './dispatch.js';
 export { llmVerdict, VALIDATION_SYSTEM_PROMPT } from './verdict.js';
@@ -856,6 +856,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     if (!this.skillRegistry) return;
     if (args.eventSkillInjected) return;
     if (args.res.producedBy.viaFallback) return;
+    if (!resultHasSuccessfulToolAction(args.res)) return;
     const hadRejection = args.res.trace.some(
       (e) =>
         (e.kind === 'verdict-plan' || e.kind === 'verdict-result') &&
