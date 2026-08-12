@@ -23,6 +23,7 @@ const stats = (over: Partial<RunStats> = {}): RunStats => ({
   learnedEventSkills: 0,
   promotions: 0,
   refusals: 0,
+  compileErrors: 0,
   demotions: 0,
   dispatchFallbacks: 0,
   ...over,

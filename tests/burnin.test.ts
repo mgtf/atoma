@@ -81,6 +81,7 @@ describe('burnin parseRunLog', () => {
       [
         'ℹ skill "x" promoted to kind:script (node, 8324 chars)',
         'ℹ skill "y" not promotable: irreducible reasoning',
+        '⚠ [A] skill compile errored: The operation was aborted due to timeout; leaving as kind:llm',
         '⚠ script skill "z" demoted to llm after 2 consecutive deterministic failures',
         '[A] direct dispatch of z failed (exit=1) — falling back to the LLM loop',
         'ℹ [A] learned event skill "recover-x" for Lithium',
@@ -90,6 +91,7 @@ describe('burnin parseRunLog', () => {
     );
     expect(s.promotions).toBe(1);
     expect(s.refusals).toBe(1);
+    expect(s.compileErrors).toBe(1);
     expect(s.demotions).toBe(1);
     expect(s.dispatchFallbacks).toBe(1);
     expect(s.learnedEventSkills).toBe(1);

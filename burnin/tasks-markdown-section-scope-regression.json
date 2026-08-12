@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "oncall-recovery-guides-section-scope",
+      "family": "files",
+      "goal": "Create docs/oncall.md and docs/recovery.md. Each file must start with one H1, contain a prose-only '## When to use' section, a '## Steps' section with exactly four numbered items, and a '## Checks' section with exactly two bullet points. In a FINAL SEPARATE PHASE, mechanically verify those exact per-section structures without modifying the files."
+    }
+  ]
+}

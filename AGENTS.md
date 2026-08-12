@@ -1414,6 +1414,25 @@ re-exports all the historical names so old imports keep working.
   `json` exactly like `return` for that shape, parsing output when possible
   and avoiding both off-scope round-trips. Arbitrary `json` payloads without a
   string summary remain rejected.
+- **THIRTIETH LIVE ITERATION, 2026-08-12 — Markdown was clean; compile errors
+  were invisible in the CSV.** A two-file section-scope task delivered in
+  184s/11 calls/$0.0737 estimated with one deterministic verifier, zero
+  friction and independent exact counts green (trace
+  `2026-08-12T23-12-43-030-3fb3bc80`). The direct script correctly scoped
+  `Steps:4` and `Checks:2` while leaving prose-only `When to use` at zero
+  items.
+  Most wall time was a different event: `write-structured-markdown-files` had
+  a stale refusal stamp after the compiler prompt evolved, legitimately
+  retried compilation, then hit the 120s post-approval timeout with zero
+  tokens. The generation stamp now prevents repetition, but the row said
+  `refusals=0` and exposed no error. That zero is semantically right
+  (`refusals` means the compiler returned "not promotable", not transport
+  failure); folding timeouts into it would corrupt the lifecycle signal.
+  Burn-in now carries a separate trailing `compile_errors` column, parses the
+  existing `skill compile errored:` log marker, and prints
+  `⚠compile-error=N` in the batch line. The viz reader exposes it with zero for
+  legacy short rows. The live row is backfilled to 1, making the 120-second
+  cost visible without rewriting historical rows.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

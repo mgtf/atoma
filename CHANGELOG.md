@@ -119,6 +119,8 @@
   later packaging and replay phases cannot inherit broken evidence.
 - L2/L3 plans preserve exact structured goal clauses—HTTP routes, JSON fields,
   formats, status codes and rejection rules—in every downstream subtask.
+- Burn-in rows distinguish compile transport/time-out errors from genuine
+  not-promotable refusals via a trailing `compile_errors` column.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

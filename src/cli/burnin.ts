@@ -75,6 +75,8 @@ export interface RunStats {
   readonly promotions: number;
   /** compile attempts the compiler REFUSED as irreducible. */
   readonly refusals: number;
+  /** compile attempts that errored or timed out before a verdict. */
+  readonly compileErrors: number;
   /** script→llm demotions (the safety net firing). */
   readonly demotions: number;
   /** dispatches that hit a contract failure and fell back to the LLM loop. */
@@ -136,6 +138,7 @@ export function parseRunLog(log: string): RunStats {
     learnedEventSkills: (log.match(/learned event skill/g) ?? []).length,
     promotions: (log.match(/promoted to kind:script/g) ?? []).length,
     refusals: (log.match(/not promotable:/g) ?? []).length,
+    compileErrors: (log.match(/skill compile errored:/g) ?? []).length,
     demotions: (log.match(/demoted to llm after/g) ?? []).length,
     dispatchFallbacks: (log.match(/falling back to the LLM loop/g) ?? []).length,
   };
@@ -173,12 +176,13 @@ export function toCsvRow(args: {
     args.provider ?? '',
     s.otherCalls,
     s.learnedEventSkills,
+    s.compileErrors,
   ];
   return cells.map((c) => String(c)).join(',');
 }
 
 export const CSV_HEADER =
-  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills';
+  'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills,compile_errors';
 
 /**
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
@@ -615,6 +619,7 @@ async function main(): Promise<void> {
         `deterministic=${stats.deterministicPhases}  learned=${stats.learnedSkills}` +
         (stats.learnedEventSkills ? `  recovery-learned=${stats.learnedEventSkills}` : '') +
         (stats.promotions ? `  ⚡promoted=${stats.promotions}` : '') +
+        (stats.compileErrors ? `  ⚠compile-error=${stats.compileErrors}` : '') +
         (stats.demotions ? `  🛡️demoted=${stats.demotions}` : '') +
         (stats.dispatchFallbacks ? `  ↩fallback=${stats.dispatchFallbacks}` : '')
     );

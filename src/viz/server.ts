@@ -71,6 +71,7 @@ function loadBurnin(): {
     learnedEventSkills: number;
     promotions: number;
     refusals: number;
+    compileErrors: number;
     demotions: number;
     dispatchFallbacks: number;
     trace: string;
@@ -107,6 +108,7 @@ function loadBurnin(): {
       // Lifecycle columns appended later — older rows simply lack them.
       promotions: num(c[13]) ?? 0,
       refusals: num(c[14]) ?? 0,
+      compileErrors: num(c[21]) ?? 0,
       demotions: num(c[15]) ?? 0,
       dispatchFallbacks: num(c[16]) ?? 0,
       trace: (c.length > 17 ? c[17] : c[13]) ?? '',
