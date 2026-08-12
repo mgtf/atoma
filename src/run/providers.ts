@@ -5,7 +5,6 @@ import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { CodexCliLlmClient } from '../core/llmCodexCli.js';
 import { makeAnthropicClient } from './auth.js';
-import { modelForTier } from '../core/models.js';
 
 /**
  * Default base URL of Z.ai's ANTHROPIC-COMPATIBLE endpoint — the same one
@@ -81,22 +80,29 @@ const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
 /** Provider names a tier pin may reference via the `provider:` prefix. */
 export const KNOWN_PROVIDER_PREFIXES = Object.keys(PROVIDER_FACTORIES);
 
+/** Provider prefixes explicitly referenced by the three tier-model env vars. */
+export function referencedProviderNames(env: NodeJS.ProcessEnv = process.env): string[] {
+  const referenced = new Set<string>();
+  for (const tier of [1, 2, 3] as const) {
+    // Default tier models are unprefixed Anthropic ids. Only an explicit env
+    // value can add a cross-provider route.
+    const value = env[`ATOMA_MODEL_L${tier}`]?.trim();
+    if (!value) continue;
+    const i = value.indexOf(':');
+    if (i <= 0) continue;
+    const prefix = value.slice(0, i).toLowerCase();
+    if (KNOWN_PROVIDER_PREFIXES.includes(prefix)) referenced.add(prefix);
+  }
+  return [...referenced];
+}
+
 /**
  * Scan the three tier pins for `provider:` prefixes and build ONLY the
  * referenced clients. Returns the map to hand to RoutingLlmClient (empty
  * when no tier crosses providers — the router then costs nothing).
  */
 export function buildReferencedProviders(): Record<string, LlmClient> {
-  const referenced = new Set<string>();
-  for (const tier of [1, 2, 3] as const) {
-    const value = modelForTier(tier);
-    const i = value.indexOf(':');
-    if (i > 0) {
-      const prefix = value.slice(0, i).toLowerCase();
-      if (KNOWN_PROVIDER_PREFIXES.includes(prefix)) referenced.add(prefix);
-    }
-  }
   const out: Record<string, LlmClient> = {};
-  for (const name of referenced) out[name] = PROVIDER_FACTORIES[name]!();
+  for (const name of referencedProviderNames()) out[name] = PROVIDER_FACTORIES[name]!();
   return out;
 }

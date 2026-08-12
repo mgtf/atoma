@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `npm run doctor` provides a quota-free preflight for the configured Node
+  runtime, base and tier-routed providers, Docker daemon and worker image.
+  Docker failures remain advisory for local runs and become blocking when
+  container or egress mode is selected.
+- `npm run doctor:dev` exposes the same checks from TypeScript source; release
+  checks and extracted archives smoke the compiled command.
+
 ## v0.1.2 — 2026-08-12
 
 Corrective release after extending acceptance to Docker, proxied egress and

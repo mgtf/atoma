@@ -22,6 +22,7 @@ import { localToolBackend } from '../src/run/toolBackend.js';
 const dirs: string[] = [];
 afterEach(() => {
   delete process.env['ATOMA_CONTAINER'];
+  delete process.env['ATOMA_EGRESS'];
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
@@ -53,6 +54,19 @@ describe('backend selection', () => {
     process.env['ATOMA_CONTAINER'] = '1';
     expect(parseRunnerArgs(['g']).container).toBe(true);
     expect(parseRunnerArgs(['--no-container', 'g']).container).toBe(false);
+  });
+
+  it('egress always implies a container while --no-egress keeps an explicit container', () => {
+    expect(parseRunnerArgs(['--egress', '--no-container', 'g'])).toMatchObject({
+      container: true,
+      egress: true,
+    });
+    process.env['ATOMA_CONTAINER'] = '1';
+    process.env['ATOMA_EGRESS'] = '1';
+    expect(parseRunnerArgs(['--no-egress', 'g'])).toMatchObject({
+      container: true,
+      egress: false,
+    });
   });
 
   it('neither flag is mistaken for the goal', () => {

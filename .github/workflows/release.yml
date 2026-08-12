@@ -43,6 +43,7 @@ jobs:
           cd "/tmp/atoma-release/${root}"
           npm ci --omit=dev
           node scripts/release-smoke.mjs
+          npm run doctor -- --help
           npm run build:worker
           npm run release:container-smoke
           set +e

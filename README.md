@@ -210,7 +210,8 @@ service, no user accounts, no multi-tenancy — see [Status](#status) below.
 git clone https://github.com/mgtf/atoma.git
 cd atoma
 npm ci
-npm run release:check             # typecheck + lint + tests + audit + build + dist MCP smoke
+npm run release:check             # checks + audit + build + compiled MCP/doctor smokes
+npm run doctor                    # quota-free Node, provider and optional Docker preflight
 
 # one real task, pick your auth:
 ANTHROPIC_API_KEY=... npm run run:build "a Node CLI that converts CSV to JSON"
@@ -226,7 +227,8 @@ A local release keeps its learned state beside the checkout: `atoma.db`,
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
 skills directory together. Docker is optional: `npm run build:worker` enables
 the isolated backend and proxied egress paths from compiled `dist/`.
-Contributors changing source use `npm run build:worker:dev`.
+Confirm that path with `npm run doctor -- --container`. Contributors changing
+source use `npm run build:worker:dev` and `npm run doctor:dev`.
 
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release is narrower:

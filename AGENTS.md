@@ -44,7 +44,10 @@ npm run lint                          # eslint, type-aware (see the Linting sect
 npm run check                         # typecheck + lint + test
 npm test                              # vitest run — all mocked, no API key needed
 npm run build                         # emits to dist/
-npm run release:check                 # check + audit + build + compiled MCP smoke
+npm run release:check                 # check + audit + build + compiled MCP/doctor smokes
+npm run doctor                        # compiled quota-free runtime preflight
+npm run doctor -- --container         # require Docker daemon + bootable worker
+npm run doctor:dev                    # source-level development path
 npm run run:build "<goal>"            # supported compiled release path (build first)
 npm run run:build:dev "<goal>"        # source-level development path
 npm run mcp                           # compiled dist/mcp/stdio.js
@@ -92,7 +95,8 @@ npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no t
 `npm run release:check`; the supported compiled MCP path is
 `node dist/mcp/stdio.js`. `release:check` is the one definition of release
 readiness: full check, npm audit, build, then a quota-free JSON-RPC smoke
-against the compiled server. Tag workflow `.github/workflows/release.yml`
+against the compiled server plus a compiled doctor help smoke. Tag workflow
+`.github/workflows/release.yml`
 repeats it, creates a production-dependency archive and re-tests that extracted
 archive before publishing a private GitHub Release. It also builds the worker
 from packaged `dist/` and runs a quota-free container/egress smoke: an
@@ -109,6 +113,30 @@ downloadable basename, then verified before extraction — v0.1.0 initially
 published its workflow-internal `release/…` path and the first external soak
 caught it. Live results are in `docs/release-soak-v0.1.0.md` and
 `docs/release-acceptance-v0.1.1.md`; v0.1.2 is the worker-packaging correction.
+
+**`atoma doctor` IS A QUOTA-FREE PREFLIGHT, NOT A PROVIDER HEALTH CALL.**
+`npm run doctor` is the compiled release path; `doctor:dev` is the source path.
+It checks the package's exact Node engine floor, resolves the base provider and
+every explicit `provider:model` tier pin, verifies credential CONFIGURATION
+without making a billable completion, and probes Docker plus the worker image.
+Docker/worker failures are warnings in local mode and hard failures under
+`--container`, `--egress`, `ATOMA_CONTAINER=1` or `ATOMA_EGRESS=1`. The worker
+check boots the real image and waits for its hello — `docker image inspect`
+alone would have approved the F9 image that existed but died on its missing
+import. `resolveToolBackendMode` in `src/run/backendMode.ts` is shared with the
+runner so flag/env precedence cannot drift; egress always implies container.
+Claude CLI auth is checked with `ANTHROPIC_API_KEY` removed, matching the
+transport exactly; Anthropic uses the same zero-request SDK constructor as the
+runtime; Ollama calls only `/api/version`; Codex uses login status unless an API
+credential is explicitly configured; Z.ai checks its key and endpoint shape.
+No command output that could contain a credential is rendered. Exit codes:
+0 ready, 1 missing required prerequisite, 2 invalid doctor arguments. A green
+provider check proves a credential source/login is PRESENT, not that a remote
+service will accept the next request — proving that would spend quota and make
+doctor itself a run. Doctor also does not make an external egress request:
+`--egress` renders that limitation as a warning and points to the deeper
+`npm run release:container-smoke`, which exercises both the allowlisted
+registry path and control-plane denial.
 
 ## Cost discipline (load-bearing — read before changing any LLM call site)
 

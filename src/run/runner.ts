@@ -20,6 +20,7 @@ import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
 import { runFrontierBaseline } from './baseline.js';
+import { resolveToolBackendMode } from './backendMode.js';
 import type { Logger, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 
@@ -64,14 +65,12 @@ export interface RunnerArgs {
  * divergence is load-bearing; leave it.
  */
 export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
+  const backendMode = resolveToolBackendMode(argv);
   let goal: string | undefined;
   let noLearnSkills = false;
   let noPromoteSkills = false;
   let noDirectSkills = false;
   let cleanWorkspace = false;
-  let container = process.env['ATOMA_CONTAINER'] === '1';
-  // Egress implies a container: there is nothing to proxy without one.
-  let egress = process.env['ATOMA_EGRESS'] === '1';
   let baseline = process.env['ATOMA_BASELINE'] === '1';
   let seed: string | undefined = process.env['ATOMA_SEED'] || undefined;
   for (let i = 0; i < argv.length; i++) {
@@ -83,17 +82,20 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     else if (a === '--no-promote-skills') noPromoteSkills = true;
     else if (a === '--no-direct-skills') noDirectSkills = true;
     else if (a === '--clean-workspace') cleanWorkspace = true;
-    else if (a === '--container') container = true;
-    else if (a === '--no-container') container = false;
-    else if (a === '--egress') { egress = true; container = true; }
-    else if (a === '--no-egress') egress = false;
+    else if (
+      a === '--container' ||
+      a === '--no-container' ||
+      a === '--egress' ||
+      a === '--no-egress'
+    ) {
+      // Parsed once by resolveToolBackendMode above.
+    }
     else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
     else if (goal === undefined) goal = a;
   }
-  if (egress) container = true;
   return {
     goal, noLearnSkills, noPromoteSkills, noDirectSkills,
-    cleanWorkspace, container, egress, baseline,
+    cleanWorkspace, ...backendMode, baseline,
     ...(seed ? { seed } : {}),
   };
 }

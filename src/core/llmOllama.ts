@@ -44,8 +44,8 @@ export interface OllamaLlmClientOptions {
   maxToolIterations?: number;
 }
 
-const DEFAULT_BASE_URL = 'http://localhost:11434';
-const DEFAULT_MODEL = 'glm-5.1:cloud';
+export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
+export const OLLAMA_DEFAULT_MODEL = 'glm-5.1:cloud';
 const DEFAULT_MAX_TOOL_ITERATIONS = 24;
 
 interface OllamaMessage {
@@ -96,8 +96,8 @@ export class OllamaLlmClient implements LlmClient {
   private readonly maxIter: number;
 
   constructor(opts: OllamaLlmClientOptions = {}) {
-    this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, '');
-    this.defaultModel = opts.defaultModel ?? DEFAULT_MODEL;
+    this.baseUrl = (opts.baseUrl ?? OLLAMA_DEFAULT_BASE_URL).replace(/\/$/, '');
+    this.defaultModel = opts.defaultModel ?? OLLAMA_DEFAULT_MODEL;
     this.maxIter = opts.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
   }
 
