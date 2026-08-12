@@ -3649,12 +3649,12 @@ the worker never loads them.
 
 ## atoma as an MCP server (stdio) — `src/mcp/`
 
-`npx tsx src/mcp/server.ts` speaks MCP on stdio: **13 tools**, two of which
+`npx tsx src/mcp/stdio.ts` speaks MCP on stdio: **13 tools**, two of which
 mutate (`atoma_run_start`, `atoma_run_cancel`) and eleven of which are pure
 readers over the persisted state (families, registry list/show, skills
 list/stats/review, ledger check, runs list, one trace, the friction report,
 plus run status).
-Registered with `claude mcp add atoma -s local -- npx tsx <abs>/src/mcp/server.ts`;
+Registered with `claude mcp add atoma -s local -- npx tsx <abs>/src/mcp/stdio.ts`;
 verified `✓ Connected` by Claude Code's own client.
 
 **WHY STDIO IS THE WHOLE SAFETY ARGUMENT, AND WHY YOU MUST NOT ADD A PORT.**
@@ -3689,10 +3689,13 @@ non-JSON line — stricter than atoma's own container protocol, which
 deliberately drops them (`drainLines`). `claimStdoutForProtocol` therefore
 captures the real `process.stdout.write` for the transport and then redirects
 `process.stdout.write` to stderr, so every `console.log` in this repo and in
-every dependency is neutralised rather than trusted. BOTH DIRECTIONS ARE
-PINNED: injecting `console.log` BEFORE the claim fails the subprocess test
-naming the offending line; injecting it AFTER is swallowed and the test still
-passes. Same rule already written down for the container worker.
+every dependency is neutralised rather than trusted. The claim must happen
+BEFORE the application import graph: ESM evaluates static imports first, so
+putting it at the top of `server.ts` was still too late for a noisy dependency.
+`stdio.ts` is now the tiny bootstrap — its only static import is the quiet
+claim helper, then it dynamically imports `server.ts`. A source-order test pins
+claim-before-import and the real subprocess test rejects any non-JSON stdout.
+Same rule already written down for the container worker.
 
 **`spawnRun` WAS EXTENDED, NOT FORKED**, because it is the one sanctioned run
 driver and its kill sequence was measured (a naive re-implementation leaks nine

@@ -31,7 +31,7 @@
  * a CHILD PROCESS — see `src/mcp/run.ts` for the four independent blockers.
  */
 
-import { Writable } from 'node:stream';
+import type { Writable } from 'node:stream';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -58,27 +58,6 @@ import {
   shutdownRuns,
   startRun,
 } from './run.js';
-
-/**
- * Capture the ONE path to fd 1 before anything can write to it, then close the
- * door behind us. `console.log` calls `process.stdout.write` on the same stream
- * object, so patching that method is what makes the guarantee structural
- * rather than a promise to be careful.
- */
-function claimStdoutForProtocol(): Writable {
-  const realWrite = process.stdout.write.bind(process.stdout);
-  const protocolOut = new Writable({
-    write(chunk: string | Uint8Array, encoding: BufferEncoding, callback: (e?: Error | null) => void) {
-      realWrite(chunk, encoding, callback);
-    },
-  });
-  process.stdout.write = ((
-    chunk: string | Uint8Array,
-    encoding?: BufferEncoding,
-    callback?: (e?: Error | null) => void
-  ): boolean => process.stderr.write(chunk, encoding, callback)) as typeof process.stdout.write;
-  return protocolOut;
-}
 
 /** Wrap any reader payload in the tool-result shape this SDK expects. */
 function jsonResult(payload: unknown): {
@@ -368,13 +347,8 @@ export function buildServer(): McpServer {
   return server;
 }
 
-/**
- * Boot only when executed directly, so the module is importable by tests
- * without speaking MCP on the test runner's stdio — the same guard the burn-in
- * CLI, the curriculum CLI and the container worker use.
- */
-async function boot(): Promise<void> {
-  const protocolOut = claimStdoutForProtocol();
+/** Boot after `stdio.ts` has already claimed stdout for the protocol. */
+export async function boot(protocolOut: Writable): Promise<void> {
   // Work from the repo root whatever cwd the host launched us in. This is what
   // makes `storeDbPath()` / `skillsDirPath()` / `./runs` resolve to the SAME
   // store the child run will use, without this file growing a second copy of
@@ -406,8 +380,4 @@ async function boot(): Promise<void> {
   const server = buildServer();
   await server.connect(new StdioServerTransport(process.stdin, protocolOut));
   process.stderr.write(`[atoma-mcp] ready on stdio · repo ${process.cwd()}\n`);
-}
-
-if (process.argv[1] && /server\.(ts|js)$/.test(process.argv[1])) {
-  await boot();
 }

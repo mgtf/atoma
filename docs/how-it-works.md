@@ -469,7 +469,7 @@ Recorded so nobody has to discover it in a demo:
 | What was tried and rejected? | `AGENTS.md` § *Considered and rejected* — with the measurements that settled it |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
-| How does another agent drive atoma? | `claude mcp add atoma -- npx tsx "$PWD/src/mcp/server.ts"` — stdio only, 13 tools |
+| How does another agent drive atoma? | `claude mcp add atoma -- npx tsx "$PWD/src/mcp/stdio.ts"` — stdio only, 13 tools |
 | Are the economics real? | `burnin/results.csv`, regenerable with `npm run burnin` |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/verify-maint.mjs` executes them; `benchmark/results-round8-scores.json` is its output. Rounds 4-7 have no committed scorer output |

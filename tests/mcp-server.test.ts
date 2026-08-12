@@ -370,6 +370,15 @@ describe('MCP server instructions', () => {
     expect(INSTRUCTIONS).toMatch(/SERIALISED/);
     expect(INSTRUCTIONS).toMatch(/DESTRUCTIVE/);
   });
+
+  it('claims stdout before dynamically loading the server import graph', () => {
+    const source = readFileSync(join(repoRoot(), 'src/mcp/stdio.ts'), 'utf8');
+    const claim = source.indexOf('claimStdoutForProtocol()');
+    const load = source.indexOf("import('./server.js')");
+    expect(claim).toBeGreaterThanOrEqual(0);
+    expect(load).toBeGreaterThan(claim);
+    expect(source).not.toMatch(/import\s+.+from\s+['"]\.\/server/);
+  });
 });
 
 /**
@@ -389,7 +398,7 @@ describe('MCP server instructions', () => {
  */
 describe('MCP server over real stdio', () => {
   it('emits nothing on stdout but JSON-RPC frames', async () => {
-    const child = spawn('npx', ['tsx', 'src/mcp/server.ts'], {
+    const child = spawn('npx', ['tsx', 'src/mcp/stdio.ts'], {
       cwd: repoRoot(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
