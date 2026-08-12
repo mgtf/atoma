@@ -82,6 +82,42 @@ describe('L1Atom', () => {
     expect(result.toolCallResults).toEqual([]);
   });
 
+  it('proves an injected script skill only after its written scratch file runs', async () => {
+    const ctx = makeCtx();
+    ctx.llm.enqueue((req) => {
+      req.onToolInvocation?.({
+        name: 'write_file',
+        args: { path: '_skill_package-and-document-cli.mjs' },
+        result: { ok: true },
+        durationMs: 1,
+        startedAt: 1,
+      });
+      req.onToolInvocation?.({
+        name: 'run_shell',
+        args: {
+          command: 'node',
+          args: ['_skill_package-and-document-cli.mjs', '{"task":"package"}'],
+        },
+        result: { exitCode: 0, stdout: '{"output":{},"summary":"ok"}\n' },
+        durationMs: 1,
+        startedAt: 2,
+      });
+      return {
+        text: jsonText({ output: 'done', summary: 'packaged' }),
+        stopReason: 'end_turn',
+        usage: { inputTokens: 1, outputTokens: 1 },
+      };
+    });
+    const atom = new L1Atom(base);
+    atom.setActiveSkill('package-and-document-cli', 'Lithium');
+    const result = await atom.execute(
+      { description: 'package' },
+      makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),
+      ctx
+    );
+    expect(result.activeScriptSkillExecuted).toBe(true);
+  });
+
   it('distinguishes successful actions from structured soft failures', () => {
     const baseInfo = { name: 'x', args: {}, durationMs: 1, startedAt: 1 };
     expect(toolInvocationSucceeded({ ...baseInfo, result: { ok: true } })).toBe(true);

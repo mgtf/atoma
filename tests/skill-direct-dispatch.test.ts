@@ -216,6 +216,51 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     expect(calls).toHaveLength(0);
     // The script body was injected for the LLM path instead.
     expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/== ACTIVE SKILL: scaffold-config/);
+    expect(events.map((e) => e.op)).toEqual(['match', 'inject', 'credit-withheld']);
+  });
+
+  it('credits an untrusted script only when L1 writes and runs its exact scratch file', async () => {
+    trustAtomType();
+    saveScriptSkill(0);
+    const { executor } = makeExecutor({ exitCode: 0, stdout: ENVELOPE_LINE, stderr: '' });
+    const events: SkillEventInfo[] = [];
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const ctx = makeCtxWith(executor, events);
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueue((req) => {
+      req.onToolInvocation?.({
+        name: 'write_file',
+        args: { path: '_skill_scaffold-config.mjs' },
+        result: { ok: true },
+        durationMs: 1,
+        startedAt: 1,
+      });
+      req.onToolInvocation?.({
+        name: 'run_shell',
+        args: {
+          command: 'node',
+          args: ['_skill_scaffold-config.mjs', JSON.stringify('scaffold the config')],
+        },
+        result: { exitCode: 0, stdout: ENVELOPE_LINE, stderr: '' },
+        durationMs: 1,
+        startedAt: 2,
+      });
+      return {
+        text: jsonText({ output: 'done', summary: 'script-assisted path' }),
+        stopReason: 'end_turn',
+        usage: { inputTokens: 10, outputTokens: 10 },
+      };
+    });
+
+    await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    expect(loaded.successes).toBe(1);
     expect(events.map((e) => e.op)).toEqual(['match', 'inject', 'success']);
   });
 
@@ -243,11 +288,12 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // dispatch doesn't leave debris for the LLM loop to trip over.
     expect(calls.map((c) => c.name)).toEqual(['write_file', 'run_shell', 'run_shell']);
     expect(calls[2]!.args['args']).toContain('_skill_scaffold-config.mjs');
-    // A deterministic failure is NOT a skill failure: the LLM loop got
-    // its shot and approved, so the skill records a success.
+    // A deterministic failure is NOT a skill failure. The fallback LLM
+    // delivered, but it did not execute the injected script scratch body, so
+    // that delivery cannot credit the script either.
     const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
     expect(loaded.failures).toBe(0);
-    expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+    expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
   });
 
   it('DEMOTES a script back to its llm fallback after 2 consecutive deterministic failures', async () => {
@@ -380,9 +426,10 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
     await water.handleDirect({ description: 'scaffold the config' }, ctx);
-    // And crucially: no success was credited to the skill by the direct path.
+    // Neither the off-contract direct result nor an LLM fallback that ignored
+    // the injected scratch body may credit the script.
     const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
-    expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1); // from the LLM loop only
+    expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
     expect(loaded.failures).toBe(0);
   });
 

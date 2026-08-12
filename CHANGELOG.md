@@ -109,6 +109,12 @@
   interactions, and uninvoked IIFE bodies are rejected before browser launch.
 - Compiled packaging recipes omit unproven package scripts instead of emitting
   `start`/`test` commands that fail when a CLI requires arguments.
+- Explicit JSON object/array requirements are checked against parseable
+  successful probe stdout before trusted results can skip semantic review.
+- The L1 transport records whether an injected script scratch file actually
+  ran; ignored script recipes cannot earn credit through type trust.
+- OpenAI-compatible pseudo-final `json` calls carrying a complete nested
+  `{output,summary}` Result are normalized without an off-scope tool round-trip.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

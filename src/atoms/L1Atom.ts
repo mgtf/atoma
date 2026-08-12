@@ -305,13 +305,34 @@ export class L1Atom extends Atom {
     // transparently on the FIRST pass, before spiralling.
     let lastValidateHtml: { ok: boolean; summary: string } | null = null;
     const observedToolCalls: Array<{ name: string; ok: boolean }> = [];
+    const writtenSkillScratchFiles = new Set<string>();
+    let activeScriptSkillExecuted = false;
     const onToolInvocation = (info: ToolInvocationInfo): void => {
       // Bounded, content-free action witness for skill auto-distillation.
       // A low-capability provider produced zero tool events, claimed it had
       // built a CLI, and two recipes were learned from that fiction. Names +
       // success bits prove an action happened without retaining tool payloads.
+      const succeeded = toolInvocationSucceeded(info);
       if (observedToolCalls.length < 64) {
-        observedToolCalls.push({ name: info.name, ok: toolInvocationSucceeded(info) });
+        observedToolCalls.push({ name: info.name, ok: succeeded });
+      }
+      if (succeeded && info.name === 'write_file' && typeof info.args['path'] === 'string') {
+        const path = info.args['path'];
+        const activeScratchPrefix =
+          this.activeSkillIdField !== null ? `_skill_${this.activeSkillIdField}.` : null;
+        if (
+          activeScratchPrefix !== null &&
+          path.startsWith(activeScratchPrefix) &&
+          /\.(?:mjs|py|sh)$/i.test(path)
+        ) {
+          writtenSkillScratchFiles.add(path);
+        }
+      }
+      if (succeeded && info.name === 'run_shell' && writtenSkillScratchFiles.size > 0) {
+        const invocation = JSON.stringify(info.args);
+        activeScriptSkillExecuted ||= [...writtenSkillScratchFiles].some((path) =>
+          invocation.includes(path)
+        );
       }
       if (info.name !== 'validate_html') return;
       const r = info.result as Record<string, unknown> | undefined;
@@ -386,6 +407,7 @@ export class L1Atom extends Atom {
       // that the transport observed NO tool action. Legacy/test producers may
       // omit the field and remain backward-compatible at upper tiers.
       toolCallResults: observedToolCalls,
+      ...(this.activeSkillIdField !== null ? { activeScriptSkillExecuted } : {}),
       // Typed witnesses, attached at production time: the child's recorded
       // probes become first-class evidence the upper tiers can weigh
       // without re-parsing the payload.

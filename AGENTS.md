@@ -1326,6 +1326,36 @@ re-exports all the historical names so old imports keep working.
   machine-recorded invocation with shipped fixtures, otherwise scripts are
   omitted. A successful deterministic envelope is evidence for what the script
   reports; it is not permission to invent adjacent metadata.
+- **TWENTY-SIXTH LIVE ITERATION, 2026-08-12 — real probes can prove the wrong
+  JSON shape.** The first validated re-earn run for the corrected packaging
+  script delivered word-frequency in 237s/17 calls/$0.2097 estimated, with no
+  direct phase and one recovered rejection (trace
+  `2026-08-12T22-40-15-482-0316dbd2`). The first L1 attempt actually emitted
+  the requested object map, but its final envelope truncated; the retry rewrote
+  the implementation to an array of `{word,count}` records. Five probes were
+  real and clean, so both validators approved despite the goal's explicit
+  "JSON object mapping". Independent scoring also found the ASCII tokenizer
+  turning `café` into `caf` despite the UTF-8 requirement.
+  L2 now mechanically compares an explicit `JSON object` / `JSON array`
+  requirement with every parseable successful recorded stdout BEFORE trust or
+  LLM validation; non-JSON/mixed stdout remains for judgment. The live argv
+  recipe names both the container rule and Unicode property escapes, and now
+  asks for a non-ASCII fixture when UTF-8 is explicit. The false Lithium and
+  Ammonia successes were transactionally removed; the driving recipe gained
+  one honest failure.
+  The packaging phase exposed two independent lifecycle issues. GLM emitted
+  the complete final Result as an off-scope `json` tool call; the transport now
+  normalises that third observed pseudo-final shape only when its nested value
+  parses to `{output,summary}`. More importantly, the untrusted script recipe
+  was ignored: L1 manually authored equivalent files, type trust skipped the
+  adherence validator, and the new script body gained 1/0 without executing.
+  L1 now records a content-free transport witness only after a successful
+  `_skill_<id>.<ext>` write is followed by a successful run_shell invocation
+  naming that exact scratch file. L2 mechanically forces
+  `activeSkillFollowed:false` for an active script lacking that witness, on
+  both trust and full-verdict paths. The false 1/0 was reset to 0/0. The
+  missing-envelope recovery skill was kept: unlike the other findings, it
+  describes the real first-attempt failure and its cause remains possible.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

@@ -25,3 +25,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T22:03:18.959Z,hydration-widget-state-journey,web,failed,0.489,900,41,0,0,0,0,6,0,0,0,0,0,2026-08-12T22-03-19-485-9a61c073.json,ollama+zai+codex,41,0
 2026-08-12T22:23:09.739Z,hydration-widget-state-journey,web,delivered,0.2477,459,23,0,0,0,0,2,0,0,0,0,0,2026-08-12T22-23-10-308-077293c4.json,ollama+zai+codex,23,0
 2026-08-12T22:35:03.343Z,dedupe-lines-cli-semantic-package,cli,delivered,0.1056,96,11,0,0,0,1,0,0,0,0,0,0,2026-08-12T22-35-03-872-45fd2b52.json,ollama+zai+codex,11,0
+2026-08-12T22:40:14.959Z,word-frequency-cli-package-revalidation,cli,delivered,0.2097,237,17,0,0,0,0,0,0,0,1,0,0,2026-08-12T22-40-15-482-0316dbd2.json,ollama+zai+codex,17,1

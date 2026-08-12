@@ -2,7 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
-import { L2Atom, webStylingEvidenceMissing } from '../src/atoms/L2Atom.js';
+import {
+  L2Atom,
+  recordedJsonShapeMismatch,
+  webStylingEvidenceMissing,
+} from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
@@ -157,6 +161,37 @@ describe('webStylingEvidenceMissing', () => {
   });
 });
 
+describe('recordedJsonShapeMismatch', () => {
+  const probeResult = (stdout: string): Result =>
+    result({
+      output: {
+        probes: [{ cmd: 'node word-frequency.js input.txt', exitCode: 0, stdout }],
+      },
+      summary: 'verified output',
+    });
+
+  it('distinguishes requested JSON objects and arrays from recorded stdout', () => {
+    expect(
+      recordedJsonShapeMismatch(
+        { description: 'print a JSON object mapping words to counts' },
+        probeResult('[{"word":"hello","count":2}]\n')
+      )
+    ).toMatch(/requires JSON object.*returned a JSON array/);
+    expect(
+      recordedJsonShapeMismatch(
+        { description: 'print a JSON object mapping words to counts' },
+        probeResult('{"hello":2}\n')
+      )
+    ).toBeNull();
+    expect(
+      recordedJsonShapeMismatch(
+        { description: 'print a JSON array of records' },
+        probeResult('{"hello":2}\n')
+      )
+    ).toMatch(/requires JSON array.*returned a JSON object/);
+  });
+});
+
 describe('trust fast-path × ground-truth probe', () => {
   it('rejects a production L1 result when the transport observed no successful action', async () => {
     const { l2, l1, ctx, exec } = setup({ 'index.js': 'console.log("real")' });
@@ -214,6 +249,33 @@ describe('trust fast-path × ground-truth probe', () => {
     );
     expect(verdict.approved).toBe(false);
     expect(verdict.reasoning).toMatch(/final validate_html call failed/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual([]);
+  });
+
+  it('rejects a recorded JSON container mismatch before trust', async () => {
+    const { l2, l1, ctx, exec } = setup({ 'word-frequency.js': 'console.log("[]")' });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: {
+          files: ['word-frequency.js'],
+          probes: [
+            {
+              cmd: 'node word-frequency.js input.txt',
+              exitCode: 0,
+              stdout: '[{"word":"hello","count":2}]\n',
+            },
+          ],
+        },
+        summary: 'verified JSON output',
+        toolCallResults: [{ name: 'record_probe', ok: true }],
+      }),
+      { description: 'print a JSON object mapping lowercase words to counts' },
+      { ...ctx, requireObservedToolAction: true }
+    );
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/requires JSON object.*JSON array/);
     expect(ctx.llm.calls).toHaveLength(0);
     expect(exec.calls).toEqual([]);
   });

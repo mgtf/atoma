@@ -11,6 +11,7 @@ import type {
   Verdict,
 } from '../core/types.js';
 import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
+import { recordedProbesFromWitnesses } from '../contracts/witness.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from '../skills/scriptScan.js';
 import {
   stripBranchProvenance,
@@ -225,6 +226,44 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
     if (/(?:reset|final)/i.test(evidenceText)) resetStyling = true;
   }
   return !(milestoneStyling && resetStyling);
+}
+
+export function recordedJsonShapeMismatch(task: Task, result: Result): string | null {
+  const expectsObject = /\bJSON\s+object\b/i.test(task.description);
+  const expectsArray = /\bJSON\s+array\b/i.test(task.description);
+  if (expectsObject === expectsArray) return null;
+  const payloadProbes =
+    result.output && typeof result.output === 'object' && !Array.isArray(result.output)
+      ? (result.output as Record<string, unknown>)['probes']
+      : undefined;
+  const probes = Array.isArray(payloadProbes)
+    ? payloadProbes
+    : recordedProbesFromWitnesses(result.evidence);
+  if (probes.length === 0) return null;
+
+  let observed = 0;
+  let matching = 0;
+  for (const probe of probes) {
+    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) continue;
+    const entry = probe as Record<string, unknown>;
+    if (entry['exitCode'] !== 0 || typeof entry['stdout'] !== 'string') continue;
+    const stdout = entry['stdout'].trim();
+    if (!stdout) continue;
+    try {
+      const parsed = JSON.parse(stdout) as unknown;
+      observed++;
+      const isArray = Array.isArray(parsed);
+      const isObject = parsed !== null && typeof parsed === 'object' && !isArray;
+      if ((expectsObject && isObject) || (expectsArray && isArray)) matching++;
+    } catch {
+      // Non-JSON stdout is silent here; the normal validator decides whether
+      // mixed/logged output satisfies the task.
+    }
+  }
+  if (observed === 0 || matching > 0) return null;
+  return expectsObject
+    ? 'the task requires JSON object output, but every parseable successful probe returned a JSON array'
+    : 'the task requires JSON array output, but every parseable successful probe returned a JSON object';
 }
 
 
@@ -1878,6 +1917,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         },
       };
     }
+    const jsonShapeMismatch = recordedJsonShapeMismatch(task, result);
+    if (jsonShapeMismatch) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name} contradicts the task's requested JSON container shape — mechanically rejected before trust/LLM validation`
+      );
+      return {
+        approved: false,
+        reasoning: jsonShapeMismatch,
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'The successful recorded stdout has the wrong JSON container shape. Preserve the verified values and ordering, but emit exactly the requested JSON object or JSON array, then re-run every success probe and return their new real stdout.',
+        },
+      };
+    }
     if (
       child.toolNames().includes('validate_html') &&
       webStylingEvidenceMissing(task, result)
@@ -1893,6 +1947,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         },
       };
     }
+    const activeSkillId = child.activeSkillId();
+    const activeSkill =
+      activeSkillId && this.skillRegistry
+        ? this.skillRegistry
+            .loadFor(child.activeSkillOwner() ?? child.name)
+            .find((s) => s.id === activeSkillId)
+        : undefined;
+    const activeScriptSkillIgnored =
+      activeSkill?.kind === 'script' && result.activeScriptSkillExecuted !== true;
     const type = this.registry.getByName(child.name);
     // The trust fast-path skips the LLM validator — but it must NOT skip the
     // ground-truth probe. The probe costs zero tokens (local fs / one page
@@ -1927,7 +1990,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           failures: type.failures,
           reasoning: approval.reasoning,
         });
-        return approval;
+        return activeScriptSkillIgnored
+          ? { ...approval, activeSkillFollowed: false }
+          : approval;
       }
       const reviewReason = trustedProbe.contradiction
         ? 'ground-truth evidence contradicts the RESULT'
@@ -1941,14 +2006,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // signal alongside the verdict. The onApproved/onFailed hooks gate the
     // skill's counter bumps on it — a child that ignored the recipe proves
     // nothing about it, and unearned successes arm the promotion trigger.
-    const activeSkillId = child.activeSkillId();
-    const activeSkill =
-      activeSkillId && this.skillRegistry
-        ? this.skillRegistry
-            .loadFor(child.activeSkillOwner() ?? child.name)
-            .find((s) => s.id === activeSkillId)
-        : undefined;
-    return llmVerdict({
+    const verdict = await llmVerdict({
       ctx,
       model: this.validationModel,
       supervisorName: this.name,
@@ -1961,6 +2019,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       payload: { output: result.output, summary: result.summary },
       ...(result.evidence ? { evidence: result.evidence } : {}),
     });
+    return activeScriptSkillIgnored
+      ? { ...verdict, activeSkillFollowed: false }
+      : verdict;
   }
 }
 

@@ -109,6 +109,8 @@ export interface Result {
   readonly output: unknown;
   readonly summary: string;
   readonly toolCallResults?: unknown[];
+  /** Transport-observed proof that an injected script skill's scratch body ran. */
+  readonly activeScriptSkillExecuted?: boolean;
   readonly trace: TraceEntry[];
   readonly producedBy: { tier: Tier; name: string; viaFallback: boolean };
   /**

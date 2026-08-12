@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
+import { L1Atom } from '../src/atoms/L1Atom.js';
+import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import {
   ADHERENCE_BODY_MAX_CHARS,
   renderActiveSkillBlock,
@@ -220,6 +222,40 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     // The CHILD did succeed, whatever it was following — type credit is
     // orthogonal to skill credit and must survive the withholding.
     expect(reg.getByName('Hydrogen')!.successes).toBe(1);
+  });
+
+  it('marks an ignored script skill as not followed even on the type trust fast-path', async () => {
+    skills.save('Hydrogen', {
+      id: 'the-recipe',
+      description: 'd',
+      whenToUse: 'w',
+      kind: 'script',
+      language: 'node',
+      body: 'process.stdout.write(JSON.stringify({output:{},summary:"ok"}))',
+    });
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
+      reg.recordSuccess('Hydrogen');
+    }
+    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const hydrogen = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    hydrogen.setActiveSkill('the-recipe', 'Hydrogen');
+    const ctx = makeCtx();
+    const verdict = await water.validateResult(
+      hydrogen,
+      {
+        output: 'packaged without running the injected scratch script',
+        summary: 'deliverable exists',
+        activeScriptSkillExecuted: false,
+        toolCallResults: [{ name: 'write_file', ok: true }],
+        trace: [],
+        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+      },
+      { description: 'package the CLI' },
+      ctx
+    );
+    expect(verdict.approved).toBe(true);
+    expect(verdict.activeSkillFollowed).toBe(false);
+    expect(ctx.llm.calls).toHaveLength(0);
   });
 
   it('keeps the legacy bump when the validator omits the signal', async () => {

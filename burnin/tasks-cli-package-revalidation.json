@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "word-frequency-cli-package-revalidation",
+      "family": "cli",
+      "goal": "Build a no-dependency Node CLI in word-frequency.js that accepts one UTF-8 text-file path and prints a JSON object mapping lowercase words to occurrence counts, ordered by first appearance. Punctuation and blank input must be handled, while missing arguments and unreadable files exit non-zero. Verify representative success and error invocations. As a FINAL SEPARATE PHASE, create package.json and README.md with a 'Verified invocations' section documenting exact observed commands and outputs."
+    }
+  ]
+}

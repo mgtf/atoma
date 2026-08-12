@@ -394,6 +394,25 @@ export function coercePseudoFinalToolCall(
   requested: string,
   args: Record<string, unknown>
 ): string | null {
+  if (requested === 'json' && typeof args['output'] === 'string') {
+    try {
+      const parsed = JSON.parse(args['output']) as unknown;
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        'output' in parsed &&
+        typeof (parsed as Record<string, unknown>)['summary'] === 'string'
+      ) {
+        return JSON.stringify({
+          output: (parsed as Record<string, unknown>)['output'],
+          summary: (parsed as Record<string, unknown>)['summary'],
+        });
+      }
+    } catch {
+      return null;
+    }
+  }
   const summary = typeof args['summary'] === 'string' ? args['summary'] : null;
   if (!summary) return null;
   if (requested === 'return' && 'output' in args) {

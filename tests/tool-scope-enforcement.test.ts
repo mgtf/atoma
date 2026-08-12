@@ -36,7 +36,7 @@ describe('offScopeToolMessage final-answer coaching', () => {
     );
   });
 
-  it('normalises only the two observed unambiguous pseudo-final shapes', () => {
+  it('normalises only the observed unambiguous pseudo-final shapes', () => {
     expect(
       JSON.parse(
         coercePseudoFinalToolCall('return', {
@@ -53,7 +53,21 @@ describe('offScopeToolMessage final-answer coaching', () => {
         )!
       )
     ).toEqual({ output: { files: ['README.md'] }, summary: 'written' });
+    expect(
+      JSON.parse(
+        coercePseudoFinalToolCall('json', {
+          output: JSON.stringify({
+            output: { packageJson: { name: 'word-frequency' } },
+            summary: 'packaged',
+          }),
+        })!
+      )
+    ).toEqual({
+      output: { packageJson: { name: 'word-frequency' } },
+      summary: 'packaged',
+    });
     expect(coercePseudoFinalToolCall('validate_html', { summary: 'no' })).toBeNull();
+    expect(coercePseudoFinalToolCall('json', { output: '{"output":{}}' })).toBeNull();
   });
 });
 
