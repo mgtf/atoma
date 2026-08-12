@@ -17,6 +17,7 @@ import { SkillRegistry } from '../skills/registry.js';
 
 const LOOPBACK_HTTP_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
+export const INTERNAL_VALIDATION_FAILED_PREFIX = '[INTERNAL VALIDATION FAILED';
 
 /**
  * L1-only executor view: every loopback fetch is verification of the server
@@ -373,7 +374,7 @@ export class L1Atom extends Atom {
     // produce the same signal via a longer path.
     const summary =
       lastValidateHtml && !(lastValidateHtml as { ok: boolean }).ok
-        ? `[INTERNAL VALIDATION FAILED — last validate_html: ${(lastValidateHtml as { summary: string }).summary}] ${rawSummary}`
+        ? `${INTERNAL_VALIDATION_FAILED_PREFIX} — last validate_html: ${(lastValidateHtml as { summary: string }).summary}] ${rawSummary}`
         : rawSummary;
 
     return {

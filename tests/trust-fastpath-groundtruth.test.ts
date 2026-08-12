@@ -138,6 +138,28 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual([]);
   });
 
+  it('rejects an explicit internal validate_html failure before trust', async () => {
+    const { l2, l1, ctx, exec } = setup({ 'index.html': '<main>widget</main>' });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['index.html'] },
+        summary:
+          '[INTERNAL VALIDATION FAILED — last validate_html: smoke check failed] widget done',
+        toolCallResults: [
+          { name: 'write_file', ok: true },
+          { name: 'validate_html', ok: false },
+        ],
+      }),
+      { description: 'build and verify index.html' },
+      { ...ctx, requireObservedToolAction: true }
+    );
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/final validate_html call failed/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual([]);
+  });
+
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {
     const { l2, l1, ctx, exec } = setup({
       'README.md': '# json-cli\n\n## Install\n\n## Usage\n',

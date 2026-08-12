@@ -1107,6 +1107,24 @@ re-exports all the historical names so old imports keep working.
   selector; ambiguous/non-id selectors still fail. Widget guidance now
   requires enumerating every class getter and proving no assignment/increment
   targets that getter name before serving. Another exact rerun is required.
+- **FOURTEENTH LIVE ITERATION, 2026-08-12 — internal validation failure must
+  outrank trust.** The strict-boolean rerun delivered in
+  210s/13 calls/$0.1056 estimated (trace
+  `2026-08-12T19-58-03-242-94cd8ff0`). Getter/backing-field generation was
+  clean and selector spelling was uniquely normalised without a failed
+  interaction. The stricter tool correctly rejected the final smoke:
+  `ok:true` sat beside six false class assertions. L1 correctly prefixed its
+  result with `[INTERNAL VALIDATION FAILED]` — and the trusted Hydrogen result
+  was nevertheless approved without a validator, so the run banner still said
+  delivered. The mechanism designed to surface the failure was inert on the
+  mature path.
+  L2 now mechanically rejects that prefix BEFORE trust/LLM validation, exactly
+  like the non-JSON and no-successful-action gates. `validate_html` also
+  preflights interaction sequences: repeated changes followed by reset are
+  refused when the smoke neither drives nor snapshots a milestone before
+  reset (explicit app history is also acceptable). This prevents spending a
+  browser round on evidence that is structurally incapable of proving the
+  intermediate state. A further exact rerun is required.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

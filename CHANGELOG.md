@@ -76,6 +76,10 @@
 - Interaction IDs tolerate only a unique case/kebab/snake spelling match to an
   existing DOM id, while widget guidance checks every getter name for illegal
   writes before serving.
+- L1 results carrying `[INTERNAL VALIDATION FAILED]` are mechanically rejected
+  before a trusted type can bypass validation.
+- `validate_html` rejects repeated-change-then-reset sequences whose smoke
+  cannot observe or reconstruct the erased intermediate state.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

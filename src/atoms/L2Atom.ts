@@ -18,7 +18,7 @@ import {
   type AtomType,
 } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
-import { L1Atom } from './L1Atom.js';
+import { INTERNAL_VALIDATION_FAILED_PREFIX, L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
   l2StrategySchema,
@@ -1819,6 +1819,21 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         modifications: {
           additionalContext:
             'Your tool work may already be complete. Do not call a return/output tool and do not narrate the result as prose. Emit one final JSON object directly as assistant text: {"output": <actual result>, "summary": "<evidence-backed summary>"}.',
+        },
+      };
+    }
+    if (result.summary.startsWith(INTERNAL_VALIDATION_FAILED_PREFIX)) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name} reports an internal validation failure — mechanically rejected before trust/LLM validation`
+      );
+      return {
+        approved: false,
+        reasoning:
+          'the L1 result explicitly reports that its final validate_html call failed',
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'Your last validate_html result was not ok. Read its exact errors/smokeResult, fix the artefact or the assertion, and re-run validation until ok:true before returning the final JSON.',
         },
       };
     }

@@ -1275,7 +1275,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           smoke: {
             type: 'string',
             description:
-              'JavaScript EXPRESSION evaluated in the page context after interactions (wrapped internally as `(() => { const __r = (YOUR_CODE); ... })()` — it CANNOT start with `const`, `let`, `return`, `function`, or contain top-level `;`-separated statements). Should return { ok: boolean, details?: any } or any truthy value to pass. Simple form: `document.querySelectorAll(".revealed").length > 0`. For logic that needs locals, wrap in an IIFE: `(() => { const x = compute(); return x > 0 })()`. For state-heavy apps (games, etc.), EXPOSE A `window.__test` helper from the app and call it here — do NOT try to simulate inputs that need domain-specific knowledge (e.g. a specific winning chess move).',
+              'JavaScript EXPRESSION evaluated in the page context after interactions (wrapped internally as `(() => { const __r = (YOUR_CODE); ... })()` — it CANNOT start with `const`, `let`, `return`, `function`, or contain top-level `;`-separated statements). Structured results MUST return { ok: true, ...details } and every boolean field is an assertion that must be true. Simple boolean form: `document.querySelectorAll(".revealed").length > 0`. For logic that needs locals, wrap in an IIFE. If interactions increment then reset, drive/snapshot the milestone INSIDE the IIFE before reset; the final DOM cannot prove an erased intermediate state.',
           },
         },
         required: ['url'],
@@ -1320,6 +1320,18 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             failedRequests: [],
             interactionLog: [],
             smokeResult: { error: syntax, hint: SMOKE_EXPR_HINT },
+          };
+        }
+        const erased = detectResetErasedIntermediateEvidence(interactions, smoke);
+        if (erased) {
+          return {
+            ok: false,
+            url,
+            errors: [`smoke rejected pre-flight: ${erased}`],
+            warnings: [],
+            failedRequests: [],
+            interactionLog: [],
+            smokeResult: { error: erased },
           };
         }
       }
@@ -1573,7 +1585,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
   };
 }
 
-interface ParsedInteraction {
+export interface ParsedInteraction {
   type: 'click' | 'rightclick' | 'keydown' | 'keyup' | 'keypress';
   selector?: string;
   x?: number;
@@ -1616,6 +1628,45 @@ function parseInteractions(raw: unknown): ParsedInteraction[] {
     out.push(parsed);
   }
   return out;
+}
+
+/**
+ * Interactions are fully replayed before smoke evaluation. Repeated state
+ * changes followed by reset erase the milestone unless the smoke itself
+ * drives and snapshots it (or reads an explicit history exposed by the app).
+ */
+export function detectResetErasedIntermediateEvidence(
+  interactions: readonly ParsedInteraction[],
+  smoke: string
+): string | null {
+  const labels = interactions.map((interaction) =>
+    `${interaction.selector ?? ''} ${interaction.key ?? ''}`.toLowerCase()
+  );
+  let resetAt = -1;
+  for (let i = labels.length - 1; i >= 0; i--) {
+    if (/(?:reset|clear)/.test(labels[i]!)) {
+      resetAt = i;
+      break;
+    }
+  }
+  if (resetAt < 2) return null;
+  const beforeReset = labels.slice(0, resetAt).filter(Boolean);
+  const repeated = beforeReset.some(
+    (label, index) => beforeReset.indexOf(label) !== index
+  );
+  if (!repeated) return null;
+  const preservesIntermediate =
+    /\b(?:milestone|beforeReset|preReset|after(?:Increment|Click|Three)|history|transition)\b/i.test(
+      smoke
+    ) &&
+    /\.(?:increment|advance|click)\s*\(/i.test(smoke) &&
+    /\.(?:reset|clear)\s*\(/i.test(smoke);
+  if (preservesIntermediate) return null;
+  return (
+    'interactions repeat a state-changing control and then reset BEFORE smoke runs, ' +
+    'so the intermediate state has been erased. Drive the exposed API inside one smoke IIFE, ' +
+    'capture a milestone/beforeReset snapshot, reset, capture the final snapshot, and include both in ok.'
+  );
 }
 
 async function resolveInteractionCoords(

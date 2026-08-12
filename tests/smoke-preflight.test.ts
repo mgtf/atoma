@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   detectSmokeStatementError,
+  detectResetErasedIntermediateEvidence,
   isSmokeOk,
   makeSmokeStuckTracker,
   SMOKE_STUCK_WINDOW,
@@ -109,6 +110,33 @@ describe('uniqueNormalizedIdSelector', () => {
     );
     expect(uniqueNormalizedIdSelector('.increment-btn', ['incrementBtn'])).toBeNull();
     expect(uniqueNormalizedIdSelector('#a-b', ['ab', 'a_b'])).toBeNull();
+  });
+});
+
+describe('detectResetErasedIntermediateEvidence', () => {
+  const sequence = [
+    { type: 'click' as const, selector: '#incrementBtn' },
+    { type: 'click' as const, selector: '#incrementBtn' },
+    { type: 'click' as const, selector: '#incrementBtn' },
+    { type: 'click' as const, selector: '#resetBtn' },
+  ];
+
+  it('rejects final-state-only smoke after repeated changes and reset', () => {
+    expect(
+      detectResetErasedIntermediateEvidence(
+        sequence,
+        '({ ok: widget.streak === 0, streak: widget.streak })'
+      )
+    ).toMatch(/intermediate state has been erased/);
+  });
+
+  it('accepts an IIFE that drives and snapshots milestone before reset', () => {
+    expect(
+      detectResetErasedIntermediateEvidence(
+        sequence,
+        '(() => { widget.increment(); const milestone = widget.streak; widget.reset(); return { ok: milestone === 1 && widget.streak === 0, milestone }; })()'
+      )
+    ).toBeNull();
   });
 });
 
