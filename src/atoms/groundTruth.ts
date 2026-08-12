@@ -108,6 +108,8 @@ export interface GroundTruthFacts {
   selfReportedMismatch: boolean;
   /** The machine-readable probe manifest exists but violates its contract. */
   manifestMalformed: boolean;
+  /** Durable HTTP docs contain a numeric loopback port from this run. */
+  durablePortLiteralFiles: string[];
   /**
    * The RESULT quoted a span it ATTRIBUTED to a file, and that file does not
    * contain it. Rendered as `path: QUOTED SPAN … — NOT FOUND`.
@@ -122,6 +124,7 @@ export function emptyGroundTruthFacts(): GroundTruthFacts {
     probeToolFailure: false,
     selfReportedMismatch: false,
     manifestMalformed: false,
+    durablePortLiteralFiles: [],
     quotedSpanNotFound: [],
   };
 }
@@ -158,7 +161,10 @@ export async function checkGroundTruth(args: {
   return {
     block,
     contradiction,
-    requiresReview: contradiction || facts.manifestMalformed,
+    requiresReview:
+      contradiction ||
+      facts.manifestMalformed ||
+      facts.durablePortLiteralFiles.length > 0,
   };
 }
 
@@ -319,6 +325,8 @@ export async function probeGroundTruthEx(args: {
  */
 const LOOPBACK_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
+const DURABLE_HTTP_PORT_LITERAL_RE =
+  /(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d{2,5}\b|LISTENING_ON_PORT=\d{2,5}\b)/i;
 
 /** Max files the read-back probe will open, and per-file excerpt budget. */
 const FILE_PROBE_MAX_FILES = 6;
@@ -747,6 +755,17 @@ async function probeFilesGroundTruth(args: {
       contents.set(path, content);
       const excerpt = content.slice(0, FILE_PROBE_EXCERPT_CHARS);
       if (content.trim().length === 0 && isClaim) facts.emptyClaimedFiles.push(path);
+      if (
+        httpChild &&
+        /\.(?:md|markdown|txt)$/i.test(path) &&
+        DURABLE_HTTP_PORT_LITERAL_RE.test(content)
+      ) {
+        facts.durablePortLiteralFiles.push(path);
+        lines.push(
+          `- ${path}: DURABLE HTTP DOC CONTAINS A NUMERIC LOOPBACK PORT — requires review. ` +
+            'Reject when it copied this run\'s OS-assigned port; approve only if the task explicitly requires a fixed port. Durable examples should use <port>.'
+        );
+      }
       lines.push(
         `- ${path}: EXISTS (${content.length} chars)` +
           (content.trim().length === 0 && isClaim ? ' — WARNING: file is EMPTY' : '') +

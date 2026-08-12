@@ -29,7 +29,8 @@
   shell probe; endpoint observations or a finite harness are the evidence.
 - HTTP builders now distinguish JSON syntax from semantic field validation and
   probe a blank/wrong-type payload; durable docs use `<port>` placeholders
-  rather than the current process's bound port.
+  rather than the current process's bound port, with independent read-back
+  forcing review when a numeric loopback port still leaks into markdown.
 - Probe-manifest validation now rejects custom `probe` scenario labels instead
   of inferring a valid web shape from the presence of `smoke`.
 - The deterministic deliverable gate now compares only proven output targets

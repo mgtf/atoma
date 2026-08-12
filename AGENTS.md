@@ -791,9 +791,13 @@ re-exports all the historical names so old imports keep working.
   the mood state/reset behavior works, and its manifest passes the tightened
   checker. The README's illustrative stdout block still pasted
   `LISTENING_ON_PORT=59420`; the shared guidance now names marker placeholders
-  explicitly too, but that last wording has NOT been re-measured. Two recovered
-  one-off friction events (missing README before it was authored; one malformed
-  smoke variable) do not recur and earn no change.
+  explicitly too, but that last wording has NOT been re-measured. As a
+  deterministic backstop, HTTP-child read-back flags numeric loopback URLs or
+  LISTENING markers in durable markdown/text and overrides trust for validator
+  review; placeholders stay on the fast-path, and a task-explicit fixed port
+  remains approvable. Two recovered one-off friction events (missing README
+  before it was authored; one malformed smoke variable) do not recur and earn
+  no change.
   All five runs left zero workspace servers/Chromium children; ledger remained
   exact. The live package script was also replayed offline: semantic
   `reorder.js` produced package/bin `reorder`, while generic `index.js` refused

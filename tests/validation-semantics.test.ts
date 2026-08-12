@@ -62,6 +62,14 @@ describe('VALIDATION_SYSTEM_PROMPT — tier contract and PLAN/RESULT rubric', ()
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/claims the work is DONE/);
   });
 
+  it('rejects captured dynamic ports in durable HTTP documentation', () => {
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
+      /DURABLE HTTP DOC CONTAINS A\s+NUMERIC LOOPBACK PORT/
+    );
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/ask for <port> placeholders/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/TASK explicitly requires that numeric fixed port/);
+  });
+
   it('keeps the patch/branch non-empty-modifications hard rule intact', () => {
     // This was previously added for the Fluorine no-op issue; make sure the
     // rewrite didn't drop it on the floor.

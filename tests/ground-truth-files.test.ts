@@ -4,6 +4,7 @@ import {
   extractResultFilePaths,
   extractResultFileClaims,
   extractRecordedProbes,
+  checkGroundTruth,
 } from '../src/atoms/L2Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
 import { makeCtx, jsonText } from './helpers.js';
@@ -43,6 +44,22 @@ function webChild(): L1Atom {
     ordinal: 1,
     systemPrompt: 'sys',
     tools: [tool('write_file'), tool('validate_html')],
+    params: {},
+  });
+}
+
+function httpChild(): L1Atom {
+  return new L1Atom({
+    name: 'Helium',
+    ordinal: 2,
+    systemPrompt: 'sys',
+    tools: [
+      tool('write_file'),
+      tool('read_file'),
+      tool('list_files'),
+      tool('fetch_url'),
+      tool('start_node_server'),
+    ],
     params: {},
   });
 }
@@ -377,6 +394,42 @@ describe('file read-back probe (#F9)', () => {
     });
     expect(content).toMatch(/exit=1/);
     expect(content).not.toMatch(/<-- SELF-REPORTED MISMATCH/);
+  });
+
+  it('requires review when durable HTTP docs capture the run\'s numeric port', async () => {
+    const exec = new FsExecutor({
+      'README.md':
+        '# API\nRun against http://localhost:59420\nOutput: LISTENING_ON_PORT=59420\n',
+    });
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: { files: ['README.md'] },
+        summary: 'documented the API',
+      },
+      child: httpChild(),
+    });
+    expect(checked.contradiction).toBe(false);
+    expect(checked.requiresReview).toBe(true);
+    expect(checked.block).toMatch(/DURABLE HTTP DOC CONTAINS A NUMERIC LOOPBACK PORT/);
+  });
+
+  it('keeps HTTP docs with port placeholders on the trust fast-path', async () => {
+    const exec = new FsExecutor({
+      'README.md':
+        '# API\nRun against http://localhost:<port>\nOutput: LISTENING_ON_PORT=<port>\n',
+    });
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: { files: ['README.md'] },
+        summary: 'documented the API',
+      },
+      child: httpChild(),
+    });
+    expect(checked.requiresReview).toBe(false);
   });
 
   it('does NOT fire for a web-bucket child (the validate_html probe owns those)', async () => {

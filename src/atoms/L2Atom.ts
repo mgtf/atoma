@@ -1844,7 +1844,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       }
       const reviewReason = trustedProbe.contradiction
         ? 'ground-truth evidence contradicts the RESULT'
-        : 'the probe manifest is malformed';
+        : 'ground-truth evidence requires review (manifest or durable HTTP docs)';
       ctx.logger.warn(
         `[${this.name}] trust fast-path OVERRIDDEN for ${child.name} (${type.successes}✓/${type.failures}✗): ${reviewReason} — falling through to a full verdict`
       );
