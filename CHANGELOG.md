@@ -121,6 +121,13 @@
   formats, status codes and rejection rules—in every downstream subtask.
 - Burn-in rows distinguish compile transport/time-out errors from genuine
   not-promotable refusals via a trailing `compile_errors` column.
+- Tasks requiring a finite `node test/probe*.js` command now require that exact
+  manifest entry to exist and exit zero before trusted result approval.
+- Web-manifest health rejects non-browser test files, unsupported interactions,
+  non-JavaScript smoke prose, and missing replay expectations.
+- Full-stack plans route real-browser and finite-harness verification through
+  separate sequential web/HTTP phases instead of simulating one capability
+  inside the other.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

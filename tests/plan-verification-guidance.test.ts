@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { L2Atom } from '../src/atoms/L2Atom.js';
-import { L3Atom } from '../src/atoms/L3Atom.js';
+import { L2Atom, taskRequiresRealBrowser } from '../src/atoms/L2Atom.js';
+import { L3Atom, routeCrossBucketVerification } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
 import { preservePlanLiteralContracts } from '../src/atoms/prompts.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
@@ -68,6 +68,7 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/http:\/\/localhost:<port>/);
     expect(planPrompt).toMatch(/LISTENING_ON_PORT=<port>/);
     expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
+    expect(planPrompt).toMatch(/FULL-STACK CROSS-BUCKET RULE/);
     expect(planPrompt).toMatch(/never rename, replace or summarise away/);
   });
 
@@ -100,6 +101,7 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/exact intended output path/);
     expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
     expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
+    expect(planPrompt).toMatch(/REAL browser must route to an L1/);
   });
 });
 
@@ -130,5 +132,95 @@ describe('preservePlanLiteralContracts', () => {
   it('leaves tasks without a structured literal contract untouched', () => {
     const plan = makePlan();
     expect(preservePlanLiteralContracts(plan, 'Write a friendly introduction.')).toBe(plan);
+  });
+});
+
+describe('cross-bucket browser routing', () => {
+  it('splits a mixed final checkpoint and routes browser/shell phases separately', () => {
+    const registry = new AtomRegistry(openDb(':memory:'));
+    registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'validate_html', description: 'browser', inputSchema: { type: 'object' } },
+      ],
+    });
+    registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'run_shell', description: 'shell', inputSchema: { type: 'object' } },
+        {
+          name: 'start_node_server',
+          description: 'server',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    });
+    const plan = makePlan({
+      subtasks: [
+        {
+          description:
+            'Validate the UI in a real browser with selector-based interactions and zero console errors.',
+          preferredChild: 'Methane',
+          inputs: {},
+        },
+        {
+          description:
+            'Reconfirm the UI probe in a real browser with selector-based interactions. Run node test-api.js and require it to pass.',
+          preferredChild: 'Methane',
+          inputs: {},
+        },
+      ],
+      aggregation: { mode: 'sequential' },
+    });
+    const routed = routeCrossBucketVerification(plan, registry);
+    expect(routed.subtasks).toHaveLength(3);
+    expect(routed.subtasks[0]!.preferredChild).toBe('Water');
+    expect(routed.subtasks[1]!.description).toMatch(/BROWSER VERIFICATION ONLY/);
+    expect(routed.subtasks[1]!.preferredChild).toBe('Water');
+    expect(routed.subtasks[2]!.description).toMatch(/FINAL SHELL\/HARNESS/);
+    expect(routed.subtasks[2]!.description).toContain('node test-api.js');
+    expect(routed.subtasks[2]!.preferredChild).toBe('Methane');
+    expect(routed.aggregation.mode).toBe('sequential');
+  });
+
+  it('redirects a browser prefilter away from an HTTP-only L1', async () => {
+    expect(taskRequiresRealBrowser('validate the UI in a real browser')).toBe(true);
+    const registry = new AtomRegistry(openDb(':memory:'));
+    registry.create(2, seed);
+    registry.create(1, {
+      ...seed,
+      tools: [
+        { name: 'validate_html', description: 'browser', inputSchema: { type: 'object' } },
+      ],
+    });
+    registry.create(1, {
+      ...seed,
+      tools: [
+        {
+          name: 'start_node_server',
+          description: 'server',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    });
+    const l2 = L2Atom.fromType(registry.getByName('Water')!, registry);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({
+        kind: 'reuse',
+        target: 'Helium',
+        confidence: 'high',
+        reasoning: 'server owns the UI',
+      })
+    );
+    const plan = await l2.plan(
+      {
+        description:
+          'Validate the UI in a real browser with selector-based interactions and zero console errors.',
+      },
+      ctx
+    );
+    expect(plan.subtasks[0]!.preferredChild).toBe('Hydrogen');
+    expect(ctx.llm.calls).toHaveLength(1);
   });
 });

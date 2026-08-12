@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { Script } from 'node:vm';
 
 /**
  * PROBE MANIFEST — THE machine-readable verification interface.
@@ -171,8 +172,8 @@ export const EXAMPLE_WEB_ENTRY: WebEntry = webEntrySchema.parse({
   probe: 'web',
   file: 'index.html',
   interactions: [{ type: 'click', selector: '#start' }],
-  smoke: '<the exact smoke expression you ran>',
-  expected: '<its observed result, JSON-encoded>',
+  smoke: 'window.__test.started === true',
+  expected: 'true',
   consoleErrors: 0,
 });
 
@@ -279,6 +280,29 @@ export function validateProbeManifest(raw: string): string[] {
     } else if (kind === 'web') {
       if (typeof en['file'] !== 'string') problems.push(`entry #${i} (web): missing string "file"`);
       if (typeof en['smoke'] !== 'string') problems.push(`entry #${i} (web): missing string "smoke"`);
+      if (
+        typeof en['file'] === 'string' &&
+        /(?:^|\/)(?:test|probe|verify|check|harness)[^/]*\.(?:[cm]?js|ts)$/i.test(en['file'])
+      ) {
+        problems.push(
+          `entry #${i} (web): "file" names a test/probe script (${JSON.stringify(en['file'])}), not the rendered artefact source`
+        );
+      }
+      if (typeof en['smoke'] === 'string') {
+        try {
+          // Parse only; never execute model-authored manifest content.
+          new Script(`(${en['smoke']})`);
+        } catch {
+          problems.push(
+            `entry #${i} (web): "smoke" is not a replayable JavaScript expression`
+          );
+        }
+      }
+      if (!('expected' in en)) {
+        problems.push(
+          `entry #${i} (web): missing JSON-encoded "expected" result — the smoke has no replay comparison target`
+        );
+      }
       if ('expected' in en && typeof en['expected'] !== 'string') {
         problems.push(
           `entry #${i} (web): "expected" must be a JSON-encoded string, got ${typeof en['expected']}`
@@ -286,6 +310,35 @@ export function validateProbeManifest(raw: string): string[] {
       }
       const inter = en['interactions'];
       if (Array.isArray(inter)) {
+        const allowedTypes = new Set(['click', 'rightclick', 'keydown', 'keyup', 'keypress']);
+        inter.forEach((action, actionIndex) => {
+          if (!action || typeof action !== 'object' || Array.isArray(action)) {
+            problems.push(`entry #${i} (web): interaction #${actionIndex} is not an object`);
+            return;
+          }
+          const a = action as Record<string, unknown>;
+          if (typeof a['type'] !== 'string' || !allowedTypes.has(a['type'])) {
+            problems.push(
+              `entry #${i} (web): interaction #${actionIndex} has unsupported type ${JSON.stringify(a['type'])}`
+            );
+          } else if (
+            (a['type'] === 'click' || a['type'] === 'rightclick') &&
+            typeof a['selector'] !== 'string' &&
+            typeof a['x'] !== 'number' &&
+            typeof a['y'] !== 'number'
+          ) {
+            problems.push(
+              `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a selector`
+            );
+          } else if (
+            (a['type'] === 'keydown' || a['type'] === 'keyup' || a['type'] === 'keypress') &&
+            typeof a['key'] !== 'string'
+          ) {
+            problems.push(
+              `entry #${i} (web): interaction #${actionIndex} ${a['type']} is missing a key`
+            );
+          }
+        });
         const coordOnly = inter.filter(
           (a) =>
             a &&

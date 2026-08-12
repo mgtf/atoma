@@ -30,3 +30,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T23:00:06.102Z,labels-api-semantic-validation,http,delivered,0.2278,233,14,0,0,0,0,0,0,0,2,0,0,2026-08-12T23-00-06-671-4f68e272.json,ollama+zai+codex,14,0
 2026-08-12T23:07:49.143Z,labels-api-semantic-validation,http,delivered,0.141,144,11,0,0,0,0,0,0,0,0,0,0,2026-08-12T23-07-49-686-8c29a38e.json,ollama+zai+codex,11,0
 2026-08-12T23:12:42.456Z,oncall-recovery-guides-section-scope,files,delivered,0.0737,184,11,0,0,0,1,0,0,0,0,0,0,2026-08-12T23-12-43-030-3fb3bc80.json,ollama+zai+codex,11,0,1
+2026-08-12T23:19:25.504Z,app-guest-counter,app,delivered,0.3548,633,14,0,0,0,0,0,0,0,0,0,1,2026-08-12T23-19-26-036-2b12ad5d.json,ollama+zai+codex,14,0,0

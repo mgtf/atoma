@@ -21,6 +21,8 @@ import {
   buildTargetContext,
   checkGroundTruth,
   llmVerdict,
+  requiredPassingCommands,
+  taskRequiresRealBrowser,
   type GroundTruthCheck,
 } from './L2Atom.js';
 import {
@@ -117,6 +119,60 @@ export function buildNarrowL2Prompt(
     bucketHint
   );
   return lines.join('\n');
+}
+
+export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry): Plan {
+  const l2Types = registry.listByTier(2);
+  const webL2 = l2Types.find((type) => type.tools.some((tool) => tool.name === 'validate_html'));
+  const shellL2 = l2Types.find(
+    (type) =>
+      type.tools.some((tool) => tool.name === 'run_shell') &&
+      type.tools.some((tool) => tool.name === 'start_node_server')
+  );
+  let changed = false;
+  const subtasks = plan.subtasks.flatMap((subtask) => {
+    const browser = taskRequiresRealBrowser(subtask.description);
+    const commands = requiredPassingCommands(subtask.description);
+    if (browser && commands.length > 0 && webL2 && shellL2) {
+      changed = true;
+      const sentences = subtask.description.split(/(?<=[.!?])\s+(?=[A-Z])/);
+      const browserSentences = sentences.filter((sentence) =>
+        /\b(?:browser|selector-based|window\.__test|console(?:\.error|\s+errors?)|failed requests?|UI probe)\b/i.test(
+          sentence
+        )
+      );
+      const shellSentences = sentences.filter((sentence) =>
+        /\b(?:test|harness|shell|probe-manifest|probe manifest|recorded probes?|README)\b/i.test(
+          sentence
+        )
+      );
+      return [
+        {
+          ...subtask,
+          description:
+            `BROWSER VERIFICATION ONLY — use a real browser and do not substitute a Node/static-source harness. ` +
+            `${browserSentences.join(' ') || subtask.description}`,
+          preferredChild: webL2.name,
+        },
+        {
+          ...subtask,
+          description:
+            `FINAL SHELL/HARNESS VERIFICATION ONLY — run the exact required command(s) ` +
+            `${commands.join(', ')} and require exit code 0; do not substitute another harness. ` +
+            `${shellSentences.join(' ') || subtask.description}`,
+          preferredChild: shellL2.name,
+        },
+      ];
+    }
+    if (browser && webL2 && subtask.preferredChild !== webL2.name) {
+      changed = true;
+      return [{ ...subtask, preferredChild: webL2.name }];
+    }
+    return [subtask];
+  });
+  return changed
+    ? { ...plan, subtasks, aggregation: { mode: 'sequential' } }
+    : plan;
 }
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {
@@ -349,6 +405,11 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `probe right after writing the files); add a separate verification`,
       `phase only when it needs different expertise or tooling than the`,
       `build.`,
+      `FULL-STACK CROSS-BUCKET RULE: a real-browser UI check and a finite`,
+      `Node/API harness do NOT belong in one subtask. Emit two sequential`,
+      `phases: browser/selector/window.__test verification to the web L2, then`,
+      `the exact node test/probe command to the HTTP L2. Never route real`,
+      `browser work to an HTTP-only child or replace it with source inspection.`,
       `Tool families above pick the verification NATURE — but write the`,
       `SUBTASK DESCRIPTIONS as OUTCOMES ("boot the app's server on an`,
       `OS-assigned port and probe every route over HTTP"), not as tool`,
@@ -475,7 +536,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       rawPlan !== null &&
       (rawPlan as Record<string, unknown>)['aggregation'] === undefined;
     if (aggregationWasOmitted) plan.aggregation = { mode: 'sequential' };
-    return preservePlanLiteralContracts(plan, task.description);
+    return preservePlanLiteralContracts(
+      routeCrossBucketVerification(plan, this.registry),
+      task.description
+    );
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {

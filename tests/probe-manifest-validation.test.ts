@@ -62,6 +62,7 @@ describe('validateProbeManifest', () => {
             probe: 'web',
             file: 'index.html',
             smoke: 'window.__tally.count === 2',
+            expected: 'true',
             interactions: [
               { type: 'click', x: 304, y: 392, label: '+1 button' },
               { type: 'click', selector: '#reset' },
@@ -83,8 +84,9 @@ describe('validateProbeManifest', () => {
             {
               probe: 'web',
               file: 'index.html',
-              smoke: 'x',
-              interactions: [{ type: 'click', selector: '#a' }, { type: 'keydown', selector: '#b' }],
+              smoke: 'window.__x === true',
+              expected: 'true',
+              interactions: [{ type: 'click', selector: '#a' }, { type: 'keydown', key: 'Enter' }],
             },
           ],
         })
@@ -96,8 +98,9 @@ describe('validateProbeManifest', () => {
     const problems = validateProbeManifest(
       JSON.stringify({ version: 1, entries: [{ probe: 'web', file: 'index.html' }] })
     );
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/#0 \(web\).*smoke/);
+    expect(problems).toHaveLength(2);
+    expect(problems.join('\n')).toMatch(/#0 \(web\).*smoke/);
+    expect(problems.join('\n')).toMatch(/missing JSON-encoded "expected"/);
   });
 
   it('accepts a MIXED manifest — that is the documented contract', () => {
@@ -108,11 +111,40 @@ describe('validateProbeManifest', () => {
           entries: [
             { cmd: 'node x.js', exitCode: 1, stdout: '', stderr: 'boom' },
             { probe: 'http', method: 'POST', path: '/inc', status: 200, body: '{"value":1}' },
-            { probe: 'web', file: 'index.html', smoke: 'document.title === "x"' },
+            {
+              probe: 'web',
+              file: 'index.html',
+              smoke: 'document.title === "x"',
+              expected: 'true',
+            },
           ],
         })
       )
     ).toEqual([]);
+  });
+
+  it('rejects a static test script disguised as a browser probe', () => {
+    const problems = validateProbeManifest(
+      JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            probe: 'web',
+            file: 'test-ui-browser.js',
+            interactions: [
+              { type: 'navigate', url: 'http://localhost:<port>/' },
+              { type: 'verify', selector: '#entryForm' },
+            ],
+            smoke: 'UI exists and window.__test is initialized',
+          },
+        ],
+      })
+    );
+    expect(problems.join('\n')).toMatch(/test\/probe script/);
+    expect(problems.join('\n')).toMatch(/not a replayable JavaScript expression/);
+    expect(problems.join('\n')).toMatch(/missing JSON-encoded "expected"/);
+    expect(problems.join('\n')).toMatch(/unsupported type "navigate"/);
+    expect(problems.join('\n')).toMatch(/unsupported type "verify"/);
   });
 
   it('tolerates unknown extra fields (forward compatibility)', () => {

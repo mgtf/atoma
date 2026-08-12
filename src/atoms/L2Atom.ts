@@ -52,6 +52,7 @@ import {
 } from './capability.js';
 import { checkGroundTruth, type GroundTruthCheck } from './groundTruth.js';
 import {
+  PROBE_MANIFEST_FILENAME,
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
 } from '../contracts/probeManifest.js';
@@ -268,6 +269,84 @@ export function recordedJsonShapeMismatch(task: Task, result: Result): string | 
     : 'the task requires JSON array output, but every parseable successful probe returned a JSON object';
 }
 
+export function requiredPassingCommands(description: string): string[] {
+  const commands = [
+    ...description.matchAll(
+      /\bnode\s+((?:[\w./-]*(?:test|probe|verify|check|harness)[\w./-]*)\.(?:m?js|cjs))\b/gi
+    ),
+  ].map((match) => `node ${match[1]}`);
+  return [...new Set(commands)];
+}
+
+export function requiredCommandManifestMismatch(
+  taskDescription: string,
+  manifestRaw: string
+): string | null {
+  const commands = requiredPassingCommands(taskDescription);
+  if (commands.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestRaw);
+  } catch {
+    return null; // Manifest health reports malformed JSON separately.
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const entries = (parsed as Record<string, unknown>)['entries'];
+  if (!Array.isArray(entries)) return null;
+  for (const command of commands) {
+    const matching = entries.filter(
+      (entry) =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        (entry as Record<string, unknown>)['cmd'] === command
+    ) as Array<Record<string, unknown>>;
+    const latest = matching.at(-1);
+    if (!latest) {
+      return `the task requires ${command} to pass, but the probe manifest has no entry for that exact command`;
+    }
+    if (latest['exitCode'] !== 0) {
+      return `the task requires ${command} to pass, but its latest recorded exit code is ${JSON.stringify(latest['exitCode'])}`;
+    }
+  }
+  return null;
+}
+
+export function taskRequiresRealBrowser(description: string): boolean {
+  return (
+    /\b(?:real browser|browser validation|validate_html)\b/i.test(description) ||
+    (/\bselector-based\b/i.test(description) &&
+      /\b(?:window\.__test|console(?:\.error|\s+errors?)|failed requests?)\b/i.test(
+        description
+      ))
+  );
+}
+
+async function checkRequiredCommandManifest(
+  task: Task,
+  ctx: RunContext
+): Promise<string | null> {
+  if (requiredPassingCommands(task.description).length === 0) return null;
+  if (!ctx.tools?.has('read_file')) return null;
+  try {
+    const raw = await ctx.tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
+    const content =
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as Record<string, unknown>)['content'] === 'string'
+        ? ((raw as Record<string, unknown>)['content'] as string)
+        : typeof raw === 'string'
+          ? raw
+          : '';
+    if (!content.trim()) {
+      return `the task requires ${requiredPassingCommands(task.description).join(', ')} to pass, but the probe manifest is missing or empty`;
+    }
+    return requiredCommandManifestMismatch(task.description, content);
+  } catch {
+    return `the task requires ${requiredPassingCommands(task.description).join(', ')} to pass, but the probe manifest could not be read`;
+  }
+}
+
 
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
@@ -361,7 +440,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // collapsing the whole task onto one L1 run.
     let prefilterHint: { target: string; reasoning: string } | null = null;
     if (catalog.length > 0) {
-      const prefilter = await prefilterStrategy({
+      let prefilter = await prefilterStrategy({
         ctx,
         task,
         // Strip the "(branched from X)" provenance tail — it carries no
@@ -374,6 +453,25 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         exclude: this.triedChildren.excluded(),
         actor: { name: this.name, tier: 2 },
       });
+      if (prefilter?.kind === 'reuse' && taskRequiresRealBrowser(task.description)) {
+        const prefilterTarget = prefilter.target;
+        const selected = catalog.find((candidate) => candidate.name === prefilterTarget);
+        if (!selected?.tools.some((tool) => tool.name === 'validate_html')) {
+          const webCandidate = catalog.find((candidate) =>
+            candidate.tools.some((tool) => tool.name === 'validate_html')
+          );
+          if (webCandidate) {
+            ctx.logger.warn(
+              `[${this.name}] browser-verification task was prefiltered to ${prefilter.target}, which lacks validate_html — routing to ${webCandidate.name}`
+            );
+            prefilter = {
+              ...prefilter,
+              target: webCandidate.name,
+              reasoning: `${prefilter.reasoning}; mechanically redirected because real browser verification requires validate_html`,
+            };
+          }
+        }
+      }
       if (prefilter && prefilter.kind === 'reuse') {
         if (!prefilter.decomposable) {
           this.pendingStrategy = {
@@ -465,6 +563,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `artefact (node/npm) plus reading files back. NEVER send a non-browser`,
       `artefact into a serve+validate_html loop — the worker would fabricate`,
       `an index.html just to have something to serve.`,
+      `A task that explicitly requires a REAL browser must route to an L1 that`,
+      `declares validate_html. An HTTP-only child cannot replace browser`,
+      `interaction with a Node request harness or static source inspection.`,
       HTTP_PORTABLE_DOC_GUIDANCE,
       `Write subtask descriptions as OUTCOMES, not tool invocations — a`,
       `description hard-naming a tool binds a child that may not declare`,
@@ -1888,6 +1989,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         modifications: {
           additionalContext:
             'No successful tool action was observed. Actually perform the subtask with your declared tools, verify the artefact, and only then return the result JSON. Do not describe intended work as completed.',
+        },
+      };
+    }
+    const requiredCommandMismatch = await checkRequiredCommandManifest(task, ctx);
+    if (requiredCommandMismatch) {
+      return {
+        approved: false,
+        reasoning: requiredCommandMismatch,
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'Fix the exact required finite test/probe script instead of substituting a different harness. Run it through record_probe until that same command exits 0; its manifest entry must be replaced with the successful observation before returning.',
         },
       };
     }

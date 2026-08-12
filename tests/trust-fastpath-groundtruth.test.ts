@@ -5,6 +5,8 @@ import { L1Atom } from '../src/atoms/L1Atom.js';
 import {
   L2Atom,
   recordedJsonShapeMismatch,
+  requiredCommandManifestMismatch,
+  requiredPassingCommands,
   webStylingEvidenceMissing,
 } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
@@ -192,6 +194,41 @@ describe('recordedJsonShapeMismatch', () => {
   });
 });
 
+describe('required passing command manifest gate', () => {
+  const task =
+    'In a final phase run the existing test-api.js end-to-end with node test-api.js and confirm it passes.';
+
+  it('extracts finite test harnesses but not long-running server commands', () => {
+    expect(requiredPassingCommands(`${task} Start with node server.js.`)).toEqual([
+      'node test-api.js',
+    ]);
+  });
+
+  it('requires the latest exact recorded command to exit zero', () => {
+    expect(
+      requiredCommandManifestMismatch(
+        task,
+        JSON.stringify({
+          version: 1,
+          entries: [{ cmd: 'node test-api.js', exitCode: 1, stderr: 'proxy failed' }],
+        })
+      )
+    ).toMatch(/latest recorded exit code is 1/);
+    expect(
+      requiredCommandManifestMismatch(
+        task,
+        JSON.stringify({
+          version: 1,
+          entries: [
+            { cmd: 'node test-api.js', exitCode: 1 },
+            { cmd: 'node test-api.js', exitCode: 0 },
+          ],
+        })
+      )
+    ).toBeNull();
+  });
+});
+
 describe('trust fast-path × ground-truth probe', () => {
   it('rejects a production L1 result when the transport observed no successful action', async () => {
     const { l2, l1, ctx, exec } = setup({ 'index.js': 'console.log("real")' });
@@ -278,6 +315,33 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(verdict.reasoning).toMatch(/requires JSON object.*JSON array/);
     expect(ctx.llm.calls).toHaveLength(0);
     expect(exec.calls).toEqual([]);
+  });
+
+  it('rejects a required harness whose manifest entry still fails', async () => {
+    const { l2, l1, ctx, exec } = setup({
+      'test-api.js': 'process.exit(1)',
+      '.atoma-probes.json': JSON.stringify({
+        version: 1,
+        entries: [{ cmd: 'node test-api.js', exitCode: 1, stderr: 'proxy failed' }],
+      }),
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['test-api.js'] },
+        summary: 'substituted another passing harness',
+        toolCallResults: [{ name: 'run_shell', ok: true }],
+      }),
+      {
+        description:
+          'Run existing test-api.js end-to-end with node test-api.js and confirm it passes.',
+      },
+      { ...ctx, requireObservedToolAction: true }
+    );
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/node test-api\.js.*exit code is 1/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual(['read_file']);
   });
 
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {

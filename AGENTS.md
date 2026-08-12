@@ -1433,6 +1433,41 @@ re-exports all the historical names so old imports keep working.
   `⚠compile-error=N` in the batch line. The viz reader exposes it with zero for
   legacy short rows. The live row is backfilled to 1, making the 120-second
   cost visible without rewriting historical rows.
+- **THIRTY-FIRST LIVE ITERATION, 2026-08-12 — an integrated app proved that
+  "some harness passed" is not "the required harness passed".** Guestbook
+  reported delivered in 633s/14 calls/$0.3548 estimated with one dispatch
+  fallback (trace `2026-08-12T23-19-26-036-2b12ad5d`), but independent
+  `node test-api.js` still exited 1: it `require()`d an already-listening
+  server, built a second proxy on a fresh port, then forwarded to port 0 and
+  returned 500. During six failed attempts it also hit duplicate declarations
+  and escaped-newline source corruption. The L1 eventually created
+  `simple-api-test.js` and `test-ui-browser.js`, both passed, and validators
+  accepted the substitutes although the top-level contract named
+  `test-api.js` exactly.
+  The recorded web probe was fabricated too: `file:"test-ui-browser.js"`,
+  unsupported `navigate`/`verify` interactions, prose in `smoke`, no
+  `expected`, and no real browser. Manifest health had only rejected pixel
+  coordinates, so it called this clean despite the schema and writer contract.
+  Three false Helium/Methane successes were removed; the build and harness
+  recipes each gained one honest failure. The trusted replay recipe already
+  received `credit-withheld`, proving the script-execution witness works.
+  Four structural corrections close the classes:
+  (1) L2 extracts finite test/probe commands such as `node test-api.js` from
+  task text and reads the manifest before trust; missing or latest-nonzero
+  exact entries reject mechanically and coach fixing that SAME harness.
+  (2) Web-manifest health now parses smoke as JavaScript without executing it,
+  requires `expected`, rejects test/probe scripts as rendered files, validates
+  interaction types, selector/key requirements and the existing coordinate
+  rule.
+  (3) L3 routes pure browser phases to the web L2 and mechanically splits a
+  mixed browser+harness checkpoint into sequential browser then exact-shell
+  phases; L2 redirects explicit real-browser prefilter picks away from any L1
+  lacking validate_html. This is phase serialisation by capability, not unsafe
+  parallelism over one workspace.
+  (4) The live server-build recipe now requires spawn→PORT=0→parse marker→kill
+  for self-booting harnesses (never require/listen/proxy-to-zero), while the
+  harness recipe uses record_probe, forbids hand-editing the manifest, and
+  refuses to fake browser evidence when validate_html is absent.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
