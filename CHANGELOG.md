@@ -102,6 +102,9 @@
   failed assertion on the first browser pass.
 - Styling-verdict analysis recognizes `Object.values(checks).every(Boolean)`
   when the named checks contain class/style/color comparisons.
+- `validate_html` rejects direct computed-style comparisons against literal
+  RGB/RGBA values before browser launch, preventing repeated CSS rewrites around
+  guessed serialization values.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

@@ -1276,6 +1276,23 @@ re-exports all the historical names so old imports keep working.
   style comparisons in `ok` OR the canonical checks/every indirection when the
   checks object contains class/style/color assertions. Both validate_html and
   L2 consume the same helper; a regression test pins the exact live shape.
+- **TWENTY-THIRD LIVE ITERATION, 2026-08-12 — repeated CSS repair exhausted the
+  whole run despite a correct final workspace.** The next hydration run hit
+  900s/41 calls/$0.4890 estimated, six escalations and outcome failed (trace
+  `2026-08-12T22-03-19-485-9a61c073`). Independent execution still passed
+  count 0 → goal 4 → reset 0 with correct class transition, and the final
+  manifest was replayable. The L1 repeatedly asserted the same guessed green
+  computed color, then rewrote selector specificity, inline styles, CSS
+  variables and timers around that expectation. It also attempted to edit
+  smoke code inside index.html once. The final L2 fallback correctly routed to
+  the L1 model (the Codex structural error disappeared) but the run signal
+  aborted it after the prior thrash consumed the budget.
+  `validate_html` now rejects any direct comparison between
+  getComputedStyle output and an rgb()/rgba() literal BEFORE launching the
+  browser, coaching initial-vs-milestone or source-defined class assertions.
+  The live recipes carry the same rule plus named checks. This is a mechanical
+  closure for the exact eleven-repeat signature, not another request to "try
+  harder".
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

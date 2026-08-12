@@ -1329,6 +1329,18 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             smokeResult: { error: syntax, hint: SMOKE_EXPR_HINT },
           };
         }
+        const brittleStyle = detectBrittleComputedStyleLiteral(smoke);
+        if (brittleStyle) {
+          return {
+            ok: false,
+            url,
+            errors: [`smoke rejected pre-flight: ${brittleStyle}`],
+            warnings: [],
+            failedRequests: [],
+            interactionLog: [],
+            smokeResult: { error: brittleStyle },
+          };
+        }
         const erased = detectResetErasedIntermediateEvidence(interactions, smoke);
         if (erased) {
           return {
@@ -2059,6 +2071,26 @@ export function detectSmokeStatementError(raw: string): string | null {
   // a statement-series masquerading as an expression.
   if (hasTopLevelStatementSeparator(trimmed)) {
     return 'smoke contains a top-level `;` — that indicates separate statements. Wrap the whole thing in an IIFE: `(() => { ...; return X })()`.';
+  }
+  return null;
+}
+
+/**
+ * Exact computed RGB literals are brittle across transitions, inheritance and
+ * browser color serialization. A live L1 spent eleven attempts rewriting
+ * correct CSS around one guessed green value while the observed class change
+ * already proved the styling requirement.
+ */
+export function detectBrittleComputedStyleLiteral(smoke: string): string | null {
+  if (
+    /getComputedStyle\s*\(/.test(smoke) &&
+    /(?:===|!==|==|!=)\s*['"]rgba?\s*\(/i.test(smoke)
+  ) {
+    return (
+      'do not compare getComputedStyle output to a literal rgb()/rgba() value. ' +
+      'Capture initial and milestone values and compare them to each other, ' +
+      'or assert the exact source-defined class/style marker.'
+    );
   }
   return null;
 }

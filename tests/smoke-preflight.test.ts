@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   detectSmokeStatementError,
   detectResetErasedIntermediateEvidence,
+  detectBrittleComputedStyleLiteral,
   isSmokeOk,
   makeSmokeStuckTracker,
   SMOKE_STUCK_WINDOW,
@@ -77,6 +78,26 @@ describe('detectSmokeStatementError', () => {
   it('empty or whitespace-only smoke returns null (execute path treats it as absent)', () => {
     expect(detectSmokeStatementError('')).toBeNull();
     expect(detectSmokeStatementError('    ')).toBeNull();
+  });
+});
+
+describe('detectBrittleComputedStyleLiteral', () => {
+  it('rejects literal computed RGB comparisons but permits relative/class checks', () => {
+    expect(
+      detectBrittleComputedStyleLiteral(
+        `getComputedStyle(el).color === 'rgb(39, 174, 96)'`
+      )
+    ).toMatch(/compare.*initial and milestone/i);
+    expect(
+      detectBrittleComputedStyleLiteral(
+        'getComputedStyle(el).color !== initial.color'
+      )
+    ).toBeNull();
+    expect(
+      detectBrittleComputedStyleLiteral(
+        `el.classList.contains('goal-reached')`
+      )
+    ).toBeNull();
   });
 });
 
