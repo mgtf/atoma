@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "dedupe-lines-cli-semantic-package",
+      "family": "cli",
+      "goal": "Build a no-dependency Node CLI in dedupe-lines.js that accepts one text-file path, prints unique non-blank lines in first-seen order, and exits non-zero for missing arguments or unreadable files. Verify representative success and error invocations. As a FINAL SEPARATE PHASE, create package.json and README.md with a 'Verified invocations' section documenting the exact observed commands and outputs."
+    }
+  ]
+}

@@ -1308,6 +1308,24 @@ re-exports all the historical names so old imports keep working.
   that is never invoked and gives the exact `append ()` correction before
   Puppeteer. These are generic protocol closures; no hydration-specific
   expected value was added.
+- **TWENTY-FIFTH LIVE ITERATION, 2026-08-12 — cross-family payoff exposed one
+  deterministic packaging defect.** A novel dedupe-lines CLI delivered in
+  96s/11 calls/$0.1056 estimated with one zero-LLM packaging phase, zero
+  escalations and ZERO friction (trace
+  `2026-08-12T22-35-03-872-45fd2b52`). Independent execution passed ordered
+  deduplication, blank-line removal, missing-argument and missing-file exits;
+  package/bin/README were semantically named and all six manifest invocations
+  replayed. The audit still found that the trusted packaging script emitted
+  `"test":"node ./dedupe-lines.js"` (and the same `start`), so npm test failed
+  by construction because this CLI requires one file argument.
+  The live script now omits unproven package scripts and was reset 9/0 → 0/0:
+  changing an unwatched body without resetting trust would violate the exact
+  body-bound rule the direct path relies on. Offline replay produced the same
+  package/docs/probe result with no `scripts` field. The compiler prompt now
+  requires every emitted package command to be an exact successful
+  machine-recorded invocation with shipped fixtures, otherwise scripts are
+  omitted. A successful deterministic envelope is evidence for what the script
+  reports; it is not permission to invent adjacent metadata.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
