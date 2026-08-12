@@ -415,7 +415,7 @@ export function coercePseudoFinalToolCall(
   }
   const summary = typeof args['summary'] === 'string' ? args['summary'] : null;
   if (!summary) return null;
-  if (requested === 'return' && 'output' in args) {
+  if ((requested === 'return' || requested === 'json') && 'output' in args) {
     let output = args['output'];
     if (typeof output === 'string') {
       try {

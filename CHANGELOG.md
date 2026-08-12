@@ -113,8 +113,8 @@
   successful probe stdout before trusted results can skip semantic review.
 - The L1 transport records whether an injected script scratch file actually
   ran; ignored script recipes cannot earn credit through type trust.
-- OpenAI-compatible pseudo-final `json` calls carrying a complete nested
-  `{output,summary}` Result are normalized without an off-scope tool round-trip.
+- OpenAI-compatible pseudo-final `json` calls carrying either a nested or
+  top-level `{output,summary}` Result are normalized without an off-scope round-trip.
 - CLI build recipes retain every fixture referenced by a recorded probe so
   later packaging and replay phases cannot inherit broken evidence.
 - L2/L3 plans preserve exact structured goal clauses—HTTP routes, JSON fields,

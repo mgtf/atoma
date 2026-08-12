@@ -28,3 +28,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T22:40:14.959Z,word-frequency-cli-package-revalidation,cli,delivered,0.2097,237,17,0,0,0,0,0,0,0,1,0,0,2026-08-12T22-40-15-482-0316dbd2.json,ollama+zai+codex,17,1
 2026-08-12T22:54:54.773Z,word-frequency-cli-package-revalidation,cli,delivered,0.1634,198,12,0,0,0,0,0,0,0,0,0,0,2026-08-12T22-54-55-383-94ebee07.json,ollama+zai+codex,12,0
 2026-08-12T23:00:06.102Z,labels-api-semantic-validation,http,delivered,0.2278,233,14,0,0,0,0,0,0,0,2,0,0,2026-08-12T23-00-06-671-4f68e272.json,ollama+zai+codex,14,0
+2026-08-12T23:07:49.143Z,labels-api-semantic-validation,http,delivered,0.141,144,11,0,0,0,0,0,0,0,0,0,0,2026-08-12T23-07-49-686-8c29a38e.json,ollama+zai+codex,11,0

@@ -1398,6 +1398,22 @@ re-exports all the historical names so old imports keep working.
   without duplication. Thus a later model can still choose a bad
   implementation, but it can no longer receive a plan in which `color` and
   `#RRGGBB` disappeared or were replaced by a familiar `priority` field.
+- **TWENTY-NINTH LIVE ITERATION, 2026-08-12 — literal-contract preservation
+  corrected the product and cut the run.** Exact labels replay delivered in
+  144s/11 calls/$0.1410 estimated (versus 233s/14/$0.2278), no escalation or
+  learning (trace `2026-08-12T23-07-49-686-8c29a38e`). The recorded L3 plan
+  now repeated `{name:string,color:"#RRGGBB"}` plus every 400 case in BOTH
+  phases. Independent requests confirmed valid color round-trip and 400 for
+  blank name, numeric name, numeric color and malformed color; manifest and
+  README placeholders were clean.
+  The only friction was two identical pseudo-final `json` calls. The prior
+  normaliser covered (a) `return` with top-level output+summary and (b) `json`
+  whose `output` string itself encoded the complete Result. This run used the
+  third unambiguous combination: `json` with top-level output+summary, output
+  being a JSON-encoded deliverable. `coercePseudoFinalToolCall` now treats
+  `json` exactly like `return` for that shape, parsing output when possible
+  and avoiding both off-scope round-trips. Arbitrary `json` payloads without a
+  string summary remain rejected.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

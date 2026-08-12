@@ -66,6 +66,17 @@ describe('offScopeToolMessage final-answer coaching', () => {
       output: { packageJson: { name: 'word-frequency' } },
       summary: 'packaged',
     });
+    expect(
+      JSON.parse(
+        coercePseudoFinalToolCall('json', {
+          output: '{"url":"http://localhost:56990","entry":"server.js"}',
+          summary: 'built and probed',
+        })!
+      )
+    ).toEqual({
+      output: { url: 'http://localhost:56990', entry: 'server.js' },
+      summary: 'built and probed',
+    });
     expect(coercePseudoFinalToolCall('validate_html', { summary: 'no' })).toBeNull();
     expect(coercePseudoFinalToolCall('json', { output: '{"output":{}}' })).toBeNull();
   });
