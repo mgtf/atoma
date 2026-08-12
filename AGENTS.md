@@ -2383,6 +2383,11 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   THE load-bearing one, since Codex keeps its own shell/read tools, so the
   cwd is what bounds their reach and keeps `atoma.db`/`skills/` off the map
   (the same reasoning that moved the build workspace out of the repo).
+  Each client creates one OS-temp jail for its empty cwd and instruction
+  files. Those roots are tracked module-wide and removed synchronously on
+  process exit; `cleanupCodexJails` also gives tests and long-lived embedders
+  an explicit release point. Before this, every process left an
+  `atoma-codex-*` directory behind indefinitely.
   MEASURED 2026-08-11, codex-cli 0.147.0: **ZERO parasitic tool turns** on
   a real L3 plan prompt (one `agent_message`), output already
   `parseTwoJson`-shaped, ~15s wall, and usage complete on `turn.completed`

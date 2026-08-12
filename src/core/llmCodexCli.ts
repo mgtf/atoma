@@ -5,6 +5,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './types.js';
 
+const codexJailRoots = new Set<string>();
+
+/** Remove every ephemeral Codex cwd/instruction root owned by this process. */
+export function cleanupCodexJails(): void {
+  for (const root of codexJailRoots) rmSync(root, { recursive: true, force: true });
+  codexJailRoots.clear();
+}
+
+process.on('exit', cleanupCodexJails);
+
 /**
  * LlmClient backed by the LOCAL Codex CLI installation (`codex exec --json`),
  * authenticated by whatever `codex login` holds — typically a ChatGPT
@@ -448,6 +458,7 @@ export class CodexCliLlmClient implements LlmClient {
     const root = mkdtempSync(path.join(tmpdir(), 'atoma-codex-'));
     const cwd = path.join(root, 'cwd');
     mkdirSync(cwd, { recursive: true });
+    codexJailRoots.add(root);
     this.jail = { cwd, root };
     return this.jail;
   }

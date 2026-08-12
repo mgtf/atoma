@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { existsSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
 import {
   CodexCliLlmClient,
   buildCodexArgs,
+  cleanupCodexJails,
   codexCallTimeoutMs,
   codexEffortFor,
   foldCodexEvents,
@@ -18,6 +20,8 @@ import {
 import { pricesFor } from '../src/core/metrics.js';
 import type { LlmCompletionRequest, ToolExecutor } from '../src/core/types.js';
 import { makeTools } from './helpers/factories.js';
+
+afterEach(() => cleanupCodexJails());
 
 /**
  * The Codex transport: a ChatGPT-subscription provider for tiers 2 and 3.
@@ -327,6 +331,20 @@ describe('CodexCliLlmClient — L1 is refused STRUCTURALLY', () => {
 });
 
 describe('CodexCliLlmClient — transport', () => {
+  it('removes its ephemeral cwd and instruction files on cleanup', async () => {
+    let cwd = '';
+    const client = new CodexCliLlmClient({
+      spawnFn: (args) => {
+        cwd = args[args.indexOf('-C') + 1] ?? '';
+        return fakeChild({ lines: OK_LINES });
+      },
+    });
+    await client.complete(req());
+    expect(existsSync(cwd)).toBe(true);
+    cleanupCodexJails();
+    expect(existsSync(cwd)).toBe(false);
+  });
+
   it('returns the agent message and mapped usage on a healthy call', async () => {
     const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
     const res = await client.complete(req());
