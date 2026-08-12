@@ -98,3 +98,26 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `smokes does NOT reset the stuck detector — it is cumulative over`,
   `a sliding window.`,
 ].join('\n');
+
+/**
+ * Shared plan-time rule for file-mutating phases.
+ *
+ * A trusted script can return before any validator runs. Its match-time guard
+ * can refuse a read-only verifier only when the subtask names the file it is
+ * supposed to change. "Harden the existing CLI" carries no such witness;
+ * "Harden index.js" does. The expense-splitter burn-in demonstrated the
+ * consequence: a verifier replayed old probes, skipped the requested --help
+ * and input-validation work, and the trusted path credited success.
+ */
+export const MUTATING_SUBTASK_FILE_GUIDANCE = [
+  `== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==`,
+  `Whenever a subtask asks to create, update, harden, fix, rewrite or document`,
+  `a file, name the exact intended output path in that subtask description`,
+  `(for example "harden index.js" or "write README.md from package.json").`,
+  `A phrase like "harden the existing CLI" is UNDERSPECIFIED: a downstream`,
+  `read-only verifier can look applicable and replay old probes while changing`,
+  `nothing. File paths are OUTCOMES, not tool invocations, so this does not`,
+  `conflict with the rule against hard-naming tools. The plan owns stable`,
+  `filenames; choose them in the first build phase and repeat them in every`,
+  `later phase that must mutate those files.`,
+].join('\n');

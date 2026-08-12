@@ -48,6 +48,7 @@ import {
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
+import { MUTATING_SUBTASK_FILE_GUIDANCE } from './prompts.js';
 import type { SkillRegistry } from '../skills/registry.js';
 
 /**
@@ -359,6 +360,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `validator then whipsaws the worker between the two shapes (observed:`,
       `five rejection cycles on one run, alternating demands between the`,
       `phantom schema and the real one).`,
+      ``,
+      MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,
       `Each subtask carries a "preferredChild" naming the L2 molecule that`,
       `should handle it (required for N>1 plans). Multiple phases can target`,

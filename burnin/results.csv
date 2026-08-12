@@ -155,3 +155,7 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-09T21:53:20.437Z,habit-streak-tracker-app,app,delivered,0.658,784,14,1,0,13,0,0,0,0,0,0,0,2026-08-09T21-53-21-057-dba82da6.json
 2026-08-09T22:11:21.803Z,cli-inicheck,cli,delivered,0.2587,179,15,1,0,14,2,0,0,0,0,0,0,2026-08-09T22-11-22-356-fcaf2c37.json
 2026-08-09T22:14:21.027Z,cli-jsonpick,cli,delivered,0.2379,175,15,1,0,14,2,0,0,0,0,0,0,2026-08-09T22-14-21-526-0c8909e7.json
+2026-08-12T11:09:12.005Z,single-page-recipe-cost-calculator,web,delivered,0.4867,360,14,1,0,13,0,0,0,0,0,0,0,2026-08-12T11-09-12-626-0fd1b899.json
+2026-08-12T11:15:14.753Z,habit-tracker-http-api,http,delivered,0.3848,328,16,1,0,15,0,0,0,0,0,0,0,2026-08-12T11-15-15-409-ed36af8c.json
+2026-08-12T11:20:45.302Z,expense-splitter-cli-app,app,delivered,0.2233,177,13,1,0,12,2,0,0,0,0,0,0,2026-08-12T11-20-46-005-04669100.json
+2026-08-12T11:30:56.264Z,inventory-reorder-cli-regression,app,delivered,0.4522,316,22,1,1,20,0,0,0,0,1,0,0,2026-08-12T11-30-56-844-9376913b.json

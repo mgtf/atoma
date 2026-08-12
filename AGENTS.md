@@ -715,6 +715,47 @@ re-exports all the historical names so old imports keep working.
   batch order (x axis = experience), and a row table where clicking opens
   the run's full trace in the Runs view. Parsing/summary helpers are pure
   and exported — covered by `tests/burnin.test.ts` on real log excerpts.
+- **LIVE PRODUCT ITERATION, 2026-08-12 — delivery banners were not the
+  score.** A curriculum batch retested the three failed families from the
+  mature store: web $0.4867/14 calls, HTTP $0.3848/16, app $0.2233/13, all
+  reported delivered and learned zero new skills (traces
+  `2026-08-12T11-09-12-626-0fd1b899`,
+  `2026-08-12T11-15-15-409-ed36af8c`,
+  `2026-08-12T11-20-46-005-04669100`). Independent execution found three
+  different truths. The web calculator passed real DOM edits and arithmetic
+  with zero console errors. The HTTP habits API passed create/log/streak, but
+  accepted an impossible date and a whitespace-only name — kept as a WATCH item,
+  because the user goal did not specify validation and one broadening is not
+  enough to change a generic API recipe. Its manifest also contained
+  `node server.js` at exit 1: record_probe had timed out the deliberately
+  long-running server and a note called that full verification. The HTTP
+  writer prompt now forbids server-process shell probes; only endpoint
+  observations or a finite harness are evidence.
+  The app run exposed the real defect: two zero-LLM phases made it look cheap,
+  but trusted `verify-cli-argv-exit-codes` replaced the phase that was supposed
+  to ADD `--help` and input validation. The plan had said only "harden the
+  existing CLI", so `scriptCanServeSubtask` had no filename target to compare
+  and correctly followed its UNPROVABLE⇒OFFER safety rule. The next trusted
+  script then packaged the generic `index.js` as a product literally named
+  `node`; both shortcuts were credited. Fixes are upstream: both plan prompts
+  now require exact output paths on mutating subtasks, and the compile prompt
+  says interpreter/generic launch tokens are never product names and must
+  refuse when no semantic name is derivable. The live
+  `package-and-document-cli` body was patched on the same rule and reset 6/0 →
+  0/0 because trust is body-bound.
+  A fresh inventory-reorder regression
+  (`2026-08-12T11-30-56-844-9376913b`) proved the correction: Opus wrote
+  "Harden reorder.js in place"; the read-only verifier was not dispatched;
+  the L1 implemented help plus numeric validation; the independent scorer
+  passed happy/help/string-price rejection and the run had ZERO friction
+  events. Honest cost: $0.4522/22 calls, versus the broken $0.2233/13-call
+  shortcut. Correctness cost money; the earlier saving was work not done, the
+  same lesson as benchmark round 5.
+  Environment check before the batch also found 51 orphaned
+  `build/app/server.js` listeners (452 MB, 4–6 days old), all predating the
+  burn-in SIGTERM grace fix of 2026-08-08. They were removed; all four new runs
+  left zero workspace servers and zero tracked Chromium processes. Treat that
+  as historical cleanup, not a live regression unless a future batch leaks one.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

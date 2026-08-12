@@ -16,6 +16,17 @@
 - The final eight active `no-explicit-any` warnings in test doubles now use
   the real SDK and framework interfaces, leaving CI free of lint annotations.
 
+### Fixed
+
+- File-mutating plan phases now name their exact output paths, allowing the
+  trusted-script target guard to refuse read-only verifiers instead of
+  silently replacing requested implementation work.
+- Skill compilation now rejects interpreter tokens and generic entry filenames
+  as package/product names; a live script that had packaged `index.js` as
+  `node` was corrected and had its trust counters reset.
+- HTTP probe guidance now forbids recording a long-running server process as a
+  shell probe; endpoint observations or a finite harness are the evidence.
+
 ## v0.1.2 — 2026-08-12
 
 Corrective release after extending acceptance to Docker, proxied egress and

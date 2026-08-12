@@ -56,6 +56,9 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     // The observed failure mode is called out as a plan defect.
     expect(planPrompt).toMatch(/PLAN DEFECT/);
     expect(planPrompt).toMatch(/NO static server, NO/);
+    expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
+    expect(planPrompt).toMatch(/"harden index\.js"/);
+    expect(planPrompt).toMatch(/read-only verifier.*replay old probes/s);
   });
 
   it('the L2 Sonnet plan prompt carries the same rule (short form)', async () => {
@@ -83,5 +86,7 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/== VERIFICATION MATCHES THE ARTEFACT ==/);
     expect(planPrompt).toMatch(/NEVER send a non-browser/);
     expect(planPrompt).toMatch(/fabricate/);
+    expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
+    expect(planPrompt).toMatch(/exact intended output path/);
   });
 });

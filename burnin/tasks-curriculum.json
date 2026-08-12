@@ -1,19 +1,19 @@
 {
   "tasks": [
     {
-      "id": "recipe-box-single-page",
+      "id": "single-page-recipe-cost-calculator",
       "family": "web",
-      "goal": "Build a single-page web app that stores a personal recipe box in localStorage, letting users add recipes with ingredients and steps, search by ingredient, and mark favorites."
+      "goal": "Build a single-page web app that lets a user enter recipe ingredients with quantities and unit costs, then displays the total cost and cost-per-serving live as values change."
     },
     {
-      "id": "book-lending-tracker-api",
+      "id": "habit-tracker-http-api",
       "family": "http",
-      "goal": "Build a small HTTP API for tracking book loans among friends, with endpoints to register books, record loans/returns, and list overdue items, backed by a local SQLite file."
+      "goal": "Build a small HTTP API for tracking daily habits, supporting creating habits, logging completions by date, and retrieving a per-habit completion streak."
     },
     {
-      "id": "habit-streak-tracker-app",
+      "id": "expense-splitter-cli-app",
       "family": "app",
-      "goal": "Build a small desktop-style app for tracking daily habit streaks, letting users add habits, check them off each day, and view current streak counts."
+      "goal": "Build a command-line expense-splitting application that lets a group add shared expenses and computes who owes whom to settle balances evenly."
     }
   ]
 }

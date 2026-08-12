@@ -168,6 +168,17 @@ describe('http manifest: a SEQUENCE, not a keyed set', () => {
     expect(lines).toMatch(/"cmd":"node <harness>","exitCode":0/);
     expect(lines).toMatch(/omit "stdout"/);
   });
+
+  it('forbids recording the long-running server process as a shell probe', () => {
+    // Live habits-API run recorded `node server.js`: record_probe could only
+    // time it out, persisted exit 1, and the note misleadingly called that
+    // full verification. Endpoint requests or a finite harness are evidence;
+    // the server lifecycle itself is not.
+    const lines = manifestWriterLines('http').join(' ');
+    expect(lines).toMatch(/NEVER record the long-running server command/);
+    expect(lines).toMatch(/node server\.js/);
+    expect(lines).toMatch(/only a finite test harness belongs/);
+  });
 });
 
 describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sides agree', () => {

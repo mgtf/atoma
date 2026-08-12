@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "inventory-reorder-cli-regression",
+      "family": "app",
+      "goal": "Build a command-line inventory reorder calculator that reads a JSON file of items with stock, reorder point, pack size and unit price, prints the purchase quantity and total cost, rejects invalid records, supports --help, and documents verified examples."
+    }
+  ]
+}

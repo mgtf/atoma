@@ -69,7 +69,7 @@ export {
   skillContextBlock,
   type SkillDraft,
 } from '../skills/lifecycle.js';
-import { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
+import { MUTATING_SUBTASK_FILE_GUIDANCE, SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 export { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 // Compatibility re-exports: tests and the skills CLI historically import
 // these from L2Atom; the definitions now live in src/contracts/ and
@@ -390,6 +390,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `or an entry schema in the subtask text: the workers carry the`,
       `canonical contract, and a plan-invented schema makes the validator`,
       `whipsaw the worker between the phantom shape and the real one.`,
+      ``,
+      MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
