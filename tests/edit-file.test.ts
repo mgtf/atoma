@@ -53,11 +53,13 @@ describe('edit_file', () => {
   });
 
   it('errors on an ambiguous (multi-match) old_string without replace_all', async () => {
-    write('a.txt', 'foo bar foo');
+    write('a.txt', 'first context\nfoo\nmiddle\nsecond context\nfoo\nend\n');
     const tool = editFileTool({ sandbox });
     await expect(
       tool.execute({ path: 'a.txt', old_string: 'foo', new_string: 'baz' })
-    ).rejects.toThrow(/matches 2 times.*replace_all/s);
+    ).rejects.toThrow(
+      /matches 2 times.*replace_all=true.*occurrence 1 near line 2.*first context.*occurrence 2 near line 5.*second context/s
+    );
   });
 
   it('replace_all substitutes every occurrence', async () => {

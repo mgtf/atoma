@@ -1016,6 +1016,27 @@ re-exports all the historical names so old imports keep working.
   final-answer coaching. Tolerant non-JSON L1 results are mechanically rejected
   before trust. Intentional empty negative-test fixtures are no longer
   contradictions when a recorded non-zero probe corroborates them.
+- **NINTH LIVE ITERATION, 2026-08-12 — rejecting the wrong tool is not the
+  same as removing the error.** The corrected recipe CRUD regression delivered
+  in 379s/19 calls/$0.2307 estimated (trace
+  `2026-08-12T19-04-08-195-d26c6387`); independent execution passed list,
+  semantic-invalid 400, create/read/delete/404, both durable port placeholders
+  were present, and no process leaked. It nevertheless carried TWELVE hard
+  tool errors: five correctly-rejected record_probe server/curl calls, six
+  ambiguous edit_file spans (the same call repeated four times), and one
+  read_file of the manifest before it existed. The final workspace had NO
+  manifest at all: every fetch_url omitted `record:true` despite the plan
+  promising it. A guard that prevents corruption but still burns a tool turn
+  has not closed the defect.
+  The correction is mechanical. `record_probe` is no longer declared to HTTP
+  L1s. The executor view passed ONLY to L1 automatically adds `record:true` to
+  every loopback fetch unless explicitly disabled; supervisor probes retain the
+  original read-only executor. Thus ordinary fetch_url calls create the
+  manifest before any read and the model cannot choose curl/server recording.
+  Ambiguous edit_file errors now include bounded, line-numbered REAL contexts
+  for each occurrence plus the explicit replace_all path — the same
+  bytes-not-instructions rule that fixed old_string-not-found. Offline
+  regression covers both directions before another live run.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
@@ -3135,9 +3156,10 @@ second is the kind of thing that gets acted on:
   EXIT=$?"` hides it inside a quoted arg, and `DECORATED_CMD_RE` is anchored
   at end-of-string, so the closing quote defeated the first version), and
   omits stdout when it embeds `LISTENING_ON_PORT` — both contracts that used
-  to live only in a prompt. In every scope that owns a shell, and NOT in any
-  bucket `required` list, so capability labels are unchanged (same rule as
-  `edit_file`). PROVEN on the data that exposed the defect: re-recording the
+  to live only in a prompt. It now remains in the file-scribe shell scope only
+  (HTTP uses auto-recorded fetch_url; web has no shell) and is NOT in any
+  bucket `required` list, so capability labels are unchanged. PROVEN on the
+  data that exposed the defect: re-recording the
   two failing workspaces' commands through it drops them from 4/6 and 9/10
   replay mismatches to ZERO of 16. Covered by `tests/record-probe.test.ts`,
   whose first case is a 2000-character output recorded byte-identically.
@@ -3173,13 +3195,15 @@ second is the kind of thing that gets acted on:
   HTTP EVIDENCE IS NOT A SHELL PROBE. Three consecutive HTTP runs ignored the
   prompt-only rule, recorded `node server.js` (30s timeout + dead port), then
   improvised curl/node-e requests including `http.delete` and malformed
-  JavaScript. The division is now executable: `record_probe` refuses a Node
-  entry carrying the LISTENING_ON_PORT/listen contract and refuses curl/wget
-  even behind bash; `fetch_url {record:true}` appends the exact ordered
-  method/path/status/body observation to the same manifest. This preserves
-  bucket scope (`fetch_url` exists only on HTTP-capable readers), records
-  expected 400/404 responses as evidence, and removes model transcription
-  from the HTTP shape too.
+  JavaScript. A first structural rejection prevented corruption but the next
+  run still spent five failed calls on it and produced no manifest. The final
+  division is capability-level: `record_probe` is absent from HTTP L1
+  declarations, and L1's executor wrapper forces every loopback `fetch_url`
+  to `record:true` unless explicitly disabled. The underlying tool appends the
+  exact ordered method/path/status/body observation. Supervisor fetches retain
+  the original executor and stay read-only. This preserves bucket scope,
+  records expected 400/404 responses as evidence, and removes both the model's
+  choice of the wrong tool and its transcription from the HTTP shape.
   A METHOD NOTE WORTH MORE THAN THE FIX: the first diagnosis of this was WRONG
   and nearly became a feature. Grepping the first trace event whose text
   matched the error string returned the run SUMMARY, not the script, and led to

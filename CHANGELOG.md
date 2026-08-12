@@ -55,9 +55,12 @@
 - Deterministic verification no longer mistakes contingent repair guidance,
   negated creation, or nominal phrases such as "document probe" for a required
   file mutation; unconditional writes remain protected by the deliverable gate.
-- HTTP evidence can be machine-recorded through `fetch_url {record:true}`;
-  `record_probe` refuses long-running servers and curl/wget before spawning,
-  eliminating dead-port manifests and hand-written HTTP clients.
+- HTTP L1 loopback requests are machine-recorded automatically through
+  `fetch_url`; `record_probe` is absent from the HTTP scope, eliminating
+  dead-port server probes, curl/node-e clients and missing manifests.
+- Ambiguous `edit_file` matches now return bounded line-numbered context for
+  each real occurrence, so the model can choose `replace_all` or a uniquely
+  scoped span instead of repeating the same rejected edit.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

@@ -203,7 +203,9 @@ describe('http manifest: a SEQUENCE, not a keyed set', () => {
     const lines = manifestWriterLines('http').join(' ');
     expect(lines).toMatch(/NEVER record the long-running server command/);
     expect(lines).toMatch(/node server\.js/);
-    expect(lines).toMatch(/only a finite test harness belongs/);
+    expect(lines).toMatch(/record_probe is intentionally NOT in the HTTP toolset/);
+    expect(lines).toMatch(/start_node_server.*fetch_url/s);
+    expect(lines).toMatch(/probe harness.*run it through run_shell/s);
   });
 });
 

@@ -308,12 +308,10 @@ export const CANONICAL_FILESCRIBE_BOOTSTRAP_MARKER = 'bootstrap-canonical-filesc
 // billed as output tokens on each retouch, the dominant spend of long
 // L1 tool loops. It does not participate in bucket DETECTION (no
 // CAPABILITY_BUCKETS.required list mentions it), so labels are unchanged.
-// `record_probe` rides in every scope that owns a shell, for the same
-// reason and with the same non-participation in bucket DETECTION. It runs a
-// command AND writes the real result into the probe manifest; the model used
-// to transcribe that by hand and was measured ABRIDGING long output, which
-// makes a compiled verifier's byte-for-byte replay fail forever. The web
-// scope is excluded: it has no shell, and its evidence is browser-shaped.
+// `record_probe` rides only in the file-scribe shell scope. HTTP L1s repeatedly
+// misused it for long-running servers and curl despite prompt/tool rejection;
+// their loopback fetch_url calls are now machine-recorded by L1's executor
+// wrapper instead. It does not participate in bucket DETECTION.
 const WEB_L1_TOOL_SCOPE: readonly string[] = [
   'write_file',
   'edit_file',
@@ -329,7 +327,6 @@ const HTTP_L1_TOOL_SCOPE: readonly string[] = [
   'read_file',
   'list_files',
   'run_shell',
-  'record_probe',
   'fetch_url',
   'start_node_server',
 ];

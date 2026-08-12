@@ -177,8 +177,11 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
         );
       }
       if (occurrences > 1 && !replaceAll) {
+        const contexts = duplicateMatchContexts(content, oldString);
         throw new Error(
-          `edit_file: old_string matches ${occurrences} times in "${path}" — extend it with surrounding context to make it unique, or pass replace_all=true.`
+          `edit_file: old_string matches ${occurrences} times in "${path}". ` +
+            `If EVERY occurrence needs the same change, resend with replace_all=true. ` +
+            `Otherwise copy one occurrence below WITH its unique surrounding bytes:\n${contexts}`
         );
       }
       const next = replaceAll
@@ -301,6 +304,32 @@ export function listFilesTool(opts: BuiltinToolOptions): BuiltinTool {
  * model already has.
  */
 export const EDIT_SPAN_ECHO_CHARS = 600;
+
+/** Render bounded, line-numbered context for an ambiguous edit span. */
+export function duplicateMatchContexts(
+  content: string,
+  oldString: string,
+  maxOccurrences = 3
+): string {
+  const blocks: string[] = [];
+  let from = 0;
+  for (let n = 1; n <= maxOccurrences; n++) {
+    const at = content.indexOf(oldString, from);
+    if (at < 0) break;
+    const rawStart = Math.max(0, at - 180);
+    const priorNewline = content.indexOf('\n', rawStart);
+    const start = rawStart === 0 ? 0 : priorNewline >= 0 && priorNewline < at ? priorNewline + 1 : rawStart;
+    const rawEnd = Math.min(content.length, at + Math.min(oldString.length, 240) + 180);
+    const nextNewline = content.lastIndexOf('\n', rawEnd);
+    const end = nextNewline > at ? nextNewline : rawEnd;
+    const line = content.slice(0, at).split('\n').length;
+    blocks.push(
+      `occurrence ${n} near line ${line}:\n---8<---\n${content.slice(start, end)}\n--->8---`
+    );
+    from = at + oldString.length;
+  }
+  return blocks.join('\n');
+}
 
 /**
  * Undo ONE level of JSON-ish string escaping.

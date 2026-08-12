@@ -8,3 +8,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T17:13:26.041Z,security-reliability-guides-direct,files,delivered,0.1146,213,11,0,0,0,0,0,0,0,0,0,0,2026-08-12T17-13-26-612-0fe9db65.json,ollama+zai+codex,11,0
 2026-08-12T17:18:36.575Z,security-reliability-guides-direct,files,delivered,0.086,100,9,0,0,0,1,0,0,0,0,0,0,2026-08-12T17-18-37-122-2d731e8e.json,ollama+zai+codex,9,0
 2026-08-12T17:57:20.512Z,health-api-portable-doc-boundary,http,delivered,0.1222,255,14,0,0,0,0,0,0,0,0,0,0,2026-08-12T17-57-21-078-73043396.json,ollama+zai+codex,14,0
+2026-08-12T19:04:07.577Z,recipe-api-lifecycle-probe,http,delivered,0.2307,379,19,0,0,0,0,0,0,0,0,0,0,2026-08-12T19-04-08-195-d26c6387.json,ollama+zai+codex,19,0

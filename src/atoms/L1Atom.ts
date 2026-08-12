@@ -5,6 +5,7 @@ import type {
   RunContext,
   Task,
   Tier,
+  ToolExecutor,
   ToolInvocationInfo,
 } from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
@@ -13,6 +14,30 @@ import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload } from '../contracts/witness.js';
 import { SkillRegistry } from '../skills/registry.js';
+
+const LOOPBACK_HTTP_URL_RE =
+  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
+
+/**
+ * L1-only executor view: every loopback fetch is verification of the server
+ * this run just booted, so machine-record it unless the caller explicitly
+ * opts out. Supervisor probes keep the original executor and remain read-only.
+ */
+export function withAutomaticLoopbackHttpRecording(executor: ToolExecutor): ToolExecutor {
+  return {
+    has: (name) => executor.has(name),
+    execute: (name, args) =>
+      executor.execute(
+        name,
+        name === 'fetch_url' &&
+          typeof args['url'] === 'string' &&
+          LOOPBACK_HTTP_URL_RE.test(args['url']) &&
+          args['record'] !== false
+          ? { ...args, record: true }
+          : args
+      ),
+  };
+}
 
 /** A transport-level success, not merely "the executor did not throw". */
 export function toolInvocationSucceeded(info: ToolInvocationInfo): boolean {
@@ -315,7 +340,7 @@ export class L1Atom extends Atom {
       userContent,
       tools: this.tools,
       params: this.params,
-      executor: ctx.tools,
+      executor: ctx.tools ? withAutomaticLoopbackHttpRecording(ctx.tools) : undefined,
       signal: ctx.signal,
       onToolInvocation,
       // Iterative build-app style tasks (write_file → start_server →

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { L1Atom, toolInvocationSucceeded } from '../src/atoms/L1Atom.js';
+import {
+  L1Atom,
+  toolInvocationSucceeded,
+  withAutomaticLoopbackHttpRecording,
+} from '../src/atoms/L1Atom.js';
+import type { ToolExecutor } from '../src/core/types.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 
@@ -264,5 +269,27 @@ All gameplay controls wired up. No console errors.`;
     });
     // No public accessor — a second add should be idempotent and still pass typecheck.
     expect(true).toBe(true);
+  });
+});
+
+describe('L1 loopback HTTP evidence', () => {
+  it('forces loopback fetches to record while leaving external/supervisor intent explicit', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const base: ToolExecutor = {
+      has: () => true,
+      execute: async (name, args) => {
+        calls.push({ name, args });
+        return { ok: true };
+      },
+    };
+    const wrapped = withAutomaticLoopbackHttpRecording(base);
+    await wrapped.execute('fetch_url', { url: 'http://localhost:1234/health' });
+    await wrapped.execute('fetch_url', { url: 'https://example.com/data' });
+    await wrapped.execute('fetch_url', {
+      url: 'http://127.0.0.1:1234/internal',
+      record: false,
+    });
+
+    expect(calls.map((call) => call.args['record'])).toEqual([true, undefined, false]);
   });
 });
