@@ -52,9 +52,10 @@ import {
   DEFAULT_RUN_TIMEOUT_MS,
   RunRejected,
   cancelRun,
-  forceStopActiveRunOnExit,
+  forceKillActiveRunAfterGrace,
   repoRoot,
   runStatus,
+  signalActiveRunOnExit,
   shutdownRuns,
   startRun,
 } from './run.js';
@@ -185,9 +186,9 @@ export function buildServer(): McpServer {
         openWorldHint: true,
       },
     },
-    (args) => {
+    async (args) => {
       try {
-        return jsonResult(startRun(args));
+        return jsonResult(await startRun(args));
       } catch (err) {
         if (err instanceof RunRejected) return errorResult(`refused: ${err.message}`);
         throw err;
@@ -361,7 +362,7 @@ export async function boot(protocolOut: Writable): Promise<void> {
     // `spawnRun` should settle after its SIGTERM→SIGKILL sequence. This timer
     // is the server-side backstop if the driver promise itself wedges.
     const forceTimer = setTimeout(() => {
-      forceStopActiveRunOnExit();
+      forceKillActiveRunAfterGrace();
       process.exit(code);
     }, RUN_KILL_GRACE_MS + 1000);
     void shutdownRuns(reason).finally(() => {
@@ -371,13 +372,15 @@ export async function boot(protocolOut: Writable): Promise<void> {
   };
   process.once('SIGINT', () => shutdown('MCP server received SIGINT'));
   process.once('SIGTERM', () => shutdown('MCP server received SIGTERM'));
+  process.once('SIGHUP', () => shutdown('MCP server received SIGHUP'));
   process.stdin.once('end', () => shutdown('MCP stdio input ended'));
   process.stdin.once('close', () => shutdown('MCP stdio input closed'));
-  // SIGKILL cannot run this hook; the cross-process lease detects that case
-  // and reaps a surviving detached group before admitting another run.
-  process.once('exit', forceStopActiveRunOnExit);
+  // A generic exit gets SIGTERM only — no uncatchable SIGKILL before Chrome
+  // can reap its helpers. The stale lease lets the next server escalate.
+  process.once('exit', signalActiveRunOnExit);
 
   const server = buildServer();
+  server.server.onclose = () => shutdown('MCP transport closed');
   await server.connect(new StdioServerTransport(process.stdin, protocolOut));
   process.stderr.write(`[atoma-mcp] ready on stdio · repo ${process.cwd()}\n`);
 }

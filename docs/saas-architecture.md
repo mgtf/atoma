@@ -10,9 +10,10 @@
 >
 > **Purpose of this document.** It exists so that design work done *before* the
 > SaaS is built does not dig the hole deeper. Section 7 is the operative part for
-> today; sections 3–6 are the target. Every claim here is backed by a file:line
-> citation or an empirical reproduction; where a claim was tested and *failed*,
-> that is recorded rather than smoothed over.
+> today; sections 3–6 are the target. Claims name their code symbol/file or an
+> empirical reproduction; historical line numbers are not treated as stable
+> identifiers. Where a claim was tested and *failed*, that is recorded rather
+> than smoothed over.
 >
 > Referenced from `AGENTS.md`. Read §5 (Invariants) and §7 (Rules starting now)
 > before proposing anything that touches skills, atom identity, or the stores.
@@ -52,7 +53,7 @@ Principal                   ← identity subject, NOT a user row
 **Principal ≠ User.** Non-human writers already mutate trust state today: the
 burn-in harness (`src/cli/burnin.ts`), the curriculum generator
 (`src/cli/curriculum.ts`), and the five idempotent canonical seeders
-(`src/atoms/capability.ts:797,832,877,915,975`). If `created_by` becomes a
+(`ensureCanonical*` in `src/atoms/capability.ts`). If `created_by` becomes a
 foreign key, those need principals too. One table with a `kind` column keeps the
 ledger's actor field uniform instead of inventing a second actor concept.
 
@@ -105,13 +106,13 @@ platform-wide.
 | Run record (goal, status, cost) | **entity** | Owner's stated requirement. Carries billing. |
 | Run trace (`runs/*.json`) | **entity** | Strictly more sensitive than the run record: traces persist verbatim prompts, tool IO, and workspace file excerpts (the read-back probe embeds file contents up to `FILE_PROBE_EXCERPT_CHARS`). A trace is effectively a copy of the customer's source. |
 | Workspace / artefacts | **private** (readable at entity level) | The deliverable. Never an input to global learning in raw form. |
-| Atom type — canonical (5 seeders) | **global** | System-owned substrate every run needs (`capability.ts:797,832,877,915,975`). Bodies are ours, not tenant-authored. |
+| Atom type — canonical (5 seeders) | **global** | System-owned substrate every run needs (`ensureCanonical*` in `atoms/capability.ts`). Bodies are ours, not tenant-authored. |
 | Atom type — dynamic (escalation debris) | **entity**, promotable | Catalog text is prompt tokens on the most expensive call: `L3.plan` renders every L2 entry + its REACHABLE L1 CHILDREN block into the Opus prompt, measured at ~$0.065/run and structurally uncacheable (5.3% cache_read). A global catalog polluted by every tenant's escalation clones makes the platform's single most expensive call monotonically more expensive. |
 | Atom trust counters | **entity** | See §4. Counters are triggers, not statistics. |
 | Skill body — `kind: llm` | **global after review** | The expensive artefact (~1 Sonnet call to distil). Sharing delivers the product thesis directly. Review is required, not optional — see §4 and the killed claim below. |
 | Skill body — `kind: script` | **global only after human review** | A compiled script is Node source *executed verbatim* in another tenant's sandbox. |
 | Skill counters / `_meta.json` | **entity** | Same reason as atom counters. |
-| Ledger events | **entity** (+ store discriminator) | `LedgerEvent` is `{at, kind, entity, detail?}` (`src/core/ledger.ts:46-52`) with no store, tenant or run id. |
+| Ledger events | **entity** (+ store discriminator) | `LedgerEvent` in `src/core/ledger.ts` is `{at, kind, entity, detail?}` with no store, tenant or run id. |
 | Burn-in rows | **entity**; derived curve global | Per-row economics are customer data; the aggregate decay curve is not. |
 | Metrics / cost | **entity** | Billing. |
 | Prefilter decision cache | **global, content-addressed** | The only store where global sharing is semantically *correct* — see §4.4. |
@@ -131,9 +132,9 @@ a run consumes budget and executes model-authored code. `org:viewer` exists so
 
 Stated before the central tension because the tension is unresolvable without it.
 
-`ToolSandbox.resolve` (`src/tools/sandbox.ts:188-208`) confines only the
+`ToolSandbox.resolve` (`src/tools/sandbox.ts`) confines only the
 *in-process* tool implementations. `run_shell` spawns a real child with
-`cwd: opts.sandbox.root` and **no jail on the child** (`src/tools/builtin.ts:338-344`
+`cwd: opts.sandbox.root` and **no jail on the child** (`runShellTool` in `src/tools/builtin.ts`
 — verified: the spawn options are `cwd`, `stdio`, `detached`, `env`, nothing
 else). Reproduced with a faithful shape (detached child, cwd = workspace,
 allowlisted `bash`):
@@ -159,7 +160,7 @@ stores, and the *accidental* case (generated cleanup code doing `rm -rf ..`)
 no longer lands in the user's git tree.
 AGENTS.md already concedes the run_shell allowlist is "STEERING, not a boundary"
 and that `bash` / `node -e` / `python3 -c` are complete escape hatches. The env
-allowlist (`sandboxChildEnv`, `sandbox.ts:39-59`) and the scratch HOME close the
+allowlist (`sandboxChildEnv` in `sandbox.ts`) and the scratch HOME close the
 env-var and dotfile exfiltration paths; **nothing closes the sibling-directory
 path.**
 
@@ -173,7 +174,7 @@ Necessary but **not sufficient**: a container stops the lateral read of other
 tenants' stores; it does not stop a payload executing against the victim's own
 source inside their own container, and it does not stop exfiltration unless
 egress is default-deny (`fetch_url` has no URL allowlist *by explicit design* —
-"network is intentionally open", `src/tools/builtin.ts:629-632`).
+"network is intentionally open" in `fetchUrlTool`).
 
 ---
 
@@ -187,7 +188,7 @@ naive reading of "skills are global".
 ### 4.1 The evidence
 
 **(a) Skill bodies are authored from tenant-controlled content.** `learnSkillFromRun`
-distils a Sonnet recipe from a run and saves it (`src/skills/lifecycle.ts:439-447`);
+in `src/skills/lifecycle.ts` distils a Sonnet recipe from a run and saves it;
 `improveSkillBody` rewrites it from a validator diagnosis. `ATOMA_SKILL_LEARN` is
 ON by default in the build profile. A tenant that controls its task text
 influences what gets distilled.
@@ -362,7 +363,7 @@ Every run executes inside an OS boundary whose only writable mount is its own
 workspace; the atom DB, skills root, ledger, prefilter cache and other runs'
 workspaces are not on the filesystem the child can see. Egress is default-deny.
 *Prevents:* the verified `../..` read of `atoma-build.db` and
-`skills/**/SKILL.md` from a `run_shell` child (`builtin.ts:338-344`). *Test:* a
+`skills/**/SKILL.md` from a `run_shell` child (`runShellTool`). *Test:* a
 run whose task is "read the file two directories up" fails with ENOENT, not with
 content.
 
@@ -415,7 +416,7 @@ re-inflates the counters promotion deliberately zeroed
 sidecar field the other wrote.
 
 **T7 — Every ledger event carries a store discriminator and an org.**
-`LedgerEvent` (`core/ledger.ts:46-52`) gains `store_id` / `org_id`;
+`LedgerEvent` (`core/ledger.ts`) gains `store_id` / `org_id`;
 `projectCounters` groups by them.
 *Prevents:* the one-store rule's known limit becoming universal. The failure is
 already observed in miniature: `viz:demo`'s `:memory:` registry allocates the
@@ -453,7 +454,7 @@ distilled, reviewed body crosses the org boundary.
 | A4 | **DONE locally:** `sanitise` rejects all-dot traversal and `branch` validates `overrideName`. Preserve these guards through the surrogate-id migration. | §4.3; `atom-name-path-escape.test.ts` |
 | A5 | **DONE locally:** `create` and `branch` share `usedOrdinals` over live ∪ history. | §4.3; `registry-remove.test.ts` |
 | A6 | **Per-run outbound credentials**; remove `process.exit(1)` from the auth path; drop `claude-cli` as a served transport. | `run/auth.ts:25-55` |
-| A7 | **Concurrency on the atom DB.** `openDb` runs DDL on *every* open (`db.exec(SCHEMA)` + two `PRAGMA table_info` + conditional `ALTER TABLE`, `db.ts:39-56`), so every connection takes a write lock at startup. `db.transaction()` is BEGIN DEFERRED, so two concurrent `create` calls compute the same first gap and the loser gets `SQLITE_BUSY_SNAPSHOT` (not covered by the 5000 ms default busy timeout) or a UNIQUE violation — with no retry anywhere in `src/`. This fires on the hottest path: the five canonical seeders run on **every** run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — AGENTS.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `db.ts:39-56`, `atomRegistry.ts:220-276` |
+| A7 | **Concurrency on the atom DB.** `openDb` runs schema/migration work on every open, so every connection can take a write lock at startup. Allocation transactions are deferred; two concurrent creates can compute the same gap and one loses without a retry. This fires on the hottest path: canonical seeders run on every run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — AGENTS.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `src/registry/db.ts`; `AtomRegistry.create/branch` |
 | A8 | **Skill counters leave the filesystem.** `readMetaChecked` now refuses a torn sidecar instead of silently resetting trust, but whole-object filesystem writes still cannot provide atomic multi-writer counters or a transaction with body promotion. | `skills/registry.ts`; T6 |
 
 ### 6.B Needed for shared learning to be safe

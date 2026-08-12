@@ -937,8 +937,10 @@ re-exports all the historical names so old imports keep working.
   child, no validator could see the child's toolset, and under claude-cli
   an off-scope attempt leaves no trace. Now: (a) `L2.validatePlan` runs a
   MECHANICAL pre-check (`undeclaredToolMentions` in `verdict.ts` — closed
-  `BUILTIN_TOOL_VOCABULARY`, negation-aware ±40-char window) BEFORE the
-  trust fast-path; ≥2 non-negated mentions of an undeclared tool
+  `BUILTIN_TOOL_VOCABULARY`, negation-aware ±40-char window) BEFORE EVERY
+  fast-path (trust AND `viaPrefilter`); the skeletal prefilter plan copies the
+  task description, so user-authored tool names can reach it too. ≥2
+  non-negated mentions of an undeclared tool
   auto-reject with coaching, zero LLM (threshold 2 because a plan that
   USES a tool names it repeatedly — the motivating plan: 7× — while
   echoes/deferrals are single, and a false positive burns a healthy
@@ -2495,12 +2497,17 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
 - When adding a new mechanism, write at minimum one direct supervisor-loop test
   and one registry state-assertion test.
 - **CI proves a CLEAN CHECKOUT, not the developer machine.**
-  `.github/workflows/ci.yml` has two jobs. `core` runs `npm ci` then
+  `.github/workflows/ci.yml` has two jobs. `core` ("Hermetic checks — Docker
+  integration skipped") runs `npm ci` then
   `npm run check` with no registry, skills, runs or prebuilt worker image —
   this is the path that catches a hidden install flag and an import that reads
   ignored runtime data. `worker`, only after core is green, builds
   `atoma-worker:latest` from the current commit and runs the real container
-  isolation suite; a stale local image cannot satisfy it. The jobs pin Node
+  isolation suite with `CI_REQUIRE_DOCKER=1`, so a missing daemon/image is a
+  FAILURE rather than six silently skipped tests. It also runs `record_probe`
+  through the real worker. Main-branch runs are never cancelled mid-worker;
+  pull-request supersessions may still cancel. A stale local image cannot
+  satisfy this job. The jobs pin Node
   22.13 because the current lint dependency requires ≥22.13 on the 22.x line.
   `package.json#engines` carries the honest full-repo floor
   (`^20.19 || ^22.13 || >=24`) rather than the old `>=20`, which emitted
@@ -3507,6 +3514,12 @@ logs to stderr and a builtin that printed to stdout would corrupt the stream.
 The worker announces its own tool declarations in a hello line — the IMAGE is
 the authority on what it can do, since a Chromium-less image has no business
 claiming `validate_html`.
+AN UNEXPECTED WORKER EXIT RESETS THE EXECUTOR. The first implementation
+rejected pending calls but kept a dead `child` and resolved `readyPromise`;
+the next tool call wrote to dead stdin and waited the full 120-second call
+timeout. Exit now clears both so `start()` launches a fresh worker, while
+explicit `stop()` rejects pending calls immediately. An injected-child test
+drives exit → restart without Docker.
 
 WIRED, OPT-IN: `--container` / `ATOMA_CONTAINER=1` selects it in `runTask`
 via `src/run/toolBackend.ts`. The swap touches ONE point because the split
@@ -3579,7 +3592,7 @@ correctness requirement, not tidiness: REPRODUCED that two containers sharing
 one `--internal` network reach each other's servers
 (`REACHED: TENANT_A_WORKSPACE_SECRET`), so a shared network hands one tenant's
 workspace to the next.
-SIX lifecycle bugs are now fixed, each invisible from the layer above:
+SEVEN lifecycle bugs are now fixed, each invisible from the layer above:
   1. `docker run -d` returns before the process inside listens, so the run's
      first request hit a dead proxy. There is a readiness wait now — and it
      reads BOTH streams, because `docker logs` mirrors stderr separately and
@@ -3603,6 +3616,10 @@ SIX lifecycle bugs are now fixed, each invisible from the layer above:
      the existing workspace before reporting the typo. Both are preflighted
      before workspace preparation, store opens or backend startup; real
      subprocess tests pin the ordering.
+  7. Proxy variables were injected without `NO_PROXY`, even though the HTTP
+     bucket starts and probes a server on this SAME container's loopback.
+     Both uppercase/lowercase forms now exempt localhost, and the worker flag
+     test pins them.
 Every one of them presented as "npm install failed" with an empty stderr.
 TEST DISCIPLINE, learned here: the control plane must be proven denied by the
 ALLOWLIST independently of the port rule. The first version of these tests
@@ -3734,23 +3751,36 @@ rather than an error: one shared workspace archived wholesale, trace attribution
 by newest-mtime-since, and the machine-to-itself requirement for comparable
 economics. The burn-in harness gets this free from its sequential loop; a server
 has to enforce it. An in-memory `inFlight` variable is NOT enforcement across
-two MCP server processes, so the authority is an atomic filesystem lease under
-`~/.atoma`. The complete owner bytes are published by hard-link (no visible
-empty-file window), carry both server PID and detached child group PID, and are
-released only after the driver promise settles. A dead owner with no child is
-recovered; a dead owner with a live group triggers the same SIGTERM → 5s →
-SIGKILL sequence and keeps the slot closed during cleanup. Release is
-token-checked, so a late old owner cannot delete its successor's lease.
+two MCP server processes, so the authority is a singleton row in
+`~/.atoma/mcp-run-lock.db`. Acquisition/recovery runs under `BEGIN IMMEDIATE`;
+owner replacement and release are conditioned on a random token. This replaced
+the first hard-link lock, whose read-token-then-unlink sequence had an ABA race:
+two stale recoverers could let the late one unlink the early one's new lease.
+The row carries server PID and detached child PGID. A dead owner with a live
+group triggers SIGTERM → 5s → SIGKILL and waits for ESRCH before a
+compare-and-swap takeover. Two real processes racing the same stale row are
+pinned: exactly one acquires.
 
 **CANCELLING IS A STATE, NOT A COMPLETION.** `atoma_run_cancel` sets
 `status: "cancelling"` and aborts `spawnRun`; the slot and lease remain held
-until the child emits exit and the trace closes, then the public status becomes
-`cancelled`. The first implementation set `cancelled` immediately, and
+until the WHOLE process group is confirmed gone and the trace closes, then the
+public status becomes `cancelled`. A leader `exit` is insufficient — a test
+leaves a descendant in the same PGID after its leader exits, and the shared
+terminator still reaps it; a second test forces the SIGKILL branch. The first
+implementation set `cancelled` immediately, and
 `startRun` only blocked `running`, so a new run could archive the workspace
 during the old group's 5-second teardown — the test explicitly enshrined the
-race as "cancelling frees the slot". Stdio close and SIGINT/SIGTERM now enter
-the same awaited shutdown. A 6-second server backstop force-kills a driver
-promise that never settles; the synchronous exit hook is the last resort.
+race as "cancelling frees the slot". Stdio EOF/close, transport `onclose`,
+SIGINT, SIGTERM and SIGHUP now enter the same awaited shutdown. A 6-second
+server backstop force-kills a driver promise that never settles; the
+synchronous exit hook signals but deliberately LEAVES the lease row stale,
+because process exit cannot confirm ESRCH — the next server does that safely.
+HONEST RESIDUAL: there is an instruction-scale window between `spawn()` and
+the synchronous SQLite `attachChild(PGID)`. Attachment failure is fail-closed
+(the new group is terminated and the driver rejects), but an uncatchable
+SIGKILL in that exact window leaves a row with no PGID and an orphan no safe
+identifier can recover. Process-name scanning was rejected: it can kill an
+unrelated npm run. Direct launches outside MCP also do not take this lease.
 
 **THE PROVIDER IS PINNED, AND THE NESTED PATH WAS VERIFIED RATHER THAN
 ASSUMED.** The child gets `ATOMA_LLM=claude-cli` unless the host set one,

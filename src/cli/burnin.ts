@@ -261,6 +261,21 @@ export function newestTraceName(runsDir: string, since: number): string {
  *     synthetic log, which `parseRunLog` reads as outcome 'error'.
  */
 export const RUN_KILL_GRACE_MS = 5000;
+export const RUN_KILL_CONFIRM_MS = 2000;
+
+export function runProcessGroupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (err) {
+    return (
+      err !== null &&
+      typeof err === 'object' &&
+      'code' in err &&
+      (err as { code?: unknown }).code === 'EPERM'
+    );
+  }
+}
 
 /** Signal a detached run's whole process group, then its leader as fallback. */
 export function signalRunProcessGroup(pid: number, signal: NodeJS.Signals): void {
@@ -274,6 +289,33 @@ export function signalRunProcessGroup(pid: number, signal: NodeJS.Signals): void
   } catch {
     /* already gone */
   }
+}
+
+async function waitForRunProcessGroupGone(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (runProcessGroupExists(pid)) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  return true;
+}
+
+/**
+ * The one graceful termination primitive for detached run groups.
+ *
+ * A leader exiting is not enough: grandchildren keep the process group alive.
+ * Confirm ESRCH after SIGTERM, escalate to SIGKILL, then confirm again.
+ */
+export async function terminateRunProcessGroup(
+  pid: number,
+  graceMs = RUN_KILL_GRACE_MS,
+  confirmMs = RUN_KILL_CONFIRM_MS
+): Promise<boolean> {
+  if (!runProcessGroupExists(pid)) return true;
+  signalRunProcessGroup(pid, 'SIGTERM');
+  if (await waitForRunProcessGroupGone(pid, graceMs)) return true;
+  signalRunProcessGroup(pid, 'SIGKILL');
+  return waitForRunProcessGroupGone(pid, confirmMs);
 }
 
 export function spawnRun(opts: {
@@ -290,13 +332,13 @@ export function spawnRun(opts: {
   readonly signal?: AbortSignal;
   /** Called with each stdout/stderr chunk as it arrives. */
   readonly onChunk?: (chunk: string) => void;
-  /** Called once with the detached process-group leader pid. Must not throw. */
+  /** Called once with the detached PGID; a throw terminates the group and rejects. */
   readonly onSpawn?: (pid: number) => void;
   /** Pass `--clean-workspace`. Defaults to true (the measurement default). */
   readonly cleanWorkspace?: boolean;
 }): Promise<string> {
   const { goal, timeoutMs, logPath } = opts;
-  return new Promise((resolveRun) => {
+  return new Promise((resolveRun, rejectRun) => {
     // Ahead of the spawn: the write below happens on the settle path, and a
     // throw there is what used to strand the promise.
     try {
@@ -325,8 +367,23 @@ export function spawnRun(opts: {
         },
       }
     );
-    if (child.pid !== undefined) opts.onSpawn?.(child.pid);
     let log = '';
+    let killTimer: NodeJS.Timeout | null = null;
+    let termination: Promise<boolean> | null = null;
+    const requestTermination = (): Promise<boolean> => {
+      if (termination) return termination;
+      if (child.pid !== undefined) {
+        termination = terminateRunProcessGroup(child.pid);
+      } else {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* spawn error path will settle */
+        }
+        termination = Promise.resolve(false);
+      }
+      return termination;
+    };
     const onChunk = (c: Buffer): void => {
       const text = c.toString();
       log += text;
@@ -334,57 +391,18 @@ export function spawnRun(opts: {
       // A delivered run that started a server idles forever by design —
       // terminate once the completion banner is in (metrics print before it).
       if (/✓ build finished/.test(log) && !killTimer) {
-        killTimer = setTimeout(killGroup, 1500);
+        killTimer = setTimeout(() => void requestTermination(), 1500);
       }
     };
-    /**
-     * GRACEFUL FIRST, then force. SIGKILL is uncatchable, so going straight
-     * to it meant the run's `process.on('exit')` sandbox teardown NEVER ran
-     * on this path — every headless Chrome the run had launched survived,
-     * along with any tracked child. Measured 2026-08-08: 126 puppeteer
-     * processes accumulated (42 reparented to init, oldest 22h), loading
-     * the machine until two later runs blew their own budgets. The run now
-     * gets SIGTERM and a grace window to close its browser the clean way
-     * (Chrome's own teardown reaps its helper fleet, which an abrupt root
-     * kill does not reliably do); SIGKILL follows only if it ignores it.
-     */
-    let killEscalation: NodeJS.Timeout | null = null;
-    let terminating = false;
-    const killGroup = (): void => {
-      if (terminating) return;
-      terminating = true;
-      if (child.pid !== undefined) signalRunProcessGroup(child.pid, 'SIGTERM');
-      else {
-        try {
-          child.kill('SIGTERM');
-        } catch {
-          /* gone */
-        }
-      }
-      killEscalation = setTimeout(() => {
-        if (child.pid !== undefined) signalRunProcessGroup(child.pid, 'SIGKILL');
-        else {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            /* gone */
-          }
-        }
-      }, RUN_KILL_GRACE_MS);
-      killEscalation.unref();
-      child.once('exit', () => {
-        if (killEscalation) clearTimeout(killEscalation);
-      });
-    };
-    let killTimer: NodeJS.Timeout | null = null;
     // Hard stop: task budget + generous teardown margin.
-    const hardTimer = setTimeout(killGroup, timeoutMs + 180_000);
+    const hardTimer = setTimeout(() => void requestTermination(), timeoutMs + 180_000);
     // Cancellation rides the SAME graceful sequence as every other stop: an
     // abort must not become the bare group SIGKILL the sequence exists to
     // avoid (uncatchable ⇒ the run's teardown never runs ⇒ leaked browsers).
+    const abortHandler = (): void => void requestTermination();
     if (opts.signal) {
-      if (opts.signal.aborted) killGroup();
-      else opts.signal.addEventListener('abort', killGroup, { once: true });
+      if (opts.signal.aborted) abortHandler();
+      else opts.signal.addEventListener('abort', abortHandler, { once: true });
     }
     child.stdout?.on('data', onChunk);
     child.stderr?.on('data', onChunk);
@@ -392,26 +410,46 @@ export function spawnRun(opts: {
     // in some failure modes), and resolving twice would silently drop the
     // second settle's log. First one wins.
     let settled = false;
-    const settle = (finalLog: string): void => {
+    const settle = (finalLog: string, error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(hardTimer);
       if (killTimer) clearTimeout(killTimer);
-      if (killEscalation) clearTimeout(killEscalation);
-      opts.signal?.removeEventListener('abort', killGroup);
+      opts.signal?.removeEventListener('abort', abortHandler);
       try {
         writeFileSync(logPath, finalLog, 'utf8');
       } catch {
         /* an unwritable log must not strand the caller — see the docstring */
       }
-      resolveRun(finalLog);
+      if (error) rejectRun(error);
+      else resolveRun(finalLog);
     };
     child.once('error', (err: Error) => {
       // No process ever ran, so there is nothing to parse: hand back a log
       // whose shape `parseRunLog` classifies as 'error'.
       settle(`${log}\n--- spawn failed --- ${err.message}\n`);
     });
-    child.once('exit', () => settle(log));
+    let spawnHookError: Error | undefined;
+    child.once('exit', () => {
+      void (async () => {
+        const gone =
+          child.pid === undefined
+            ? true
+            : await (termination ?? terminateRunProcessGroup(child.pid));
+        // Fail closed: a surviving group keeps the promise (and MCP lease)
+        // pending until the server's own hard-exit backstop takes over.
+        if (!gone) return;
+        settle(log, spawnHookError);
+      })();
+    });
+    if (child.pid !== undefined) {
+      try {
+        opts.onSpawn?.(child.pid);
+      } catch (err) {
+        spawnHookError = err instanceof Error ? err : new Error(String(err));
+        void requestTermination();
+      }
+    }
   });
 }
 

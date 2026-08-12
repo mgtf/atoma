@@ -10,6 +10,7 @@ import {
 
 /** Image tag the worker Dockerfile builds to. */
 export const DEFAULT_WORKER_IMAGE = 'atoma-worker:latest';
+export type ContainerSpawn = typeof spawn;
 
 /** Match bind-mount ownership on native Linux; Docker Desktop also accepts it. */
 export function hostContainerUser(): string | undefined {
@@ -69,6 +70,12 @@ export function workerRunArgs(opts: {
           `npm_config_proxy=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
           '-e',
           `npm_config_https_proxy=http://${opts.egress.proxyHost}:${opts.egress.proxyPort}`,
+          // The HTTP bucket probes servers inside this SAME container.
+          // Loopback must never leave through the default-deny proxy.
+          '-e',
+          'NO_PROXY=127.0.0.1,localhost,::1',
+          '-e',
+          'no_proxy=127.0.0.1,localhost,::1',
         ]
       : []),
     // ONLY the workspace. The atom registry, the skill bodies, the ledger and
@@ -129,6 +136,8 @@ export class ContainerToolExecutor implements ToolExecutor {
       callTimeoutMs?: number;
       startTimeoutMs?: number;
       docker?: string;
+      /** Injectable process spawn for lifecycle tests. */
+      spawnFn?: ContainerSpawn;
       /** Override for tests/deployments; defaults to the host uid:gid. */
       containerUser?: string;
       /** Mirror the worker's stderr onto the host's. Default true. */
@@ -147,7 +156,7 @@ export class ContainerToolExecutor implements ToolExecutor {
         ...(user ? { user } : {}),
         ...(this.opts.egress ? { egress: this.opts.egress } : {}),
       });
-      const child = spawn(this.opts.docker ?? 'docker', args, {
+      const child = (this.opts.spawnFn ?? spawn)(this.opts.docker ?? 'docker', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       this.child = child;
@@ -197,6 +206,8 @@ export class ContainerToolExecutor implements ToolExecutor {
       });
       child.on('exit', (code) => {
         clearTimeout(timer);
+        if (this.child === child) this.child = null;
+        this.readyPromise = null;
         // Fail every in-flight call rather than leaving them pending: a dead
         // container must surface as an error the supervise loop can act on,
         // never as a run that hangs forever (the failure mode the CLI
@@ -257,6 +268,10 @@ export class ContainerToolExecutor implements ToolExecutor {
     const child = this.child;
     if (!child) return;
     this.child = null;
+    this.readyPromise = null;
+    const stopped = new Error('worker container stopped');
+    for (const [, pending] of this.pending) pending.reject(stopped);
+    this.pending.clear();
     try {
       child.stdin?.end();
     } catch {

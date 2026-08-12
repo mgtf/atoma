@@ -9,11 +9,12 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never discard the worker proof for a commit already on main.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   core:
-    name: Clean checkout
+    name: Hermetic checks (Docker integration skipped)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -38,4 +39,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build:worker
+      - run: test -f dist/tools/worker.js && test -f dist/contracts/probeManifest.js
       - run: npx vitest run tests/container-isolation.test.ts
+        env:
+          CI_REQUIRE_DOCKER: "1"

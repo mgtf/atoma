@@ -85,14 +85,16 @@ registered conditions in advance.
 [`verify-maint.mjs`](verify-maint.mjs) — which executes the CLI rather than
 reading claims about it.
 
-**Re-scored under a TIGHTER instrument after the fact, and the result held.**
-An adversarial reviewer pointed out the scorer never opened
+**The committed score artefact is the original 7-check instrument.**
+[`results-round8-scores.json`](results-round8-scores.json) records 7/7 for all
+nine deliverables. An adversarial reviewer later pointed out the scorer never opened
 `.atoma-probes.json`, which the goal text explicitly names — so manifest
 destruction, a whitewashed regression or a stale merge all scored full marks.
-Three clauses were added (parses, entries preserved, every recorded entry still
-replays byte-identically) and all nine deliverables score **10 of 10**. The
-clauses discriminate: sabotaging a copy's manifest stdout drops it to 9/10,
-deleting entries to 8/10.
+Three clauses were added to `verify-maint.mjs` (parses, entries preserved,
+every recorded entry still replays byte-identically), making the CURRENT scorer
+a 10-check instrument. The round-8 workspaces are not committed, so its 10/10
+result cannot be regenerated from this repository and is deliberately not
+claimed here.
 
 That scorer is new, and it should have existed three rounds ago: rounds 5, 6
 and 7 each reported a correctness figure from a scorer that was never

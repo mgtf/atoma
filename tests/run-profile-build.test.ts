@@ -1,11 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { storeDbPath } from '../src/core/stores.js';
 import { defaultBuiltinTools } from '../src/tools/builtin.js';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import { buildProfile, NEURON_SYSTEM_PROMPT, NEURON_DESCRIPTION } from '../src/run/profiles/build.js';
@@ -43,38 +40,6 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     expect(NEURON_SYSTEM_PROMPT.length).toBe(949);
   });
 
-  it('matches the REAL persisted prompt, when the build store is present', () => {
-    // Belt to the hash's braces: if the developer's own store is around, the
-    // seed must equal it exactly — that is the condition under which the
-    // idempotent patch stays a no-op and the counters survive.
-    //
-    // Against a COPY, never the original: `openDb` runs `db.exec(SCHEMA)`,
-    // flips journal_mode to WAL and applies forward migrations, so pointing
-    // it at the live store would have `npm test` writing to the developer's
-    // own registry (and dropping -wal/-shm beside it). A read-only guard must
-    // not mutate what it is guarding.
-    // THROUGH THE SHARED RESOLVER, not a literal. This read `'./atoma-build.db'`
-    // directly, and the guard above is an `existsSync` early-return — so the
-    // store consolidation would have made the whole check go dark SILENTLY,
-    // still green, still reported as passing, while the Neuron baseline
-    // (Methane 133✓ and Water 36✓ ride the same seeder) stopped being
-    // verified at all. A test whose subject can vanish must name it the way
-    // production does.
-    const store = storeDbPath();
-    if (!existsSync(store)) return;
-    const copy = join(mkdtempSync(join(tmpdir(), 'atoma-db-copy-')), 'build.db');
-    copyFileSync(store, copy);
-    try {
-      const reg = new AtomRegistry(openDb(copy));
-      const neuron = reg.listByTier(3).find((t) => t.name === 'Neuron');
-      expect(neuron, 'no Neuron in the build store — baseline unverifiable').toBeTruthy();
-      expect(neuron!.systemPrompt).toBe(NEURON_SYSTEM_PROMPT);
-      expect(neuron!.description).toBe(NEURON_DESCRIPTION);
-    } finally {
-      rmSync(dirname(copy), { recursive: true, force: true });
-    }
-  });
-
   it('seeding twice on a fresh store does not bump the version', () => {
     // The idempotence that keeps trust alive across runs.
     const reg = new AtomRegistry(openDb(':memory:'));
@@ -84,6 +49,8 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     const ctx = { registry: reg, toolDecls: tools, log };
 
     const first = buildProfile.seedL3(ctx);
+    expect(first.systemPrompt).toBe(NEURON_SYSTEM_PROMPT);
+    expect(first.description).toBe(NEURON_DESCRIPTION);
     buildProfile.seedCatalog(ctx);
     const versionsAfterFirst = reg
       .listByTier(1)

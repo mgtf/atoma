@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ContainerToolExecutor, workerRunArgs } from '../src/tools/containerExecutor.js';
+import { containerToolBackend } from '../src/run/toolBackend.js';
 import { drainLines, encodeMessage, isWorkerHello } from '../src/tools/containerProtocol.js';
 
 /**
@@ -34,6 +35,9 @@ function dockerReady(): boolean {
 }
 
 const HAVE_DOCKER = dockerReady();
+if (process.env['CI_REQUIRE_DOCKER'] === '1' && !HAVE_DOCKER) {
+  throw new Error('CI worker job requires Docker and a freshly built atoma-worker:latest image');
+}
 const describeDocker = HAVE_DOCKER ? describe : describe.skip;
 
 describe('workerRunArgs — the isolation is in the flags, so assert them', () => {
@@ -82,6 +86,8 @@ describe('workerRunArgs — the isolation is in the flags, so assert them', () =
     const env = a.filter((_x, i) => a[i - 1] === '-e');
     expect(env).toContain('HTTP_PROXY=http://atoma-proxy:3128');
     expect(env).toContain('npm_config_https_proxy=http://atoma-proxy:3128');
+    expect(env).toContain('NO_PROXY=127.0.0.1,localhost,::1');
+    expect(env).toContain('no_proxy=127.0.0.1,localhost,::1');
     // Still only the workspace, still no capabilities: egress widens the
     // network and nothing else.
     expect(a.filter((_x, i) => a[i - 1] === '-v')).toEqual(['/host/ws:/workspace']);
@@ -162,6 +168,26 @@ describeDocker('a containerised run cannot reach the stores', () => {
     expect(readFileSync(join(workspace, 'hello.txt'), 'utf8')).toContain('from the container');
   }, 60_000);
 
+  it('records probe output through the worker contract at runtime', async () => {
+    await exec.execute('write_file', {
+      path: 'probe.js',
+      content: "console.log('CONTAINER_PROBE_OK');",
+    });
+    const result = (await exec.execute('record_probe', { cmd: 'node probe.js' })) as {
+      recorded?: boolean;
+      stdout?: string;
+    };
+    expect(result.recorded).toBe(true);
+    expect(result.stdout).toContain('CONTAINER_PROBE_OK');
+    const manifest = JSON.parse(readFileSync(join(workspace, '.atoma-probes.json'), 'utf8')) as {
+      entries: Array<{ cmd: string; stdout?: string }>;
+    };
+    expect(manifest.entries[0]).toMatchObject({
+      cmd: 'node probe.js',
+      stdout: 'CONTAINER_PROBE_OK\n',
+    });
+  }, 60_000);
+
   it('CANNOT read the sibling stores — the walk that works in-process', async () => {
     const r = (await exec.execute('run_shell', {
       command: 'ls',
@@ -213,4 +239,34 @@ describeDocker('a containerised run cannot reach the stores', () => {
     expect(probed.status).toBe(200);
     expect(probed.body).toContain('"ok":true');
   }, 90_000);
+
+  it('keeps HTTP loopback working when proxied egress is enabled', async () => {
+    const egressWorkspace = join(dir, 'egress-ws');
+    mkdirSync(egressWorkspace, { recursive: true });
+    const backend = await containerToolBackend({
+      workspaceRoot: egressWorkspace,
+      egress: true,
+      runId: `test-loopback-${process.pid}`,
+    });
+    try {
+      await backend.executor.execute('write_file', {
+        path: 'server.js',
+        content: [
+          "const http = require('http');",
+          "const s = http.createServer((_q, r) => r.end('EGRESS_LOOPBACK_OK'));",
+          's.listen(0, "127.0.0.1", () => console.log("LISTENING_ON_PORT=" + s.address().port));',
+        ].join('\n'),
+      });
+      const started = (await backend.executor.execute('start_node_server', {
+        entry: 'server.js',
+      })) as { url?: string };
+      const probed = (await backend.executor.execute('fetch_url', {
+        url: started.url,
+      })) as { status?: number; body?: string };
+      expect(probed.status).toBe(200);
+      expect(probed.body).toContain('EGRESS_LOOPBACK_OK');
+    } finally {
+      await backend.cleanup();
+    }
+  }, 120_000);
 });

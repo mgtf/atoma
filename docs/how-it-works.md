@@ -472,4 +472,4 @@ Recorded so nobody has to discover it in a demo:
 | How does another agent drive atoma? | `claude mcp add atoma -- npx tsx "$PWD/src/mcp/stdio.ts"` — stdio only, 13 tools |
 | Are the economics real? | `burnin/results.csv`, regenerable with `npm run burnin` |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
-| Do the deliverables actually work? | `benchmark/verify-maint.mjs` executes them; `benchmark/results-round8-scores.json` is its output. Rounds 4-7 have no committed scorer output |
+| Do the deliverables actually work? | `benchmark/results-round8-scores.json` is the committed historical 7-check output; `verify-maint.mjs` now has 10 checks, but the round workspaces needed to regenerate it are not committed. Rounds 4-7 have no committed scorer output |

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -15,6 +15,7 @@ import {
   resetRunsForTest,
   runStatus,
   shutdownRuns,
+  signalActiveRunOnExit,
   startRun,
   validateStartInput,
   type RunDriver,
@@ -22,7 +23,8 @@ import {
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
 import { families, friction, registryList, runTrace, skillsList } from '../src/mcp/readers.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
-import { storeDbPath } from '../src/core/stores.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 
 /**
  * The atoma MCP server — atoma exposed to an MCP host (Claude Code) over
@@ -47,7 +49,7 @@ import { storeDbPath } from '../src/core/stores.js';
 /** A driver that never spawns anything and never settles — the run stays "running". */
 const neverSettles: RunDriver = () => new Promise<string>(() => {});
 /** Unit tests exercise bookkeeping; filesystem-lease behavior has its own suite. */
-const noLease: RunLeaseAcquirer = () => ({
+const noLease: RunLeaseAcquirer = async () => ({
   path: '<test>',
   attachChild() {},
   release() {},
@@ -140,12 +142,12 @@ describe('MCP run tool — serialisation', () => {
    * economics instead of an error. The burn-in harness gets this free from its
    * sequential loop; a server has to enforce it.
    */
-  it('refuses a second run while one is in flight, naming the one that holds the slot', () => {
-    const first = startTestRun({ goal: 'build a thing' });
+  it('refuses a second run while one is in flight, naming the one that holds the slot', async () => {
+    const first = await startTestRun({ goal: 'build a thing' });
     expect(first.status).toBe('running');
-    expect(() => startTestRun({ goal: 'build another thing' })).toThrow(RunRejected);
+    await expect(startTestRun({ goal: 'build another thing' })).rejects.toThrow(RunRejected);
     try {
-      startTestRun({ goal: 'build another thing' });
+      await startTestRun({ goal: 'build another thing' });
     } catch (err) {
       expect((err as Error).message).toContain(first.runId);
     }
@@ -157,26 +159,28 @@ describe('MCP run tool — serialisation', () => {
       new Promise<string>((resolveRun) => {
         finish = resolveRun;
       });
-    const first = startTestRun({ goal: 'build a thing' }, driver);
+    const first = await startTestRun({ goal: 'build a thing' }, driver);
     const cancelled = cancelRun({}) as { cancelled?: string };
     expect(cancelled.cancelled).toBe(first.runId);
     const status = runStatus({ runId: first.runId }) as { status: string };
     expect(status.status).toBe('cancelling');
-    expect(() => startTestRun({ goal: 'too early' })).toThrow(RunRejected);
+    await expect(startTestRun({ goal: 'too early' })).rejects.toThrow(RunRejected);
 
     finish('');
     await shutdownRuns();
     expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelled');
-    expect(() => startTestRun({ goal: 'a later run' })).not.toThrow();
+    await expect(startTestRun({ goal: 'a later run' })).resolves.toMatchObject({
+      status: 'running',
+    });
   });
 
-  it('the abort signal reaches the driver — that is what makes cancellation graceful', () => {
+  it('the abort signal reaches the driver — that is what makes cancellation graceful', async () => {
     let seen: AbortSignal | undefined;
     const capture: RunDriver = (opts) => {
       seen = opts.signal;
       return new Promise<string>(() => {});
     };
-    startTestRun({ goal: 'build a thing' }, capture);
+    await startTestRun({ goal: 'build a thing' }, capture);
     expect(seen).toBeDefined();
     expect(seen!.aborted).toBe(false);
     cancelRun({});
@@ -194,7 +198,7 @@ describe('MCP run tool — serialisation', () => {
         finish = resolveRun;
       });
     };
-    const first = startTestRun({ goal: 'build a thing' }, driver);
+    const first = await startTestRun({ goal: 'build a thing' }, driver);
     const shutdown = shutdownRuns('stdio closed');
     expect(seen?.aborted).toBe(true);
     expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelling');
@@ -211,9 +215,9 @@ describe('MCP run tool — serialisation', () => {
     expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelled');
   });
 
-  it('attaches the detached child pid to the cross-process lease', () => {
+  it('attaches the detached child pid to the cross-process lease', async () => {
     let attachedPid: number | undefined;
-    const acquire: RunLeaseAcquirer = () => ({
+    const acquire: RunLeaseAcquirer = async () => ({
       path: '<test>',
       attachChild: (pid) => {
         attachedPid = pid;
@@ -225,11 +229,27 @@ describe('MCP run tool — serialisation', () => {
       return new Promise<string>(() => {});
     };
 
-    startRun({ goal: 'build a thing' }, driver, acquire);
+    await startRun({ goal: 'build a thing' }, driver, acquire);
     expect(attachedPid).toBe(4242);
   });
 
-  it('pins the provider on the child rather than inheriting a dead API key', () => {
+  it('leaves the lease stale on a hard control-plane exit', async () => {
+    let releases = 0;
+    const acquire: RunLeaseAcquirer = async () => ({
+      path: '<test>',
+      attachChild() {},
+      release: () => {
+        releases++;
+      },
+    });
+    await startRun({ goal: 'build a thing' }, neverSettles, acquire);
+    signalActiveRunOnExit();
+    expect(releases).toBe(0);
+    // Test teardown is explicit and may release; production process.exit
+    // closes the DB handle while leaving the row for stale recovery.
+  });
+
+  it('pins the provider on the child rather than inheriting a dead API key', async () => {
     let env: Readonly<Record<string, string>> | undefined;
     let cwd: string | undefined;
     let npmScript: string | undefined;
@@ -241,7 +261,7 @@ describe('MCP run tool — serialisation', () => {
       clean = opts.cleanWorkspace;
       return new Promise<string>(() => {});
     };
-    startTestRun({ goal: 'build a thing' }, capture);
+    await startTestRun({ goal: 'build a thing' }, capture);
     // The host environment carries an ANTHROPIC_API_KEY that the auth chain
     // prefers FIRST (the documented "#1 auth trap"); in this project it is
     // dead, and a run reaching the direct-API path dies in ~15s.
@@ -253,13 +273,13 @@ describe('MCP run tool — serialisation', () => {
     expect(clean).toBe(true);
   });
 
-  it('keepWorkspace is what stops the caller’s deliverable being archived', () => {
+  it('keepWorkspace is what stops the caller’s deliverable being archived', async () => {
     let clean: boolean | undefined;
     const capture: RunDriver = (opts) => {
       clean = opts.cleanWorkspace;
       return new Promise<string>(() => {});
     };
-    startTestRun({ goal: 'build a thing', keepWorkspace: true }, capture);
+    await startTestRun({ goal: 'build a thing', keepWorkspace: true }, capture);
     expect(clean).toBe(false);
   });
 });
@@ -294,26 +314,26 @@ describe('MCP readers', () => {
     expect((friction() as { runsScanned: number }).runsScanned).toBe(0);
   });
 
-  /**
-   * Read against a COPY, never the live store: `openDb` would exec the schema
-   * and flip journal_mode on the real file. The copy pattern is
-   * tests/run-profile-build.test.ts's.
-   */
-  it('reads a real store copy through a readonly handle', () => {
-    const live = storeDbPath();
-    if (!existsSync(live)) return; // fresh clone — nothing to read
-    const copy = join(dir, 'copy.db');
-    copyFileSync(live, copy);
-    process.env['ATOMA_DB_PATH'] = copy;
+  it('reads a hermetic store fixture through a readonly handle', () => {
+    const fixture = join(dir, 'fixture.db');
+    const db = openDb(fixture);
+    const registry = new AtomRegistry(db);
+    const created = registry.create(1, {
+      description: 'fixture',
+      systemPrompt: 'fixture',
+      tools: [],
+      params: {},
+      createdBy: 'test',
+    });
+    registry.recordSuccess(created.name);
+    db.close();
+    process.env['ATOMA_DB_PATH'] = fixture;
     const out = registryList({ tier: 1 }) as {
       types: { name: string; tools: string[]; successes: number }[];
     };
-    expect(Array.isArray(out.types)).toBe(true);
-    for (const t of out.types) {
-      expect(typeof t.name).toBe('string');
-      expect(Array.isArray(t.tools)).toBe(true);
-      expect(typeof t.successes).toBe('number');
-    }
+    expect(out.types).toEqual([
+      expect.objectContaining({ name: created.name, tools: [], successes: 1 }),
+    ]);
   });
 
   /**
@@ -378,6 +398,11 @@ describe('MCP server instructions', () => {
     expect(claim).toBeGreaterThanOrEqual(0);
     expect(load).toBeGreaterThan(claim);
     expect(source).not.toMatch(/import\s+.+from\s+['"]\.\/server/);
+    const serverSource = readFileSync(join(repoRoot(), 'src/mcp/server.ts'), 'utf8');
+    expect(serverSource).toContain("process.once('SIGHUP'");
+    expect(serverSource).toContain('server.server.onclose');
+    expect(serverSource).toContain("process.once('exit', signalActiveRunOnExit)");
+    expect(serverSource).toContain('forceKillActiveRunAfterGrace()');
   });
 });
 

@@ -267,11 +267,11 @@ function requestCancellation(record: RunRecord, reason: string): void {
  * machine to itself for comparable economics. The burn-in harness gets this
  * free from its sequential loop; a server has to enforce it.
  */
-export function startRun(
+export async function startRun(
   input: StartRunInput,
   driver: RunDriver = spawnRun,
   acquireLease: RunLeaseAcquirer = acquireRunLease
-): RunRecordPublic {
+): Promise<RunRecordPublic> {
   if (inFlight) {
     throw new RunRejected(
       `a run is already in flight (${inFlight.runId}, started ${inFlight.startedAt}). atoma serialises runs: the build workspace is shared, trace attribution is newest-file-wins, and concurrent runs make the cost numbers incomparable. Wait for it or call atoma_run_cancel.`
@@ -286,7 +286,7 @@ export function startRun(
   const logPath = join(root, 'burnin', 'logs', 'mcp', `${runId}.log`);
   let lease: RunLease;
   try {
-    lease = acquireLease(runId);
+    lease = await acquireLease(runId);
   } catch (err) {
     if (err instanceof RunLockBusyError) throw new RunRejected(err.message);
     throw err;
@@ -310,9 +310,8 @@ export function startRun(
 
   const runsDir = runsDirPath();
   // Fire and forget: the promise is the record's own completion handler. It
-  // ALWAYS settles now — `spawnRun` gained an 'error' listener and a guarded
-  // log write precisely because a server cannot survive a promise that never
-  // resolves.
+  // Settles only after the detached process group is confirmed gone. A group
+  // that somehow survives SIGKILL deliberately keeps the lease occupied.
   let driven: Promise<string>;
   try {
     driven = driver({
@@ -339,8 +338,8 @@ export function startRun(
         record.tail = (record.tail + chunk).slice(-PROGRESS_TAIL_CHARS);
       },
       onSpawn: (pid) => {
-        record.childPid = pid;
         record.lease.attachChild(pid);
+        record.childPid = pid;
       },
     });
   } catch (err) {
@@ -428,13 +427,21 @@ export async function shutdownRuns(reason = 'MCP server shutting down'): Promise
   await waitForRunIdle();
 }
 
-/** Synchronous hard-exit backstop; graceful shutdown should have run first. */
-export function forceStopActiveRunOnExit(): void {
+/** Generic process-exit hook: graceful signal only, lease remains stale. */
+export function signalActiveRunOnExit(): void {
   if (!inFlight) return;
   if (inFlight.childPid !== undefined) {
+    signalRunProcessGroup(inFlight.childPid, 'SIGTERM');
+  }
+  // DO NOT release: process.exit cannot confirm ESRCH. Leave the row stale so
+  // the next server recovers it transactionally and reaps any surviving group.
+}
+
+/** Server shutdown timer after the grace window: force, but keep the lease. */
+export function forceKillActiveRunAfterGrace(): void {
+  if (inFlight?.childPid !== undefined) {
     signalRunProcessGroup(inFlight.childPid, 'SIGKILL');
   }
-  inFlight.lease.release();
 }
 
 /** Test seam: forget every record so a suite can assert on a clean slate. */

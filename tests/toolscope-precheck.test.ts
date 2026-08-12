@@ -203,6 +203,23 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
     expect(ctx.llm.calls).toHaveLength(0);
   });
 
+  it('pre-check also outranks the viaPrefilter fast-path', async () => {
+    const { water, child } = setup();
+    const ctx = makeCtx();
+    const plan = {
+      ...makePlan({
+        reasoning: 'validate_html is required for this phase',
+        proposedAction: 'call validate_html and report validate_html output',
+        expectedOutput: 'e',
+      }),
+      viaPrefilter: true,
+    };
+    const verdict = await water.validatePlan(child, plan, { description: 't' }, ctx);
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/outside the child's declared toolset/);
+    expect(ctx.llm.calls).toHaveLength(0);
+  });
+
   it('F1(b) hybrid gate: an HTTP child SERVING html gets the browser probe after a content sniff', async () => {
     const { child } = setup();
     const ctx = makeCtx();

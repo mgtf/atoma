@@ -1699,24 +1699,10 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   // (Haiku by default), not the supervisor's own model. The job here is a
   // terse yes/no on the child's plan/result; it does not need Sonnet to answer.
   async validatePlan(child: L1Atom, plan: Plan, task: Task, ctx: RunContext): Promise<Verdict> {
-    // Prefilter fast-path: a plan synthesised by the Haiku prefilter
-    // short-circuit is already the product of a capability-match
-    // decision — asking another Haiku to vet "delegate leaf task to L1
-    // Helium" produces no new signal and regularly rejects the
-    // freshly-bootstrapped canonical picks. We short-circuit to
-    // approval, which matches the semantic of validatePlan (yes/no on
-    // the plan's fitness) without paying the redundant round-trip.
-    // Trust counters are NOT used here: an untrusted but prefilter-
-    // validated child gets the pass precisely because the prefilter
-    // already did the capability-match reasoning.
-    if (plan.viaPrefilter) {
-      return {
-        approved: true,
-        reasoning: `prefilter fast-path: plan was synthesised by Haiku's capability-match decision on child "${child.name}", no separate validator pass needed`,
-      };
-    }
-    // Mechanical toolset pre-check — BEFORE the trust fast-path on purpose:
-    // a trusted child's off-scope plan would otherwise be approved blind.
+    // Mechanical toolset pre-check — BEFORE every fast-path on purpose:
+    // a trusted OR prefilter-synthesised off-scope plan would otherwise be
+    // approved blind. The prefilter copies task text into its skeletal plan,
+    // so user-authored undeclared tool names can reach this path too.
     // Zero LLM cost; the F1 fix's cheap half (app-task-tracker run: a plan
     // promised validate_html seven times on an HTTP-bucket child, the
     // validator approved, and the verification phase silently never ran).
@@ -1751,6 +1737,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             `task seems to require an undeclared tool, do what IS achievable in scope and state ` +
             `the limit explicitly in your result instead of promising the unachievable.`,
         },
+      };
+    }
+    // Prefilter fast-path: after the zero-cost scope gate, a plan synthesised
+    // by the Haiku capability match needs no second Haiku verdict.
+    if (plan.viaPrefilter) {
+      return {
+        approved: true,
+        reasoning: `prefilter fast-path: plan was synthesised by Haiku's capability-match decision on child "${child.name}", no separate validator pass needed`,
       };
     }
     const type = this.registry.getByName(child.name);
