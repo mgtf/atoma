@@ -171,6 +171,7 @@ describe('the sandbox env allowlist carries proxy configuration', () => {
       HTTP_PROXY: 'http://atoma-proxy:3128',
       HTTPS_PROXY: 'http://atoma-proxy:3128',
       NO_PROXY: 'localhost',
+      NODE_USE_ENV_PROXY: '1',
       npm_config_proxy: 'http://atoma-proxy:3128',
       npm_config_https_proxy: 'http://atoma-proxy:3128',
     };

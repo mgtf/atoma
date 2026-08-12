@@ -76,6 +76,11 @@ export function workerRunArgs(opts: {
           'NO_PROXY=127.0.0.1,localhost,::1',
           '-e',
           'no_proxy=127.0.0.1,localhost,::1',
+          // Node 22+ does not consult HTTP_PROXY for fetch() unless this is
+          // explicitly enabled. Without it fetch_url had no route on the
+          // internal network even for allowlisted hosts.
+          '-e',
+          'NODE_USE_ENV_PROXY=1',
         ]
       : []),
     // ONLY the workspace. The atom registry, the skill bodies, the ledger and

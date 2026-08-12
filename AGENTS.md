@@ -3616,10 +3616,13 @@ SEVEN lifecycle bugs are now fixed, each invisible from the layer above:
      the existing workspace before reporting the typo. Both are preflighted
      before workspace preparation, store opens or backend startup; real
      subprocess tests pin the ordering.
-  7. Proxy variables were injected without `NO_PROXY`, even though the HTTP
-     bucket starts and probes a server on this SAME container's loopback.
-     Both uppercase/lowercase forms now exempt localhost, and the worker flag
-     test pins them.
+  7. Proxy variables were injected without `NO_PROXY`, and Node 22's `fetch`
+     ignores `HTTP_PROXY` unless `NODE_USE_ENV_PROXY=1`. The result was split:
+     loopback risked policy denial while an allowlisted external `fetch_url`
+     had no route and returned `fetch failed`. Both NO_PROXY forms exempt
+     localhost, env-proxy mode is explicit and allowlisted into child Node
+     processes, and a real egress worker test proves loopback plus an external
+     registry fetch.
 Every one of them presented as "npm install failed" with an empty stderr.
 TEST DISCIPLINE, learned here: the control plane must be proven denied by the
 ALLOWLIST independently of the port rule. The first version of these tests

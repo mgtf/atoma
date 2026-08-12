@@ -50,6 +50,7 @@ const CHILD_ENV_ALLOWLIST: readonly string[] = [
   'https_proxy',
   'NO_PROXY',
   'no_proxy',
+  'NODE_USE_ENV_PROXY',
   'npm_config_proxy',
   'npm_config_https_proxy',
 ];

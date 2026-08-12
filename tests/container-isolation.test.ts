@@ -88,6 +88,7 @@ describe('workerRunArgs — the isolation is in the flags, so assert them', () =
     expect(env).toContain('npm_config_https_proxy=http://atoma-proxy:3128');
     expect(env).toContain('NO_PROXY=127.0.0.1,localhost,::1');
     expect(env).toContain('no_proxy=127.0.0.1,localhost,::1');
+    expect(env).toContain('NODE_USE_ENV_PROXY=1');
     // Still only the workspace, still no capabilities: egress widens the
     // network and nothing else.
     expect(a.filter((_x, i) => a[i - 1] === '-v')).toEqual(['/host/ws:/workspace']);
@@ -265,6 +266,12 @@ describeDocker('a containerised run cannot reach the stores', () => {
       })) as { status?: number; body?: string };
       expect(probed.status).toBe(200);
       expect(probed.body).toContain('EGRESS_LOOPBACK_OK');
+      const external = (await backend.executor.execute('fetch_url', {
+        url: 'https://registry.npmjs.org/left-pad/latest',
+        timeoutMs: 20_000,
+      })) as { status?: number; body?: string; error?: string };
+      expect(external.status, JSON.stringify(external)).toBe(200);
+      expect(external.body).toContain('"name":"left-pad"');
     } finally {
       await backend.cleanup();
     }
