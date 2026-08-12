@@ -1,14 +1,11 @@
-import type { ManifestEntry } from './probeManifest.js';
-
 /**
  * TYPED WITNESSES — machine-checkable evidence attached to a Result.
  * ==================================================================
  * The verification-first principle: a RESULT carrying witnesses is
- * structurally stronger than one carrying narrative. Two witness sources
- * exist today — the child\'s in-envelope probe record (`output.probes`)
- * and the on-disk probe manifest — and both flow through the shapes
- * defined by the contracts layer, so validators and future projections
- * consume ONE type instead of re-parsing payloads.
+ * structurally stronger than one carrying narrative. The witness source today
+ * is the child's in-envelope probe record (`output.probes`). The on-disk
+ * manifest is independent SUPERVISOR evidence and stays in GroundTruthFacts
+ * rather than being speculatively modelled as a Result field nobody populates.
  */
 
 /**
@@ -29,9 +26,7 @@ export interface RecordedProbe {
 }
 
 /** A witness is evidence with a declared source. */
-export type Witness =
-  | ({ readonly source: 'recorded-probe' } & RecordedProbe)
-  | { readonly source: 'manifest'; readonly entry: ManifestEntry };
+export type Witness = { readonly source: 'recorded-probe' } & RecordedProbe;
 
 function pickString(o: Record<string, unknown>, keys: string[]): string | undefined {
   for (const k of keys) {
@@ -82,4 +77,14 @@ export function extractRecordedProbes(payload: unknown): RecordedProbe[] {
 /** Witness view of a result payload — the typed form of the evidence. */
 export function witnessesFromPayload(payload: unknown): Witness[] {
   return extractRecordedProbes(payload).map((p) => ({ source: 'recorded-probe' as const, ...p }));
+}
+
+/** Typed witnesses back to the normalised probe view consumed by validators. */
+export function recordedProbesFromWitnesses(
+  witnesses: readonly Witness[] | undefined
+): RecordedProbe[] {
+  return (witnesses ?? [])
+    .filter((w) => w.source === 'recorded-probe')
+    .map(({ source: _source, ...probe }) => probe)
+    .slice(0, 12);
 }

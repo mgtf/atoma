@@ -81,12 +81,17 @@ function setup(files: Record<string, string>): {
   return { l2, l1, ctx: { ...base, tools: exec }, exec };
 }
 
-function result(payload: { output: unknown; summary: string }): Result {
+function result(payload: {
+  output: unknown;
+  summary: string;
+  evidence?: Result['evidence'];
+}): Result {
   return {
     output: payload.output,
     summary: payload.summary,
     trace: [],
     producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+    ...(payload.evidence ? { evidence: payload.evidence } : {}),
   };
 }
 
@@ -167,6 +172,34 @@ describe('trust fast-path × ground-truth probe', () => {
     // The already-computed block is threaded into llmVerdict, so the manifest
     // and claimed file are each read once.
     expect(exec.calls.filter((c) => c === 'read_file')).toHaveLength(2);
+  });
+
+  it('consumes typed Result.evidence instead of requiring probes to remain in the payload', async () => {
+    const { l2, l1, ctx } = setup({ 'index.js': 'console.log("actual")' });
+    ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'typed witness reports mismatch' }));
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['index.js'] },
+        summary: 'verified index.js',
+        evidence: [
+          {
+            source: 'recorded-probe',
+            cmd: 'node index.js',
+            expected: 'expected',
+            actual: 'actual',
+            match: false,
+          },
+        ],
+      }),
+      { description: 'write and verify index.js' },
+      ctx
+    );
+
+    expect(verdict.approved).toBe(false);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/SELF-REPORTED MISMATCH/);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/"node index\.js"/);
   });
 
   it('falls through to a full LLM verdict when a claimed file is MISSING', async () => {

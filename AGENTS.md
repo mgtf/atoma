@@ -380,7 +380,14 @@ npm run run:build -- --baseline "<goal>"              # ONE frontier agent, no t
 entry shapes + health check + writer/reader prompt generators
 (`probeManifest.ts`), the script stdout envelope + strict parse +
 pre-flight gate + scratch-extension policy (`scriptEnvelope.ts`), and
-typed witnesses (`witness.ts`, populated onto `Result.evidence` by L1).
+typed witnesses (`witness.ts`, populated onto `Result.evidence` by L1,
+propagated by L2/L3 aggregation and consumed by the ground-truth validator).
+The first witness revision was write-only: L1 populated the field, every
+validator reparsed `output.probes`, aggregation dropped it, and a speculative
+`source:"manifest"` variant had no constructor anywhere. Recorded-probe
+witnesses now flow end to end; payload parsing remains a legacy fallback, and
+the on-disk manifest stays independent supervisor evidence in
+`GroundTruthFacts` rather than pretending to be child-reported Result data.
 The prompt blocks embed EXAMPLE objects parsed through their schemas at
 module load — schema/example drift fails the whole suite. RULE: never
 hand-write a JSON shape in a prompt that code elsewhere parses; render

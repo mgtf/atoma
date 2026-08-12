@@ -728,6 +728,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     if (subResults.length === 1) {
       return subResults[0]!;
     }
+    const evidence = subResults.flatMap((result) => result.evidence ?? []);
+    const evidenceField = evidence.length > 0 ? { evidence } : {};
     if (aggregation.mode === 'sequential') {
       // For phased pipelines, the FINAL phase's result is the deliverable.
       // The earlier phases produced intermediate state on disk that the
@@ -742,6 +744,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         summary: `${subResults.length} sequential phases — final: ${last.summary}. Trace: ${phaseSummaries}`,
         trace: [],
         producedBy: { tier: 3, name: this.name, viaFallback: false },
+        ...evidenceField,
       };
     }
     if (aggregation.mode === 'concat') {
@@ -754,6 +757,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         summary,
         trace: [],
         producedBy: { tier: 3, name: this.name, viaFallback: false },
+        ...evidenceField,
       };
     }
     const userContent = [
@@ -786,6 +790,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       summary,
       trace: [],
       producedBy: { tier: 3, name: this.name, viaFallback: false },
+      ...evidenceField,
     };
   }
 
@@ -933,7 +938,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const payload = { output: result.output, summary: result.summary };
     let trustedProbe: GroundTruthCheck | null = null;
     if (type && shouldTrustType(type)) {
-      trustedProbe = await checkGroundTruth({ ctx, subject: 'RESULT', payload, child });
+      trustedProbe = await checkGroundTruth({
+        ctx,
+        subject: 'RESULT',
+        payload,
+        ...(result.evidence ? { evidence: result.evidence } : {}),
+        child,
+      });
       if (!trustedProbe.requiresReview) {
         const approval = trustedApproval(type);
         ctx.recordTrust?.({
@@ -964,6 +975,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       child,
       task,
       payload,
+      ...(result.evidence ? { evidence: result.evidence } : {}),
       ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
     });
   }

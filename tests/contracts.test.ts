@@ -108,7 +108,9 @@ describe('contracts — schema/validator/prompt agreement', () => {
 
 describe('contracts — typed witnesses (P5)', () => {
   it('witnessesFromPayload normalises historical probe spellings into tagged witnesses', async () => {
-    const { witnessesFromPayload } = await import('../src/contracts/witness.js');
+    const { witnessesFromPayload, recordedProbesFromWitnesses } = await import(
+      '../src/contracts/witness.js'
+    );
     const w = witnessesFromPayload({
       output: {
         examples_verified: [
@@ -118,6 +120,9 @@ describe('contracts — typed witnesses (P5)', () => {
     });
     expect(w).toHaveLength(1);
     expect(w[0]).toMatchObject({ source: 'recorded-probe', cmd: 'node cli.js x', exitCode: 0 });
+    expect(recordedProbesFromWitnesses(w)).toEqual([
+      expect.objectContaining({ cmd: 'node cli.js x', exitCode: 0 }),
+    ]);
   });
 
   it('an L1 result carries its witnesses as first-class evidence', async () => {

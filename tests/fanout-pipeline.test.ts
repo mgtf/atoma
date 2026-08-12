@@ -72,7 +72,15 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     }
     // 6-8. L1.execute for each subtask (FIFO order follows subtask order).
     for (const label of ['A', 'B', 'C']) {
-      ctx.llm.enqueueText(jsonText({ output: label, summary: `did ${label}` }));
+      ctx.llm.enqueueText(
+        jsonText({
+          output: {
+            value: label,
+            probes: [{ cmd: `echo ${label}`, exitCode: 0, stdout: `${label}\n` }],
+          },
+          summary: `did ${label}`,
+        })
+      );
     }
 
     const task = { description: 'full job' };
@@ -82,7 +90,12 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     const result = await sucrose.execute(task, plan, ctx);
 
     expect(Array.isArray(result.output)).toBe(true);
-    expect(result.output).toEqual(['A', 'B', 'C']);
+    expect(result.output).toEqual([
+      expect.objectContaining({ value: 'A' }),
+      expect.objectContaining({ value: 'B' }),
+      expect.objectContaining({ value: 'C' }),
+    ]);
+    expect(result.evidence?.map((w) => w.cmd)).toEqual(['echo A', 'echo B', 'echo C']);
     expect(result.summary).toMatch(/3 subtasks aggregated \(concat\)/);
     expect(result.producedBy).toEqual({
       tier: 2,

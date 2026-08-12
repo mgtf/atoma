@@ -4,7 +4,12 @@ import {
   PROBE_MANIFEST_FILENAME,
   validateProbeManifest,
 } from '../contracts/probeManifest.js';
-import { extractRecordedProbes, type RecordedProbe } from '../contracts/witness.js';
+import {
+  extractRecordedProbes,
+  recordedProbesFromWitnesses,
+  type RecordedProbe,
+  type Witness,
+} from '../contracts/witness.js';
 
 /**
  * GROUND-TRUTH PROBES (P7 extraction — verbatim from L2Atom).
@@ -129,6 +134,7 @@ export async function checkGroundTruth(args: {
   ctx: RunContext;
   subject: 'PLAN' | 'RESULT';
   payload: unknown;
+  evidence?: readonly Witness[];
   child: Atom;
 }): Promise<GroundTruthCheck> {
   const { block, facts } = await probeGroundTruthEx(args);
@@ -167,6 +173,7 @@ export async function probeGroundTruthEx(args: {
   ctx: RunContext;
   subject: 'PLAN' | 'RESULT';
   payload: unknown;
+  evidence?: readonly Witness[];
   /**
    * The child atom whose RESULT we are validating. We inspect its
    * declared tool names to decide whether a validate_html ground-truth
@@ -656,6 +663,7 @@ export function extractResultFileClaims(payload: unknown): {
 async function probeFilesGroundTruth(args: {
   ctx: RunContext;
   payload: unknown;
+  evidence?: readonly Witness[];
   child: import('../core/atom.js').Atom;
 }): Promise<{ block: string; facts: GroundTruthFacts }> {
   const empty = { block: '', facts: emptyGroundTruthFacts() };
@@ -666,7 +674,10 @@ async function probeFilesGroundTruth(args: {
   // to read back and the probe would just add an empty evidence block.
   if (!args.child.toolNames().includes('write_file')) return empty;
   const claims = extractResultFileClaims(args.payload);
-  const recorded = renderRecordedProbes(extractRecordedProbes(args.payload));
+  const witnessed = recordedProbesFromWitnesses(args.evidence);
+  const recorded = renderRecordedProbes(
+    witnessed.length > 0 ? witnessed : extractRecordedProbes(args.payload)
+  );
   facts.selfReportedMismatch = recorded.selfReportedFailure;
   if (
     claims.structured.length === 0 &&

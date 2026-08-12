@@ -1,4 +1,4 @@
-import type { GenerationParams, RunContext, Task, Tier, Verdict } from '../core/types.js';
+import type { GenerationParams, Result, RunContext, Task, Tier, Verdict } from '../core/types.js';
 import type { Atom } from '../core/atom.js';
 import { parseVerdict } from './json.js';
 import { probeGroundTruth } from './groundTruth.js';
@@ -628,6 +628,8 @@ export async function llmVerdict(args: {
   child: Atom;
   task: Task;
   payload: unknown;
+  /** Typed child evidence; payload parsing remains the legacy fallback. */
+  evidence?: Result['evidence'];
   /**
    * Optional pre-formatted description of the atoms the plan references
    * (usually the DELEGATION target's name + description + trust counters).
@@ -699,6 +701,7 @@ export async function llmVerdict(args: {
       ctx: args.ctx,
       subject: args.subject,
       payload: args.payload,
+      ...(args.evidence ? { evidence: args.evidence } : {}),
       child: args.child,
     }));
 

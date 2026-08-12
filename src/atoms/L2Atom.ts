@@ -1524,6 +1524,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // existing call sites and tests see no difference.
       return subResults[0]!;
     }
+    const evidence = subResults.flatMap((result) => result.evidence ?? []);
+    const evidenceField = evidence.length > 0 ? { evidence } : {};
     if (aggregation.mode === 'sequential') {
       // Phased pipeline: the FINAL phase carries the deliverable. See
       // L3Atom.aggregate sequential branch for full rationale.
@@ -1536,6 +1538,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         summary: `${subResults.length} sequential phases — final: ${last.summary}. Trace: ${phaseSummaries}`,
         trace: [],
         producedBy: { tier: 2, name: this.name, viaFallback: false },
+        ...evidenceField,
       };
     }
     if (aggregation.mode === 'concat') {
@@ -1548,6 +1551,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         summary,
         trace: [],
         producedBy: { tier: 2, name: this.name, viaFallback: false },
+        ...evidenceField,
       };
     }
     // llm-synthesize
@@ -1581,6 +1585,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       summary,
       trace: [],
       producedBy: { tier: 2, name: this.name, viaFallback: false },
+      ...evidenceField,
     };
   }
 
@@ -1799,6 +1804,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         ctx,
         subject: 'RESULT',
         payload: result,
+        ...(result.evidence ? { evidence: result.evidence } : {}),
         child,
       });
       if (!trustedProbe.requiresReview) {
@@ -1845,6 +1851,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ...(activeSkill ? { activeSkill: { id: activeSkill.id, body: activeSkill.body } } : {}),
       task,
       payload: { output: result.output, summary: result.summary },
+      ...(result.evidence ? { evidence: result.evidence } : {}),
     });
   }
 }
