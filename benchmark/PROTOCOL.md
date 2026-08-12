@@ -1,9 +1,10 @@
 # Cost-amortisation benchmark — pre-registration
 
-> **Status: registered, not yet run.** This document is committed BEFORE the
-> first run. Its hypothesis, primary metric and falsification condition are
-> fixed at that commit and are not to be edited once data exists — amend by
-> appending a dated note instead.
+> **Status: rounds 1–8 completed.** This document was committed BEFORE the
+> first run; its original hypothesis, primary metric and falsification
+> condition remain below unchanged. Every later round was registered in a
+> dated appendix before its data existed. Results are immutable per-round:
+> `RESULT.md` is round 1, and `ROUND2.md` through `ROUND8.md` carry the rest.
 
 ## Why this exists
 

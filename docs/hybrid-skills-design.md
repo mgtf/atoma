@@ -10,9 +10,10 @@ which are preserved as written and are wrong where §9 says so.**
 
 ## 1. The problem, measured
 
-Across rounds 5-8 the zero-token dispatch path fired **10 / 1 / 1 / 0** times.
-Only the first of those had deliverables behind it, and they were wrong (2 of 9
-correct). Every fix since has been real and each made the mechanism more
+Across rounds 5-8 the zero-token dispatch path fired **10 / 1 / 1 / 0** times
+on the primary task series (**11 / 1 / 1 / 0** including held-out rows).
+Only the first round had substantial dispatch volume, and its deliverables
+were wrong (2 of 9 correct). Every fix since has been real and each made the mechanism more
 correct; none made it pay.
 
 Round 8 says why, and it is not the mechanism. The catalogue split correctly —
@@ -252,9 +253,9 @@ tokens each, ~5.2k tokens across all seven runs) against **5.6M cache-read
 tokens at a 93.5% cache rate**, so removing them barely moves the transcript
 that gets re-read.
 
-For scale: round 7's badly-distilled recipe cost **~$0.30/run** — ten times
-this prize — and it was caused by one line of a `when_to_use`. Against that,
-a new skill kind touching ~13 files plus a sidecar that save / load / promote /
+For scale: round 7's already-satisfied validator cascade cost
+**~$0.325/run** — roughly ten times this prize — and was fixed in the existing
+verdict layer. Against that, a new skill kind touching ~13 files plus a sidecar that save / load / promote /
 demote / drop / merge / export must all learn is not a trade worth making.
 
 ### 9.5 The central safety claim is false on the majority path

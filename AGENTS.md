@@ -3216,8 +3216,9 @@ second is the kind of thing that gets acted on:
   contract, which is the #F9 fabrication hole.
   (c) **THE PRIZE IS ~$0.02-0.036/RUN** (7-12%), because probe results are ~44
   tokens each against 5.6M cache-read tokens at a 93.5% cache rate. Round 7's
-  badly-distilled recipe cost $0.30/run — ten times more — from one line of a
-  `when_to_use`. A new skill kind touches ~13 files.
+  already-satisfied validator cascade cost $0.325/run — roughly ten times more
+  — and was fixed in the existing verdict layer. A new skill kind touches
+  ~13 files.
   (d) The safety premise ("the normal validator still judges the final result")
   is **false on the majority path**: 30 of 43 round-8 RESULT validations took
   the trust fast-path with zero LLM calls, four of six runs made none at all,
@@ -3825,9 +3826,11 @@ recipes learned. Deliverable correctness 19/19, 19/19, 19/19 by an executing
 scorer.
 
 **THE ZERO-TOKEN PATH WORKS ON MAINTENANCE, NOT ON BUILDS (round 5 settled
-it).** Four build rounds produced ONE dispatch in 52 runs. Round 5, on a
+it).** Four build rounds produced ONE dispatch across 54 atoma rows
+(47 primary + 7 held-out). Round 5, on a
 MAINTENANCE task (a seeded CLI + README + manifest, one behaviour change, then
-re-verify the rest): **10 dispatches in 8 runs, zero contract failures, zero
+re-verify the rest): **10 dispatches in 8 primary runs** — 11 in 9 when the
+held-out row is included — **zero contract failures, zero
 demotions, $0.1509/run against a $0.7069 same-day control — 4.69×**. The split
 was exactly as designed: editing source stayed on the LLM path and the compiler
 REFUSED to compile it; re-running recorded invocations compiled and dispatched
@@ -4006,7 +4009,8 @@ semantics, which fixes the anchor.
 
 **WHAT WAS NOT ESTABLISHED ON BUILD TASKS, after three attempts to make it
 work.** The
-zero-token compiled-script path has fired ONCE in 52 atoma runs. Rounds 2-4
+zero-token compiled-script path has fired ONCE in 54 atoma rows
+(47 primary + 7 held-out). Rounds 2-4
 each fixed a real broken link — `when_to_use` phrased as unevaluable disk
 state; the manifest recording TRUNCATED stdout; `record_probe` refusing a whole
 command line so the model wrapped everything in `bash -c` and broke the

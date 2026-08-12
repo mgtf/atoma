@@ -78,10 +78,11 @@ patterns needing judgment, and records why — verbatim, from a benchmark run:
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-**Eight controlled rounds have not shown this mechanism paying.** It fired once in 52 runs across
-four build rounds, then 10 / 1 / 1 / 0 across four maintenance rounds — and the round where it
-fired ten times shipped seven wrong deliverables. Each fix since made it more correct and none
-made it cheaper; the best remaining idea was designed, measured at a **$0.03/run ceiling** and
+**Eight controlled rounds have not shown this mechanism paying.** Across every committed atoma
+row it fired once in 54 build runs, then 11 / 1 / 1 / 0 times across four maintenance rounds
+(10 / 1 / 1 / 0 on the primary tasks alone). Round 5 shipped seven wrong deliverables out of
+nine. Each fix since made the path more correct and none made it cheaper; the best remaining
+idea was designed, measured at a **$0.03/run ceiling** and
 [refused](docs/hybrid-skills-design.md). It is kept because it is sound and cheap to carry, not
 because it is load-bearing. Mechanisms 1 and 2 are the product.
 
@@ -105,10 +106,11 @@ Mean cost per run on each round's main task, each against **its own same-day con
 | ratio | 1.54× | 1.89× | 3.33× | 2.35× | | 3.57× | 2.05× | **1.00×** | 2.62× |
 | control arm *n* | 5 | 3 | 3 | 2 | | 2 | 2 | 2 | **1** |
 
-**Read the two weak rounds, not just the strong ones.** Round 7 shows **no saving at all** — a
-badly-distilled recipe demanded evidence the worker could not produce and the validators enforced
-it, costing $0.33/run in escalation churn until it was
-[diagnosed and fixed](benchmark/ROUND7.md). Round 8's control arm is a **single observation**: its
+**Read the two weak rounds, not just the strong ones.** Round 7 shows **no saving at all** — an
+earlier sequential phase had already applied the edit, then validators repeatedly rejected a
+later phase for honestly reporting the work already satisfied. That rare semantics gap cost
+$0.33/run in escalation churn until it was [diagnosed and fixed](benchmark/ROUND7.md). Round 8's
+control arm is a **single observation**: its
 second run lost its LLM connection, so its cost is unrecoverable (the deliverable was correct).
 Round 5's 3.57× is the round whose deliverables were later found wrong — see below.
 
@@ -155,8 +157,6 @@ regenerable with `npm run burnin`.
 | Cheapest *delivered* run | **$0.126 · 132s** |
 | Runs containing at least one zero-model-call phase | **45 of 156** — median $0.26 · 227s |
 | Expensive-model calls per run | **1** on the normal path (148 of 150 delivered runs) |
-| Input tokens served from prompt cache, at 10% of list price | **90%** — median 0.8M tokens/run |
-| Learned recipes in the catalogue | **24**, of which **5 compiled to deterministic scripts** |
 
 ### Three honest readings
 
@@ -170,7 +170,7 @@ other way round.
 complete run has ever cost $0.00, and none can today: every run still pays for one top-level
 planning call. 45 of 156 corpus runs contain a phase that executed with no model call — but those
 runs' mean cost is $0.37, identical to the corpus mean, and in the controlled rounds the compiled
-path fired 14 times in 8 rounds, 10 of them in the single round whose deliverables were wrong.
+path fired 14 times in 8 rounds, 11 of them in the single round whose deliverables were wrong.
 The saving comes from tiering and earned trust.
 
 **Failure handling improved measurably.** Runs needing corrective intervention fell from **28 of

@@ -242,7 +242,7 @@ mistakes it for a normal delivery.
 ## 4. Flow — how a repeatable phase gets compiled away
 
 The most speculative of the three mechanisms, and the one that has not yet paid: across eight
-controlled rounds the compiled path fired 14 times, 10 of them in a single round whose
+controlled rounds the compiled path fired 14 times, 11 of them in a single round whose
 deliverables turned out wrong. The lifecycle below is sound and every step is guarded; what is
 missing is demand for it on the task families measured so far. See
 [`hybrid-skills-design.md`](hybrid-skills-design.md) for the most recent attempt to change
@@ -277,9 +277,9 @@ times.
 **Splitting build from verify is what makes anything compilable at all.** A monolithic
 "build and check it" recipe always gets refused, because the build half is irreducible
 reasoning. Distilling the verification half separately is where most compiled scripts come from —
-**3 of the 5** in a 24-recipe catalogue. The other two compile straight from authoring recipes
-whose output is fully determined by the workspace: assembling a package.json and README for an
-already-tested CLI, and writing an index that links files already present.
+the measured catalogue produced most of its script forms this way. The remaining script forms
+came from authoring recipes whose output was fully determined by the workspace, such as assembling
+package metadata and documentation for an already-tested CLI.
 
 **Field-proven, unattended — with a caveat about the evidence.** When a workspace's module
 semantics broke a compiled verifier, the entire safety stack ran by itself across two runs —
@@ -427,8 +427,8 @@ Per run, on a mature family:
 | Routing scans | cheap | ~5–7 | One per phase; short-circuits the expensive call when something already fits |
 | Mid-tier plans | mid | **0 on the happy path** | Skipped entirely when the routing scan finds a clear match |
 | Reviews | cheap | 0 on trusted components | Replaced by the zero-token probe |
-| Execution | cheap | the bulk of tokens | Long tool loops, ~90% served from prompt cache at 10% of list price |
-| Compiled phases | — | **0 calls**, but rare | Two tool calls and a strict JSON parse. Present in 45 of 156 corpus runs; in the controlled rounds it fired once in 53 build runs and 12 times in 27 maintenance runs |
+| Execution | cheap | the bulk of tokens | Long tool loops; prompt caching is monitored live in every run summary |
+| Compiled phases | — | **0 calls**, but rare | Two tool calls and a strict JSON parse. Present in 45 of 156 corpus runs; across every committed controlled-run row it fired once in 54 build runs and 13 times in 30 maintenance runs |
 
 **Prompt caching is load-bearing and monitored.** The system-level prompt is deliberately long
 enough to clear the provider's minimum cacheable size; trimming it below that threshold silently

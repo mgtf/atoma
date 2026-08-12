@@ -13,7 +13,7 @@ demoted*. Met at run 3.
 
 | | rounds 1-4 (build tasks) | round 5 (maintenance) |
 |---|---|---|
-| Successful zero-LLM dispatches | **1 in 52 runs** | **10 in 8 runs** |
+| Successful zero-LLM dispatches | **1 in 54 rows** (47 primary + 7 held-out) | **10 in 8 primary runs** (11/9 incl. held-out) |
 | Dispatch contract failures | 5 | **0** |
 | Demotions | 2 | **0** |
 | Cost per run, steady state | $0.47–0.54 | **$0.1509** |
