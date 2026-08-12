@@ -623,7 +623,9 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
         type: 'object',
         properties: {
           port: {
-            type: 'number',
+            type: 'integer',
+            minimum: 0,
+            maximum: 65535,
             description:
               'Port to listen on. Defaults to 0 (OS-assigned). Pass a fixed port only when you must; parallel subtasks MUST leave it unset to avoid "Address already in use" clashes.',
           },
@@ -631,10 +633,17 @@ export function startStaticServerTool(opts: BuiltinToolOptions): BuiltinTool {
       },
     },
     async execute(args) {
-      const requestedPort =
-        typeof args['port'] === 'number' && Number.isFinite(args['port'])
-          ? Math.floor(args['port'])
-          : 0;
+      const rawPort = args['port'];
+      if (
+        rawPort !== undefined &&
+        (typeof rawPort !== 'number' ||
+          !Number.isInteger(rawPort) ||
+          rawPort < 0 ||
+          rawPort > 65535)
+      ) {
+        throw new Error('start_static_server: port must be an integer between 0 and 65535');
+      }
+      const requestedPort = rawPort ?? 0;
 
       // Try the caller's requested port first; if it's taken, kill the
       // failing child and retry ONCE with port=0 (OS-assigned). This way

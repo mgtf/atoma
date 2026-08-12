@@ -2780,7 +2780,12 @@ second is the kind of thing that gets acted on:
   EADDRINUSE auto-retry could never succeed). python runs with `-u`; the
   "Serving" match scans BOTH streams with accumulated buffers; a child
   that exits before serving fails FAST with the output tail (no more
-  phantom ok:true with a dead URL). Boot timers are 8s/10s and are only
+  phantom ok:true with a dead URL). The port is validated as an integer in
+  0..65535 BEFORE spawn. The first clean Linux CI exposed why this belongs
+  to our contract rather than Python's: macOS rejects port 70000, while
+  Linux Python wraps it to 4464 and serves successfully — the old
+  "dead child" regression test passed locally and asserted the opposite in
+  CI. Boot timers are 8s/10s and are only
   the silent-but-alive fallback — healthy boots resolve on the match
   (pyenv python takes ~5s to first output). Both server tools spawn
   DETACHED (own process group) and `cleanup()` group-kills before the

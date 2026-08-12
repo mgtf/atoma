@@ -67,21 +67,19 @@ describe('start_static_server — boot contract', () => {
     expect(await fetchStatus(second.url)).toBe(200);
   }, 20_000);
 
-  it('a child that dies before serving fails FAST and loudly — no phantom ok:true', async () => {
+  it('rejects out-of-range ports before Python can wrap them', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-static3-'));
     dirs.push(dir);
     const sandbox = new ToolSandbox(dir);
     sandboxes.push(sandbox);
     const tool = startStaticServerTool({ sandbox });
-    // Port 70000 is out of range — python exits during argparse/bind.
-    // (Port 1 was the first attempt: macOS since Big Sur lets non-root
-    // bind privileged ports, so python served it happily.)
+    // macOS rejects 70000, but Linux Python wraps it to 4464 and serves
+    // successfully. The contract must be platform-neutral before spawning.
     const t0 = Date.now();
-    await expect(tool.execute({ port: 70000 })).rejects.toThrow(/exited with code/);
-    // Exit-driven, not timer-driven: well under the 8s fallback timer
-    // the old code would have waited out before reporting a DEAD server
-    // as ok:true (interpreter boot itself can take ~5s under pyenv).
-    expect(Date.now() - t0).toBeLessThan(7500);
+    await expect(tool.execute({ port: 70000 })).rejects.toThrow(/between 0 and 65535/);
+    await expect(tool.execute({ port: -1 })).rejects.toThrow(/between 0 and 65535/);
+    await expect(tool.execute({ port: 1.5 })).rejects.toThrow(/between 0 and 65535/);
+    expect(Date.now() - t0).toBeLessThan(100);
   }, 15_000);
 });
 
