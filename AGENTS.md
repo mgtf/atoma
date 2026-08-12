@@ -3590,10 +3590,11 @@ the worker never loads them.
 
 ## atoma as an MCP server (stdio) — `src/mcp/`
 
-`npx tsx src/mcp/server.ts` speaks MCP on stdio: **13 tools**, one of which
-mutates (`atoma_run_start`) and twelve of which are pure readers over the
-persisted state (families, registry list/show, skills list/stats/review, ledger
-check, runs list, one trace, the friction report, plus run status/cancel).
+`npx tsx src/mcp/server.ts` speaks MCP on stdio: **13 tools**, two of which
+mutate (`atoma_run_start`, `atoma_run_cancel`) and eleven of which are pure
+readers over the persisted state (families, registry list/show, skills
+list/stats/review, ledger check, runs list, one trace, the friction report,
+plus run status).
 Registered with `claude mcp add atoma -s local -- npx tsx <abs>/src/mcp/server.ts`;
 verified `✓ Connected` by Claude Code's own client.
 
@@ -3637,13 +3638,14 @@ passes. Same rule already written down for the container worker.
 **`spawnRun` WAS EXTENDED, NOT FORKED**, because it is the one sanctioned run
 driver and its kill sequence was measured (a naive re-implementation leaks nine
 browser processes per web run) — and it has no unit test, so a second copy
-would rot like `research-brief.ts` and `curriculum.ts` did. Four additions, all
+would rot like `research-brief.ts` and `curriculum.ts` did. Five additions, all
 defaulting to today's behaviour: `cwd` (was hardcoded `process.cwd()`; an MCP
 host launches with an arbitrary one and `npm run run:build` would fail as a
 missing script), `signal` (the ONLY way to cancel — the child was otherwise
 unreachable, and an abort routes into the SAME SIGTERM → 5s grace → SIGKILL
 sequence, so a cancelled run still closes its trace), `onChunk` (progress for a
-caller who cannot see the child's stdout), `cleanWorkspace` (unconditional
+caller who cannot see the child's stdout), `onSpawn` (the detached process-group
+id, used by the MCP hard-exit backstop and lease recovery), `cleanWorkspace` (unconditional
 before, which is right for measurement and surprising in an interactive host
 where it ARCHIVES the deliverable just asked about). TWO SETTLE BUGS fixed
 there at the same time, both of which presented as a promise that never
@@ -3667,7 +3669,24 @@ single-tenancy facts make concurrency produce plausible-looking WRONG numbers
 rather than an error: one shared workspace archived wholesale, trace attribution
 by newest-mtime-since, and the machine-to-itself requirement for comparable
 economics. The burn-in harness gets this free from its sequential loop; a server
-has to enforce it.
+has to enforce it. An in-memory `inFlight` variable is NOT enforcement across
+two MCP server processes, so the authority is an atomic filesystem lease under
+`~/.atoma`. The complete owner bytes are published by hard-link (no visible
+empty-file window), carry both server PID and detached child group PID, and are
+released only after the driver promise settles. A dead owner with no child is
+recovered; a dead owner with a live group triggers the same SIGTERM → 5s →
+SIGKILL sequence and keeps the slot closed during cleanup. Release is
+token-checked, so a late old owner cannot delete its successor's lease.
+
+**CANCELLING IS A STATE, NOT A COMPLETION.** `atoma_run_cancel` sets
+`status: "cancelling"` and aborts `spawnRun`; the slot and lease remain held
+until the child emits exit and the trace closes, then the public status becomes
+`cancelled`. The first implementation set `cancelled` immediately, and
+`startRun` only blocked `running`, so a new run could archive the workspace
+during the old group's 5-second teardown — the test explicitly enshrined the
+race as "cancelling frees the slot". Stdio close and SIGINT/SIGTERM now enter
+the same awaited shutdown. A 6-second server backstop force-kills a driver
+promise that never settles; the synchronous exit hook is the last resort.
 
 **THE PROVIDER IS PINNED, AND THE NESTED PATH WAS VERIFIED RATHER THAN
 ASSUMED.** The child gets `ATOMA_LLM=claude-cli` unless the host set one,
@@ -3686,8 +3705,9 @@ left ZERO leftover processes and zero leaked Chrome.
 **A CANCELLED RUN READS `outcome: "error"`, AND THAT IS THE PARSER BEING
 HONEST.** It prints neither completion nor failure banner, so `parseRunLog`
 falls through to 'error' with null economics. The record's own `status` stays
-`cancelled` (authoritative) and carries a hint saying so, or a host reports "the
-run errored" to a user who cancelled on purpose. The config-failure heuristic is
+`cancelling` until child exit, then becomes `cancelled` (authoritative) and
+carries a hint saying so, or a host reports "the run errored" to a user who
+cancelled on purpose. The config-failure heuristic is
 SKIPPED for cancellations for the same reason: it fires on "died fast, spent
 nothing", which is exactly what a cancellation looks like, and a false
 misconfiguration alarm sends the reader hunting a dead API key that is not
@@ -3714,14 +3734,16 @@ they are read at CALL time and a mid-benchmark check was already misled by
 reading them without a round's env vars.
 
 **TESTS ARE THE ANTI-ROT INSURANCE**, not a batch of live runs
-(`tests/mcp-server.test.ts`, 18 cases): the emitted flags must exist in the
+(`tests/mcp-server.test.ts` + `tests/mcp-run-lock.test.ts`): the emitted flags must exist in the
 runner source; a goal starting with `--` is refused (it would be discarded and
 the family's DEFAULT goal would run — so `--clean-workspace <words>` would
 archive the caller's workspace AND build the wrong thing); unknown and
 traversal-shaped family ids are refused through `findLaunchable`; the timeout is
-validated before spawning (the runner `exit(2)`s on a bad one); serialisation,
-abort delivery, the pinned provider and cwd are asserted through an INJECTED
-driver so no test ever spawns a run; `runTrace` cannot leave the runs dir; the
+validated before spawning (the runner `exit(2)`s on a bad one); cancellation
+keeps the slot through settlement, shutdown awaits abort, and the detached pid
+reaches the lease through an INJECTED driver so no test spends quota. The lease
+suite uses both same-process adversaries and a REAL second process, plus stale
+owner recovery and token-safe release. `runTrace` cannot leave the runs dir; the
 instructions never name a builtin tool (the ae63e06 rule, checked against
 `BUILTIN_TOOL_VOCABULARY`); and one test drives a REAL subprocess to prove
 stdout carries nothing but frames.

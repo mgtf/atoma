@@ -44,11 +44,18 @@ import {
   newestTraceDuration,
   newestTraceName,
   parseRunLog,
+  signalRunProcessGroup,
   spawnRun,
   type RunStats,
 } from '../cli/burnin.js';
 import { findLaunchable } from '../run/profiles/index.js';
 import { runsDirPath } from './readers.js';
+import {
+  acquireRunLease,
+  RunLockBusyError,
+  type RunLease,
+  type RunLeaseAcquirer,
+} from './runLock.js';
 
 /** Matches the runner's own claude-cli default (15 min). */
 export const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000;
@@ -59,7 +66,7 @@ const PROGRESS_TAIL_CHARS = 2000;
 
 export interface RunRecordPublic {
   readonly runId: string;
-  readonly status: 'running' | 'finished' | 'cancelled' | 'spawn-failed';
+  readonly status: 'running' | 'cancelling' | 'finished' | 'cancelled' | 'spawn-failed';
   readonly goal: string;
   readonly family: string;
   readonly startedAt: string;
@@ -84,6 +91,8 @@ interface RunRecord {
   endedAt?: string;
   readonly logPath: string;
   readonly abort: AbortController;
+  readonly lease: RunLease;
+  childPid?: number;
   chunks: number;
   tail: string;
   stats?: RunStats;
@@ -96,6 +105,7 @@ interface RunRecord {
 const records = new Map<string, RunRecord>();
 let inFlight: RunRecord | null = null;
 let seq = 0;
+const idleWaiters = new Set<() => void>();
 
 /**
  * The atoma repo root, derived from this module's own location so the server
@@ -215,9 +225,30 @@ function remember(r: RunRecord): void {
     // Oldest first; never evict the one still running.
     for (const [id, rec] of records) {
       if (records.size <= MAX_RECORDS) break;
-      if (rec.status !== 'running') records.delete(id);
+      if (rec.status !== 'running' && rec.status !== 'cancelling') records.delete(id);
     }
   }
+}
+
+function finishRun(record: RunRecord): void {
+  record.lease.release();
+  if (inFlight === record) inFlight = null;
+  if (!inFlight) {
+    for (const resolveIdle of idleWaiters) resolveIdle();
+    idleWaiters.clear();
+  }
+}
+
+export function waitForRunIdle(): Promise<void> {
+  if (!inFlight) return Promise.resolve();
+  return new Promise<void>((resolveIdle) => idleWaiters.add(resolveIdle));
+}
+
+function requestCancellation(record: RunRecord, reason: string): void {
+  if (record.status !== 'running') return;
+  record.status = 'cancelling';
+  record.hint = `Cancellation requested: ${reason}. Waiting for the child process group to exit.`;
+  record.abort.abort(new Error(reason));
 }
 
 /**
@@ -231,8 +262,12 @@ function remember(r: RunRecord): void {
  * machine to itself for comparable economics. The burn-in harness gets this
  * free from its sequential loop; a server has to enforce it.
  */
-export function startRun(input: StartRunInput, driver: RunDriver = spawnRun): RunRecordPublic {
-  if (inFlight && inFlight.status === 'running') {
+export function startRun(
+  input: StartRunInput,
+  driver: RunDriver = spawnRun,
+  acquireLease: RunLeaseAcquirer = acquireRunLease
+): RunRecordPublic {
+  if (inFlight) {
     throw new RunRejected(
       `a run is already in flight (${inFlight.runId}, started ${inFlight.startedAt}). atoma serialises runs: the build workspace is shared, trace attribution is newest-file-wins, and concurrent runs make the cost numbers incomparable. Wait for it or call atoma_run_cancel.`
     );
@@ -244,6 +279,13 @@ export function startRun(input: StartRunInput, driver: RunDriver = spawnRun): Ru
   const stamp = new Date(startedAtMs).toISOString().replace(/[:.]/g, '-');
   const runId = `mcp-${stamp}-${++seq}`;
   const logPath = join(root, 'burnin', 'logs', 'mcp', `${runId}.log`);
+  let lease: RunLease;
+  try {
+    lease = acquireLease(runId);
+  } catch (err) {
+    if (err instanceof RunLockBusyError) throw new RunRejected(err.message);
+    throw err;
+  }
 
   const record: RunRecord = {
     runId,
@@ -254,6 +296,7 @@ export function startRun(input: StartRunInput, driver: RunDriver = spawnRun): Ru
     startedAt: new Date(startedAtMs).toISOString(),
     logPath,
     abort: new AbortController(),
+    lease,
     chunks: 0,
     tail: '',
   };
@@ -265,61 +308,77 @@ export function startRun(input: StartRunInput, driver: RunDriver = spawnRun): Ru
   // ALWAYS settles now — `spawnRun` gained an 'error' listener and a guarded
   // log write precisely because a server cannot survive a promise that never
   // resolves.
-  void driver({
-    goal,
-    timeoutMs,
-    logPath,
-    cwd: root,
-    signal: record.abort.signal,
-    cleanWorkspace: input.keepWorkspace !== true,
-    extraArgs: buildRunArgs(input),
-    extraEnv: {
-      // The provider must be DECIDED, never inherited. The Claude Code
-      // environment carries an ANTHROPIC_API_KEY that `makeAnthropicClient`
-      // prefers FIRST (documented as the #1 auth trap), and in this project it
-      // is dead — a run reaching the direct-API path dies in ~15s and reads as
-      // a config failure. claude-cli on the local subscription is the path
-      // that works, verified from a Claude-Code-spawned child. An explicit
-      // host setting still wins.
-      ATOMA_LLM: process.env['ATOMA_LLM'] ?? 'claude-cli',
-    },
-    onChunk: (chunk) => {
-      record.chunks++;
-      record.tail = (record.tail + chunk).slice(-PROGRESS_TAIL_CHARS);
-    },
-  }).then(
+  let driven: Promise<string>;
+  try {
+    driven = driver({
+      goal,
+      timeoutMs,
+      logPath,
+      cwd: root,
+      signal: record.abort.signal,
+      cleanWorkspace: input.keepWorkspace !== true,
+      extraArgs: buildRunArgs(input),
+      extraEnv: {
+        // The provider must be DECIDED, never inherited. The Claude Code
+        // environment carries an ANTHROPIC_API_KEY that `makeAnthropicClient`
+        // prefers FIRST (documented as the #1 auth trap), and in this project it
+        // is dead — a run reaching the direct-API path dies in ~15s and reads as
+        // a config failure. claude-cli on the local subscription is the path
+        // that works, verified from a Claude-Code-spawned child. An explicit
+        // host setting still wins.
+        ATOMA_LLM: process.env['ATOMA_LLM'] ?? 'claude-cli',
+      },
+      onChunk: (chunk) => {
+        record.chunks++;
+        record.tail = (record.tail + chunk).slice(-PROGRESS_TAIL_CHARS);
+      },
+      onSpawn: (pid) => {
+        record.childPid = pid;
+        record.lease.attachChild(pid);
+      },
+    });
+  } catch (err) {
+    driven = Promise.reject(err instanceof Error ? err : new Error(String(err)));
+  }
+
+  void driven.then(
     (log) => {
-      const stats = parseRunLog(log);
-      const durationS = newestTraceDuration(runsDir, startedAtMs);
-      record.stats = stats;
-      record.durationS = durationS;
-      record.trace = newestTraceName(runsDir, startedAtMs) || undefined;
-      record.endedAt = new Date().toISOString();
-      const wasCancelled = record.status === 'cancelled';
-      if (record.status === 'running') record.status = 'finished';
-      if (wasCancelled) {
-        // A cancelled run prints neither completion banner nor failure
-        // banner, so `parseRunLog` — correctly, per its own contract — reports
-        // outcome 'error' with null economics. Say so, or a host reads "the
-        // run errored" back to a user who cancelled it on purpose. The
-        // config-failure heuristic is skipped for the same reason: it fires on
-        // "died fast, spent nothing", which is exactly what a cancellation
-        // looks like, and a false misconfiguration alarm sends the reader
-        // hunting a dead API key that is not there.
-        record.hint =
-          'Cancelled on request. `stats.outcome` reads "error" and the economics are null because the run was terminated before printing its summary — that is the cancellation, not a failure. The trace is closed and marked cancelled.';
-      } else if (looksLikeConfigFailure(stats, durationS)) {
-        record.configFailureSuspected = true;
-        record.hint =
-          'The run died almost instantly having spent nothing — that is the signature of a MISCONFIGURED launch (dead API key, wrong provider, missing `claude /login`), not of a hard task. Check the log.';
+      try {
+        const stats = parseRunLog(log);
+        const durationS = newestTraceDuration(runsDir, startedAtMs);
+        record.stats = stats;
+        record.durationS = durationS;
+        record.trace = newestTraceName(runsDir, startedAtMs) || undefined;
+        record.endedAt = new Date().toISOString();
+        const wasCancelled = record.status === 'cancelling';
+        record.status = wasCancelled ? 'cancelled' : 'finished';
+        if (wasCancelled) {
+          // A cancelled run prints neither completion banner nor failure
+          // banner, so `parseRunLog` — correctly, per its own contract —
+          // reports outcome 'error' with null economics.
+          record.hint =
+            'Cancelled on request. `stats.outcome` reads "error" and the economics are null because the run was terminated before printing its summary — that is the cancellation, not a failure. The trace is closed and marked cancelled.';
+        } else if (looksLikeConfigFailure(stats, durationS)) {
+          record.configFailureSuspected = true;
+          record.hint =
+            'The run died almost instantly having spent nothing — that is the signature of a MISCONFIGURED launch (dead API key, wrong provider, missing `claude /login`), not of a hard task. Check the log.';
+        }
+      } catch (err) {
+        record.status = record.status === 'cancelling' ? 'cancelled' : 'spawn-failed';
+        record.endedAt = new Date().toISOString();
+        record.hint = `run post-processing failed: ${err instanceof Error ? err.message : String(err)}`;
+      } finally {
+        finishRun(record);
       }
-      if (inFlight === record) inFlight = null;
     },
     (err: unknown) => {
-      record.status = 'spawn-failed';
+      const wasCancelled = record.status === 'cancelling';
+      record.status = wasCancelled ? 'cancelled' : 'spawn-failed';
       record.endedAt = new Date().toISOString();
-      record.hint = `spawn failed: ${err instanceof Error ? err.message : String(err)}`;
-      if (inFlight === record) inFlight = null;
+      record.hint = wasCancelled
+        ? 'Cancelled on request before the run produced a summary.'
+        : `spawn failed: ${err instanceof Error ? err.message : String(err)}`;
+      finishRun(record);
     }
   );
 
@@ -332,7 +391,7 @@ export function runStatus(opts: { runId?: string } = {}): unknown {
     return r ? publish(r) : { note: `no run with id "${opts.runId}"` };
   }
   return {
-    inFlight: inFlight && inFlight.status === 'running' ? inFlight.runId : null,
+    inFlight: inFlight?.runId ?? null,
     runs: [...records.values()].map(publish).reverse(),
   };
 }
@@ -348,18 +407,39 @@ export function cancelRun(opts: { runId?: string } = {}): unknown {
   const target = opts.runId ? records.get(opts.runId) : inFlight;
   if (!target) return { note: opts.runId ? `no run with id "${opts.runId}"` : 'no run in flight' };
   if (target.status !== 'running') return { note: `run ${target.runId} is already ${target.status}`, run: publish(target) };
-  target.status = 'cancelled';
-  target.abort.abort();
+  requestCancellation(target, 'requested through atoma_run_cancel');
   return {
     cancelled: target.runId,
-    note: 'SIGTERM sent to the run’s process group; SIGKILL follows after a 5s grace window. The trace is closed and marked cancelled. Poll atoma_run_status for the final economics.',
+    note: 'SIGTERM sent to the run’s process group; SIGKILL follows after a 5s grace window. The slot remains occupied until the child exits and the trace is closed. Poll atoma_run_status for final status.',
     run: publish(target),
   };
 }
 
+/** Graceful server shutdown: abort the active group and wait for its exit. */
+export async function shutdownRuns(reason = 'MCP server shutting down'): Promise<void> {
+  if (!inFlight) return;
+  requestCancellation(inFlight, reason);
+  await waitForRunIdle();
+}
+
+/** Synchronous hard-exit backstop; graceful shutdown should have run first. */
+export function forceStopActiveRunOnExit(): void {
+  if (!inFlight) return;
+  if (inFlight.childPid !== undefined) {
+    signalRunProcessGroup(inFlight.childPid, 'SIGKILL');
+  }
+  inFlight.lease.release();
+}
+
 /** Test seam: forget every record so a suite can assert on a clean slate. */
 export function resetRunsForTest(): void {
+  if (inFlight) {
+    inFlight.abort.abort(new Error('test reset'));
+    inFlight.lease.release();
+  }
   records.clear();
   inFlight = null;
+  for (const resolveIdle of idleWaiters) resolveIdle();
+  idleWaiters.clear();
   seq = 0;
 }

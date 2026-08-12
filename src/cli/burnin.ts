@@ -226,7 +226,7 @@ export function newestTraceName(runsDir: string, since: number): string {
  * `extraArgs` are appended AFTER the flags and BEFORE the goal, because
  * `parseRunnerArgs` takes the first non-flag argument as the goal.
  *
- * THE LAST FOUR OPTIONS WERE ADDED FOR THE MCP SERVER, and each closes a real
+ * THE LAST FIVE OPTIONS WERE ADDED FOR THE MCP SERVER, and each closes a real
  * gap rather than adding a knob — every default reproduces the previous
  * behaviour exactly, so burnin and the benchmark are byte-for-byte unaffected.
  *   - `cwd`: was hardcoded to `process.cwd()`. An MCP host launches its server
@@ -240,6 +240,9 @@ export function newestTraceName(runsDir: string, since: number): string {
  *   - `onChunk`: progress for a caller that cannot show the child's stdout.
  *     Deliberately a callback and not a stream: the accumulated `log` is
  *     unbounded, and a consumer that wants to bound it must see the pieces.
+ *   - `onSpawn`: exposes only the detached process-group id, so the MCP owner
+ *     can reap it on its own hard-exit path without growing a second spawn or
+ *     kill implementation.
  *   - `cleanWorkspace`: `--clean-workspace` was unconditional, which is right
  *     for measurement (every batch row starts from the same state) and
  *     surprising in an interactive host, where it ARCHIVES the deliverable the
@@ -255,6 +258,22 @@ export function newestTraceName(runsDir: string, since: number): string {
  *     (npm not on PATH, bad cwd) resolved never. It now settles with a
  *     synthetic log, which `parseRunLog` reads as outcome 'error'.
  */
+export const RUN_KILL_GRACE_MS = 5000;
+
+/** Signal a detached run's whole process group, then its leader as fallback. */
+export function signalRunProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    /* not a group leader, or already gone */
+  }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    /* already gone */
+  }
+}
+
 export function spawnRun(opts: {
   readonly goal: string;
   readonly timeoutMs: number;
@@ -267,6 +286,8 @@ export function spawnRun(opts: {
   readonly signal?: AbortSignal;
   /** Called with each stdout/stderr chunk as it arrives. */
   readonly onChunk?: (chunk: string) => void;
+  /** Called once with the detached process-group leader pid. Must not throw. */
+  readonly onSpawn?: (pid: number) => void;
   /** Pass `--clean-workspace`. Defaults to true (the measurement default). */
   readonly cleanWorkspace?: boolean;
 }): Promise<string> {
@@ -300,6 +321,7 @@ export function spawnRun(opts: {
         },
       }
     );
+    if (child.pid !== undefined) opts.onSpawn?.(child.pid);
     let log = '';
     const onChunk = (c: Buffer): void => {
       const text = c.toString();
@@ -322,23 +344,29 @@ export function spawnRun(opts: {
      * (Chrome's own teardown reaps its helper fleet, which an abrupt root
      * kill does not reliably do); SIGKILL follows only if it ignores it.
      */
-    const KILL_GRACE_MS = 5000;
     let killEscalation: NodeJS.Timeout | null = null;
+    let terminating = false;
     const killGroup = (): void => {
-      const signalGroup = (sig: NodeJS.Signals): void => {
+      if (terminating) return;
+      terminating = true;
+      if (child.pid !== undefined) signalRunProcessGroup(child.pid, 'SIGTERM');
+      else {
         try {
-          if (child.pid) process.kill(-child.pid, sig);
+          child.kill('SIGTERM');
         } catch {
           /* gone */
         }
-        try {
-          child.kill(sig);
-        } catch {
-          /* gone */
+      }
+      killEscalation = setTimeout(() => {
+        if (child.pid !== undefined) signalRunProcessGroup(child.pid, 'SIGKILL');
+        else {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* gone */
+          }
         }
-      };
-      signalGroup('SIGTERM');
-      killEscalation = setTimeout(() => signalGroup('SIGKILL'), KILL_GRACE_MS);
+      }, RUN_KILL_GRACE_MS);
       killEscalation.unref();
       child.once('exit', () => {
         if (killEscalation) clearTimeout(killEscalation);
@@ -365,6 +393,8 @@ export function spawnRun(opts: {
       settled = true;
       clearTimeout(hardTimer);
       if (killTimer) clearTimeout(killTimer);
+      if (killEscalation) clearTimeout(killEscalation);
+      opts.signal?.removeEventListener('abort', killGroup);
       try {
         writeFileSync(logPath, finalLog, 'utf8');
       } catch {

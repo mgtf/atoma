@@ -14,10 +14,12 @@ import {
   repoRoot,
   resetRunsForTest,
   runStatus,
+  shutdownRuns,
   startRun,
   validateStartInput,
   type RunDriver,
 } from '../src/mcp/run.js';
+import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
 import { families, friction, registryList, runTrace, skillsList } from '../src/mcp/readers.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { storeDbPath } from '../src/core/stores.js';
@@ -44,6 +46,16 @@ import { storeDbPath } from '../src/core/stores.js';
 
 /** A driver that never spawns anything and never settles — the run stays "running". */
 const neverSettles: RunDriver = () => new Promise<string>(() => {});
+/** Unit tests exercise bookkeeping; filesystem-lease behavior has its own suite. */
+const noLease: RunLeaseAcquirer = () => ({
+  path: '<test>',
+  attachChild() {},
+  release() {},
+});
+const startTestRun = (
+  input: Parameters<typeof startRun>[0],
+  driver: RunDriver = neverSettles
+): ReturnType<typeof startRun> => startRun(input, driver, noLease);
 
 describe('MCP run tool — argv assembly and validation', () => {
   beforeEach(() => resetRunsForTest());
@@ -126,25 +138,33 @@ describe('MCP run tool — serialisation', () => {
    * sequential loop; a server has to enforce it.
    */
   it('refuses a second run while one is in flight, naming the one that holds the slot', () => {
-    const first = startRun({ goal: 'build a thing' }, neverSettles);
+    const first = startTestRun({ goal: 'build a thing' });
     expect(first.status).toBe('running');
-    expect(() => startRun({ goal: 'build another thing' }, neverSettles)).toThrow(RunRejected);
+    expect(() => startTestRun({ goal: 'build another thing' })).toThrow(RunRejected);
     try {
-      startRun({ goal: 'build another thing' }, neverSettles);
+      startTestRun({ goal: 'build another thing' });
     } catch (err) {
       expect((err as Error).message).toContain(first.runId);
     }
   });
 
-  it('cancelling frees the slot and marks the record', () => {
-    const first = startRun({ goal: 'build a thing' }, neverSettles);
+  it('keeps the slot while cancellation waits for the child to exit', async () => {
+    let finish!: (log: string) => void;
+    const driver: RunDriver = () =>
+      new Promise<string>((resolveRun) => {
+        finish = resolveRun;
+      });
+    const first = startTestRun({ goal: 'build a thing' }, driver);
     const cancelled = cancelRun({}) as { cancelled?: string };
     expect(cancelled.cancelled).toBe(first.runId);
     const status = runStatus({ runId: first.runId }) as { status: string };
-    expect(status.status).toBe('cancelled');
-    // The slot is free even though the driver promise never settled — a run
-    // whose child is gone must not block the server forever.
-    expect(() => startRun({ goal: 'a later run' }, neverSettles)).not.toThrow();
+    expect(status.status).toBe('cancelling');
+    expect(() => startTestRun({ goal: 'too early' })).toThrow(RunRejected);
+
+    finish('');
+    await shutdownRuns();
+    expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelled');
+    expect(() => startTestRun({ goal: 'a later run' })).not.toThrow();
   });
 
   it('the abort signal reaches the driver — that is what makes cancellation graceful', () => {
@@ -153,13 +173,57 @@ describe('MCP run tool — serialisation', () => {
       seen = opts.signal;
       return new Promise<string>(() => {});
     };
-    startRun({ goal: 'build a thing' }, capture);
+    startTestRun({ goal: 'build a thing' }, capture);
     expect(seen).toBeDefined();
     expect(seen!.aborted).toBe(false);
     cancelRun({});
     // Aborting is what routes into spawnRun's SIGTERM → 5s grace → SIGKILL
     // sequence; a bare group SIGKILL is uncatchable and leaks browsers.
     expect(seen!.aborted).toBe(true);
+  });
+
+  it('server shutdown aborts the active group and waits for settlement', async () => {
+    let seen: AbortSignal | undefined;
+    let finish!: (log: string) => void;
+    const driver: RunDriver = (opts) => {
+      seen = opts.signal;
+      return new Promise<string>((resolveRun) => {
+        finish = resolveRun;
+      });
+    };
+    const first = startTestRun({ goal: 'build a thing' }, driver);
+    const shutdown = shutdownRuns('stdio closed');
+    expect(seen?.aborted).toBe(true);
+    expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelling');
+
+    let settled = false;
+    void shutdown.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    finish('');
+    await shutdown;
+    expect(settled).toBe(true);
+    expect((runStatus({ runId: first.runId }) as { status: string }).status).toBe('cancelled');
+  });
+
+  it('attaches the detached child pid to the cross-process lease', () => {
+    let attachedPid: number | undefined;
+    const acquire: RunLeaseAcquirer = () => ({
+      path: '<test>',
+      attachChild: (pid) => {
+        attachedPid = pid;
+      },
+      release() {},
+    });
+    const driver: RunDriver = (opts) => {
+      opts.onSpawn?.(4242);
+      return new Promise<string>(() => {});
+    };
+
+    startRun({ goal: 'build a thing' }, driver, acquire);
+    expect(attachedPid).toBe(4242);
   });
 
   it('pins the provider on the child rather than inheriting a dead API key', () => {
@@ -172,7 +236,7 @@ describe('MCP run tool — serialisation', () => {
       clean = opts.cleanWorkspace;
       return new Promise<string>(() => {});
     };
-    startRun({ goal: 'build a thing' }, capture);
+    startTestRun({ goal: 'build a thing' }, capture);
     // The host environment carries an ANTHROPIC_API_KEY that the auth chain
     // prefers FIRST (the documented "#1 auth trap"); in this project it is
     // dead, and a run reaching the direct-API path dies in ~15s.
@@ -189,7 +253,7 @@ describe('MCP run tool — serialisation', () => {
       clean = opts.cleanWorkspace;
       return new Promise<string>(() => {});
     };
-    startRun({ goal: 'build a thing', keepWorkspace: true }, capture);
+    startTestRun({ goal: 'build a thing', keepWorkspace: true }, capture);
     expect(clean).toBe(false);
   });
 });

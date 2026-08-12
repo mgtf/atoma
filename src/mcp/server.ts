@@ -35,6 +35,7 @@ import { Writable } from 'node:stream';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { RUN_KILL_GRACE_MS } from '../cli/burnin.js';
 import {
   families,
   friction,
@@ -47,7 +48,16 @@ import {
   skillsReview,
   skillsStats,
 } from './readers.js';
-import { DEFAULT_RUN_TIMEOUT_MS, RunRejected, cancelRun, repoRoot, runStatus, startRun } from './run.js';
+import {
+  DEFAULT_RUN_TIMEOUT_MS,
+  RunRejected,
+  cancelRun,
+  forceStopActiveRunOnExit,
+  repoRoot,
+  runStatus,
+  shutdownRuns,
+  startRun,
+} from './run.js';
 
 /**
  * Capture the ONE path to fd 1 before anything can write to it, then close the
@@ -363,14 +373,41 @@ export function buildServer(): McpServer {
  * without speaking MCP on the test runner's stdio — the same guard the burn-in
  * CLI, the curriculum CLI and the container worker use.
  */
-if (process.argv[1] && /server\.(ts|js)$/.test(process.argv[1])) {
+async function boot(): Promise<void> {
   const protocolOut = claimStdoutForProtocol();
   // Work from the repo root whatever cwd the host launched us in. This is what
   // makes `storeDbPath()` / `skillsDirPath()` / `./runs` resolve to the SAME
   // store the child run will use, without this file growing a second copy of
   // the path rules — four divergent copies of that rule WAS the bug once.
   process.chdir(repoRoot());
+  let shuttingDown = false;
+  const shutdown = (reason: string, code = 0): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // `spawnRun` should settle after its SIGTERM→SIGKILL sequence. This timer
+    // is the server-side backstop if the driver promise itself wedges.
+    const forceTimer = setTimeout(() => {
+      forceStopActiveRunOnExit();
+      process.exit(code);
+    }, RUN_KILL_GRACE_MS + 1000);
+    void shutdownRuns(reason).finally(() => {
+      clearTimeout(forceTimer);
+      process.exit(code);
+    });
+  };
+  process.once('SIGINT', () => shutdown('MCP server received SIGINT'));
+  process.once('SIGTERM', () => shutdown('MCP server received SIGTERM'));
+  process.stdin.once('end', () => shutdown('MCP stdio input ended'));
+  process.stdin.once('close', () => shutdown('MCP stdio input closed'));
+  // SIGKILL cannot run this hook; the cross-process lease detects that case
+  // and reaps a surviving detached group before admitting another run.
+  process.once('exit', forceStopActiveRunOnExit);
+
   const server = buildServer();
   await server.connect(new StdioServerTransport(process.stdin, protocolOut));
   process.stderr.write(`[atoma-mcp] ready on stdio · repo ${process.cwd()}\n`);
+}
+
+if (process.argv[1] && /server\.(ts|js)$/.test(process.argv[1])) {
+  await boot();
 }
