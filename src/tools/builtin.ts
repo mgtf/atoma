@@ -458,7 +458,7 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
           command: {
             type: 'string',
             description:
-              'Alternative to cmd: the program alone (must be in the allowlist). E.g. "node", "npm", "python3".',
+              'Alternative to cmd: preferably the program alone (must be in the allowlist), e.g. "node". For compatibility, a whole line is also accepted here when args is empty.',
           },
           args: {
             type: 'array',
@@ -477,7 +477,18 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
       // choice. A line needing a shell is routed through bash (already on the
       // allowlist and documented as a sanctioned escape hatch); a plain one is
       // split and still checked against the allowlist.
-      const line = typeof args['cmd'] === 'string' ? args['cmd'].trim() : '';
+      let line = typeof args['cmd'] === 'string' ? args['cmd'].trim() : '';
+      const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
+      const commandField =
+        typeof args['command'] === 'string' ? args['command'].trim() : '';
+      // Models still occasionally put the whole line in `command` despite the
+      // declaration preferring `cmd` (live: `grep -n "node cli.js" README.md`).
+      // When args is empty there is no ambiguity: normalize it through the
+      // exact same parser/shell classifier as `cmd`. Security is unchanged —
+      // the resolved executable is still allowlist-checked below.
+      if (!line && rawArgs.length === 0 && SHELL_LINE_RE.test(commandField)) {
+        line = commandField;
+      }
       let command: string;
       let argv: string[];
       if (line) {
@@ -492,7 +503,6 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
         }
       } else {
         command = expectString(args, 'command');
-        const rawArgs = Array.isArray(args['args']) ? (args['args'] as unknown[]) : [];
         argv = rawArgs.map((a) => String(a));
       }
       if (!allowlist.has(command)) {

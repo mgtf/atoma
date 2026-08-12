@@ -574,7 +574,11 @@ re-exports all the historical names so old imports keep working.
   bash (allowlisted, and documented as a sanctioned escape hatch); this
   includes pipes/redirections AND expansion syntax (globs, tilde, braces,
   escapes, leading environment assignments). A plain line is split and still
-  allowlist-checked. `{command, args}` still works.
+  allowlist-checked. `{command, args}` still works. A later live recurrence put
+  `grep -n "node cli.js" README.md` in `command` with no `args`; that
+  unambiguous shape is now normalized through the SAME line parser too. The
+  preferred key remains `cmd`, but choosing the legacy field no longer burns a
+  failed tool round-trip; executable allowlisting is unchanged.
 
   THE DOUBLE-ESCAPE IS NOT AUTO-CORRECTED, AND THAT IS A MEASURED DECISION.
   `new_string` carries the same escaping in **7 of 7** cases, so fixing only

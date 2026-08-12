@@ -174,18 +174,21 @@ describe('runShellTool', () => {
     );
   });
 
-  it('a shell LINE sent as the executable gets shape coaching, not just the list', async () => {
-    // Measured: an L1 sent `chmod +x test-api.js && node test-api.js` as
-    // the command, so the rejection named something no allowlist could
-    // contain and the retry repeated the shape.
-    const sandbox = new ToolSandbox(mkdtempSync(join(tmpdir(), 'atoma-shell-')));
-    const sh = runShellTool({ sandbox });
-    await expect(
-      sh.execute({ command: 'chmod +x test-api.js && node test-api.js' })
-    ).rejects.toThrow(/is a shell LINE, not an executable/);
-    await expect(sh.execute({ command: 'node index.js | head -3' })).rejects.toThrow(
-      /bash", args: \["-c"/
-    );
+  it('normalizes a whole line mistakenly sent in command when args is empty', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-shell-command-line-'));
+    try {
+      writeFileSync(join(root, 'README.md'), 'Run with node cli.js\n');
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const result = (await sh.execute({
+        command: 'grep -n "node cli.js" README.md',
+      })) as { exitCode: number; stdout: string };
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('1:Run with node cli.js');
+      // Security stays unchanged after normalization.
+      await expect(sh.execute({ command: 'curl http://x' })).rejects.toThrow(/fetch_url/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

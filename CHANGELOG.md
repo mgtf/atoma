@@ -61,6 +61,9 @@
   corrected probe uses a different command.
 - Burn-in quota detection ignores delivered artefact text, canonicalizes base
   and routed providers, and records event-skill learning separately.
+- `run_shell` accepts an unambiguous whole line placed in `command` when
+  `args` is empty, using the same parser and allowlist as the preferred `cmd`
+  form.
 
 ## v0.1.2 — 2026-08-12
 
