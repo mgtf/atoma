@@ -226,6 +226,23 @@ describe('run_shell accepts a whole command line', () => {
     }
   });
 
+  it('routes glob expansion through bash instead of passing a literal asterisk', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-glob-'));
+    try {
+      writeFileSync(join(root, 'a.txt'), 'a');
+      writeFileSync(join(root, 'b.txt'), 'b');
+      const sh = runShellTool({ sandbox: new ToolSandbox(root) });
+      const res = (await sh.execute({ cmd: 'echo *.txt' })) as {
+        exitCode: number;
+        stdout: string;
+      };
+      expect(res.exitCode).toBe(0);
+      expect(res.stdout.trim().split(/\s+/).sort()).toEqual(['a.txt', 'b.txt']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('keeps a quoted phrase together — the exact round-4 rejection', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-line-q-'));
     try {

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import {
+  commandLineNeedsShell,
   mergeShellProbe,
   recordProbeTool,
   renderProbeCmd,
@@ -249,6 +250,19 @@ describe('record_probe accepts a whole command line — the round-3 defect', () 
     expect(String(manifest().entries[0]!['stdout']).trim()).toBe('Hello World');
   });
 
+  it('executes shell expansions exactly as the recorded line will replay them', async () => {
+    writeFileSync(join(root, 'a.probe.txt'), 'a');
+    writeFileSync(join(root, 'b.probe.txt'), 'b');
+    const t = recordProbeTool({ sandbox });
+    const res = (await t.execute({ cmd: 'printf "%s\\n" *.probe.txt' })) as {
+      ranThroughShell: boolean;
+      stdout: string;
+    };
+    expect(res.ranThroughShell).toBe(true);
+    expect(res.stdout.trim().split('\n').sort()).toEqual(['a.probe.txt', 'b.probe.txt']);
+    expect(manifest().entries[0]!['cmd']).toBe('printf "%s\\n" *.probe.txt');
+  });
+
   it('keeps the {command,args} shape working for existing callers', async () => {
     writeFileSync(join(root, 'x.js'), "console.log('legacy');");
     const t = recordProbeTool({ sandbox });
@@ -279,5 +293,27 @@ describe('splitCommandLine', () => {
   });
   it('preserves an intentionally empty argument', () => {
     expect(splitCommandLine('node x.js ""')).toEqual(['node', 'x.js', '']);
+  });
+  it('rejects an unterminated quote instead of executing different argv', () => {
+    expect(() => splitCommandLine('node x.js "unfinished')).toThrow(/unterminated quote/);
+  });
+});
+
+describe('commandLineNeedsShell', () => {
+  it('recognises expansion and environment syntax a local argv split cannot preserve', () => {
+    for (const line of [
+      'node --test tests/*.test.js',
+      'cat ~/input.txt',
+      'printf "%s" file?.txt',
+      'NODE_ENV=test node index.js',
+      'echo file\\ name',
+      'echo {a,b}',
+    ]) {
+      expect(commandLineNeedsShell(line), line).toBe(true);
+    }
+  });
+
+  it('keeps an ordinary quoted argv line on the direct allowlisted path', () => {
+    expect(commandLineNeedsShell('node x.js "Hello World" --flag')).toBe(false);
   });
 });

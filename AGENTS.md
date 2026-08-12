@@ -506,8 +506,10 @@ re-exports all the historical names so old imports keep working.
   string. `record_probe` had already been fixed for this and leaving
   `run_shell` behind made the two tools disagree about what a command looks
   like — worse than either choice alone. A line needing a shell routes through
-  bash (allowlisted, and documented as a sanctioned escape hatch); a plain one
-  is split and still allowlist-checked. `{command, args}` still works.
+  bash (allowlisted, and documented as a sanctioned escape hatch); this
+  includes pipes/redirections AND expansion syntax (globs, tilde, braces,
+  escapes, leading environment assignments). A plain line is split and still
+  allowlist-checked. `{command, args}` still works.
 
   THE DOUBLE-ESCAPE IS NOT AUTO-CORRECTED, AND THAT IS A MEASURED DECISION.
   `new_string` carries the same escaping in **7 of 7** cases, so fixing only
@@ -2739,9 +2741,18 @@ second is the kind of thing that gets acted on:
   dispatches. THE TOOL WHOSE JOB IS RECORDING A COMMAND REFUSED THE SHAPE IN
   WHICH IT RECORDS IT. It now accepts `cmd` as a whole line — the shape the
   manifest stores and the one models reach for — records it bare, and adds a
-  shell only when the line genuinely needs one (pipe, redirect, &&).
+  shell only when the line genuinely needs one.
   {command, args} still works. Pinned by a test that replays the exact
   extraction regex that broke.
+  EXACTNESS ALSO INCLUDES SHELL EXPANSION. The first classifier recognised
+  pipes and redirects but not `*`, `?`, `[]`, `~`, braces, backslash escapes
+  or a leading `NAME=value`. So `node --test tests/*.test.js` executed the
+  literal asterisk via direct argv while the manifest stored shell text that a
+  later verifier would expand — the machine recorded the bytes faithfully for
+  a DIFFERENT invocation. Both run_shell and record_probe now share one
+  conservative classifier; unnecessary bash is cheap, execution/replay drift
+  is not. Unterminated quotes are rejected instead of silently becoming
+  different argv.
   A METHOD NOTE WORTH MORE THAN THE FIX: the first diagnosis of this was WRONG
   and nearly became a feature. Grepping the first trace event whose text
   matched the error string returned the run SUMMARY, not the script, and led to

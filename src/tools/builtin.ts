@@ -481,7 +481,7 @@ export function runShellTool(opts: BuiltinToolOptions): BuiltinTool {
       let command: string;
       let argv: string[];
       if (line) {
-        if (NEEDS_SHELL_RE.test(line)) {
+        if (commandLineNeedsShell(line)) {
           command = 'bash';
           argv = ['-c', line];
         } else {
@@ -1921,8 +1921,20 @@ function expectString(args: Record<string, unknown>, key: string): string {
  * dropped quotes — amputating `node index.js "Hello World"` to
  * `node index.js` and failing a correct deliverable.
  */
-/** Shell metacharacters that genuinely need an interpreter. */
-const NEEDS_SHELL_RE = /[|&;<>()$`]|\d>&\d/;
+/**
+ * Syntax whose meaning changes when a line is split into argv locally.
+ *
+ * Conservative by design: an unnecessary bash hop costs almost nothing, while
+ * missing one records a command different from the one a future verifier
+ * replays. Globs were the live gap — `*.test.js` ran literally on the first
+ * pass, then expanded when the manifest was replayed through a shell.
+ */
+const NEEDS_SHELL_RE = /[|&;<>()$`*?[\]{}~#\\\r\n]|\d>&\d/;
+const LEADING_ENV_ASSIGNMENT_RE = /^\s*[A-Za-z_][A-Za-z0-9_]*=/;
+
+export function commandLineNeedsShell(line: string): boolean {
+  return NEEDS_SHELL_RE.test(line) || LEADING_ENV_ASSIGNMENT_RE.test(line);
+}
 
 /**
  * Split a plain command line into argv, honouring quotes.
@@ -1956,6 +1968,7 @@ export function splitCommandLine(line: string): string[] {
       any = true;
     }
   }
+  if (quote) throw new Error('command line contains an unterminated quote');
   if (any) out.push(cur);
   return out;
 }
@@ -2057,9 +2070,9 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
       let viaShell = false;
       if (rawLine) {
         cmd = rawLine;
-        if (NEEDS_SHELL_RE.test(rawLine)) {
-          // Genuinely needs an interpreter (pipe, redirect, &&). Run it
-          // through bash, but record the line the user wrote.
+        if (commandLineNeedsShell(rawLine)) {
+          // Needs interpreter semantics (pipe, redirect, expansion, env).
+          // Run through bash, but record the line the user wrote.
           command = 'bash';
           argv = ['-c', rawLine];
           viaShell = true;
