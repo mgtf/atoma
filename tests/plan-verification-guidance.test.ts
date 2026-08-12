@@ -4,7 +4,9 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L3Atom } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
+import { preservePlanLiteralContracts } from '../src/atoms/prompts.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
+import { makePlan } from './helpers/factories.js';
 
 /**
  * Regression tests for the "VERIFICATION MATCHES THE ARTEFACT" rule in
@@ -65,6 +67,8 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
     expect(planPrompt).toMatch(/http:\/\/localhost:<port>/);
     expect(planPrompt).toMatch(/LISTENING_ON_PORT=<port>/);
+    expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
+    expect(planPrompt).toMatch(/never rename, replace or summarise away/);
   });
 
   it('the L2 Sonnet plan prompt carries the same rule (short form)', async () => {
@@ -95,5 +99,36 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/== FILE-MUTATING SUBTASKS NAME THEIR TARGETS ==/);
     expect(planPrompt).toMatch(/exact intended output path/);
     expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
+    expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
+  });
+});
+
+describe('preservePlanLiteralContracts', () => {
+  it('mechanically carries exact HTTP schema clauses into every phase', () => {
+    const goal =
+      'Build POST /labels accepting {"name": string, "color": "#RRGGBB"} and GET /labels. ' +
+      'Reject blank names, wrong types, and malformed colors with status 400.';
+    const plan = makePlan({
+      subtasks: [
+        { description: 'Build the labels API.', preferredChild: 'Methane', inputs: {} },
+        { description: 'Verify proper validation.', preferredChild: 'Methane', inputs: {} },
+      ],
+      aggregation: { mode: 'sequential' },
+    });
+    const enriched = preservePlanLiteralContracts(plan, goal);
+    for (const subtask of enriched.subtasks) {
+      expect(subtask.description).toContain('== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==');
+      expect(subtask.description).toContain('{"name": string, "color": "#RRGGBB"}');
+      expect(subtask.description).toContain('Reject blank names, wrong types');
+    }
+    expect(
+      preservePlanLiteralContracts(enriched, enriched.subtasks[0]!.description).subtasks[0]!
+        .description.match(/LITERAL CONTRACTS FROM TOP-LEVEL GOAL/g)
+    ).toHaveLength(1);
+  });
+
+  it('leaves tasks without a structured literal contract untouched', () => {
+    const plan = makePlan();
+    expect(preservePlanLiteralContracts(plan, 'Write a friendly introduction.')).toBe(plan);
   });
 });

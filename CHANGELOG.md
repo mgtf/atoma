@@ -117,6 +117,8 @@
   `{output,summary}` Result are normalized without an off-scope tool round-trip.
 - CLI build recipes retain every fixture referenced by a recorded probe so
   later packaging and replay phases cannot inherit broken evidence.
+- L2/L3 plans preserve exact structured goal clauses—HTTP routes, JSON fields,
+  formats, status codes and rejection rules—in every downstream subtask.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

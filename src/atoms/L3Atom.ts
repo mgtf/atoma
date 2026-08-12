@@ -48,7 +48,12 @@ import {
   extractBranchDiagnostic,
   resolveCreationDescription,
 } from './capability.js';
-import { HTTP_PORTABLE_DOC_GUIDANCE, MUTATING_SUBTASK_FILE_GUIDANCE } from './prompts.js';
+import {
+  HTTP_PORTABLE_DOC_GUIDANCE,
+  LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
+  MUTATING_SUBTASK_FILE_GUIDANCE,
+  preservePlanLiteralContracts,
+} from './prompts.js';
 import type { SkillRegistry } from '../skills/registry.js';
 
 /**
@@ -364,6 +369,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ``,
       MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,
+      LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
+      ``,
       `Each subtask carries a "preferredChild" naming the L2 molecule that`,
       `should handle it (required for N>1 plans). Multiple phases can target`,
       `the SAME L2 — that's the common case for PHASED builds.`,
@@ -468,7 +475,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       rawPlan !== null &&
       (rawPlan as Record<string, unknown>)['aggregation'] === undefined;
     if (aggregationWasOmitted) plan.aggregation = { mode: 'sequential' };
-    return plan;
+    return preservePlanLiteralContracts(plan, task.description);
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {

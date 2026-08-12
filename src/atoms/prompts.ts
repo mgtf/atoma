@@ -5,6 +5,7 @@
  * an examples→atoms→L2Atom dependency inversion that also dragged the
  * whole 2,800-line module into anything wanting one prompt constant.
  */
+import type { Plan } from '../core/types.js';
 
 /**
  * Shared smoke-test design guidance. Appended to every L1 system
@@ -190,3 +191,48 @@ export const HTTP_PORTABLE_DOC_GUIDANCE = [
   `\`LISTENING_ON_PORT=59420\`.`,
   `The live bound URL belongs in run evidence/results only, not documentation.`,
 ].join('\n');
+
+export const LITERAL_CONTRACT_PRESERVATION_GUIDANCE = [
+  `== PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION ==`,
+  `A subtask may narrow SCOPE but must never rename, replace or summarise away`,
+  `the user's exact routes, JSON field names, types, formats, status codes or`,
+  `fixed literals. "Implement proper validation" is not a substitute for`,
+  `\`POST /labels {"name":string,"color":"#RRGGBB"}; reject blank/wrong/malformed`,
+  `with 400\`. Repeat the exact contract in BOTH the build and verification`,
+  `subtasks that consume it. Never fill an omitted schema from a familiar recipe.`,
+].join('\n');
+
+const LITERAL_CONTRACT_MARKER = '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==';
+
+export function extractLiteralContractClauses(description: string): string {
+  const inherited = description.indexOf(LITERAL_CONTRACT_MARKER);
+  if (inherited >= 0) return description.slice(inherited + LITERAL_CONTRACT_MARKER.length).trim();
+  if (!/(?:\{[^{}\n]{1,300}\}|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/\S+)/i.test(description)) {
+    return '';
+  }
+  const clauses = description
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)
+    .map((clause) => clause.trim())
+    .filter(
+      (clause) =>
+        /(?:\{[^{}]{1,300}\}|\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/\S+|\b(?:reject|required?|must|only|status\s+\d{3}|malformed|wrong\s+type)\b)/i.test(
+          clause
+        )
+    );
+  return [...new Set(clauses)].join('\n').slice(0, 1600);
+}
+
+export function preservePlanLiteralContracts(plan: Plan, taskDescription: string): Plan {
+  const clauses = extractLiteralContractClauses(taskDescription);
+  if (!clauses) return plan;
+  const block = `${LITERAL_CONTRACT_MARKER}\n${clauses}`;
+  return {
+    ...plan,
+    subtasks: plan.subtasks.map((subtask) =>
+      subtask.description.includes(LITERAL_CONTRACT_MARKER)
+        ? subtask
+        : { ...subtask, description: `${subtask.description}\n\n${block}` }
+    ),
+  };
+}

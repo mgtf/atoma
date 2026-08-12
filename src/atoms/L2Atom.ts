@@ -77,7 +77,9 @@ export {
 } from '../skills/lifecycle.js';
 import {
   HTTP_PORTABLE_DOC_GUIDANCE,
+  LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
+  preservePlanLiteralContracts,
   SMOKE_DESIGN_GUIDANCE,
 } from './prompts.js';
 export { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
@@ -475,6 +477,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ``,
       MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,
+      LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
+      ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
       `  - "reuse": pick an existing L1 element from the catalog that fits`,
       `  - "create": design a new L1 element and register it (provide a seed)`,
@@ -565,7 +569,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const pair = parseTwoJson(resp.text);
     this.pendingStrategy = l2StrategySchema.parse(pair[0]);
     const plan = planSchema.parse(pair[1]);
-    return plan;
+    return preservePlanLiteralContracts(plan, task.description);
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {

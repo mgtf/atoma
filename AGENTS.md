@@ -1375,6 +1375,29 @@ re-exports all the historical names so old imports keep working.
   must not be deleted. The allowlist still excludes rm: allowing the command
   would have made this run worse by silently deleting required evidence; the
   rejected call was a useful guard, not a missing capability.
+- **TWENTY-EIGHTH LIVE ITERATION, 2026-08-12 — decomposition erased the API
+  schema while preserving the route names.** A labels HTTP run reported
+  delivered in 233s/14 calls/$0.2278 estimated with zero friction (trace
+  `2026-08-12T23-00-06-671-4f68e272`), and its 12-entry HTTP manifest plus
+  `<port>` documentation were structurally clean. Independent requests proved
+  the product was wrong: the goal required `{name:string,color:"#RRGGBB"}`,
+  but POST returned the familiar `{name,description,priority}` shape and
+  accepted `color:"red"` with 201.
+  The loss happened before L1. L3's build subtask reduced the exact schema to
+  "POST /labels validation"; its verification subtask named malformed color,
+  but the L1 plan silently substituted "wrong type for priority" and a third
+  valid priority payload. The generic HTTP recipes then correctly implemented
+  the underspecified subtasks, and real probes proved the wrong contract. They
+  were not penalised; two false Helium and Methane successes were removed.
+  Both plan prompts now carry a literal-contract rule: narrowing phase scope
+  may not rename or omit routes, field names, types, formats, status codes or
+  fixed values. Defence in depth is mechanical:
+  `preservePlanLiteralContracts` extracts structured top-level clauses
+  (method+route / JSON-ish schema / reject-status requirements) and appends
+  them verbatim to EVERY emitted subtask; L2 forwards the inherited block
+  without duplication. Thus a later model can still choose a bad
+  implementation, but it can no longer receive a plan in which `color` and
+  `#RRGGBB` disappeared or were replaced by a familiar `priority` field.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

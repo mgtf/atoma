@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "labels-api-semantic-validation",
+      "family": "http",
+      "goal": "Build a zero-dependency Node JSON API in server.js with POST /labels accepting {\"name\": string, \"color\": \"#RRGGBB\"} and GET /labels listing created labels. Reject blank names, wrong types, and malformed colors with status 400. Bind process.env.PORT and emit LISTENING_ON_PORT=<N>. Add README.md using only <port> placeholders in durable URLs and startup markers. In a FINAL SEPARATE PHASE, mechanically probe the empty list, valid creation/listing, blank name, wrong type, and malformed color."
+    }
+  ]
+}
