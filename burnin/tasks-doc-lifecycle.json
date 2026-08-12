@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "stream-batch-docs-config",
+      "family": "files",
+      "goal": "Create README.md and CONTRIBUTING.md for a hypothetical stream-batch CLI. README.md must contain Overview, Installation and Usage headings; CONTRIBUTING.md must contain Development Workflow, Testing and Code of Conduct headings. Also create config.json with exact stage names ingest, normalize and publish, each enabled, and maxRetries set to 3."
+    },
+    {
+      "id": "service-operations-guides",
+      "family": "files",
+      "goal": "Create docs/auth.md, docs/storage.md and docs/observability.md. Each file must have an H1 title, a '## When to use' section, and a '## Steps' section containing at least three concrete bullet points appropriate to that topic."
+    }
+  ]
+}

@@ -816,6 +816,30 @@ re-exports all the historical names so old imports keep working.
   zero leaked children. This is the zero-token path paying on the maintenance
   phase it was built for; the run still made 15 LLM calls for planning and the
   novel CLI build, so it is a PHASE saving, never a zero-cost run.
+- **FOURTH LIVE ITERATION, 2026-08-12 — quantified requirements keep their
+  section scope.** Two file-scribe tasks delivered stream-batch docs/config
+  ($0.3509/19 calls, trace `2026-08-12T12-35-51-650-a8dacba1`) and three
+  operations guides ($0.2174/13,
+  `2026-08-12T12-40-12-661-ded78cb0`). The first task's wording ("Overview,
+  Installation and Usage headings") was instrument-ambiguous and produced
+  `## Installation and Usage` plus `## Usage`; that is a task-authoring defect,
+  not evidence for a runtime change. The second artefact independently passed
+  all requested structures, but trusted `verify-markdown-section-structure`
+  false-failed all three: it read "at least three bullets under Steps" as
+  "every H2 has three bullets", demanding bullets in prose-only
+  `## When to use`, then paid the full fallback. Its compiled body now binds a
+  numeric item requirement to the nearest explicitly named `##` heading; the
+  exact three real files replay clean offline with `itemRequirementSection:
+  "Steps"`. The compiler prompt carries the general quantifier-scope rule, and
+  the live script reset 7/0 → 0/0 because its body changed.
+  Distillation also created `replay-recorded-probes-from-manifest` at 0/0,
+  duplicating the trusted `replay-recorded-shell-probes` while reintroducing
+  the forbidden `; echo EXIT=$?` command decoration. It was dropped
+  immediately; `verify-config-and-doc-headings` was kept as a genuinely
+  distinct config+docs verifier. One recovered whole-line grep error occurred
+  in the ambiguous first task; no consecutive-batch signature, no harness
+  change. Both runs left zero leaked children and ledger projection stayed
+  exact.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

@@ -161,6 +161,8 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     expect(compileCall.userContent).toMatch(/exit NON-ZERO rather than/);
     expect(compileCall.userContent).toMatch(/INTERPRETER TOKENS ARE NOT PRODUCT NAMES/);
     expect(compileCall.userContent).toMatch(/package literally named `node` or `index`/);
+    expect(compileCall.userContent).toMatch(/QUANTIFIER SCOPE IS SEMANTIC/);
+    expect(compileCall.userContent).toMatch(/apply N to that section\s+only/);
     // Robust extraction: the slugify rehearsal's compiled script truncated
     // commands at quotes, deduped four invocations into one, and reported a
     // phantom mismatch. Compiled scripts must survive formatting variance.

@@ -34,6 +34,9 @@
 - The deterministic deliverable gate now compares only proven output targets
   for mutating tasks, so unchanged input files and explicitly negated files no
   longer force a correct script back through the LLM loop.
+- Skill compilation now preserves the scope of quantified requirements: a
+  minimum bullet count attached to `## Steps` is not applied to prose-only
+  sibling sections.
 
 ## v0.1.2 — 2026-08-12
 

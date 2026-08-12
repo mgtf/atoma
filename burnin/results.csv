@@ -168,3 +168,5 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T12:20:11.416Z,pathcase-cli-package,cli,delivered,0.1715,123,12,1,0,11,0,0,0,0,0,0,1,2026-08-12T12-20-12-070-7c28e336.json
 2026-08-12T12:26:56.907Z,titlecase-cli-package-dispatch,cli,delivered,0.2014,127,12,1,0,11,0,0,0,0,0,0,0,2026-08-12T12-26-57-476-ab29b9b8.json
 2026-08-12T12:30:53.951Z,sentenceclip-cli-package-dispatch,cli,delivered,0.1777,139,15,1,0,14,1,0,0,0,0,0,0,2026-08-12T12-30-54-526-cc0bab45.json
+2026-08-12T12:35:51.153Z,stream-batch-docs-config,files,delivered,0.3509,260,19,1,2,16,0,1,2,0,1,0,0,2026-08-12T12-35-51-650-a8dacba1.json
+2026-08-12T12:40:12.040Z,service-operations-guides,files,delivered,0.2174,140,13,1,1,11,0,0,0,0,1,0,1,2026-08-12T12-40-12-661-ded78cb0.json
