@@ -389,7 +389,11 @@ INVOCATION ABI (`src/skills/abi.ts`: scratch filename, interpreter,
 argv — both dispatch paths import it), the off-scope tool rejection
 (`offScopeToolMessage` in `src/core/llm.ts`, used by every transport
 loop) and CLI argument parsing (`src/cli/args.ts` — flags anywhere;
-unknown commands print help and exit 1, never the silent-help 0). The probe machinery lives in
+unknown commands print help and exit 1, never the silent-help 0). `ledger`
+was the last holdout: it still read `argv[0]` directly, so
+`ledger --db ./x.db check` failed while the same flag-first form worked in
+registry and skills. It now uses the shared parser, and a real-subprocess test
+pins both flag orders plus import safety. The probe machinery lives in
 `src/atoms/groundTruth.ts` (zero LLM calls by construction); the compile
 prompt + generation hash in `src/skills/compilePrompt.ts`; L2Atom
 re-exports all the historical names so old imports keep working.

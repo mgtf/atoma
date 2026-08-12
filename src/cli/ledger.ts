@@ -28,22 +28,19 @@ import { existsSync } from 'node:fs';
 import { ledgerDbPath, projectCounters, readLedger } from '../core/ledger.js';
 import { skillsDirPath, storeDbPath, legacyStoreNotice } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { parseCliArgs } from './args.js';
 
 function main(): void {
-  const argv = process.argv.slice(2);
-  const cmd = argv[0] ?? 'tail';
-  const flag = (name: string): string | undefined => {
-    const i = argv.indexOf(`--${name}`);
-    return i >= 0 ? argv[i + 1] : undefined;
-  };
+  const { command, positional, flags } = parseCliArgs(process.argv);
+  const cmd = command ?? 'tail';
 
   if (cmd !== 'tail' && cmd !== 'check') {
     console.log('usage: ledger tail [n] [--db path] | ledger check [--db path] [--skills-dir path]');
     process.exit(cmd === 'help' ? 0 : 1);
   }
 
-  const dbPath = flag('db') ?? ledgerDbPath();
-  const notice = legacyStoreNotice(storeDbPath(flag('db')));
+  const dbPath = flags['db'] ?? ledgerDbPath();
+  const notice = legacyStoreNotice(storeDbPath(flags['db']));
   if (notice) console.log(notice);
   if (!existsSync(dbPath)) {
     console.log(`(no store at ${dbPath} — nothing to read)`);
@@ -53,7 +50,7 @@ function main(): void {
   const events = readLedger(db);
 
   if (cmd === 'tail') {
-    const n = Number(argv[1]) > 0 ? Number(argv[1]) : 20;
+    const n = Number(positional[0]) > 0 ? Number(positional[0]) : 20;
     if (events.length === 0) {
       console.log(`(ledger empty in ${dbPath})`);
       return;
@@ -93,7 +90,7 @@ function main(): void {
 
   // Skills (_meta.json) — still a separate store, so this pairing is still
   // the caller's responsibility.
-  const skills = new SkillRegistry(skillsDirPath(flag('skills-dir')));
+  const skills = new SkillRegistry(skillsDirPath(flags['skills-dir']));
   let skillCount = 0;
   for (const ns of skills.listNamespaces()) {
     for (const sk of skills.loadFor(ns)) {
@@ -122,4 +119,6 @@ function main(): void {
   );
 }
 
-main();
+if (process.argv[1] && /ledger\.(ts|js)$/.test(process.argv[1])) {
+  main();
+}
