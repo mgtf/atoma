@@ -34,6 +34,12 @@ describe('contracts — schema/validator/prompt agreement', () => {
       smokeResultIncludesStyling({ ok: true, milestoneClass: 'goal-reached' })
     ).toBe(true);
     expect(
+      smokeResultIncludesStyling({
+        ok: true,
+        entriesListContent: '<div class="entry">Hello</div>',
+      })
+    ).toBe(false);
+    expect(
       smokeOkIncludesStyling(
         '({ok: milestoneClass === "goal-reached", milestoneClass})'
       )

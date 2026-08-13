@@ -32,3 +32,4 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T23:12:42.456Z,oncall-recovery-guides-section-scope,files,delivered,0.0737,184,11,0,0,0,1,0,0,0,0,0,0,2026-08-12T23-12-43-030-3fb3bc80.json,ollama+zai+codex,11,0,1
 2026-08-12T23:19:25.504Z,app-guest-counter,app,delivered,0.3548,633,14,0,0,0,0,0,0,0,0,0,1,2026-08-12T23-19-26-036-2b12ad5d.json,ollama+zai+codex,14,0,0
 2026-08-12T23:40:11.469Z,app-guest-counter,app,failed,0.6049,900,12,0,0,0,0,0,0,0,0,0,0,2026-08-12T23-40-11-988-b6a6f68f.json,ollama+zai+codex,12,0,0
+2026-08-12T23:58:58.472Z,app-guest-counter,app,delivered,0.2971,573,19,0,0,0,0,0,0,0,0,1,1,2026-08-12T23-58-58-982-54d09e81.json,ollama+zai+codex,19,0,1

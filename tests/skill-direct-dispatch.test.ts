@@ -346,6 +346,8 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
         const demoted = skills.loadFor('Hydrogen')[0]!;
         expect(demoted.kind).toBe('llm');
         expect(demoted.body).toMatch(/derive fields from the workspace/);
+        expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/derive fields from the workspace/);
+        expect(ctx.llm.calls[2]!.systemPrompt).not.toMatch(/kind: script|== SCRIPT BODY ==/);
         expect(events.some((e) => e.op === 'demote')).toBe(true);
         // save() during demotion cleared the streak with the body rewrite.
         expect(demoted.directFailures).toBeUndefined();

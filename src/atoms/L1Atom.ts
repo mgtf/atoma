@@ -52,6 +52,33 @@ export function toolInvocationSucceeded(info: ToolInvocationInfo): boolean {
   return true;
 }
 
+export function shellInvocationRunsFile(
+  args: Record<string, unknown>,
+  path: string
+): boolean {
+  const argv = Array.isArray(args['args']) ? args['args'] : [];
+  if (
+    typeof args['command'] === 'string' &&
+    ['node', 'python3', 'bash'].includes(args['command']) &&
+    argv[0] === path
+  ) {
+    return true;
+  }
+  const line =
+    typeof args['cmd'] === 'string'
+      ? args['cmd']
+      : typeof args['command'] === 'string' && argv.length === 0
+        ? args['command']
+        : '';
+  return new RegExp(`^(?:node|python3|bash)\\s+["']?${escapeRegex(path)}(?:["']?\\s|["']?$)`).test(
+    line.trim()
+  );
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export class L1Atom extends Atom {
   readonly tier: Tier = 1;
   readonly model: string;
@@ -329,9 +356,8 @@ export class L1Atom extends Atom {
         }
       }
       if (succeeded && info.name === 'run_shell' && writtenSkillScratchFiles.size > 0) {
-        const invocation = JSON.stringify(info.args);
         activeScriptSkillExecuted ||= [...writtenSkillScratchFiles].some((path) =>
-          invocation.includes(path)
+          shellInvocationRunsFile(info.args, path)
         );
       }
       if (info.name !== 'validate_html') return;

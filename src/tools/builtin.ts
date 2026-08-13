@@ -33,7 +33,7 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
     declaration: {
       name: 'write_file',
       description:
-        'Write a text file inside the workspace. Creates parent directories as needed. Overwrites existing files. Use RELATIVE paths only (e.g. "index.html", "src/main.js").',
+        `Write a text file inside the workspace. Creates parent directories as needed. Overwrites existing files. Use RELATIVE paths only (e.g. "index.html", "src/main.js"). Writing ${PROBE_MANIFEST_FILENAME} preserves and merges entries from earlier phases instead of deleting them.`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -48,11 +48,68 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
       const content = expectString(args, 'content');
       const abs = opts.sandbox.resolve(path);
       mkdirSync(dirname(abs), { recursive: true });
-      writeFileSync(abs, content, 'utf8');
-      opts.logger?.info(`[tool:write_file] ${path} (${content.length} bytes)`);
-      return { ok: true, path, bytes: content.length };
+      const finalContent =
+        path === PROBE_MANIFEST_FILENAME && existsSync(abs)
+          ? mergeProbeManifestWrite(readFileSync(abs, 'utf8'), content)
+          : content;
+      writeFileSync(abs, finalContent, 'utf8');
+      opts.logger?.info(`[tool:write_file] ${path} (${finalContent.length} bytes)`);
+      return { ok: true, path, bytes: finalContent.length };
     },
   };
+}
+
+export function mergeProbeManifestWrite(existingRaw: string, incomingRaw: string): string {
+  let existing: unknown;
+  let incoming: unknown;
+  try {
+    existing = JSON.parse(existingRaw);
+    incoming = JSON.parse(incomingRaw);
+  } catch {
+    return incomingRaw;
+  }
+  const existingEntries =
+    existing && typeof existing === 'object' && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)['entries']
+      : undefined;
+  const incomingEntries =
+    incoming && typeof incoming === 'object' && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)['entries']
+      : undefined;
+  if (!Array.isArray(existingEntries) || !Array.isArray(incomingEntries)) return incomingRaw;
+
+  const merged = [...existingEntries];
+  for (const entry of incomingEntries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    let replaceIndex = -1;
+    if (typeof record['cmd'] === 'string') {
+      replaceIndex = merged.findIndex(
+        (candidate) =>
+          candidate !== null &&
+          typeof candidate === 'object' &&
+          !Array.isArray(candidate) &&
+          (candidate as Record<string, unknown>)['cmd'] === record['cmd']
+      );
+    } else if (record['probe'] === 'web') {
+      replaceIndex = merged.findIndex(
+        (candidate) =>
+          candidate !== null &&
+          typeof candidate === 'object' &&
+          !Array.isArray(candidate) &&
+          (candidate as Record<string, unknown>)['probe'] === 'web' &&
+          (candidate as Record<string, unknown>)['file'] === record['file'] &&
+          (candidate as Record<string, unknown>)['smoke'] === record['smoke']
+      );
+    } else if (
+      merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(record))
+    ) {
+      continue;
+    }
+    if (replaceIndex >= 0) merged[replaceIndex] = record;
+    else merged.push(record);
+  }
+  return `${JSON.stringify({ ...(incoming as Record<string, unknown>), version: 1, entries: merged }, null, 2)}\n`;
 }
 
 /**

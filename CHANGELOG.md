@@ -132,6 +132,16 @@
   classifies only the subtask's own phase scope.
 - `validate_html` supports selector-based `{type:"type", text}` form entry;
   `keypress` remains a single-key action.
+- Styling-evidence detection inspects result field names rather than HTML
+  string values, avoiding false positives on diagnostics containing `class=`.
+- `write_file` merges probe-manifest entries across phases instead of allowing
+  a web writer to erase earlier shell/HTTP evidence.
+- Failed direct dispatch reloads a same-call demoted skill before L1 injection,
+  and scratch cleanup no longer counts as proof that the script executed.
+- Task-required portable README documentation is read before trust even when a
+  child omits it from result files; numeric ports trigger remediation.
+- Web probe expectations avoid volatile timestamps/ids/ports and identify the
+  real embedded-UI source file.
 - Post-approval learning/compilation is capped at 120 seconds, and transport
   failures receive a generation-scoped stamp so they cannot block every later
   run; all observed successful calls remain within the new bound.

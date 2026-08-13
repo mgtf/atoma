@@ -344,6 +344,29 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual(['read_file']);
   });
 
+  it('reads task-required portable README docs even when the result omits them', async () => {
+    const { l2, l1, ctx, exec } = setup({
+      'README.md': 'Start server\nLISTENING_ON_PORT=3000\nhttp://localhost:<port>/',
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { url: 'http://localhost:55555/' },
+        summary: 'server verified',
+        toolCallResults: [{ name: 'fetch_url', ok: true }],
+      }),
+      {
+        description:
+          'Confirm README.md keeps portable <port> and LISTENING_ON_PORT=<port> examples, never a numeric port.',
+      },
+      { ...ctx, requireObservedToolAction: true }
+    );
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/README\.md contains a numeric/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual(['read_file']);
+  });
+
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {
     const { l2, l1, ctx, exec } = setup({
       'README.md': '# json-cli\n\n## Install\n\n## Usage\n',

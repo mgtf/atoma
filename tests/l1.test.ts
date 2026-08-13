@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   L1Atom,
+  shellInvocationRunsFile,
   toolInvocationSucceeded,
   withAutomaticLoopbackHttpRecording,
 } from '../src/atoms/L1Atom.js';
@@ -129,6 +130,22 @@ describe('L1Atom', () => {
     expect(toolInvocationSucceeded({ ...baseInfo, result: { error: 'failed' } })).toBe(false);
     expect(toolInvocationSucceeded({ ...baseInfo, result: { exitCode: 1 } })).toBe(false);
     expect(toolInvocationSucceeded({ ...baseInfo, error: 'executor threw' })).toBe(false);
+  });
+
+  it('does not mistake scratch cleanup for script execution', () => {
+    const scratch = '_skill_replay-recorded-shell-probes.mjs';
+    expect(
+      shellInvocationRunsFile({ command: 'node', args: [scratch, '{"task":"replay"}'] }, scratch)
+    ).toBe(true);
+    expect(
+      shellInvocationRunsFile(
+        {
+          command: 'node',
+          args: ['-e', 'require("fs").rmSync(process.argv[1])', scratch],
+        },
+        scratch
+      )
+    ).toBe(false);
   });
 
   it('tolerates narrative prose output instead of crashing the run', async () => {

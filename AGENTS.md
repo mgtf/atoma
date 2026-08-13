@@ -1493,6 +1493,44 @@ re-exports all the historical names so old imports keep working.
   declaration, parser, manifest health and prompt all share it. This lets a
   real form test type name/message before clicking submit instead of faking the
   state through smoke or unrolling one keypress per character.
+- **THIRTY-THIRD LIVE ITERATION, 2026-08-13 — the integrated product passed;
+  its evidence lifecycle still lied twice.** The final guestbook replay
+  delivered in 573s/19 calls/$0.2971 estimated with one compile error, one
+  demotion and one dispatch fallback (trace
+  `2026-08-12T23-58-58-982-54d09e81`). Exact `node test-api.js` independently
+  passed all 8 cases, and real Puppeteer form entry passed with entryCount=1,
+  submitted text visible, zero console errors and zero failed requests.
+  The new browser routing and `type` interaction therefore work.
+  Closure still found four evidence defects. First, a successful smoke returned
+  `entriesListContent` containing HTML `class=` text; the styling binder scanned
+  VALUES as well as field names and false-rejected it. It now recursively scans
+  keys only, so `milestoneClass` is styling evidence while arbitrary innerHTML
+  is not. Second, the browser phase wrote a web-only manifest and erased the
+  existing shell probe; the trusted shell replayer consequently found nothing,
+  accumulated its second direct failure and demoted. `write_file` now
+  structurally merges manifest writes across phases (shell by cmd, web by
+  file+smoke, exact duplicates suppressed), matching record_probe/fetch_url
+  instead of relying on prompt compliance.
+  Third, after direct dispatch demoted the script on disk, L2 injected the
+  stale in-memory SCRIPT object into the fallback L1. It now reloads the skill
+  after every failed direct attempt, so a same-call demotion injects the
+  restored LLM body. The transport's script witness also now requires the
+  scratch path as argv[0] of node/python/bash; a later `node -e rmSync(...,
+  scratch)` cleanup can no longer counterfeit execution. The demoted replay
+  recipe was rewritten to current cmd/exitCode + record_probe semantics and
+  reset 24/0 → 0/0 because the body changed and its prior credit was not
+  body-bound.
+  Fourth, README still contained `LISTENING_ON_PORT=3000` even though later
+  results omitted README from their claimed files. L2 now reads task-required
+  portable README.md directly before trust and rejects any numeric loopback
+  marker/URL. Stable web evidence guidance also excludes timestamps/generated
+  ids/ports from smokeResult, and names server.js (not a fake index/test file)
+  for embedded UIs.
+  The current workspace was corrected without another product run: README uses
+  `<port>`, favicon is data-backed, test-api exits 0, and a fresh machine-driven
+  browser probe rewrote the manifest to stable server.js + exact shell entries;
+  manifest health and durable-port checks are green. Helium/Lithium/Methane
+  credits earned before those corrections were removed.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

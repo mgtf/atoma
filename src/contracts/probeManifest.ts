@@ -138,11 +138,15 @@ export function smokeOkIncludesStyling(smoke: string): boolean {
 }
 
 export function smokeResultIncludesStyling(result: unknown): boolean {
-  return (
-    result !== null &&
-    typeof result === 'object' &&
-    WEB_STYLE_TERM_RE.test(JSON.stringify(result))
-  );
+  if (result === null || typeof result !== 'object') return false;
+  const visit = (value: unknown): boolean => {
+    if (value === null || typeof value !== 'object') return false;
+    if (Array.isArray(value)) return value.some(visit);
+    return Object.entries(value as Record<string, unknown>).some(
+      ([key, child]) => WEB_STYLE_TERM_RE.test(key) || visit(child)
+    );
+  };
+  return visit(result);
 }
 
 /* ─────────────────── schema-validated examples ─────────────────── */
@@ -466,12 +470,18 @@ export function manifestWriterLines(kind: 'shell' | 'http' | 'web'): string[] {
       `interactions and the smoke expression are stable — recording those`,
       `three makes a later pass able to re-serve the artefact and replay the`,
       `exact same validation. Prose in a README cannot be replayed; this can.`,
+      `For an embedded UI served from a Node application, "file" is the real`,
+      `server entry (for example server.js), never an extracted/fake index.html`,
+      `or a test script.`,
       `The discriminator is EXACT: "probe" MUST be the literal "web". Never`,
       `put a scenario label there (for example "reset_after_increments");`,
       `the smoke/interactions already distinguish scenarios, and every reader`,
       `dispatches on the literal value.`,
       `"expected" is a STRING containing JSON.stringify(smokeResult), never the`,
       `object itself. The checker and replay reader require that encoded form.`,
+      `Because replay compares that result, smokeResult must exclude volatile`,
+      `timestamps, generated ids, numeric ports and locale-formatted dates;`,
+      `return stable booleans/counts/source-defined labels instead.`,
       `INTERACTIONS MUST BE SELECTOR-BASED — MANDATORY. Record`,
       `{"type": "click", "selector": "#start"}, NEVER pixel coordinates`,
       `({"x":304,"y":392}), even though validate_html accepts them: coordinates`,

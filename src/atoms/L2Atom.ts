@@ -50,7 +50,11 @@ import {
   lastResultVerdictSkillFollowed,
   resolveCreationDescription,
 } from './capability.js';
-import { checkGroundTruth, type GroundTruthCheck } from './groundTruth.js';
+import {
+  checkGroundTruth,
+  DURABLE_HTTP_PORT_LITERAL_RE,
+  type GroundTruthCheck,
+} from './groundTruth.js';
 import {
   PROBE_MANIFEST_FILENAME,
   smokeOkIncludesStyling,
@@ -346,6 +350,35 @@ async function checkRequiredCommandManifest(
     return requiredCommandManifestMismatch(task.description, content);
   } catch {
     return `the task requires ${requiredPassingCommands(task.description).join(', ')} to pass, but the probe manifest could not be read`;
+  }
+}
+
+async function checkRequiredPortableHttpDocs(
+  task: Task,
+  ctx: RunContext
+): Promise<string | null> {
+  if (
+    !/\bREADME\.md\b/i.test(task.description) ||
+    !/(?:<port>|portable|numeric port|LISTENING_ON_PORT)/i.test(task.description) ||
+    !ctx.tools?.has('read_file')
+  ) {
+    return null;
+  }
+  try {
+    const raw = await ctx.tools.execute('read_file', { path: 'README.md' });
+    const content =
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as Record<string, unknown>)['content'] === 'string'
+        ? ((raw as Record<string, unknown>)['content'] as string)
+        : typeof raw === 'string'
+          ? raw
+          : '';
+    return DURABLE_HTTP_PORT_LITERAL_RE.test(content)
+      ? 'the task requires portable README.md port placeholders, but README.md contains a numeric loopback URL or LISTENING_ON_PORT value'
+      : null;
+  } catch {
+    return 'the task requires portable HTTP documentation in README.md, but README.md could not be read';
   }
 }
 
@@ -895,6 +928,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               memo.set(skills.skill.id, [...seen.slice(-7), direct.summary]);
               return direct;
             }
+          }
+          const matchedScriptId = skills.skill.id;
+          const refreshed = this.skillRegistry
+            .loadFor(skills.ownerNs)
+            .find((candidate) => candidate.id === matchedScriptId);
+          if (refreshed) {
+            skills = { ...skills, skill: refreshed };
           }
         }
 
@@ -2003,6 +2043,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         modifications: {
           additionalContext:
             'Fix the exact required finite test/probe script instead of substituting a different harness. Run it through record_probe until that same command exits 0; its manifest entry must be replaced with the successful observation before returning.',
+        },
+      };
+    }
+    const portableDocsMismatch = await checkRequiredPortableHttpDocs(task, ctx);
+    if (portableDocsMismatch) {
+      return {
+        approved: false,
+        reasoning: portableDocsMismatch,
+        scope: 'ephemeral',
+        modifications: {
+          additionalContext:
+            'Replace every durable numeric localhost port and LISTENING_ON_PORT number in README.md with <port>. Keep live numeric URLs only in run evidence, then read README.md back before returning.',
         },
       };
     }

@@ -8,6 +8,7 @@ import {
   appendHttpProbe,
   commandLineNeedsShell,
   fetchUrlTool,
+  mergeProbeManifestWrite,
   mergeShellProbe,
   recordProbeTool,
   renderProbeCmd,
@@ -311,6 +312,31 @@ describe('mergeShellProbe — pure merge semantics', () => {
     const out = JSON.parse(mergeShellProbe(withHttp, e('node a.js', 'x')));
     expect(out.entries).toHaveLength(2);
     expect(out.entries[0].probe).toBe('http');
+  });
+});
+
+describe('mergeProbeManifestWrite — cross-phase manifest preservation', () => {
+  it('keeps an earlier shell probe when a web phase writes its own entry', () => {
+    const existing = JSON.stringify({
+      version: 1,
+      entries: [{ cmd: 'node test-api.js', exitCode: 0 }],
+    });
+    const incoming = JSON.stringify({
+      version: 1,
+      entries: [
+        {
+          probe: 'web',
+          file: 'server.js',
+          interactions: [{ type: 'click', selector: '#submit' }],
+          smoke: 'window.__test.entryCount === 1',
+          expected: 'true',
+        },
+      ],
+    });
+    const merged = JSON.parse(mergeProbeManifestWrite(existing, incoming));
+    expect(merged.entries).toHaveLength(2);
+    expect(merged.entries[0]).toEqual({ cmd: 'node test-api.js', exitCode: 0 });
+    expect(merged.entries[1].probe).toBe('web');
   });
 });
 

@@ -372,7 +372,7 @@ export async function probeGroundTruthEx(args: {
  */
 const LOOPBACK_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
-const DURABLE_HTTP_PORT_LITERAL_RE =
+export const DURABLE_HTTP_PORT_LITERAL_RE =
   /(?:https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d{2,5}\b|LISTENING_ON_PORT=\d{2,5}\b)/i;
 
 /** Max files the read-back probe will open, and per-file excerpt budget. */
