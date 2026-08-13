@@ -5,7 +5,7 @@ import {
   ComboboxOption,
   ComboboxOptions,
 } from '@headlessui/react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 export interface RunPickerOption {
@@ -26,6 +26,7 @@ export interface RunPickerProps {
 
 function RunPicker({ options, value, placeholder, emptyLabel, onChange }: RunPickerProps) {
   const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((option) => option.id === value) ?? null;
   const filtered = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -44,31 +45,46 @@ function RunPicker({ options, value, placeholder, emptyLabel, onChange }: RunPic
       }}
       onClose={() => setQuery('')}
     >
-      <div className="run-picker-control">
-        <ComboboxInput
-          aria-label={placeholder}
-          className="run-picker-input"
-          placeholder={placeholder}
-          displayValue={(option: RunPickerOption | null) => option?.title ?? ''}
-          onChange={(event) => setQuery(event.target.value)}
-          onFocus={(event) => event.currentTarget.select()}
-        />
-        <ComboboxButton className="run-picker-button" aria-label={placeholder}>
-          <span aria-hidden="true">⌄</span>
-        </ComboboxButton>
-      </div>
-      <ComboboxOptions anchor="bottom start" className="run-picker-options">
-        {({ option }) => (
-          <ComboboxOption key={option.id} value={option} className="run-picker-option">
-            <span className={`run-picker-state ${option.state}`} aria-hidden="true" />
-            <span className="run-picker-copy">
-              <strong>{option.title}</strong>
-              <span>{option.meta}</span>
-            </span>
-          </ComboboxOption>
-        )}
-      </ComboboxOptions>
-      {filtered.length === 0 ? <span className="sr-only">{emptyLabel}</span> : null}
+      {({ open }) => (
+        <>
+          <div className="run-picker-control">
+            <span className="run-picker-search" aria-hidden="true">⌕</span>
+            <ComboboxInput
+              ref={inputRef}
+              aria-label={placeholder}
+              className="run-picker-input"
+              placeholder={placeholder}
+              value={open ? query : selected?.title ?? ''}
+              onChange={(event) => setQuery(event.target.value)}
+              onFocus={() => {
+                if (!open) setQuery('');
+              }}
+            />
+            <ComboboxButton
+              className="run-picker-button"
+              aria-label={placeholder}
+              onClick={() => {
+                setQuery('');
+                requestAnimationFrame(() => inputRef.current?.focus());
+              }}
+            >
+              <span aria-hidden="true">⌄</span>
+            </ComboboxButton>
+          </div>
+          <ComboboxOptions anchor="bottom start" className="run-picker-options">
+            {({ option }) => (
+              <ComboboxOption key={option.id} value={option} className="run-picker-option">
+                <span className={`run-picker-state ${option.state}`} aria-hidden="true" />
+                <span className="run-picker-copy">
+                  <strong title={option.title}>{option.title}</strong>
+                  <span>{option.meta}</span>
+                </span>
+              </ComboboxOption>
+            )}
+          </ComboboxOptions>
+          {filtered.length === 0 ? <span className="sr-only">{emptyLabel}</span> : null}
+        </>
+      )}
     </Combobox>
   );
 }

@@ -85,6 +85,7 @@ const I18N_CATALOGS = {
     'pane.selectBurnin': 'Click a table row to open that run\'s trace.',
 
     'runs.none': 'No run recorded',
+    'runs.search': 'Search {{count}} runs…',
     'runs.notFound': 'Run not found.',
     'runs.picker': 'Runs (newest → oldest)',
     'runs.flag.cancelled': '✕ cancelled',
@@ -353,6 +354,7 @@ const I18N_CATALOGS = {
     'pane.selectBurnin': 'Clique une ligne du tableau pour ouvrir la trace du run correspondant.',
 
     'runs.none': 'Aucun run enregistré',
+    'runs.search': 'Rechercher parmi {{count}} runs…',
     'runs.notFound': 'Run introuvable.',
     'runs.picker': 'Runs (récent → ancien)',
     'runs.flag.cancelled': '✕ annulé',
@@ -737,8 +739,10 @@ function runPickerOption(r) {
           : r.degraded
             ? '  ' + t('runs.flag.fallback')
             : '';
-  const title = `${r.label}${flags}`;
-  const meta = `${r.startedAt.slice(0, 19).replace('T', ' ')} · ${r.calls ?? 0} calls · ${fmtCost(r.costUsd ?? 0)}`;
+  const title = String(r.label).replace(/^(?:build-app|baseline):\s*/i, '');
+  const meta =
+    `${r.startedAt.slice(0, 19).replace('T', ' ')} · ${r.calls ?? 0} calls · ${fmtCost(r.costUsd ?? 0)}` +
+    (flags ? ` · ${flags.trim()}` : '');
   const pickerState = r.cancelled
     ? 'cancelled'
     : r.hasError || r.inFlight && !isIndexEntryLive(r)
@@ -750,7 +754,7 @@ function runPickerOption(r) {
     id: r.id,
     title,
     meta,
-    search: `${r.id} ${title} ${meta}`.toLocaleLowerCase(),
+    search: `${r.id} ${r.label} ${title} ${meta}`.toLocaleLowerCase(),
     state: pickerState,
   };
 }
@@ -765,7 +769,7 @@ function populateRunPicker(runs, keepSelection = null) {
   const props = {
     options,
     value,
-    placeholder: t('nav.selectRun'),
+    placeholder: t('runs.search', { count: runs.length }),
     emptyLabel: t('runs.none'),
     onChange: (id) => {
       runPickerController?.setValue(id);

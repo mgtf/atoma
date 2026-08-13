@@ -87,6 +87,8 @@ describe('viz Vite build contract', () => {
     expect(client).toMatch(/data-tooltip/);
     expect(picker).toMatch(/virtual=\{\{ options: filtered \}\}/);
     expect(picker).toMatch(/ComboboxInput/);
+    expect(picker).toMatch(/value=\{open \? query : selected\?\.title/);
+    expect(picker).toMatch(/requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
   });
 });
 

@@ -9,7 +9,8 @@
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider
   zoom, compact selection summaries, 50-row pagination and metric tooltips.
 - The Runs header uses a React 19 / Headless UI searchable combobox with
-  keyboard/ARIA behavior and virtualized options for large trace histories.
+  keyboard/ARIA behavior and virtualized options for large trace histories;
+  opening via input or chevron clears and focuses the query immediately.
 
 ### Changed
 

@@ -1599,7 +1599,11 @@ re-exports all the historical names so old imports keep working.
   React 19 + TypeScript + Headless UI owns the first state-heavy widget, a
   searchable keyboard/ARIA combobox whose options are virtualized (29 DOM
   options for 190 runs in the browser acceptance test). React Fast Refresh is
-  enabled through Vite; the established trace/registry renderers and tiny i18n
+  enabled through Vite. Opening through either the input or chevron clears and
+  focuses the query immediately; display labels drop the repetitive
+  `build-app:` prefix while full text remains searchable/hoverable. Browser
+  acceptance filtered five guestbook runs without selection gymnastics or
+  console errors. The established trace/registry renderers and tiny i18n
   core remain vanilla while ECharts owns the interaction-heavy Burn-in chart.
   This creates the component seam needed by a future SaaS client without
   destabilising the audited run-detail UI. Wired into
