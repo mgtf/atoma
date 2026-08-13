@@ -131,7 +131,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/exitingRoleFilters/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
+    expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
     expect(gpuRenderer).toMatch(/private eventCard\(/);
+    expect(gpuRenderer).toMatch(/CARD_FILTER_GLSL|CARD_FILTER_WGSL/);
+    expect(gpuRenderer).toMatch(/gpuCardShaderMode\(event\)/);
+    expect(gpuRenderer).toMatch(/padding: 12/);
+    expect(gpuRenderer).toMatch(/listMask\.rect\(leftX \+ 1/);
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);

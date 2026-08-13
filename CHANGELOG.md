@@ -17,6 +17,9 @@
 - The full-GL shell adds an animated GLSL aurora/grid field, GPU sweep
   transitions between views, energy-state top navigation, and event cards with
   depth rails, scanlines, hover lift, pressed compression and selected pulses.
+- Event cards now run dual-backend shaders selected by function: reasoning
+  waves for LLMs, packet grids for tools, shield rings for trust, plasma for
+  skills, crystalline replay glints for cache and circuit traces for registry.
 - The visualizer has a Vite HMR development path and a compiled `viz:serve`
   release path; release smoke verifies its index, hashed asset and Burn-in API.
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider
@@ -56,6 +59,9 @@
   imperative renderer HMR performs a clean reload, and a GPU error boundary
   exposes recovery instead of leaving a blank canvas. Compiled browser smoke
   now fails on warnings, page errors, failed requests and HTTP errors.
+- The selected top-navigation rail remains stationary while surrounding glow
+  and particles animate, and the timeline mask reserves shader/hover padding
+  so enlarged cards are no longer clipped on their right edge.
 - The GPU renderer prefers WebGPU, retries with WebGL after initialization
   failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in

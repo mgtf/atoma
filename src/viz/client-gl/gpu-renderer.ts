@@ -1,6 +1,7 @@
 import {
   Application,
   Container,
+  Filter,
   Graphics,
   Rectangle,
   RendererType,
@@ -123,6 +124,218 @@ function eventAccent(event: VizEvent): number {
   return GPU_COLORS.tiers[(event.actor?.tier ?? 1) as 1 | 2 | 3] ?? GPU_COLORS.primary;
 }
 
+export function gpuCardShaderMode(event: VizEvent): number {
+  if (event.kind === 'llm') return 0;
+  if (event.kind === 'tool') return 1;
+  if (event.kind === 'trust') return 2;
+  if (event.kind === 'skill') return 3;
+  if (event.kind === 'cache') return 4;
+  if (event.kind === 'registry') return 5;
+  return 6;
+}
+
+export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
+  in vec2 aPosition;
+  out vec2 vTextureCoord;
+  uniform vec4 uInputSize;
+  uniform vec4 uOutputFrame;
+  uniform vec4 uOutputTexture;
+
+  void main() {
+    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+    position.y =
+      position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) -
+      uOutputTexture.z;
+    gl_Position = vec4(position, 0.0, 1.0);
+    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
+  }
+`;
+
+export const CARD_FILTER_GLSL = /* glsl */ `
+  in vec2 vTextureCoord;
+  out vec4 finalColor;
+  uniform sampler2D uTexture;
+  uniform float uTime;
+  uniform float uMode;
+  uniform float uHover;
+  uniform float uSelected;
+
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  void main() {
+    vec2 uv = vTextureCoord;
+    vec4 sampleColor = texture(uTexture, uv);
+    float edge = 1.0 - smoothstep(0.0, 0.11, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
+    float t = uTime;
+    float fx = 0.0;
+    vec3 tint = vec3(0.22, 0.55, 1.0);
+
+    if (uMode < 0.5) {
+      // LLM: travelling reasoning waves and token bands.
+      float wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
+      float band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
+      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
+      tint = vec3(0.28, 0.48, 1.0);
+    } else if (uMode < 1.5) {
+      // Tool: terminal grid, packet scan and deterministic digital noise.
+      vec2 gridUv = abs(fract(uv * vec2(36.0, 9.0)) - 0.5);
+      float grid = step(gridUv.x, 0.025) + step(gridUv.y, 0.035);
+      float packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
+      float noise = hash(floor(uv * 120.0) + floor(t * 8.0));
+      fx = grid * 0.07 + packet * 0.24 + (noise - 0.5) * 0.025;
+      tint = vec3(0.05, 0.82, 0.96);
+    } else if (uMode < 2.5) {
+      // Trust: shield-like radial pulse with a stable gold edge.
+      vec2 p = uv - 0.5;
+      float ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
+      float shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
+      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
+      tint = vec3(1.0, 0.68, 0.12);
+    } else if (uMode < 3.5) {
+      // Skill: magenta plasma, deliberately organic rather than gridded.
+      float plasma =
+        sin(uv.x * 18.0 + t * 1.9) +
+        sin(uv.y * 15.0 - t * 1.5) +
+        sin((uv.x + uv.y) * 13.0 + t);
+      fx = plasma * 0.035 + edge * 0.09;
+      tint = vec3(0.92, 0.22, 0.82);
+    } else if (uMode < 4.5) {
+      // Cache: crystalline diagonals and a fast replay glint.
+      float crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
+      float replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
+      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
+      tint = vec3(0.08, 0.9, 0.92);
+    } else if (uMode < 5.5) {
+      // Registry: violet circuit traces with stable node intersections.
+      vec2 circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - 0.5);
+      float traces = step(circuitUv.x, 0.028) * step(0.17, circuitUv.y);
+      float nodes = step(length(circuitUv), 0.075);
+      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
+      tint = vec3(0.62, 0.35, 1.0);
+    } else {
+      // Lifecycle/other: restrained state pulse.
+      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
+      tint = vec3(0.45, 0.62, 0.92);
+    }
+
+    float intensity = 0.46 + uHover * 0.72 + uSelected * 0.58;
+    sampleColor.rgb += tint * fx * intensity * sampleColor.a;
+    sampleColor.rgb += tint * edge * (uHover * 0.055 + uSelected * 0.065) * sampleColor.a;
+    finalColor = sampleColor;
+  }
+`;
+
+export const CARD_FILTER_WGSL = /* wgsl */ `
+  struct GlobalFilterUniforms {
+    uInputSize: vec4<f32>,
+    uInputPixel: vec4<f32>,
+    uInputClamp: vec4<f32>,
+    uOutputFrame: vec4<f32>,
+    uGlobalFrame: vec4<f32>,
+    uOutputTexture: vec4<f32>,
+  };
+
+  struct CardUniforms {
+    uTime: f32,
+    uMode: f32,
+    uHover: f32,
+    uSelected: f32,
+  };
+
+  @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
+  @group(0) @binding(1) var uTexture: texture_2d<f32>;
+  @group(0) @binding(2) var uSampler: sampler;
+  @group(1) @binding(0) var<uniform> cardUniforms: CardUniforms;
+
+  struct VSOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+  };
+
+  fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
+    var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
+    position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
+    position.y = position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
+    return vec4(position, 0.0, 1.0);
+  }
+
+  fn filterTextureCoord(aPosition: vec2<f32>) -> vec2<f32> {
+    return aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
+  }
+
+  @vertex
+  fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
+    return VSOutput(filterVertexPosition(aPosition), filterTextureCoord(aPosition));
+  }
+
+  fn hash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+
+  @fragment
+  fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    var sampleColor = textureSample(uTexture, uSampler, uv);
+    let edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
+    let edge = 1.0 - smoothstep(0.0, 0.11, edgeDistance);
+    let t = cardUniforms.uTime;
+    var fx = 0.0;
+    var tint = vec3(0.22, 0.55, 1.0);
+
+    if (cardUniforms.uMode < 0.5) {
+      let wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
+      let band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
+      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
+      tint = vec3(0.28, 0.48, 1.0);
+    } else if (cardUniforms.uMode < 1.5) {
+      let gridUv = abs(fract(uv * vec2(36.0, 9.0)) - vec2(0.5));
+      let grid = select(0.0, 1.0, gridUv.x <= 0.025) + select(0.0, 1.0, gridUv.y <= 0.035);
+      let packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
+      let digitalNoise = hash(floor(uv * 120.0) + floor(vec2(t * 8.0)));
+      fx = grid * 0.07 + packet * 0.24 + (digitalNoise - 0.5) * 0.025;
+      tint = vec3(0.05, 0.82, 0.96);
+    } else if (cardUniforms.uMode < 2.5) {
+      let p = uv - vec2(0.5);
+      let ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
+      let shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
+      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
+      tint = vec3(1.0, 0.68, 0.12);
+    } else if (cardUniforms.uMode < 3.5) {
+      let plasma =
+        sin(uv.x * 18.0 + t * 1.9) +
+        sin(uv.y * 15.0 - t * 1.5) +
+        sin((uv.x + uv.y) * 13.0 + t);
+      fx = plasma * 0.035 + edge * 0.09;
+      tint = vec3(0.92, 0.22, 0.82);
+    } else if (cardUniforms.uMode < 4.5) {
+      let crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
+      let replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
+      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
+      tint = vec3(0.08, 0.9, 0.92);
+    } else if (cardUniforms.uMode < 5.5) {
+      let circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - vec2(0.5));
+      let traces = select(0.0, 1.0, circuitUv.x <= 0.028) * select(0.0, 1.0, circuitUv.y >= 0.17);
+      let nodes = select(0.0, 1.0, length(circuitUv) <= 0.075);
+      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
+      tint = vec3(0.62, 0.35, 1.0);
+    } else {
+      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
+      tint = vec3(0.45, 0.62, 0.92);
+    }
+
+    let intensity = 0.46 + cardUniforms.uHover * 0.72 + cardUniforms.uSelected * 0.58;
+    sampleColor.r += tint.r * fx * intensity * sampleColor.a;
+    sampleColor.g += tint.g * fx * intensity * sampleColor.a;
+    sampleColor.b += tint.b * fx * intensity * sampleColor.a;
+    sampleColor.r += tint.r * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
+    sampleColor.g += tint.g * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
+    sampleColor.b += tint.b * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
+    return sampleColor;
+  }
+`;
+
 function eventDecision(event: VizEvent): string {
   if (event.kind !== 'llm') return '';
   const parsed = tryParseJson(event.response) as Record<string, unknown> | undefined;
@@ -242,6 +455,7 @@ export class GpuRenderer {
   private snapshot: GpuRenderSnapshot | null = null;
   private readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
+  private readonly frameFilters = new Set<Filter>();
   private previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -314,6 +528,8 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    for (const filter of this.frameFilters) filter.destroy();
+    this.frameFilters.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
     this.app.destroy(true, { children: true });
     this.initialized = false;
@@ -328,6 +544,8 @@ export class GpuRenderer {
     this.snapshot = snapshot;
     for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
     this.tickerCallbacks.clear();
+    for (const filter of this.frameFilters) filter.destroy();
+    this.frameFilters.clear();
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
@@ -749,8 +967,10 @@ export class GpuRenderer {
           : 0;
       scanline.x = 4 + (Math.max(0, elapsed) * (hovered ? 0.16 : 0.05)) % Math.max(8, width - 10);
       scanline.alpha = active ? 0.11 + pulse * 0.08 : hovered ? 0.09 : 0.02;
-      underline.alpha = active ? 0.62 + pulse * 0.35 : hovered ? 0.42 : 0;
-      underline.scale.x = active ? 0.88 + pulse * 0.12 : hovered ? 0.65 + pulse * 0.15 : 0.2;
+      // The selected tab's rail is a stable positional anchor. Surrounding
+      // glow/sparks can move, but the bar itself must not breathe or drift.
+      underline.alpha = active ? 0.95 : hovered ? 0.42 : 0;
+      underline.scale.x = active ? 1 : hovered ? 0.65 + pulse * 0.15 : 0.2;
       base.tint = pressed ? 0xafd1ff : hovered ? 0xd7e8ff : 0xffffff;
       const nextLabelColor = pressed || hovered || active ? GPU_COLORS.text : 0xa9b5ca;
       if (nextLabelColor !== currentLabelColor) {
@@ -779,6 +999,46 @@ export class GpuRenderer {
     return container;
   }
 
+  private createCardFilter(mode: number) {
+    const filter = Filter.from({
+      gl: {
+        vertex: CARD_FILTER_GLSL_VERTEX,
+        fragment: CARD_FILTER_GLSL,
+      },
+      gpu: {
+        vertex: {
+          source: CARD_FILTER_WGSL,
+          entryPoint: 'mainVertex',
+        },
+        fragment: {
+          source: CARD_FILTER_WGSL,
+          entryPoint: 'mainFragment',
+        },
+      },
+      resources: {
+        cardUniforms: {
+          uTime: { value: 0, type: 'f32' },
+          uMode: { value: mode, type: 'f32' },
+          uHover: { value: 0, type: 'f32' },
+          uSelected: { value: 0, type: 'f32' },
+        },
+      },
+      padding: 12,
+      resolution: 'inherit',
+      antialias: 'inherit',
+    });
+    this.frameFilters.add(filter);
+    return {
+      filter,
+      uniforms: filter.resources['cardUniforms'].uniforms as {
+        uTime: number;
+        uMode: number;
+        uHover: number;
+        uSelected: number;
+      },
+    };
+  }
+
   private eventCard(
     parent: Container,
     id: string,
@@ -787,6 +1047,7 @@ export class GpuRenderer {
     width: number,
     height: number,
     accent: number,
+    shaderMode: number,
     selected: boolean,
     onActivate: (id: string) => void
   ) {
@@ -798,6 +1059,8 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
+    const cardShader = this.createCardFilter(shaderMode);
+    container.filters = [cardShader.filter];
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -839,6 +1102,8 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
+    let shaderHover = 0;
+    let shaderSelected = selected ? 1 : 0;
     let elapsed = wasVisible ? performance.now() : -entranceDelay;
     container.alpha = wasVisible ? 1 : 0;
     const animate = (ticker: Ticker) => {
@@ -854,6 +1119,11 @@ export class GpuRenderer {
         y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
       );
       const pulse = 0.5 + Math.sin(elapsed / 190) * 0.5;
+      shaderHover += ((hovered ? 1 : 0) - shaderHover) * Math.min(1, ticker.deltaMS * 0.014);
+      shaderSelected += ((selected ? 1 : 0) - shaderSelected) * Math.min(1, ticker.deltaMS * 0.014);
+      cardShader.uniforms.uTime = elapsed / 1000;
+      cardShader.uniforms.uHover = shaderHover;
+      cardShader.uniforms.uSelected = shaderSelected;
       aura.alpha = selected
         ? 0.16 + pulse * 0.22
         : hovered
@@ -1521,7 +1791,10 @@ export class GpuRenderer {
     const listY = controlsBottom + 7;
     const listHeight = height - listY - GPU_LAYOUT.gap;
     const listMask = new Graphics();
-    listMask.rect(leftX + 10, listY, leftWidth - 20, listHeight).fill(0xffffff);
+    // Card filters have 12px shader padding and hover-scale around center.
+    // Keep vertical clipping strict (no overlap with filters) but use the full
+    // pane width so right-side glow/scale is not guillotined.
+    listMask.rect(leftX + 1, listY, leftWidth - 2, listHeight).fill(0xffffff);
     lowerControlsLayer.addChild(listMask);
     const listLayer = new Container();
     listLayer.mask = listMask;
@@ -1550,6 +1823,7 @@ export class GpuRenderer {
         cardWidth,
         cardHeight,
         eventAccent(event),
+        gpuCardShaderMode(event),
         selected,
         snapshot.onActivate
       );
