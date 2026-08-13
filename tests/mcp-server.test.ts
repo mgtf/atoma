@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { INSTRUCTIONS } from '../src/mcp/server.js';
+import { INSTRUCTIONS, packageVersion } from '../src/mcp/server.js';
 import {
   DEFAULT_RUN_TIMEOUT_MS,
   RUN_FLAGS,
@@ -441,7 +441,12 @@ describe('MCP server over real stdio', () => {
     const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
     const frames = (): {
       id?: number;
-      result?: { content?: { text: string }[]; tools?: { name: string }[]; isError?: boolean };
+      result?: {
+        content?: { text: string }[];
+        tools?: { name: string }[];
+        isError?: boolean;
+        serverInfo?: { name: string; version: string };
+      };
     }[] =>
       out
         .split('\n')
@@ -496,6 +501,12 @@ describe('MCP server over real stdio', () => {
       });
       expect(nonJson, `non-JSON on stdout: ${nonJson.slice(0, 3).join(' | ')}`).toEqual([]);
       expect(lines.length).toBeGreaterThan(0);
+
+      const initialized = frames().find((f) => f.id === 1);
+      expect(initialized?.result?.serverInfo).toEqual({
+        name: 'atoma',
+        version: packageVersion(),
+      });
 
       const list = frames().find((f) => f.id === 2);
       const names = (list?.result?.tools ?? []).map((t) => t.name);

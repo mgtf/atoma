@@ -32,6 +32,8 @@
  */
 
 import type { Writable } from 'node:stream';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -110,7 +112,7 @@ Call atoma_families first if you need to know how to phrase a goal.`;
 
 export function buildServer(): McpServer {
   const server = new McpServer(
-    { name: 'atoma', version: '0.1.0' },
+    { name: 'atoma', version: packageVersion() },
     { instructions: INSTRUCTIONS }
   );
 
@@ -346,6 +348,16 @@ export function buildServer(): McpServer {
   );
 
   return server;
+}
+
+export function packageVersion(): string {
+  const parsed = JSON.parse(readFileSync(join(repoRoot(), 'package.json'), 'utf8')) as {
+    version?: unknown;
+  };
+  if (typeof parsed.version !== 'string' || parsed.version.length === 0) {
+    throw new Error('package.json has no version');
+  }
+  return parsed.version;
 }
 
 /** Boot after `stdio.ts` has already claimed stdout for the protocol. */

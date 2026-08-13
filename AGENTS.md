@@ -4729,6 +4729,10 @@ makes `storeDbPath()` / `skillsDirPath()` correct verbatim, with no second copy
 of the path rules (four divergent copies of that rule WAS the bug once). The
 root comes from `import.meta.url` and is confirmed by `package.json`'s presence,
 so `src/mcp/` and `dist/mcp/` both work.
+The same package file is now the MCP server-info version authority:
+`buildServer()` previously advertised the stale literal `0.1.0` after the
+package reached 0.1.3. `packageVersion()` reads the root package at startup,
+and the real stdio initialize test compares `serverInfo.version` with it.
 
 **RUNS ARE SERIALISED AND A SECOND START IS REFUSED.** Three independent
 single-tenancy facts make concurrency produce plausible-looking WRONG numbers
