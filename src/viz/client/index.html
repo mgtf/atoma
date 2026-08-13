@@ -1,70 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<title>Atoma — run visualizer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<link rel="icon" href="data:," />
-<link rel="stylesheet" href="/styles.css" />
+  <meta charset="utf-8" />
+  <title>Atoma — run visualizer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
 </head>
 <body>
-<header>
-  <h1><span class="dot-l3">●</span><span class="dot-l2">●</span><span class="dot-l1">●</span> &nbsp;Atoma</h1>
-  <div class="view-switch" id="viewSwitch">
-    <button data-view="runs" class="active" data-i18n="nav.runs">Runs</button>
-    <button data-view="registry" data-i18n="nav.registry">Registry</button>
-    <button data-view="skills" data-i18n="nav.skills">Skills</button>
-    <button data-view="burnin" data-i18n="nav.burnin">Burn-in</button>
-    <button data-view="launch" data-i18n="nav.launch">Launch</button>
-  </div>
-  <div id="runPickerRoot"></div>
-  <select id="registrySelect" data-i18n-title="nav.selectRegistry" style="display:none;"></select>
-  <input id="registrySearch" type="search" data-i18n-placeholder="nav.filterAtoms" style="display:none;" />
-  <input id="skillsSearch" type="search" data-i18n-placeholder="nav.filterSkills" style="display:none;" />
-  <span class="spacer"></span>
-  <select id="langSelect" data-i18n-title="nav.language"></select>
-  <button id="refreshBtn" data-i18n-title="nav.refresh.title" data-i18n="nav.refresh">Refresh</button>
-</header>
-
-<div class="layout">
-  <section class="pane" id="leftPane">
-    <!-- Runs view -->
-    <div id="runsView">
-      <div id="runSummary"></div>
-      <div id="lanesWrap"></div>
-      <div class="filters" id="filters"></div>
-      <!-- "En ce moment" sits DIRECTLY above the (newest-first) list so the
-           in-flight step and the steps just completed read as one flow. -->
-      <div id="nowBanner"></div>
-      <div id="eventsList"></div>
-    </div>
-    <!-- Registry view -->
-    <div id="registryView" style="display:none;">
-      <div id="registrySummary"></div>
-      <div id="registryLanes"></div>
-    </div>
-    <!-- Skills view -->
-    <div id="skillsView" style="display:none;">
-      <div id="skillsSummary"></div>
-      <div id="skillsLanes"></div>
-    </div>
-    <!-- Burn-in view -->
-    <div id="burninView" style="display:none;">
-      <div id="burninToolbar"></div>
-      <div id="burninSummary"></div>
-      <div id="burninChart"></div>
-      <div id="burninRows"></div>
-      <div id="burninPager"></div>
-    </div>
-    <div id="launchView" style="display:none;">
-      <div id="launchForm"></div>
-    </div>
-  </section>
-  <section class="pane" id="rightPane">
-    <div class="empty" data-i18n="pane.selectEvent"></div>
-  </section>
-</div>
-
-<script type="module" src="/main.js"></script>
+  <div id="root"></div>
+  <script type="module" src="/main.tsx"></script>
 </body>
 </html>

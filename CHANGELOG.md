@@ -11,11 +11,17 @@
 - The Runs header uses a React 19 / Headless UI searchable combobox with
   keyboard/ARIA behavior and virtualized options for large trace histories;
   opening via input or chevron clears and focuses the query immediately.
+- The entire visualizer now uses typed React components and a shared MUI theme;
+  component tests traverse Runs, Registry, Skills, Burn-in and Launch against
+  their API contracts.
 
 ### Changed
 
 - Burn-in uses a time-axis scatter instead of connected batch-order lines, and
   family cards are replaced by a bounded global summary plus compact chips.
+- All five visualizer views replace the legacy custom DOM renderer with
+  lazy-loaded React/MUI feature components while preserving live delta polling,
+  event details, cross-view links, filters and read-only server semantics.
 
 ### Fixed
 
@@ -29,6 +35,11 @@
   stale hardcoded `0.1.0`.
 - Burn-in API rows normalize blank historical providers to `claude-legacy`
   when O/S/H explain every call, or `unknown` when attribution is impossible.
+- The Vite client API module is named `data-api.ts`, avoiding a `/api`
+  development-proxy collision that served it as `application/octet-stream`;
+  a source-contract test keeps the forbidden root `api.ts` name from returning.
+- Run summaries render the real per-model names from the trace array instead of
+  array indices, and Burn-in chart tooltips escape CSV-derived text.
 
 ## v0.1.3 — 2026-08-13
 

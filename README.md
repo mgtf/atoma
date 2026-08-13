@@ -234,6 +234,11 @@ npm run skills -- list            # what it learned, and what it refused to comp
 npm run burnin                    # regenerate the economics table above
 ```
 
+The visualizer is a fully typed React 19 client. MUI supplies the shared
+component system, the Runs combobox stays virtualized through Headless UI, and
+ECharts is lazy-loaded only for Burn-in analytics. The API remains read-only;
+development and compiled-release clients use the same endpoints.
+
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and

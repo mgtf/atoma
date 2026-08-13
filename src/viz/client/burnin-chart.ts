@@ -6,7 +6,7 @@ import {
   ToolboxComponent,
   TooltipComponent,
 } from 'echarts/components';
-import { init, use } from 'echarts/core';
+import { init, use, type ECharts } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 
 use([
@@ -19,6 +19,6 @@ use([
   CanvasRenderer,
 ]);
 
-export function initBurninChart(host) {
+export function initBurninChart(host: HTMLDivElement): ECharts {
   return init(host, null, { renderer: 'canvas' });
 }

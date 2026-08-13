@@ -6,7 +6,6 @@ import {
   ComboboxOptions,
 } from '@headlessui/react';
 import { useMemo, useRef, useState } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 
 export interface RunPickerOption {
   id: string;
@@ -24,7 +23,7 @@ export interface RunPickerProps {
   onChange: (id: string) => void;
 }
 
-function RunPicker({ options, value, placeholder, emptyLabel, onChange }: RunPickerProps) {
+export function RunPicker({ options, value, placeholder, emptyLabel, onChange }: RunPickerProps) {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((option) => option.id === value) ?? null;
@@ -87,33 +86,4 @@ function RunPicker({ options, value, placeholder, emptyLabel, onChange }: RunPic
       )}
     </Combobox>
   );
-}
-
-export interface RunPickerController {
-  update(props: RunPickerProps): void;
-  setValue(value: string | null): void;
-  destroy(): void;
-}
-
-export function mountRunPicker(
-  host: HTMLElement,
-  initialProps: RunPickerProps
-): RunPickerController {
-  const root: Root = createRoot(host);
-  let props = initialProps;
-  const render = () => root.render(<RunPicker {...props} />);
-  render();
-  return {
-    update(nextProps) {
-      props = nextProps;
-      render();
-    },
-    setValue(value) {
-      props = { ...props, value };
-      render();
-    },
-    destroy() {
-      root.unmount();
-    },
-  };
 }

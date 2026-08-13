@@ -755,10 +755,10 @@ re-exports all the historical names so old imports keep working.
   scatter with legend/tooltips/inside zoom/slider/drag-zoom, family/outcome/
   24h-7d-30d filters, and 50-row pagination. Zoom updates the summary and rows,
   so 10k historical records remain bounded to 50 row nodes. Every lifecycle
-  metric is a focusable hover badge; `↩` explicitly means deterministic
+  metric is a focusable MUI tooltip chip; `↩` explicitly means deterministic
   dispatch fell back to the validated LLM loop. Parsing helpers remain covered
-  by `tests/burnin.test.ts`; source-contract tests pin the renderer fields,
-  pagination and chart controls.
+  by `tests/burnin.test.ts`; component tests pin navigation and lifecycle
+  rendering, while source-contract tests pin pagination and chart controls.
 - **LIVE PRODUCT ITERATION, 2026-08-12 — delivery banners were not the
   score.** A curriculum batch retested the three failed families from the
   mature store: web $0.4867/14 calls, HTTP $0.3848/16, app $0.2233/13, all
@@ -1595,18 +1595,30 @@ re-exports all the historical names so old imports keep working.
   `npm run viz:serve` serves that compiled client on 4111 with no dev
   dependencies. The release smoke fetches the compiled index, module asset and
   `/api/burnin`, so the visualizer is now a claimed release-archive surface.
-  Framework adoption is incremental, not a risky whole-client rewrite:
-  React 19 + TypeScript + Headless UI owns the first state-heavy widget, a
-  searchable keyboard/ARIA combobox whose options are virtualized (29 DOM
-  options for 190 runs in the browser acceptance test). React Fast Refresh is
-  enabled through Vite. Opening through either the input or chevron clears and
-  focuses the query immediately; display labels drop the repetitive
-  `build-app:` prefix while full text remains searchable/hoverable. Browser
-  acceptance filtered five guestbook runs without selection gymnastics or
-  console errors. The established trace/registry renderers and tiny i18n
-  core remain vanilla while ECharts owns the interaction-heavy Burn-in chart.
-  This creates the component seam needed by a future SaaS client without
-  destabilising the audited run-detail UI. Wired into
+  The client is now React 19 + TypeScript throughout. MUI is the application
+  component system (shell, navigation, cards, forms, tabs, accordions,
+  tooltips, tables and pagination); Headless UI remains the one specialist
+  primitive for the virtualised Runs combobox, and ECharts owns the
+  interaction-heavy Burn-in scatter. Tailwind was deliberately not added:
+  it supplies styling utilities rather than the accessible components this
+  migration needed, and a second styling system beside MUI would widen the
+  surface without replacing a capability. Every feature view is lazy-loaded;
+  ECharts is a second-level lazy chunk, keeping the initial bundle below the
+  configured 750 KB warning ceiling.
+  Runs preserves the audited semantics: 1s delta polling, 2s index polling,
+  the 12-minute abandonment predicate, paired llm-start events, newest-first
+  timeline, exact tool↔LLM correlation, sticky details and scroll compensation.
+  Browser acceptance traverses all five views against the real APIs, opens an
+  LLM detail, confirms model names and chart canvas, and reports zero console
+  errors. `tests/viz-client-components.test.ts` exercises the same navigation
+  with mocked API contracts; `tests/viz-client-run-utils.test.ts` pins live,
+  delta-merge and filtering invariants.
+  **DO NOT name a root client module `api.ts`.** Vite's `/api` dev proxy also
+  matches `/api.ts`, forwards the module request to the read-only server and
+  returns it as `application/octet-stream`; production builds still pass while
+  the HMR UI is blank. The typed client is therefore `data-api.ts`, and the
+  source-contract test pins both the required name and the forbidden one.
+  Wired into
   both examples via `RecordingLlmClient` (wraps any `LlmClient`) and
   `RecordingRegistry` (subclasses `AtomRegistry`) — both observers only,
   zero effect on runtime behaviour. Runs are persisted as JSON under
@@ -4115,43 +4127,31 @@ second is the kind of thing that gets acted on:
   cannot see a call site that skips `t()` at all — while the FRENCH-LEAK test
   catches exactly the demonstrated bug, a recognisable French word in a
   literal outside the catalog, which is always wrong and needs no judgment.
-  A third test then closed the gap the other two left, and its history is the
-  lesson: the French word-list detector was written first and immediately
-  proved its own limit — a follow-up sweep found `Appel LLM`, `dernier run`,
-  `Version actuelle` and `afficher / masquer`, all French, all missed,
-  because a word list is only as good as the words someone thought of. The
-  replacement is STRUCTURAL: a quoted literal of two or more words sitting
-  where `h()` expects a CHILD is rendered text, whatever language it is in.
-  That found 14 more (10 English, 4 French) and they are fixed. Residue it
-  still does NOT catch, stated so nobody reads silence as coverage:
-  one-word labels, template literals, and `innerHTML` assignments. A v0.1.3
-  follow-up then hit that exact residue: fourteen Burn-in/Skills/registry
-  callsites still rendered `injoignable`, `indisponible`, `Aucune mesure`,
-  `— aucun/aucune —`, `Outils`, `Raison`, `Historique` or `courant` outside
-  the French catalog. They now use `t()`, and the French-literal detector scans
-  strings up to 240 characters plus those words,
-  so the demonstrated innerHTML paths are covered. Arbitrary English
-  innerHTML/template text and unknown one-word labels remain outside the
-  structural proof. This is a floor, not proof. Do not restore the word
-  "fully" without a checker that earns it.
-  Every label goes through `t('some.key', { vars })` against the catalogs
-  at the top of `src/viz/client/main.js`; static chrome in `index.html` uses `data-i18n` /
-  `data-i18n-title` / `data-i18n-placeholder`, filled by
-  `applyStaticI18n()` at boot. Vite now bundles the client offline, but the
-  ~40-line core still covers the complete two-locale surface without adding
-  framework state. Its API remains i18next-compatible
-  (dotted keys, `{{var}}`, `.one` count variant, dotted namespaces) so
-  swapping in the real library is a drop-in — catalogs and call sites
-  unchanged. English is the SOURCE and the default: `detectLocale()
-  deliberately ignores navigator.language, so a French browser gets
-  English until the user opts in via the header picker (persisted in
-  localStorage) or `?lang=fr`. A missing key renders as the key itself —
-  loud and greppable. `fr` ships in strict key parity with `en`, which proves
-  the plumbing; add a locale by dropping a
-  catalog next to it and it appears in the picker. WATCH OUT: `t` is now
-  a global, so a local variable named `t` shadows it — the registry
-  render paths were renamed to `type`/`ty`/`tot` for exactly this
-  reason.
+  The history still matters: a French word-list detector missed `Appel LLM`,
+  `dernier run`, `Version actuelle` and `afficher / masquer`; the later
+  structural `h()`-child check found 14 more strings; and then fourteen
+  `innerHTML`/one-word residues escaped that too. The full React migration
+  deletes `main.js`, `h()` and every raw-HTML renderer rather than extending
+  another heuristic. React text nodes escape API/model content by default;
+  the one deliberate HTML surface, ECharts' tooltip formatter, applies an
+  explicit HTML escape to task/family/outcome. The source-contract test now
+  forbids the legacy renderer and the component integration test visits every
+  view. That is stronger for the demonstrated classes, but still not proof
+  that every future literal is translated — keep user-facing text in the
+  catalogs.
+  Every label goes through `useI18n().t('some.key', { vars })` against
+  `src/viz/client/i18n.tsx`; there is no static DOM translation pass and no
+  global `t`. Locale is React state, so switching language repaints in place
+  instead of reloading the page. The small provider keeps the established
+  i18next-compatible surface (dotted keys, `{{var}}`, `.one` count variant)
+  without adding a second runtime library beside MUI. English remains the
+  SOURCE and default: `detectLocale()` deliberately ignores
+  `navigator.language`, so a French browser gets English until the user opts
+  in via the header picker (persisted in localStorage) or `?lang=fr`. A
+  missing key renders as the key itself — loud and greppable. The parity test
+  imports the typed catalogs directly and requires equality in BOTH
+  directions; the former source parser could only prove English→French and
+  allowed an orphan French-only key.
 - **"Right now" says what the call is DOING.** A bare role chip
   ("EXECUTE") told you a slot was busy and nothing else — on a
   multi-minute L1 tool loop that reads as frozen. The banner now adds a

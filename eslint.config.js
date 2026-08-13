@@ -116,18 +116,11 @@ export default tseslint.config(
     },
   },
   {
-    // Vite-bundled vanilla browser client. It deliberately remains framework-
-    // free JavaScript, so TypeScript's promise rules have no reliable type
-    // information here; browser globals and Vite's production transform are
-    // the relevant environment.
-    files: ['src/viz/client/**/*.js'],
-    ...tseslint.configs.disableTypeChecked,
+    // The Vite client is fully typed React/TypeScript. Keep every async rule
+    // above active while declaring its browser runtime globals.
+    files: ['src/viz/client/**/*.{ts,tsx}'],
     languageOptions: {
       globals: globals.browser,
-    },
-    rules: {
-      ...tseslint.configs.disableTypeChecked.rules,
-      'no-empty': 'off',
     },
   },
 );

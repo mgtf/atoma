@@ -169,7 +169,7 @@ graph TB
 | | Deliverable gate | On the unsupervised path, every file the task asked for must exist — and, when the subtask used a mutating verb, must not be byte-identical afterwards. Existence alone was inert on maintenance work, where every file is seeded |
 | **Observability** | Cost metering | One formula, used by both the run summary and the console, so they cannot disagree |
 | | Trace recorder | Full JSON per run: every call, tool invocation, registry change and skill decision |
-| | Web console | Replays any run; shows in-flight calls live |
+| | Web console | Read-only React/MUI client: replays runs live, inspects registry/skills, and charts burn-in economics |
 | | Economics ledger | `burnin/results.csv`, one row per measured run |
 | | Friction report | Offline scan of stored traces for recurring tool failures — no model calls |
 
