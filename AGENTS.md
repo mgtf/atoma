@@ -1538,6 +1538,11 @@ re-exports all the historical names so old imports keep working.
   filename merely containing the substring "test". Manifest merge also keeps
   malformed incoming entries visible to health checks instead of silently
   sanitising them; form `type` selects existing text before replacement.
+  A final `skills review` found the only catalog blocker:
+  `document-api-from-server-source` positively named two network tools outside
+  Lithium's scope while trying to defer that work. Its body now says
+  "network-capable phase" without naming/imitating undeclared capabilities;
+  review moved from 1 blocked to 0 while preserving its 6/0 counters.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,
