@@ -1636,6 +1636,12 @@ re-exports all the historical names so old imports keep working.
   controls — the generic chip estimate truncated `TRUST`, `ALL ROLES` and
   `VALIDATE-RESULT`. Atom lanes use the same sizing and WRAP to a new row,
   rather than truncating `CarbonDioxide` or dropping atoms that no longer fit.
+  Filter rows also wrap and center their labels. Role selection is
+  LLM-EXCLUSIVE: choosing `PREFILTER` sets `{kind:"llm",role:"prefilter"}`;
+  otherwise the shared event predicate intentionally keeps non-LLM events
+  during a role filter, making an active Prefilter button appear broken.
+  Selecting a kind resets any stale role and every filter change resets the
+  timeline scroll anchor.
   Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five

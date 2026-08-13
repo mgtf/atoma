@@ -419,7 +419,8 @@ export class GpuRenderer {
     height: number,
     active: boolean,
     onActivate: (id: string) => void,
-    accent: number = GPU_COLORS.primary
+    accent: number = GPU_COLORS.primary,
+    centerLabel = false
   ) {
     const container = new Container();
     container.position.set(x, y);
@@ -434,14 +435,15 @@ export class GpuRenderer {
     const labelText = this.text(
       container,
       truncate(label, Math.max(1, Math.floor((width - 16) / 6.2))),
-      10,
+      centerLabel ? width / 2 : 10,
       Math.max(5, (height - 16) / 2),
       {
-      size: 11,
-      color: active ? GPU_COLORS.text : GPU_COLORS.muted,
-      weight: active ? '700' : '600',
+        size: 11,
+        color: active ? GPU_COLORS.text : GPU_COLORS.muted,
+        weight: active ? '700' : '600',
       }
     );
+    if (centerLabel) labelText.anchor.x = 0.5;
     labelText.eventMode = 'none';
     container.eventMode = 'static';
     container.cursor = 'pointer';
@@ -490,7 +492,9 @@ export class GpuRenderer {
         Math.max(66, label.length * 7 + 22),
         32,
         snapshot.state.view === view,
-        snapshot.onActivate
+        snapshot.onActivate,
+        GPU_COLORS.primary,
+        true
       );
       x += Math.max(66, label.length * 7 + 22) + 6;
     }
@@ -505,7 +509,9 @@ export class GpuRenderer {
       42,
       32,
       false,
-      snapshot.onActivate
+      snapshot.onActivate,
+      GPU_COLORS.primary,
+      true
     );
     this.button(
       this.root,
@@ -517,7 +523,9 @@ export class GpuRenderer {
       42,
       32,
       false,
-      snapshot.onActivate
+      snapshot.onActivate,
+      GPU_COLORS.primary,
+      true
     );
   }
 
@@ -632,7 +640,8 @@ export class GpuRenderer {
           28,
           snapshot.state.selectedAtomName === name,
           snapshot.onActivate,
-          GPU_COLORS.tiers[tier as 1 | 2 | 3]
+          GPU_COLORS.tiers[tier as 1 | 2 | 3],
+          true
         );
         atomX += buttonWidth + 5;
       }
@@ -642,36 +651,45 @@ export class GpuRenderer {
     const filterY = nextLaneY + 4;
     const kinds = ['all', 'llm', 'tool', 'trust', 'skill', 'cache', 'registry'];
     let filterX = leftX + 14;
+    let kindY = filterY;
     for (const kind of kinds) {
       const label = kind.toUpperCase();
       const buttonWidth = gpuFilterButtonWidth(label);
+      if (filterX + buttonWidth > leftX + leftWidth - 12 && filterX > leftX + 14) {
+        filterX = leftX + 14;
+        kindY += 32;
+      }
       this.button(
         this.root,
         `run.filter.kind.${kind}`,
         'button',
         label,
         filterX,
-        filterY,
+        kindY,
         buttonWidth,
         27,
         snapshot.state.runFilters.kind === kind,
-        snapshot.onActivate
+        snapshot.onActivate,
+        GPU_COLORS.primary,
+        true
       );
       filterX += buttonWidth + 5;
-      if (filterX > leftX + leftWidth - 60) break;
     }
 
-    let controlsBottom = filterY + 32;
+    let controlsBottom = kindY + 32;
     if (snapshot.state.runFilters.kind === 'all' || snapshot.state.runFilters.kind === 'llm') {
       const roles = [...new Set(run.events.flatMap((event) => event.role ? [event.role] : []))];
       if (roles.length) {
         let roleX = leftX + 14;
-        const roleY = controlsBottom + 4;
+        let roleY = controlsBottom + 4;
         const roleOptions = ['all', ...roles];
         for (const role of roleOptions) {
           const label = role === 'all' ? 'ALL ROLES' : role.toUpperCase();
           const buttonWidth = gpuFilterButtonWidth(label);
-          if (roleX + buttonWidth > leftX + leftWidth - 12) break;
+          if (roleX + buttonWidth > leftX + leftWidth - 12 && roleX > leftX + 14) {
+            roleX = leftX + 14;
+            roleY += 30;
+          }
           this.button(
             this.root,
             `run.filter.role.${role}`,
@@ -682,7 +700,9 @@ export class GpuRenderer {
             buttonWidth,
             25,
             snapshot.state.runFilters.role === role,
-            snapshot.onActivate
+            snapshot.onActivate,
+            GPU_COLORS.primary,
+            true
           );
           roleX += buttonWidth + 5;
         }
@@ -692,11 +712,14 @@ export class GpuRenderer {
     const branches = [...new Set(run.events.flatMap((event) => event.branchId ? [event.branchId] : []))];
     if (branches.length > 1) {
       let branchX = leftX + 14;
-      const branchY = controlsBottom + 4;
+      let branchY = controlsBottom + 4;
       for (const branch of ['all', ...branches.slice(0, 5)]) {
         const label = branch === 'all' ? 'ALL BRANCHES' : `⑂ ${branch.slice(0, 6)}`;
         const buttonWidth = gpuFilterButtonWidth(label);
-        if (branchX + buttonWidth > leftX + leftWidth - 12) break;
+        if (branchX + buttonWidth > leftX + leftWidth - 12 && branchX > leftX + 14) {
+          branchX = leftX + 14;
+          branchY += 30;
+        }
         this.button(
           this.root,
           `run.filter.branch.${branch}`,
@@ -707,7 +730,9 @@ export class GpuRenderer {
           buttonWidth,
           25,
           snapshot.state.runFilters.branchId === branch,
-          snapshot.onActivate
+          snapshot.onActivate,
+          GPU_COLORS.primary,
+          true
         );
         branchX += buttonWidth + 5;
       }

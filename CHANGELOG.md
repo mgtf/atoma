@@ -43,6 +43,9 @@
 - GPU filter and atom controls allocate width from their semibold text metrics;
   semantic labels such as `VALIDATE-RESULT` remain complete, while atom lanes
   wrap instead of truncating names or silently dropping later atoms.
+- GPU filter rows wrap instead of dropping overflowing options and center their
+  labels geometrically. Selecting a role now switches to the LLM kind, so
+  `PREFILTER` no longer leaves unrelated tool/skill/registry cards visible.
 - The GPU renderer prefers WebGPU, retries with WebGL after initialization
   failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in

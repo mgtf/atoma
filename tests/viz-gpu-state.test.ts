@@ -5,7 +5,10 @@ import {
   gpuFilterButtonWidth,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
-import { useGpuStore } from '../src/viz/client-gl/store.js';
+import {
+  nextRunFilters,
+  useGpuStore,
+} from '../src/viz/client-gl/store.js';
 
 beforeEach(() => {
   useGpuStore.setState({
@@ -122,5 +125,21 @@ describe('full-GL filter controls preserve semantic labels', () => {
       const availableCharacters = Math.floor((gpuFilterButtonWidth(label) - 16) / 6.2);
       expect(availableCharacters, label).toBeGreaterThanOrEqual(label.length);
     }
+  });
+
+  it('makes role filters LLM-exclusive and resets stale roles on kind changes', () => {
+    const current = { kind: 'all', role: 'all', branchId: 'all' };
+    expect(nextRunFilters(current, 'role', 'prefilter')).toEqual({
+      kind: 'llm',
+      role: 'prefilter',
+      branchId: 'all',
+    });
+    expect(
+      nextRunFilters(
+        { kind: 'llm', role: 'prefilter', branchId: 'all' },
+        'kind',
+        'tool'
+      )
+    ).toEqual({ kind: 'tool', role: 'all', branchId: 'all' });
   });
 });

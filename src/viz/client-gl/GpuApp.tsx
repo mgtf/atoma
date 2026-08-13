@@ -15,7 +15,7 @@ import {
   useSkillLists,
   useSkillNamespaces,
 } from './queries.js';
-import { useGpuStore } from './store.js';
+import { nextRunFilters, useGpuStore } from './store.js';
 
 const ThreeBackdrop = lazy(() =>
   import('./ThreeBackdrop.js').then((module) => ({ default: module.ThreeBackdrop }))
@@ -133,18 +133,24 @@ export function GpuApp() {
       return;
     }
     if (id.startsWith('run.filter.kind.')) {
-      store.setRunFilters({ ...store.runFilters, kind: id.slice('run.filter.kind.'.length) });
+      store.setRunFilters(
+        nextRunFilters(store.runFilters, 'kind', id.slice('run.filter.kind.'.length))
+      );
+      store.setScrollY('runs', 0);
       return;
     }
     if (id.startsWith('run.filter.role.')) {
-      store.setRunFilters({ ...store.runFilters, role: id.slice('run.filter.role.'.length) });
+      store.setRunFilters(
+        nextRunFilters(store.runFilters, 'role', id.slice('run.filter.role.'.length))
+      );
+      store.setScrollY('runs', 0);
       return;
     }
     if (id.startsWith('run.filter.branch.')) {
-      store.setRunFilters({
-        ...store.runFilters,
-        branchId: id.slice('run.filter.branch.'.length),
-      });
+      store.setRunFilters(
+        nextRunFilters(store.runFilters, 'branchId', id.slice('run.filter.branch.'.length))
+      );
+      store.setScrollY('runs', 0);
       return;
     }
     if (id.startsWith('registry.select.')) {

@@ -4,6 +4,16 @@ import type { EventFilters } from '../client/run-utils.js';
 export type ViewName = 'runs' | 'registry' | 'skills' | 'burnin' | 'launch';
 export type InputKind = 'run' | 'registry' | 'skills' | 'launch' | null;
 
+export function nextRunFilters(
+  current: EventFilters,
+  dimension: 'kind' | 'role' | 'branchId',
+  value: string
+): EventFilters {
+  if (dimension === 'kind') return { ...current, kind: value, role: 'all' };
+  if (dimension === 'role') return { ...current, kind: 'llm', role: value };
+  return { ...current, branchId: value };
+}
+
 export interface GpuUiState {
   view: ViewName;
   locale: 'en' | 'fr';
