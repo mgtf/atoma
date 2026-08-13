@@ -1,0 +1,9 @@
+{
+  "tasks": [
+    {
+      "id": "deploy-rollback-guides-compile-low",
+      "family": "files",
+      "goal": "Create docs/deploy-safety.md and docs/rollback-safety.md. Each file must start with exactly one H1, contain a prose-only '## Purpose' section, a '## Procedure' section with exactly five numbered items, and a '## Verification' section with exactly three bullet points. In a FINAL SEPARATE PHASE, mechanically verify those exact per-section structures without modifying either file."
+    }
+  ]
+}

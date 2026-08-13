@@ -1014,6 +1014,16 @@ re-exports all the historical names so old imports keep working.
   with zero flags. This is not a global "low is better" claim: Claude's medium
   pin remains load-bearing against its high default, and every non-`codex:`
   compiler route stays medium. `compileEffortForModel` owns the narrow policy.
+  PRODUCTION CONFIRMATION followed on a fresh Markdown task (trace
+  `2026-08-13T08-25-36-940-9c020c0a`): the real lifecycle compile completed in
+  48.649s, returned a 5896-character scan-clean/envelope-valid script, promoted
+  `write-structured-markdown-files`, and left `compile_errors=0`. The whole run
+  delivered in 126s/11 calls/$0.1574 estimated with one deterministic
+  verification phase, zero friction and exact independent section counts. The
+  promoted body then executed offline in a fresh workspace: two new files,
+  H1=1 / numbered=5 / bullets=3, exit 0 and a valid result envelope. Promotion
+  reset it to 0/0 as designed; no direct dispatch is armed until three
+  validated runs.
   TOOL closure found repeated harness gaps rather than harmless model noise:
   HTTP L1s recorded long-running `node server.js` commands (30s timeout +
   dead port), then improvised curl/node-e clients (`http.delete`, malformed JS,

@@ -20,7 +20,8 @@
   floor is now 22.13+ (or 24+) to match that patched browser runtime and CI.
 - Codex-backed skill compilation uses `effort: low`; other providers retain
   `medium`. An exact-prompt ABBA replay changed 0/2 timeouts into 2/2 valid,
-  scan-clean script responses.
+  scan-clean script responses; a fresh production run then compiled and
+  promoted in 48.6 seconds with `compile_errors=0`.
 
 ### Fixed
 
