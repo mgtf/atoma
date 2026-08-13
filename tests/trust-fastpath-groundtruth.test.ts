@@ -319,6 +319,35 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual([]);
   });
 
+  it('rejects a manifest-only JSON container mismatch before trust', async () => {
+    const { l2, l1, ctx, exec } = setup({
+      '.atoma-probes.json': JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            cmd: 'node word-frequency.js input.txt',
+            exitCode: 0,
+            stdout: '[{"word":"hello","count":2}]\n',
+          },
+        ],
+      }),
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: [] },
+        summary: 'verified output without inline probes',
+        toolCallResults: [{ name: 'record_probe', ok: true }],
+      }),
+      { description: 'print a JSON object mapping lowercase words to counts' },
+      { ...ctx, requireObservedToolAction: true }
+    );
+    expect(verdict.approved).toBe(false);
+    expect(verdict.reasoning).toMatch(/requires JSON object.*JSON array/);
+    expect(ctx.llm.calls).toHaveLength(0);
+    expect(exec.calls).toEqual(['read_file']);
+  });
+
   it('rejects a required harness whose manifest entry still fails', async () => {
     const { l2, l1, ctx, exec } = setup({
       'test-api.js': 'process.exit(1)',

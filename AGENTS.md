@@ -1360,7 +1360,12 @@ re-exports all the historical names so old imports keep working.
   turning `café` into `caf` despite the UTF-8 requirement.
   L2 now mechanically compares an explicit `JSON object` / `JSON array`
   requirement with every parseable successful recorded stdout BEFORE trust or
-  LLM validation; non-JSON/mixed stdout remains for judgment. The live argv
+  LLM validation; non-JSON/mixed stdout remains for judgment. The first
+  implementation only inspected probes copied into Result/evidence, so a terse
+  trusted Result could omit them while the on-disk manifest proved the wrong
+  container. L2 now also reads successful shell entries from the supervisor-owned
+  manifest when inline evidence is absent or non-contradictory; an inline
+  contradiction still rejects without the extra file read. The live argv
   recipe names both the container rule and Unicode property escapes, and now
   asks for a non-ASCII fixture when UTF-8 is explicit. The false Lithium and
   Ammonia successes were transactionally removed; the driving recipe gained

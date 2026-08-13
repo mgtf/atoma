@@ -8,6 +8,8 @@
   both family summaries and individual rows; legacy CSV rows still default to zero.
 - Burn-in/Skills network errors, empty states and raw-JSON toggles no longer
   leak French literals into the default English visualizer locale.
+- Explicit JSON object/array requirements also inspect successful stdout from
+  the on-disk probe manifest when a trusted Result omits inline probes.
 
 ## v0.1.3 — 2026-08-13
 

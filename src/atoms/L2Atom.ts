@@ -11,7 +11,10 @@ import type {
   Verdict,
 } from '../core/types.js';
 import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
-import { recordedProbesFromWitnesses } from '../contracts/witness.js';
+import {
+  extractRecordedProbes,
+  recordedProbesFromWitnesses,
+} from '../contracts/witness.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from '../skills/scriptScan.js';
 import {
   stripBranchProvenance,
@@ -236,17 +239,13 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
   return !(milestoneStyling && resetStyling);
 }
 
-export function recordedJsonShapeMismatch(task: Task, result: Result): string | null {
+function recordedJsonShapeMismatchFromProbes(
+  task: Task,
+  probes: readonly unknown[]
+): string | null {
   const expectsObject = /\bJSON\s+object\b/i.test(task.description);
   const expectsArray = /\bJSON\s+array\b/i.test(task.description);
   if (expectsObject === expectsArray) return null;
-  const payloadProbes =
-    result.output && typeof result.output === 'object' && !Array.isArray(result.output)
-      ? (result.output as Record<string, unknown>)['probes']
-      : undefined;
-  const probes = Array.isArray(payloadProbes)
-    ? payloadProbes
-    : recordedProbesFromWitnesses(result.evidence);
   if (probes.length === 0) return null;
 
   let observed = 0;
@@ -272,6 +271,54 @@ export function recordedJsonShapeMismatch(task: Task, result: Result): string | 
   return expectsObject
     ? 'the task requires JSON object output, but every parseable successful probe returned a JSON array'
     : 'the task requires JSON array output, but every parseable successful probe returned a JSON object';
+}
+
+function resultRecordedProbes(result: Result): unknown[] {
+  return [
+    ...extractRecordedProbes({ output: result.output }),
+    ...recordedProbesFromWitnesses(result.evidence),
+  ];
+}
+
+export function recordedJsonShapeMismatch(task: Task, result: Result): string | null {
+  return recordedJsonShapeMismatchFromProbes(task, resultRecordedProbes(result));
+}
+
+async function checkRecordedJsonShape(
+  task: Task,
+  result: Result,
+  ctx: RunContext
+): Promise<string | null> {
+  const probes = resultRecordedProbes(result);
+  const inlineMismatch = recordedJsonShapeMismatchFromProbes(task, probes);
+  if (inlineMismatch) return inlineMismatch;
+  const expectsShape =
+    /\bJSON\s+object\b/i.test(task.description) !==
+    /\bJSON\s+array\b/i.test(task.description);
+  if (!expectsShape || !ctx.tools?.has('read_file')) {
+    return null;
+  }
+  try {
+    const raw = await ctx.tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
+    const content =
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as Record<string, unknown>)['content'] === 'string'
+        ? ((raw as Record<string, unknown>)['content'] as string)
+        : typeof raw === 'string'
+          ? raw
+          : '';
+    const parsed = content.trim() ? (JSON.parse(content) as unknown) : null;
+    const entries =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)['entries']
+        : undefined;
+    if (Array.isArray(entries)) probes.push(...entries);
+  } catch {
+    // Missing/malformed manifests are handled by the ground-truth health
+    // checker. Shape mismatch remains silent when no parseable evidence exists.
+  }
+  return recordedJsonShapeMismatchFromProbes(task, probes);
 }
 
 export function requiredPassingCommands(description: string): string[] {
@@ -2091,7 +2138,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         },
       };
     }
-    const jsonShapeMismatch = recordedJsonShapeMismatch(task, result);
+    const jsonShapeMismatch = await checkRecordedJsonShape(task, result, ctx);
     if (jsonShapeMismatch) {
       ctx.logger.warn(
         `[${this.name}] result from ${child.name} contradicts the task's requested JSON container shape — mechanically rejected before trust/LLM validation`
