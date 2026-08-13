@@ -15,37 +15,52 @@
 .run-picker-control { position: relative; width: 100%; }
 .run-picker-input {
   width: 100%;
-  height: 34px;
-  padding: 6px 34px 6px 30px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--panel-2);
+  height: 40px;
+  padding: 8px 38px 8px 34px;
+  border: 1px solid rgba(255, 255, 255, .23);
+  border-radius: 8px;
+  background: transparent;
   color: var(--text);
   font: inherit;
   text-overflow: ellipsis;
+  transition: border-color 150ms cubic-bezier(.4, 0, .2, 1),
+              box-shadow 150ms cubic-bezier(.4, 0, .2, 1);
 }
 .run-picker-input::-webkit-search-cancel-button { display: none; }
-.run-picker-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.run-picker-input:hover { border-color: rgba(255, 255, 255, .87); }
+.run-picker-input:focus {
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .run-picker-search {
   position: absolute;
-  left: 10px;
-  top: 6px;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 1;
   color: var(--muted);
-  font-size: 15px;
   pointer-events: none;
 }
+.run-picker-search svg { display: block; width: 18px; height: 18px; }
 .run-picker-button {
   position: absolute;
-  right: 3px;
-  top: 4px;
-  width: 27px;
-  height: 26px;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: rgba(255, 255, 255, .54);
   cursor: pointer;
 }
+.run-picker-button:hover { color: var(--text); }
+.run-picker-button svg { width: 24px; height: 24px; }
 .run-picker-options {
   z-index: 1600;
   width: min(var(--input-width), calc(100vw - 24px));

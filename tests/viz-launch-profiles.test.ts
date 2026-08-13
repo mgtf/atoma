@@ -81,6 +81,9 @@ describe('viz React/MUI build contract', () => {
     expect(burnin).toMatch(/burnin\.metric\.fallbacks/);
     expect(picker).toMatch(/virtual=\{\{ options: filtered \}\}/);
     expect(picker).toMatch(/ComboboxInput/);
+    expect(picker).toMatch(/ArrowDropDownIcon/);
+    expect(picker).toMatch(/SearchIcon/);
+    expect(picker).not.toContain('>⌄<');
     expect(picker).toMatch(/requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
   });
 });

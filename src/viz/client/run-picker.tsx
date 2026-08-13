@@ -5,6 +5,8 @@ import {
   ComboboxOption,
   ComboboxOptions,
 } from '@headlessui/react';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
+import SearchIcon from '@mui/icons-material/Search';
 import { useMemo, useRef, useState } from 'react';
 
 export interface RunPickerOption {
@@ -47,7 +49,7 @@ export function RunPicker({ options, value, placeholder, emptyLabel, onChange }:
       {({ open }) => (
         <>
           <div className="run-picker-control">
-            <span className="run-picker-search" aria-hidden="true">⌕</span>
+            <span className="run-picker-search" aria-hidden="true"><SearchIcon /></span>
             <ComboboxInput
               ref={inputRef}
               aria-label={placeholder}
@@ -67,7 +69,7 @@ export function RunPicker({ options, value, placeholder, emptyLabel, onChange }:
                 requestAnimationFrame(() => inputRef.current?.focus());
               }}
             >
-              <span aria-hidden="true">⌄</span>
+              <ArrowDropDownIcon aria-hidden="true" />
             </ComboboxButton>
           </div>
           <ComboboxOptions anchor="bottom start" className="run-picker-options">

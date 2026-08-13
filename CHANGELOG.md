@@ -40,6 +40,8 @@
   a source-contract test keeps the forbidden root `api.ts` name from returning.
 - Run summaries render the real per-model names from the trace array instead of
   array indices, and Burn-in chart tooltips escape CSV-derived text.
+- The searchable Runs picker now shares the MUI field outline and the same
+  Search/ArrowDropDown icon family as the application's other select controls.
 
 ## v0.1.3 — 2026-08-13
 
