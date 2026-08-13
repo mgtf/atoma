@@ -42,6 +42,10 @@
   array indices, and Burn-in chart tooltips escape CSV-derived text.
 - The searchable Runs picker now shares the MUI field outline and the same
   Search/ArrowDropDown icon family as the application's other select controls.
+- In development, the read-only API root redirects from port 4111 to the Vite
+  UI on 5173 instead of serving an untranspiled `main.tsx` entry with a MIME
+  error; the launcher now starts tsx and Vite directly without `npm exec`
+  wrapper chains.
 
 ## v0.1.3 — 2026-08-13
 

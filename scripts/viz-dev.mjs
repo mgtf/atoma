@@ -1,16 +1,22 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const detached = process.platform !== 'win32';
 const apiPort = process.env['ATOMA_VIZ_API_PORT'] ?? '4111';
 const devPort = process.env['ATOMA_VIZ_DEV_PORT'] ?? '5173';
+const viteCli = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
+const devUiUrl = `http://127.0.0.1:${devPort}`;
 const children = [
   spawn(
-    npm,
-    ['exec', 'tsx', '--', 'src/viz/server.ts', '--host', '127.0.0.1', '--port', apiPort],
-    { stdio: 'inherit', detached }
+    process.execPath,
+    ['--import', 'tsx', 'src/viz/server.ts', '--host', '127.0.0.1', '--port', apiPort],
+    {
+      stdio: 'inherit',
+      detached,
+      env: { ...process.env, ATOMA_VIZ_DEV_URL: devUiUrl },
+    }
   ),
-  spawn(npm, ['exec', 'vite', '--', '--config', 'vite.config.ts'], {
+  spawn(process.execPath, [viteCli, '--config', 'vite.config.ts'], {
     stdio: 'inherit',
     detached,
   }),
@@ -60,5 +66,5 @@ process.once('exit', () => {
 });
 
 console.log(
-  `atoma viz dev — UI http://127.0.0.1:${devPort} · API http://127.0.0.1:${apiPort}`
+  `atoma viz dev — UI ${devUiUrl} · API http://127.0.0.1:${apiPort} (root redirects to UI)`
 );

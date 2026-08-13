@@ -170,6 +170,15 @@ const DBS = resolveDbs();
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CLIENT_DIR = join(HERE, 'client');
 const UI_HTML_PATH = join(CLIENT_DIR, 'index.html');
+const DEV_UI_URL = (() => {
+  const configured = process.env['ATOMA_VIZ_DEV_URL']?.trim();
+  if (!configured) return null;
+  const parsed = new URL(configured);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('ATOMA_VIZ_DEV_URL must use http or https');
+  }
+  return parsed;
+})();
 
 function assetContentType(file: string): string {
   switch (extname(file)) {
@@ -535,6 +544,16 @@ const server = createServer((req, res) => {
   const pathname = url.pathname;
 
   if (pathname === '/' || pathname === '/index.html') {
+    if (DEV_UI_URL) {
+      const target = new URL(`${pathname}${url.search}`, DEV_UI_URL);
+      res.writeHead(307, {
+        location: target.href,
+        'content-length': '0',
+        'cache-control': 'no-store',
+      });
+      res.end();
+      return;
+    }
     if (!existsSync(UI_HTML_PATH)) {
       send(res, 500, 'viz client missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
       return;

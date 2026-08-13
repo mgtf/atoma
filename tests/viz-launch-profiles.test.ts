@@ -50,6 +50,7 @@ describe('viz React/MUI build contract', () => {
   const burnin = readFileSync('src/viz/client/features/BurninView.tsx', 'utf8');
   const chart = readFileSync('src/viz/client/burnin-chart.ts', 'utf8');
   const picker = readFileSync('src/viz/client/run-picker.tsx', 'utf8');
+  const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
   const vite = readFileSync('vite.config.ts', 'utf8');
 
   it('has HMR development and compiled static deployment paths', () => {
@@ -70,6 +71,10 @@ describe('viz React/MUI build contract', () => {
     expect(pkg.devDependencies['@headlessui/react']).toBeTruthy();
     expect(vite).toMatch(/plugin-react/);
     expect(app).toMatch(/ThemeProvider|lazy\(/);
+    expect(devLauncher).toContain('ATOMA_VIZ_DEV_URL');
+    expect(devLauncher).toContain('process.execPath');
+    expect(devLauncher).not.toMatch(/npm['"],\s*\['exec'|npm exec/);
+    expect(server).toContain('res.writeHead(307');
   });
 
   it('uses component-based scalable charting, pagination and tooltips', () => {

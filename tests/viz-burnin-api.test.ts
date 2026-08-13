@@ -25,6 +25,47 @@ async function freePort(): Promise<number> {
   });
 }
 
+function startViz(port: number, root: string, env: NodeJS.ProcessEnv = {}) {
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'src/viz/server.ts',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--dir',
+      join(root, 'runs'),
+      '--db',
+      join(root, 'missing.db'),
+      '--skills-dir',
+      join(root, 'skills'),
+    ],
+    {
+      cwd: process.cwd(),
+      env: { ...process.env, ...env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  );
+  children.push(child);
+  return child;
+}
+
+async function waitForResponse(url: string, init?: RequestInit): Promise<Response | undefined> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      return await fetch(url, init);
+    } catch {
+      // The tsx process is still starting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return undefined;
+}
+
 describe('GET /api/burnin', () => {
   it('normalizes legacy provider attribution and lifecycle defaults', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-viz-burnin-'));
@@ -40,41 +81,9 @@ describe('GET /api/burnin', () => {
       ].join('\n') + '\n'
     );
     const port = await freePort();
-    const child = spawn(
-      process.execPath,
-      [
-        join(process.cwd(), 'node_modules/tsx/dist/cli.mjs'),
-        'src/viz/server.ts',
-        '--host',
-        '127.0.0.1',
-        '--port',
-        String(port),
-        '--dir',
-        join(root, 'runs'),
-        '--db',
-        join(root, 'missing.db'),
-        '--skills-dir',
-        join(root, 'skills'),
-      ],
-      {
-        cwd: process.cwd(),
-        env: { ...process.env, ATOMA_BURNIN_CSV: csv },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }
-    );
-    children.push(child);
+    startViz(port, root, { ATOMA_BURNIN_CSV: csv });
 
-    const deadline = Date.now() + 10_000;
-    let response: Response | undefined;
-    while (Date.now() < deadline) {
-      try {
-        response = await fetch(`http://127.0.0.1:${port}/api/burnin`);
-        if (response.ok) break;
-      } catch {
-        // The tsx process is still starting.
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
+    const response = await waitForResponse(`http://127.0.0.1:${port}/api/burnin`);
     expect(response?.ok).toBe(true);
     const payload = (await response!.json()) as {
       rows: Array<Record<string, unknown>>;
@@ -97,5 +106,28 @@ describe('GET /api/burnin', () => {
       provider: 'unknown',
     });
     expect(payload.rows.every((row) => row['provider'] !== '')).toBe(true);
+  }, 20_000);
+});
+
+describe('development UI routing', () => {
+  it('redirects the API root to Vite while keeping API routes local', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-viz-dev-root-'));
+    roots.push(root);
+    const port = await freePort();
+    startViz(port, root, {
+      ATOMA_BURNIN_CSV: join(root, 'missing.csv'),
+      ATOMA_VIZ_DEV_URL: 'http://127.0.0.1:5173',
+    });
+
+    const rootResponse = await waitForResponse(
+      `http://127.0.0.1:${port}/?lang=fr`,
+      { redirect: 'manual' }
+    );
+    expect(rootResponse?.status).toBe(307);
+    expect(rootResponse?.headers.get('location')).toBe('http://127.0.0.1:5173/?lang=fr');
+
+    const apiResponse = await fetch(`http://127.0.0.1:${port}/api/burnin`);
+    expect(apiResponse.ok).toBe(true);
+    expect(await apiResponse.json()).toMatchObject({ rows: [] });
   }, 20_000);
 });

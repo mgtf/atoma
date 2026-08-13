@@ -228,7 +228,7 @@ env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   ATOMA_MODEL_L2=codex:gpt-5.4-mini ATOMA_MODEL_L3=codex:gpt-5.6-sol \
   npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
 
-npm run viz                       # Vite HMR UI on :5173, read-only API on :4111
+npm run viz                       # HMR UI :5173; API :4111 redirects its root there
 npm run viz:serve                 # compiled visualizer after npm run build
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above

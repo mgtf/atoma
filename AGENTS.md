@@ -1591,6 +1591,12 @@ re-exports all the historical names so old imports keep working.
   client now lives under `src/viz/client/` and builds through Vite:
   `npm run viz` / `viz:dev` starts the read-only API on 4111 plus HMR UI on
   5173 (override with `ATOMA_VIZ_API_PORT` / `ATOMA_VIZ_DEV_PORT`);
+  the API root redirects to the HMR URL in that mode, while `/api/*` remains
+  local to 4111. Without the redirect, 4111 served source `index.html` whose
+  `main.tsx` asset the read-only server correctly labelled as a non-JavaScript
+  binary, yielding a blank MIME error. `scripts/viz-dev.mjs` invokes the tsx
+  and Vite CLIs directly with `process.execPath`: one coordinator plus two
+  child processes, instead of two `npm exec` wrapper chains (six processes).
   `npm run build` emits hashed assets under `dist/viz/client`, and
   `npm run viz:serve` serves that compiled client on 4111 with no dev
   dependencies. The release smoke fetches the compiled index, module asset and
