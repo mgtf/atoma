@@ -1595,9 +1595,14 @@ re-exports all the historical names so old imports keep working.
   `npm run viz:serve` serves that compiled client on 4111 with no dev
   dependencies. The release smoke fetches the compiled index, module asset and
   `/api/burnin`, so the visualizer is now a claimed release-archive surface.
-  Vite is a build/dev seam, not a framework rewrite: the existing vanilla
-  client and tiny i18n core remain, while ECharts owns the one interaction-heavy
-  analytical view. Wired into
+  Framework adoption is incremental, not a risky whole-client rewrite:
+  React 19 + TypeScript + Headless UI owns the first state-heavy widget, a
+  searchable keyboard/ARIA combobox whose options are virtualized (29 DOM
+  options for 190 runs in the browser acceptance test). React Fast Refresh is
+  enabled through Vite; the established trace/registry renderers and tiny i18n
+  core remain vanilla while ECharts owns the interaction-heavy Burn-in chart.
+  This creates the component seam needed by a future SaaS client without
+  destabilising the audited run-detail UI. Wired into
   both examples via `RecordingLlmClient` (wraps any `LlmClient`) and
   `RecordingRegistry` (subclasses `AtomRegistry`) — both observers only,
   zero effect on runtime behaviour. Runs are persisted as JSON under

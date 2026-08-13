@@ -34,6 +34,40 @@
   /* The language picker is a two-item control — it must NOT inherit the
      run-selector's 320px min-width. */
   header select#langSelect { min-width: 0; width: auto; padding: 6px 8px; }
+  #runPickerRoot { width: clamp(280px, 42vw, 640px); }
+  .run-picker-control { position: relative; width: 100%; }
+  .run-picker-input {
+    width: 100%; height: 32px; padding: 6px 34px 6px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel-2); color: var(--text); font: inherit;
+  }
+  .run-picker-input:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .run-picker-button {
+    position: absolute; right: 3px; top: 3px; width: 27px; height: 26px;
+    border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  }
+  .run-picker-options {
+    z-index: 60; width: var(--input-width); max-height: min(480px, 70vh);
+    overflow: auto; padding: 5px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); color: var(--text); box-shadow: 0 14px 36px rgba(0,0,0,.45);
+  }
+  .run-picker-option {
+    display: flex; gap: 8px; align-items: center; min-height: 42px; padding: 6px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .run-picker-option[data-focus] { background: var(--chip); outline: 1px solid var(--accent); }
+  .run-picker-option[data-selected] { background: rgba(110,168,255,.14); }
+  .run-picker-copy { display: flex; flex-direction: column; min-width: 0; }
+  .run-picker-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-picker-copy span { color: var(--muted); font-size: 10px; }
+  .run-picker-state { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+  .run-picker-state.live { background: var(--ok); box-shadow: 0 0 0 3px rgba(74,222,128,.12); }
+  .run-picker-state.error { background: var(--err); }
+  .run-picker-state.cancelled { background: var(--l2); }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
   header .spacer { flex: 1; }
   header button {
     background: var(--panel-2); color: var(--text);

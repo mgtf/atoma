@@ -1,23 +1,4 @@
-import { init as initChart, use as useChart } from 'echarts/core';
-import { ScatterChart } from 'echarts/charts';
-import {
-  DataZoomComponent,
-  GridComponent,
-  LegendComponent,
-  ToolboxComponent,
-  TooltipComponent,
-} from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
-
-useChart([
-  ScatterChart,
-  DataZoomComponent,
-  GridComponent,
-  LegendComponent,
-  ToolboxComponent,
-  TooltipComponent,
-  CanvasRenderer,
-]);
+import { mountRunPicker } from './run-picker';
 
 /* ==========================================================================
  * i18n — minimal core, i18next-COMPATIBLE surface.
@@ -741,7 +722,7 @@ function atomRef(ref) {
   return span;
 }
 
-function runSelectLabel(r) {
+function runPickerOption(r) {
   // `cancelled` wins over `hasError` because user-cancellation is a
   // deliberate action, not a fault — we set both flags on the index
   // entry but the UI label should reflect the user's intent.
@@ -756,30 +737,58 @@ function runSelectLabel(r) {
           : r.degraded
             ? '  ' + t('runs.flag.fallback')
             : '';
-  return `${r.label}  —  ${r.startedAt.slice(0, 19).replace('T', ' ')}  (${r.calls ?? 0} calls, ${fmtCost(r.costUsd ?? 0)})${flags}`;
+  const title = `${r.label}${flags}`;
+  const meta = `${r.startedAt.slice(0, 19).replace('T', ' ')} · ${r.calls ?? 0} calls · ${fmtCost(r.costUsd ?? 0)}`;
+  const pickerState = r.cancelled
+    ? 'cancelled'
+    : r.hasError || r.inFlight && !isIndexEntryLive(r)
+      ? 'error'
+      : isIndexEntryLive(r)
+        ? 'live'
+        : 'complete';
+  return {
+    id: r.id,
+    title,
+    meta,
+    search: `${r.id} ${title} ${meta}`.toLocaleLowerCase(),
+    state: pickerState,
+  };
 }
 
-function populateRunSelect(runs, keepSelection) {
-  const sel = $('runSelect');
-  sel.innerHTML = '';
-  if (runs.length === 0) {
-    sel.appendChild(h('option', {}, t('runs.none')));
-    return;
+let runPickerController = null;
+
+function populateRunPicker(runs, keepSelection = null) {
+  const options = runs.map(runPickerOption);
+  const value = keepSelection && runs.some((run) => run.id === keepSelection)
+    ? keepSelection
+    : null;
+  const props = {
+    options,
+    value,
+    placeholder: t('nav.selectRun'),
+    emptyLabel: t('runs.none'),
+    onChange: (id) => {
+      runPickerController?.setValue(id);
+      void selectRun(id);
+    },
+  };
+  if (!runPickerController) {
+    runPickerController = mountRunPicker($('runPickerRoot'), props);
+  } else {
+    runPickerController.update(props);
   }
-  for (const r of runs) sel.appendChild(h('option', { value: r.id }, runSelectLabel(r)));
-  if (keepSelection && runs.some((r) => r.id === keepSelection)) sel.value = keepSelection;
 }
 
 async function loadIndex() {
   const r = await fetch('/api/runs');
   state.runs = await r.json();
   if (state.runs.length === 0) {
-    populateRunSelect(state.runs);
+    populateRunPicker(state.runs);
     renderSummary(null);
     return;
   }
-  populateRunSelect(state.runs);
-  selectRun(state.runs[0].id);
+  populateRunPicker(state.runs);
+  void selectRun(state.runs[0].id);
   scheduleIndexPoll();
 }
 
@@ -812,12 +821,12 @@ function scheduleIndexPoll() {
       state.runs = fresh;
       if (topChanged || newCount || anyInflight) {
         const currentId = state.currentRun?.id ?? null;
-        populateRunSelect(fresh, currentId);
+        populateRunPicker(fresh, currentId);
         // Auto-advance to the fresh top run if the user hadn't drilled
         // into a specific run OR the previous selection was the
         // former top (i.e. they were following the latest).
         if (topChanged && (!currentId || !fresh.some((r) => r.id === currentId))) {
-          selectRun(fresh[0].id);
+          void selectRun(fresh[0].id);
         }
       }
     } catch {}
@@ -826,7 +835,7 @@ function scheduleIndexPoll() {
 }
 
 async function selectRun(id) {
-  $('runSelect').value = id;
+  runPickerController?.setValue(id);
   $('eventsList').innerHTML = '<div class="loader">' + t('common.loading') + '</div>';
   $('rightPane').innerHTML = '<div class="empty">' + t('pane.selectEvent') + '</div>';
   const r = await fetch('/api/runs/' + encodeURIComponent(id));
@@ -2419,7 +2428,6 @@ function renderRegistryDetail(el, ev) {
   }
 }
 
-$('runSelect').addEventListener('change', (e) => selectRun(e.target.value));
 $('registrySelect').addEventListener('change', (e) => selectRegistry(e.target.value));
 $('registrySearch').addEventListener('input', (e) => {
   state.registryFilter = e.target.value.toLowerCase();
@@ -2461,7 +2469,7 @@ function switchView(v) {
   $('skillsView').style.display = isSkills ? '' : 'none';
   $('burninView').style.display = isBurnin ? '' : 'none';
   $('launchView').style.display = isLaunch ? '' : 'none';
-  $('runSelect').style.display = isRuns ? '' : 'none';
+  $('runPickerRoot').style.display = isRuns ? '' : 'none';
   $('registrySelect').style.display = isReg ? '' : 'none';
   $('registrySearch').style.display = isReg ? '' : 'none';
   $('skillsSearch').style.display = isSkills ? '' : 'none';
@@ -2624,6 +2632,8 @@ function renderLaunch() {
 const FAMILY_COLORS = { cli: '#34d399', web: '#60a5fa', http: '#c084fc', app: '#6ea8ff', files: '#f59e0b' };
 let burninChartInstance = null;
 let burninZoomFrame = null;
+let burninChartRuntimePromise = null;
+let burninChartRenderId = 0;
 
 function burninTimestamp(row, index = 0) {
   const parsed = Date.parse(row.ts);
@@ -2816,7 +2826,8 @@ function renderBurninSummary(rows) {
   host.appendChild(strip);
 }
 
-function renderBurninChart(rows) {
+async function renderBurninChart(rows) {
+  const renderId = ++burninChartRenderId;
   const host = $('burninChart');
   burninChartInstance?.dispose();
   burninChartInstance = null;
@@ -2826,7 +2837,10 @@ function renderBurninChart(rows) {
 
   const chartHost = h('div', { class: 'section burnin-chart' });
   host.appendChild(chartHost);
-  burninChartInstance = initChart(chartHost, null, { renderer: 'canvas' });
+  burninChartRuntimePromise ??= import('./burnin-chart');
+  const { initBurninChart } = await burninChartRuntimePromise;
+  if (renderId !== burninChartRenderId || !chartHost.isConnected) return;
+  burninChartInstance = initBurninChart(chartHost);
   const families = [...new Set(plotted.map((row) => row.family))].sort();
   const series = families.map((family) => ({
     name: family,
@@ -2975,10 +2989,9 @@ function renderBurninRows(rows) {
         if (!row.trace) return;
         const id = row.trace.replace(/\.json$/, '');
         switchView('runs');
-        loadIndex().then(() => {
+        void loadIndex().then(() => {
           if (state.runs.some((candidate) => candidate.id === id)) {
-            $('runSelect').value = id;
-            selectRun(id);
+            void selectRun(id);
           }
         });
       },
@@ -3024,7 +3037,7 @@ function refreshBurninView({ chart }) {
   renderBurninToolbar();
   const selected = burninSelectedRows();
   renderBurninSummary(selected);
-  if (chart) renderBurninChart(burninBaseRows());
+  if (chart) void renderBurninChart(burninBaseRows());
   renderBurninRows(selected);
 }
 

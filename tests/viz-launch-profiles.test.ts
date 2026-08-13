@@ -57,9 +57,13 @@ describe('launchable profiles are all describable', () => {
 describe('viz Vite build contract', () => {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts: Record<string, string>;
+    devDependencies: Record<string, string>;
   };
   const server = readFileSync('src/viz/server.ts', 'utf8');
   const client = readFileSync('src/viz/client/main.js', 'utf8');
+  const chart = readFileSync('src/viz/client/burnin-chart.js', 'utf8');
+  const picker = readFileSync('src/viz/client/run-picker.tsx', 'utf8');
+  const vite = readFileSync('vite.config.ts', 'utf8');
 
   it('has HMR development and compiled static deployment paths', () => {
     expect(existsSync('src/viz/client/index.html')).toBe(true);
@@ -69,14 +73,20 @@ describe('viz Vite build contract', () => {
     expect(pkg.scripts['viz:serve']).toBe('node dist/viz/server.js');
     expect(pkg.scripts['build']).toMatch(/viz:build/);
     expect(server).toMatch(/dist\/viz\/client|CLIENT_DIR/);
+    expect(pkg.devDependencies['react']).toBeTruthy();
+    expect(pkg.devDependencies['@headlessui/react']).toBeTruthy();
+    expect(vite).toMatch(/plugin-react/);
   });
 
   it('uses scalable charting, pagination and explained lifecycle badges', () => {
-    expect(client).toMatch(/from 'echarts\/core'/);
+    expect(client).toMatch(/import\('\.\/burnin-chart'\)/);
+    expect(chart).toMatch(/from 'echarts\/core'/);
     expect(client).toMatch(/type:\s*'slider'/);
     expect(client).toMatch(/pageSize:\s*50/);
     expect(client).toMatch(/burnin\.metric\.fallbacks/);
     expect(client).toMatch(/data-tooltip/);
+    expect(picker).toMatch(/virtual=\{\{ options: filtered \}\}/);
+    expect(picker).toMatch(/ComboboxInput/);
   });
 });
 
