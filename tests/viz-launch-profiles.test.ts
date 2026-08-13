@@ -116,6 +116,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/const PAGE_SIZE = 50/);
     expect(gpuRenderer).toMatch(/withCost\.forEach/);
     expect(gpuRenderer).toMatch(/slice\(start, start \+ count\)/);
+    expect(gpuRenderer).toMatch(/listLayer\.mask = listMask/);
+    expect(gpuRenderer).toMatch(/scrollMax\.runs = Math\.max/);
+    expect(gpuRenderer).toMatch(/gpuEventCardCopy\(event\)/);
     expect(gpuRenderer).toMatch(/row\.refusals/);
     expect(gpuRenderer).toMatch(/row\.compileErrors/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);

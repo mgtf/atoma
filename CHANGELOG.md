@@ -35,6 +35,11 @@
 
 ### Fixed
 
+- GPU timeline rows are clipped to their scroll viewport and scrolling is
+  clamped to filtered content, preventing cards from overlapping filter
+  controls or overscrolling into blank space. Event cards again expose
+  actor/child/branch, tool arguments, result facts, model, cost, duration,
+  counters and timestamp.
 - The GPU renderer prefers WebGPU, retries with WebGL after initialization
   failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in

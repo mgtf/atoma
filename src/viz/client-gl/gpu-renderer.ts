@@ -13,6 +13,7 @@ import {
   fmtCost,
   fmtMs,
   isRunLive,
+  toolArgSummary,
   tryParseJson,
 } from '../client/run-utils.js';
 import type {
@@ -124,6 +125,74 @@ function eventDecision(event: VizEvent): string {
   return '';
 }
 
+export interface GpuEventCardCopy {
+  title: string;
+  meta: string;
+  body: string;
+  footer: string;
+  decision: string;
+}
+
+function resultFacts(result: unknown): string {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
+  const value = result as Record<string, unknown>;
+  const facts = [
+    typeof value['ok'] === 'boolean' ? `ok=${value['ok']}` : '',
+    typeof value['exitCode'] === 'number' ? `exit=${value['exitCode']}` : '',
+    typeof value['status'] === 'number' ? `status=${value['status']}` : '',
+    value['recorded'] === true ? 'recorded' : '',
+  ];
+  return facts.filter(Boolean).join(' · ');
+}
+
+export function gpuEventCardCopy(event: VizEvent): GpuEventCardCopy {
+  const title =
+    event.kind === 'llm'
+      ? event.role ?? 'llm'
+      : event.kind === 'tool'
+        ? event.name ?? 'tool'
+        : event.kind === 'skill'
+          ? event.op ?? 'skill'
+          : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
+  const meta = [
+    event.actor?.name ? `L${event.actor.tier ?? '?'} ${event.actor.name}` : '',
+    event.child?.name ? `→ ${event.child.name}` : '',
+    event.subject ?? '',
+    event.branchId ? `⑂ ${event.branchId.slice(0, 6)}` : '',
+  ].filter(Boolean).join(' · ');
+  let body = event.error ?? event.reasoning ?? '';
+  if (event.kind === 'tool' && !event.error) {
+    body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
+  } else if (event.kind === 'cache') {
+    body = [scalar(event.outcome), event.reasoning].filter(Boolean).join(' · ');
+  } else if (event.kind === 'registry' && !body) {
+    body = [
+      event.snapshot?.name ?? event.name,
+      event.snapshot?.description,
+    ].filter(Boolean).join(' · ');
+  }
+  const time = Number.isFinite(event.ts)
+    ? new Date(event.ts).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+    : '';
+  const footer =
+    event.kind === 'llm'
+      ? [event.model, fmtMs(event.durationMs), fmtCost(event.costUsd), time].filter(Boolean).join(' · ')
+      : event.kind === 'tool'
+        ? [fmtMs(event.durationMs), time].filter(Boolean).join(' · ')
+        : event.kind === 'trust'
+          ? [`✓${scalar(event['successes'], '0')}/✗${scalar(event['failures'], '0')}`, time].filter(Boolean).join(' · ')
+          : event.kind === 'skill'
+            ? [`${event.l1Name ?? '?'}/${event.skillId ?? '?'}`, time].filter(Boolean).join(' · ')
+            : event.kind === 'registry'
+              ? [`v${event.snapshot?.version ?? scalar(event.version, '?')}`, time].filter(Boolean).join(' · ')
+              : [event.model, time].filter(Boolean).join(' · ');
+  return { title, meta, body, footer, decision: eventDecision(event) };
+}
+
 function nowDescription(
   t: GpuRenderSnapshot['t'],
   event: VizEvent
@@ -156,6 +225,7 @@ export class GpuRenderer {
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
+  private readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
@@ -165,7 +235,11 @@ export class GpuRenderer {
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
-    this.snapshot.onScroll(this.snapshot.state.view, event.deltaY);
+    const view = this.snapshot.state.view;
+    const current = this.snapshot.state.scrollY[view];
+    const maximum = this.scrollMax[view] ?? Number.POSITIVE_INFINITY;
+    const next = Math.max(0, Math.min(maximum, current + event.deltaY));
+    this.snapshot.onScroll(view, next - current);
   };
 
   async init(host: HTMLElement) {
@@ -226,6 +300,7 @@ export class GpuRenderer {
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
+    this.scrollMax.runs = 0;
 
     const width = this.app.screen.width;
     const height = this.app.screen.height;
@@ -659,10 +734,17 @@ export class GpuRenderer {
 
     const listY = controlsBottom + 7;
     const listHeight = height - listY - GPU_LAYOUT.gap;
+    const listMask = new Graphics();
+    listMask.rect(leftX + 10, listY, leftWidth - 20, listHeight).fill(0xffffff);
+    this.root.addChild(listMask);
+    const listLayer = new Container();
+    listLayer.mask = listMask;
+    this.root.addChild(listLayer);
     const events = filterEvents(run.events, snapshot.state.runFilters)
       .filter((event) => event.kind !== 'llm-start' || !completed.has(String(event.llmEventId)))
       .reverse();
-    const rowHeight = 70;
+    const rowHeight = 80;
+    this.scrollMax.runs = Math.max(0, events.length * rowHeight - listHeight);
     const scrollY = snapshot.state.scrollY.runs;
     const start = Math.max(0, Math.floor(scrollY / rowHeight));
     const count = Math.ceil(listHeight / rowHeight) + 2;
@@ -672,7 +754,7 @@ export class GpuRenderer {
       if (y > listY + listHeight || y + rowHeight < listY) return;
       const selected = snapshot.state.selectedEventId === event.id;
       this.panel(
-        this.root,
+        listLayer,
         leftX + 14,
         y,
         leftWidth - 28,
@@ -680,43 +762,40 @@ export class GpuRenderer {
         selected ? 0x182b49 : GPU_COLORS.panelRaised,
         selected ? GPU_COLORS.primary : eventAccent(event)
       );
-      const eventLabel =
-        event.kind === 'llm'
-          ? event.role ?? 'llm'
-          : event.kind === 'tool'
-            ? event.name ?? 'tool'
-            : event.kind === 'skill'
-              ? event.op ?? 'skill'
-              : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
-      this.text(this.root, eventLabel, leftX + 25, y + 9, {
+      const copy = gpuEventCardCopy(event);
+      this.text(listLayer, truncate(copy.title, 22), leftX + 25, y + 8, {
         size: 11,
         weight: '700',
         color: eventAccent(event),
       });
-      const decision = eventDecision(event);
-      if (decision) {
-        this.text(this.root, decision, leftX + leftWidth - 135, y + 9, {
+      if (copy.meta) {
+        this.text(listLayer, truncate(copy.meta, 68), leftX + 155, y + 9, {
+          size: 9,
+          color: GPU_COLORS.muted,
+        });
+      }
+      if (copy.decision) {
+        this.text(listLayer, copy.decision, leftX + leftWidth - 135, y + 8, {
           size: 10,
-          color: decision.startsWith('✕') || decision.startsWith('↑')
+          color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
             ? GPU_COLORS.warning
             : GPU_COLORS.success,
           weight: '700',
         });
       }
       this.text(
-        this.root,
-        truncate(
-          event.error ??
-            event.reasoning ??
-            `${event.model ?? ''} ${event.durationMs ? `· ${fmtMs(event.durationMs)}` : ''}`,
-          150
-        ),
+        listLayer,
+        truncate(copy.body, 180),
         leftX + 25,
-        y + 29,
+        y + 31,
         { size: 10, color: GPU_COLORS.muted, width: leftWidth - 54 }
       );
+      this.text(listLayer, truncate(copy.footer, 110), leftX + 25, y + 56, {
+        size: 9,
+        color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
+      });
       this.button(
-        this.root,
+        listLayer,
         `event.${event.id}`,
         'button',
         '',

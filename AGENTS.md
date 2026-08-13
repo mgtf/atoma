@@ -1625,7 +1625,13 @@ re-exports all the historical names so old imports keep working.
   licence to grow the initial path.
   Runs preserves the audited semantics: 1s delta polling, 2s index polling,
   the 12-minute abandonment predicate, paired llm-start events, newest-first
-  timeline, exact tool↔LLM correlation and bounded visible event rows. Burn-in
+  timeline, exact tool↔LLM correlation and bounded visible event rows. The
+  GPU timeline has an explicit rectangular mask and a content-length scroll
+  clamp: without both, a partially scrolled first card rendered underneath
+  the role/branch controls and a short filtered list overscrolled into blank
+  space. `gpuEventCardCopy` is the pure one-definition mapping that keeps each
+  card's actor/child/branch, tool args/result facts, model/cost/duration,
+  counters and timestamp visible; tests pin tool and LLM directions. Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five
   views, requires two canvases and a non-empty scene, then proves both WebGPU
