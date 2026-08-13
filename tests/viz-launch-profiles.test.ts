@@ -53,6 +53,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const gpuApp = readFileSync('src/viz/client-gl/GpuApp.tsx', 'utf8');
   const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
+  const threeBackdrop = readFileSync('src/viz/client-gl/ThreeBackdrop.tsx', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
   const vite = readFileSync('vite.config.ts', 'utf8');
@@ -129,6 +130,11 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/animateEnteringFilterSpace/);
     expect(gpuRenderer).toMatch(/exitingRoleFilters/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
+    expect(gpuRenderer).toMatch(/private navButton\(/);
+    expect(gpuRenderer).toMatch(/private eventCard\(/);
+    expect(gpuRenderer).toMatch(/drawViewTransition/);
+    expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
+    expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
     expect(gpuRenderer).toMatch(/row\.refusals/);
     expect(gpuRenderer).toMatch(/row\.compileErrors/);

@@ -14,6 +14,9 @@
 - GPU filter controls provide animated neutral, hover, pressed and active
   states, staggered entrance, fragment dissolution and spring-like layout
   transitions that preserve occupied space until exit animations complete.
+- The full-GL shell adds an animated GLSL aurora/grid field, GPU sweep
+  transitions between views, energy-state top navigation, and event cards with
+  depth rails, scanlines, hover lift, pressed compression and selected pulses.
 - The visualizer has a Vite HMR development path and a compiled `viz:serve`
   release path; release smoke verifies its index, hashed asset and Burn-in API.
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider

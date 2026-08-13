@@ -1653,6 +1653,13 @@ re-exports all the historical names so old imports keep working.
   mismatch. The imperative Pixi class self-invalidates HMR to avoid old
   instances calling newly-added prototype methods, and `GpuErrorBoundary`
   provides a visible reload path instead of a blank canvas.
+  The visual layer stays renderer-native: the R3F backdrop runs a four-octave
+  GLSL aurora/grid/star field; top navigation has energy rails and hover/press
+  sparks; view changes use a GPU beam sweep; event cards add depth rails,
+  scanlines, hover lift, pressed compression and selected pulses. None of
+  these effects adds DOM nodes. A Chromium/SwiftShader acceptance sample with
+  the effects active measured 16.74ms mean / 17.30ms P95 over 120 frames
+  (~60fps); this is the baseline before adding further continuous effects.
   Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five

@@ -245,6 +245,15 @@ export class GpuRenderer {
   private previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
+  private readonly seenAnimatedControls = new Set<string>();
+  private previousView: ViewName | null = null;
+  private activeViewTransition: {
+    from: ViewName;
+    to: ViewName;
+    startedAt: number;
+  } | null = null;
+  private previousEventIds = new Set<string>();
+  private currentEventIds = new Set<string>();
   private metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
@@ -325,6 +334,7 @@ export class GpuRenderer {
     this.metrics.runCollapseOffset = 0;
     this.currentFilterBounds = new Map();
     this.handledExitIds = new Set();
+    this.currentEventIds = new Set();
     this.scrollMax.runs = 0;
 
     const width = this.app.screen.width;
@@ -361,7 +371,17 @@ export class GpuRenderer {
     }
     this.drawOverlays(snapshot, width, height);
     this.drawRemovedFilterEffects();
+    if (this.previousView && this.previousView !== snapshot.state.view) {
+      this.activeViewTransition = {
+        from: this.previousView,
+        to: snapshot.state.view,
+        startedAt: performance.now(),
+      };
+    }
+    this.previousView = snapshot.state.view;
+    this.drawViewTransition(width, height);
     this.previousFilterBounds = this.currentFilterBounds;
+    this.previousEventIds = this.currentEventIds;
     this.metrics.objectCount = this.countObjects(this.root);
   }
 
@@ -643,6 +663,240 @@ export class GpuRenderer {
     return container;
   }
 
+  private navButton(
+    parent: Container,
+    id: string,
+    label: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    active: boolean,
+    onActivate: (id: string) => void
+  ) {
+    const firstAppearance = !this.seenAnimatedControls.has(id);
+    this.seenAnimatedControls.add(id);
+    const container = new Container();
+    container.position.set(x, y);
+    container.eventMode = 'static';
+    container.cursor = 'pointer';
+    container.hitArea = new Rectangle(0, 0, width, height);
+
+    const glow = new Graphics();
+    glow.roundRect(-4, -3, width + 8, height + 6, 11);
+    glow.stroke({ color: GPU_COLORS.primary, width: 2.5, alpha: 0.85 });
+    glow.alpha = active ? 0.28 : 0;
+    container.addChild(glow);
+
+    const base = new Graphics();
+    base.roundRect(0, 0, width, height, 8);
+    base.fill({ color: active ? 0x183259 : 0x111b2c, alpha: 0.9 });
+    base.stroke({
+      color: active ? GPU_COLORS.primary : 0x2d3d59,
+      width: active ? 1.6 : 1,
+    });
+    container.addChild(base);
+
+    const scanline = new Graphics();
+    scanline.rect(0, 3, 2, height - 6).fill({ color: 0xffffff, alpha: 0.7 });
+    scanline.alpha = active ? 0.12 : 0.025;
+    container.addChild(scanline);
+
+    const underline = new Graphics();
+    underline.roundRect(0, 0, Math.max(12, width - 18), 2.2, 1.1);
+    underline.fill(GPU_COLORS.primary);
+    underline.position.set(9, height - 4);
+    underline.alpha = active ? 0.9 : 0;
+    container.addChild(underline);
+
+    const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
+      size: 11,
+      color: active ? GPU_COLORS.text : 0xa9b5ca,
+      weight: active ? '700' : '600',
+    });
+    labelText.anchor.x = 0.5;
+
+    const sparks = Array.from({ length: 3 }, (_, index) => {
+      const spark = new Graphics();
+      spark.circle(0, 0, 1.2 - index * 0.18).fill(index === 1 ? 0xffffff : GPU_COLORS.primary);
+      spark.alpha = active ? 0.5 : 0;
+      container.addChild(spark);
+      return spark;
+    });
+
+    let hovered = false;
+    let pressed = false;
+    let elapsed = firstAppearance ? -Math.max(0, x - 112) * 0.35 : performance.now();
+    container.alpha = firstAppearance ? 0 : 1;
+    let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.max(0, Math.min(1, elapsed / 280));
+      const easedEntrance = 1 - (1 - entrance) ** 3;
+      const targetScale = pressed ? 0.95 : hovered ? 1.045 : 1;
+      const scale = easedEntrance * targetScale;
+      container.alpha = easedEntrance;
+      container.scale.set(scale);
+      container.position.set(
+        x + width * (1 - scale) / 2,
+        y + height * (1 - scale) / 2 + (pressed ? 1.5 : hovered ? -1 : 0)
+      );
+      const pulse = 0.5 + Math.sin(elapsed / 155) * 0.5;
+      glow.alpha = active
+        ? 0.18 + pulse * 0.22
+        : hovered
+          ? 0.1 + pulse * 0.18
+          : 0;
+      scanline.x = 4 + (Math.max(0, elapsed) * (hovered ? 0.16 : 0.05)) % Math.max(8, width - 10);
+      scanline.alpha = active ? 0.11 + pulse * 0.08 : hovered ? 0.09 : 0.02;
+      underline.alpha = active ? 0.62 + pulse * 0.35 : hovered ? 0.42 : 0;
+      underline.scale.x = active ? 0.88 + pulse * 0.12 : hovered ? 0.65 + pulse * 0.15 : 0.2;
+      base.tint = pressed ? 0xafd1ff : hovered ? 0xd7e8ff : 0xffffff;
+      const nextLabelColor = pressed || hovered || active ? GPU_COLORS.text : 0xa9b5ca;
+      if (nextLabelColor !== currentLabelColor) {
+        currentLabelColor = nextLabelColor;
+        labelText.style.fill = nextLabelColor;
+      }
+      sparks.forEach((spark, index) => {
+        const phase = elapsed / 350 + index * 2.1;
+        spark.position.set(10 + (Math.sin(phase) * 0.5 + 0.5) * (width - 20), height - 3 - Math.abs(Math.cos(phase)) * 4);
+        spark.alpha = active ? 0.25 + pulse * 0.5 : hovered ? 0.18 + pulse * 0.3 : 0;
+      });
+    };
+    this.addTicker(animate);
+
+    container.on('pointerover', () => { hovered = true; });
+    container.on('pointerout', () => {
+      hovered = false;
+      pressed = false;
+    });
+    container.on('pointerdown', () => { pressed = true; });
+    container.on('pointerup', () => { pressed = false; });
+    container.on('pointerupoutside', () => { pressed = false; });
+    container.on('pointertap', () => onActivate(id));
+    parent.addChild(container);
+    this.metrics.hitTargets.push({ id, role: 'tab', label, x, y, width, height });
+    return container;
+  }
+
+  private eventCard(
+    parent: Container,
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    accent: number,
+    selected: boolean,
+    onActivate: (id: string) => void
+  ) {
+    const wasVisible = this.previousEventIds.has(id);
+    const entranceDelay = this.currentEventIds.size * 18;
+    this.currentEventIds.add(id);
+    const container = new Container();
+    container.position.set(x, y);
+    container.eventMode = 'static';
+    container.cursor = 'pointer';
+    container.hitArea = new Rectangle(0, 0, width, height);
+
+    const aura = new Graphics();
+    aura.roundRect(-3, -3, width + 6, height + 6, 10);
+    aura.stroke({ color: accent, width: 2.4, alpha: 0.72 });
+    aura.alpha = selected ? 0.28 : 0;
+    container.addChild(aura);
+
+    const base = new Graphics();
+    base.roundRect(0, 0, width, height, 8);
+    base.fill({ color: selected ? 0x172a49 : 0x111a2b, alpha: 0.9 });
+    base.stroke({ color: selected ? GPU_COLORS.primary : accent, width: selected ? 1.7 : 1.05, alpha: 0.9 });
+    container.addChild(base);
+
+    const depth = new Graphics();
+    depth.roundRect(4, 4, width - 8, height - 8, 6);
+    depth.stroke({ color: 0x9cb8e8, width: 0.65, alpha: selected ? 0.22 : 0.08 });
+    container.addChild(depth);
+
+    const rail = new Graphics();
+    rail.roundRect(0, 7, 2.5, height - 14, 1.2).fill(accent);
+    rail.alpha = 0.72;
+    container.addChild(rail);
+
+    const scan = new Graphics();
+    scan.rect(5, 0, width - 10, 1.4).fill({ color: accent, alpha: 0.65 });
+    scan.alpha = selected ? 0.15 : 0.035;
+    container.addChild(scan);
+
+    const content = new Container();
+    container.addChild(content);
+
+    const sparks = Array.from({ length: 3 }, (_, index) => {
+      const spark = new Graphics();
+      spark.circle(0, 0, 1.25 - index * 0.15).fill(index === 1 ? 0xffffff : accent);
+      spark.alpha = selected ? 0.4 : 0;
+      container.addChild(spark);
+      return spark;
+    });
+
+    let hovered = false;
+    let pressed = false;
+    let elapsed = wasVisible ? performance.now() : -entranceDelay;
+    container.alpha = wasVisible ? 1 : 0;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.max(0, Math.min(1, elapsed / 300));
+      const easedEntrance = 1 - (1 - entrance) ** 3;
+      const targetScale = pressed ? 0.992 : hovered ? 1.008 : 1;
+      const scale = easedEntrance * targetScale;
+      container.alpha = easedEntrance;
+      container.scale.set(scale);
+      container.position.set(
+        x + width * (1 - scale) / 2,
+        y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
+      );
+      const pulse = 0.5 + Math.sin(elapsed / 190) * 0.5;
+      aura.alpha = selected
+        ? 0.16 + pulse * 0.22
+        : hovered
+          ? 0.08 + pulse * 0.15
+          : 0;
+      base.tint = pressed ? 0xb8d8ff : hovered ? 0xd8e9ff : 0xffffff;
+      depth.alpha = hovered || selected ? 1 : 0.65;
+      rail.alpha = selected ? 0.72 + pulse * 0.25 : hovered ? 0.9 : 0.62;
+      scan.y = 5 + (Math.max(0, elapsed) * (hovered ? 0.075 : 0.025)) % Math.max(8, height - 10);
+      scan.alpha = selected ? 0.08 + pulse * 0.12 : hovered ? 0.09 : 0.025;
+      sparks.forEach((spark, index) => {
+        const phase = elapsed / 460 + index * 2.1;
+        spark.position.set(
+          8 + (Math.sin(phase) * 0.5 + 0.5) * (width - 16),
+          5 + (Math.cos(phase * 1.4) * 0.5 + 0.5) * (height - 10)
+        );
+        spark.alpha = selected ? 0.18 + pulse * 0.42 : hovered ? 0.12 + pulse * 0.28 : 0;
+      });
+    };
+    this.addTicker(animate);
+
+    container.on('pointerover', () => { hovered = true; });
+    container.on('pointerout', () => {
+      hovered = false;
+      pressed = false;
+    });
+    container.on('pointerdown', () => { pressed = true; });
+    container.on('pointerup', () => { pressed = false; });
+    container.on('pointerupoutside', () => { pressed = false; });
+    container.on('pointertap', () => onActivate(`event.${id}`));
+    parent.addChild(container);
+    this.metrics.hitTargets.push({
+      id: `event.${id}`,
+      role: 'button',
+      label: '',
+      x,
+      y,
+      width,
+      height,
+    });
+    return content;
+  }
+
   private drawExitingFilterButtons(
     targets: FilterVisualTarget[],
     collapsingLayer: Container,
@@ -853,6 +1107,90 @@ export class GpuRenderer {
     }
   }
 
+  private drawViewTransition(width: number, height: number) {
+    const transition = this.activeViewTransition;
+    if (!transition) return;
+    const initialElapsed = performance.now() - transition.startedAt;
+    if (initialElapsed >= 560) {
+      this.activeViewTransition = null;
+      return;
+    }
+    const layer = new Container();
+    layer.eventMode = 'none';
+    const bars = Array.from({ length: 16 }, (_, index) => {
+      const bar = new Graphics();
+      const barWidth = 42;
+      bar.poly([
+        0, 0,
+        barWidth, 0,
+        barWidth - 80, height,
+        -80, height,
+      ]);
+      bar.fill({
+        color:
+          index % 3 === 0
+            ? GPU_COLORS.primary
+            : index % 3 === 1
+              ? GPU_COLORS.tiers[3]
+              : GPU_COLORS.cyan,
+        alpha: 0.075,
+      });
+      layer.addChild(bar);
+      return bar;
+    });
+    const beam = new Graphics();
+    beam.rect(0, 0, 3, height).fill({ color: 0xd9ecff, alpha: 0.9 });
+    layer.addChild(beam);
+    const particles = Array.from({ length: 22 }, (_, index) => {
+      const particle = new Graphics();
+      particle.circle(0, 0, 1 + index % 3 * 0.4).fill(
+        index % 2 ? GPU_COLORS.primary : GPU_COLORS.cyan
+      );
+      layer.addChild(particle);
+      return particle;
+    });
+    const label = this.text(
+      layer,
+      transition.to.toUpperCase(),
+      0,
+      height * 0.18,
+      { size: 11, color: 0xd9ecff, weight: '700' }
+    );
+    this.root.addChild(layer);
+
+    let elapsed = initialElapsed;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const progress = Math.min(1, elapsed / 560);
+      const eased = 1 - (1 - progress) ** 3;
+      const sweepX = -width * 0.42 + eased * width * 1.55;
+      bars.forEach((bar, index) => {
+        bar.position.set(sweepX + index * 34, 0);
+        bar.alpha = Math.sin(Math.PI * progress) * (0.34 - index * 0.008);
+      });
+      beam.position.x = sweepX + 15 * 34;
+      beam.alpha = Math.sin(Math.PI * progress) * 0.65;
+      label.position.set(beam.x - 84, height * 0.18);
+      label.alpha = Math.sin(Math.PI * progress) * 0.75;
+      particles.forEach((particle, index) => {
+        const phase = index * 1.71 + elapsed / 190;
+        particle.position.set(
+          beam.x - 20 - Math.abs(Math.sin(phase)) * 110,
+          index / particles.length * height + Math.sin(phase * 1.4) * 24
+        );
+        particle.alpha = Math.sin(Math.PI * progress) * (0.2 + index % 3 * 0.12);
+      });
+      if (progress >= 1) {
+        this.activeViewTransition = null;
+        this.app.ticker.remove(animate);
+        this.tickerCallbacks.delete(animate);
+        layer.removeFromParent();
+        layer.destroy({ children: true });
+      }
+    };
+    this.addTicker(animate);
+  }
+
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
     this.panel(
       this.root,
@@ -875,19 +1213,16 @@ export class GpuRenderer {
     let x = 112;
     for (const view of views) {
       const label = snapshot.t(`nav.${view}`).toUpperCase();
-      this.button(
+      this.navButton(
         this.root,
         `nav.${view}`,
-        'tab',
         label,
         x,
         10,
         Math.max(66, label.length * 7 + 22),
         32,
         snapshot.state.view === view,
-        snapshot.onActivate,
-        GPU_COLORS.primary,
-        true
+        snapshot.onActivate
       );
       x += Math.max(66, label.length * 7 + 22) + 6;
     }
@@ -1204,29 +1539,34 @@ export class GpuRenderer {
       const y = listY + index * rowHeight - scrollY;
       if (y > listY + listHeight || y + rowHeight < listY) return;
       const selected = snapshot.state.selectedEventId === event.id;
-      this.panel(
+      const cardX = leftX + 14;
+      const cardWidth = leftWidth - 28;
+      const cardHeight = rowHeight - 6;
+      const cardContent = this.eventCard(
         listLayer,
-        leftX + 14,
+        event.id,
+        cardX,
         y,
-        leftWidth - 28,
-        rowHeight - 6,
-        selected ? 0x182b49 : GPU_COLORS.panelRaised,
-        selected ? GPU_COLORS.primary : eventAccent(event)
+        cardWidth,
+        cardHeight,
+        eventAccent(event),
+        selected,
+        snapshot.onActivate
       );
       const copy = gpuEventCardCopy(event);
-      this.text(listLayer, truncate(copy.title, 30), leftX + 25, y + 8, {
+      this.text(cardContent, truncate(copy.title, 30), 11, 8, {
         size: 11,
         weight: '700',
         color: eventAccent(event),
       });
       if (copy.meta) {
-        this.text(listLayer, truncate(copy.meta, 50), leftX + 220, y + 9, {
+        this.text(cardContent, truncate(copy.meta, 50), 206, 9, {
           size: 9,
           color: GPU_COLORS.muted,
         });
       }
       if (copy.decision) {
-        this.text(listLayer, copy.decision, leftX + leftWidth - 135, y + 8, {
+        this.text(cardContent, copy.decision, cardWidth - 149, 8, {
           size: 10,
           color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
             ? GPU_COLORS.warning
@@ -1235,29 +1575,16 @@ export class GpuRenderer {
         });
       }
       this.text(
-        listLayer,
+        cardContent,
         truncate(copy.body, 180),
-        leftX + 25,
-        y + 31,
-        { size: 10, color: GPU_COLORS.muted, width: leftWidth - 54 }
+        11,
+        31,
+        { size: 10, color: GPU_COLORS.muted, width: cardWidth - 26 }
       );
-      this.text(listLayer, truncate(copy.footer, 110), leftX + 25, y + 56, {
+      this.text(cardContent, truncate(copy.footer, 110), 11, 56, {
         size: 9,
         color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       });
-      this.button(
-        listLayer,
-        `event.${event.id}`,
-        'button',
-        '',
-        leftX + 14,
-        y,
-        leftWidth - 28,
-        rowHeight - 6,
-        selected,
-        snapshot.onActivate,
-        eventAccent(event)
-      ).alpha = 0.001;
     });
 
     if (twoPane) {
