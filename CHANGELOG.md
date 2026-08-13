@@ -6,6 +6,8 @@
 
 - The Burn-in visualizer displays compiler refusals and transport errors in
   both family summaries and individual rows; legacy CSV rows still default to zero.
+- Burn-in/Skills network errors, empty states and raw-JSON toggles no longer
+  leak French literals into the default English visualizer locale.
 
 ## v0.1.3 — 2026-08-13
 

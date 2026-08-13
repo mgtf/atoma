@@ -4084,9 +4084,16 @@ second is the kind of thing that gets acted on:
   where `h()` expects a CHILD is rendered text, whatever language it is in.
   That found 14 more (10 English, 4 French) and they are fixed. Residue it
   still does NOT catch, stated so nobody reads silence as coverage:
-  one-word labels, template literals, and `innerHTML` assignments. This is a
-  floor, not proof. Do not restore the word "fully" without a checker that
-  earns it.
+  one-word labels, template literals, and `innerHTML` assignments. A v0.1.3
+  follow-up then hit that exact residue: fourteen Burn-in/Skills/registry
+  callsites still rendered `injoignable`, `indisponible`, `Aucune mesure`,
+  `— aucun/aucune —`, `Outils`, `Raison`, `Historique` or `courant` outside
+  the French catalog. They now use `t()`, and the French-literal detector scans
+  strings up to 240 characters plus those words,
+  so the demonstrated innerHTML paths are covered. Arbitrary English
+  innerHTML/template text and unknown one-word labels remain outside the
+  structural proof. This is a floor, not proof. Do not restore the word
+  "fully" without a checker that earns it.
   Every label goes through `t('some.key', { vars })` against the catalogs
   at the top of `ui.html`; static chrome uses `data-i18n` /
   `data-i18n-title` / `data-i18n-placeholder`, filled by
@@ -4100,8 +4107,8 @@ second is the kind of thing that gets acted on:
   deliberately ignores navigator.language, so a French browser gets
   English until the user opts in via the header picker (persisted in
   localStorage) or `?lang=fr`. A missing key renders as the key itself —
-  loud and greppable. `fr` ships complete (157 keys, strict parity with
-  `en`) which is what proves the plumbing; add a locale by dropping a
+  loud and greppable. `fr` ships in strict key parity with `en`, which proves
+  the plumbing; add a locale by dropping a
   catalog next to it and it appears in the picker. WATCH OUT: `t` is now
   a global, so a local variable named `t` shadows it — the registry
   render paths were renamed to `type`/`ty`/`tot` for exactly this

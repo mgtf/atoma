@@ -153,12 +153,12 @@ describe('no French leaks into the English source', () => {
     expect(frEnd).toBeGreaterThan(frStart);
 
     const FRENCH =
-      /\b(Atome|Lien|Compteurs|vide|Aucune?|D\u00e9tails|R\u00e9sultat|Co\u00fbt|Dur\u00e9e|Appels|Mod\u00e8le|R\u00e9ponse|Requ\u00eate|Erreur|R\u00e9sum\u00e9|\u00c9tape|Cr\u00e9\u00e9|Raison|Chargement|Recherche|Filtrer|Afficher|Masquer|Fermer)\b/;
+      /\b(Atome|Lien|Compteurs|Outils|Historique|courant|vide|Aucune?|aucun|D\u00e9tails|R\u00e9sultat|Co\u00fbt|Dur\u00e9e|Appels|Mod\u00e8le|R\u00e9ponse|Requ\u00eate|Erreur|R\u00e9sum\u00e9|\u00c9tape|Cr\u00e9\u00e9|Raison|Chargement|Recherche|Filtrer|Afficher|Masquer|Fermer|injoignable|indisponible)\b/i;
     const offenders: string[] = [];
     lines.forEach((line, i) => {
       if (i >= frStart && i <= frEnd) return; // the fr catalog is meant to be French
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) return; // comments may discuss it
-      for (const m of line.matchAll(/['`]([^'`\n]{2,80})['`]/g)) {
+      for (const m of line.matchAll(/['`]([^'`\n]{2,240})['`]/g)) {
         if (FRENCH.test(m[1]!)) offenders.push(`ui.html:${i + 1}  ${JSON.stringify(m[1])}`);
       }
     });

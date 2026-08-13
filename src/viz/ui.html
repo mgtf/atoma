@@ -333,6 +333,10 @@ const I18N_CATALOGS = {
     'burnin.lastRun': 'last run:',
     'registry.currentVersion': 'Current version',
     'common.toggle': '▸ show / hide',
+    'common.toggleRawJson': '▸ show / hide raw JSON',
+    'common.tools': 'Tools',
+    'common.reason': 'Reason',
+    'common.current': 'current',
     'common.link': 'Link',
     'registry.atom': 'Atom',
     'skill.title': 'Skill',
@@ -538,11 +542,15 @@ const I18N_CATALOGS = {
     'skills.legendHint': '— click a skill to see its full body',
     'skills.totalSuccess': 'Total successes',
     'skills.totalFailure': 'Total failures',
+    'skills.endpointUnavailable': 'Skills endpoint unavailable.',
+    'skills.historyInRun': 'History in this run ({{count}})',
 
     'burnin.runsAxis': 'runs (chronological order = experience) →',
     'burnin.delivered': '{{count}} delivered · ',
     'burnin.compileErrors': 'compile error×{{count}}',
     'burnin.refusals': 'refusal×{{count}}',
+    'burnin.unavailable': 'Burn-in API unavailable.',
+    'burnin.empty': 'No measurements — run <code>npm run burnin</code> (expected CSV: {{path}})',
   },
   fr: {
     'lang.name': 'Français',
@@ -562,6 +570,10 @@ const I18N_CATALOGS = {
     'burnin.lastRun': 'dernier run :',
     'registry.currentVersion': 'Version actuelle',
     'common.toggle': '▸ afficher / masquer',
+    'common.toggleRawJson': '▸ afficher / masquer le JSON brut',
+    'common.tools': 'Outils',
+    'common.reason': 'Raison',
+    'common.current': 'actuel',
     'common.link': 'Lien',
     'registry.atom': 'Atome',
     'skill.title': 'Skill',
@@ -768,11 +780,15 @@ const I18N_CATALOGS = {
     'skills.legendHint': '— clique sur une skill pour voir son corps complet',
     'skills.totalSuccess': 'Total succès',
     'skills.totalFailure': 'Total échecs',
+    'skills.endpointUnavailable': 'Endpoint skills indisponible.',
+    'skills.historyInRun': 'Historique dans ce run ({{count}})',
 
     'burnin.runsAxis': 'runs (ordre chronologique = expérience) →',
     'burnin.delivered': '{{count}} livrés · ',
     'burnin.compileErrors': 'erreur compilation×{{count}}',
     'burnin.refusals': 'refus compilation×{{count}}',
+    'burnin.unavailable': 'API burn-in injoignable.',
+    'burnin.empty': 'Aucune mesure — lance <code>npm run burnin</code> (CSV attendu : {{path}})',
   },
 };
 
@@ -2351,10 +2367,10 @@ function renderAtomDetail(entry) {
       h('div', { class: 'k' }, t('registry.createdBy')), h('div', { class: 'v' }, `${s.createdBy}  ·  ${s.createdAt}`),
       h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `✓ ${s.successes}  ·  ✗ ${s.failures}`),
       h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(s.params)),
-      h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+      h('div', { class: 'k' }, t('common.tools')), h('div', { class: 'v' },
         (s.tools && s.tools.length)
           ? h('div', { class: 'tools-list' }, s.tools.map((t) => h('span', { class: 'chip muted' }, t)))
-          : h('span', { class: 'meta' }, '— aucun —')),
+          : h('span', { class: 'meta' }, t('common.none'))),
     ]),
   ]));
 
@@ -2392,7 +2408,7 @@ function renderAtomDetail(entry) {
         return wrap;
       });
     el.appendChild(h('div', { class: 'section' }, [
-      h('h3', {}, `Historique dans ce run (${entry.events.length})`),
+      h('h3', {}, t('skills.historyInRun', { count: entry.events.length })),
       h('div', { class: 'history-list' }, rows),
     ]));
   }
@@ -2411,7 +2427,7 @@ function renderLlmDetail(el, ev) {
         `in=${ev.usage.inputTokens}  out=${ev.usage.outputTokens}  cacheRead=${ev.usage.cacheReadInputTokens}  cacheCreate=${ev.usage.cacheCreationInputTokens}`),
       h('div', { class: 'k' }, t('summary.cost')), h('div', { class: 'v' }, fmtCost(ev.costUsd)),
       h('div', { class: 'k' }, t('ev.stopReason')), h('div', { class: 'v' }, ev.stopReason ?? '—'),
-      ...(ev.error ? [h('div', { class: 'k' }, 'Erreur'), h('div', { class: 'v' }, ev.error)] : []),
+      ...(ev.error ? [h('div', { class: 'k' }, t('event.error')), h('div', { class: 'v' }, ev.error)] : []),
     ]),
   ]);
   el.appendChild(header);
@@ -2569,7 +2585,7 @@ function renderStrategyPlanPair(strategy, plan, raw) {
     onclick: () => {
       rawWrap.style.display = rawWrap.style.display === 'none' ? '' : 'none';
     },
-  }, '▸ afficher / masquer le JSON brut');
+  }, t('common.toggleRawJson'));
   wrap.appendChild(toggle);
   wrap.appendChild(rawWrap);
 
@@ -2585,7 +2601,7 @@ function renderRegistryDetail(el, ev) {
       ...(ev.from ? [h('div', { class: 'k' }, 'Origine'), h('div', { class: 'v' }, ev.from)] : []),
       ...(ev.by ? [h('div', { class: 'k' }, 'Par'), h('div', { class: 'v' }, ev.by)] : []),
       ...(ev.version != null ? [h('div', { class: 'k' }, 'Version'), h('div', { class: 'v' }, 'v' + ev.version)] : []),
-      ...(ev.reason ? [h('div', { class: 'k' }, 'Raison'), h('div', { class: 'v' }, ev.reason)] : []),
+      ...(ev.reason ? [h('div', { class: 'k' }, t('common.reason')), h('div', { class: 'v' }, ev.reason)] : []),
     ]),
   ]);
   el.appendChild(head);
@@ -2818,15 +2834,16 @@ async function loadBurnin() {
     const r = await fetch('/api/burnin');
     payload = await r.json();
   } catch (e) {
-    $('burninSummary').innerHTML = '<div class="empty">API burnin injoignable.</div>';
+    $('burninSummary').innerHTML = '<div class="empty">' + t('burnin.unavailable') + '</div>';
     return;
   }
   const rows = payload.rows || [];
   state.burninRows = rows;
   if (rows.length === 0) {
     $('burninSummary').innerHTML =
-      '<div class="empty">Aucune mesure — lance un batch avec <code>npm run burnin</code> (CSV attendu : ' +
-      payload.csvPath + ')</div>';
+      '<div class="empty">' +
+      t('burnin.empty', { path: escapeHtml(payload.csvPath) }) +
+      '</div>';
     $('burninChart').innerHTML = '';
     $('burninRows').innerHTML = '';
     return;
@@ -2976,7 +2993,7 @@ async function loadSkills() {
     return;
   }
   if (!r.ok) {
-    $('skillsLanes').innerHTML = '<div class="empty">Endpoint /api/skills indisponible.</div>';
+    $('skillsLanes').innerHTML = '<div class="empty">' + t('skills.endpointUnavailable') + '</div>';
     return;
   }
   state.skillNamespaces = await r.json();
@@ -3064,7 +3081,7 @@ function renderSkillsLanes() {
     });
     lanes.appendChild(h('div', { class: 'lane l1' }, [
       h('h4', {}, `${ns.l1Name}  (${matching.length}${q && matching.length !== ns.count ? '/' + ns.count : ''})`),
-      h('div', {}, matching.length ? chips : h('span', { class: 'meta' }, '— aucune —')),
+      h('div', {}, matching.length ? chips : h('span', { class: 'meta' }, t('common.none'))),
     ]));
   }
   el.appendChild(lanes);
@@ -3261,10 +3278,10 @@ function renderRegistryAtomDetail(type) {
       h('div', { class: 'k' }, t('registry.createdBy')), h('div', { class: 'v' }, `${type.createdBy}  ·  ${type.createdAt}`),
       h('div', { class: 'k' }, t('registry.successFailure')), h('div', { class: 'v' }, `✓ ${type.successes}  ·  ✗ ${type.failures}`),
       h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(type.params)),
-      h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+      h('div', { class: 'k' }, t('common.tools')), h('div', { class: 'v' },
         (type.tools && type.tools.length)
           ? h('div', { class: 'tools-list' }, type.tools.map((n) => h('span', { class: 'chip muted' }, n)))
-          : h('span', { class: 'meta' }, '— aucun —')),
+          : h('span', { class: 'meta' }, t('common.none'))),
     ]),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
@@ -3272,7 +3289,7 @@ function renderRegistryAtomDetail(type) {
     h('pre', {}, type.description || t('common.empty')),
   ]));
   el.appendChild(h('div', { class: 'section' }, [
-    h('h3', {}, `System prompt (v${type.version} · courant)`),
+    h('h3', {}, `System prompt (v${type.version} · ${t('common.current')})`),
     h('pre', {}, type.systemPrompt || t('common.empty')),
   ]));
 
@@ -3286,12 +3303,12 @@ function renderRegistryAtomDetail(type) {
       const body = h('div', { style: 'display:none; margin-top:8px;' }, [
         h('div', { class: 'kv' }, [
           h('div', { class: 'k' }, t('registry.updatedBy')), h('div', { class: 'v' }, `${h_.modifiedBy}  ·  ${h_.modifiedAt}`),
-          h('div', { class: 'k' }, 'Raison'), h('div', { class: 'v' }, h_.reason ?? '—'),
+          h('div', { class: 'k' }, t('common.reason')), h('div', { class: 'v' }, h_.reason ?? '—'),
           h('div', { class: 'k' }, 'Params'), h('div', { class: 'v' }, JSON.stringify(h_.params)),
-          h('div', { class: 'k' }, 'Outils'), h('div', { class: 'v' },
+          h('div', { class: 'k' }, t('common.tools')), h('div', { class: 'v' },
             (h_.tools && h_.tools.length)
               ? h('div', { class: 'tools-list' }, h_.tools.map((n) => h('span', { class: 'chip muted' }, n)))
-              : h('span', { class: 'meta' }, '— aucun —')),
+              : h('span', { class: 'meta' }, t('common.none'))),
         ]),
         h('h3', { style: 'margin-top:10px;' }, t('ev.systemPrompt')),
         h('pre', {}, h_.systemPrompt || t('common.empty')),
@@ -3341,7 +3358,7 @@ async function fetchAndRenderL1Skills(l1Name, section) {
   if (!r.ok) {
     section.innerHTML = '';
     section.appendChild(h('h3', {}, t('registry.attachedSkills')));
-    section.appendChild(h('div', { class: 'meta' }, '— aucune —'));
+    section.appendChild(h('div', { class: 'meta' }, t('common.none')));
     return;
   }
   const skills = await r.json();
