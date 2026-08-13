@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.1.3 — 2026-08-13
+
 ### Added
 
 - `npm run doctor` provides a quota-free preflight for the configured Node

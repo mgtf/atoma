@@ -114,6 +114,9 @@ downloadable basename, then verified before extraction — v0.1.0 initially
 published its workflow-internal `release/…` path and the first external soak
 caught it. Live results are in `docs/release-soak-v0.1.0.md` and
 `docs/release-acceptance-v0.1.1.md`; v0.1.2 is the worker-packaging correction.
+The v0.1.3 candidate acceptance (verification contracts, Codex compile A/B,
+Puppeteer 25/Node floor and fresh-worker results) is in
+`docs/release-acceptance-v0.1.3.md`.
 
 **`atoma doctor` IS A QUOTA-FREE PREFLIGHT, NOT A PROVIDER HEALTH CALL.**
 `npm run doctor` is the compiled release path; `doctor:dev` is the source path.

@@ -1,6 +1,6 @@
 {
   "name": "atoma",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "description": "Three-tier LLM agent orchestration with persisted types, earned trust, and symmetric supervision",
