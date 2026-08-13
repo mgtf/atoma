@@ -228,7 +228,8 @@ env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   ATOMA_MODEL_L2=codex:gpt-5.4-mini ATOMA_MODEL_L3=codex:gpt-5.6-sol \
   npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
 
-npm run viz                       # replay that run: every call, every cost, every decision
+npm run viz                       # Vite HMR UI on :5173, read-only API on :4111
+npm run viz:serve                 # compiled visualizer after npm run build
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above
 ```
@@ -242,8 +243,9 @@ Confirm that path with `npm run doctor -- --container`. Contributors changing
 source use `npm run build:worker:dev` and `npm run doctor:dev`.
 
 The full source checkout supports every operator, benchmark and development
-command. The compiled archive attached to each GitHub Release is narrower:
-MCP plus its build-run path, installable with production dependencies only.
+command. The compiled archive attached to each GitHub Release includes MCP,
+its build-run path, doctor, and the read-only visualizer (`npm run viz:serve`);
+benchmark and mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
 [`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md).

@@ -114,5 +114,20 @@ export default tseslint.config(
       ...tseslint.configs.disableTypeChecked.rules,
       'no-empty': 'off',
     },
-  }
+  },
+  {
+    // Vite-bundled vanilla browser client. It deliberately remains framework-
+    // free JavaScript, so TypeScript's promise rules have no reliable type
+    // information here; browser globals and Vite's production transform are
+    // the relevant environment.
+    files: ['src/viz/client/**/*.js'],
+    ...tseslint.configs.disableTypeChecked,
+    languageOptions: {
+      globals: globals.browser,
+    },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      'no-empty': 'off',
+    },
+  },
 );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { LAUNCHABLE_PROFILES, findLaunchable } from '../src/run/profiles/index.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 
@@ -54,6 +54,32 @@ describe('launchable profiles are all describable', () => {
   });
 });
 
+describe('viz Vite build contract', () => {
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
+    scripts: Record<string, string>;
+  };
+  const server = readFileSync('src/viz/server.ts', 'utf8');
+  const client = readFileSync('src/viz/client/main.js', 'utf8');
+
+  it('has HMR development and compiled static deployment paths', () => {
+    expect(existsSync('src/viz/client/index.html')).toBe(true);
+    expect(existsSync('src/viz/client/styles.css')).toBe(true);
+    expect(pkg.scripts['viz']).toMatch(/viz-dev/);
+    expect(pkg.scripts['viz:build']).toMatch(/vite build/);
+    expect(pkg.scripts['viz:serve']).toBe('node dist/viz/server.js');
+    expect(pkg.scripts['build']).toMatch(/viz:build/);
+    expect(server).toMatch(/dist\/viz\/client|CLIENT_DIR/);
+  });
+
+  it('uses scalable charting, pagination and explained lifecycle badges', () => {
+    expect(client).toMatch(/from 'echarts\/core'/);
+    expect(client).toMatch(/type:\s*'slider'/);
+    expect(client).toMatch(/pageSize:\s*50/);
+    expect(client).toMatch(/burnin\.metric\.fallbacks/);
+    expect(client).toMatch(/data-tooltip/);
+  });
+});
+
 /**
  * The viz i18n parity rule was purely disciplinary until now: AGENTS.md
  * states en/fr must stay in strict parity, and nothing enforced it. A missing
@@ -61,7 +87,7 @@ describe('launchable profiles are all describable', () => {
  * that pane in that locale.
  */
 describe('viz i18n catalogs stay in parity', () => {
-  const html = readFileSync('src/viz/ui.html', 'utf8');
+  const html = readFileSync('src/viz/client/main.js', 'utf8');
   const lines = html.split('\n');
   const enStart = lines.findIndex((l) => /^ {2}en: \{/.test(l));
   const frStart = lines.findIndex((l) => /^ {2}fr: \{/.test(l));
@@ -99,16 +125,16 @@ describe('viz i18n catalogs stay in parity', () => {
 });
 
 describe('viz burn-in lifecycle visibility', () => {
-  const html = readFileSync('src/viz/ui.html', 'utf8');
+  const html = readFileSync('src/viz/client/main.js', 'utf8');
   const server = readFileSync('src/viz/server.ts', 'utf8');
 
   it('renders compiler refusals and transport errors already present in the API', () => {
     expect(server).toMatch(/refusals:\s*num\(c\[14\]\)\s*\?\?\s*0/);
     expect(server).toMatch(/compileErrors:\s*num\(c\[21\]\)\s*\?\?\s*0/);
-    expect(html).toMatch(/r\.refusals[\s\S]{0,120}burnin\.refusals/);
-    expect(html).toMatch(/r\.compileErrors[\s\S]{0,120}burnin\.compileErrors/);
-    expect(html).toMatch(/f\.refusals[\s\S]{0,120}burnin\.refusals/);
-    expect(html).toMatch(/f\.compileErrors[\s\S]{0,120}burnin\.compileErrors/);
+    expect(html).toContain("add(row.refusals, '⛔', 'burnin.metric.refusals')");
+    expect(html).toContain("add(row.compileErrors, '⚠', 'burnin.metric.compileErrors')");
+    expect(html).toContain('family.refusals += row.refusals || 0');
+    expect(html).toContain('family.compileErrors += row.compileErrors || 0');
   });
 });
 
@@ -118,8 +144,7 @@ describe('viz burn-in lifecycle visibility', () => {
  */
 describe('the generated command quotes the goal', () => {
   it('escapes embedded double quotes', () => {
-    // Mirror of launchCommand() in ui.html — the UI is served verbatim and
-    // cannot be imported, so the rule is pinned here and in the source.
+    // Mirror of launchCommand() in the Vite client.
     const cmd = (script: string, goal: string): string =>
       'npm run ' + script + ' -- "' + goal.trim().replace(/"/g, '\\"') + '"';
     expect(cmd('run:build', 'Build a CLI that prints "hello"')).toBe(
@@ -143,7 +168,7 @@ describe('the generated command quotes the goal', () => {
  * wrong, whatever the surrounding code does.
  */
 describe('no French leaks into the English source', () => {
-  const raw = readFileSync('src/viz/ui.html', 'utf8');
+  const raw = readFileSync('src/viz/client/main.js', 'utf8');
   const lines = raw.split('\n');
 
   it('finds no French literal outside the fr catalog', () => {
@@ -159,7 +184,7 @@ describe('no French leaks into the English source', () => {
       if (i >= frStart && i <= frEnd) return; // the fr catalog is meant to be French
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) return; // comments may discuss it
       for (const m of line.matchAll(/['`]([^'`\n]{2,240})['`]/g)) {
-        if (FRENCH.test(m[1]!)) offenders.push(`ui.html:${i + 1}  ${JSON.stringify(m[1])}`);
+        if (FRENCH.test(m[1]!)) offenders.push(`main.js:${i + 1}  ${JSON.stringify(m[1])}`);
       }
     });
     expect(offenders, `French outside the fr catalog:\n${offenders.join('\n')}`).toEqual([]);
@@ -183,7 +208,7 @@ describe('no French leaks into the English source', () => {
  * — so it is a floor, not proof of full coverage.
  */
 describe('no bare user-facing string in the viz', () => {
-  const lines = readFileSync('src/viz/ui.html', 'utf8').split('\n');
+  const lines = readFileSync('src/viz/client/main.js', 'utf8').split('\n');
 
   it('every multi-word h() child goes through t()', () => {
     const enStart = lines.findIndex((l) => /^ {2}en: \{/.test(l));
@@ -199,7 +224,7 @@ describe('no bare user-facing string in the viz', () => {
         const txt = m[1]!;
         if (/t\(/.test(txt)) continue;
         const words = txt.match(/[A-Za-z][A-Za-z'-]{1,}/g) ?? [];
-        if (words.length >= 2) offenders.push(`ui.html:${i + 1}  ${JSON.stringify(txt)}`);
+        if (words.length >= 2) offenders.push(`main.js:${i + 1}  ${JSON.stringify(txt)}`);
       }
     });
     expect(offenders, `bare strings:\n${offenders.join('\n')}`).toEqual([]);

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { basename, resolve, join } from 'node:path';
+import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
@@ -10,8 +10,9 @@ import { assessShareability, type ShareAssessment } from '../skills/shareability
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
- * `TraceRecorder` plus the static UI bundled alongside (`ui.html`). No
- * framework — just `node:http` — keeps the app dependency list clean.
+ * `TraceRecorder` plus the Vite-built static client bundled under
+ * `dist/viz/client`. The server remains framework-free and read-only:
+ * `node:http` serves APIs plus hashed assets, while Vite is build/dev only.
  *
  * Also exposes a read-only view of any atom registry (SQLite DB) so the UI
  * can render a "Registry" screen independent of any particular run.
@@ -155,7 +156,25 @@ function resolveDbs(): { id: string; label: string; path: string; exists: boolea
 const DBS = resolveDbs();
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
-const UI_HTML_PATH = join(HERE, 'ui.html');
+const CLIENT_DIR = join(HERE, 'client');
+const UI_HTML_PATH = join(CLIENT_DIR, 'index.html');
+
+function assetContentType(file: string): string {
+  switch (extname(file)) {
+    case '.js':
+      return 'text/javascript; charset=utf-8';
+    case '.css':
+      return 'text/css; charset=utf-8';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 function send(res: import('node:http').ServerResponse, code: number, body: string | Buffer, type: string): void {
   res.writeHead(code, {
@@ -505,7 +524,7 @@ const server = createServer((req, res) => {
 
   if (pathname === '/' || pathname === '/index.html') {
     if (!existsSync(UI_HTML_PATH)) {
-      send(res, 500, 'ui.html missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
+      send(res, 500, 'viz client missing at ' + UI_HTML_PATH, 'text/plain; charset=utf-8');
       return;
     }
     const html = readFileSync(UI_HTML_PATH);
@@ -657,6 +676,19 @@ const server = createServer((req, res) => {
         examples: [...p.guidance.examples],
       })),
     });
+    return;
+  }
+
+  const assetPath = resolve(CLIENT_DIR, `.${pathname}`);
+  const assetRelative = relative(CLIENT_DIR, assetPath);
+  if (
+    assetRelative !== '' &&
+    !assetRelative.startsWith('..') &&
+    !assetRelative.startsWith('/') &&
+    existsSync(assetPath) &&
+    statSync(assetPath).isFile()
+  ) {
+    send(res, 200, readFileSync(assetPath), assetContentType(assetPath));
     return;
   }
 

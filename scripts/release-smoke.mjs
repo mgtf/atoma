@@ -2,15 +2,32 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
+import { createServer as createNetServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = resolve(root, 'dist/mcp/stdio.js');
+const vizEntry = resolve(root, 'dist/viz/server.js');
+const vizIndex = resolve(root, 'dist/viz/client/index.html');
 const releaseVersion = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version;
 if (!existsSync(entry)) {
   throw new Error(`compiled MCP entry missing: ${entry} (run npm run build first)`);
 }
+if (!existsSync(vizEntry) || !existsSync(vizIndex)) {
+  throw new Error('compiled viz server/client missing (run npm run build first)');
+}
+
+const freePort = async () =>
+  await new Promise((resolvePort, rejectPort) => {
+    const probe = createNetServer();
+    probe.once('error', rejectPort);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      probe.close((error) => (error ? rejectPort(error) : resolvePort(port)));
+    });
+  });
 
 const child = spawn(process.execPath, [entry], {
   cwd: root,
@@ -93,7 +110,50 @@ try {
     ),
   ]);
   if (exitCode !== 0) throw new Error(`compiled MCP exited ${exitCode}; stderr: ${stderr.slice(-500)}`);
-  process.stdout.write(`release smoke ok: ${tools.length} MCP tools, JSON-only stdout\n`);
+  const port = await freePort();
+  const viz = spawn(process.execPath, [vizEntry, '--host', '127.0.0.1', '--port', String(port)], {
+    cwd: root,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let vizStderr = '';
+  viz.stderr.on('data', (chunk) => {
+    vizStderr += chunk.toString();
+  });
+  const vizExited = new Promise((resolveExit) => viz.once('exit', resolveExit));
+  try {
+    const deadline = Date.now() + 10_000;
+    let response;
+    while (Date.now() < deadline) {
+      try {
+        response = await fetch(`http://127.0.0.1:${port}/`);
+        if (response.ok) break;
+      } catch {
+        // Server is still starting.
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    if (!response?.ok) throw new Error(`compiled viz did not become ready: ${vizStderr.slice(-500)}`);
+    const html = await response.text();
+    const asset = /<script[^>]+src="([^"]+)"/.exec(html)?.[1];
+    if (!asset) throw new Error('compiled viz index has no module asset');
+    const assetResponse = await fetch(`http://127.0.0.1:${port}${asset}`);
+    if (!assetResponse.ok) throw new Error(`compiled viz asset failed: ${assetResponse.status}`);
+    const burninResponse = await fetch(`http://127.0.0.1:${port}/api/burnin`);
+    const burnin = await burninResponse.json();
+    if (!burninResponse.ok || !Array.isArray(burnin.rows)) {
+      throw new Error('compiled viz /api/burnin did not return rows');
+    }
+  } finally {
+    if (viz.exitCode === null) viz.kill('SIGTERM');
+    await Promise.race([
+      vizExited,
+      new Promise((resolveWait) => setTimeout(resolveWait, 2_000)),
+    ]);
+    if (viz.exitCode === null) viz.kill('SIGKILL');
+  }
+  process.stdout.write(
+    `release smoke ok: ${tools.length} MCP tools, JSON-only stdout, compiled viz UI/API\n`
+  );
 } finally {
   if (child.exitCode === null) child.kill('SIGKILL');
 }

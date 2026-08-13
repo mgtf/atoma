@@ -34,7 +34,7 @@ import type { Task, Tool } from '../core/types.js';
  *
  * English is the source, matching the viz i18n convention: the UI prefers a
  * `launch.help.<id>` catalog key when one exists and falls back to `help`,
- * so a new profile is always describable without touching ui.html.
+ * so a new profile is always describable without touching the Vite client.
  */
 export interface TaskProfileGuidance {
   /** Label for the family picker. */

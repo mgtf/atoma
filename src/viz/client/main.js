@@ -1,309 +1,30 @@
-<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8" />
-<title>Atoma — visualiseur de runs</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  :root {
-    --bg: #0b0f17;
-    --panel: #121826;
-    --panel-2: #0f1523;
-    --border: #1f2a3d;
-    --text: #e6edf7;
-    --muted: #8a96ae;
-    --accent: #6ea8ff;
-    --l1: #2dd4bf;
-    --l2: #fbbf24;
-    --l3: #c084fc;
-    --ok: #4ade80;
-    --err: #f87171;
-    --chip: #1a2335;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif; height: 100%; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  header {
-    display: flex; align-items: center; gap: 16px;
-    padding: 10px 16px; background: var(--panel);
-    border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10;
-  }
-  header h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: 0.3px; }
-  header .dot-l1 { color: var(--l1); }
-  header .dot-l2 { color: var(--l2); }
-  header .dot-l3 { color: var(--l3); }
-  header select {
-    background: var(--panel-2); color: var(--text);
-    border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
-    min-width: 320px; max-width: 640px; font: inherit;
-  }
-  /* The language picker is a two-item control — it must NOT inherit the
-     run-selector's 320px min-width. */
-  header select#langSelect { min-width: 0; width: auto; padding: 6px 8px; }
-  header .spacer { flex: 1; }
-  header button {
-    background: var(--panel-2); color: var(--text);
-    border: 1px solid var(--border); padding: 6px 12px; border-radius: 6px;
-    cursor: pointer; font: inherit;
-  }
-  header button:hover { border-color: var(--accent); }
-  header input[type=search] {
-    background: var(--panel-2); color: var(--text);
-    border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px;
-    min-width: 200px; font: inherit;
-  }
-  .view-switch { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
-  .view-switch button {
-    border: none; border-radius: 0; padding: 6px 14px; background: var(--panel-2);
-  }
-  .view-switch button.active { background: var(--accent); color: #0b0f17; }
-  .view-switch button + button { border-left: 1px solid var(--border); }
-  .view-switch button.active + button,
-  .view-switch button + button.active { border-left-color: var(--accent); }
+import { init as initChart, use as useChart } from 'echarts/core';
+import { ScatterChart } from 'echarts/charts';
+import {
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  ToolboxComponent,
+  TooltipComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 
-  .layout { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(520px, 1.3fr); gap: 0; height: calc(100vh - 49px); }
-  .pane { overflow: auto; padding: 14px 16px; }
-  .pane + .pane { border-left: 1px solid var(--border); background: var(--panel-2); }
+useChart([
+  ScatterChart,
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  ToolboxComponent,
+  TooltipComponent,
+  CanvasRenderer,
+]);
 
-  .summary { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
-  .summary h2 { margin: 0 0 6px 0; font-size: 14px; font-weight: 600; }
-  .summary .task { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
-  /* RESULT block. A sequential run's summary concatenates every phase and
-     every "== GROUND TRUTH ==" evidence dump into one string — rendered
-     raw it is an unreadable wall. Split into a deliverable line, one card
-     per phase, and monospace evidence blocks. */
-  .result { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
-  .result h3 { margin: 0 0 4px 0; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
-  .result .final { font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
-  .result .phase { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
-  .result .phase-head { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
-  .result .prose { font-size: 12px; line-height: 1.5; white-space: pre-wrap; color: var(--text); }
-  .result .evidence {
-    margin-top: 6px; padding: 8px 10px; border-left: 3px solid var(--ok);
-    background: rgba(0, 0, 0, 0.25); border-radius: 0 6px 6px 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
-    max-height: 260px; overflow: auto; color: #b9c4d4;
-  }
-  .result .evidence-label { font-size: 10px; letter-spacing: 0.5px; color: var(--ok); text-transform: uppercase; margin-bottom: 3px; }
-  .result .toggle { cursor: pointer; user-select: none; font-size: 11px; color: var(--accent); margin-top: 6px; display: inline-block; }
-  .summary .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 10px; }
-  .summary .stat { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
-  .summary .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .summary .stat .v { font-size: 16px; font-weight: 600; margin-top: 2px; }
-
-  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .chip {
-    background: var(--chip); color: var(--text); border: 1px solid var(--border);
-    border-radius: 999px; padding: 4px 10px; cursor: pointer; font-size: 12px; user-select: none;
-  }
-  .chip.active { background: var(--accent); color: #0b0f17; border-color: var(--accent); }
-  .chip.muted { color: var(--muted); }
-
-  .event {
-    border: 1px solid var(--border); border-radius: 10px; background: var(--panel);
-    padding: 10px 12px; margin-bottom: 8px; cursor: pointer; transition: border-color 80ms;
-  }
-  .event:hover { border-color: var(--accent); }
-  .event.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  /* Purely informational run-boundary markers (start / end). Not events,
-     not clickable — a dashed frame keeps them visually apart from cards. */
-  .run-marker {
-    border: 1px dashed var(--border); border-radius: 10px;
-    padding: 7px 12px; margin-bottom: 8px; cursor: default;
-    background: transparent; font-size: 12px; color: var(--muted, #9aa4b2);
-  }
-  .run-marker:hover { border-color: var(--border); }
-  .run-marker .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .event .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .event .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; min-width: 70px; }
-  .event .role {
-    padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;
-    background: #1a2335; border: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.4px;
-  }
-  .role.plan { color: var(--accent); border-color: #2a3b57; }
-  .role.execute { color: #86efac; border-color: #1e3a2a; }
-  .role.validate-plan, .role.validate-result { color: #fca5a5; border-color: #3b1e1e; }
-  .role.prefilter { color: #c7d2fe; border-color: #2a2a4a; }
-  .role.tool { color: #fbbf24; border-color: #3a2f15; }
-  .role.trust { color: var(--ok); border-color: #1e3a2a; }
-  .branch-chip {
-    display: inline-block; padding: 1px 6px; border-radius: 4px;
-    font-size: 10px; font-weight: 600; letter-spacing: 0.3px;
-    background: #1a2335; border: 1px solid var(--border);
-    color: #a78bfa; font-family: 'SF Mono', Menlo, monospace;
-  }
-  .role.fallback-plan, .role.fallback-execute { color: #fcd34d; border-color: #3a2f15; }
-  .role.create { color: var(--l1); }
-  .role.patch { color: var(--l2); }
-  .role.branch { color: var(--l3); }
-  .role.recordSuccess { color: var(--ok); }
-  .role.recordFailure { color: var(--err); }
-  .role.skill { color: #f0abfc; border-color: #3b1e3a; }
-  .role.match { color: #f0abfc; border-color: #3b1e3a; }
-  .role.inject { color: #d8b4fe; border-color: #2e1d4d; }
-  .role.learn { color: #86efac; border-color: #1e3a2a; }
-  .role.update { color: #fcd34d; border-color: #3a2f15; }
-  /* Lifecycle ops deserve distinct weight: promote/direct are the wins the
-     whole project aims at, demote is the safety net firing. */
-  .role.promote { color: #ffd700; border-color: #4a3c00; font-weight: 700; }
-  .role.direct { color: #ffd700; border-color: #4a3c00; font-weight: 700; }
-  .role.demote { color: #fca5a5; border-color: #4a1e1e; font-weight: 700; }
-  .role.success { color: var(--ok); }
-  .role.failure { color: var(--err); }
-  /* Safety / attribution decisions — a blocked or uncredited skill. */
-  .role.quarantine { color: var(--err); border-color: #4a1e1e; font-weight: 700; }
-  .role.credit-withheld { color: #fbbf24; border-color: #3a2f15; }
-  /* Zero-cost routing: a decision replayed from the prefilter cache. */
-  .role.cache { color: #67e8f9; border-color: #164e63; font-weight: 700; }
-
-  .tier {
-    display: inline-block; padding: 1px 6px; border-radius: 4px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
-  }
-  .tier.t1 { background: rgba(45, 212, 191, 0.15); color: var(--l1); }
-  .tier.t2 { background: rgba(251, 191, 36, 0.15); color: var(--l2); }
-  .tier.t3 { background: rgba(192, 132, 252, 0.15); color: var(--l3); }
-  .arrow { color: var(--muted); font-weight: 700; }
-  .name { font-weight: 600; }
-  .meta { color: var(--muted); font-size: 11px; }
-  .model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--muted); }
-  .cost { color: var(--muted); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  /* Second line of a call card: model, price, tokens, timing. Monospace
-     so the numbers line up across stacked cards when scanning a run. */
-  .event .cost-line {
-    margin-top: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px; color: var(--muted);
-  }
-  .tool-arg { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; opacity: .85; }
-  .err-badge { background: rgba(248, 113, 113, 0.15); color: var(--err); border: 1px solid #3b1e1e; border-radius: 4px; padding: 1px 6px; font-size: 11px; }
-
-  .section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
-  .section h3 { margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 12px; }
-  .kv .k { color: var(--muted); }
-  .kv .v { word-break: break-word; }
-
-  .tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
-  .tab { padding: 6px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: 12px; }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-  pre {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px; max-height: 520px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
-  }
-
-  .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
-  .loader { color: var(--muted); text-align: center; padding: 20px; }
-
-  /* swimlanes */
-  .lanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-  .lane { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 80px; }
-  .lane h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; }
-  .lane.l1 h4 { color: var(--l1); }
-  .lane.l2 h4 { color: var(--l2); }
-  .lane.l3 h4 { color: var(--l3); }
-  .lane .chip { display: inline-block; margin: 2px 4px 2px 0; font-size: 11px; padding: 3px 9px; }
-  .lane .chip.atom { cursor: pointer; }
-  .lane .chip.atom.new { border-color: var(--ok); color: var(--ok); }
-  .lane .chip.atom.patched { border-color: var(--l2); color: var(--l2); }
-  .lane .chip.atom.selected { background: var(--accent); color: #0b0f17; border-color: var(--accent); }
-  .lane .chip .v { opacity: 0.55; font-size: 10px; margin-left: 4px; }
-
-  /* The legend closes the lanes block and the filter pills open the next
-     one — without breathing room below, the two read as one crowded
-     strip. gap is horizontal only, so the wrap needs row-gap too when
-     the legend itself wraps on a narrow pane. */
-  .origin-legend { display: flex; gap: 4px 12px; font-size: 11px; color: var(--muted); margin-top: 6px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
-  .origin-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-  .origin-legend .dot.new { background: var(--ok); }
-  .origin-legend .dot.patched { background: var(--l2); }
-  .origin-legend .dot.existing { background: var(--muted); }
-
-  .history-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-  .history-list .row { display: flex; gap: 8px; align-items: center; }
-  .history-list .when { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-  .tools-list { display: flex; gap: 4px; flex-wrap: wrap; }
-  .tools-list .chip { font-size: 11px; padding: 2px 8px; }
-  .live-dot { color: var(--ok); animation: livePulse 1.2s ease-in-out infinite; margin-right: 4px; }
-  /* "Right now" explanation lines: what the busy slot is actually doing,
-     and the live tool activity inside that same call. */
-  .now-what { margin-top: 6px; font-size: 12.5px; color: var(--text); line-height: 1.45; }
-  .now-activity {
-    margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px; color: var(--muted);
-  }
-  @keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-  .interrupted { opacity: 0.75; border-left: 3px solid var(--err); }
-</style>
-</head>
-<body>
-<header>
-  <h1><span class="dot-l3">●</span><span class="dot-l2">●</span><span class="dot-l1">●</span> &nbsp;Atoma</h1>
-  <div class="view-switch" id="viewSwitch">
-    <button data-view="runs" class="active" data-i18n="nav.runs">Runs</button>
-    <button data-view="registry" data-i18n="nav.registry">Registry</button>
-    <button data-view="skills" data-i18n="nav.skills">Skills</button>
-    <button data-view="burnin" data-i18n="nav.burnin">Burn-in</button>
-    <button data-view="launch" data-i18n="nav.launch">Launch</button>
-  </div>
-  <select id="runSelect" data-i18n-title="nav.selectRun"></select>
-  <select id="registrySelect" data-i18n-title="nav.selectRegistry" style="display:none;"></select>
-  <input id="registrySearch" type="search" data-i18n-placeholder="nav.filterAtoms" style="display:none;" />
-  <input id="skillsSearch" type="search" data-i18n-placeholder="nav.filterSkills" style="display:none;" />
-  <span class="spacer"></span>
-  <select id="langSelect" data-i18n-title="nav.language"></select>
-  <button id="refreshBtn" data-i18n-title="nav.refresh.title" data-i18n="nav.refresh">Refresh</button>
-</header>
-
-<div class="layout">
-  <section class="pane" id="leftPane">
-    <!-- Runs view -->
-    <div id="runsView">
-      <div id="runSummary"></div>
-      <div id="lanesWrap"></div>
-      <div class="filters" id="filters"></div>
-      <!-- "En ce moment" sits DIRECTLY above the (newest-first) list so the
-           in-flight step and the steps just completed read as one flow. -->
-      <div id="nowBanner"></div>
-      <div id="eventsList"></div>
-    </div>
-    <!-- Registry view -->
-    <div id="registryView" style="display:none;">
-      <div id="registrySummary"></div>
-      <div id="registryLanes"></div>
-    </div>
-    <!-- Skills view -->
-    <div id="skillsView" style="display:none;">
-      <div id="skillsSummary"></div>
-      <div id="skillsLanes"></div>
-    </div>
-    <!-- Burn-in view -->
-    <div id="burninView" style="display:none;">
-      <div id="burninSummary"></div>
-      <div id="burninChart"></div>
-      <div id="burninRows"></div>
-    </div>
-    <div id="launchView" style="display:none;">
-      <div id="launchForm"></div>
-    </div>
-  </section>
-  <section class="pane" id="rightPane">
-    <div class="empty" data-i18n="pane.selectEvent"></div>
-  </section>
-</div>
-
-<script>
 /* ==========================================================================
  * i18n — minimal core, i18next-COMPATIBLE surface.
  *
- * Why not the real library: this file is served VERBATIM by the viz server
- * (`cp src/viz/ui.html dist/`), with no bundler and no module resolution in
- * the browser. Pulling i18next would mean either a CDN — breaking the
- * offline use of a localhost dev tool — or vendoring a ~40 KB UMD blob into
- * a file we hand-maintain. So the core below is deliberately tiny, but its
- * SURFACE matches i18next: `t('a.b.c', { count: 3 })`, `{{var}}`
+ * The visualizer is now Vite-bundled, but this deliberately tiny core remains
+ * sufficient for two local catalogs and avoids adding runtime framework
+ * machinery. Its SURFACE matches i18next: `t('a.b.c', { count: 3 })`, `{{var}}`
  * interpolation, `_plural` key suffix, dotted namespaces. Swapping in the
  * real library later is a drop-in — the catalogs and every call site stay
  * exactly as they are.
@@ -551,6 +272,36 @@ const I18N_CATALOGS = {
     'burnin.refusals': 'refusal×{{count}}',
     'burnin.unavailable': 'Burn-in API unavailable.',
     'burnin.empty': 'No measurements — run <code>npm run burnin</code> (expected CSV: {{path}})',
+    'burnin.family': 'Family',
+    'burnin.outcome': 'Outcome',
+    'burnin.timeRange': 'Time range',
+    'burnin.all': 'All',
+    'burnin.deliveredOnly': 'Delivered',
+    'burnin.failedOnly': 'Failed / error',
+    'burnin.allTime': 'All time',
+    'burnin.last24h': 'Last 24 hours',
+    'burnin.last7d': 'Last 7 days',
+    'burnin.last30d': 'Last 30 days',
+    'burnin.resetZoom': 'Reset time zoom',
+    'burnin.selected': '{{count}} run(s) in the selected range',
+    'burnin.runsSelected': 'Runs selected',
+    'burnin.deliveryRate': 'Delivery rate',
+    'burnin.medianCost': 'Median cost',
+    'burnin.p90Duration': 'P90 duration',
+    'burnin.familyBreakdown': 'Families in selection',
+    'burnin.rowsTitle': 'Runs (newest → oldest)',
+    'burnin.page': 'Page {{current}} / {{total}}',
+    'burnin.previous': 'Previous',
+    'burnin.next': 'Next',
+    'burnin.metric.models': 'LLM calls by model tier: Opus / Sonnet / Haiku / other routed providers.',
+    'burnin.metric.deterministic': 'Zero-LLM deterministic script phases completed successfully.',
+    'burnin.metric.learned': 'Task-level skills learned after an approved novel run.',
+    'burnin.metric.recovery': 'Event-driven recovery skills learned after a recovered rejection.',
+    'burnin.metric.promotions': 'LLM recipes compiled into script candidates.',
+    'burnin.metric.refusals': 'Compiler decisions that the recipe is not safely scriptable.',
+    'burnin.metric.compileErrors': 'Compiler transport errors or timeouts before a decision.',
+    'burnin.metric.demotions': 'Script skills demoted back to LLM recipes after deterministic failures.',
+    'burnin.metric.fallbacks': 'Deterministic dispatch contract failures that fell back to the validated LLM loop.',
   },
   fr: {
     'lang.name': 'Français',
@@ -789,6 +540,36 @@ const I18N_CATALOGS = {
     'burnin.refusals': 'refus compilation×{{count}}',
     'burnin.unavailable': 'API burn-in injoignable.',
     'burnin.empty': 'Aucune mesure — lance <code>npm run burnin</code> (CSV attendu : {{path}})',
+    'burnin.family': 'Famille',
+    'burnin.outcome': 'Résultat',
+    'burnin.timeRange': 'Période',
+    'burnin.all': 'Tout',
+    'burnin.deliveredOnly': 'Livré',
+    'burnin.failedOnly': 'Échec / erreur',
+    'burnin.allTime': 'Toute la période',
+    'burnin.last24h': 'Dernières 24 heures',
+    'burnin.last7d': '7 derniers jours',
+    'burnin.last30d': '30 derniers jours',
+    'burnin.resetZoom': 'Réinitialiser le zoom temporel',
+    'burnin.selected': '{{count}} run(s) dans la plage sélectionnée',
+    'burnin.runsSelected': 'Runs sélectionnés',
+    'burnin.deliveryRate': 'Taux de livraison',
+    'burnin.medianCost': 'Coût médian',
+    'burnin.p90Duration': 'Durée P90',
+    'burnin.familyBreakdown': 'Familles de la sélection',
+    'burnin.rowsTitle': 'Runs (récent → ancien)',
+    'burnin.page': 'Page {{current}} / {{total}}',
+    'burnin.previous': 'Précédent',
+    'burnin.next': 'Suivant',
+    'burnin.metric.models': 'Appels LLM par niveau de modèle : Opus / Sonnet / Haiku / autres providers routés.',
+    'burnin.metric.deterministic': 'Phases de script déterministes sans appel LLM terminées avec succès.',
+    'burnin.metric.learned': 'Skills de tâche apprises après un run inédit approuvé.',
+    'burnin.metric.recovery': 'Skills de récupération apprises après un rejet corrigé.',
+    'burnin.metric.promotions': 'Recettes LLM compilées en candidates script.',
+    'burnin.metric.refusals': 'Décisions du compilateur indiquant que la recette ne peut pas devenir un script sûr.',
+    'burnin.metric.compileErrors': 'Erreurs ou timeouts du transport avant une décision du compilateur.',
+    'burnin.metric.demotions': 'Scripts rétrogradés en recettes LLM après des échecs déterministes.',
+    'burnin.metric.fallbacks': 'Échecs du contrat de dispatch déterministe ayant basculé vers la boucle LLM validée.',
   },
 };
 
@@ -902,6 +683,18 @@ const state = {
   skillsByL1: {},      // l1Name -> [SkillSummary]
   selectedSkill: null, // { l1Name, id }
   skillsFilter: '',
+  // Burn-in analytics: filters are independent from the chart's temporary
+  // dataZoom window; page resets whenever either selection changes.
+  burninRows: [],
+  burninFilters: {
+    family: 'all',
+    outcome: 'all',
+    preset: 'all',
+    zoomStart: null,
+    zoomEnd: null,
+    page: 1,
+    pageSize: 50,
+  },
   // Live polling state. When a run is in-flight (endedAt undefined),
   // we poll /api/runs/<id> every 1s and re-render as new events arrive.
   // We also poll /api/runs (the index) every 2s to detect freshly-
@@ -2505,14 +2298,14 @@ function tryParseJson(txt) {
     try { return JSON.parse(fence[1]); } catch {}
   }
   // Tolerate leading/trailing prose around a balanced JSON value.
-  const start = txt.search(/[\[{]/);
+  const start = txt.search(/{|\[/);
   if (start >= 0) {
     try { return JSON.parse(txt.slice(start)); } catch {}
   }
   return undefined;
 }
 
-function renderStrategyPlanPair(strategy, plan, raw) {
+function renderStrategyPlanPair(strategy, plan, _raw) {
   const wrap = h('div', { class: 'plan-card' });
 
   // Strategy block.
@@ -2672,6 +2465,9 @@ function switchView(v) {
   $('registrySelect').style.display = isReg ? '' : 'none';
   $('registrySearch').style.display = isReg ? '' : 'none';
   $('skillsSearch').style.display = isSkills ? '' : 'none';
+  const singlePane = isBurnin || isLaunch;
+  document.querySelector('.layout').classList.toggle('single-pane', singlePane);
+  $('rightPane').style.display = singlePane ? 'none' : '';
   const emptyMsg = isRuns
     ? t('pane.selectEvent')
     : isReg
@@ -2681,7 +2477,7 @@ function switchView(v) {
         : isLaunch
           ? t('pane.selectLaunch')
           : t('pane.selectSkill');
-  $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
+  if (!singlePane) $('rightPane').innerHTML = '<div class="empty">' + emptyMsg + '</div>';
   if (isReg && state.registries.length === 0) loadRegistries();
   if (isSkills && state.skillNamespaces.length === 0) loadSkills();
   if (isBurnin) loadBurnin();
@@ -2825,162 +2621,414 @@ function renderLaunch() {
 // order (the x axis IS experience), and the row table — clicking a row jumps
 // to that run's full trace in the Runs view.
 
-const FAMILY_COLORS = { cli: '#34d399', web: '#60a5fa', http: '#c084fc' };
+const FAMILY_COLORS = { cli: '#34d399', web: '#60a5fa', http: '#c084fc', app: '#6ea8ff', files: '#f59e0b' };
+let burninChartInstance = null;
+let burninZoomFrame = null;
+
+function burninTimestamp(row, index = 0) {
+  const parsed = Date.parse(row.ts);
+  return Number.isFinite(parsed) ? parsed : index;
+}
+
+function quantile(values, percentile) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil(percentile * sorted.length) - 1);
+  return sorted[Math.max(0, index)];
+}
+
+function burninBaseRows() {
+  const filters = state.burninFilters;
+  let rows = state.burninRows.filter((row) =>
+    (filters.family === 'all' || row.family === filters.family) &&
+    (filters.outcome === 'all' ||
+      (filters.outcome === 'delivered' ? row.outcome === 'delivered' : row.outcome !== 'delivered'))
+  );
+  if (filters.preset !== 'all' && rows.length > 0) {
+    const maxTime = Math.max(...rows.map((row, index) => burninTimestamp(row, index)));
+    const days = Number(filters.preset);
+    const threshold = maxTime - days * 24 * 60 * 60 * 1000;
+    rows = rows.filter((row, index) => burninTimestamp(row, index) >= threshold);
+  }
+  return rows;
+}
+
+function burninSelectedRows() {
+  const { zoomStart, zoomEnd } = state.burninFilters;
+  return burninBaseRows().filter((row, index) => {
+    const ts = burninTimestamp(row, index);
+    return (zoomStart == null || ts >= zoomStart) && (zoomEnd == null || ts <= zoomEnd);
+  });
+}
+
+function burninControl(label, value, choices, onChange) {
+  const select = h('select', {});
+  for (const [choiceValue, choiceLabel] of choices) {
+    select.appendChild(h('option', { value: choiceValue }, choiceLabel));
+  }
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+  return h('div', { class: 'burnin-control' }, [h('label', {}, label), select]);
+}
+
+function clearBurninZoom() {
+  state.burninFilters.zoomStart = null;
+  state.burninFilters.zoomEnd = null;
+  state.burninFilters.page = 1;
+}
+
+function renderBurninToolbar() {
+  const host = $('burninToolbar');
+  host.innerHTML = '';
+  const families = [...new Set(state.burninRows.map((row) => row.family))].sort();
+  const filters = state.burninFilters;
+  const update = (key, value) => {
+    filters[key] = value;
+    clearBurninZoom();
+    refreshBurninView({ chart: true });
+  };
+  const reset = h('button', { type: 'button' }, t('burnin.resetZoom'));
+  reset.addEventListener('click', () => {
+    clearBurninZoom();
+    burninChartInstance?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+    refreshBurninView({ chart: false });
+  });
+  host.appendChild(h('div', { class: 'burnin-toolbar' }, [
+    burninControl(
+      t('burnin.family'),
+      filters.family,
+      [['all', t('burnin.all')], ...families.map((family) => [family, family])],
+      (value) => update('family', value)
+    ),
+    burninControl(
+      t('burnin.outcome'),
+      filters.outcome,
+      [
+        ['all', t('burnin.all')],
+        ['delivered', t('burnin.deliveredOnly')],
+        ['failed', t('burnin.failedOnly')],
+      ],
+      (value) => update('outcome', value)
+    ),
+    burninControl(
+      t('burnin.timeRange'),
+      filters.preset,
+      [
+        ['all', t('burnin.allTime')],
+        ['1', t('burnin.last24h')],
+        ['7', t('burnin.last7d')],
+        ['30', t('burnin.last30d')],
+      ],
+      (value) => update('preset', value)
+    ),
+    reset,
+    h('span', { class: 'burnin-selection' }, t('burnin.selected', { count: burninSelectedRows().length })),
+  ]));
+}
 
 async function loadBurnin() {
   $('burninSummary').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
   let payload;
   try {
-    const r = await fetch('/api/burnin');
-    payload = await r.json();
-  } catch (e) {
+    const response = await fetch('/api/burnin');
+    payload = await response.json();
+  } catch {
     $('burninSummary').innerHTML = '<div class="empty">' + t('burnin.unavailable') + '</div>';
     return;
   }
   const rows = payload.rows || [];
   state.burninRows = rows;
+  clearBurninZoom();
   if (rows.length === 0) {
+    $('burninToolbar').innerHTML = '';
     $('burninSummary').innerHTML =
-      '<div class="empty">' +
-      t('burnin.empty', { path: escapeHtml(payload.csvPath) }) +
-      '</div>';
+      '<div class="empty">' + t('burnin.empty', { path: escapeHtml(payload.csvPath) }) + '</div>';
     $('burninChart').innerHTML = '';
     $('burninRows').innerHTML = '';
+    $('burninPager').innerHTML = '';
     return;
   }
-  renderBurninSummary(rows);
-  renderBurninChart(rows);
-  renderBurninRows(rows);
+  refreshBurninView({ chart: true });
+}
+
+function burninStat(label, value) {
+  return h('div', { class: 'burnin-stat' }, [
+    h('span', { class: 'meta' }, label),
+    h('span', { class: 'value' }, value),
+  ]);
 }
 
 function renderBurninSummary(rows) {
-  const byFam = new Map();
-  for (const r of rows) {
-    const f = byFam.get(r.family) || { n: 0, ok: 0, cost: 0, costN: 0, det: 0, learned: 0, recovery: 0, refusals: 0, compileErrors: 0, lastCost: null };
-    f.n++;
-    if (r.outcome === 'delivered') f.ok++;
-    if (r.costUsd != null) { f.cost += r.costUsd; f.costN++; f.lastCost = r.costUsd; }
-    f.det += r.deterministicPhases;
-    f.learned += r.learnedSkills;
-    f.recovery += r.learnedEventSkills || 0;
-    f.refusals += r.refusals || 0;
-    f.compileErrors += r.compileErrors || 0;
-    byFam.set(r.family, f);
+  const host = $('burninSummary');
+  host.innerHTML = '';
+  if (rows.length === 0) {
+    host.appendChild(h('div', { class: 'empty' }, t('burnin.selected', { count: 0 })));
+    return;
   }
-  const el = $('burninSummary');
-  el.innerHTML = '';
-  const wrap = h('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;' });
-  for (const [fam, f] of [...byFam.entries()].sort()) {
-    const color = FAMILY_COLORS[fam] || 'var(--accent)';
-    const mean = f.costN ? (f.cost / f.costN) : null;
-    wrap.appendChild(h('div', { class: 'section', style: 'flex:1; min-width:150px; border-left: 3px solid ' + color + '; padding:8px 10px;' }, [
-      h('div', { style: 'font-weight:600; color:' + color + ';' }, fam),
-      h('div', { class: 'muted', style: 'font-size:11px;' },
-        t('burnin.delivered', { count: f.ok + '/' + f.n }) + f.det + ' $0.00 phases · ' + f.learned + '/' + f.recovery + ' skills/recoveries' +
-        (f.refusals ? ' · ⛔' + t('burnin.refusals', { count: f.refusals }) : '') +
-        (f.compileErrors ? ' · ⚠' + t('burnin.compileErrors', { count: f.compileErrors }) : '')),
-      h('div', { style: 'font-size:18px; margin-top:2px;' },
-        (mean != null ? '$' + mean.toFixed(3) : '—') +
-        (f.lastCost != null ? ' ' : '')),
-      f.lastCost != null
-        ? h('div', { class: 'muted', style: 'font-size:11px;' }, t('burnin.lastRun') + ' $' + f.lastCost.toFixed(3))
-        : h('span', {}, ''),
-    ]));
+  const delivered = rows.filter((row) => row.outcome === 'delivered').length;
+  const costs = rows.map((row) => row.costUsd).filter((value) => value != null);
+  const durations = rows.map((row) => row.durationS).filter((value) => value != null);
+  host.appendChild(h('div', { class: 'burnin-overview' }, [
+    burninStat(t('burnin.runsSelected'), String(rows.length)),
+    burninStat(t('burnin.deliveryRate'), Math.round((delivered / rows.length) * 100) + '%'),
+    burninStat(
+      t('burnin.medianCost'),
+      costs.length ? '$' + quantile(costs, 0.5).toFixed(3) : '—'
+    ),
+    burninStat(
+      t('burnin.p90Duration'),
+      durations.length ? quantile(durations, 0.9) + 's' : '—'
+    ),
+  ]));
+
+  const byFamily = new Map();
+  for (const row of rows) {
+    const family = byFamily.get(row.family) || {
+      total: 0,
+      delivered: 0,
+      costs: [],
+      refusals: 0,
+      compileErrors: 0,
+    };
+    family.total++;
+    if (row.outcome === 'delivered') family.delivered++;
+    if (row.costUsd != null) family.costs.push(row.costUsd);
+    family.refusals += row.refusals || 0;
+    family.compileErrors += row.compileErrors || 0;
+    byFamily.set(row.family, family);
   }
-  el.appendChild(wrap);
+  const strip = h('div', { class: 'burnin-family-strip' }, [
+    h('span', { class: 'meta' }, t('burnin.familyBreakdown')),
+  ]);
+  for (const [name, family] of [...byFamily.entries()].sort()) {
+    const median = family.costs.length ? '$' + quantile(family.costs, 0.5).toFixed(3) : '—';
+    const lifecycle =
+      (family.refusals ? ' · ⛔' + family.refusals : '') +
+      (family.compileErrors ? ' · ⚠' + family.compileErrors : '');
+    strip.appendChild(h('span', {
+      class: 'chip burnin-family-chip',
+      style: 'border-left-color:' + (FAMILY_COLORS[name] || 'var(--accent)'),
+      title:
+        t('burnin.refusals', { count: family.refusals }) + ' · ' +
+        t('burnin.compileErrors', { count: family.compileErrors }),
+    }, name + ' · ' + family.delivered + '/' + family.total + ' · ' + median + lifecycle));
+  }
+  host.appendChild(strip);
 }
 
 function renderBurninChart(rows) {
-  const plotted = rows.filter((r) => r.costUsd != null);
-  if (plotted.length === 0) { $('burninChart').innerHTML = ''; return; }
-  const W = 640, H = 170, PAD = 28;
-  const maxCost = Math.max(...plotted.map((r) => r.costUsd), 0.1);
-  const x = (i) => PAD + (plotted.length === 1 ? 0 : (i * (W - PAD * 2)) / (plotted.length - 1));
-  const y = (c) => H - PAD - (c / maxCost) * (H - PAD * 2);
-  let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%; max-width:' + W + 'px; background: var(--panel, rgba(127,127,127,.06)); border-radius:6px;">';
-  // Y grid: 0, mid, max.
-  for (const c of [0, maxCost / 2, maxCost]) {
-    svg += '<line x1="' + PAD + '" y1="' + y(c) + '" x2="' + (W - PAD) + '" y2="' + y(c) + '" stroke="currentColor" stroke-opacity="0.12"/>' +
-      '<text x="4" y="' + (y(c) + 3) + '" font-size="9" fill="currentColor" fill-opacity="0.5">$' + c.toFixed(2) + '</text>';
+  const host = $('burninChart');
+  burninChartInstance?.dispose();
+  burninChartInstance = null;
+  host.innerHTML = '';
+  const plotted = rows.filter((row) => row.costUsd != null);
+  if (plotted.length === 0) return;
+
+  const chartHost = h('div', { class: 'section burnin-chart' });
+  host.appendChild(chartHost);
+  burninChartInstance = initChart(chartHost, null, { renderer: 'canvas' });
+  const families = [...new Set(plotted.map((row) => row.family))].sort();
+  const series = families.map((family) => ({
+    name: family,
+    type: 'scatter',
+    large: plotted.length > 2000,
+    largeThreshold: 2000,
+    progressive: 3000,
+    symbolSize: 7,
+    itemStyle: { color: FAMILY_COLORS[family] || '#f59e0b' },
+    data: plotted
+      .filter((row) => row.family === family)
+      .map((row, index) => ({
+        value: [burninTimestamp(row, index), row.costUsd],
+        row,
+        symbol: row.outcome === 'delivered' ? 'circle' : 'emptyCircle',
+        symbolSize: row.outcome === 'delivered' ? 7 : 10,
+      })),
+  }));
+  burninChartInstance.setOption({
+    animation: false,
+    backgroundColor: 'transparent',
+    textStyle: { color: '#8a96ae', fontFamily: 'system-ui, sans-serif' },
+    legend: { top: 4, textStyle: { color: '#8a96ae' } },
+    grid: { left: 58, right: 24, top: 42, bottom: 72 },
+    toolbox: {
+      right: 16,
+      top: 4,
+      iconStyle: { borderColor: '#8a96ae' },
+      feature: { dataZoom: { yAxisIndex: 'none' }, restore: {} },
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        const row = params.data.row;
+        return '<strong>' + escapeHtml(row.taskId) + '</strong><br>' +
+          escapeHtml(new Date(burninTimestamp(row)).toLocaleString(LOCALE)) + '<br>' +
+          escapeHtml(row.family) + ' · ' + escapeHtml(row.outcome) + '<br>' +
+          '$' + escapeHtml(row.costUsd) + ' · ' + escapeHtml(row.durationS ?? '?') + 's · ' +
+          escapeHtml(row.llmCalls ?? '?') + ' LLM';
+      },
+    },
+    xAxis: {
+      type: 'time',
+      axisLine: { lineStyle: { color: '#1f2a3d' } },
+      axisLabel: {
+        color: '#8a96ae',
+        formatter: (value) =>
+          new Intl.DateTimeFormat(LOCALE, {
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+          }).format(new Date(value)),
+      },
+      splitLine: { show: false },
+    },
+    yAxis: {
+      type: 'value',
+      name: 'USD',
+      min: 0,
+      axisLabel: { color: '#8a96ae', formatter: (value) => '$' + Number(value).toFixed(2) },
+      splitLine: { lineStyle: { color: '#1f2a3d' } },
+    },
+    dataZoom: [
+      { type: 'inside', filterMode: 'filter', throttle: 80 },
+      {
+        type: 'slider',
+        filterMode: 'filter',
+        height: 24,
+        bottom: 20,
+        borderColor: '#1f2a3d',
+        backgroundColor: '#0f1523',
+        fillerColor: 'rgba(110,168,255,.18)',
+        dataBackground: { lineStyle: { color: '#6ea8ff' }, areaStyle: { color: '#1a2335' } },
+        textStyle: { color: '#8a96ae' },
+      },
+    ],
+    series,
+  });
+  burninChartInstance.on('datazoom', (event) => {
+    cancelAnimationFrame(burninZoomFrame);
+    burninZoomFrame = requestAnimationFrame(() => {
+      const zoom = event.batch?.[0] || event;
+      const start = Number(zoom.start ?? 0);
+      const end = Number(zoom.end ?? 100);
+      const times = plotted.map((row, index) => burninTimestamp(row, index)).sort((a, b) => a - b);
+      if (start <= 0 && end >= 100) {
+        state.burninFilters.zoomStart = null;
+        state.burninFilters.zoomEnd = null;
+      } else {
+        state.burninFilters.zoomStart = times[Math.floor((start / 100) * (times.length - 1))];
+        state.burninFilters.zoomEnd = times[Math.ceil((end / 100) * (times.length - 1))];
+      }
+      state.burninFilters.page = 1;
+      refreshBurninView({ chart: false });
+    });
+  });
+}
+
+function metricBadge(text, tooltip) {
+  return h('span', {
+    class: 'metric-badge',
+    tabindex: '0',
+    'aria-label': tooltip,
+    'data-tooltip': tooltip,
+  }, text);
+}
+
+function burninMetricBadges(row) {
+  const badges = [];
+  if (row.llmCalls || row.otherCalls) {
+    badges.push(metricBadge(
+      'O' + row.opusCalls + '/S' + row.sonnetCalls + '/H' + row.haikuCalls + (row.otherCalls ? '/+' + row.otherCalls : ''),
+      t('burnin.metric.models')
+    ));
   }
-  // Per-family polyline + points; failures are hollow red-ringed.
-  const fams = [...new Set(plotted.map((r) => r.family))];
-  for (const fam of fams) {
-    const color = FAMILY_COLORS[fam] || '#f59e0b';
-    const pts = [];
-    plotted.forEach((r, i) => { if (r.family === fam) pts.push([x(i), y(r.costUsd), r]); });
-    if (pts.length > 1) {
-      svg += '<polyline fill="none" stroke="' + color + '" stroke-opacity="0.5" stroke-width="1.5" points="' +
-        pts.map((p) => p[0] + ',' + p[1]).join(' ') + '"/>';
-    }
-    for (const [px, py, r] of pts) {
-      const failed = r.outcome !== 'delivered';
-      // ESCAPED: this SVG is assigned via innerHTML, and `taskId` reaches it
-      // straight from burnin/results.csv. `npm run burnin` does not validate
-      // the ids in its task file, so an id carrying `</title><img src=x
-      // onerror=…>` would execute in the viz origin.
-      // NOT an LLM-injection path: `curriculum.ts` slugifies generated ids to
-      // [a-z0-9-] before writing them, so the model cannot reach here. The
-      // realistic vector is a hand-written tasks-*.json, i.e. self-inflicted
-      // — which is why this is a cheap correctness fix, not an incident.
-      // `escapeHtml` was already defined in this file, just never used here.
-      const tid = escapeHtml(r.taskId);
-      const outcome = escapeHtml(r.outcome);
-      const cost = escapeHtml(r.costUsd);
-      svg += failed
-        ? '<circle cx="' + px + '" cy="' + py + '" r="4" fill="none" stroke="#ef4444" stroke-width="2"><title>' + tid + ' — ' + outcome + ' $' + cost + '</title></circle>'
-        : '<circle cx="' + px + '" cy="' + py + '" r="3.5" fill="' + color + '"><title>' + tid + ' — $' + cost + (r.deterministicPhases ? ' · ' + escapeHtml(r.deterministicPhases) + ' phases $0' : '') + '</title></circle>';
-    }
-  }
-  svg += '<text x="' + (W - PAD) + '" y="' + (H - 6) + '" font-size="9" text-anchor="end" fill="currentColor" fill-opacity="0.5">' + t('burnin.runsAxis') + '</text>';
-  svg += '</svg>';
-  $('burninChart').innerHTML = '<div class="section">' + svg + '</div>';
+  const add = (count, symbol, key) => {
+    if (count) badges.push(metricBadge(symbol + count, t(key)));
+  };
+  add(row.deterministicPhases, '⚡', 'burnin.metric.deterministic');
+  add(row.learnedSkills, '📖+', 'burnin.metric.learned');
+  add(row.learnedEventSkills, '⟳+', 'burnin.metric.recovery');
+  add(row.promotions, '⚙️', 'burnin.metric.promotions');
+  add(row.refusals, '⛔', 'burnin.metric.refusals');
+  add(row.compileErrors, '⚠', 'burnin.metric.compileErrors');
+  add(row.demotions, '🛡️', 'burnin.metric.demotions');
+  add(row.dispatchFallbacks, '↩', 'burnin.metric.fallbacks');
+  return badges;
 }
 
 function renderBurninRows(rows) {
-  const el = $('burninRows');
-  el.innerHTML = '';
+  const host = $('burninRows');
+  host.innerHTML = '';
+  const filters = state.burninFilters;
+  const totalPages = Math.max(1, Math.ceil(rows.length / filters.pageSize));
+  filters.page = Math.min(filters.page, totalPages);
+  const start = (filters.page - 1) * filters.pageSize;
+  const pageRows = rows.slice().reverse().slice(start, start + filters.pageSize);
   const list = h('div', {});
-  for (const r of [...rows].reverse()) {
-    const color = FAMILY_COLORS[r.family] || 'var(--accent)';
+  for (const row of pageRows) {
+    const color = FAMILY_COLORS[row.family] || 'var(--accent)';
     const line = h('div', {
-      class: 'event',
-      style: 'cursor:' + (r.trace ? 'pointer' : 'default') + '; border-left: 3px solid ' + color + ';',
+      class: 'event burnin-event',
+      style: 'cursor:' + (row.trace ? 'pointer' : 'default') + '; border-left: 3px solid ' + color + ';',
       onclick: () => {
-        if (!r.trace) return;
-        const id = r.trace.replace(/\.json$/, '');
+        if (!row.trace) return;
+        const id = row.trace.replace(/\.json$/, '');
         switchView('runs');
         loadIndex().then(() => {
-          if (state.runs.some((x) => x.id === id)) {
+          if (state.runs.some((candidate) => candidate.id === id)) {
             $('runSelect').value = id;
             selectRun(id);
           }
         });
       },
     }, [h('div', { class: 'row' }, [
-      h('span', {
-        style: 'color: var(--' + (r.outcome === 'delivered' ? 'ok' : 'err') + ');',
-      }, r.outcome === 'delivered' ? '✓' : '✗'),
-      h('strong', {}, r.taskId),
+      h('span', { style: 'color: var(--' + (row.outcome === 'delivered' ? 'ok' : 'err') + ');' }, row.outcome === 'delivered' ? '✓' : '✗'),
+      h('strong', { class: 'run-main' }, row.taskId),
       h('span', { class: 'muted', style: 'font-size:11px;' },
-        r.ts.slice(0, 16).replace('T', ' ') + ' · $' + (r.costUsd != null ? r.costUsd.toFixed(3) : '?') +
-        ' · ' + (r.durationS != null ? r.durationS + 's' : '?') +
-        (r.provider ? ' · ' + r.provider : '') +
-        ' · O' + r.opusCalls + '/S' + r.sonnetCalls + '/H' + r.haikuCalls +
-        (r.otherCalls ? '/+' + r.otherCalls : '') +
-        (r.deterministicPhases ? ' · ⚡' + r.deterministicPhases : '') +
-        (r.learnedSkills ? ' · 📖+' + r.learnedSkills : '') +
-        (r.learnedEventSkills ? ' · ⟳+' + r.learnedEventSkills : '') +
-        (r.promotions ? ' · ⚙️compile×' + r.promotions : '') +
-        (r.refusals ? ' · ⛔' + t('burnin.refusals', { count: r.refusals }) : '') +
-        (r.compileErrors ? ' · ⚠' + t('burnin.compileErrors', { count: r.compileErrors }) : '') +
-        (r.demotions ? ' · 🛡️demote×' + r.demotions : '') +
-        (r.dispatchFallbacks ? ' · ↩' + r.dispatchFallbacks : '')),
+        row.ts.slice(0, 16).replace('T', ' ') + ' · $' + (row.costUsd != null ? row.costUsd.toFixed(3) : '?') +
+        ' · ' + (row.durationS != null ? row.durationS + 's' : '?') +
+        (row.provider ? ' · ' + row.provider : '')),
+      h('span', { class: 'burnin-metrics' }, burninMetricBadges(row)),
     ])]);
     list.appendChild(line);
   }
-  el.appendChild(h('div', { class: 'section' }, [h('h3', {}, t('runs.picker')), list]));
+  host.appendChild(h('div', { class: 'section' }, [h('h3', {}, t('burnin.rowsTitle')), list]));
+  renderBurninPager(rows.length, totalPages);
 }
+
+function renderBurninPager(totalRows, totalPages) {
+  const host = $('burninPager');
+  host.innerHTML = '';
+  if (totalRows === 0) return;
+  const previous = h('button', { type: 'button' }, t('burnin.previous'));
+  const next = h('button', { type: 'button' }, t('burnin.next'));
+  previous.disabled = state.burninFilters.page <= 1;
+  next.disabled = state.burninFilters.page >= totalPages;
+  previous.addEventListener('click', () => {
+    state.burninFilters.page--;
+    renderBurninRows(burninSelectedRows());
+  });
+  next.addEventListener('click', () => {
+    state.burninFilters.page++;
+    renderBurninRows(burninSelectedRows());
+  });
+  host.appendChild(h('div', { class: 'burnin-pager' }, [
+    previous,
+    h('span', { class: 'meta' }, t('burnin.page', { current: state.burninFilters.page, total: totalPages })),
+    next,
+  ]));
+}
+
+function refreshBurninView({ chart }) {
+  renderBurninToolbar();
+  const selected = burninSelectedRows();
+  renderBurninSummary(selected);
+  if (chart) renderBurninChart(burninBaseRows());
+  renderBurninRows(selected);
+}
+
+window.addEventListener('resize', () => burninChartInstance?.resize());
 
 async function loadSkills() {
   $('skillsLanes').innerHTML = `<div class="loader">${t('common.loading')}</div>`;
@@ -3396,6 +3444,3 @@ async function fetchAndRenderL1Skills(l1Name, section) {
 applyStaticI18n();
 initLangPicker();
 loadIndex();
-</script>
-</body>
-</html>

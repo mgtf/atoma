@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- The visualizer has a Vite HMR development path and a compiled `viz:serve`
+  release path; release smoke verifies its index, hashed asset and Burn-in API.
+- Burn-in analytics provide family/outcome/time presets, ECharts drag/slider
+  zoom, compact selection summaries, 50-row pagination and metric tooltips.
+
+### Changed
+
+- Burn-in uses a time-axis scatter instead of connected batch-order lines, and
+  family cards are replaced by a bounded global summary plus compact chips.
+
 ### Fixed
 
 - The Burn-in visualizer displays compiler refusals and transport errors in

@@ -108,7 +108,8 @@ compiles first. They were one command until the v0.1.1 acceptance matrix tried
 it from the archive and got TS5058 because `tsconfig.json` is deliberately not
 packaged. The archive carries no store, skills, traces, workspace or
 credentials. Source-only operator, benchmark and development CLIs are not
-claimed as part of the compiled archive.
+claimed as part of the compiled archive, except the read-only visualizer
+(`npm run viz:serve`) whose prebuilt client/API is now release-smoked.
 Checksums are generated FROM INSIDE the release directory so they contain the
 downloadable basename, then verified before extraction — v0.1.0 initially
 published its workflow-internal `release/…` path and the first external soak
@@ -742,10 +743,17 @@ re-exports all the historical names so old imports keep working.
   `burnin/tasks-default.json` (`{tasks: [{id, family, goal}]}`); logs under
   `burnin/logs/` (gitignored), CSV committed. Rendered by the viz's
   **Burn-in** tab (`/api/burnin` reads the CSV, override with
-  `ATOMA_BURNIN_CSV`): per-family stat cards, an SVG cost-per-run scatter in
-  batch order (x axis = experience), and a row table where clicking opens
-  the run's full trace in the Runs view. Parsing/summary helpers are pure
-  and exported — covered by `tests/burnin.test.ts` on real log excerpts.
+  `ATOMA_BURNIN_CSV`). The first UI rendered one large card per family, joined
+  sparse points with misleading lines, and inserted every historical run into
+  the DOM; its compact `↩1`/`⚠1` glyphs had no explanation. The Vite/ECharts
+  client now shows four global stats plus compact family chips, a time-axis
+  scatter with legend/tooltips/inside zoom/slider/drag-zoom, family/outcome/
+  24h-7d-30d filters, and 50-row pagination. Zoom updates the summary and rows,
+  so 10k historical records remain bounded to 50 row nodes. Every lifecycle
+  metric is a focusable hover badge; `↩` explicitly means deterministic
+  dispatch fell back to the validated LLM loop. Parsing helpers remain covered
+  by `tests/burnin.test.ts`; source-contract tests pin the renderer fields,
+  pagination and chart controls.
 - **LIVE PRODUCT ITERATION, 2026-08-12 — delivery banners were not the
   score.** A curriculum batch retested the three failed families from the
   mature store: web $0.4867/14 calls, HTTP $0.3848/16, app $0.2233/13, all
@@ -1574,8 +1582,17 @@ re-exports all the historical names so old imports keep working.
   review moved from 1 blocked to 0 while preserving its 6/0 counters.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
-  mutation (`create` / `patch` / `branch` / counter bumps) during a run,
-  then serves a self-contained HTML UI on http://127.0.0.1:4111. Wired into
+  mutation (`create` / `patch` / `branch` / counter bumps) during a run. The
+  client now lives under `src/viz/client/` and builds through Vite:
+  `npm run viz` / `viz:dev` starts the read-only API on 4111 plus HMR UI on
+  5173 (override with `ATOMA_VIZ_API_PORT` / `ATOMA_VIZ_DEV_PORT`);
+  `npm run build` emits hashed assets under `dist/viz/client`, and
+  `npm run viz:serve` serves that compiled client on 4111 with no dev
+  dependencies. The release smoke fetches the compiled index, module asset and
+  `/api/burnin`, so the visualizer is now a claimed release-archive surface.
+  Vite is a build/dev seam, not a framework rewrite: the existing vanilla
+  client and tiny i18n core remain, while ECharts owns the one interaction-heavy
+  analytical view. Wired into
   both examples via `RecordingLlmClient` (wraps any `LlmClient`) and
   `RecordingRegistry` (subclasses `AtomRegistry`) — both observers only,
   zero effect on runtime behaviour. Runs are persisted as JSON under
@@ -4104,12 +4121,11 @@ second is the kind of thing that gets acted on:
   structural proof. This is a floor, not proof. Do not restore the word
   "fully" without a checker that earns it.
   Every label goes through `t('some.key', { vars })` against the catalogs
-  at the top of `ui.html`; static chrome uses `data-i18n` /
+  at the top of `src/viz/client/main.js`; static chrome in `index.html` uses `data-i18n` /
   `data-i18n-title` / `data-i18n-placeholder`, filled by
-  `applyStaticI18n()` at boot. The core is ~40 lines, NOT a library, for
-  a structural reason: `ui.html` is served verbatim (`cp` at build) with
-  no bundler, so i18next would mean a CDN (breaking an offline localhost
-  tool) or a vendored 40 KB blob. Its SURFACE is i18next-compatible
+  `applyStaticI18n()` at boot. Vite now bundles the client offline, but the
+  ~40-line core still covers the complete two-locale surface without adding
+  framework state. Its API remains i18next-compatible
   (dotted keys, `{{var}}`, `.one` count variant, dotted namespaces) so
   swapping in the real library is a drop-in — catalogs and call sites
   unchanged. English is the SOURCE and the default: `detectLocale()
