@@ -2599,10 +2599,14 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   65 against 1029), so a byte-for-byte replay can never match, and
   `validateProbeManifest` checks structure rather than completeness so nothing
   notices. Most workspaces are clean — 6 of 8 replay perfectly — which is why
-  the script dispatches successfully sometimes and demotes anyway. Unfixed: the
-  choice between teaching the writer harder, recording a length/hash so
-  truncation is detectable, and making the reader treat "recorded is a strict
-  prefix of actual" as a truncated record rather than a failure.
+  the script dispatches successfully sometimes and demotes anyway.
+  THIS WAS FIXED LATER BY `record_probe`, not left open: the machine now runs
+  the chosen command and writes its complete bytes, and re-recording the two
+  failing workspaces reduced 16 replay comparisons to zero mismatches (see the
+  Tools section below). No length/hash field or prefix tolerance was added:
+  treating a strict prefix as success could hide a real error appended after
+  otherwise-correct output. Revisit only if a post-record_probe trace contains
+  a machine-written strict-prefix record; none has.
 - **Not every skill is compilable, and matching breadth is the tell.**
   `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
   on purpose. Its four observed prefilter matches were: one genuine
