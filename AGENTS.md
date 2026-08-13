@@ -1453,8 +1453,10 @@ re-exports all the historical names so old imports keep working.
   Burn-in now carries a separate trailing `compile_errors` column, parses the
   existing `skill compile errored:` log marker, and prints
   `⚠compile-error=N` in the batch line. The viz reader exposes it with zero for
-  legacy short rows. The live row is backfilled to 1, making the 120-second
-  cost visible without rewriting historical rows.
+  legacy short rows; the Burn-in family summary and each historical row now
+  render both compile errors and genuine compiler refusals instead of silently
+  dropping the parsed fields. The live row is backfilled to 1, making the
+  120-second cost visible without rewriting historical rows.
 - **THIRTY-FIRST LIVE ITERATION, 2026-08-12 — an integrated app proved that
   "some harness passed" is not "the required harness passed".** Guestbook
   reported delivered in 633s/14 calls/$0.3548 estimated with one dispatch

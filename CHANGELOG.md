@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- The Burn-in visualizer displays compiler refusals and transport errors in
+  both family summaries and individual rows; legacy CSV rows still default to zero.
+
 ## v0.1.3 — 2026-08-13
 
 ### Added

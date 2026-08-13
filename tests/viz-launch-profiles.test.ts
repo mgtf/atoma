@@ -98,6 +98,20 @@ describe('viz i18n catalogs stay in parity', () => {
   });
 });
 
+describe('viz burn-in lifecycle visibility', () => {
+  const html = readFileSync('src/viz/ui.html', 'utf8');
+  const server = readFileSync('src/viz/server.ts', 'utf8');
+
+  it('renders compiler refusals and transport errors already present in the API', () => {
+    expect(server).toMatch(/refusals:\s*num\(c\[14\]\)\s*\?\?\s*0/);
+    expect(server).toMatch(/compileErrors:\s*num\(c\[21\]\)\s*\?\?\s*0/);
+    expect(html).toMatch(/r\.refusals[\s\S]{0,120}burnin\.refusals/);
+    expect(html).toMatch(/r\.compileErrors[\s\S]{0,120}burnin\.compileErrors/);
+    expect(html).toMatch(/f\.refusals[\s\S]{0,120}burnin\.refusals/);
+    expect(html).toMatch(/f\.compileErrors[\s\S]{0,120}burnin\.compileErrors/);
+  });
+});
+
 /**
  * The tab renders a command to COPY, never an argv it builds. A goal
  * containing a double quote must still paste as one shell argument.
