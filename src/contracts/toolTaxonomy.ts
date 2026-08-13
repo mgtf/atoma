@@ -2,7 +2,7 @@
  * The periodic-table taxonomy belongs to TOOLS.
  *
  * Elements are the framework's atomic capabilities; L1/L2/L3 agents are
- * molecules, cells and organs respectively. Invocation names stay the wire
+ * molecules, cells and tissues respectively. Invocation names stay the wire
  * contract (`read_file`, `run_shell`, ...). The element identity is stable
  * display/observability metadata and must never replace that contract.
  */

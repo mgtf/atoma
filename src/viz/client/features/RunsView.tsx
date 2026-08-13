@@ -20,7 +20,6 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { useI18n } from '../i18n.js';
 import {
   buildAtomMap,
-  filterEvents,
   fmtCost,
   fmtMs,
   fmtTime,
@@ -38,6 +37,11 @@ import { useRunTrace } from '../use-runs.js';
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
 import { taxonomyForTier } from '../../../core/taxonomy.js';
 import { currentDisplayName } from '../../../registry/taxonomyNames.js';
+import {
+  buildTimelineLayout,
+  type TimelineBranch,
+  type TimelineItem,
+} from '../timeline-layout.js';
 import {
   buildStructuredDetail,
   eventRoleLabel,
@@ -133,10 +137,14 @@ const EventCard = memo(function EventCard({
   event,
   selected,
   onSelect,
+  timelineItem,
+  branch,
 }: {
   event: VizEvent;
   selected: boolean;
   onSelect: () => void;
+  timelineItem?: TimelineItem;
+  branch?: TimelineBranch;
 }) {
   const { t } = useI18n();
   const interrupted = event.kind === 'llm-start';
@@ -157,6 +165,10 @@ const EventCard = memo(function EventCard({
         cursor: interrupted ? 'default' : 'pointer',
         contentVisibility: 'auto',
         containIntrinsicSize: '72px',
+        ml: timelineItem ? Math.min(6, timelineItem.lane * 1.5) : 0,
+        boxShadow: timelineItem && timelineItem.lane > 0
+          ? `${Math.min(10, timelineItem.lane * 3)}px ${Math.min(8, timelineItem.lane * 2)}px 0 rgba(2,5,11,.28)`
+          : undefined,
         '&:hover': interrupted ? undefined : { borderColor: 'primary.main' },
       }}
     >
@@ -165,7 +177,23 @@ const EventCard = memo(function EventCard({
           <Typography variant="body2" sx={{ fontWeight: 700 }}>{eventTitle(event, t)}</Typography>
           {event.actor?.tier ? <TierChip tier={event.actor.tier} label={event.actor.name} /> : null}
           {event.child?.name ? <Chip size="small" variant="outlined" label={`→ ${event.child.name}`} /> : null}
-          {event.branchId ? <Chip size="small" variant="outlined" label={`⑂ ${event.branchId.slice(0, 6)}`} /> : null}
+          {branch ? (
+            <Chip
+              size="small"
+              variant="outlined"
+              label={`${branch.parallel ? 'B' : 'P'}${branch.path.join('.')}`}
+            />
+          ) : null}
+          {timelineItem?.branchStart && branch ? (
+            <Chip
+              size="small"
+              color={branch.parallel ? 'info' : 'default'}
+              variant="outlined"
+              label={`${t(branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase', {
+                n: branch.path.join('.'),
+              })}${branch.label ? ` · ${branch.label.slice(0, 42)}` : ''}`}
+            />
+          ) : null}
           {interrupted ? <Chip size="small" color="error" label={t('event.interrupted')} /> : null}
           <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
             {fmtTime(event.ts)}
@@ -305,7 +333,10 @@ function FilterBar({
 }) {
   const { t } = useI18n();
   const roles = [...new Set(events.flatMap((event) => event.role ? [event.role] : []))];
-  const branches = [...new Set(events.flatMap((event) => event.branchId ? [event.branchId] : []))];
+  const branches = useMemo(
+    () => buildTimelineLayout(events, { ...value, branchId: 'all' }).branches,
+    [events, value]
+  );
   return (
     <Stack spacing={0.75}>
       <ToggleButtonGroup
@@ -340,7 +371,14 @@ function FilterBar({
           sx={{ flexWrap: 'wrap' }}
         >
           <ToggleButton value="all">{t('filters.allBranches')}</ToggleButton>
-          {branches.map((branch) => <ToggleButton key={branch} value={branch}>⑂ {branch.slice(0, 6)}</ToggleButton>)}
+          {branches.slice(0, 8).map((branch) => (
+            <ToggleButton key={branch.id} value={branch.id}>
+              {t(branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase', {
+                n: branch.path.join('.'),
+              })}
+              {branch.label ? ` · ${branch.label.slice(0, 32)}` : ''}
+            </ToggleButton>
+          ))}
         </ToggleButtonGroup>
       ) : null}
     </Stack>
@@ -672,13 +710,15 @@ export function RunsView({
     () => new Set((run?.events ?? []).filter((event) => event.kind === 'llm').map((event) => event.id)),
     [run]
   );
-  const visibleEvents = useMemo(() => {
-    if (!run) return [];
-    const live = isRunLive(run);
-    return filterEvents(run.events, filters)
-      .filter((event) => event.kind !== 'llm-start' || (!completed.has(String(event.llmEventId)) && !live))
-      .reverse();
-  }, [completed, filters, run]);
+  const timeline = useMemo(
+    () => run ? buildTimelineLayout(run.events, filters) : null,
+    [filters, run]
+  );
+  const visibleItems = timeline?.items ?? [];
+  const branchById = useMemo(
+    () => new Map((timeline?.branches ?? []).map((branch) => [branch.id, branch])),
+    [timeline]
+  );
   const selectedEvent = run?.events.find((event) => event.id === selectedEventId) ?? null;
   const selectedAtom = selectedAtomName ? atoms.get(selectedAtomName) ?? null : null;
 
@@ -712,25 +752,45 @@ export function RunsView({
         />
         <FilterBar events={run.events} value={filters} onChange={setFilters} />
         <NowBanner run={run} completed={completed} />
-        {!isRunLive(run) ? (
-          <Paper sx={{ p: 1, textAlign: 'center', borderColor: run.error ? 'error.main' : run.degraded ? 'warning.main' : 'success.main' }}>
-            {run.cancelled ? t('marker.cancelled') : run.error ? t('marker.error') : run.degraded ? t('marker.degraded') : t('marker.end')}
+        <Stack
+          spacing={0.75}
+          sx={{
+            position: 'relative',
+            pl: 2,
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              left: 7,
+              top: 8,
+              bottom: 8,
+              width: 2,
+              bgcolor: 'primary.main',
+              opacity: 0.35,
+            },
+          }}
+        >
+          <Paper sx={{ p: 1, textAlign: 'center' }}>
+            {t('marker.start')} · {fmtTime(run.startedAt)}
           </Paper>
-        ) : null}
-        <Stack spacing={0.75}>
-          {visibleEvents.map((event) => (
+          {visibleItems.map((item) => (
             <EventCard
-              key={event.id}
-              event={event}
-              selected={selectedEventId === event.id}
+              key={item.event.id}
+              event={item.event}
+              selected={selectedEventId === item.event.id}
+              timelineItem={item}
+              branch={item.branchId ? branchById.get(item.branchId) : undefined}
               onSelect={() => {
-                setSelectedEventId(event.id);
+                setSelectedEventId(item.event.id);
                 setSelectedAtomName(null);
               }}
             />
           ))}
-          {!visibleEvents.length ? <EmptyPane>{t('filters.noMatch')}</EmptyPane> : null}
-          <Paper sx={{ p: 1, textAlign: 'center' }}>{t('marker.start')} · {fmtTime(run.startedAt)}</Paper>
+          {!visibleItems.length ? <EmptyPane>{t('filters.noMatch')}</EmptyPane> : null}
+          {!isRunLive(run) ? (
+            <Paper sx={{ p: 1, textAlign: 'center', borderColor: run.error ? 'error.main' : run.degraded ? 'warning.main' : 'success.main' }}>
+              {run.cancelled ? t('marker.cancelled') : run.error ? t('marker.error') : run.degraded ? t('marker.degraded') : t('marker.end')}
+            </Paper>
+          ) : null}
         </Stack>
       </Stack>
       <Box sx={{ p: 2, minWidth: 0, position: { lg: 'sticky' }, top: { lg: 49 }, alignSelf: 'start', maxHeight: { lg: 'calc(100vh - 49px)' }, overflow: 'auto' }}>

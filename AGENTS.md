@@ -1677,20 +1677,32 @@ re-exports all the historical names so old imports keep working.
   split, and the optional R3F/Three topology is a lazy ~995 KB / 266 KB-gzip
   chunk. The warning ceiling is 1100 KB for that explicit 3D boundary, not a
   licence to grow the initial path.
-  Runs preserves the audited semantics: 1s delta polling, 2s index polling,
-  the 12-minute abandonment predicate, paired llm-start events, newest-first
-  timeline, exact tool↔LLM correlation and bounded visible event rows. The
+ Runs preserves the audited semantics: 1s delta polling, 2s index polling,
+ the 12-minute abandonment predicate, paired llm-start events, exact
+ tool↔LLM correlation and bounded visible event rows. The timeline is
+ causal top-to-bottom (oldest→newest): putting the end above its fork made a
+ branch diagram visually self-contradictory. The
   GPU timeline has an explicit rectangular mask and a content-length scroll
   clamp: without both, a partially scrolled first card rendered underneath
   the role/branch controls and a short filtered list overscrolled into blank
-  space. `gpuEventCardCopy` is the pure one-definition mapping that keeps each
+ space. Content starts with 18px vertical breathing room and cards reserve
+ 24px on the right for shader padding + hover lift + depth extrusion; without
+ those reserves the first hover was clipped on top and the rounded right edge
+ was guillotined. Card depth uses offset ROUNDED layers only — polygonal
+ side/bottom faces were tried and produced visibly broken corner geometry.
+ `gpuEventCardCopy` is the pure one-definition mapping that keeps each
   card's actor/child/branch, tool args/result facts, model/cost/duration,
   counters and timestamp visible; tests pin tool and LLM directions.
   `gpuFilterButtonWidth` uses the actual semibold glyph budget for semantic
   controls — the generic chip estimate truncated `TRUST`, `ALL ROLES` and
   `VALIDATE-RESULT`. Atom lanes use the same sizing and WRAP to a new row,
   rather than truncating `CarbonDioxide` or dropping atoms that no longer fit.
-  Filter rows also wrap and center their labels. Role selection is
+  Filter rows also wrap and center their labels. Interactive control gaps are
+  14px (20px in primary navigation), not the old 5–6px: hover scale plus glow
+  consumed the old gap and visually fused adjacent buttons. The enclosed
+  particle group is centred 16px from the agent button edge so its 7px orbit
+  keeps real internal padding; `gpuAtomButtonWidth` reserves a 28px particle
+  zone + 8px separation before left-aligning text at x=34. Role selection is
   LLM-EXCLUSIVE: choosing `PREFILTER` sets `{kind:"llm",role:"prefilter"}`;
   otherwise the shared event predicate intentionally keeps non-LLM events
   during a role filter, making an active Prefilter button appear broken.
@@ -1702,11 +1714,41 @@ re-exports all the historical names so old imports keep working.
   dissolve, then the branch/timeline container collapses over 390ms with a
   ~1.7px ease-out-back overshoot. Re-insertion runs the inverse transition;
   moving content starts at the old layout position while buttons appear.
+  `buildTimelineLayout` is the one pure definition of the run graph:
+  `Y=time`, trunk lane 0, branch lanes on X, supervision tier on depth. New
+  traces emit exact `branch` start/end events carrying parent id, subtask
+  index/count, aggregation mode and human subtask label; immutable older
+  traces fall back to interval containment + tier ordering and are presented
+  as inferred rather than pretending UUIDs encode a tree. Sequential phases
+  reuse a lane; overlapping siblings receive separate lanes. Pixi keeps
+  virtualized interactive text cards and renders git-graph connectors; R3F
+  renders only the visible 3D card slabs/rails/connectors from the SAME layout
+  and never captures pointers. This preserves the deliberate two-context
+  architecture and avoids one Three mesh per archived event. Chromium/
+  SwiftShader acceptance after the redesign: 16.67ms mean / 17.50ms P95 over
+  120 frames with both canvases active (~60fps).
   Three is pinned to r182 until R3F stops constructing deprecated `Clock`
   (deprecated in r183); hiding that warning would disguise a real peer timing
   mismatch. The imperative Pixi class self-invalidates HMR to avoid old
   instances calling newly-added prototype methods, and `GpuErrorBoundary`
   provides a visible reload path instead of a blank canvas.
+  The Atoma brand mark is one isometric crystal, not an atom/orbit cliché and
+  not a lattice of tiny facets: three large faces (teal molecule, amber cell,
+  violet tissue) meet at a bright core. That silhouette stays readable at
+  favicon size. The Pixi mark pulses only the core; the static SVG is the
+  source for favicon/PWA raster sizes. The wordmark is capitalized **Atoma**
+  everywhere; primary navigation starts at x=160 and the Runs input at ≥610px
+  so the brand has a real exclusion zone.
+  Both GPU and MUI builds share `src/viz/public` via Vite `publicDir`.
+  `manifest.webmanifest` + 192/512/maskable/Apple icons make the compiled viz
+  installable; the hand-written service worker registers in PROD ONLY, never
+  intercepts `/api/*`, and provides shell/static fallback without pretending
+  the SQLite-backed data is offline-capable. Release smoke fetches every PWA
+  surface and checks the manifest MIME. `scripts/viz-build.mjs` forces
+  `NODE_ENV=production`: inheriting an operator's exported `development`
+  value produced a dev React bundle and compiled `import.meta.env.PROD` false,
+  silently tree-shaking service-worker registration out of a command named
+  build.
   The visual layer stays renderer-native: the R3F backdrop runs a four-octave
   GLSL aurora/grid/star field; top navigation has energy rails and hover/press
   sparks; view changes use a GPU beam sweep; event cards add depth rails,
@@ -1719,8 +1761,13 @@ re-exports all the historical names so old imports keep working.
   the pane edge so hover scaling/glow cannot be clipped on the right. None of
   these effects adds DOM nodes. A Chromium/SwiftShader acceptance sample with
   all card shaders active measured 16.67ms mean / 17.60ms P95 over 120 frames
-  (~60fps). Stat tiles add renderer-native telemetry bars; atom controls use
-  tier-colored nucleus/orbit/electron motion. Burn-in's scatter is one batched
+  (~60fps). Stat tiles add renderer-native telemetry bars; agent controls keep
+  their ENCLOSED nucleus/orbit/electrons (one particle per tier), which is
+  useful rank encoding. The loose orbit incident was a Pixi pivot bug: the
+  ellipse was drawn around `(10,height/2)` but the Graphics object rotated
+  around `(0,0)`, so the whole ellipse wandered outside the button. Draw the
+  ellipse at local origin and position its object at the nucleus; do not
+  remove the enclosed tier particles again. Burn-in's scatter is one batched
   Graphics object with temporal grid, family colors and a single interactive
   overlay that resolves nearest-point hover into a GPU tooltip — 171 points do
   NOT become 171 display objects. Its hover acceptance measured 17.02ms mean /

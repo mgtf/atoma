@@ -54,8 +54,11 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
   const threeBackdrop = readFileSync('src/viz/client-gl/ThreeBackdrop.tsx', 'utf8');
+  const timelineLayout = readFileSync('src/viz/client/timeline-layout.ts', 'utf8');
+  const timelineRails = readFileSync('src/viz/client-gl/RunsTimelineRails.tsx', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
+  const buildLauncher = readFileSync('scripts/viz-build.mjs', 'utf8');
   const vite = readFileSync('vite.config.ts', 'utf8');
 
   it('has HMR development and compiled static deployment paths', () => {
@@ -92,6 +95,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(devLauncher).toContain('ATOMA_VIZ_DEV_URL');
     expect(devLauncher).toContain('process.execPath');
     expect(devLauncher).not.toMatch(/npm['"],\s*\['exec'|npm exec/);
+    expect(buildLauncher).toMatch(/NODE_ENV:\s*'production'/);
     expect(server).toContain('res.writeHead(307');
     expect(gpuApp).toMatch(/ThreeBackdrop|GpuSurface|DomBridge/);
     expect(gpuMain).toMatch(/GpuErrorBoundary/);
@@ -126,6 +130,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/matching\.slice\(start, start \+ visibleCount\)/);
     expect(gpuRenderer).not.toMatch(/\.slice\(0, 12\)/);
     expect(gpuRenderer).toMatch(/gpuEventCardCopy\(event\)/);
+    expect(gpuRenderer).toMatch(/buildTimelineLayout\(run\.events/);
+    expect(timelineLayout).toMatch(/chronological:\s*true/);
+    expect(timelineLayout).toMatch(/inferParents|assignLanes/);
     expect(gpuRenderer).toMatch(/private filterButton\(/);
     expect(gpuRenderer).toMatch(/pointerover|pointerdown/);
     expect(gpuRenderer).toMatch(/drawRemovedFilterEffects/);
@@ -134,8 +141,25 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/exitingRoleFilters/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
+    expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
+    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(9, 8\)/);
+    expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
+    expect(gpuRenderer).toMatch(/let x = 160/);
     expect(gpuRenderer).toMatch(/private statCard\(/);
     expect(gpuRenderer).toMatch(/private atomButton\(/);
+    expect(gpuRenderer).toMatch(/ellipse\(0, 0, 7, 4\)/);
+    expect(gpuRenderer).toMatch(/const particleCenterX = 16/);
+    expect(gpuRenderer).toMatch(/orbit\.position\.set\(particleCenterX, height \/ 2\)/);
+    expect(gpuRenderer).toMatch(/Array\.from\(\{ length: tier \}/);
+    expect(gpuRenderer).not.toMatch(/ellipse\(10, height \/ 2, 7, 4\)/);
+    expect(gpuRenderer).toMatch(/gpuAtomButtonWidth\(name\)/);
+    expect(gpuRenderer).toMatch(/const CONTROL_HOVER_GAP = 14/);
+    expect(gpuRenderer).toMatch(/const NAV_HOVER_GAP = 20/);
+    expect(gpuRenderer).toMatch(/atomX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
+    expect(gpuRenderer).toMatch(/filterX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
+    expect(gpuRenderer).toMatch(/roleX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
+    expect(gpuRenderer).toMatch(/branchX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
+    expect(gpuRenderer).toMatch(/label\.length \* 7 \+ 22\) \+ NAV_HOVER_GAP/);
     expect(gpuRenderer).toMatch(/private drawBurninChart\(/);
     expect(gpuRenderer).toMatch(/cursor = 'crosshair'|pointermove/);
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
@@ -147,6 +171,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
+    expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
+    expect(timelineRails).toMatch(/visibleItems\.map|visibleBranches\.map/);
+    expect(timelineRails).not.toMatch(/run\.events\.map/);
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
     expect(gpuRenderer).toMatch(/row\.refusals/);
     expect(gpuRenderer).toMatch(/row\.compileErrors/);

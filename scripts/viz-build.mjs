@@ -8,7 +8,7 @@ const result = spawnSync(
   [viteCli, 'build', '--config', 'vite.config.ts'],
   {
     cwd: fileURLToPath(new URL('..', import.meta.url)),
-    env: { ...process.env, ATOMA_VIZ_UI: ui },
+    env: { ...process.env, NODE_ENV: 'production', ATOMA_VIZ_UI: ui },
     stdio: 'inherit',
   }
 );

@@ -12,6 +12,11 @@ const en = (key: string, vars?: Record<string, unknown>) => translate('en', key,
 const fr = (key: string, vars?: Record<string, unknown>) => translate('fr', key, vars);
 
 describe('structured detail presentation', () => {
+  it('keeps the tool filter discoverable in both locales', () => {
+    expect(en('filters.tools')).toBe('Tools');
+    expect(fr('filters.tools')).toBe('Outils');
+  });
+
   it('turns verdict booleans and prose into readable fields', () => {
     const nodes = buildStructuredDetail({
       approved: true,

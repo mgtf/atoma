@@ -192,6 +192,10 @@ function assetContentType(file: string): string {
       return 'image/svg+xml';
     case '.png':
       return 'image/png';
+    case '.webmanifest':
+      return 'application/manifest+json; charset=utf-8';
+    case '.ico':
+      return 'image/x-icon';
     case '.webp':
       return 'image/webp';
     default:
@@ -747,7 +751,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(cli.port, cli.host, () => {
-  console.log(`atoma viz server — http://${cli.host}:${cli.port}/`);
+  console.log(`Atoma viz server — http://${cli.host}:${cli.port}/`);
   console.log(`serving runs from: ${RUNS_DIR}`);
   if (!existsSync(RUNS_DIR)) {
     console.log(`(directory does not exist yet — it will be created when a run is recorded)`);

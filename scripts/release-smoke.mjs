@@ -138,6 +138,30 @@ try {
     if (!asset) throw new Error('compiled viz index has no module asset');
     const assetResponse = await fetch(`http://127.0.0.1:${port}${asset}`);
     if (!assetResponse.ok) throw new Error(`compiled viz asset failed: ${assetResponse.status}`);
+    const manifestResponse = await fetch(`http://127.0.0.1:${port}/manifest.webmanifest`);
+    const manifest = await manifestResponse.json();
+    if (
+      !manifestResponse.ok ||
+      !manifestResponse.headers.get('content-type')?.startsWith('application/manifest+json') ||
+      manifest.short_name !== 'Atoma' ||
+      !Array.isArray(manifest.icons) ||
+      manifest.icons.length < 3
+    ) {
+      throw new Error('compiled viz PWA manifest is missing or invalid');
+    }
+    for (const path of [
+      '/favicon.svg',
+      '/apple-touch-icon.png',
+      '/icons/atoma-192.png',
+      '/icons/atoma-512.png',
+      '/icons/atoma-maskable-512.png',
+      '/sw.js',
+    ]) {
+      const staticResponse = await fetch(`http://127.0.0.1:${port}${path}`);
+      if (!staticResponse.ok) {
+        throw new Error(`compiled viz PWA asset failed: ${path} → ${staticResponse.status}`);
+      }
+    }
     const burninResponse = await fetch(`http://127.0.0.1:${port}/api/burnin`);
     const burnin = await burninResponse.json();
     if (!burninResponse.ok || !Array.isArray(burnin.rows)) {

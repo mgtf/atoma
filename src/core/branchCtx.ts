@@ -10,10 +10,9 @@ import type {
 /**
  * Derive a child RunContext that tags every observable event (LLM call,
  * tool invocation, trust fast-path) with the given `branchId`. Used by
- * L2/L3 when they fan-out `Promise.all` over subtasks: each subtask
- * runs with its own branch ctx, so the trace/viz can render parallel
- * chains in distinct lanes instead of collapsing them into one
- * interleaved timeline.
+ * L2/L3 for every subtask (parallel OR sequential): each subtask runs with
+ * its own branch ctx, while `recordBranch` carries the aggregation mode so
+ * the viz can distinguish a fan-out lane from a sequential phase.
  *
  * What gets wrapped:
  *   - `llm.complete(req)` → injects `branchId` on `req` unless the
@@ -27,6 +26,8 @@ import type {
  *     simply spread the branchId into the object we forward.
  *   - `currentBranchId` → the field itself, in case any downstream
  *     consumer reads ctx directly.
+ *   - `recordBranch` → forwarded unchanged; nested dispatchers provide
+ *     their own id plus `currentBranchId` as the exact parent.
  */
 export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   const wrappedLlm: LlmClient = {
@@ -65,6 +66,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
     ...(wrappedRecordSkill !== undefined ? { recordSkill: wrappedRecordSkill } : {}),
     ...(wrappedRecordCacheHit !== undefined ? { recordCacheHit: wrappedRecordCacheHit } : {}),
+    ...(ctx.recordBranch !== undefined ? { recordBranch: ctx.recordBranch } : {}),
     currentBranchId: branchId,
   };
   return out;

@@ -1,6 +1,17 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { translate } from '../client/i18n.js';
-import type { GpuRenderMetrics } from './gpu-renderer.js';
+import type {
+  GpuRenderMetrics,
+  GpuTimelineViewport,
+} from './gpu-renderer.js';
 import { DomBridge } from './DomBridge.js';
 import { GpuSurface } from './GpuSurface.js';
 import {
@@ -32,6 +43,19 @@ declare global {
   }
 }
 
+function sameTimelineViewport(
+  left: GpuTimelineViewport | null,
+  right: GpuTimelineViewport | null
+): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return Object.keys(left).every(
+    (key) =>
+      left[key as keyof GpuTimelineViewport] ===
+      right[key as keyof GpuTimelineViewport]
+  );
+}
+
 function errorMessage(errors: unknown[]) {
   const found = errors.find(Boolean);
   if (found instanceof Error) return found.message;
@@ -42,6 +66,8 @@ function errorMessage(errors: unknown[]) {
 
 export function GpuApp() {
   const state = useGpuStore();
+  const [timelineViewport, setTimelineViewport] =
+    useState<GpuTimelineViewport | null>(null);
   const metrics = useRef<GpuRenderMetrics>({
     backend: 'unknown',
     objectCount: 0,
@@ -250,6 +276,12 @@ export function GpuApp() {
 
   const updateMetrics = useCallback((next: GpuRenderMetrics) => {
     metrics.current = next;
+    const nextTimeline = next.timelineViewport
+      ? { ...next.timelineViewport }
+      : null;
+    setTimelineViewport((current) =>
+      sameTimelineViewport(current, nextTimeline) ? current : nextTimeline
+    );
     if (import.meta.env.DEV && window.__ATOMA_VIZ_TEST__) {
       window.__ATOMA_VIZ_TEST__.renderer = next;
     }
@@ -271,7 +303,12 @@ export function GpuApp() {
   return (
     <main className="gpu-app">
       <Suspense fallback={null}>
-        <ThreeBackdrop run={runQuery.data ?? null} />
+        <ThreeBackdrop
+          run={runQuery.data ?? null}
+          view={state.view}
+          runFilters={state.runFilters}
+          timelineViewport={timelineViewport}
+        />
       </Suspense>
       <GpuSurface data={data} t={t} onActivate={activate} onMetrics={updateMetrics} />
       <DomBridge

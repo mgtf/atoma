@@ -11,13 +11,16 @@ import {
 } from 'pixi.js';
 import {
   buildAtomMap,
-  filterEvents,
   fmtCost,
   fmtMs,
   isRunLive,
   toolArgSummary,
   tryParseJson,
 } from '../client/run-utils.js';
+import {
+  buildTimelineLayout,
+  type TimelineBranch,
+} from '../client/timeline-layout.js';
 import type {
   BurninRow,
   LaunchProfile,
@@ -70,12 +73,30 @@ interface FilterVisualTarget extends GpuHitTarget {
   accent: number;
 }
 
+export interface GpuTimelineViewport {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  railBaseX: number;
+  laneSpacing: number;
+  cardBaseX: number;
+  cardBaseWidth: number;
+  branchCardOffset: number;
+  contentTopPadding: number;
+  contentBottomPadding: number;
+  rowHeight: number;
+  totalHeight: number;
+  scrollY: number;
+}
+
 export interface GpuRenderMetrics {
   backend: 'webgpu' | 'webgl' | 'unknown';
   objectCount: number;
   runCollapseOffset: number;
   visibleLabels: string[];
   hitTargets: GpuHitTarget[];
+  timelineViewport?: GpuTimelineViewport;
 }
 
 export interface GpuRenderSnapshot {
@@ -119,6 +140,14 @@ export function gpuFilterButtonWidth(label: string) {
   return Math.max(52, Math.ceil(label.length * 7.2 + 24));
 }
 
+export function gpuAtomButtonWidth(label: string) {
+  // 28px particle zone + 8px separation + 12px right padding.
+  return Math.min(160, Math.max(80, Math.ceil(label.length * 6.4 + 48)));
+}
+
+const CONTROL_HOVER_GAP = 14;
+const NAV_HOVER_GAP = 20;
+
 function quantile(values: number[], percentile: number) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -140,6 +169,35 @@ function detailToneColor(tone: DetailTone): number {
   if (tone === 'warning') return GPU_COLORS.warning;
   if (tone === 'info') return GPU_COLORS.cyan;
   return GPU_COLORS.muted;
+}
+
+const BRANCH_COLORS = [
+  0x22d3ee,
+  0xe879f9,
+  0x4ade80,
+  0xfbbf24,
+  0x6ea8ff,
+  0xfb7185,
+  0xa78bfa,
+  0x2dd4bf,
+] as const;
+
+function timelineBranchColor(branch: TimelineBranch): number {
+  return BRANCH_COLORS[branch.colorIndex % BRANCH_COLORS.length]!;
+}
+
+function timelineBranchLabel(
+  branch: TimelineBranch,
+  t: (key: string, vars?: Record<string, unknown>) => string
+): string {
+  const base = t(
+    branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase',
+    { n: branch.path.join('.') }
+  );
+  const descriptor = branch.label
+    ? truncate(branch.label.replace(/\s+/g, ' '), 28)
+    : branch.agentName;
+  return descriptor ? `${base} · ${descriptor}` : base;
 }
 
 export function gpuCardShaderMode(event: VizEvent): number {
@@ -624,6 +682,7 @@ export class GpuRenderer {
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
     this.metrics.runCollapseOffset = 0;
+    delete this.metrics.timelineViewport;
     this.currentFilterBounds = new Map();
     this.handledExitIds = new Set();
     this.currentEventIds = new Set();
@@ -1185,6 +1244,7 @@ export class GpuRenderer {
     onActivate: (id: string) => void
   ) {
     const accent = GPU_COLORS.tiers[tier];
+    const particleCenterX = 16;
     const firstAppearance = !this.seenAnimatedControls.has(id);
     this.seenAnimatedControls.add(id);
     const container = new Container();
@@ -1206,12 +1266,15 @@ export class GpuRenderer {
     container.addChild(base);
 
     const nucleus = new Graphics();
-    nucleus.circle(10, height / 2, active ? 3 : 2.3).fill(accent);
+    nucleus.circle(particleCenterX, height / 2, active ? 3 : 2.3).fill(accent);
     nucleus.alpha = active ? 0.95 : 0.5;
     container.addChild(nucleus);
 
     const orbit = new Graphics();
-    orbit.ellipse(10, height / 2, 7, 4).stroke({ color: accent, width: 0.8, alpha: 0.35 });
+    orbit
+      .ellipse(0, 0, 7, 4)
+      .stroke({ color: accent, width: 0.8, alpha: 0.35 });
+    orbit.position.set(particleCenterX, height / 2);
     container.addChild(orbit);
 
     const electrons = Array.from({ length: tier }, (_, index) => {
@@ -1222,12 +1285,17 @@ export class GpuRenderer {
       return electron;
     });
 
-    const labelText = this.text(container, label, width / 2 + 5, Math.max(5, (height - 16) / 2), {
-      size: 10,
-      color: active ? GPU_COLORS.text : 0xa9b5ca,
-      weight: active ? '700' : '600',
-    });
-    labelText.anchor.x = 0.5;
+    this.text(
+      container,
+      truncate(label, Math.max(1, Math.floor((width - 44) / 6.2))),
+      34,
+      Math.max(5, (height - 16) / 2),
+      {
+        size: 10,
+        color: active ? GPU_COLORS.text : 0xa9b5ca,
+        weight: active ? '700' : '600',
+      }
+    );
 
     let hovered = false;
     let pressed = false;
@@ -1256,9 +1324,11 @@ export class GpuRenderer {
       orbit.rotation = elapsed * (tier % 2 ? 0.0012 : -0.001);
       orbit.alpha = active ? 0.75 : hovered ? 0.5 : 0.28;
       electrons.forEach((electron, index) => {
-        const phase = elapsed / (370 + tier * 45) + index * Math.PI * 2 / Math.max(1, tier);
+        const phase =
+          elapsed / (370 + tier * 45) +
+          index * Math.PI * 2 / Math.max(1, tier);
         electron.position.set(
-          10 + Math.cos(phase) * 7,
+          particleCenterX + Math.cos(phase) * 7,
           height / 2 + Math.sin(phase) * 4
         );
         electron.alpha = active ? 0.5 + pulse * 0.4 : hovered ? 0.55 : 0;
@@ -1330,18 +1400,48 @@ export class GpuRenderer {
     accent: number,
     shaderMode: number,
     selected: boolean,
-    onActivate: (id: string) => void
+    onActivate: (id: string) => void,
+    zDepth = 0
   ) {
     const wasVisible = this.previousEventIds.has(id);
     const entranceDelay = this.currentEventIds.size * 18;
     this.currentEventIds.add(id);
     const container = new Container();
     container.position.set(x, y);
+    container.skew.x = -zDepth * 0.007;
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
     const cardShader = this.createCardFilter(shaderMode);
     container.filters = [cardShader.filter];
+
+    const extrusion = new Graphics();
+    const extrusionX = 5 + zDepth * 7;
+    const extrusionY = 5 + zDepth * 5;
+    extrusion.roundRect(extrusionX, extrusionY, width, height, 8);
+    extrusion.fill({ color: 0x02050b, alpha: 0.38 + zDepth * 0.14 });
+    extrusion.stroke({
+      color: accent,
+      width: 1,
+      alpha: 0.14 + zDepth * 0.16,
+    });
+    container.addChild(extrusion);
+
+    const middleExtrusion = new Graphics();
+    middleExtrusion.roundRect(
+      extrusionX * 0.52,
+      extrusionY * 0.52,
+      width,
+      height,
+      8
+    );
+    middleExtrusion.fill({ color: 0x08111f, alpha: 0.34 + zDepth * 0.1 });
+    middleExtrusion.stroke({
+      color: accent,
+      width: 0.8,
+      alpha: 0.1 + zDepth * 0.13,
+    });
+    container.addChild(middleExtrusion);
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -1393,10 +1493,11 @@ export class GpuRenderer {
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.992 : hovered ? 1.008 : 1;
       const scale = easedEntrance * targetScale;
+      const depthScaleX = 1 - zDepth * 0.018;
       container.alpha = easedEntrance;
-      container.scale.set(scale);
+      container.scale.set(scale * depthScaleX, scale);
       container.position.set(
-        x + width * (1 - scale) / 2,
+        x + width * (1 - scale * depthScaleX) / 2,
         y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
       );
       const pulse = 0.5 + Math.sin(elapsed / 190) * 0.5;
@@ -1412,6 +1513,8 @@ export class GpuRenderer {
           : 0;
       base.tint = pressed ? 0xb8d8ff : hovered ? 0xd8e9ff : 0xffffff;
       depth.alpha = hovered || selected ? 1 : 0.65;
+      extrusion.alpha = hovered ? 0.82 : selected ? 0.75 : 0.58;
+      middleExtrusion.alpha = hovered ? 0.92 : selected ? 0.82 : 0.66;
       rail.alpha = selected ? 0.72 + pulse * 0.25 : hovered ? 0.9 : 0.62;
       scan.y = 5 + (Math.max(0, elapsed) * (hovered ? 0.075 : 0.025)) % Math.max(8, height - 10);
       scan.alpha = selected ? 0.08 + pulse * 0.12 : hovered ? 0.09 : 0.025;
@@ -1742,6 +1845,76 @@ export class GpuRenderer {
     this.addTicker(animate);
   }
 
+  private drawAtomaMark(x: number, y: number) {
+    const container = new Container();
+    container.position.set(x, y);
+    container.eventMode = 'none';
+
+    const cx = 18;
+    const cy = 18;
+    const r = 16;
+    const w = r * Math.sqrt(3) / 2;
+    const face = (
+      graphics: Graphics,
+      points: ReadonlyArray<readonly [number, number]>,
+      fill: number
+    ) => {
+      const [first, ...rest] = points;
+      if (!first) return;
+      graphics.moveTo(first[0], first[1]);
+      for (const point of rest) graphics.lineTo(point[0], point[1]);
+      graphics.closePath();
+      graphics.fill({ color: fill, alpha: 1 });
+    };
+
+    const v0: readonly [number, number] = [cx, cy - r];
+    const v1: readonly [number, number] = [cx + w, cy - r / 2];
+    const v2: readonly [number, number] = [cx + w, cy + r / 2];
+    const v3: readonly [number, number] = [cx, cy + r];
+    const v4: readonly [number, number] = [cx - w, cy + r / 2];
+    const v5: readonly [number, number] = [cx - w, cy - r / 2];
+    const c: readonly [number, number] = [cx, cy];
+
+    const crystal = new Graphics();
+    face(crystal, [v5, v0, v1, c], 0xf59e0b);
+    face(crystal, [v1, v2, v3, c], 0x7c3aed);
+    face(crystal, [v5, c, v3, v4], 0x0f766e);
+    crystal
+      .moveTo(v0[0], v0[1])
+      .lineTo(v1[0], v1[1])
+      .lineTo(v2[0], v2[1])
+      .lineTo(v3[0], v3[1])
+      .lineTo(v4[0], v4[1])
+      .lineTo(v5[0], v5[1])
+      .closePath()
+      .stroke({ color: 0xe6edf7, width: 1.6, alpha: 0.88 });
+    container.addChild(crystal);
+
+    const core = new Graphics();
+    core
+      .moveTo(0, -6.2)
+      .lineTo(7, 0)
+      .lineTo(0, 6.2)
+      .lineTo(-7, 0)
+      .closePath()
+      .fill({ color: 0xf8fbff, alpha: 1 })
+      .stroke({ color: GPU_COLORS.cyan, width: 1.35, alpha: 0.95 });
+    core.position.set(cx, cy);
+    container.addChild(core);
+
+    const reducedMotion =
+      typeof matchMedia !== 'undefined' &&
+      matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reducedMotion) {
+      this.addTicker(() => {
+        const cycle = performance.now() % 6400;
+        const pulse = cycle < 900 ? Math.sin((cycle / 900) * Math.PI) : 0;
+        core.scale.set(1 + pulse * 0.08);
+      });
+    }
+    this.root.addChild(container);
+  }
+
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
     this.panel(
       this.root,
@@ -1753,15 +1926,21 @@ export class GpuRenderer {
       GPU_COLORS.border,
       0
     );
-    [GPU_COLORS.tiers[3], GPU_COLORS.tiers[2], GPU_COLORS.tiers[1]].forEach((color, index) => {
-      const dot = new Graphics();
-      dot.circle(16 + index * 11, 26, 4).fill(color);
-      this.root.addChild(dot);
+    this.drawAtomaMark(9, 8);
+    this.text(this.root, 'Atoma', 63, 17.5, {
+      size: 18,
+      color: 0x263f68,
+      weight: '700',
+      alpha: 0.72,
     });
-    this.text(this.root, 'Atoma', 52, 17, { size: 15, weight: '700' });
+    this.text(this.root, 'Atoma', 62, 16, {
+      size: 18,
+      color: GPU_COLORS.text,
+      weight: '700',
+    });
 
     const views: ViewName[] = ['runs', 'registry', 'skills', 'burnin', 'launch'];
-    let x = 112;
+    let x = 160;
     for (const view of views) {
       const label = snapshot.t(`nav.${view}`).toUpperCase();
       this.navButton(
@@ -1775,7 +1954,7 @@ export class GpuRenderer {
         snapshot.state.view === view,
         snapshot.onActivate
       );
-      x += Math.max(66, label.length * 7 + 22) + 6;
+      x += Math.max(66, label.length * 7 + 22) + NAV_HOVER_GAP;
     }
 
     this.button(
@@ -2005,10 +2184,10 @@ export class GpuRenderer {
       let atomX = laneStartX;
       for (const entry of [...atoms.values()].filter((value) => value.snapshot.tier === tier)) {
         const name = entry.snapshot.name;
-        const buttonWidth = Math.min(140, gpuFilterButtonWidth(name));
+        const buttonWidth = gpuAtomButtonWidth(name);
         if (atomX + buttonWidth > leftX + leftWidth - 12) {
           atomX = laneStartX;
-          y += 33;
+          y += 28 + CONTROL_HOVER_GAP;
         }
         this.atomButton(
           this.root,
@@ -2022,9 +2201,9 @@ export class GpuRenderer {
           snapshot.state.selectedAtomName === name,
           snapshot.onActivate
         );
-        atomX += buttonWidth + 5;
+        atomX += buttonWidth + CONTROL_HOVER_GAP;
       }
-      nextLaneY = y + 38;
+      nextLaneY = y + 28 + CONTROL_HOVER_GAP;
     }
 
     const filterY = nextLaneY + 4;
@@ -2036,7 +2215,7 @@ export class GpuRenderer {
       const buttonWidth = gpuFilterButtonWidth(label);
       if (filterX + buttonWidth > leftX + leftWidth - 12 && filterX > leftX + 14) {
         filterX = leftX + 14;
-        kindY += 32;
+        kindY += 27 + CONTROL_HOVER_GAP;
       }
       this.filterButton(
         this.root,
@@ -2049,10 +2228,10 @@ export class GpuRenderer {
         snapshot.state.runFilters.kind === kind,
         snapshot.onActivate
       );
-      filterX += buttonWidth + 5;
+      filterX += buttonWidth + CONTROL_HOVER_GAP;
     }
 
-    const controlsBottomWithoutRoles = kindY + 32;
+    const controlsBottomWithoutRoles = kindY + 27 + CONTROL_HOVER_GAP;
     let controlsBottom = controlsBottomWithoutRoles;
     const roleWasVisible = [...this.previousFilterBounds.keys()].some((id) =>
       id.startsWith('run.filter.role.')
@@ -2068,7 +2247,7 @@ export class GpuRenderer {
           const buttonWidth = gpuFilterButtonWidth(label);
           if (roleX + buttonWidth > leftX + leftWidth - 12 && roleX > leftX + 14) {
             roleX = leftX + 14;
-            roleY += 30;
+          roleY += 25 + CONTROL_HOVER_GAP;
           }
           this.filterButton(
             this.root,
@@ -2081,9 +2260,9 @@ export class GpuRenderer {
             snapshot.state.runFilters.role === role,
             snapshot.onActivate
           );
-          roleX += buttonWidth + 5;
+          roleX += buttonWidth + CONTROL_HOVER_GAP;
         }
-        controlsBottom = roleY + 29;
+        controlsBottom = roleY + 25 + CONTROL_HOVER_GAP;
       }
     }
     const exitingRoleFilters =
@@ -2111,31 +2290,51 @@ export class GpuRenderer {
         controlsBottom - controlsBottomWithoutRoles
       );
     }
-    const branches = [...new Set(run.events.flatMap((event) => event.branchId ? [event.branchId] : []))];
-    if (branches.length > 1) {
+    const branchOverview = buildTimelineLayout(run.events, {
+      ...snapshot.state.runFilters,
+      branchId: 'all',
+    });
+    const overviewById = new Map(
+      branchOverview.branches.map((branch) => [branch.id, branch])
+    );
+    const branchIds = branchOverview.branches.map((branch) => branch.id);
+    const shownBranchIds = branchIds.slice(0, 6);
+    if (
+      snapshot.state.runFilters.branchId !== 'all' &&
+      !shownBranchIds.includes(snapshot.state.runFilters.branchId)
+    ) {
+      shownBranchIds.push(snapshot.state.runFilters.branchId);
+    }
+    if (branchIds.length > 1) {
       let branchX = leftX + 14;
       let branchY = controlsBottom + 4;
-      for (const branch of ['all', ...branches.slice(0, 5)]) {
-        const label = branch === 'all' ? 'ALL BRANCHES' : `⑂ ${branch.slice(0, 6)}`;
+      for (const branchId of ['all', ...shownBranchIds]) {
+        const branch = overviewById.get(branchId);
+        const label =
+          branchId === 'all'
+            ? snapshot.t('timeline.allBranches').toUpperCase()
+            : branch
+              ? timelineBranchLabel(branch, snapshot.t).toUpperCase()
+              : `⑂ ${branchId.slice(0, 6)}`;
         const buttonWidth = gpuFilterButtonWidth(label);
         if (branchX + buttonWidth > leftX + leftWidth - 12 && branchX > leftX + 14) {
           branchX = leftX + 14;
-          branchY += 30;
+          branchY += 25 + CONTROL_HOVER_GAP;
         }
         this.filterButton(
           lowerControlsLayer,
-          `run.filter.branch.${branch}`,
+          `run.filter.branch.${branchId}`,
           label,
           branchX,
           branchY,
           buttonWidth,
           25,
-          snapshot.state.runFilters.branchId === branch,
+          snapshot.state.runFilters.branchId === branchId,
           snapshot.onActivate
         );
-        branchX += buttonWidth + 5;
+        branchX += buttonWidth + CONTROL_HOVER_GAP;
       }
-      controlsBottom = branchY + 29;
+      controlsBottom = branchY + 25 + CONTROL_HOVER_GAP;
     }
 
     const completed = new Set(run.events.filter((event) => event.kind === 'llm').map((event) => event.id));
@@ -2180,22 +2379,158 @@ export class GpuRenderer {
     const listLayer = new Container();
     listLayer.mask = listMask;
     lowerControlsLayer.addChild(listLayer);
-    const events = filterEvents(run.events, snapshot.state.runFilters)
-      .filter((event) => event.kind !== 'llm-start' || !completed.has(String(event.llmEventId)))
-      .reverse();
-    const rowHeight = 80;
-    this.scrollMax.runs = Math.max(0, events.length * rowHeight - listHeight);
-    const scrollY = snapshot.state.scrollY.runs;
-    const start = Math.max(0, Math.floor(scrollY / rowHeight));
+    const timeline = buildTimelineLayout(run.events, snapshot.state.runFilters);
+    const rowHeight = timeline.rowHeight;
+    const contentTopPadding = 18;
+    const contentBottomPadding = 20;
+    const cardRightPadding = 24;
+    this.scrollMax.runs = Math.max(
+      0,
+      timeline.totalHeight +
+        contentTopPadding +
+        contentBottomPadding -
+        listHeight
+    );
+    const scrollY = Math.min(
+      snapshot.state.scrollY.runs,
+      this.scrollMax.runs
+    );
+    const start = Math.max(
+      0,
+      Math.floor(Math.max(0, scrollY - contentTopPadding) / rowHeight)
+    );
     const count = Math.ceil(listHeight / rowHeight) + 2;
-    events.slice(start, start + count).forEach((event, visibleIndex) => {
-      const index = start + visibleIndex;
-      const y = listY + index * rowHeight - scrollY;
+    const laneSpacing =
+      timeline.maxLane > 0
+        ? Math.min(16, 76 / timeline.maxLane)
+        : 0;
+    const timelineGutter =
+      snapshot.state.runFilters.branchId === 'all'
+        ? Math.min(112, 34 + timeline.maxLane * laneSpacing)
+        : 34;
+    const branchCardOffset = 10;
+    const cardBaseX = leftX + 14 + timelineGutter;
+    const cardBaseWidth =
+      leftWidth - 28 - timelineGutter - cardRightPadding;
+    const railX = (lane: number) => leftX + 24 + lane * laneSpacing;
+    const rowCenterY = (row: number) =>
+      listY +
+      contentTopPadding +
+      row * rowHeight -
+      scrollY +
+      (rowHeight - 10) / 2;
+    this.metrics.timelineViewport = {
+      left: leftX,
+      top: listY,
+      width: leftWidth,
+      height: listHeight,
+      railBaseX: railX(0),
+      laneSpacing,
+      cardBaseX,
+      cardBaseWidth,
+      branchCardOffset,
+      contentTopPadding,
+      contentBottomPadding,
+      rowHeight,
+      totalHeight:
+        timeline.totalHeight + contentTopPadding + contentBottomPadding,
+      scrollY,
+    };
+    if (timeline.items.length === 0) {
+      this.text(listLayer, snapshot.t('filters.noMatch'), leftX + 24, listY + 22, {
+        size: 11,
+        color: GPU_COLORS.muted,
+        width: leftWidth - 48,
+      });
+    }
+    const graph = new Graphics();
+    if (timeline.items.length > 0) {
+      graph
+        .moveTo(railX(0), rowCenterY(0))
+        .lineTo(railX(0), rowCenterY(timeline.items.length - 1));
+      graph.stroke({ color: GPU_COLORS.primary, width: 2.2, alpha: 0.42 });
+    }
+    for (const branch of timeline.branches) {
+      const color = timelineBranchColor(branch);
+      graph
+        .moveTo(railX(branch.lane), rowCenterY(branch.firstRow))
+        .lineTo(railX(branch.lane), rowCenterY(branch.lastRow));
+      graph.stroke({ color, width: 2.4, alpha: 0.72 });
+    }
+    for (const connector of timeline.connectors) {
+      const branch = timeline.branches.find(
+        (candidate) => candidate.id === connector.branchId
+      );
+      const color = branch ? timelineBranchColor(branch) : GPU_COLORS.primary;
+      const fromX = railX(connector.fromLane);
+      const toX = railX(connector.toLane);
+      const connectorY = rowCenterY(connector.row);
+      const bend = Math.max(5, Math.abs(toX - fromX) * 0.45);
+      graph.moveTo(fromX, connectorY);
+      graph.bezierCurveTo(
+        fromX + Math.sign(toX - fromX) * bend,
+        connectorY,
+        toX - Math.sign(toX - fromX) * bend,
+        connectorY,
+        toX,
+        connectorY
+      );
+      graph.stroke({
+        color,
+        width: connector.kind === 'fork' ? 1.8 : 1.2,
+        alpha: connector.kind === 'fork' ? 0.78 : 0.48,
+      });
+    }
+    for (const item of timeline.items.slice(start, start + count)) {
+      const branch = item.branchId
+        ? timeline.branches.find((candidate) => candidate.id === item.branchId)
+        : undefined;
+      graph
+        .circle(railX(item.lane), rowCenterY(item.row), item.branchStart ? 4 : 2.4);
+      graph.fill({
+        color: branch ? timelineBranchColor(branch) : GPU_COLORS.primary,
+        alpha: item.branchStart || item.branchEnd ? 0.95 : 0.62,
+      });
+    }
+    listLayer.addChild(graph);
+
+    if (timeline.items.length > 0) {
+      const startY = rowCenterY(0);
+      const endY = rowCenterY(timeline.items.length - 1);
+      if (startY >= listY - 20 && startY <= listY + listHeight + 20) {
+        this.text(listLayer, snapshot.t('timeline.start').toUpperCase(), railX(0) + 7, startY - 7, {
+          size: 8,
+          color: GPU_COLORS.primary,
+          weight: '700',
+        });
+      }
+      if (endY >= listY - 20 && endY <= listY + listHeight + 20) {
+        this.text(listLayer, snapshot.t('timeline.end').toUpperCase(), railX(0) + 7, endY - 7, {
+          size: 8,
+          color: GPU_COLORS.primary,
+          weight: '700',
+        });
+      }
+    }
+
+    timeline.items.slice(start, start + count).forEach((item) => {
+      const event = item.event;
+      const y =
+        listY +
+        contentTopPadding +
+        item.row * rowHeight -
+        scrollY;
       if (y > listY + listHeight || y + rowHeight < listY) return;
       const selected = snapshot.state.selectedEventId === event.id;
-      const cardX = leftX + 14;
-      const cardWidth = leftWidth - 28;
-      const cardHeight = rowHeight - 6;
+      const branch = item.branchId
+        ? timeline.branches.find((candidate) => candidate.id === item.branchId)
+        : undefined;
+      const branchOffset = item.lane * branchCardOffset;
+      const cardX = cardBaseX + branchOffset;
+      const cardWidth = cardBaseWidth - branchOffset;
+      const cardHeight = rowHeight - 10;
+      const tierDepth = item.tier === 3 ? 0.9 : item.tier === 2 ? 0.58 : item.tier === 1 ? 0.3 : 0.12;
+      const zDepth = Math.min(1, tierDepth + item.lane * 0.08);
       const cardContent = this.eventCard(
         listLayer,
         event.id,
@@ -2206,7 +2541,8 @@ export class GpuRenderer {
         eventAccent(event),
         gpuCardShaderMode(event),
         selected,
-        snapshot.onActivate
+        snapshot.onActivate,
+        zDepth
       );
       const copy = gpuEventCardCopy(event);
       this.text(cardContent, truncate(copy.title, 30), 11, 8, {
@@ -2214,10 +2550,15 @@ export class GpuRenderer {
         weight: '700',
         color: eventAccent(event),
       });
-      if (copy.meta) {
-        this.text(cardContent, truncate(copy.meta, 50), 206, 9, {
+      const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
+      const branchMeta = branch ? timelineBranchLabel(branch, snapshot.t) : '';
+      const meta = [rawMeta, branchMeta].filter(Boolean).join(' · ');
+      if (meta) {
+        const metaX = Math.min(180, Math.max(130, cardWidth * 0.38));
+        this.text(cardContent, truncate(meta, 58), metaX, 9, {
           size: 9,
           color: GPU_COLORS.muted,
+          width: Math.max(80, cardWidth - metaX - 150),
         });
       }
       if (copy.decision) {
@@ -2240,6 +2581,21 @@ export class GpuRenderer {
         size: 9,
         color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       });
+      if (item.branchStart && branch) {
+        this.text(
+          listLayer,
+          branch.parallel
+            ? `B${branch.path.join('.')}`
+            : `P${branch.path.join('.')}`,
+          railX(branch.lane) + 6,
+          y + 4,
+          {
+            size: 8,
+            color: timelineBranchColor(branch),
+            weight: '700',
+          }
+        );
+      }
     });
 
     if (twoPane) {

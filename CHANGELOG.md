@@ -55,6 +55,34 @@
 - Registry trace events now record the mutation initiator as `actor` and the
   affected agent as `child`; legacy traces recover every mechanically provable
   target without inventing an initiator for old unattributed counter bumps.
+- Runs now uses a causal top-to-bottom timeline with a main trunk, nested phase
+  paths, fan-out/fan-in connectors and human branch labels. Interactive cards
+  remain virtualized in Pixi with 2.5D depth, while the R3F layer renders only
+  visible 3D card slabs and branch rails from the same pure layout.
+- New traces persist exact branch start/end metadata (parent, subtask index,
+  aggregation mode and label); archived traces use a bounded tier/interval
+  inference instead of opaque UUID-only branch chips.
+- The event-kind filter is again labelled `Tools` / `Outils` for
+  discoverability; elemental names remain the taxonomy shown on tool details.
+- Timeline cards reserve hover/shader space above and to the right, preventing
+  the first card from clipping against the viewport. Depth now uses smooth
+  rounded layers instead of polygonal faces that broke right-hand corners.
+- Agent buttons retain their enclosed 1/2/3-particle tier animation; the
+  orbit now rotates around its local nucleus instead of the canvas origin, so
+  its ellipse can no longer wander outside the button.
+- Agent particles now keep a 9px minimum internal margin, while filter and
+  navigation controls reserve 14px/20px gaps so hover scale and glow do not
+  collide with neighbouring buttons. Agent-button sizing also reserves a
+  dedicated particle zone before the text.
+- Atoma now uses one isometric crystal as its brand mark — three rank faces
+  meeting at a bright core — so the header and favicon stay readable instead of
+  collapsing into a lattice of tiny facets.
+- The visualizer ships a shared favicon, Apple icon, 192/512/maskable app
+  icons, web manifest and production-only service worker. API requests remain
+  network-only; the PWA cache is limited to the visual shell and static assets.
+- Viz builds now force `NODE_ENV=production`, preventing an exported local
+  development value from producing a React dev bundle and removing the
+  production-only service-worker registration.
 - `npm run viz` and `viz:build` now select the full-GL client. The visible
   application UI is canvas-rendered; only text input, clipboard, IME and
   accessibility semantics remain in a minimal DOM bridge.

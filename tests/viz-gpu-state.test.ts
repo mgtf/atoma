@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   gpuCardShaderMode,
   gpuEventCardCopy,
+  gpuAtomButtonWidth,
   gpuFilterButtonWidth,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
@@ -143,6 +144,13 @@ describe('full-GL event cards preserve trace metadata', () => {
 });
 
 describe('full-GL filter controls preserve semantic labels', () => {
+  it('reserves a dedicated particle zone inside agent buttons', () => {
+    expect(gpuAtomButtonWidth('Ammonia')).toBeGreaterThanOrEqual(92);
+    expect(gpuAtomButtonWidth('VesselElement')).toBeGreaterThan(
+      gpuAtomButtonWidth('Ammonia')
+    );
+  });
+
   it('allocates enough width for every current kind, role and branch label', () => {
     for (const label of [
       'REGISTRY',

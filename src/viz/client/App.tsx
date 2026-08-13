@@ -101,12 +101,23 @@ export function App() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="sticky" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar variant="dense" sx={{ gap: 1.5, minHeight: 48 }}>
-          <Typography variant="h6" sx={{ whiteSpace: 'nowrap' }}>
-            <Box component="span" sx={{ color: '#c084fc' }}>●</Box>
-            <Box component="span" sx={{ color: '#fbbf24' }}>●</Box>
-            <Box component="span" sx={{ color: '#2dd4bf' }}>●</Box>
-            {'  '}Atoma
-          </Typography>
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{ alignItems: 'center', whiteSpace: 'nowrap', mr: 2 }}
+          >
+            <Box
+              component="img"
+              src="/favicon.svg"
+              alt=""
+              sx={{
+                width: 36,
+                height: 36,
+                filter: 'drop-shadow(3px 4px 5px rgba(34,211,238,.12))',
+              }}
+            />
+            <Typography variant="h6" sx={{ fontWeight: 750 }}>Atoma</Typography>
+          </Stack>
           <Tabs
             value={view}
             onChange={(_event, value: ViewName) => setView(value)}

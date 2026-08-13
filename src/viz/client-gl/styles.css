@@ -51,7 +51,7 @@ button, input, textarea { font: inherit; }
 
 .gpu-run-input {
   top: 10px;
-  left: max(480px, 42vw);
+  left: max(610px, 48vw);
   right: 120px;
   height: 32px;
   padding: 6px 12px;
@@ -118,7 +118,7 @@ button, input, textarea { font: inherit; }
 
 @media (max-width: 900px) {
   .gpu-run-input {
-    left: 250px;
+    left: 610px;
     right: 112px;
   }
   .gpu-view-search {
@@ -131,4 +131,8 @@ button, input, textarea { font: inherit; }
     width: auto;
     top: 310px;
   }
+}
+
+@media (max-width: 1000px) {
+  .gpu-run-input { display: none; }
 }

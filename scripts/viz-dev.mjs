@@ -71,5 +71,5 @@ process.once('exit', () => {
 });
 
 console.log(
-  `atoma viz dev — ${ui.toUpperCase()} UI ${devUiUrl} · API http://127.0.0.1:${apiPort} (root redirects to UI)`
+  `Atoma viz dev — ${ui.toUpperCase()} UI ${devUiUrl} · API http://127.0.0.1:${apiPort} (root redirects to UI)`
 );

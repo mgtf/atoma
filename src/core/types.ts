@@ -377,6 +377,18 @@ export interface SkillEventInfo {
   branchId?: string;
 }
 
+export interface BranchEventInfo {
+  readonly op: 'start' | 'end';
+  readonly branchId: string;
+  readonly parentBranchId?: string;
+  readonly index: number;
+  readonly total: number;
+  readonly aggregationMode: AggregationSpec['mode'];
+  readonly label: string;
+  readonly actorName: string;
+  readonly actorTier: Tier;
+}
+
 export interface RunContext {
   readonly logger: Logger;
   /**
@@ -436,14 +448,17 @@ export interface RunContext {
    * cache still serves, it just leaves no trace.
    */
   readonly recordCacheHit?: (info: CacheHitInfo) => void;
+  /** Exact subtask lifecycle metadata for timeline fork/join rendering. */
+  readonly recordBranch?: (info: BranchEventInfo) => void;
   /**
-   * Fan-out lane identifier (uuid) of the subtask currently executing.
-   * Set by L2/L3 when they dispatch `Promise.all` over subtasks — each
-   * parallel branch gets its own shallow-cloned ctx with a unique id, so
+   * Timeline lane identifier (uuid) of the subtask currently executing.
+   * Set by L2/L3 for parallel and sequential dispatch alike — each subtask
+   * gets its own shallow-cloned ctx with a unique id, so
    * every event recorded downstream (LLM call, tool invocation, trust
    * fast-path) carries that id. The viz uses it to group events into
-   * per-subtask lanes rather than collapsing parallel chains into one
-   * confused timeline. Absent (undefined) at the trunk level.
+   * per-subtask phases/branches rather than collapsing them into one
+   * confused timeline. `recordBranch` says whether the lane is sequential
+   * or parallel. Absent (undefined) at the trunk level.
    */
   readonly currentBranchId?: string;
 }

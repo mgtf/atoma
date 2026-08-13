@@ -3,10 +3,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GpuApp } from './GpuApp.js';
 import { GpuErrorBoundary } from './GpuErrorBoundary.js';
+import { registerAtomaServiceWorker } from '../client/pwa.js';
 import './styles.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root');
+registerAtomaServiceWorker();
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -360,6 +360,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     // Prefilter decisions replayed from the on-disk cache: the LLM call
     // that did NOT happen still deserves a card.
     recordCacheHit: (info) => recorder.recordCacheHit(info),
+    recordBranch: (info) => recorder.recordBranch(info),
   };
 
   const task = profile.buildTask(goal);

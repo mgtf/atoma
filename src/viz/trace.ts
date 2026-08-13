@@ -254,6 +254,20 @@ export interface VizCacheEvent {
   branchId?: string;
 }
 
+export interface VizBranchEvent {
+  id: string;
+  ts: number;
+  kind: 'branch';
+  op: 'start' | 'end';
+  branchId: string;
+  parentBranchId?: string;
+  index: number;
+  total: number;
+  aggregationMode: import('../core/types.js').AggregationSpec['mode'];
+  label: string;
+  actor: VizAtomRef;
+}
+
 export type VizEvent =
   | VizLlmEvent
   | VizLlmStartEvent
@@ -261,7 +275,8 @@ export type VizEvent =
   | VizToolEvent
   | VizTrustEvent
   | VizSkillEvent
-  | VizCacheEvent;
+  | VizCacheEvent
+  | VizBranchEvent;
 
 export interface VizRunIndexEntry {
   id: string;
@@ -535,6 +550,25 @@ export class TraceRecorder {
         ? { actor: { name: info.actorName, tier: info.actorTier } }
         : {}),
       ...(info.branchId !== undefined ? { branchId: info.branchId } : {}),
+    };
+    this.record(ev);
+  }
+
+  recordBranch(info: import('../core/types.js').BranchEventInfo): void {
+    const ev: VizBranchEvent = {
+      id: randomUUID(),
+      ts: Date.now(),
+      kind: 'branch',
+      op: info.op,
+      branchId: info.branchId,
+      ...(info.parentBranchId !== undefined
+        ? { parentBranchId: info.parentBranchId }
+        : {}),
+      index: info.index,
+      total: info.total,
+      aggregationMode: info.aggregationMode,
+      label: info.label,
+      actor: { name: info.actorName, tier: info.actorTier },
     };
     this.record(ev);
   }

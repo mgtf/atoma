@@ -9,6 +9,7 @@ const clientName = process.env['ATOMA_VIZ_UI'] === 'mui' ? 'client' : 'client-gl
 export default defineConfig({
   plugins: [react()],
   root: fileURLToPath(new URL(`./src/viz/${clientName}`, import.meta.url)),
+  publicDir: fileURLToPath(new URL('./src/viz/public', import.meta.url)),
   build: {
     outDir: fileURLToPath(new URL('./dist/viz/client', import.meta.url)),
     emptyOutDir: true,

@@ -241,6 +241,9 @@ React Three Fiber renders the tier topology behind it. Zustand owns scene/UI
 state and TanStack Query owns the read-only API state. Only text input,
 clipboard, IME and accessibility use a minimal DOM bridge. The previous
 MUI client remains available through `npm run viz:mui`.
+The compiled visualizer is installable as an **Atoma** PWA; its service worker
+caches only the application shell and static assets, never the live `/api/*`
+data backed by the local registry and traces.
 
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;

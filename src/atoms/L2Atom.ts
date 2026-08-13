@@ -810,7 +810,15 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   ): Promise<Result[]> {
     this.planChildAliases.clear();
     return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) =>
-      this.runSubtask({ subtask, strategy, parentTask: task, idx, ctx })
+      this.runSubtask({
+        subtask,
+        strategy,
+        parentTask: task,
+        idx,
+        total: subtasks.length,
+        aggregationMode: plan.aggregation.mode,
+        ctx,
+      })
     );
   }
 
@@ -828,9 +836,19 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     strategy: L2Strategy;
     parentTask: Task;
     idx: number;
+    total: number;
+    aggregationMode: Plan['aggregation']['mode'];
     ctx: RunContext;
   }): Promise<Result> {
-    const { subtask, strategy, parentTask, idx, ctx } = args;
+    const {
+      subtask,
+      strategy,
+      parentTask,
+      idx,
+      total,
+      aggregationMode,
+      ctx,
+    } = args;
     const l1Type = this.resolveL1ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l1Type.name);
     const l1 = L1Atom.fromType(l1Type);
@@ -1038,26 +1056,42 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // Fork a branch-scoped ctx so every LLM/tool/trust event recorded
     // inside this supervise loop carries a unique branchId. Viz renders
     // each branch as its own lane instead of interleaving them.
-    const branchCtx = forkBranch(ctx, randomUUID());
-    const res = await superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
-    // Event-skill distillation (#E1) — a RECOVERED run (rejections in the
-    // trace, ultimately approved, not a fallback deliverable) carries the
-    // failure→fix delta worth keying on the event signature. Opportunistic:
-    // errors are logged and swallowed, the run is already delivered.
+    const branchId = randomUUID();
+    const branchInfo = {
+      branchId,
+      ...(ctx.currentBranchId ? { parentBranchId: ctx.currentBranchId } : {}),
+      index: idx,
+      total,
+      aggregationMode,
+      label: subtask.description,
+      actorName: this.name,
+      actorTier: 2 as const,
+    };
+    ctx.recordBranch?.({ op: 'start', ...branchInfo });
+    const branchCtx = forkBranch(ctx, branchId);
     try {
-      await this.maybeLearnEventSkill({
-        l1Name: l1Type.name,
-        subTask,
-        res,
-        eventSkillInjected: eventState.injected,
-        ctx: branchCtx,
-      });
-    } catch (err) {
-      ctx.logger.warn(
-        `[${this.name}] event-skill learning attempt errored: ${(err as Error).message}`
-      );
+      const res = await superviseLoop<L1Atom>(this, l1, subTask, branchCtx, hooks);
+      // Event-skill distillation (#E1) — a RECOVERED run (rejections in the
+      // trace, ultimately approved, not a fallback deliverable) carries the
+      // failure→fix delta worth keying on the event signature. Opportunistic:
+      // errors are logged and swallowed, the run is already delivered.
+      try {
+        await this.maybeLearnEventSkill({
+          l1Name: l1Type.name,
+          subTask,
+          res,
+          eventSkillInjected: eventState.injected,
+          ctx: branchCtx,
+        });
+      } catch (err) {
+        ctx.logger.warn(
+          `[${this.name}] event-skill learning attempt errored: ${(err as Error).message}`
+        );
+      }
+      return res;
+    } finally {
+      ctx.recordBranch?.({ op: 'end', ...branchInfo });
     }
-    return res;
   }
 
 

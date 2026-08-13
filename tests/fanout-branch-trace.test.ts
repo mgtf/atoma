@@ -7,7 +7,11 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { MockLlmClient } from '../src/core/llm.js';
 import { RecordingLlmClient } from '../src/viz/recordingLlm.js';
-import { TraceRecorder, type VizLlmEvent } from '../src/viz/trace.js';
+import {
+  TraceRecorder,
+  type VizBranchEvent,
+  type VizLlmEvent,
+} from '../src/viz/trace.js';
 import { DEFAULT_LIMITS } from '../src/core/limits.js';
 import type { RunContext } from '../src/core/types.js';
 import { silentLogger, jsonText, jsonTextPair } from './helpers.js';
@@ -82,6 +86,7 @@ describe('fan-out — trace events carry branchId per subtask', () => {
       signal: new AbortController().signal,
       llm: recording,
       limits: DEFAULT_LIMITS,
+      recordBranch: (info) => recorder.recordBranch(info),
     };
 
     const plan = await l2.plan({ description: 't' }, ctx);
@@ -117,5 +122,27 @@ describe('fan-out — trace events carry branchId per subtask', () => {
     const [aBranch] = aBranches;
     const [bBranch] = bBranches;
     expect(aBranch).not.toBe(bBranch);
+
+    const lifecycle = run.events.filter(
+      (event): event is VizBranchEvent => event.kind === 'branch'
+    );
+    expect(lifecycle).toHaveLength(4);
+    expect(lifecycle.filter((event) => event.op === 'start')).toEqual([
+      expect.objectContaining({
+        index: 0,
+        total: 2,
+        aggregationMode: 'concat',
+        label: 'A',
+        actor: { name: l2.name, tier: 2 },
+      }),
+      expect.objectContaining({
+        index: 1,
+        total: 2,
+        aggregationMode: 'concat',
+        label: 'B',
+        actor: { name: l2.name, tier: 2 },
+      }),
+    ]);
+    expect(lifecycle.every((event) => event.parentBranchId === undefined)).toBe(true);
   });
 });

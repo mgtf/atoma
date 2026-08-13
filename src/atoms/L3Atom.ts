@@ -591,7 +591,16 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     this.planChildAliases.clear();
     return dispatchWithAggregation(subtasks, plan, ctx, (subtask, idx) => {
       const hooks = this.makeL2Hooks(ctx, subtask.description);
-      return this.runSubtask({ subtask, strategy, parentTask: task, idx, hooks, ctx });
+      return this.runSubtask({
+        subtask,
+        strategy,
+        parentTask: task,
+        idx,
+        total: subtasks.length,
+        aggregationMode: plan.aggregation.mode,
+        hooks,
+        ctx,
+      });
     });
   }
 
@@ -600,10 +609,21 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     strategy: L3Strategy;
     parentTask: Task;
     idx: number;
+    total: number;
+    aggregationMode: Plan['aggregation']['mode'];
     hooks: SupervisionHooks<L2Atom>;
     ctx: RunContext;
   }): Promise<Result> {
-    const { subtask, strategy, parentTask, idx, hooks, ctx } = args;
+    const {
+      subtask,
+      strategy,
+      parentTask,
+      idx,
+      total,
+      aggregationMode,
+      hooks,
+      ctx,
+    } = args;
     const l2Type = this.resolveL2ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l2Type.name);
     const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers, this.skillRegistry);
@@ -614,8 +634,24 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       : { description: subtask.description };
     // Fork a branch-scoped ctx so the viz can render each L2 subtask
     // (and its downstream L1 tree) as its own lane.
-    const branchCtx = forkBranch(ctx, randomUUID());
-    return superviseLoop<L2Atom>(this, l2, subTask, branchCtx, hooks);
+    const branchId = randomUUID();
+    const branchInfo = {
+      branchId,
+      ...(ctx.currentBranchId ? { parentBranchId: ctx.currentBranchId } : {}),
+      index: idx,
+      total,
+      aggregationMode,
+      label: subtask.description,
+      actorName: this.name,
+      actorTier: 3 as const,
+    };
+    ctx.recordBranch?.({ op: 'start', ...branchInfo });
+    const branchCtx = forkBranch(ctx, branchId);
+    try {
+      return await superviseLoop<L2Atom>(this, l2, subTask, branchCtx, hooks);
+    } finally {
+      ctx.recordBranch?.({ op: 'end', ...branchInfo });
+    }
   }
 
   private resolveL2ForSubtask(

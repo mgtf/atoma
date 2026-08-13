@@ -1,0 +1,33 @@
+{
+  "name": "Atoma Visualizer",
+  "short_name": "Atoma",
+  "description": "Inspect Atoma runs, agent registries, skills, costs, and verification evidence.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b13",
+  "theme_color": "#0b111e",
+  "categories": ["developer tools", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/atoma-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/atoma-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/atoma-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

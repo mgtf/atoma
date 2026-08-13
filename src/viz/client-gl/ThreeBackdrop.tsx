@@ -5,7 +5,11 @@ import {
   Vector2,
   type Group,
 } from 'three';
+import type { EventFilters } from '../client/run-utils.js';
 import type { VizRun } from '../client/types.js';
+import type { GpuTimelineViewport } from './gpu-renderer.js';
+import { RunsTimelineRails } from './RunsTimelineRails.js';
+import type { ViewName } from './store.js';
 
 const TIER_COLORS = {
   1: '#2dd4bf',
@@ -178,7 +182,17 @@ function TierTopology({ run, animate }: { run: VizRun | null; animate: boolean }
   );
 }
 
-export function ThreeBackdrop({ run }: { run: VizRun | null }) {
+export function ThreeBackdrop({
+  run,
+  view,
+  runFilters,
+  timelineViewport,
+}: {
+  run: VizRun | null;
+  view: ViewName;
+  runFilters: EventFilters;
+  timelineViewport: GpuTimelineViewport | null;
+}) {
   const animate =
     typeof matchMedia !== 'undefined' &&
     !matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -192,7 +206,16 @@ export function ThreeBackdrop({ run }: { run: VizRun | null }) {
         <ambientLight intensity={0.4} />
         <pointLight position={[3, 7, 9]} intensity={18} color="#6ea8ff" />
         <ShaderField animate={animate} />
-        <TierTopology run={run} animate={animate} />
+        {view === 'runs' ? (
+          <RunsTimelineRails
+            run={run}
+            filters={runFilters}
+            timelineViewport={timelineViewport}
+            animate={animate}
+          />
+        ) : (
+          <TierTopology run={run} animate={animate} />
+        )}
       </Canvas>
     </div>
   );
