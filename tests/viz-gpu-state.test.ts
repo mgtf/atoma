@@ -1,6 +1,9 @@
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { gpuEventCardCopy } from '../src/viz/client-gl/gpu-renderer.js';
+import {
+  gpuEventCardCopy,
+  gpuFilterButtonWidth,
+} from '../src/viz/client-gl/gpu-renderer.js';
 import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 
@@ -103,5 +106,21 @@ describe('full-GL event cards preserve trace metadata', () => {
     expect(copy.footer).toContain('zai:glm-4.5-air');
     expect(copy.footer).toContain('$0.0123');
     expect(copy.decision).toBe('✓ approved');
+  });
+});
+
+describe('full-GL filter controls preserve semantic labels', () => {
+  it('allocates enough width for every current kind, role and branch label', () => {
+    for (const label of [
+      'REGISTRY',
+      'ALL ROLES',
+      'PREFILTER',
+      'VALIDATE-RESULT',
+      'ALL BRANCHES',
+      '⑂ c545fb',
+    ]) {
+      const availableCharacters = Math.floor((gpuFilterButtonWidth(label) - 16) / 6.2);
+      expect(availableCharacters, label).toBeGreaterThanOrEqual(label.length);
+    }
   });
 });

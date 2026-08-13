@@ -40,6 +40,9 @@
   controls or overscrolling into blank space. Event cards again expose
   actor/child/branch, tool arguments, result facts, model, cost, duration,
   counters and timestamp.
+- GPU filter and atom controls allocate width from their semibold text metrics;
+  semantic labels such as `VALIDATE-RESULT` remain complete, while atom lanes
+  wrap instead of truncating names or silently dropping later atoms.
 - The GPU renderer prefers WebGPU, retries with WebGL after initialization
   failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in

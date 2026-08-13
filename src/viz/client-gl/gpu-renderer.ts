@@ -93,6 +93,14 @@ function truncate(value: string, max: number) {
   return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
 }
 
+export function gpuFilterButtonWidth(label: string) {
+  // Uppercase filter labels use the 11px semibold face, whose wide glyphs
+  // average closer to 7px than the 6px estimate used for ordinary chips.
+  // Add enough horizontal padding that the generic button renderer never
+  // applies ellipsis to a semantic control.
+  return Math.max(52, Math.ceil(label.length * 7.2 + 24));
+}
+
 function quantile(values: number[], percentile: number) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -597,8 +605,9 @@ export class GpuRenderer {
 
     const atoms = buildAtomMap(run);
     const laneY = statsY + 65;
-    [3, 2, 1].forEach((tier, index) => {
-      const y = laneY + index * 38;
+    let nextLaneY = laneY;
+    for (const tier of [3, 2, 1]) {
+      let y = nextLaneY;
       this.text(this.root, `L${tier}`, leftX + 14, y + 7, {
         size: 10,
         color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
@@ -607,8 +616,11 @@ export class GpuRenderer {
       let atomX = leftX + 46;
       for (const entry of [...atoms.values()].filter((value) => value.snapshot.tier === tier)) {
         const name = entry.snapshot.name;
-        const buttonWidth = Math.min(100, Math.max(55, name.length * 6 + 18));
-        if (atomX + buttonWidth > leftX + leftWidth - 12) break;
+        const buttonWidth = Math.min(140, gpuFilterButtonWidth(name));
+        if (atomX + buttonWidth > leftX + leftWidth - 12) {
+          atomX = leftX + 46;
+          y += 33;
+        }
         this.button(
           this.root,
           `atom.${name}`,
@@ -624,14 +636,15 @@ export class GpuRenderer {
         );
         atomX += buttonWidth + 5;
       }
-    });
+      nextLaneY = y + 38;
+    }
 
-    const filterY = laneY + 118;
+    const filterY = nextLaneY + 4;
     const kinds = ['all', 'llm', 'tool', 'trust', 'skill', 'cache', 'registry'];
     let filterX = leftX + 14;
     for (const kind of kinds) {
       const label = kind.toUpperCase();
-      const buttonWidth = Math.max(45, label.length * 6 + 16);
+      const buttonWidth = gpuFilterButtonWidth(label);
       this.button(
         this.root,
         `run.filter.kind.${kind}`,
@@ -657,7 +670,7 @@ export class GpuRenderer {
         const roleOptions = ['all', ...roles];
         for (const role of roleOptions) {
           const label = role === 'all' ? 'ALL ROLES' : role.toUpperCase();
-          const buttonWidth = Math.max(58, Math.min(105, label.length * 6 + 16));
+          const buttonWidth = gpuFilterButtonWidth(label);
           if (roleX + buttonWidth > leftX + leftWidth - 12) break;
           this.button(
             this.root,
@@ -682,7 +695,7 @@ export class GpuRenderer {
       const branchY = controlsBottom + 4;
       for (const branch of ['all', ...branches.slice(0, 5)]) {
         const label = branch === 'all' ? 'ALL BRANCHES' : `⑂ ${branch.slice(0, 6)}`;
-        const buttonWidth = branch === 'all' ? 96 : 68;
+        const buttonWidth = gpuFilterButtonWidth(label);
         if (branchX + buttonWidth > leftX + leftWidth - 12) break;
         this.button(
           this.root,
@@ -763,13 +776,13 @@ export class GpuRenderer {
         selected ? GPU_COLORS.primary : eventAccent(event)
       );
       const copy = gpuEventCardCopy(event);
-      this.text(listLayer, truncate(copy.title, 22), leftX + 25, y + 8, {
+      this.text(listLayer, truncate(copy.title, 30), leftX + 25, y + 8, {
         size: 11,
         weight: '700',
         color: eventAccent(event),
       });
       if (copy.meta) {
-        this.text(listLayer, truncate(copy.meta, 68), leftX + 155, y + 9, {
+        this.text(listLayer, truncate(copy.meta, 50), leftX + 220, y + 9, {
           size: 9,
           color: GPU_COLORS.muted,
         });

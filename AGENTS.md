@@ -1631,7 +1631,12 @@ re-exports all the historical names so old imports keep working.
   the role/branch controls and a short filtered list overscrolled into blank
   space. `gpuEventCardCopy` is the pure one-definition mapping that keeps each
   card's actor/child/branch, tool args/result facts, model/cost/duration,
-  counters and timestamp visible; tests pin tool and LLM directions. Burn-in
+  counters and timestamp visible; tests pin tool and LLM directions.
+  `gpuFilterButtonWidth` uses the actual semibold glyph budget for semantic
+  controls — the generic chip estimate truncated `TRUST`, `ALL ROLES` and
+  `VALIDATE-RESULT`. Atom lanes use the same sizing and WRAP to a new row,
+  rather than truncating `CarbonDioxide` or dropping atoms that no longer fit.
+  Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five
   views, requires two canvases and a non-empty scene, then proves both WebGPU
