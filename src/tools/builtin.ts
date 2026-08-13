@@ -80,7 +80,12 @@ export function mergeProbeManifestWrite(existingRaw: string, incomingRaw: string
 
   const merged = [...existingEntries];
   for (const entry of incomingEntries) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      if (!merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry))) {
+        merged.push(entry);
+      }
+      continue;
+    }
     const record = entry as Record<string, unknown>;
     let replaceIndex = -1;
     if (typeof record['cmd'] === 'string') {
@@ -1549,6 +1554,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               if (it.text === undefined) throw new Error('type requires "text"');
               const coords = await resolveInteractionCoords(page, it);
               await page.mouse.click(coords.x, coords.y);
+              await page.keyboard.press(
+                (process.platform === 'darwin' ? 'Meta+A' : 'Control+A') as import('puppeteer').KeyInput
+              );
+              await page.keyboard.press('Backspace');
               await page.keyboard.type(it.text);
               if (coords.resolvedSelector && coords.resolvedSelector !== it.selector) {
                 warnings.push(

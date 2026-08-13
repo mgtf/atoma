@@ -338,6 +338,22 @@ describe('mergeProbeManifestWrite — cross-phase manifest preservation', () => 
     expect(merged.entries[0]).toEqual({ cmd: 'node test-api.js', exitCode: 0 });
     expect(merged.entries[1].probe).toBe('web');
   });
+
+  it('does not silently sanitize malformed incoming entries', () => {
+    const merged = JSON.parse(
+      mergeProbeManifestWrite(
+        JSON.stringify({ version: 1, entries: [{ cmd: 'node ok.js', exitCode: 0 }] }),
+        JSON.stringify({ version: 1, entries: ['broken-entry'] })
+      )
+    );
+    expect(merged.entries).toEqual([
+      { cmd: 'node ok.js', exitCode: 0 },
+      'broken-entry',
+    ]);
+    expect(validateProbeManifest(JSON.stringify(merged)).join('\n')).toMatch(
+      /entry #1 is not an object/
+    );
+  });
 });
 
 describe('appendHttpProbe — sequence semantics', () => {

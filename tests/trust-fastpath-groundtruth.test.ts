@@ -199,9 +199,11 @@ describe('required passing command manifest gate', () => {
     'In a final phase run the existing test-api.js end-to-end with node test-api.js and confirm it passes.';
 
   it('extracts finite test harnesses but not long-running server commands', () => {
-    expect(requiredPassingCommands(`${task} Start with node server.js.`)).toEqual([
-      'node test-api.js',
-    ]);
+    expect(
+      requiredPassingCommands(
+        `${task} Start with node server.js. A file named contest.js is unrelated.`
+      )
+    ).toEqual(['node test-api.js']);
   });
 
   it('requires the latest exact recorded command to exit zero', () => {

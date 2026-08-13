@@ -277,7 +277,7 @@ export function recordedJsonShapeMismatch(task: Task, result: Result): string | 
 export function requiredPassingCommands(description: string): string[] {
   const commands = [
     ...description.matchAll(
-      /\bnode\s+((?:[\w./-]*(?:test|probe|verify|check|harness)[\w./-]*)\.(?:m?js|cjs))\b/gi
+      /\bnode\s+((?:[\w.-]+\/)*(?:(?:test|probe|verify|check|harness)[\w.-]*|[\w.-]+-(?:test|probe|verify|check|harness))\.(?:m?js|cjs))\b/gi
     ),
   ].map((match) => `node ${match[1]}`);
   return [...new Set(commands)];
@@ -321,6 +321,9 @@ export function taskRequiresRealBrowser(description: string): boolean {
   const phaseDescription = stripLiteralContractBlock(description);
   return (
     /\b(?:real browser|browser validation|validate_html)\b/i.test(phaseDescription) ||
+    /\b(?:confirm|reconfirm|replay|verify)\b[\s\S]{0,100}\bweb probes?\b/i.test(
+      phaseDescription
+    ) ||
     (/\bselector-based\b/i.test(phaseDescription) &&
       /\b(?:window\.__test|console(?:\.error|\s+errors?)|failed requests?)\b/i.test(
         phaseDescription
@@ -359,7 +362,7 @@ async function checkRequiredPortableHttpDocs(
 ): Promise<string | null> {
   if (
     !/\bREADME\.md\b/i.test(task.description) ||
-    !/(?:<port>|portable|numeric port|LISTENING_ON_PORT)/i.test(task.description) ||
+    !/(?:<port>|portable|never[^.\n]{0,80}numeric port)/i.test(task.description) ||
     !ctx.tools?.has('read_file')
   ) {
     return null;

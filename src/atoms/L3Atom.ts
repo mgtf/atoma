@@ -144,7 +144,7 @@ export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry)
       const shellSentences = sentences.filter((sentence) =>
         /\b(?:test|harness|shell|probe-manifest|probe manifest|recorded probes?|README)\b/i.test(
           sentence
-        )
+        ) && !taskRequiresRealBrowser(sentence)
       );
       return [
         {

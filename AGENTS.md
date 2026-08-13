@@ -1531,6 +1531,13 @@ re-exports all the historical names so old imports keep working.
   browser probe rewrote the manifest to stable server.js + exact shell entries;
   manifest health and durable-port checks are green. Helium/Lithium/Methane
   credits earned before those corrections were removed.
+  Adversarial follow-up then tightened three boundaries: "confirm/replay web
+  probe" counts as browser work even without the literal phrase "real browser",
+  browser-bearing sentences are excluded from the split shell phase, and the
+  finite-command extractor matches test-api/api-test basenames rather than any
+  filename merely containing the substring "test". Manifest merge also keeps
+  malformed incoming entries visible to health checks instead of silently
+  sanitising them; form `type` selects existing text before replacement.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run,

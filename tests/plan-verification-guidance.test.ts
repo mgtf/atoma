@@ -180,11 +180,15 @@ describe('cross-bucket browser routing', () => {
     expect(routed.subtasks[2]!.description).toMatch(/FINAL SHELL\/HARNESS/);
     expect(routed.subtasks[2]!.description).toContain('node test-api.js');
     expect(routed.subtasks[2]!.preferredChild).toBe('Methane');
+    expect(taskRequiresRealBrowser(routed.subtasks[2]!.description)).toBe(false);
     expect(routed.aggregation.mode).toBe('sequential');
   });
 
   it('redirects a browser prefilter away from an HTTP-only L1', async () => {
     expect(taskRequiresRealBrowser('validate the UI in a real browser')).toBe(true);
+    expect(taskRequiresRealBrowser('Reconfirm the recorded web probe remains valid.')).toBe(
+      true
+    );
     expect(
       taskRequiresRealBrowser(
         'Create server.js and probe its API.\n\n== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\nRecord a selector-based web probe for window.__test.'
