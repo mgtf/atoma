@@ -90,6 +90,18 @@ function loadBurnin(): {
       const n = Number(s);
       return s !== undefined && s !== '' && Number.isFinite(n) ? n : null;
     };
+    const llmCalls = num(c[6]);
+    const opusCalls = num(c[7]) ?? 0;
+    const sonnetCalls = num(c[8]) ?? 0;
+    const haikuCalls = num(c[9]) ?? 0;
+    const otherCalls = num(c[19]) ?? 0;
+    const explicitProvider = c[18]?.trim();
+    const claudeCalls = opusCalls + sonnetCalls + haikuCalls;
+    const provider =
+      explicitProvider ||
+      (claudeCalls > 0 && otherCalls === 0 && (llmCalls === null || llmCalls === claudeCalls)
+        ? 'claude-legacy'
+        : 'unknown');
     rows.push({
       ts: c[0]!,
       taskId: c[1]!,
@@ -97,11 +109,11 @@ function loadBurnin(): {
       outcome: c[3]!,
       costUsd: num(c[4]),
       durationS: num(c[5]),
-      llmCalls: num(c[6]),
-      opusCalls: num(c[7]) ?? 0,
-      sonnetCalls: num(c[8]) ?? 0,
-      haikuCalls: num(c[9]) ?? 0,
-      otherCalls: num(c[19]) ?? 0,
+      llmCalls,
+      opusCalls,
+      sonnetCalls,
+      haikuCalls,
+      otherCalls,
       deterministicPhases: num(c[10]) ?? 0,
       escalations: num(c[11]) ?? 0,
       learnedSkills: num(c[12]) ?? 0,
@@ -113,7 +125,7 @@ function loadBurnin(): {
       demotions: num(c[15]) ?? 0,
       dispatchFallbacks: num(c[16]) ?? 0,
       trace: (c.length > 17 ? c[17] : c[13]) ?? '',
-      provider: c[18] ?? '',
+      provider,
     });
   }
   return { rows, csvPath: BURNIN_CSV };

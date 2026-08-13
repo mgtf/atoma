@@ -734,9 +734,14 @@ re-exports all the historical names so old imports keep working.
   and appends per-run economics to `burnin/results.csv`: cost, duration,
   calls per model tier, deterministic phases, escalations, learned skills,
   trace filename. `provider` and `other_calls` are appended columns: historical
-  Claude rows leave them blank/zero, while cross-provider rows no longer hide
-  Codex/GLM calls outside O/S/H (the live hybrid read 5 total as O0/S0/H3
-  before this). Non-Anthropic batches state that `cost_usd` is an estimated
+  Claude rows leave the CSV provider cell blank and other=0, while cross-provider
+  rows no longer hide Codex/GLM calls outside O/S/H (the live hybrid read 5
+  total as O0/S0/H3 before this). The viz API never emits an ambiguous empty
+  provider: a legacy row whose O/S/H counters explain every LLM call becomes
+  `claude-legacy` (direct API vs Claude CLI cannot be recovered honestly), and
+  rows with no attributable calls become `unknown`. A real-subprocess API test
+  pins both directions plus modern explicit providers. Non-Anthropic batches
+  state that `cost_usd` is an estimated
   API-price equivalent, not local/subscription billing. Every batch extends
   the cost-decay curve AND matures the skill/trust counters — the harness IS
   usage; the viz row renders both provider and `+other` calls. Task file:

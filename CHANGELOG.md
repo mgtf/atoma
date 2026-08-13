@@ -24,6 +24,8 @@
   the on-disk probe manifest when a trusted Result omits inline probes.
 - MCP initialize metadata reads the package version instead of advertising the
   stale hardcoded `0.1.0`.
+- Burn-in API rows normalize blank historical providers to `claude-legacy`
+  when O/S/H explain every call, or `unknown` when attribution is impossible.
 
 ## v0.1.3 — 2026-08-13
 
