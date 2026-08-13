@@ -16,6 +16,8 @@
 
 - The final eight active `no-explicit-any` warnings in test doubles now use
   the real SDK and framework interfaces, leaving CI free of lint annotations.
+- Puppeteer 25 removes the vulnerable extract-zip chain; the supported Node
+  floor is now 22.13+ (or 24+) to match that patched browser runtime and CI.
 
 ### Fixed
 

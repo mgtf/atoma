@@ -3408,17 +3408,24 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   through the real worker. Main-branch runs are never cancelled mid-worker;
   pull-request supersessions may still cancel. A stale local image cannot
   satisfy this job. The jobs pin Node
-  22.13 because the current lint dependency requires ≥22.13 on the 22.x line.
-  `package.json#engines` carries the honest full-repo floor
-  (`^20.19 || ^22.13 || >=24`) rather than the old `>=20`, which emitted
-  EBADENGINE on a supported-looking Node 22.12 install. No provider credential
-  is present and every LLM call in the suite is mocked.
-  The dependency tree is audit-clean as of 2026-08-12. Runtime fixes came via
+  22.13, now also the honest full-repo floor (`^22.13 || >=24`). Node 20
+  support ended when the only patched Puppeteer line moved to Node ≥22.12:
+  staying on Puppeteer 24 left the high-severity extract-zip symlink traversal
+  with no patched 2.x release, while overriding Puppeteer's browser package
+  across a major API boundary was not a compatibility fix. The project already
+  ran CI on 22.13, and Node 20 is out of upstream support at this date. No
+  provider credential is present and every LLM call in the suite is mocked.
+  The dependency tree is audit-clean as of 2026-08-13. Runtime fixes came via
   MCP SDK 1.30 and patched transitive Hono/ws/fast-uri/basic-ftp releases;
-  dev fixes required Vitest 4 / Vite 8 and esbuild 0.28. `tsx` still requested
+  browser extraction via Puppeteer 25, and dev fixes required Vitest 4 /
+  Vite 8 and esbuild 0.28. `tsx` still requested
   the vulnerable 0.27 line, so the root esbuild dependency plus `$esbuild`
   override keeps all three consumers on one patched binary. `npm ci`,
   `npm audit` and the full suite were rerun after the major test-runner update.
+  Puppeteer 25 migration acceptance additionally rebuilt the real worker and
+  passed all 24 container image/isolation/lifecycle tests; the clean-lock
+  release path then passed 1345/1345 tests, audit, build, compiled MCP smoke and
+  compiled doctor help.
 
 ## Linting (`npm run lint`, `eslint.config.js`)
 

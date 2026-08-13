@@ -25,7 +25,7 @@ import { resolveToolBackendMode, type ToolBackendMode } from '../run/backendMode
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 
 const runFile = promisify(execFile);
-export const NODE_ENGINE_RANGE = '^20.19.0 || ^22.13.0 || >=24';
+export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -112,7 +112,6 @@ export function nodeVersionSupported(version: string): boolean {
   if (!match) return false;
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  if (major === 20) return minor >= 19;
   if (major === 22) return minor >= 13;
   return major >= 24;
 }
@@ -432,7 +431,7 @@ export async function diagnoseDoctor(args: {
           label: 'Node.js',
           status: 'fail',
           detail: `${deps.nodeVersion} does not satisfy ${NODE_ENGINE_RANGE}`,
-          remedy: 'Install Node 20.19+, 22.13+, or 24+.',
+          remedy: 'Install Node 22.13+ or 24+.',
         }
   );
 

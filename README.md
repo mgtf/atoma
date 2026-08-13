@@ -287,8 +287,8 @@ process group is confirmed gone and the trace has closed.
 
 ## Status
 
-**Working research system, honestly labelled.** Strict TypeScript on Node 20.19+,
-22.13+, or 24+, with hermetic and fresh-worker CI.
+**Working research system, honestly labelled.** Strict TypeScript on Node
+22.13+ or 24+, with hermetic and fresh-worker CI.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
@@ -304,6 +304,6 @@ written up in
 ---
 
 <div align="center">
-<sub>TypeScript · SQLite · Node 20.19+ / 22.13+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
+<sub>TypeScript · SQLite · Node 22.13+ / 24+ · the corpus table regenerates with <code>npm run burnin</code>;
 the controlled rounds are in <code>benchmark/</code></sub>
 </div>

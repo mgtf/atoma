@@ -42,7 +42,7 @@ function dependencies(
 describe('atoma doctor', () => {
   it.each([
     ['v20.18.9', false],
-    ['v20.19.0', true],
+    ['v20.19.0', false],
     ['22.12.0', false],
     ['22.13.0', true],
     ['v23.9.0', false],
