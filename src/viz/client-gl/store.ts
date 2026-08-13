@@ -26,6 +26,8 @@ export interface GpuUiState {
   runFilters: EventFilters;
   search: Record<Exclude<InputKind, null>, string>;
   focusedInput: InputKind;
+  runPickerScrollY: number;
+  runPickerActiveIndex: number;
   burninFamily: string;
   burninOutcome: string;
   burninPreset: string;
@@ -43,6 +45,8 @@ export interface GpuUiState {
   setRunFilters: (filters: EventFilters) => void;
   setSearch: (kind: Exclude<InputKind, null>, value: string) => void;
   setFocusedInput: (kind: InputKind) => void;
+  setRunPickerScrollY: (value: number) => void;
+  setRunPickerActiveIndex: (value: number) => void;
   setBurninFilter: (kind: 'family' | 'outcome' | 'preset', value: string) => void;
   setBurninPage: (page: number) => void;
   setScrollY: (view: ViewName, value: number) => void;
@@ -73,6 +77,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
   search: { run: '', registry: '', skills: '', launch: '' },
   focusedInput: null,
+  runPickerScrollY: 0,
+  runPickerActiveIndex: 0,
   burninFamily: 'all',
   burninOutcome: 'all',
   burninPreset: 'all',
@@ -92,7 +98,13 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     set({ locale });
   },
   selectRun: (selectedRunId) =>
-    set({ selectedRunId, selectedEventId: null, selectedAtomName: null }),
+    set({
+      selectedRunId,
+      selectedEventId: null,
+      selectedAtomName: null,
+      runPickerScrollY: 0,
+      runPickerActiveIndex: 0,
+    }),
   selectEvent: (selectedEventId) =>
     set({ selectedEventId, selectedAtomName: null }),
   selectAtom: (selectedAtomName) =>
@@ -105,6 +117,10 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   setSearch: (kind, value) =>
     set((state) => ({ search: { ...state.search, [kind]: value } })),
   setFocusedInput: (focusedInput) => set({ focusedInput }),
+  setRunPickerScrollY: (runPickerScrollY) =>
+    set({ runPickerScrollY: Math.max(0, runPickerScrollY) }),
+  setRunPickerActiveIndex: (runPickerActiveIndex) =>
+    set({ runPickerActiveIndex: Math.max(0, runPickerActiveIndex) }),
   setBurninFilter: (kind, value) =>
     set({
       [kind === 'family'

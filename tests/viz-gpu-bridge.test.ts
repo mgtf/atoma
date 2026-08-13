@@ -24,6 +24,8 @@ beforeEach(() => {
     locale: 'en',
     selectedRunId: 'run-1',
     focusedInput: null,
+    runPickerActiveIndex: 0,
+    runPickerScrollY: 0,
     search: { run: '', registry: '', skills: '', launch: '' },
   });
 });
@@ -32,10 +34,14 @@ afterEach(() => {
   cleanup();
 });
 
-function renderBridge(onSelectRun = vi.fn(), onCopy = vi.fn()) {
+function renderBridge(
+  onSelectRun = vi.fn(),
+  onCopy = vi.fn(),
+  runItems = runs
+) {
   render(
     createElement(DomBridge, {
-      runs,
+      runs: runItems,
       t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
       onSelectRun,
       onCopy,
@@ -66,6 +72,21 @@ describe('full-GL minimal DOM bridge', () => {
 
     useGpuStore.getState().setView('launch');
     expect(await screen.findByRole('textbox', { name: 'Goal' })).toBeInTheDocument();
+  });
+
+  it('navigates the complete run list with arrows and Enter', async () => {
+    const user = userEvent.setup();
+    const manyRuns = Array.from({ length: 20 }, (_, index) => ({
+      id: `run-${index + 1}`,
+      label: `build-app: Run ${index + 1}`,
+      startedAt: '2026-08-13T10:00:00.000Z',
+    }));
+    const onSelectRun = vi.fn();
+    renderBridge(onSelectRun, vi.fn(), manyRuns);
+    const input = screen.getByRole('textbox', { name: /Search 20 runs/ });
+    await user.click(input);
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');
+    expect(onSelectRun).toHaveBeenCalledWith('run-4');
   });
 });
 

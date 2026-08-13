@@ -1678,6 +1678,12 @@ re-exports all the historical names so old imports keep working.
   and forced WebGL paths with zero console errors. Pure tests pin Zustand
   transitions, query invalidation, the DOM bridge, i18n and existing delta
   helpers.
+  The GPU Runs picker is a VIRTUAL list over the whole index, not a capped
+  sample. Its first version called `.slice(0, 12)`, so 178 of 190 real runs
+  were structurally unreachable and Enter always chose the first match.
+  Search, independent wheel offset, scrollbar, ArrowUp/Down, Home/End and
+  Enter now share Zustand state; only visible rows become Pixi objects, and
+  canvas pointer selection closes after the selected id is committed.
   **DO NOT name a root client module `api.ts`.** Vite's `/api` dev proxy also
   matches `/api.ts`, forwards the module request to the read-only server and
   returns it as `application/octet-stream`; production builds still pass while

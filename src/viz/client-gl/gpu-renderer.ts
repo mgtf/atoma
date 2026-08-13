@@ -75,6 +75,7 @@ export interface GpuRenderSnapshot {
   t: (key: string, vars?: Record<string, unknown>) => string;
   onActivate: (id: string) => void;
   onScroll: (view: ViewName, delta: number) => void;
+  onRunPickerScroll: (delta: number) => void;
 }
 
 interface TextOptions {
@@ -468,6 +469,8 @@ export class GpuRenderer {
   } | null = null;
   private previousEventIds = new Set<string>();
   private currentEventIds = new Set<string>();
+  private runPickerBounds: Rectangle | null = null;
+  private runPickerScrollMax = 0;
   private metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
@@ -478,6 +481,25 @@ export class GpuRenderer {
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
+    if (
+      this.snapshot.state.focusedInput === 'run' &&
+      this.runPickerBounds
+    ) {
+      const bounds = this.app.canvas.getBoundingClientRect();
+      const localX =
+        (event.clientX - bounds.left) * this.app.screen.width / Math.max(1, bounds.width);
+      const localY =
+        (event.clientY - bounds.top) * this.app.screen.height / Math.max(1, bounds.height);
+      if (this.runPickerBounds.contains(localX, localY)) {
+        const current = this.snapshot.state.runPickerScrollY;
+        const next = Math.max(
+          0,
+          Math.min(this.runPickerScrollMax, current + event.deltaY)
+        );
+        this.snapshot.onRunPickerScroll(next - current);
+        return;
+      }
+    }
     const view = this.snapshot.state.view;
     const current = this.snapshot.state.scrollY[view];
     const maximum = this.scrollMax[view] ?? Number.POSITIVE_INFINITY;
@@ -553,6 +575,8 @@ export class GpuRenderer {
     this.currentFilterBounds = new Map();
     this.handledExitIds = new Set();
     this.currentEventIds = new Set();
+    this.runPickerBounds = null;
+    this.runPickerScrollMax = 0;
     this.scrollMax.runs = 0;
 
     const width = this.app.screen.width;
@@ -1720,35 +1744,121 @@ export class GpuRenderer {
     );
   }
 
-  private drawOverlays(snapshot: GpuRenderSnapshot, width: number, _height: number) {
+  private drawOverlays(snapshot: GpuRenderSnapshot, width: number, height: number) {
     if (snapshot.state.view !== 'runs' || snapshot.state.focusedInput !== 'run') return;
     const x = Math.max(480, width * 0.42);
     const popupWidth = Math.max(260, width - x - 120);
+    const popupY = GPU_LAYOUT.headerHeight - 2;
+    const rowHeight = 43;
+    const headerHeight = 30;
     const query = snapshot.state.search.run.toLocaleLowerCase();
     const matching = snapshot.data.runs
-      .filter((run) => `${run.id} ${run.label}`.toLocaleLowerCase().includes(query))
-      .slice(0, 12);
-    const popupHeight = Math.max(42, matching.length * 43 + 8);
-    this.panel(this.root, x, GPU_LAYOUT.headerHeight - 2, popupWidth, popupHeight, 0x0c1321, GPU_COLORS.primary);
-    matching.forEach((run, index) => {
-      const y = GPU_LAYOUT.headerHeight + 3 + index * 43;
-      const active = snapshot.state.selectedRunId === run.id;
+      .filter((run) => `${run.id} ${run.label}`.toLocaleLowerCase().includes(query));
+    const maximumPopupHeight = Math.min(500, height - popupY - 10);
+    const listViewportHeight = Math.max(
+      rowHeight,
+      maximumPopupHeight - headerHeight - 7
+    );
+    const contentHeight = matching.length * rowHeight;
+    this.runPickerScrollMax = Math.max(0, contentHeight - listViewportHeight);
+    const scrollY = Math.max(
+      0,
+      Math.min(this.runPickerScrollMax, snapshot.state.runPickerScrollY)
+    );
+    const visibleListHeight = Math.min(listViewportHeight, Math.max(rowHeight, contentHeight));
+    const popupHeight = headerHeight + visibleListHeight + 7;
+    this.runPickerBounds = new Rectangle(x, popupY, popupWidth, popupHeight);
+    this.panel(
+      this.root,
+      x,
+      popupY,
+      popupWidth,
+      popupHeight,
+      0x0c1321,
+      GPU_COLORS.primary
+    );
+    this.text(
+      this.root,
+      `${matching.length} / ${snapshot.data.runs.length} RUNS`,
+      x + 12,
+      popupY + 8,
+      { size: 9, color: GPU_COLORS.muted, weight: '700' }
+    );
+
+    const listY = popupY + headerHeight;
+    const listMask = new Graphics();
+    listMask
+      .rect(x + 4, listY, popupWidth - 8, visibleListHeight)
+      .fill(0xffffff);
+    this.root.addChild(listMask);
+    const listLayer = new Container();
+    listLayer.mask = listMask;
+    this.root.addChild(listLayer);
+
+    const start = Math.max(0, Math.floor(scrollY / rowHeight));
+    const visibleCount = Math.ceil(visibleListHeight / rowHeight) + 2;
+    matching.slice(start, start + visibleCount).forEach((run, visibleIndex) => {
+      const index = start + visibleIndex;
+      const rowY = listY + index * rowHeight - scrollY;
+      const keyboardActive = index === snapshot.state.runPickerActiveIndex;
+      const selected = snapshot.state.selectedRunId === run.id;
+      const status = run.cancelled
+        ? '✕'
+        : run.hasError
+          ? '!'
+          : run.inFlight
+            ? '●'
+            : selected
+              ? '◆'
+              : '';
       this.button(
-        this.root,
+        listLayer,
         `run.select.${run.id}`,
         'option',
-        truncate(run.label.replace(/^(?:build-app|baseline):\s*/i, ''), 82),
+        `${status ? `${status} ` : ''}${truncate(
+          run.label.replace(/^(?:build-app|baseline):\s*/i, ''),
+          82
+        )}`,
         x + 5,
-        y,
-        popupWidth - 10,
+        rowY + 2,
+        popupWidth - 18,
         38,
-        active,
+        keyboardActive,
         snapshot.onActivate,
-        run.hasError ? GPU_COLORS.error : run.inFlight ? GPU_COLORS.success : GPU_COLORS.primary
+        run.hasError
+          ? GPU_COLORS.error
+          : run.inFlight
+            ? GPU_COLORS.success
+            : selected
+              ? GPU_COLORS.tiers[3]
+              : GPU_COLORS.primary
       );
     });
+
+    if (this.runPickerScrollMax > 0) {
+      const track = new Graphics();
+      track.roundRect(0, 0, 3, visibleListHeight - 8, 1.5);
+      track.fill({ color: 0x2c3c58, alpha: 0.65 });
+      track.position.set(x + popupWidth - 8, listY + 4);
+      this.root.addChild(track);
+      const thumbHeight = Math.max(
+        24,
+        (visibleListHeight / contentHeight) * (visibleListHeight - 8)
+      );
+      const thumb = new Graphics();
+      thumb.roundRect(0, 0, 3, thumbHeight, 1.5);
+      thumb.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
+      thumb.position.set(
+        x + popupWidth - 8,
+        listY +
+          4 +
+          (scrollY / this.runPickerScrollMax) *
+            (visibleListHeight - 8 - thumbHeight)
+      );
+      this.root.addChild(thumb);
+    }
     if (!matching.length) {
-      this.text(this.root, snapshot.t('runs.none'), x + 14, GPU_LAYOUT.headerHeight + 12, {
+      this.text(this.root, snapshot.t('runs.none'), x + 14, listY + 12, {
         size: 11,
         color: GPU_COLORS.muted,
       });

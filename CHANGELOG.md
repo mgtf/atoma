@@ -48,6 +48,9 @@
 
 ### Fixed
 
+- The GPU run picker no longer truncates its dataset to twelve entries. It
+  virtualizes all runs behind an independent wheel scrollbar and supports
+  ArrowUp/ArrowDown, Home/End, Enter and reliable canvas selection.
 - GPU timeline rows are clipped to their scroll viewport and scrolling is
   clamped to filtered content, preventing cards from overlapping filter
   controls or overscrolling into blank space. Event cards again expose

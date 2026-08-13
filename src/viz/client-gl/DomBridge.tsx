@@ -16,12 +16,15 @@ export function DomBridge({
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
   const focusedInput = useGpuStore((state) => state.focusedInput);
+  const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
   const setView = useGpuStore((state) => state.setView);
   const refresh = useGpuStore((state) => state.refresh);
   const setLocale = useGpuStore((state) => state.setLocale);
   const setSearch = useGpuStore((state) => state.setSearch);
   const setFocusedInput = useGpuStore((state) => state.setFocusedInput);
+  const setRunPickerActiveIndex = useGpuStore((state) => state.setRunPickerActiveIndex);
+  const setRunPickerScrollY = useGpuStore((state) => state.setRunPickerScrollY);
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const runValue = focusedInput === 'run' ? search.run : selectedRun?.label ?? '';
   const filteredRuns = runs.filter((run) =>
@@ -66,16 +69,43 @@ export function DomBridge({
           onFocus={() => {
             setSearch('run', '');
             setFocusedInput('run');
+            const selectedIndex = Math.max(
+              0,
+              runs.findIndex((run) => run.id === selectedRunId)
+            );
+            setRunPickerActiveIndex(selectedIndex);
+            setRunPickerScrollY(Math.max(0, (selectedIndex - 4) * 43));
           }}
-          onBlur={() => window.setTimeout(() => setFocusedInput(null), 120)}
-          onChange={(event) => setSearch('run', event.target.value)}
+          onBlur={() => window.setTimeout(() => setFocusedInput(null), 240)}
+          onChange={(event) => {
+            setSearch('run', event.target.value);
+            setRunPickerActiveIndex(0);
+            setRunPickerScrollY(0);
+          }}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {
               setFocusedInput(null);
               event.currentTarget.blur();
             }
-            if (event.key === 'Enter' && filteredRuns[0]) {
-              onSelectRun(filteredRuns[0].id);
+            let nextIndex = runPickerActiveIndex;
+            if (event.key === 'ArrowDown') nextIndex++;
+            else if (event.key === 'ArrowUp') nextIndex--;
+            else if (event.key === 'Home') nextIndex = 0;
+            else if (event.key === 'End') nextIndex = filteredRuns.length - 1;
+            if (nextIndex !== runPickerActiveIndex) {
+              event.preventDefault();
+              nextIndex = Math.max(0, Math.min(filteredRuns.length - 1, nextIndex));
+              setRunPickerActiveIndex(nextIndex);
+              const rowTop = nextIndex * 43;
+              const currentScroll = useGpuStore.getState().runPickerScrollY;
+              if (rowTop < currentScroll) setRunPickerScrollY(rowTop);
+              else if (rowTop + 43 > currentScroll + 387) {
+                setRunPickerScrollY(rowTop + 43 - 387);
+              }
+            }
+            const activeRun = filteredRuns[runPickerActiveIndex] ?? filteredRuns[0];
+            if (event.key === 'Enter' && activeRun) {
+              onSelectRun(activeRun.id);
               setFocusedInput(null);
               event.currentTarget.blur();
             }

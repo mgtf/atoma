@@ -63,6 +63,10 @@ export function GpuSurface({
         const currentY = useGpuStore.getState().scrollY[view];
         useGpuStore.getState().setScrollY(view, currentY + delta);
       },
+      onRunPickerScroll: (delta) => {
+        const store = useGpuStore.getState();
+        store.setRunPickerScrollY(store.runPickerScrollY + delta);
+      },
     });
     const metrics = current.getMetrics();
     if (host.current) {
