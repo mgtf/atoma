@@ -118,7 +118,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
 
   it('bounds full-GL rendering and keeps data-heavy widgets on the GPU', () => {
     expect(gpuRenderer).toMatch(/const PAGE_SIZE = 50/);
-    expect(gpuRenderer).toMatch(/withCost\.forEach/);
+    expect(gpuRenderer).toMatch(/for \(const point of points\)/);
     expect(gpuRenderer).toMatch(/slice\(start, start \+ count\)/);
     expect(gpuRenderer).toMatch(/listLayer\.mask = listMask/);
     expect(gpuRenderer).toMatch(/scrollMax\.runs = Math\.max/);
@@ -131,6 +131,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/exitingRoleFilters/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
+    expect(gpuRenderer).toMatch(/private statCard\(/);
+    expect(gpuRenderer).toMatch(/private atomButton\(/);
+    expect(gpuRenderer).toMatch(/private drawBurninChart\(/);
+    expect(gpuRenderer).toMatch(/cursor = 'crosshair'|pointermove/);
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
     expect(gpuRenderer).toMatch(/private eventCard\(/);
     expect(gpuRenderer).toMatch(/CARD_FILTER_GLSL|CARD_FILTER_WGSL/);

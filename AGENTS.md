@@ -1665,7 +1665,12 @@ re-exports all the historical names so old imports keep working.
   the pane edge so hover scaling/glow cannot be clipped on the right. None of
   these effects adds DOM nodes. A Chromium/SwiftShader acceptance sample with
   all card shaders active measured 16.67ms mean / 17.60ms P95 over 120 frames
-  (~60fps).
+  (~60fps). Stat tiles add renderer-native telemetry bars; atom controls use
+  tier-colored nucleus/orbit/electron motion. Burn-in's scatter is one batched
+  Graphics object with temporal grid, family colors and a single interactive
+  overlay that resolves nearest-point hover into a GPU tooltip — 171 points do
+  NOT become 171 display objects. Its hover acceptance measured 17.02ms mean /
+  18.60ms P95 under Chromium/SwiftShader.
   Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five

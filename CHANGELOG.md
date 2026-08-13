@@ -20,6 +20,10 @@
 - Event cards now run dual-backend shaders selected by function: reasoning
   waves for LLMs, packet grids for tools, shield rings for trust, plasma for
   skills, crystalline replay glints for cache and circuit traces for registry.
+- Run/Burn-in statistics use holographic telemetry bars, tier atoms use
+  color-specific orbital particles and selection pulses, and the Burn-in
+  scatter adds temporal gridlines, family colors, radar sweep, point hover
+  highlighting and GPU tooltips.
 - The visualizer has a Vite HMR development path and a compiled `viz:serve`
   release path; release smoke verifies its index, hashed asset and Burn-in API.
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider

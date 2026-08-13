@@ -999,6 +999,199 @@ export class GpuRenderer {
     return container;
   }
 
+  private statCard(
+    parent: Container,
+    id: string,
+    label: string,
+    value: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    accent: number
+  ) {
+    const firstAppearance = !this.seenAnimatedControls.has(id);
+    this.seenAnimatedControls.add(id);
+    const container = new Container();
+    container.position.set(x, y);
+
+    const glow = new Graphics();
+    glow.roundRect(-2, -2, width + 4, height + 4, 10);
+    glow.stroke({ color: accent, width: 1.8, alpha: 0.7 });
+    glow.alpha = 0.12;
+    container.addChild(glow);
+
+    const base = new Graphics();
+    base.roundRect(0, 0, width, height, 8);
+    base.fill({ color: 0x111a2b, alpha: 0.92 });
+    base.stroke({ color: 0x293956, width: 1, alpha: 0.88 });
+    container.addChild(base);
+
+    const topRail = new Graphics();
+    topRail.roundRect(8, 0, width - 16, 1.6, 0.8).fill(accent);
+    topRail.alpha = 0.48;
+    container.addChild(topRail);
+
+    const scanline = new Graphics();
+    scanline.rect(5, 0, width - 10, 1).fill({ color: accent, alpha: 0.55 });
+    scanline.alpha = 0.05;
+    container.addChild(scanline);
+
+    const labelText = this.text(container, label, 10, 7, {
+      size: 9,
+      color: GPU_COLORS.muted,
+      weight: '500',
+    });
+    const valueText = this.text(container, value, 10, 25, {
+      size: 14,
+      color: GPU_COLORS.text,
+      weight: '700',
+    });
+
+    const telemetry = Array.from({ length: 9 }, (_, index) => {
+      const bar = new Graphics();
+      bar.roundRect(0, 0, 2.2, 4, 1).fill(accent);
+      bar.position.set(width - 38 + index * 3.5, height - 8);
+      bar.alpha = 0.22;
+      container.addChild(bar);
+      return bar;
+    });
+
+    let elapsed = firstAppearance ? -Number(id.replace(/\D/g, '').slice(-1) || 0) * 35 : performance.now();
+    container.alpha = firstAppearance ? 0 : 1;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.max(0, Math.min(1, elapsed / 320));
+      const eased = 1 - (1 - entrance) ** 3;
+      container.alpha = eased;
+      container.position.y = y + (1 - eased) * 7;
+      const pulse = 0.5 + Math.sin(elapsed / 330) * 0.5;
+      glow.alpha = 0.06 + pulse * 0.11;
+      topRail.alpha = 0.34 + pulse * 0.28;
+      scanline.y = 4 + (Math.max(0, elapsed) * 0.025) % Math.max(8, height - 8);
+      scanline.alpha = 0.025 + pulse * 0.045;
+      valueText.alpha = 0.9 + pulse * 0.1;
+      labelText.alpha = 0.72 + pulse * 0.18;
+      telemetry.forEach((bar, index) => {
+        const level = 2 + (Math.sin(elapsed / 210 + index * 1.37) * 0.5 + 0.5) * 7;
+        bar.height = level;
+        bar.y = height - 5 - level;
+        bar.alpha = 0.13 + level / 12;
+      });
+    };
+    this.addTicker(animate);
+    parent.addChild(container);
+    return container;
+  }
+
+  private atomButton(
+    parent: Container,
+    id: string,
+    label: string,
+    tier: 1 | 2 | 3,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    active: boolean,
+    onActivate: (id: string) => void
+  ) {
+    const accent = GPU_COLORS.tiers[tier];
+    const firstAppearance = !this.seenAnimatedControls.has(id);
+    this.seenAnimatedControls.add(id);
+    const container = new Container();
+    container.position.set(x, y);
+    container.eventMode = 'static';
+    container.cursor = 'pointer';
+    container.hitArea = new Rectangle(0, 0, width, height);
+
+    const aura = new Graphics();
+    aura.roundRect(-3, -3, width + 6, height + 6, 10);
+    aura.stroke({ color: accent, width: 2, alpha: 0.75 });
+    aura.alpha = active ? 0.28 : 0;
+    container.addChild(aura);
+
+    const base = new Graphics();
+    base.roundRect(0, 0, width, height, 8);
+    base.fill({ color: active ? accent : 0x121c2d, alpha: active ? 0.22 : 0.9 });
+    base.stroke({ color: active ? accent : 0x30405d, width: active ? 1.5 : 1 });
+    container.addChild(base);
+
+    const nucleus = new Graphics();
+    nucleus.circle(10, height / 2, active ? 3 : 2.3).fill(accent);
+    nucleus.alpha = active ? 0.95 : 0.5;
+    container.addChild(nucleus);
+
+    const orbit = new Graphics();
+    orbit.ellipse(10, height / 2, 7, 4).stroke({ color: accent, width: 0.8, alpha: 0.35 });
+    container.addChild(orbit);
+
+    const electrons = Array.from({ length: tier }, (_, index) => {
+      const electron = new Graphics();
+      electron.circle(0, 0, 1.1).fill(index % 2 ? 0xffffff : accent);
+      electron.alpha = active ? 0.7 : 0;
+      container.addChild(electron);
+      return electron;
+    });
+
+    const labelText = this.text(container, label, width / 2 + 5, Math.max(5, (height - 16) / 2), {
+      size: 10,
+      color: active ? GPU_COLORS.text : 0xa9b5ca,
+      weight: active ? '700' : '600',
+    });
+    labelText.anchor.x = 0.5;
+
+    let hovered = false;
+    let pressed = false;
+    let elapsed = firstAppearance ? -(x % 120) * 1.2 : performance.now();
+    container.alpha = firstAppearance ? 0 : 1;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.max(0, Math.min(1, elapsed / 300));
+      const eased = 1 - (1 - entrance) ** 3;
+      const targetScale = pressed ? 0.95 : hovered ? 1.04 : 1;
+      const scale = eased * targetScale;
+      container.alpha = eased;
+      container.scale.set(scale);
+      container.position.set(
+        x + width * (1 - scale) / 2,
+        y + height * (1 - scale) / 2 + (pressed ? 1 : hovered ? -1 : 0)
+      );
+      const pulse = 0.5 + Math.sin(elapsed / 180) * 0.5;
+      aura.alpha = active
+        ? 0.16 + pulse * 0.25
+        : hovered
+          ? 0.08 + pulse * 0.16
+          : 0;
+      base.tint = pressed ? 0xbad9ff : hovered ? 0xdcecff : 0xffffff;
+      nucleus.scale.set(active ? 1 + pulse * 0.25 : hovered ? 1.15 : 1);
+      orbit.rotation = elapsed * (tier % 2 ? 0.0012 : -0.001);
+      orbit.alpha = active ? 0.75 : hovered ? 0.5 : 0.28;
+      electrons.forEach((electron, index) => {
+        const phase = elapsed / (370 + tier * 45) + index * Math.PI * 2 / Math.max(1, tier);
+        electron.position.set(
+          10 + Math.cos(phase) * 7,
+          height / 2 + Math.sin(phase) * 4
+        );
+        electron.alpha = active ? 0.5 + pulse * 0.4 : hovered ? 0.55 : 0;
+      });
+    };
+    this.addTicker(animate);
+
+    container.on('pointerover', () => { hovered = true; });
+    container.on('pointerout', () => {
+      hovered = false;
+      pressed = false;
+    });
+    container.on('pointerdown', () => { pressed = true; });
+    container.on('pointerup', () => { pressed = false; });
+    container.on('pointerupoutside', () => { pressed = false; });
+    container.on('pointertap', () => onActivate(id));
+    parent.addChild(container);
+    this.metrics.hitTargets.push({ id, role: 'button', label, x, y, width, height });
+    return container;
+  }
+
   private createCardFilter(mode: number) {
     const filter = Filter.from({
       gl: {
@@ -1601,12 +1794,26 @@ export class GpuRenderer {
       [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
       [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
     ];
+    const statAccents = [
+      GPU_COLORS.cyan,
+      GPU_COLORS.tiers[3],
+      GPU_COLORS.primary,
+      GPU_COLORS.success,
+    ];
     const statWidth = (leftWidth - 28 - GPU_LAYOUT.gap * 3) / 4;
     stats.forEach(([label, value], index) => {
       const x = leftX + 14 + index * (statWidth + GPU_LAYOUT.gap);
-      this.panel(this.root, x, statsY, statWidth, 55, GPU_COLORS.panelRaised);
-      this.text(this.root, label!, x + 9, statsY + 7, { size: 9, color: GPU_COLORS.muted });
-      this.text(this.root, value!, x + 9, statsY + 25, { size: 13, weight: '700' });
+      this.statCard(
+        this.root,
+        `runs.stat.${index}`,
+        label!,
+        value!,
+        x,
+        statsY,
+        statWidth,
+        55,
+        statAccents[index] ?? GPU_COLORS.primary
+      );
     });
 
     const atoms = buildAtomMap(run);
@@ -1627,19 +1834,17 @@ export class GpuRenderer {
           atomX = leftX + 46;
           y += 33;
         }
-        this.button(
+        this.atomButton(
           this.root,
           `atom.${name}`,
-          'button',
           name,
+          tier as 1 | 2 | 3,
           atomX,
           y,
           buttonWidth,
           28,
           snapshot.state.selectedAtomName === name,
-          snapshot.onActivate,
-          GPU_COLORS.tiers[tier as 1 | 2 | 3],
-          true
+          snapshot.onActivate
         );
         atomX += buttonWidth + 5;
       }
@@ -2134,6 +2339,224 @@ export class GpuRenderer {
     });
   }
 
+  private drawBurninChart(
+    parent: Container,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    rows: BurninRow[]
+  ) {
+    const firstAppearance = !this.seenAnimatedControls.has('burnin.chart');
+    this.seenAnimatedControls.add('burnin.chart');
+    const chart = new Container();
+    chart.position.set(x, y);
+    chart.eventMode = 'static';
+    chart.cursor = 'crosshair';
+    chart.hitArea = new Rectangle(0, 0, width, height);
+
+    const frame = new Graphics();
+    frame.roundRect(0, 0, width, height, 8);
+    frame.fill({ color: 0x0d1626, alpha: 0.9 });
+    frame.stroke({ color: 0x263a5a, width: 1.1, alpha: 0.9 });
+    chart.addChild(frame);
+
+    const grid = new Graphics();
+    for (let index = 1; index < 6; index++) {
+      const gx = 28 + index / 6 * (width - 48);
+      grid.moveTo(gx, 14).lineTo(gx, height - 24);
+    }
+    for (let index = 1; index < 5; index++) {
+      const gy = 12 + index / 5 * (height - 38);
+      grid.moveTo(28, gy).lineTo(width - 14, gy);
+    }
+    grid.stroke({ color: 0x4e6d9f, width: 0.6, alpha: 0.16 });
+    chart.addChild(grid);
+
+    const timestamps = rows
+      .map((row) => Date.parse(row.ts))
+      .filter(Number.isFinite);
+    const minTime = Math.min(...timestamps);
+    const maxTime = Math.max(...timestamps);
+    const maxCost = Math.max(0.01, ...rows.map((row) => row.costUsd ?? 0));
+    const familyColors: Record<string, number> = {
+      app: 0x6ea8ff,
+      cli: 0x2dd4bf,
+      'cli-trio': 0x22d3ee,
+      files: 0xc084fc,
+      http: 0xfbbf24,
+      web: 0xe879f9,
+    };
+    const plotWidth = width - 48;
+    const plotHeight = height - 42;
+    const points = rows.flatMap((row, index) => {
+      if (row.costUsd === null) return [];
+      const timestamp = Date.parse(row.ts);
+      const px =
+        28 +
+        (Number.isFinite(timestamp) && maxTime > minTime
+          ? (timestamp - minTime) / (maxTime - minTime)
+          : index / Math.max(1, rows.length - 1)) *
+          plotWidth;
+      const py = 12 + plotHeight - row.costUsd / maxCost * plotHeight;
+      return [{
+        row,
+        x: px,
+        y: py,
+        color:
+          row.outcome === 'delivered'
+            ? familyColors[row.family] ?? GPU_COLORS.success
+            : GPU_COLORS.error,
+      }];
+    });
+    this.metrics.hitTargets.push({
+      id: 'burnin.chart',
+      role: 'figure',
+      label: 'Burn-in cost scatter',
+      x,
+      y,
+      width,
+      height,
+    });
+    for (const point of points) {
+      this.metrics.hitTargets.push({
+        id: `burnin.point.${point.row.taskId}`,
+        role: 'graphics-symbol',
+        label: point.row.taskId,
+        x: x + point.x - 8,
+        y: y + point.y - 8,
+        width: 16,
+        height: 16,
+      });
+    }
+
+    const pointGraphics = new Graphics();
+    for (const point of points) {
+      pointGraphics
+        .circle(point.x, point.y, point.row.outcome === 'delivered' ? 2.8 : 4.5)
+        .fill({ color: point.color, alpha: 0.88 });
+    }
+    chart.addChild(pointGraphics);
+
+    const sweepTrail = Array.from({ length: 5 }, (_, index) => {
+      const line = new Graphics();
+      line.rect(0, 12, 1.2 + index * 0.35, plotHeight).fill({
+        color: index % 2 ? GPU_COLORS.primary : GPU_COLORS.cyan,
+        alpha: 0.14,
+      });
+      line.alpha = 0.02 + index * 0.015;
+      chart.addChild(line);
+      return line;
+    });
+
+    const highlight = new Graphics();
+    highlight.circle(0, 0, 8).stroke({ color: 0xffffff, width: 1.4, alpha: 0.9 });
+    highlight.circle(0, 0, 4).fill(0xffffff);
+    highlight.alpha = 0;
+    chart.addChild(highlight);
+
+    const tooltip = new Container();
+    const tooltipBg = new Graphics();
+    tooltipBg.roundRect(0, 0, 210, 54, 7);
+    tooltipBg.fill({ color: 0x080e19, alpha: 0.96 });
+    tooltipBg.stroke({ color: GPU_COLORS.primary, width: 1.1, alpha: 0.9 });
+    tooltip.addChild(tooltipBg);
+    const tooltipTitle = this.text(tooltip, '', 10, 7, {
+      size: 10,
+      color: GPU_COLORS.text,
+      weight: '700',
+    });
+    const tooltipMeta = this.text(tooltip, '', 10, 28, {
+      size: 9,
+      color: GPU_COLORS.muted,
+    });
+    tooltip.alpha = 0;
+    chart.addChild(tooltip);
+
+    this.text(chart, `$${maxCost.toFixed(2)}`, 5, 8, {
+      size: 8,
+      color: GPU_COLORS.muted,
+    });
+    this.text(chart, '$0', 10, height - 25, {
+      size: 8,
+      color: GPU_COLORS.muted,
+    });
+    if (Number.isFinite(minTime) && Number.isFinite(maxTime)) {
+      this.text(chart, new Date(minTime).toLocaleDateString(), 28, height - 18, {
+        size: 8,
+        color: GPU_COLORS.muted,
+      });
+      const endLabel = this.text(
+        chart,
+        new Date(maxTime).toLocaleDateString(),
+        width - 14,
+        height - 18,
+        { size: 8, color: GPU_COLORS.muted }
+      );
+      endLabel.anchor.x = 1;
+    }
+
+    let hoveredPoint: typeof points[number] | null = null;
+    chart.on('pointermove', (event) => {
+      const local = event.getLocalPosition(chart);
+      let nearest: typeof points[number] | null = null;
+      let nearestDistance = 15 * 15;
+      for (const point of points) {
+        const dx = point.x - local.x;
+        const dy = point.y - local.y;
+        const distance = dx * dx + dy * dy;
+        if (distance < nearestDistance) {
+          nearest = point;
+          nearestDistance = distance;
+        }
+      }
+      hoveredPoint = nearest;
+      if (!nearest) {
+        tooltip.alpha = 0;
+        highlight.alpha = 0;
+        return;
+      }
+      highlight.position.set(nearest.x, nearest.y);
+      highlight.tint = nearest.color;
+      highlight.alpha = 1;
+      tooltipTitle.text = truncate(nearest.row.taskId, 32);
+      tooltipMeta.text =
+        `${nearest.row.family} · ${fmtCost(nearest.row.costUsd)} · ` +
+        `${nearest.row.durationS ?? '?'}s · ${nearest.row.outcome}`;
+      tooltip.position.set(
+        Math.max(8, Math.min(width - 218, nearest.x + 12)),
+        Math.max(8, Math.min(height - 62, nearest.y - 62))
+      );
+      tooltip.alpha = 1;
+    });
+    chart.on('pointerout', () => {
+      hoveredPoint = null;
+      tooltip.alpha = 0;
+      highlight.alpha = 0;
+    });
+
+    let elapsed = firstAppearance ? 0 : performance.now();
+    chart.alpha = firstAppearance ? 0 : 1;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.min(1, elapsed / 420);
+      chart.alpha = 1 - (1 - entrance) ** 3;
+      const sweep = 28 + (elapsed * 0.055) % Math.max(32, plotWidth);
+      sweepTrail.forEach((line, index) => {
+        line.x = sweep - index * 7;
+        line.alpha = (0.025 + index * 0.016) * (0.55 + Math.sin(elapsed / 230) * 0.25);
+      });
+      if (hoveredPoint) {
+        const pulse = 0.5 + Math.sin(elapsed / 110) * 0.5;
+        highlight.scale.set(0.9 + pulse * 0.28);
+        highlight.alpha = 0.62 + pulse * 0.38;
+      }
+    };
+    this.addTicker(animate);
+    parent.addChild(chart);
+    return chart;
+  }
+
   private drawBurnin(snapshot: GpuRenderSnapshot, width: number, height: number) {
     const payload = snapshot.data.burnin;
     if (!payload?.rows.length) {
@@ -2248,29 +2671,38 @@ export class GpuRenderer {
       [snapshot.t('burnin.medianCost'), fmtCost(quantile(costs, 0.5))],
       [snapshot.t('burnin.p90Duration'), `${quantile(durations, 0.9) ?? '—'}s`],
     ];
+    const burninStatAccents = [
+      GPU_COLORS.primary,
+      GPU_COLORS.success,
+      GPU_COLORS.cyan,
+      GPU_COLORS.warning,
+    ];
     const statsY = optionY + 38;
     const statWidth = (width - GPU_LAYOUT.gap * 5) / 4;
     stats.forEach(([label, value], index) => {
       const statX = GPU_LAYOUT.gap + index * (statWidth + GPU_LAYOUT.gap);
-      this.panel(this.root, statX, statsY, statWidth, 58, GPU_COLORS.panelRaised);
-      this.text(this.root, label!, statX + 10, statsY + 8, { size: 9, color: GPU_COLORS.muted });
-      this.text(this.root, value!, statX + 10, statsY + 28, { size: 14, weight: '700' });
+      this.statCard(
+        this.root,
+        `burnin.stat.${index}`,
+        label!,
+        value!,
+        statX,
+        statsY,
+        statWidth,
+        58,
+        burninStatAccents[index] ?? GPU_COLORS.primary
+      );
     });
     const chartY = statsY + 68;
     const chartHeight = Math.min(280, height * 0.34);
-    this.panel(this.root, GPU_LAYOUT.gap, chartY, width - GPU_LAYOUT.gap * 2, chartHeight);
-    const plot = new Graphics();
-    const usableWidth = width - GPU_LAYOUT.gap * 2 - 48;
-    const usableHeight = chartHeight - 44;
-    const withCost = rows.filter((row) => row.costUsd !== null);
-    const maxCost = Math.max(0.01, ...withCost.map((row) => row.costUsd ?? 0));
-    withCost.forEach((row, index) => {
-      const px = GPU_LAYOUT.gap + 30 + index / Math.max(1, withCost.length - 1) * usableWidth;
-      const py = chartY + 16 + usableHeight - (row.costUsd ?? 0) / maxCost * usableHeight;
-      const color = row.outcome === 'delivered' ? GPU_COLORS.success : GPU_COLORS.error;
-      plot.circle(px, py, row.outcome === 'delivered' ? 3 : 5).fill({ color, alpha: 0.85 });
-    });
-    this.root.addChild(plot);
+    this.drawBurninChart(
+      this.root,
+      GPU_LAYOUT.gap,
+      chartY,
+      width - GPU_LAYOUT.gap * 2,
+      chartHeight,
+      rows
+    );
 
     const tableY = chartY + chartHeight + 10;
     const availableRows = Math.min(PAGE_SIZE, Math.max(1, Math.floor((height - tableY - 40) / 25)));
