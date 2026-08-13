@@ -4,6 +4,13 @@
 
 ### Added
 
+- A full-GPU visualizer is now the default client: PixiJS 8 renders the 2D
+  design system through WebGPU/WebGL, R3F renders a lazy Three.js tier
+  topology, Zustand owns scene state, and TanStack Query owns API state.
+- `npm run viz:smoke` exercises the compiled client in a real browser across
+  all five views and verifies both WebGPU and forced-WebGL rendering.
+- `npm run viz:mui` and `npm run viz:build:mui` retain the previous MUI client
+  as an immediate development and build fallback.
 - The visualizer has a Vite HMR development path and a compiled `viz:serve`
   release path; release smoke verifies its index, hashed asset and Burn-in API.
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider
@@ -17,6 +24,9 @@
 
 ### Changed
 
+- `npm run viz` and `viz:build` now select the full-GL client. The visible
+  application UI is canvas-rendered; only text input, clipboard, IME and
+  accessibility semantics remain in a minimal DOM bridge.
 - Burn-in uses a time-axis scatter instead of connected batch-order lines, and
   family cards are replaced by a bounded global summary plus compact chips.
 - All five visualizer views replace the legacy custom DOM renderer with
@@ -25,6 +35,8 @@
 
 ### Fixed
 
+- The GPU renderer prefers WebGPU, retries with WebGL after initialization
+  failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in
   both family summaries and individual rows; legacy CSV rows still default to zero.
 - Burn-in/Skills network errors, empty states and raw-JSON toggles no longer

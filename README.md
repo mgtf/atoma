@@ -229,15 +229,18 @@ env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
 
 npm run viz                       # HMR UI :5173; API :4111 redirects its root there
+npm run viz:mui                   # retained DOM/MUI fallback
 npm run viz:serve                 # compiled visualizer after npm run build
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above
 ```
 
-The visualizer is a fully typed React 19 client. MUI supplies the shared
-component system, the Runs combobox stays virtualized through Headless UI, and
-ECharts is lazy-loaded only for Burn-in analytics. The API remains read-only;
-development and compiled-release clients use the same endpoints.
+The default visualizer is a full-GPU React 19 client: PixiJS renders the 2D
+component system through WebGPU with a deterministic WebGL fallback, while
+React Three Fiber renders the tier topology behind it. Zustand owns scene/UI
+state and TanStack Query owns the read-only API state. Only text input,
+clipboard, IME and accessibility use a minimal DOM bridge. The previous
+MUI client remains available through `npm run viz:mui`.
 
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;

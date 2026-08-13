@@ -40,7 +40,7 @@ describe('launchable profiles are all describable', () => {
   });
 });
 
-describe('viz React/MUI build contract', () => {
+describe('viz full-GL build contract with MUI fallback', () => {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts: Record<string, string>;
     devDependencies: Record<string, string>;
@@ -50,6 +50,9 @@ describe('viz React/MUI build contract', () => {
   const burnin = readFileSync('src/viz/client/features/BurninView.tsx', 'utf8');
   const chart = readFileSync('src/viz/client/burnin-chart.ts', 'utf8');
   const picker = readFileSync('src/viz/client/run-picker.tsx', 'utf8');
+  const gpuApp = readFileSync('src/viz/client-gl/GpuApp.tsx', 'utf8');
+  const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
+  const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
   const vite = readFileSync('vite.config.ts', 'utf8');
 
@@ -61,20 +64,37 @@ describe('viz React/MUI build contract', () => {
     // caught by that proxy and arrives as application/octet-stream.
     expect(existsSync('src/viz/client/api.ts')).toBe(false);
     expect(existsSync('src/viz/client/data-api.ts')).toBe(true);
+    expect(existsSync('src/viz/client-gl/index.html')).toBe(true);
+    expect(existsSync('src/viz/client-gl/main.tsx')).toBe(true);
     expect(pkg.scripts['viz']).toMatch(/viz-dev/);
-    expect(pkg.scripts['viz:build']).toMatch(/vite build/);
+    expect(pkg.scripts['viz:build']).toMatch(/viz-build/);
+    expect(pkg.scripts['viz:build:mui']).toMatch(/viz-build.*mui/);
+    expect(pkg.scripts['viz:mui']).toMatch(/--ui mui/);
+    expect(pkg.scripts['viz:smoke']).toMatch(/viz-gpu-smoke/);
     expect(pkg.scripts['viz:serve']).toBe('node dist/viz/server.js');
     expect(pkg.scripts['build']).toMatch(/viz:build/);
     expect(server).toMatch(/dist\/viz\/client|CLIENT_DIR/);
     expect(pkg.devDependencies['react']).toBeTruthy();
     expect(pkg.devDependencies['@mui/material']).toBeTruthy();
     expect(pkg.devDependencies['@headlessui/react']).toBeTruthy();
+    expect(pkg.devDependencies['pixi.js']).toBeTruthy();
+    expect(pkg.devDependencies['zustand']).toBeTruthy();
+    expect(pkg.devDependencies['@tanstack/react-query']).toBeTruthy();
+    expect(pkg.devDependencies['three']).toBeTruthy();
+    expect(pkg.devDependencies['@react-three/fiber']).toBeTruthy();
+    expect(pkg.devDependencies['@pixi/react']).toBeUndefined();
     expect(vite).toMatch(/plugin-react/);
+    expect(vite).toMatch(/client-gl/);
     expect(app).toMatch(/ThemeProvider|lazy\(/);
     expect(devLauncher).toContain('ATOMA_VIZ_DEV_URL');
     expect(devLauncher).toContain('process.execPath');
     expect(devLauncher).not.toMatch(/npm['"],\s*\['exec'|npm exec/);
     expect(server).toContain('res.writeHead(307');
+    expect(gpuApp).toMatch(/ThreeBackdrop|GpuSurface|DomBridge/);
+    expect(gpuRenderer).toMatch(
+      /preference:\s*forceWebGl\s*\?\s*\['webgl'\]\s*:\s*\['webgpu', 'webgl'\]/
+    );
+    expect(gpuStore).toMatch(/create<GpuUiState>/);
   });
 
   it('uses component-based scalable charting, pagination and tooltips', () => {
@@ -90,6 +110,15 @@ describe('viz React/MUI build contract', () => {
     expect(picker).toMatch(/SearchIcon/);
     expect(picker).not.toContain('>⌄<');
     expect(picker).toMatch(/requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
+  });
+
+  it('bounds full-GL rendering and keeps data-heavy widgets on the GPU', () => {
+    expect(gpuRenderer).toMatch(/const PAGE_SIZE = 50/);
+    expect(gpuRenderer).toMatch(/withCost\.forEach/);
+    expect(gpuRenderer).toMatch(/slice\(start, start \+ count\)/);
+    expect(gpuRenderer).toMatch(/row\.refusals/);
+    expect(gpuRenderer).toMatch(/row\.compileErrors/);
+    expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);
   });
 });
 
@@ -112,6 +141,7 @@ describe('viz i18n catalogs stay in parity', () => {
 
 describe('viz burn-in lifecycle visibility', () => {
   const burnin = readFileSync('src/viz/client/features/BurninView.tsx', 'utf8');
+  const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
   const server = readFileSync('src/viz/server.ts', 'utf8');
 
   it('renders compiler refusals and transport errors already present in the API', () => {
@@ -119,6 +149,8 @@ describe('viz burn-in lifecycle visibility', () => {
     expect(server).toMatch(/compileErrors:\s*num\(c\[21\]\)\s*\?\?\s*0/);
     expect(burnin).toContain("[row.refusals, '⛔', 'burnin.metric.refusals']");
     expect(burnin).toContain("[row.compileErrors, '⚠', 'burnin.metric.compileErrors']");
+    expect(gpuRenderer).toContain('row.refusals');
+    expect(gpuRenderer).toContain('row.compileErrors');
   });
 });
 

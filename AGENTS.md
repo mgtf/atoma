@@ -1588,7 +1588,8 @@ re-exports all the historical names so old imports keep working.
 - **Web visualiser** (`src/viz/`, `npm run viz`): records every LLM call
   (prompt + response + usage + tier/atom routing) and every registry
   mutation (`create` / `patch` / `branch` / counter bumps) during a run. The
-  client now lives under `src/viz/client/` and builds through Vite:
+  the default GPU client lives under `src/viz/client-gl/` and builds through
+  Vite; the previous DOM/MUI client remains under `src/viz/client/`:
   `npm run viz` / `viz:dev` starts the read-only API on 4111 plus HMR UI on
   5173 (override with `ATOMA_VIZ_API_PORT` / `ATOMA_VIZ_DEV_PORT`);
   the API root redirects to the HMR URL in that mode, while `/api/*` remains
@@ -1601,24 +1602,36 @@ re-exports all the historical names so old imports keep working.
   `npm run viz:serve` serves that compiled client on 4111 with no dev
   dependencies. The release smoke fetches the compiled index, module asset and
   `/api/burnin`, so the visualizer is now a claimed release-archive surface.
-  The client is now React 19 + TypeScript throughout. MUI is the application
-  component system (shell, navigation, cards, forms, tabs, accordions,
-  tooltips, tables and pagination); Headless UI remains the one specialist
-  primitive for the virtualised Runs combobox, and ECharts owns the
-  interaction-heavy Burn-in scatter. Tailwind was deliberately not added:
-  it supplies styling utilities rather than the accessible components this
-  migration needed, and a second styling system beside MUI would widen the
-  surface without replacing a capability. Every feature view is lazy-loaded;
-  ECharts is a second-level lazy chunk, keeping the initial bundle below the
-  configured 750 KB warning ceiling.
+  The default client is React 19 + TypeScript but its visible UI is full GPU:
+  PixiJS 8 draws the 2D component system, preferring WebGPU with WebGL fallback,
+  while R3F 9 / Three.js renders the tier topology in a separate lazy canvas
+  behind it. Two contexts are deliberate: sharing one GL context would require
+  abandoning the high-level renderers, manually resetting state between them,
+  and would disable Pixi's WebGPU path. Zustand owns only UI/scene state;
+  TanStack Query owns every `/api/*` payload and the 2s index / 1s live-delta
+  polling. A tiny DOM bridge remains for real text inputs, clipboard, IME and
+  assistive-technology tabs/live regions — no application panel/card/chart is
+  HTML.
+  `@pixi/react` is deliberately NOT used: its current reconciler targets React
+  19.0 and its React 19.2 support remains unpublished. Downgrading React or
+  overriding `react-reconciler` would turn the renderer boundary into a latent
+  invalid-hook failure; the React surface therefore owns an imperative Pixi
+  renderer lifecycle.
+  `npm run viz` / `viz:build` select full GL; `npm run viz:mui` and
+  `viz:build:mui` retain the prior implementation for instant rollback.
+  The initial GPU app chunk is ~476 KB minified; Pixi renderer backends are
+  split, and the optional R3F/Three topology is a lazy ~995 KB / 266 KB-gzip
+  chunk. The warning ceiling is 1100 KB for that explicit 3D boundary, not a
+  licence to grow the initial path.
   Runs preserves the audited semantics: 1s delta polling, 2s index polling,
   the 12-minute abandonment predicate, paired llm-start events, newest-first
-  timeline, exact tool↔LLM correlation, sticky details and scroll compensation.
-  Browser acceptance traverses all five views against the real APIs, opens an
-  LLM detail, confirms model names and chart canvas, and reports zero console
-  errors. `tests/viz-client-components.test.ts` exercises the same navigation
-  with mocked API contracts; `tests/viz-client-run-utils.test.ts` pins live,
-  delta-merge and filtering invariants.
+  timeline, exact tool↔LLM correlation and bounded visible event rows. Burn-in
+  batches all scatter points into one Graphics object and renders at most 50
+  rows. `npm run viz:smoke` launches the COMPILED client, traverses all five
+  views, requires two canvases and a non-empty scene, then proves both WebGPU
+  and forced WebGL paths with zero console errors. Pure tests pin Zustand
+  transitions, query invalidation, the DOM bridge, i18n and existing delta
+  helpers.
   **DO NOT name a root client module `api.ts`.** Vite's `/api` dev proxy also
   matches `/api.ts`, forwards the module request to the read-only server and
   returns it as `application/octet-stream`; production builds still pass while
@@ -4136,21 +4149,21 @@ second is the kind of thing that gets acted on:
   The history still matters: a French word-list detector missed `Appel LLM`,
   `dernier run`, `Version actuelle` and `afficher / masquer`; the later
   structural `h()`-child check found 14 more strings; and then fourteen
-  `innerHTML`/one-word residues escaped that too. The full React migration
-  deletes `main.js`, `h()` and every raw-HTML renderer rather than extending
-  another heuristic. React text nodes escape API/model content by default;
-  the one deliberate HTML surface, ECharts' tooltip formatter, applies an
-  explicit HTML escape to task/family/outcome. The source-contract test now
-  forbids the legacy renderer and the component integration test visits every
-  view. That is stronger for the demonstrated classes, but still not proof
-  that every future literal is translated — keep user-facing text in the
-  catalogs.
-  Every label goes through `useI18n().t('some.key', { vars })` against
-  `src/viz/client/i18n.tsx`; there is no static DOM translation pass and no
-  global `t`. Locale is React state, so switching language repaints in place
-  instead of reloading the page. The small provider keeps the established
+  `innerHTML`/one-word residues escaped that too. The React migrations deleted
+  `main.js`, `h()` and every raw-HTML renderer rather than extending another
+  heuristic. The GPU client passes API/model strings into Pixi Text objects,
+  never HTML; the retained MUI client's one ECharts tooltip formatter still
+  applies an explicit HTML escape. The source-contract test forbids the legacy
+  renderer and the browser GPU smoke visits every view. That is stronger for
+  the demonstrated classes, but still not proof that every future literal is
+  translated — keep user-facing text in the catalogs.
+  GPU labels call `translate(locale, key, vars)` from the typed catalogs in
+  `src/viz/client/i18n.tsx`; the MUI fallback uses `useI18n().t()` over the
+  same source. There is no static DOM translation pass and no global `t`.
+  Locale is Zustand state in the GPU client, so switching language repaints
+  the scene in place. The small translator keeps the established
   i18next-compatible surface (dotted keys, `{{var}}`, `.one` count variant)
-  without adding a second runtime library beside MUI. English remains the
+  without adding another runtime library. English remains the
   SOURCE and default: `detectLocale()` deliberately ignores
   `navigator.language`, so a French browser gets English until the user opts
   in via the header picker (persisted in localStorage) or `?lang=fr`. A
