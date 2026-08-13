@@ -18,6 +18,9 @@
   the real SDK and framework interfaces, leaving CI free of lint annotations.
 - Puppeteer 25 removes the vulnerable extract-zip chain; the supported Node
   floor is now 22.13+ (or 24+) to match that patched browser runtime and CI.
+- Codex-backed skill compilation uses `effort: low`; other providers retain
+  `medium`. An exact-prompt ABBA replay changed 0/2 timeouts into 2/2 valid,
+  scan-clean script responses.
 
 ### Fixed
 

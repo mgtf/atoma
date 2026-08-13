@@ -31,6 +31,10 @@ import { undeclaredToolMentions } from '../atoms/verdict.js';
 // (stats/curriculum need the predicate without importing this whole engine).
 export { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 
+export function compileEffortForModel(model: string): 'low' | 'medium' {
+  return /^codex:/i.test(model.trim()) ? 'low' : 'medium';
+}
+
 /**
  * SKILL LIFECYCLE ENGINE — extracted from L2Atom (structural slice 2).
  * ====================================================================
@@ -945,7 +949,16 @@ export class SkillLifecycle {
       // where maxTokens is advisory-only: at the default 'high' a compile
       // ran ~7 minutes / ~20k thinking+output tokens through the subprocess
       // and was killed by the run deadline twice (rehearsal runs 4 and 5).
-      params: { ...this.host.params, maxTokens: 4000, temperature: 0, effort: 'medium' },
+      // Codex is different: a controlled ABBA replay of the exact timed-out
+      // compile prompt produced 0/2 completions at medium (both 120s) and 2/2
+      // valid, scan-clean scripts at low (42s/51s). Keep the exception scoped
+      // to the provider prefix; Claude and every other route stay at medium.
+      params: {
+        ...this.host.params,
+        maxTokens: 4000,
+        temperature: 0,
+        effort: compileEffortForModel(this.host.model),
+      },
       // Post-approval bookkeeping: own budget, never the run deadline.
       signal: postApprovalSignal(),
     });

@@ -1005,6 +1005,15 @@ re-exports all the historical names so old imports keep working.
   120s, and transport errors receive a current-generation refusal stamp so
   they cannot consume every subsequent run; the two live casualties were
   stamped explicitly.
+  CODEX COMPILE EFFORT IS NOW `low`, AND ONLY FOR CODEX. Controlled ABBA replay
+  (2026-08-13) used the EXACT `write-structured-markdown-files` prompt that had
+  timed out, same `gpt-5.4-mini`, same system prompt and 120s cap:
+  medium = 120006ms timeout / 119962ms timeout; low = 50971ms / 42375ms, both
+  valid promotable JSON responses. The low bodies were 5896/5533 characters,
+  declared the required output+summary envelope and passed `scanScriptBody`
+  with zero flags. This is not a global "low is better" claim: Claude's medium
+  pin remains load-bearing against its high default, and every non-`codex:`
+  compiler route stays medium. `compileEffortForModel` owns the narrow policy.
   TOOL closure found repeated harness gaps rather than harmless model noise:
   HTTP L1s recorded long-running `node server.js` commands (30s timeout +
   dead port), then improvised curl/node-e clients (`http.delete`, malformed JS,

@@ -22,7 +22,17 @@ import {
   TRUST_THRESHOLD_SUCCESSES,
 } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
+import { compileEffortForModel } from '../src/skills/lifecycle.js';
 import { makeCtx, jsonText } from './helpers.js';
+
+describe('compile effort routing', () => {
+  it('uses low only for provider-prefixed Codex compilation', () => {
+    expect(compileEffortForModel('codex:gpt-5.4-mini')).toBe('low');
+    expect(compileEffortForModel('CODEx:gpt-5.6-sol')).toBe('low');
+    expect(compileEffortForModel('claude-sonnet-5')).toBe('medium');
+    expect(compileEffortForModel('zai:glm-4.5-air')).toBe('medium');
+  });
+});
 
 /**
  * Tests for #C2c — skill PROMOTION llm→script + DEMOTION script→llm.
