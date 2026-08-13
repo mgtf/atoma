@@ -11,6 +11,9 @@
   all five views and verifies both WebGPU and forced-WebGL rendering.
 - `npm run viz:mui` and `npm run viz:build:mui` retain the previous MUI client
   as an immediate development and build fallback.
+- GPU filter controls provide animated neutral, hover, pressed and active
+  states, staggered entrance, fragment dissolution and spring-like layout
+  transitions that preserve occupied space until exit animations complete.
 - The visualizer has a Vite HMR development path and a compiled `viz:serve`
   release path; release smoke verifies its index, hashed asset and Burn-in API.
 - Burn-in analytics provide family/outcome/time presets, ECharts drag/slider
@@ -46,6 +49,10 @@
 - GPU filter rows wrap instead of dropping overflowing options and center their
   labels geometrically. Selecting a role now switches to the LLM kind, so
   `PREFILTER` no longer leaves unrelated tool/skill/registry cards visible.
+- Three is pinned before the `Clock` deprecation used internally by R3F;
+  imperative renderer HMR performs a clean reload, and a GPU error boundary
+  exposes recovery instead of leaving a blank canvas. Compiled browser smoke
+  now fails on warnings, page errors, failed requests and HTTP errors.
 - The GPU renderer prefers WebGPU, retries with WebGL after initialization
   failure, and exposes a deterministic `?renderer=webgl` acceptance path.
 - The Burn-in visualizer displays compiler refusals and transport errors in

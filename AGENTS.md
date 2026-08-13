@@ -1641,7 +1641,18 @@ re-exports all the historical names so old imports keep working.
   otherwise the shared event predicate intentionally keeps non-LLM events
   during a role filter, making an active Prefilter button appear broken.
   Selecting a kind resets any stale role and every filter change resets the
-  timeline scroll anchor.
+  timeline scroll anchor. Filter controls are GPU-native game widgets, not
+  styled DOM: staggered entrance, scanline, orbiting hover particles, pressed
+  compression, active pulse and fragment dissolve. Removing the role row is a
+  TWO-PHASE layout transition: its old height remains reserved through the
+  dissolve, then the branch/timeline container collapses over 390ms with a
+  ~1.7px ease-out-back overshoot. Re-insertion runs the inverse transition;
+  moving content starts at the old layout position while buttons appear.
+  Three is pinned to r182 until R3F stops constructing deprecated `Clock`
+  (deprecated in r183); hiding that warning would disguise a real peer timing
+  mismatch. The imperative Pixi class self-invalidates HMR to avoid old
+  instances calling newly-added prototype methods, and `GpuErrorBoundary`
+  provides a visible reload path instead of a blank canvas.
   Burn-in
   batches all scatter points into one Graphics object and renders at most 50
   rows. `npm run viz:smoke` launches the COMPILED client, traverses all five

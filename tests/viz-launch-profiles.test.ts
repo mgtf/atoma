@@ -51,6 +51,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const chart = readFileSync('src/viz/client/burnin-chart.ts', 'utf8');
   const picker = readFileSync('src/viz/client/run-picker.tsx', 'utf8');
   const gpuApp = readFileSync('src/viz/client-gl/GpuApp.tsx', 'utf8');
+  const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
@@ -81,6 +82,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(pkg.devDependencies['zustand']).toBeTruthy();
     expect(pkg.devDependencies['@tanstack/react-query']).toBeTruthy();
     expect(pkg.devDependencies['three']).toBeTruthy();
+    expect(pkg.devDependencies['three']).toMatch(/0\.182/);
     expect(pkg.devDependencies['@react-three/fiber']).toBeTruthy();
     expect(pkg.devDependencies['@pixi/react']).toBeUndefined();
     expect(vite).toMatch(/plugin-react/);
@@ -91,6 +93,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(devLauncher).not.toMatch(/npm['"],\s*\['exec'|npm exec/);
     expect(server).toContain('res.writeHead(307');
     expect(gpuApp).toMatch(/ThreeBackdrop|GpuSurface|DomBridge/);
+    expect(gpuMain).toMatch(/GpuErrorBoundary/);
     expect(gpuRenderer).toMatch(
       /preference:\s*forceWebGl\s*\?\s*\['webgl'\]\s*:\s*\['webgpu', 'webgl'\]/
     );
@@ -119,6 +122,14 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/listLayer\.mask = listMask/);
     expect(gpuRenderer).toMatch(/scrollMax\.runs = Math\.max/);
     expect(gpuRenderer).toMatch(/gpuEventCardCopy\(event\)/);
+    expect(gpuRenderer).toMatch(/private filterButton\(/);
+    expect(gpuRenderer).toMatch(/pointerover|pointerdown/);
+    expect(gpuRenderer).toMatch(/drawRemovedFilterEffects/);
+    expect(gpuRenderer).toMatch(/drawExitingFilterButtons/);
+    expect(gpuRenderer).toMatch(/animateEnteringFilterSpace/);
+    expect(gpuRenderer).toMatch(/exitingRoleFilters/);
+    expect(gpuRenderer).toMatch(/app\.ticker\.add/);
+    expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
     expect(gpuRenderer).toMatch(/row\.refusals/);
     expect(gpuRenderer).toMatch(/row\.compileErrors/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);

@@ -41,11 +41,21 @@ try {
   try {
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
-    const errors = [];
+    const diagnostics = [];
     page.on('console', (message) => {
-      if (message.type() === 'error') errors.push(message.text());
+      if (message.type() === 'error' || message.type() === 'warn') {
+        diagnostics.push(`${message.type()}: ${message.text()}`);
+      }
     });
-    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+    page.on('requestfailed', (request) => {
+      diagnostics.push(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`);
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        diagnostics.push(`http ${response.status()}: ${response.url()}`);
+      }
+    });
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]');
 
@@ -74,9 +84,9 @@ try {
       result.canvases < 2 ||
       !['webgpu', 'webgl'].includes(result.backend ?? '') ||
       result.objects < 20 ||
-      errors.length > 0
+      diagnostics.length > 0
     ) {
-      throw new Error(`GPU smoke failed: ${JSON.stringify({ ...result, errors })}`);
+      throw new Error(`GPU smoke failed: ${JSON.stringify({ ...result, diagnostics })}`);
     }
     console.log(
       `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views`
@@ -91,8 +101,26 @@ try {
   });
   try {
     const page = await fallbackBrowser.newPage();
+    const diagnostics = [];
+    page.on('console', (message) => {
+      if (message.type() === 'error' || message.type() === 'warn') {
+        diagnostics.push(`${message.type()}: ${message.text()}`);
+      }
+    });
+    page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+    page.on('requestfailed', (request) => {
+      diagnostics.push(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`);
+    });
+    page.on('response', (response) => {
+      if (response.status() >= 400) {
+        diagnostics.push(`http ${response.status()}: ${response.url()}`);
+      }
+    });
     await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]');
+    if (diagnostics.length > 0) {
+      throw new Error(`GPU fallback diagnostics: ${JSON.stringify(diagnostics)}`);
+    }
     console.log('viz GPU fallback ok: WebGL');
   } finally {
     await fallbackBrowser.close();

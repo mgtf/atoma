@@ -88,6 +88,34 @@ button, input, textarea { font: inherit; }
   border: 0;
 }
 
+.gpu-crash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  padding: 32px;
+  background: #070b13;
+  color: #f87171;
+  text-align: center;
+}
+
+.gpu-crash pre {
+  max-width: min(760px, 90vw);
+  white-space: pre-wrap;
+  color: #a9b5ca;
+}
+
+.gpu-crash button {
+  justify-self: center;
+  padding: 8px 16px;
+  border: 1px solid #6ea8ff;
+  border-radius: 8px;
+  background: #162033;
+  color: #e6edf7;
+  cursor: pointer;
+}
+
 @media (max-width: 900px) {
   .gpu-run-input {
     left: 250px;

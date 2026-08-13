@@ -45,6 +45,7 @@ export function GpuApp() {
   const metrics = useRef<GpuRenderMetrics>({
     backend: 'unknown',
     objectCount: 0,
+    runCollapseOffset: 0,
     visibleLabels: [],
     hitTargets: [],
   });

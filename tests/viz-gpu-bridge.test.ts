@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n.js';
 import { DomBridge } from '../src/viz/client-gl/DomBridge.js';
+import { GpuErrorBoundary } from '../src/viz/client-gl/GpuErrorBoundary.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 
 const runs = [
@@ -65,5 +66,24 @@ describe('full-GL minimal DOM bridge', () => {
 
     useGpuStore.getState().setView('launch');
     expect(await screen.findByRole('textbox', { name: 'Goal' })).toBeInTheDocument();
+  });
+});
+
+describe('full-GL recovery boundary', () => {
+  it('offers a reload instead of leaving a blank canvas', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    function Broken(): never {
+      throw new Error('shader pipeline failed');
+    }
+    render(
+      createElement(
+        GpuErrorBoundary,
+        null,
+        createElement(Broken)
+      )
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('shader pipeline failed');
+    expect(screen.getByRole('button', { name: 'Reload visualizer' })).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 });

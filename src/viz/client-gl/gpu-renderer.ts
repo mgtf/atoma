@@ -6,6 +6,7 @@ import {
   RendererType,
   Text,
   TextStyle,
+  Ticker,
 } from 'pixi.js';
 import {
   buildAtomMap,
@@ -54,9 +55,15 @@ export interface GpuHitTarget {
   height: number;
 }
 
+interface FilterVisualTarget extends GpuHitTarget {
+  active: boolean;
+  accent: number;
+}
+
 export interface GpuRenderMetrics {
   backend: 'webgpu' | 'webgl' | 'unknown';
   objectCount: number;
+  runCollapseOffset: number;
   visibleLabels: string[];
   hitTargets: GpuHitTarget[];
 }
@@ -234,9 +241,14 @@ export class GpuRenderer {
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
   private readonly scrollMax: Partial<Record<ViewName, number>> = {};
+  private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
+  private previousFilterBounds = new Map<string, FilterVisualTarget>();
+  private currentFilterBounds = new Map<string, FilterVisualTarget>();
+  private handledExitIds = new Set<string>();
   private metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
+    runCollapseOffset: 0,
     visibleLabels: [],
     hitTargets: [],
   };
@@ -305,9 +317,14 @@ export class GpuRenderer {
 
   render(snapshot: GpuRenderSnapshot) {
     this.snapshot = snapshot;
+    for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
+    this.tickerCallbacks.clear();
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
+    this.metrics.runCollapseOffset = 0;
+    this.currentFilterBounds = new Map();
+    this.handledExitIds = new Set();
     this.scrollMax.runs = 0;
 
     const width = this.app.screen.width;
@@ -343,6 +360,8 @@ export class GpuRenderer {
       }
     }
     this.drawOverlays(snapshot, width, height);
+    this.drawRemovedFilterEffects();
+    this.previousFilterBounds = this.currentFilterBounds;
     this.metrics.objectCount = this.countObjects(this.root);
   }
 
@@ -458,6 +477,380 @@ export class GpuRenderer {
     parent.addChild(container);
     this.metrics.hitTargets.push({ id, role, label, x, y, width, height });
     return container;
+  }
+
+  private addTicker(callback: (ticker: Ticker) => void) {
+    this.tickerCallbacks.add(callback);
+    this.app.ticker.add(callback);
+  }
+
+  private filterButton(
+    parent: Container,
+    id: string,
+    label: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    active: boolean,
+    onActivate: (id: string) => void,
+    accent = GPU_COLORS.primary
+  ) {
+    const target: FilterVisualTarget = {
+      id,
+      role: 'button',
+      label,
+      x,
+      y,
+      width,
+      height,
+      active,
+      accent,
+    };
+    const wasVisible = this.previousFilterBounds.has(id);
+    const appearanceDelay = this.currentFilterBounds.size * 14;
+    this.currentFilterBounds.set(id, target);
+    this.metrics.hitTargets.push(target);
+
+    const container = new Container();
+    container.position.set(x, y);
+    container.eventMode = 'static';
+    container.cursor = 'pointer';
+    container.hitArea = new Rectangle(0, 0, width, height);
+
+    const aura = new Graphics();
+    aura.roundRect(-3, -3, width + 6, height + 6, 10);
+    aura.stroke({ color: accent, width: 2.5, alpha: 0.8 });
+    aura.alpha = active ? 0.32 : 0;
+    container.addChild(aura);
+
+    const base = new Graphics();
+    base.roundRect(0, 0, width, height, 8);
+    base.fill({
+      color: active ? accent : 0x111b2c,
+      alpha: active ? 0.27 : 0.9,
+    });
+    base.stroke({
+      color: active ? accent : 0x30405d,
+      width: active ? 1.8 : 1,
+      alpha: active ? 1 : 0.85,
+    });
+    container.addChild(base);
+
+    const inner = new Graphics();
+    inner.roundRect(3, 3, width - 6, height - 6, 6);
+    inner.stroke({ color: active ? 0xd9e8ff : 0x6f86ad, width: 0.7, alpha: active ? 0.35 : 0.12 });
+    container.addChild(inner);
+
+    const scanline = new Graphics();
+    scanline.rect(0, 3, 2, height - 6).fill({ color: 0xffffff, alpha: 0.7 });
+    scanline.alpha = active ? 0.15 : 0.035;
+    container.addChild(scanline);
+
+    const corner = new Graphics();
+    corner
+      .moveTo(4, 9)
+      .lineTo(4, 4)
+      .lineTo(9, 4)
+      .moveTo(width - 9, height - 4)
+      .lineTo(width - 4, height - 4)
+      .lineTo(width - 4, height - 9)
+      .stroke({ color: accent, width: 1.2, alpha: active ? 0.9 : 0.25 });
+    container.addChild(corner);
+
+    const sparkles = Array.from({ length: 4 }, (_, index) => {
+      const sparkle = new Graphics();
+      sparkle.circle(0, 0, index % 2 === 0 ? 1.4 : 1).fill({
+        color: index % 2 === 0 ? accent : 0xffffff,
+      });
+      sparkle.alpha = active ? 0.55 : 0;
+      container.addChild(sparkle);
+      return sparkle;
+    });
+
+    const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
+      size: 11,
+      color: active ? GPU_COLORS.text : 0xa9b5ca,
+      weight: active ? '700' : '600',
+    });
+    labelText.anchor.x = 0.5;
+    labelText.eventMode = 'none';
+
+    let hovered = false;
+    let pressed = false;
+    let elapsed = wasVisible ? performance.now() : -appearanceDelay;
+    let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
+    container.alpha = wasVisible ? 1 : 0;
+    const animate = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const entrance = Math.max(0, Math.min(1, elapsed / 260));
+      const easedEntrance = 1 - (1 - entrance) ** 3;
+      const targetScale = pressed ? 0.955 : hovered ? 1.035 : 1;
+      const scale = easedEntrance * targetScale;
+      container.alpha = easedEntrance;
+      container.scale.set(scale);
+      container.position.set(
+        x + width * (1 - scale) / 2,
+        y + height * (1 - scale) / 2 + (pressed ? 1.5 : 0)
+      );
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed / 170);
+      aura.alpha = active
+        ? 0.2 + pulse * 0.22
+        : hovered
+          ? 0.12 + pulse * 0.16
+          : 0;
+      scanline.x = 4 + (Math.max(0, elapsed) * (hovered ? 0.12 : 0.045)) % Math.max(8, width - 10);
+      scanline.alpha = active ? 0.12 + pulse * 0.12 : hovered ? 0.08 + pulse * 0.1 : 0.025;
+      base.tint = pressed ? 0xb8d7ff : hovered ? 0xd6e7ff : 0xffffff;
+      const nextLabelColor = pressed || hovered || active ? GPU_COLORS.text : 0xa9b5ca;
+      if (nextLabelColor !== currentLabelColor) {
+        currentLabelColor = nextLabelColor;
+        labelText.style.fill = nextLabelColor;
+      }
+      sparkles.forEach((sparkle, index) => {
+        const phase = elapsed / 430 + index * Math.PI / 2;
+        sparkle.position.set(
+          width / 2 + Math.cos(phase) * (width / 2 - 8),
+          height / 2 + Math.sin(phase * 1.35) * (height / 2 - 5)
+        );
+        sparkle.alpha = active
+          ? 0.28 + pulse * 0.42
+          : hovered
+            ? 0.18 + pulse * 0.35
+            : 0;
+      });
+    };
+    this.addTicker(animate);
+
+    container.on('pointerover', () => {
+      hovered = true;
+    });
+    container.on('pointerout', () => {
+      hovered = false;
+      pressed = false;
+    });
+    container.on('pointerdown', () => {
+      pressed = true;
+    });
+    container.on('pointerup', () => {
+      pressed = false;
+    });
+    container.on('pointerupoutside', () => {
+      pressed = false;
+    });
+    container.on('pointertap', () => onActivate(id));
+    parent.addChild(container);
+    return container;
+  }
+
+  private drawExitingFilterButtons(
+    targets: FilterVisualTarget[],
+    collapsingLayer: Container,
+    collapseDistance: number
+  ) {
+    if (!targets.length) return;
+    const snapshotAtStart = this.snapshot;
+    collapsingLayer.y = collapseDistance;
+    this.metrics.runCollapseOffset = collapseDistance;
+    const groups = targets.map((target, targetIndex) => {
+      this.handledExitIds.add(target.id);
+      const container = new Container();
+      container.position.set(target.x, target.y);
+
+      const aura = new Graphics();
+      aura.roundRect(-3, -3, target.width + 6, target.height + 6, 10);
+      aura.stroke({ color: target.accent, width: 2, alpha: 0.75 });
+      aura.alpha = target.active ? 0.32 : 0.12;
+      container.addChild(aura);
+
+      const base = new Graphics();
+      base.roundRect(0, 0, target.width, target.height, 8);
+      base.fill({
+        color: target.active ? target.accent : 0x111b2c,
+        alpha: target.active ? 0.27 : 0.9,
+      });
+      base.stroke({
+        color: target.active ? target.accent : 0x30405d,
+        width: target.active ? 1.8 : 1,
+      });
+      container.addChild(base);
+
+      const label = this.text(
+        container,
+        target.label,
+        target.width / 2,
+        Math.max(5, (target.height - 16) / 2),
+        {
+          size: 11,
+          color: target.active ? GPU_COLORS.text : 0xa9b5ca,
+          weight: target.active ? '700' : '600',
+        }
+      );
+      label.anchor.x = 0.5;
+
+      const fragments = Array.from({ length: 10 }, (_, index) => {
+        const fragment = new Graphics();
+        const column = index % 5;
+        const row = Math.floor(index / 5);
+        fragment.rect(0, 0, 2 + index % 2, 1.4).fill({
+          color: index % 3 === 0 ? 0xffffff : target.accent,
+        });
+        fragment.position.set(
+          7 + column / 4 * (target.width - 14),
+          6 + row * (target.height - 12)
+        );
+        fragment.alpha = 0;
+        container.addChild(fragment);
+        return {
+          fragment,
+          originX: fragment.x,
+          originY: fragment.y,
+          vx: (column - 2) * 0.035 + Math.sin(index * 4.1) * 0.02,
+          vy: (row ? 1 : -1) * 0.045 - index * 0.001,
+        };
+      });
+      this.root.addChild(container);
+      return { container, aura, base, label, fragments, delay: targetIndex * 18 };
+    });
+
+    let elapsed = 0;
+    let completed = false;
+    let groupsRemoved = false;
+    const exitDuration = 460 + (groups.length - 1) * 18;
+    const collapseDuration = 390;
+    const dissolve = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      if (!groupsRemoved) {
+        for (const group of groups) {
+          const local = Math.max(0, elapsed - group.delay);
+          const progress = Math.min(1, local / 460);
+          const dissolveProgress = Math.max(0, (progress - 0.16) / 0.84);
+          group.container.alpha = 1 - dissolveProgress ** 1.45;
+          const scale = 1 - dissolveProgress * 0.12;
+          group.container.scale.set(scale);
+          group.container.position.set(
+            group.container.position.x,
+            group.container.position.y - ticker.deltaMS * 0.008 * dissolveProgress
+          );
+          group.aura.alpha = (0.18 + Math.sin(local / 55) * 0.12) * (1 - dissolveProgress);
+          group.base.tint = 0xffffff - Math.floor(dissolveProgress * 0x202000);
+          group.label.alpha = 1 - dissolveProgress * 1.25;
+          for (const fragment of group.fragments) {
+            fragment.fragment.alpha = Math.sin(Math.PI * dissolveProgress) * 0.9;
+            fragment.fragment.x =
+              fragment.originX + fragment.vx * local * dissolveProgress;
+            fragment.fragment.y =
+              fragment.originY + fragment.vy * local * dissolveProgress;
+            fragment.fragment.rotation += ticker.deltaMS * 0.004;
+          }
+        }
+      }
+      if (!groupsRemoved && elapsed >= exitDuration) {
+        groupsRemoved = true;
+        for (const group of groups) {
+          group.container.removeFromParent();
+          group.container.destroy({ children: true });
+        }
+      }
+      const collapseProgress = Math.max(
+        0,
+        Math.min(1, (elapsed - exitDuration) / collapseDuration)
+      );
+      if (collapseProgress > 0) {
+        // A restrained ease-out-back: the content rises, overshoots by about
+        // one pixel, then settles instead of snapping at the layout boundary.
+        const overshoot = 1.35;
+        const shifted = collapseProgress - 1;
+        const eased =
+          1 +
+          (overshoot + 1) * shifted ** 3 +
+          overshoot * shifted ** 2;
+        collapsingLayer.y = collapseDistance * (1 - eased);
+        this.metrics.runCollapseOffset = collapsingLayer.y;
+      }
+      if (!completed && collapseProgress >= 1) {
+        completed = true;
+        collapsingLayer.y = 0;
+        this.metrics.runCollapseOffset = 0;
+        this.app.ticker.remove(dissolve);
+        this.tickerCallbacks.delete(dissolve);
+        requestAnimationFrame(() => {
+          if (snapshotAtStart && this.snapshot === snapshotAtStart) {
+            this.render(snapshotAtStart);
+          }
+        });
+      }
+    };
+    this.addTicker(dissolve);
+  }
+
+  private animateEnteringFilterSpace(layer: Container, distance: number) {
+    if (distance <= 0) return;
+    layer.y = -distance;
+    this.metrics.runCollapseOffset = -distance;
+    let elapsed = 0;
+    const duration = 390;
+    const expand = (ticker: Ticker) => {
+      elapsed += ticker.deltaMS;
+      const progress = Math.min(1, elapsed / duration);
+      const overshoot = 1.35;
+      const shifted = progress - 1;
+      const eased =
+        1 +
+        (overshoot + 1) * shifted ** 3 +
+        overshoot * shifted ** 2;
+      layer.y = -distance * (1 - eased);
+      this.metrics.runCollapseOffset = layer.y;
+      if (progress >= 1) {
+        layer.y = 0;
+        this.metrics.runCollapseOffset = 0;
+        this.app.ticker.remove(expand);
+        this.tickerCallbacks.delete(expand);
+      }
+    };
+    this.addTicker(expand);
+  }
+
+  private drawRemovedFilterEffects() {
+    for (const [id, target] of this.previousFilterBounds) {
+      if (this.currentFilterBounds.has(id)) continue;
+      if (this.handledExitIds.has(id)) continue;
+      const particles = new Container();
+      const centerX = target.x + target.width / 2;
+      const centerY = target.y + target.height / 2;
+      const sprites = Array.from({ length: 14 }, (_, index) => {
+        const particle = new Graphics();
+        const angle = index / 14 * Math.PI * 2;
+        const color = index % 3 === 0 ? 0xffffff : GPU_COLORS.primary;
+        particle.circle(0, 0, index % 2 === 0 ? 1.8 : 1.1).fill(color);
+        particle.position.set(centerX, centerY);
+        particles.addChild(particle);
+        return {
+          particle,
+          vx: Math.cos(angle) * (0.045 + index % 4 * 0.012),
+          vy: Math.sin(angle) * (0.035 + index % 3 * 0.014) - 0.018,
+        };
+      });
+      this.root.addChild(particles);
+      let elapsed = 0;
+      const dissolve = (ticker: Ticker) => {
+        elapsed += ticker.deltaMS;
+        const progress = Math.min(1, elapsed / 420);
+        for (const sprite of sprites) {
+          sprite.particle.x += sprite.vx * ticker.deltaMS;
+          sprite.particle.y += sprite.vy * ticker.deltaMS;
+          sprite.particle.alpha = (1 - progress) ** 1.7;
+          sprite.particle.scale.set(1 + progress * 0.8);
+        }
+        if (progress >= 1) {
+          this.app.ticker.remove(dissolve);
+          this.tickerCallbacks.delete(dissolve);
+          particles.removeFromParent();
+          particles.destroy({ children: true });
+        }
+      };
+      this.addTicker(dissolve);
+    }
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
@@ -659,24 +1052,25 @@ export class GpuRenderer {
         filterX = leftX + 14;
         kindY += 32;
       }
-      this.button(
+      this.filterButton(
         this.root,
         `run.filter.kind.${kind}`,
-        'button',
         label,
         filterX,
         kindY,
         buttonWidth,
         27,
         snapshot.state.runFilters.kind === kind,
-        snapshot.onActivate,
-        GPU_COLORS.primary,
-        true
+        snapshot.onActivate
       );
       filterX += buttonWidth + 5;
     }
 
-    let controlsBottom = kindY + 32;
+    const controlsBottomWithoutRoles = kindY + 32;
+    let controlsBottom = controlsBottomWithoutRoles;
+    const roleWasVisible = [...this.previousFilterBounds.keys()].some((id) =>
+      id.startsWith('run.filter.role.')
+    );
     if (snapshot.state.runFilters.kind === 'all' || snapshot.state.runFilters.kind === 'llm') {
       const roles = [...new Set(run.events.flatMap((event) => event.role ? [event.role] : []))];
       if (roles.length) {
@@ -690,24 +1084,46 @@ export class GpuRenderer {
             roleX = leftX + 14;
             roleY += 30;
           }
-          this.button(
+          this.filterButton(
             this.root,
             `run.filter.role.${role}`,
-            'button',
             label,
             roleX,
             roleY,
             buttonWidth,
             25,
             snapshot.state.runFilters.role === role,
-            snapshot.onActivate,
-            GPU_COLORS.primary,
-            true
+            snapshot.onActivate
           );
           roleX += buttonWidth + 5;
         }
         controlsBottom = roleY + 29;
       }
+    }
+    const exitingRoleFilters =
+      snapshot.state.runFilters.kind !== 'all' &&
+      snapshot.state.runFilters.kind !== 'llm'
+        ? [...this.previousFilterBounds.values()].filter((target) =>
+          target.id.startsWith('run.filter.role.')
+        )
+        : [];
+    const lowerControlsLayer = new Container();
+    this.root.addChild(lowerControlsLayer);
+    if (exitingRoleFilters.length) {
+      const previousRoleBottom = Math.max(
+        ...exitingRoleFilters.map((target) => target.y + target.height + 4)
+      );
+      const collapseDistance = Math.max(0, previousRoleBottom - controlsBottom);
+      this.drawExitingFilterButtons(
+        exitingRoleFilters,
+        lowerControlsLayer,
+        collapseDistance
+      );
+    } else if (controlsBottom > controlsBottomWithoutRoles && !roleWasVisible) {
+      this.animateEnteringFilterSpace(
+        lowerControlsLayer,
+        controlsBottom - controlsBottomWithoutRoles
+      );
     }
     const branches = [...new Set(run.events.flatMap((event) => event.branchId ? [event.branchId] : []))];
     if (branches.length > 1) {
@@ -720,19 +1136,16 @@ export class GpuRenderer {
           branchX = leftX + 14;
           branchY += 30;
         }
-        this.button(
-          this.root,
+        this.filterButton(
+          lowerControlsLayer,
           `run.filter.branch.${branch}`,
-          'button',
           label,
           branchX,
           branchY,
           buttonWidth,
           25,
           snapshot.state.runFilters.branchId === branch,
-          snapshot.onActivate,
-          GPU_COLORS.primary,
-          true
+          snapshot.onActivate
         );
         branchX += buttonWidth + 5;
       }
@@ -748,20 +1161,20 @@ export class GpuRenderer {
     );
     if (isRunLive(run) && inFlight.length) {
       const liveY = controlsBottom + 5;
-      this.panel(this.root, leftX + 14, liveY, leftWidth - 28, 52, 0x10263b, GPU_COLORS.cyan);
+      this.panel(lowerControlsLayer, leftX + 14, liveY, leftWidth - 28, 52, 0x10263b, GPU_COLORS.cyan);
       const current = inFlight.at(-1)!;
       const tools = run.events.filter(
         (event) => event.kind === 'tool' && event.llmEventId === current.llmEventId
       );
       this.text(
-        this.root,
+        lowerControlsLayer,
         `${snapshot.t('now.title')} · ${(current.role ?? 'LLM').toUpperCase()} · ${current.actor?.name ?? '?'} · ${tools.length} tool`,
         leftX + 24,
         liveY + 11,
         { size: 10, color: GPU_COLORS.cyan, weight: '700' }
       );
       this.text(
-        this.root,
+        lowerControlsLayer,
         truncate(nowDescription(snapshot.t, current), 130),
         leftX + 24,
         liveY + 29,
@@ -774,10 +1187,10 @@ export class GpuRenderer {
     const listHeight = height - listY - GPU_LAYOUT.gap;
     const listMask = new Graphics();
     listMask.rect(leftX + 10, listY, leftWidth - 20, listHeight).fill(0xffffff);
-    this.root.addChild(listMask);
+    lowerControlsLayer.addChild(listMask);
     const listLayer = new Container();
     listLayer.mask = listMask;
-    this.root.addChild(listLayer);
+    lowerControlsLayer.addChild(listLayer);
     const events = filterEvents(run.events, snapshot.state.runFilters)
       .filter((event) => event.kind !== 'llm-start' || !completed.has(String(event.llmEventId)))
       .reverse();
@@ -1151,13 +1564,51 @@ export class GpuRenderer {
     });
     const families = [...new Set(payload.rows.map((row) => row.family))].sort();
     let x = GPU_LAYOUT.gap;
-    this.button(this.root, 'burnin.family.all', 'button', snapshot.t('burnin.all'), x, top, 64, 30, snapshot.state.burninFamily === 'all', snapshot.onActivate);
-    x += 70;
+    let familyY = top;
+    const addFamilyFilter = (id: string, label: string, active: boolean) => {
+      const buttonWidth = gpuFilterButtonWidth(label);
+      if (x + buttonWidth > width - GPU_LAYOUT.gap && x > GPU_LAYOUT.gap) {
+        x = GPU_LAYOUT.gap;
+        familyY += 34;
+      }
+      this.filterButton(
+        this.root,
+        id,
+        label,
+        x,
+        familyY,
+        buttonWidth,
+        30,
+        active,
+        snapshot.onActivate
+      );
+      x += buttonWidth + 6;
+    };
+    addFamilyFilter('burnin.family.all', snapshot.t('burnin.all'), snapshot.state.burninFamily === 'all');
     for (const family of families.slice(0, 7)) {
-      this.button(this.root, `burnin.family.${family}`, 'button', family, x, top, 70, 30, snapshot.state.burninFamily === family, snapshot.onActivate);
-      x += 76;
+      addFamilyFilter(`burnin.family.${family}`, family, snapshot.state.burninFamily === family);
     }
     let optionX = GPU_LAYOUT.gap;
+    let optionY = familyY + 36;
+    const addOptionFilter = (id: string, label: string, active: boolean) => {
+      const buttonWidth = gpuFilterButtonWidth(label);
+      if (optionX + buttonWidth > width - GPU_LAYOUT.gap && optionX > GPU_LAYOUT.gap) {
+        optionX = GPU_LAYOUT.gap;
+        optionY += 32;
+      }
+      this.filterButton(
+        this.root,
+        id,
+        label,
+        optionX,
+        optionY,
+        buttonWidth,
+        28,
+        active,
+        snapshot.onActivate
+      );
+      optionX += buttonWidth + 6;
+    };
     for (const outcome of ['all', 'delivered', 'failed']) {
       const label =
         outcome === 'all'
@@ -1165,20 +1616,11 @@ export class GpuRenderer {
           : outcome === 'delivered'
             ? snapshot.t('burnin.deliveredOnly')
             : snapshot.t('burnin.failedOnly');
-      const buttonWidth = outcome === 'all' ? 64 : 112;
-      this.button(
-        this.root,
+      addOptionFilter(
         `burnin.outcome.${outcome}`,
-        'button',
         label,
-        optionX,
-        top + 36,
-        buttonWidth,
-        28,
-        snapshot.state.burninOutcome === outcome,
-        snapshot.onActivate
+        snapshot.state.burninOutcome === outcome
       );
-      optionX += buttonWidth + 6;
     }
     optionX += 10;
     for (const preset of ['all', '1', '7', '30']) {
@@ -1190,20 +1632,11 @@ export class GpuRenderer {
             : preset === '7'
               ? snapshot.t('burnin.last7d')
               : snapshot.t('burnin.last30d');
-      this.button(
-        this.root,
+      addOptionFilter(
         `burnin.preset.${preset}`,
-        'button',
         label,
-        optionX,
-        top + 36,
-        100,
-        28,
-        snapshot.state.burninPreset === preset,
-        snapshot.onActivate
+        snapshot.state.burninPreset === preset
       );
-      optionX += 106;
-      if (optionX > width - 100) break;
     }
     const delivered = rows.filter((row) => row.outcome === 'delivered').length;
     const costs = rows.flatMap((row) => row.costUsd === null ? [] : [row.costUsd]);
@@ -1214,7 +1647,7 @@ export class GpuRenderer {
       [snapshot.t('burnin.medianCost'), fmtCost(quantile(costs, 0.5))],
       [snapshot.t('burnin.p90Duration'), `${quantile(durations, 0.9) ?? '—'}s`],
     ];
-    const statsY = top + 74;
+    const statsY = optionY + 38;
     const statWidth = (width - GPU_LAYOUT.gap * 5) / 4;
     stats.forEach(([label, value], index) => {
       const statX = GPU_LAYOUT.gap + index * (statWidth + GPU_LAYOUT.gap);
@@ -1331,4 +1764,12 @@ export class GpuRenderer {
       this.button(this.root, 'launch.copy', 'button', snapshot.t('launch.copy'), x + panelWidth - 114, commandY, 92, 68, false, snapshot.onActivate);
     }
   }
+}
+
+// Pixi owns an imperative object graph whose instances survive React Fast
+// Refresh. Replacing this class in place can leave an old instance calling a
+// newly-added prototype method, so renderer edits deliberately trigger one
+// clean reload instead of attempting stateful HMR.
+if (import.meta.hot) {
+  import.meta.hot.accept(() => window.location.reload());
 }
