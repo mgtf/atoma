@@ -5,7 +5,11 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { defaultBuiltinTools } from '../src/tools/builtin.js';
 import { ToolSandbox } from '../src/tools/sandbox.js';
-import { buildProfile, NEURON_SYSTEM_PROMPT, NEURON_DESCRIPTION } from '../src/run/profiles/build.js';
+import {
+  buildProfile,
+  MERISTEM_SYSTEM_PROMPT,
+  MERISTEM_DESCRIPTION,
+} from '../src/run/profiles/build.js';
 import { runTask, parseRunnerArgs } from '../src/run/runner.js';
 
 /**
@@ -17,10 +21,8 @@ import { runTask, parseRunnerArgs } from '../src/run/runner.js';
  *  1. SEEDS. `seedL3` re-aligns the persisted tier-3 prompt whenever the
  *     constant changes, and `AtomRegistry.patch` ZEROES trust counters. A
  *     single character drifting during the move would have been the first
- *     tier-3 patch in the project's history and would have cost Neuron its
- *     record — with Methane at 133/0 and Water at 36/0 sitting behind the
- *     same seeding pass. The baseline below is the sha256 of what the live
- *     store actually held before the refactor.
+ *     tier-3 patch in the project's history. The baseline below pins the
+ *     post-taxonomy Meristem tissue prompt.
  *
  *  2. STDOUT. `src/cli/burnin.ts` parses the run's console output to build
  *     `burnin/results.csv`, 146 committed rows of longitudinal cost curve.
@@ -28,7 +30,7 @@ import { runTask, parseRunnerArgs } from '../src/run/runner.js';
  *     reclassifies every future run.
  */
 
-const NEURON_PROMPT_SHA16 = 'e0c75d266546b3c8';
+const MERISTEM_PROMPT_SHA16 = '84e5c2227a6fad8a';
 
 function sha16(s: string): string {
   return createHash('sha256').update(s).digest('hex').slice(0, 16);
@@ -36,8 +38,8 @@ function sha16(s: string): string {
 
 describe('build profile — the seeds survived the move byte-for-byte', () => {
   it('the tier-3 prompt still hashes to what the live store held', () => {
-    expect(sha16(NEURON_SYSTEM_PROMPT)).toBe(NEURON_PROMPT_SHA16);
-    expect(NEURON_SYSTEM_PROMPT.length).toBe(949);
+    expect(sha16(MERISTEM_SYSTEM_PROMPT)).toBe(MERISTEM_PROMPT_SHA16);
+    expect(MERISTEM_SYSTEM_PROMPT.length).toBe(977);
   });
 
   it('seeding twice on a fresh store does not bump the version', () => {
@@ -49,8 +51,8 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
     const ctx = { registry: reg, toolDecls: tools, log };
 
     const first = buildProfile.seedL3(ctx);
-    expect(first.systemPrompt).toBe(NEURON_SYSTEM_PROMPT);
-    expect(first.description).toBe(NEURON_DESCRIPTION);
+    expect(first.systemPrompt).toBe(MERISTEM_SYSTEM_PROMPT);
+    expect(first.description).toBe(MERISTEM_DESCRIPTION);
     buildProfile.seedCatalog(ctx);
     const versionsAfterFirst = reg
       .listByTier(1)

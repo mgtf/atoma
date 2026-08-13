@@ -34,10 +34,10 @@ describe('VALIDATION_SYSTEM_PROMPT — tier contract and PLAN/RESULT rubric', ()
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(/TIERING CONTRACT/);
     // Tier responsibilities must be enumerated.
     expect(VALIDATION_SYSTEM_PROMPT).toMatch(
-      /L1 elements are the ONLY tier allowed to invoke tools/
+      /L1 molecules are the ONLY agent tier allowed to invoke those elements/
     );
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/L2 molecules plan and delegate/);
-    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/L3 cells plan and delegate/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/L2 cells plan and delegate/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/L3 tissues plan and delegate/);
   });
 
   it('forbids rejecting a plan for legitimate downward delegation', () => {

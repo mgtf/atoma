@@ -64,10 +64,10 @@ comes from. Everything below is that fact, measured repeatedly.
 Three mechanisms. The first two carry the result; the third is real but has not yet paid.
 
 **1. The cheapest model that can answer, answers.**
-An expensive model decomposes the goal into phases, a mid-tier model routes each phase, and a
-cheap model does the file-writing and command-running. This is structural, not a guideline —
-only the bottom tier is given tools on the supervised path. A yes/no check never runs on a
-reasoning model.
+An L3 **tissue** decomposes the goal into phases, an L2 **cell** routes each phase, and an L1
+**molecule** does the work by invoking atomic tool **elements** such as file-writing and
+command-running. This is structural, not a guideline — only molecules receive elements on the
+supervised path. A yes/no check never runs on a reasoning model.
 
 **2. Components earn trust, and can lose it.**
 Every reusable component carries a success/failure record. Once one has a clean track record the
@@ -250,6 +250,11 @@ the isolated backend and proxied egress paths from compiled `dist/`.
 Confirm that path with `npm run doctor -- --container`. Contributors changing
 source use `npm run build:worker:dev` and `npm run doctor:dev`.
 
+Stores created before the Element→Molecule→Cell→Tissue taxonomy use
+`npm run registry -- migrate-taxonomy` for a dry-run, then
+`npm run registry -- migrate-taxonomy --apply`. The apply path creates its own
+DB+skills backup before renaming identities.
+
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release includes MCP,
 its build-run path, doctor, and the read-only visualizer (`npm run viz:serve`);
@@ -277,7 +282,7 @@ claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"   # then start a 
 the supported release path uses compiled `dist/`.
 
 **Thirteen tools.** One starts a run and returns immediately with an id to poll; one cancels a run;
-the other eleven are read-only — the atom catalogue with its earned trust, the recipe library and
+the other eleven are read-only — the agent catalogue with its earned trust, the recipe library and
 its lifecycle, the audit ledger's integrity projection, run traces, and the tool-friction report.
 The caller pays for one tool call and atoma does the tiering.
 

@@ -30,7 +30,7 @@ const BASE = {
   model: 'claude-haiku-4-5',
   taskDescription: 'build a thing',
   excluded: [] as string[],
-  catalogLines: ['  - Hydrogen: web builder'],
+  catalogLines: ['  - Water: web builder'],
 };
 
 describe('prefilterCacheKey', () => {
@@ -38,9 +38,9 @@ describe('prefilterCacheKey', () => {
     expect(prefilterCacheKey(BASE)).toBe(prefilterCacheKey({ ...BASE }));
     expect(prefilterCacheKey({ ...BASE, model: 'other' })).not.toBe(prefilterCacheKey(BASE));
     expect(prefilterCacheKey({ ...BASE, taskDescription: 'x' })).not.toBe(prefilterCacheKey(BASE));
-    expect(prefilterCacheKey({ ...BASE, excluded: ['Hydrogen'] })).not.toBe(prefilterCacheKey(BASE));
+    expect(prefilterCacheKey({ ...BASE, excluded: ['Water'] })).not.toBe(prefilterCacheKey(BASE));
     expect(
-      prefilterCacheKey({ ...BASE, catalogLines: ['  - Hydrogen: web builder (5✓/0✗)'] })
+      prefilterCacheKey({ ...BASE, catalogLines: ['  - Water: web builder (5✓/0✗)'] })
     ).not.toBe(prefilterCacheKey(BASE));
     expect(prefilterCacheKey({ ...BASE, constraints: ['fast'] })).not.toBe(prefilterCacheKey(BASE));
   });
@@ -72,19 +72,19 @@ describe('cache store — a table in the store, bounded, disableable', () => {
   it('round-trips an outcome and persists it', () => {
     const key = prefilterCacheKey(BASE);
     expect(prefilterCacheGet(key)).toBeNull();
-    prefilterCachePut(key, { kind: 'reuse', target: 'Hydrogen', reasoning: 'fits', confidence: 'high' });
-    expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
+    prefilterCachePut(key, { kind: 'reuse', target: 'Water', reasoning: 'fits', confidence: 'high' });
+    expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Water' });
     expect(existsSync(join(dir, 'cache.db'))).toBe(true);
     // A fresh handle (new process simulation) reads the same entry.
     resetPrefilterCacheForTests();
-    expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
+    expect(prefilterCacheGet(key)).toMatchObject({ kind: 'reuse', target: 'Water' });
   });
 
   it('a HIT no longer rewrites the whole store — it increments one row', () => {
     // The file form re-serialised all 500 entries (217 KB measured) on every
     // get, purely to bump `hits`. This is the operation it wanted.
     const key = prefilterCacheKey(BASE);
-    prefilterCachePut(key, { kind: 'reuse', target: 'Hydrogen', reasoning: 'fits', confidence: 'high' });
+    prefilterCachePut(key, { kind: 'reuse', target: 'Water', reasoning: 'fits', confidence: 'high' });
     prefilterCacheGet(key);
     prefilterCacheGet(key);
     const s = prefilterCacheStats();
@@ -173,26 +173,26 @@ describe('prefilterStrategy — cache integration', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const CATALOG = [{ name: 'Hydrogen', description: 'web builder' }];
+  const CATALOG = [{ name: 'Water', description: 'web builder' }];
 
   it('serves the second identical call from the cache — zero LLM calls', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'fits' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'fits' })
     );
     const first = await prefilterStrategy({ ctx, task: { description: 'build a page' }, catalog: CATALOG });
-    expect(first).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
+    expect(first).toMatchObject({ kind: 'reuse', target: 'Water' });
     expect(ctx.llm.calls).toHaveLength(1);
 
     const second = await prefilterStrategy({ ctx, task: { description: 'build a page' }, catalog: CATALOG });
-    expect(second).toMatchObject({ kind: 'reuse', target: 'Hydrogen' });
+    expect(second).toMatchObject({ kind: 'reuse', target: 'Water' });
     expect(ctx.llm.calls).toHaveLength(1); // no new call — served from disk
   });
 
   it('caches the low-confidence → escalate REWRITE, not the raw reuse', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'low', reasoning: 'meh' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'low', reasoning: 'meh' })
     );
     const first = await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });
     expect(first?.kind).toBe('escalate');
@@ -205,23 +205,23 @@ describe('prefilterStrategy — cache integration', () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText('not json at all');
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'fits now' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'fits now' })
     );
     const first = await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });
     expect(first?.kind).toBe('escalate'); // parse failure → escalate, uncached
     const second = await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });
-    expect(second).toMatchObject({ kind: 'reuse', target: 'Hydrogen' }); // retried live
+    expect(second).toMatchObject({ kind: 'reuse', target: 'Water' }); // retried live
     expect(ctx.llm.calls).toHaveLength(2);
   });
 
   it('a changed catalog misses naturally (key includes the catalog text)', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'fits' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'fits' })
     );
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'catalog changed' }));
     await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });
-    const evolved = [{ name: 'Hydrogen', description: 'web builder — now with smoke discipline' }];
+    const evolved = [{ name: 'Water', description: 'web builder — now with smoke discipline' }];
     const second = await prefilterStrategy({ ctx, task: { description: 't' }, catalog: evolved });
     expect(second?.kind).toBe('escalate');
     expect(ctx.llm.calls).toHaveLength(2);
@@ -230,17 +230,17 @@ describe('prefilterStrategy — cache integration', () => {
   it('respects the anti-loop exclusion in the key', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'fits' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'fits' })
     );
     await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });
-    // Same task, but Hydrogen was tried and failed: the filtered catalog is
+    // Same task, but Water was tried and failed: the filtered catalog is
     // empty → deterministic escalate BEFORE the cache/LLM — and critically,
-    // NOT the cached "reuse Hydrogen".
+    // NOT the cached "reuse Water".
     const second = await prefilterStrategy({
       ctx,
       task: { description: 't' },
       catalog: CATALOG,
-      exclude: new Set(['Hydrogen']),
+      exclude: new Set(['Water']),
     });
     expect(second?.kind).toBe('escalate');
     expect(ctx.llm.calls).toHaveLength(1);

@@ -150,7 +150,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
       description: 'web builder',
       systemPrompt: 'You are an L1.',
     });
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'the-recipe',
       description: 'd',
       whenToUse: 'w',
@@ -165,12 +165,12 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
   /** tier prefilter → skill prefilter → one clean L1 cycle up to validateResult. */
   function enqueueHappyPathUpToResult(ctx: ReturnType<typeof makeCtx>): void {
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'the-recipe', confidence: 'high', reasoning: 's' })
     );
-    // L1.plan + L2.validatePlan (Hydrogen is untrusted → full LLM verdict).
+    // L1.plan + L2.validatePlan (Water is untrusted → full LLM verdict).
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'plan ok' }));
     // L1.execute — validateResult response is scenario-specific.
@@ -178,12 +178,12 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
   }
 
   it('shows the recipe to the RESULT validator only (adherence block placement)', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     enqueueHappyPathUpToResult(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok', activeSkillFollowed: true }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
 
     // Call #4 is the PLAN verdict: adherence is a RESULT-phase judgment,
     // the block must not leak into plan validation.
@@ -196,24 +196,24 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
   });
 
   it('bumps the skill on activeSkillFollowed: true', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     enqueueHappyPathUpToResult(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok', activeSkillFollowed: true }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
-    expect(skills.loadFor('Hydrogen')[0]!.successes).toBe(1);
+    await neuron.handleDirect({ description: 'task' }, ctx);
+    expect(skills.loadFor('Water')[0]!.successes).toBe(1);
   });
 
   it('WITHHOLDS skill credit on activeSkillFollowed: false — atom type still credited', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     enqueueHappyPathUpToResult(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok', activeSkillFollowed: false }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Hydrogen')[0]!;
+    const skill = skills.loadFor('Water')[0]!;
     expect(skill.successes).toBe(0);
     expect(skill.failures).toBe(0);
     // The match itself IS recorded (markMatched fires at match time), so
@@ -221,11 +221,11 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     expect(skill.matches).toBe(1);
     // The CHILD did succeed, whatever it was following — type credit is
     // orthogonal to skill credit and must survive the withholding.
-    expect(reg.getByName('Hydrogen')!.successes).toBe(1);
+    expect(reg.getByName('Water')!.successes).toBe(1);
   });
 
   it('marks an ignored script skill as not followed even on the type trust fast-path', async () => {
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'the-recipe',
       description: 'd',
       whenToUse: 'w',
@@ -234,21 +234,21 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
       body: 'process.stdout.write(JSON.stringify({output:{},summary:"ok"}))',
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      reg.recordSuccess('Hydrogen');
+      reg.recordSuccess('Water');
     }
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    const hydrogen = L1Atom.fromType(reg.getByName('Hydrogen')!);
-    hydrogen.setActiveSkill('the-recipe', 'Hydrogen');
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const water = L1Atom.fromType(reg.getByName('Water')!);
+    water.setActiveSkill('the-recipe', 'Water');
     const ctx = makeCtx();
-    const verdict = await water.validateResult(
-      hydrogen,
+    const verdict = await neuron.validateResult(
+      water,
       {
         output: 'packaged without running the injected scratch script',
         summary: 'deliverable exists',
         activeScriptSkillExecuted: false,
         toolCallResults: [{ name: 'write_file', ok: true }],
         trace: [],
-        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+        producedBy: { tier: 1, name: 'Water', viaFallback: false },
       },
       { description: 'package the CLI' },
       ctx
@@ -259,20 +259,20 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
   });
 
   it('keeps the legacy bump when the validator omits the signal', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     enqueueHappyPathUpToResult(ctx);
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
-    expect(skills.loadFor('Hydrogen')[0]!.successes).toBe(1);
+    await neuron.handleDirect({ description: 'task' }, ctx);
+    expect(skills.loadFor('Water')[0]!.successes).toBe(1);
   });
 
   it('WITHHOLDS skill blame and SKIPS the revision when the failing run ignored the recipe', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'the-recipe', confidence: 'high', reasoning: 's' })
@@ -302,9 +302,9 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok now' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Hydrogen')[0]!;
+    const skill = skills.loadFor('Water')[0]!;
     // Blame withheld: the failure was not the recipe's.
     expect(skill.failures).toBe(0);
     // Revision skipped: no Sonnet improveSkillBody call was made, and the
@@ -312,14 +312,14 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     expect(ctx.llm.calls.some((c) => c.userContent.includes('IMPROVED body'))).toBe(false);
     expect(skill.body).toBe('STEP 1: do the thing.\nSTEP 2: verify it.');
     // The atom type still records its failure (the child DID fail).
-    expect(reg.getByName('Hydrogen')!.failures).toBe(1);
+    expect(reg.getByName('Water')!.failures).toBe(1);
   });
 
   it('still blames the skill when the signal is absent from the failing cycle', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'the-recipe', confidence: 'high', reasoning: 's' })
@@ -340,9 +340,9 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok now' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Hydrogen')[0]!;
+    const skill = skills.loadFor('Water')[0]!;
     expect(skill.failures).toBe(1);
     expect(ctx.llm.calls.some((c) => c.userContent.includes('IMPROVED body'))).toBe(true);
     expect(skill.body).toBe('STEP 1: do the REVISED thing.\nSTEP 2: verify it better.');

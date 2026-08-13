@@ -47,24 +47,24 @@ describe('L2 — recordSkill events', () => {
   });
 
   function trustChild(): void {
-    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Hydrogen');
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Water');
   }
 
   it('emits match + inject + success on a clean skill-driven run', async () => {
     trustChild();
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'when web',
       kind: 'llm',
       body: 'STEP 1.',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const seen: SkillEventInfo[] = [];
     const ctx = { ...makeCtx(), recordSkill: (info: SkillEventInfo) => seen.push(info) };
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fits' })
@@ -72,12 +72,12 @@ describe('L2 — recordSkill events', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
 
     const ops = seen.map((e) => e.op);
     expect(ops).toEqual(['match', 'inject', 'success']);
-    expect(seen.every((e) => e.l1Name === 'Hydrogen' && e.skillId === 'web-build-loop')).toBe(true);
-    expect(seen.every((e) => e.actorName === 'Water' && e.actorTier === 2)).toBe(true);
+    expect(seen.every((e) => e.l1Name === 'Water' && e.skillId === 'web-build-loop')).toBe(true);
+    expect(seen.every((e) => e.actorName === 'Tracheid' && e.actorTier === 2)).toBe(true);
     // Match carries the prefilter reasoning verbatim.
     expect(seen[0]!.reasoning).toMatch(/fits/);
     // Inject carries kind metadata for the viz badge.
@@ -86,42 +86,42 @@ describe('L2 — recordSkill events', () => {
 
   it('emits no skill events when the L1 has no skills', async () => {
     trustChild();
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const seen: SkillEventInfo[] = [];
     const ctx = { ...makeCtx(), recordSkill: (info: SkillEventInfo) => seen.push(info) };
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
     expect(seen).toHaveLength(0);
   });
 
   it('emits no skill events when the prefilter escalates (no match)', async () => {
     trustChild();
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'unrelated',
       description: 'd',
       whenToUse: 'never',
       kind: 'llm',
       body: 'unused',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const seen: SkillEventInfo[] = [];
     const ctx = { ...makeCtx(), recordSkill: (info: SkillEventInfo) => seen.push(info) };
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     // Skill prefilter says escalate.
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
-    await water.handleDirect({ description: 'task' }, ctx);
+    await neuron.handleDirect({ description: 'task' }, ctx);
     expect(seen).toHaveLength(0);
   });
 });

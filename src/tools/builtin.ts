@@ -11,6 +11,7 @@ import {
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
 } from '../contracts/probeManifest.js';
+import { elementForTool } from '../contracts/toolTaxonomy.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
 export interface BuiltinToolOptions {
@@ -26,6 +27,25 @@ export interface BuiltinToolOptions {
 export interface BuiltinTool {
   declaration: Tool;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** Attach the stable periodic-table identity without changing the wire name. */
+export function withElementTaxonomy(tool: BuiltinTool): BuiltinTool {
+  const element = elementForTool(tool.declaration.name);
+  if (!element) {
+    throw new Error(`No element taxonomy registered for built-in tool "${tool.declaration.name}"`);
+  }
+  return {
+    ...tool,
+    declaration: {
+      ...tool.declaration,
+      element: {
+        number: element.number,
+        name: element.name,
+        symbol: element.symbol,
+      },
+    },
+  };
 }
 
 export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
@@ -2582,5 +2602,5 @@ export function defaultBuiltinTools(opts: BuiltinToolOptions): BuiltinTool[] {
     validateHtmlTool(opts),
     fetchUrlTool(opts),
     startNodeServerTool(opts),
-  ];
+  ].map(withElementTaxonomy);
 }

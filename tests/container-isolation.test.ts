@@ -141,8 +141,8 @@ describeDocker('a containerised run cannot reach the stores', () => {
     workspace = join(dir, 'ws');
     writeFileSync(join(dir, 'atoma.db'), 'TENANT_REGISTRY_SECRET');
     writeFileSync(join(dir, 'atoma-ledger.jsonl'), 'TENANT_LEDGER_SECRET');
-    mkdirSync(join(dir, 'skills', 'Helium'), { recursive: true });
-    writeFileSync(join(dir, 'skills', 'Helium', 'SKILL.md'), 'TENANT_SKILL_SECRET');
+    mkdirSync(join(dir, 'skills', 'Methane'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'Methane', 'SKILL.md'), 'TENANT_SKILL_SECRET');
     mkdirSync(workspace, { recursive: true });
     exec = new ContainerToolExecutor({ workspaceHostPath: workspace, startTimeoutMs: 90_000 });
     await exec.start();

@@ -4,6 +4,10 @@
 
 ### Added
 
+- Built-in tools now carry stable periodic-table element identities while
+  retaining their existing invocation names.
+- `registry migrate-taxonomy` dry-runs or applies the backed-up, in-place
+  migration of registry identities, ledger provenance and skill namespaces.
 - A full-GPU visualizer is now the default client: PixiJS 8 renders the 2D
   design system through WebGPU/WebGL, R3F renders a lazy Three.js tier
   topology, Zustand owns scene state, and TanStack Query owns API state.
@@ -20,7 +24,7 @@
 - Event cards now run dual-backend shaders selected by function: reasoning
   waves for LLMs, packet grids for tools, shield rings for trust, plasma for
   skills, crystalline replay glints for cache and circuit traces for registry.
-- Run/Burn-in statistics use holographic telemetry bars, tier atoms use
+- Run/Burn-in statistics use holographic telemetry bars, tier agents use
   color-specific orbital particles and selection pulses, and the Burn-in
   scatter adds temporal gridlines, family colors, radar sweep, point hover
   highlighting and GPU tooltips.
@@ -37,6 +41,20 @@
 
 ### Changed
 
+- The public composition model is now Element (tool) → Molecule (L1) → Cell
+  (L2) → botanical Tissue (L3); numeric tiers and technical API names remain
+  backward-compatible, with new `Agent`, `AgentRegistry`, `MoleculeAgent`,
+  `CellAgent` and `TissueAgent` aliases.
+- The visualizer projects structured identities in pre-migration traces onto
+  the current taxonomy while preserving raw audit text, and labels GPU run
+  lanes as molecules, cells and tissues.
+- Event detail panes now render arbitrary JSON recursively as localized
+  sections and semantic fields. Verdict/status booleans use readable badges,
+  known keys receive human labels, and deep GPU details have independent
+  scrolling instead of a clipped raw JSON block.
+- Registry trace events now record the mutation initiator as `actor` and the
+  affected agent as `child`; legacy traces recover every mechanically provable
+  target without inventing an initiator for old unattributed counter bumps.
 - `npm run viz` and `viz:build` now select the full-GL client. The visible
   application UI is canvas-rendered; only text input, clipboard, IME and
   accessibility semantics remain in a minimal DOM bridge.
@@ -56,9 +74,9 @@
   controls or overscrolling into blank space. Event cards again expose
   actor/child/branch, tool arguments, result facts, model, cost, duration,
   counters and timestamp.
-- GPU filter and atom controls allocate width from their semibold text metrics;
-  semantic labels such as `VALIDATE-RESULT` remain complete, while atom lanes
-  wrap instead of truncating names or silently dropping later atoms.
+- GPU filter and agent controls allocate width from their semibold text metrics;
+  semantic labels such as `VALIDATE-RESULT` remain complete, while agent lanes
+  wrap instead of truncating names or silently dropping later agents.
 - GPU filter rows wrap instead of dropping overflowing options and center their
   labels geometrically. Selecting a role now switches to the LLM kind, so
   `PREFILTER` no longer leaves unrelated tool/skill/registry cards visible.

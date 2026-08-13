@@ -137,7 +137,7 @@ export function buildNarrowL1Prompt(
   diagnostic: string = ''
 ): string {
   const header: string[] = [
-    `You are an L1 element builder with ONE narrow responsibility.`,
+    `You are an L1 molecule builder with ONE narrow responsibility.`,
     `Your current subtask: ${subtaskDescription}`,
     ``,
     `Do NOT import assumptions from other domains — the parent type you`,
@@ -605,11 +605,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const peerCatalog = this.peers.map((p) => ({ name: p.name, ordinal: p.ordinal }));
 
     const userContent = [
-      `You are atom "${this.name}" (tier 2 / molecule).`,
+      `You are cell "${this.name}" (tier 2 / cell).`,
       ``,
-      `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
+      `HARD RULE: You NEVER execute tools yourself; those tools are elements. You do NOT write files, run`,
       `shells, start servers, or validate anything. Your role is to DECOMPOSE the`,
-      `task into orthogonal subtasks and route each to an L1 element (the only`,
+      `task into orthogonal subtasks and route each to an L1 molecule (the only`,
       `tier that can call tools).`,
       ``,
       `== DECOMPOSITION DISCIPLINE ==`,
@@ -618,7 +618,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `    "implement game state machine", "start server + run validation")`,
       `  - is ORTHOGONAL to every other subtask — no subtask reads or depends on`,
       `    another subtask's output. Subtasks run in PARALLEL.`,
-      `  - targets a specific L1 element via "preferredChild" (required for N>1,`,
+      `  - targets a specific L1 molecule via "preferredChild" (required for N>1,`,
       `    optional for N=1 where your strategy field still drives selection).`,
       `A single-responsibility task is still valid: emit a list with exactly ONE`,
       `subtask. Do NOT force decomposition when the task is genuinely atomic.`,
@@ -666,9 +666,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
       ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
-      `  - "reuse": pick an existing L1 element from the catalog that fits`,
-      `  - "create": design a new L1 element and register it (provide a seed)`,
-      `  - "mutualize": delegate to a peer L2 molecule when their specialty fits better`,
+      `  - "reuse": pick an existing L1 molecule from the catalog that fits`,
+      `  - "create": design a new L1 molecule and register it (provide a seed)`,
+      `  - "mutualize": delegate to a peer L2 cell when their specialty fits better`,
       `Prefer "reuse" over "create" whenever possible.`,
       ``,
       `CRITICAL — domain-match rule:`,
@@ -1274,7 +1274,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const basePrompt =
       seed.systemPrompt ??
       [
-        `You are an L1 element with ONE narrow responsibility.`,
+        `You are an L1 molecule with ONE narrow responsibility.`,
         `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
         `Call tools sequentially to produce your single output. Return a structured`,
         `{"output", "summary"} JSON at the end.`,
@@ -1613,7 +1613,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         return freshBranched;
       },
       onApproved: async (child, result, verdict) => {
-        this.registry.recordSuccess(child.name);
+        this.registry.recordSuccess(child.name, this.name);
         // Skill trust counter bump (C2a). When the supervise loop
         // approves a result and a skill drove the run, record a
         // success on the skill itself — this is what lets future
@@ -1721,7 +1721,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         }
       },
       onFailed: async (child, _reason, lastResultVerdict) => {
-        this.registry.recordFailure(child.name);
+        this.registry.recordFailure(child.name, this.name);
         // USAGE-CONDITIONED BLAME (mirror of onApproved's credit gate, and
         // the more damaging direction): a failure recorded against a skill
         // the child visibly ignored is unearned — and `failures > 0` blocks
@@ -1897,7 +1897,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ? this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n')
       : '(no tools available — reasoning-only answer)';
     const userContent = [
-      `You are atom "${this.name}" (tier 2) in FALLBACK mode: do the task yourself, no delegation.`,
+      `You are cell "${this.name}" (tier 2) in FALLBACK mode: do the task yourself, no delegation.`,
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',

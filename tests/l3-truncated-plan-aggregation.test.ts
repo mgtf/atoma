@@ -22,22 +22,22 @@ import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
 function seedRegistry(): AtomRegistry {
   const reg = new AtomRegistry(openDb(':memory:'));
-  reg.create(3, { description: 'cell', systemPrompt: 'l3', tools: [], params: {}, createdBy: 't' });
-  reg.create(2, { description: 'molecule', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+  reg.create(3, { description: 'tissue', systemPrompt: 'l3', tools: [], params: {}, createdBy: 't' });
+  reg.create(2, { description: 'cell', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
   return reg;
 }
 
 describe('L3.plan — aggregation truncation default', () => {
   it('degrades a MISSING aggregation to sequential, not to the shared concat default', async () => {
     const reg = seedRegistry();
-    const l3 = L3Atom.buildWithModel(reg.getByName('Neuron')!, reg, 'claude-opus-5');
+    const l3 = L3Atom.buildWithModel(reg.getByName('Meristem')!, reg, 'claude-opus-5');
     const ctx = makeCtx();
     // Tier prefilter (L3 always defers to the Opus plan, carrying the hint).
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
     // Opus plan pair with NO `aggregation` key — the truncated shape.
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Water', reasoning: 'r' },
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
         { reasoning: 'r', subtasks: [{ description: 'phase 1' }, { description: 'phase 2' }] }
       )
     );
@@ -47,12 +47,12 @@ describe('L3.plan — aggregation truncation default', () => {
 
   it('honours an EXPLICIT concat — the degradation must not override intent', async () => {
     const reg = seedRegistry();
-    const l3 = L3Atom.buildWithModel(reg.getByName('Neuron')!, reg, 'claude-opus-5');
+    const l3 = L3Atom.buildWithModel(reg.getByName('Meristem')!, reg, 'claude-opus-5');
     const ctx = makeCtx();
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Water', reasoning: 'r' },
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
         {
           reasoning: 'r',
           subtasks: [{ description: 'scrape A' }, { description: 'scrape B' }],
@@ -67,12 +67,12 @@ describe('L3.plan — aggregation truncation default', () => {
   it('L2 keeps the SHARED concat default — the change is L3-only', async () => {
     const reg = seedRegistry();
     reg.create(1, { description: 'leaf', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg, []);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, []);
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no clear match' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'r' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'r' },
         { reasoning: 'r', subtasks: [{ description: 'leaf work' }] }
       )
     );

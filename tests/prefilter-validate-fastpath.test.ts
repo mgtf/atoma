@@ -25,8 +25,8 @@ describe('prefilter validate fast-path (#6)', () => {
 
     const ctx = makeCtx();
     const plan = {
-      reasoning: 'prefilter selected Hydrogen',
-      subtasks: [{ description: 't', preferredChild: 'Hydrogen' }],
+      reasoning: 'prefilter selected Water',
+      subtasks: [{ description: 't', preferredChild: 'Water' }],
       aggregation: { mode: 'concat' as const },
       expectedOutput: 't',
       viaPrefilter: true,
@@ -52,7 +52,7 @@ describe('prefilter validate fast-path (#6)', () => {
 
     const plan = {
       reasoning: 'thought about it',
-      subtasks: [{ description: 't', preferredChild: 'Hydrogen' }],
+      subtasks: [{ description: 't', preferredChild: 'Water' }],
       aggregation: { mode: 'concat' as const },
       expectedOutput: 't',
     };
@@ -71,8 +71,8 @@ describe('prefilter validate fast-path (#6)', () => {
 
     const ctx = makeCtx();
     const plan = {
-      reasoning: 'prefilter selected Water',
-      subtasks: [{ description: 't', preferredChild: 'Water' }],
+      reasoning: 'prefilter selected Neuron',
+      subtasks: [{ description: 't', preferredChild: 'Neuron' }],
       aggregation: { mode: 'concat' as const },
       expectedOutput: 't',
       viaPrefilter: true,
@@ -105,7 +105,7 @@ describe('prefilter validate fast-path (#6)', () => {
     // The whole point: a freshly-bootstrapped canonical (0 successes)
     // that prefilter picked should NOT have its plan re-vetted by
     // Haiku. This is the exact scenario the Node/REST live run hit
-    // when Helium (canonical HTTP L1, 0 successes) was prefilter-
+    // when Methane (canonical HTTP L1, 0 successes) was prefilter-
     // picked and then rejected by a redundant Haiku validator pass.
     const reg = new AtomRegistry(openDb(':memory:'));
     const l2Type = reg.create(2, seed);
@@ -118,8 +118,8 @@ describe('prefilter validate fast-path (#6)', () => {
 
     const ctx = makeCtx();
     const plan = {
-      reasoning: 'prefilter selected Hydrogen',
-      subtasks: [{ description: 't', preferredChild: 'Hydrogen' }],
+      reasoning: 'prefilter selected Water',
+      subtasks: [{ description: 't', preferredChild: 'Water' }],
       aggregation: { mode: 'concat' as const },
       expectedOutput: 't',
       viaPrefilter: true,

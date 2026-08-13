@@ -17,7 +17,7 @@ import { makeCtx, jsonText } from './helpers.js';
  * cache hits happen).
  */
 
-const CATALOG = [{ name: 'Hydrogen', description: 'web builder' }];
+const CATALOG = [{ name: 'Water', description: 'web builder' }];
 
 describe('prefilter cache — observer event', () => {
   let dir: string;
@@ -40,7 +40,7 @@ describe('prefilter cache — observer event', () => {
     const hits: CacheHitInfo[] = [];
     const ctx = { ...makeCtx(), recordCacheHit: (i: CacheHitInfo) => hits.push(i) };
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'web shape' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'web shape' })
     );
 
     await prefilterStrategy({ ctx, task: { description: 'build a page' }, catalog: CATALOG });
@@ -49,7 +49,7 @@ describe('prefilter cache — observer event', () => {
     await prefilterStrategy({ ctx, task: { description: 'build a page' }, catalog: CATALOG });
     expect(ctx.llm.calls).toHaveLength(1); // served from disk
     expect(hits).toHaveLength(1);
-    expect(hits[0]!.outcome).toBe('reuse Hydrogen');
+    expect(hits[0]!.outcome).toBe('reuse Water');
     expect(hits[0]!.reasoning).toBe('web shape');
     expect(hits[0]!.model).toMatch(/haiku/);
   });
@@ -62,13 +62,13 @@ describe('prefilter cache — observer event', () => {
       ctx,
       task: { description: 't' },
       catalog: CATALOG,
-      actor: { name: 'Water', tier: 2 as const },
+      actor: { name: 'Neuron', tier: 2 as const },
     };
     await prefilterStrategy(args);
     await prefilterStrategy(args);
     expect(hits).toHaveLength(1);
     expect(hits[0]!.outcome).toBe('escalate');
-    expect(hits[0]!.actorName).toBe('Water');
+    expect(hits[0]!.actorName).toBe('Neuron');
     expect(hits[0]!.actorTier).toBe(2);
   });
 
@@ -82,7 +82,7 @@ describe('prefilter cache — observer event', () => {
     expect(branched.recordCacheHit).toBeDefined();
 
     root.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'r' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'r' })
     );
     await prefilterStrategy({ ctx: branched, task: { description: 'x' }, catalog: CATALOG });
     await prefilterStrategy({ ctx: branched, task: { description: 'x' }, catalog: CATALOG });
@@ -97,7 +97,7 @@ describe('prefilter cache — observer event', () => {
     const ctx = { ...makeCtx(), recordCacheHit: (i: CacheHitInfo) => hits.push(i) };
     for (let i = 0; i < 2; i++) {
       ctx.llm.enqueueText(
-        jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'r' })
+        jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'r' })
       );
     }
     await prefilterStrategy({ ctx, task: { description: 't' }, catalog: CATALOG });

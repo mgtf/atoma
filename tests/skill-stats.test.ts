@@ -45,31 +45,31 @@ describe('SkillRegistry.markMatched — match history', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-matches-'));
     reg = new SkillRegistry(dir);
-    reg.save('Hydrogen', { id: 'r', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    reg.save('Water', { id: 'r', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('increments matches and stamps lastMatchedAt', () => {
-    reg.markMatched('Hydrogen', 'r');
-    reg.markMatched('Hydrogen', 'r');
-    const s = reg.loadFor('Hydrogen')[0]!;
+    reg.markMatched('Water', 'r');
+    reg.markMatched('Water', 'r');
+    const s = reg.loadFor('Water')[0]!;
     expect(s.matches).toBe(2);
     expect(s.lastMatchedAt).toBeTruthy();
   });
 
   it('no-ops on a missing skill', () => {
-    reg.markMatched('Hydrogen', 'ghost');
-    expect(reg.loadFor('Hydrogen')[0]!.matches).toBeUndefined();
+    reg.markMatched('Water', 'ghost');
+    expect(reg.loadFor('Water')[0]!.matches).toBeUndefined();
   });
 
   it('survives counter bumps and body saves; zeroed by resetCounters', () => {
-    reg.markMatched('Hydrogen', 'r');
-    reg.recordSuccess('Hydrogen', 'r');
-    expect(reg.loadFor('Hydrogen')[0]!.matches).toBe(1);
-    reg.save('Hydrogen', { id: 'r', description: 'd2', whenToUse: 'w2', kind: 'llm', body: 'b2' });
-    expect(reg.loadFor('Hydrogen')[0]!.matches).toBe(1);
-    reg.resetCounters('Hydrogen', 'r');
-    expect(reg.loadFor('Hydrogen')[0]!.matches).toBeUndefined();
+    reg.markMatched('Water', 'r');
+    reg.recordSuccess('Water', 'r');
+    expect(reg.loadFor('Water')[0]!.matches).toBe(1);
+    reg.save('Water', { id: 'r', description: 'd2', whenToUse: 'w2', kind: 'llm', body: 'b2' });
+    expect(reg.loadFor('Water')[0]!.matches).toBe(1);
+    reg.resetCounters('Water', 'r');
+    expect(reg.loadFor('Water')[0]!.matches).toBeUndefined();
   });
 });
 
@@ -77,11 +77,11 @@ describe('SkillRegistry.drop', () => {
   it('deletes the skill folder and reports success', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-drop-'));
     const reg = new SkillRegistry(dir);
-    reg.save('Hydrogen', { id: 'debris', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    expect(reg.drop('Hydrogen', 'debris')).toBe(true);
-    expect(reg.loadFor('Hydrogen')).toEqual([]);
-    expect(existsSync(join(dir, 'Hydrogen', 'debris'))).toBe(false);
-    expect(reg.drop('Hydrogen', 'debris')).toBe(false);
+    reg.save('Water', { id: 'debris', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    expect(reg.drop('Water', 'debris')).toBe(true);
+    expect(reg.loadFor('Water')).toEqual([]);
+    expect(existsSync(join(dir, 'Water', 'debris'))).toBe(false);
+    expect(reg.drop('Water', 'debris')).toBe(false);
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -93,14 +93,14 @@ describe('SkillRegistry.merge — routing-surface absorption', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'atoma-merge-'));
     reg = new SkillRegistry(dir);
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'keeper',
       description: 'build a node CLI with README',
       whenToUse: 'when the task is a node CLI tool',
       kind: 'llm',
       body: 'KEEPER BODY',
     });
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'dupe',
       description: 'scaffold a node command-line tool',
       whenToUse: 'when the user wants a command-line utility',
@@ -111,11 +111,11 @@ describe('SkillRegistry.merge — routing-surface absorption', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   it('keeper absorbs when_to_use, keeps body and counters; absorbed skill deleted', () => {
-    reg.recordSuccess('Hydrogen', 'keeper');
-    reg.recordSuccess('Hydrogen', 'keeper');
-    reg.recordSuccess('Hydrogen', 'dupe');
+    reg.recordSuccess('Water', 'keeper');
+    reg.recordSuccess('Water', 'keeper');
+    reg.recordSuccess('Water', 'dupe');
 
-    const merged = reg.merge('Hydrogen', 'keeper', 'dupe')!;
+    const merged = reg.merge('Water', 'keeper', 'dupe')!;
     expect(merged.body).toBe('KEEPER BODY');
     expect(merged.whenToUse).toBe(
       'when the task is a node CLI tool; also: when the user wants a command-line utility'
@@ -123,21 +123,21 @@ describe('SkillRegistry.merge — routing-surface absorption', () => {
     // Keeper's counters preserved (its body did not change), absorbed
     // counters die with the absorbed body — never summed.
     expect(merged.successes).toBe(2);
-    expect(reg.loadFor('Hydrogen').map((s) => s.id)).toEqual(['keeper']);
+    expect(reg.loadFor('Water').map((s) => s.id)).toEqual(['keeper']);
   });
 
   it('preserves the keeper promotion-refusal stamp (body unchanged — no save() route)', () => {
-    reg.markPromotionRefused('Hydrogen', 'keeper', 'irreducible', 'gen-x');
-    reg.merge('Hydrogen', 'keeper', 'dupe');
-    const s = reg.loadFor('Hydrogen')[0]!;
+    reg.markPromotionRefused('Water', 'keeper', 'irreducible', 'gen-x');
+    reg.merge('Water', 'keeper', 'dupe');
+    const s = reg.loadFor('Water')[0]!;
     expect(s.promotionRefusedAt).toBeTruthy();
     expect(s.promotionRefusedGeneration).toBe('gen-x');
   });
 
   it('returns null on identical ids or a missing side', () => {
-    expect(reg.merge('Hydrogen', 'keeper', 'keeper')).toBeNull();
-    expect(reg.merge('Hydrogen', 'keeper', 'ghost')).toBeNull();
-    expect(reg.merge('Hydrogen', 'ghost', 'dupe')).toBeNull();
+    expect(reg.merge('Water', 'keeper', 'keeper')).toBeNull();
+    expect(reg.merge('Water', 'keeper', 'ghost')).toBeNull();
+    expect(reg.merge('Water', 'ghost', 'dupe')).toBeNull();
   });
 });
 
@@ -185,7 +185,7 @@ describe('computeStatsRows — free-ride gap', () => {
   it('computes matches minus driven runs, floored at zero', () => {
     const byL1 = new Map([
       [
-        'Hydrogen',
+        'Water',
         [
           fakeSkill({ id: 'rider', matches: 5, successes: 1, failures: 0 }),
           fakeSkill({ id: 'legacy', successes: 2 }), // pre-matches era: no matches recorded
@@ -223,14 +223,14 @@ describe('similarityPairs — merge candidates', () => {
       description: 'validate an html page with a headless browser smoke expression',
       whenToUse: 'when the deliverable renders in a browser',
     });
-    const byL1 = new Map([['Hydrogen', [nearDupA, nearDupB, unrelated]]]);
+    const byL1 = new Map([['Water', [nearDupA, nearDupB, unrelated]]]);
     const pairs = similarityPairs(byL1, 0.5);
     expect(pairs).toHaveLength(1);
     expect([pairs[0]!.a, pairs[0]!.b].sort()).toEqual(['a', 'b']);
     // Same skills on DIFFERENT L1s never pair — namespaces don't compete.
     const split = new Map([
-      ['Hydrogen', [nearDupA]],
-      ['Lithium', [nearDupB]],
+      ['Water', [nearDupA]],
+      ['Ammonia', [nearDupB]],
     ]);
     expect(similarityPairs(split, 0.5)).toHaveLength(0);
   });
@@ -289,7 +289,7 @@ describe('under-matched — a compilable recipe the prefilter rarely picks', () 
 
   it('surfaces the flag in the rendered status row, and only on the victim', () => {
     const victim = fakeSkill({ id: 'v', matches: 2, successes: 2 });
-    const rows = computeStatsRows(new Map([['Lithium', [victim, busy]]]), OPTS);
+    const rows = computeStatsRows(new Map([['Ammonia', [victim, busy]]]), OPTS);
     expect(rows.find((r) => r.id === 'v')!.status).toContain('under-matched');
     expect(rows.find((r) => r.id === 'build-sibling')!.status).not.toContain('under-matched');
   });

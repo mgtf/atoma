@@ -40,7 +40,7 @@ describe('TraceRecorder — degraded flag', () => {
       result: {
         summary: 'fallback summary',
         output: 'o',
-        producedBy: { tier: 3, name: 'Neuron', viaFallback: true },
+        producedBy: { tier: 3, name: 'Meristem', viaFallback: true },
       },
     });
     expect(persisted?.degraded).toBe(true);
@@ -57,7 +57,7 @@ describe('TraceRecorder — degraded flag', () => {
       result: {
         summary: 's',
         output: 'o',
-        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+        producedBy: { tier: 1, name: 'Water', viaFallback: false },
       },
     });
     expect(persisted?.degraded).toBeUndefined();
@@ -84,7 +84,7 @@ describe('TraceRecorder — degraded flag', () => {
       result: {
         summary: 's',
         output: 'o',
-        producedBy: { tier: 3, name: 'Neuron', viaFallback: true },
+        producedBy: { tier: 3, name: 'Meristem', viaFallback: true },
       },
     });
     const entry = readIndex(dir)[0]!;

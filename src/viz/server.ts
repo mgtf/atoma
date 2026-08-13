@@ -7,6 +7,8 @@ import { SkillRegistry } from '../skills/registry.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
+import { taxonomyForTier, type AgentRank } from '../core/taxonomy.js';
+import { elementForTool } from '../contracts/toolTaxonomy.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -14,7 +16,7 @@ import { assessShareability, type ShareAssessment } from '../skills/shareability
  * `dist/viz/client`. The server remains framework-free and read-only:
  * `node:http` serves APIs plus hashed assets, while Vite is build/dev only.
  *
- * Also exposes a read-only view of any atom registry (SQLite DB) so the UI
+ * Also exposes a read-only view of any agent registry (SQLite DB) so the UI
  * can render a "Registry" screen independent of any particular run.
  *
  * Usage:  npm run viz -- --dir ./runs --port 4111 [--db ./atoma.db ...]
@@ -270,11 +272,18 @@ interface RegistryHistoryEntry {
 
 interface RegistryType {
   tier: 1 | 2 | 3;
+  rank: AgentRank;
   ordinal: number;
   name: string;
   description: string;
   systemPrompt: string;
   tools: string[];
+  elements: Array<{
+    tool: string;
+    number: number;
+    name: string;
+    symbol: string;
+  }>;
   params: Record<string, unknown>;
   createdBy: string;
   createdAt: string;
@@ -304,6 +313,15 @@ function safeParseJson<T>(s: string, fallback: T): T {
 function toolNames(toolsJson: string): string[] {
   const parsed = safeParseJson<Array<{ name?: string }>>(toolsJson, []);
   return parsed.map((t) => (typeof t?.name === 'string' ? t.name : '?'));
+}
+
+function toolElements(toolsJson: string): RegistryType['elements'] {
+  return toolNames(toolsJson).flatMap((tool) => {
+    const element = elementForTool(tool);
+    return element
+      ? [{ tool, number: element.number, name: element.name, symbol: element.symbol }]
+      : [];
+  });
 }
 
 function openReadOnly(path: string): Database.Database {
@@ -404,11 +422,13 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
 
     const types: RegistryType[] = rows.map((r) => ({
       tier: r.tier as 1 | 2 | 3,
+      rank: taxonomyForTier(r.tier as 1 | 2 | 3).rank,
       ordinal: r.ordinal,
       name: r.name,
       description: r.description,
       systemPrompt: r.system_prompt,
       tools: toolNames(r.tools_json),
+      elements: toolElements(r.tools_json),
       params: safeParseJson<Record<string, unknown>>(r.params_json, {}),
       createdBy: r.created_by,
       createdAt: r.created_at,

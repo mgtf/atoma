@@ -43,6 +43,8 @@ import { computeFrictionRows, extractFrictionEvents } from '../viz/friction.js';
 import type { FrictionEvent } from '../viz/friction.js';
 import type { VizRun } from '../viz/trace.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
+import { taxonomyForTier } from '../core/taxonomy.js';
+import { elementForTool } from '../contracts/toolTaxonomy.js';
 
 /** Default number of newest traces a scan considers, mirroring `npm run friction`. */
 const DEFAULT_TRACE_WINDOW = 20;
@@ -134,7 +136,7 @@ export function families(): {
 
 export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
   const dbPath = storeDbPath();
-  if (!existsSync(dbPath)) return { store: dbPath, note: 'no atom store yet', types: [] };
+  if (!existsSync(dbPath)) return { store: dbPath, note: 'no agent store yet', types: [] };
   const db = readonlyDb(dbPath);
   try {
     const reg = new AtomRegistry(db);
@@ -142,6 +144,7 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
     const types = tiers.flatMap((t) =>
       reg.listByTier(t).map((a) => ({
         tier: a.tier,
+        rank: taxonomyForTier(a.tier).rank,
         name: a.name,
         version: a.version,
         successes: a.successes,
@@ -149,6 +152,12 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
         createdBy: a.createdBy,
         createdAt: a.createdAt,
         tools: a.tools.map((tool) => tool.name),
+        elements: a.tools.flatMap((tool) => {
+          const element = tool.element ?? elementForTool(tool.name);
+          return element
+            ? [{ tool: tool.name, number: element.number, name: element.name, symbol: element.symbol }]
+            : [];
+        }),
         description: a.description,
       }))
     );
@@ -160,16 +169,17 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
 
 export function registryShow(opts: { name: string }): unknown {
   const dbPath = storeDbPath();
-  if (!existsSync(dbPath)) return { store: dbPath, note: 'no atom store yet' };
+  if (!existsSync(dbPath)) return { store: dbPath, note: 'no agent store yet' };
   const db = readonlyDb(dbPath);
   try {
     const reg = new AtomRegistry(db);
     const atom = reg.getByName(opts.name);
-    if (!atom) return { store: dbPath, note: `no atom type named "${opts.name}"` };
+    if (!atom) return { store: dbPath, note: `no agent type named "${opts.name}"` };
     return {
       store: dbPath,
       atom: {
         tier: atom.tier,
+        rank: taxonomyForTier(atom.tier).rank,
         name: atom.name,
         version: atom.version,
         successes: atom.successes,
@@ -178,6 +188,12 @@ export function registryShow(opts: { name: string }): unknown {
         createdAt: atom.createdAt,
         description: atom.description,
         tools: atom.tools.map((t) => t.name),
+        elements: atom.tools.flatMap((tool) => {
+          const element = tool.element ?? elementForTool(tool.name);
+          return element
+            ? [{ tool: tool.name, number: element.number, name: element.name, symbol: element.symbol }]
+            : [];
+        }),
         params: atom.params,
         systemPrompt: truncate(atom.systemPrompt),
       },

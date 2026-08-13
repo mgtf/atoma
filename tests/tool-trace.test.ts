@@ -74,7 +74,7 @@ describe('RecordingLlmClient — in-flight llm-start markers', () => {
       await rec.complete({
         model: 'stub',
         systemPrompt: 'sys',
-        userContent: 'You are atom "Fluorine" (tier 1). Your plan has been APPROVED. Execute it now.',
+        userContent: 'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
       });
       const events = recorder.currentRun!.events;
       const start = events.find((e) => e.kind === 'llm-start');
@@ -85,7 +85,7 @@ describe('RecordingLlmClient — in-flight llm-start markers', () => {
       expect(start!.llmEventId).toBe(done!.id);
       // Classification is available at start time — same role/actor.
       expect(start!.role).toBe('execute');
-      expect(start!.actor).toEqual({ name: 'Fluorine', tier: 1 });
+      expect(start!.actor).toEqual({ name: 'Water', tier: 1 });
       // Start precedes completion in the event stream.
       expect(events.indexOf(start!)).toBeLessThan(events.indexOf(done!));
     } finally {
@@ -128,7 +128,7 @@ describe('RecordingLlmClient — tool-call tracing', () => {
         model: 'stub',
         systemPrompt: 'sys',
         userContent:
-          'You are atom "Fluorine" (tier 1). Your plan has been APPROVED. Execute it now.',
+          'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
       });
       const events = recorder.currentRun!.events;
       const toolEvents = events.filter(
@@ -167,12 +167,12 @@ describe('RecordingLlmClient — tool-call tracing', () => {
         model: 'stub',
         systemPrompt: 'sys',
         userContent:
-          'You are atom "Fluorine" (tier 1). Your plan has been APPROVED. Execute it now.',
+          'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
       });
       const toolEv = recorder.currentRun!.events.find(
         (e): e is VizToolEvent => e.kind === 'tool'
       );
-      expect(toolEv!.actor).toEqual({ name: 'Fluorine', tier: 1 });
+      expect(toolEv!.actor).toEqual({ name: 'Water', tier: 1 });
     } finally {
       recorder.endRun();
       rmSync(dir, { recursive: true, force: true });
@@ -187,7 +187,7 @@ describe('RecordingLlmClient — tool-call tracing', () => {
       await rec.complete({
         model: 'stub',
         systemPrompt: 'sys',
-        userContent: 'You are atom "X" (tier 1). Your plan has been APPROVED.',
+        userContent: 'You are molecule "X" (tier 1). Your plan has been APPROVED.',
         onToolInvocation: (info) => seen.push(info),
       });
       // Both the user's callback AND the recorder's internal one must fire.

@@ -44,8 +44,8 @@ async function main(): Promise<void> {
   const llm = new RecordingLlmClient(mock, recorder);
 
   const l3Type = registry.create(3, {
-    description: 'Demo cell orchestrating a scripted run.',
-    systemPrompt: 'You are Neuron, a demo L3 cell.',
+    description: 'Demo tissue orchestrating a scripted run.',
+    systemPrompt: 'You are Meristem, a demo L3 tissue.',
     tools: [],
     params: { temperature: 0.2, maxTokens: 2048 },
     createdBy: 'viz-demo',
@@ -68,17 +68,17 @@ async function main(): Promise<void> {
       {
         strategy: 'create',
         seed: {
-          description: 'A demo L2 molecule that decomposes tiny research tasks.',
-          systemPrompt: 'You are a demo L2 molecule.',
+          description: 'A demo L2 cell that decomposes tiny research tasks.',
+          systemPrompt: 'You are a demo L2 cell.',
           tools: [],
           params: { temperature: 0.2, maxTokens: 1024 },
         },
         reasoning: 'no L2 exists yet — must create one for this task',
       },
       {
-        reasoning: 'delegate to a new L2 molecule',
-        proposedAction: 'create an L2 molecule and hand off the brief',
-        expectedOutput: 'a 3-bullet brief from the new molecule',
+        reasoning: 'delegate to a new L2 cell',
+        proposedAction: 'create an L2 cell and hand off the brief',
+        expectedOutput: 'a 3-bullet brief from the new cell',
       },
     ])
   );
@@ -87,16 +87,16 @@ async function main(): Promise<void> {
       {
         strategy: 'create',
         seed: {
-          description: 'A demo L1 element that writes a short brief from its prompt.',
-          systemPrompt: 'You are a demo L1 element.',
+          description: 'A demo L1 molecule that writes a short brief from its prompt.',
+          systemPrompt: 'You are a demo L1 molecule.',
           tools: [],
           params: { temperature: 0.3, maxTokens: 512 },
         },
         reasoning: 'no L1 exists — create a leaf element',
       },
       {
-        reasoning: 'delegate to a new L1 element',
-        proposedAction: 'create an L1 element and ask it to produce the brief',
+        reasoning: 'delegate to a new L1 molecule',
+        proposedAction: 'create an L1 molecule and ask it to produce the brief',
         expectedOutput: 'a short structured brief',
       },
     ])

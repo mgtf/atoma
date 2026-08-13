@@ -17,7 +17,7 @@ class FakeL2 extends Atom implements Supervisor<L1Atom> {
   public selfExecs = 0;
 
   constructor() {
-    super({ name: 'Water', ordinal: 1, systemPrompt: 'p', tools: [], params: {} });
+    super({ name: 'Neuron', ordinal: 1, systemPrompt: 'p', tools: [], params: {} });
   }
   queuePlan(v: Verdict) { this.pv.push(v); }
   queueResult(v: Verdict) { this.rv.push(v); }
@@ -86,7 +86,7 @@ describe('mutation scopes via L2 hooks + registry', () => {
     await superviseLoop(l2, L1Atom.fromType(h), { description: 'x' }, ctx, l2Hooks(reg, l2));
 
     // registry still has version 1, no patched/branched rows
-    const fromDb = reg.getByName('Hydrogen');
+    const fromDb = reg.getByName('Water');
     expect(fromDb?.version).toBe(1);
     expect(reg.listByTier(1).length).toBe(1);
   });
@@ -112,12 +112,12 @@ describe('mutation scopes via L2 hooks + registry', () => {
 
     await superviseLoop(l2, L1Atom.fromType(h), { description: 'x' }, ctx, l2Hooks(reg, l2));
 
-    const fromDb = reg.getByName('Hydrogen');
+    const fromDb = reg.getByName('Water');
     expect(fromDb?.version).toBe(2);
     expect(fromDb?.systemPrompt).toBe('improved canonical prompt');
   });
 
-  it('branch: creates a new L1 type with a new element name', async () => {
+  it('branch: creates a new L1 type with a new molecule name', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const h = reg.create(1, {
       description: 'test', systemPrompt: 'base', tools: [], params: {}, createdBy: 'test',
@@ -138,8 +138,8 @@ describe('mutation scopes via L2 hooks + registry', () => {
     await superviseLoop(l2, L1Atom.fromType(h), { description: 'x' }, ctx, l2Hooks(reg, l2));
 
     const tier1 = reg.listByTier(1);
-    expect(tier1.map((t) => t.name)).toEqual(['Hydrogen', 'Helium']);
-    const he = reg.getByName('Helium');
-    expect(he?.systemPrompt).toContain('new direction');
+    expect(tier1.map((t) => t.name)).toEqual(['Water', 'Methane']);
+    const methane = reg.getByName('Methane');
+    expect(methane?.systemPrompt).toContain('new direction');
   });
 });

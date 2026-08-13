@@ -15,7 +15,8 @@ import type { PrefilterOutcome } from './cost.js';
  * inputs (task description + constraints + excluded names + catalog
  * lines). Any registry evolution that changes a description, adds an
  * entry, or bumps counters INTO the catalog text changes the key and
- * misses naturally. The trace-attribution preamble (`You are atom …`)
+ * misses naturally. The tier-aware trace-attribution preamble
+ * (`You are molecule|cell|tissue …`)
  * is deliberately NOT in the key — two supervisors consulting the same
  * catalog about the same task deserve the same answer.
  *

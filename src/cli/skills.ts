@@ -68,7 +68,7 @@ function renderTable(headers: string[], rows: string[][]): string {
   return lines.join('\n');
 }
 
-const tableHeaders = ['l1', 'id', 'kind', 'lang', 'succ', 'fail', 'refused', 'updated_at', 'description'];
+const tableHeaders = ['molecule', 'id', 'kind', 'lang', 'succ', 'fail', 'refused', 'updated_at', 'description'];
 
 function formatSkill(l1: string, s: Skill): string[] {
   return [
@@ -93,7 +93,7 @@ function cmdList(registry: SkillRegistry, l1Filter: string | undefined): void {
   if (rows.length === 0) {
     console.log(
       l1Filter
-        ? `(no skills for L1 "${l1Filter}" under ${registry.rootDir})`
+        ? `(no skills for molecule "${l1Filter}" under ${registry.rootDir})`
         : `(no skills under ${registry.rootDir})`
     );
     return;
@@ -108,7 +108,7 @@ function findSkill(registry: SkillRegistry, l1: string, id: string): Skill | nul
 function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
   const s = findSkill(registry, l1, id);
   if (!s) {
-    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    console.error(`no skill "${id}" for molecule "${l1}" under ${registry.rootDir}`);
     process.exit(1);
   }
   console.log(`${l1} / ${s.id}  (kind: ${s.kind}${s.language ? `, language: ${s.language}` : ''})`);
@@ -187,14 +187,14 @@ function cmdStats(registry: SkillRegistry, l1Filter: string | undefined, simFlag
   if (rows.length === 0) {
     console.log(
       l1Filter
-        ? `(no skills for L1 "${l1Filter}" under ${registry.rootDir})`
+        ? `(no skills for molecule "${l1Filter}" under ${registry.rootDir})`
         : `(no skills under ${registry.rootDir})`
     );
     return;
   }
   console.log(
     renderTable(
-      ['l1', 'id', 'kind', 'match', 'succ', 'fail', 'rides', 'status'],
+      ['molecule', 'id', 'kind', 'match', 'succ', 'fail', 'rides', 'status'],
       rows.map((r) => [
         r.l1,
         r.id,
@@ -230,7 +230,7 @@ function cmdStats(registry: SkillRegistry, l1Filter: string | undefined, simFlag
 function cmdDrop(registry: SkillRegistry, l1: string, id: string, force: boolean): void {
   const s = findSkill(registry, l1, id);
   if (!s) {
-    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    console.error(`no skill "${id}" for molecule "${l1}" under ${registry.rootDir}`);
     process.exit(1);
   }
   if (s.successes > 0 && !force) {
@@ -249,7 +249,7 @@ function cmdMerge(registry: SkillRegistry, l1: string, keepId: string, absorbId:
   const absorb = findSkill(registry, l1, absorbId);
   if (!keep || !absorb) {
     console.error(
-      `merge needs two existing skills; missing: ${[!keep && keepId, !absorb && absorbId].filter(Boolean).join(', ')} (L1 "${l1}", ${registry.rootDir})`
+      `merge needs two existing skills; missing: ${[!keep && keepId, !absorb && absorbId].filter(Boolean).join(', ')} (molecule "${l1}", ${registry.rootDir})`
     );
     process.exit(1);
   }
@@ -274,7 +274,7 @@ function cmdMerge(registry: SkillRegistry, l1: string, keepId: string, absorbId:
 function cmdExport(registry: SkillRegistry, l1: string, id: string, outDir: string): void {
   const s = findSkill(registry, l1, id);
   if (!s) {
-    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    console.error(`no skill "${id}" for molecule "${l1}" under ${registry.rootDir}`);
     process.exit(1);
   }
   const result = exportSkillToSpec(s);
@@ -297,7 +297,7 @@ function cmdExport(registry: SkillRegistry, l1: string, id: string, outDir: stri
 function cmdReset(registry: SkillRegistry, l1: string, id: string): void {
   const before = findSkill(registry, l1, id);
   if (!before) {
-    console.error(`no skill "${id}" for L1 "${l1}" under ${registry.rootDir}`);
+    console.error(`no skill "${id}" for molecule "${l1}" under ${registry.rootDir}`);
     process.exit(1);
   }
   registry.resetCounters(l1, id);
@@ -317,9 +317,9 @@ function help(unknown?: string): void {
     [
       'atoma skills CLI',
       '',
-      '  list [--l1 <name>]        — list skills (all namespaces, or one L1)',
+      '  list [--molecule <name>]  — list skills (all namespaces, or one molecule)',
       '  show <l1> <skill-id>      — full body + counters + promotion state',
-      '  stats [--l1 <name>] [--sim <0..1>]',
+      '  stats [--molecule <name>] [--sim <0..1>]',
       '                            — utility view: matches vs driven runs,',
       '                              free-ride gap, lifecycle status, and',
       '                              merge candidates by matching-surface',
@@ -347,6 +347,7 @@ function help(unknown?: string): void {
       '',
       'Common flags:',
       '  --dir <path>   override ATOMA_SKILLS_DIR (default: ./skills)',
+      '  --l1 <name>    compatibility alias for --molecule',
     ].join('\n')
   );
 }
@@ -420,14 +421,15 @@ function main(): void {
     return;
   }
   const registry = new SkillRegistry(dirFrom(args.flags));
+  const moleculeFilter = args.flags['molecule'] ?? args.flags['l1'];
 
   switch (args.command) {
     case 'list':
-      return cmdList(registry, args.flags['l1']);
+      return cmdList(registry, moleculeFilter);
     case 'stats':
-      return cmdStats(registry, args.flags['l1'], args.flags['sim']);
+      return cmdStats(registry, moleculeFilter, args.flags['sim']);
     case 'review':
-      return cmdReview(registry, args.flags['l1'], args.flags['db']);
+      return cmdReview(registry, moleculeFilter, args.flags['db']);
     case 'show': {
       const [l1, id] = args.positional;
       if (!l1 || !id) {

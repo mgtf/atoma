@@ -25,9 +25,9 @@ type Classification = Pick<VizLlmEvent, 'role' | 'actor' | 'child' | 'subject'>;
 /**
  * Infer caller/role from request shape. Relies on stable markers in the
  * current prompt constants (VALIDATION_SYSTEM_PROMPT, PREFILTER_SYSTEM_PROMPT,
- * SKILL_PREFILTER_SYSTEM_PROMPT, and the `You are atom "X" (tier N)` preamble
- * used by every plan/execute userContent). Keep in sync if those prompts are
- * reworded.
+ * SKILL_PREFILTER_SYSTEM_PROMPT, and the tier-aware
+ * `You are molecule|cell|tissue "X" (tier N)` preamble used by every
+ * plan/execute userContent). Legacy `atom` traces remain accepted.
  */
 function classify(req: LlmCompletionRequest): Classification {
   if (req.systemPrompt.startsWith(VALIDATION_MARKER)) {
@@ -56,7 +56,7 @@ function classify(req: LlmCompletionRequest): Classification {
   }
 
   const actorMatch = req.userContent.match(
-    /You are (?:atom\s+)?"?([^"\n]+?)"?\s*\(tier\s*(\d)/
+    /You are (?:(?:atom|molecule|cell|tissue)\s+)?"?([^"\n]+?)"?\s*\(tier\s*(\d)/
   );
   const actor: VizLlmEvent['actor'] | undefined =
     actorMatch && actorMatch[1] && actorMatch[2]

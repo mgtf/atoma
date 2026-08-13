@@ -8,6 +8,7 @@ import type {
   SkillSummary,
   VizRun,
 } from './types.js';
+import { projectRunTaxonomy } from './run-utils.js';
 
 export async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(path);
@@ -17,10 +18,10 @@ export async function fetchJson<T>(path: string): Promise<T> {
 
 export const api = {
   runs: () => fetchJson<RunIndexEntry[]>('/api/runs'),
-  run: (id: string, after?: number) =>
-    fetchJson<VizRun>(
+  run: async (id: string, after?: number) =>
+    projectRunTaxonomy(await fetchJson<VizRun>(
       `/api/runs/${encodeURIComponent(id)}${after === undefined ? '' : `?after=${after}`}`
-    ),
+    )),
   registries: () => fetchJson<RegistrySummary[]>('/api/registries'),
   registry: (id: string) =>
     fetchJson<{ registry: RegistrySummary; types: RegistryType[] }>(

@@ -82,6 +82,10 @@ export interface VizRegistryEvent {
   op: 'create' | 'patch' | 'branch' | 'recordSuccess' | 'recordFailure';
   tier?: Tier;
   name: string;
+  /** Initiator of the mutation/counter decision, when known. */
+  actor?: VizAtomRef;
+  /** Agent type created, patched, branched or credited/blamed. */
+  child?: VizAtomRef;
   by?: string;
   from?: string;
   version?: number;

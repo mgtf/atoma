@@ -6,11 +6,11 @@ import { buildNarrowL2Prompt } from '../src/atoms/L3Atom.js';
 /**
  * Regression tests for fix #1 (diagnostic injection into branched
  * atoms). Observed in the backgammon timeout run:
- *   - Hydrogen looped 16 validate_html calls and declared success
+ *   - Water looped 16 validate_html calls and declared success
  *   - Supervisor's ground-truth probe rejected with a 404
- *   - branchOnEscalation created Beryllium with a generic "prior
+ *   - branchOnEscalation created CarbonDioxide with a generic "prior
  *     attempts failed" note — NO mention of the 404
- *   - Beryllium re-ran 23 identical validate_html cycles, timed out
+ *   - CarbonDioxide re-ran 23 identical validate_html cycles, timed out
  *
  * The fix pulls the last 1-2 negative verdict reasonings out of the
  * supervise-loop trace and embeds them verbatim in the narrow prompt

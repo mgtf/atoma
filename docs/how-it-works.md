@@ -12,23 +12,30 @@ individual mechanisms, see `AGENTS.md` at the repository root.
 
 ## 1. The core idea
 
-An *atom* is an agent backed by a language model. atoma arranges atoms in three tiers, and
-the tiers differ in exactly two ways: **which model they run on**, and **whether they can
-touch the outside world**.
+atoma models tools as atomic **elements** and arranges its LLM-backed agents in three
+compositional tiers: **molecules**, **cells**, and botanical **tissues**. The agent tiers
+differ in exactly two ways: **which model they run on**, and **whether they can invoke
+elements that touch the outside world**.
+
+The curated identity pools mirror expected population: 118 molecule names for the
+numerous L1 workers, 40 cell names for L2, and 20 botanical tissue names for the small
+L3 layer. Numeric tiers remain the stable storage and routing contract.
 
 ```mermaid
 graph TB
     APP([Your goal]) --> L3
-    L3["<b>L3 — Cells</b><br/>frontier model<br/><i>breaks the goal into phases</i>"] --> L2A
+    L3["<b>L3 — Tissues</b><br/>frontier model<br/><i>breaks the goal into phases</i>"] --> L2A
     L3 --> L2B
-    L2A["<b>L2 — Molecules</b><br/>mid-tier model<br/><i>routes a phase to a worker,<br/>then judges the result</i>"] --> L1A
+    L2A["<b>L2 — Cells</b><br/>mid-tier model<br/><i>routes a phase to a worker,<br/>then judges the result</i>"] --> L1A
     L2A --> L1B
-    L2B["<b>L2 — Molecules</b>"] --> L1C
-    L1A["<b>L1 — Elements</b><br/>cheap model<br/><i>the only tier with tools</i>"]
-    L1B["<b>L1 — Elements</b>"]
-    L1C["<b>L1 — Elements</b>"]
-    L1A -.->|"write · read · shell · fetch · browser"| WS[("Sandboxed<br/>workspace")]
-    L1B -.-> WS
+    L2B["<b>L2 — Cells</b>"] --> L1C
+    L1A["<b>L1 — Molecules</b><br/>cheap model<br/><i>the only agent tier that invokes elements</i>"]
+    L1B["<b>L1 — Molecules</b>"]
+    L1C["<b>L1 — Molecules</b>"]
+    L1A -.-> E["<b>Elements</b><br/>write · read · shell<br/>fetch · browser"]
+    L1B -.-> E
+    L1C -.-> E
+    E -.-> WS[("Sandboxed<br/>workspace")]
     L1C -.-> WS
     style L3 fill:#6b21a8,color:#fff
     style L2A fill:#1d4ed8,color:#fff
@@ -102,7 +109,7 @@ graph TB
 
     subgraph MEM[" 🗄️ Memory — what survives a run "]
         direction LR
-        REG[("<b>Atom registry</b><br/>types · versions<br/>trust counters")]
+        REG[("<b>Agent registry</b><br/>types · versions<br/>trust counters")]
         SKILLS[("<b>Skill library</b><br/>recipes and<br/>compiled scripts")]
         LEDGER[("<b>Lifecycle ledger</b><br/>append-only<br/>audit trail")]
         PCACHE[("<b>Routing cache</b><br/><i>deliberately weak — §7</i>")]
@@ -151,11 +158,11 @@ graph TB
 | **Runtime** | Runner | Everything family-independent: provider choice, sandbox, budget, abort signals, watchdog, trace, post-mortem |
 | | TaskProfile | The *only* per-family part: workspace prep, seed agents, task constraints |
 | | Provider routing | Five provider routes over four transports; a tier can be pinned to a different vendor than its neighbours. Codex is L2/L3 only |
-| **Orchestration** | L3 / L2 / L1 atoms | Decompose · route and judge · execute |
+| **Orchestration** | L3 tissues / L2 cells / L1 molecules | Decompose · route and judge · execute |
 | | Supervise loop | The single plan→judge→execute→judge protocol, shared by both hand-offs |
 | | Prefilter | A cheap-model scan answering "does something we already have fit this?" before any expensive call |
 | | Verdict engine | Approve or reject, and at what scope: tweak this instance, amend the stored type, or branch a variant |
-| **Memory** | Atom registry | SQLite table of agent types with full version history and trust counters |
+| **Memory** | Agent registry | SQLite table of agent types with full version history and trust counters |
 | | Skill library | On-disk recipes and compiled scripts, with their own counters |
 | | Lifecycle ledger | Append-only record of every trust change, written inside the same transaction as the change |
 | | Routing cache | Memoises identical routing decisions (see §7 for why it is deliberately weak) |

@@ -11,6 +11,10 @@ import { probeGroundTruth } from '../src/atoms/groundTruth.js';
 import { defaultBuiltinTools } from '../src/tools/builtin.js';
 import { ToolSandbox } from '../src/tools/sandbox.js';
 import { manifestWriterLines } from '../src/contracts/probeManifest.js';
+import {
+  BUILTIN_TOOL_ELEMENTS,
+  BUILTIN_TOOL_NAMES,
+} from '../src/contracts/toolTaxonomy.js';
 import { makeCtx, jsonText } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 import type { ToolExecutor } from '../src/core/types.js';
@@ -75,9 +79,13 @@ describe('undeclaredToolMentions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-vocab-'));
     try {
       const declared = defaultBuiltinTools({ sandbox: new ToolSandbox(dir) }).map(
-        (t) => t.declaration.name
+        (t) => t.declaration
       );
-      expect(BUILTIN_TOOL_VOCABULARY).toEqual(declared);
+      expect(BUILTIN_TOOL_VOCABULARY).toEqual(declared.map((tool) => tool.name));
+      expect(BUILTIN_TOOL_NAMES).toEqual(declared.map((tool) => tool.name));
+      expect(declared.map((tool) => tool.element)).toEqual(
+        BUILTIN_TOOL_ELEMENTS.map(({ number, name, symbol }) => ({ number, name, symbol }))
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -124,7 +132,7 @@ describe('L2.validatePlan — mechanical pre-check before any LLM call', () => {
       params: {},
       createdBy: 't',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, []);
+    const water = L2Atom.fromType(reg.getByName('Tracheid')!, reg, []);
     // `fromType`'s second parameter is the MODEL id, not the registry — the
     // arg passed here was a copy-paste of the L2 signature above and is
     // unused on every path this file exercises (the verdict runs on the

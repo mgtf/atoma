@@ -110,7 +110,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
   });
 
   it('save then load round-trips a node script skill', () => {
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'write-package-json',
       description: 'scaffold a Node package.json',
       whenToUse: 'when the subtask is a Node package descriptor with name + version',
@@ -122,7 +122,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
         "fs.writeFileSync('package.json', JSON.stringify({name, version, private: true}, null, 2));\n" +
         "console.log(`wrote package.json: ${name}@${version}`);",
     });
-    const loaded = reg.loadFor('Lithium');
+    const loaded = reg.loadFor('Ammonia');
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.kind).toBe('script');
     expect(loaded[0]!.language).toBe('node');
@@ -131,7 +131,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
 
   it('rejects save() of kind:script without a language at the API level', () => {
     expect(() =>
-      reg.save('Lithium', {
+      reg.save('Ammonia', {
         id: 'x',
         description: 'd',
         whenToUse: 'w',
@@ -143,7 +143,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
 
   it('rejects save() of kind:llm WITH a language (forbidden combination)', () => {
     expect(() =>
-      reg.save('Lithium', {
+      reg.save('Ammonia', {
         id: 'x',
         description: 'd',
         whenToUse: 'w',
@@ -155,7 +155,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
   });
 
   it('persists language in SKILL.md frontmatter (hand-readable)', () => {
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'x',
       description: 'd',
       whenToUse: 'w',
@@ -163,7 +163,7 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
       language: 'bash',
       body: 'echo hi',
     });
-    const text = readFileSync(join(dir, 'Lithium', 'x', 'SKILL.md'), 'utf8');
+    const text = readFileSync(join(dir, 'Ammonia', 'x', 'SKILL.md'), 'utf8');
     expect(text).toMatch(/kind: script/);
     expect(text).toMatch(/language: bash/);
   });

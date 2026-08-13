@@ -28,7 +28,7 @@ function tool(name: string): Tool {
 
 function fileChild(): L1Atom {
   return new L1Atom({
-    name: 'Lithium',
+    name: 'Ammonia',
     ordinal: 3,
     systemPrompt: 'sys',
     tools: [tool('write_file'), tool('read_file'), tool('list_files'), tool('run_shell')],

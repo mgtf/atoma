@@ -28,14 +28,14 @@ describe('TraceRecorder.recordTrust', () => {
     recorder.beginRun(task, 'test');
 
     const info: TrustFastPathInfo = {
-      supervisorName: 'Neuron',
+      supervisorName: 'Meristem',
       supervisorTier: 3,
-      childName: 'Sucrose',
+      childName: 'Myocyte',
       childTier: 2,
       subject: 'PLAN',
       successes: 4,
       failures: 0,
-      reasoning: 'trust fast-path: Sucrose has 4 successes / 0 failures',
+      reasoning: 'trust fast-path: Myocyte has 4 successes / 0 failures',
     };
     recorder.recordTrust(info);
 
@@ -44,8 +44,8 @@ describe('TraceRecorder.recordTrust', () => {
     const ev = run.events[0] as VizTrustEvent;
     expect(ev.kind).toBe('trust');
     expect(ev.subject).toBe('PLAN');
-    expect(ev.actor).toEqual({ name: 'Neuron', tier: 3 });
-    expect(ev.child).toEqual({ name: 'Sucrose', tier: 2 });
+    expect(ev.actor).toEqual({ name: 'Meristem', tier: 3 });
+    expect(ev.child).toEqual({ name: 'Myocyte', tier: 2 });
     expect(ev.successes).toBe(4);
     expect(ev.failures).toBe(0);
     expect(ev.reasoning).toMatch(/trust fast-path/);
@@ -61,9 +61,9 @@ describe('TraceRecorder.recordTrust', () => {
     // Several trust events — these must NOT count toward LLM totals.
     for (let i = 0; i < 5; i++) {
       recorder.recordTrust({
-        supervisorName: 'Neuron',
+        supervisorName: 'Meristem',
         supervisorTier: 3,
-        childName: 'Sucrose',
+        childName: 'Myocyte',
         childTier: 2,
         subject: i % 2 === 0 ? 'PLAN' : 'RESULT',
         successes: 4,

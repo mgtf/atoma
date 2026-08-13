@@ -31,7 +31,7 @@ function stubOpusPlan(target: string): string {
  * L2's own description. A task requiring file-scribe L1 work
  * ("Node library + README + tests") escalated because no L2
  * description mentioned file-scribe capability — forcing a full
- * Opus plan call (~$0.12/run) just to conclude "route to Methane,
+ * Opus plan call (~$0.12/run) just to conclude "route to Sclereid,
  * its L1 children include the file scribe anyway".
  *
  * Fix: when building the prefilter catalog, each L2 description is
@@ -41,7 +41,7 @@ function stubOpusPlan(target: string): string {
  */
 
 const seed = {
-  description: 'root cell',
+  description: 'root tissue',
   systemPrompt: 'sys',
   tools: [],
   params: {},
@@ -119,12 +119,12 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Methane',
+        target: 'Sclereid',
         confidence: 'high',
         reasoning: 'test',
       })
     );
-    ctx.llm.enqueueText(stubOpusPlan('Methane'));
+    ctx.llm.enqueueText(stubOpusPlan('Sclereid'));
     await l3.plan({ description: 'some task' }, ctx);
 
     const prefilterCall = ctx.llm.calls[0]!;
@@ -132,24 +132,24 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
 
     // Each L2 catalog line carries a REACHABLE L1 CHILDREN block on its own line.
     expect(user).toMatch(/REACHABLE L1 CHILDREN/);
-    // The block appears once per L2 (Water + Methane).
+    // The block appears once per L2 (Tracheid + Sclereid).
     const occurrences = (user.match(/REACHABLE L1 CHILDREN/g) ?? []).length;
     expect(occurrences).toBe(2);
 
     // Both L2s see all three canonical L1s (canonicals are reachable
     // from any L2 via tier-1 prefilter).
-    expect(user).toContain('Hydrogen');
-    expect(user).toContain('Helium');
-    expect(user).toContain('Lithium');
+    expect(user).toContain('Water');
+    expect(user).toContain('Methane');
+    expect(user).toContain('Ammonia');
   });
 
   it('also includes L1s dynamically created by a specific L2 (createdBy link)', async () => {
     const { reg, l3Type } = seedRegistry();
-    // Simulate a past run where Methane dynamically created a custom L1.
+    // Simulate a past run where Sclereid dynamically created a custom L1.
     reg.create(1, {
       ...seed,
       description: 'bespoke JWT handler for the auth flow',
-      createdBy: 'Methane',
+      createdBy: 'Sclereid',
     });
 
     const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
@@ -157,23 +157,23 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Methane',
+        target: 'Sclereid',
         confidence: 'high',
         reasoning: 'test',
       })
     );
-    ctx.llm.enqueueText(stubOpusPlan('Methane'));
+    ctx.llm.enqueueText(stubOpusPlan('Sclereid'));
     await l3.plan({ description: 'some task' }, ctx);
 
     const user = ctx.llm.calls[0]!.userContent;
-    // The block is now multi-line: extract the Methane block (from the
-    // "Methane:" line down to the next catalog entry's "- " line) and
+    // The block is now multi-line: extract the Sclereid block (from the
+    // "Sclereid:" line down to the next catalog entry's "- " line) and
     // assert the custom L1 appears in it.
-    const methaneBlock = extractCatalogBlock(user, 'Methane');
-    expect(methaneBlock).toMatch(/bespoke JWT handler/);
-    // Water's block should NOT list the Methane-owned custom child.
-    const waterBlock = extractCatalogBlock(user, 'Water');
-    expect(waterBlock).not.toMatch(/bespoke JWT handler/);
+    const erythrocyteBlock = extractCatalogBlock(user, 'Sclereid');
+    expect(erythrocyteBlock).toMatch(/bespoke JWT handler/);
+    // Tracheid's block should NOT list the Sclereid-owned custom child.
+    const neuronBlock = extractCatalogBlock(user, 'Tracheid');
+    expect(neuronBlock).not.toMatch(/bespoke JWT handler/);
   });
 
   it('emits a bare L2 description (no dispatches tail) when the registry has no L1s yet', async () => {
@@ -186,15 +186,15 @@ describe('L3.plan prefilter catalog — L1 affinity enrichment (#X)', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Water',
+        target: 'Tracheid',
         confidence: 'high',
         reasoning: 'test',
       })
     );
-    ctx.llm.enqueueText(stubOpusPlan('Water'));
+    ctx.llm.enqueueText(stubOpusPlan('Tracheid'));
     await l3.plan({ description: 't' }, ctx);
     const user = ctx.llm.calls[0]!.userContent;
-    expect(user).toMatch(/Water: orchestrator/);
+    expect(user).toMatch(/Tracheid: orchestrator/);
     expect(user).not.toMatch(/dispatches leaves to:/);
   });
 });

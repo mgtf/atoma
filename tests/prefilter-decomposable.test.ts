@@ -20,13 +20,13 @@ describe('prefilter decomposable hint', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);
     reg.create(1, { ...seed, description: 'file scribe' });
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
 
     const ctx = makeCtx();
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         decomposable: false,
         reasoning: 'atomic task',
@@ -35,7 +35,7 @@ describe('prefilter decomposable hint', () => {
 
     const plan = await l2.plan({ description: 'write a single file' }, ctx);
     expect(plan.subtasks).toHaveLength(1);
-    expect(plan.subtasks[0]!.preferredChild).toBe('Hydrogen');
+    expect(plan.subtasks[0]!.preferredChild).toBe('Water');
     // Prefilter only — no Sonnet call.
     expect(ctx.llm.calls).toHaveLength(1);
   });
@@ -44,28 +44,28 @@ describe('prefilter decomposable hint', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);
     reg.create(1, { ...seed, description: 'file scribe' });
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
 
     const ctx = makeCtx();
-    // Prefilter: reuse Hydrogen, decomposable
+    // Prefilter: reuse Water, decomposable
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         decomposable: true,
         reasoning: 'multi-artefact task',
       })
     );
-    // Sonnet plan: two subtasks, both preferring Hydrogen
+    // Sonnet plan: two subtasks, both preferring Water
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'use Hydrogen' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'use Water' },
         {
           reasoning: 'decomposed',
           subtasks: [
-            { description: 'write package.json', preferredChild: 'Hydrogen' },
-            { description: 'write index.js', preferredChild: 'Hydrogen' },
+            { description: 'write package.json', preferredChild: 'Water' },
+            { description: 'write index.js', preferredChild: 'Water' },
           ],
           aggregation: { mode: 'concat' },
           expectedOutput: 'both files',
@@ -84,7 +84,7 @@ describe('prefilter decomposable hint', () => {
     expect(sonnetCall.params?.maxTokens).toBe(STRATEGY_MAX_TOKENS);
     // Sonnet saw the hint in userContent.
     expect(sonnetCall.userContent).toContain('== PREFILTER HINT ==');
-    expect(sonnetCall.userContent).toContain('Hydrogen');
+    expect(sonnetCall.userContent).toContain('Water');
     expect(sonnetCall.userContent).toContain('decomposable');
     // Plan came back with the two subtasks Sonnet emitted.
     expect(plan.subtasks).toHaveLength(2);
@@ -93,7 +93,7 @@ describe('prefilter decomposable hint', () => {
   it('L2.plan: decomposable=true but catalog empty → no prefilter, full plan path unchanged', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
 
     const ctx = makeCtx();
     ctx.llm.enqueueText(
@@ -123,7 +123,7 @@ describe('prefilter decomposable hint', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Water',
+        target: 'Tracheid',
         confidence: 'high',
         decomposable: true,
         reasoning: 'multi-phase build',
@@ -131,12 +131,12 @@ describe('prefilter decomposable hint', () => {
     );
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Water', reasoning: 'use Water' },
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'use Tracheid' },
         {
           reasoning: 'split server and client',
           subtasks: [
-            { description: 'server', preferredChild: 'Water' },
-            { description: 'client', preferredChild: 'Water' },
+            { description: 'server', preferredChild: 'Tracheid' },
+            { description: 'client', preferredChild: 'Tracheid' },
           ],
           aggregation: { mode: 'concat' },
           expectedOutput: 'both',
@@ -151,7 +151,7 @@ describe('prefilter decomposable hint', () => {
     expect(ctx.llm.calls).toHaveLength(2);
     const opusCall = ctx.llm.calls[1]!;
     expect(opusCall.userContent).toContain('== PREFILTER HINT ==');
-    expect(opusCall.userContent).toContain('Water');
+    expect(opusCall.userContent).toContain('Tracheid');
     expect(plan.subtasks).toHaveLength(2);
   });
 
@@ -172,7 +172,7 @@ describe('prefilter decomposable hint', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Water',
+        target: 'Tracheid',
         confidence: 'high',
         // decomposable omitted: would have short-circuited under the
         // old contract; under the new contract L3 still calls Opus.
@@ -182,11 +182,11 @@ describe('prefilter decomposable hint', () => {
     // Opus plan call follows.
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Water', reasoning: 'use Water' },
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'use Tracheid' },
         {
           reasoning: 'opus plan',
           subtasks: [
-            { description: 'whole task', preferredChild: 'Water' },
+            { description: 'whole task', preferredChild: 'Tracheid' },
           ],
           aggregation: { mode: 'concat' },
           expectedOutput: 'done',
@@ -199,7 +199,7 @@ describe('prefilter decomposable hint', () => {
     expect(ctx.llm.calls).toHaveLength(2);
     // The Opus call must have received the prefilter hint in its userContent.
     expect(ctx.llm.calls[1]!.userContent).toContain('== PREFILTER HINT ==');
-    expect(ctx.llm.calls[1]!.userContent).toContain('Water');
+    expect(ctx.llm.calls[1]!.userContent).toContain('Tracheid');
     // And no `viaPrefilter` flag — only the L2 skeletal shortcut sets that.
     expect(plan).not.toHaveProperty('viaPrefilter');
     expect(plan.subtasks).toHaveLength(1);

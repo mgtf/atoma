@@ -346,10 +346,10 @@ export class SkillLifecycle {
     }
     const userContent = [
       `You are distilling a successful run into a reusable SKILL — a markdown`,
-      `recipe attached to a tier-1 element so future runs on a similar task can`,
+      `recipe attached to a tier-1 molecule so future runs on a similar task can`,
       `follow it instead of re-discovering the steps.`,
       ``,
-      `An L1 element just completed a subtask without escalation. Look at the`,
+      `An L1 molecule just completed a subtask without escalation. Look at the`,
       `subtask description and the L1's summary, infer the GENERAL PATTERN, and`,
       `output a skill draft.`,
       ``,
@@ -562,7 +562,7 @@ export class SkillLifecycle {
       `a short guidance note injected into future retry attempts when the same`,
       `failure pattern appears, so the next run fixes it on the FIRST retry.`,
       ``,
-      `A tier-1 element's attempt was rejected by the validator, the element`,
+      `A tier-1 molecule's attempt was rejected by the validator, the molecule`,
       `adapted, and the reworked result was approved. Extract the general`,
       `recovery pattern.`,
       ``,
@@ -679,7 +679,7 @@ export class SkillLifecycle {
     ctx: RunContext;
   }): Promise<string | null> {
     const userContent = [
-      `You are revising a SKILL — a reusable how-to recipe attached to a tier-1 element.`,
+      `You are revising a SKILL — a reusable how-to recipe attached to a tier-1 molecule.`,
       `The skill drove a recent run that the supervisor REJECTED. Your job: produce an`,
       `IMPROVED body for the skill that fixes the specific failure, while keeping the`,
       `skill applicable to its general task class. Do NOT rewrite the whole recipe.`,

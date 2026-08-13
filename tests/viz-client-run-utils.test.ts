@@ -6,6 +6,8 @@ import {
   isIndexEntryLive,
   isRunLive,
   mergeRunDelta,
+  projectRunTaxonomy,
+  tryParseJson,
 } from '../src/viz/client/run-utils.js';
 import type { VizRun } from '../src/viz/client/types.js';
 
@@ -42,6 +44,17 @@ describe('React viz live predicates', () => {
 });
 
 describe('React viz delta and filters', () => {
+  it('parses back-to-back strategy and plan JSON documents for detail rendering', () => {
+    expect(tryParseJson(
+      'Strategy follows:\n' +
+      '{"strategy":"reuse","reasoning":"brace } inside string"}\n' +
+      '{"subtasks":[{"description":"Write docs","preferredChild":"Water"}]}'
+    )).toEqual([
+      { strategy: 'reuse', reasoning: 'brace } inside string' },
+      { subtasks: [{ description: 'Write docs', preferredChild: 'Water' }] },
+    ]);
+  });
+
   it('appends a delta at eventsFrom and resyncs from zero', () => {
     const current = run({
       events: [
@@ -70,5 +83,160 @@ describe('React viz delta and filters', () => {
     ];
     expect(filterEvents(events, { kind: 'llm', role: 'all', branchId: 'all' }).map((event) => event.id)).toEqual(['s1', 'l1']);
     expect(filterEvents(events, { kind: 'all', role: 'execute', branchId: 'a' }).map((event) => event.id)).toEqual(['s1', 'x1']);
+  });
+});
+
+describe('React viz taxonomy projection', () => {
+  it('shows immutable legacy traces with current structured identities', () => {
+    const projected = projectRunTaxonomy(run({
+      initialTypes: [
+        {
+          tier: 1,
+          ordinal: 1,
+          name: 'Hydrogen',
+          description: 'legacy molecule',
+          systemPrompt: 'You are Hydrogen, an L1 element.',
+          tools: ['read_file'],
+          params: {},
+          createdBy: 'Methane',
+          createdAt: '2026-08-01T00:00:00.000Z',
+          version: 1,
+          successes: 3,
+          failures: 0,
+        },
+        {
+          tier: 2,
+          ordinal: 1,
+          name: 'Water',
+          description: 'legacy cell',
+          systemPrompt: 'You are Water, an L2 molecule.',
+          tools: [],
+          params: {},
+          createdBy: 'Neuron',
+          createdAt: '2026-08-01T00:00:00.000Z',
+          version: 1,
+          successes: 2,
+          failures: 0,
+        },
+        {
+          tier: 3,
+          ordinal: 1,
+          name: 'Neuron',
+          description: 'legacy tissue',
+          systemPrompt: 'You are Neuron, an L3 cell.',
+          tools: [],
+          params: {},
+          createdBy: 'user',
+          createdAt: '2026-08-01T00:00:00.000Z',
+          version: 1,
+          successes: 1,
+          failures: 0,
+        },
+      ],
+      events: [
+        {
+          id: 'llm',
+          kind: 'llm',
+          ts: 1,
+          actor: { tier: 3, name: 'Neuron' },
+          child: { tier: 2, name: 'Water' },
+          userContent: 'You are atom "Neuron" (tier 3 / cell).',
+        },
+        {
+          id: 'skill',
+          kind: 'skill',
+          ts: 2,
+          l1Name: 'Hydrogen',
+        },
+        {
+          id: 'tool',
+          kind: 'tool',
+          ts: 3,
+          name: 'read_file',
+        },
+        {
+          id: 'registry-patch',
+          kind: 'registry',
+          op: 'patch',
+          ts: 4,
+          name: 'Hydrogen',
+          by: 'Water',
+          snapshot: {
+            tier: 1,
+            ordinal: 1,
+            name: 'Hydrogen',
+            description: 'legacy molecule',
+            systemPrompt: 'legacy',
+            tools: [],
+            params: {},
+            createdBy: 'Methane',
+            createdAt: '2026-08-01T00:00:00.000Z',
+            version: 2,
+            successes: 0,
+            failures: 0,
+          },
+        },
+        {
+          id: 'registry-success',
+          kind: 'registry',
+          op: 'recordSuccess',
+          ts: 5,
+          name: 'Hydrogen',
+        },
+      ],
+      result: {
+        summary: 'Produced by Hydrogen.',
+        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+      },
+    }));
+
+    expect(projected.initialTypes?.map((type) => type.name)).toEqual([
+      'Water',
+      'Tracheid',
+      'Meristem',
+    ]);
+    expect(projected.initialTypes?.[0]).toMatchObject({
+      rank: 'molecule',
+      createdBy: 'Sclereid',
+    });
+    expect(projected.events[0]).toMatchObject({
+      actor: { tier: 3, name: 'Meristem' },
+      child: { tier: 2, name: 'Tracheid' },
+      // Raw audit text is deliberately not rewritten.
+      userContent: 'You are atom "Neuron" (tier 3 / cell).',
+    });
+    expect(projected.events[1]?.l1Name).toBe('Water');
+    expect(projected.events[2]?.name).toBe('read_file');
+    expect(projected.events[3]).toMatchObject({
+      name: 'Water',
+      actor: { tier: 2, name: 'Tracheid' },
+      child: { tier: 1, name: 'Water' },
+    });
+    expect(projected.events[4]?.actor).toBeUndefined();
+    expect('actor' in projected.events[4]!).toBe(false);
+    expect(projected.events[4]?.child).toEqual({ tier: 1, name: 'Water' });
+    expect(projected.result?.producedBy?.name).toBe('Water');
+    expect(projected.result?.summary).toBe('Produced by Hydrogen.');
+    expect(projectRunTaxonomy(projected)).toEqual(projected);
+  });
+
+  it('does not rewrite a custom override whose ordinal proves it is not the legacy name', () => {
+    const projected = projectRunTaxonomy(run({
+      initialTypes: [{
+        tier: 1,
+        ordinal: 1,
+        name: 'CustomHydrogen',
+        description: 'custom',
+        systemPrompt: 'custom',
+        tools: [],
+        params: {},
+        createdBy: 'user',
+        createdAt: '2026-08-01T00:00:00.000Z',
+        version: 1,
+        successes: 0,
+        failures: 0,
+      }],
+    }));
+    expect(projected.initialTypes?.[0]?.name).toBe('CustomHydrogen');
   });
 });

@@ -18,8 +18,8 @@ const seed = {
 describe('strategy maxTokens cap', () => {
   it('L2.plan caps maxTokens to STRATEGY_MAX_TOKENS even when the atom type is greedy', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    reg.create(2, seed); // Water (empty tier-1 catalog → no prefilter, full plan path)
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+    reg.create(2, seed); // Tracheid (empty tier-1 catalog → no prefilter, full plan path)
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
 
     const ctx = makeCtx();
     // Full plan path returns a [strategy, plan] pair
@@ -56,15 +56,15 @@ describe('strategy maxTokens cap', () => {
   it('prefilter path does not hit the strategy call (no strategy cap applies)', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);
-    reg.create(1, { ...seed, description: 'fetches URLs' });  // Hydrogen
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+    reg.create(1, { ...seed, description: 'fetches URLs' });  // Water
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
 
     const ctx = makeCtx();
-    // prefilter picks Hydrogen
+    // prefilter picks Water
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         reasoning: 'matches',
       })

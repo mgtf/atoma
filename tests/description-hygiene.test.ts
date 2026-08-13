@@ -19,7 +19,7 @@ import type { DB } from '../src/registry/db.js';
  */
 
 const baseSeed = {
-  description: 'test element',
+  description: 'test molecule',
   systemPrompt: 'be terse',
   tools: [],
   params: {},
@@ -53,7 +53,7 @@ describe('tokenBagKey', () => {
   });
 
   it('still separates genuinely different names', () => {
-    expect(tokenBagKey('Hydrogen')).not.toBe(tokenBagKey('Helium'));
+    expect(tokenBagKey('Water')).not.toBe(tokenBagKey('Methane'));
     expect(tokenBagKey('Minesweeper')).not.toBe(tokenBagKey('Tetris'));
   });
 });
@@ -104,21 +104,21 @@ describe('AtomRegistry.describe', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, { ...baseSeed, description: 'Mario-like platformer builder.' });
     const updated = r.describe(
-      'Hydrogen',
+      'Water',
       'Single-page Minesweeper builder (WebGL + canvas overlay).',
       'operator'
     );
     expect(updated.description).toMatch(/Minesweeper builder/);
     expect(updated.version).toBe(2);
     // History is preserved — v1 snapshot archived.
-    expect(r.versionsOf('Hydrogen').length).toBe(1);
+    expect(r.versionsOf('Water').length).toBe(1);
   });
 
   it('preserves branch-provenance tails while replacing the core description', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, { ...baseSeed, description: 'parent' });
-    const branched = r.branch('Hydrogen', {}, 'tester', 'Minesweeper-WebGL');
-    expect(branched.description).toMatch(/\(branched from Hydrogen\)$/);
+    const branched = r.branch('Water', {}, 'tester', 'Minesweeper-WebGL');
+    expect(branched.description).toMatch(/\(branched from Water\)$/);
 
     const updated = r.describe(
       branched.name,
@@ -127,19 +127,19 @@ describe('AtomRegistry.describe', () => {
     );
     expect(updated.description).toMatch(/^WebGL Minesweeper builder/);
     // Provenance tail survives the rewrite so ancestry is not lost.
-    expect(updated.description).toMatch(/\(branched from Hydrogen\)$/);
+    expect(updated.description).toMatch(/\(branched from Water\)$/);
   });
 
   it('resets counters because describe is still a patch (behaviour changed)', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, baseSeed);
-    r.recordSuccess('Hydrogen');
-    r.recordSuccess('Hydrogen');
-    expect(r.getByName('Hydrogen')!.successes).toBe(2);
+    r.recordSuccess('Water');
+    r.recordSuccess('Water');
+    expect(r.getByName('Water')!.successes).toBe(2);
 
-    r.describe('Hydrogen', 'fresh description');
+    r.describe('Water', 'fresh description');
 
-    const after = r.getByName('Hydrogen')!;
+    const after = r.getByName('Water')!;
     expect(after.description).toBe('fresh description');
     expect(after.successes).toBe(0);
     expect(after.failures).toBe(0);

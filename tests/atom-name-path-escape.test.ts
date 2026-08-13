@@ -54,7 +54,7 @@ function registryWithLeaf(): { reg: AtomRegistry; leaf: string } {
 
 describe('isSafeAtomName', () => {
   it('accepts ordinary taxonomy names', () => {
-    for (const n of ['Hydrogen', 'Water', 'Methane-2', 'file_scribe.v2']) {
+    for (const n of ['Water', 'Neuron', 'Methane-2', 'file_scribe.v2']) {
       expect(isSafeAtomName(n), n).toBe(true);
     }
   });
@@ -137,8 +137,8 @@ describe('the skill store cannot be written outside its root', () => {
  *
  * `create` honoured that (live ∪ history); `branch` read live rows only. So
  * the two allocators disagreed, and REPRODUCED: create, create, remove the
- * second, then branch — `create` correctly skipped to Lithium while `branch`
- * handed back "Helium".
+ * second, then branch — `create` correctly skipped to Ammonia while `branch`
+ * handed back "Methane".
  */
 describe('ordinal allocation honours the removal tombstone', () => {
   const seed = { description: 'd', systemPrompt: 'p', tools: [], params: {}, createdBy: 'user' };

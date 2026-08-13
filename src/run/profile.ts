@@ -75,7 +75,7 @@ export interface TaskProfile {
    * at the archive. A family with nothing to prepare implements a no-op.
    */
   prepareWorkspace(root: string, clean: boolean): void;
-  /** Create or refresh this family's tier-3 cell and return it. */
+  /** Create or refresh this family's tier-3 tissue and return it. */
   seedL3(ctx: ProfileSeedContext): AtomType;
   /** Seed the canonical L2/L1 catalog the prefilter will match against. */
   seedCatalog(ctx: ProfileSeedContext): void;

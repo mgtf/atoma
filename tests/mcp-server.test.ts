@@ -308,7 +308,7 @@ describe('MCP readers', () => {
     process.env['ATOMA_SKILLS_DIR'] = join(dir, 'no-skills');
     process.env['ATOMA_RUNS_DIR'] = join(dir, 'no-runs');
     const reg = registryList() as { note?: string; types: unknown[] };
-    expect(reg.note).toMatch(/no atom store/);
+    expect(reg.note).toMatch(/no agent store/);
     expect(reg.types).toEqual([]);
     expect((skillsList() as { namespaces: unknown[] }).namespaces).toEqual([]);
     expect((friction() as { runsScanned: number }).runsScanned).toBe(0);

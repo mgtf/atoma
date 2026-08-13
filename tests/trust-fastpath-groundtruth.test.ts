@@ -17,7 +17,7 @@ import type { Result, RunContext, Tool, ToolExecutor } from '../src/core/types.j
 /**
  * The trust fast-path skips the LLM validator — but it must NOT skip the
  * ground-truth probe, which costs zero tokens. Observed on the json-cli live
- * run: Lithium at 6 successes and Ammonia at 8 meant ZERO validation calls for
+ * run: Ammonia at 6 successes and Idioblast at 8 meant ZERO validation calls for
  * the entire run, so the read-back probe never fired at all and a RESULT
  * claiming "exit code 1" shipped while the CLI actually exits 0. A trusted
  * type is precisely the one nobody is watching any more.
@@ -80,7 +80,7 @@ function setup(files: Record<string, string>): {
   // Earn trust: this is the whole point — the child is TRUSTED.
   for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l1Type.name);
 
-  const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
+  const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
   const l1 = L1Atom.fromType(reg.getByName(l1Type.name)!);
   const exec = new FsExecutor(files);
   const base = makeCtx();
@@ -97,7 +97,7 @@ function result(payload: {
     output: payload.output,
     summary: payload.summary,
     trace: [],
-    producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+    producedBy: { tier: 1, name: 'Water', viaFallback: false },
     ...(payload.evidence ? { evidence: payload.evidence } : {}),
     ...(payload.toolCallResults !== undefined
       ? { toolCallResults: payload.toolCallResults }

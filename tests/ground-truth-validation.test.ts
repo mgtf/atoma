@@ -25,7 +25,7 @@ function makeChild(): L1Atom {
   // assert the happy path (probe fires), so the child must advertise
   // validate_html.
   return new L1Atom({
-    name: 'Hydrogen',
+    name: 'Water',
     ordinal: 1,
     systemPrompt: 'sys',
     tools: [
@@ -141,7 +141,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'RESULT',
       child: makeChild(),
@@ -155,7 +155,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
   });
 
   it('skips the probe when the child does NOT declare validate_html (#9 — HTTP-bucket atoms return a URL that is NOT a web page)', async () => {
-    // This is the exact scenario the Node/REST live run hit: Helium
+    // This is the exact scenario the Node/REST live run hit: Methane
     // (HTTP-scope L1) returned "http://localhost:55947/" as its
     // output. Without the bucket gate, the supervisor ran Puppeteer
     // against a JSON API endpoint, got errors, and rejected the
@@ -167,7 +167,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
     const httpChild = new L1Atom({
-      name: 'Helium',
+      name: 'Methane',
       ordinal: 2,
       systemPrompt: 'sys',
       tools: [
@@ -193,7 +193,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Methane',
+      supervisorName: 'Erythrocyte',
       supervisorTier: 2,
       subject: 'RESULT',
       child: httpChild,
@@ -214,7 +214,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'PLAN',
       child: makeChild(),
@@ -240,7 +240,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'RESULT',
       child: makeChild(),
@@ -258,7 +258,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'RESULT',
       child: makeChild(),
@@ -287,7 +287,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'RESULT',
       child: makeChild(),
@@ -316,7 +316,7 @@ describe('llmVerdict — ground-truth re-validation', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'RESULT',
       child: makeChild(),

@@ -61,7 +61,7 @@ describe('validation cost discipline', () => {
         output: 'x',
         summary: 's',
         trace: [],
-        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+        producedBy: { tier: 1, name: 'Water', viaFallback: false },
       },
       { description: 'task' },
       ctx

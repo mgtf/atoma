@@ -21,12 +21,12 @@ const seed = {
 describe('trust fast-path in validators', () => {
   it('L2.validatePlan skips the LLM call when the child type is trusted', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    reg.create(2, seed);                 // Water (L2 itself)
-    const l1Type = reg.create(1, seed);  // Hydrogen
+    reg.create(2, seed);                 // Tracheid (L2 itself)
+    const l1Type = reg.create(1, seed);  // Water
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l1Type.name);
 
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
 
     const ctx = makeCtx();  // no queued responses — LLM must not be called
 
@@ -46,8 +46,8 @@ describe('trust fast-path in validators', () => {
     const l1Type = reg.create(1, seed);
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l1Type.name);
 
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
     const ctx = makeCtx();
 
     const v = await l2.validateResult(
@@ -56,7 +56,7 @@ describe('trust fast-path in validators', () => {
         output: 'x',
         summary: 's',
         trace: [],
-        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+        producedBy: { tier: 1, name: 'Water', viaFallback: false },
       },
       { description: 't' },
       ctx
@@ -72,8 +72,8 @@ describe('trust fast-path in validators', () => {
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l1Type.name);
     reg.recordFailure(l1Type.name);
 
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
     const ctx = makeCtx();
     ctx.llm.enqueueText(JSON.stringify({ approved: true, reasoning: 'real verdict' }));
 
@@ -92,8 +92,8 @@ describe('trust fast-path in validators', () => {
     reg.create(2, seed);
     const l1Type = reg.create(1, seed);
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(l1Type.name);
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
 
     const trustEvents: TrustFastPathInfo[] = [];
     const ctx = { ...makeCtx(), recordTrust: (i: TrustFastPathInfo) => trustEvents.push(i) };
@@ -110,7 +110,7 @@ describe('trust fast-path in validators', () => {
         output: 'x',
         summary: 's',
         trace: [],
-        producedBy: { tier: 1, name: 'Hydrogen', viaFallback: false },
+        producedBy: { tier: 1, name: 'Water', viaFallback: false },
       },
       { description: 't' },
       ctx
@@ -118,8 +118,8 @@ describe('trust fast-path in validators', () => {
 
     expect(trustEvents).toHaveLength(2);
     expect(trustEvents[0]!.subject).toBe('PLAN');
-    expect(trustEvents[0]!.supervisorName).toBe('Water');
-    expect(trustEvents[0]!.childName).toBe('Hydrogen');
+    expect(trustEvents[0]!.supervisorName).toBe('Tracheid');
+    expect(trustEvents[0]!.childName).toBe('Water');
     expect(trustEvents[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
     expect(trustEvents[0]!.reasoning).toMatch(/trust fast-path/);
     expect(trustEvents[1]!.subject).toBe('RESULT');
@@ -129,8 +129,8 @@ describe('trust fast-path in validators', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, seed);
     reg.create(1, seed); // zero successes, not trusted
-    const l2 = L2Atom.fromType(reg.getByName('Water')!, reg);
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
 
     const trustEvents: TrustFastPathInfo[] = [];
     const ctx = { ...makeCtx(), recordTrust: (i: TrustFastPathInfo) => trustEvents.push(i) };

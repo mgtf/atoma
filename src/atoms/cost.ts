@@ -8,6 +8,7 @@ import type {
   Tier,
 } from '../core/types.js';
 import { modelForTier } from '../core/models.js';
+import { taxonomyForTier } from '../core/taxonomy.js';
 import { parseWith } from './json.js';
 import { prefilterCacheGet, prefilterCacheKey, prefilterCachePut } from './prefilterCache.js';
 
@@ -210,7 +211,7 @@ export function trustedApproval(type: AtomType): PositiveVerdict {
  */
 export const PREFILTER_SYSTEM_PROMPT = [
   'You pre-filter catalog lookups for a three-tier LLM orchestrator.',
-  'Given a task and a catalog of child atom types, pick ONE that clearly fits,',
+  'Given a task and a catalog of child agent types, pick ONE that clearly fits,',
   'or declare that no clear match exists.',
   'You do NOT design new types, you do NOT call tools, you do NOT produce plans.',
   'Bias strongly toward escalation when in doubt — escalation to the supervisor',
@@ -227,7 +228,7 @@ export const PREFILTER_SYSTEM_PROMPT = [
   '',
   'L1-affinity rule (applies to L2/L3 catalogs):',
   '  A catalog entry may include a "REACHABLE L1 CHILDREN" block listing',
-  '  the lower-tier atoms that entry can dispatch to. When present, those',
+  '  the lower-tier molecules that entry can dispatch to. When present, those',
   '  children\'s capabilities count for the MATCH decision — an L2 whose own',
   '  description names a narrow bucket (e.g. "HTTP server orchestrator") can',
   '  STILL be a valid "reuse" pick if its REACHABLE L1 CHILDREN cover the',
@@ -370,7 +371,7 @@ export interface CatalogEntry {
 }
 
 /**
- * Per-task anti-loop memo: tracks which child atoms this supervisor has
+ * Per-task anti-loop memo: tracks which child agents this supervisor has
  * already delegated to during the current task, and auto-clears when the task
  * boundary changes. Shared by L2 and L3 so their prefilter can't re-pick a
  * failing child across supervise-loop iterations.
@@ -430,7 +431,7 @@ export async function prefilterStrategy(args: {
   systemPrompt?: string;
   /**
    * Optional caller attribution. When provided we prepend a short
-   * `You are atom "<name>" (tier <N>) ...` preamble to the userContent so
+   * `You are <rank> "<name>" (tier <N>) ...` preamble to the userContent so
    * the run trace can attribute this prefilter call to the L2 or L3 that
    * issued it. Without this, prefilter events show up as ownerless in the
    * decomposition report (the shared system prompt intentionally stays
@@ -457,7 +458,7 @@ export async function prefilterStrategy(args: {
   const catalogLines = filtered.map((c) => `  - ${c.name}: ${c.description}`);
   const userContent = [
     args.actor
-      ? `You are atom "${args.actor.name}" (tier ${args.actor.tier}) running a prefilter catalog lookup.`
+      ? `You are ${taxonomyForTier(args.actor.tier).rank} "${args.actor.name}" (tier ${args.actor.tier}) running a prefilter catalog lookup.`
       : '',
     args.actor ? `` : '',
     `Task: ${args.task.description}`,

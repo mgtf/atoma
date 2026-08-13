@@ -106,11 +106,11 @@ describe('SkillRegistry', () => {
   });
 
   it('returns [] for an L1 with no skills folder yet', () => {
-    expect(reg.loadFor('Hydrogen')).toEqual([]);
+    expect(reg.loadFor('Water')).toEqual([]);
   });
 
   it('save then loadFor round-trips a skill (counters start at zero)', () => {
-    const saved = reg.save('Hydrogen', {
+    const saved = reg.save('Water', {
       id: 'web-build-loop',
       description: 'write index.html, serve, validate, iterate',
       whenToUse: 'when the subtask is a single-file web artefact build',
@@ -120,66 +120,66 @@ describe('SkillRegistry', () => {
     expect(saved.successes).toBe(0);
     expect(saved.failures).toBe(0);
 
-    const loaded = reg.loadFor('Hydrogen');
+    const loaded = reg.loadFor('Water');
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.id).toBe('web-build-loop');
     expect(loaded[0]!.body).toMatch(/start_static_server/);
   });
 
   it('lists multiple skills sorted by id (stable prefilter prompts)', () => {
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'write-readme',
       description: 'create README.md',
       whenToUse: 'when the subtask is a markdown doc',
       kind: 'llm',
       body: 'Write a 4-section README.',
     });
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'write-package-json',
       description: 'create package.json',
       whenToUse: 'when the subtask is a Node package descriptor',
       kind: 'llm',
       body: 'Write the JSON.',
     });
-    const skills = reg.loadFor('Lithium').map((s) => s.id);
+    const skills = reg.loadFor('Ammonia').map((s) => s.id);
     expect(skills).toEqual(['write-package-json', 'write-readme']);
   });
 
   it('recordSuccess / recordFailure bump counters via the meta sidecar', () => {
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'x',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    reg.recordSuccess('Lithium', 'x');
-    reg.recordSuccess('Lithium', 'x');
-    reg.recordFailure('Lithium', 'x');
-    const [skill] = reg.loadFor('Lithium');
+    reg.recordSuccess('Ammonia', 'x');
+    reg.recordSuccess('Ammonia', 'x');
+    reg.recordFailure('Ammonia', 'x');
+    const [skill] = reg.loadFor('Ammonia');
     expect(skill!.successes).toBe(2);
     expect(skill!.failures).toBe(1);
   });
 
   it('preserves counters across a save() rewrite (patches do not punish trust)', () => {
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'x',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'first version',
     });
-    reg.recordSuccess('Lithium', 'x');
-    reg.recordSuccess('Lithium', 'x');
+    reg.recordSuccess('Ammonia', 'x');
+    reg.recordSuccess('Ammonia', 'x');
     // Re-save with new body — counters should survive.
-    reg.save('Lithium', {
+    reg.save('Ammonia', {
       id: 'x',
       description: 'd refreshed',
       whenToUse: 'w refreshed',
       kind: 'llm',
       body: 'second version with more detail',
     });
-    const [skill] = reg.loadFor('Lithium');
+    const [skill] = reg.loadFor('Ammonia');
     expect(skill!.successes).toBe(2);
     expect(skill!.failures).toBe(0);
     expect(skill!.body).toMatch(/second version/);
@@ -193,7 +193,7 @@ describe('SkillRegistry', () => {
     // accumulated. The fix initialises the meta file lazily on
     // first bump.
     const { writeFileSync, mkdirSync, existsSync: exists } = await import('node:fs');
-    const skillDir = join(dir, 'Hydrogen', 'hand-written');
+    const skillDir = join(dir, 'Water', 'hand-written');
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, 'SKILL.md'),
@@ -209,9 +209,9 @@ describe('SkillRegistry', () => {
       'utf8'
     );
     expect(exists(join(skillDir, '_meta.json'))).toBe(false);
-    reg.recordSuccess('Hydrogen', 'hand-written');
+    reg.recordSuccess('Water', 'hand-written');
     expect(exists(join(skillDir, '_meta.json'))).toBe(true);
-    const [skill] = reg.loadFor('Hydrogen');
+    const [skill] = reg.loadFor('Water');
     expect(skill!.successes).toBe(1);
     expect(skill!.failures).toBe(0);
   });
@@ -222,19 +222,19 @@ describe('SkillRegistry', () => {
     // accidentally manifest a counter for a skill ID it pulled out
     // of thin air (e.g. cached from a deleted skill).
     const { existsSync: exists } = await import('node:fs');
-    reg.recordSuccess('Hydrogen', 'never-existed');
-    expect(exists(join(dir, 'Hydrogen', 'never-existed'))).toBe(false);
+    reg.recordSuccess('Water', 'never-existed');
+    expect(exists(join(dir, 'Water', 'never-existed'))).toBe(false);
   });
 
   it('SKILL.md on disk is hand-readable (frontmatter + body)', () => {
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'foo',
       description: 'desc',
       whenToUse: 'when foo',
       kind: 'llm',
       body: 'do the foo',
     });
-    const text = readFileSync(join(dir, 'Hydrogen', 'foo', 'SKILL.md'), 'utf8');
+    const text = readFileSync(join(dir, 'Water', 'foo', 'SKILL.md'), 'utf8');
     expect(text).toMatch(/^---/);
     // Spec-canonical key since the Agent Skills alignment: the writer emits
     // `name:` (parseFrontmatter still reads legacy `id:` stores).
@@ -244,15 +244,15 @@ describe('SkillRegistry', () => {
   });
 
   it('skips folders missing SKILL.md without crashing', () => {
-    mkdirSync(join(dir, 'Hydrogen', 'orphan'), { recursive: true });
-    reg.save('Hydrogen', {
+    mkdirSync(join(dir, 'Water', 'orphan'), { recursive: true });
+    reg.save('Water', {
       id: 'real',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    const skills = reg.loadFor('Hydrogen');
+    const skills = reg.loadFor('Water');
     expect(skills.map((s) => s.id)).toEqual(['real']);
   });
 
@@ -269,10 +269,10 @@ describe('SkillRegistry', () => {
   });
 
   it('a malformed SKILL.md is skipped with a warn (not a hard throw)', () => {
-    const broken = join(dir, 'Hydrogen', 'broken');
+    const broken = join(dir, 'Water', 'broken');
     mkdirSync(broken, { recursive: true });
     writeFileSync(join(broken, 'SKILL.md'), 'no frontmatter at all', 'utf8');
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'good',
       description: 'd',
       whenToUse: 'w',
@@ -284,7 +284,7 @@ describe('SkillRegistry', () => {
     const orig = console.warn;
     console.warn = (): void => {};
     try {
-      const skills = reg.loadFor('Hydrogen');
+      const skills = reg.loadFor('Water');
       expect(skills.map((s) => s.id)).toEqual(['good']);
     } finally {
       console.warn = orig;
@@ -293,7 +293,7 @@ describe('SkillRegistry', () => {
 
   describe('promoteToScript / demoteToLlm — llm↔script lifecycle', () => {
     it('promoteToScript stashes the original body in _fallback.md and rewrites SKILL.md', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'scaffold-node-ssr',
         description: 'scaffold a Node SSR server with SQLite',
         whenToUse: 'task is a Node SSR app with persistence',
@@ -301,11 +301,11 @@ describe('SkillRegistry', () => {
         body: '1. write_file package.json\n2. write_file server.js\n3. npm install\n4. start_node_server',
       });
       // Earn some trust before promotion.
-      reg.recordSuccess('Helium', 'scaffold-node-ssr');
-      reg.recordSuccess('Helium', 'scaffold-node-ssr');
+      reg.recordSuccess('Methane', 'scaffold-node-ssr');
+      reg.recordSuccess('Methane', 'scaffold-node-ssr');
 
       const promoted = reg.promoteToScript({
-        l1Name: 'Helium',
+        l1Name: 'Methane',
         skillId: 'scaffold-node-ssr',
         language: 'node',
         scriptBody: 'console.log(JSON.stringify({output: "ok", summary: "done"}))',
@@ -323,27 +323,27 @@ describe('SkillRegistry', () => {
       expect(promoted.failures).toBe(0);
       // And the reset is on DISK, not just in the returned object.
       const metaAfter = JSON.parse(
-        readFileSync(join(dir, 'Helium', 'scaffold-node-ssr', '_meta.json'), 'utf8')
+        readFileSync(join(dir, 'Methane', 'scaffold-node-ssr', '_meta.json'), 'utf8')
       );
       expect(metaAfter.successes).toBe(0);
 
       // Disk state: SKILL.md frontmatter says script + node, sidecar holds llm body.
-      const skillFile = join(dir, 'Helium', 'scaffold-node-ssr', 'SKILL.md');
+      const skillFile = join(dir, 'Methane', 'scaffold-node-ssr', 'SKILL.md');
       const skillText = readFileSync(skillFile, 'utf8');
       expect(skillText).toMatch(/kind: script/);
       expect(skillText).toMatch(/language: node/);
-      const fallbackFile = join(dir, 'Helium', 'scaffold-node-ssr', '_fallback.md');
+      const fallbackFile = join(dir, 'Methane', 'scaffold-node-ssr', '_fallback.md');
       expect(existsSync(fallbackFile)).toBe(true);
       expect(readFileSync(fallbackFile, 'utf8')).toMatch(/start_node_server/);
 
       // loadFor exposes fallbackBody on the loaded skill.
-      const loaded = reg.loadFor('Helium')[0]!;
+      const loaded = reg.loadFor('Methane')[0]!;
       expect(loaded.kind).toBe('script');
       expect(loaded.fallbackBody).toMatch(/start_node_server/);
     });
 
     it('promoteToScript refuses to overwrite an already-script skill (would erase fallback)', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'x',
         description: 'd',
         whenToUse: 'w',
@@ -353,7 +353,7 @@ describe('SkillRegistry', () => {
       });
       expect(() =>
         reg.promoteToScript({
-          l1Name: 'Helium',
+          l1Name: 'Methane',
           skillId: 'x',
           language: 'node',
           scriptBody: 'console.log("second")',
@@ -362,23 +362,23 @@ describe('SkillRegistry', () => {
     });
 
     it('demoteToLlm restores the fallback body verbatim and keeps post-promotion counters', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'roundtrip',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'ORIGINAL llm recipe — step 1, step 2',
       });
-      reg.recordSuccess('Helium', 'roundtrip');
+      reg.recordSuccess('Methane', 'roundtrip');
       reg.promoteToScript({
-        l1Name: 'Helium',
+        l1Name: 'Methane',
         skillId: 'roundtrip',
         language: 'node',
         scriptBody: 'console.log("script")',
       });
       // Demote (script just failed in the wild).
-      reg.recordFailure('Helium', 'roundtrip');
-      const demoted = reg.demoteToLlm('Helium', 'roundtrip')!;
+      reg.recordFailure('Methane', 'roundtrip');
+      const demoted = reg.demoteToLlm('Methane', 'roundtrip')!;
       expect(demoted.kind).toBe('llm');
       expect(demoted.body).toMatch(/ORIGINAL llm recipe/);
       // The pre-promotion success was cleared BY the promotion (see
@@ -389,23 +389,23 @@ describe('SkillRegistry', () => {
 
       // _fallback.md is INTENTIONALLY left in place so a future
       // re-promotion (after manual counter reset) can compare.
-      const fallbackFile = join(dir, 'Helium', 'roundtrip', '_fallback.md');
+      const fallbackFile = join(dir, 'Methane', 'roundtrip', '_fallback.md');
       expect(existsSync(fallbackFile)).toBe(true);
     });
 
     it('demoteToLlm returns null when the skill is not currently kind:script', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'plain',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'still llm',
       });
-      expect(reg.demoteToLlm('Helium', 'plain')).toBeNull();
+      expect(reg.demoteToLlm('Methane', 'plain')).toBeNull();
     });
 
     it('markPromotionRefused stamps _meta.json so the supervisor can short-circuit future Sonnet compile calls', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'too-llm-shaped',
         description: 'd',
         whenToUse: 'w',
@@ -413,7 +413,7 @@ describe('SkillRegistry', () => {
         body: 'recipe with irreducible LLM steps',
       });
       const meta = reg.markPromotionRefused(
-        'Helium',
+        'Methane',
         'too-llm-shaped',
         'schema design is an irreducible LLM reasoning step'
       )!;
@@ -421,7 +421,7 @@ describe('SkillRegistry', () => {
       // loadFor surfaces the stamp AND the reason on the Skill: the WHY is
       // the actionable part for the operator ("why do I have no script
       // skills?" used to require grepping ./runs).
-      const loaded = reg.loadFor('Helium')[0]!;
+      const loaded = reg.loadFor('Methane')[0]!;
       expect(loaded.promotionRefusedAt).toBe(meta.promotionRefusedAt);
       expect(loaded.promotionRefusedReason).toBe(
         'schema design is an irreducible LLM reasoning step'
@@ -429,72 +429,72 @@ describe('SkillRegistry', () => {
     });
 
     it('markPromotionRefused bounds the persisted reason and tolerates its absence', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'bounded',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'b',
       });
-      const long = reg.markPromotionRefused('Helium', 'bounded', 'x'.repeat(2000))!;
+      const long = reg.markPromotionRefused('Methane', 'bounded', 'x'.repeat(2000))!;
       expect(long.promotionRefusedReason).toHaveLength(REFUSAL_REASON_MAX_CHARS);
       // A reason-less stamp (legacy callers, empty Sonnet reason) stays valid
       // and does not write an empty-string field.
-      reg.save('Helium', { id: 'bounded', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b2' });
-      const bare = reg.markPromotionRefused('Helium', 'bounded')!;
+      reg.save('Methane', { id: 'bounded', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b2' });
+      const bare = reg.markPromotionRefused('Methane', 'bounded')!;
       expect(bare.promotionRefusedAt).toBeTruthy();
       expect(bare.promotionRefusedReason).toBeUndefined();
     });
 
     it('counter bumps PRESERVE promotionRefusedAt (only save() clears it)', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'sticky',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'b',
       });
-      const stamped = reg.markPromotionRefused('Helium', 'sticky', 'because reasons')!;
-      reg.recordSuccess('Helium', 'sticky');
-      reg.recordSuccess('Helium', 'sticky');
-      const after = reg.loadFor('Helium')[0]!;
+      const stamped = reg.markPromotionRefused('Methane', 'sticky', 'because reasons')!;
+      reg.recordSuccess('Methane', 'sticky');
+      reg.recordSuccess('Methane', 'sticky');
+      const after = reg.loadFor('Methane')[0]!;
       expect(after.successes).toBe(2);
       expect(after.promotionRefusedAt).toBe(stamped.promotionRefusedAt);
       expect(after.promotionRefusedReason).toBe('because reasons');
     });
 
     it('save() CLEARS promotionRefusedAt — a rewritten body deserves a fresh compile attempt', () => {
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'rewritten',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'old recipe',
       });
-      reg.markPromotionRefused('Helium', 'rewritten', 'old body was judgment-shaped');
-      expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeTruthy();
+      reg.markPromotionRefused('Methane', 'rewritten', 'old body was judgment-shaped');
+      expect(reg.loadFor('Methane')[0]!.promotionRefusedAt).toBeTruthy();
       // Simulate improveSkillBody / re-distillation rewriting the body.
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'rewritten',
         description: 'd',
         whenToUse: 'w',
         kind: 'llm',
         body: 'NEW recipe — much more procedural now',
       });
-      expect(reg.loadFor('Helium')[0]!.promotionRefusedAt).toBeUndefined();
+      expect(reg.loadFor('Methane')[0]!.promotionRefusedAt).toBeUndefined();
       // The reason is a judgment about the OLD body — it clears with the stamp.
-      expect(reg.loadFor('Helium')[0]!.promotionRefusedReason).toBeUndefined();
+      expect(reg.loadFor('Methane')[0]!.promotionRefusedReason).toBeUndefined();
     });
 
     it('markPromotionRefused returns null for a missing skill (no auto-create)', () => {
-      expect(reg.markPromotionRefused('Helium', 'does-not-exist')).toBeNull();
+      expect(reg.markPromotionRefused('Methane', 'does-not-exist')).toBeNull();
     });
 
     it('demoteToLlm returns null when no fallback sidecar is present', () => {
       // Hand-author a kind:script skill (skipping the promoteToScript path)
       // to simulate a skill created script-first via the auto-creation
       // pipeline once that lands. There's no _fallback.md to restore.
-      reg.save('Helium', {
+      reg.save('Methane', {
         id: 'born-script',
         description: 'd',
         whenToUse: 'w',
@@ -502,7 +502,7 @@ describe('SkillRegistry', () => {
         language: 'node',
         body: 'console.log("hi")',
       });
-      expect(reg.demoteToLlm('Helium', 'born-script')).toBeNull();
+      expect(reg.demoteToLlm('Methane', 'born-script')).toBeNull();
     });
   });
 });
@@ -523,7 +523,7 @@ describe('L1Atom.skills() integration', () => {
     const atom = L1Atom.fromType({
       tier: 1,
       ordinal: 1,
-      name: 'Hydrogen',
+      name: 'Water',
       description: 'd',
       systemPrompt: 'sys',
       tools: [],
@@ -538,7 +538,7 @@ describe('L1Atom.skills() integration', () => {
   });
 
   it('hydrates skills() from the registry when one is provided', () => {
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
@@ -549,7 +549,7 @@ describe('L1Atom.skills() integration', () => {
       {
         tier: 1,
         ordinal: 1,
-        name: 'Hydrogen',
+        name: 'Water',
         description: 'd',
         systemPrompt: 'sys',
         tools: [],
@@ -571,16 +571,16 @@ describe('L1Atom.skills() integration', () => {
   });
 
   it('an unrelated namespace returns empty even when others have skills', () => {
-    reg.save('Hydrogen', {
+    reg.save('Water', {
       id: 'x',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    expect(reg.loadFor('Helium')).toEqual([]);
-    // Hydrogen still has its skill on disk.
-    expect(existsSync(join(dir, 'Hydrogen', 'x', 'SKILL.md'))).toBe(true);
+    expect(reg.loadFor('Methane')).toEqual([]);
+    // Water still has its skill on disk.
+    expect(existsSync(join(dir, 'Water', 'x', 'SKILL.md'))).toBe(true);
   });
 });
 
@@ -614,17 +614,17 @@ describe('a torn _meta.json never becomes a confident zero', () => {
 
   function seedAt(successes: number): { reg: SkillRegistry; metaPath: string } {
     const reg = new SkillRegistry(dir);
-    reg.save('Hydrogen', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    for (let i = 0; i < successes; i++) reg.recordSuccess('Hydrogen', 'earned');
-    return { reg, metaPath: join(dir, 'Hydrogen', 'earned', '_meta.json') };
+    reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    for (let i = 0; i < successes; i++) reg.recordSuccess('Water', 'earned');
+    return { reg, metaPath: join(dir, 'Water', 'earned', '_meta.json') };
   }
 
   it('refuses the bump instead of overwriting the earned counters with 1', () => {
     const { reg, metaPath } = seedAt(9);
-    expect(reg.loadFor('Hydrogen')[0]!.successes).toBe(9);
+    expect(reg.loadFor('Water')[0]!.successes).toBe(9);
     // Torn write: valid prefix, no closing brace — what a crash leaves.
     writeFileSync(metaPath, '{"successes": 9, "failures": 0, "updat', 'utf8');
-    reg.recordSuccess('Hydrogen', 'earned');
+    reg.recordSuccess('Water', 'earned');
     // The file is UNCHANGED, so the 9 are still recoverable by hand.
     expect(readFileSync(metaPath, 'utf8')).toBe('{"successes": 9, "failures": 0, "updat');
   });
@@ -633,20 +633,20 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     const { reg, metaPath } = seedAt(3);
     writeFileSync(metaPath, 'not json at all', 'utf8');
     const before = readLedger().length;
-    reg.recordSuccess('Hydrogen', 'earned');
-    reg.recordFailure('Hydrogen', 'earned');
+    reg.recordSuccess('Water', 'earned');
+    reg.recordFailure('Water', 'earned');
     expect(readLedger().length).toBe(before);
   });
 
   it('an ABSENT sidecar still initialises at zero — hand-written skills keep working', () => {
     const reg = new SkillRegistry(dir);
-    mkdirSync(join(dir, 'Hydrogen', 'byhand'), { recursive: true });
+    mkdirSync(join(dir, 'Water', 'byhand'), { recursive: true });
     writeFileSync(
-      join(dir, 'Hydrogen', 'byhand', 'SKILL.md'),
+      join(dir, 'Water', 'byhand', 'SKILL.md'),
       '---\nname: byhand\ndescription: d\nwhen_to_use: w\nkind: llm\n---\nbody\n',
       'utf8'
     );
-    reg.recordSuccess('Hydrogen', 'byhand');
-    expect(reg.loadFor('Hydrogen').find((s) => s.id === 'byhand')!.successes).toBe(1);
+    reg.recordSuccess('Water', 'byhand');
+    expect(reg.loadFor('Water').find((s) => s.id === 'byhand')!.successes).toBe(1);
   });
 });

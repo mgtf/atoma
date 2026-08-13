@@ -82,8 +82,8 @@ export function buildNarrowL2Prompt(
         ? `Your leaf tier-1 will write a single-file web artefact, serve it via start_static_server, and validate via headless browser (validate_html).`
         : `Your leaf tier-1 works with whatever tools it has been handed — do not assume a specific bucket.`;
   const lines: string[] = [
-    `You are an L2 molecule that decomposes a single-purpose task into`,
-    `orthogonal L1 leaf subtasks and supervises their parallel execution.`,
+    `You are an L2 cell that decomposes a single-purpose task into`,
+    `orthogonal L1 molecule subtasks and supervises their parallel execution.`,
     ``,
     `Your current subtask: ${subtaskDescription}`,
     ``,
@@ -347,13 +347,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         ? '(no tools — children will work with prompts only)'
         : this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n');
     const userContent = [
-      `You are atom "${this.name}" (tier 3 / cell).`,
+      `You are tissue "${this.name}" (tier 3 / tissue).`,
       ``,
-      `HARD RULE: You NEVER execute tools yourself. You do NOT write files, run`,
+      `HARD RULE: You NEVER execute tools yourself; those tools are elements. You do NOT write files, run`,
       `shells, start servers, or validate anything. Your ONLY job is strategic:`,
-      `DECOMPOSE the task into subtasks and route each to an L2 molecule.`,
-      `The L2s will in turn decompose their own work into L1 leaf tasks — L1`,
-      `is the only tier allowed to call tools. Keep your reasoning short and`,
+      `DECOMPOSE the task into subtasks and route each to an L2 cell.`,
+      `The L2 cells will in turn decompose their own work into L1 molecule tasks —`,
+      `L1 molecules are the only agent rank allowed to invoke elements. Keep your reasoning short and`,
       `your plan high-level.`,
       ``,
       `== DECOMPOSITION DISCIPLINE — pick ONE shape ==`,
@@ -432,7 +432,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ``,
       LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
       ``,
-      `Each subtask carries a "preferredChild" naming the L2 molecule that`,
+      `Each subtask carries a "preferredChild" naming the L2 cell that`,
       `should handle it (required for N>1 plans). Multiple phases can target`,
       `the SAME L2 — that's the common case for PHASED builds.`,
       ``,
@@ -450,8 +450,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `    phase's output is the deliverable. For PHASED.`,
       ``,
       `== STRATEGY OPTIONS (baseline when a subtask lacks preferredChild) ==`,
-      `  - "reuse": pick an existing L2 molecule from the catalog that fits`,
-      `  - "create": design a new L2 molecule and register it (provide a seed)`,
+      `  - "reuse": pick an existing L2 cell from the catalog that fits`,
+      `  - "create": design a new L2 cell and register it (provide a seed)`,
       ``,
       `CRITICAL — domain-match rule:`,
       `  ONLY "reuse" an L2 whose description matches the task's domain. If the`,
@@ -693,8 +693,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       systemPrompt:
         seed.systemPrompt ??
         [
-          `You are an L2 molecule created by ${this.name}.`,
-          `Decompose sub-tasks into L1 elements and supervise them.`,
+          `You are an L2 cell created by ${this.name}.`,
+          `Decompose sub-tasks into L1 molecules and supervise them.`,
           `Subtask you were handed: ${subtask.description}`,
           `Parent task (for context only): ${parentTask.description}`,
         ].join('\n'),
@@ -781,10 +781,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
         return L2Atom.fromType(branched, this.registry, [], this.skillRegistry);
       },
       onApproved: async (child, _result) => {
-        this.registry.recordSuccess(child.name);
+        this.registry.recordSuccess(child.name, this.name);
       },
       onFailed: async (child, _reason) => {
-        this.registry.recordFailure(child.name);
+        this.registry.recordFailure(child.name, this.name);
       },
     };
   }
@@ -836,7 +836,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       };
     }
     const userContent = [
-      `You are "${this.name}" (tier 3). Synthesise a single result from ${subResults.length} sub-results.`,
+      `You are tissue "${this.name}" (tier 3). Synthesise a single result from ${subResults.length} sub-results.`,
       `Original task: ${parentTask.description}`,
       aggregation.instruction
         ? `Merge instruction: ${aggregation.instruction}`
@@ -880,7 +880,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ? this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n')
       : '(no tools available — reasoning-only answer)';
     const userContent = [
-      `You are "${this.name}" (tier 3) in FALLBACK: do the task yourself, no delegation.`,
+      `You are tissue "${this.name}" (tier 3) in FALLBACK: do the task yourself, no delegation.`,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',
       hasTools
@@ -925,7 +925,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const hasTools = this.tools.length > 0 && ctx.tools !== undefined;
     const hasValidator = hasTools && this.tools.some((t) => t.name === 'validate_html');
     const userContent = [
-      `You are "${this.name}" (tier 3) in FALLBACK: L2/L1 supervision failed, you are now the executor.`,
+      `You are tissue "${this.name}" (tier 3) in FALLBACK: L2/L1 supervision failed, you are now the executor.`,
       hasTools
         ? 'You HAVE tool access in this fallback turn. Use the tools to actually perform the work — do NOT just describe it. Relative paths for file tools ("index.html", not "/abs/index.html").'
         : 'You have NO tool access; produce a reasoning-only answer. Do not claim to have written files or started servers.',

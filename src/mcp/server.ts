@@ -3,7 +3,7 @@
  *
  * WHAT IT IS FOR: it lets an MCP host — Claude Code, or anything else speaking
  * the protocol — start a task run through the tiered pipeline and read atoma's
- * accumulated state (atom types and their earned trust, skills and their
+ * accumulated state (agent types and their earned trust, skills and their
  * lifecycle, the ledger's integrity projection, run traces, the friction
  * report). The host pays one tool call; atoma does the tiering.
  *
@@ -93,13 +93,13 @@ const READ_ONLY = {
  * did it and one run burned half its calls on a phase the wording had implied;
  * teaching it one level up, in the human's own words, would reintroduce it.
  */
-export const INSTRUCTIONS = `atoma is a three-tier LLM agent orchestration framework: a tier-3 atom decomposes a
-goal, tier-2 atoms supervise, and only tier-1 atoms hold tools and touch the filesystem. Cheap
-models do the cheap work, and atom types plus skill recipes accumulate earned trust across runs, so
+export const INSTRUCTIONS = `atoma is a three-tier LLM agent orchestration framework: a tier-3 tissue decomposes a
+goal, tier-2 cells supervise, and only tier-1 molecules invoke elemental tools and touch the filesystem. Cheap
+models do the cheap work, and agent types plus skill recipes accumulate earned trust across runs, so
 repeat work gets cheaper.
 
 Starting a run is DESTRUCTIVE and SERIALISED. One run happens at a time; by default the shared build
-workspace is archived first, and a run mutates the atom registry, the skill store and the lifecycle
+workspace is archived first, and a run mutates the agent registry, the skill store and the lifecycle
 ledger, and spends model quota. Runs take minutes: call atoma_run_start, then poll atoma_run_status,
 and use atoma_run_cancel to stop one.
 
@@ -141,7 +141,7 @@ export function buildServer(): McpServer {
       title: 'Start a task run',
       description:
         `Start a run through atoma's tiered pipeline and return immediately with a runId — a run takes minutes, so poll atoma_run_status. Families: ${familyHelp}.\n\n` +
-        'DESTRUCTIVE: by default the shared build workspace is ARCHIVED before the run starts (pass keepWorkspace to keep it), and the run mutates the atom registry, the skill store and the lifecycle ledger, and spends model quota. ' +
+        'DESTRUCTIVE: by default the shared build workspace is ARCHIVED before the run starts (pass keepWorkspace to keep it), and the run mutates the agent registry, the skill store and the lifecycle ledger, and spends model quota. ' +
         'SERIALISED: only one run at a time — a second call is refused while one is in flight, because the workspace is shared and concurrent runs make the cost numbers incomparable. ' +
         'The goal is prose describing the artefact you want; do not name tools in it.',
       inputSchema: {
@@ -232,9 +232,9 @@ export function buildServer(): McpServer {
   server.registerTool(
     'atoma_registry_list',
     {
-      title: 'List atom types',
+      title: 'List agent types',
       description:
-        'Persisted atom types with their earned trust counters. A type with 3+ successes and zero failures is TRUSTED, which lets its supervisor skip LLM validation — that fast-path is one of the two mechanisms behind atoma’s cost curve.',
+        'Persisted molecules, cells and tissues with their earned trust counters and elemental tool metadata. A type with 3+ successes and zero failures is TRUSTED, which lets its supervisor skip LLM validation — that fast-path is one of the two mechanisms behind atoma’s cost curve.',
       inputSchema: { tier: z.number().int().min(1).max(3).optional().describe('1, 2 or 3.') },
       annotations: READ_ONLY,
     },
@@ -244,10 +244,10 @@ export function buildServer(): McpServer {
   server.registerTool(
     'atoma_registry_show',
     {
-      title: 'Show one atom type',
+      title: 'Show one agent type',
       description:
-        'One atom type in full, plus its version history (who patched it, when, why). Note that a patch RESETS trust: a changed type has to earn it again.',
-      inputSchema: { name: z.string().min(1).describe('Atom type name, e.g. "Hydrogen".') },
+        'One molecule, cell or tissue in full, plus its version history (who patched it, when, why). Note that a patch RESETS trust: a changed type has to earn it again.',
+      inputSchema: { name: z.string().min(1).describe('Agent type name, e.g. "Water".') },
       annotations: READ_ONLY,
     },
     (args) => jsonResult(registryShow(args))
@@ -260,8 +260,8 @@ export function buildServer(): McpServer {
     {
       title: 'List skills',
       description:
-        'Skill recipes per tier-1 atom, with kind (llm recipe or compiled script), counters and any promotion-refusal stamp.',
-      inputSchema: { l1: z.string().optional().describe('Restrict to one tier-1 namespace.') },
+        'Skill recipes per tier-1 molecule, with kind (llm recipe or compiled script), counters and any promotion-refusal stamp.',
+      inputSchema: { l1: z.string().optional().describe('Restrict to one molecule namespace.') },
       annotations: READ_ONLY,
     },
     (args) => jsonResult(skillsList(args))
@@ -274,7 +274,7 @@ export function buildServer(): McpServer {
       description:
         'Per-skill matches vs runs actually driven, the free-ride gap (matched but credit withheld by the adherence gate), a lifecycle status, and merge candidates by description overlap. The payload echoes the trust/promote thresholds in force, because statuses are computed from environment values read at call time — reading these numbers without them has misled a benchmark round before.',
       inputSchema: {
-        l1: z.string().optional(),
+        l1: z.string().optional().describe('Restrict to one molecule namespace.'),
         sim: z.number().min(0).max(1).optional().describe('Merge-candidate similarity threshold. Default 0.5.'),
       },
       annotations: READ_ONLY,
@@ -287,8 +287,8 @@ export function buildServer(): McpServer {
     {
       title: 'Skill shareability pre-screen',
       description:
-        'MECHANICAL pre-screen for cross-organisation sharing: leaked literals from the originating run, tool names the owning atom cannot declare, and a static scan of script bodies. IT IS NOT THE REVIEW GATE — a clean verdict only means a human reviewer’s time will not be wasted. Report its caveat verbatim.',
-      inputSchema: { l1: z.string().optional() },
+        'MECHANICAL pre-screen for cross-organisation sharing: leaked literals from the originating run, tool names the owning molecule cannot declare, and a static scan of script bodies. IT IS NOT THE REVIEW GATE — a clean verdict only means a human reviewer’s time will not be wasted. Report its caveat verbatim.',
+      inputSchema: { l1: z.string().optional().describe('Restrict to one molecule namespace.') },
       annotations: READ_ONLY,
     },
     (args) => jsonResult(skillsReview(args))

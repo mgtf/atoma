@@ -21,6 +21,8 @@ import { api } from '../data-api.js';
 import { useI18n } from '../i18n.js';
 import { CodeBlock, EmptyPane, ErrorPane, LoadingPane, StatCard, TierChip } from '../shared.js';
 import type { RegistrySummary, RegistryType, SkillSummary } from '../types.js';
+import { elementForTool } from '../../../contracts/toolTaxonomy.js';
+import { taxonomyForTier } from '../../../core/taxonomy.js';
 
 function AtomDetail({
   atom,
@@ -42,6 +44,13 @@ function AtomDetail({
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Typography variant="h6">{atom.name}</Typography>
           <TierChip tier={atom.tier} />
+          <Chip
+            size="small"
+            label={t(
+              `rank.${atom.rank ?? taxonomyForTier(atom.tier as 1 | 2 | 3).rank}`
+            )}
+            variant="outlined"
+          />
           <Chip size="small" label={`v${atom.version}`} variant="outlined" />
         </Stack>
         <Typography color="text.secondary">{atom.description}</Typography>
@@ -55,7 +64,18 @@ function AtomDetail({
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('common.tools')}</Typography>
         <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          {atom.tools.map((tool) => <Chip key={tool} size="small" label={tool} variant="outlined" />)}
+          {atom.tools.map((tool) => {
+            const element = elementForTool(tool);
+            return (
+              <Chip
+                key={tool}
+                size="small"
+                label={element ? `${element.symbol} · ${tool}` : tool}
+                title={element?.name}
+                variant="outlined"
+              />
+            );
+          })}
           {!atom.tools.length ? <Typography color="text.secondary">{t('common.none')}</Typography> : null}
         </Stack>
       </Box>
@@ -195,7 +215,7 @@ export function RegistryView({
               </Box>
               <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 1 }}>
                 {[3, 2, 1].map((tier) => (
-                  <StatCard key={tier} label={`L${tier}`} value={payload.registry.counts[tier as 1 | 2 | 3]} />
+                  <StatCard key={tier} label={t(`lanes.l${tier}`)} value={payload.registry.counts[tier as 1 | 2 | 3]} />
                 ))}
                 <StatCard
                   label={t('registry.successFailure')}
@@ -206,7 +226,7 @@ export function RegistryView({
                 const atoms = filtered.filter((item) => item.tier === tier).sort((a, b) => a.ordinal - b.ordinal);
                 return (
                   <Paper key={tier} sx={{ p: 1.25, borderLeft: `3px solid ${tier === 3 ? '#c084fc' : tier === 2 ? '#fbbf24' : '#2dd4bf'}` }}>
-                    <Typography variant="subtitle2" sx={{ mb: 0.75 }}>L{tier}</Typography>
+                    <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t(`lanes.l${tier}`)}</Typography>
                     <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
                       {atoms.map((item) => (
                         <Chip

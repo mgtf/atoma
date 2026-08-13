@@ -76,7 +76,7 @@ export type LedgerEventKind =
 export interface LedgerEvent {
   readonly at: string;
   readonly kind: LedgerEventKind;
-  /** `Hydrogen` for atom types, `Hydrogen/web-build-loop` for skills. */
+  /** `Water` for an L1 molecule, `Water/web-build-loop` for its skills. */
   readonly entity: string;
   readonly detail?: Record<string, unknown>;
 }

@@ -15,6 +15,12 @@ export interface Tool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: Record<string, unknown>;
+  /**
+   * Periodic-table identity for built-in atomic capabilities. `name` remains
+   * the immutable invocation/wire contract; this is taxonomy metadata only.
+   * Optional so third-party declarations and legacy `tools_json` still load.
+   */
+  readonly element?: import('../contracts/toolTaxonomy.js').Element;
 }
 
 export interface GenerationParams {
@@ -32,7 +38,7 @@ export interface GenerationParams {
 }
 
 /**
- * One unit of work a supervisor hands to a child atom. Spelled out as its
+ * One unit of work a supervisor hands to a child agent. Spelled out as its
  * own shape (rather than reusing `Task`) because a subtask carries a
  * routing hint (`preferredChild`) that has no place at the task-level API.
  * `description` is the "what" the child must accomplish. `inputs` is an
@@ -131,8 +137,8 @@ export interface AtomModifications {
   systemPromptAppend?: string;
   systemPromptReplace?: string;
   /**
-   * Overwrite the atom type's short human-readable description. Useful when a
-   * validator realises that a branched/patched atom's *purpose* has drifted
+   * Overwrite the agent type's short human-readable description. Useful when a
+   * validator realises that a branched/patched agent's *purpose* has drifted
    * from its original template (e.g. a "platformer builder" description on a
    * type whose system prompt now targets Minesweeper). The description is
    * what the prefilter sees when choosing a catalog entry, so keeping it in
@@ -253,7 +259,7 @@ export interface LlmCompletionRequest {
 }
 
 export interface ToolInvocationInfo {
-  /** Tool name exactly as declared on the atom. */
+  /** Tool name exactly as declared on the molecule. */
   name: string;
   /** JSON-serialisable args the model sent to the tool. */
   args: Record<string, unknown>;
@@ -298,7 +304,7 @@ export interface ToolExecutor {
  * via the trust fast-path (`shouldTrustType` / `trustedApproval`). Such
  * decisions skip the LLM call entirely and therefore don't appear in the
  * trace as `kind: 'llm'` events — but they ARE real supervision decisions
- * that the visualiser should show, otherwise the lane for a trusted atom
+ * that the visualiser should show, otherwise the lane for a trusted agent
  * looks suspiciously empty ("zero L2 calls" puzzles users reasonably). The
  * hook is optional to keep core decoupled from the viz layer.
  */
@@ -401,7 +407,7 @@ export interface RunContext {
   readonly signal: AbortSignal;
   readonly llm: LlmClient;
   readonly limits: Limits;
-  /** Optional: tool executor used by atoms when the LLM emits tool_use blocks. */
+  /** Optional: tool executor used by molecules when the LLM emits tool_use blocks. */
   readonly tools?: ToolExecutor;
   /**
    * Product-run integrity gate: when true, a production L1 Result that carries

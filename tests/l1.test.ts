@@ -11,9 +11,9 @@ import { makePlan } from './helpers/factories.js';
 
 describe('L1Atom', () => {
   const base = {
-    name: 'Hydrogen',
+    name: 'Water',
     ordinal: 1,
-    systemPrompt: 'you are hydrogen',
+    systemPrompt: 'you are water',
     tools: [],
     params: { temperature: 0 },
   };
@@ -79,7 +79,7 @@ describe('L1Atom', () => {
       ctx
     );
     expect(result.output).toBe('4');
-    expect(result.producedBy).toEqual({ tier: 1, name: 'Hydrogen', viaFallback: false });
+    expect(result.producedBy).toEqual({ tier: 1, name: 'Water', viaFallback: false });
     expect(result.toolCallResults).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe('L1Atom', () => {
       };
     });
     const atom = new L1Atom(base);
-    atom.setActiveSkill('package-and-document-cli', 'Lithium');
+    atom.setActiveSkill('package-and-document-cli', 'Ammonia');
     const result = await atom.execute(
       { description: 'package' },
       makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),

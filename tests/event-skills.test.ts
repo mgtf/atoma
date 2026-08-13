@@ -81,7 +81,7 @@ describe('frontmatter — trigger field', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-trig-'));
     const reg = new SkillRegistry(dir);
     expect(() =>
-      reg.save('Hydrogen', {
+      reg.save('Water', {
         id: 'bad',
         description: 'd',
         whenToUse: 'w',
@@ -226,7 +226,7 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
   }
 
   it('injects the matched event skill into the retry after a rejection', async () => {
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'recover-evidence',
       description: 'paste ground-truth evidence into the summary',
       whenToUse: 'on evidence rejections',
@@ -234,19 +234,19 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
       trigger: 'validator rejects result missing ground-truth evidence',
       body: 'On the retry: paste the verbatim run_shell output into a == GROUND TRUTH == block.',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
-    // Tier prefilter picks Hydrogen. NO skill-prefilter slot: the only
+    // Tier prefilter picks Water. NO skill-prefilter slot: the only
     // skill is event-driven and the task prefilter must not see it.
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     enqueueRecoveredRun(
       ctx,
       'RESULT is missing the ground-truth evidence block; summary unverifiable'
     );
 
-    await water.handleDirect({ description: 'build a page' }, ctx);
+    await neuron.handleDirect({ description: 'build a page' }, ctx);
 
     // 9 calls: tier prefilter + 2×(plan, vplan, exec, vresult). A skill-
     // prefilter call here would mean event skills leaked into task matching.
@@ -256,11 +256,11 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
     expect(ctx.llm.calls[5]!.systemPrompt).toMatch(/== EVENT RECOVERY SKILL: recover-evidence ==/);
     expect(ctx.llm.calls[5]!.systemPrompt).toMatch(/GROUND TRUTH == block/);
     // Utility signal: the injection counts as a match.
-    expect(skills.loadFor('Hydrogen')[0]!.matches).toBe(1);
+    expect(skills.loadFor('Water')[0]!.matches).toBe(1);
   });
 
   it('does not inject when no trigger matches the complaint', async () => {
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'recover-evidence',
       description: 'd',
       whenToUse: 'w',
@@ -268,26 +268,26 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
       trigger: 'validator rejects result missing ground-truth evidence',
       body: 'irrelevant here',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     enqueueRecoveredRun(ctx, 'plan targets an unknown catalog name');
 
-    await water.handleDirect({ description: 'build a page' }, ctx);
+    await neuron.handleDirect({ description: 'build a page' }, ctx);
     for (const call of ctx.llm.calls) {
       expect(call.systemPrompt ?? '').not.toMatch(/EVENT RECOVERY SKILL/);
     }
-    expect(skills.loadFor('Hydrogen')[0]!.matches).toBeUndefined();
+    expect(skills.loadFor('Water')[0]!.matches).toBeUndefined();
   });
 
   it('distills an event skill from a recovered run (novel event, learning on)', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     enqueueRecoveredRun(ctx, 'RESULT is missing the ground-truth evidence block');
     // onApproved fires the C3 task-skill distillation first (no skill was
@@ -303,9 +303,9 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
       })
     );
 
-    await water.handleDirect({ description: 'build a page' }, ctx);
+    await neuron.handleDirect({ description: 'build a page' }, ctx);
 
-    const learned = skills.loadFor('Hydrogen').find((s) => s.id === 'recover-missing-evidence');
+    const learned = skills.loadFor('Water').find((s) => s.id === 'recover-missing-evidence');
     expect(learned).toBeDefined();
     expect(learned!.trigger).toBe('validator rejects result missing ground-truth evidence');
     expect(learned!.kind).toBe('llm');
@@ -321,24 +321,24 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     // Case 1: clean run (no rejection) — only the C3 task-skill call fires.
     {
-      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
       const ctx = makeCtx();
       ctx.llm.enqueueText(
-        jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+        jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
       );
       ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
       ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
       enqueueExecution(ctx, { output: 'done', summary: 'ok' });
       ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
       ctx.llm.enqueueText('not json, skip the task-skill distillation');
-      await water.handleDirect({ description: 'task one' }, ctx);
+      await neuron.handleDirect({ description: 'task one' }, ctx);
       expect(
         ctx.llm.calls.some((c) => c.userContent.includes('EVENT-DRIVEN recovery skill'))
       ).toBe(false);
     }
     // Case 2: recovered run WITH an injected event skill — confounded, skip.
     {
-      skills.save('Hydrogen', {
+      skills.save('Water', {
         id: 'recover-evidence',
         description: 'd',
         whenToUse: 'w',
@@ -346,16 +346,16 @@ describe('L2 supervise loop — event-skill injection + learning (e2e)', () => {
         trigger: 'validator rejects result missing ground-truth evidence',
         body: 'paste the evidence',
       });
-      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
       const ctx = makeCtx();
       ctx.llm.enqueueText(
-        jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+        jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
       );
       enqueueRecoveredRun(ctx, 'RESULT is missing the ground-truth evidence block');
       // C3 task-skill distillation still fires post-approval; event-skill
       // distillation must NOT (the recovery is confounded with the skill).
       ctx.llm.enqueueText('not json, skip');
-      await water.handleDirect({ description: 'task two' }, ctx);
+      await neuron.handleDirect({ description: 'task two' }, ctx);
       expect(
         ctx.llm.calls.some((c) => c.userContent.includes('EVENT-DRIVEN recovery skill'))
       ).toBe(false);

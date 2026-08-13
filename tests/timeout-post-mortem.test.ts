@@ -24,7 +24,7 @@ function baseRun(events: VizRun['events']): VizRun {
 }
 
 describe('formatTimeoutPostMortem', () => {
-  it('reports the last active atom and the LLM/tool call totals', () => {
+  it('reports the last active agent and the LLM/tool call totals', () => {
     const run = baseRun([
       {
         id: 'l1',
@@ -32,7 +32,7 @@ describe('formatTimeoutPostMortem', () => {
         kind: 'llm',
         role: 'plan',
         model: 'haiku',
-        actor: { name: 'Neuron', tier: 3 },
+        actor: { name: 'Meristem', tier: 3 },
         systemPrompt: 's',
         userContent: 'u',
         response: '{"approved":true}',
@@ -46,7 +46,7 @@ describe('formatTimeoutPostMortem', () => {
         ts: 2,
         kind: 'tool',
         llmEventId: 'l1',
-        actor: { name: 'Hydrogen', tier: 1 },
+        actor: { name: 'Water', tier: 1 },
         name: 'write_file',
         args: { path: 'x' },
         durationMs: 5,
@@ -55,7 +55,7 @@ describe('formatTimeoutPostMortem', () => {
     const out = formatTimeoutPostMortem(run, { budgetMs: 600_000, isTimeout: true });
     expect(out).toMatch(/== post-mortem ==/);
     expect(out).toMatch(/2 total — 1 LLM call\(s\), 1 tool call\(s\)/);
-    expect(out).toMatch(/last active atom: Hydrogen/);
+    expect(out).toMatch(/last active agent: Water/);
     // Suggestion tailored for a timeout path
     expect(out).toMatch(/raise ATOMA_BUILD_TIMEOUT_MS above 600s/);
   });
@@ -85,7 +85,7 @@ describe('formatTimeoutPostMortem', () => {
     const events: VizRun['events'] = [
       {
         id: 'v1', ts: 1, kind: 'llm', role: 'validate-result', model: 'haiku',
-        actor: { name: 'Water', tier: 2 },
+        actor: { name: 'Neuron', tier: 2 },
         systemPrompt: 's', userContent: 'u',
         response: '{"approved":false,"reasoning":"first rejection: 404 on GET /"}',
         stopReason: 'end_turn', durationMs: 5,
@@ -94,7 +94,7 @@ describe('formatTimeoutPostMortem', () => {
       },
       {
         id: 'v2', ts: 2, kind: 'llm', role: 'validate-result', model: 'haiku',
-        actor: { name: 'Water', tier: 2 },
+        actor: { name: 'Neuron', tier: 2 },
         systemPrompt: 's', userContent: 'u',
         response: '{"approved":false,"reasoning":"second rejection: smoke oscillating"}',
         stopReason: 'end_turn', durationMs: 5,
@@ -104,8 +104,8 @@ describe('formatTimeoutPostMortem', () => {
     ];
     const out = formatTimeoutPostMortem(baseRun(events), { budgetMs: 600_000, isTimeout: true });
     expect(out).toMatch(/last validator rejections \(newest first\)/);
-    expect(out).toMatch(/\[RESULT by Water\] second rejection: smoke oscillating/);
-    expect(out).toMatch(/\[RESULT by Water\] first rejection: 404 on GET \//);
+    expect(out).toMatch(/\[RESULT by Neuron\] second rejection: smoke oscillating/);
+    expect(out).toMatch(/\[RESULT by Neuron\] first rejection: 404 on GET \//);
   });
 
   it('emits a non-timeout suggestion line when isTimeout is false', () => {

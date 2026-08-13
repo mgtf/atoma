@@ -60,17 +60,17 @@ describe('formatDecompositionReport', () => {
     const run = baseRun([
       makeLlm({
         role: 'prefilter',
-        actor: { name: 'Neuron', tier: 3 },
+        actor: { name: 'Meristem', tier: 3 },
         response: JSON.stringify({
           kind: 'reuse',
-          target: 'Water',
+          target: 'Neuron',
           confidence: 'high',
-          reasoning: 'Water exactly matches the task scope.',
+          reasoning: 'Neuron exactly matches the task scope.',
         }),
       }),
       makeLlm({
         role: 'prefilter',
-        actor: { name: 'Water', tier: 2 },
+        actor: { name: 'Neuron', tier: 2 },
         response: JSON.stringify({
           kind: 'reuse',
           target: 'Potassium',
@@ -86,10 +86,10 @@ describe('formatDecompositionReport', () => {
 
     const out = formatDecompositionReport(run);
     expect(out).toContain('--- decomposition ---');
-    expect(out).toContain('L3 Neuron — prefilter ➜ reuse Water');
-    expect(out).toContain('Water exactly matches');
-    expect(out).toContain('L2 Water — prefilter ➜ reuse Potassium');
-    expect(out).toContain('L1 Potassium — 4 tool call(s), 1 errored');
+    expect(out).toContain('L3 tissue Meristem — prefilter ➜ reuse Neuron');
+    expect(out).toContain('Neuron exactly matches');
+    expect(out).toContain('L2 cell Neuron — prefilter ➜ reuse Potassium');
+    expect(out).toContain('L1 molecule Potassium — 4 element call(s), 1 errored');
     expect(out).toMatch(/start_static_server × 2 \(1 errored\)/);
     expect(out).toContain('write_file × 1');
     expect(out).toContain('validate_html × 1');
@@ -101,7 +101,7 @@ describe('formatDecompositionReport', () => {
       {
         reasoning: 'split by orthogonal artefacts',
         subtasks: [
-          { description: 'Build the HTML dashboard', preferredChild: 'Water' },
+          { description: 'Build the HTML dashboard', preferredChild: 'Neuron' },
           { description: 'Write the screenshot test', preferredChild: 'Argon' },
         ],
         aggregation: { mode: 'concat' },
@@ -118,15 +118,15 @@ describe('formatDecompositionReport', () => {
       },
     ]);
     const run = baseRun([
-      makeLlm({ role: 'plan', actor: { name: 'Neuron', tier: 3 }, response: l3Response }),
-      makeLlm({ role: 'plan', actor: { name: 'Water', tier: 2 }, branchId: 'branch-a', response: l2Response }),
+      makeLlm({ role: 'plan', actor: { name: 'Meristem', tier: 3 }, response: l3Response }),
+      makeLlm({ role: 'plan', actor: { name: 'Neuron', tier: 2 }, branchId: 'branch-a', response: l2Response }),
     ]);
 
     const out = formatDecompositionReport(run);
-    expect(out).toContain('L3 Neuron — planned 2 subtask(s) (strategy: create)');
-    expect(out).toContain('#1 Build the HTML dashboard  ➜ Water');
+    expect(out).toContain('L3 tissue Meristem — planned 2 subtask(s) (strategy: create)');
+    expect(out).toContain('#1 Build the HTML dashboard  ➜ Neuron');
     expect(out).toContain('#2 Write the screenshot test  ➜ Argon');
-    expect(out).toContain('L2 Water — planned 1 subtask(s) (strategy: reuse → Potassium)');
+    expect(out).toContain('L2 cell Neuron — planned 1 subtask(s) (strategy: reuse → Potassium)');
     expect(out).toContain('#1 Write index.html and validate it  ➜ Potassium');
   });
 
@@ -144,20 +144,20 @@ describe('formatDecompositionReport', () => {
     const run = baseRun([
       makeLlm({
         role: 'plan',
-        actor: { name: 'Water', tier: 2 },
+        actor: { name: 'Neuron', tier: 2 },
         branchId: 'branch-a',
         response: mkL2Plan('subtask A'),
       }),
       makeLlm({
         role: 'plan',
-        actor: { name: 'Water', tier: 2 },
+        actor: { name: 'Neuron', tier: 2 },
         branchId: 'branch-b',
         response: mkL2Plan('subtask B'),
       }),
     ]);
     const out = formatDecompositionReport(run);
-    expect(out).toContain('L2 Water [branch branch-a]');
-    expect(out).toContain('L2 Water [branch branch-b]');
+    expect(out).toContain('L2 cell Neuron [branch branch-a]');
+    expect(out).toContain('L2 cell Neuron [branch branch-b]');
     expect(out).toContain('#1 subtask A');
     expect(out).toContain('#1 subtask B');
   });
@@ -166,17 +166,17 @@ describe('formatDecompositionReport', () => {
     const run = baseRun([
       makeLlm({
         role: 'plan',
-        actor: { name: 'Neuron', tier: 3 },
+        actor: { name: 'Meristem', tier: 3 },
         response: '',
         error: 'overloaded',
       }),
     ]);
     const out = formatDecompositionReport(run);
-    expect(out).toContain('L3 Neuron — plan (unparseable)');
+    expect(out).toContain('L3 tissue Meristem — plan (unparseable)');
     expect(out).toContain('overloaded');
     // Tool + L2 blocks still render (empty) — no exception.
-    expect(out).toContain('L2: (no planning activity recorded)');
-    expect(out).toContain('L1 tool usage: (no tool invocations recorded)');
+    expect(out).toContain('L2 cell: (no planning activity recorded)');
+    expect(out).toContain('L1 molecule element usage: (no element invocations recorded)');
   });
 
   it('caps the per-L1 tool sample and reports the omitted count', () => {
@@ -190,18 +190,18 @@ describe('formatDecompositionReport', () => {
       })
     );
     const out = formatDecompositionReport(baseRun(events), { toolExcerptLimit: 3 });
-    expect(out).toContain('L1 Potassium — 12 tool call(s)');
+    expect(out).toContain('L1 molecule Potassium — 12 element call(s)');
     expect(out).toContain('first 3 call(s):');
     expect(out).toContain('9 more omitted');
   });
 
   it('ignores tool events attributed to tier 2/3 actors (L2 fallback writes)', () => {
     const run = baseRun([
-      makeTool({ name: 'write_file', args: { path: 'index.html' }, actor: { name: 'Water', tier: 2 } }),
+      makeTool({ name: 'write_file', args: { path: 'index.html' }, actor: { name: 'Neuron', tier: 2 } }),
       makeTool({ name: 'write_file', args: { path: 'index.html' }, actor: { name: 'Potassium', tier: 1 } }),
     ]);
     const out = formatDecompositionReport(run);
-    expect(out).toContain('L1 Potassium — 1 tool call(s)');
-    expect(out).not.toMatch(/L1 Water/);
+    expect(out).toContain('L1 molecule Potassium — 1 element call(s)');
+    expect(out).not.toMatch(/L1 molecule Neuron/);
   });
 });

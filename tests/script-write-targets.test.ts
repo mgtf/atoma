@@ -18,7 +18,7 @@ import {
  * is inert on the whole class it was built for.
  *
  * The fixture below is the SHAPE of the real round-7 compiled body
- * (`Lithium/recheck-invocations-vs-probes`): it WRITES the manifest and only
+ * (`Ammonia/recheck-invocations-vs-probes`): it WRITES the manifest and only
  * READS the README. That distinction is the entire point.
  */
 

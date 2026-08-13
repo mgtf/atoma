@@ -37,7 +37,28 @@ const routes: Record<string, unknown> = {
     startedAt: '2026-08-13T10:00:00.000Z',
     endedAt: '2026-08-13T10:01:00.000Z',
     durationMs: 60_000,
-    events: [],
+    events: [
+      {
+        id: 'validation-1',
+        ts: Date.parse('2026-08-13T10:00:30.000Z'),
+        kind: 'llm',
+        role: 'validate-result',
+        actor: { tier: 3, name: 'Meristem' },
+        child: { tier: 2, name: 'Tracheid' },
+        model: 'zai:glm-test',
+        systemPrompt: 'Validate the result.',
+        userContent: 'Check the generated files.',
+        response: JSON.stringify({
+          approved: true,
+          reasoning: 'Every requested document passed.',
+          modifications: {
+            preferredChild: 'Ammonia',
+          },
+        }),
+        durationMs: 1000,
+        costUsd: 0.01,
+      },
+    ],
     initialTypes: [],
     totals: {
       calls: 1,
@@ -64,7 +85,7 @@ const routes: Record<string, unknown> = {
       {
         tier: 1,
         ordinal: 1,
-        name: 'Hydrogen',
+        name: 'Water',
         description: 'Web component builder',
         systemPrompt: 'Build verified web components.',
         tools: ['write_file'],
@@ -78,8 +99,8 @@ const routes: Record<string, unknown> = {
       },
     ],
   },
-  '/api/skills': [{ l1Name: 'Hydrogen', count: 1 }],
-  '/api/skills/Hydrogen': [
+  '/api/skills': [{ l1Name: 'Water', count: 1 }],
+  '/api/skills/Water': [
     {
       id: 'build-widget',
       description: 'Build a widget',
@@ -90,7 +111,7 @@ const routes: Record<string, unknown> = {
       updatedAt: '2026-08-13T10:00:00.000Z',
     },
   ],
-  '/api/skills/Hydrogen/build-widget': {
+  '/api/skills/Water/build-widget': {
     id: 'build-widget',
     description: 'Build a widget',
     whenToUse: 'The task asks for a widget',
@@ -197,16 +218,41 @@ function renderApp() {
 }
 
 describe('the React visualizer shell', () => {
+  it('renders recursive LLM JSON as localized semantic fields', async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    await screen.findByDisplayValue('Component migration');
+    await waitFor(() => {
+      expect(
+        document.querySelector('[data-event-id="validation-1"]')
+      ).toBeInstanceOf(HTMLButtonElement);
+    });
+    const eventCard = document.querySelector('[data-event-id="validation-1"]');
+    if (!(eventCard instanceof HTMLButtonElement)) throw new Error('validation event missing');
+    await user.click(eventCard);
+    await user.click(screen.getByRole('tab', { name: 'Response' }));
+
+    expect(await screen.findByText('Decision')).toBeInTheDocument();
+    expect(screen.getByText('✓ Approved')).toBeInTheDocument();
+    expect(screen.getByText('Reasoning')).toBeInTheDocument();
+    expect(screen.getByText('Every requested document passed.')).toBeInTheDocument();
+    expect(screen.getByText('Requested changes')).toBeInTheDocument();
+    expect(screen.getByText('Preferred agent')).toBeInTheDocument();
+    expect(screen.getByText('Ammonia')).toBeInTheDocument();
+    expect(screen.queryByText(/"approved"/)).not.toBeInTheDocument();
+  });
+
   it('navigates every API-backed view through accessible MUI tabs', async () => {
     const user = userEvent.setup();
     renderApp();
 
     expect(await screen.findByDisplayValue('Component migration')).toBeInTheDocument();
     expect(await screen.findByText('Render a component application')).toBeInTheDocument();
-    expect(await screen.findByText(/zai:glm-test/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/zai:glm-test/)).length).toBeGreaterThanOrEqual(1);
 
     await user.click(screen.getByRole('tab', { name: 'Registry' }));
-    expect((await screen.findAllByText('Hydrogen')).length).toBeGreaterThanOrEqual(2);
+    expect((await screen.findAllByText('Water')).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText('Web component builder')).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: 'Skills' }));

@@ -19,7 +19,7 @@ describe('prefilterStrategy', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         reasoning: 'matches',
       })
@@ -28,13 +28,13 @@ describe('prefilterStrategy', () => {
       ctx,
       task: { description: 'fetch a url' },
       catalog: [
-        { name: 'Hydrogen', description: 'fetches arbitrary URLs' },
-        { name: 'Helium', description: 'writes files' },
+        { name: 'Water', description: 'fetches arbitrary URLs' },
+        { name: 'Methane', description: 'writes files' },
       ],
     });
     expect(outcome).toEqual({
       kind: 'reuse',
-      target: 'Hydrogen',
+      target: 'Water',
       confidence: 'high',
       reasoning: 'matches',
     });
@@ -49,7 +49,7 @@ describe('prefilterStrategy', () => {
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 'do a weird thing' },
-      catalog: [{ name: 'Hydrogen', description: 'fetches URLs' }],
+      catalog: [{ name: 'Water', description: 'fetches URLs' }],
     });
     expect(outcome?.kind).toBe('escalate');
   });
@@ -67,7 +67,7 @@ describe('prefilterStrategy', () => {
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 't' },
-      catalog: [{ name: 'Hydrogen', description: 'h' }],
+      catalog: [{ name: 'Water', description: 'h' }],
     });
     expect(outcome?.kind).toBe('escalate');
   });
@@ -77,7 +77,7 @@ describe('prefilterStrategy', () => {
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'low',
         reasoning: 'only available option but HTML-centric, task is Node/REST',
       })
@@ -85,7 +85,7 @@ describe('prefilterStrategy', () => {
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 'build a Node REST API' },
-      catalog: [{ name: 'Hydrogen', description: 'writes HTML, validates via headless browser' }],
+      catalog: [{ name: 'Water', description: 'writes HTML, validates via headless browser' }],
     });
     expect(outcome?.kind).toBe('escalate');
     if (outcome?.kind === 'escalate') {
@@ -96,12 +96,12 @@ describe('prefilterStrategy', () => {
   it('escalates when Haiku picks reuse but omits confidence (conservative default)', async () => {
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', reasoning: 'plausible' })
+      jsonText({ kind: 'reuse', target: 'Water', reasoning: 'plausible' })
     );
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 't' },
-      catalog: [{ name: 'Hydrogen', description: 'generic builder' }],
+      catalog: [{ name: 'Water', description: 'generic builder' }],
     });
     expect(outcome?.kind).toBe('escalate');
   });
@@ -112,7 +112,7 @@ describe('prefilterStrategy', () => {
     const outcome = await prefilterStrategy({
       ctx,
       task: { description: 't' },
-      catalog: [{ name: 'Hydrogen', description: 'h' }],
+      catalog: [{ name: 'Water', description: 'h' }],
     });
     expect(outcome?.kind).toBe('escalate');
   });
@@ -123,7 +123,7 @@ describe('prefilterStrategy', () => {
     await prefilterStrategy({
       ctx,
       task: { description: 't' },
-      catalog: [{ name: 'Hydrogen', description: 'h' }],
+      catalog: [{ name: 'Water', description: 'h' }],
     });
     const params = ctx.llm.calls[0]!.params;
     expect(params?.temperature).toBe(0);

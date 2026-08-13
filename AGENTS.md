@@ -16,6 +16,7 @@ throughout.
 | Section | When you need it |
 |---|---|
 | Commands | run/inspect anything (`build`, `burnin`, `viz`, `registry`, `skills`) |
+| Domain taxonomy | rank names, tool elements, persisted-name migration |
 | Cost discipline | **read before touching ANY LLM call site** |
 | Observability | metrics, viz, burn-in ledger, run traces |
 | Architecture invariants | before changing the supervision loop / tiers / registry |
@@ -32,8 +33,59 @@ throughout.
 
 ## What this is
 
-`atoma` is a TypeScript framework for three-tier LLM agent orchestration. Every atom
-is an LLM-backed agent. See `README.md` for the external pitch.
+`atoma` is a TypeScript framework for three-tier LLM agent orchestration.
+See `README.md` for the external pitch.
+
+## Domain taxonomy
+
+The public composition model is **Element → Molecule → Cell → Tissue**:
+
+- **Elements are tools**, the atomic capabilities (`write_file`, `read_file`,
+  `run_shell`, etc.). Invocation names are immutable wire contracts;
+  periodic-table identities are metadata from
+  `src/contracts/toolTaxonomy.ts` (`H · write_file`, `Li · read_file`).
+- **L1 agents are Molecules**. They are the only agent rank that invokes
+  elements.
+- **L2 agents are Cells**. They route and validate molecule work.
+- **L3 agents are botanical Tissues**. They decompose top-level goals; names
+  (`Meristem`, `Xylem`, `Phloem`, …) deliberately avoid the medical/organ
+  metaphor and redundant `Tissue` suffixes.
+
+The curated name pools deliberately follow expected registry cardinality:
+**118 molecules, 40 cells, 20 tissues**. Every allocator remains total with a
+`<Rank><n>` fallback, but the recognisable namespace is largest where the
+registry grows most. Migration keeps the OLD list boundaries frozen
+(40 old molecules, 20 old cells), so a legacy `Molecule41` or `Cell21` maps
+correctly even though the new target lists are longer.
+
+Numeric tiers remain **1/2/3** in the database, traces, model env vars and
+class names (`L1Atom`/`L2Atom`/`L3Atom`) because those are stable technical
+contracts, not display taxonomy. Likewise `Tool`, `AtomRegistry` and
+`atom_types` remain implementation names. Do not rename tool invocations to
+element names: taxonomy augments `read_file`; it never replaces it.
+The 13 `atoma_*` MCP host tools are control/read APIs and are NOT L1
+elements; the element catalogue applies to sandbox capabilities exposed to
+molecules.
+The public API additionally exports taxonomy-first aliases
+`Agent`, `AgentRegistry`, `MoleculeAgent`, `CellAgent` and `TissueAgent`;
+the legacy symbols remain identical references for compatibility.
+
+Taxonomy v2 moves live names by ordinal:
+`Hydrogen→Water` (L1), `Water→Tracheid` (L2), `Neuron→Meristem` (L3), and the
+same rule for every later ordinal. `registry migrate-taxonomy` is dry-run by
+default; `--apply` backs up the DB and skill tree, renames live rows,
+provenance/ledger entities and L1 skill namespaces, archives the prior prompt,
+enriches tool declarations, resets atom-type trust (the prompt changed), and
+clears the disposable prefilter cache. Historical trace payloads are not
+rewritten: they record the identity that actually ran. Never perform only the
+SQL half — skill namespaces and ledger entities are part of the identity.
+For the same reason, dated incident narratives below retain the pre-v2 names
+they observed; current commands and filesystem paths use the migrated names.
+The viz projects those immutable traces at the typed client boundary via
+`projectRunTaxonomy`: structured snapshots, actor/child refs, skill owners and
+`producedBy` use current names in both GPU and MUI clients, while raw
+prompt/response/result prose stays byte-honest. Run lanes render the current
+rank labels, not bare `L1/L2/L3`. Never rewrite trace files to achieve this.
 
 ## Commands
 
@@ -54,13 +106,15 @@ npm run run:build:dev "<goal>"        # source-level development path
 npm run mcp                           # compiled dist/mcp/stdio.js
 npm run mcp:dev                       # source-level MCP entrypoint
 
-npm run registry -- list              # inspect persisted atom types + counters
+npm run registry -- list              # inspect persisted agent types + counters
 npm run registry -- list --tier 2
-npm run registry -- show Hydrogen
+npm run registry -- show Water
 npm run registry -- top --by failure  # sort by failures; also success|ratio
-npm run registry -- history Hydrogen  # archived versions: prompt head, tools, who/when/why
-npm run registry -- rollback Hydrogen --to 2   # restore v2 content as a NEW live version
+npm run registry -- history Water     # archived versions: prompt head, tools, who/when/why
+npm run registry -- rollback Water --to 2   # restore v2 content as a NEW live version
 npm run registry -- remove Glucose      # delete dynamic-creation debris
+npm run registry -- migrate-taxonomy    # dry-run legacy → v2 identities
+npm run registry -- migrate-taxonomy --apply  # backup + migrate DB and skills
 npm run registry -- --db ./archived.db list      # override the one store (rarely needed)
 
 npm run ledger -- tail 20             # the lifecycle_events table, newest last
@@ -71,13 +125,13 @@ npm run skills -- list                # all skills: kind, counters, refusal stam
 npm run burnin                        # batch tasks through the REAL pipeline; appends
                                       # per-run economics to burnin/results.csv
 npm run burnin -- tasks.json --family cli --out custom.csv --timeout 900000
-npm run skills -- list --l1 Helium
-npm run skills -- show Helium scaffold-node-ssr-sqlite-api
-npm run skills -- reset Helium scaffold-node-ssr-sqlite-api  # zero counters + clear refusal
-npm run skills -- stats [--l1 Helium] [--sim 0.5]  # utility view: matches vs driven,
+npm run skills -- list --molecule Methane
+npm run skills -- show Methane scaffold-node-ssr-sqlite-api
+npm run skills -- reset Methane scaffold-node-ssr-sqlite-api  # zero counters + clear refusal
+npm run skills -- stats [--molecule Methane] [--sim 0.5]  # utility view: matches vs driven,
                                       # free-ride gap, lifecycle status, merge candidates
-npm run skills -- drop Helium <id> [--force]       # delete a skill (--force if successes>0)
-npm run skills -- merge Helium <keep> <absorb>     # keeper absorbs when_to_use; absorbed deleted
+npm run skills -- drop Methane <id> [--force]       # delete a skill (--force if successes>0)
+npm run skills -- merge Methane <keep> <absorb>     # keeper absorbs when_to_use; absorbed deleted
 
 npm run curriculum -- --dry-run       # show lifecycle targets, no LLM call
 npm run curriculum                    # ONE Sonnet-tier call → burnin/tasks-curriculum.json
@@ -1815,7 +1869,7 @@ re-exports all the historical names so old imports keep working.
   counter-preserving; a genuinely changed seed prompt re-aligns the
   persisted row and legitimately resets trust), or create otherwise.
   the build profile applies the same conditional-refresh pattern to the
-  Neuron L3 seed prompt.
+  Meristem L3 seed prompt.
 - **Verification is READ-ONLY by design: the supervisor never replays the
   child's commands.** It may run FIXED, idempotent probes it owns
   (`validate_html` loading a URL; the file read-back), but it does not execute
@@ -2448,7 +2502,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   never names `output`/`summary`. `parseScriptEnvelope` alone rejects
   off-contract scripts only AFTER they have run and had their side
   effects. Concrete case: the hand-authored
-  `skills/Lithium/scaffold-package-json` reads argv POSITIONALLY
+  `skills/Ammonia/scaffold-package-json` reads argv POSITIONALLY
   (`name`, `version`, `description...`) whereas direct dispatch passes
   ONE arg — the JSON-encoded subtask description. Dispatching it wrote
   a `package.json` whose `name` was the whole task sentence, exited 0,
@@ -2722,7 +2776,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   otherwise-correct output. Revisit only if a post-record_probe trace contains
   a machine-written strict-prefix record; none has.
 - **Not every skill is compilable, and matching breadth is the tell.**
-  `Helium/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
+  `Methane/probe-crud-json-api-lifecycle` sits at 7✓ and stays `kind: llm`
   on purpose. Its four observed prefilter matches were: one genuine
   verification, and THREE authoring subtasks ("write README.md", "write
   probe.js" ×2). A compiled script would print a valid envelope and write
@@ -2743,7 +2797,7 @@ LEARNED PATTERNS lives in `./skills/<l1-name>/<skill-id>/`.
   successes`: several were free-ride credits), (b) risked `failures = 1`
   → permanent promotion block if the first post-save match was a live-API
   subtask, and (c) killed the recipe that serves 60% of the family's real
-  traffic. `Helium/replay-probe-harness` is the sibling: born 0/0,
+  traffic. `Methane/replay-probe-harness` is the sibling: born 0/0,
   manifest-first, its `when_to_use` names the observed phrasing ("run
   the test script") and structurally excludes live-API exercising
   (per-route enumerations) — clauses the prefilter can actually evaluate
@@ -4251,6 +4305,28 @@ second is the kind of thing that gets acted on:
   score (same `op: 'inject'`, provenance read from the reasoning). The
   run summary gains a `Garde-fous` card tallying both guards, and the
   lifecycle digest counts mid-run recoveries.
+- **Detail panes render JSON as information, not source text.**
+  `src/viz/client/structured-detail.ts` is the one recursive projection used
+  by both MUI and the GPU renderer: object keys become human labels,
+  arrays/objects become nested sections, known fields such as
+  `preferredChild` are localized, and booleans such as `approved`, `ok`,
+  `match` and `activeSkillFollowed` become semantic success/error/warning
+  badges. Unknown keys degrade through camel/snake-case humanization and
+  unparseable responses remain raw code, never guessed. The GPU detail pane
+  owns an independent pointer-bounded scroll + scrollbar so a deep object
+  does not steal the timeline scroll or disappear under its mask. English and
+  French catalogs are both pinned by `tests/viz-structured-detail.test.ts`;
+  the React component test drives a real nested verdict response.
+- **Registry events distinguish initiator from target.** `RecordingRegistry`
+  writes `actor` from `createdBy`/`modifiedBy` or the supervisor passed to
+  `recordSuccess`/`recordFailure`, and `child` is the type being created,
+  patched, branched, credited or blamed. L2/L3 counter hooks pass their own
+  names explicitly. The client reconstructs both fields for old
+  create/patch/branch events and always reconstructs the target of old counter
+  events from snapshots; it deliberately leaves the initiator absent on an
+  old `recordSuccess`/`recordFailure` that never recorded `by` — chronological
+  guessing would fabricate causality. Covered by
+  `tests/registry-viz-actors.test.ts` and the legacy projection fixture.
 - **A prefilter cache hit gets its own event (`kind: 'cache'`).** It
   REPLACES an LLM call, so with no event the timeline just shows one
   fewer call and the run reads as cheaper for no stated reason — the

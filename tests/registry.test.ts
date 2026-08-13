@@ -12,7 +12,7 @@ function makeRegistry(): AtomRegistry {
 }
 
 const baseSeed = {
-  description: 'test element',
+  description: 'test molecule',
   systemPrompt: 'be terse',
   tools: [],
   params: { temperature: 0 },
@@ -25,26 +25,26 @@ describe('AtomRegistry', () => {
     r = makeRegistry();
   });
 
-  it('assigns Hydrogen for the first L1 type', () => {
+  it('assigns Water for the first L1 molecule', () => {
     const t = r.create(1, baseSeed);
-    expect(t.name).toBe('Hydrogen');
+    expect(t.name).toBe('Water');
     expect(t.ordinal).toBe(1);
     expect(t.tier).toBe(1);
     expect(t.version).toBe(1);
   });
 
-  it('assigns Helium, Lithium for subsequent L1 types', () => {
+  it('assigns Methane, Ammonia for subsequent L1 molecules', () => {
     r.create(1, baseSeed);
     const he = r.create(1, baseSeed);
     const li = r.create(1, baseSeed);
-    expect(he.name).toBe('Helium');
-    expect(li.name).toBe('Lithium');
+    expect(he.name).toBe('Methane');
+    expect(li.name).toBe('Ammonia');
   });
 
-  it('assigns Water / Methane for L2, Neuron for L3', () => {
-    expect(r.create(2, { ...baseSeed, description: 'l2-a' }).name).toBe('Water');
-    expect(r.create(2, { ...baseSeed, description: 'l2-b' }).name).toBe('Methane');
-    expect(r.create(3, { ...baseSeed, description: 'l3-a' }).name).toBe('Neuron');
+  it('assigns Tracheid / Sclereid for L2, Meristem for L3', () => {
+    expect(r.create(2, { ...baseSeed, description: 'l2-a' }).name).toBe('Tracheid');
+    expect(r.create(2, { ...baseSeed, description: 'l2-b' }).name).toBe('Sclereid');
+    expect(r.create(3, { ...baseSeed, description: 'l3-a' }).name).toBe('Meristem');
   });
 
   it('patch increments version and archives the prior state', () => {
@@ -97,28 +97,28 @@ describe('AtomRegistry', () => {
 
   it('branch creates a new type with the next available name', () => {
     r.create(1, baseSeed);
-    const branched = r.branch('Hydrogen', { systemPromptAppend: 'extra' }, 'tester');
-    expect(branched.name).toBe('Helium');
+    const branched = r.branch('Water', { systemPromptAppend: 'extra' }, 'tester');
+    expect(branched.name).toBe('Methane');
     expect(branched.tier).toBe(1);
     expect(branched.systemPrompt).toContain('extra');
   });
 
   it('branch respects an overrideName when no collision', () => {
     r.create(1, baseSeed);
-    const b = r.branch('Hydrogen', { systemPromptAppend: 'x' }, 'tester', 'CustomName');
+    const b = r.branch('Water', { systemPromptAppend: 'x' }, 'tester', 'CustomName');
     expect(b.name).toBe('CustomName');
     expect(b.tier).toBe(1);
   });
 
   it('branch auto-suffixes overrideName on collision instead of throwing', () => {
     r.create(1, baseSeed);
-    const first = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'Oxide');
+    const first = r.branch('Water', { systemPromptAppend: 'a' }, 'tester', 'Oxide');
     expect(first.name).toBe('Oxide');
 
-    const second = r.branch('Hydrogen', { systemPromptAppend: 'b' }, 'tester', 'Oxide');
+    const second = r.branch('Water', { systemPromptAppend: 'b' }, 'tester', 'Oxide');
     expect(second.name).toBe('Oxide-2');
 
-    const third = r.branch('Hydrogen', { systemPromptAppend: 'c' }, 'tester', 'Oxide');
+    const third = r.branch('Water', { systemPromptAppend: 'c' }, 'tester', 'Oxide');
     expect(third.name).toBe('Oxide-3');
 
     // Ordinals must still be unique within the tier.
@@ -131,15 +131,15 @@ describe('AtomRegistry', () => {
     r.create(2, { ...baseSeed, description: 'molecule' });
     r.create(1, baseSeed);
     const tier1 = r.listByTier(1);
-    expect(tier1.map((t) => t.name)).toEqual(['Hydrogen', 'Helium']);
+    expect(tier1.map((t) => t.name)).toEqual(['Water', 'Methane']);
     expect(r.listByTier(2).length).toBe(1);
   });
 
   it('getByName returns the type regardless of tier', () => {
     r.create(1, baseSeed);
     r.create(2, { ...baseSeed, description: 'water-ish' });
-    expect(r.getByName('Water')?.tier).toBe(2);
-    expect(r.getByName('Hydrogen')?.tier).toBe(1);
+    expect(r.getByName('Tracheid')?.tier).toBe(2);
+    expect(r.getByName('Water')?.tier).toBe(1);
   });
 
   describe('history + rollback (roll-forward to the past)', () => {
@@ -214,7 +214,7 @@ describe('AtomRegistry', () => {
     it('branch auto-suffixes semantic-duplicate overrideNames (case / punctuation variants)', () => {
       r.create(1, baseSeed);
       const a = r.branch(
-        'Hydrogen',
+        'Water',
         { systemPromptAppend: 'a' },
         'tester',
         'Minesweeper-WebGL'
@@ -231,7 +231,7 @@ describe('AtomRegistry', () => {
       // semantic-duplicate behaviour under test here is unchanged; only the
       // fixture had to become a name the whole system can represent.
       const b = r.branch(
-        'Hydrogen',
+        'Water',
         { systemPromptAppend: 'b' },
         'tester',
         'minesweeper_webgl'
@@ -248,17 +248,17 @@ describe('AtomRegistry', () => {
       // SkillRegistry.sanitise the moment any skill was loaded for it. The
       // two layers now agree on what a name may be.
       r.create(1, baseSeed);
-      const b = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'minesweeper webgl');
+      const b = r.branch('Water', { systemPromptAppend: 'a' }, 'tester', 'minesweeper webgl');
       expect(b.name).not.toContain(' ');
       expect(isSafeAtomName(b.name)).toBe(true);
     });
 
     it('branch on a genuinely different name is untouched', () => {
       r.create(1, baseSeed);
-      r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'Minesweeper-WebGL');
+      r.branch('Water', { systemPromptAppend: 'a' }, 'tester', 'Minesweeper-WebGL');
       // Different word order → different normalized key → no collision.
       const b = r.branch(
-        'Hydrogen',
+        'Water',
         { systemPromptAppend: 'b' },
         'tester',
         'WebGLMinesweeper'
@@ -285,7 +285,7 @@ describe('AtomRegistry', () => {
       insert.run(1, 2, 'minesweeper_webgl', 'd', 's', '[]', '{}', 't', now);
       insert.run(1, 3, 'MINESWEEPER WEBGL', 'd', 's', '[]', '{}', 't', now);
       insert.run(1, 4, 'WebGLMinesweeper', 'd', 's', '[]', '{}', 't', now); // different key → lone
-      insert.run(2, 1, 'Water', 'd', 's', '[]', '{}', 't', now);
+      insert.run(2, 1, 'Tracheid', 'd', 's', '[]', '{}', 't', now);
 
       const groups = r.findDuplicateGroups();
       const mine = groups.find(
@@ -297,7 +297,7 @@ describe('AtomRegistry', () => {
       // the duplicate group — the pragmatic normalization is order-sensitive
       // by design.
       expect(mine!.types.some((t) => t.name === 'WebGLMinesweeper')).toBe(false);
-      // Water is alone on its tier → no group at all.
+      // Tracheid is alone on its tier → no group at all.
       expect(groups.some((g) => g.tier === 2)).toBe(false);
     });
 
@@ -331,15 +331,15 @@ describe('AtomRegistry', () => {
     it('mergeInto refuses to cross tier boundaries', () => {
       r.create(1, baseSeed);
       r.create(2, { ...baseSeed, description: 'm' });
-      expect(() => r.mergeInto('Water', ['Hydrogen'])).toThrow(/cannot merge/);
+      expect(() => r.mergeInto('Tracheid', ['Water'])).toThrow(/cannot merge/);
     });
 
     it('branch on a tier with no existing types does not crash on the normalized-key probe', () => {
       // Regression guard: a fresh empty tier must let `branch` succeed
       // without attempting to compare against an empty key set.
       r.create(2, { ...baseSeed, description: 'l2-seed' });
-      // Tier 2 is the only populated tier — branching on Water should work.
-      const b = r.branch('Water', { systemPromptAppend: 'x' }, 't', 'NovelName');
+      // Tier 2 is the only populated tier — branching on Tracheid should work.
+      const b = r.branch('Tracheid', { systemPromptAppend: 'x' }, 't', 'NovelName');
       expect(b.name).toBe('NovelName');
     });
 
@@ -371,23 +371,23 @@ describe('AtomRegistry', () => {
     it('branch sets description to "<core> (branched from <source>)" — single suffix only', () => {
       r.create(1, baseSeed);
       const b1 = r.branch(
-        'Hydrogen',
+        'Water',
         { systemPromptAppend: 'a' },
         'tester',
         'ChildA'
       );
-      expect(b1.description).toBe('test element (branched from Hydrogen)');
+      expect(b1.description).toBe('test molecule (branched from Water)');
 
       // Branching again from the already-branched type must NOT produce
-      // "(branched from Hydrogen) (branched from ChildA)". The
-      // Hydrogen-provenance tail of the source is peeled first.
+      // "(branched from Water) (branched from ChildA)". The
+      // Water-provenance tail of the source is peeled first.
       const b2 = r.branch(
         'ChildA',
         { systemPromptAppend: 'b' },
         'tester',
         'ChildB'
       );
-      expect(b2.description).toBe('test element (branched from ChildA)');
+      expect(b2.description).toBe('test molecule (branched from ChildA)');
       expect(
         (b2.description.match(/\(branched from/g) ?? []).length
       ).toBe(1);
@@ -409,7 +409,7 @@ describe('AtomRegistry', () => {
 
     it('descriptionReplace preserves an existing (branched from X) tail', () => {
       r.create(1, baseSeed);
-      const b = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 'tester', 'Child');
+      const b = r.branch('Water', { systemPromptAppend: 'a' }, 'tester', 'Child');
       const patched = r.patch(
         b.name,
         { descriptionReplace: 'NEW purpose' },
@@ -418,7 +418,7 @@ describe('AtomRegistry', () => {
       );
       // Core text replaced; branch-provenance tail kept so we don't lose
       // ancestry info.
-      expect(patched.description).toBe('NEW purpose (branched from Hydrogen)');
+      expect(patched.description).toBe('NEW purpose (branched from Water)');
     });
 
     it('description-only patch bumps the version (it\'s meaningful, not a no-op)', () => {

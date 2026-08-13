@@ -219,11 +219,11 @@ describe('L3Atom.createSubtaskL2 — capability-first description', () => {
     const any2 = l2 as any;
     any2.planChildAliases.clear();
     const first = any2.resolveL1ForSubtask(
-      { description: 'write module A', preferredChild: 'Carbon' },
+      { description: 'write module A', preferredChild: 'Sucrose' },
       strategy, { description: 'parent' }, 0, ctx
     );
     const second = any2.resolveL1ForSubtask(
-      { description: 'write module B', preferredChild: 'Carbon' },
+      { description: 'write module B', preferredChild: 'Sucrose' },
       strategy, { description: 'parent' }, 1, ctx
     );
     expect(second.name).toBe(first.name);

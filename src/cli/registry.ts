@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * atoma registry CLI — inspect persisted atom types and their usage history.
+ * atoma registry CLI — inspect persisted agent types and their usage history.
  *
  * Usage:
  *   tsx src/cli/registry.ts list [--tier 1|2|3] [--db path]
@@ -10,11 +10,22 @@
  * Defaults: --db from ATOMA_DB_PATH env or ./atoma.db; --by success for `top`.
  */
 
+import { cpSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 import { openDb } from '../registry/db.js';
-import { legacyStoreNotice, storeDbPath } from '../core/stores.js';
+import { legacyStoreNotice, skillsDirPath, storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
+import type { DB } from '../registry/db.js';
+import {
+  applyTaxonomyMigration,
+  assertCurrentTaxonomy,
+  planTaxonomyMigration,
+} from '../registry/taxonomyMigration.js';
+import { taxonomyForTier } from '../core/taxonomy.js';
+import { elementForTool } from '../contracts/toolTaxonomy.js';
 import {
   PREFILTER_CACHE_MAX_AGE_MS,
   PREFILTER_CACHE_MAX_ENTRIES,
@@ -33,6 +44,7 @@ interface Args {
     | 'remove'
     | 'history'
     | 'rollback'
+    | 'migrate-taxonomy'
     | 'cache'
     | 'help';
   positional: string[];
@@ -42,7 +54,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const { command, positional, flags } = parseCliArgs(argv);
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'cache', 'help'].includes(command)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'migrate-taxonomy', 'cache', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -84,6 +96,7 @@ function renderTable(headers: string[], rows: string[][]): string {
 function formatType(t: AtomType): string[] {
   return [
     String(t.tier),
+    taxonomyForTier(t.tier).label,
     t.name,
     String(t.ordinal),
     `v${t.version}`,
@@ -100,6 +113,7 @@ function formatType(t: AtomType): string[] {
 
 const tableHeaders = [
   'tier',
+  'rank',
   'name',
   'ord',
   'v',
@@ -142,6 +156,59 @@ function cmdCache(clear: boolean): void {
   --clear empties it. The cache is disposable: correctness lives in the KEY.`);
 }
 
+function taxonomyBackup(db: DB, dbPath: string, skillsDir: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dir = join(homedir(), '.atoma', 'archive', `pre-taxonomy-v2-${stamp}`);
+  mkdirSync(dir, { recursive: true });
+  if (dbPath !== ':memory:') {
+    db.pragma('wal_checkpoint(FULL)');
+    copyFileSync(resolve(dbPath), join(dir, basename(dbPath)));
+  }
+  if (existsSync(skillsDir)) {
+    cpSync(resolve(skillsDir), join(dir, 'skills'), { recursive: true });
+  }
+  return dir;
+}
+
+function cmdMigrateTaxonomy(
+  db: DB,
+  dbPath: string,
+  skillsDir: string,
+  apply: boolean
+): void {
+  const plan = planTaxonomyMigration(db, skillsDir);
+  if (plan.alreadyCurrent) {
+    console.log('registry taxonomy is already current (v2).');
+    return;
+  }
+
+  console.log(
+    `taxonomy migration: Element(tool) → Molecule(L1) → Cell(L2) → Tissue(L3)`
+  );
+  for (const rename of plan.renames) {
+    console.log(`  tier ${rename.tier} #${rename.ordinal}: ${rename.from} → ${rename.to}`);
+  }
+  for (const move of plan.skillNamespaces) {
+    console.log(`  skills: ${move.from}/ → ${move.to}/`);
+  }
+  console.log(
+    `  ${plan.affectedTypes} live type(s) will receive migrated prompts/tool metadata and reset trust.`
+  );
+
+  if (!apply) {
+    console.log('\ndry run only; re-run with --apply to create a backup and migrate.');
+    return;
+  }
+
+  const backup = taxonomyBackup(db, dbPath, skillsDir);
+  const result = applyTaxonomyMigration(db, skillsDir, plan);
+  console.log(`\nbackup: ${backup}`);
+  console.log(
+    `migrated ${result.renamedTypes} type name(s), ${result.renamedSkillNamespaces} skill namespace(s); ` +
+      `reset ${result.resetTypes} type trust record(s), cleared ${result.clearedPrefilterEntries} cached decision(s).`
+  );
+}
+
 function cmdList(registry: AtomRegistry, tier: Tier | undefined): void {
   const tiers: Tier[] = tier ? [tier] : [1, 2, 3];
   const rows: string[][] = [];
@@ -156,19 +223,30 @@ function cmdList(registry: AtomRegistry, tier: Tier | undefined): void {
 function cmdShow(registry: AtomRegistry, name: string, dbPath: string): void {
   const type = registry.getByName(name);
   if (!type) {
-    console.error(`no atom type named "${name}" in ${dbPath}`);
+    console.error(`no agent type named "${name}" in ${dbPath}`);
     // The "did you mean the other DB?" hint is gone with the second DB: there
     // is one store now (src/core/stores.ts). `list` is the remaining answer.
     console.error(`  hint: run \`list\` to see what this store holds.`);
     process.exit(1);
   }
-  console.log(`${type.name}  (tier ${type.tier}, ordinal ${type.ordinal}, v${type.version})`);
+  console.log(
+    `${type.name}  (${taxonomyForTier(type.tier).label}, tier ${type.tier}, ordinal ${type.ordinal}, v${type.version})`
+  );
   console.log(`  description : ${type.description}`);
   console.log(`  created by  : ${type.createdBy}`);
   console.log(`  created at  : ${type.createdAt}`);
   console.log(`  successes   : ${type.successes}`);
   console.log(`  failures    : ${type.failures}`);
-  console.log(`  tools       : ${type.tools.map((x) => x.name).join(', ') || '(none)'}`);
+  console.log(
+    `  elements    : ${
+      type.tools
+        .map((tool) => {
+          const element = tool.element ?? elementForTool(tool.name);
+          return element ? `${element.symbol}:${tool.name}` : tool.name;
+        })
+        .join(', ') || '(none)'
+    }`
+  );
   console.log(`  params      : ${JSON.stringify(type.params)}`);
   console.log(`  system_prompt:`);
   for (const line of type.systemPrompt.split('\n')) console.log(`    ${line}`);
@@ -280,8 +358,8 @@ function cmdRebrand(registry: AtomRegistry, name: string | null, all: boolean): 
     }
     console.log(
       touched === 0
-        ? 'no atoms needed rebranding — all personas already match their names.'
-        : `rebranded ${touched}/${names.length} atom(s). Re-run show <name> to verify.`
+        ? 'no agents needed rebranding — all personas already match their names.'
+        : `rebranded ${touched}/${names.length} agent(s). Re-run show <name> to verify.`
     );
     return;
   }
@@ -291,7 +369,7 @@ function cmdRebrand(registry: AtomRegistry, name: string | null, all: boolean): 
   }
   const existing = registry.getByName(name);
   if (!existing) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no agent type named "${name}"`);
     process.exit(1);
   }
   const before = existing.systemPrompt.split('\n')[0] ?? '';
@@ -311,7 +389,7 @@ function cmdRebrand(registry: AtomRegistry, name: string | null, all: boolean): 
 function cmdDescribe(registry: AtomRegistry, name: string, newDescription: string): void {
   const existing = registry.getByName(name);
   if (!existing) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no agent type named "${name}"`);
     process.exit(1);
   }
   const before = existing.description;
@@ -324,7 +402,7 @@ function cmdDescribe(registry: AtomRegistry, name: string, newDescription: strin
 
 /**
  * Permanently delete a type + its version history. Guarded: canonical
- * bootstrap atoms and user-created cells are refused without --force,
+ * bootstrap agents and user-created tissues are refused without --force,
  * because deleting them breaks the next run's happy path (the bootstrap
  * would recreate them at zero trust) or orphans the whole registry
  * (removing the only L3). Dynamic-creation debris (createdBy = an atom
@@ -333,14 +411,14 @@ function cmdDescribe(registry: AtomRegistry, name: string, newDescription: strin
 function cmdRemove(registry: AtomRegistry, name: string, force: boolean): void {
   const existing = registry.getByName(name);
   if (!existing) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no agent type named "${name}"`);
     process.exit(1);
   }
   const isProtected =
     existing.createdBy.startsWith('bootstrap-canonical') || existing.createdBy === 'user';
   if (isProtected && !force) {
     console.error(
-      `refusing to remove "${name}" (createdBy: ${existing.createdBy}) — it is a canonical/bootstrap atom.\n` +
+      `refusing to remove "${name}" (createdBy: ${existing.createdBy}) — it is a canonical/bootstrap agent.\n` +
         `  Removing it resets the happy path (recreated at zero trust on the next run). Pass --force if you really mean it.`
     );
     process.exit(2);
@@ -356,7 +434,7 @@ function cmdRemove(registry: AtomRegistry, name: string, force: boolean): void {
 function help(): void {
   console.log(`atoma registry CLI
 
-  list [--tier 1|2|3]         — list registered atom types
+  list [--tier 1|2|3]         — list registered agent types
   show <name>                 — detail of one type + version history
   top  [--tier 1|2|3]         — top 20 by successes (default)
        [--by success|failure|ratio]
@@ -374,7 +452,7 @@ function help(): void {
                                 patch with descriptionReplace; the type
                                 version is bumped and counters are reset.
   rebrand <name>              — align the "You are <Name>…" first line of
-    | rebrand --all             the systemPrompt with the atom's actual
+    | rebrand --all             the systemPrompt with the agent's actual
                                 taxonomy name. Fixes legacy seeds that
                                 hardcoded a persona ("You are Carbon…")
                                 that then contaminated every branch. Use
@@ -382,7 +460,7 @@ function help(): void {
   remove <name> [--force]     — permanently delete a type + its version
                                 history. For dynamic-creation debris
                                 (mislabelled clone series). Canonical
-                                bootstrap atoms and user-created cells
+                                bootstrap agents and user-created tissues
                                 are refused without --force.
   history <name>              — archived versions of a type (prompt head,
                                 tools, who/when/why), plus the live one.
@@ -393,6 +471,11 @@ function help(): void {
                                 re-earns trust). Prompt/tools/params are
                                 restored exactly; description is not
                                 versioned and is kept as-is.
+  migrate-taxonomy [--apply]  — move a legacy registry from
+                                Element(L1)/Molecule(L2)/Cell(L3) to
+                                Element(tool)/Molecule(L1)/Cell(L2)/
+                                Tissue(L3). Dry-run by default; --apply
+                                backs up DB + skills before migration.
   cache [--clear]             — prefilter decision cache (a table in the
                                 same store): size, how many entries were
                                 ever read back, total hits. --clear empties
@@ -400,14 +483,15 @@ function help(): void {
                                 lives in the key.
 
 Common flags:
-  --db <path>   override ATOMA_DB_PATH (default: ./atoma.db)
+  --db <path>          override ATOMA_DB_PATH (default: ./atoma.db)
+  --skills-dir <path>  override ATOMA_SKILLS_DIR for taxonomy migration
 `);
 }
 
 function cmdHistory(registry: AtomRegistry, name: string): void {
   const live = registry.getByName(name);
   if (!live) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no agent type named "${name}"`);
     process.exit(1);
   }
   const rows = registry.listVersions(name);
@@ -435,7 +519,7 @@ function cmdRollback(registry: AtomRegistry, name: string, toRaw: string | undef
   }
   const before = registry.getByName(name);
   if (!before) {
-    console.error(`no atom type named "${name}"`);
+    console.error(`no agent type named "${name}"`);
     process.exit(1);
   }
   try {
@@ -474,7 +558,15 @@ function main(): void {
   }
 
   const dbPath = dbPathFrom(args.flags);
-  const registry = new AtomRegistry(openDb(dbPath));
+  const db = openDb(dbPath);
+  const registry = new AtomRegistry(db);
+  const mutatesRegistry =
+    args.command === 'describe' ||
+    args.command === 'rebrand' ||
+    args.command === 'remove' ||
+    args.command === 'rollback' ||
+    (args.command === 'dedupe' && args.flags['apply'] === 'true');
+  if (mutatesRegistry) assertCurrentTaxonomy(db);
 
   switch (args.command) {
     case 'list':
@@ -534,6 +626,13 @@ function main(): void {
       }
       return cmdRollback(registry, name, args.flags['to']);
     }
+    case 'migrate-taxonomy':
+      return cmdMigrateTaxonomy(
+        db,
+        dbPath,
+        skillsDirPath(args.flags['skills-dir']),
+        args.flags['apply'] === 'true'
+      );
     case 'cache':
       return cmdCache('clear' in args.flags);
   }

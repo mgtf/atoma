@@ -9,8 +9,8 @@ import { makeCtx, jsonText } from './helpers.js';
 /**
  * Regression tests for the tier-aware plan-checklist rewrite.
  *
- * Background: earlier runs saw Neuron (L3) repeatedly reject perfectly valid
- * Glucose (L2) delegation plans for "missing VISIBLE deliverables" — a rule
+ * Background: earlier runs saw Meristem (L3) repeatedly reject perfectly valid
+ * Hepatocyte (L2) delegation plans for "missing VISIBLE deliverables" — a rule
  * that should only apply to the L1 plan (the tier that actually builds the
  * artefact). The rework:
  *   1. injects a "Plan kind" hint (DIRECT vs DELEGATION) into userContent
@@ -23,7 +23,7 @@ import { makeCtx, jsonText } from './helpers.js';
 
 function makeL1(): L1Atom {
   return new L1Atom({
-    name: 'Hydrogen',
+    name: 'Water',
     ordinal: 1,
     systemPrompt: 's',
     tools: [],
@@ -39,7 +39,7 @@ describe('llmVerdict — injects Plan-kind hint based on child tier', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'PLAN',
       child: makeL1(),
@@ -75,14 +75,14 @@ describe('llmVerdict — injects Plan-kind hint based on child tier', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Neuron',
+      supervisorName: 'Meristem',
       supervisorTier: 3,
       subject: 'PLAN',
       child: l2Child,
       task: { description: 'build a Minesweeper' },
       payload: {
         reasoning: 'r',
-        proposedAction: 'delegate leaf task to L1 "Fluorine"',
+        proposedAction: 'delegate leaf task to L1 "Water"',
         expectedOutput: 'build a Minesweeper',
       },
     });

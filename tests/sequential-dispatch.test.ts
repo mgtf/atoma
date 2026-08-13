@@ -18,7 +18,7 @@ import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
  *   - the aggregated result carries the LAST step's output (not concat),
  *     matching the new sequential aggregate contract in L2Atom.aggregate.
  *
- * Tests use a single L1 child (Hydrogen) to keep mocking simple — the
+ * Tests use a single L1 child (Water) to keep mocking simple — the
  * sequential semantics are about HOW we dispatch, not WHAT child each
  * subtask uses.
  */
@@ -42,27 +42,27 @@ describe('L2.execute — sequential dispatch', () => {
       description: 'web builder',
       systemPrompt: 'You are an L1.',
     });
-    // Force trust fast-path on Hydrogen so validators don't fire.
-    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Hydrogen');
+    // Force trust fast-path on Water so validators don't fire.
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Water');
   });
 
   it('threads previousStepSummary into each subsequent subtask and returns last-step output', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
     const ctx = makeCtx();
 
     // L2 prefilter (Haiku) — escalate so the full Sonnet plan runs and we
     // can supply a sequential plan via the mock.
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no match' }));
-    // L2 plan: 3 sequential phases all targeting Hydrogen.
+    // L2 plan: 3 sequential phases all targeting Water.
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'reuse' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'reuse' },
         {
           reasoning: 'phased build',
           subtasks: [
-            { description: 'phase-1: scaffold', preferredChild: 'Hydrogen' },
-            { description: 'phase-2: extend', preferredChild: 'Hydrogen' },
-            { description: 'phase-3: smoke', preferredChild: 'Hydrogen' },
+            { description: 'phase-1: scaffold', preferredChild: 'Water' },
+            { description: 'phase-2: extend', preferredChild: 'Water' },
+            { description: 'phase-3: smoke', preferredChild: 'Water' },
           ],
           aggregation: { mode: 'sequential' },
           expectedOutput: 'final artefact',
@@ -80,7 +80,7 @@ describe('L2.execute — sequential dispatch', () => {
       );
     }
 
-    const result = await water.handleDirect({ description: 'phased pong' }, ctx);
+    const result = await neuron.handleDirect({ description: 'phased pong' }, ctx);
 
     // 1) The final aggregated result is the LAST phase's output (not a concat).
     expect(result.output).toBe('output-phase-3');
@@ -113,18 +113,18 @@ describe('L2.execute — sequential dispatch', () => {
   });
 
   it('parallel modes (concat) still dispatch via Promise.all without threading', async () => {
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg);
     const ctx = makeCtx();
 
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no match' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'reuse' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'reuse' },
         {
           reasoning: 'orthogonal',
           subtasks: [
-            { description: 'leaf-A', preferredChild: 'Hydrogen' },
-            { description: 'leaf-B', preferredChild: 'Hydrogen' },
+            { description: 'leaf-A', preferredChild: 'Water' },
+            { description: 'leaf-B', preferredChild: 'Water' },
           ],
           aggregation: { mode: 'concat' },
           expectedOutput: 'list',
@@ -145,7 +145,7 @@ describe('L2.execute — sequential dispatch', () => {
       );
     }
 
-    const result = await water.handleDirect({ description: 'fan-out' }, ctx);
+    const result = await neuron.handleDirect({ description: 'fan-out' }, ctx);
 
     // Concat: array of outputs, no last-step privilege.
     expect(Array.isArray(result.output)).toBe(true);

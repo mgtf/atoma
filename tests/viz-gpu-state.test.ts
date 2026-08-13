@@ -34,10 +34,10 @@ describe('full-GL Zustand scene state', () => {
       selectedEventId: 'event-1',
       selectedAtomName: null,
     });
-    store.selectAtom('Hydrogen');
+    store.selectAtom('Water');
     expect(useGpuStore.getState()).toMatchObject({
       selectedEventId: null,
-      selectedAtomName: 'Hydrogen',
+      selectedAtomName: 'Water',
     });
   });
 
@@ -87,15 +87,15 @@ describe('full-GL event cards preserve trace metadata', () => {
       ts: Date.parse('2026-08-13T10:20:30.000Z'),
       kind: 'tool',
       name: 'read_file',
-      actor: { tier: 1, name: 'Lithium' },
+      actor: { tier: 1, name: 'Ammonia' },
       branchId: 'abcdef12-3456',
       args: { path: 'src/index.ts' },
       result: { ok: true },
       durationMs: 12,
     });
     expect(copy).toMatchObject({
-      title: 'read_file',
-      meta: expect.stringContaining('L1 Lithium'),
+      title: 'Li · read_file',
+      meta: expect.stringContaining('L1 Ammonia'),
       body: expect.stringContaining('src/index.ts'),
     });
     expect(copy.meta).toContain('⑂ abcdef');
@@ -110,19 +110,35 @@ describe('full-GL event cards preserve trace metadata', () => {
       ts: Date.parse('2026-08-13T10:20:30.000Z'),
       kind: 'llm',
       role: 'validate-result',
-      actor: { tier: 3, name: 'Neuron' },
-      child: { tier: 2, name: 'Methane' },
+      actor: { tier: 3, name: 'Meristem' },
+      child: { tier: 2, name: 'Erythrocyte' },
       model: 'zai:glm-4.5-air',
       response: JSON.stringify({ approved: true, reasoning: 'clean' }),
       durationMs: 1500,
       costUsd: 0.0123,
     });
     expect(copy.title).toBe('validate-result');
-    expect(copy.meta).toContain('L3 Neuron');
-    expect(copy.meta).toContain('→ Methane');
+    expect(copy.meta).toContain('L3 Meristem');
+    expect(copy.meta).toContain('→ Erythrocyte');
     expect(copy.footer).toContain('zai:glm-4.5-air');
     expect(copy.footer).toContain('$0.0123');
     expect(copy.decision).toBe('✓ approved');
+  });
+
+  it('projects a legacy atom-prefilter target without rewriting skill ids', () => {
+    const base = {
+      id: 'prefilter',
+      ts: 1,
+      kind: 'llm',
+      role: 'prefilter',
+      actor: { tier: 2, name: 'Tracheid' },
+      response: JSON.stringify({ outcome: 'reuse', target: 'Hydrogen' }),
+    };
+    expect(gpuEventCardCopy(base).decision).toBe('→ Water');
+    expect(gpuEventCardCopy({
+      ...base,
+      systemPrompt: 'You match a subtask against a catalog of learned skills',
+    }).decision).toBe('→ Hydrogen');
   });
 });
 

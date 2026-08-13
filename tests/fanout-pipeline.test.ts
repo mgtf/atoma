@@ -34,16 +34,16 @@ const seed = {
 describe('L2.execute — fan-out over N orthogonal subtasks', () => {
   it('runs 3 subtasks in parallel and concat-aggregates outputs', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    const a = reg.create(1, seed); // Hydrogen
-    const b = reg.create(1, seed); // Helium
-    const c = reg.create(1, seed); // Lithium
+    const a = reg.create(1, seed); // Water
+    const b = reg.create(1, seed); // Methane
+    const c = reg.create(1, seed); // Ammonia
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
       reg.recordSuccess(a.name);
       reg.recordSuccess(b.name);
       reg.recordSuccess(c.name);
     }
     const l2Type = reg.create(2, seed);
-    const sucrose = L2Atom.fromType(l2Type, reg);
+    const neuron = L2Atom.fromType(l2Type, reg);
 
     const ctx = makeCtx();
     // 1. Prefilter: force escalation so the strategy+plan pair LLM call fires.
@@ -84,10 +84,10 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     }
 
     const task = { description: 'full job' };
-    const plan = await sucrose.plan(task, ctx);
+    const plan = await neuron.plan(task, ctx);
     expect(plan.subtasks).toHaveLength(3);
 
-    const result = await sucrose.execute(task, plan, ctx);
+    const result = await neuron.execute(task, plan, ctx);
 
     expect(Array.isArray(result.output)).toBe(true);
     expect(result.output).toEqual([
@@ -99,27 +99,27 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     expect(result.summary).toMatch(/3 subtasks aggregated \(concat\)/);
     expect(result.producedBy).toEqual({
       tier: 2,
-      name: sucrose.name,
+      name: neuron.name,
       viaFallback: false,
     });
   });
 
   it('auto-creates a fresh L1 when a subtask has an unknown preferredChild (planner hallucination)', async () => {
-    // Regression: Sonnet sometimes invents a chemical-element name for
-    // `preferredChild` that isn't in the catalog (e.g. "Carbon" when only
-    // Hydrogen exists). We used to crash the whole fan-out on
+    // Regression: Sonnet sometimes invents a molecule name for
+    // `preferredChild` that isn't in the catalog (e.g. "Sucrose" when only
+    // Water exists). We used to crash the whole fan-out on
     // RegistryNotFoundError — now we auto-create a fresh L1 whose
     // description matches the subtask and run the supervise loop against
     // it, so N-1 healthy subtasks don't die alongside the confused one.
     //
-    // The newly-created L1 starts with 0 successes so Sucrose's validator
+    // The newly-created L1 starts with 0 successes so Neuron's validator
     // fires LLM calls to approve its plan + result. We use a fallback
     // handler (enqueued LAST) that matches any remaining request and
     // responds role-aware — plan, execute, or verdict — so the test
     // tolerates the FIFO/microtask ordering of the 2 parallel subtasks
     // without manually counting slots.
     const reg = new AtomRegistry(openDb(':memory:'));
-    const h = reg.create(1, seed); // Hydrogen — trusted
+    const h = reg.create(1, seed); // Water — trusted
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess(h.name);
     const l2Type = reg.create(2, seed);
     const l2 = L2Atom.fromType(l2Type, reg);
@@ -129,13 +129,13 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'skip' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'r' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'r' },
         {
           reasoning: 'r',
           subtasks: [
-            { description: 'A', preferredChild: 'Hydrogen' },
+            { description: 'A', preferredChild: 'Water' },
             // Hallucinated name — NOT in registry. Should auto-create.
-            { description: 'B', preferredChild: 'Carbon' },
+            { description: 'B', preferredChild: 'Sucrose' },
           ],
           aggregation: { mode: 'concat' },
           expectedOutput: 'e',
@@ -174,16 +174,16 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     expect(Array.isArray(result.output)).toBe(true);
     expect((result.output as unknown[]).length).toBe(2);
 
-    // A new L1 was auto-created for the "Carbon" subtask → catalog grew.
+    // A new L1 was auto-created for the "Sucrose" subtask → catalog grew.
     const l1Names = reg.listByTier(1).map((t) => t.name);
-    expect(l1Names).toContain('Hydrogen');
+    expect(l1Names).toContain('Water');
     expect(l1Names.length).toBe(2);
-    const newL1 = reg.listByTier(1).find((t) => t.name !== 'Hydrogen')!;
+    const newL1 = reg.listByTier(1).find((t) => t.name !== 'Water')!;
     // As of the capability-first description policy, freshly-created
     // L1s advertise a tool-signature-derived label instead of echoing
     // the subtask narrative. This test's fixture L2 has no tools, so
-    // the canonical fallback is the tier-1 "custom leaf toolset" label.
-    expect(newL1.description).toMatch(/custom leaf toolset/);
+    // the canonical fallback is the tier-1 "custom molecule leaf toolset" label.
+    expect(newL1.description).toMatch(/custom molecule leaf toolset/);
     expect(newL1.description).not.toMatch(/L1 for subtask/);
   });
 
@@ -195,11 +195,11 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     const l2 = L2Atom.fromType(l2Type, reg);
 
     const ctx = makeCtx();
-    // Prefilter picks Hydrogen → synthetic plan with 1 subtask.
+    // Prefilter picks Water → synthetic plan with 1 subtask.
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         reasoning: 'direct match',
       })
@@ -218,7 +218,7 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     // wrapped in an array. This is the backwards-compat guarantee.
     expect(result.output).toBe('single');
     expect(result.summary).toBe('done');
-    expect(result.producedBy.name).toBe('Hydrogen');
+    expect(result.producedBy.name).toBe('Water');
     expect(result.producedBy.tier).toBe(1);
   });
 
@@ -258,11 +258,11 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
     const plan = await l2.plan({ description: 't' }, ctx);
     await l2.execute({ description: 't' }, plan, ctx);
 
-    // Pull L1.plan calls (those whose userContent includes "You are atom"
+    // Pull L1.plan calls (those whose userContent includes "You are molecule"
     // — the L1 plan template preamble) and check the `Inputs:` line each
     // L1 saw. Order is FIFO so L1-A is the first, L1-B the second.
     const l1PlanCalls = ctx.llm.calls.filter((c) =>
-      /You are atom.*tier 1/.test(c.userContent)
+      /You are molecule.*tier 1/.test(c.userContent)
     );
     expect(l1PlanCalls.length).toBeGreaterThanOrEqual(2);
     expect(l1PlanCalls[0]!.userContent).toContain('Inputs: {"seed":1}');

@@ -37,7 +37,7 @@ describe('selectCurriculumTargets', () => {
   it('categorises: script-maturation, stale-refusal-retry, promotion-push, failed-family', () => {
     const byL1 = new Map([
       [
-        'Hydrogen',
+        'Water',
         [
           fakeSkill({ id: 'fresh-script', kind: 'script', language: 'node', successes: 1 }),
           fakeSkill({
@@ -70,7 +70,7 @@ describe('selectCurriculumTargets', () => {
   it('skips blocked skills (failures > 0), refused-current-gen, and never-driven llm skills', () => {
     const byL1 = new Map([
       [
-        'Hydrogen',
+        'Water',
         [
           fakeSkill({ id: 'blocked', successes: 4, failures: 1 }),
           fakeSkill({
@@ -90,7 +90,7 @@ describe('selectCurriculumTargets', () => {
   it('orders by category priority then distance, and caps the batch', () => {
     const byL1 = new Map([
       [
-        'Hydrogen',
+        'Water',
         [
           fakeSkill({ id: 'push-far', successes: 1 }),
           fakeSkill({ id: 'push-near', successes: 4 }),
@@ -139,7 +139,7 @@ describe('curriculum prompt', () => {
     expect(CURRICULUM_SYSTEM_PROMPT).toMatch(/FINAL SEPARATE\s+PHASE/);
     const user = buildCurriculumUserContent(
       [
-        { category: 'promotion-push', l1: 'Hydrogen', skillId: 's', hint: 'HINT-A' },
+        { category: 'promotion-push', l1: 'Water', skillId: 's', hint: 'HINT-A' },
         { category: 'failed-family-retry', l1: '', family: 'cli', hint: 'HINT-B' },
       ],
       ['cli', 'web']

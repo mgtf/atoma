@@ -312,11 +312,11 @@ function formatTierBlock(label: string, entries: TierSummary[]): string[] {
 function formatToolBlock(entries: ToolActivity[], excerptLimit: number): string[] {
   const lines: string[] = [];
   if (entries.length === 0) {
-    lines.push('L1 tool usage: (no tool invocations recorded)');
+    lines.push('L1 molecule element usage: (no element invocations recorded)');
     return lines;
   }
   for (const entry of entries) {
-    const header = `L1 ${entry.actorName} — ${entry.total} tool call(s)${
+    const header = `L1 molecule ${entry.actorName} — ${entry.total} element call(s)${
       entry.errorCount > 0 ? `, ${entry.errorCount} errored` : ''
     }`;
     lines.push(header);
@@ -354,9 +354,9 @@ export function formatDecompositionReport(
 
   const lines: string[] = [];
   lines.push('--- decomposition ---');
-  lines.push(...formatTierBlock('L3', l3));
+  lines.push(...formatTierBlock('L3 tissue', l3));
   lines.push('');
-  lines.push(...formatTierBlock('L2', l2));
+  lines.push(...formatTierBlock('L2 cell', l2));
   lines.push('');
   lines.push(...formatToolBlock(tools, excerptLimit));
   return lines.join('\n');
@@ -406,7 +406,7 @@ export function formatTimeoutPostMortem(
   if (lastActive && 'actor' in lastActive && lastActive.actor) {
     const a = lastActive.actor;
     lines.push(
-      `last active atom: ${a.name ?? '?'}` +
+      `last active agent: ${a.name ?? '?'}` +
         (a.tier !== undefined ? ` (tier ${a.tier})` : '') +
         (lastActive.kind === 'tool' ? ` — last event was a \`${lastActive.name}\` tool call` : '')
     );

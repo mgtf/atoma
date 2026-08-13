@@ -44,7 +44,7 @@ const WEB_TOOLS = makeTools([
 
 const seed = {
   description: 'legacy platformer builder',
-  systemPrompt: 'You are Hydrogen, a WebGL platformer builder. Do platformer things.',
+  systemPrompt: 'You are Water, a WebGL platformer builder. Do platformer things.',
   tools: [],
   params: {},
   createdBy: 'test',
@@ -184,7 +184,7 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     // And the fresh-L1 preamble is still present — we ADDED the
     // guidance, we did not replace the original contract.
     expect(created.systemPrompt).toContain(
-      'You are an L1 element with ONE narrow responsibility.'
+      'You are an L1 molecule with ONE narrow responsibility.'
     );
     expect(created.systemPrompt).toContain(
       'Subtask you were handed: build a chess puzzle grid'
@@ -196,7 +196,7 @@ describe('buildNarrowL2Prompt', () => {
   it('bakes the subtask description and fan-out guidance into the prompt', () => {
     const prompt = buildNarrowL2Prompt('orchestrate a Snake build');
     expect(prompt).toContain('Your current subtask: orchestrate a Snake build');
-    expect(prompt).toContain('orthogonal L1 leaf subtasks');
+    expect(prompt).toContain('orthogonal L1 molecule subtasks');
     expect(prompt).toContain('NEVER execute tools yourself');
   });
 });
@@ -217,7 +217,7 @@ class FakeL2 extends (Object as unknown as new () => Atom)
   implements Supervisor<L1Atom> {
   readonly tier: Tier = 2;
   readonly model = 'sonnet';
-  override readonly name = 'Water';
+  override readonly name = 'Tracheid';
   override readonly ordinal = 1;
   private pv: Verdict[] = [];
 
@@ -260,7 +260,7 @@ describe('L2 branchOnEscalation — resets the L1 prompt to the current subtask'
   it('writes a systemPromptReplace aligned with the subtask, not inherited from parent', async () => {
     // Setup: registry with a Frankenstein L1 (name says generic, prompt says platformer).
     const reg = new AtomRegistry(openDb(':memory:'));
-    const parent = reg.create(1, seed); // Hydrogen
+    const parent = reg.create(1, seed); // Water
     const l2Type = reg.create(2, {
       description: 'l2',
       systemPrompt: 'L2 prompt',
@@ -271,7 +271,7 @@ describe('L2 branchOnEscalation — resets the L1 prompt to the current subtask'
 
     // Real L2Atom so we can pull its private hooks via running execute.
     // Instead of going through the full execute → we directly test the
-    // hooks factory via an integration: give Water a plan that rejects
+    // hooks factory via an integration: give Tracheid a plan that rejects
     // 5× and escalates on an L1Atom child. When branchOnEscalation fires,
     // the new branch in the registry must have a RESET prompt.
     const water = L2Atom.fromType(l2Type, reg);
@@ -325,25 +325,25 @@ describe('L3 branchOnEscalation — resets the L2 prompt to the current subtask'
       tools: [],
       params: {},
       createdBy: 'test',
-    }); // Water
+    }); // Tracheid
     reg.create(3, {
       description: 'l3',
       systemPrompt: 'L3 prompt',
       tools: [],
       params: {},
       createdBy: 'test',
-    }); // Neuron
-    const neuron = L3Atom.buildWithModel(reg.getByName('Neuron')!, reg, FALLBACK_OPUS);
+    }); // Meristem
+    const tissue = L3Atom.buildWithModel(reg.getByName('Meristem')!, reg, FALLBACK_OPUS);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hooks: SupervisionHooks<L2Atom> = (neuron as any).makeL2Hooks(
+    const hooks: SupervisionHooks<L2Atom> = (tissue as any).makeL2Hooks(
       makeCtx(),
       'orchestrate a dashboard build'
     );
     const child = L2Atom.fromType(parent, reg);
     await hooks.branchOnEscalation(child, [], 'escalation-plan');
 
-    const branchedL2 = reg.listByTier(2).find((t) => t.name !== 'Water')!;
+    const branchedL2 = reg.listByTier(2).find((t) => t.name !== 'Tracheid')!;
     expect(branchedL2.systemPrompt).toContain(
       'Your current subtask: orchestrate a dashboard build'
     );

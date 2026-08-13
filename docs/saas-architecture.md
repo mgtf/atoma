@@ -116,7 +116,7 @@ platform-wide.
 | Burn-in rows | **entity**; derived curve global | Per-row economics are customer data; the aggregate decay curve is not. |
 | Metrics / cost | **entity** | Billing. |
 | Prefilter decision cache | **global, content-addressed** | The only store where global sharing is semantically *correct* — see §4.4. |
-| Taxonomy ordinals | **global, finite** | `nextAvailableElement` (`src/registry/taxonomies/elements.ts:128-135`) returns the first gap by atomic number and degrades to `Element<n>` past 118. Consumed platform-wide. |
+| Taxonomy ordinals | **global by rank** | Tool elements use the static periodic table in `src/contracts/toolTaxonomy.ts`; agent identities allocate independently from molecule, cell and tissue catalogues and degrade to `<Rank><n>` after each curated list. |
 
 **`platform:admin` cross-org read** (support) must be break-glass and audited. It
 is the one role that defeats the isolation this model exists to provide.

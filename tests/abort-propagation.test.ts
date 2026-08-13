@@ -25,7 +25,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
       jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' })
     );
     const atom = new L1Atom({
-      name: 'Hydrogen',
+      name: 'Water',
       ordinal: 1,
       systemPrompt: 's',
       tools: [],
@@ -39,7 +39,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ output: 'o', summary: 's' }));
     const atom = new L1Atom({
-      name: 'Hydrogen',
+      name: 'Water',
       ordinal: 1,
       systemPrompt: 's',
       tools: [],
@@ -64,7 +64,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
       )
     );
     const atom = new L2Atom({
-      name: 'Water',
+      name: 'Neuron',
       ordinal: 1,
       systemPrompt: 's',
       tools: [],
@@ -101,7 +101,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
     const child = new L1Atom({
-      name: 'Hydrogen',
+      name: 'Water',
       ordinal: 1,
       systemPrompt: 's',
       tools: [],
@@ -110,7 +110,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Water',
+      supervisorName: 'Neuron',
       supervisorTier: 2,
       subject: 'PLAN',
       child,
@@ -125,7 +125,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Hydrogen',
+        target: 'Water',
         confidence: 'high',
         reasoning: 'matches',
       })
@@ -133,7 +133,7 @@ describe('abort signal propagation — every LLM call site threads ctx.signal', 
     await prefilterStrategy({
       ctx,
       task: { description: 't' },
-      catalog: [{ name: 'Hydrogen', description: 'does hydrogen stuff' }],
+      catalog: [{ name: 'Water', description: 'does web work' }],
     });
     expect(ctx.llm.calls[0]!.signal).toBe(ctx.signal);
   });

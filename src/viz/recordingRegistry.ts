@@ -6,7 +6,11 @@ import {
 } from '../registry/atomRegistry.js';
 import type { DB } from '../registry/db.js';
 import type { AtomModifications, Tier } from '../core/types.js';
-import { snapshotType, type TraceRecorder } from './trace.js';
+import {
+  snapshotType,
+  type TraceRecorder,
+  type VizAtomRef,
+} from './trace.js';
 
 /**
  * AtomRegistry subclass that logs every create / patch / branch / counter
@@ -16,6 +20,18 @@ import { snapshotType, type TraceRecorder } from './trace.js';
 export class RecordingRegistry extends AtomRegistry {
   constructor(db: DB, private readonly recorder: TraceRecorder) {
     super(db);
+  }
+
+  private ref(name: string): VizAtomRef {
+    const type = this.getByName(name);
+    return {
+      name,
+      ...(type ? { tier: type.tier } : {}),
+    };
+  }
+
+  private childRef(type: AtomType): VizAtomRef {
+    return { name: type.name, tier: type.tier };
   }
 
   override create(tier: Tier, seed: CreateSeed): AtomType {
@@ -28,6 +44,8 @@ export class RecordingRegistry extends AtomRegistry {
       tier: t.tier,
       name: t.name,
       by: seed.createdBy,
+      actor: this.ref(seed.createdBy),
+      child: this.childRef(t),
       version: t.version,
       snapshot: snapshotType(t),
     });
@@ -55,6 +73,8 @@ export class RecordingRegistry extends AtomRegistry {
       tier: t.tier,
       name: t.name,
       by: modifiedBy,
+      actor: this.ref(modifiedBy),
+      child: this.childRef(t),
       version: t.version,
       modifications: mods,
       snapshot: snapshotType(t),
@@ -80,6 +100,8 @@ export class RecordingRegistry extends AtomRegistry {
       tier: t.tier,
       name: t.name,
       by: createdBy,
+      actor: this.ref(createdBy),
+      child: this.childRef(t),
       from: fromName,
       version: t.version,
       modifications: mods,
@@ -88,25 +110,31 @@ export class RecordingRegistry extends AtomRegistry {
     return t;
   }
 
-  override recordSuccess(name: string): void {
-    super.recordSuccess(name);
+  override recordSuccess(name: string, by?: string): void {
+    super.recordSuccess(name, by);
+    const target = this.getByName(name);
     this.recorder.record({
       id: randomUUID(),
       ts: Date.now(),
       kind: 'registry',
       op: 'recordSuccess',
       name,
+      ...(by ? { by, actor: this.ref(by) } : {}),
+      ...(target ? { tier: target.tier, child: this.childRef(target) } : {}),
     });
   }
 
-  override recordFailure(name: string): void {
-    super.recordFailure(name);
+  override recordFailure(name: string, by?: string): void {
+    super.recordFailure(name, by);
+    const target = this.getByName(name);
     this.recorder.record({
       id: randomUUID(),
       ts: Date.now(),
       kind: 'registry',
       op: 'recordFailure',
       name,
+      ...(by ? { by, actor: this.ref(by) } : {}),
+      ...(target ? { tier: target.tier, child: this.childRef(target) } : {}),
     });
   }
 }

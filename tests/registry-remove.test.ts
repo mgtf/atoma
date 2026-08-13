@@ -42,8 +42,8 @@ describe('AtomRegistry.remove', () => {
     // Reusing a freed ordinal would let a future atom silently inherit
     // a dead atom's identity in old run traces.
     const reg = new AtomRegistry(openDb(':memory:'));
-    const first = reg.create(1, seed); // Hydrogen, ordinal 1
-    const second = reg.create(1, seed); // Helium, ordinal 2
+    const first = reg.create(1, seed); // Water, ordinal 1
+    const second = reg.create(1, seed); // Methane, ordinal 2
     reg.remove(first.name);
     const third = reg.create(1, seed);
     expect(third.name).not.toBe(first.name);

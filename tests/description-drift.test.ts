@@ -37,7 +37,7 @@ describe('description drift — branch + prefilter', () => {
   it('branch-of-branch does not pile up (branched from X) suffixes', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(1, l1Seed);
-    const a = r.branch('Hydrogen', { systemPromptAppend: 'a' }, 't', 'A');
+    const a = r.branch('Water', { systemPromptAppend: 'a' }, 't', 'A');
     const b = r.branch('A', { systemPromptAppend: 'b' }, 't', 'B');
     const c = r.branch('B', { systemPromptAppend: 'c' }, 't', 'C');
     // Each descendant carries EXACTLY one "(branched from <parent>)" tail.
@@ -53,15 +53,15 @@ describe('description drift — branch + prefilter', () => {
   it('prefilter sees core descriptions only — provenance tail stripped', async () => {
     const r = new AtomRegistry(openDb(':memory:'));
     r.create(2, l2Seed);
-    r.create(1, l1Seed); // Hydrogen
+    r.create(1, l1Seed); // Water
     // Chain-branch to produce a long provenance tail on the persisted description.
-    r.branch('Hydrogen', { systemPromptAppend: 'a' }, 't', 'A');
+    r.branch('Water', { systemPromptAppend: 'a' }, 't', 'A');
     r.branch('A', { systemPromptAppend: 'b' }, 't', 'B');
     const b = r.getByName('B')!;
     // Pre-condition: the persisted description DOES carry a provenance tail.
     expect(b.description).toMatch(/\(branched from /);
 
-    const l2 = L2Atom.fromType(r.getByName('Water')!, r);
+    const l2 = L2Atom.fromType(r.getByName('Tracheid')!, r);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'B', confidence: 'high', reasoning: 'match' })
@@ -79,25 +79,25 @@ describe('description drift — branch + prefilter', () => {
     const r = new AtomRegistry(openDb(':memory:'));
     const l3Type = r.create(3, l2Seed);
     r.create(2, l2Seed);
-    r.branch('Water', { systemPromptAppend: 'a' }, 't', 'WaterA');
-    r.branch('WaterA', { systemPromptAppend: 'b' }, 't', 'WaterB');
-    const wb = r.getByName('WaterB')!;
+    r.branch('Tracheid', { systemPromptAppend: 'a' }, 't', 'TracheidA');
+    r.branch('TracheidA', { systemPromptAppend: 'b' }, 't', 'TracheidB');
+    const wb = r.getByName('TracheidB')!;
     expect(wb.description).toMatch(/\(branched from /);
 
     const l3 = L3Atom.buildWithModel(l3Type, r, FALLBACK_OPUS);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'WaterB', confidence: 'high', reasoning: 'match' })
+      jsonText({ kind: 'reuse', target: 'TracheidB', confidence: 'high', reasoning: 'match' })
     );
     // L3 no longer short-circuits on prefilter — it always runs the
     // Opus plan call. Stub a minimal valid response so the test reaches
     // its assertion on the prefilter userContent (call #0).
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'WaterB', reasoning: 'stub' },
+        { strategy: 'reuse', target: 'TracheidB', reasoning: 'stub' },
         {
           reasoning: 'stub',
-          subtasks: [{ description: 't', preferredChild: 'WaterB' }],
+          subtasks: [{ description: 't', preferredChild: 'TracheidB' }],
           aggregation: { mode: 'concat' },
           expectedOutput: 'stub',
         }

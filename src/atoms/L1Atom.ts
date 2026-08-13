@@ -207,8 +207,9 @@ export class L1Atom extends Atom {
         ? '(no tools available — describe your output in the plan text)'
         : this.tools.map((t) => `  - ${t.name}: ${t.description}`).join('\n');
     const userContent = [
-      `You are atom "${this.name}" (tier 1 / element ordinal ${this.ordinal}).`,
-      `You are the ONLY tier allowed to execute tools. You cannot delegate further.`,
+      `You are molecule "${this.name}" (tier 1 / molecule ordinal ${this.ordinal}).`,
+      `You are the ONLY tier allowed to execute tools; in taxonomy, those tools are elements.`,
+      `You cannot delegate further.`,
       `Produce a concise plan of how YOU will accomplish the task by calling the`,
       `tools below during the execute phase. Do not invent tools; use only those listed.`,
       ``,
@@ -258,7 +259,7 @@ export class L1Atom extends Atom {
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
     const hasValidator = this.tools.some((t) => t.name === 'validate_html');
     const userContent = [
-      `You are atom "${this.name}" (tier 1). Your plan has been APPROVED. Execute it now.`,
+      `You are molecule "${this.name}" (tier 1). Your plan has been APPROVED. Execute it now.`,
       ``,
       `Task: ${task.description}`,
       task.inputs ? `Inputs: ${JSON.stringify(task.inputs)}` : '',

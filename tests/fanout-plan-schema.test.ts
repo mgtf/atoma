@@ -23,9 +23,9 @@ describe('subtaskSpecSchema', () => {
     const ok = subtaskSpecSchema.parse({
       description: 'do x',
       inputs: { k: 'v' },
-      preferredChild: 'Hydrogen',
+      preferredChild: 'Water',
     });
-    expect(ok.preferredChild).toBe('Hydrogen');
+    expect(ok.preferredChild).toBe('Water');
     expect(ok.inputs).toEqual({ k: 'v' });
   });
 });
@@ -46,7 +46,7 @@ describe('aggregationSpecSchema', () => {
   });
 
   it('accepts a full planSchema with aggregation.instruction: null without throwing', () => {
-    // This is the exact shape observed in production crashing the Ammonia
+    // This is the exact shape observed in production crashing the Leukocyte
     // L2 replan on the Node/REST run — Sonnet emitted {mode: "concat",
     // instruction: null} and zod rejected it before the schema tolerated
     // null.
@@ -66,8 +66,8 @@ describe('planSchema — fan-out native shape', () => {
     const plan = planSchema.parse({
       reasoning: 'decompose',
       subtasks: [
-        { description: 'write layout', preferredChild: 'Hydrogen' },
-        { description: 'write logic', preferredChild: 'Helium' },
+        { description: 'write layout', preferredChild: 'Water' },
+        { description: 'write logic', preferredChild: 'Methane' },
       ],
       aggregation: { mode: 'llm-synthesize', instruction: 'assemble into one file' },
       expectedOutput: 'a live URL',
@@ -125,8 +125,8 @@ describe('parsePlanTolerant + fan-out', () => {
     const text = JSON.stringify({
       reasoning: 'decompose',
       subtasks: [
-        { description: 'A', preferredChild: 'Hydrogen' },
-        { description: 'B', preferredChild: 'Helium' },
+        { description: 'A', preferredChild: 'Water' },
+        { description: 'B', preferredChild: 'Methane' },
       ],
       aggregation: { mode: 'concat' },
       expectedOutput: 'done',

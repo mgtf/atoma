@@ -97,15 +97,15 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
     await superviseLoop(l2, l1, { description: 'do a thing' }, ctx, hooks(reg, l2.name));
 
-    const after = reg.getByName('Hydrogen')!;
+    const after = reg.getByName('Water')!;
     expect(after.version).toBe(2);
     expect(after.systemPrompt).toContain('original prompt');
     expect(after.systemPrompt).toContain('RESPOND IN JSON ONLY, no prose.');
-    expect(reg.versionsOf('Hydrogen')).toHaveLength(1);
-    expect(reg.versionsOf('Hydrogen')[0]!.version).toBe(1);
+    expect(reg.versionsOf('Water')).toHaveLength(1);
+    expect(reg.versionsOf('Water')[0]!.version).toBe(1);
     // Version history snapshot carries the ORIGINAL prompt, not the new one.
     // (No direct accessor; verify via a fresh instance loaded from DB.)
-    expect(L1Atom.fromType(after).name).toBe('Hydrogen');
+    expect(L1Atom.fromType(after).name).toBe('Water');
   });
 
   it('systemPromptReplace wholesale rewrites the prompt (exact swap)', async () => {
@@ -135,7 +135,7 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
     await superviseLoop(l2, l1, { description: 't' }, ctx, hooks(reg, l2.name));
 
-    const after = reg.getByName('Hydrogen')!;
+    const after = reg.getByName('Water')!;
     expect(after.systemPrompt).toBe(newPrompt); // exact match, no concatenation
     expect(after.version).toBe(2);
   });
@@ -170,7 +170,7 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
     await superviseLoop(l2, l1, { description: 't' }, ctx, hooks(reg, l2.name));
 
-    const after = reg.getByName('Hydrogen')!;
+    const after = reg.getByName('Water')!;
     expect(after.description).toBe(
       'Single-file WebGL Minesweeper builder with validation loop.'
     );
@@ -207,10 +207,10 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
     // Registry is untouched: the rejection happened at parse-time, BEFORE
     // any mutation could land.
-    const after = reg.getByName('Hydrogen')!;
+    const after = reg.getByName('Water')!;
     expect(after.version).toBe(1);
     expect(after.systemPrompt).toBe(seed.systemPrompt);
-    expect(reg.versionsOf('Hydrogen')).toEqual([]);
+    expect(reg.versionsOf('Water')).toEqual([]);
   });
 
   it('ALLOWS a patch with ONLY descriptionReplace — descriptions are legit non-empty mods', async () => {
@@ -241,7 +241,7 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
     await superviseLoop(l2, l1, { description: 't' }, ctx, hooks(reg, l2.name));
 
-    const after = reg.getByName('Hydrogen')!;
+    const after = reg.getByName('Water')!;
     expect(after.description).toBe('fresh description');
     expect(after.version).toBe(2);
   });
@@ -264,7 +264,7 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
 
 const dummyPlan: Plan = makePlan({
   reasoning: 'prefilter selected something',
-  proposedAction: 'delegate leaf task to L1 "Hydrogen"',
+  proposedAction: 'delegate leaf task to L1 "Water"',
   expectedOutput: 'a working artifact',
 });
 const dummyTask: Task = { description: 'build something end-to-end' };
@@ -272,13 +272,13 @@ const dummyTask: Task = { description: 'build something end-to-end' };
 describe('prompt-update pipeline — L3 → L2 (mirror)', () => {
   it('L3 verdict with systemPromptAppend mutates the L2 type in the registry', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    reg.create(1, seed); // Hydrogen (L1) — referenced by dummyPlan for targetContext
+    reg.create(1, seed); // Water (L1) — referenced by dummyPlan for targetContext
     const l2Type = reg.create(2, {
       ...seed,
       description: 'original L2 orchestrator',
-      systemPrompt: 'You are Water, a generic L2 molecule.',
+      systemPrompt: 'You are Tracheid, a generic L2 cell.',
     });
-    const l3Type = reg.create(3, { ...seed, description: 'top-level cell' });
+    const l3Type = reg.create(3, { ...seed, description: 'top-level tissue' });
 
     const l2 = L2Atom.fromType(l2Type, reg);
     const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
@@ -306,7 +306,7 @@ describe('prompt-update pipeline — L3 → L2 (mirror)', () => {
 
     // Apply via the exact same call shape L3Atom.execute uses in its hook.
     const patched = reg.patch(l2.name, verdict.modifications, l3.name, verdict.reasoning);
-    expect(patched.systemPrompt).toContain('You are Water, a generic L2 molecule.');
+    expect(patched.systemPrompt).toContain('You are Tracheid, a generic L2 cell.');
     expect(patched.systemPrompt).toContain('Always produce strategy JSON with no extra prose.');
     expect(patched.version).toBe(2);
 
@@ -363,8 +363,8 @@ describe('prompt-update pipeline — L3 → L2 (mirror)', () => {
     const verdict = await l3.validatePlan(l2, dummyPlan, dummyTask, ctx);
     if (verdict.approved) throw new Error('expected negative verdict');
     const branched = reg.branch(l2.name, verdict.modifications, l3.name, verdict.branchName);
-    // Taxonomy: next available L2 after Water is Methane.
-    expect(branched.name).toBe('Methane');
+    // Taxonomy: next available L2 after Tracheid is Sclereid.
+    expect(branched.name).toBe('Sclereid');
     expect(branched.tier).toBe(2);
     expect(branched.systemPrompt).toContain('Specialisation: concise summaries.');
     // Parent untouched.

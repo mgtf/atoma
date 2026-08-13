@@ -23,43 +23,49 @@ const SCRIBE_TOOLS = ['write_file', 'read_file', 'run_shell', 'list_files'];
 const WEB_TOOLS = ['write_file', 'read_file', 'start_static_server', 'validate_html'];
 
 describe('visibleSkillNamespaces — the lattice, pure', () => {
-  const namespaces = ['Helium', 'Hydrogen', 'Lithium', 'Ghost'];
+  const namespaces = ['Methane', 'Water', 'Ammonia', 'Ghost'];
   const toolNamesFor = (ns: string): readonly string[] | null =>
-    ns === 'Helium' ? HTTP_TOOLS : ns === 'Lithium' ? SCRIBE_TOOLS : ns === 'Hydrogen' ? WEB_TOOLS : null;
+    ns === 'Methane'
+      ? HTTP_TOOLS
+      : ns === 'Ammonia'
+        ? SCRIBE_TOOLS
+        : ns === 'Water'
+          ? WEB_TOOLS
+          : null;
 
   it('an http reader sees the file-scribe donor (required ⊆ reader), never the orphan', () => {
     const vis = visibleSkillNamespaces({
-      home: 'Helium',
+      home: 'Methane',
       readerToolNames: HTTP_TOOLS,
       namespaces,
       toolNamesFor,
     });
-    // Home first; Hydrogen (web bucket requires validate_html) is NOT
+    // Home first; Water (web bucket requires validate_html) is NOT
     // executable by an http reader; Ghost is orphaned (no registry entry).
-    expect(vis).toEqual(['Helium', 'Lithium']);
+    expect(vis).toEqual(['Methane', 'Ammonia']);
   });
 
   it('a file-scribe reader does NOT see the http donor (cannot execute its class)', () => {
     const vis = visibleSkillNamespaces({
-      home: 'Lithium',
+      home: 'Ammonia',
       readerToolNames: SCRIBE_TOOLS,
       namespaces,
       toolNamesFor,
     });
-    expect(vis).toEqual(['Lithium']);
+    expect(vis).toEqual(['Ammonia']);
   });
 
   it('a kitchen-sink reader sees every live bucket; home stays first', () => {
     const ALL = [...new Set([...HTTP_TOOLS, ...WEB_TOOLS, ...SCRIBE_TOOLS])];
     const vis = visibleSkillNamespaces({
-      home: 'Lithium',
+      home: 'Ammonia',
       readerToolNames: ALL,
       namespaces,
       toolNamesFor,
     });
-    expect(vis[0]).toBe('Lithium');
-    expect(vis).toContain('Helium');
-    expect(vis).toContain('Hydrogen');
+    expect(vis[0]).toBe('Ammonia');
+    expect(vis).toContain('Methane');
+    expect(vis).toContain('Water');
   });
 
   it('a null-bucket reader (no write_file) sees home only', () => {
@@ -78,12 +84,12 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
     try {
       expect(
         visibleSkillNamespaces({
-          home: 'Helium',
+          home: 'Methane',
           readerToolNames: HTTP_TOOLS,
           namespaces,
           toolNamesFor,
         })
-      ).toEqual(['Helium']);
+      ).toEqual(['Methane']);
     } finally {
       if (before === undefined) delete process.env['ATOMA_SKILL_SHARED_CATALOG'];
       else process.env['ATOMA_SKILL_SHARED_CATALOG'] = before;
@@ -117,7 +123,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
     skills = new SkillRegistry(dir);
     reg = new AtomRegistry(openDb(':memory:'));
     mkType(2, 'orchestrator', []);
-    mkType(1, 'http builder', HTTP_TOOLS); // Hydrogen (first L1 name)
+    mkType(1, 'http builder', HTTP_TOOLS); // Water (first L1 name)
     mkType(1, 'file scribe', SCRIBE_TOOLS); // second L1 → taxonomy name
   });
   afterEach(() => {
@@ -134,7 +140,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
       kind: 'llm',
       body: '1. read the manifest with read_file\n2. run_shell each recorded cmd\n3. compare exit codes',
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     // Tier prefilter → the HTTP L1 (the reader).
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1a!, confidence: 'high', reasoning: 't' }));
@@ -148,7 +154,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
     ctx.llm.enqueueText(jsonText({ output: 'verified', summary: 'replayed 3 probes, all matched' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'result ok' }));
 
-    await water.handleDirect({ description: 'confirm the recorded probes still pass' }, ctx);
+    await neuron.handleDirect({ description: 'confirm the recorded probes still pass' }, ctx);
 
     const donorSkill = skills.loadFor(l1b!)[0]!;
     expect(donorSkill.successes).toBe(1); // credit landed on the OWNER
@@ -179,7 +185,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
         body: 'b',
       });
       for (let i = 0; i < 3; i++) reg.recordSuccess(l1a!);
-      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
       const ctx = makeCtx();
       ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1a!, confidence: 'high', reasoning: 't' }));
       ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
@@ -195,7 +201,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
         })
       );
 
-      await water.handleDirect({ description: 'novel-ish verification task' }, ctx);
+      await neuron.handleDirect({ description: 'novel-ish verification task' }, ctx);
       // Not re-created at home; the donor's copy is untouched.
       expect(skills.loadFor(l1a!).map((s) => s.id)).toEqual(['unrelated']);
       expect(skills.loadFor(l1b!).map((s) => s.id)).toEqual(['replay-recorded-probes']);
@@ -218,7 +224,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
       language: 'node',
       body: "import fs from 'node:fs';\nconsole.log(JSON.stringify({output:1, summary:'ok'}));",
     });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     // Tier prefilter → the WEB L1 (no run_shell).
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: webName, confidence: 'high', reasoning: 't' }));
@@ -230,7 +236,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'built' }));
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'result ok' }));
 
-    await water.handleDirect({ description: 'build the page' }, ctx);
+    await neuron.handleDirect({ description: 'build the page' }, ctx);
     // 5 calls total — none of them a skill prefilter (its catalog was empty
     // after the ABI filter dropped the donor script).
     expect(ctx.llm.calls).toHaveLength(5);

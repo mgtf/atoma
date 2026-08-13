@@ -124,7 +124,7 @@ describe('capabilityDescription', () => {
     const a = capabilityDescription(makeTools(['rare_tool_b', 'rare_tool_a']), 1);
     const b = capabilityDescription(makeTools(['rare_tool_a', 'rare_tool_b']), 1);
     expect(a).toBe(b);
-    expect(a).toMatch(/custom leaf toolset/);
+    expect(a).toMatch(/custom molecule leaf toolset/);
     // Stable ordering: sort alphabetically so different insertion orders collapse.
     expect(a).toContain('rare_tool_a, rare_tool_b');
   });
@@ -158,9 +158,9 @@ describe('capabilityDescription', () => {
 
   it('distinguishes custom toolsets by tier as well', () => {
     const tools = makeTools(['rare_tool_a', 'rare_tool_b']);
-    expect(capabilityDescription(tools, 1)).toMatch(/custom leaf toolset/);
-    expect(capabilityDescription(tools, 2)).toMatch(/custom orchestrator toolset/);
-    expect(capabilityDescription(tools, 3)).toMatch(/custom top-level cell toolset/);
+    expect(capabilityDescription(tools, 1)).toMatch(/custom molecule leaf toolset/);
+    expect(capabilityDescription(tools, 2)).toMatch(/custom cell orchestrator toolset/);
+    expect(capabilityDescription(tools, 3)).toMatch(/custom top-level tissue toolset/);
   });
 });
 

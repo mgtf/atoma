@@ -9,9 +9,9 @@ describe('shared CLI parser — flags anywhere (audit: silent-help failure)', ()
   });
 
   it('command-first form unchanged, with mixed flags and positionals', () => {
-    const p = parseCliArgs(['node', 'cli', 'show', 'Helium', '--dir', './s', 'my-skill']);
+    const p = parseCliArgs(['node', 'cli', 'show', 'Methane', '--dir', './s', 'my-skill']);
     expect(p.command).toBe('show');
-    expect(p.positional).toEqual(['Helium', 'my-skill']);
+    expect(p.positional).toEqual(['Methane', 'my-skill']);
     expect(p.flags['dir']).toBe('./s');
   });
 

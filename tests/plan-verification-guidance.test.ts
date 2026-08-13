@@ -12,7 +12,7 @@ import { makePlan } from './helpers/factories.js';
  * Regression tests for the "VERIFICATION MATCHES THE ARTEFACT" rule in
  * both plan prompts. Observed failure (clock-cli live run, 2026-07-25):
  * L3's Opus plan gave a Node CLI build a "serve + validate_html"
- * phase 2 — Hydrogen burned 9 failed start_static_server boots and
+ * phase 2 — Water burned 9 failed start_static_server boots and
  * fabricated a parasitic index.html just to have something to serve.
  * The plan prompts must steer verification to the probe matching the
  * artefact's nature (browser page → validate_html; HTTP API →
@@ -31,17 +31,17 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
   it('the L3 Opus plan prompt carries the artefact-matched verification rule', async () => {
     const r = new AtomRegistry(openDb(':memory:'));
     const l3Type = r.create(3, seed);
-    r.create(2, seed); // Water
+    r.create(2, seed); // Tracheid
     const l3 = L3Atom.buildWithModel(l3Type, r, FALLBACK_OPUS);
     const ctx = makeCtx();
     // Prefilter escalates; the Opus plan call is call #1.
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no match' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Water', reasoning: 'stub' },
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'stub' },
         {
           reasoning: 'stub',
-          subtasks: [{ description: 't', preferredChild: 'Water' }],
+          subtasks: [{ description: 't', preferredChild: 'Tracheid' }],
           aggregation: { mode: 'concat' },
           expectedOutput: 'stub',
         }
@@ -74,18 +74,18 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
 
   it('the L2 Sonnet plan prompt carries the same rule (short form)', async () => {
     const r = new AtomRegistry(openDb(':memory:'));
-    r.create(2, seed); // Water
-    r.create(1, { ...seed, description: 'file scribe' }); // Hydrogen
-    const l2 = L2Atom.fromType(r.getByName('Water')!, r);
+    r.create(2, seed); // Tracheid
+    r.create(1, { ...seed, description: 'file scribe' }); // Water
+    const l2 = L2Atom.fromType(r.getByName('Tracheid')!, r);
     const ctx = makeCtx();
     // Prefilter escalates; the Sonnet plan call is call #1.
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no match' }));
     ctx.llm.enqueueText(
       jsonTextPair(
-        { strategy: 'reuse', target: 'Hydrogen', reasoning: 'stub' },
+        { strategy: 'reuse', target: 'Water', reasoning: 'stub' },
         {
           reasoning: 'stub',
-          subtasks: [{ description: 't', preferredChild: 'Hydrogen' }],
+          subtasks: [{ description: 't', preferredChild: 'Water' }],
           aggregation: { mode: 'concat' },
           expectedOutput: 'stub',
         }
@@ -112,8 +112,8 @@ describe('preservePlanLiteralContracts', () => {
       'Reject blank names, wrong types, and malformed colors with status 400.';
     const plan = makePlan({
       subtasks: [
-        { description: 'Build the labels API.', preferredChild: 'Methane', inputs: {} },
-        { description: 'Verify proper validation.', preferredChild: 'Methane', inputs: {} },
+        { description: 'Build the labels API.', preferredChild: 'Sclereid', inputs: {} },
+        { description: 'Verify proper validation.', preferredChild: 'Sclereid', inputs: {} },
       ],
       aggregation: { mode: 'sequential' },
     });
@@ -160,13 +160,13 @@ describe('cross-bucket browser routing', () => {
         {
           description:
             'Validate the UI in a real browser with selector-based interactions and zero console errors.',
-          preferredChild: 'Methane',
+          preferredChild: 'Sclereid',
           inputs: {},
         },
         {
           description:
             'Reconfirm the UI probe in a real browser with selector-based interactions. Run node test-api.js and require it to pass.',
-          preferredChild: 'Methane',
+          preferredChild: 'Sclereid',
           inputs: {},
         },
       ],
@@ -174,12 +174,12 @@ describe('cross-bucket browser routing', () => {
     });
     const routed = routeCrossBucketVerification(plan, registry);
     expect(routed.subtasks).toHaveLength(3);
-    expect(routed.subtasks[0]!.preferredChild).toBe('Water');
+    expect(routed.subtasks[0]!.preferredChild).toBe('Tracheid');
     expect(routed.subtasks[1]!.description).toMatch(/BROWSER VERIFICATION ONLY/);
-    expect(routed.subtasks[1]!.preferredChild).toBe('Water');
+    expect(routed.subtasks[1]!.preferredChild).toBe('Tracheid');
     expect(routed.subtasks[2]!.description).toMatch(/FINAL SHELL\/HARNESS/);
     expect(routed.subtasks[2]!.description).toContain('node test-api.js');
-    expect(routed.subtasks[2]!.preferredChild).toBe('Methane');
+    expect(routed.subtasks[2]!.preferredChild).toBe('Sclereid');
     expect(taskRequiresRealBrowser(routed.subtasks[2]!.description)).toBe(false);
     expect(routed.aggregation.mode).toBe('sequential');
   });
@@ -212,12 +212,12 @@ describe('cross-bucket browser routing', () => {
         },
       ],
     });
-    const l2 = L2Atom.fromType(registry.getByName('Water')!, registry);
+    const l2 = L2Atom.fromType(registry.getByName('Tracheid')!, registry);
     const ctx = makeCtx();
     ctx.llm.enqueueText(
       jsonText({
         kind: 'reuse',
-        target: 'Helium',
+        target: 'Methane',
         confidence: 'high',
         reasoning: 'server owns the UI',
       })
@@ -229,7 +229,7 @@ describe('cross-bucket browser routing', () => {
       },
       ctx
     );
-    expect(plan.subtasks[0]!.preferredChild).toBe('Hydrogen');
+    expect(plan.subtasks[0]!.preferredChild).toBe('Water');
     expect(ctx.llm.calls).toHaveLength(1);
   });
 });

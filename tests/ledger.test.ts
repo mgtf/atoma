@@ -38,8 +38,8 @@ describe('lifecycle ledger', () => {
   });
 
   it('append + read round-trips in append order', () => {
-    appendLedger({ kind: 'type-success', entity: 'Hydrogen' });
-    appendLedger({ kind: 'type-failure', entity: 'Hydrogen' });
+    appendLedger({ kind: 'type-success', entity: 'Water' });
+    appendLedger({ kind: 'type-failure', entity: 'Water' });
     const events = readLedger();
     expect(events.map((e) => e.kind)).toEqual(['type-success', 'type-failure']);
     expect(events[0]!.at).toBeTruthy();
@@ -62,16 +62,16 @@ describe('lifecycle ledger', () => {
 
   it('SkillRegistry mutations flow through: bump, promote (reset), demote', () => {
     const skills = new SkillRegistry(join(dir, 'skills'));
-    skills.save('Hydrogen', { id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    skills.recordSuccess('Hydrogen', 's');
-    skills.recordSuccess('Hydrogen', 's');
+    skills.save('Water', { id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    skills.recordSuccess('Water', 's');
+    skills.recordSuccess('Water', 's');
     skills.promoteToScript({
-      l1Name: 'Hydrogen', skillId: 's', language: 'node',
+      l1Name: 'Water', skillId: 's', language: 'node',
       scriptBody: 'x', compiledGeneration: 'g1',
     });
-    skills.recordSuccess('Hydrogen', 's');
-    const projected = projectCounters(readLedger()).get('Hydrogen/s')!;
-    const live = skills.loadFor('Hydrogen')[0]!;
+    skills.recordSuccess('Water', 's');
+    const projected = projectCounters(readLedger()).get('Water/s')!;
+    const live = skills.loadFor('Water')[0]!;
     // Projection matches the store exactly: 2✓ erased by promotion, then 1✓.
     expect(projected.successes).toBe(live.successes);
     expect(projected.successes).toBe(1);
@@ -85,8 +85,8 @@ describe('lifecycle ledger', () => {
     // SKILL.md, so appending first produced store < ledger — the direction
     // `check` reports as IMPOSSIBLE, i.e. as proof of a bypassed choke point.
     const skills = new SkillRegistry(join(dir, 'skills'));
-    skills.recordSuccess('Hydrogen', 'never-existed');
-    skills.recordFailure('Hydrogen', 'never-existed');
+    skills.recordSuccess('Water', 'never-existed');
+    skills.recordFailure('Water', 'never-existed');
     expect(readLedger()).toHaveLength(0);
   });
 
@@ -139,7 +139,7 @@ describe('lifecycle ledger', () => {
 
   it('an in-memory registry cannot reach the configured store — the incident, structurally closed', () => {
     // Two throwaway `tsx` scripts once opened `:memory:` registries, bumped
-    // `Helium`, and left `ledger check` reporting `IMPOSSIBLE  Helium:
+    // `Methane`, and left `ledger check` reporting `IMPOSSIBLE  Methane:
     // store 2 < ledger 6` permanently. It was a guard (`ledgerWritesAllowed`);
     // now the registry writes through its OWN handle, so there is nothing to
     // guard — the events have nowhere else to go.

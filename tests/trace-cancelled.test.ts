@@ -57,7 +57,7 @@ describe('TraceRecorder.endRun({ cancelled: true })', () => {
       result: {
         summary: 's',
         output: 'o',
-        producedBy: { tier: 3, name: 'Neuron', viaFallback: false },
+        producedBy: { tier: 3, name: 'Meristem', viaFallback: false },
       },
     });
     expect(persisted!.cancelled).toBeUndefined();

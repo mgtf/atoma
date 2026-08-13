@@ -111,7 +111,7 @@ describe('nested ``` fence inside a JSON string (evidence-destruction regression
   });
 
   it('parseTwoJson survives a nested fence in the first payload', () => {
-    const strategy = { strategy: 'reuse', target: 'Lithium', reasoning: 'run: ```bash\nls\n```' };
+    const strategy = { strategy: 'reuse', target: 'Ammonia', reasoning: 'run: ```bash\nls\n```' };
     const plan = { reasoning: 'r', subtasks: [{ description: 'd' }] };
     const text =
       '```json\n' + JSON.stringify(strategy) + '\n```\n```json\n' + JSON.stringify(plan) + '\n```';
@@ -128,7 +128,7 @@ describe('nested ``` fence inside a JSON string (evidence-destruction regression
     const fused = [
       {
         strategy: 'reuse',
-        target: 'Ammonia',
+        target: 'Leukocyte',
         reasoning: 'coupled artefacts, sequential build',
         subtasks: [{ description: 'phase 1' }, { description: 'phase 2' }],
         aggregation: { mode: 'sequential' },
@@ -136,7 +136,7 @@ describe('nested ``` fence inside a JSON string (evidence-destruction regression
       },
     ];
     const [a, b] = parseTwoJson(JSON.stringify(fused));
-    expect(a).toEqual({ strategy: 'reuse', target: 'Ammonia', reasoning: 'coupled artefacts, sequential build' });
+    expect(a).toEqual({ strategy: 'reuse', target: 'Leukocyte', reasoning: 'coupled artefacts, sequential build' });
     expect(b).toEqual({
       reasoning: 'coupled artefacts, sequential build',
       subtasks: [{ description: 'phase 1' }, { description: 'phase 2' }],
@@ -367,7 +367,7 @@ describe('parsePlanTolerant', () => {
 
   it('unwraps a {strategy, plan} combined envelope', () => {
     const envelope = JSON.stringify({
-      strategy: { strategy: 'reuse', target: 'Hydrogen', reasoning: 'pf' },
+      strategy: { strategy: 'reuse', target: 'Water', reasoning: 'pf' },
       plan: legacyInput,
     });
     expect(parsePlanTolerant(envelope)).toEqual(expectedCoerced);
@@ -376,7 +376,7 @@ describe('parsePlanTolerant', () => {
   it('picks the plan-shaped candidate from a narrative with multiple JSON objects', () => {
     const text = `Decided to delegate.
 
-{"strategy": "reuse", "target": "Hydrogen"}
+{"strategy": "reuse", "target": "Water"}
 
 And here is the actual plan:
 

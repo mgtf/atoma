@@ -24,7 +24,7 @@ import { makePlan } from './helpers/factories.js';
 const fluorineSeed = {
   description:
     'Builds, serves, and validates a single-file WebGL Minesweeper game, iterating until validation passes.',
-  systemPrompt: 'You are Fluorine, an L1 element worker.',
+  systemPrompt: 'You are Fluorine, an L1 molecule worker.',
   tools: [],
   params: {},
   createdBy: 'test',
@@ -44,45 +44,45 @@ describe('buildTargetContext', () => {
 
   it('extracts `L1 "Name"` patterns from proposedAction', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    reg.create(1, fluorineSeed); // becomes "Hydrogen"
-    reg.describe('Hydrogen', 'WebGL Minesweeper builder with headless validation.');
+    reg.create(1, fluorineSeed); // becomes "Water"
+    reg.describe('Water', 'WebGL Minesweeper builder with headless validation.');
 
     const plan = {
-      reasoning: 'prefilter selected Hydrogen',
-      proposedAction: 'delegate leaf task to L1 "Hydrogen"',
+      reasoning: 'prefilter selected Water',
+      proposedAction: 'delegate leaf task to L1 "Water"',
       expectedOutput: 'done',
     };
     const ctx = buildTargetContext(plan, reg);
     expect(ctx).toBeDefined();
-    expect(ctx!).toMatch(/Hydrogen \(L1/);
+    expect(ctx!).toMatch(/Water \(L1/);
     expect(ctx!).toMatch(/WebGL Minesweeper builder/);
   });
 
   it('falls back to a whole-word catalog scan when no quoted-name pattern', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(1, fluorineSeed);
-    reg.describe('Hydrogen', 'Single-file WebGL Minesweeper builder.');
+    reg.describe('Water', 'Single-file WebGL Minesweeper builder.');
 
     const plan = {
       reasoning: 'r',
-      proposedAction: 'hand the work to Hydrogen and await its output',
+      proposedAction: 'hand the work to Water and await its output',
       expectedOutput: 'a URL',
     };
     const ctx = buildTargetContext(plan, reg);
     expect(ctx).toBeDefined();
-    expect(ctx!).toContain('Hydrogen');
+    expect(ctx!).toContain('Water');
   });
 
   it('shows trust counters so the validator knows what has historically worked', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(1, fluorineSeed);
-    reg.recordSuccess('Hydrogen');
-    reg.recordSuccess('Hydrogen');
-    reg.recordSuccess('Hydrogen');
+    reg.recordSuccess('Water');
+    reg.recordSuccess('Water');
+    reg.recordSuccess('Water');
 
     const plan = {
       reasoning: 'r',
-      proposedAction: 'delegate leaf task to L1 "Hydrogen"',
+      proposedAction: 'delegate leaf task to L1 "Water"',
       expectedOutput: 'e',
     };
     const ctx = buildTargetContext(plan, reg)!;
@@ -92,10 +92,10 @@ describe('buildTargetContext', () => {
   it('strips branch-provenance tails so the description is clean', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(1, fluorineSeed);
-    reg.branch('Hydrogen', {}, 'tester', 'WebGLMinesweeper');
-    // Its raw description now has "(branched from Hydrogen)" appended.
+    reg.branch('Water', {}, 'tester', 'WebGLMinesweeper');
+    // Its raw description now has "(branched from Water)" appended.
     const raw = reg.getByName('WebGLMinesweeper')!.description;
-    expect(raw).toMatch(/\(branched from Hydrogen\)$/);
+    expect(raw).toMatch(/\(branched from Water\)$/);
 
     const plan = {
       reasoning: 'r',
@@ -103,13 +103,13 @@ describe('buildTargetContext', () => {
       expectedOutput: 'e',
     };
     const ctx = buildTargetContext(plan, reg)!;
-    expect(ctx).not.toMatch(/\(branched from Hydrogen\)/);
+    expect(ctx).not.toMatch(/\(branched from Water\)/);
     expect(ctx).toMatch(/WebGLMinesweeper \(L1/);
   });
 
   it('skips unknown names (regex matches a name not in the registry)', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    reg.create(1, fluorineSeed); // Hydrogen exists
+    reg.create(1, fluorineSeed); // Water exists
 
     const plan = {
       reasoning: 'r',
@@ -136,7 +136,7 @@ describe('llmVerdict — injects targetContext into userContent', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Neuron',
+      supervisorName: 'Meristem',
       supervisorTier: 3,
       subject: 'PLAN',
       child,
@@ -171,7 +171,7 @@ describe('llmVerdict — injects targetContext into userContent', () => {
     await llmVerdict({
       ctx,
       model: 'claude-haiku-test',
-      supervisorName: 'Neuron',
+      supervisorName: 'Meristem',
       supervisorTier: 3,
       subject: 'PLAN',
       child,
@@ -189,7 +189,7 @@ describe('L2Atom.validatePlan — end-to-end target injection', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(1, fluorineSeed);
     reg.describe(
-      'Hydrogen',
+      'Water',
       'WebGL Minesweeper builder with headless validation.'
     );
     const l2Type = reg.create(2, {
@@ -201,7 +201,7 @@ describe('L2Atom.validatePlan — end-to-end target injection', () => {
     });
     const l2 = L2Atom.fromType(l2Type, reg);
 
-    const l1 = L1Atom.fromType(reg.getByName('Hydrogen')!);
+    const l1 = L1Atom.fromType(reg.getByName('Water')!);
     const ctx = makeCtx();
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
@@ -209,7 +209,7 @@ describe('L2Atom.validatePlan — end-to-end target injection', () => {
       l1,
       makePlan({
         reasoning: 'r',
-        proposedAction: 'delegate leaf task to L1 "Hydrogen"',
+        proposedAction: 'delegate leaf task to L1 "Water"',
         expectedOutput: 'e',
       }),
       { description: 't' },
@@ -218,6 +218,6 @@ describe('L2Atom.validatePlan — end-to-end target injection', () => {
 
     const userContent = ctx.llm.calls[0]!.userContent;
     expect(userContent).toContain('Delegation target(s):');
-    expect(userContent).toMatch(/Hydrogen \(L1[^)]+\): WebGL Minesweeper/);
+    expect(userContent).toMatch(/Water \(L1[^)]+\): WebGL Minesweeper/);
   });
 });

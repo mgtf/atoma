@@ -29,8 +29,17 @@ import type {
   VizEvent,
   VizRun,
 } from '../client/types.js';
+import { taxonomyForTier } from '../../core/taxonomy.js';
+import { elementForTool } from '../../contracts/toolTaxonomy.js';
+import { currentDisplayName } from '../../registry/taxonomyNames.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
+import {
+  buildStructuredDetail,
+  eventRoleLabel,
+  type DetailTone,
+  type StructuredDetailNode,
+} from '../client/structured-detail.js';
 
 export interface GpuDataSnapshot {
   runs: RunIndexEntry[];
@@ -123,6 +132,14 @@ function eventAccent(event: VizEvent): number {
   if (event.kind === 'skill') return event.op === 'quarantine' ? GPU_COLORS.error : GPU_COLORS.magenta;
   if (event.kind === 'registry') return 0xa78bfa;
   return GPU_COLORS.tiers[(event.actor?.tier ?? 1) as 1 | 2 | 3] ?? GPU_COLORS.primary;
+}
+
+function detailToneColor(tone: DetailTone): number {
+  if (tone === 'success') return GPU_COLORS.success;
+  if (tone === 'error') return GPU_COLORS.error;
+  if (tone === 'warning') return GPU_COLORS.warning;
+  if (tone === 'info') return GPU_COLORS.cyan;
+  return GPU_COLORS.muted;
 }
 
 export function gpuCardShaderMode(event: VizEvent): number {
@@ -342,8 +359,16 @@ function eventDecision(event: VizEvent): string {
   const parsed = tryParseJson(event.response) as Record<string, unknown> | undefined;
   if (!parsed || Array.isArray(parsed)) return '';
   if (event.role === 'prefilter') {
+    const target = scalar(parsed['target'], 'reuse');
+    const isSkillPrefilter = event.systemPrompt?.includes(
+      'You match a subtask against a catalog of learned skills'
+    );
+    const childTier =
+      !isSkillPrefilter && (event.actor?.tier === 2 || event.actor?.tier === 3)
+        ? event.actor.tier - 1
+        : undefined;
     return parsed['outcome'] === 'reuse'
-      ? `→ ${scalar(parsed['target'], 'reuse')}`
+      ? `→ ${currentDisplayName(childTier, target) ?? target}`
       : parsed['outcome'] === 'escalate'
         ? '↑ escalate'
         : '';
@@ -375,11 +400,16 @@ function resultFacts(result: unknown): string {
 }
 
 export function gpuEventCardCopy(event: VizEvent): GpuEventCardCopy {
+  const toolElement = event.kind === 'tool' && event.name
+    ? elementForTool(event.name)
+    : undefined;
   const title =
     event.kind === 'llm'
       ? event.role ?? 'llm'
       : event.kind === 'tool'
-        ? event.name ?? 'tool'
+        ? toolElement
+          ? `${toolElement.symbol} · ${event.name}`
+          : event.name ?? 'tool'
         : event.kind === 'skill'
           ? event.op ?? 'skill'
           : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
@@ -471,6 +501,10 @@ export class GpuRenderer {
   private currentEventIds = new Set<string>();
   private runPickerBounds: Rectangle | null = null;
   private runPickerScrollMax = 0;
+  private detailBounds: Rectangle | null = null;
+  private detailScrollY = 0;
+  private detailScrollMax = 0;
+  private detailKey: string | null = null;
   private metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
@@ -497,6 +531,24 @@ export class GpuRenderer {
           Math.min(this.runPickerScrollMax, current + event.deltaY)
         );
         this.snapshot.onRunPickerScroll(next - current);
+        return;
+      }
+    }
+    if (this.snapshot.state.view === 'runs' && this.detailBounds) {
+      const bounds = this.app.canvas.getBoundingClientRect();
+      const localX =
+        (event.clientX - bounds.left) * this.app.screen.width / Math.max(1, bounds.width);
+      const localY =
+        (event.clientY - bounds.top) * this.app.screen.height / Math.max(1, bounds.height);
+      if (this.detailBounds.contains(localX, localY)) {
+        const next = Math.max(
+          0,
+          Math.min(this.detailScrollMax, this.detailScrollY + event.deltaY)
+        );
+        if (next !== this.detailScrollY) {
+          this.detailScrollY = next;
+          this.render(this.snapshot);
+        }
         return;
       }
     }
@@ -577,6 +629,18 @@ export class GpuRenderer {
     this.currentEventIds = new Set();
     this.runPickerBounds = null;
     this.runPickerScrollMax = 0;
+    const nextDetailKey =
+      snapshot.state.view === 'runs'
+        ? snapshot.state.selectedEventId
+          ? `event:${snapshot.state.selectedEventId}`
+          : snapshot.state.selectedAtomName
+            ? `agent:${snapshot.state.selectedAtomName}`
+            : null
+        : null;
+    if (nextDetailKey !== this.detailKey) this.detailScrollY = 0;
+    this.detailKey = nextDetailKey;
+    this.detailBounds = null;
+    this.detailScrollMax = 0;
     this.scrollMax.runs = 0;
 
     const width = this.app.screen.width;
@@ -1931,17 +1995,19 @@ export class GpuRenderer {
     let nextLaneY = laneY;
     for (const tier of [3, 2, 1]) {
       let y = nextLaneY;
-      this.text(this.root, `L${tier}`, leftX + 14, y + 7, {
+      const laneLabel = snapshot.t(`lanes.l${tier}`);
+      const laneStartX = leftX + Math.min(132, Math.max(72, laneLabel.length * 6 + 18));
+      this.text(this.root, laneLabel, leftX + 14, y + 7, {
         size: 10,
         color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
         weight: '700',
       });
-      let atomX = leftX + 46;
+      let atomX = laneStartX;
       for (const entry of [...atoms.values()].filter((value) => value.snapshot.tier === tier)) {
         const name = entry.snapshot.name;
         const buttonWidth = Math.min(140, gpuFilterButtonWidth(name));
         if (atomX + buttonWidth > leftX + leftWidth - 12) {
-          atomX = leftX + 46;
+          atomX = laneStartX;
           y += 33;
         }
         this.atomButton(
@@ -1966,7 +2032,7 @@ export class GpuRenderer {
     let filterX = leftX + 14;
     let kindY = filterY;
     for (const kind of kinds) {
-      const label = kind.toUpperCase();
+      const label = kind === 'tool' ? snapshot.t('filters.tools').toUpperCase() : kind.toUpperCase();
       const buttonWidth = gpuFilterButtonWidth(label);
       if (filterX + buttonWidth > leftX + leftWidth - 12 && filterX > leftX + 14) {
         filterX = leftX + 14;
@@ -2088,7 +2154,7 @@ export class GpuRenderer {
       );
       this.text(
         lowerControlsLayer,
-        `${snapshot.t('now.title')} · ${(current.role ?? 'LLM').toUpperCase()} · ${current.actor?.name ?? '?'} · ${tools.length} tool`,
+        `${snapshot.t('now.title')} · ${(current.role ?? 'LLM').toUpperCase()} · ${current.actor?.name ?? '?'} · ${snapshot.t('now.elementCount', { count: tools.length })}`,
         leftX + 24,
         liveY + 11,
         { size: 10, color: GPU_COLORS.cyan, weight: '700' }
@@ -2183,7 +2249,7 @@ export class GpuRenderer {
         ? atoms.get(snapshot.state.selectedAtomName)
         : undefined;
       if (event) this.drawEventDetail(snapshot, event, rightX, top, rightWidth, height - top);
-      else if (atom) this.drawAtomDetail(atom.snapshot, rightX, top, rightWidth);
+      else if (atom) this.drawAtomDetail(snapshot, atom.snapshot, rightX, top, rightWidth);
       else this.text(this.root, snapshot.t('pane.selectEvent'), rightX + 18, top + 20, {
         size: 12,
         color: GPU_COLORS.muted,
@@ -2200,11 +2266,17 @@ export class GpuRenderer {
     width: number,
     height: number
   ) {
-    this.text(this.root, event.kind === 'llm' ? event.role ?? 'LLM' : event.kind, x + 18, y + 16, {
+    this.text(
+      this.root,
+      event.kind === 'llm' ? eventRoleLabel(event.role, snapshot.t) : event.kind,
+      x + 18,
+      y + 16,
+      {
       size: 15,
       weight: '700',
       color: eventAccent(event),
-    });
+      }
+    );
     this.text(this.root, `${event.actor?.name ?? ''} ${event.model ?? ''}`, x + 18, y + 42, {
       size: 10,
       color: GPU_COLORS.muted,
@@ -2237,17 +2309,59 @@ export class GpuRenderer {
     const raw =
       event.kind === 'llm'
         ? event.response ?? event.error ?? ''
-        : event.kind === 'tool'
-          ? JSON.stringify(event.error ?? event.result ?? event.args, null, 2)
-          : event.reasoning ?? JSON.stringify(event, null, 2);
-    const parsed = event.kind === 'llm' ? tryParseJson(raw) : undefined;
-    const body = parsed === undefined ? raw : JSON.stringify(parsed, null, 2);
-    this.text(this.root, truncate(body, 5000), x + 18, y + 68, {
-      size: 10,
-      mono: true,
-      color: 0xcbd5e1,
-      width: width - 36,
-    }).mask = this.detailMask(x + 12, y + 62, width - 24, height - 76);
+        : event.error ?? event.reasoning ?? '';
+    const structured =
+      event.kind === 'llm'
+        ? tryParseJson(raw)
+        : event.kind === 'tool' && !event.error
+          ? { args: event.args ?? {}, result: event.result }
+          : event.kind !== 'skill' && !event.error
+            ? event
+            : undefined;
+    const detailTop = y + 68;
+    const detailBottom = y + height - (event.kind === 'skill' ? 62 : 14);
+    const detailHeight = Math.max(40, detailBottom - detailTop);
+    this.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+    const detailLayer = new Container();
+    detailLayer.position.y = -this.detailScrollY;
+    this.root.addChild(detailLayer);
+    const mask = this.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+    detailLayer.mask = mask;
+    const contentBottom =
+      structured === undefined
+        ? detailTop +
+          this.text(detailLayer, truncate(raw, 8000), x + 18, detailTop, {
+            size: 10,
+            mono: true,
+            color: 0xcbd5e1,
+            width: width - 42,
+          }).height
+        : this.drawStructuredDetailNodes(
+            detailLayer,
+            buildStructuredDetail(structured, snapshot.t),
+            x + 18,
+            detailTop,
+            width - 42
+          );
+    this.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
+    this.detailScrollY = Math.min(this.detailScrollY, this.detailScrollMax);
+    detailLayer.position.y = -this.detailScrollY;
+    if (this.detailScrollMax > 0) {
+      const trackHeight = detailHeight;
+      const thumbHeight = Math.max(
+        28,
+        trackHeight * Math.min(1, detailHeight / (detailHeight + this.detailScrollMax))
+      );
+      const thumbY =
+        detailTop +
+        (trackHeight - thumbHeight) * (this.detailScrollY / this.detailScrollMax);
+      const scrollbar = new Graphics();
+      scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
+      scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
+      scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
+      scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
+      this.root.addChild(scrollbar);
+    }
     if (event.kind === 'skill' && event.l1Name && event.skillId) {
       this.button(
         this.root,
@@ -2264,6 +2378,102 @@ export class GpuRenderer {
     }
   }
 
+  private drawStructuredDetailNodes(
+    parent: Container,
+    nodes: readonly StructuredDetailNode[],
+    x: number,
+    startY: number,
+    width: number,
+    depth = 0
+  ): number {
+    let cursor = startY;
+    for (const node of nodes) {
+      const inset = depth * 12;
+      const nodeX = x + inset;
+      const nodeWidth = Math.max(120, width - inset);
+      if (node.kind === 'field') {
+        const background = new Graphics();
+        parent.addChild(background);
+        this.text(parent, node.label, nodeX + 10, cursor + 7, {
+          size: 9,
+          color: GPU_COLORS.muted,
+          weight: '600',
+          width: nodeWidth - 20,
+        });
+        if (node.presentation === 'badge') {
+          const accent = detailToneColor(node.tone);
+          const badgeWidth = Math.min(
+            nodeWidth - 20,
+            Math.max(72, node.value.length * 6.4 + 22)
+          );
+          const badge = new Graphics();
+          badge.roundRect(nodeX + 10, cursor + 25, badgeWidth, 24, 6);
+          badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
+          badge.stroke({ color: accent, width: 1, alpha: 0.75 });
+          parent.addChild(badge);
+          this.text(parent, node.value, nodeX + 20, cursor + 30, {
+            size: 10,
+            color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
+            weight: '700',
+            width: badgeWidth - 18,
+          });
+          background.roundRect(nodeX, cursor, nodeWidth, 59, 7);
+          background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
+          background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
+          cursor += 67;
+          continue;
+        }
+
+        const valueText = this.text(
+          parent,
+          truncate(node.value, 4000),
+          nodeX + 10,
+          cursor + 25,
+          {
+            size: 10,
+            mono: node.presentation === 'code',
+            color: node.tone === 'info' ? GPU_COLORS.cyan : 0xcbd5e1,
+            width: nodeWidth - 20,
+          }
+        );
+        const fieldHeight = Math.max(58, valueText.height + 36);
+        background.roundRect(nodeX, cursor, nodeWidth, fieldHeight, 7);
+        background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
+        background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
+        cursor += fieldHeight + 8;
+        continue;
+      }
+
+      const rail = new Graphics();
+      parent.addChild(rail);
+      const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
+      this.text(parent, title, nodeX + 10, cursor + 3, {
+        size: depth === 0 ? 12 : 10,
+        color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
+        weight: '700',
+        width: nodeWidth - 20,
+      });
+      const railTop = cursor + 25;
+      cursor += 29;
+      cursor = this.drawStructuredDetailNodes(
+        parent,
+        node.children,
+        x,
+        cursor,
+        width,
+        depth + 1
+      );
+      rail.moveTo(nodeX + 2, railTop).lineTo(nodeX + 2, Math.max(railTop, cursor - 7));
+      rail.stroke({
+        color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
+        width: depth === 0 ? 2 : 1,
+        alpha: 0.65,
+      });
+      cursor += 5;
+    }
+    return cursor;
+  }
+
   private detailMask(x: number, y: number, width: number, height: number) {
     const mask = new Graphics();
     mask.rect(x, y, width, height).fill(0xffffff);
@@ -2271,9 +2481,16 @@ export class GpuRenderer {
     return mask;
   }
 
-  private drawAtomDetail(atom: RegistryType, x: number, y: number, width: number) {
+  private drawAtomDetail(
+    snapshot: GpuRenderSnapshot,
+    atom: RegistryType,
+    x: number,
+    y: number,
+    width: number
+  ) {
+    const taxonomy = taxonomyForTier(atom.tier as 1 | 2 | 3);
     this.text(this.root, atom.name, x + 18, y + 16, { size: 16, weight: '700' });
-    this.text(this.root, `L${atom.tier} · v${atom.version} · ✓${atom.successes}/✗${atom.failures}`, x + 18, y + 43, {
+    this.text(this.root, `L${atom.tier} ${snapshot.t(`rank.${taxonomy.rank}`)} · v${atom.version} · ✓${atom.successes}/✗${atom.failures}`, x + 18, y + 43, {
       size: 10,
       color: GPU_COLORS.tiers[atom.tier as 1 | 2 | 3],
     });
@@ -2323,7 +2540,7 @@ export class GpuRenderer {
     const query = snapshot.state.search.registry.toLowerCase();
     let y = top + 92 - snapshot.state.scrollY.registry;
     for (const tier of [3, 2, 1]) {
-      this.text(this.root, `L${tier}`, x + 16, y + 8, {
+      this.text(this.root, snapshot.t(`lanes.l${tier}`), x + 16, y + 8, {
         size: 11,
         weight: '700',
         color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
@@ -2356,7 +2573,7 @@ export class GpuRenderer {
     const rightX = x + leftWidth + GPU_LAYOUT.gap;
     this.panel(this.root, rightX, top, width - rightX - GPU_LAYOUT.gap, height - top - GPU_LAYOUT.gap);
     const atom = payload.types.find((item) => item.name === snapshot.state.selectedRegistryAtom) ?? payload.types[0];
-    if (atom) this.drawAtomDetail(atom, rightX, top, width - rightX - GPU_LAYOUT.gap);
+    if (atom) this.drawAtomDetail(snapshot, atom, rightX, top, width - rightX - GPU_LAYOUT.gap);
   }
 
   private drawSkills(snapshot: GpuRenderSnapshot, width: number, height: number) {

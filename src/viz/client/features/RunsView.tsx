@@ -35,17 +35,28 @@ import { CodeBlock, EmptyPane, ErrorPane, LoadingPane, StatCard, TierChip } from
 import { tierColors } from '../theme.js';
 import type { VizEvent, VizRun } from '../types.js';
 import { useRunTrace } from '../use-runs.js';
+import { elementForTool } from '../../../contracts/toolTaxonomy.js';
+import { taxonomyForTier } from '../../../core/taxonomy.js';
+import { currentDisplayName } from '../../../registry/taxonomyNames.js';
+import {
+  buildStructuredDetail,
+  eventRoleLabel,
+  type DetailTone,
+  type StructuredDetailNode,
+} from '../structured-detail.js';
 
 const KIND_FILTERS = ['all', 'llm', 'tool', 'trust', 'skill', 'cache', 'registry'];
 
-function displayValue(value: unknown, fallback = ''): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value);
-  }
-  if (value !== undefined) return JSON.stringify(value) ?? fallback;
-  return fallback;
-}
+const DETAIL_TONE_COLORS: Record<
+  DetailTone,
+  'default' | 'success' | 'error' | 'warning' | 'info'
+> = {
+  neutral: 'default',
+  success: 'success',
+  error: 'error',
+  warning: 'warning',
+  info: 'info',
+};
 
 function OutcomeChips({ event }: { event: VizEvent }) {
   const { t } = useI18n();
@@ -53,7 +64,15 @@ function OutcomeChips({ event }: { event: VizEvent }) {
   if (!parsed || Array.isArray(parsed)) return null;
   if (event.role === 'prefilter') {
     const outcome = typeof parsed['outcome'] === 'string' ? parsed['outcome'] : undefined;
-    const target = typeof parsed['target'] === 'string' ? parsed['target'] : '?';
+    const rawTarget = typeof parsed['target'] === 'string' ? parsed['target'] : '?';
+    const isSkillPrefilter = event.systemPrompt?.includes(
+      'You match a subtask against a catalog of learned skills'
+    );
+    const childTier =
+      !isSkillPrefilter && (event.actor?.tier === 2 || event.actor?.tier === 3)
+        ? event.actor.tier - 1
+        : undefined;
+    const target = currentDisplayName(childTier, rawTarget) ?? rawTarget;
     const confidence = typeof parsed['confidence'] === 'string' ? parsed['confidence'] : undefined;
     return (
       <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
@@ -95,8 +114,11 @@ function eventAccent(event: VizEvent) {
 }
 
 function eventTitle(event: VizEvent, t: (key: string, vars?: Record<string, unknown>) => string) {
-  if (event.kind === 'llm' || event.kind === 'llm-start') return event.role ?? 'LLM';
-  if (event.kind === 'tool') return event.name ?? 'tool';
+  if (event.kind === 'llm' || event.kind === 'llm-start') return eventRoleLabel(event.role, t);
+  if (event.kind === 'tool') {
+    const element = event.name ? elementForTool(event.name) : undefined;
+    return element ? `${element.symbol} · ${event.name}` : event.name ?? 'tool';
+  }
   if (event.kind === 'trust') return `${event.subject ?? 'RESULT'} · ${t('event.trust.fastPath')}`;
   if (event.kind === 'cache') return t('event.cache.label');
   if (event.kind === 'skill') {
@@ -338,6 +360,7 @@ function NowBanner({ run, completed }: { run: VizRun; completed: Set<string> }) 
         {starts.map((event) => {
           const tools = run.events.filter((candidate) => candidate.kind === 'tool' && candidate.llmEventId === event.llmEventId);
           const last = tools.at(-1);
+          const lastElement = last?.name ? elementForTool(last.name) : undefined;
           return (
             <Stack key={event.id} direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
               <Chip size="small" color="info" label={event.role ?? 'LLM'} />
@@ -346,7 +369,7 @@ function NowBanner({ run, completed }: { run: VizRun; completed: Set<string> }) 
                 {tools.length
                   ? t(tools.length === 1 ? 'now.activity.one' : 'now.activity', {
                     count: tools.length,
-                    tool: `${last?.name ?? '?'} ${toolArgSummary(last?.args)}`,
+                    tool: `${lastElement ? `${lastElement.symbol} · ` : ''}${last?.name ?? '?'} ${toolArgSummary(last?.args)}`,
                     ago: Math.max(0, Math.round((Date.now() - (last?.ts ?? Date.now())) / 1000)),
                   })
                   : t('now.activity.none')}
@@ -366,6 +389,13 @@ function AtomDetail({ atom }: { atom: AtomView }) {
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Typography variant="h6">{atom.snapshot.name}</Typography>
         <TierChip tier={atom.snapshot.tier} />
+        <Chip
+          size="small"
+          label={t(
+            `rank.${taxonomyForTier(atom.snapshot.tier as 1 | 2 | 3).rank}`
+          )}
+          variant="outlined"
+        />
         <Chip size="small" label={t(`registry.origin.${atom.origin}`)} variant="outlined" />
       </Stack>
       <Typography color="text.secondary">{atom.snapshot.description}</Typography>
@@ -376,7 +406,18 @@ function AtomDetail({ atom }: { atom: AtomView }) {
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('common.tools')}</Typography>
         <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
-          {atom.snapshot.tools.map((tool) => <Chip key={tool} size="small" label={tool} variant="outlined" />)}
+          {atom.snapshot.tools.map((tool) => {
+            const element = elementForTool(tool);
+            return (
+              <Chip
+                key={tool}
+                size="small"
+                label={element ? `${element.symbol} · ${tool}` : tool}
+                title={element?.name}
+                variant="outlined"
+              />
+            );
+          })}
         </Stack>
       </Box>
       <Box>
@@ -387,51 +428,111 @@ function AtomDetail({ atom }: { atom: AtomView }) {
   );
 }
 
-function StructuredResponse({ text }: { text: string }) {
-  const { t } = useI18n();
-  const parsed = tryParseJson(text);
-  if (!Array.isArray(parsed) || parsed.length !== 2) {
-    return <CodeBlock maxHeight={720}>{parsed === undefined ? text : JSON.stringify(parsed, null, 2)}</CodeBlock>;
+function StructuredNodeView({
+  node,
+  path,
+  depth = 0,
+}: {
+  node: StructuredDetailNode;
+  path: string;
+  depth?: number;
+}) {
+  if (node.kind === 'field') {
+    return (
+      <Paper
+        variant="outlined"
+        sx={{
+          px: 1.25,
+          py: 1,
+          bgcolor: depth > 0 ? 'rgba(255,255,255,0.018)' : 'transparent',
+        }}
+      >
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', mb: 0.45, letterSpacing: '0.04em' }}
+        >
+          {node.label}
+        </Typography>
+        {node.presentation === 'badge' ? (
+          <Chip
+            size="small"
+            color={DETAIL_TONE_COLORS[node.tone]}
+            variant={node.tone === 'neutral' ? 'outlined' : 'filled'}
+            label={node.value}
+          />
+        ) : (
+          <Typography
+            variant="body2"
+            sx={{
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'anywhere',
+              lineHeight: 1.55,
+              fontFamily:
+                node.presentation === 'code'
+                  ? 'ui-monospace, SFMono-Regular, Menlo, monospace'
+                  : undefined,
+              color: node.tone === 'info' ? 'info.light' : 'text.primary',
+            }}
+          >
+            {node.value}
+          </Typography>
+        )}
+      </Paper>
+    );
   }
-  const strategy = parsed[0] && typeof parsed[0] === 'object'
-    ? parsed[0] as Record<string, unknown>
-    : {};
-  const plan = parsed[1] && typeof parsed[1] === 'object'
-    ? parsed[1] as Record<string, unknown>
-    : {};
-  const subtasks = Array.isArray(plan['subtasks']) ? plan['subtasks'] : [];
+
   return (
-    <Stack spacing={1}>
-      <Paper sx={{ p: 1.25 }}>
-        <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('detail.strategy')}</Typography>
-        <CodeBlock>{JSON.stringify(strategy, null, 2)}</CodeBlock>
-      </Paper>
-      <Paper sx={{ p: 1.25 }}>
-        <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('detail.plan')}</Typography>
-        <Stack spacing={0.75}>
-          {subtasks.map((subtask, index) => {
-            const value: Record<string, unknown> = subtask && typeof subtask === 'object'
-              ? subtask as Record<string, unknown>
-              : { value: subtask };
-            return (
-              <Paper key={index} variant="outlined" sx={{ p: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  {t('detail.subtasks')} {index + 1}
-                </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {displayValue(value['description'] ?? value['task'], `#${index + 1}`)}
-                </Typography>
-                {value['preferredChild'] ? (
-                  <Chip size="small" variant="outlined" label={displayValue(value['preferredChild'])} sx={{ mt: 0.5 }} />
-                ) : null}
-              </Paper>
-            );
-          })}
-          {!subtasks.length ? <CodeBlock>{JSON.stringify(plan, null, 2)}</CodeBlock> : null}
-        </Stack>
-      </Paper>
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 1.15,
+        borderLeftWidth: depth > 0 ? 3 : 1,
+        borderLeftColor: depth > 0 ? 'primary.main' : 'divider',
+        bgcolor: depth > 0 ? 'rgba(110,168,255,0.025)' : 'transparent',
+      }}
+    >
+      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', mb: 0.85 }}>
+        <Typography variant="subtitle2">{node.label}</Typography>
+        {node.count !== undefined ? (
+          <Chip size="small" variant="outlined" label={node.count} />
+        ) : null}
+      </Stack>
+      <Stack spacing={0.75}>
+        {node.children.map((child, index) => (
+          <StructuredNodeView
+            key={`${path}.${child.key}.${index}`}
+            node={child}
+            path={`${path}.${child.key}.${index}`}
+            depth={depth + 1}
+          />
+        ))}
+      </Stack>
+    </Paper>
+  );
+}
+
+function StructuredValue({ value }: { value: unknown }) {
+  const { t } = useI18n();
+  const nodes = buildStructuredDetail(value, t);
+  return (
+    <Stack spacing={0.85}>
+      {nodes.map((node, index) => (
+        <StructuredNodeView
+          key={`root.${node.key}.${index}`}
+          node={node}
+          path={`root.${node.key}.${index}`}
+        />
+      ))}
     </Stack>
   );
+}
+
+function StructuredResponse({ text }: { text: string }) {
+  const parsed = tryParseJson(text);
+  return parsed === undefined
+    ? <CodeBlock maxHeight={720}>{text}</CodeBlock>
+    : <StructuredValue value={parsed} />;
 }
 
 function EventDetail({
@@ -455,7 +556,7 @@ function EventDetail({
     return (
       <Box>
         <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center' }}>
-          <Typography variant="h6">{event.role ?? 'LLM'}</Typography>
+          <Typography variant="h6">{eventRoleLabel(event.role, t)}</Typography>
           <TierChip tier={event.actor?.tier} label={event.actor?.name} />
           <Chip size="small" label={event.model ?? '?'} variant="outlined" />
         </Stack>
@@ -471,11 +572,22 @@ function EventDetail({
     );
   }
   if (event.kind === 'tool') {
+    const element = event.name ? elementForTool(event.name) : undefined;
     return (
       <Stack spacing={1.5}>
-        <Typography variant="h6">{event.name}</Typography>
-        <CodeBlock>{JSON.stringify(event.args ?? {}, null, 2)}</CodeBlock>
-        <CodeBlock maxHeight={650}>{event.error ?? JSON.stringify(event.result, null, 2)}</CodeBlock>
+        <Typography variant="h6">
+          {element ? `${element.name} (${element.symbol}) · ${event.name}` : event.name}
+        </Typography>
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('detail.arguments')}</Typography>
+          <StructuredValue value={event.args ?? {}} />
+        </Box>
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('detail.result')}</Typography>
+          {event.error
+            ? <Alert severity="error">{event.error}</Alert>
+            : <StructuredValue value={event.result} />}
+        </Box>
       </Stack>
     );
   }
@@ -499,7 +611,7 @@ function EventDetail({
     <Stack spacing={1.5}>
       <Typography variant="h6">{eventTitle(event, t)}</Typography>
       {event.reasoning ? <Typography>{event.reasoning}</Typography> : null}
-      <CodeBlock maxHeight={680}>{JSON.stringify(event, null, 2)}</CodeBlock>
+      <StructuredValue value={event} />
     </Stack>
   );
 }

@@ -7,9 +7,9 @@ import type {
   Tool,
 } from '../core/types.js';
 import { RegistryNotFoundError } from '../core/errors.js';
-import { nextAvailableElement } from './taxonomies/elements.js';
 import { nextAvailableMolecule } from './taxonomies/molecules.js';
 import { nextAvailableCell } from './taxonomies/cells.js';
+import { nextAvailableTissue } from './taxonomies/tissues.js';
 
 /**
  * Is this string safe to use as an atom NAME?
@@ -99,11 +99,11 @@ function rowToType(row: Row): AtomType {
 function nextAvailable(tier: Tier, used: Set<number>): { ordinal: number; name: string } {
   switch (tier) {
     case 1:
-      return nextAvailableElement(used);
-    case 2:
       return nextAvailableMolecule(used);
-    case 3:
+    case 2:
       return nextAvailableCell(used);
+    case 3:
+      return nextAvailableTissue(used);
   }
 }
 
@@ -182,8 +182,8 @@ export function stripBranchProvenance(description: string): string {
 /**
  * Rewrite a leading "You are <PersonaName>" line so the persona matches the
  * atom's actual name. Addresses a recurring contamination where Sonnet, when
- * authoring a seed system prompt, hardcodes a name like "You are Carbon, an
- * L1 element..." that then persists through branches — every descendant of
+ * authoring a seed system prompt, hardcoded a pre-v2 name like "You are
+ * Carbon, an L1 element..." that then persisted through branches — every descendant of
  * the seeded atom ends up thinking it's Carbon even when its registry name
  * is Phosphorus, Silicon, Aluminum, etc.
  *
@@ -693,7 +693,7 @@ export class AtomRegistry {
    * approved final result. Trusted types accumulate successes to eventually
    * short-circuit the validator LLM call.
    */
-  recordSuccess(name: string): void {
+  recordSuccess(name: string, by?: string): void {
     // ONE TRANSACTION, and that is the point of the ledger living here. The
     // append used to precede the UPDATE as two writes to two files, so a
     // crash between them left the store one BELOW the ledger — precisely the
@@ -702,7 +702,11 @@ export class AtomRegistry {
     // the wall-clock budget), so the integrity checker could be made to lie
     // by timing alone.
     this.db.transaction(() => {
-      this.note({ kind: 'type-success', entity: name });
+      this.note({
+        kind: 'type-success',
+        entity: name,
+        ...(by ? { detail: { by } } : {}),
+      });
       this.db.prepare('UPDATE atom_types SET successes = successes + 1 WHERE name = ?').run(name);
     })();
   }
@@ -712,9 +716,13 @@ export class AtomRegistry {
    * is about to branch the type. Any failure resets trust until enough new
    * successes accumulate.
    */
-  recordFailure(name: string): void {
+  recordFailure(name: string, by?: string): void {
     this.db.transaction(() => {
-      this.note({ kind: 'type-failure', entity: name });
+      this.note({
+        kind: 'type-failure',
+        entity: name,
+        ...(by ? { detail: { by } } : {}),
+      });
       this.db.prepare('UPDATE atom_types SET failures = failures + 1 WHERE name = ?').run(name);
     })();
   }

@@ -194,7 +194,7 @@ export function capabilityDescription(
     // the role so tier-cross contamination stays visible in prefilter.
     const sig = [...names].sort().join(', ');
     const role =
-      tier === 1 ? 'leaf' : tier === 2 ? 'orchestrator' : 'top-level cell';
+      tier === 1 ? 'molecule leaf' : tier === 2 ? 'cell orchestrator' : 'top-level tissue';
     parts.push(`custom ${role} toolset: ${sig || 'no tools'}`);
   }
 
@@ -512,7 +512,7 @@ export const CANONICAL_L2_HTTP_DESCRIPTION =
   'Node HTTP server orchestrator: routes a leaf task to a tier-1 builder that writes server code, installs dependencies, boots a Node process, and probes endpoints via fetch_url';
 
 export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are an L1 element with ONE narrow responsibility.`,
+  `You are an L1 molecule with ONE narrow responsibility.`,
   `DO NOT attempt to solve the whole task — only the specific subtask you are handed.`,
   `Call tools sequentially to produce your single output. Return a structured`,
   `{"output", "summary"} JSON at the end.`,
@@ -554,11 +554,11 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
 ];
 
 export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are a domain-neutral L2 orchestrator for single-file web builds.`,
-  `DELEGATION DISCIPLINE: you NEVER call tools yourself. Decompose the task`,
-  `into AT MOST one L1 leaf (the write + serve + validate loop) and delegate.`,
+  `You are a domain-neutral L2 cell for single-file web builds.`,
+  `DELEGATION DISCIPLINE: you NEVER invoke elements yourself. Decompose the task`,
+  `into AT MOST one L1 molecule (the write + serve + validate loop) and delegate.`,
   `Prefer reusing the existing canonical L1 via prefilter — only request a`,
-  `new L1 when the toolset genuinely diverges.`,
+  `new L1 when the element set genuinely diverges.`,
   ``,
   `Scope boundary: task-specific nouns (grid dimensions, game rules, UI`,
   `copy) belong in the SUBTASK DESCRIPTION you pass down, never in the L1's`,
@@ -566,7 +566,7 @@ export const CANONICAL_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
 ];
 
 export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are an L1 element specialised for Node HTTP server builds.`,
+  `You are an L1 molecule specialised for Node HTTP server builds.`,
   `Your job: write a single self-contained server entry point, install its`,
   `dependencies, boot it, and verify the endpoints with HTTP probes.`,
   ``,
@@ -651,12 +651,12 @@ export const CANONICAL_HTTP_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
 ];
 
 export const CANONICAL_HTTP_L2_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are a domain-neutral L2 orchestrator for Node HTTP server builds.`,
-  `DELEGATION DISCIPLINE: you NEVER call tools yourself. Decompose the task`,
-  `into orthogonal L1 leaves (server code, client stub, schema file, etc.)`,
-  `and delegate each to a tier-1 atom.`,
+  `You are a domain-neutral L2 cell for Node HTTP server builds.`,
+  `DELEGATION DISCIPLINE: you NEVER invoke elements yourself. Decompose the task`,
+  `into orthogonal L1 molecules (server code, client stub, schema file, etc.)`,
+  `and delegate each to a tier-1 molecule.`,
   `Prefer reusing the existing canonical HTTP L1 via prefilter — only`,
-  `request a new L1 when the toolset genuinely diverges.`,
+  `request a new L1 when the element set genuinely diverges.`,
   ``,
   `Scope boundary: task-specific nouns (endpoint paths, request shapes,`,
   `database names) belong in the SUBTASK DESCRIPTION you pass down, never`,
@@ -735,7 +735,7 @@ export const GROUND_TRUTH_EVIDENCE_LINES: readonly string[] = [
 export { PROBE_MANIFEST_FILENAME } from '../contracts/probeManifest.js';
 
 export const CANONICAL_FILESCRIBE_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
-  `You are an L1 element specialised for static-file authoring: JSON,`,
+  `You are an L1 molecule specialised for static-file authoring: JSON,`,
   `markdown, YAML, text, configuration files, documentation — anything`,
   `that is NOT a runnable server, NOT a browser-rendered page.`,
   ``,

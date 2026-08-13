@@ -35,8 +35,8 @@ export const REFUSAL_REASON_MAX_CHARS = 500;
 
 /**
  * Filesystem-backed skill store. Skills live under
- *   <rootDir>/<l1-name>/<skill-id>/SKILL.md   (frontmatter + body)
- *   <rootDir>/<l1-name>/<skill-id>/_meta.json (counters)
+ *   <rootDir>/<molecule-name>/<skill-id>/SKILL.md   (frontmatter + body)
+ *   <rootDir>/<molecule-name>/<skill-id>/_meta.json (counters)
  *
  * The serialiser is a tiny YAML frontmatter + markdown body parser —
  * we don't pull a YAML library because the frontmatter shape is fixed
@@ -55,7 +55,7 @@ export class SkillRegistry {
     this.rootDir = resolve(rootDir);
   }
 
-  /** Return the full directory holding all skills for an L1. */
+  /** Return the full directory holding all skills for an L1 molecule. */
   private namespaceDir(l1Name: string): string {
     return join(this.rootDir, sanitise(l1Name));
   }
@@ -65,8 +65,8 @@ export class SkillRegistry {
   }
 
   /**
-   * Load every skill belonging to a given L1. Missing namespace returns
-   * an empty list (a fresh L1 has no skills). Malformed skill folders
+   * Load every skill belonging to a molecule. Missing namespace returns
+   * an empty list (a fresh molecule has no skills). Malformed skill folders
    * (no SKILL.md, bad frontmatter) are SKIPPED with a console.warn
    * rather than throwing — one bad file should not bring down the
    * whole atom.

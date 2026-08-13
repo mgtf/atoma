@@ -29,7 +29,7 @@ function tool(name: string): Tool {
 /** File-bucket child: writes/reads files, NO validate_html. */
 function fileChild(): L1Atom {
   return new L1Atom({
-    name: 'Lithium',
+    name: 'Ammonia',
     ordinal: 3,
     systemPrompt: 'sys',
     tools: [tool('write_file'), tool('read_file'), tool('list_files'), tool('run_shell')],
@@ -40,7 +40,7 @@ function fileChild(): L1Atom {
 /** Web-bucket child: the existing validate_html probe owns this one. */
 function webChild(): L1Atom {
   return new L1Atom({
-    name: 'Hydrogen',
+    name: 'Water',
     ordinal: 1,
     systemPrompt: 'sys',
     tools: [tool('write_file'), tool('validate_html')],
@@ -50,7 +50,7 @@ function webChild(): L1Atom {
 
 function httpChild(): L1Atom {
   return new L1Atom({
-    name: 'Helium',
+    name: 'Methane',
     ordinal: 2,
     systemPrompt: 'sys',
     tools: [
@@ -442,7 +442,7 @@ describe('file read-back probe (#F9)', () => {
   });
 
   it('catches a dynamic port at the file-scribe boundary, before the HTTP parent', async () => {
-    // Live failure: Methane delegated README.md to Lithium. Gating this check
+    // Live failure: Erythrocyte delegated README.md to Ammonia. Gating this check
     // on the CHILD owning HTTP tools let the port through L2; L3 caught it
     // only after the whole phase had completed and a retry exhausted 900s.
     const exec = new FsExecutor({
@@ -530,7 +530,7 @@ describe('file read-back probe (#F9)', () => {
 
   it('does NOT fire for a child that cannot write files', async () => {
     const reasoner = new L1Atom({
-      name: 'Boron',
+      name: 'Glucose',
       ordinal: 5,
       systemPrompt: 'sys',
       tools: [tool('fetch_url')],

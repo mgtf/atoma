@@ -37,7 +37,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     // Three consecutive live attempts at a web deliverable died with the
     // SAME validator complaint — "narrative claims are not evidence" — and
     // the root cause was here: the http and file-scribe canonicals carry
-    // explicit evidence contracts, the web canonical carried NONE. Hydrogen
+    // explicit evidence contracts, the web canonical carried NONE. Water
     // was never told HOW to prove its work.
     const reg = new AtomRegistry(openDb(':memory:'));
     const l1 = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
@@ -60,7 +60,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(l2.tier).toBe(2);
     expect(l2.description).toBe(CANONICAL_L2_WEB_DESCRIPTION);
     expect(l2.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
-    expect(l2.systemPrompt).toContain('domain-neutral L2 orchestrator');
+    expect(l2.systemPrompt).toContain('domain-neutral L2 cell');
     expect(reg.listByTier(2)).toHaveLength(1);
   });
 
@@ -85,7 +85,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
       systemPrompt: 'legacy',
       tools: WEB_TOOLS,
       params: {},
-      createdBy: 'Water',
+      createdBy: 'Neuron',
     });
     const canonical = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
     // Both present. Canonical is the new one; legacy is untouched.
@@ -93,7 +93,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(all).toHaveLength(2);
     const stillLegacy = reg.getByName(legacy.name)!;
     expect(stillLegacy.description).toBe(legacy.description);
-    expect(stillLegacy.createdBy).toBe('Water');
+    expect(stillLegacy.createdBy).toBe('Neuron');
     expect(canonical.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
     expect(canonical.description).toBe(capabilityDescription(WEB_TOOLS, 1));
   });
@@ -122,7 +122,7 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(prompt).toMatch(/PROBE MANIFEST ON DISK/);
     expect(prompt).toMatch(/"probe": "http"/);
     expect(prompt).toContain('.atoma-probes.json');
-    // Phase-2 of the LoL-SSR run: Helium stuffed the block into the
+    // Phase-2 of the LoL-SSR run: Methane stuffed the block into the
     // "output" field as prose, validator rejected on placement. The
     // prompt must explicitly forbid that and show the canonical shape.
     expect(prompt).toMatch(/NEVER stuff prose[\s\S]+?GROUND-TRUTH block into "output"/);

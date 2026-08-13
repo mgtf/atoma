@@ -30,9 +30,9 @@ describe('TraceRecorder.recordSkillEvent', () => {
 
     const info: SkillEventInfo = {
       op: 'match',
-      l1Name: 'Lithium',
+      l1Name: 'Ammonia',
       skillId: 'scaffold-package-json',
-      actorName: 'Methane',
+      actorName: 'Erythrocyte',
       actorTier: 2,
       reasoning: 'skill matched the subtask shape',
     };
@@ -43,9 +43,9 @@ describe('TraceRecorder.recordSkillEvent', () => {
     const ev = run.events[0] as VizSkillEvent;
     expect(ev.kind).toBe('skill');
     expect(ev.op).toBe('match');
-    expect(ev.l1Name).toBe('Lithium');
+    expect(ev.l1Name).toBe('Ammonia');
     expect(ev.skillId).toBe('scaffold-package-json');
-    expect(ev.actor).toEqual({ name: 'Methane', tier: 2 });
+    expect(ev.actor).toEqual({ name: 'Erythrocyte', tier: 2 });
     expect(ev.reasoning).toMatch(/matched the subtask/);
     expect(typeof ev.id).toBe('string');
     expect(typeof ev.ts).toBe('number');
@@ -58,9 +58,9 @@ describe('TraceRecorder.recordSkillEvent', () => {
     for (const op of ['match', 'inject', 'success'] as const) {
       recorder.recordSkillEvent({
         op,
-        l1Name: 'Lithium',
+        l1Name: 'Ammonia',
         skillId: 'foo',
-        actorName: 'Methane',
+        actorName: 'Erythrocyte',
         actorTier: 2,
       });
     }
@@ -76,9 +76,9 @@ describe('TraceRecorder.recordSkillEvent', () => {
     recorder.beginRun(task, 'test');
     recorder.recordSkillEvent({
       op: 'success',
-      l1Name: 'Lithium',
+      l1Name: 'Ammonia',
       skillId: 'foo',
-      actorName: 'Methane',
+      actorName: 'Erythrocyte',
       actorTier: 2,
     });
     const ev = recorder.currentRun!.events[0] as VizSkillEvent;
@@ -102,9 +102,9 @@ describe('forkBranch propagates recordSkill', () => {
     const branchCtx = forkBranch(baseCtx, 'branch-uuid-abc');
     branchCtx.recordSkill?.({
       op: 'match',
-      l1Name: 'Lithium',
+      l1Name: 'Ammonia',
       skillId: 'foo',
-      actorName: 'Methane',
+      actorName: 'Erythrocyte',
       actorTier: 2,
     });
     expect(seen).toHaveLength(1);
@@ -112,9 +112,9 @@ describe('forkBranch propagates recordSkill', () => {
     // Trunk-level emission stays branch-less.
     baseCtx.recordSkill?.({
       op: 'success',
-      l1Name: 'Lithium',
+      l1Name: 'Ammonia',
       skillId: 'foo',
-      actorName: 'Methane',
+      actorName: 'Erythrocyte',
       actorTier: 2,
     });
     expect(seen).toHaveLength(2);

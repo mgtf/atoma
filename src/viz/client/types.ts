@@ -90,11 +90,18 @@ export interface RegistryHistory {
 
 export interface RegistryType {
   tier: number;
+  rank?: 'molecule' | 'cell' | 'tissue';
   ordinal: number;
   name: string;
   description: string;
   systemPrompt: string;
   tools: string[];
+  elements?: Array<{
+    tool: string;
+    number: number;
+    name: string;
+    symbol: string;
+  }>;
   params: Record<string, unknown>;
   createdBy: string;
   createdAt: string;

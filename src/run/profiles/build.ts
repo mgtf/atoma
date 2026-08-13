@@ -43,19 +43,19 @@ export function defaultWorkspaceRoot(): string {
  * DO NOT EDIT CASUALLY. `seedL3` refreshes the persisted prompt whenever this
  * constant changes, and `AtomRegistry.patch` ZEROES the trust counters — so a
  * one-character change here is the first tier-3 patch in the project's
- * history and costs Neuron its record. `tests/run-profile-build.test.ts` pins
+ * history and costs Meristem its record. `tests/run-profile-build.test.ts` pins
  * the exact text against what is persisted in the live store.
  */
-export const NEURON_SYSTEM_PROMPT = [
-  'You are Neuron, a top-level cell that builds real apps end-to-end.',
-  'DELEGATION DISCIPLINE: you NEVER call tools yourself. You choose an L2 molecule (reuse or create) and hand the task over. The L2 will in turn route a focused leaf task to an L1 element; L1 is the ONLY tier that writes files, runs shell commands, starts servers and validates artefacts. This hierarchy keeps LLM cost low — do not try to do the work from here.',
+export const MERISTEM_SYSTEM_PROMPT = [
+  'You are Meristem, a top-level tissue that builds real apps end-to-end.',
+  'DELEGATION DISCIPLINE: you NEVER invoke elements yourself. You choose an L2 cell (reuse or create) and hand the task over. The L2 will in turn route a focused leaf task to an L1 molecule; L1 is the ONLY agent tier that invokes elements to write files, run shell commands, start servers and validate artefacts. This hierarchy keeps LLM cost low — do not try to do the work from here.',
   'Produce runnable, self-contained artefacts shaped by the task itself: a single index.html for browser pages, a Node entry file for HTTP servers/APIs, plain script/config/doc files for CLI and file deliverables. Never impose one artefact shape on a task of a different nature.',
   'The final output you return must state how the deliverable was verified (which probe ran and its result) and give its entry point: the served URL when a server is part of the deliverable, otherwise the main file path plus the command that runs it.',
 ].join('\n');
 
-/** Persisted description of the build family's tier-3 cell. Same edit caution. */
-export const NEURON_DESCRIPTION =
-  'A top-level cell that orchestrates real application builds by delegating strategy to L2 molecules; concrete side-effects happen only at L1.';
+/** Persisted description of the build family's tier-3 tissue. Same edit caution. */
+export const MERISTEM_DESCRIPTION =
+  'A top-level tissue that orchestrates real application builds by delegating strategy to L2 cells; concrete side-effects happen only in L1 molecules.';
 
 /**
  * Task constraints for the build family.
@@ -162,16 +162,16 @@ export const buildProfile: TaskProfile = {
   },
 
   seedL3({ registry, toolDecls, log }: ProfileSeedContext): AtomType {
-    let l3Type = registry.listByTier(3).find((t) => t.name === 'Neuron');
+    let l3Type = registry.listByTier(3).find((t) => t.name === 'Meristem');
     if (!l3Type) {
       l3Type = registry.create(3, {
-        description: NEURON_DESCRIPTION,
-        systemPrompt: NEURON_SYSTEM_PROMPT,
+        description: MERISTEM_DESCRIPTION,
+        systemPrompt: MERISTEM_SYSTEM_PROMPT,
         tools: [...toolDecls],
         params: { maxTokens: 16384 },
         createdBy: 'user',
       });
-      log(`bootstrapped L3 cell: ${l3Type.name}`);
+      log(`bootstrapped L3 tissue: ${l3Type.name}`);
     } else {
       // Always refresh the tools (executor set may have changed across
       // runs) and re-align the system prompt with the current seed.
@@ -179,14 +179,14 @@ export const buildProfile: TaskProfile = {
         l3Type.name,
         {
           addTools: [...toolDecls],
-          ...(l3Type.systemPrompt !== NEURON_SYSTEM_PROMPT
-            ? { systemPromptReplace: NEURON_SYSTEM_PROMPT }
+          ...(l3Type.systemPrompt !== MERISTEM_SYSTEM_PROMPT
+            ? { systemPromptReplace: MERISTEM_SYSTEM_PROMPT }
             : {}),
         },
         'build-app',
         'refresh system tools + seed prompt'
       );
-      log(`reusing L3 cell: ${l3Type.name} (v${l3Type.version})`);
+      log(`reusing L3 tissue: ${l3Type.name} (v${l3Type.version})`);
     }
     return l3Type;
   },

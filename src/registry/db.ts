@@ -1,5 +1,9 @@
 import Database from 'better-sqlite3';
 import { importLegacyLedger, LEDGER_TABLE_DDL } from '../core/ledger.js';
+import {
+  initializeTaxonomyVersion,
+  STORE_METADATA_DDL,
+} from './taxonomyMigration.js';
 
 export type DB = Database.Database;
 
@@ -55,6 +59,7 @@ export function openDb(path: string): DB {
   // the counter it records can share a transaction and so that an in-memory
   // registry cannot append to the real store. See src/core/ledger.ts.
   db.exec(LEDGER_TABLE_DDL);
+  db.exec(STORE_METADATA_DDL);
   // Forward migration for DBs that predate the counter columns. Safe to run
   // every open: no-op when the columns are already present.
   addColumnIfMissing(db, 'atom_types', 'successes', 'successes INTEGER NOT NULL DEFAULT 0');
@@ -62,5 +67,6 @@ export function openDb(path: string): DB {
   // Carry a pre-consolidation atoma-ledger.jsonl across, once, if one sits
   // next to this file and the table is still empty. No-op for `:memory:`.
   importLegacyLedger(db, path);
+  initializeTaxonomyVersion(db);
   return db;
 }

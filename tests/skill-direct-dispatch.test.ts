@@ -106,11 +106,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   });
 
   function trustAtomType(): void {
-    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Hydrogen');
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Water');
   }
 
   function saveScriptSkill(successes: number): void {
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -118,7 +118,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       language: 'node',
       body: SCRIPT_BODY,
     });
-    for (let i = 0; i < successes; i++) skills.recordSuccess('Hydrogen', 'scaffold-config');
+    for (let i = 0; i < successes; i++) skills.recordSuccess('Water', 'scaffold-config');
   }
 
   function makeCtxWith(
@@ -138,7 +138,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES); // 3/0 — trusted
     const { executor, calls } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
     const events: SkillEventInfo[] = [];
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor, events);
 
     // ONLY the two prefilter replies are queued. If the dispatch fell
@@ -146,18 +146,18 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // reply" on the L1 plan call — that's the strongest assertion that
     // the fast-path really made zero further LLM calls.
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2);
     expect(result.output).toEqual({ built: true });
     expect(result.summary).toBe('script ran clean');
-    expect(result.producedBy).toEqual({ tier: 1, name: 'Hydrogen', viaFallback: false });
+    expect(result.producedBy).toEqual({ tier: 1, name: 'Water', viaFallback: false });
 
     // write + run mirror skillContextBlock's calling convention, then the
     // scratch script is removed — it is scaffolding, not deliverable, and
@@ -181,7 +181,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
 
     // Skill success counter bumped by the dispatch itself (the supervise
     // loop never ran, so its onApproved hook could not).
-    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
     expect(loaded.failures).toBe(0);
 
@@ -195,11 +195,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     saveScriptSkill(0); // 0/0 — below the trust threshold
     const { executor, calls } = makeExecutor({ exitCode: 0, stdout: ENVELOPE_LINE, stderr: '' });
     const events: SkillEventInfo[] = [];
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor, events);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -208,7 +208,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
 
     expect(result.summary).toBe('ok');
     expect(ctx.llm.calls).toHaveLength(4);
@@ -224,10 +224,10 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     saveScriptSkill(0);
     const { executor } = makeExecutor({ exitCode: 0, stdout: ENVELOPE_LINE, stderr: '' });
     const events: SkillEventInfo[] = [];
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor, events);
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -258,8 +258,8 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       };
     });
 
-    await water.handleDirect({ description: 'scaffold the config' }, ctx);
-    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
+    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(1);
     expect(events.map((e) => e.op)).toEqual(['match', 'inject', 'success']);
   });
@@ -268,11 +268,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
     const { executor, calls } = makeExecutor({ exitCode: 1, stdout: '', stderr: 'boom' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -280,7 +280,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'saved by the loop', summary: 'llm path ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
 
     expect(result.summary).toBe('llm path ok');
     // The direct attempt DID try both tools before giving up — and still
@@ -291,7 +291,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // A deterministic failure is NOT a skill failure. The fallback LLM
     // delivered, but it did not execute the injected script scratch body, so
     // that delivery cannot credit the script either.
-    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
     expect(loaded.failures).toBe(0);
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
   });
@@ -300,7 +300,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     trustAtomType();
     // Reach kind:script the production way — promotion writes _fallback.md,
     // which is what demotion restores.
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -308,23 +308,23 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       body: '1. derive fields from the workspace.\n2. write_file config.\n3. read back.',
     });
     skills.promoteToScript({
-      l1Name: 'Hydrogen',
+      l1Name: 'Water',
       skillId: 'scaffold-config',
       language: 'node',
       scriptBody: SCRIPT_BODY,
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills.recordSuccess('Hydrogen', 'scaffold-config');
+      skills.recordSuccess('Water', 'scaffold-config');
     }
     // Brittle script: exits 1 on every run, LLM loop saves the subtask.
     const { executor } = makeExecutor({ exitCode: 1, stdout: '', stderr: 'REVERIFY-FAIL: nothing extracted' });
 
     for (const runLabel of ['first', 'second'] as const) {
-      const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+      const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
       const events: SkillEventInfo[] = [];
       const ctx = makeCtxWith(executor, events);
       ctx.llm.enqueueText(
-        jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+        jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
       );
       ctx.llm.enqueueText(
         jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -334,16 +334,16 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
         output: 'saved by the loop',
         summary: `llm ok (${runLabel})`,
       });
-      const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+      const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
       expect(result.summary).toBe(`llm ok (${runLabel})`);
       if (runLabel === 'first') {
         // Streak at 1 — still a script, no demotion yet.
-        expect(skills.loadFor('Hydrogen')[0]!.kind).toBe('script');
-        expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBe(1);
+        expect(skills.loadFor('Water')[0]!.kind).toBe('script');
+        expect(skills.loadFor('Water')[0]!.directFailures).toBe(1);
       } else {
         // Streak hit 2 — demoted, original llm recipe restored, and the
         // demotion is visible in the event stream.
-        const demoted = skills.loadFor('Hydrogen')[0]!;
+        const demoted = skills.loadFor('Water')[0]!;
         expect(demoted.kind).toBe('llm');
         expect(demoted.body).toMatch(/derive fields from the workspace/);
         expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/derive fields from the workspace/);
@@ -363,20 +363,20 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   it('a deterministic SUCCESS clears the failure streak', async () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
-    skills.markDirectFailure('Hydrogen', 'scaffold-config');
-    expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBe(1);
+    skills.markDirectFailure('Water', 'scaffold-config');
+    expect(skills.loadFor('Water')[0]!.directFailures).toBe(1);
     const { executor } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
     );
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('script ran clean');
-    expect(skills.loadFor('Hydrogen')[0]!.directFailures).toBeUndefined();
+    expect(skills.loadFor('Water')[0]!.directFailures).toBeUndefined();
   });
 
   it('treats a self-reported FAILED envelope as off-contract even on exit 0', async () => {
@@ -392,11 +392,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       summary: 'FAILED: index.js and/or package.json not found in workspace.',
     });
     const { executor } = makeExecutor({ exitCode: 0, stdout: failEnvelope, stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -405,7 +405,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done properly', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
     expect(ctx.llm.calls).toHaveLength(4);
   });
@@ -415,11 +415,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
     const nullOut = JSON.stringify({ output: null, summary: 'wrote nothing, all good!' });
     const { executor } = makeExecutor({ exitCode: 0, stdout: nullOut, stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -427,10 +427,10 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     // Neither the off-contract direct result nor an LLM fallback that ignored
     // the injected scratch body may credit the script.
-    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
     expect(loaded.failures).toBe(0);
   });
@@ -439,11 +439,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
     const { executor } = makeExecutor({ exitCode: 0, stdout: 'plain text, no envelope', stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -451,7 +451,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
     expect(ctx.llm.calls).toHaveLength(4);
   });
@@ -464,7 +464,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // BEFORE the envelope parse could reject it, leaving the LLM loop to
     // clean up after a side effect it didn't cause. The gate must skip the
     // run entirely, not run-then-reject.
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -478,15 +478,15 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       ].join('\n'),
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills.recordSuccess('Hydrogen', 'scaffold-config');
+      skills.recordSuccess('Water', 'scaffold-config');
     }
     const { executor, calls } = makeExecutor({ exitCode: 0, stdout: 'wrote config.json', stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const events: SkillEventInfo[] = [];
     const ctx = makeCtxWith(executor, events);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -494,7 +494,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
     // Zero tool calls from the dispatch path: no write_file, no run_shell,
     // and therefore no scratch-script cleanup either.
@@ -511,11 +511,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
     const { executor, calls } = makeExecutor({ exitCode: 0, stdout: ENVELOPE_LINE, stderr: '' });
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -523,7 +523,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
     expect(ctx.llm.calls).toHaveLength(4);
     expect(calls).toHaveLength(0);
@@ -532,11 +532,11 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   it('does not dispatch when ctx.tools is absent (research-brief-style runs)', async () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
-    const water = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx(); // no tools
 
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 'tier' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 'tier' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'fits' })
@@ -544,7 +544,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'ok' });
 
-    const result = await water.handleDirect({ description: 'scaffold the config' }, ctx);
+    const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('ok');
     expect(ctx.llm.calls).toHaveLength(4);
   });
@@ -563,36 +563,36 @@ describe('SkillRegistry.resetCounters', () => {
   });
 
   it('zeroes counters AND clears the promotion-refusal stamp', () => {
-    skills.save('Hydrogen', {
+    skills.save('Water', {
       id: 'some-skill',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    skills.recordSuccess('Hydrogen', 'some-skill');
-    skills.recordFailure('Hydrogen', 'some-skill');
-    skills.markPromotionRefused('Hydrogen', 'some-skill');
+    skills.recordSuccess('Water', 'some-skill');
+    skills.recordFailure('Water', 'some-skill');
+    skills.markPromotionRefused('Water', 'some-skill');
 
-    const meta = skills.resetCounters('Hydrogen', 'some-skill');
+    const meta = skills.resetCounters('Water', 'some-skill');
     expect(meta).toEqual(
       expect.objectContaining({ successes: 0, failures: 0 })
     );
-    const loaded = skills.loadFor('Hydrogen').find((s) => s.id === 'some-skill')!;
+    const loaded = skills.loadFor('Water').find((s) => s.id === 'some-skill')!;
     expect(loaded.successes).toBe(0);
     expect(loaded.failures).toBe(0);
     expect(loaded.promotionRefusedAt).toBeUndefined();
   });
 
   it('returns null for a skill that does not exist', () => {
-    expect(skills.resetCounters('Hydrogen', 'ghost')).toBeNull();
+    expect(skills.resetCounters('Water', 'ghost')).toBeNull();
   });
 
   it('listNamespaces enumerates L1 folders (sorted), empty store yields []', () => {
     expect(skills.listNamespaces()).toEqual([]);
-    skills.save('Lithium', { id: 'a-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    skills.save('Hydrogen', { id: 'b-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    expect(skills.listNamespaces()).toEqual(['Hydrogen', 'Lithium']);
+    skills.save('Ammonia', { id: 'a-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    skills.save('Water', { id: 'b-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    expect(skills.listNamespaces()).toEqual(['Ammonia', 'Water']);
   });
 });
 
@@ -610,12 +610,12 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
-    for (let i = 0; i < 3; i++) reg.recordSuccess('Hydrogen');
-    skills.save('Hydrogen', {
+    for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
+    skills.save('Water', {
       id: 'verify-stuff', description: 'd', whenToUse: 'w', kind: 'script', language: 'node',
       body: 'console.log(JSON.stringify({output: "ok", summary: "done"}))',
     });
-    for (let i = 0; i < 3; i++) skills.recordSuccess('Hydrogen', 'verify-stuff');
+    for (let i = 0; i < 3; i++) skills.recordSuccess('Water', 'verify-stuff');
 
     const executor = {
       has: () => true,
@@ -629,25 +629,25 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     const ctx = { ...makeCtx(), tools: executor as never };
 
     // Attempt 1: dispatch fires (2 prefilter calls only).
-    const water1 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    const neuron1 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
-    const first = await water1.handleDirect({ description: 'verify every documented command' }, ctx);
+    const first = await neuron1.handleDirect({ description: 'verify every documented command' }, ctx);
     expect(first.summary).toBe('done');
     expect(ctx.llm.calls).toHaveLength(2);
 
     // Attempt 2 (upstream rejected the content → replan): FRESH instance,
     // reworded description, same ctx. The dispatch reproduces 'done' — the
     // guard catches it and the validated LLM loop runs instead.
-    const water2 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    const neuron2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, {
       output: 'adapted',
       summary: 'did it differently this time',
     });
-    const second = await water2.handleDirect(
+    const second = await neuron2.handleDirect(
       { description: 're-run EVERY command in the README verbatim' },
       ctx
     );
@@ -656,10 +656,10 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
 
     // A NEW run (fresh ctx): the guard resets, dispatch fires again.
     const ctx2 = { ...makeCtx(), tools: executor as never };
-    const water3 = L2Atom.fromType(reg.getByName('Water')!, reg, [], skills);
-    ctx2.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    const neuron3 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    ctx2.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     ctx2.llm.enqueueText(jsonText({ kind: 'reuse', target: 'verify-stuff', confidence: 'high', reasoning: 'f' }));
-    const third = await water3.handleDirect({ description: 'verify commands' }, ctx2);
+    const third = await neuron3.handleDirect({ description: 'verify commands' }, ctx2);
     expect(third.summary).toBe('done');
     expect(ctx2.llm.calls).toHaveLength(2);
     rmSync(dir, { recursive: true, force: true });
@@ -739,8 +739,8 @@ describe('deliverable gate — a script cannot report success for a file it neve
     reg2 = new AtomRegistry(openDb(':memory:'));
     reg2.create(2, SEED2);
     reg2.create(1, { ...SEED2, description: 'builder', systemPrompt: 'You are an L1.' });
-    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg2.recordSuccess('Hydrogen');
-    skills2.save('Hydrogen', {
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg2.recordSuccess('Water');
+    skills2.save('Water', {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -749,7 +749,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
       body: OPAQUE_SCRIPT_BODY,
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills2.recordSuccess('Hydrogen', 'scaffold-config');
+      skills2.recordSuccess('Water', 'scaffold-config');
     }
     envBefore2 = process.env['ATOMA_SKILL_DIRECT'];
     delete process.env['ATOMA_SKILL_DIRECT'];
@@ -762,7 +762,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
 
   function queuePrefilters(ctx: ReturnType<typeof makeCtx>): void {
     ctx.llm.enqueueText(
-      jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' })
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
     );
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 's' })
@@ -771,7 +771,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
 
   it('falls back to the LLM loop when the named deliverable is absent, crediting nothing', async () => {
     const { executor, calls } = fsExecutor({}); // README.md does NOT exist
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
@@ -780,7 +780,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'wrote it properly' });
 
-    await water.handleDirect(
+    await neuron.handleDirect(
       { description: 'Write a README.md documenting the CLI usage and options.' },
       ctx
     );
@@ -795,7 +795,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(events.some((e) => e.op === 'direct')).toBe(false);
     // And NOT a directFailure either: the script is not broken, it was
     // matched to the wrong kind of subtask.
-    expect(skills2.loadFor('Hydrogen')[0]!.directFailures ?? 0).toBe(0);
+    expect(skills2.loadFor('Water')[0]!.directFailures ?? 0).toBe(0);
   });
 
   it('never OFFERS a read-only script for a write subtask — the round-7 filter', async () => {
@@ -804,7 +804,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     // after a wasted dispatch, five times in six runs, taking dispatches from
     // 10 to 1. Filtering the catalogue is cheaper and more precise than
     // rejecting the result.
-    skills2.save('Hydrogen', {
+    skills2.save('Water', {
       id: 'readonly-verifier',
       description: 'replay recorded invocations',
       whenToUse: 'confirm a CLI still behaves as recorded',
@@ -813,16 +813,16 @@ describe('deliverable gate — a script cannot report success for a file it neve
       body: "import fs from 'node:fs';\nJSON.parse(fs.readFileSync('.atoma-probes.json','utf8'));\nconsole.log('{}');",
     });
     const { executor, calls } = fsExecutor({ 'README.md': 'old\n' });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const ctx = { ...base, tools: executor };
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     // The skill prefilter must not even be offered the read-only script; if
     // it were, this queued reply would name it and a dispatch would follow.
     ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'nothing fits' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
 
-    await water
+    await neuron
       .handleDirect({ description: 'update README.md to describe the new behaviour' }, ctx)
       .catch(() => undefined);
 
@@ -837,15 +837,15 @@ describe('deliverable gate — a script cannot report success for a file it neve
     // CREDITED. Seven of nine deliverables shipped a README asserting
     // `chars 36` about a CLI that prints 35.
     const { executor } = fsExecutor({ 'README.md': 'chars 36\n' }); // never rewritten
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'f' }));
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
 
-    await water
+    await neuron
       .handleDirect({ description: 'update README.md with the new behaviour' }, ctx)
       .catch(() => undefined);
 
@@ -869,7 +869,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
       present['package.json'] = '{"name":"pathcase"}\n';
       present['README.md'] = 'new docs\n';
     });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
@@ -878,7 +878,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     const description =
       'write package.json for pathcase.js and write README.md using the verified invocations; no server, no browser, no index.html';
     expect(subtaskMutationTargets(description)).toEqual(['package.json', 'README.md']);
-    await water.handleDirect({ description }, ctx);
+    await neuron.handleDirect({ description }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2);
     expect(events.some((e) => e.op === 'direct')).toBe(true);
@@ -894,7 +894,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
       // Wrong destination: a basename-only gate used to accept this.
       present['README.md'] = 'new root docs\n';
     });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
@@ -902,7 +902,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'fixed', summary: 'updated the nested docs' });
 
-    await water.handleDirect({ description: 'update docs/README.md with current usage' }, ctx);
+    await neuron.handleDirect({ description: 'update docs/README.md with current usage' }, ctx);
 
     expect(events.some((e) => e.op === 'direct')).toBe(false);
     expect(ctx.llm.calls.length).toBeGreaterThan(2);
@@ -911,14 +911,14 @@ describe('deliverable gate — a script cannot report success for a file it neve
 
   it('falls back before dispatch when a mutating task names no output path', async () => {
     const { executor, calls } = fsExecutor({});
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const ctx = { ...base, tools: executor };
     queuePrefilters(ctx);
     ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
     enqueueExecutedResult(ctx, { output: 'done', summary: 'hardened it' });
 
-    await water.handleDirect({ description: 'harden the existing CLI' }, ctx);
+    await neuron.handleDirect({ description: 'harden the existing CLI' }, ctx);
 
     expect(
       calls.some(
@@ -933,14 +933,14 @@ describe('deliverable gate — a script cannot report success for a file it neve
   it('does NOT gate a pure re-verification subtask, which writes nothing by design', async () => {
     // Rejecting these would send healthy dispatches back to the LLM loop.
     const { executor } = fsExecutor({ 'README.md': 'chars 36\n' });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Hydrogen', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' }));
     ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'scaffold-config', confidence: 'high', reasoning: 'f' }));
 
-    await water.handleDirect(
+    await neuron.handleDirect(
       { description: 'Re-execute every invocation documented in README.md and report whether each still matches' },
       ctx
     );
@@ -950,27 +950,27 @@ describe('deliverable gate — a script cannot report success for a file it neve
 
   it('dispatches normally for a read-only check when the named file is present', async () => {
     const { executor } = fsExecutor({ 'config.json': '{}' });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const ctx = { ...base, tools: executor };
     queuePrefilters(ctx);
     // No further LLM replies queued: the dispatch must NOT fall through.
 
-    await water.handleDirect({ description: 'Verify config.json against the template.' }, ctx);
+    await neuron.handleDirect({ description: 'Verify config.json against the template.' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2); // the two prefilters only
-    expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+    expect(skills2.loadFor('Water')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
   it('does not require a file mentioned only in a read-only negation', async () => {
     const { executor } = fsExecutor({ 'config.json': '{}' });
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const events: SkillEventInfo[] = [];
     const ctx = { ...base, tools: executor, recordSkill: (e: SkillEventInfo) => events.push(e) };
     queuePrefilters(ctx);
 
-    await water.handleDirect({
+    await neuron.handleDirect({
       description: 'Verify config.json against the template; no browser and no index.html.',
     }, ctx);
 
@@ -980,15 +980,15 @@ describe('deliverable gate — a script cannot report success for a file it neve
 
   it('stays out of the way when the subtask names no file at all', async () => {
     const { executor } = fsExecutor({});
-    const water = L2Atom.fromType(reg2.getByName('Water')!, reg2, [], skills2);
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
     const base = makeCtx();
     const ctx = { ...base, tools: executor };
     queuePrefilters(ctx);
 
-    await water.handleDirect({ description: 'Re-run the recorded invocations and report.' }, ctx);
+    await neuron.handleDirect({ description: 'Re-run the recorded invocations and report.' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2);
-    expect(skills2.loadFor('Hydrogen')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+    expect(skills2.loadFor('Water')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 });
 
