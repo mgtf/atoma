@@ -5,7 +5,7 @@ import {
   Vector2,
   type Group,
 } from 'three';
-import type { EventFilters } from '../client/run-utils.js';
+import { buildAtomMap, coerceEventFilters, type EventFilters } from '../client/run-utils.js';
 import type { VizRun } from '../client/types.js';
 import type { GpuTimelineViewport } from './gpu-renderer.js';
 import { RunsTimelineRails } from './RunsTimelineRails.js';
@@ -125,7 +125,7 @@ function ShaderField({ animate }: { animate: boolean }) {
 function TierTopology({ run, animate }: { run: VizRun | null; animate: boolean }) {
   const group = useRef<Group>(null);
   const nodes = useMemo(() => {
-    const source = run?.initialTypes ?? [];
+    const source = run ? [...buildAtomMap(run).values()].map((entry) => entry.snapshot) : [];
     return source.slice(0, 32).map((atom, index) => {
       const peers = source.filter((item) => item.tier === atom.tier);
       const peerIndex = peers.findIndex((item) => item.name === atom.name);
@@ -199,7 +199,7 @@ export function ThreeBackdrop({
   return (
     <div className="three-backdrop" aria-hidden="true">
       <Canvas
-        events={false}
+        events={() => ({ enabled: false, priority: 1 })}
         camera={{ position: [0, 0, 15], fov: 42 }}
         dpr={[1, 1.5]}
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
@@ -210,7 +210,7 @@ export function ThreeBackdrop({
         {view === 'runs' ? (
           <RunsTimelineRails
             run={run}
-            filters={runFilters}
+            filters={run ? coerceEventFilters(run.events, runFilters) : runFilters}
             timelineViewport={timelineViewport}
             animate={animate}
           />

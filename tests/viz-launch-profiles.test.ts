@@ -132,6 +132,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).not.toMatch(/\.slice\(0, 12\)/);
     expect(gpuRenderer).toMatch(/gpuEventCardCopy\(event\)/);
     expect(gpuRenderer).toMatch(/buildTimelineLayout\(run\.events/);
+    expect(gpuRenderer).toMatch(/timelineBranchHeading\(/);
+    expect(gpuRenderer).toMatch(/runFilters\.branchId !== 'all'/);
+    expect(timelineLayout).toMatch(/export function timelineBranchHeading\(/);
+    expect(readFileSync('src/viz/client/features/RunsView.tsx', 'utf8')).toMatch(
+      /timelineBranchHeading\(/
+    );
     expect(timelineLayout).toMatch(/chronological:\s*true/);
     expect(timelineLayout).toMatch(/inferParents|assignLanes/);
     expect(gpuRenderer).toMatch(/private filterButton\(/);
@@ -140,10 +146,20 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/drawExitingFilterButtons/);
     expect(gpuRenderer).toMatch(/animateEnteringFilterSpace/);
     expect(gpuRenderer).toMatch(/exitingRoleFilters/);
+    expect(gpuRenderer).toMatch(/visibleEventKindFilters\(run\.events\)/);
+    expect(gpuRenderer).toMatch(/roleRowTransition/);
+    expect(gpuRenderer).toMatch(/startedAt/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
-    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(9, 8\)/);
+    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(10, 12\)/);
+    expect(gpuRenderer).toMatch(/crystal\.scale\.set\(frame\.scale \* 1\.12\)/);
+    expect(gpuRenderer).toMatch(/buildAtomaMarkFrame\(/);
+    expect(gpuApp).not.toMatch(/AtomaCrystal/);
+    expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);
+    expect(gpuRenderer).toMatch(/branch\.heading\.toggle/);
+    expect(gpuRenderer).toMatch(/run\.summary\.toggle/);
+    expect(gpuRenderer).toMatch(/filePathFromArgs/);
     expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
     expect(gpuRenderer).toMatch(/let x = 160/);
     expect(gpuRenderer).toMatch(/private statCard\(/);
@@ -153,13 +169,14 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/orbit\.position\.set\(particleCenterX, height \/ 2\)/);
     expect(gpuRenderer).toMatch(/Array\.from\(\{ length: tier \}/);
     expect(gpuRenderer).not.toMatch(/ellipse\(10, height \/ 2, 7, 4\)/);
-    expect(gpuRenderer).toMatch(/gpuAtomButtonWidth\(name\)/);
+    expect(gpuRenderer).toMatch(/gpuAtomButtonWidth/);
     expect(gpuRenderer).toMatch(/const CONTROL_HOVER_GAP = 14/);
     expect(gpuRenderer).toMatch(/const NAV_HOVER_GAP = 20/);
-    expect(gpuRenderer).toMatch(/atomX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
-    expect(gpuRenderer).toMatch(/filterX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
-    expect(gpuRenderer).toMatch(/roleX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
-    expect(gpuRenderer).toMatch(/branchX \+= buttonWidth \+ CONTROL_HOVER_GAP/);
+    expect(gpuRenderer).toMatch(/layoutAtomLaneBlocks/);
+    expect(gpuRenderer).toMatch(/layoutRunFilterBlocks/);
+    expect(gpuRenderer).toMatch(/layoutFilterChipBlock/);
+    expect(gpuRenderer).toMatch(/filterBlockFrame/);
+    expect(gpuRenderer).toMatch(/x \+= width \+ gap/);
     expect(gpuRenderer).toMatch(/label\.length \* 7 \+ 22\) \+ NAV_HOVER_GAP/);
     expect(gpuRenderer).toMatch(/private drawBurninChart\(/);
     expect(gpuRenderer).toMatch(/cursor = 'crosshair'|pointermove/);
@@ -173,7 +190,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
     expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
-    expect(threeBackdrop).toMatch(/events=\{false\}/);
+    expect(threeBackdrop).toMatch(/buildAtomMap\(run\)/);
+    expect(gpuRenderer).toMatch(/if \(!entries\.length\) return \[\]/);
+    expect(threeBackdrop).toMatch(/events=\{\(\) => \(\{ enabled: false, priority: 1 \}\)\}/);
     expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
     expect(gpuStyles).toMatch(/pointer-events: none !important;/);
     expect(gpuRenderer).toMatch(/listMask\.eventMode = 'none'/);
@@ -185,6 +204,14 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/row\.refusals/);
     expect(gpuRenderer).toMatch(/row\.compileErrors/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);
+    expect(gpuRenderer).toMatch(/buildSkillEventDetail\(event, skill, snapshot\.t\)/);
+    expect(gpuApp).toMatch(/runSkillSelection/);
+    expect(gpuRenderer).toMatch(/matchesSearchQuery\(skillSearchText\(skill, namespace\.l1Name\)/);
+    expect(gpuRenderer).not.toMatch(/whenToUse.*includes\(query\)|includes\(query\).*whenToUse/);
+    expect(readFileSync('src/viz/client/features/RegistryView.tsx', 'utf8'))
+      .not.toMatch(/systemPrompt.*filter|filter.*systemPrompt/);
+    expect(readFileSync('src/viz/client/features/SkillsView.tsx', 'utf8'))
+      .toMatch(/matchesSearchQuery\(skillSearchText\(skill, namespace\.l1Name\)/);
   });
 });
 

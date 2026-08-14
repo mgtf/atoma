@@ -37,6 +37,7 @@ const CODE_KEYS = new Set([
   'cmd',
   'command',
   'expectedStdout',
+  'recipe',
   'stderr',
   'stdout',
   'systemPrompt',
@@ -181,13 +182,164 @@ function singularItemKey(parentKey: string): string {
   return 'item';
 }
 
+const MARKDOWN_CONTENT_KEYS = new Set([
+  'content',
+  'text',
+  'body',
+  'output',
+  'markdown',
+  'readme',
+]);
+
+export function filePathFromArgs(args?: Record<string, unknown>): string | undefined {
+  if (!args) return undefined;
+  for (const key of ['path', 'file', 'filename']) {
+    if (typeof args[key] === 'string') return args[key];
+  }
+  return undefined;
+}
+
+export function looksLikeMarkdown(value: string, path?: string): boolean {
+  if (path && /\.(md|markdown)$/i.test(path)) return value.trim().length > 0;
+  return (
+    /^(?:#{1,6}\s+\S|```|(?:[-*+]|\d+\.)\s+\S)/m.test(value) ||
+    /\n#{1,6}\s+\S/.test(value) ||
+    /\n```/.test(value)
+  );
+}
+
+export function parseMarkdownDetail(
+  markdown: string,
+  t: Translator
+): StructuredDetailNode[] {
+  const nodes: StructuredDetailNode[] = [];
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  let index = 0;
+  let paragraph: string[] = [];
+  let listItems: string[] = [];
+  let section: StructuredDetailSection | null = null;
+
+  const pushNode = (node: StructuredDetailNode) => {
+    if (section) {
+      (section.children as StructuredDetailNode[]).push(node);
+      return;
+    }
+    nodes.push(node);
+  };
+  const flushParagraph = () => {
+    const text = paragraph.join(' ').trim();
+    paragraph = [];
+    if (!text) return;
+    pushNode({
+      kind: 'field',
+      key: 'paragraph',
+      label: t('detail.field.paragraph'),
+      value: text,
+      tone: 'neutral',
+      presentation: 'text',
+    });
+  };
+  const flushList = () => {
+    if (!listItems.length) return;
+    pushNode({
+      kind: 'section',
+      key: 'list',
+      label: t('detail.field.list'),
+      count: listItems.length,
+      children: listItems.map((item, itemIndex) => ({
+        kind: 'field' as const,
+        key: `item-${itemIndex}`,
+        label: t('detail.field.item'),
+        value: item,
+        tone: 'neutral' as const,
+        presentation: 'text' as const,
+      })),
+    });
+    listItems = [];
+  };
+  const closeSection = () => {
+    if (!section) return;
+    nodes.push(section);
+    section = null;
+  };
+
+  while (index < lines.length) {
+    const line = lines[index] ?? '';
+    if (line.startsWith('```')) {
+      flushParagraph();
+      flushList();
+      const lang = line.slice(3).trim();
+      const buffer: string[] = [];
+      index += 1;
+      while (index < lines.length && !(lines[index] ?? '').startsWith('```')) {
+        buffer.push(lines[index] ?? '');
+        index += 1;
+      }
+      pushNode({
+        kind: 'field',
+        key: 'code',
+        label: lang || t('detail.field.code'),
+        value: buffer.join('\n'),
+        tone: 'neutral',
+        presentation: 'code',
+      });
+      index += 1;
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (heading?.[2]) {
+      flushParagraph();
+      flushList();
+      closeSection();
+      section = {
+        kind: 'section',
+        key: 'heading',
+        label: heading[2].trim(),
+        children: [],
+      };
+      index += 1;
+      continue;
+    }
+    const list = /^(?:[-*+]|\d+\.)\s+(.+)$/.exec(line);
+    if (list?.[1]) {
+      flushParagraph();
+      listItems.push(list[1].trim());
+      index += 1;
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      index += 1;
+      continue;
+    }
+    flushList();
+    paragraph.push(line.trim());
+    index += 1;
+  }
+  flushParagraph();
+  flushList();
+  closeSection();
+  return nodes.length
+    ? nodes
+    : [{
+        kind: 'field',
+        key: 'content',
+        label: t('detail.field.content'),
+        value: markdown,
+        tone: 'neutral',
+        presentation: 'text',
+      }];
+}
+
 export function buildStructuredDetail(
   value: unknown,
   t: Translator,
-  options: { maxDepth?: number; maxNodes?: number } = {}
+  options: { maxDepth?: number; maxNodes?: number; markdownPath?: string } = {}
 ): readonly StructuredDetailNode[] {
   const maxDepth = options.maxDepth ?? 8;
   const maxNodes = options.maxNodes ?? 240;
+  const markdownPath = options.markdownPath;
   let nodes = 0;
   const omittedField = (count: number): StructuredDetailField => ({
     kind: 'field',
@@ -206,6 +358,19 @@ export function buildStructuredDetail(
         JSON.stringify(current)?.slice(0, 2000) ?? String(current),
         t
       );
+    }
+    if (typeof current === 'string') {
+      const treatAsMarkdown =
+        looksLikeMarkdown(current, markdownPath) &&
+        (MARKDOWN_CONTENT_KEYS.has(key) || Boolean(markdownPath && /\.(md|markdown)$/i.test(markdownPath)));
+      if (treatAsMarkdown) {
+        return {
+          kind: 'section',
+          key,
+          label: structuredDetailLabel(key, t),
+          children: parseMarkdownDetail(current, t),
+        };
+      }
     }
     if (Array.isArray(current)) {
       const itemKey = singularItemKey(key);
@@ -283,5 +448,83 @@ export function buildStructuredDetail(
         : []),
     ];
   }
+  if (typeof value === 'string' && looksLikeMarkdown(value, markdownPath)) {
+    return parseMarkdownDetail(value, t);
+  }
   return [scalarField('value', value, t)];
+}
+
+export function skillEventTitle(
+  event: { kind?: string; op?: string },
+  t: Translator
+): string {
+  if (event.kind !== 'skill') return event.kind ?? 'skill';
+  const op = event.op === 'credit-withheld' ? 'creditWithheld' : event.op;
+  if (!op) return t('skill.title');
+  const key = `skillOp.${op}`;
+  const translated = t(key);
+  return translated === key ? op : translated;
+}
+
+export function skillEventSubtitle(event: {
+  l1Name?: string;
+  skillId?: string;
+  actor?: { name?: string };
+}): string {
+  const path = [event.l1Name, event.skillId].filter(Boolean).join(' / ');
+  const actor = event.actor?.name;
+  return [path, actor && actor !== event.l1Name ? actor : ''].filter(Boolean).join(' · ');
+}
+
+function present(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '';
+}
+
+export function buildSkillEventDetail(
+  event: {
+    kind?: string;
+    op?: string;
+    l1Name?: string;
+    skillId?: string;
+    reasoning?: string;
+    actor?: { name?: string };
+  },
+  skill: {
+    id: string;
+    description?: string;
+    whenToUse?: string;
+    kind?: string;
+    language?: string;
+    successes?: number;
+    failures?: number;
+    updatedAt?: string;
+    body?: string;
+    shareability?: { verdict: string };
+  } | null | undefined,
+  t: Translator
+): readonly StructuredDetailNode[] {
+  const catalog = skill && skill.id === event.skillId ? skill : null;
+  const payload: Record<string, unknown> = {
+    decision: skillEventTitle(event, t),
+    skillId: event.skillId,
+    l1Name: event.l1Name,
+    actor: event.actor?.name && event.actor.name !== event.l1Name
+      ? event.actor.name
+      : undefined,
+    kind: catalog?.language ? `${catalog.kind}:${catalog.language}` : catalog?.kind,
+    description: catalog?.description,
+    whenToUse: catalog?.whenToUse,
+    successes: catalog?.successes,
+    failures: catalog?.failures,
+    updatedAt: catalog?.updatedAt,
+    shareability: catalog?.shareability
+      ? t(`skill.share.${catalog.shareability.verdict}`)
+      : undefined,
+    reasoning: event.reasoning,
+    recipe: catalog?.body ? catalog.body.slice(0, 4000) : undefined,
+  };
+  return buildStructuredDetail(
+    Object.fromEntries(Object.entries(payload).filter(([, value]) => present(value))),
+    t
+  );
 }

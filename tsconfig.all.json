@@ -11,6 +11,7 @@
   "include": [
     "src/**/*",
     "tests/**/*",
+    "burnin/**/*.ts",
     "benchmark/**/*.mjs",
     "eslint.config.js",
     "*.config.ts"

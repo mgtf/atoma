@@ -24,6 +24,8 @@ export interface GpuUiState {
   selectedRegistryAtom: string | null;
   selectedSkill: { l1Name: string; id: string } | null;
   runFilters: EventFilters;
+  branchHeadingExpanded: boolean;
+  runSummaryExpanded: boolean;
   search: Record<Exclude<InputKind, null>, string>;
   focusedInput: InputKind;
   runPickerScrollY: number;
@@ -43,6 +45,8 @@ export interface GpuUiState {
   selectRegistryAtom: (name: string | null) => void;
   selectSkill: (selection: { l1Name: string; id: string } | null) => void;
   setRunFilters: (filters: EventFilters) => void;
+  toggleBranchHeading: () => void;
+  toggleRunSummary: () => void;
   setSearch: (kind: Exclude<InputKind, null>, value: string) => void;
   setFocusedInput: (kind: InputKind) => void;
   setRunPickerScrollY: (value: number) => void;
@@ -75,6 +79,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   selectedRegistryAtom: null,
   selectedSkill: null,
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
+  branchHeadingExpanded: true,
+  runSummaryExpanded: true,
   search: { run: '', registry: '', skills: '', launch: '' },
   focusedInput: null,
   runPickerScrollY: 0,
@@ -104,16 +110,39 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
       selectedAtomName: null,
       runPickerScrollY: 0,
       runPickerActiveIndex: 0,
+      runSummaryExpanded: true,
     }),
   selectEvent: (selectedEventId) =>
-    set({ selectedEventId, selectedAtomName: null }),
+    set({
+      selectedEventId,
+      selectedAtomName: null,
+      runSummaryExpanded: selectedEventId === null,
+    }),
   selectAtom: (selectedAtomName) =>
-    set({ selectedAtomName, selectedEventId: null }),
+    set({
+      selectedAtomName,
+      selectedEventId: null,
+      runSummaryExpanded: selectedAtomName === null,
+    }),
   selectRegistry: (selectedRegistryId) =>
     set({ selectedRegistryId, selectedRegistryAtom: null }),
   selectRegistryAtom: (selectedRegistryAtom) => set({ selectedRegistryAtom }),
   selectSkill: (selectedSkill) => set({ selectedSkill }),
-  setRunFilters: (runFilters) => set({ runFilters }),
+  setRunFilters: (runFilters) =>
+    set((state) => ({
+      runFilters,
+      branchHeadingExpanded:
+        runFilters.branchId !== state.runFilters.branchId
+          ? true
+          : state.branchHeadingExpanded,
+      // One notification: Pixi pointertap is not a React event, so a follow-up
+      // setScrollY would remount the GPU scene and kill the role-row dissolve.
+      scrollY: state.scrollY.runs === 0 ? state.scrollY : { ...state.scrollY, runs: 0 },
+    })),
+  toggleBranchHeading: () =>
+    set((state) => ({ branchHeadingExpanded: !state.branchHeadingExpanded })),
+  toggleRunSummary: () =>
+    set((state) => ({ runSummaryExpanded: !state.runSummaryExpanded })),
   setSearch: (kind, value) =>
     set((state) => ({ search: { ...state.search, [kind]: value } })),
   setFocusedInput: (focusedInput) => set({ focusedInput }),
@@ -132,6 +161,10 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     } as Partial<GpuUiState>),
   setBurninPage: (burninPage) => set({ burninPage }),
   setScrollY: (view, value) =>
-    set((state) => ({ scrollY: { ...state.scrollY, [view]: Math.max(0, value) } })),
+    set((state) => {
+      const next = Math.max(0, value);
+      if (state.scrollY[view] === next) return state;
+      return { scrollY: { ...state.scrollY, [view]: next } };
+    }),
   refresh: () => set((state) => ({ refreshNonce: state.refreshNonce + 1 })),
 }));

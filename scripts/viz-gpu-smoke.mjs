@@ -81,7 +81,7 @@ try {
       hasLaunchTextarea: !!document.querySelector('.gpu-launch-input'),
     }));
     if (
-      result.canvases < 2 ||
+      result.canvases !== 2 ||
       !['webgpu', 'webgl'].includes(result.backend ?? '') ||
       result.objects < 20 ||
       diagnostics.length > 0

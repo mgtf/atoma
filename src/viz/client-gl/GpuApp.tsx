@@ -91,7 +91,19 @@ export function GpuApp() {
     [namespacesQuery.data]
   );
   const skillLists = useSkillLists(namespaceNames, state.view === 'skills');
-  const skillDetailQuery = useSkillDetail(state.selectedSkill, state.view === 'skills');
+  const selectedRunEvent = useMemo(
+    () => runQuery.data?.events.find((event) => event.id === state.selectedEventId) ?? null,
+    [runQuery.data, state.selectedEventId]
+  );
+  const runSkillSelection =
+    state.view === 'runs' &&
+    selectedRunEvent?.kind === 'skill' &&
+    selectedRunEvent.l1Name &&
+    selectedRunEvent.skillId
+      ? { l1Name: selectedRunEvent.l1Name, id: selectedRunEvent.skillId }
+      : null;
+  const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
+  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection));
   const burninQuery = useBurnin(state.view === 'burnin');
   const profilesQuery = useProfiles(state.view === 'launch');
 
@@ -163,21 +175,26 @@ export function GpuApp() {
       store.setRunFilters(
         nextRunFilters(store.runFilters, 'kind', id.slice('run.filter.kind.'.length))
       );
-      store.setScrollY('runs', 0);
       return;
     }
     if (id.startsWith('run.filter.role.')) {
       store.setRunFilters(
         nextRunFilters(store.runFilters, 'role', id.slice('run.filter.role.'.length))
       );
-      store.setScrollY('runs', 0);
       return;
     }
     if (id.startsWith('run.filter.branch.')) {
       store.setRunFilters(
         nextRunFilters(store.runFilters, 'branchId', id.slice('run.filter.branch.'.length))
       );
-      store.setScrollY('runs', 0);
+      return;
+    }
+    if (id === 'branch.heading.toggle') {
+      store.toggleBranchHeading();
+      return;
+    }
+    if (id === 'run.summary.toggle') {
+      store.toggleRunSummary();
       return;
     }
     if (id.startsWith('registry.select.')) {

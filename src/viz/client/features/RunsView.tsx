@@ -17,9 +17,11 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../data-api.js';
 import { useI18n } from '../i18n.js';
 import {
   buildAtomMap,
+  coerceEventFilters,
   fmtCost,
   fmtMs,
   fmtTime,
@@ -27,29 +29,33 @@ import {
   isRunLive,
   toolArgSummary,
   tryParseJson,
+  visibleEventKindFilters,
   type AtomView,
   type EventFilters,
 } from '../run-utils.js';
 import { CodeBlock, EmptyPane, ErrorPane, LoadingPane, StatCard, TierChip } from '../shared.js';
 import { tierColors } from '../theme.js';
-import type { VizEvent, VizRun } from '../types.js';
+import type { SkillSummary, VizEvent, VizRun } from '../types.js';
 import { useRunTrace } from '../use-runs.js';
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
 import { taxonomyForTier } from '../../../core/taxonomy.js';
 import { currentDisplayName } from '../../../registry/taxonomyNames.js';
 import {
   buildTimelineLayout,
+  timelineBranchHeading,
   type TimelineBranch,
   type TimelineItem,
 } from '../timeline-layout.js';
 import {
+  buildSkillEventDetail,
   buildStructuredDetail,
   eventRoleLabel,
+  filePathFromArgs,
+  skillEventSubtitle,
+  skillEventTitle,
   type DetailTone,
   type StructuredDetailNode,
 } from '../structured-detail.js';
-
-const KIND_FILTERS = ['all', 'llm', 'tool', 'trust', 'skill', 'cache', 'registry'];
 
 const DETAIL_TONE_COLORS: Record<
   DetailTone,
@@ -125,10 +131,7 @@ function eventTitle(event: VizEvent, t: (key: string, vars?: Record<string, unkn
   }
   if (event.kind === 'trust') return `${event.subject ?? 'RESULT'} · ${t('event.trust.fastPath')}`;
   if (event.kind === 'cache') return t('event.cache.label');
-  if (event.kind === 'skill') {
-    const key = event.op === 'credit-withheld' ? 'skillOp.creditWithheld' : `skillOp.${event.op}`;
-    return t(key);
-  }
+  if (event.kind === 'skill') return skillEventTitle(event, t);
   if (event.kind === 'registry') return `${event.op ?? 'registry'} · ${event.snapshot?.name ?? ''}`;
   return event.kind;
 }
@@ -155,8 +158,8 @@ const EventCard = memo(function EventCard({
       onClick={interrupted ? undefined : onSelect}
       aria-pressed={interrupted ? undefined : selected}
       sx={{
-        p: 1.25,
-        width: '100%',
+        p: 1,
+        width: 'min(520px, 100%)',
         textAlign: 'left',
         color: 'text.primary',
         bgcolor: selected ? 'rgba(110,168,255,.12)' : 'background.paper',
@@ -172,7 +175,7 @@ const EventCard = memo(function EventCard({
         '&:hover': interrupted ? undefined : { borderColor: 'primary.main' },
       }}
     >
-      <Stack spacing={0.65}>
+      <Stack spacing={0.35}>
         <Stack direction="row" spacing={0.75} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <Typography variant="body2" sx={{ fontWeight: 700 }}>{eventTitle(event, t)}</Typography>
           {event.actor?.tier ? <TierChip tier={event.actor.tier} label={event.actor.name} /> : null}
@@ -290,14 +293,35 @@ function AtomLanes({
 }) {
   const { t } = useI18n();
   return (
-    <Stack spacing={0.75}>
+    <Stack
+      direction="row"
+      spacing={1}
+      useFlexGap
+      sx={{ flexWrap: 'wrap', alignItems: 'flex-start' }}
+    >
       {[3, 2, 1].map((tier) => {
         const entries = [...atoms.values()]
           .filter((entry) => entry.snapshot.tier === tier)
           .sort((a, b) => a.snapshot.ordinal - b.snapshot.ordinal);
+        if (!entries.length) return null;
         return (
-          <Paper key={tier} sx={{ p: 1, borderLeft: `3px solid ${tierColors[tier as 1 | 2 | 3]}` }}>
-            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>{t(`lanes.l${tier}`)}</Typography>
+          <Box
+            key={tier}
+            sx={{
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              px: 0.75,
+              py: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Typography variant="subtitle2" sx={{ color: tierColors[tier as 1 | 2 | 3], mb: 0 }}>
+              {t(`lanes.l${tier}`)}
+            </Typography>
             <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>
               {entries.map((entry) => (
                 <Tooltip
@@ -313,9 +337,8 @@ function AtomLanes({
                   />
                 </Tooltip>
               ))}
-              {!entries.length ? <Typography variant="caption" color="text.secondary">{t('common.none')}</Typography> : null}
             </Stack>
-          </Paper>
+          </Box>
         );
       })}
     </Stack>
@@ -332,54 +355,96 @@ function FilterBar({
   onChange: (next: EventFilters) => void;
 }) {
   const { t } = useI18n();
+  const kinds = visibleEventKindFilters(events);
+  const filters = coerceEventFilters(events, value);
   const roles = [...new Set(events.flatMap((event) => event.role ? [event.role] : []))];
   const branches = useMemo(
-    () => buildTimelineLayout(events, { ...value, branchId: 'all' }).branches,
-    [events, value]
+    () => buildTimelineLayout(events, { ...filters, branchId: 'all' }).branches,
+    [events, filters]
   );
   return (
     <Stack spacing={0.75}>
-      <ToggleButtonGroup
-        size="small"
-        exclusive
-        value={value.kind}
-        onChange={(_event, next) => next && onChange({ ...value, kind: next })}
-        sx={{ flexWrap: 'wrap' }}
+      <Stack
+        direction="row"
+        spacing={1}
+        useFlexGap
+        sx={{ flexWrap: 'wrap', alignItems: 'flex-start' }}
       >
-        {KIND_FILTERS.map((kind) => (
-          <ToggleButton key={kind} value={kind}>{t(kind === 'all' ? 'filters.all' : `filters.${kind === 'tool' ? 'tools' : kind === 'skill' ? 'skills' : kind}`)}</ToggleButton>
-        ))}
-      </ToggleButtonGroup>
-      {(value.kind === 'all' || value.kind === 'llm') && roles.length ? (
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={value.role}
-          onChange={(_event, next) => next && onChange({ ...value, role: next })}
-          sx={{ flexWrap: 'wrap' }}
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            px: 0.25,
+            py: 0.25,
+          }}
         >
-          <ToggleButton value="all">{t('filters.allRoles')}</ToggleButton>
-          {roles.map((role) => <ToggleButton key={role} value={role}>{role}</ToggleButton>)}
-        </ToggleButtonGroup>
-      ) : null}
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={filters.kind}
+            onChange={(_event, next) => next && onChange({ ...value, kind: next })}
+            sx={{ flexWrap: 'wrap' }}
+          >
+            {kinds.map((kind) => (
+              <ToggleButton key={kind} value={kind}>{t(kind === 'all' ? 'filters.all' : `filters.${kind === 'tool' ? 'tools' : kind === 'skill' ? 'skills' : kind}`)}</ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+        {(filters.kind === 'all' || filters.kind === 'llm') && roles.length ? (
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'divider',
+              borderRadius: 1,
+              px: 0.25,
+              py: 0.25,
+            }}
+          >
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={value.role}
+              onChange={(_event, next) => next && onChange({ ...value, role: next })}
+              sx={{ flexWrap: 'wrap' }}
+            >
+              <ToggleButton value="all">{t('filters.allRoles')}</ToggleButton>
+              {roles.map((role) => <ToggleButton key={role} value={role}>{role}</ToggleButton>)}
+            </ToggleButtonGroup>
+          </Box>
+        ) : null}
+      </Stack>
       {branches.length ? (
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={value.branchId}
-          onChange={(_event, next) => next && onChange({ ...value, branchId: next })}
-          sx={{ flexWrap: 'wrap' }}
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            borderRadius: 1,
+            px: 0.25,
+            py: 0.25,
+            alignSelf: 'flex-start',
+          }}
         >
-          <ToggleButton value="all">{t('filters.allBranches')}</ToggleButton>
-          {branches.slice(0, 8).map((branch) => (
-            <ToggleButton key={branch.id} value={branch.id}>
-              {t(branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase', {
-                n: branch.path.join('.'),
-              })}
-              {branch.label ? ` · ${branch.label.slice(0, 32)}` : ''}
-            </ToggleButton>
-          ))}
-        </ToggleButtonGroup>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={value.branchId}
+            onChange={(_event, next) => next && onChange({ ...value, branchId: next })}
+            sx={{ flexWrap: 'wrap' }}
+          >
+            <ToggleButton value="all">{t('filters.allBranches')}</ToggleButton>
+            {branches.slice(0, 8).map((branch) => {
+              const heading = timelineBranchHeading(branch, t);
+              return (
+                <ToggleButton key={branch.id} value={branch.id}>
+                  {heading.title === heading.eyebrow
+                    ? heading.eyebrow
+                    : `${heading.eyebrow} · ${heading.title.slice(0, 32)}`}
+                </ToggleButton>
+              );
+            })}
+          </ToggleButtonGroup>
+        </Box>
       ) : null}
     </Stack>
   );
@@ -550,9 +615,15 @@ function StructuredNodeView({
   );
 }
 
-function StructuredValue({ value }: { value: unknown }) {
+function StructuredValue({
+  value,
+  markdownPath,
+}: {
+  value: unknown;
+  markdownPath?: string;
+}) {
   const { t } = useI18n();
-  const nodes = buildStructuredDetail(value, t);
+  const nodes = buildStructuredDetail(value, t, { markdownPath });
   return (
     <Stack spacing={0.85}>
       {nodes.map((node, index) => (
@@ -571,6 +642,55 @@ function StructuredResponse({ text }: { text: string }) {
   return parsed === undefined
     ? <CodeBlock maxHeight={720}>{text}</CodeBlock>
     : <StructuredValue value={parsed} />;
+}
+
+function SkillEventDetail({
+  event,
+  onOpenSkill,
+}: {
+  event: VizEvent;
+  onOpenSkill: (l1Name: string, id: string) => void;
+}) {
+  const { t } = useI18n();
+  const [skill, setSkill] = useState<SkillSummary | null>(null);
+  useEffect(() => {
+    setSkill(null);
+    if (!event.l1Name || !event.skillId) return;
+    let cancelled = false;
+    void api.skill(event.l1Name, event.skillId)
+      .then((detail) => {
+        if (!cancelled) setSkill(detail);
+      })
+      .catch(() => {
+        if (!cancelled) setSkill(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event.l1Name, event.skillId]);
+  const nodes = buildSkillEventDetail(event, skill, t);
+  return (
+    <Stack spacing={1.5}>
+      <Box>
+        <Typography variant="h6">{skillEventTitle(event, t)}</Typography>
+        <Typography color="text.secondary">{skillEventSubtitle(event)}</Typography>
+      </Box>
+      <Stack spacing={0.85}>
+        {nodes.map((node, index) => (
+          <StructuredNodeView
+            key={`skill.${node.key}.${index}`}
+            node={node}
+            path={`skill.${node.key}.${index}`}
+          />
+        ))}
+      </Stack>
+      {event.l1Name && event.skillId ? (
+        <Button variant="outlined" onClick={() => onOpenSkill(event.l1Name!, event.skillId!)}>
+          {t('registry.openSkill')}
+        </Button>
+      ) : null}
+    </Stack>
+  );
 }
 
 function EventDetail({
@@ -624,23 +744,13 @@ function EventDetail({
           <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t('detail.result')}</Typography>
           {event.error
             ? <Alert severity="error">{event.error}</Alert>
-            : <StructuredValue value={event.result} />}
+            : <StructuredValue value={event.result} markdownPath={filePathFromArgs(event.args)} />}
         </Box>
       </Stack>
     );
   }
   if (event.kind === 'skill') {
-    return (
-      <Stack spacing={1.5}>
-        <Typography variant="h6">{eventTitle(event, t)}</Typography>
-        <Typography>{event.reasoning}</Typography>
-        {event.l1Name && event.skillId ? (
-          <Button variant="outlined" onClick={() => onOpenSkill(event.l1Name!, event.skillId!)}>
-            {t('registry.openSkill')}
-          </Button>
-        ) : null}
-      </Stack>
-    );
+    return <SkillEventDetail event={event} onOpenSkill={onOpenSkill} />;
   }
   if (event.kind === 'registry' && event.snapshot) {
     return <AtomDetail atom={{ snapshot: event.snapshot, origin: event.op === 'create' ? 'created' : event.op === 'branch' ? 'branched' : 'patched', events: [event] }} />;
@@ -671,6 +781,7 @@ export function RunsView({
   const [selectedAtomName, setSelectedAtomName] = useState<string | null>(null);
   const [detailTab, setDetailTab] = useState(1);
   const [filters, setFilters] = useState<EventFilters>({ kind: 'all', role: 'all', branchId: 'all' });
+  const [runSummaryOpen, setRunSummaryOpen] = useState(true);
   const [, setClock] = useState(0);
   const leftPaneRef = useRef<HTMLDivElement>(null);
   const previousHeightRef = useRef(0);
@@ -681,6 +792,7 @@ export function RunsView({
   useEffect(() => {
     setSelectedEventId(null);
     setSelectedAtomName(null);
+    setRunSummaryOpen(true);
     setFilters({ kind: 'all', role: 'all', branchId: 'all' });
     previousHeightRef.current = 0;
     previousEventCountRef.current = 0;
@@ -710,17 +822,33 @@ export function RunsView({
     () => new Set((run?.events ?? []).filter((event) => event.kind === 'llm').map((event) => event.id)),
     [run]
   );
+  const appliedFilters = run ? coerceEventFilters(run.events, filters) : filters;
   const timeline = useMemo(
-    () => run ? buildTimelineLayout(run.events, filters) : null,
-    [filters, run]
+    () => run ? buildTimelineLayout(run.events, appliedFilters) : null,
+    [appliedFilters, run]
   );
   const visibleItems = timeline?.items ?? [];
   const branchById = useMemo(
     () => new Map((timeline?.branches ?? []).map((branch) => [branch.id, branch])),
     [timeline]
   );
+  const selectedBranchHeading = useMemo(() => {
+    if (appliedFilters.branchId === 'all' || !run) return null;
+    const overview = buildTimelineLayout(run.events, { ...appliedFilters, branchId: 'all' });
+    const branch = overview.branches.find((item) => item.id === appliedFilters.branchId);
+    return branch
+      ? timelineBranchHeading(branch, t)
+      : {
+          eyebrow: t('filters.branch', { id: appliedFilters.branchId }),
+          title: t('filters.branch', { id: appliedFilters.branchId }),
+          lines: [],
+        };
+  }, [appliedFilters, run, t]);
   const selectedEvent = run?.events.find((event) => event.id === selectedEventId) ?? null;
   const selectedAtom = selectedAtomName ? atoms.get(selectedAtomName) ?? null : null;
+  useEffect(() => {
+    setRunSummaryOpen(!selectedEventId && !selectedAtomName);
+  }, [selectedEventId, selectedAtomName]);
 
   if (!runId) return <EmptyPane>{t('runs.none')}</EmptyPane>;
   if (loading && !run) return <LoadingPane />;
@@ -752,6 +880,31 @@ export function RunsView({
         />
         <FilterBar events={run.events} value={filters} onChange={setFilters} />
         <NowBanner run={run} completed={completed} />
+        {selectedBranchHeading ? (
+          <Accordion defaultExpanded disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Box>
+                <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 0.8 }}>
+                  {selectedBranchHeading.eyebrow}
+                </Typography>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, whiteSpace: 'normal' }}>
+                  {selectedBranchHeading.title}
+                </Typography>
+              </Box>
+            </AccordionSummary>
+            {selectedBranchHeading.lines.length ? (
+              <AccordionDetails>
+                <Stack component="ul" spacing={0.4} sx={{ m: 0, pl: 2 }}>
+                  {selectedBranchHeading.lines.map((line) => (
+                    <Typography key={line} component="li" variant="body2" color="text.secondary">
+                      {line}
+                    </Typography>
+                  ))}
+                </Stack>
+              </AccordionDetails>
+            ) : null}
+          </Accordion>
+        ) : null}
         <Stack
           spacing={0.75}
           sx={{
@@ -794,13 +947,37 @@ export function RunsView({
         </Stack>
       </Stack>
       <Box sx={{ p: 2, minWidth: 0, position: { lg: 'sticky' }, top: { lg: 49 }, alignSelf: 'start', maxHeight: { lg: 'calc(100vh - 49px)' }, overflow: 'auto' }}>
+        <Accordion
+          expanded={runSummaryOpen}
+          onChange={(_event, next) => setRunSummaryOpen(next)}
+          disableGutters
+          sx={{ mb: 1.5 }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box>
+              <Typography variant="overline" color="text.secondary">{t('run.summary')}</Typography>
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{run.label}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {[fmtMs(run.durationMs), t('runs.calls', { count: run.totals?.calls ?? 0 }), fmtCost(run.totals?.costUsd)].join(' · ')}
+              </Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            {run.task?.description ? (
+              <Box>
+                <Typography variant="caption" color="text.secondary">{t('run.goal')}</Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{run.task.description}</Typography>
+              </Box>
+            ) : null}
+          </AccordionDetails>
+        </Accordion>
         {selectedEvent ? (
           <EventDetail event={selectedEvent} tab={detailTab} onTab={setDetailTab} onOpenSkill={onOpenSkill} />
         ) : selectedAtom ? (
           <AtomDetail atom={selectedAtom} />
-        ) : (
+        ) : !runSummaryOpen ? (
           <EmptyPane>{t('pane.selectEvent')}</EmptyPane>
-        )}
+        ) : null}
       </Box>
     </Box>
   );

@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from '../src/viz/client/i18n.js';
 import {
+  buildSkillEventDetail,
   buildStructuredDetail,
   eventRoleLabel,
+  looksLikeMarkdown,
+  parseMarkdownDetail,
+  skillEventSubtitle,
+  skillEventTitle,
   structuredDetailLabel,
   type StructuredDetailField,
   type StructuredDetailSection,
@@ -114,5 +119,78 @@ describe('structured detail presentation', () => {
       key: 'truncated',
       value: '16 additional entries omitted',
     });
+  });
+
+  it('fills a skill event pane from the decision and catalog', () => {
+    const event = {
+      kind: 'skill',
+      op: 'inject',
+      l1Name: 'Idioblast',
+      skillId: 'write-doc-and-config-files',
+      actor: { name: 'Idioblast' },
+    };
+    expect(skillEventTitle(event, en)).toBe('Skill body injected into the molecule prompt');
+    expect(skillEventSubtitle(event)).toBe('Idioblast / write-doc-and-config-files');
+    expect(skillEventTitle({ kind: 'skill', op: 'credit-withheld' }, fr))
+      .toBe('Compteurs NON modifiés (recette non suivie)');
+
+    const withoutCatalog = buildSkillEventDetail(event, null, en) as StructuredDetailField[];
+    expect(withoutCatalog.map((node) => node.label)).toEqual([
+      'Decision',
+      'Skill id',
+      'Molecule',
+    ]);
+
+    const withCatalog = buildSkillEventDetail(event, {
+      id: 'write-doc-and-config-files',
+      kind: 'llm',
+      description: 'Author paired docs and a config file.',
+      whenToUse: 'Task asks for README plus config.json',
+      successes: 3,
+      failures: 0,
+      updatedAt: '2026-08-14T00:21:19.000Z',
+      body: '1. Read the workspace\n2. Write the files',
+      shareability: { verdict: 'review-required' },
+    }, en) as StructuredDetailField[];
+    expect(withCatalog).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Description', value: 'Author paired docs and a config file.' }),
+      expect.objectContaining({ label: 'When to use', value: 'Task asks for README plus config.json' }),
+      expect.objectContaining({ label: 'Successes', value: '3' }),
+      expect.objectContaining({ label: 'Recipe', presentation: 'code' }),
+      expect.objectContaining({
+        label: 'Sharing review',
+        value: '○ Nothing mechanical found — a human must still read it',
+      }),
+    ]));
+  });
+
+  it('parses markdown file contents instead of dumping raw text', () => {
+    const markdown = [
+      '# Usage',
+      '',
+      'Run the CLI against a fixture.',
+      '',
+      '- happy path',
+      '- missing file',
+      '',
+      '```js',
+      'node cli.js input.txt',
+      '```',
+    ].join('\n');
+    expect(looksLikeMarkdown(markdown, 'README.md')).toBe(true);
+    const parsed = parseMarkdownDetail(markdown, en);
+    expect(parsed[0]).toMatchObject({ kind: 'section', label: 'Usage' });
+    const usage = parsed[0] as StructuredDetailSection;
+    expect(usage.children).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: 'Paragraph', value: 'Run the CLI against a fixture.' }),
+      expect.objectContaining({ kind: 'section', label: 'List', count: 2 }),
+      expect.objectContaining({ label: 'js', presentation: 'code', value: 'node cli.js input.txt' }),
+    ]));
+    const nodes = buildStructuredDetail(
+      { content: markdown },
+      en,
+      { markdownPath: 'README.md' }
+    );
+    expect(nodes[0]).toMatchObject({ kind: 'section', key: 'content', label: 'Content' });
   });
 });

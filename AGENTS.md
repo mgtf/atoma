@@ -1735,10 +1735,18 @@ re-exports all the historical names so old imports keep working.
   The Atoma brand mark is one isometric crystal, not an atom/orbit cliché and
   not a lattice of tiny facets: three large faces (teal molecule, amber cell,
   violet tissue) meet at a bright core. That silhouette stays readable at
-  favicon size. The Pixi mark pulses only the core; the static SVG is the
-  source for favicon/PWA raster sizes. The wordmark is capitalized **Atoma**
-  everywhere; primary navigation starts at x=160 and the Runs input at ≥610px
-  so the brand has a real exclusion zone.
+  favicon size. The Pixi mark is one projected five-point crystal whose faces
+  are depth-sorted and relit every frame: fixed key light, bounded clearcoat/
+  rim highlights, a soft core pulse and a ~10-second turn make the material
+  read at 28px without texture maps or post-processing. Projection and light
+  math live in the pure `buildAtomaMarkFrame` helper so tests pin the three
+  rank colors, face ordering and motion bounds without a brittle screenshot.
+  Reduced-motion renders one static frame. Do NOT mount a second R3F logo over
+  it: that double-composites two asynchronous crystals and creates a THIRD GPU
+  context beyond the deliberate Pixi + backdrop pair. The static SVG remains
+  the source for favicon/PWA raster sizes. The wordmark is capitalized
+  **Atoma** everywhere; primary navigation starts at x=160 and the Runs input
+  at ≥610px so the brand has a real exclusion zone.
   Both GPU and MUI builds share `src/viz/public` via Vite `publicDir`.
   `manifest.webmanifest` + 192/512/maskable/Apple icons make the compiled viz
   installable; the hand-written service worker registers in PROD ONLY, never

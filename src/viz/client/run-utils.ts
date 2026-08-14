@@ -234,9 +234,64 @@ export interface AtomView {
   events: VizEvent[];
 }
 
+function rememberAtomName(names: Set<string>, name?: string) {
+  if (name) names.add(name);
+}
+
+/** Agents that actually appear in this run — never the idle rest of the store. */
+export function usedAtomNames(run: VizRun): Set<string> {
+  const names = new Set<string>();
+  rememberAtomName(names, run.result?.producedBy?.name);
+  for (const event of run.events) {
+    rememberAtomName(names, event.actor?.name);
+    rememberAtomName(names, event.child?.name);
+    rememberAtomName(names, event.l1Name);
+    if (event.kind === 'registry') rememberAtomName(names, event.snapshot?.name);
+  }
+  return names;
+}
+
+function atomRefTier(run: VizRun, name: string): number {
+  if (run.result?.producedBy?.name === name && run.result.producedBy.tier) {
+    return run.result.producedBy.tier;
+  }
+  for (const event of run.events) {
+    if (event.actor?.name === name && event.actor.tier) return event.actor.tier;
+    if (event.child?.name === name && event.child.tier) return event.child.tier;
+    if (event.kind === 'registry' && event.snapshot?.name === name && event.snapshot.tier) {
+      return event.snapshot.tier;
+    }
+    if (event.l1Name === name) return 1;
+  }
+  return 0;
+}
+
+function stubAtomView(name: string, tier: number): AtomView {
+  return {
+    snapshot: {
+      tier,
+      ordinal: 0,
+      name,
+      description: '',
+      systemPrompt: '',
+      tools: [],
+      params: {},
+      createdBy: '',
+      createdAt: '',
+      version: 0,
+      successes: 0,
+      failures: 0,
+    },
+    origin: 'existing',
+    events: [],
+  };
+}
+
 export function buildAtomMap(run: VizRun): Map<string, AtomView> {
+  const used = usedAtomNames(run);
   const map = new Map<string, AtomView>();
   for (const snapshot of run.initialTypes ?? []) {
+    if (!used.has(snapshot.name)) continue;
     map.set(snapshot.name, { snapshot, origin: 'existing', events: [] });
   }
   const rank = { existing: 0, patched: 1, branched: 2, created: 3 } as const;
@@ -263,6 +318,9 @@ export function buildAtomMap(run: VizRun): Map<string, AtomView> {
       events: [...(previous?.events ?? []), event],
     });
   }
+  for (const name of used) {
+    if (!map.has(name)) map.set(name, stubAtomView(name, atomRefTier(run, name)));
+  }
   return map;
 }
 
@@ -270,6 +328,31 @@ export interface EventFilters {
   kind: string;
   role: string;
   branchId: string;
+}
+
+export const EVENT_KIND_FILTERS = [
+  'all',
+  'llm',
+  'tool',
+  'trust',
+  'skill',
+  'cache',
+  'registry',
+] as const;
+
+export function visibleEventKindFilters(
+  events: readonly { kind: string }[]
+): string[] {
+  const hasCache = events.some((event) => event.kind === 'cache');
+  return EVENT_KIND_FILTERS.filter((kind) => kind !== 'cache' || hasCache);
+}
+
+export function coerceEventFilters(
+  events: readonly { kind: string }[],
+  filters: EventFilters
+): EventFilters {
+  if (visibleEventKindFilters(events).includes(filters.kind)) return filters;
+  return { ...filters, kind: 'all', role: 'all' };
 }
 
 export function filterEvents(events: VizEvent[], filters: EventFilters): VizEvent[] {

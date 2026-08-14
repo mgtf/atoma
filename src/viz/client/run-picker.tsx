@@ -8,6 +8,7 @@ import {
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import SearchIcon from '@mui/icons-material/Search';
 import { useMemo, useRef, useState } from 'react';
+import { matchesSearchQuery } from './search.js';
 
 export interface RunPickerOption {
   id: string;
@@ -30,9 +31,7 @@ export function RunPicker({ options, value, placeholder, emptyLabel, onChange }:
   const inputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((option) => option.id === value) ?? null;
   const filtered = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return options;
-    return options.filter((option) => option.search.includes(normalized));
+    return options.filter((option) => matchesSearchQuery(option.search, query));
   }, [options, query]);
 
   return (

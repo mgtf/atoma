@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../data-api.js';
 import { useI18n } from '../i18n.js';
+import { matchesSearchQuery, skillSearchText } from '../search.js';
 import { CodeBlock, EmptyPane, ErrorPane, LoadingPane, StatCard } from '../shared.js';
 import type { SkillNamespace, SkillSummary } from '../types.js';
 
@@ -169,11 +170,10 @@ export function SkillsView({
         />
         <Stack spacing={1}>
           {namespaces.map((namespace) => {
-            const query = filter.toLocaleLowerCase();
             const matching = (skillsByL1[namespace.l1Name] ?? []).filter((skill) =>
-              `${skill.id} ${skill.description} ${skill.whenToUse}`.toLocaleLowerCase().includes(query)
+              matchesSearchQuery(skillSearchText(skill, namespace.l1Name), filter)
             );
-            if (query && !matching.length) return null;
+            if (!matching.length) return null;
             return (
               <Paper key={namespace.l1Name} sx={{ p: 1.25 }}>
                 <Typography variant="subtitle2" sx={{ mb: 0.75 }}>

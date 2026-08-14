@@ -11,14 +11,23 @@ import {
 } from 'pixi.js';
 import {
   buildAtomMap,
+  coerceEventFilters,
   fmtCost,
   fmtMs,
   isRunLive,
   toolArgSummary,
   tryParseJson,
+  visibleEventKindFilters,
 } from '../client/run-utils.js';
 import {
+  atomSearchText,
+  matchesSearchQuery,
+  runSearchText,
+  skillSearchText,
+} from '../client/search.js';
+import {
   buildTimelineLayout,
+  timelineBranchHeading,
   type TimelineBranch,
 } from '../client/timeline-layout.js';
 import type {
@@ -35,11 +44,16 @@ import type {
 import { taxonomyForTier } from '../../core/taxonomy.js';
 import { elementForTool } from '../../contracts/toolTaxonomy.js';
 import { currentDisplayName } from '../../registry/taxonomyNames.js';
+import { buildAtomaMarkFrame, type AtomaMarkPoint } from './brand-mark.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import {
+  buildSkillEventDetail,
   buildStructuredDetail,
   eventRoleLabel,
+  filePathFromArgs,
+  skillEventSubtitle,
+  skillEventTitle,
   type DetailTone,
   type StructuredDetailNode,
 } from '../client/structured-detail.js';
@@ -140,13 +154,218 @@ export function gpuFilterButtonWidth(label: string) {
   return Math.max(52, Math.ceil(label.length * 7.2 + 24));
 }
 
+const CONTROL_HOVER_GAP = 14;
+const NAV_HOVER_GAP = 20;
+
+export const FILTER_BLOCK_PAD = 8;
+export const FILTER_BLOCK_GAP = 12;
+export const FILTER_BUTTON_HEIGHT = 27;
+export const ATOM_BUTTON_HEIGHT = 28;
+
+export function gpuLaneLabelWidth(label: string) {
+  return Math.min(132, Math.max(72, Math.ceil(label.length * 6 + 18)));
+}
+
+export interface FilterChipSpec {
+  id: string;
+  label: string;
+}
+
+export interface FilterChipLayout extends FilterChipSpec {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FilterBlockLayout {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  chips: FilterChipLayout[];
+}
+
+function placeChipBlock(
+  chips: readonly FilterChipSpec[],
+  originX: number,
+  originY: number,
+  maxRow: number,
+  widthOf: (label: string) => number,
+  buttonH: number,
+  insetX = 0
+): FilterBlockLayout {
+  const pad = FILTER_BLOCK_PAD;
+  const gap = CONTROL_HOVER_GAP;
+  let x = 0;
+  let y = 0;
+  let innerW = insetX;
+  const placed: FilterChipLayout[] = [];
+  for (const chip of chips) {
+    const width = widthOf(chip.label);
+    if (x > 0 && insetX + x + width > maxRow) {
+      x = 0;
+      y += buttonH + gap;
+    }
+    placed.push({
+      ...chip,
+      x: originX + pad + insetX + x,
+      y: originY + pad + y,
+      width,
+      height: buttonH,
+    });
+    x += width + gap;
+    innerW = Math.max(innerW, insetX + x - gap);
+  }
+  return {
+    x: originX,
+    y: originY,
+    width: Math.max(innerW, insetX) + pad * 2,
+    height: (chips.length ? y + buttonH : 0) + pad * 2,
+    chips: placed,
+  };
+}
+
+export function layoutFilterChipBlock(
+  originX: number,
+  originY: number,
+  maxWidth: number,
+  chips: readonly FilterChipSpec[]
+): FilterBlockLayout {
+  return placeChipBlock(
+    chips,
+    originX,
+    originY,
+    Math.max(FILTER_BUTTON_HEIGHT, maxWidth - FILTER_BLOCK_PAD * 2),
+    gpuFilterButtonWidth,
+    FILTER_BUTTON_HEIGHT
+  );
+}
+
+export function layoutRunFilterBlocks(options: {
+  originX: number;
+  originY: number;
+  maxWidth: number;
+  kinds: readonly FilterChipSpec[];
+  roles: readonly FilterChipSpec[] | null;
+}): { kinds: FilterBlockLayout; roles: FilterBlockLayout | null; bottom: number } {
+  const pad = FILTER_BLOCK_PAD;
+  const buttonH = FILTER_BUTTON_HEIGHT;
+  const maxInner = Math.max(buttonH, options.maxWidth - pad * 2);
+  const kinds = placeChipBlock(
+    options.kinds,
+    options.originX,
+    options.originY,
+    maxInner,
+    gpuFilterButtonWidth,
+    buttonH
+  );
+  if (!options.roles?.length) {
+    return { kinds, roles: null, bottom: kinds.y + kinds.height };
+  }
+
+  const stackedRoles = placeChipBlock(
+    options.roles,
+    options.originX,
+    options.originY + kinds.height + FILTER_BLOCK_GAP,
+    maxInner,
+    gpuFilterButtonWidth,
+    buttonH
+  );
+  const inlineRoles = placeChipBlock(
+    options.roles,
+    options.originX + kinds.width + FILTER_BLOCK_GAP,
+    options.originY,
+    maxInner,
+    gpuFilterButtonWidth,
+    buttonH
+  );
+  const singleRow =
+    kinds.height === buttonH + pad * 2 &&
+    inlineRoles.height === buttonH + pad * 2 &&
+    inlineRoles.x + inlineRoles.width <= options.originX + options.maxWidth;
+  const roles = singleRow ? inlineRoles : stackedRoles;
+  return { kinds, roles, bottom: Math.max(kinds.y + kinds.height, roles.y + roles.height) };
+}
+
+export interface AtomLaneSpec {
+  tier: 1 | 2 | 3;
+  label: string;
+  names: readonly string[];
+}
+
+export interface AtomLaneBlockLayout extends FilterBlockLayout {
+  tier: 1 | 2 | 3;
+  label: string;
+  labelX: number;
+  labelY: number;
+}
+
+export function layoutAtomLaneBlocks(options: {
+  originX: number;
+  originY: number;
+  maxWidth: number;
+  lanes: readonly AtomLaneSpec[];
+}): { lanes: AtomLaneBlockLayout[]; bottom: number } {
+  const pad = FILTER_BLOCK_PAD;
+  const buttonH = ATOM_BUTTON_HEIGHT;
+  const maxInner = Math.max(buttonH, options.maxWidth - pad * 2);
+
+  const measure = (lane: AtomLaneSpec, originX: number, originY: number, maxRow: number) => {
+    const labelW = gpuLaneLabelWidth(lane.label);
+    const block = placeChipBlock(
+      lane.names.map((name) => ({ id: `atom.${name}`, label: name })),
+      originX,
+      originY,
+      maxRow,
+      gpuAtomButtonWidth,
+      buttonH,
+      labelW
+    );
+    return {
+      ...block,
+      tier: lane.tier,
+      label: lane.label,
+      labelX: originX + pad,
+      labelY: originY + pad + 7,
+    };
+  };
+
+  const natural = options.lanes.map((lane) => measure(lane, 0, 0, Number.POSITIVE_INFINITY));
+  const inlineWidth =
+    natural.reduce((sum, lane) => sum + lane.width, 0) +
+    FILTER_BLOCK_GAP * Math.max(0, options.lanes.length - 1);
+  const inline =
+    options.lanes.length > 0 &&
+    inlineWidth <= options.maxWidth &&
+    natural.every((lane) => lane.height === buttonH + pad * 2);
+
+  const lanes: AtomLaneBlockLayout[] = [];
+  if (inline) {
+    let x = options.originX;
+    for (const lane of options.lanes) {
+      const block = measure(lane, x, options.originY, Number.POSITIVE_INFINITY);
+      lanes.push(block);
+      x += block.width + FILTER_BLOCK_GAP;
+    }
+  } else {
+    let y = options.originY;
+    for (const lane of options.lanes) {
+      const block = measure(lane, options.originX, y, maxInner);
+      lanes.push(block);
+      y += block.height + FILTER_BLOCK_GAP;
+    }
+  }
+  const bottom = lanes.length
+    ? Math.max(...lanes.map((lane) => lane.y + lane.height))
+    : options.originY;
+  return { lanes, bottom };
+}
+
 export function gpuAtomButtonWidth(label: string) {
   // 28px particle zone + 8px separation + 12px right padding.
   return Math.min(160, Math.max(80, Math.ceil(label.length * 6.4 + 48)));
 }
-
-const CONTROL_HOVER_GAP = 14;
-const NAV_HOVER_GAP = 20;
 
 function quantile(values: number[], percentile: number) {
   if (!values.length) return null;
@@ -190,14 +409,9 @@ function timelineBranchLabel(
   branch: TimelineBranch,
   t: (key: string, vars?: Record<string, unknown>) => string
 ): string {
-  const base = t(
-    branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase',
-    { n: branch.path.join('.') }
-  );
-  const descriptor = branch.label
-    ? truncate(branch.label.replace(/\s+/g, ' '), 28)
-    : branch.agentName;
-  return descriptor ? `${base} · ${descriptor}` : base;
+  const heading = timelineBranchHeading(branch, t);
+  if (heading.title === heading.eyebrow) return heading.eyebrow;
+  return `${heading.eyebrow} · ${truncate(heading.title, 28)}`;
 }
 
 export function gpuCardShaderMode(event: VizEvent): number {
@@ -548,6 +762,12 @@ export class GpuRenderer {
   private previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
+  private roleRowTransition: {
+    phase: 'exit' | 'enter';
+    targets: FilterVisualTarget[];
+    distance: number;
+    startedAt: number;
+  } | null = null;
   private readonly seenAnimatedControls = new Set<string>();
   private previousView: ViewName | null = null;
   private activeViewTransition: {
@@ -754,6 +974,7 @@ export class GpuRenderer {
     this.previousView = snapshot.state.view;
     this.drawViewTransition(width, height);
     this.previousFilterBounds = this.currentFilterBounds;
+    if (snapshot.state.view !== 'runs') this.roleRowTransition = null;
     this.previousEventIds = this.currentEventIds;
     this.metrics.objectCount = this.countObjects(this.root);
   }
@@ -794,6 +1015,39 @@ export class GpuRenderer {
     graphics.fill({ color: fill, alpha: 0.84 });
     if (border !== fill) graphics.stroke({ color: border, width: 1, alpha: 0.9 });
     graphics.eventMode = 'none';
+    parent.addChild(graphics);
+    return graphics;
+  }
+
+  private filterBlockFrame(
+    parent: Container,
+    block: Pick<FilterBlockLayout, 'x' | 'y' | 'width' | 'height'>
+  ) {
+    const graphics = new Graphics();
+    graphics.roundRect(block.x, block.y, block.width, block.height, 10);
+    graphics.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.72 });
+    graphics.eventMode = 'none';
+    parent.addChild(graphics);
+    return graphics;
+  }
+
+  private collapseCaret(
+    parent: Container,
+    right: number,
+    top: number,
+    expanded: boolean,
+    color: number
+  ) {
+    const size = 12;
+    const graphics = new Graphics();
+    if (expanded) {
+      graphics.poly([0, 2, size, 2, size / 2, size]);
+    } else {
+      graphics.poly([2, 0, size, size / 2, 2, size]);
+    }
+    graphics.fill({ color, alpha: 0.95 });
+    graphics.eventMode = 'none';
+    graphics.position.set(right - size, top);
     parent.addChild(graphics);
     return graphics;
   }
@@ -1561,16 +1815,37 @@ export class GpuRenderer {
     return content;
   }
 
+  private easeOutBack(progress: number, overshoot = 1.35) {
+    const shifted = Math.min(1, Math.max(0, progress)) - 1;
+    return 1 + (overshoot + 1) * shifted ** 3 + overshoot * shifted ** 2;
+  }
+
   private drawExitingFilterButtons(
     targets: FilterVisualTarget[],
     collapsingLayer: Container,
-    collapseDistance: number
+    collapseDistance: number,
+    startedAt = performance.now()
   ) {
     if (!targets.length) return;
     const snapshotAtStart = this.snapshot;
-    collapsingLayer.y = collapseDistance;
-    this.metrics.runCollapseOffset = collapseDistance;
-    const groups = targets.map((target, targetIndex) => {
+    const exitDuration = 460 + (targets.length - 1) * 18;
+    const collapseDuration = 390;
+    let elapsed = Math.max(0, performance.now() - startedAt);
+    let completed = elapsed >= exitDuration + collapseDuration;
+    let groupsRemoved = elapsed >= exitDuration;
+    collapsingLayer.y = groupsRemoved
+      ? collapseDistance * (1 - this.easeOutBack((elapsed - exitDuration) / collapseDuration))
+      : collapseDistance;
+    this.metrics.runCollapseOffset = collapsingLayer.y;
+    if (completed) {
+      collapsingLayer.y = 0;
+      this.metrics.runCollapseOffset = 0;
+      this.roleRowTransition = null;
+      return;
+    }
+    const groups = groupsRemoved
+      ? []
+      : targets.map((target, targetIndex) => {
       this.handledExitIds.add(target.id);
       const container = new Container();
       container.position.set(target.x, target.y);
@@ -1630,39 +1905,53 @@ export class GpuRenderer {
       this.root.addChild(container);
       return { container, aura, base, label, fragments, delay: targetIndex * 18 };
     });
+    for (const id of targets.map((target) => target.id)) this.handledExitIds.add(id);
 
-    let elapsed = 0;
-    let completed = false;
-    let groupsRemoved = false;
-    const exitDuration = 460 + (groups.length - 1) * 18;
-    const collapseDuration = 390;
-    const dissolve = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
-      if (!groupsRemoved) {
-        for (const group of groups) {
-          const local = Math.max(0, elapsed - group.delay);
-          const progress = Math.min(1, local / 460);
-          const dissolveProgress = Math.max(0, (progress - 0.16) / 0.84);
-          group.container.alpha = 1 - dissolveProgress ** 1.45;
-          const scale = 1 - dissolveProgress * 0.12;
-          group.container.scale.set(scale);
-          group.container.position.set(
-            group.container.position.x,
-            group.container.position.y - ticker.deltaMS * 0.008 * dissolveProgress
-          );
-          group.aura.alpha = (0.18 + Math.sin(local / 55) * 0.12) * (1 - dissolveProgress);
-          group.base.tint = 0xffffff - Math.floor(dissolveProgress * 0x202000);
-          group.label.alpha = 1 - dissolveProgress * 1.25;
-          for (const fragment of group.fragments) {
-            fragment.fragment.alpha = Math.sin(Math.PI * dissolveProgress) * 0.9;
-            fragment.fragment.x =
-              fragment.originX + fragment.vx * local * dissolveProgress;
-            fragment.fragment.y =
-              fragment.originY + fragment.vy * local * dissolveProgress;
-            fragment.fragment.rotation += ticker.deltaMS * 0.004;
-          }
+    const applyDissolve = (deltaMS: number) => {
+      if (groupsRemoved) return;
+      for (const group of groups) {
+        const local = Math.max(0, elapsed - group.delay);
+        const progress = Math.min(1, local / 460);
+        const dissolveProgress = Math.max(0, (progress - 0.16) / 0.84);
+        group.container.alpha = 1 - dissolveProgress ** 1.45;
+        const scale = 1 - dissolveProgress * 0.12;
+        group.container.scale.set(scale);
+        group.container.position.set(
+          group.container.position.x,
+          group.container.position.y - deltaMS * 0.008 * dissolveProgress
+        );
+        group.aura.alpha = (0.18 + Math.sin(local / 55) * 0.12) * (1 - dissolveProgress);
+        group.base.tint = 0xffffff - Math.floor(dissolveProgress * 0x202000);
+        group.label.alpha = 1 - dissolveProgress * 1.25;
+        for (const fragment of group.fragments) {
+          fragment.fragment.alpha = Math.sin(Math.PI * dissolveProgress) * 0.9;
+          fragment.fragment.x =
+            fragment.originX + fragment.vx * local * dissolveProgress;
+          fragment.fragment.y =
+            fragment.originY + fragment.vy * local * dissolveProgress;
+          fragment.fragment.rotation += deltaMS * 0.004;
         }
       }
+    };
+
+    const applyCollapse = () => {
+      const collapseProgress = Math.max(
+        0,
+        Math.min(1, (elapsed - exitDuration) / collapseDuration)
+      );
+      if (collapseProgress > 0) {
+        collapsingLayer.y = collapseDistance * (1 - this.easeOutBack(collapseProgress));
+        this.metrics.runCollapseOffset = collapsingLayer.y;
+      }
+      return collapseProgress;
+    };
+
+    applyDissolve(0);
+    applyCollapse();
+
+    const dissolve = (ticker: Ticker) => {
+      elapsed = Math.max(0, performance.now() - startedAt);
+      applyDissolve(ticker.deltaMS);
       if (!groupsRemoved && elapsed >= exitDuration) {
         groupsRemoved = true;
         for (const group of groups) {
@@ -1670,26 +1959,12 @@ export class GpuRenderer {
           group.container.destroy({ children: true });
         }
       }
-      const collapseProgress = Math.max(
-        0,
-        Math.min(1, (elapsed - exitDuration) / collapseDuration)
-      );
-      if (collapseProgress > 0) {
-        // A restrained ease-out-back: the content rises, overshoots by about
-        // one pixel, then settles instead of snapping at the layout boundary.
-        const overshoot = 1.35;
-        const shifted = collapseProgress - 1;
-        const eased =
-          1 +
-          (overshoot + 1) * shifted ** 3 +
-          overshoot * shifted ** 2;
-        collapsingLayer.y = collapseDistance * (1 - eased);
-        this.metrics.runCollapseOffset = collapsingLayer.y;
-      }
+      const collapseProgress = applyCollapse();
       if (!completed && collapseProgress >= 1) {
         completed = true;
         collapsingLayer.y = 0;
         this.metrics.runCollapseOffset = 0;
+        this.roleRowTransition = null;
         this.app.ticker.remove(dissolve);
         this.tickerCallbacks.delete(dissolve);
         requestAnimationFrame(() => {
@@ -1702,26 +1977,31 @@ export class GpuRenderer {
     this.addTicker(dissolve);
   }
 
-  private animateEnteringFilterSpace(layer: Container, distance: number) {
+  private animateEnteringFilterSpace(
+    layer: Container,
+    distance: number,
+    startedAt = performance.now()
+  ) {
     if (distance <= 0) return;
-    layer.y = -distance;
-    this.metrics.runCollapseOffset = -distance;
-    let elapsed = 0;
     const duration = 390;
-    const expand = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+    const apply = (elapsed: number) => {
       const progress = Math.min(1, elapsed / duration);
-      const overshoot = 1.35;
-      const shifted = progress - 1;
-      const eased =
-        1 +
-        (overshoot + 1) * shifted ** 3 +
-        overshoot * shifted ** 2;
-      layer.y = -distance * (1 - eased);
+      layer.y = -distance * (1 - this.easeOutBack(progress));
       this.metrics.runCollapseOffset = layer.y;
+      return progress;
+    };
+    if (apply(Math.max(0, performance.now() - startedAt)) >= 1) {
+      layer.y = 0;
+      this.metrics.runCollapseOffset = 0;
+      this.roleRowTransition = null;
+      return;
+    }
+    const expand = () => {
+      const progress = apply(Math.max(0, performance.now() - startedAt));
       if (progress >= 1) {
         layer.y = 0;
         this.metrics.runCollapseOffset = 0;
+        this.roleRowTransition = null;
         this.app.ticker.remove(expand);
         this.tickerCallbacks.delete(expand);
       }
@@ -1859,67 +2139,98 @@ export class GpuRenderer {
     const container = new Container();
     container.position.set(x, y);
     container.eventMode = 'none';
-
-    const cx = 18;
-    const cy = 18;
-    const r = 16;
-    const w = r * Math.sqrt(3) / 2;
-    const face = (
-      graphics: Graphics,
-      points: ReadonlyArray<readonly [number, number]>,
-      fill: number
-    ) => {
-      const [first, ...rest] = points;
-      if (!first) return;
-      graphics.moveTo(first[0], first[1]);
-      for (const point of rest) graphics.lineTo(point[0], point[1]);
-      graphics.closePath();
-      graphics.fill({ color: fill, alpha: 1 });
-    };
-
-    const v0: readonly [number, number] = [cx, cy - r];
-    const v1: readonly [number, number] = [cx + w, cy - r / 2];
-    const v2: readonly [number, number] = [cx + w, cy + r / 2];
-    const v3: readonly [number, number] = [cx, cy + r];
-    const v4: readonly [number, number] = [cx - w, cy + r / 2];
-    const v5: readonly [number, number] = [cx - w, cy - r / 2];
-    const c: readonly [number, number] = [cx, cy];
-
-    const crystal = new Graphics();
-    face(crystal, [v5, v0, v1, c], 0xf59e0b);
-    face(crystal, [v1, v2, v3, c], 0x7c3aed);
-    face(crystal, [v5, c, v3, v4], 0x0f766e);
-    crystal
-      .moveTo(v0[0], v0[1])
-      .lineTo(v1[0], v1[1])
-      .lineTo(v2[0], v2[1])
-      .lineTo(v3[0], v3[1])
-      .lineTo(v4[0], v4[1])
-      .lineTo(v5[0], v5[1])
-      .closePath()
-      .stroke({ color: 0xe6edf7, width: 1.6, alpha: 0.88 });
+    const crystal = new Container();
+    crystal.position.set(14, 14);
+    crystal.pivot.set(14, 14);
+    const aura = new Graphics();
+    const shadow = new Graphics();
+    const faceGlow = new Graphics();
+    const facets = new Graphics();
+    const clearcoat = new Graphics();
+    const core = new Graphics();
+    crystal.addChild(aura, shadow, faceGlow, facets, clearcoat, core);
     container.addChild(crystal);
 
-    const core = new Graphics();
-    core
-      .moveTo(0, -6.2)
-      .lineTo(7, 0)
-      .lineTo(0, 6.2)
-      .lineTo(-7, 0)
-      .closePath()
-      .fill({ color: 0xf8fbff, alpha: 1 })
-      .stroke({ color: GPU_COLORS.cyan, width: 1.35, alpha: 0.95 });
-    core.position.set(cx, cy);
-    container.addChild(core);
+    const traceFace = (
+      graphics: Graphics,
+      points: readonly [AtomaMarkPoint, AtomaMarkPoint, AtomaMarkPoint]
+    ) => graphics
+      .moveTo(points[0].x, points[0].y)
+      .lineTo(points[1].x, points[1].y)
+      .lineTo(points[2].x, points[2].y)
+      .closePath();
+
+    const paint = (elapsedMs: number) => {
+      const frame = buildAtomaMarkFrame(elapsedMs);
+      crystal.scale.set(frame.scale * 1.12);
+      aura
+        .clear()
+        .circle(14, 14, 12.6 + frame.pulse * 0.65)
+        .fill({ color: 0x4169e1, alpha: 0.018 + frame.pulse * 0.014 })
+        .circle(14, 14, 9.6 + frame.pulse * 0.4)
+        .fill({ color: GPU_COLORS.cyan, alpha: 0.018 + frame.pulse * 0.012 });
+      shadow
+        .clear()
+        .ellipse(14.4, 25.2, 6.6, 1.35)
+        .fill({ color: 0x020817, alpha: 0.34 });
+      faceGlow.clear();
+      facets.clear();
+      clearcoat.clear();
+
+      for (const face of frame.faces) {
+        traceFace(faceGlow, face.points).stroke({
+          color: face.edgeColor,
+          width: 2.4,
+          alpha: face.glowAlpha,
+        });
+        traceFace(facets, face.points)
+          .fill({ color: face.fillColor, alpha: 0.985 })
+          .stroke({
+            color: face.edgeColor,
+            width: 0.82,
+            alpha: 0.48 + face.sheenAlpha * 0.9,
+          });
+
+        const inset = face.points.map((point) => ({
+          x: point.x + (face.centroid.x - point.x) * 0.22,
+          y: point.y + (face.centroid.y - point.y) * 0.22,
+        })) as [AtomaMarkPoint, AtomaMarkPoint, AtomaMarkPoint];
+        traceFace(clearcoat, inset).fill({
+          color: 0xffffff,
+          alpha: face.sheenAlpha,
+        });
+        const highPoint = face.points.reduce((highest, point) =>
+          point.y < highest.y ? point : highest
+        );
+        clearcoat
+          .moveTo(highPoint.x, highPoint.y)
+          .lineTo(
+            highPoint.x + (face.centroid.x - highPoint.x) * 0.58,
+            highPoint.y + (face.centroid.y - highPoint.y) * 0.58
+          )
+          .stroke({ color: 0xffffff, width: 0.72, alpha: face.sheenAlpha * 1.25 });
+      }
+
+      core.clear();
+      core
+        .circle(14, 14, 5.1 + frame.pulse * 0.75)
+        .fill({ color: GPU_COLORS.cyan, alpha: 0.035 + frame.pulse * 0.025 })
+        .circle(14, 14, 3.35 + frame.pulse * 0.28)
+        .fill({ color: 0x6ea8ff, alpha: 0.09 + frame.pulse * 0.055 })
+        .circle(14, 14, 2.18 + frame.pulse * 0.12)
+        .fill({ color: 0xf8fbff, alpha: 0.98 })
+        .stroke({ color: GPU_COLORS.cyan, width: 0.92, alpha: 0.96 })
+        .circle(13.35, 13.25, 0.56)
+        .fill({ color: 0xffffff, alpha: 0.96 });
+    };
 
     const reducedMotion =
       typeof matchMedia !== 'undefined' &&
       matchMedia('(prefers-reduced-motion: reduce)').matches;
+    paint(reducedMotion ? 0 : performance.now());
     if (!reducedMotion) {
       this.addTicker(() => {
-        const cycle = performance.now() % 6400;
-        const pulse = cycle < 900 ? Math.sin((cycle / 900) * Math.PI) : 0;
-        core.scale.set(1 + pulse * 0.08);
+        paint(performance.now());
       });
     }
     this.root.addChild(container);
@@ -1936,15 +2247,15 @@ export class GpuRenderer {
       GPU_COLORS.border,
       0
     );
-    this.drawAtomaMark(9, 8);
-    this.text(this.root, 'Atoma', 63, 17.5, {
-      size: 18,
+    this.drawAtomaMark(10, 12);
+    this.text(this.root, 'Atoma', 49, 17.5, {
+      size: 16,
       color: 0x263f68,
       weight: '700',
       alpha: 0.72,
     });
-    this.text(this.root, 'Atoma', 62, 16, {
-      size: 18,
+    this.text(this.root, 'Atoma', 48, 16, {
+      size: 16,
       color: GPU_COLORS.text,
       weight: '700',
     });
@@ -2004,9 +2315,9 @@ export class GpuRenderer {
     const popupY = GPU_LAYOUT.headerHeight - 2;
     const rowHeight = 43;
     const headerHeight = 30;
-    const query = snapshot.state.search.run.toLocaleLowerCase();
+    const query = snapshot.state.search.run;
     const matching = snapshot.data.runs
-      .filter((run) => `${run.id} ${run.label}`.toLocaleLowerCase().includes(query));
+      .filter((run) => matchesSearchQuery(runSearchText(run), query));
     const maximumPopupHeight = Math.min(500, height - popupY - 10);
     const listViewportHeight = Math.max(
       rowHeight,
@@ -2180,128 +2491,151 @@ export class GpuRenderer {
     });
 
     const atoms = buildAtomMap(run);
-    const laneY = statsY + 65;
-    let nextLaneY = laneY;
-    for (const tier of [3, 2, 1]) {
-      let y = nextLaneY;
-      const laneLabel = snapshot.t(`lanes.l${tier}`);
-      const laneStartX = leftX + Math.min(132, Math.max(72, laneLabel.length * 6 + 18));
-      this.text(this.root, laneLabel, leftX + 14, y + 7, {
+    const atomLayout = layoutAtomLaneBlocks({
+      originX: leftX + 14,
+      originY: statsY + 55 + FILTER_BLOCK_GAP,
+      maxWidth: leftWidth - 28,
+      lanes: ([3, 2, 1] as const).flatMap((tier) => {
+        const entries = [...atoms.values()].filter((value) => value.snapshot.tier === tier);
+        if (!entries.length) return [];
+        return [{
+          tier,
+          label: snapshot.t(`lanes.l${tier}`),
+          names: entries.map((entry) => entry.snapshot.name),
+        }];
+      }),
+    });
+    for (const lane of atomLayout.lanes) {
+      this.filterBlockFrame(this.root, lane);
+      this.text(this.root, lane.label, lane.labelX, lane.labelY, {
         size: 10,
-        color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
+        color: GPU_COLORS.tiers[lane.tier],
         weight: '700',
       });
-      let atomX = laneStartX;
-      for (const entry of [...atoms.values()].filter((value) => value.snapshot.tier === tier)) {
-        const name = entry.snapshot.name;
-        const buttonWidth = gpuAtomButtonWidth(name);
-        if (atomX + buttonWidth > leftX + leftWidth - 12) {
-          atomX = laneStartX;
-          y += 28 + CONTROL_HOVER_GAP;
-        }
+      for (const chip of lane.chips) {
         this.atomButton(
           this.root,
-          `atom.${name}`,
-          name,
-          tier as 1 | 2 | 3,
-          atomX,
-          y,
-          buttonWidth,
-          28,
-          snapshot.state.selectedAtomName === name,
+          chip.id,
+          chip.label,
+          lane.tier,
+          chip.x,
+          chip.y,
+          chip.width,
+          chip.height,
+          snapshot.state.selectedAtomName === chip.label,
           snapshot.onActivate
         );
-        atomX += buttonWidth + CONTROL_HOVER_GAP;
       }
-      nextLaneY = y + 28 + CONTROL_HOVER_GAP;
     }
 
-    const filterY = nextLaneY + 4;
-    const kinds = ['all', 'llm', 'tool', 'trust', 'skill', 'cache', 'registry'];
-    let filterX = leftX + 14;
-    let kindY = filterY;
-    for (const kind of kinds) {
-      const label = kind === 'tool' ? snapshot.t('filters.tools').toUpperCase() : kind.toUpperCase();
-      const buttonWidth = gpuFilterButtonWidth(label);
-      if (filterX + buttonWidth > leftX + leftWidth - 12 && filterX > leftX + 14) {
-        filterX = leftX + 14;
-        kindY += 27 + CONTROL_HOVER_GAP;
-      }
+    const filterY = atomLayout.bottom + FILTER_BLOCK_GAP;
+    const runFilters = coerceEventFilters(run.events, snapshot.state.runFilters);
+    const kinds = visibleEventKindFilters(run.events);
+    const rolesVisible =
+      runFilters.kind === 'all' ||
+      runFilters.kind === 'llm';
+    const roleNames = rolesVisible
+      ? [...new Set(run.events.flatMap((event) => event.role ? [event.role] : []))]
+      : [];
+    const filterLayout = layoutRunFilterBlocks({
+      originX: leftX + 14,
+      originY: filterY,
+      maxWidth: leftWidth - 28,
+      kinds: kinds.map((kind) => ({
+        id: `run.filter.kind.${kind}`,
+        label: kind === 'tool' ? snapshot.t('filters.tools').toUpperCase() : kind.toUpperCase(),
+      })),
+      roles: roleNames.length
+        ? ['all', ...roleNames].map((role) => ({
+            id: `run.filter.role.${role}`,
+            label: role === 'all' ? 'ALL ROLES' : role.toUpperCase(),
+          }))
+        : null,
+    });
+    this.filterBlockFrame(this.root, filterLayout.kinds);
+    for (const chip of filterLayout.kinds.chips) {
       this.filterButton(
         this.root,
-        `run.filter.kind.${kind}`,
-        label,
-        filterX,
-        kindY,
-        buttonWidth,
-        27,
-        snapshot.state.runFilters.kind === kind,
+        chip.id,
+        chip.label,
+        chip.x,
+        chip.y,
+        chip.width,
+        chip.height,
+        runFilters.kind === chip.id.slice('run.filter.kind.'.length),
         snapshot.onActivate
       );
-      filterX += buttonWidth + CONTROL_HOVER_GAP;
+    }
+    if (filterLayout.roles) {
+      this.filterBlockFrame(this.root, filterLayout.roles);
+      for (const chip of filterLayout.roles.chips) {
+        this.filterButton(
+          this.root,
+          chip.id,
+          chip.label,
+          chip.x,
+          chip.y,
+          chip.width,
+          chip.height,
+          runFilters.role === chip.id.slice('run.filter.role.'.length),
+          snapshot.onActivate
+        );
+      }
     }
 
-    const controlsBottomWithoutRoles = kindY + 27 + CONTROL_HOVER_GAP;
-    let controlsBottom = controlsBottomWithoutRoles;
+    const controlsBottomWithoutRoles = filterLayout.kinds.y + filterLayout.kinds.height + FILTER_BLOCK_GAP;
+    let controlsBottom = filterLayout.bottom + FILTER_BLOCK_GAP;
     const roleWasVisible = [...this.previousFilterBounds.keys()].some((id) =>
       id.startsWith('run.filter.role.')
     );
-    if (snapshot.state.runFilters.kind === 'all' || snapshot.state.runFilters.kind === 'llm') {
-      const roles = [...new Set(run.events.flatMap((event) => event.role ? [event.role] : []))];
-      if (roles.length) {
-        let roleX = leftX + 14;
-        let roleY = controlsBottom + 4;
-        const roleOptions = ['all', ...roles];
-        for (const role of roleOptions) {
-          const label = role === 'all' ? 'ALL ROLES' : role.toUpperCase();
-          const buttonWidth = gpuFilterButtonWidth(label);
-          if (roleX + buttonWidth > leftX + leftWidth - 12 && roleX > leftX + 14) {
-            roleX = leftX + 14;
-          roleY += 25 + CONTROL_HOVER_GAP;
-          }
-          this.filterButton(
-            this.root,
-            `run.filter.role.${role}`,
-            label,
-            roleX,
-            roleY,
-            buttonWidth,
-            25,
-            snapshot.state.runFilters.role === role,
-            snapshot.onActivate
-          );
-          roleX += buttonWidth + CONTROL_HOVER_GAP;
-        }
-        controlsBottom = roleY + 25 + CONTROL_HOVER_GAP;
-      }
-    }
-    const exitingRoleFilters =
-      snapshot.state.runFilters.kind !== 'all' &&
-      snapshot.state.runFilters.kind !== 'llm'
-        ? [...this.previousFilterBounds.values()].filter((target) =>
+    const exitingRoleFilters = !rolesVisible
+      ? [...this.previousFilterBounds.values()].filter((target) =>
           target.id.startsWith('run.filter.role.')
         )
-        : [];
-    const lowerControlsLayer = new Container();
-    this.root.addChild(lowerControlsLayer);
-    if (exitingRoleFilters.length) {
+      : [];
+    const enterDistance = Math.max(0, controlsBottom - controlsBottomWithoutRoles);
+    if (rolesVisible) {
+      if (this.roleRowTransition?.phase === 'exit') this.roleRowTransition = null;
+      if (enterDistance > 0 && !roleWasVisible && this.roleRowTransition?.phase !== 'enter') {
+        this.roleRowTransition = {
+          phase: 'enter',
+          targets: [],
+          distance: enterDistance,
+          startedAt: performance.now(),
+        };
+      }
+    } else if (exitingRoleFilters.length && this.roleRowTransition?.phase !== 'exit') {
       const previousRoleBottom = Math.max(
         ...exitingRoleFilters.map((target) => target.y + target.height + 4)
       );
-      const collapseDistance = Math.max(0, previousRoleBottom - controlsBottom);
+      this.roleRowTransition = {
+        phase: 'exit',
+        targets: exitingRoleFilters,
+        distance: Math.max(0, previousRoleBottom - controlsBottom),
+        startedAt: performance.now(),
+      };
+    } else if (this.roleRowTransition?.phase === 'enter') {
+      this.roleRowTransition = null;
+    }
+    const lowerControlsLayer = new Container();
+    this.root.addChild(lowerControlsLayer);
+    const roleRowTransition = this.roleRowTransition;
+    if (roleRowTransition?.phase === 'exit') {
       this.drawExitingFilterButtons(
-        exitingRoleFilters,
+        roleRowTransition.targets,
         lowerControlsLayer,
-        collapseDistance
+        roleRowTransition.distance,
+        roleRowTransition.startedAt
       );
-    } else if (controlsBottom > controlsBottomWithoutRoles && !roleWasVisible) {
+    } else if (roleRowTransition?.phase === 'enter') {
       this.animateEnteringFilterSpace(
         lowerControlsLayer,
-        controlsBottom - controlsBottomWithoutRoles
+        roleRowTransition.distance,
+        roleRowTransition.startedAt
       );
     }
     const branchOverview = buildTimelineLayout(run.events, {
-      ...snapshot.state.runFilters,
+      ...runFilters,
       branchId: 'all',
     });
     const overviewById = new Map(
@@ -2310,41 +2644,44 @@ export class GpuRenderer {
     const branchIds = branchOverview.branches.map((branch) => branch.id);
     const shownBranchIds = branchIds.slice(0, 6);
     if (
-      snapshot.state.runFilters.branchId !== 'all' &&
-      !shownBranchIds.includes(snapshot.state.runFilters.branchId)
+      runFilters.branchId !== 'all' &&
+      !shownBranchIds.includes(runFilters.branchId)
     ) {
-      shownBranchIds.push(snapshot.state.runFilters.branchId);
+      shownBranchIds.push(runFilters.branchId);
     }
     if (branchIds.length > 1) {
-      let branchX = leftX + 14;
-      let branchY = controlsBottom + 4;
-      for (const branchId of ['all', ...shownBranchIds]) {
-        const branch = overviewById.get(branchId);
-        const label =
-          branchId === 'all'
-            ? snapshot.t('timeline.allBranches').toUpperCase()
-            : branch
-              ? timelineBranchLabel(branch, snapshot.t).toUpperCase()
-              : `⑂ ${branchId.slice(0, 6)}`;
-        const buttonWidth = gpuFilterButtonWidth(label);
-        if (branchX + buttonWidth > leftX + leftWidth - 12 && branchX > leftX + 14) {
-          branchX = leftX + 14;
-          branchY += 25 + CONTROL_HOVER_GAP;
-        }
+      const branchBlock = layoutFilterChipBlock(
+        leftX + 14,
+        controlsBottom,
+        leftWidth - 28,
+        ['all', ...shownBranchIds].map((branchId) => {
+          const branch = overviewById.get(branchId);
+          return {
+            id: `run.filter.branch.${branchId}`,
+            label:
+              branchId === 'all'
+                ? snapshot.t('timeline.allBranches').toUpperCase()
+                : branch
+                  ? timelineBranchLabel(branch, snapshot.t).toUpperCase()
+                  : `⑂ ${branchId.slice(0, 6)}`,
+          };
+        })
+      );
+      this.filterBlockFrame(lowerControlsLayer, branchBlock);
+      for (const chip of branchBlock.chips) {
         this.filterButton(
           lowerControlsLayer,
-          `run.filter.branch.${branchId}`,
-          label,
-          branchX,
-          branchY,
-          buttonWidth,
-          25,
-          snapshot.state.runFilters.branchId === branchId,
+          chip.id,
+          chip.label,
+          chip.x,
+          chip.y,
+          chip.width,
+          chip.height,
+          runFilters.branchId === chip.id.slice('run.filter.branch.'.length),
           snapshot.onActivate
         );
-        branchX += buttonWidth + CONTROL_HOVER_GAP;
       }
-      controlsBottom = branchY + 25 + CONTROL_HOVER_GAP;
+      controlsBottom = branchBlock.y + branchBlock.height + FILTER_BLOCK_GAP;
     }
 
     const completed = new Set(run.events.filter((event) => event.kind === 'llm').map((event) => event.id));
@@ -2378,6 +2715,76 @@ export class GpuRenderer {
       controlsBottom = liveY + 57;
     }
 
+    if (runFilters.branchId !== 'all') {
+      const selectedBranch = overviewById.get(runFilters.branchId);
+      const heading = selectedBranch
+        ? timelineBranchHeading(selectedBranch, snapshot.t)
+        : {
+            eyebrow: snapshot.t('filters.branch', { id: runFilters.branchId.slice(0, 8) }),
+            title: snapshot.t('filters.branch', { id: runFilters.branchId.slice(0, 8) }),
+            lines: [] as const,
+          };
+      const expanded = snapshot.state.branchHeadingExpanded;
+      const visibleLines = expanded ? heading.lines : [];
+      const accent = selectedBranch ? timelineBranchColor(selectedBranch) : GPU_COLORS.primary;
+      const blockX = leftX + 14;
+      const blockWidth = leftWidth - 28;
+      const padX = 14;
+      const padY = 10;
+      const innerWidth = blockWidth - padX * 2 - 36;
+      const block = new Container();
+      let cursor = padY;
+      const eyebrow = this.text(block, heading.eyebrow.toUpperCase(), padX, cursor, {
+        size: 10,
+        weight: '700',
+        color: accent,
+      });
+      this.collapseCaret(block, blockWidth - padX, cursor + 1, expanded, accent);
+      cursor += eyebrow.height + 5;
+      const title = this.text(block, heading.title, padX, cursor, {
+        size: 14,
+        weight: '700',
+        color: GPU_COLORS.text,
+        width: innerWidth,
+      });
+      cursor += title.height;
+      if (visibleLines.length) cursor += 8;
+      for (const line of visibleLines) {
+        const row = this.text(block, `·  ${line}`, padX, cursor, {
+          size: 11,
+          color: GPU_COLORS.muted,
+          width: innerWidth,
+        });
+        cursor += row.height + 3;
+      }
+      cursor += padY - 2;
+      this.panel(
+        lowerControlsLayer,
+        blockX,
+        controlsBottom,
+        blockWidth,
+        cursor,
+        GPU_COLORS.panelRaised,
+        accent
+      );
+      block.eventMode = 'static';
+      block.cursor = 'pointer';
+      block.hitArea = new Rectangle(0, 0, blockWidth, cursor);
+      block.on('pointertap', () => snapshot.onActivate('branch.heading.toggle'));
+      block.position.set(blockX, controlsBottom);
+      lowerControlsLayer.addChild(block);
+      this.metrics.hitTargets.push({
+        id: 'branch.heading.toggle',
+        role: 'button',
+        label: snapshot.t(expanded ? 'timeline.collapse' : 'timeline.expand'),
+        x: blockX,
+        y: controlsBottom,
+        width: blockWidth,
+        height: cursor,
+      });
+      controlsBottom += cursor + FILTER_BLOCK_GAP;
+    }
+
     const listY = controlsBottom + 7;
     const listHeight = height - listY - GPU_LAYOUT.gap;
     const listMask = new Graphics();
@@ -2393,7 +2800,7 @@ export class GpuRenderer {
     listLayer.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
     listLayer.mask = listMask;
     lowerControlsLayer.addChild(listLayer);
-    const timeline = buildTimelineLayout(run.events, snapshot.state.runFilters);
+    const timeline = buildTimelineLayout(run.events, runFilters);
     const rowHeight = timeline.rowHeight;
     const contentTopPadding = 18;
     const contentBottomPadding = 20;
@@ -2416,17 +2823,17 @@ export class GpuRenderer {
     const count = Math.ceil(listHeight / rowHeight) + 2;
     const laneSpacing =
       timeline.maxLane > 0
-        ? Math.min(16, 76 / timeline.maxLane)
-        : 0;
-    const timelineGutter =
-      snapshot.state.runFilters.branchId === 'all'
-        ? Math.min(112, 34 + timeline.maxLane * laneSpacing)
-        : 34;
+        ? Math.min(22, 96 / timeline.maxLane)
+        : 22;
+    const railInset = 28;
+    const labelGutter = 46;
     const branchCardOffset = 10;
-    const cardBaseX = leftX + 14 + timelineGutter;
-    const cardBaseWidth =
-      leftWidth - 28 - timelineGutter - cardRightPadding;
-    const railX = (lane: number) => leftX + 24 + lane * laneSpacing;
+    const railX = (lane: number) => leftX + railInset + lane * laneSpacing;
+    const cardBaseX = railX(timeline.maxLane) + labelGutter;
+    const cardBaseWidth = Math.min(
+      520,
+      leftX + leftWidth - cardRightPadding - cardBaseX
+    );
     const rowCenterY = (row: number) =>
       listY +
       contentTopPadding +
@@ -2559,24 +2966,22 @@ export class GpuRenderer {
         zDepth
       );
       const copy = gpuEventCardCopy(event);
-      this.text(cardContent, truncate(copy.title, 30), 11, 8, {
+      this.text(cardContent, truncate(copy.title, 28), 11, 6, {
         size: 11,
         weight: '700',
         color: eventAccent(event),
       });
       const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
-      const branchMeta = branch ? timelineBranchLabel(branch, snapshot.t) : '';
-      const meta = [rawMeta, branchMeta].filter(Boolean).join(' · ');
-      if (meta) {
-        const metaX = Math.min(180, Math.max(130, cardWidth * 0.38));
-        this.text(cardContent, truncate(meta, 58), metaX, 9, {
+      const actor = rawMeta.split(' · ')[0] ?? '';
+      if (actor) {
+        this.text(cardContent, truncate(actor, 28), 118, 7, {
           size: 9,
           color: GPU_COLORS.muted,
-          width: Math.max(80, cardWidth - metaX - 150),
+          width: Math.max(80, cardWidth - 250),
         });
       }
       if (copy.decision) {
-        this.text(cardContent, copy.decision, cardWidth - 149, 8, {
+        this.text(cardContent, copy.decision, cardWidth - 118, 6, {
           size: 10,
           color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
             ? GPU_COLORS.warning
@@ -2584,16 +2989,11 @@ export class GpuRenderer {
           weight: '700',
         });
       }
-      this.text(
-        cardContent,
-        truncate(copy.body, 180),
-        11,
-        31,
-        { size: 10, color: GPU_COLORS.muted, width: cardWidth - 26 }
-      );
-      this.text(cardContent, truncate(copy.footer, 110), 11, 56, {
+      const detail = [copy.body, copy.footer].filter(Boolean).join(' · ');
+      this.text(cardContent, truncate(detail, 160), 11, 28, {
         size: 9,
         color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
+        width: cardWidth - 22,
       });
       if (item.branchStart && branch) {
         this.text(
@@ -2614,18 +3014,124 @@ export class GpuRenderer {
 
     if (twoPane) {
       this.panel(this.root, rightX, top, rightWidth, height - top - GPU_LAYOUT.gap);
+      const summaryHeight = this.drawRunSummaryCard(
+        snapshot,
+        run,
+        rightX,
+        top,
+        rightWidth
+      );
+      const detailTop = top + summaryHeight;
       const event = run.events.find((value) => value.id === snapshot.state.selectedEventId);
       const atom = snapshot.state.selectedAtomName
         ? atoms.get(snapshot.state.selectedAtomName)
         : undefined;
-      if (event) this.drawEventDetail(snapshot, event, rightX, top, rightWidth, height - top);
-      else if (atom) this.drawAtomDetail(snapshot, atom.snapshot, rightX, top, rightWidth);
-      else this.text(this.root, snapshot.t('pane.selectEvent'), rightX + 18, top + 20, {
-        size: 12,
-        color: GPU_COLORS.muted,
-        width: rightWidth - 36,
-      });
+      if (event) {
+        this.drawEventDetail(
+          snapshot,
+          event,
+          rightX,
+          detailTop,
+          rightWidth,
+          height - detailTop
+        );
+      } else if (atom) {
+        this.drawAtomDetail(snapshot, atom.snapshot, rightX, detailTop, rightWidth);
+      } else if (!snapshot.state.runSummaryExpanded) {
+        this.text(this.root, snapshot.t('pane.selectEvent'), rightX + 18, detailTop + 12, {
+          size: 12,
+          color: GPU_COLORS.muted,
+          width: rightWidth - 36,
+        });
+      }
     }
+  }
+
+  private drawRunSummaryCard(
+    snapshot: GpuRenderSnapshot,
+    run: VizRun,
+    x: number,
+    y: number,
+    width: number
+  ): number {
+    const expanded = snapshot.state.runSummaryExpanded;
+    const padX = 16;
+    const cardWidth = width - 20;
+    const innerWidth = cardWidth - padX * 2;
+    const block = new Container();
+    let cursor = 12;
+    this.text(block, snapshot.t('run.summary').toUpperCase(), padX, cursor, {
+      size: 10,
+      weight: '700',
+      color: GPU_COLORS.cyan,
+    });
+    this.collapseCaret(block, cardWidth - padX, cursor + 1, expanded, GPU_COLORS.cyan);
+    cursor += 18;
+    const title = this.text(block, truncate(run.label, 90), padX, cursor, {
+      size: 13,
+      weight: '700',
+      color: GPU_COLORS.text,
+      width: innerWidth - 8,
+    });
+    cursor += title.height + 6;
+    const facts = [
+      fmtMs(run.durationMs),
+      snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
+      fmtCost(run.totals?.costUsd),
+    ].filter(Boolean).join('  ·  ');
+    this.text(block, facts, padX, cursor, {
+      size: 10,
+      color: GPU_COLORS.muted,
+    });
+    cursor += 18;
+    const goal = run.task?.description ?? '';
+    if (goal) {
+      this.text(block, snapshot.t('run.goal').toUpperCase(), padX, cursor, {
+        size: 9,
+        weight: '700',
+        color: GPU_COLORS.muted,
+      });
+      cursor += 16;
+      const goalText = this.text(
+        block,
+        expanded ? goal : truncate(goal, 140),
+        padX,
+        cursor,
+        {
+          size: 11,
+          color: GPU_COLORS.text,
+          width: innerWidth,
+        }
+      );
+      cursor += goalText.height + 10;
+    } else {
+      cursor += 8;
+    }
+    this.panel(
+      this.root,
+      x + 10,
+      y + 10,
+      width - 20,
+      cursor,
+      GPU_COLORS.panelRaised,
+      GPU_COLORS.cyan
+    );
+    block.eventMode = 'static';
+    block.cursor = 'pointer';
+    block.hitArea = new Rectangle(0, 0, width - 20, cursor);
+    block.on('pointertap', () => snapshot.onActivate('run.summary.toggle'));
+    block.position.set(x + 10, y + 10);
+    this.root.addChild(block);
+    this.metrics.hitTargets.push({
+      id: 'run.summary.toggle',
+      role: 'button',
+      label: snapshot.t(expanded ? 'run.collapse' : 'run.expand'),
+      x: x + 10,
+      y: y + 10,
+      width: width - 20,
+      height: cursor,
+    });
+    return cursor + 18;
   }
 
   private drawEventDetail(
@@ -2636,6 +3142,72 @@ export class GpuRenderer {
     width: number,
     height: number
   ) {
+    if (event.kind === 'skill') {
+      const title = this.text(this.root, skillEventTitle(event, snapshot.t), x + 18, y + 16, {
+        size: 15,
+        weight: '700',
+        color: eventAccent(event),
+        width: width - 36,
+      });
+      const subtitle = this.text(this.root, skillEventSubtitle(event), x + 18, y + 22 + title.height, {
+        size: 10,
+        color: GPU_COLORS.muted,
+        width: width - 36,
+      });
+      const skill =
+        snapshot.data.skillDetail?.id === event.skillId ? snapshot.data.skillDetail : null;
+      const structured = buildSkillEventDetail(event, skill, snapshot.t);
+      const detailTop = y + 36 + title.height + subtitle.height;
+      const detailBottom = y + height - 62;
+      const detailHeight = Math.max(40, detailBottom - detailTop);
+      this.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+      const detailLayer = new Container();
+      detailLayer.position.y = -this.detailScrollY;
+      this.root.addChild(detailLayer);
+      const mask = this.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
+      detailLayer.mask = mask;
+      const contentBottom = this.drawStructuredDetailNodes(
+        detailLayer,
+        structured,
+        x + 18,
+        detailTop,
+        width - 42
+      );
+      this.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
+      this.detailScrollY = Math.min(this.detailScrollY, this.detailScrollMax);
+      detailLayer.position.y = -this.detailScrollY;
+      if (this.detailScrollMax > 0) {
+        const trackHeight = detailHeight;
+        const thumbHeight = Math.max(
+          28,
+          trackHeight * Math.min(1, detailHeight / (detailHeight + this.detailScrollMax))
+        );
+        const thumbY =
+          detailTop +
+          (trackHeight - thumbHeight) * (this.detailScrollY / this.detailScrollMax);
+        const scrollbar = new Graphics();
+        scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
+        scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
+        scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
+        scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
+        this.root.addChild(scrollbar);
+      }
+      if (event.l1Name && event.skillId) {
+        this.button(
+          this.root,
+          `skill.open.${event.l1Name}::${event.skillId}`,
+          'button',
+          snapshot.t('registry.openSkill'),
+          x + 18,
+          y + height - 55,
+          width - 36,
+          34,
+          false,
+          snapshot.onActivate
+        );
+      }
+      return;
+    }
     this.text(
       this.root,
       event.kind === 'llm' ? eventRoleLabel(event.role, snapshot.t) : event.kind,
@@ -2685,11 +3257,11 @@ export class GpuRenderer {
         ? tryParseJson(raw)
         : event.kind === 'tool' && !event.error
           ? { args: event.args ?? {}, result: event.result }
-          : event.kind !== 'skill' && !event.error
+          : !event.error
             ? event
             : undefined;
     const detailTop = y + 68;
-    const detailBottom = y + height - (event.kind === 'skill' ? 62 : 14);
+    const detailBottom = y + height - 14;
     const detailHeight = Math.max(40, detailBottom - detailTop);
     this.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
     const detailLayer = new Container();
@@ -2708,7 +3280,9 @@ export class GpuRenderer {
           }).height
         : this.drawStructuredDetailNodes(
             detailLayer,
-            buildStructuredDetail(structured, snapshot.t),
+            buildStructuredDetail(structured, snapshot.t, {
+              markdownPath: event.kind === 'tool' ? filePathFromArgs(event.args) : undefined,
+            }),
             x + 18,
             detailTop,
             width - 42
@@ -2731,20 +3305,6 @@ export class GpuRenderer {
       scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
       scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
       this.root.addChild(scrollbar);
-    }
-    if (event.kind === 'skill' && event.l1Name && event.skillId) {
-      this.button(
-        this.root,
-        `skill.open.${event.l1Name}::${event.skillId}`,
-        'button',
-        snapshot.t('registry.openSkill'),
-        x + 18,
-        y + height - 55,
-        width - 36,
-        34,
-        false,
-        snapshot.onActivate
-      );
     }
   }
 
@@ -2908,20 +3468,21 @@ export class GpuRenderer {
       this.text(this.root, snapshot.t('common.loading'), x + 16, top + 96);
       return;
     }
-    const query = snapshot.state.search.registry.toLowerCase();
+    const query = snapshot.state.search.registry;
     let y = top + 92 - snapshot.state.scrollY.registry;
     for (const tier of [3, 2, 1]) {
+      const atoms = payload.types.filter(
+        (atom) =>
+          atom.tier === tier &&
+          matchesSearchQuery(atomSearchText(atom), query)
+      );
+      if (!atoms.length) continue;
       this.text(this.root, snapshot.t(`lanes.l${tier}`), x + 16, y + 8, {
         size: 11,
         weight: '700',
         color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
       });
       y += 28;
-      const atoms = payload.types.filter(
-        (atom) =>
-          atom.tier === tier &&
-          `${atom.name} ${atom.description}`.toLowerCase().includes(query)
-      );
       for (const atom of atoms) {
         if (y > height - 35) break;
         this.button(
@@ -2952,13 +3513,13 @@ export class GpuRenderer {
     const leftWidth = Math.min(560, width * 0.45);
     this.panel(this.root, GPU_LAYOUT.gap, top, leftWidth, height - top - GPU_LAYOUT.gap);
     this.text(this.root, snapshot.t('nav.skills'), 26, top + 14, { size: 16, weight: '700' });
-    const query = snapshot.state.search.skills.toLowerCase();
+    const query = snapshot.state.search.skills;
     let y = top + 100 - snapshot.state.scrollY.skills;
     for (const namespace of snapshot.data.skillNamespaces) {
       const skills = (snapshot.data.skillsByNamespace[namespace.l1Name] ?? []).filter((skill) =>
-        `${skill.id} ${skill.description} ${skill.whenToUse}`.toLowerCase().includes(query)
+        matchesSearchQuery(skillSearchText(skill, namespace.l1Name), query)
       );
-      if (query && !skills.length) continue;
+      if (!skills.length) continue;
       this.text(this.root, `${namespace.l1Name} (${skills.length})`, 26, y, {
         size: 11,
         weight: '700',

@@ -19,6 +19,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../data-api.js';
 import { useI18n } from '../i18n.js';
+import { atomSearchText, matchesSearchQuery } from '../search.js';
 import { CodeBlock, EmptyPane, ErrorPane, LoadingPane, StatCard, TierChip } from '../shared.js';
 import type { RegistrySummary, RegistryType, SkillSummary } from '../types.js';
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
@@ -169,9 +170,8 @@ export function RegistryView({
   }, [selectedRegistry, refreshKey]);
 
   const filtered = useMemo(() => {
-    const query = filter.toLocaleLowerCase();
     return (payload?.types ?? []).filter((atom) =>
-      `${atom.name} ${atom.description} ${atom.systemPrompt}`.toLocaleLowerCase().includes(query)
+      matchesSearchQuery(atomSearchText(atom), filter)
     );
   }, [filter, payload]);
   const atom = payload?.types.find((item) => item.name === selectedAtom) ?? null;

@@ -2,7 +2,7 @@ import type { EventFilters } from './run-utils.js';
 import { filterEvents } from './run-utils.js';
 import type { VizEvent } from './types.js';
 
-export const TIMELINE_ROW_HEIGHT = 92;
+export const TIMELINE_ROW_HEIGHT = 64;
 
 export interface TimelineBranch {
   readonly id: string;
@@ -146,6 +146,91 @@ function markParallelSiblings(branches: MutableBranch[]): void {
         overlaps(other, branch)
     );
   }
+}
+
+const LITERAL_CONTRACT_MARKER = '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==';
+const PLANNER_PHASE_PREFIX = /^(?:(?:final|last)\s+)?(?:separate\s+)?phase\s*:\s*/i;
+
+export interface TimelineBranchHeading {
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly lines: readonly string[];
+}
+
+function collapseWs(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function sentenceCaseFirst(value: string): string {
+  const trimmed = collapseWs(value);
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function splitReadableLines(value: string): string[] {
+  const text = collapseWs(value);
+  const lead = text.match(
+    /^(.+?[:.])\s+((?:and\s+)?(?:GET|POST|PUT|PATCH|DELETE)\b.+)$/i
+  );
+  const parts = lead?.[1] && lead[2] ? [lead[1], lead[2]] : [text];
+  return parts.flatMap((part) =>
+    collapseWs(part)
+      .split(
+        /(?<=[.!?])\s+|(?<=;)\s+(?=(?:and\s+)?(?:GET|POST|PUT|PATCH|DELETE)\b)/i
+      )
+      .map((item) => collapseWs(item.replace(/[;]+$/, '')))
+      .filter(Boolean)
+  );
+}
+
+function splitHeading(text: string): { title: string; rest: string } {
+  const byMatch = text.match(/^(.{12,90}?)(?:\s+by\s+)(.+)$/i);
+  if (byMatch?.[1] && byMatch[2]) {
+    return { title: sentenceCaseFirst(byMatch[1]), rest: sentenceCaseFirst(byMatch[2]) };
+  }
+  const colon = text.indexOf(': ');
+  if (colon >= 18 && colon <= 120) {
+    return {
+      title: sentenceCaseFirst(text.slice(0, colon)),
+      rest: sentenceCaseFirst(text.slice(colon + 2)),
+    };
+  }
+  const sentence = text.match(/^(.+?[.!?])\s+(.+)$/);
+  if (sentence?.[1] && sentence[2] && sentence[1].length <= 140) {
+    return { title: sentenceCaseFirst(sentence[1]), rest: sentenceCaseFirst(sentence[2]) };
+  }
+  return { title: sentenceCaseFirst(text), rest: '' };
+}
+
+export function timelineBranchHeading(
+  branch: TimelineBranch,
+  t: (key: string, vars?: Record<string, unknown>) => string
+): TimelineBranchHeading {
+  const eyebrow = t(
+    branch.parallel ? 'timeline.parallelBranch' : 'timeline.phase',
+    { n: branch.path.join('.') }
+  );
+  const raw = collapseWs(branch.label ?? branch.agentName ?? '');
+  if (!raw) return { eyebrow, title: eyebrow, lines: [] };
+  const withoutContracts = collapseWs(raw.split(LITERAL_CONTRACT_MARKER)[0] ?? raw);
+  const withoutPrefix =
+    collapseWs(withoutContracts.replace(PLANNER_PHASE_PREFIX, '')) || withoutContracts;
+  const { title, rest } = splitHeading(withoutPrefix);
+  return {
+    eyebrow,
+    title: title || eyebrow,
+    lines: rest ? splitReadableLines(rest) : [],
+  };
+}
+
+export function timelineBranchTitle(
+  branch: TimelineBranch,
+  t: (key: string, vars?: Record<string, unknown>) => string
+): string {
+  const heading = timelineBranchHeading(branch, t);
+  return heading.title === heading.eyebrow
+    ? heading.eyebrow
+    : `${heading.eyebrow} · ${heading.title}`;
 }
 
 export function buildTimelineLayout(

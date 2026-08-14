@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildTimelineLayout } from '../src/viz/client/timeline-layout.js';
+import {
+  buildTimelineLayout,
+  timelineBranchHeading,
+  timelineBranchTitle,
+} from '../src/viz/client/timeline-layout.js';
 import type { VizEvent } from '../src/viz/client/types.js';
 
 function event(
@@ -166,5 +170,46 @@ describe('Runs timeline layout', () => {
     expect(layout.items.map((item) => item.event.id)).toEqual(['tool-a']);
     expect(layout.items[0]?.lane).toBe(0);
     expect(layout.connectors).toEqual([]);
+  });
+
+  it('formats a selected-branch heading for humans, not the raw planner dump', () => {
+    const label = [
+      'FINAL SEPARATE PHASE: verify server.js as an HTTP API by booting it on an OS-assigned port',
+      'and probing the exact documented contract: POST /items with {"label":"Blue umbrella","location":"Lobby"};',
+      'GET /items; GET /items/:id using the created ID; POST /items with a blank label;',
+      'and POST /items with a missing location. Confirm success responses have the documented status codes.',
+      '',
+      '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==',
+      'POST /items {label, location}',
+    ].join(' ');
+    const layout = buildTimelineLayout([
+      event('start', 5, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'verify',
+        index: 1,
+        total: 2,
+        aggregationMode: 'sequential',
+        label,
+        actor: { tier: 2, name: 'Tracheid' },
+      }),
+      event('work', 10, { branchId: 'verify', actor: { tier: 1, name: 'Ammonia' } }),
+      event('end', 20, { kind: 'branch', op: 'end', branchId: 'verify' }),
+    ], all);
+    const branch = layout.branches.find((item) => item.id === 'verify')!;
+    const translate = (key: string, vars?: Record<string, unknown>) => {
+      const phase = vars?.n;
+      return key === 'timeline.phase' && (typeof phase === 'string' || typeof phase === 'number')
+        ? `Phase ${phase}`
+        : key;
+    };
+    const heading = timelineBranchHeading(branch, translate);
+    expect(heading.eyebrow).toBe('Phase 2');
+    expect(heading.title).toBe('Verify server.js as an HTTP API');
+    expect(heading.lines.some((line) => /POST \/items with \{"label":"Blue umbrella"/.test(line))).toBe(true);
+    expect(heading.lines.some((line) => line.startsWith('GET /items'))).toBe(true);
+    expect(heading.title).not.toMatch(/LITERAL CONTRACTS/);
+    expect(heading.lines.join(' ')).not.toMatch(/LITERAL CONTRACTS/);
+    expect(timelineBranchTitle(branch, translate)).toBe('Phase 2 · Verify server.js as an HTTP API');
   });
 });

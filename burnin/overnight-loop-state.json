@@ -1,0 +1,18 @@
+{
+  "deadline": "2026-08-15T08:00:00+03:00",
+  "status": "compare-atoma-done",
+  "note": "User redirected to atoma vs Opus --baseline comparison. Overnight cycle 2 stopped after museum; reading-streak aborted.",
+  "cycle2": {
+    "zine-crud-json-api": "delivered $0.2151 / 215s / 17",
+    "coffee-blend-web-page": "error 817s (smoke thrash, SIGTERM)",
+    "museum-ticket-http-service": "delivered $0.1854 / 254s / 17 recovery-learned=1",
+    "reading-streak-app": "aborted so comparison could start"
+  },
+  "compare": {
+    "tasks": "burnin/tasks-compare-frontier.json",
+    "out": "burnin/results-compare-opus.csv",
+    "control": "anthropic --baseline L3=claude-opus-5",
+    "treatment": "ollama+zai+codex mature store",
+    "promptsForChat": "burnin/COMPARE-PROMPTS.md"
+  }
+}

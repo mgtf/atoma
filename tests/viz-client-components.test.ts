@@ -248,7 +248,9 @@ describe('the React visualizer shell', () => {
     renderApp();
 
     expect(await screen.findByDisplayValue('Component migration')).toBeInTheDocument();
-    expect(await screen.findByText('Render a component application')).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText('Render a component application')).length
+    ).toBeGreaterThanOrEqual(1);
     expect((await screen.findAllByText(/zai:glm-test/)).length).toBeGreaterThanOrEqual(1);
 
     await user.click(screen.getByRole('tab', { name: 'Registry' }));

@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   ABANDONED_AFTER_MS,
+  buildAtomMap,
+  coerceEventFilters,
   filterEvents,
+  visibleEventKindFilters,
   isAbandoned,
   isIndexEntryLive,
   isRunLive,
   mergeRunDelta,
   projectRunTaxonomy,
   tryParseJson,
+  usedAtomNames,
 } from '../src/viz/client/run-utils.js';
 import type { VizRun } from '../src/viz/client/types.js';
 
@@ -83,6 +87,63 @@ describe('React viz delta and filters', () => {
     ];
     expect(filterEvents(events, { kind: 'llm', role: 'all', branchId: 'all' }).map((event) => event.id)).toEqual(['s1', 'l1']);
     expect(filterEvents(events, { kind: 'all', role: 'execute', branchId: 'a' }).map((event) => event.id)).toEqual(['s1', 'x1']);
+  });
+
+  it('hides the cache kind filter until a run actually records a cache hit', () => {
+    const without = [{ id: 'l1', kind: 'llm', ts: 1 }, { id: 't1', kind: 'tool', ts: 2 }];
+    expect(visibleEventKindFilters(without)).toEqual([
+      'all',
+      'llm',
+      'tool',
+      'trust',
+      'skill',
+      'registry',
+    ]);
+    expect(visibleEventKindFilters([...without, { id: 'c1', kind: 'cache', ts: 3 }])).toContain(
+      'cache'
+    );
+    expect(
+      coerceEventFilters(without, { kind: 'cache', role: 'all', branchId: 'all' })
+    ).toEqual({ kind: 'all', role: 'all', branchId: 'all' });
+  });
+
+  it('keeps run atom lanes to agents that actually participated', () => {
+    const snapshot = (name: string, tier: number, ordinal: number) => ({
+      tier,
+      ordinal,
+      name,
+      description: `${name} description`,
+      systemPrompt: `You are ${name}.`,
+      tools: [],
+      params: {},
+      createdBy: 'seed',
+      createdAt: '2026-08-14T00:00:00.000Z',
+      version: 1,
+      successes: 0,
+      failures: 0,
+    });
+    const fixture = run({
+      initialTypes: [
+        snapshot('Meristem', 3, 1),
+        snapshot('Tracheid', 2, 1),
+        snapshot('Sclereid', 2, 2),
+        snapshot('Idioblast', 2, 3),
+        snapshot('Water', 1, 1),
+      ],
+      events: [
+        { id: 'p1', kind: 'llm', role: 'plan', actor: { name: 'Meristem', tier: 3 }, ts: 1 },
+        { id: 'e1', kind: 'llm', role: 'execute', actor: { name: 'Idioblast', tier: 2 }, ts: 2 },
+      ],
+      result: { producedBy: { name: 'Idioblast', tier: 2 } },
+    });
+    expect([...usedAtomNames(fixture)].sort()).toEqual(['Idioblast', 'Meristem']);
+    expect([...buildAtomMap(fixture).keys()].sort()).toEqual(['Idioblast', 'Meristem']);
+    expect(buildAtomMap(fixture).has('Sclereid')).toBe(false);
+    const skillOnly = buildAtomMap(run({
+      initialTypes: [],
+      events: [{ id: 's1', kind: 'skill', l1Name: 'Ammonia', actor: { name: 'Tracheid', tier: 2 }, ts: 1 }],
+    }));
+    expect(skillOnly.get('Ammonia')?.snapshot.tier).toBe(1);
   });
 });
 

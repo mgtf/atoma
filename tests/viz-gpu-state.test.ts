@@ -5,6 +5,9 @@ import {
   gpuEventCardCopy,
   gpuAtomButtonWidth,
   gpuFilterButtonWidth,
+  layoutAtomLaneBlocks,
+  layoutFilterChipBlock,
+  layoutRunFilterBlocks,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
 import {
@@ -34,12 +37,25 @@ describe('full-GL Zustand scene state', () => {
     expect(useGpuStore.getState()).toMatchObject({
       selectedEventId: 'event-1',
       selectedAtomName: null,
+      runSummaryExpanded: false,
     });
     store.selectAtom('Water');
     expect(useGpuStore.getState()).toMatchObject({
       selectedEventId: null,
       selectedAtomName: 'Water',
+      runSummaryExpanded: false,
     });
+    store.selectEvent(null);
+    expect(useGpuStore.getState().runSummaryExpanded).toBe(true);
+  });
+
+  it('toggles the branch heading and re-expands it when the branch changes', () => {
+    const store = useGpuStore.getState();
+    store.setRunFilters({ kind: 'all', role: 'all', branchId: 'phase-2' });
+    store.toggleBranchHeading();
+    expect(useGpuStore.getState().branchHeadingExpanded).toBe(false);
+    store.setRunFilters({ kind: 'all', role: 'all', branchId: 'phase-1' });
+    expect(useGpuStore.getState().branchHeadingExpanded).toBe(true);
   });
 
   it('resets dependent UI state and clamps GPU scrolling', () => {
@@ -151,6 +167,92 @@ describe('full-GL filter controls preserve semantic labels', () => {
     );
   });
 
+  it('puts kind and role filter blocks on one row when they fit', () => {
+    const layout = layoutRunFilterBlocks({
+      originX: 20,
+      originY: 80,
+      maxWidth: 920,
+      kinds: [
+        { id: 'run.filter.kind.all', label: 'ALL' },
+        { id: 'run.filter.kind.llm', label: 'LLM' },
+        { id: 'run.filter.kind.tool', label: 'TOOLS' },
+        { id: 'run.filter.kind.trust', label: 'TRUST' },
+        { id: 'run.filter.kind.skill', label: 'SKILL' },
+        { id: 'run.filter.kind.registry', label: 'REGISTRY' },
+      ],
+      roles: [
+        { id: 'run.filter.role.all', label: 'ALL ROLES' },
+        { id: 'run.filter.role.prefilter', label: 'PREFILTER' },
+        { id: 'run.filter.role.plan', label: 'PLAN' },
+        { id: 'run.filter.role.execute', label: 'EXECUTE' },
+      ],
+    });
+    expect(layout.roles).not.toBeNull();
+    expect(layout.roles!.y).toBe(layout.kinds.y);
+    expect(layout.roles!.x).toBeGreaterThan(layout.kinds.x + layout.kinds.width);
+    expect(layout.bottom).toBe(layout.kinds.y + layout.kinds.height);
+  });
+
+  it('puts atom lanes on one row when they fit and stacks them otherwise', () => {
+    const compact = layoutAtomLaneBlocks({
+      originX: 20,
+      originY: 40,
+      maxWidth: 920,
+      lanes: [
+        { tier: 3, label: 'L3 · tissues', names: ['Meristem'] },
+        { tier: 2, label: 'L2 · cells', names: ['Sclereid'] },
+        { tier: 1, label: 'L1 · molecules', names: ['Methane'] },
+      ],
+    });
+    expect(compact.lanes).toHaveLength(3);
+    expect(compact.lanes[1]!.y).toBe(compact.lanes[0]!.y);
+    expect(compact.lanes[2]!.x).toBeGreaterThan(compact.lanes[1]!.x + compact.lanes[1]!.width);
+
+    const stacked = layoutAtomLaneBlocks({
+      originX: 20,
+      originY: 40,
+      maxWidth: 220,
+      lanes: [
+        { tier: 3, label: 'L3 · tissues', names: ['Meristem'] },
+        { tier: 2, label: 'L2 · cells', names: ['Sclereid'] },
+        { tier: 1, label: 'L1 · molecules', names: ['Methane'] },
+      ],
+    });
+    expect(stacked.lanes[1]!.y).toBeGreaterThan(stacked.lanes[0]!.y + stacked.lanes[0]!.height);
+  });
+
+  it('frames a wrapping branch chip row as one block', () => {
+    const block = layoutFilterChipBlock(20, 80, 240, [
+      { id: 'run.filter.branch.all', label: 'ALL BRANCHES' },
+      { id: 'run.filter.branch.a', label: 'PARALLEL BRANCH 1 · CREATE' },
+      { id: 'run.filter.branch.b', label: 'PARALLEL BRANCH 1 · VERIFY' },
+    ]);
+    expect(block.chips.length).toBe(3);
+    expect(block.chips[2]!.y).toBeGreaterThan(block.chips[0]!.y);
+    expect(block.height).toBeGreaterThan(block.chips[0]!.height);
+  });
+
+  it('stacks role filters when the pane cannot hold both frames', () => {
+    const layout = layoutRunFilterBlocks({
+      originX: 20,
+      originY: 80,
+      maxWidth: 260,
+      kinds: [
+        { id: 'run.filter.kind.all', label: 'ALL' },
+        { id: 'run.filter.kind.llm', label: 'LLM' },
+        { id: 'run.filter.kind.tool', label: 'TOOLS' },
+        { id: 'run.filter.kind.trust', label: 'TRUST' },
+        { id: 'run.filter.kind.skill', label: 'SKILL' },
+        { id: 'run.filter.kind.registry', label: 'REGISTRY' },
+      ],
+      roles: [
+        { id: 'run.filter.role.all', label: 'ALL ROLES' },
+        { id: 'run.filter.role.execute', label: 'EXECUTE' },
+      ],
+    });
+    expect(layout.roles!.y).toBeGreaterThan(layout.kinds.y + layout.kinds.height);
+  });
+
   it('allocates enough width for every current kind, role and branch label', () => {
     for (const label of [
       'REGISTRY',
@@ -179,5 +281,31 @@ describe('full-GL filter controls preserve semantic labels', () => {
         'tool'
       )
     ).toEqual({ kind: 'tool', role: 'all', branchId: 'all' });
+  });
+
+  it('applies a kind filter and scroll reset in one store notification', () => {
+    const store = useGpuStore.getState();
+    store.setScrollY('runs', 120);
+    let notifications = 0;
+    const unsub = useGpuStore.subscribe(() => {
+      notifications += 1;
+    });
+    store.setRunFilters(nextRunFilters(store.runFilters, 'kind', 'tool'));
+    unsub();
+    expect(notifications).toBe(1);
+    expect(useGpuStore.getState()).toMatchObject({
+      runFilters: { kind: 'tool', role: 'all', branchId: 'all' },
+      scrollY: { runs: 0 },
+    });
+  });
+
+  it('does not notify when GPU scroll is already at the clamped value', () => {
+    let notifications = 0;
+    const unsub = useGpuStore.subscribe(() => {
+      notifications += 1;
+    });
+    useGpuStore.getState().setScrollY('runs', 0);
+    unsub();
+    expect(notifications).toBe(0);
   });
 });

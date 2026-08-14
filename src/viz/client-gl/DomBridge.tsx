@@ -1,3 +1,4 @@
+import { matchesSearchQuery, runSearchText } from '../client/search.js';
 import type { RunIndexEntry } from '../client/types.js';
 import { useGpuStore, type ViewName } from './store.js';
 
@@ -28,7 +29,7 @@ export function DomBridge({
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const runValue = focusedInput === 'run' ? search.run : selectedRun?.label ?? '';
   const filteredRuns = runs.filter((run) =>
-    `${run.id} ${run.label}`.toLocaleLowerCase().includes(search.run.toLocaleLowerCase())
+    matchesSearchQuery(runSearchText(run), search.run)
   );
 
   return (
