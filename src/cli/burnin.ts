@@ -427,6 +427,26 @@ export async function terminateRunProcessGroup(
   return waitForRunProcessGroupGone(pid, confirmMs);
 }
 
+/**
+ * Synthetic log epilogue for a run the HARD timer reaped.
+ *
+ * A wedged runner prints NONE of `parseRunLog`'s markers, so before this the
+ * reaped run read as outcome 'error' with null economics and no hint —
+ * indistinguishable from any other failure in the CSV and in the MCP run
+ * record (2026-08-14 review, MCP §). The runner already owns the
+ * `TIMEOUT after` marker (`parseRunLog` maps it to outcome 'failed'), so the
+ * harness appends the same marker plus an explicit attribution, mirroring the
+ * `--- spawn failed ---` precedent on the spawn-error path. Exported for the
+ * focused unit test: the hard timer itself sits behind a 180s margin no test
+ * should wait out.
+ */
+export function hardTimeoutLogEpilogue(hardDeadlineMs: number): string {
+  return (
+    `\n--- hard timeout --- TIMEOUT after ${Math.round(hardDeadlineMs / 1000)}s: ` +
+    'the harness reaped a wedged runner past its deadline (it printed no completion or failure marker of its own).\n'
+  );
+}
+
 export function spawnRun(opts: {
   readonly goal: string;
   readonly timeoutMs: number;
@@ -445,8 +465,15 @@ export function spawnRun(opts: {
   readonly onSpawn?: (pid: number) => void;
   /** Pass `--clean-workspace`. Defaults to true (the measurement default). */
   readonly cleanWorkspace?: boolean;
+  /**
+   * Margin past `timeoutMs` before the hard reap. The 180s default leaves the
+   * runner's own watchdog (timeoutMs + 60s) room to exit cleanly first. A
+   * test seam: no test should wait three minutes to see the branch fire.
+   */
+  readonly hardKillMarginMs?: number;
 }): Promise<string> {
   const { goal, timeoutMs, logPath } = opts;
+  const hardKillMarginMs = opts.hardKillMarginMs ?? 180_000;
   return new Promise((resolveRun, rejectRun) => {
     // Ahead of the spawn: the write below happens on the settle path, and a
     // throw there is what used to strand the promise.
@@ -512,7 +539,15 @@ export function spawnRun(opts: {
       }
     };
     // Hard stop: task budget + generous teardown margin.
-    const hardTimer = setTimeout(() => void requestTermination(), timeoutMs + 180_000);
+    let hardReaped = false;
+    const hardTimer = setTimeout(() => {
+      // Attribute the reap ONLY when nothing else asked for termination first:
+      // a cancellation or delivered-banner kill that merely races this timer
+      // is not a wedged runner, and stamping TIMEOUT onto it would relabel a
+      // cancelled/delivered run as failed.
+      if (!termination) hardReaped = true;
+      void requestTermination();
+    }, timeoutMs + hardKillMarginMs);
     // Cancellation rides the SAME graceful sequence as every other stop: an
     // abort must not become the bare group SIGKILL the sequence exists to
     // avoid (uncatchable ⇒ the run's teardown never runs ⇒ leaked browsers).
@@ -527,12 +562,19 @@ export function spawnRun(opts: {
     // in some failure modes), and resolving twice would silently drop the
     // second settle's log. First one wins.
     let settled = false;
-    const settle = (finalLog: string, error?: Error): void => {
+    const settle = (logSoFar: string, error?: Error): void => {
       if (settled) return;
       settled = true;
       clearTimeout(hardTimer);
       if (killTimer) clearTimeout(killTimer);
       opts.signal?.removeEventListener('abort', abortHandler);
+      // A hard-reaped runner printed none of parseRunLog's markers, so append
+      // the runner-owned TIMEOUT marker HERE — before both the file write and
+      // the resolve — so the log on disk and the resolved string agree, and
+      // the caller's parseRunLog reads outcome 'failed' with an attribution
+      // instead of a bare 'error' with null economics.
+      const finalLog =
+        hardReaped && !error ? logSoFar + hardTimeoutLogEpilogue(timeoutMs + hardKillMarginMs) : logSoFar;
       try {
         writeFileSync(logPath, finalLog, 'utf8');
       } catch {

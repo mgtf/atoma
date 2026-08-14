@@ -125,6 +125,25 @@ après-midi du 13/08).
 > plutôt que précipitée en fin de session. Suite complète : 1549 passed /
 > 8 skipped, typecheck + lint + docs:check verts.
 
+> **Statut 2026-08-15 (batch runtime 7)** : la priorité 5.3 (« mettre les
+> preuves à l'abri ») et le polish MCP sont appliqués. Sauvegarde —
+> `npm run backup -- --dest <montage hors machine>` : snapshot daté
+> `atoma-state-<stamp>/` contenant `store.db` (backup SQLite EN LIGNE,
+> WAL-safe — `snapshotSqliteStore` extrait en une-définition dans
+> `src/core/sqliteBackup.ts`, partagé avec le harnais compare),
+> `skills.tar.gz`, `runs.tar.gz`, `archive.tar.gz` et `manifest.json` ;
+> prune keep-N qui ne touche que son propre préfixe ; destination DANS le
+> dépôt refusée (un « backup » same-tree ne protège rien) ; entrypoint
+> import-safe. MCP — les cinq bornes : `atoma_run_trace` pagine ses événements
+> (`offset`/`limit` ≤ 1000, `totalEvents`/`nextOffset`) et tronque les chaînes
+> d'erreur ; `goal` plafonné à 4 000 caractères ; la récupération de lease
+> périmé est VISIBLE (`recovered {runId, childPgid}` sur startRun, ligne
+> cross-process sur runStatus au lieu d'amnésie) ; sortie de run / corps de
+> skill / texte de trace marqués données modèle NON FIABLES (INSTRUCTIONS +
+> `caveat`) ; le hard-timeout du burn-in écrit un marqueur synthétique
+> `TIMEOUT after <N>s` dans le log au lieu d'un faux silence. Suite complète :
+> 1567 passed / 8 skipped, typecheck + lint + docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

@@ -102,6 +102,7 @@ npm run curriculum -- --dry-run
 npm run curriculum
 npm run burnin
 npm run friction
+npm run backup -- --dest <off-machine mount>   # store+skills+runs+archives, dated, pruned
 npm run benchmark -- --dry-run
 npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md
 ```
@@ -469,6 +470,12 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   remains observable rather than becoming a false success.
 - MCP readers carry mechanical-review caveats in-band; they do not claim semantic
   approval.
+- MCP payloads are BOUNDED and honest about trust: `atoma_run_trace` pages its
+  events (`offset`/`limit`, capped) and truncates error strings; `goal` has a
+  hard length cap; run output/skill bodies/trace text are marked UNTRUSTED
+  model data (INSTRUCTIONS + `caveat` on runStatus). Stale-lease recovery is
+  VISIBLE: startRun reports what it reaped (`recovered`), and runStatus with
+  no in-memory match reports the cross-process lease row instead of amnesia.
 - The exported 13-tool surface is a compatibility contract. Add/remove tools only
   with protocol tests, docs, compiled smoke updates, and explicit rationale.
 

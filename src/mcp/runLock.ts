@@ -8,7 +8,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { homedir, uptime } from 'node:os';
@@ -28,8 +28,23 @@ export interface RunLockOwner {
   readonly childPgid?: number;
 }
 
+/** A run the recovery path destroyed to free the slot — see `acquireRunLease`. */
+export interface ReapedRun {
+  readonly runId: string;
+  readonly childPgid: number;
+}
+
 export interface RunLease {
   readonly path: string;
+  /**
+   * Present when acquiring meant REAPING a previous server's surviving run:
+   * the dead owner's live process group was terminated as a side effect of
+   * this acquisition. The 2026-08-14 review flagged that the reap was SILENT —
+   * the caller got a lease as if nothing had happened, so a host that had just
+   * destroyed a run could not explain the missing deliverable. startRun
+   * publishes this on its payload.
+   */
+  readonly recovered?: ReapedRun;
   /** Persist the detached process-group id. Throws if ownership was lost. */
   attachChild(pgid: number): void;
   /** Conditional by token and safe to call twice. */
@@ -128,7 +143,7 @@ function processExists(pid: number): boolean {
  * portable fallback. A missing fingerprint is treated as unverifiable, never
  * as permission to signal a process group.
  */
-function processFingerprint(pid: number): string | null {
+export function processFingerprint(pid: number): string | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -184,10 +199,16 @@ function toOwner(row: LeaseRow): RunLockOwner {
   };
 }
 
-function makeLease(db: Database.Database, path: string, owner: RunLockOwner): RunLease {
+function makeLease(
+  db: Database.Database,
+  path: string,
+  owner: RunLockOwner,
+  recovered?: ReapedRun
+): RunLease {
   let released = false;
   return {
     path,
+    ...(recovered ? { recovered } : {}),
     attachChild(pgid) {
       if (released) throw new Error(`cannot attach child ${pgid}: run lease is already released`);
       const childFingerprint = processFingerprint(pgid);
@@ -271,6 +292,7 @@ export async function acquireRunLease(
         );
       }
 
+      let reaped: ReapedRun | undefined;
       if (stale.childPgid !== undefined && runProcessGroupExists(stale.childPgid)) {
         const childIdentity = recordedIdentity(
           stale.childPgid,
@@ -291,6 +313,11 @@ export async function acquireRunLease(
               stale
             );
           }
+          // A surviving run was just DESTROYED to free the slot. Carry the
+          // identity of what was killed onto the lease so the caller can say
+          // so — a silent reap leaves the host unable to explain why the
+          // previous run's deliverable vanished (2026-08-14 review, MCP §).
+          reaped = { runId: stale.runId, childPgid: stale.childPgid };
         } else {
           // Same numeric PGID, different process birth: it belongs to someone
           // else now. Reclaim only the stale row and never send a signal.
@@ -310,11 +337,51 @@ export async function acquireRunLease(
         );
         return true;
       }).immediate();
-      if (claimed) return makeLease(db, path, owner);
+      if (claimed) return makeLease(db, path, owner, reaped);
     }
     throw new RunLockBusyError(`could not acquire MCP run lease ${path} after recovery races`);
   } catch (err) {
     db.close();
     throw err;
+  }
+}
+
+/**
+ * READ-ONLY view of the lease row, for status reporting.
+ *
+ * WHY IT EXISTS: run records are in-memory only, so after a server restart
+ * `atoma_run_status` used to answer "no run with id" while the lease row still
+ * named a possibly-LIVE run from the previous server — the surviving run was
+ * invisible until the next `atoma_run_start` destructively recovered it
+ * (2026-08-14 review, MCP §). This peek lets the status path report that
+ * cross-process owner without becoming a second recovery path.
+ *
+ * THE CONTRACT IS "LOOK, NEVER TOUCH": the handle is readonly + fileMustExist
+ * (the same shape the MCP readers use — `openLockDb` would mkdir, exec the
+ * schema and flip journal_mode, i.e. WRITE), the query is one SELECT, and no
+ * process is probed or signalled — reporting must never kill or mutate what it
+ * reports on. Recovery stays exclusively in `acquireRunLease`, where it runs
+ * under BEGIN IMMEDIATE with fingerprint checks. An absent/torn store is
+ * "nothing to report", never a throw in a status poll.
+ */
+export function peekRunLease(path = mcpRunLockPath()): RunLockOwner | null {
+  if (!existsSync(path)) return null;
+  let db: Database.Database;
+  try {
+    db = new Database(path, { readonly: true, fileMustExist: true });
+  } catch {
+    return null;
+  }
+  try {
+    const row = db
+      .prepare('SELECT * FROM mcp_run_lease WHERE singleton = 1')
+      .get() as LeaseRow | undefined;
+    return row ? toOwner(row) : null;
+  } catch {
+    // Missing table (a foreign file at this path) or a torn store: a status
+    // reader has nothing to say about it.
+    return null;
+  } finally {
+    db.close();
   }
 }

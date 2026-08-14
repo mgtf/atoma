@@ -38,6 +38,7 @@
     "viz:demo": "tsx src/viz/demo.ts",
     "ledger": "tsx src/cli/ledger.ts",
     "friction": "tsx src/cli/friction.ts",
+    "backup": "tsx src/cli/backup.ts",
     "benchmark": "tsx src/cli/benchmark.ts"
   },
   "dependencies": {

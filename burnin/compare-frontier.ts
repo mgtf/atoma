@@ -5,7 +5,6 @@
  *   env -u OPENAI_API_KEY ZAI_API_KEY="$(< "$HOME/.config/atoma/zai-api-key")" \
  *     npx tsx burnin/compare-frontier.ts
  */
-import Database from 'better-sqlite3';
 import {
   appendFileSync,
   cpSync,
@@ -28,6 +27,8 @@ import {
   type RunStats,
 } from '../src/cli/burnin.js';
 import { skillsDirPath, storeDbPath } from '../src/core/stores.js';
+import { snapshotSqliteStore } from '../src/core/sqliteBackup.js';
+export { snapshotSqliteStore } from '../src/core/sqliteBackup.js';
 
 export type Arm = 'baseline' | 'atoma';
 interface Task {
@@ -52,51 +53,6 @@ export interface CompareRoundState {
   readonly baselineSkills: string;
   readonly treatmentDb: string;
   readonly treatmentSkills: string;
-}
-
-/**
- * Copy a live SQLite database through SQLite's online-backup API.
- *
- * Copying only the main `*.db` file is not a snapshot when the source uses
- * WAL: committed pages may still live solely in `*.db-wal`. Opening the source
- * read-only and asking SQLite to back it up sees one consistent transaction
- * boundary, includes those WAL pages, and never checkpoints or writes the
- * production store.
- */
-export async function snapshotSqliteStore(
-  sourceDb: string,
-  destinationDb: string
-): Promise<void> {
-  const source = resolve(sourceDb);
-  const destination = resolve(destinationDb);
-  if (source === destination) {
-    throw new Error('compare snapshot destination must differ from the source store');
-  }
-  if (!existsSync(source)) {
-    throw new Error(`compare treatment source store does not exist: ${source}`);
-  }
-  if (existsSync(destination)) {
-    throw new Error(`compare snapshot destination already exists: ${destination}`);
-  }
-  mkdirSync(dirname(destination), { recursive: true });
-
-  let sourceHandle: Database.Database | null = null;
-  try {
-    sourceHandle = new Database(source, { readonly: true, fileMustExist: true });
-    await sourceHandle.backup(destination);
-  } catch (err) {
-    // A failed online backup may leave a partial destination. It is scoped to
-    // the newly-reserved round, but remove it here as well so this helper is
-    // safe when called directly.
-    rmSync(destination, { force: true });
-    rmSync(destination + '-wal', { force: true });
-    rmSync(destination + '-shm', { force: true });
-    throw new Error(`could not snapshot compare treatment store ${source}`, {
-      cause: err,
-    });
-  } finally {
-    sourceHandle?.close();
-  }
 }
 
 function destinationIsInsideSource(source: string, destination: string): boolean {

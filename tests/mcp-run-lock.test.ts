@@ -4,7 +4,12 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import { acquireRunLease, RunLockBusyError } from '../src/mcp/runLock.js';
+import {
+  acquireRunLease,
+  peekRunLease,
+  processFingerprint,
+  RunLockBusyError,
+} from '../src/mcp/runLock.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS mcp_run_lease (
@@ -231,6 +236,126 @@ describe('MCP cross-process run lease', () => {
       'run-two'
     );
     after.close();
+  });
+
+  /**
+   * The reap used to be SILENT: a dead owner's LIVE group was terminated and
+   * the acquirer got a lease as if nothing had happened, so a host that had
+   * just destroyed a run could not explain the missing deliverable
+   * (2026-08-14 review, MCP §). The lease must name what it killed.
+   */
+  it('recovering a dead owner with a LIVE group reaps it AND reports what was reaped', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    if (!child.pid) throw new Error('child pid unavailable');
+    await new Promise<void>((resolveSpawn, rejectSpawn) => {
+      child.once('spawn', resolveSpawn);
+      child.once('error', rejectSpawn);
+    });
+    try {
+      // The recorded fingerprint must MATCH the live group for the reap branch
+      // to fire (a mismatch means a recycled pgid and is never signalled).
+      const fingerprint = processFingerprint(child.pid);
+      expect(fingerprint).toBeTruthy();
+      const db = inspect();
+      db.prepare(
+        `INSERT INTO mcp_run_lease
+         (singleton, token, run_id, owner_pid, child_pgid, acquired_at,
+          owner_fingerprint, child_fingerprint)
+         VALUES (1, 'dead-owner', 'orphaned-run', 99999999, ?, ?, NULL, ?)`
+      ).run(child.pid, new Date().toISOString(), fingerprint);
+      db.close();
+
+      const lease = await acquireRunLease('new-run', lockPath);
+      expect(lease.recovered).toEqual({ runId: 'orphaned-run', childPgid: child.pid });
+      // And the group is really gone — the report describes a real reap.
+      expect(() => process.kill(-child.pid!, 0)).toThrow();
+      lease.release();
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already reaped is the expected case.
+      }
+    }
+  }, 15_000);
+
+  it('a first-claim lease carries no recovered field', async () => {
+    const lease = await acquireRunLease('fresh-run', lockPath);
+    expect(lease.recovered).toBeUndefined();
+    lease.release();
+  });
+
+  /**
+   * peekRunLease exists so atoma_run_status can report a previous server's
+   * possibly-live run after a restart (records are in-memory only). Its
+   * contract is LOOK, NEVER TOUCH: no recovery, no signal, no write — a
+   * status poll must never kill or mutate what it reports on.
+   */
+  it('peekRunLease reads the row without signalling or mutating anything', async () => {
+    expect(peekRunLease(join(dir, 'absent.db'))).toBeNull();
+
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    if (!child.pid) throw new Error('child pid unavailable');
+    await new Promise<void>((resolveSpawn, rejectSpawn) => {
+      child.once('spawn', resolveSpawn);
+      child.once('error', rejectSpawn);
+    });
+    try {
+      const db = inspect();
+      db.prepare(
+        `INSERT INTO mcp_run_lease
+         (singleton, token, run_id, owner_pid, child_pgid, acquired_at)
+         VALUES (1, 'tok', 'prev-run', 12345, ?, '2026-08-14T00:00:00.000Z')`
+      ).run(child.pid);
+      db.close();
+
+      const owner = peekRunLease(lockPath);
+      expect(owner).toMatchObject({
+        runId: 'prev-run',
+        ownerPid: 12345,
+        childPgid: child.pid,
+        acquiredAt: '2026-08-14T00:00:00.000Z',
+      });
+      // The group the row names is STILL ALIVE: the peek sent no signal —
+      // unlike acquireRunLease, whose recovery would have reaped it.
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      // And the row is untouched.
+      const after = inspect();
+      const row = after
+        .prepare('SELECT token, run_id, owner_pid, child_pgid FROM mcp_run_lease')
+        .get();
+      after.close();
+      expect(row).toEqual({
+        token: 'tok',
+        run_id: 'prev-run',
+        owner_pid: 12345,
+        child_pgid: child.pid,
+      });
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already gone is fine.
+      }
+    }
+  });
+
+  it('peekRunLease sees a live WAL-mode lease and its release', async () => {
+    // acquireRunLease opens the store in WAL mode — the readonly peek must
+    // read it while the writer connection is still open.
+    const lease = await acquireRunLease('held-run', lockPath);
+    try {
+      expect(peekRunLease(lockPath)?.runId).toBe('held-run');
+    } finally {
+      lease.release();
+    }
+    expect(peekRunLease(lockPath)).toBeNull();
   });
 
   it('lets exactly one of two processes recover the same stale token', async () => {

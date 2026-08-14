@@ -417,14 +417,31 @@ export function runsList(opts: { last?: number } = {}): unknown {
   return { runsDir: dir, count: runs.length, runs };
 }
 
+/** Events per page when the caller names no limit. A friction-heavy trace has
+ * hundreds of events; the shape survey a host actually wants fits in one page,
+ * and `nextOffset` is there when it does not. */
+const TRACE_EVENTS_DEFAULT_LIMIT = 200;
+/** Ceiling on a caller-supplied limit — a reader must stay bounded even when
+ * asked not to be. */
+const TRACE_EVENTS_MAX_LIMIT = 1000;
+
 /**
  * One trace, WITHOUT its event payloads. A trace holds every prompt and every
  * tool result verbatim — the whole point of the viz — so returning one through
  * a tool result would push megabytes of model-authored text into the host's
  * context. The host gets the shape and the economics; `npm run viz` is where a
  * human reads the bodies.
+ *
+ * Events are PAGED (`offset`/`limit`, default 200), because "shape only" was
+ * not actually bounded: a long run maps every event, and each tool event's
+ * `error` string is model-embedding text — `edit_file` errors echo verbatim
+ * spans and line-numbered file contexts, so a friction-heavy trace carried
+ * dozens of multi-KB errors across hundreds of events, all billed into the
+ * host's context. `error` is also truncated per event for the same reason the
+ * module-level MAX_TEXT_CHARS exists. Out-of-range paging inputs CLAMP rather
+ * than throw — readers are tolerant by design (same rule as skillsStats.sim).
  */
-export function runTrace(opts: { file: string }): unknown {
+export function runTrace(opts: { file: string; offset?: number; limit?: number }): unknown {
   const dir = runsDirPath();
   // Traversal guard: the argument names a file INSIDE the runs dir, and
   // nothing else. `basename` alone would silently accept `../../etc/passwd`
@@ -435,6 +452,17 @@ export function runTrace(opts: { file: string }): unknown {
   }
   if (!existsSync(path)) return { note: `no trace at ${path}` };
   const run = JSON.parse(readFileSync(path, 'utf8')) as VizRun;
+  const allEvents = run.events ?? [];
+  const totalEvents = allEvents.length;
+  const offset =
+    typeof opts.offset === 'number' && Number.isInteger(opts.offset) && opts.offset > 0
+      ? opts.offset
+      : 0;
+  const limit =
+    typeof opts.limit === 'number' && Number.isInteger(opts.limit) && opts.limit >= 1
+      ? Math.min(opts.limit, TRACE_EVENTS_MAX_LIMIT)
+      : TRACE_EVENTS_DEFAULT_LIMIT;
+  const page = allEvents.slice(offset, offset + limit);
   return {
     file: opts.file,
     id: run.id,
@@ -443,12 +471,16 @@ export function runTrace(opts: { file: string }): unknown {
     endedAt: run.endedAt,
     cancelled: run.cancelled,
     totals: run.totals,
-    eventCount: run.events?.length ?? 0,
+    eventCount: totalEvents,
+    totalEvents,
+    eventsFrom: offset,
+    // null when this page reaches the end — the host's loop condition.
+    nextOffset: offset + page.length < totalEvents ? offset + page.length : null,
     // `id`, `ts` and `kind` are the only fields common to every member of the
     // VizEvent union; the rest are read defensively so a new event kind cannot
     // break this reader (and a `tool` event's name field is `name`, not
     // `tool` — the union is not uniform).
-    events: (run.events ?? []).map((e) => {
+    events: page.map((e) => {
       const any = e as {
         actor?: { tier?: number; name?: string };
         role?: string;
@@ -467,10 +499,13 @@ export function runTrace(opts: { file: string }): unknown {
         model: any.model,
         name: any.name,
         op: any.op,
-        error: any.error,
+        // A tool-event error is model-embedding text (edit_file errors echo
+        // spans and line-numbered file contexts) — bounded like every other
+        // model-authored string this module returns.
+        error: typeof any.error === 'string' ? truncate(any.error) : any.error,
       };
     }),
-    note: 'event PAYLOADS (prompts, responses, tool results) are omitted on purpose — read them in `npm run viz`.',
+    note: 'event PAYLOADS (prompts, responses, tool results) are omitted on purpose — read them in `npm run viz`. Events are paged: pass nextOffset back as offset until it is null.',
   };
 }
 
