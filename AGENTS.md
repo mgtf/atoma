@@ -206,6 +206,10 @@ Read this section before changing any LLM call site.
 - Probe manifests are structured records. Normalize paths before recognizing
   `.atoma-probes.json`; machine writers merge entries, and model hand-edits are
   refused.
+- Manifest MERGE semantics have one definition: `src/contracts/probeManifest.ts`
+  owns entry identity per shape (shell by `cmd`, web by `file`+`smoke`, http =
+  ordered append) and documents the three writers' corrupt-input policies side
+  by side. Never re-implement a merge in a tool.
 
 ## Architecture invariants
 
@@ -255,6 +259,14 @@ Read this section before changing any LLM call site.
   the requested end state; do not demand meaningless rewrites.
 - Keep `VALIDATION_SYSTEM_PROMPT` explicit that L1 plans should contain concrete
   tool-oriented proposed actions while L2/L3 must delegate.
+- Mechanical RESULT gates live in ONE declarative table
+  (`src/atoms/resultGates.ts`) with an explicit disposition per gate:
+  result-declared failures reject outright; disk-evidence gates reject ONCE per
+  task (`ctx.mechanicalResultRejections`, fork-shared) and hand byte-identical
+  repeats to the LLM; prose-triggered gates never reject — they override the
+  trust fast-path and attach a `MECHANICAL GATE FINDINGS` block to the full
+  verdict. Workspace reads are cached per validation cycle. A new incident adds
+  a table row with a stated disposition, never a new inline `if`.
 
 ## Skills lifecycle
 

@@ -11,10 +11,6 @@ import type {
   Verdict,
 } from '../core/types.js';
 import { eventSkillBlock, matchEventSkill } from '../skills/events.js';
-import {
-  extractRecordedProbes,
-  recordedProbesFromWitnesses,
-} from '../contracts/witness.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from '../skills/scriptScan.js';
 import {
   stripBranchProvenance,
@@ -22,11 +18,10 @@ import {
   type AtomType,
 } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
-import { INTERNAL_VALIDATION_FAILED_PREFIX, L1Atom } from './L1Atom.js';
+import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
   l2StrategySchema,
-  NON_JSON_PAYLOAD_SUMMARY_PREFIX,
   parsePayloadTolerant,
   parsePlanWithFallback,
   parseTwoJson,
@@ -53,16 +48,7 @@ import {
   lastResultVerdictSkillFollowed,
   resolveCreationDescription,
 } from './capability.js';
-import {
-  checkGroundTruth,
-  DURABLE_HTTP_PORT_LITERAL_RE,
-  type GroundTruthCheck,
-} from './groundTruth.js';
-import {
-  PROBE_MANIFEST_FILENAME,
-  smokeOkIncludesStyling,
-  smokeResultIncludesStyling,
-} from '../contracts/probeManifest.js';
+import { checkGroundTruth, type GroundTruthCheck } from './groundTruth.js';
 export {
   checkGroundTruth,
   extractResultFileClaims,
@@ -98,6 +84,20 @@ export { SMOKE_DESIGN_GUIDANCE } from './prompts.js';
 export { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from '../skills/compilePrompt.js';
 export { validateProbeManifest } from '../contracts/probeManifest.js';
 export { scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
+// The mechanical RESULT gates live in ONE declarative table now
+// (src/atoms/resultGates.ts); these re-exports keep the historical import
+// paths working for tests and CLI consumers.
+export {
+  recordedJsonShapeMismatch,
+  requiredCommandManifestMismatch,
+  requiredPassingCommands,
+  webStylingEvidenceMissing,
+} from './resultGates.js';
+import {
+  buildResultGateEnv,
+  renderResultGateFindings,
+  runResultGates,
+} from './resultGates.js';
 import type { Skill } from '../skills/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import { visibleSkillNamespaces } from '../skills/visibility.js';
@@ -206,176 +206,6 @@ export function buildNarrowL1Prompt(
   return [...header, ...bucketBody].join('\n');
 }
 
-export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
-  const phaseDescription = stripLiteralContractBlock(task.description);
-  if (!/\b(?:conditional\s+styl|styling|style|class|colou?r)\b/i.test(phaseDescription)) {
-    return false;
-  }
-  if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) {
-    return true;
-  }
-  const probes = (result.output as Record<string, unknown>)['probes'];
-  if (!Array.isArray(probes)) return true;
-  let milestoneStyling = false;
-  let resetStyling = false;
-  for (const probe of probes) {
-    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) continue;
-    const entry = probe as Record<string, unknown>;
-    const smoke = typeof entry['smoke'] === 'string' ? entry['smoke'] : '';
-    const smokeResult =
-      entry['smokeResult'] && typeof entry['smokeResult'] === 'object'
-        ? JSON.stringify(entry['smokeResult'])
-        : '';
-    const hasStyling =
-      /(?:class|style|colou?r|getComputedStyle)/i.test(smoke) &&
-      smokeResultIncludesStyling(entry['smokeResult']) &&
-      smokeOkIncludesStyling(smoke);
-    if (!hasStyling) continue;
-    const evidenceText = `${smoke}\n${smokeResult}`;
-    if (/(?:milestone|afterIncrement|afterClick|streak.?3)/i.test(evidenceText)) {
-      milestoneStyling = true;
-    }
-    if (/(?:reset|final)/i.test(evidenceText)) resetStyling = true;
-  }
-  return !(milestoneStyling && resetStyling);
-}
-
-function expectedJsonContainer(description: string): 'object' | 'array' | null {
-  const phaseDescription = stripLiteralContractBlock(description);
-  const expectsObject = /\bJSON\s+object\b/i.test(phaseDescription);
-  const expectsArray = /\bJSON\s+array\b/i.test(phaseDescription);
-  if (expectsObject === expectsArray) return null;
-  return expectsObject ? 'object' : 'array';
-}
-
-function recordedJsonShapeMismatchFromProbes(
-  task: Task,
-  probes: readonly unknown[]
-): string | null {
-  const expected = expectedJsonContainer(task.description);
-  if (!expected) return null;
-  if (probes.length === 0) return null;
-
-  let observed = 0;
-  let matching = 0;
-  for (const probe of probes) {
-    if (!probe || typeof probe !== 'object' || Array.isArray(probe)) continue;
-    const entry = probe as Record<string, unknown>;
-    if (entry['exitCode'] !== 0 || typeof entry['stdout'] !== 'string') continue;
-    const stdout = entry['stdout'].trim();
-    if (!stdout) continue;
-    try {
-      const parsed = JSON.parse(stdout) as unknown;
-      observed++;
-      const isArray = Array.isArray(parsed);
-      const isObject = parsed !== null && typeof parsed === 'object' && !isArray;
-      if (
-        (expected === 'object' && isObject) ||
-        (expected === 'array' && isArray)
-      ) {
-        matching++;
-      }
-    } catch {
-      // Non-JSON stdout is silent here; the normal validator decides whether
-      // mixed/logged output satisfies the task.
-    }
-  }
-  if (observed === 0 || matching > 0) return null;
-  return expected === 'object'
-    ? 'the task requires JSON object output, but every parseable successful probe returned a JSON array'
-    : 'the task requires JSON array output, but every parseable successful probe returned a JSON object';
-}
-
-function resultRecordedProbes(result: Result): unknown[] {
-  return [
-    ...extractRecordedProbes({ output: result.output }),
-    ...recordedProbesFromWitnesses(result.evidence),
-  ];
-}
-
-export function recordedJsonShapeMismatch(task: Task, result: Result): string | null {
-  return recordedJsonShapeMismatchFromProbes(task, resultRecordedProbes(result));
-}
-
-async function checkRecordedJsonShape(
-  task: Task,
-  result: Result,
-  ctx: RunContext
-): Promise<string | null> {
-  const probes = resultRecordedProbes(result);
-  const inlineMismatch = recordedJsonShapeMismatchFromProbes(task, probes);
-  if (inlineMismatch) return inlineMismatch;
-  const expectsShape = expectedJsonContainer(task.description) !== null;
-  if (!expectsShape || !ctx.tools?.has('read_file')) {
-    return null;
-  }
-  try {
-    const raw = await ctx.tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
-    const content =
-      raw &&
-      typeof raw === 'object' &&
-      typeof (raw as Record<string, unknown>)['content'] === 'string'
-        ? ((raw as Record<string, unknown>)['content'] as string)
-        : typeof raw === 'string'
-          ? raw
-          : '';
-    const parsed = content.trim() ? (JSON.parse(content) as unknown) : null;
-    const entries =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)['entries']
-        : undefined;
-    if (Array.isArray(entries)) probes.push(...entries);
-  } catch {
-    // Missing/malformed manifests are handled by the ground-truth health
-    // checker. Shape mismatch remains silent when no parseable evidence exists.
-  }
-  return recordedJsonShapeMismatchFromProbes(task, probes);
-}
-
-export function requiredPassingCommands(description: string): string[] {
-  const phaseDescription = stripLiteralContractBlock(description);
-  const commands = [
-    ...phaseDescription.matchAll(
-      /\bnode\s+((?:[\w.-]+\/)*(?:(?:test|probe|verify|check|harness)[\w.-]*|[\w.-]+-(?:test|probe|verify|check|harness))\.(?:m?js|cjs))\b/gi
-    ),
-  ].map((match) => `node ${match[1]}`);
-  return [...new Set(commands)];
-}
-
-export function requiredCommandManifestMismatch(
-  taskDescription: string,
-  manifestRaw: string
-): string | null {
-  const commands = requiredPassingCommands(taskDescription);
-  if (commands.length === 0) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(manifestRaw);
-  } catch {
-    return null; // Manifest health reports malformed JSON separately.
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-  const entries = (parsed as Record<string, unknown>)['entries'];
-  if (!Array.isArray(entries)) return null;
-  for (const command of commands) {
-    const matching = entries.filter(
-      (entry) =>
-        entry !== null &&
-        typeof entry === 'object' &&
-        !Array.isArray(entry) &&
-        (entry as Record<string, unknown>)['cmd'] === command
-    ) as Array<Record<string, unknown>>;
-    const latest = matching.at(-1);
-    if (!latest) {
-      return `the task requires ${command} to pass, but the probe manifest has no entry for that exact command`;
-    }
-    if (latest['exitCode'] !== 0) {
-      return `the task requires ${command} to pass, but its latest recorded exit code is ${JSON.stringify(latest['exitCode'])}`;
-    }
-  }
-  return null;
-}
-
 export function taskRequiresRealBrowser(description: string): boolean {
   const phaseDescription = stripLiteralContractBlock(description);
   return (
@@ -389,63 +219,6 @@ export function taskRequiresRealBrowser(description: string): boolean {
       ))
   );
 }
-
-async function checkRequiredCommandManifest(
-  task: Task,
-  ctx: RunContext
-): Promise<string | null> {
-  if (requiredPassingCommands(task.description).length === 0) return null;
-  if (!ctx.tools?.has('read_file')) return null;
-  try {
-    const raw = await ctx.tools.execute('read_file', { path: PROBE_MANIFEST_FILENAME });
-    const content =
-      raw &&
-      typeof raw === 'object' &&
-      typeof (raw as Record<string, unknown>)['content'] === 'string'
-        ? ((raw as Record<string, unknown>)['content'] as string)
-        : typeof raw === 'string'
-          ? raw
-          : '';
-    if (!content.trim()) {
-      return `the task requires ${requiredPassingCommands(task.description).join(', ')} to pass, but the probe manifest is missing or empty`;
-    }
-    return requiredCommandManifestMismatch(task.description, content);
-  } catch {
-    return `the task requires ${requiredPassingCommands(task.description).join(', ')} to pass, but the probe manifest could not be read`;
-  }
-}
-
-async function checkRequiredPortableHttpDocs(
-  task: Task,
-  ctx: RunContext
-): Promise<string | null> {
-  const phaseDescription = stripLiteralContractBlock(task.description);
-  if (
-    !/\bREADME\.md\b/i.test(phaseDescription) ||
-    !/(?:<port>|portable|never[^.\n]{0,80}numeric port)/i.test(phaseDescription) ||
-    !ctx.tools?.has('read_file')
-  ) {
-    return null;
-  }
-  try {
-    const raw = await ctx.tools.execute('read_file', { path: 'README.md' });
-    const content =
-      raw &&
-      typeof raw === 'object' &&
-      typeof (raw as Record<string, unknown>)['content'] === 'string'
-        ? ((raw as Record<string, unknown>)['content'] as string)
-        : typeof raw === 'string'
-          ? raw
-          : '';
-    return DURABLE_HTTP_PORT_LITERAL_RE.test(content)
-      ? 'the task requires portable README.md port placeholders, but README.md contains a numeric loopback URL or LISTENING_ON_PORT value'
-      : null;
-  } catch {
-    return 'the task requires portable HTTP documentation in README.md, but README.md could not be read';
-  }
-}
-
-
 
 export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom> {
   readonly tier: Tier = 2;
@@ -2114,108 +1887,43 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   async validateResult(child: L1Atom, result: Result, task: Task, ctx: RunContext): Promise<Verdict> {
-    if (
-      ctx.requireObservedToolAction === true &&
-      result.toolCallResults !== undefined &&
-      !resultHasSuccessfulToolAction(result)
-    ) {
+    // The mechanical gates run as ONE declarative pipeline (resultGates.ts):
+    // shared cached workspace reads, an explicit disposition per gate, and a
+    // run-wide one-shot memo so a byte-identical mechanical rejection can
+    // never repeat into the 3-strike escalation cascade. `requires-review`
+    // findings never reject — they override the trust fast-path and hand the
+    // facts to the full LLM verdict, exactly like checkGroundTruth.
+    const gates = await runResultGates(
+      buildResultGateEnv({
+        task,
+        result,
+        childName: child.name,
+        childToolNames: child.toolNames(),
+        ctx,
+      }),
+      (ctx.mechanicalResultRejections ??= new Set<string>())
+    );
+    if (gates.rejection) {
       ctx.logger.warn(
-        `[${this.name}] result from ${child.name} reports no successful observed tool action — mechanically rejected before trust/LLM validation`
+        `[${this.name}] result from ${child.name} mechanically rejected by the ${gates.rejection.gateId} gate (before trust/LLM validation): ${gates.rejection.reasoning}`
       );
       return {
         approved: false,
-        reasoning:
-          'the L1 result was produced without any successful tool action observed by the transport, so its file/execution claims are unsupported narrative',
+        reasoning: gates.rejection.reasoning,
         scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'No successful tool action was observed. Actually perform the subtask with your declared tools, verify the artefact, and only then return the result JSON. Do not describe intended work as completed.',
-        },
+        modifications: { additionalContext: gates.rejection.coaching },
       };
     }
-    const requiredCommandMismatch = await checkRequiredCommandManifest(task, ctx);
-    if (requiredCommandMismatch) {
-      return {
-        approved: false,
-        reasoning: requiredCommandMismatch,
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'Fix the exact required finite test/probe script instead of substituting a different harness. Run it through record_probe until that same command exits 0; its manifest entry must be replaced with the successful observation before returning.',
-        },
-      };
-    }
-    const portableDocsMismatch = await checkRequiredPortableHttpDocs(task, ctx);
-    if (portableDocsMismatch) {
-      return {
-        approved: false,
-        reasoning: portableDocsMismatch,
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'Replace every durable numeric localhost port and LISTENING_ON_PORT number in README.md with <port>. Keep live numeric URLs only in run evidence, then read README.md back before returning.',
-        },
-      };
-    }
-    if (result.summary.startsWith(NON_JSON_PAYLOAD_SUMMARY_PREFIX)) {
+    const gateFindingsBlock =
+      gates.reviewFindings.length > 0
+        ? renderResultGateFindings(gates.reviewFindings)
+        : undefined;
+    if (gateFindingsBlock) {
       ctx.logger.warn(
-        `[${this.name}] result from ${child.name} used the tolerant non-JSON wrapper — mechanically rejected before trust/LLM validation`
+        `[${this.name}] result from ${child.name}: mechanical gate finding(s) [${gates.reviewFindings
+          .map((f) => f.gateId)
+          .join(', ')}] — forcing a full verdict instead of the trust fast-path`
       );
-      return {
-        approved: false,
-        reasoning:
-          'the L1 completed tool work but did not emit the required final {"output","summary"} JSON envelope',
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'Your tool work may already be complete. Do not call a return/output tool and do not narrate the result as prose. Emit one final JSON object directly as assistant text: {"output": <actual result>, "summary": "<evidence-backed summary>"}.',
-        },
-      };
-    }
-    if (result.summary.startsWith(INTERNAL_VALIDATION_FAILED_PREFIX)) {
-      ctx.logger.warn(
-        `[${this.name}] result from ${child.name} reports an internal validation failure — mechanically rejected before trust/LLM validation`
-      );
-      return {
-        approved: false,
-        reasoning:
-          'the L1 result explicitly reports that its final validate_html call failed',
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'Your last validate_html result was not ok. Read its exact errors/smokeResult, fix the artefact or the assertion, and re-run validation until ok:true before returning the final JSON.',
-        },
-      };
-    }
-    const jsonShapeMismatch = await checkRecordedJsonShape(task, result, ctx);
-    if (jsonShapeMismatch) {
-      ctx.logger.warn(
-        `[${this.name}] result from ${child.name} contradicts the task's requested JSON container shape — mechanically rejected before trust/LLM validation`
-      );
-      return {
-        approved: false,
-        reasoning: jsonShapeMismatch,
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'The successful recorded stdout has the wrong JSON container shape. Preserve the verified values and ordering, but emit exactly the requested JSON object or JSON array, then re-run every success probe and return their new real stdout.',
-        },
-      };
-    }
-    if (
-      child.toolNames().includes('validate_html') &&
-      webStylingEvidenceMissing(task, result)
-    ) {
-      return {
-        approved: false,
-        reasoning:
-          'the task requires conditional styling, but the recorded browser probe contains no class/style/color milestone evidence',
-        scope: 'ephemeral',
-        modifications: {
-          additionalContext:
-            'Return milestone and reset snapshots containing the actual class/style/color values, and make ok assert the expected transition. State counters or labels alone do not verify conditional styling.',
-        },
-      };
     }
     const activeSkillId = child.activeSkillId();
     const activeSkill =
@@ -2239,8 +1947,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // along so the probe doesn't run twice) rather than rejecting outright —
     // a path-extraction heuristic or malformed manifest must never fail a run
     // on its own.
+    // A gate finding disqualifies the trust fast-path outright: llmVerdict
+    // runs its own ground-truth probe internally, so the trusted branch's
+    // probe would be a duplicate on that path.
     let trustedProbe: GroundTruthCheck | null = null;
-    if (type && shouldTrustType(type)) {
+    if (type && shouldTrustType(type) && gateFindingsBlock === undefined) {
       trustedProbe = await checkGroundTruth({
         ctx,
         subject: 'RESULT',
@@ -2284,6 +1995,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       subject: 'RESULT',
       child,
       ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
+      ...(gateFindingsBlock !== undefined ? { mechanicalFindingsBlock: gateFindingsBlock } : {}),
       ...(activeSkill ? { activeSkill: { id: activeSkill.id, body: activeSkill.body } } : {}),
       task,
       payload: { output: result.output, summary: result.summary },

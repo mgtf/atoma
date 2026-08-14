@@ -334,8 +334,16 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual([]);
   });
 
-  it('rejects a recorded JSON container mismatch before trust', async () => {
-    const { l2, l1, ctx, exec } = setup({ 'word-frequency.js': 'console.log("[]")' });
+  it('forces a full verdict for a recorded JSON container mismatch instead of trusting', async () => {
+    // The "JSON object" requirement is a regex reading of task prose, so the
+    // gate is requires-review: it must override the trust fast-path and hand
+    // the facts to the LLM validator — never reject on its own (2026-08-14
+    // review: a false trigger becomes one cheap validator call instead of a
+    // deterministic rejection cascade).
+    const { l2, l1, ctx } = setup({ 'word-frequency.js': 'console.log("[]")' });
+    ctx.llm.enqueueText(
+      jsonText({ approved: false, reasoning: 'the recorded stdout is a JSON array' })
+    );
     const verdict = await l2.validateResult(
       l1,
       result({
@@ -356,12 +364,15 @@ describe('trust fast-path × ground-truth probe', () => {
       { ...ctx, requireObservedToolAction: true }
     );
     expect(verdict.approved).toBe(false);
-    expect(verdict.reasoning).toMatch(/requires JSON object.*JSON array/);
-    expect(ctx.llm.calls).toHaveLength(0);
-    expect(exec.calls).toEqual([]);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/MECHANICAL GATE FINDINGS/);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/\[recorded-json-shape\]/);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/requires JSON object.*JSON array/);
+    // Leads to verify, not verdicts to obey — the framing is part of the contract.
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/leads to VERIFY/);
   });
 
-  it('rejects a manifest-only JSON container mismatch before trust', async () => {
+  it('forces a full verdict for a manifest-only JSON container mismatch, reading the manifest ONCE', async () => {
     const { l2, l1, ctx, exec } = setup({
       '.atoma-probes.json': JSON.stringify({
         version: 1,
@@ -374,6 +385,9 @@ describe('trust fast-path × ground-truth probe', () => {
         ],
       }),
     });
+    ctx.llm.enqueueText(
+      jsonText({ approved: false, reasoning: 'manifest stdout contradicts the object shape' })
+    );
     const verdict = await l2.validateResult(
       l1,
       result({
@@ -385,9 +399,46 @@ describe('trust fast-path × ground-truth probe', () => {
       { ...ctx, requireObservedToolAction: true }
     );
     expect(verdict.approved).toBe(false);
-    expect(verdict.reasoning).toMatch(/requires JSON object.*JSON array/);
-    expect(ctx.llm.calls).toHaveLength(0);
-    expect(exec.calls).toEqual(['read_file']);
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/\[recorded-json-shape\]/);
+    // Shared per-cycle read cache: the gate pipeline pays ONE manifest read.
+    expect(exec.calls.filter((c) => c === 'read_file')).toHaveLength(1);
+  });
+
+  it('gives a reject-once gate ONE mechanical rejection, then hands the repeat to the LLM', async () => {
+    // The $2.03 lesson (types.ts mechanicalPlanRejections), applied to the
+    // RESULT side: a byte-identical mechanical rejection repeated against the
+    // same task would trip the 3-strike tracker and escalate a healthy child.
+    const files = {
+      'test-api.js': 'process.exit(1)',
+      '.atoma-probes.json': JSON.stringify({
+        version: 1,
+        entries: [{ cmd: 'node test-api.js', exitCode: 1, stdout: '' }],
+      }),
+    };
+    const { l2, l1, ctx } = setup(files);
+    const task = { description: 'running node test-api.js must exit 0' };
+    const failing = () =>
+      result({
+        output: { files: ['test-api.js'] },
+        summary: 'harness present',
+        toolCallResults: [{ name: 'write_file', ok: true }],
+      });
+
+    const first = await l2.validateResult(l1, failing(), task, ctx);
+    expect(first.approved).toBe(false);
+    expect(first.reasoning).toMatch(/latest recorded exit code is 1/);
+    expect(ctx.llm.calls).toHaveLength(0); // one free coached rejection
+
+    ctx.llm.enqueueText(
+      jsonText({ approved: false, reasoning: 'harness still failing, keep fixing it' })
+    );
+    const second = await l2.validateResult(l1, failing(), task, ctx);
+    expect(second.approved).toBe(false);
+    // The repeat is NOT another byte-identical mechanical rejection: the LLM
+    // judges, with the gate finding attached.
+    expect(ctx.llm.calls).toHaveLength(1);
+    expect(ctx.llm.calls[0]!.userContent).toMatch(/\[required-command-manifest\]/);
   });
 
   it('does not load an inherited JSON shape requirement from the probe manifest', async () => {

@@ -65,6 +65,26 @@ après-midi du 13/08).
 > `scriptTargets`. Suite complète : 1501 passed / 8 skipped, typecheck + lint
 > verts.
 
+> **Statut 2026-08-14 (batch runtime 4)** : les refactorings 3.1, 3.2 et 3.4
+> sont appliqués. Les sept gates mécaniques de `validateResult` vivent dans UNE
+> table déclarative (`src/atoms/resultGates.ts`) avec une disposition explicite
+> par gate : `reject` (échecs auto-déclarés par le résultat — witness transport,
+> préfixes NON_JSON / INTERNAL VALIDATION FAILED), `reject-once` (preuves disque
+> — manifeste de commande requis, docs HTTP portables : un rejet mécanique coaché
+> par tâche, mémo run-scoped `ctx.mechanicalResultRejections` partagé au fork,
+> puis la répétition identique passe au LLM avec les faits), `requires-review`
+> (déclencheurs prose — styling web, forme du conteneur JSON : ne rejettent plus
+> jamais seuls, ils court-circuitent le trust fast-path et attachent un bloc
+> `MECHANICAL GATE FINDINGS` au verdict complet — l'architecture checkGroundTruth,
+> §3.2 appliqué). Les lectures workspace sont mises en cache par cycle (le
+> manifeste n'est plus lu deux fois par les gates commande + forme JSON). Le
+> merge du manifeste a UNE définition (§3.4) : identité d'entrée par shape et
+> politiques d'entrée corrompue documentées côte à côte dans
+> `src/contracts/probeManifest.ts`, les trois écrivains (write_file,
+> record_probe, fetch_url) consomment le même module, divergences délibérées
+> épinglées par tests. Suite complète : 1514 passed / 8 skipped, typecheck +
+> lint + docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

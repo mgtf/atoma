@@ -8,9 +8,19 @@ import {
   DECORATED_CMD_RE,
   PORT_BEARING_STDOUT_RE,
   PROBE_MANIFEST_FILENAME,
+  appendHttpProbe,
+  mergeProbeManifestWrite,
+  mergeShellProbe,
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
 } from '../contracts/probeManifest.js';
+
+// The manifest MERGE semantics (entry identity per shape + the three
+// corrupt-input policies) are contract, not tool plumbing: ONE definition in
+// src/contracts/probeManifest.ts, shared by write_file, record_probe and
+// fetch_url record:true. Re-exported so existing consumers/tests importing
+// them from this module keep working.
+export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe };
 import { elementForTool } from '../contracts/toolTaxonomy.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
@@ -97,64 +107,6 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
       return { ok: true, path, bytes: finalContent.length };
     },
   };
-}
-
-export function mergeProbeManifestWrite(existingRaw: string, incomingRaw: string): string {
-  let existing: unknown;
-  let incoming: unknown;
-  try {
-    existing = JSON.parse(existingRaw);
-    incoming = JSON.parse(incomingRaw);
-  } catch {
-    return incomingRaw;
-  }
-  const existingEntries =
-    existing && typeof existing === 'object' && !Array.isArray(existing)
-      ? (existing as Record<string, unknown>)['entries']
-      : undefined;
-  const incomingEntries =
-    incoming && typeof incoming === 'object' && !Array.isArray(incoming)
-      ? (incoming as Record<string, unknown>)['entries']
-      : undefined;
-  if (!Array.isArray(existingEntries) || !Array.isArray(incomingEntries)) return incomingRaw;
-
-  const merged = [...existingEntries];
-  for (const entry of incomingEntries) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-      if (!merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry))) {
-        merged.push(entry);
-      }
-      continue;
-    }
-    const record = entry as Record<string, unknown>;
-    let replaceIndex = -1;
-    if (typeof record['cmd'] === 'string') {
-      replaceIndex = merged.findIndex(
-        (candidate) =>
-          candidate !== null &&
-          typeof candidate === 'object' &&
-          !Array.isArray(candidate) &&
-          (candidate as Record<string, unknown>)['cmd'] === record['cmd']
-      );
-    } else if (record['probe'] === 'web') {
-      replaceIndex = merged.findIndex(
-        (candidate) =>
-          candidate !== null &&
-          typeof candidate === 'object' &&
-          !Array.isArray(candidate) &&
-          (candidate as Record<string, unknown>)['probe'] === 'web' &&
-          (candidate as Record<string, unknown>)['file'] === record['file'] &&
-          (candidate as Record<string, unknown>)['smoke'] === record['smoke']
-      );
-    } else if (
-      merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(record))
-    ) {
-      continue;
-    }
-    if (replaceIndex >= 0) merged[replaceIndex] = record;
-    else merged.push(record);
-  }
-  return `${JSON.stringify({ ...(incoming as Record<string, unknown>), version: 1, entries: merged }, null, 2)}\n`;
 }
 
 /**
@@ -2419,73 +2371,6 @@ function sourceStartsLongRunningServer(source: string, scriptPath: string): bool
   // Python servers do not share the Node readiness marker. These are the
   // standard blocking entrypoints; merely importing Flask/uvicorn is not enough.
   return /\.serve_forever\s*\(|\b(?:app|web)\.run\s*\(|\buvicorn\.run\s*\(/.test(source);
-}
-
-/**
- * Merge one shell entry into a probe manifest, by `cmd`.
- *
- * Shell entries MERGE (an invocation re-run after a fix should replace its
- * stale record, not accumulate duplicates); http entries APPEND in order,
- * which is why this helper is shell-only. Pure, so the merge semantics are
- * testable without a filesystem.
- */
-export function mergeShellProbe(
-  existingRaw: string | null,
-  entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string },
-  supersedes?: string
-): string {
-  let doc: { version: number; entries: Record<string, unknown>[] } = { version: 1, entries: [] };
-  if (existingRaw) {
-    try {
-      const parsed = JSON.parse(existingRaw) as typeof doc;
-      if (parsed && Array.isArray(parsed.entries)) doc = { version: 1, entries: parsed.entries };
-    } catch {
-      // A corrupt manifest is replaced rather than appended to: half a JSON
-      // document is not a record anyone can replay.
-    }
-  }
-  if (supersedes && supersedes !== entry.cmd) {
-    doc.entries = doc.entries.filter((e) => e['cmd'] !== supersedes);
-  }
-  const i = doc.entries.findIndex((e) => e['cmd'] === entry.cmd);
-  if (i >= 0) doc.entries[i] = entry;
-  else doc.entries.push(entry);
-  return JSON.stringify(doc, null, 2) + '\n';
-}
-
-/**
- * Append one HTTP observation to a probe manifest. Unlike shell commands,
- * HTTP entries are a stateful sequence: POST /items may legitimately appear
- * several times with 201, 400 and 409, so they never merge by route.
- */
-export function appendHttpProbe(
-  existingRaw: string | null,
-  entry: {
-    probe: 'http';
-    method: string;
-    path: string;
-    status: number;
-    body?: string;
-    note?: string;
-  }
-): string {
-  let doc: { version: number; entries: Record<string, unknown>[] } = {
-    version: 1,
-    entries: [],
-  };
-  if (existingRaw) {
-    try {
-      const parsed = JSON.parse(existingRaw) as typeof doc;
-      if (parsed && Array.isArray(parsed.entries)) {
-        doc = { version: 1, entries: parsed.entries };
-      }
-    } catch {
-      // A corrupt manifest is replaced rather than extended with more
-      // plausible-looking data.
-    }
-  }
-  doc.entries.push(entry);
-  return JSON.stringify(doc, null, 2) + '\n';
 }
 
 /**

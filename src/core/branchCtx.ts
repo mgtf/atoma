@@ -70,6 +70,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     string[]
   >());
   const mechanicalPlanRejections = (ctx.mechanicalPlanRejections ??= new Set<string>());
+  const mechanicalResultRejections = (ctx.mechanicalResultRejections ??= new Set<string>());
 
   const out: RunContext = {
     logger: ctx.logger,
@@ -78,6 +79,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     limits: ctx.limits,
     dispatchedScriptSignatures,
     mechanicalPlanRejections,
+    mechanicalResultRejections,
     ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
     // Field-enumeration hazard, measured: this rebuild once dropped
     // `requireObservedToolAction`, and because the flag is only SET on the

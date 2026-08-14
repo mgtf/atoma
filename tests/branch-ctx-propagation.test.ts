@@ -48,6 +48,18 @@ describe('forkBranch — field propagation', () => {
     expect(root.mechanicalPlanRejections?.has('subtask|tool')).toBe(true);
   });
 
+  it('shares ONE mechanicalResultRejections set across nested forks', () => {
+    // The reject-once RESULT gates memoise their single free rejection here;
+    // a branch-scoped copy would re-reject byte-identically on every replan,
+    // which is the exact cascade the memo exists to prevent.
+    const root = makeCtx();
+    const outer = forkBranch(root, 'outer');
+    const inner = forkBranch(outer, 'inner');
+    (inner.mechanicalResultRejections ??= new Set()).add('required-command-manifest|task');
+    expect(outer.mechanicalResultRejections?.has('required-command-manifest|task')).toBe(true);
+    expect(root.mechanicalResultRejections?.has('required-command-manifest|task')).toBe(true);
+  });
+
   it('forwards run-stat signals through a double fork', () => {
     const seen: string[] = [];
     const root = { ...makeCtx(), recordRunStat: (signal: string) => seen.push(signal) };

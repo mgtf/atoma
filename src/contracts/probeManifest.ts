@@ -616,3 +616,181 @@ export function manifestReaderLines(): string[] {
     `ahead of the mismatch gate).`,
   ];
 }
+
+/* ────────────────── merge semantics — ONE definition ────────────────── */
+/**
+ * ENTRY IDENTITY — one rule per shape, shared by every manifest writer
+ * (write_file's structural merge, record_probe, fetch_url record:true):
+ *
+ *   SHELL  keyed by `cmd` — re-running an invocation after a fix REPLACES
+ *          its stale record in place, never accumulating duplicates.
+ *   WEB    keyed by `file` + `smoke` — the same validation re-run REPLACES
+ *          its record; a different smoke on the same file is a DISTINCT
+ *          validation and keeps its own entry.
+ *   HTTP   NO identity: an HTTP manifest is a SEQUENCE. The same route
+ *          legitimately appears several times with different outcomes (a
+ *          real CRUD manifest recorded POST /recipes four times: 201, 400
+ *          malformed, 400 missing-fields, repeat), so the machine recorder
+ *          ALWAYS APPENDS in order and never merges by route.
+ *
+ * CORRUPT-INPUT POLICIES — three, deliberately DIFFERENT, documented side
+ * by side because they used to live in three independent implementations
+ * inside `src/tools/builtin.ts` and read as drift:
+ *
+ *   - `mergeProbeManifestWrite` (write_file): when either document fails to
+ *     parse or lacks an entries array, PASS THE INCOMING DOCUMENT THROUGH
+ *     verbatim. The input is MODEL-owned: the model may be legitimately
+ *     REPAIRING a structurally broken manifest, and silently discarding its
+ *     whole document would fight that repair.
+ *   - `mergeShellProbe` (record_probe) and `appendHttpProbe` (fetch_url
+ *     record:true): a corrupt/absent existing manifest RESETS to a fresh
+ *     `{version: 1, entries: []}`. The input is MACHINE-owned: half a JSON
+ *     document is not a record anyone can replay, and these writers must
+ *     leave a valid manifest behind them.
+ *
+ * PRESERVED DIVERGENCES (moved verbatim; possibly accidental, kept because
+ * this consolidation is byte-compatible by contract):
+ *   - write_file DEDUPES an http/unknown-shape entry that is an EXACT
+ *     JSON.stringify duplicate of an existing one, while the machine append
+ *     path keeps exact duplicates (the SEQUENCE contract above).
+ *   - `mergeShellProbe`/`appendHttpProbe` rebuild the top-level document as
+ *     `{version, entries}` (dropping any extra top-level fields), while
+ *     `mergeProbeManifestWrite` preserves the INCOMING document's extra
+ *     top-level fields and forces `version: 1`.
+ *   - `mergeShellProbe` reads `entry['cmd']` unguarded, so an existing
+ *     manifest already holding a non-object entry (reachable only through
+ *     write_file's tolerant path, which preserves such entries for the
+ *     health check to report) makes it throw, where
+ *     `mergeProbeManifestWrite` handles the same entry null-safely.
+ */
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** SHELL identity — does `candidate` occupy the identity slot for `cmd`? */
+export function matchesShellIdentity(candidate: unknown, cmd: string): boolean {
+  return isPlainRecord(candidate) && candidate['cmd'] === cmd;
+}
+
+/** WEB identity — does `candidate` occupy the identity slot for file+smoke? */
+export function matchesWebIdentity(candidate: unknown, file: unknown, smoke: unknown): boolean {
+  return (
+    isPlainRecord(candidate) &&
+    candidate['probe'] === 'web' &&
+    candidate['file'] === file &&
+    candidate['smoke'] === smoke
+  );
+}
+
+/**
+ * Structural merge for a MODEL-authored whole-document manifest write
+ * (write_file). Shell entries replace by `cmd`, web entries replace by
+ * `file`+`smoke`, anything else appends unless it is an exact duplicate.
+ * Corrupt input → the incoming document passes through verbatim (see the
+ * policy block above).
+ */
+export function mergeProbeManifestWrite(existingRaw: string, incomingRaw: string): string {
+  let existing: unknown;
+  let incoming: unknown;
+  try {
+    existing = JSON.parse(existingRaw);
+    incoming = JSON.parse(incomingRaw);
+  } catch {
+    return incomingRaw;
+  }
+  const existingEntries = isPlainRecord(existing) ? existing['entries'] : undefined;
+  const incomingEntries = isPlainRecord(incoming) ? incoming['entries'] : undefined;
+  if (!Array.isArray(existingEntries) || !Array.isArray(incomingEntries)) return incomingRaw;
+
+  const merged = [...existingEntries];
+  for (const entry of incomingEntries) {
+    if (!isPlainRecord(entry)) {
+      if (!merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry))) {
+        merged.push(entry);
+      }
+      continue;
+    }
+    let replaceIndex = -1;
+    if (typeof entry['cmd'] === 'string') {
+      const cmd = entry['cmd'];
+      replaceIndex = merged.findIndex((candidate) => matchesShellIdentity(candidate, cmd));
+    } else if (entry['probe'] === 'web') {
+      replaceIndex = merged.findIndex((candidate) =>
+        matchesWebIdentity(candidate, entry['file'], entry['smoke'])
+      );
+    } else if (merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(entry))) {
+      continue;
+    }
+    if (replaceIndex >= 0) merged[replaceIndex] = entry;
+    else merged.push(entry);
+  }
+  return `${JSON.stringify({ ...(incoming as Record<string, unknown>), version: 1, entries: merged }, null, 2)}\n`;
+}
+
+/**
+ * Merge one MACHINE-recorded shell entry into a probe manifest, by `cmd`
+ * (record_probe). `supersedes` removes exactly the named stale SHELL entry
+ * — only after its corrected replacement ran, and never an http/web entry,
+ * which carry no `cmd`. Corrupt/absent existing manifest → reset (see the
+ * policy block above).
+ */
+export function mergeShellProbe(
+  existingRaw: string | null,
+  entry: { cmd: string; exitCode: number; stdout?: string; stderr?: string; note?: string },
+  supersedes?: string
+): string {
+  let doc: { version: number; entries: Record<string, unknown>[] } = { version: 1, entries: [] };
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw) as typeof doc;
+      if (parsed && Array.isArray(parsed.entries)) doc = { version: 1, entries: parsed.entries };
+    } catch {
+      // A corrupt manifest is replaced rather than appended to: half a JSON
+      // document is not a record anyone can replay.
+    }
+  }
+  if (supersedes && supersedes !== entry.cmd) {
+    doc.entries = doc.entries.filter((e) => e['cmd'] !== supersedes);
+  }
+  const i = doc.entries.findIndex((e) => e['cmd'] === entry.cmd);
+  if (i >= 0) doc.entries[i] = entry;
+  else doc.entries.push(entry);
+  return JSON.stringify(doc, null, 2) + '\n';
+}
+
+/**
+ * Append one MACHINE-recorded HTTP observation to a probe manifest
+ * (fetch_url record:true). Never merges — HTTP entries are an ordered
+ * SEQUENCE (see the identity block above). Corrupt/absent existing
+ * manifest → reset.
+ */
+export function appendHttpProbe(
+  existingRaw: string | null,
+  entry: {
+    probe: 'http';
+    method: string;
+    path: string;
+    status: number;
+    body?: string;
+    note?: string;
+  }
+): string {
+  let doc: { version: number; entries: Record<string, unknown>[] } = {
+    version: 1,
+    entries: [],
+  };
+  if (existingRaw) {
+    try {
+      const parsed = JSON.parse(existingRaw) as typeof doc;
+      if (parsed && Array.isArray(parsed.entries)) {
+        doc = { version: 1, entries: parsed.entries };
+      }
+    } catch {
+      // A corrupt manifest is replaced rather than extended with more
+      // plausible-looking data.
+    }
+  }
+  doc.entries.push(entry);
+  return JSON.stringify(doc, null, 2) + '\n';
+}

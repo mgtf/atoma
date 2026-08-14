@@ -16,6 +16,11 @@ import {
 } from '../src/tools/builtin.js';
 import {
   PROBE_MANIFEST_FILENAME,
+  appendHttpProbe as contractAppendHttpProbe,
+  matchesShellIdentity,
+  matchesWebIdentity,
+  mergeProbeManifestWrite as contractMergeProbeManifestWrite,
+  mergeShellProbe as contractMergeShellProbe,
   validateProbeManifest,
 } from '../src/contracts/probeManifest.js';
 
@@ -438,6 +443,120 @@ describe('appendHttpProbe — sequence semantics', () => {
       })
     ) as { entries: Record<string, unknown>[] };
     expect(out.entries.map((entry) => entry['status'])).toEqual([201, 400]);
+  });
+});
+
+describe('one merge contract — all three consumers share src/contracts/probeManifest.ts', () => {
+  it('builtin re-exports ARE the contract functions, not copies', () => {
+    expect(mergeProbeManifestWrite).toBe(contractMergeProbeManifestWrite);
+    expect(mergeShellProbe).toBe(contractMergeShellProbe);
+    expect(appendHttpProbe).toBe(contractAppendHttpProbe);
+  });
+
+  it('the same shell entry lands identically via write_file merge and record_probe merge', () => {
+    const existing = JSON.stringify({
+      version: 1,
+      entries: [
+        { cmd: 'node cli.js data.csv', exitCode: 0, stdout: 'old' },
+        { probe: 'http', method: 'GET', path: '/status', status: 200 },
+      ],
+    });
+    const entry = { cmd: 'node cli.js data.csv', exitCode: 0, stdout: 'new' };
+    const viaWrite = JSON.parse(
+      mergeProbeManifestWrite(existing, JSON.stringify({ version: 1, entries: [entry] }))
+    ) as { entries: unknown[] };
+    const viaRecord = JSON.parse(mergeShellProbe(existing, entry)) as { entries: unknown[] };
+    expect(viaWrite.entries).toEqual(viaRecord.entries);
+    expect(viaWrite.entries).toHaveLength(2);
+  });
+
+  it('shell identity is `cmd` alone — an http entry echoing the text elsewhere never matches', () => {
+    expect(matchesShellIdentity({ cmd: 'node a.js', exitCode: 0 }, 'node a.js')).toBe(true);
+    expect(matchesShellIdentity({ cmd: 'node b.js', exitCode: 0 }, 'node a.js')).toBe(false);
+    expect(matchesShellIdentity(null, 'node a.js')).toBe(false);
+    expect(
+      matchesShellIdentity(
+        { probe: 'http', method: 'GET', path: 'node a.js', status: 200 },
+        'node a.js'
+      )
+    ).toBe(false);
+  });
+
+  it('web identity is file+smoke — the same pair replaces, a different smoke stays distinct', () => {
+    const web = (smoke: string, expected: string) => ({
+      probe: 'web',
+      file: 'index.html',
+      smoke,
+      expected,
+    });
+    const existing = JSON.stringify({
+      version: 1,
+      entries: [web('window.__test.ok === true', 'true')],
+    });
+    const replaced = JSON.parse(
+      mergeProbeManifestWrite(
+        existing,
+        JSON.stringify({ version: 1, entries: [web('window.__test.ok === true', 'false')] })
+      )
+    ) as { entries: Record<string, unknown>[] };
+    expect(replaced.entries).toHaveLength(1);
+    expect(replaced.entries[0]!['expected']).toBe('false');
+    const appended = JSON.parse(
+      mergeProbeManifestWrite(
+        existing,
+        JSON.stringify({ version: 1, entries: [web('window.__test.count === 3', 'true')] })
+      )
+    ) as { entries: Record<string, unknown>[] };
+    expect(appended.entries).toHaveLength(2);
+    expect(
+      matchesWebIdentity(
+        web('window.__test.ok === true', 'true'),
+        'index.html',
+        'window.__test.ok === true'
+      )
+    ).toBe(true);
+    expect(
+      matchesWebIdentity(
+        web('window.__test.ok === true', 'true'),
+        'index.html',
+        'window.__test.count === 3'
+      )
+    ).toBe(false);
+  });
+
+  it('supersedes removes exactly the stale SHELL entry and can never touch http/web entries', () => {
+    const existing = JSON.stringify({
+      version: 1,
+      entries: [
+        { probe: 'http', method: 'GET', path: 'node stale.js', status: 200 },
+        { probe: 'web', file: 'node stale.js', smoke: 'window.__test.ok === true', expected: 'true' },
+        { cmd: 'node stale.js', exitCode: 1, stdout: 'oops' },
+      ],
+    });
+    const out = JSON.parse(
+      mergeShellProbe(existing, { cmd: 'node fixed.js', exitCode: 0, stdout: 'ok' }, 'node stale.js')
+    ) as { entries: Record<string, unknown>[] };
+    expect(out.entries).toHaveLength(3);
+    expect(out.entries[0]!['probe']).toBe('http');
+    expect(out.entries[1]!['probe']).toBe('web');
+    expect(out.entries[2]!['cmd']).toBe('node fixed.js');
+  });
+
+  it('PRESERVED DIVERGENCE: write_file dedupes an exact-duplicate http entry, the machine append keeps it (SEQUENCE)', () => {
+    const httpEntry = {
+      probe: 'http' as const,
+      method: 'POST',
+      path: '/items',
+      status: 201,
+      body: '{"id":1}',
+    };
+    const existing = JSON.stringify({ version: 1, entries: [httpEntry] });
+    const viaWrite = JSON.parse(
+      mergeProbeManifestWrite(existing, JSON.stringify({ version: 1, entries: [httpEntry] }))
+    ) as { entries: unknown[] };
+    const viaFetch = JSON.parse(appendHttpProbe(existing, httpEntry)) as { entries: unknown[] };
+    expect(viaWrite.entries).toHaveLength(1);
+    expect(viaFetch.entries).toHaveLength(2);
   });
 });
 

@@ -656,6 +656,14 @@ export async function llmVerdict(args: {
    */
   groundTruthBlock?: string;
   /**
+   * Rendered `== MECHANICAL GATE FINDINGS ==` block from the result-gate
+   * pipeline (resultGates.ts). Distinct from `groundTruthBlock` on purpose:
+   * supplying THAT field suppresses the validator-side ground-truth probe,
+   * while gate findings must never do so — an untrusted child still gets its
+   * independent probe alongside the findings.
+   */
+  mechanicalFindingsBlock?: string;
+  /**
    * The persistent skill that drove this run, when there is one. RESULT
    * verdicts render it as an "ACTIVE SKILL" block and ask the validator
    * for the `activeSkillFollowed` adherence signal (usage-conditioned
@@ -727,6 +735,7 @@ export async function llmVerdict(args: {
     args.targetContext ? `Delegation target(s):\n${args.targetContext}` : '',
     `${args.subject}: ${JSON.stringify(args.payload)}`,
     groundTruthBlock,
+    args.mechanicalFindingsBlock ?? '',
     // Adherence is a RESULT-phase judgment: a plan merely STATES intent to
     // follow the recipe, only the executed work can demonstrate it. Plan
     // verdicts therefore never carry the block even when a skill is active.

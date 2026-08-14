@@ -416,6 +416,15 @@ export interface RunContext {
    * `dispatchedScriptSignatures` (replans build fresh instances).
    */
   mechanicalPlanRejections?: Set<string>;
+  /**
+   * Run-scoped memo of (gate, task) pairs already MECHANICALLY rejected by a
+   * `reject-once` RESULT gate (resultGates.ts). Same rationale as the plan
+   * memo above: the first offense earns one coached mechanical rejection,
+   * and a byte-identical repeat is handed to the LLM validator with the
+   * facts attached instead of tripping the repeat-rejection tracker.
+   * Shared across forks by `forkBranch` (replans build fresh instances).
+   */
+  mechanicalResultRejections?: Set<string>;
   readonly signal: AbortSignal;
   readonly llm: LlmClient;
   readonly limits: Limits;
