@@ -294,6 +294,12 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   seed. MCP `promoteSkills:true` maps to the same explicit env opt-in.
 - Untrusted scripts run through the normal L1 tool loop. Trusted scripts may
   dispatch deterministically only after all preflight gates pass.
+- Output intent is STRUCTURED first: plans declare `outputs` on every
+  file-mutating subtask (threaded onto the child Task) and compilers declare
+  `writes` in the promotion envelope, cross-checked once against the static
+  resolver and persisted in `_meta.json`. The lexical grammar in
+  `scriptTargets.ts` is the FALLBACK for legacy plans/scripts — never grow it
+  a new clause for a phrasing the declared field would have carried.
 - Script stdout ends with exactly one JSON envelope containing non-null `output`
   and string `summary`. Malformed envelopes and `FAILED`/`ERROR` summary prefixes
   fall back to the validated LLM path; do not invent a separate `ok` field.

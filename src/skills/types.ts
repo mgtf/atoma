@@ -125,6 +125,8 @@ export interface Skill {
   readonly promotionRefusedGeneration?: string;
   /** Mirrors `SkillMeta.compiledGeneration`; see there. */
   readonly compiledGeneration?: string;
+  /** Mirrors `SkillMeta.declaredWrites`; see there. */
+  readonly declaredWrites?: readonly string[];
   /** Mirrors `SkillMeta.provenance`; see there. */
   readonly provenance?: SkillProvenance;
   /** Mirrors `SkillMeta.directFailures`; see there for semantics. */
@@ -229,4 +231,15 @@ export interface SkillMeta {
   readonly matches?: number;
   /** ISO timestamp of the most recent prefilter match. */
   readonly lastMatchedAt?: string;
+  /**
+   * `kind: script` only — workspace-relative paths the compiled body writes,
+   * DECLARED by the compiler in its promotion envelope and cross-checked once
+   * at promotion against the static write-target resolver (any statically
+   * proven basename missing from the declaration is added, so the effective
+   * set never under-claims). Consumed by the match-time capability test
+   * (`scriptCanServeSubtask`) as an EXACT write list — no `opaque` escape
+   * hatch — where legacy scripts without it fall back to the static body
+   * scan. Rebuilt wholesale on every promotion; meaningless on `kind: llm`.
+   */
+  readonly declaredWrites?: readonly string[];
 }

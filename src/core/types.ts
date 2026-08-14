@@ -4,6 +4,17 @@ export interface Task {
   readonly description: string;
   readonly inputs?: Record<string, unknown>;
   readonly constraints?: string[];
+  /**
+   * Workspace-relative paths this subtask is expected to CREATE or MODIFY,
+   * declared structurally by the plan that authored it. When present and
+   * non-empty it is AUTHORITATIVE for mutation classification and the
+   * deterministic-dispatch target gates; when absent or empty, consumers
+   * fall back to the lexical grammar over `description`
+   * (`subtaskMutatesFiles` / `subtaskMutationTargetPaths`) — output intent
+   * used to travel ONLY as prose and be regex-recovered, which cost one live
+   * run per unrecognised phrasing (2026-08-14 review §3.3).
+   */
+  readonly outputs?: readonly string[];
 }
 
 export interface ToolCall {
@@ -51,6 +62,8 @@ export interface SubtaskSpec {
   readonly description: string;
   readonly inputs?: Record<string, unknown>;
   readonly preferredChild?: string;
+  /** See `Task.outputs` — threaded verbatim onto the child Task. */
+  readonly outputs?: readonly string[];
 }
 
 /**

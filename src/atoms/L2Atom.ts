@@ -520,7 +520,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create"|"mutualize", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L1-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L1-name>"?, "inputs": {}?, "outputs": ["<file the subtask creates/modifies>", ...]?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -638,9 +638,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const l1Type = this.resolveL1ForSubtask(subtask, strategy, parentTask, idx, ctx);
     this.triedChildren.mark(l1Type.name);
     const l1 = L1Atom.fromType(l1Type);
-    const subTask: Task = subtask.inputs
-      ? { description: subtask.description, inputs: subtask.inputs }
-      : { description: subtask.description };
+    const subTask: Task = {
+      description: subtask.description,
+      ...(subtask.inputs ? { inputs: subtask.inputs } : {}),
+      // Structured output intent travels with the task: the skill dispatch
+      // gates read it as authoritative instead of regex-recovering it.
+      ...(subtask.outputs && subtask.outputs.length > 0 ? { outputs: subtask.outputs } : {}),
+    };
 
     // Skill prefilter (C2a). When a SkillRegistry is wired and the
     // child has at least one persisted skill, run a Haiku

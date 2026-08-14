@@ -513,7 +513,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?, "outputs": ["<file the subtask creates/modifies>", ...]?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
@@ -644,9 +644,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const l2 = L2Atom.fromType(l2Type, this.registry, this.l2Peers, this.skillRegistry);
     for (const p of this.l2Peers) l2.addPeer(p);
     this.l2Peers.push(l2);
-    const subTask: Task = subtask.inputs
-      ? { description: subtask.description, inputs: subtask.inputs }
-      : { description: subtask.description };
+    const subTask: Task = {
+      description: subtask.description,
+      ...(subtask.inputs ? { inputs: subtask.inputs } : {}),
+      // Structured output intent travels with the task: the skill dispatch
+      // gates read it as authoritative instead of regex-recovering it.
+      ...(subtask.outputs && subtask.outputs.length > 0 ? { outputs: subtask.outputs } : {}),
+    };
     // Fork a branch-scoped ctx so the viz can render each L2 subtask
     // (and its downstream L1 tree) as its own lane.
     const branchId = randomUUID();

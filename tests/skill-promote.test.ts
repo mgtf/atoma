@@ -175,6 +175,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // every validator approved it, because the artefact itself was fine. A
     // markdown recipe adapts; a compiled literal cannot.
     const compileCall = ctx.llm.calls.at(-1)!;
+    expect(compileCall.userContent).toMatch(/"writes"/); // compiler declares its write list
     expect(compileCall.userContent).toMatch(/NO TASK-SPECIFIC LITERALS/);
     expect(compileCall.userContent).toMatch(/Never hardcode a filename/);
     expect(compileCall.userContent).toMatch(/exit NON-ZERO rather than/);
@@ -242,6 +243,39 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // maxTokens: at the default 'high' a compile ran ~7 min and got killed
     // by the run deadline (rehearsal runs 4 and 5).
     expect(compileCall.params?.effort).toBe('medium');
+  });
+
+  it('persists compiler-declared writes, unioned with statically proven targets (review §3.3)', async () => {
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'web-build-loop', confidence: 'high', reasoning: 'fit' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'built' }));
+    // The compiler declares README.md but forgets the manifest its own body
+    // provably writes — the promotion cross-check must persist the UNION, or
+    // an under-claiming list turns into permanent false refusals at match time.
+    const BODY = [
+      'const fs = require("fs");',
+      'const path = require("path");',
+      "const manifestPath = path.join(process.cwd(), '.atoma-probes.json');",
+      'fs.writeFileSync(manifestPath, JSON.stringify({version: 1, entries: []}));',
+      'console.log(JSON.stringify({output: "ok", summary: "done"}));',
+    ].join('\n');
+    ctx.llm.enqueueText(
+      JSON.stringify({ promotable: true, language: 'node', body: BODY, writes: ['README.md'] })
+    );
+
+    await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
+
+    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    expect(after.kind).toBe('script');
+    expect(after.declaredWrites).toEqual(['README.md', '.atoma-probes.json']);
   });
 
   it('does NOT promote when the skill has any failures recorded (gate prevents thrash after demotion)', async () => {

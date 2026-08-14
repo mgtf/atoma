@@ -329,6 +329,45 @@ export function subtaskMutationTargetPaths(description: string): string[] {
 }
 
 /**
+ * Output intent for one subtask, from the STRUCTURED channel when the plan
+ * declared it, from the lexical grammar otherwise.
+ *
+ * The plan call authors both the description AND (since 2026-08-14, review
+ * §3.3) an optional `outputs` array of workspace-relative paths the subtask
+ * must create or modify. When present and non-empty it is AUTHORITATIVE:
+ * mutation classification and the target set come from it verbatim, and the
+ * incident-grown grammar below never runs. When absent (legacy plans, models
+ * that ignore the field) the lexical grammar is the fallback. An empty or
+ * blank-only array is treated as UNDECLARED, not as read-only: a lazy `[]`
+ * on a genuinely mutating subtask would otherwise skip the before/after
+ * dispatch gate and reopen the round-5 phantom-success class.
+ */
+export interface SubtaskOutputIntent {
+  readonly mutating: boolean;
+  /** Full workspace-relative output paths (deduped, order preserved). */
+  readonly targetPaths: readonly string[];
+  readonly source: 'declared' | 'lexical';
+}
+
+export function subtaskOutputIntent(subTask: {
+  readonly description: string;
+  readonly outputs?: readonly string[];
+}): SubtaskOutputIntent {
+  const declared = [
+    ...new Set((subTask.outputs ?? []).map((p) => p.trim()).filter((p) => p.length > 0)),
+  ];
+  if (declared.length > 0) {
+    return { mutating: true, targetPaths: declared, source: 'declared' };
+  }
+  const mutating = subtaskMutatesFiles(subTask.description);
+  return {
+    mutating,
+    targetPaths: mutating ? subtaskMutationTargetPaths(subTask.description) : [],
+    source: 'lexical',
+  };
+}
+
+/**
  * Match-time capability test. `false` = do not offer this script for this
  * subtask.
  *
@@ -337,12 +376,35 @@ export function subtaskMutationTargetPaths(description: string): string[] {
  * verifier through on a subtask needing two files it can never write.
  * Measured over the 14 archived gate fallbacks of rounds 6-7: ALL refuses
  * 14/14, ANY 12/14, and neither touches the 2 legitimate dispatches.
+ *
+ * `opts.outputs` is the subtask's structured output declaration (wins over the
+ * lexical grammar); `opts.declaredWrites` is the COMPILER-declared write list
+ * persisted at promotion (wins over the static body scan — the scan stays the
+ * fallback for legacy scripts, with its opaque escape hatch).
  */
-export function scriptCanServeSubtask(body: string, description: string): boolean {
-  const phaseDescription = stripLiteralContractBlock(description);
-  if (!subtaskMutatesFiles(phaseDescription)) return true; // nothing to protect
-  const targets = subtaskMutationTargets(phaseDescription);
+export function scriptCanServeSubtask(
+  body: string,
+  description: string,
+  opts?: {
+    readonly outputs?: readonly string[];
+    readonly declaredWrites?: readonly string[];
+  }
+): boolean {
+  const intent = subtaskOutputIntent({
+    description: stripLiteralContractBlock(description),
+    ...(opts?.outputs ? { outputs: opts.outputs } : {}),
+  });
+  if (!intent.mutating) return true; // nothing to protect
+  const targets = [...new Set(intent.targetPaths.map((t) => path.basename(t)))];
   if (targets.length === 0) return true; // no target proven
+  const declaredWrites = (opts?.declaredWrites ?? [])
+    .map((p) => path.basename(p.trim()))
+    .filter((p) => p.length > 0);
+  if (declaredWrites.length > 0) {
+    // Compiler-declared writes are exact: no opaque escape hatch needed.
+    const writes = new Set(declaredWrites);
+    return targets.every((n) => writes.has(n));
+  }
   const { paths, opaque } = scriptWriteTargets(body);
   if (opaque) return true; // not provable
   return targets.every((n) => paths.has(n));

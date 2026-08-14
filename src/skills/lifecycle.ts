@@ -1,13 +1,12 @@
+import { basename } from 'node:path';
 import type { GenerationParams, Result, RunContext, Task } from '../core/types.js';
 import type { L1Atom } from '../atoms/L1Atom.js';
 import type { Skill } from './types.js';
 import {
   scriptCanServeSubtask,
   scriptWriteTargets,
-  subtaskMutatesFiles,
-  subtaskMutationTargetPaths,
-  subtaskMutationTargets,
   subtaskNamedFilePaths,
+  subtaskOutputIntent,
 } from './scriptTargets.js';
 import { SkillRegistry } from './registry.js';
 import {
@@ -806,7 +805,9 @@ export class SkillLifecycle {
     args.ctx.logger.info(
       `[${this.host.name}] skill "${args.skillId}" eligible for promotion (${skill.successes} successes / 0 failures); attempting compile`
     );
-    let compiled: { promotable: true; language: 'node'; body: string } | { promotable: false; reason: string };
+    let compiled:
+      | { promotable: true; language: 'node'; body: string; writes?: readonly string[] }
+      | { promotable: false; reason: string };
     try {
       compiled = await this.compileSkillToScript({
         skill,
@@ -900,6 +901,27 @@ export class SkillLifecycle {
       });
       return;
     }
+    // Cross-check the compiler's declared writes ONCE, here, against the
+    // static resolver — the match-time capability test then consumes the
+    // persisted list as EXACT and the ~150-line static grammar stays a
+    // legacy fallback. Direction of repair: a statically PROVEN basename
+    // missing from the declaration is ADDED (an under-claiming list would
+    // turn into permanent false refusals at match time); extra declared
+    // paths are kept verbatim (the compiler knows dynamic destinations the
+    // scan cannot see).
+    const declaredWrites = (() => {
+      const declared = [...(compiled.writes ?? [])];
+      const statically = scriptWriteTargets(compiled.body);
+      const declaredBase = new Set(declared.map((w) => basename(w)));
+      const missing = [...statically.paths].filter((b) => !declaredBase.has(b));
+      if (declared.length > 0 && missing.length > 0) {
+        args.ctx.logger.warn(
+          `[${this.host.name}] skill "${args.skillId}": compiler under-declared its writes (missing ${missing.join(', ')}) — persisting the union`
+        );
+      }
+      const union = [...declared, ...missing];
+      return union.length > 0 ? union : undefined;
+    })();
     this.skills.promoteToScript({
       l1Name: args.l1Name,
       skillId: args.skillId,
@@ -907,6 +929,7 @@ export class SkillLifecycle {
       scriptBody: compiled.body,
       compiledGeneration: COMPILE_PROMPT_GENERATION,
       compiledBy: this.host.model,
+      ...(declaredWrites ? { declaredWrites } : {}),
     });
     args.ctx.logger.info(
       `[${this.host.name}] skill "${args.skillId}" promoted to kind:script (${compiled.language}, ${compiled.body.length} chars)`
@@ -940,7 +963,7 @@ export class SkillLifecycle {
     result: Result;
     ctx: RunContext;
   }): Promise<
-    | { promotable: true; language: 'node'; body: string }
+    | { promotable: true; language: 'node'; body: string; writes?: readonly string[] }
     | { promotable: false; reason: string }
   > {
     const userContent = buildCompileSkillPrompt({
@@ -1005,7 +1028,26 @@ export class SkillLifecycle {
         reason: `compile response has invalid language=${String(language)} or empty body`,
       };
     }
-    return { promotable: true, language: 'node', body };
+    // Compiler-declared write paths (review §3.3): tolerated as absent/null
+    // for backward compatibility; blank entries dropped. The caller
+    // cross-checks against the static resolver before persisting.
+    const rawWrites = obj['writes'];
+    const writes = Array.isArray(rawWrites)
+      ? [
+          ...new Set(
+            rawWrites
+              .filter((w): w is string => typeof w === 'string')
+              .map((w) => w.trim())
+              .filter((w) => w.length > 0)
+          ),
+        ]
+      : undefined;
+    return {
+      promotable: true,
+      language: 'node',
+      body,
+      ...(writes && writes.length > 0 ? { writes } : {}),
+    };
   }
 
   /**
@@ -1107,10 +1149,13 @@ export class SkillLifecycle {
           if (
             s.kind === 'script' &&
             shouldTrustSkill(s) &&
-            !scriptCanServeSubtask(s.body, subTask.description)
+            !scriptCanServeSubtask(s.body, subTask.description, {
+              ...(subTask.outputs ? { outputs: subTask.outputs } : {}),
+              ...(s.declaredWrites ? { declaredWrites: s.declaredWrites } : {}),
+            })
           ) {
           ctx.logger.debug(
-            `[${this.host.name}] skill "${s.id}" not offered: its compiled body writes [${[...scriptWriteTargets(s.body).paths].join(", ") || "nothing"}], and this subtask asks to change [${subtaskMutationTargets(subTask.description).join(", ")}]`
+            `[${this.host.name}] skill "${s.id}" not offered: it writes [${(s.declaredWrites ?? [...scriptWriteTargets(s.body).paths]).join(', ') || 'nothing'}], and this subtask asks to change [${subtaskOutputIntent(subTask).targetPaths.join(', ')}]`
           );
           continue;
         }
@@ -1176,10 +1221,9 @@ export class SkillLifecycle {
     // every one of them already exists, so the existence check below cannot
     // tell "wrote the update" from "wrote nothing" — only a before/after
     // comparison can. Zero tokens; local reads.
-    const mutating = subtaskMutatesFiles(subTask.description);
-    const mutationTargetPaths = mutating
-      ? subtaskMutationTargetPaths(subTask.description)
-      : [];
+    const intent = subtaskOutputIntent(subTask);
+    const mutating = intent.mutating;
+    const mutationTargetPaths = [...intent.targetPaths];
     if (mutating && mutationTargetPaths.length === 0) {
       ctx.logger.debug(
         `[${this.host.name}] direct dispatch of ${skill.id} skipped: subtask is mutating but names no provable output path — running the LLM loop so success cannot be credited without a gate`

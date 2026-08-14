@@ -145,6 +145,9 @@ export class SkillRegistry {
             ? { promotionRefusedGeneration: meta.promotionRefusedGeneration }
             : {}),
           ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
+          ...(meta.declaredWrites && meta.declaredWrites.length > 0
+            ? { declaredWrites: meta.declaredWrites }
+            : {}),
           ...(meta.provenance ? { provenance: meta.provenance } : {}),
           ...(meta.directFailures ? { directFailures: meta.directFailures } : {}),
           ...(meta.matches ? { matches: meta.matches } : {}),
@@ -470,6 +473,8 @@ export class SkillRegistry {
     compiledGeneration?: string;
     /** Model id that ran the compile — provenance {mechanism:'compiled'}. */
     compiledBy?: string;
+    /** Compiler-declared write paths, already cross-checked by the caller. */
+    declaredWrites?: readonly string[];
   }): Skill {
     const dir = this.skillDir(args.l1Name, args.skillId);
     const skillFile = join(dir, 'SKILL.md');
@@ -504,6 +509,9 @@ export class SkillRegistry {
       failures: 0,
       updatedAt: nowIso(),
       ...(args.compiledGeneration ? { compiledGeneration: args.compiledGeneration } : {}),
+      ...(args.declaredWrites && args.declaredWrites.length > 0
+        ? { declaredWrites: [...args.declaredWrites] }
+        : {}),
       provenance: {
         mechanism: 'compiled',
         ...(args.compiledBy ? { model: args.compiledBy } : {}),
@@ -542,6 +550,9 @@ export class SkillRegistry {
       updatedAt: writtenMeta.updatedAt,
       ...(writtenMeta.compiledGeneration
         ? { compiledGeneration: writtenMeta.compiledGeneration }
+        : {}),
+      ...(writtenMeta.declaredWrites && writtenMeta.declaredWrites.length > 0
+        ? { declaredWrites: writtenMeta.declaredWrites }
         : {}),
       ...(writtenMeta.provenance ? { provenance: writtenMeta.provenance } : {}),
     };
@@ -825,6 +836,10 @@ function readMeta(path: string): SkillMeta {
         : {}),
       ...(typeof obj.lastMatchedAt === 'string' && obj.lastMatchedAt.length > 0
         ? { lastMatchedAt: obj.lastMatchedAt }
+        : {}),
+      ...(Array.isArray(obj.declaredWrites) &&
+      obj.declaredWrites.every((w): w is string => typeof w === 'string' && w.length > 0)
+        ? { declaredWrites: obj.declaredWrites }
         : {}),
     };
   } catch (err) {

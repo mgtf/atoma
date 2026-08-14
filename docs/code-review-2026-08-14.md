@@ -85,6 +85,24 @@ après-midi du 13/08).
 > épinglées par tests. Suite complète : 1514 passed / 8 skipped, typecheck +
 > lint + docs:check verts.
 
+> **Statut 2026-08-14 (batch runtime 5)** : le refactoring 3.3 est appliqué —
+> l'intention de sortie voyage STRUCTURÉE. Côté plan : `subtaskSpecSchema` et
+> `Task` portent `outputs` (chemins que la sous-tâche crée/modifie, tolérant
+> null/blancs, `[]` = non déclaré jamais read-only), threadé sur la Task enfant
+> par L2/L3, enseigné par `MUTATING_SUBTASK_FILE_GUIDANCE` et les deux formes
+> JSON de plan. `subtaskOutputIntent` (scriptTargets.ts) rend la liste déclarée
+> autoritaire pour la classification mutation + cibles du gate de dispatch ; la
+> grammaire lexicale reste le fallback des plans legacy et ne doit plus gagner
+> de clause. Côté compilateur : l'enveloppe de promotion déclare `writes`,
+> cross-checkée une fois à la promotion contre le résolveur statique (union en
+> cas de sous-déclaration, avertissement loggé), persistée dans `_meta.json`
+> (`declaredWrites`), consommée par `scriptCanServeSubtask` comme liste EXACTE
+> (sans échappatoire opaque) — le scan statique reste le fallback des scripts
+> legacy. Le hash `COMPILE_PROMPT_GENERATION` change avec le template : les
+> stamps de refus de la génération précédente expirent et offrent un retry,
+> par design. Suite complète : 1521 passed / 8 skipped, typecheck + lint +
+> docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

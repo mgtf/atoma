@@ -648,6 +648,19 @@ export const subtaskSpecSchema = z.object({
   description: z.string(),
   inputs: z.record(z.unknown()).optional(),
   preferredChild: z.string().optional(),
+  // Structured output intent (Task.outputs). Same null-tolerance pattern as
+  // aggregation.instruction: models emit `"outputs": null` on read-only
+  // subtasks, and a plain .optional() would crash the whole plan parse.
+  // Blank entries are dropped so a sloppy `[""]` degrades to "undeclared"
+  // (lexical fallback) instead of poisoning the dispatch gates.
+  outputs: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .transform((v) => {
+      const cleaned = (v ?? []).map((p) => p.trim()).filter((p) => p.length > 0);
+      return cleaned.length > 0 ? cleaned : undefined;
+    }),
 });
 
 /**

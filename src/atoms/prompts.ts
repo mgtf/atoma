@@ -188,6 +188,13 @@ export const MUTATING_SUBTASK_FILE_GUIDANCE = [
   `generic launcher such as "index.js", "main.js", "cli.js" or "app.js".`,
   `A generic path leaves deterministic packaging no honest product/bin name`,
   `and forces the full LLM fallback even when every invocation is verified.`,
+  `ALSO declare the same intent STRUCTURALLY: every file-mutating subtask`,
+  `carries "outputs": [<exact workspace-relative paths it creates or`,
+  `modifies>]. List OUTPUTS only — never inputs it merely reads ("update`,
+  `README.md from package.json" declares outputs ["README.md"]). Omit the`,
+  `field entirely on read-only subtasks (verification, re-running recorded`,
+  `probes). The runtime treats a declared list as authoritative for its`,
+  `dispatch gates; prose stays the fallback for plans that omit it.`,
 ].join('\n');
 
 /** Durable HTTP docs must not capture the one port assigned to this run. */
