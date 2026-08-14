@@ -383,6 +383,7 @@ export async function superviseLoop<C extends Atom>(
         atom: parent.name,
         payload: { phase: e.phase, failingChild: current.name },
       });
+      ctx.recordRunStat?.('escalation');
 
       if (hooks.onFailed) {
         await hooks.onFailed(current, `escalation-${e.phase}`, lastResultVerdict);

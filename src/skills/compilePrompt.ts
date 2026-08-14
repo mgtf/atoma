@@ -1,4 +1,4 @@
-import {  manifestReaderLines } from '../contracts/probeManifest.js';
+import { manifestReaderLines } from '../contracts/probeManifest.js';
 
 /**
  * The compile-prompt TEMPLATE, extracted so its GENERATION can be hashed.
@@ -150,9 +150,13 @@ export function buildCompileSkillPrompt(args: {
       `  Promotable case: {"promotable": true, "language": "node", "body": "<full script source>"}`,
       `  Refusal case:    {"promotable": false, "reason": "<one sentence>"}`,
       `The script body MUST be the COMPLETE source — do not truncate, do not`,
-      `paste placeholders. Use only stdlib + the dependencies the recipe`,
-      `already names (e.g. better-sqlite3); install via npm at runtime when`,
-      `needed; emit LISTENING_ON_PORT=<n> on stdout if you spawn a server.`,
+      `paste placeholders. Use Node stdlib, workspace-relative modules, or`,
+      `dependencies that are ALREADY installed and resolvable from the`,
+      `workspace. Never run npm/pnpm/yarn or fetch dependencies at runtime:`,
+      `trusted dispatch may execute under --network none, and package-manager`,
+      `spawns are not a reproducible script dependency. If the recipe cannot`,
+      `work without a missing package, return promotable:false instead. Emit`,
+      `LISTENING_ON_PORT=<n> on stdout if you spawn a server.`,
     ].join('\n');
 }
 

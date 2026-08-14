@@ -184,6 +184,70 @@ describe('cross-bucket browser routing', () => {
     expect(routed.aggregation.mode).toBe('sequential');
   });
 
+  it('keeps an already-capable web L2 and preserves explicit parallel aggregation', () => {
+    const registry = new AtomRegistry(openDb(':memory:'));
+    registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'validate_html', description: 'browser A', inputSchema: { type: 'object' } },
+      ],
+    });
+    const secondWeb = registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'validate_html', description: 'browser B', inputSchema: { type: 'object' } },
+      ],
+    });
+    const plan = makePlan({
+      subtasks: [
+        {
+          description: 'Validate the UI in a real browser with selector-based interactions.',
+          preferredChild: secondWeb.name,
+          inputs: {},
+        },
+      ],
+      aggregation: { mode: 'concat' },
+    });
+
+    const routed = routeCrossBucketVerification(plan, registry);
+
+    expect(routed).toBe(plan);
+    expect(routed.subtasks[0]!.preferredChild).toBe(secondWeb.name);
+    expect(routed.aggregation.mode).toBe('concat');
+  });
+
+  it('does not overwrite concat when a browser subtask needs rerouting', () => {
+    const registry = new AtomRegistry(openDb(':memory:'));
+    registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'validate_html', description: 'browser', inputSchema: { type: 'object' } },
+      ],
+    });
+    const shell = registry.create(2, {
+      ...seed,
+      tools: [
+        { name: 'run_shell', description: 'shell', inputSchema: { type: 'object' } },
+        { name: 'start_node_server', description: 'server', inputSchema: { type: 'object' } },
+      ],
+    });
+    const plan = makePlan({
+      subtasks: [
+        {
+          description: 'Validate the UI in a real browser with selector-based interactions.',
+          preferredChild: shell.name,
+          inputs: {},
+        },
+      ],
+      aggregation: { mode: 'concat' },
+    });
+
+    const routed = routeCrossBucketVerification(plan, registry);
+
+    expect(routed.subtasks[0]!.preferredChild).not.toBe(shell.name);
+    expect(routed.aggregation.mode).toBe('concat');
+  });
+
   it('redirects a browser prefilter away from an HTTP-only L1', async () => {
     expect(taskRequiresRealBrowser('validate the UI in a real browser')).toBe(true);
     expect(taskRequiresRealBrowser('Reconfirm the recorded web probe remains valid.')).toBe(

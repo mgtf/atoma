@@ -10,6 +10,7 @@ import {
   RUN_FLAGS,
   RunRejected,
   buildRunArgs,
+  buildRunEnvOverrides,
   cancelRun,
   repoRoot,
   resetRunsForTest,
@@ -84,6 +85,23 @@ describe('MCP run tool — argv assembly and validation', () => {
     expect(buildRunArgs({ goal: 'x', container: true, egress: true })).toEqual([
       '--container',
       '--egress',
+    ]);
+  });
+
+  it('maps promoteSkills=true to the explicit environment opt-in', () => {
+    expect(buildRunEnvOverrides({ goal: 'x' }, {})).toEqual({
+      ATOMA_LLM: 'claude-cli',
+    });
+    expect(buildRunEnvOverrides({ goal: 'x', promoteSkills: true }, {})).toEqual({
+      ATOMA_LLM: 'claude-cli',
+      ATOMA_SKILL_PROMOTE: '1',
+    });
+    // False is deliberately represented by the higher-priority CLI veto.
+    expect(buildRunEnvOverrides({ goal: 'x', promoteSkills: false }, {})).toEqual({
+      ATOMA_LLM: 'claude-cli',
+    });
+    expect(buildRunArgs({ goal: 'x', promoteSkills: false })).toEqual([
+      '--no-promote-skills',
     ]);
   });
 

@@ -22,6 +22,11 @@ import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
 import { runFrontierBaseline } from './baseline.js';
 import { resolveToolBackendMode } from './backendMode.js';
+import {
+  formatRunStatsEpilogue,
+  type RunStats,
+  type RunStatSignal,
+} from '../contracts/runStats.js';
 import type { Logger, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 
@@ -53,6 +58,54 @@ export interface RunnerArgs {
    * which is the shape we already measured four times.
    */
   seed?: string;
+}
+
+export type SkillPromotionSource =
+  | 'cli-disable'
+  | 'environment-enable'
+  | 'environment-disable'
+  | 'seed-default'
+  | 'default-disable';
+
+export interface SkillPromotionDecision {
+  readonly enabled: boolean;
+  readonly source: SkillPromotionSource;
+}
+
+type RunSignalCounts = Record<RunStatSignal, number>;
+
+function machineRunStats(
+  outcome: RunStats['outcome'],
+  metrics: InMemoryMetrics,
+  signals: Readonly<RunSignalCounts>
+): RunStats {
+  const summary = metrics.summary();
+  const callsMatching = (marker: RegExp): number =>
+    summary.perModel.reduce(
+      (total, model) => total + (marker.test(model.model) ? model.calls : 0),
+      0
+    );
+  const opusCalls = callsMatching(/opus/i);
+  const sonnetCalls = callsMatching(/sonnet/i);
+  const haikuCalls = callsMatching(/haiku/i);
+  return {
+    outcome,
+    costUsd: Number(summary.totals.costUsd.toFixed(4)),
+    llmCalls: summary.totals.calls,
+    opusCalls,
+    sonnetCalls,
+    haikuCalls,
+    otherCalls: Math.max(0, summary.totals.calls - opusCalls - sonnetCalls - haikuCalls),
+    deterministicPhases: signals.deterministic,
+    escalations: signals.escalation,
+    learnedSkills: signals['learned-skill'],
+    learnedEventSkills: signals['learned-event-skill'],
+    promotions: signals.promotion,
+    refusals: signals.refusal,
+    compileErrors: signals['compile-error'],
+    demotions: signals.demotion,
+    dispatchFallbacks: signals['dispatch-fallback'],
+  };
 }
 
 /**
@@ -99,6 +152,28 @@ export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
     cleanWorkspace, ...backendMode, baseline,
     ...(seed ? { seed } : {}),
   };
+}
+
+/**
+ * Resolve the llm→script compilation policy without starting a run.
+ *
+ * Promotion has value on maintenance work, represented today by a seeded
+ * workspace. From-scratch runs keep compilation frozen unless the operator
+ * explicitly opts in. The CLI kill switch is a veto, including over a seed
+ * and `ATOMA_SKILL_PROMOTE=1`; only that exact environment value enables the
+ * compiler, so typos fail closed.
+ */
+export function resolveSkillPromotion(
+  args: Pick<RunnerArgs, 'noPromoteSkills' | 'seed'>,
+  configuredValue: string | undefined
+): SkillPromotionDecision {
+  if (args.noPromoteSkills) return { enabled: false, source: 'cli-disable' };
+  if (configuredValue === '1') return { enabled: true, source: 'environment-enable' };
+  if (configuredValue !== undefined) {
+    return { enabled: false, source: 'environment-disable' };
+  }
+  if (args.seed) return { enabled: true, source: 'seed-default' };
+  return { enabled: false, source: 'default-disable' };
 }
 
 /**
@@ -173,20 +248,31 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // TRUST_PROMOTE_THRESHOLD_SUCCESSES with zero failures, the L2 makes a
   // single Sonnet call to compile its body into a deterministic Node
   // script. On approval the next match runs the script via write_file +
-  // run_shell instead of an LLM tool-loop. Same priority ordering as
-  // auto-distillation: CLI flag > env var > default-on. Demotion (any
-  // future failure on the script form) restores the stashed llm body from
-  // the `_fallback.md` sidecar, and the failures-must-be-zero gate then
-  // blocks re-promotion until the operator resets the counters by hand.
-  if (args.noPromoteSkills) {
-    process.env['ATOMA_SKILL_PROMOTE'] = '0';
+  // run_shell instead of an LLM tool-loop. Compilation is frozen by default
+  // on from-scratch work: it has measured value on MAINTENANCE tasks, which
+  // today are identified by a seeded workspace. Priority is CLI veto > exact
+  // env opt-in/opt-out > seed default > default-off. Demotion (any future
+  // failure on the script form) restores the stashed llm body from the
+  // `_fallback.md` sidecar, and the failures-must-be-zero gate then blocks
+  // re-promotion until the operator resets the counters by hand.
+  const promotionEnv = process.env['ATOMA_SKILL_PROMOTE'];
+  const promotion = resolveSkillPromotion(args, promotionEnv);
+  process.env['ATOMA_SKILL_PROMOTE'] = promotion.enabled ? '1' : '0';
+  if (promotion.source === 'cli-disable') {
     console.log('skill llm→script promotion: off (--no-promote-skills)');
-  } else if (process.env['ATOMA_SKILL_PROMOTE'] === '0') {
-    console.log('skill llm→script promotion: off (ATOMA_SKILL_PROMOTE=0)');
-  } else {
-    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+  } else if (promotion.source === 'environment-enable') {
+    console.log('skill llm→script promotion: ON (ATOMA_SKILL_PROMOTE=1)');
+  } else if (promotion.source === 'environment-disable') {
     console.log(
-      'skill llm→script promotion: ON (default — pass --no-promote-skills to disable)'
+      `skill llm→script promotion: off (ATOMA_SKILL_PROMOTE=${JSON.stringify(promotionEnv)}; only exact "1" enables)`
+    );
+  } else if (promotion.source === 'seed-default') {
+    console.log(
+      'skill llm→script promotion: ON (maintenance seed default — pass --no-promote-skills to disable)'
+    );
+  } else {
+    console.log(
+      'skill llm→script promotion: off (from-scratch default — set ATOMA_SKILL_PROMOTE=1 to opt in)'
     );
   }
   // Deterministic dispatch of TRUSTED kind:script skills (#C4). A script
@@ -238,6 +324,17 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // the profile wins). Exits with guidance if nothing resolves.
   const anthropic = useOllama || useClaudeCli ? undefined : makeAnthropicClient();
   const metrics = new InMemoryMetrics();
+  const runSignals: RunSignalCounts = {
+    deterministic: 0,
+    escalation: 0,
+    'learned-skill': 0,
+    'learned-event-skill': 0,
+    promotion: 0,
+    refusal: 0,
+    'compile-error': 0,
+    demotion: 0,
+    'dispatch-fallback': 0,
+  };
   const baseClient = useOllama
     ? new OllamaLlmClient({
         baseUrl: process.env['OLLAMA_BASE_URL'],
@@ -357,6 +454,9 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     // Mirror recordTrust for skill-pipeline events so the viz can render
     // a Skills lane (match / inject / learn / update / counter bumps).
     recordSkill: (info) => recorder.recordSkillEvent(info),
+    recordRunStat: (signal) => {
+      runSignals[signal] += 1;
+    },
     // Prefilter decisions replayed from the on-disk cache: the LLM call
     // that did NOT happen still deserves a card.
     recordCacheHit: (info) => recorder.recordCacheHit(info),
@@ -386,8 +486,16 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     } else {
       recorder.flushPartial();
     }
-    await backend.cleanup();
-    process.exit(code);
+    try {
+      await backend.cleanup();
+    } catch (err) {
+      // Exit must still progress so the synchronous Docker exit registry gets
+      // its final bounded attempt. Resolving cleanup failures silently would
+      // claim resources were gone; awaiting forever would defeat the watchdog.
+      console.error(`✖ sandbox cleanup incomplete: ${(err as Error).message}`);
+    } finally {
+      process.exit(code);
+    }
   };
   process.on('SIGINT', () => void shutdown(0));
   process.on('SIGTERM', () => void shutdown(0));
@@ -433,6 +541,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
         `   ✗ watchdog could not close the trace: ${(err as Error).message}`
       );
     }
+    console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
     // Synchronous exit on purpose: awaiting sandbox.cleanup() here would
     // re-enter the same class of hang the watchdog exists to escape. The
     // sandbox's process-level exit handler SIGKILLs tracked children.
@@ -482,6 +591,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     console.log(
       `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
     );
+    console.log(formatRunStatsEpilogue(machineRunStats('delivered', metrics, runSignals)));
     console.log(
       '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
     );
@@ -532,6 +642,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     console.error('');
     console.error(`LLM usage at abort:`);
     console.error(metrics.formatSummary());
+    console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
     console.error(
       `\nrun enregistré dans ${recorder.runsDir} — ouvre le visualiseur pour plus de détails : npm run viz`
     );

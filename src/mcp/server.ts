@@ -167,7 +167,9 @@ export function buildServer(): McpServer {
         promoteSkills: z
           .boolean()
           .optional()
-          .describe('Compile a trusted recipe into a deterministic script. Default true.'),
+          .describe(
+            'Compile a trusted recipe into a deterministic script. Default false for unseeded MCP runs; true explicitly opts in.'
+          ),
         directSkills: z
           .boolean()
           .optional()

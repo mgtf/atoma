@@ -116,6 +116,12 @@ export function nodeVersionSupported(version: string): boolean {
   return major >= 24;
 }
 
+/** Engine 28 introduced bridge gateway mode `isolated`, required by egress. */
+export function dockerVersionSupportsIsolatedGateway(version: string): boolean {
+  const match = /^(\d+)\./.exec(version.trim());
+  return match !== null && Number(match[1]) >= 28;
+}
+
 function nonEmpty(value: string | undefined): boolean {
   return value !== undefined && value.trim().length > 0;
 }
@@ -329,7 +335,8 @@ async function checkProvider(
 
 async function checkDocker(
   required: boolean,
-  deps: DoctorDependencies
+  deps: DoctorDependencies,
+  egress: boolean
 ): Promise<DoctorCheck[]> {
   const status = unavailableStatus(required);
   try {
@@ -339,11 +346,22 @@ async function checkDocker(
       { timeoutMs: 5_000 }
     );
     const version = result.stdout.trim() || 'unknown';
+    const isolatedGatewaySupported = dockerVersionSupportsIsolatedGateway(version);
     const docker: DoctorCheck = {
       id: 'docker',
       label: 'Docker daemon',
-      status: 'pass',
-      detail: `reachable · server ${version}`,
+      status: egress && !isolatedGatewaySupported ? 'fail' : 'pass',
+      detail:
+        `reachable · server ${version}` +
+        (egress && !isolatedGatewaySupported
+          ? ' · too old for isolated egress gateway'
+          : ''),
+      ...(egress && !isolatedGatewaySupported
+        ? {
+            remedy:
+              'Upgrade to Docker Engine 28+; older --internal bridges can reach host services through their gateway.',
+          }
+        : {}),
     };
     try {
       await deps.runCommand(
@@ -502,7 +520,7 @@ export async function diagnoseDoctor(args: {
   for (const provider of providers) {
     checks.push(await checkProvider(provider, env, deps));
   }
-  checks.push(...(await checkDocker(args.mode.container, deps)));
+  checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));
   if (args.mode.egress) {
     checks.push({
       id: 'egress',

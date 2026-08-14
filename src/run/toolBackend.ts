@@ -57,8 +57,9 @@ export async function containerToolBackend(opts: {
   /**
    * Opt into PROXIED egress. Off by default: with it off the run gets
    * `--network none` and cannot fetch anything, which is right until a task
-   * genuinely needs a dependency. On, the run joins a per-run `--internal`
-   * network whose only peer is an allowlisting proxy.
+   * genuinely needs a dependency. On, the run joins a per-run internal
+   * network with its host gateway removed; its only peer is an allowlisting
+   * proxy.
    */
   egress?: boolean;
   egressAllowlist?: readonly string[];

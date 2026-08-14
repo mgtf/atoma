@@ -626,7 +626,12 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
         return { ok: true };
       },
     };
-    const ctx = { ...makeCtx(), tools: executor as never };
+    const directEvents: SkillEventInfo[] = [];
+    const ctx = {
+      ...makeCtx(),
+      tools: executor as never,
+      recordSkill: (event: SkillEventInfo) => directEvents.push(event),
+    };
 
     // Attempt 1: dispatch fires (2 prefilter calls only).
     const neuron1 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
@@ -635,6 +640,7 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     const first = await neuron1.handleDirect({ description: 'verify every documented command' }, ctx);
     expect(first.summary).toBe('done');
     expect(ctx.llm.calls).toHaveLength(2);
+    expect(directEvents.filter((event) => event.op === 'direct')).toHaveLength(1);
 
     // Attempt 2 (upstream rejected the content → replan): FRESH instance,
     // reworded description, same ctx. The dispatch reproduces 'done' — the
@@ -653,6 +659,9 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     );
     expect(second.summary).toMatch(/differently/);
     expect(ctx.llm.calls.length).toBe(6); // the L1 loop actually ran
+    // The duplicate script execution was discarded before credit/events.
+    // Only the first accepted direct result is published as a direct success.
+    expect(directEvents.filter((event) => event.op === 'direct')).toHaveLength(1);
 
     // A NEW run (fresh ctx): the guard resets, dispatch fires again.
     const ctx2 = { ...makeCtx(), tools: executor as never };

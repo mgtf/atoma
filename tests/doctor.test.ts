@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   diagnoseDoctor,
+  dockerVersionSupportsIsolatedGateway,
   nodeVersionSupported,
   parseDoctorOptions,
   renderDoctorReport,
@@ -51,6 +52,15 @@ describe('atoma doctor', () => {
     ['garbage', false],
   ])('applies the package Node engine floor to %s', (version, supported) => {
     expect(nodeVersionSupported(version)).toBe(supported);
+  });
+
+  it.each([
+    ['27.5.1', false],
+    ['28.0.0', true],
+    ['29.1.2', true],
+    ['unknown', false],
+  ])('recognizes the Docker isolated-gateway floor in %s', (version, supported) => {
+    expect(dockerVersionSupportsIsolatedGateway(version)).toBe(supported);
   });
 
   it('resolves the same container and egress precedence as the runner', () => {
@@ -165,6 +175,37 @@ describe('atoma doctor', () => {
       detail: expect.stringContaining('10 tools'),
     });
     expect(report.checks.find((check) => check.id === 'egress')?.status).toBe('warn');
+  });
+
+  it('fails egress closed on Docker 27 while ordinary container mode remains available', async () => {
+    const oldDocker = dependencies({
+      runCommand: async (command, args) => {
+        if (command === 'docker' && args[0] === 'version') {
+          return { stdout: '27.5.1\n', stderr: '' };
+        }
+        if (command === 'docker' && args[0] === 'image') {
+          return { stdout: 'sha256:test\n', stderr: '' };
+        }
+        return { stdout: '', stderr: '' };
+      },
+    });
+    const egress = await diagnoseDoctor({
+      mode: { container: true, egress: true },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: oldDocker,
+    });
+    const isolated = await diagnoseDoctor({
+      mode: { container: true, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: oldDocker,
+    });
+
+    expect(egress.ready).toBe(false);
+    expect(egress.checks.find((check) => check.id === 'docker')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('too old'),
+    });
+    expect(isolated.checks.find((check) => check.id === 'docker')?.status).toBe('pass');
   });
 
   it('checks every explicitly routed provider without making an LLM call', async () => {

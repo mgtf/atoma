@@ -250,8 +250,11 @@ A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
 the MCP run lease is `~/.atoma/mcp-run-lock.db`. Back up the database and
 skills directory together. Docker is optional: `npm run build:worker` enables
-the isolated backend and proxied egress paths from compiled `dist/`.
-Confirm that path with `npm run doctor -- --container`. Contributors changing
+the isolated backend and proxied egress paths from compiled `dist/`. Proxied
+egress requires Docker Engine 28+ so its private bridge can remove both host
+gateway addresses; plain container isolation (`--network none`) works on older
+engines. Confirm the selected path with `npm run doctor -- --container` or
+`npm run doctor -- --egress`. Contributors changing
 source use `npm run build:worker:dev` and `npm run doctor:dev`.
 
 Stores created before the Element→Molecule→Cell→Tissue taxonomy use

@@ -123,16 +123,30 @@ export function buildNarrowL2Prompt(
 
 export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry): Plan {
   const l2Types = registry.listByTier(2);
-  const webL2 = l2Types.find((type) => type.tools.some((tool) => tool.name === 'validate_html'));
-  const shellL2 = l2Types.find(
-    (type) =>
+  const supportsBrowser = (name: string | undefined): boolean => {
+    const type = name ? registry.getByName(name) : undefined;
+    return type?.tier === 2 && type.tools.some((tool) => tool.name === 'validate_html');
+  };
+  const supportsShellHarness = (name: string | undefined): boolean => {
+    const type = name ? registry.getByName(name) : undefined;
+    return (
+      type?.tier === 2 &&
       type.tools.some((tool) => tool.name === 'run_shell') &&
       type.tools.some((tool) => tool.name === 'start_node_server')
-  );
+    );
+  };
+  const fallbackWebL2 = l2Types.find((type) => supportsBrowser(type.name));
+  const fallbackShellL2 = l2Types.find((type) => supportsShellHarness(type.name));
   let changed = false;
   const subtasks = plan.subtasks.flatMap((subtask) => {
     const browser = taskRequiresRealBrowser(subtask.description);
     const commands = requiredPassingCommands(subtask.description);
+    const webL2 = supportsBrowser(subtask.preferredChild)
+      ? registry.getByName(subtask.preferredChild!)
+      : fallbackWebL2;
+    const shellL2 = supportsShellHarness(subtask.preferredChild)
+      ? registry.getByName(subtask.preferredChild!)
+      : fallbackShellL2;
     if (browser && commands.length > 0 && webL2 && shellL2) {
       changed = true;
       const sentences = subtask.description.split(/(?<=[.!?])\s+(?=[A-Z])/);
@@ -164,15 +178,16 @@ export function routeCrossBucketVerification(plan: Plan, registry: AtomRegistry)
         },
       ];
     }
-    if (browser && webL2 && subtask.preferredChild !== webL2.name) {
+    if (browser && webL2 && !supportsBrowser(subtask.preferredChild)) {
       changed = true;
       return [{ ...subtask, preferredChild: webL2.name }];
     }
     return [subtask];
   });
-  return changed
-    ? { ...plan, subtasks, aggregation: { mode: 'sequential' } }
-    : plan;
+  // Routing does not own dispatch topology. In particular an explicit concat
+  // or llm-synthesize plan represents orthogonal checkpoints and must not be
+  // silently serialized merely because one checkpoint changed bucket.
+  return changed ? { ...plan, subtasks } : plan;
 }
 
 export class L3Atom extends Atom implements Supervisor<L2Atom> {

@@ -86,10 +86,12 @@ const MUTATING_ACTION_SOURCE =
   '(?:build|building|create|creating|document|documenting|harden|hardening|' +
   'update|updating|rewrite|rewriting|edit|editing|correct|correcting|fix|' +
   'fixing|amend|amending|revise|revising|write|writing|add|adding|append|' +
-  'appending|regenerate|regenerating|refresh|refreshing)';
+  'appending|regenerate|regenerating|refresh|refreshing|modify|modifying|' +
+  'change|changing|remove|removing|rename|renaming|extend|extending)';
 const PASSIVE_MUTATION_SOURCE =
   '(?:built|created|documented|hardened|updated|rewritten|edited|corrected|' +
-  'fixed|amended|revised|written|added|appended|regenerated|refreshed)';
+  'fixed|amended|revised|written|added|appended|regenerated|refreshed|' +
+  'modified|changed|removed|renamed|extended)';
 const MUTATING_VERB_RE = new RegExp(`\\b${MUTATING_ACTION_SOURCE}\\b`, 'i');
 const FAILURE_CONDITION_SOURCE =
   "(?:fails?|failed|failure|mismatches?|invalid|does\\s+not\\s+pass|doesn't\\s+pass)";
@@ -108,7 +110,8 @@ const NEGATED_MUTATION_RE = new RegExp(
   'gi'
 );
 const AUXILIARY_NEGATED_MUTATION_RE = new RegExp(
-  `\\b(?:do|does|must|should)\\s+not\\s+(?:need\\s+to\\s+)?` +
+  `\\b(?:(?:do|does|must|should)\\s+not|(?:don't|doesn't|mustn't|shouldn't))\\s+` +
+    `(?:need\\s+to\\s+)?` +
     `\\b${MUTATING_ACTION_SOURCE}\\b`,
   'gi'
 );
@@ -244,8 +247,15 @@ export function scriptWriteTargets(body: string): ScriptWriteTargets {
 export function subtaskNamedFilePaths(description: string): string[] {
   const phaseDescription = stripLiteralContractBlock(description);
   const lower = phaseDescription.toLowerCase();
-  const negatedBefore =
-    /(?:\b(?:no|without)\s+(?:(?:a|an|the|any)\s+)?|\b(?:do|does|must|should)\s+not\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bnever\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bdon't\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?)$/i;
+  const fileActionSource =
+    `(?:${MUTATING_ACTION_SOURCE}|include|including|produce|producing|ship|shipping|` +
+    `generate|generating|touch|touching)`;
+  const negatedBefore = new RegExp(
+    `(?:\\b(?:no|without)\\s+(?:(?:a|an|the|any)\\s+)?|` +
+      `\\b(?:(?:do|does|must|should)\\s+not|(?:don't|doesn't|mustn't|shouldn't))\\s+` +
+      `(?:${fileActionSource}\\s+)?|\\bnever\\s+(?:${fileActionSource}\\s+)?)$`,
+    'i'
+  );
   return [
     ...new Set(
       extractResultFilePaths({ summary: phaseDescription })

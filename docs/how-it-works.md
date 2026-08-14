@@ -416,7 +416,9 @@ the engineering record linked from `AGENTS.md` rather than papered over.
   in the archive linked from `AGENTS.md`
   from one session of three cold starts; no committed artefact regenerates it.
 - `--egress` adds a per-run private network and a gate process with a default-deny, anchored host
-  allowlist — raw IP addresses always refused, lookalike hosts refused by construction.
+  allowlist — raw IP addresses always refused, lookalike hosts refused by construction. It
+  requires Docker Engine 28+: both bridge gateway modes are `isolated`, removing the host-side
+  gateway addresses that a plain `--internal` network would still expose.
 
 It is not the default, deliberately: local development is single-tenant, so the isolation would
 protect the operator from nobody, while a real multi-tenant deployment would containerise always

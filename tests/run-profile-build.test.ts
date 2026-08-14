@@ -10,7 +10,11 @@ import {
   MERISTEM_SYSTEM_PROMPT,
   MERISTEM_DESCRIPTION,
 } from '../src/run/profiles/build.js';
-import { runTask, parseRunnerArgs } from '../src/run/runner.js';
+import {
+  runTask,
+  parseRunnerArgs,
+  resolveSkillPromotion,
+} from '../src/run/runner.js';
 
 /**
  * Guards for the generic-runner extraction (build-app.ts 541 lines -> a
@@ -120,21 +124,79 @@ describe('runner CLI parsing — the divergence from parseCliArgs is load-bearin
     expect(args.noPromoteSkills).toBe(true);
     expect(args.noDirectSkills).toBe(true);
   });
+
+  it('marks --seed as maintenance context without swallowing the goal', () => {
+    const args = parseRunnerArgs([
+      '--seed',
+      'benchmark/fixtures/wclite',
+      'Maintain the seeded CLI',
+    ]);
+    expect(args.seed).toBe('benchmark/fixtures/wclite');
+    expect(args.goal).toBe('Maintain the seeded CLI');
+  });
+});
+
+describe('runner skill-promotion policy — pure, no provider calls', () => {
+  it('freezes compilation on an unseeded run by default', () => {
+    expect(resolveSkillPromotion({ noPromoteSkills: false }, undefined)).toEqual({
+      enabled: false,
+      source: 'default-disable',
+    });
+  });
+
+  it('enables compilation by default for a seeded maintenance run', () => {
+    expect(
+      resolveSkillPromotion(
+        { noPromoteSkills: false, seed: 'benchmark/fixtures/wclite' },
+        undefined
+      )
+    ).toEqual({ enabled: true, source: 'seed-default' });
+  });
+
+  it('keeps exact ATOMA_SKILL_PROMOTE=1 as an explicit unseeded opt-in', () => {
+    expect(resolveSkillPromotion({ noPromoteSkills: false }, '1')).toEqual({
+      enabled: true,
+      source: 'environment-enable',
+    });
+  });
+
+  it('lets an explicit environment opt-out override the maintenance default', () => {
+    expect(
+      resolveSkillPromotion({ noPromoteSkills: false, seed: '/fixture' }, '0')
+    ).toEqual({ enabled: false, source: 'environment-disable' });
+  });
+
+  it('fails closed on mistyped environment opt-ins', () => {
+    expect(resolveSkillPromotion({ noPromoteSkills: false, seed: '/fixture' }, 'true')).toEqual({
+      enabled: false,
+      source: 'environment-disable',
+    });
+  });
+
+  it('makes --no-promote-skills the final veto over env opt-in and seed mode', () => {
+    expect(resolveSkillPromotion({ noPromoteSkills: true, seed: '/fixture' }, '1')).toEqual({
+      enabled: false,
+      source: 'cli-disable',
+    });
+  });
 });
 
 describe('runner stdout contract — burn-in parses this', () => {
   const src = readFileSync('src/run/runner.ts', 'utf8');
 
-  // Exactly the markers parseRunLog attributes to the entrypoint. The others
-  // it greps for ("ran via deterministic dispatch", "learned new skill",
-  // "promoted to kind:script", the TOTAL row…) are emitted by the library and
-  // the metrics table, not here.
+  // Legacy outcome markers remain stable for interrupted runs that cannot
+  // emit the structured epilogue.
   it.each([
     ['✓ build finished', 'delivered'],
     ['--- run failed ---', 'failed'],
     ['TIMEOUT after', 'failed'],
   ])('still emits %s (burn-in reads it as "%s")', (marker) => {
     expect(src).toContain(marker);
+  });
+
+  it('emits the machine stats epilogue on delivered and failed paths', () => {
+    expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('delivered'/g)).toHaveLength(1);
+    expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('failed'/g)).toHaveLength(2);
   });
 
   it('exposes runTask taking a profile plus argv', () => {

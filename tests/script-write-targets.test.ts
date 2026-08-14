@@ -128,7 +128,17 @@ describe('subtaskNamedPaths', () => {
 
 describe('subtaskMutationTargets — outputs, not every mentioned file', () => {
   it('covers every mutating verb used by the shared planner guidance', () => {
-    for (const verb of ['build', 'create', 'document', 'harden']) {
+    for (const verb of [
+      'build',
+      'create',
+      'document',
+      'harden',
+      'modify',
+      'change',
+      'remove',
+      'rename',
+      'extend',
+    ]) {
       expect(subtaskMutationTargets(`${verb} index.js`)).toEqual(['index.js']);
     }
   });
@@ -143,6 +153,9 @@ describe('subtaskMutationTargets — outputs, not every mentioned file', () => {
     expect(
       subtaskMutationTargets('update README.md, refresh .atoma-probes.json and edit wclite.js')
     ).toEqual(['README.md', '.atoma-probes.json', 'wclite.js']);
+    for (const verb of ['modified', 'changed', 'removed', 'renamed', 'extended']) {
+      expect(subtaskMutationTargets(`README.md must be ${verb}`)).toEqual(['README.md']);
+    }
   });
 });
 
@@ -165,6 +178,16 @@ describe('subtaskMutatesFiles — contingent repair is not an output requirement
           "and report the result without creating browser or server artefacts."
       )
     ).toBe(false);
+    for (const description of [
+      "don't modify README.md",
+      "doesn't change README.md",
+      "mustn't remove README.md",
+      "shouldn't rename README.md",
+      'do not extend README.md',
+    ]) {
+      expect(subtaskMutatesFiles(description), description).toBe(false);
+      expect(subtaskNamedFilePaths(description), description).toEqual([]);
+    }
   });
 
   it('keeps inherited literal contracts out of the dispatch-time mutation classifier', () => {

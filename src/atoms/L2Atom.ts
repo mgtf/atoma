@@ -984,7 +984,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             // byte-identical result. When an upstream validator rejects
             // that result on CONTENT (mechanically the dispatch
             // "succeeded", so no directFailure, no demotion — the skill
-            // even got credited), the replan re-matched the same script
+            // even used to get credited), the replan re-matched the same script
             // and re-produced the same rejected result: measured live,
             // SIX identical dispatches, two escalations, three Opus plans
             // in one run. Replans build FRESH L2/L1 instances and reword
@@ -1007,6 +1007,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               );
             } else {
               memo.set(skills.skill.id, [...seen.slice(-7), direct.summary]);
+              this.lifecycle()?.commitScriptSkillDirect(skills.skill, skills.ownerNs, ctx);
               return direct;
             }
           }
@@ -1817,6 +1818,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               ctx.logger.info(
                 `[${this.name}] skill "${skillId}" demoted to kind:llm after script failure`
               );
+              ctx.recordRunStat?.('demotion');
               ctx.recordSkill?.({
                 op: 'demote',
                 l1Name: blameNs,

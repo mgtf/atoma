@@ -275,6 +275,11 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   generalize beyond the triggering task. No task-specific literals.
 - Promotion compiles an LLM recipe to a deterministic script only after earned
   successes. Promotion resets script trust; the new executable must earn trust.
+- Promotion is frozen by default on from-scratch runs. A seeded workspace is
+  the current maintenance-mode signal and enables promotion by default;
+  `ATOMA_SKILL_PROMOTE=1` is the exact opt-in anywhere, while any other explicit
+  value disables it. `--no-promote-skills` is the final veto over both env and
+  seed. MCP `promoteSkills:true` maps to the same explicit env opt-in.
 - Untrusted scripts run through the normal L1 tool loop. Trusted scripts may
   dispatch deterministically only after all preflight gates pass.
 - Script stdout ends with exactly one JSON envelope containing non-null `output`
@@ -342,8 +347,9 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   from target. Cache hits have their own event kind.
 - Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers
   before append. Measurements committed to the repo must remain parseable.
-- `parseRunLog` is legacy text parsing; prefer a future structured stats epilogue
-  rather than adding more global regexes.
+- The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
+  contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
+  never add global regexes over model-authored prose.
 - The friction report is offline and includes recency. Fix recurring real tool
   errors at their source; do not erase successful recovery evidence.
 - Act on friction signatures only when they recur across two consecutive batches
@@ -384,7 +390,9 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - Worker and in-process backends share contracts from `src/contracts/`; never
   fork protocol shapes.
 - Container execution uses `network none` unless explicit egress is selected.
-  Egress uses the dedicated internal network/proxy policy, never a plain bridge.
+  Proxied egress requires Docker Engine 28+: its per-run internal bridge uses
+  isolated IPv4 and IPv6 gateway modes, because plain `--internal` can still
+  reach host services through the bridge address. Fail closed on older engines.
 - The worker receives an allowlisted environment, not a spread parent env.
   Credentials and control-plane store paths never cross the boundary.
 - Network allowlists compare parsed hostnames; lookalikes and IP literals fail.

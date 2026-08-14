@@ -443,6 +443,14 @@ export interface RunContext {
    */
   readonly recordSkill?: (info: SkillEventInfo) => void;
   /**
+   * Machine run-counter observer. Unlike console text, these signals cannot
+   * be forged by task output or validator prose; the runner folds them into
+   * the `ATOMA_RUN_STATS` epilogue consumed by burn-in.
+   */
+  readonly recordRunStat?: (
+    signal: import('../contracts/runStats.js').RunStatSignal
+  ) => void;
+  /**
    * Optional prefilter-cache observer — see `CacheHitInfo`. Same
    * observer-only contract as `recordTrust` / `recordSkill`: absent, the
    * cache still serves, it just leaves no trace.

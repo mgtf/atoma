@@ -1,8 +1,8 @@
 /**
  * The single peer a containerised run can reach.
  *
- * The run sits on a `--internal` docker network with no route anywhere. This
- * proxy is attached to BOTH that network and an external one, so it is the
+ * The run sits on an internal Docker network whose host gateway is removed.
+ * This proxy is attached to BOTH that network and an external one, so it is the
  * only path out — and `decideEgress` is the whole of what it will carry.
  *
  * Two verbs, because that is all a package manager needs:

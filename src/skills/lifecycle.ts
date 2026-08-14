@@ -21,7 +21,12 @@ import {
 import { parseScriptEnvelope, scriptDeclaresEnvelope } from '../contracts/scriptEnvelope.js';
 import { extractJson } from '../atoms/json.js';
 import { buildCompileSkillPrompt, COMPILE_PROMPT_GENERATION } from './compilePrompt.js';
-import { scriptInterpreter, scriptScratchFilename } from './abi.js';
+import {
+  scriptInterpreter,
+  scriptInvocationArgv,
+  scriptInvocationArgvTemplate,
+  scriptScratchFilename,
+} from './abi.js';
 import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
@@ -219,6 +224,7 @@ export function skillContextBlock(skill: {
     }
     const interpreter = scriptInterpreter(skill.language ?? 'node');
     const filename = scriptScratchFilename(skill.id, skill.language ?? 'node');
+    const argvTemplate = scriptInvocationArgvTemplate(filename);
     return [
       `== ACTIVE SKILL: ${skill.id} (kind: script, language: ${skill.language}) ==`,
       `This skill ships an EXECUTABLE script (below). Your task is NOT to`,
@@ -228,8 +234,7 @@ export function skillContextBlock(skill: {
       `     a JSON-encoded string. Pass it verbatim as argv[2].`,
       `  2. write_file ${filename} with the script body VERBATIM (do not`,
       `     edit, summarise, or paraphrase — the body is canonical).`,
-      `  3. run_shell { command: "${interpreter}", args: ["${filename}",`,
-      `       <JSON.stringify(subtaskDescription)>] }`,
+      `  3. run_shell { command: "${interpreter}", args: ${argvTemplate} }`,
       `  4. Read the run_shell result.`,
       `     - On success: stdout is the script's deliverable. If the LAST`,
       `       non-empty line of stdout parses as a JSON object with`,
@@ -520,6 +525,7 @@ export class SkillLifecycle {
       args.ctx.logger.info(
         `[${this.host.name}] learned new skill "${draft.id}" for ${args.l1Name}`
       );
+      args.ctx.recordRunStat?.('learned-skill');
       args.ctx.recordSkill?.({
         op: 'learn',
         l1Name: args.l1Name,
@@ -640,6 +646,7 @@ export class SkillLifecycle {
     args.ctx.logger.info(
       `[${this.host.name}] learned event skill "${draft.id}" for ${args.l1Name} (trigger: ${draft.trigger})`
     );
+    args.ctx.recordRunStat?.('learned-event-skill');
     args.ctx.recordSkill?.({
       op: 'learn',
       l1Name: args.l1Name,
@@ -812,6 +819,7 @@ export class SkillLifecycle {
       args.ctx.logger.warn(
         `[${this.host.name}] skill compile errored: ${(err as Error).message}; leaving as kind:llm and stamping this compiler generation to prevent retry thrash`
       );
+      args.ctx.recordRunStat?.('compile-error');
       // A transport failure used to leave the skill unstamped, so every later
       // success retried the same compile. Two Codex calls then consumed the
       // full 240s post-approval budget with zero tokens, one starving the
@@ -838,6 +846,7 @@ export class SkillLifecycle {
       args.ctx.logger.info(
         `[${this.host.name}] skill "${args.skillId}" not promotable: ${compiled.reason}`
       );
+      args.ctx.recordRunStat?.('refusal');
       // Stamp the refusal so the gate above short-circuits on every
       // subsequent success until the body changes. This is the
       // anti-thrash guard: in the LoL-SSR run we observed Sonnet
@@ -874,6 +883,7 @@ export class SkillLifecycle {
       args.ctx.logger.warn(
         `[${this.host.name}] skill "${args.skillId}" promotion BLOCKED — ${reason}`
       );
+      args.ctx.recordRunStat?.('refusal');
       this.skills.markPromotionRefused(
         args.l1Name,
         args.skillId,
@@ -901,6 +911,7 @@ export class SkillLifecycle {
     args.ctx.logger.info(
       `[${this.host.name}] skill "${args.skillId}" promoted to kind:script (${compiled.language}, ${compiled.body.length} chars)`
     );
+    args.ctx.recordRunStat?.('promotion');
     args.ctx.recordSkill?.({
       op: 'promote',
       l1Name: args.l1Name,
@@ -1139,10 +1150,12 @@ export class SkillLifecycle {
    * counts as a skill failure (existing onFailed semantics, which also
    * drive script→llm demotion).
    *
-   * On success the skill's success counter bumps here (the supervise
-   * loop never runs, so its onApproved hook can't). Atom-type counters
-   * are intentionally NOT touched — the L1 model never executed, so the
-   * run proves nothing about the atom type.
+   * A mechanically successful execution is returned UNCOMMITTED. The caller
+   * owns the run-scoped anti-redispatch memo and must call
+   * `commitScriptSkillDirect` only if it accepts the result. This separation
+   * prevents a byte-identical output rejected by that memo from earning a
+   * success and emitting a phantom direct event. Atom-type counters are never
+   * touched — the L1 model did not execute.
    */
   async runScriptSkillDirect(
     skill: Skill,
@@ -1196,7 +1209,7 @@ export class SkillLifecycle {
       await ctx.tools!.execute('write_file', { path: filename, content: skill.body });
       const res = (await ctx.tools!.execute('run_shell', {
         command: interpreter,
-        args: [filename, JSON.stringify(subTask.description)],
+        args: scriptInvocationArgv(filename, subTask.description),
       })) as { exitCode?: number; stdout?: string; stderr?: string } | null;
       // The scratch script is NOT part of the deliverable: subtasks routinely
       // end with "list_files to confirm exactly <these files> exist", and a
@@ -1208,6 +1221,7 @@ export class SkillLifecycle {
         ctx.logger.debug(
           `[${this.host.name}] direct dispatch of ${skill.id} failed (exit=${res?.exitCode ?? '?'}; stderr=${(res?.stderr ?? '').slice(0, 200)}) — falling back to the LLM loop`
         );
+        ctx.recordRunStat?.('dispatch-fallback');
         this.noteDirectFailure(l1Name, skill, ctx);
         return null;
       }
@@ -1216,6 +1230,7 @@ export class SkillLifecycle {
         ctx.logger.debug(
           `[${this.host.name}] direct dispatch of ${skill.id}: stdout carried no {"output","summary"} envelope — falling back to the LLM loop`
         );
+        ctx.recordRunStat?.('dispatch-fallback');
         this.noteDirectFailure(l1Name, skill, ctx);
         return null;
       }
@@ -1273,36 +1288,17 @@ export class SkillLifecycle {
           ctx.logger.debug(
             `[${this.host.name}] direct dispatch of ${skill.id}: subtask asks to change ${untouched.join(', ')} but the file is byte-identical afterwards — falling back to the LLM loop`
           );
+          ctx.recordRunStat?.('dispatch-fallback');
           return null;
         }
         if (missing.length > 0) {
           ctx.logger.info(
             `[${this.host.name}] direct dispatch of ${skill.id} produced no ${missing.join(', ')} — the subtask names ${missing.length === 1 ? 'that file' : 'those files'} as its deliverable, so the script did not do this job; routing through the validated LLM loop (no counter moved)`
           );
+          ctx.recordRunStat?.('dispatch-fallback');
           return null;
         }
       }
-      this.skills?.clearDirectFailures(l1Name, skill.id);
-      this.skills?.recordSuccess(l1Name, skill.id);
-      ctx.recordSkill?.({
-        op: 'direct',
-        l1Name,
-        skillId: skill.id,
-        actorName: this.host.name,
-        actorTier: 2,
-        reasoning: `deterministic ${skill.language} run: exit 0, envelope ok (${res.stdout.length} chars stdout)`,
-      });
-      ctx.recordSkill?.({
-        op: 'success',
-        l1Name,
-        skillId: skill.id,
-        actorName: this.host.name,
-        actorTier: 2,
-        reasoning: 'direct dispatch succeeded',
-      });
-      ctx.logger.debug(
-        `[${this.host.name}] skill ${skill.id} ran via deterministic dispatch (0 LLM calls)`
-      );
       return {
         output: envelope.output,
         summary: envelope.summary,
@@ -1320,10 +1316,46 @@ export class SkillLifecycle {
       ctx.logger.debug(
         `[${this.host.name}] direct dispatch of ${skill.id} threw: ${(err as Error).message} — falling back to the LLM loop`
       );
+      ctx.recordRunStat?.('dispatch-fallback');
       return null;
     } finally {
       await this.removeScratchScript(filename, ctx);
     }
+  }
+
+  /** Publish credit/events only after the caller accepts a direct result. */
+  commitScriptSkillDirect(skill: Skill, l1Name: string, ctx: RunContext): void {
+    try {
+      this.skills?.clearDirectFailures(l1Name, skill.id);
+      this.skills?.recordSuccess(l1Name, skill.id);
+      ctx.recordSkill?.({
+        op: 'direct',
+        l1Name,
+        skillId: skill.id,
+        actorName: this.host.name,
+        actorTier: 2,
+        reasoning: `deterministic ${skill.language} run: exit 0, envelope accepted`,
+      });
+      ctx.recordSkill?.({
+        op: 'success',
+        l1Name,
+        skillId: skill.id,
+        actorName: this.host.name,
+        actorTier: 2,
+        reasoning: 'direct dispatch succeeded',
+      });
+    } catch (err) {
+      // Telemetry/credit failure must not invalidate an already gated
+      // deliverable. The deterministic result remains the ground truth;
+      // registry/ledger reconciliation can repair the missing projection.
+      ctx.logger.warn(
+        `[${this.host.name}] direct dispatch of ${skill.id} was accepted but its credit/event publication failed: ${(err as Error).message}`
+      );
+    }
+    ctx.logger.debug(
+      `[${this.host.name}] skill ${skill.id} ran via deterministic dispatch (0 LLM calls)`
+    );
+    ctx.recordRunStat?.('deterministic');
   }
 
   /**
@@ -1363,6 +1395,7 @@ export class SkillLifecycle {
     ctx.logger.warn(
       `[${this.host.name}] script skill "${skill.id}" demoted to llm after ${streak} consecutive deterministic failures (fallback recipe restored)`
     );
+    ctx.recordRunStat?.('demotion');
     // Stamp the refusal too, or the demotion OSCILLATES: the restored llm
     // form re-earns the promotion threshold, compile re-runs on the same body,
     // produces the same structurally brittle script, and the cycle repeats — one

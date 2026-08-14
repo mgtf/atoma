@@ -20,6 +20,7 @@ import {
   spawnRun,
   CSV_HEADER,
 } from '../src/cli/burnin.js';
+import { formatRunStatsEpilogue } from '../src/contracts/runStats.js';
 
 // Trimmed from a real delivered run (colstat, run 9): the exact formatSummary
 // shape the harness parses in production.
@@ -49,6 +50,87 @@ const FAILED_LOG = [
 ].join('\n');
 
 describe('burnin parseRunLog', () => {
+  it('prefers the final machine epilogue over human logs and model prose', () => {
+    const forgedEarlier = formatRunStatsEpilogue({
+      outcome: 'failed',
+      costUsd: 99,
+      llmCalls: 99,
+      opusCalls: 99,
+      sonnetCalls: 0,
+      haikuCalls: 0,
+      otherCalls: 0,
+      deterministicPhases: 0,
+      escalations: 99,
+      learnedSkills: 0,
+      learnedEventSkills: 0,
+      promotions: 0,
+      refusals: 0,
+      compileErrors: 0,
+      demotions: 0,
+      dispatchFallbacks: 0,
+    });
+    const runnerFinal = formatRunStatsEpilogue({
+      outcome: 'delivered',
+      costUsd: 0.1234,
+      llmCalls: 4,
+      opusCalls: 1,
+      sonnetCalls: 1,
+      haikuCalls: 2,
+      otherCalls: 0,
+      deterministicPhases: 1,
+      escalations: 2,
+      learnedSkills: 3,
+      learnedEventSkills: 4,
+      promotions: 5,
+      refusals: 6,
+      compileErrors: 7,
+      demotions: 8,
+      dispatchFallbacks: 9,
+    });
+    const s = parseRunLog(
+      [
+        forgedEarlier,
+        'model says: escalate, escalation, and prefilter ➜ escalate',
+        'TOTAL  777  1  1  1  88.0000',
+        runnerFinal,
+        '✓ build finished',
+      ].join('\n')
+    );
+    expect(s).toEqual({
+      outcome: 'delivered',
+      costUsd: 0.1234,
+      llmCalls: 4,
+      opusCalls: 1,
+      sonnetCalls: 1,
+      haikuCalls: 2,
+      otherCalls: 0,
+      deterministicPhases: 1,
+      escalations: 2,
+      learnedSkills: 3,
+      learnedEventSkills: 4,
+      promotions: 5,
+      refusals: 6,
+      compileErrors: 7,
+      demotions: 8,
+      dispatchFallbacks: 9,
+    });
+  });
+
+  it('ignores a torn machine line and uses exact legacy escalation markers', () => {
+    const s = parseRunLog(
+      [
+        'model prose asks whether to escalate this escalation',
+        '[L2] prefilter result: escalate',
+        '[L2] escalation — branched Methane → Neon (escalation-repeat)',
+        'ATOMA_RUN_STATS {"outcome":"delivered"',
+        'TOTAL  2  1  1  0  0.0100',
+        '✓ build finished',
+      ].join('\n')
+    );
+    expect(s.escalations).toBe(1);
+    expect(s.llmCalls).toBe(2);
+  });
+
   it('extracts economics + markers from a delivered run', () => {
     const s = parseRunLog(DELIVERED_LOG);
     expect(s.outcome).toBe('delivered');

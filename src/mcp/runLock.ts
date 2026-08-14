@@ -8,9 +8,10 @@
  */
 
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { homedir, uptime } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   RUN_KILL_CONFIRM_MS,
@@ -59,6 +60,8 @@ interface LeaseRow {
   owner_pid: number;
   child_pgid: number | null;
   acquired_at: string;
+  owner_fingerprint: string | null;
+  child_fingerprint: string | null;
 }
 
 const SCHEMA = `
@@ -68,9 +71,16 @@ const SCHEMA = `
     run_id TEXT NOT NULL,
     owner_pid INTEGER NOT NULL,
     child_pgid INTEGER,
-    acquired_at TEXT NOT NULL
+    acquired_at TEXT NOT NULL,
+    owner_fingerprint TEXT,
+    child_fingerprint TEXT
   )
 `;
+
+const FINGERPRINT_COLUMNS = [
+  ['owner_fingerprint', 'TEXT'],
+  ['child_fingerprint', 'TEXT'],
+] as const;
 
 function openLockDb(path: string): Database.Database {
   mkdirSync(dirname(path), { recursive: true });
@@ -78,6 +88,21 @@ function openLockDb(path: string): Database.Database {
   db.pragma('busy_timeout = 5000');
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  const columns = new Set(
+    (db.pragma('table_info(mcp_run_lease)') as Array<{ name: string }>).map((column) =>
+      column.name
+    )
+  );
+  for (const [name, type] of FINGERPRINT_COLUMNS) {
+    if (columns.has(name)) continue;
+    try {
+      db.exec(`ALTER TABLE mcp_run_lease ADD COLUMN ${name} ${type}`);
+    } catch (err) {
+      // Two MCP processes can open an old store together. One may complete
+      // the additive migration after the other's PRAGMA snapshot.
+      if (!/duplicate column name/i.test((err as Error).message)) throw err;
+    }
+  }
   return db;
 }
 
@@ -96,6 +121,59 @@ function processExists(pid: number): boolean {
   }
 }
 
+/**
+ * Stable process birth identity, not merely a recyclable PID.
+ *
+ * Linux exposes boot id + start ticks directly. BSD/macOS `ps lstart` is the
+ * portable fallback. A missing fingerprint is treated as unverifiable, never
+ * as permission to signal a process group.
+ */
+function processFingerprint(pid: number): string | null {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const afterName = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    const startTicks = afterName[19]; // field 22; array starts at field 3
+    const bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    if (startTicks && bootId) return `linux:${bootId}:${startTicks}`;
+  } catch {
+    // Non-Linux platform or the process disappeared between probes.
+  }
+  try {
+    const result = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8',
+      timeout: 1000,
+    });
+    const started = result.status === 0 ? result.stdout.trim().replace(/\s+/g, ' ') : '';
+    return started ? `ps:${started}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function leasePredatesCurrentBoot(acquiredAt: string): boolean {
+  const acquiredMs = Date.parse(acquiredAt);
+  if (!Number.isFinite(acquiredMs)) return false;
+  // Leave two seconds for wall-clock/uptime sampling skew at boot.
+  return acquiredMs < Date.now() - uptime() * 1000 - 2000;
+}
+
+type RecordedIdentity = 'match' | 'mismatch' | 'unverifiable' | 'gone';
+
+function recordedIdentity(
+  pid: number,
+  expectedFingerprint: string | null,
+  acquiredAt: string
+): RecordedIdentity {
+  if (!processExists(pid)) return 'gone';
+  if (!expectedFingerprint) {
+    return leasePredatesCurrentBoot(acquiredAt) ? 'mismatch' : 'unverifiable';
+  }
+  const actual = processFingerprint(pid);
+  if (!actual) return 'unverifiable';
+  return actual === expectedFingerprint ? 'match' : 'mismatch';
+}
+
 function toOwner(row: LeaseRow): RunLockOwner {
   return {
     token: row.token,
@@ -112,11 +190,14 @@ function makeLease(db: Database.Database, path: string, owner: RunLockOwner): Ru
     path,
     attachChild(pgid) {
       if (released) throw new Error(`cannot attach child ${pgid}: run lease is already released`);
+      const childFingerprint = processFingerprint(pgid);
       const changed = db
         .prepare(
-          'UPDATE mcp_run_lease SET child_pgid = ? WHERE singleton = 1 AND token = ?'
+          `UPDATE mcp_run_lease
+           SET child_pgid = ?, child_fingerprint = ?
+           WHERE singleton = 1 AND token = ?`
         )
-        .run(pgid, owner.token).changes;
+        .run(pgid, childFingerprint, owner.token).changes;
       if (changed !== 1) {
         throw new Error(`lost MCP run lease before child ${pgid} could be attached`);
       }
@@ -146,11 +227,13 @@ export async function acquireRunLease(
     ownerPid: process.pid,
     acquiredAt: new Date().toISOString(),
   };
+  const ownerFingerprint = processFingerprint(owner.ownerPid);
   const read = db.prepare('SELECT * FROM mcp_run_lease WHERE singleton = 1');
   const insert = db.prepare(
     `INSERT INTO mcp_run_lease
-      (singleton, token, run_id, owner_pid, child_pgid, acquired_at)
-     VALUES (1, ?, ?, ?, NULL, ?)`
+      (singleton, token, run_id, owner_pid, child_pgid, acquired_at,
+       owner_fingerprint, child_fingerprint)
+     VALUES (1, ?, ?, ?, NULL, ?, ?, NULL)`
   );
   const deleteByToken = db.prepare(
     'DELETE FROM mcp_run_lease WHERE singleton = 1 AND token = ?'
@@ -162,7 +245,13 @@ export async function acquireRunLease(
       if (!existing) {
         const claimed = db.transaction(() => {
           if (read.get() !== undefined) return false;
-          insert.run(owner.token, owner.runId, owner.ownerPid, owner.acquiredAt);
+          insert.run(
+            owner.token,
+            owner.runId,
+            owner.ownerPid,
+            owner.acquiredAt,
+            ownerFingerprint
+          );
           return true;
         }).immediate();
         if (claimed) return makeLease(db, path, owner);
@@ -170,20 +259,41 @@ export async function acquireRunLease(
       }
 
       const stale = toOwner(existing);
-      if (processExists(stale.ownerPid)) {
+      const ownerIdentity = recordedIdentity(
+        stale.ownerPid,
+        existing.owner_fingerprint,
+        stale.acquiredAt
+      );
+      if (ownerIdentity === 'match' || ownerIdentity === 'unverifiable') {
         throw new RunLockBusyError(
-          `another MCP server owns the run slot (${stale.runId}, pid ${stale.ownerPid}, since ${stale.acquiredAt})`,
+          `another MCP server owns the run slot (${stale.runId}, pid ${stale.ownerPid}, since ${stale.acquiredAt}${ownerIdentity === 'unverifiable' ? ', process birth unverifiable' : ''})`,
           stale
         );
       }
 
       if (stale.childPgid !== undefined && runProcessGroupExists(stale.childPgid)) {
-        const gone = await terminateRunProcessGroup(stale.childPgid);
-        if (!gone) {
+        const childIdentity = recordedIdentity(
+          stale.childPgid,
+          existing.child_fingerprint,
+          stale.acquiredAt
+        );
+        if (childIdentity === 'unverifiable' || childIdentity === 'gone') {
           throw new RunLockBusyError(
-            `the previous MCP server died while run ${stale.runId} survived (process group ${stale.childPgid}); cleanup did not reach ESRCH after ${RUN_KILL_GRACE_MS + RUN_KILL_CONFIRM_MS}ms`,
+            `the previous MCP server died while run ${stale.runId} left process group ${stale.childPgid}, but its birth identity cannot be verified; refusing to signal a possibly recycled group`,
             stale
           );
+        }
+        if (childIdentity === 'match') {
+          const gone = await terminateRunProcessGroup(stale.childPgid);
+          if (!gone) {
+            throw new RunLockBusyError(
+              `the previous MCP server died while run ${stale.runId} survived (process group ${stale.childPgid}); cleanup did not reach ESRCH after ${RUN_KILL_GRACE_MS + RUN_KILL_CONFIRM_MS}ms`,
+              stale
+            );
+          }
+        } else {
+          // Same numeric PGID, different process birth: it belongs to someone
+          // else now. Reclaim only the stale row and never send a signal.
         }
       }
 
@@ -191,7 +301,13 @@ export async function acquireRunLease(
       // replaced the stale token, this transaction changes nothing and loops.
       const claimed = db.transaction(() => {
         if (deleteByToken.run(stale.token).changes !== 1) return false;
-        insert.run(owner.token, owner.runId, owner.ownerPid, owner.acquiredAt);
+        insert.run(
+          owner.token,
+          owner.runId,
+          owner.ownerPid,
+          owner.acquiredAt,
+          ownerFingerprint
+        );
         return true;
       }).immediate();
       if (claimed) return makeLease(db, path, owner);

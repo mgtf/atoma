@@ -20,11 +20,10 @@
  *     purpose ("Press Ctrl+C when you are done testing"), so the harness
  *     terminates it once "✓ build finished" and the metrics table have been
  *     printed. Failed runs exit on their own.
- *   - Metrics come from the run's own stdout (the `TOTAL` row of
- *     `formatSummary`) — the same numbers a human reads — plus counts of
- *     the load-bearing log markers (deterministic dispatch, escalations,
- *     learned skills). Duration comes from the newest trace in ./runs when
- *     available, wall time otherwise.
+ *   - Metrics and lifecycle counts come from the runner's final
+ *     `ATOMA_RUN_STATS` JSON epilogue. Legacy/torn runs fall back to the
+ *     human `TOTAL` table and exact log markers. Duration comes from the
+ *     newest trace in ./runs when available, wall time otherwise.
  */
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -33,6 +32,12 @@ import {
   referencedProviderNames,
   resolveBaseProviderKind,
 } from '../run/providers.js';
+import {
+  parseRunStatsEpilogue,
+  type RunStats,
+} from '../contracts/runStats.js';
+
+export type { RunStats } from '../contracts/runStats.js';
 
 export interface BurninTask {
   readonly id: string;
@@ -56,33 +61,6 @@ export function burninProviderInfo(
   };
 }
 
-export interface RunStats {
-  readonly outcome: 'delivered' | 'failed' | 'error';
-  readonly costUsd: number | null;
-  readonly llmCalls: number | null;
-  readonly opusCalls: number;
-  readonly sonnetCalls: number;
-  readonly haikuCalls: number;
-  /** Calls whose model id is outside the historical Claude family columns. */
-  readonly otherCalls: number;
-  readonly deterministicPhases: number;
-  readonly escalations: number;
-  /** Task-level recipes (`learned new skill`). */
-  readonly learnedSkills: number;
-  /** Mid-run recovery recipes (`learned event skill`). */
-  readonly learnedEventSkills: number;
-  /** llm→script compilations that succeeded in this run. */
-  readonly promotions: number;
-  /** compile attempts the compiler REFUSED as irreducible. */
-  readonly refusals: number;
-  /** compile attempts that errored or timed out before a verdict. */
-  readonly compileErrors: number;
-  /** script→llm demotions (the safety net firing). */
-  readonly demotions: number;
-  /** dispatches that hit a contract failure and fell back to the LLM loop. */
-  readonly dispatchFallbacks: number;
-}
-
 /** Parse one model row of `formatSummary` (e.g. `claude-opus-5  1  2  1552  0  0.0672`). */
 function modelCalls(log: string, marker: RegExp): number {
   let calls = 0;
@@ -102,6 +80,9 @@ function modelCalls(log: string, marker: RegExp): number {
  * so a hung/killed run still shows up in the curve).
  */
 export function parseRunLog(log: string): RunStats {
+  const machine = parseRunStatsEpilogue(log);
+  if (machine) return machine;
+
   const outcome: RunStats['outcome'] = /✓ build finished/.test(log)
     ? 'delivered'
     : /--- run failed ---|TIMEOUT after/.test(log)
@@ -133,7 +114,10 @@ export function parseRunLog(log: string): RunStats {
     otherCalls:
       llmCalls === null ? 0 : Math.max(0, llmCalls - opusCalls - sonnetCalls - haikuCalls),
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
-    escalations: (log.match(/escalat/gi) ?? []).length,
+    // Legacy fallback only: count the runner-owned escalation marker, never
+    // arbitrary model prose or routine prefilter decisions containing the
+    // same word.
+    escalations: (log.match(/\bescalation — branched\b/g) ?? []).length,
     learnedSkills: (log.match(/learned new skill/g) ?? []).length,
     learnedEventSkills: (log.match(/learned event skill/g) ?? []).length,
     promotions: (log.match(/promoted to kind:script/g) ?? []).length,

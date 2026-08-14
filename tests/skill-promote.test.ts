@@ -231,6 +231,9 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // script (the harness does the networking) compiles clean.
     expect(compileCall.userContent).toMatch(/NETWORK POLICY — MANDATORY/);
     expect(compileCall.userContent).toMatch(/spawn\s+it via child_process/);
+    expect(compileCall.userContent).toMatch(/Never run npm\/pnpm\/yarn/);
+    expect(compileCall.userContent).toMatch(/--network none/);
+    expect(compileCall.userContent).not.toMatch(/install via npm at runtime/);
     // A computed validity verdict must bind to the exit code — a compiled
     // markdown verifier printed allValid=false inside a zero-exit envelope
     // and a sabotaged file passed the deterministic path undetected.

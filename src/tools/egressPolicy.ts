@@ -1,8 +1,8 @@
 /**
  * What a containerised run is allowed to reach.
  *
- * The run itself sits on a `--internal` docker network with no route
- * anywhere; this policy is enforced by the ONE peer it can reach, the egress
+ * The run itself sits on an internal Docker bridge with gateway mode
+ * `isolated`; this policy is enforced by the ONE peer it can reach, the egress
  * proxy. So this file is the whole boundary between "the run can fetch its
  * dependencies" and "the run can call the control plane" — measured:
  * a default `bridge` network reaches `host.docker.internal`, which is the

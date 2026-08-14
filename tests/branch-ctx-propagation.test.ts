@@ -47,4 +47,11 @@ describe('forkBranch — field propagation', () => {
     expect(outer.mechanicalPlanRejections?.has('subtask|tool')).toBe(true);
     expect(root.mechanicalPlanRejections?.has('subtask|tool')).toBe(true);
   });
+
+  it('forwards run-stat signals through a double fork', () => {
+    const seen: string[] = [];
+    const root = { ...makeCtx(), recordRunStat: (signal: string) => seen.push(signal) };
+    forkBranch(forkBranch(root, 'outer'), 'inner').recordRunStat?.('escalation');
+    expect(seen).toEqual(['escalation']);
+  });
 });

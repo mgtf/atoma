@@ -42,6 +42,29 @@ après-midi du 13/08).
 > une lecture stricte et un remplacement atomique ; le benchmark exige un nouveau
 > chemin `--result` par round au lieu de réécrire une preuve existante.
 
+> **Statut 2026-08-14 (batch runtime 3)** : le refactoring 3.6 est appliqué —
+> le runner émet un épilogue machine `ATOMA_RUN_STATS {json}`
+> (`src/contracts/runStats.ts`, signaux comptés via `ctx.recordRunStat`) que le
+> burn-in préfère au parsing regex, gardé en fallback pour les runs interrompus ;
+> la classe `/escalat/gi` (1.13) est retirée avec lui. La priorité 5.3 est
+> appliquée : la promotion de skills est gelée par défaut sur les runs
+> from-scratch (`resolveSkillPromotion` — seed = signal maintenance, opt-in exact
+> `ATOMA_SKILL_PROMOTE=1`, veto CLI final ; le MCP mappe `promoteSkills:true`
+> sur le même opt-in). Le lease MCP porte des empreintes de naissance de
+> processus (boot id + start ticks, fallback `ps lstart`) contre la
+> réutilisation de PID/PGID après reboot. L'egress exige Docker Engine 28+
+> (gateways `isolated` ; un `--internal` nu atteint l'hôte par l'adresse de la
+> passerelle — doctor échoue en mode egress sur un moteur plus vieux).
+> `compare-frontier` isole chaque round : snapshot SQLite online-backup du store
+> mature + copie déréférencée des skills, le bras treatment ne mute plus la
+> production (1.6 clos en entier). Aussi : routage L3 cross-bucket par CAPACITÉ
+> du preferredChild (plus d'égalité de nom, plus de réécriture forcée de
+> l'aggregation), ABI d'invocation script unifiée (`scriptInvocationArgv`
+> consommée par les deux chemins de dispatch), le compile prompt interdit toute
+> installation de paquets à l'exécution, vocabulaire de mutation étendu dans
+> `scriptTargets`. Suite complète : 1501 passed / 8 skipped, typecheck + lint
+> verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

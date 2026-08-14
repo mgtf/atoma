@@ -28,6 +28,8 @@ import type {
  *     consumer reads ctx directly.
  *   - `recordBranch` → forwarded unchanged; nested dispatchers provide
  *     their own id plus `currentBranchId` as the exact parent.
+ *   - `recordRunStat` → forwarded unchanged; it is run-scoped accounting,
+ *     not a branch-labelled viz event.
  */
 export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   const wrappedLlm: LlmClient = {
@@ -89,6 +91,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
       : {}),
     ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
     ...(wrappedRecordSkill !== undefined ? { recordSkill: wrappedRecordSkill } : {}),
+    ...(ctx.recordRunStat !== undefined ? { recordRunStat: ctx.recordRunStat } : {}),
     ...(wrappedRecordCacheHit !== undefined ? { recordCacheHit: wrappedRecordCacheHit } : {}),
     ...(ctx.recordBranch !== undefined ? { recordBranch: ctx.recordBranch } : {}),
     currentBranchId: branchId,

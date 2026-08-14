@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillRegistry, parseFrontmatter, renderFrontmatter } from '../src/skills/registry.js';
 import { skillContextBlock } from '../src/atoms/L2Atom.js';
+import {
+  scriptArgv,
+  scriptInvocationArgv,
+  scriptInvocationArgvTemplate,
+} from '../src/skills/abi.js';
 
 /**
  * Phase 2 — `kind: 'script'` skills. Frontmatter accepts a `language`
@@ -170,6 +175,19 @@ describe('SkillRegistry.save / loadFor — kind: script (phase 2)', () => {
 });
 
 describe('skillContextBlock — kind: script (phase 2)', () => {
+  it('derives both dispatch forms from the shared argv ABI', () => {
+    expect(scriptArgv('write "quoted" output')).toEqual([
+      JSON.stringify('write "quoted" output'),
+    ]);
+    expect(scriptInvocationArgv('_skill_x.mjs', 'write "quoted" output')).toEqual([
+      '_skill_x.mjs',
+      JSON.stringify('write "quoted" output'),
+    ]);
+    expect(scriptInvocationArgvTemplate('_skill_x.mjs')).toBe(
+      '["_skill_x.mjs", <JSON.stringify(subtaskDescription)>]'
+    );
+  });
+
   it('emits the EXECUTE THIS SCRIPT prompt with the right interpreter for node', () => {
     const out = skillContextBlock({
       id: 'write-package-json',

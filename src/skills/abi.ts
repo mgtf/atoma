@@ -35,3 +35,20 @@ export function scriptInterpreter(language: SkillLanguage): string {
 export function scriptArgv(subtaskDescription: string): string[] {
   return [JSON.stringify(subtaskDescription)];
 }
+
+/** Full run_shell argv for the trusted direct path. */
+export function scriptInvocationArgv(
+  filename: string,
+  subtaskDescription: string
+): string[] {
+  return [filename, ...scriptArgv(subtaskDescription)];
+}
+
+/**
+ * Human-readable form of the same ABI for the L1-driven prompt path.
+ * The placeholder is intentionally executable-looking without encoding the
+ * literal word "subtaskDescription" as the argument value.
+ */
+export function scriptInvocationArgvTemplate(filename: string): string {
+  return `["${filename}", <JSON.stringify(subtaskDescription)>]`;
+}

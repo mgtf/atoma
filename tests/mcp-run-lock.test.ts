@@ -13,6 +13,19 @@ const SCHEMA = `
     run_id TEXT NOT NULL,
     owner_pid INTEGER NOT NULL,
     child_pgid INTEGER,
+    acquired_at TEXT NOT NULL,
+    owner_fingerprint TEXT,
+    child_fingerprint TEXT
+  )
+`;
+
+const LEGACY_SCHEMA = `
+  CREATE TABLE mcp_run_lease (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    token TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    owner_pid INTEGER NOT NULL,
+    child_pgid INTEGER,
     acquired_at TEXT NOT NULL
   )
 `;
@@ -109,6 +122,93 @@ describe('MCP cross-process run lease', () => {
     expect(owner.run_id).toBe('new-run');
     db.close();
     recovered.release();
+  });
+
+  it('migrates an existing lease store before recording process fingerprints', async () => {
+    const legacy = new Database(lockPath);
+    legacy.exec(LEGACY_SCHEMA);
+    legacy.close();
+
+    const lease = await acquireRunLease('migrated-run', lockPath);
+    const db = new Database(lockPath);
+    const columns = (db.pragma('table_info(mcp_run_lease)') as Array<{ name: string }>).map(
+      (column) => column.name
+    );
+    expect(columns).toContain('owner_fingerprint');
+    expect(columns).toContain('child_fingerprint');
+    expect(
+      (db.prepare('SELECT owner_fingerprint FROM mcp_run_lease').get() as {
+        owner_fingerprint: string | null;
+      }).owner_fingerprint
+    ).toEqual(expect.any(String));
+    db.close();
+    lease.release();
+  });
+
+  it('does not confuse a recycled live PID with the recorded owner', async () => {
+    const db = inspect();
+    db.prepare(
+      `INSERT INTO mcp_run_lease
+       (singleton, token, run_id, owner_pid, child_pgid, acquired_at, owner_fingerprint)
+       VALUES (1, 'old-process', 'old-run', ?, NULL, ?, 'not-this-process')`
+    ).run(process.pid, new Date().toISOString());
+    db.close();
+
+    const recovered = await acquireRunLease('new-run', lockPath);
+    const after = inspect();
+    expect(
+      (after.prepare('SELECT run_id FROM mcp_run_lease').get() as { run_id: string }).run_id
+    ).toBe('new-run');
+    after.close();
+    recovered.release();
+  });
+
+  it('recognizes that a legacy lease predates the current boot', async () => {
+    const db = inspect();
+    db.prepare(
+      `INSERT INTO mcp_run_lease
+       (singleton, token, run_id, owner_pid, child_pgid, acquired_at,
+        owner_fingerprint, child_fingerprint)
+       VALUES (1, 'before-reboot', 'old-run', ?, NULL,
+               '1970-01-01T00:00:00.000Z', NULL, NULL)`
+    ).run(process.pid);
+    db.close();
+
+    const recovered = await acquireRunLease('after-reboot', lockPath);
+    recovered.release();
+  });
+
+  it('never signals a live process group whose numeric id was recycled', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      detached: true,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    if (!child.pid) throw new Error('child pid unavailable');
+    await new Promise<void>((resolveSpawn, rejectSpawn) => {
+      child.once('spawn', resolveSpawn);
+      child.once('error', rejectSpawn);
+    });
+    try {
+      const db = inspect();
+      db.prepare(
+        `INSERT INTO mcp_run_lease
+         (singleton, token, run_id, owner_pid, child_pgid, acquired_at,
+          owner_fingerprint, child_fingerprint)
+         VALUES (1, 'dead-with-reused-group', 'old-run', 99999999, ?, ?,
+                 NULL, 'not-this-child')`
+      ).run(child.pid, new Date().toISOString());
+      db.close();
+
+      const recovered = await acquireRunLease('safe-run', lockPath);
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+      recovered.release();
+    } finally {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // Already gone is fine.
+      }
+    }
   });
 
   it('records the detached child and never deletes a successor lease', async () => {
