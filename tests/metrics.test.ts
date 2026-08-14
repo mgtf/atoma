@@ -226,6 +226,42 @@ describe('MetricsLlmClient', () => {
   });
 });
 
+describe('served-model-aware accounting (review 2026-08-14 §1.13)', () => {
+  it('prices a codex-pinned call on the GPT slug row, not the /opus/i row', async () => {
+    // resolveCodexModel maps `codex:claude-opus-5` → gpt-5.6-sol, but
+    // pricesFor('codex:claude-opus-5') hits /opus/i ($5/$25) — GPT tokens
+    // billed at Claude rates. The transport now reports what it actually
+    // invoked and the recorder prices on that.
+    const inner = new MockLlmClient();
+    inner.enqueue({
+      text: 'plan',
+      stopReason: 'end_turn',
+      usage: { inputTokens: 0, outputTokens: 1_000_000 },
+      servedModel: 'gpt-5.6-sol',
+    });
+    const recorder = new InMemoryMetrics();
+    const wrapped = new MetricsLlmClient(inner, recorder);
+    await wrapped.complete({ model: 'codex:claude-opus-5', systemPrompt: 's', userContent: 'u' });
+
+    // The per-model row is keyed by the SERVED model…
+    expect(recorder.events[0]!.model).toBe('gpt-5.6-sol');
+    // …and priced on the GPT row: 1M output @ $30, where /opus/i says $25.
+    expect(recorder.summary().totals.costUsd).toBeCloseTo(30, 3);
+  });
+
+  it('a transport that omits servedModel keeps the pin — byte-compatible default', async () => {
+    const inner = new MockLlmClient();
+    inner.enqueueText('ok');
+    const recorder = new InMemoryMetrics();
+    await new MetricsLlmClient(inner, recorder).complete({
+      model: 'claude-opus-5',
+      systemPrompt: 's',
+      userContent: 'u',
+    });
+    expect(recorder.events[0]!.model).toBe('claude-opus-5');
+  });
+});
+
 describe('partial usage survives a mid-loop death (audit rank-12)', () => {
   it('MetricsLlmClient records the tokens attached to the error', async () => {
     const { InMemoryMetrics, MetricsLlmClient } = await import('../src/core/metrics.js');

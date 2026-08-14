@@ -32,6 +32,15 @@ export interface VizLlmEvent {
     | 'fallback-execute'
     | 'unknown';
   model: string;
+  /**
+   * The model the transport ACTUALLY invoked when it differs from the pin
+   * (`model` above stays the routing identity — `codex:claude-opus-5` —
+   * while a transport may serve `gpt-5.6-sol`). Optional and additive:
+   * events recorded before 2026-08-15, and events from transports that
+   * serve the pin verbatim, simply lack it. `costUsd` is priced on this
+   * when present (review 2026-08-14 §1.13).
+   */
+  servedModel?: string;
   actor?: VizAtomRef;
   child?: VizAtomRef;
   subject?: 'PLAN' | 'RESULT';

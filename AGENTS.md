@@ -186,6 +186,16 @@ Read this section before changing any LLM call site.
   marker before marking the latest tool result. Never exceed four breakpoints.
 - `estimateCostUsd` is the only cost formula. Anthropic input, cache-read, and
   cache-creation counters are disjoint; never subtract one from another.
+- Accounting follows the SERVED model, not the tier pin: transports that
+  rewrite the model (codex slug mapping, ollama collapse, claude-cli aliases)
+  report `servedModel` on the response, and metrics/recording price
+  `servedModel ?? req.model`. The pin stays the routing identity in events.
+- Errors keep their paid tokens on EVERY transport: a throw from a tool loop
+  carries `partialUsage`, and both observability layers read it — the trace
+  and the CSV must never disagree about one call's cost.
+- Provider construction has one switch: `makeBaseClient` in
+  `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
+  the ollama/claude-cli/anthropic ternary again.
 
 ## Contracts and storage
 
@@ -229,9 +239,19 @@ Read this section before changing any LLM call site.
   every `forkBranch`; add fork-propagation coverage for new optional fields.
 - Registry descriptions are reusable capability labels, never task narratives.
   Route creation descriptions through `resolveCreationDescription`.
-- `runTask(profile, argv)` owns provider, sandbox, traces, skills, budgets,
-  signals, watchdogs, and post-mortems. A `TaskProfile` contributes only
+- `startTask(profile, argv)` is the library entry: it owns provider, sandbox,
+  traces, skills, budgets, the watchdog and post-mortems, throws
+  `RunnerConfigError` on bad input, resolves lifecycle env against the HOST
+  snapshot (a run's own writes never become the next run's "operator intent"),
+  and returns a `RunHandle {settled, shutdown}` that never parks and never
+  exits. `runTask(profile, argv)` is the CLI shell that owns process death:
+  exit 2 on config errors, exit 1 on failure, park-forever on delivery,
+  SIGINT/SIGTERM → shutdown. Its stdout is an API (burn-in parses it) — the
+  handle refactor kept it byte-identical. A `TaskProfile` contributes only
   family-specific workspace, seed, canonical catalog, constraints, and env names.
+- Codex tier pins are refused for L1 at LAUNCH (`RunnerConfigError`), not only
+  in doctor: a codex L1 would serve every text-only prefilter/validator and
+  detonate at the first tool-bearing execute, mid-run and mid-spend.
 - Canonical bootstrap is idempotent and bucket-specific. Prompt/tool changes
   patch and reset trust only when content genuinely differs.
 - Verification is read-only. Supervisors may run fixed probes they own, but

@@ -4,6 +4,7 @@ import { AnthropicLlmClient } from '../core/llm.js';
 import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { CodexCliLlmClient } from '../core/llmCodexCli.js';
+import { splitProviderModel } from '../core/llmRouting.js';
 import { makeAnthropicClient } from './auth.js';
 
 /**
@@ -38,6 +39,43 @@ export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
 }
 
 /**
+ * ONE construction switch for the process-wide base provider. The runner
+ * and the curriculum CLI both used to hand-roll this ternary, re-reading
+ * OLLAMA_BASE_URL/OLLAMA_MODEL independently — the drift class this repo
+ * has been bitten by twice (research-brief.ts lost every safety guarantee
+ * the build path gained; curriculum's copy of the provider switch missed
+ * the bare `claude` alias). Review 2026-08-14 §3.9.
+ *
+ * `anthropic` REQUIRES a constructed SDK client rather than building one:
+ * `makeAnthropicClient()` exits the process when no credential resolves,
+ * and only the caller knows whether an Anthropic credential should even be
+ * demanded (an ollama/claude-cli session must never die on a missing key).
+ */
+export function makeBaseClient(
+  kind: BaseProviderKind,
+  opts?: { anthropic?: Anthropic; env?: NodeJS.ProcessEnv }
+): LlmClient {
+  const env = opts?.env ?? process.env;
+  switch (kind) {
+    case 'ollama':
+      return new OllamaLlmClient({
+        baseUrl: env['OLLAMA_BASE_URL'],
+        defaultModel: env['OLLAMA_MODEL'],
+      });
+    case 'claude-cli':
+      return new ClaudeCliLlmClient();
+    case 'anthropic':
+      if (!opts?.anthropic) {
+        throw new Error(
+          'makeBaseClient("anthropic") needs a constructed Anthropic SDK client — ' +
+            'call makeAnthropicClient() and pass it as opts.anthropic'
+        );
+      }
+      return new AnthropicLlmClient(opts.anthropic);
+  }
+}
+
+/**
  * Providers that a `provider:model` tier pin can reference
  * (e.g. ATOMA_MODEL_L1=zai:glm-4.5-air). Each entry builds its client
  * lazily — only providers actually referenced by a tier var are
@@ -61,13 +99,12 @@ const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
       })
     );
   },
-  anthropic: () => new AnthropicLlmClient(makeAnthropicClient()),
-  ollama: () =>
-    new OllamaLlmClient({
-      baseUrl: process.env['OLLAMA_BASE_URL'],
-      defaultModel: process.env['OLLAMA_MODEL'],
-    }),
-  'claude-cli': () => new ClaudeCliLlmClient(),
+  // The three base kinds route through the ONE construction switch above —
+  // a tier-pinned `anthropic:`/`ollama:`/`claude-cli:` client must be built
+  // exactly like the ATOMA_LLM base client, or the two paths drift.
+  anthropic: () => makeBaseClient('anthropic', { anthropic: makeAnthropicClient() }),
+  ollama: () => makeBaseClient('ollama'),
+  'claude-cli': () => makeBaseClient('claude-cli'),
   // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
   // ONLY. It cannot host a tool loop (openai/codex#6049: Codex's own
   // built-in tools cannot be disabled, so calls would bypass ToolSandbox
@@ -80,7 +117,15 @@ const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
 /** Provider names a tier pin may reference via the `provider:` prefix. */
 export const KNOWN_PROVIDER_PREFIXES = Object.keys(PROVIDER_FACTORIES);
 
-/** Provider prefixes explicitly referenced by the three tier-model env vars. */
+/**
+ * Provider prefixes explicitly referenced by the three tier-model env vars.
+ * Parsing DELEGATES to `splitProviderModel` — this function used to
+ * re-implement the same first-colon/known-prefix walk byte-for-byte, which
+ * is exactly the two-copies-of-one-rule drift that broke `storeDbPath` and
+ * `usedOrdinals` (review 2026-08-14 §3.9). A known-provider pin with an
+ * empty model (`zai:`) therefore throws HERE, at construction scan time,
+ * with the env-var shape in the message — instead of the first LLM call.
+ */
 export function referencedProviderNames(env: NodeJS.ProcessEnv = process.env): string[] {
   const referenced = new Set<string>();
   for (const tier of [1, 2, 3] as const) {
@@ -88,10 +133,8 @@ export function referencedProviderNames(env: NodeJS.ProcessEnv = process.env): s
     // value can add a cross-provider route.
     const value = env[`ATOMA_MODEL_L${tier}`]?.trim();
     if (!value) continue;
-    const i = value.indexOf(':');
-    if (i <= 0) continue;
-    const prefix = value.slice(0, i).toLowerCase();
-    if (KNOWN_PROVIDER_PREFIXES.includes(prefix)) referenced.add(prefix);
+    const { provider } = splitProviderModel(value, KNOWN_PROVIDER_PREFIXES);
+    if (provider !== null) referenced.add(provider);
   }
   return [...referenced];
 }

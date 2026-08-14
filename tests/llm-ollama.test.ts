@@ -361,6 +361,72 @@ describe('OllamaLlmClient', () => {
     ).rejects.toThrow(/Ollama HTTP 404/);
   });
 
+  it('reports the SERVED model: pins collapse onto defaultModel, explicit tags stay verbatim', async () => {
+    // Pricing on req.model billed Claude rates for local/GLM tokens — the
+    // observability layers price on servedModel (review 2026-08-14 §1.13).
+    restore = installFetchStub(async () =>
+      jsonResponse({ model: 'x', message: { role: 'assistant', content: 'ok' }, done: true })
+    );
+    const client = new OllamaLlmClient({ defaultModel: 'glm-5.1:cloud' });
+    const collapsed = await client.complete({
+      model: 'claude-opus-5',
+      systemPrompt: 's',
+      userContent: 'u',
+    });
+    expect(collapsed.servedModel).toBe('glm-5.1:cloud');
+    const verbatim = await client.complete({
+      model: 'qwen3:8b',
+      systemPrompt: 's',
+      userContent: 'u',
+    });
+    expect(verbatim.servedModel).toBe('qwen3:8b');
+  });
+
+  it('attaches the usage aggregated SO FAR to an error leaving the tool loop (partialUsage parity)', async () => {
+    // Mirror of AnthropicLlmClient.raise (e15d810): a run killed on round 2
+    // used to lose round 1's paid tokens — MetricsLlmClient recorded zeros
+    // (review 2026-08-14 §1.13).
+    let step = 0;
+    restore = installFetchStub(async () => {
+      step++;
+      if (step === 1) {
+        return jsonResponse({
+          model: 'x',
+          message: {
+            role: 'assistant',
+            content: '',
+            tool_calls: [{ id: 'tc1', function: { name: 'write_file', arguments: { path: 'a' } } }],
+          },
+          done: false,
+          prompt_eval_count: 10,
+          eval_count: 5,
+        });
+      }
+      return new Response('boom', { status: 500 });
+    });
+    const client = new OllamaLlmClient();
+    const executor: ToolExecutor = { execute: async () => 'ok', has: () => true };
+    let caught: unknown;
+    try {
+      await client.complete({
+        model: 'x',
+        systemPrompt: 's',
+        userContent: 'u',
+        tools: [{ name: 'write_file', description: 'w', inputSchema: { type: 'object', properties: {} } }],
+        executor,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(String(caught)).toMatch(/Ollama HTTP 500/);
+    expect((caught as { partialUsage?: unknown }).partialUsage).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    });
+  });
+
   it('forwards temperature / maxTokens as Ollama options', async () => {
     restore = installFetchStub(async (_i, init) => {
       calls.push([_i, init]);

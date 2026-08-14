@@ -151,11 +151,30 @@ export class OllamaLlmClient implements LlmClient {
     let finalText = '';
     let stopReason: string | null = null;
 
+    // Attach the usage aggregated SO FAR to any error leaving this loop —
+    // the exact `partialUsage` mechanism AnthropicLlmClient.raise carries
+    // (e15d810). Without it, a run killed on round 7 of an Ollama tool loop
+    // lost every token it had already paid for: MetricsLlmClient recorded
+    // zeros for the six completed rounds (review 2026-08-14 §1.13).
+    const raise = (err: unknown): never => {
+      try {
+        (err as { partialUsage?: object }).partialUsage = {
+          inputTokens: aggInput,
+          outputTokens: aggOutput,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+        };
+      } catch {
+        // frozen/exotic abort reasons can't carry properties — fine.
+      }
+      throw err;
+    };
+
     for (let iter = 0; iter < budget; iter++) {
       if (req.signal?.aborted) {
-        throw req.signal.reason instanceof Error
-          ? req.signal.reason
-          : new Error('aborted');
+        raise(
+          req.signal.reason instanceof Error ? req.signal.reason : new Error('aborted')
+        );
       }
 
       const body = {
@@ -166,23 +185,35 @@ export class OllamaLlmClient implements LlmClient {
         ...(Object.keys(options).length > 0 ? { options } : {}),
       };
 
-      const resp = await fetch(`${this.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: req.signal,
-      });
+      let resp: Response;
+      try {
+        resp = await fetch(`${this.baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: req.signal,
+        });
+      } catch (err) {
+        // Mid-flight abort / connection failure: the rounds already
+        // completed are still paid for.
+        return raise(err);
+      }
       if (!resp.ok) {
         const errText = await resp.text().catch(() => '');
-        throw new Error(`Ollama HTTP ${resp.status}: ${errText.slice(0, 400)}`);
+        return raise(new Error(`Ollama HTTP ${resp.status}: ${errText.slice(0, 400)}`));
       }
-      const json = (await resp.json()) as OllamaChatResponse;
+      let json: OllamaChatResponse;
+      try {
+        json = (await resp.json()) as OllamaChatResponse;
+      } catch (err) {
+        return raise(err);
+      }
 
       aggInput += json.prompt_eval_count ?? 0;
       aggOutput += json.eval_count ?? 0;
 
       const msg = json.message;
-      if (!msg) throw new Error('Ollama response missing `message`');
+      if (!msg) return raise(new Error('Ollama response missing `message`'));
       const toolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
       const shouldLoop = toolCalls.length > 0 && req.executor !== undefined;
 
@@ -291,24 +322,29 @@ export class OllamaLlmClient implements LlmClient {
       // Budget exhausted without a final assistant text turn. Mirror the
       // Anthropic client's "tool budget exhausted" fallback by doing
       // ONE tools-disabled round-trip to force a final text reply.
-      const resp = await fetch(`${this.baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            ...messages,
-            {
-              role: 'user',
-              content:
-                '== TOOL BUDGET EXHAUSTED == Return your best final answer now as plain text; no more tool calls will be permitted.',
-            },
-          ],
-          stream: false,
-          ...(Object.keys(options).length > 0 ? { options } : {}),
-        }),
-        signal: req.signal,
-      });
+      let resp: Response;
+      try {
+        resp = await fetch(`${this.baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [
+              ...messages,
+              {
+                role: 'user',
+                content:
+                  '== TOOL BUDGET EXHAUSTED == Return your best final answer now as plain text; no more tool calls will be permitted.',
+              },
+            ],
+            stream: false,
+            ...(Object.keys(options).length > 0 ? { options } : {}),
+          }),
+          signal: req.signal,
+        });
+      } catch (err) {
+        return raise(err);
+      }
       if (resp.ok) {
         const json = (await resp.json()) as OllamaChatResponse;
         aggInput += json.prompt_eval_count ?? 0;
@@ -321,8 +357,10 @@ export class OllamaLlmClient implements LlmClient {
         // cause with zero transport context. An HTTP failure on the
         // finalization round-trip is a transport error like any other.
         const body = await resp.text().catch(() => '');
-        throw new Error(
-          `Ollama budget-exhausted finalization failed: HTTP ${resp.status} ${body.slice(0, 200)}`
+        return raise(
+          new Error(
+            `Ollama budget-exhausted finalization failed: HTTP ${resp.status} ${body.slice(0, 200)}`
+          )
         );
       }
     }
@@ -336,6 +374,10 @@ export class OllamaLlmClient implements LlmClient {
         cacheCreationInputTokens: 0,
         cacheReadInputTokens: 0,
       },
+      // What was ACTUALLY invoked: Anthropic pins collapse onto the
+      // configured defaultModel here, so pricing on req.model would bill
+      // Claude rates for local/GLM tokens (review 2026-08-14 §1.13).
+      servedModel: model,
     };
   }
 }

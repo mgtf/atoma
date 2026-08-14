@@ -103,6 +103,28 @@ après-midi du 13/08).
 > par design. Suite complète : 1521 passed / 8 skipped, typecheck + lint +
 > docs:check verts.
 
+> **Statut 2026-08-15 (batch runtime 6)** : les refactorings 3.5 et 3.9 sont
+> appliqués. §3.5 — `startTask(profile, argv)` retourne un
+> `RunHandle {settled, shutdown}` : plus de park-forever ni de `process.exit`
+> ni de handlers de signaux dans la bibliothèque (erreurs de config typées
+> `RunnerConfigError`), `runTask` reste le shell CLI qui possède la mort du
+> processus (exit 2/1, park, SIGINT/SIGTERM), stdout octet-identique (les
+> tests sous-processus le prouvent). L'env lifecycle se résout contre un
+> snapshot HÔTE — le sticky-off documenté (run 1 `--no-learn-skills`
+> contaminant run 2) est fermé et testé. Le pin Codex L1 est refusé au
+> LANCEMENT (plus seulement dans doctor). §3.9 — `servedModel` sur la réponse
+> transport : metrics et recorder facturent le modèle SERVI
+> (`codex:claude-opus-5` → prix gpt-5.6-sol, plus jamais la ligne /opus/i) ;
+> parité `partialUsage` sur les trois transports (Ollama et claude-cli
+> n'avalent plus les tokens payés, trace et CSV ne se contredisent plus) ;
+> `splitProviderModel` rejette un modèle vide après préfixe connu et
+> `referencedProviderNames` lui délègue le parse ; `makeBaseClient` est
+> l'unique switch de construction (runner + curriculum) ; bannière stderr sur
+> `ATOMA_CODEX_MODEL`. Reste explicitement hors batch : l'unification
+> `parseCliArgs`/`parseRunnerArgs` (déclaration de flags booléens) — reportée
+> plutôt que précipitée en fin de session. Suite complète : 1549 passed /
+> 8 skipped, typecheck + lint + docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

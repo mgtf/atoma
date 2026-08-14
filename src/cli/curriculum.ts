@@ -37,12 +37,13 @@ import { trustThreshold, promoteThreshold } from '../atoms/cost.js';
 import { refusalStampIsCurrent } from '../skills/generations.js';
 import { extractJson } from '../atoms/json.js';
 import { modelForTier } from '../core/models.js';
-import { AnthropicLlmClient } from '../core/llm.js';
-import { OllamaLlmClient } from '../core/llmOllama.js';
-import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
 import { makeAnthropicClient } from '../run/auth.js';
-import { buildReferencedProviders, resolveBaseProviderKind } from '../run/providers.js';
+import {
+  buildReferencedProviders,
+  makeBaseClient,
+  resolveBaseProviderKind,
+} from '../run/providers.js';
 import type { LlmClient } from '../core/types.js';
 import type { Skill } from '../skills/types.js';
 import type { BurninTask } from './burnin.js';
@@ -274,18 +275,21 @@ export function parseCurriculumTasks(text: string, families: readonly string[]):
   return out;
 }
 
-/** Same provider switch as build-app (ATOMA_LLM), + cross-vendor routing parity. */
+/**
+ * Same provider switch as the runner (ATOMA_LLM), + cross-vendor routing
+ * parity. Construction lives in `makeBaseClient` — this file's hand-rolled
+ * copy is the one that historically missed the bare `claude` alias and
+ * silently fell into the Anthropic path (see providers.ts).
+ * `makeAnthropicClient()` is called ONLY for the anthropic kind: it exits
+ * the process when no credential resolves, and an ollama/claude-cli
+ * session must not die on a missing Anthropic key.
+ */
 function makeClient(): LlmClient {
   const provider = resolveBaseProviderKind(process.env['ATOMA_LLM']);
-  const base: LlmClient =
-    provider === 'ollama'
-      ? new OllamaLlmClient({
-          baseUrl: process.env['OLLAMA_BASE_URL'],
-          defaultModel: process.env['OLLAMA_MODEL'],
-        })
-      : provider === 'claude-cli'
-        ? new ClaudeCliLlmClient()
-        : new AnthropicLlmClient(makeAnthropicClient());
+  const base: LlmClient = makeBaseClient(
+    provider,
+    provider === 'anthropic' ? { anthropic: makeAnthropicClient() } : {}
+  );
   const providers = buildReferencedProviders();
   return Object.keys(providers).length > 0 ? new RoutingLlmClient(base, providers) : base;
 }

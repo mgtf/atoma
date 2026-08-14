@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
@@ -12,12 +12,14 @@ import {
   isCodexTransientError,
   mapCodexUsage,
   resolveCodexModel,
+  resetCodexModelOverrideWarningForTests,
   CODEX_MODEL_FRONTIER,
   CODEX_MODEL_MID,
   CODEX_MODEL_SMALL,
   DEFAULT_CODEX_CALL_TIMEOUT_MS,
 } from '../src/core/llmCodexCli.js';
-import { pricesFor } from '../src/core/metrics.js';
+import { InMemoryMetrics, MetricsLlmClient, pricesFor } from '../src/core/metrics.js';
+import { RoutingLlmClient } from '../src/core/llmRouting.js';
 import type { LlmCompletionRequest, ToolExecutor } from '../src/core/types.js';
 import { makeTools } from './helpers/factories.js';
 
@@ -354,6 +356,17 @@ describe('CodexCliLlmClient — transport', () => {
     expect(res.usage.outputTokens).toBe(13);
   });
 
+  it('reports the SERVED slug so accounting is not billed on the pin', async () => {
+    // resolveCodexModel rewrites Anthropic-shaped pins; without servedModel
+    // the metrics layer priced gpt-5.6-sol tokens at the /opus/i row
+    // (review 2026-08-14 §1.13).
+    const client = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
+    const mapped = await client.complete(req({ model: 'claude-opus-5' }));
+    expect(mapped.servedModel).toBe(CODEX_MODEL_FRONTIER);
+    const verbatim = await client.complete(req({ model: 'gpt-5.6-luna' }));
+    expect(verbatim.servedModel).toBe('gpt-5.6-luna');
+  });
+
   it('spawns exactly ONE subprocess per successful call', async () => {
     let spawns = 0;
     const client = new CodexCliLlmClient({
@@ -455,7 +468,77 @@ describe('CodexCliLlmClient — transport', () => {
   });
 });
 
+describe('ATOMA_CODEX_MODEL override banner (review 2026-08-14 §1.13)', () => {
+  afterEach(() => {
+    delete process.env['ATOMA_CODEX_MODEL'];
+    resetCodexModelOverrideWarningForTests();
+  });
+
+  it('warns ONCE per process on stderr, naming the override and the flattening risk', () => {
+    resetCodexModelOverrideWarningForTests();
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }));
+    try {
+      process.env['ATOMA_CODEX_MODEL'] = 'gpt-5.4-mini';
+      // The override rewrites EVERY codex call — the banner must not.
+      resolveCodexModel('gpt-5.6-sol');
+      resolveCodexModel('claude-opus-5');
+      const banners = writes.filter((w) => w.includes('ATOMA_CODEX_MODEL'));
+      expect(banners).toHaveLength(1);
+      expect(banners[0]).toMatch(/gpt-5\.4-mini/);
+      expect(banners[0]).toMatch(/flatten/i);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('stays silent when the override is not set', () => {
+    resetCodexModelOverrideWarningForTests();
+    const writes: string[] = [];
+    const spy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        writes.push(String(chunk));
+        return true;
+      }));
+    try {
+      resolveCodexModel('gpt-5.6-sol');
+      expect(writes.filter((w) => w.includes('ATOMA_CODEX_MODEL'))).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('pricing — a Codex call must never read as free', () => {
+  it('a codex-PINNED call is priced end to end on the served GPT slug, not the /opus/i row', async () => {
+    // Full chain: MetricsLlmClient wraps the ROUTER (where observability
+    // lives in production), the router strips `codex:` and dispatches, the
+    // transport resolves `claude-opus-5` → gpt-5.6-sol and reports it back.
+    const codexClient = new CodexCliLlmClient({ spawnFn: () => fakeChild({ lines: OK_LINES }) });
+    const metrics = new InMemoryMetrics();
+    const client = new MetricsLlmClient(
+      new RoutingLlmClient(codexClient /* default unused */, { codex: codexClient }),
+      metrics
+    );
+    await client.complete({
+      model: 'codex:claude-opus-5',
+      systemPrompt: 's',
+      userContent: 'u',
+    });
+    expect(metrics.events[0]!.model).toBe(CODEX_MODEL_FRONTIER);
+    // OK_LINES usage on the gpt-5.6-sol row ($5 in / $0.5 cached / $30 out):
+    //   2856×5/1M + 6912×0.5/1M + 13×30/1M ≈ $0.018126
+    // The /opus/i row ($25 out) would read ≈ $0.018061 — close, which is
+    // exactly why the row KEY is the assertion that matters.
+    expect(metrics.summary().totals.costUsd).toBeCloseTo(0.018126, 5);
+  });
+
   it('prices the GPT-5.6 slugs, with or without the routing prefix', () => {
     // Unmatched models fall to 0/0/0, which would make every tiering
     // comparison flattering and false: the spend has moved to another

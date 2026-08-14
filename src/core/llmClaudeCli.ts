@@ -158,7 +158,12 @@ export class ClaudeCliLlmClient implements LlmClient {
     await new Promise((r) => setTimeout(r, 3000));
     const second = await this.completeOnce(req);
     if (!isCliTransportErrorText(second.text)) return second;
-    throw new Error(`claude-cli transport error (after 1 retry): ${second.text.slice(0, 200)}`);
+    // Both attempts returned usage before being judged transport errors —
+    // those tokens were paid; attach them (review 2026-08-14 §1.13).
+    throw attachPartialUsage(
+      new Error(`claude-cli transport error (after 1 retry): ${second.text.slice(0, 200)}`),
+      [first.usage, second.usage]
+    );
   }
 
   private async completeOnce(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -193,6 +198,10 @@ export class ClaudeCliLlmClient implements LlmClient {
       }, this.callTimeoutMs);
     };
     let lastAssistantText = '';
+    // Resolved ONCE and reported back as `servedModel`: this transport maps
+    // tier pins onto CLI aliases (haiku/sonnet/opus), so pricing on the raw
+    // pin would misattribute the tokens (review 2026-08-14 §1.13).
+    const served = resolveCliModel(req.model);
     try {
       bumpDeadline();
       const toolOptions = hasTools
@@ -201,7 +210,7 @@ export class ClaudeCliLlmClient implements LlmClient {
       const stream = query({
         prompt: req.userContent,
         options: {
-          model: resolveCliModel(req.model),
+          model: served,
           systemPrompt: req.systemPrompt,
           // SDK isolation: no CLAUDE.md / settings bleed, no built-in tools.
           settingSources: [],
@@ -247,6 +256,7 @@ export class ClaudeCliLlmClient implements LlmClient {
               text: msg.result || lastAssistantText,
               stopReason: msg.stop_reason ?? 'end_turn',
               usage: mapped,
+              servedModel: served,
             };
           }
           // Non-success result (error_max_turns, error_during_execution, ...):
@@ -255,9 +265,21 @@ export class ClaudeCliLlmClient implements LlmClient {
           // beats a hard throw (mirrors the Anthropic client's graceful
           // budget-exhausted finalization).
           if (lastAssistantText) {
-            return { text: lastAssistantText, stopReason: msg.subtype, usage: mapped };
+            return {
+              text: lastAssistantText,
+              stopReason: msg.subtype,
+              usage: mapped,
+              servedModel: served,
+            };
           }
-          throw new Error(`claude-cli query ended without output: ${msg.subtype}`);
+          // The usage was computed above and used to be DISCARDED here —
+          // the one claude-cli path that lost paid tokens on error
+          // (review 2026-08-14 §1.13). Same `partialUsage` contract as
+          // AnthropicLlmClient.raise (e15d810).
+          throw attachPartialUsage(
+            new Error(`claude-cli query ended without output: ${msg.subtype}`),
+            [mapped]
+          );
         }
       }
       throw new Error('claude-cli query stream ended without a result message');
@@ -276,6 +298,39 @@ export class ClaudeCliLlmClient implements LlmClient {
       req.signal?.removeEventListener('abort', onAbort);
     }
   }
+}
+
+/**
+ * Attach paid-for tokens to an error leaving this transport — the exact
+ * `partialUsage` property AnthropicLlmClient.raise established (e15d810),
+ * mirrored here per review 2026-08-14 §1.13: claude-cli used to compute
+ * usage from the result message and then discard it on the throw, so
+ * MetricsLlmClient recorded zeros for tokens already billed. Sums multiple
+ * usages because the transport-error retry path pays for TWO attempts.
+ */
+function attachPartialUsage(
+  err: Error,
+  usages: readonly LlmCompletionResponse['usage'][]
+): Error {
+  try {
+    (err as Error & { partialUsage?: object }).partialUsage = usages.reduce<{
+      inputTokens: number;
+      outputTokens: number;
+      cacheCreationInputTokens: number;
+      cacheReadInputTokens: number;
+    }>(
+      (acc, u) => ({
+        inputTokens: acc.inputTokens + u.inputTokens,
+        outputTokens: acc.outputTokens + u.outputTokens,
+        cacheCreationInputTokens: acc.cacheCreationInputTokens + (u.cacheCreationInputTokens ?? 0),
+        cacheReadInputTokens: acc.cacheReadInputTokens + (u.cacheReadInputTokens ?? 0),
+      }),
+      { inputTokens: 0, outputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0 }
+    );
+  } catch {
+    // frozen/exotic errors can't carry properties — fine.
+  }
+  return err;
 }
 
 /**

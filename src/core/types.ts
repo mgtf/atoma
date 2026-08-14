@@ -295,6 +295,18 @@ export interface LlmCompletionResponse {
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
   };
+  /**
+   * The model the transport ACTUALLY invoked, when it differs from the
+   * requested `req.model` (bare slug/alias, no provider prefix). Three
+   * transports silently rewrite the pin — resolveCodexModel maps
+   * `claude-opus-5` → `gpt-5.6-sol`, Ollama collapses Anthropic pins onto
+   * its configured defaultModel, claude-cli maps pins onto haiku/sonnet/
+   * opus aliases — so pricing on the pin billed GPT tokens at Claude rates
+   * (review 2026-08-14 §1.13). Observability layers price with
+   * `servedModel ?? req.model`; AnthropicLlmClient serves `req.model`
+   * verbatim and may omit the field.
+   */
+  servedModel?: string;
 }
 
 export interface LlmClient {

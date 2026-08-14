@@ -110,6 +110,38 @@ export function estimateCostUsd(
   );
 }
 
+/**
+ * Usage a transport aggregated BEFORE its error, attached to the thrown
+ * error as `partialUsage` (the mechanism AnthropicLlmClient.raise
+ * established in e15d810; Ollama and claude-cli mirror it — review
+ * 2026-08-14 §1.13). ONE reader for both observability layers:
+ * MetricsLlmClient and RecordingLlmClient used to disagree about the same
+ * failed call — the CSV carried the partial tokens while the trace wrote
+ * $0 — so trace and cost curve contradicted each other about one event.
+ */
+export interface PartialUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheCreationInputTokens: number;
+  readonly cacheReadInputTokens: number;
+}
+
+export function partialUsageOf(err: unknown): PartialUsage | undefined {
+  if (err === null || (typeof err !== 'object' && typeof err !== 'function')) return undefined;
+  const p = (err as { partialUsage?: unknown }).partialUsage;
+  if (p === null || typeof p !== 'object') return undefined;
+  const u = p as Partial<PartialUsage>;
+  // Missing counters default to 0 rather than rejecting the whole object:
+  // a transport that only tracks input/output (Ollama has no cache) still
+  // gets its paid tokens counted.
+  return {
+    inputTokens: u.inputTokens ?? 0,
+    outputTokens: u.outputTokens ?? 0,
+    cacheCreationInputTokens: u.cacheCreationInputTokens ?? 0,
+    cacheReadInputTokens: u.cacheReadInputTokens ?? 0,
+  };
+}
+
 export interface ModelAggregate {
   readonly model: string;
   readonly calls: number;
@@ -250,16 +282,11 @@ export class MetricsLlmClient implements LlmClient {
       resp = await this.inner.complete(req);
     } catch (err) {
       // Record the failed call WITH whatever usage the loop aggregated
-      // before dying (attached by AnthropicLlmClient.raise). Zeros meant
+      // before dying (attached by each transport's raise path). Zeros meant
       // a run killed on round 7 of a tool loop reported none of the six
       // rounds it PAID for — burn-in rows showed llm=? / cost=null and
       // the curve understated exactly the runs that hurt most.
-      const partial = (err as { partialUsage?: {
-        inputTokens: number;
-        outputTokens: number;
-        cacheCreationInputTokens: number;
-        cacheReadInputTokens: number;
-      } }).partialUsage;
+      const partial = partialUsageOf(err);
       this.recorder.record({
         model: req.model,
         inputTokens: partial?.inputTokens ?? 0,
@@ -272,7 +299,12 @@ export class MetricsLlmClient implements LlmClient {
       throw err;
     }
     this.recorder.record({
-      model: req.model,
+      // Price on the model the transport ACTUALLY invoked, not the tier
+      // pin: `codex:claude-opus-5` served gpt-5.6-sol tokens but hit the
+      // /opus/i price row, Ollama collapses every pin onto its configured
+      // defaultModel, claude-cli maps pins onto aliases (review 2026-08-14
+      // §1.13). Transports that serve req.model verbatim omit servedModel.
+      model: resp.servedModel ?? req.model,
       inputTokens: resp.usage.inputTokens,
       outputTokens: resp.usage.outputTokens,
       cacheCreationInputTokens: resp.usage.cacheCreationInputTokens ?? 0,

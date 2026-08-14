@@ -8,6 +8,7 @@ import type {
 import {
   pricesFor,
   estimateCostUsd,
+  partialUsageOf,
   type PriceTable,
   DEFAULT_PRICES,
 } from '../core/metrics.js';
@@ -174,7 +175,13 @@ export class RecordingLlmClient implements LlmClient {
         cacheReadInputTokens: resp.usage.cacheReadInputTokens ?? 0,
         cacheCreationInputTokens: resp.usage.cacheCreationInputTokens ?? 0,
       };
-      const p = pricesFor(req.model, this.prices);
+      // Price on the model the transport ACTUALLY invoked (codex maps
+      // `claude-opus-5` → gpt-5.6-sol, Ollama collapses pins onto its
+      // defaultModel, claude-cli maps pins onto aliases) — same rule as
+      // MetricsLlmClient, so trace and CSV agree (review 2026-08-14 §1.13).
+      // The event's `model` stays req.model: the pin is the routing
+      // identity the viz shows; the served identity rides alongside.
+      const p = pricesFor(resp.servedModel ?? req.model, this.prices);
       // Shared formula lives in src/core/metrics.ts (estimateCostUsd)
       // so the viz and the metrics summary never drift apart. Before
       // the extraction, this file had an independent (and buggy) copy
@@ -186,6 +193,7 @@ export class RecordingLlmClient implements LlmClient {
         ts: started,
         kind: 'llm',
         model: req.model,
+        ...(resp.servedModel !== undefined ? { servedModel: resp.servedModel } : {}),
         systemPrompt: req.systemPrompt,
         userContent: req.userContent,
         response: resp.text,
@@ -198,6 +206,19 @@ export class RecordingLlmClient implements LlmClient {
       });
       return resp;
     } catch (err) {
+      // Read the usage the transport aggregated before dying (attached as
+      // `partialUsage` by each transport's raise path) — the SAME reader
+      // MetricsLlmClient uses. Hardcoded zeros here made the trace say
+      // $0.00 for the exact event the CSV priced from the partial tokens:
+      // two observability layers contradicting each other about one call
+      // (review 2026-08-14 §1.13).
+      const partial = partialUsageOf(err);
+      const usage = partial ?? {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadInputTokens: 0,
+        cacheCreationInputTokens: 0,
+      };
       this.recorder.record({
         id: llmEventId,
         ts: started,
@@ -208,13 +229,8 @@ export class RecordingLlmClient implements LlmClient {
         response: '',
         stopReason: 'error',
         durationMs: Date.now() - started,
-        usage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadInputTokens: 0,
-          cacheCreationInputTokens: 0,
-        },
-        costUsd: 0,
+        usage,
+        costUsd: estimateCostUsd(usage, pricesFor(req.model, this.prices)),
         error: (err as Error).message,
         ...cls,
         ...(req.branchId !== undefined ? { branchId: req.branchId } : {}),

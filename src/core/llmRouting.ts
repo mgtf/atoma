@@ -14,6 +14,18 @@ import type { LlmClient, LlmCompletionRequest, LlmCompletionResponse } from './t
  * provider. Anything else keeps the whole string as a model id for the
  * default client — Ollama tags legitimately contain colons
  * (`qwen3:8b`, `glm-5.1:cloud`) and must flow through untouched.
+ *
+ * DOUBLE-PREFIX ESCAPE: only the FIRST token is ever a provider, so a
+ * model id that itself starts with a provider-looking token is reachable
+ * by prefixing its real provider — `ollama:codex:latest` routes the tag
+ * `codex:latest` to the ollama client instead of parsing "codex" as a
+ * provider. Documented rather than special-cased: the first-colon rule is
+ * the whole grammar.
+ *
+ * A KNOWN provider with an EMPTY model (`zai:`) is rejected HERE, at
+ * split time: the old behaviour returned model '' and the empty string
+ * travelled to the vendor as a model id, failing far from the typo
+ * (review 2026-08-14 §3.9 hardening).
  */
 export function splitProviderModel(
   model: string,
@@ -23,7 +35,14 @@ export function splitProviderModel(
   if (i <= 0) return { provider: null, model };
   const prefix = model.slice(0, i).toLowerCase();
   if (!knownProviders.includes(prefix)) return { provider: null, model };
-  return { provider: prefix, model: model.slice(i + 1) };
+  const rest = model.slice(i + 1);
+  if (rest.length === 0) {
+    throw new Error(
+      `tier model pin "${model}" names provider "${prefix}" but no model id — ` +
+        `use the form ATOMA_MODEL_L1=${prefix}:<model-id>`
+    );
+  }
+  return { provider: prefix, model: rest };
 }
 
 /**
@@ -63,6 +82,10 @@ export class RoutingLlmClient implements LlmClient {
       // the wrong vendor is a cost/privacy bug, not a recoverable hiccup.
       throw new Error(`RoutingLlmClient: no client for provider "${provider}"`);
     }
+    // The response (including `servedModel`, the transport's own report of
+    // what it actually invoked) flows back UNTOUCHED — the router names
+    // providers, never models, so it must not overwrite the served identity
+    // the observability layers price on.
     return client.complete({ ...req, model });
   }
 }

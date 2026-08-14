@@ -90,6 +90,16 @@ export function codexCallTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_CODEX_CALL_TIMEOUT_MS;
 }
 
+// Once-per-process flag for the ATOMA_CODEX_MODEL banner below. ONE line,
+// not one per call: the override rewrites EVERY codex call's slug, so the
+// warning would otherwise repeat dozens of times per run.
+let warnedCodexModelOverride = false;
+
+/** Test seam: lets a suite assert the banner fires exactly once. */
+export function resetCodexModelOverrideWarningForTests(): void {
+  warnedCodexModelOverride = false;
+}
+
 /**
  * Map whatever arrived as `req.model` onto a slug Codex will accept.
  *
@@ -108,7 +118,22 @@ export function codexCallTimeoutMs(): number {
  */
 export function resolveCodexModel(model: string): string {
   const override = process.env['ATOMA_CODEX_MODEL'];
-  if (override && override.trim().length > 0) return override.trim();
+  if (override && override.trim().length > 0) {
+    // ATOMA_CLAUDE_MODEL gets a runner banner; this override had NONE
+    // (review 2026-08-14 §1.13) — it silently rewrote every codex-routed
+    // slug, flattening the tier gradient with nothing in the logs to say
+    // so. stderr, not stdout: stdout is a parsed surface (burn-in markers,
+    // MCP frames).
+    if (!warnedCodexModelOverride) {
+      warnedCodexModelOverride = true;
+      process.stderr.write(
+        `⚠ ATOMA_CODEX_MODEL=${override.trim()} overrides EVERY codex-routed call — ` +
+          'tier pins are ignored and the cost gradient across codex tiers is flattened ' +
+          'onto one model. Debug-only; unset it for real runs.\n'
+      );
+    }
+    return override.trim();
+  }
   const m = model.trim();
   if (m.length === 0) return CODEX_MODEL_FRONTIER;
   // Anthropic-shaped pins (the tier defaults) → equivalent power tier.
@@ -343,8 +368,13 @@ export class CodexCliLlmClient implements LlmClient {
       );
     }
 
+    // Resolved here as well as in completeOnce (same deterministic result)
+    // so the response can report what was ACTUALLY invoked: pricing on the
+    // pin billed `codex:claude-opus-5` at the /opus/i row for gpt-5.6-sol
+    // tokens (review 2026-08-14 §1.13).
+    const served = resolveCodexModel(req.model);
     const first = await this.completeOnce(req);
-    if (first.error === undefined) return toResponse(first);
+    if (first.error === undefined) return toResponse(first, served);
     if (!isCodexTransientError(first.error)) {
       throw new Error(`codex call failed: ${first.error.slice(0, 300)}`);
     }
@@ -353,7 +383,7 @@ export class CodexCliLlmClient implements LlmClient {
     // a parser crash far from the cause.
     await new Promise((r) => setTimeout(r, 3000));
     const second = await this.completeOnce(req);
-    if (second.error === undefined) return toResponse(second);
+    if (second.error === undefined) return toResponse(second, served);
     throw new Error(`codex call failed (after 1 retry): ${second.error.slice(0, 300)}`);
   }
 
@@ -464,8 +494,8 @@ export class CodexCliLlmClient implements LlmClient {
   }
 }
 
-function toResponse(o: CodexOutcome): LlmCompletionResponse {
-  return { text: o.text, stopReason: 'end_turn', usage: o.usage };
+function toResponse(o: CodexOutcome, servedModel: string): LlmCompletionResponse {
+  return { text: o.text, stopReason: 'end_turn', usage: o.usage, servedModel };
 }
 
 /**

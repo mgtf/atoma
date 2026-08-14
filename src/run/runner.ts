@@ -4,10 +4,7 @@ import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
-import { buildReferencedProviders, resolveBaseProviderKind } from './providers.js';
-import { AnthropicLlmClient } from '../core/llm.js';
-import { OllamaLlmClient } from '../core/llmOllama.js';
-import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
+import { buildReferencedProviders, makeBaseClient, resolveBaseProviderKind } from './providers.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
@@ -177,13 +174,110 @@ export function resolveSkillPromotion(
 }
 
 /**
- * Run one task end to end, for any family.
+ * A launched run, decoupled from the process that hosts it.
  *
- * Extracted verbatim from the old `examples/build-app.ts`, which had become the
- * product while living in `examples/` — the burn-in harness spawns it per
- * task, AGENTS.md documents it as load-bearing in a dozen places, and the
- * only other entrypoint had silently drifted away from every safety
- * guarantee added here (watchdog, signal handling, provider routing).
+ * `runTask` used to BE the process: it parked forever on a never-settling
+ * promise so the demo server stayed reachable, called `process.exit` on six
+ * paths, registered SIGINT/SIGTERM handlers per invocation without removal,
+ * and left the skill-lifecycle env vars sticky across in-process calls. The
+ * MCP server had to grow a SQLite lease, PGID plumbing and hard-exit
+ * backstops purely because the only way to run a task was to fork a whole
+ * npm process (2026-08-14 review §3.5). The park/exit behavior is a CLI
+ * concern; it now lives in `runTask`, the thin shell over this handle.
+ */
+export interface RunHandle {
+  /**
+   * Settles when the task settles — after ALL of the run's reporting output
+   * (result, registry state, metrics, stats epilogue, delivery/failure
+   * banner) has been printed. Never parks, never exits the process. On the
+   * failed path the backend has already been cleaned up.
+   */
+  readonly settled: Promise<RunOutcome>;
+  /**
+   * Graceful teardown: closes the trace (as `cancelled` when the run is
+   * still in flight — the mid-run Ctrl+C semantics), then cleans the tool
+   * backend. Idempotent; never exits the process.
+   */
+  shutdown(): Promise<void>;
+}
+
+export interface RunOutcome {
+  readonly outcome: 'delivered' | 'failed';
+}
+
+/** Invalid launch input (timeout, seed, tier pin). The CLI maps it to exit 2. */
+export class RunnerConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunnerConfigError';
+  }
+}
+
+export type LifecycleToggleSource = 'cli-disable' | 'environment-disable' | 'default-enable';
+
+export interface LifecycleToggleDecision {
+  readonly enabled: boolean;
+  readonly source: LifecycleToggleSource;
+}
+
+/** Auto-distillation policy: CLI flag > HOST env > default-on. Pure. */
+export function resolveSkillLearning(
+  noLearnSkills: boolean,
+  hostValue: string | undefined
+): LifecycleToggleDecision {
+  if (noLearnSkills) return { enabled: false, source: 'cli-disable' };
+  if (hostValue === '0') return { enabled: false, source: 'environment-disable' };
+  return { enabled: true, source: 'default-enable' };
+}
+
+/** Trusted direct dispatch: a kill switch, not an opt-in. Pure. */
+export function resolveDirectDispatch(
+  noDirectSkills: boolean,
+  hostValue: string | undefined
+): LifecycleToggleDecision {
+  if (noDirectSkills) return { enabled: false, source: 'cli-disable' };
+  if (hostValue === '0') return { enabled: false, source: 'environment-disable' };
+  return { enabled: true, source: 'default-enable' };
+}
+
+/**
+ * STICKY-ENV FIX. The lifecycle resolvers must read what the OPERATOR
+ * configured, never what a previous in-process run wrote: run 1 with
+ * `--no-learn-skills` used to set ATOMA_SKILL_LEARN='0', and run 2 WITHOUT
+ * the flag then read that '0' back as the operator's choice — the documented
+ * default-on silently became sticky-off. The snapshot is taken once per
+ * process, before the first run mutates anything, so every later resolution
+ * sees the same host intent and `startTask` stays idempotent.
+ */
+interface HostLifecycleEnv {
+  readonly learn: string | undefined;
+  readonly promote: string | undefined;
+  readonly direct: string | undefined;
+}
+let hostLifecycleEnv: HostLifecycleEnv | null = null;
+/** Exported for tests and embedders; production callers never need it. */
+export function hostLifecycleSnapshot(): HostLifecycleEnv {
+  hostLifecycleEnv ??= {
+    learn: process.env['ATOMA_SKILL_LEARN'],
+    promote: process.env['ATOMA_SKILL_PROMOTE'],
+    direct: process.env['ATOMA_SKILL_DIRECT'],
+  };
+  return hostLifecycleEnv;
+}
+export function resetHostLifecycleSnapshotForTests(): void {
+  hostLifecycleEnv = null;
+}
+
+/**
+ * Launch one task and return a handle, for any family.
+ *
+ * Extracted from `runTask` (itself extracted from the old
+ * `examples/build-app.ts`, which had become the product while living in
+ * `examples/`). This function owns everything a run IS — provider routing,
+ * stores, sandbox, trace recording, the run budget, the watchdog, the
+ * reporting output. It deliberately does NOT own how the host process ends:
+ * no park-forever, no `process.exit`, no signal handlers. Those are CLI
+ * concerns and live in `runTask`.
  *
  * THE CONSOLE OUTPUT OF THIS FUNCTION IS AN API. `src/cli/burnin.ts`'s
  * `parseRunLog` reads it to build `burnin/results.csv`, the project's
@@ -192,8 +286,19 @@ export function resolveSkillPromotion(
  * changing any of them silently reclassifies runs. The rest of what the
  * harness greps for is emitted by the library and the metrics table.
  * `tests/run-profile-build.test.ts` pins all three.
+ *
+ * `opts.onWedged` is the LAST-RESORT action when the watchdog finds the
+ * transport wedged past the deadline. The default preserves the historical
+ * CLI semantics — a synchronous `process.exit(1)` (awaiting cleanup there
+ * would re-enter the same hang; the sandbox's process-level exit handler
+ * SIGKILLs tracked children). An embedder may substitute its own action,
+ * knowing the wedged transport may hold the event loop open regardless.
  */
-export async function runTask(profile: TaskProfile, argv: readonly string[]): Promise<void> {
+export async function startTask(
+  profile: TaskProfile,
+  argv: readonly string[],
+  opts?: { onWedged?: () => void }
+): Promise<RunHandle> {
   // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
   // run against a local Ollama install (or Ollama Cloud via a :cloud
   // tag). The Ollama path ignores ANTHROPIC_API_KEY and doesn't need a
@@ -216,15 +321,24 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   const timeoutRaw = process.env[profile.envVars.timeoutMs];
   const timeoutMs = Number(timeoutRaw ?? (useClaudeCli ? 15 * 60 * 1000 : 10 * 60 * 1000));
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    console.error(
+    throw new RunnerConfigError(
       `invalid ${profile.envVars.timeoutMs}="${timeoutRaw}" (expected positive integer in ms)`
     );
-    process.exit(2);
   }
   const seedRoot = args.seed ? resolve(args.seed) : undefined;
   if (seedRoot && !existsSync(seedRoot)) {
-    console.error(`--seed: no such directory: ${seedRoot}`);
-    process.exit(2);
+    throw new RunnerConfigError(`--seed: no such directory: ${seedRoot}`);
+  }
+  // Codex serves tiers 2/3 only — its transport cannot expose tools through
+  // ToolSandbox, so an L1 pin would happily serve every prefilter/validator
+  // (text-only) and detonate at the first tool-bearing execute, mid-run and
+  // mid-spend. Doctor has carried this check since v0.1.3; a wrong tier pin
+  // must fail at LAUNCH, not inside an optional diagnostic (review §3.9).
+  const l1Pin = process.env['ATOMA_MODEL_L1']?.trim().toLowerCase();
+  if (l1Pin?.startsWith('codex:')) {
+    throw new RunnerConfigError(
+      'ATOMA_MODEL_L1 cannot use codex because Codex cannot expose tools through ToolSandbox — pin L1 to a tool-capable provider (e.g. zai:glm-4.5-air) and keep codex on L2/L3'
+    );
   }
   console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
   const signal = AbortSignal.timeout(timeoutMs);
@@ -232,16 +346,22 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // signal; on long runs Node trips its default 10-listener warning.
   setMaxListeners(0, signal);
 
+  // Lifecycle toggles resolve against the HOST snapshot (see
+  // hostLifecycleSnapshot), then the env vars are written DETERMINISTICALLY
+  // so the library hooks (which read them at call time) see the decision —
+  // and so a second in-process run resolves from operator intent, not from
+  // what the first run wrote.
+  const hostEnv = hostLifecycleSnapshot();
   // Auto-distillation is ON by default. Priority is CLI flag > env var >
   // default-on. The L2 onApproved hook reads ATOMA_SKILL_LEARN === '1' at
   // call time, so we just set the env var here and the lib stays unchanged.
-  if (args.noLearnSkills) {
-    process.env['ATOMA_SKILL_LEARN'] = '0';
+  const learning = resolveSkillLearning(args.noLearnSkills, hostEnv.learn);
+  process.env['ATOMA_SKILL_LEARN'] = learning.enabled ? '1' : '0';
+  if (learning.source === 'cli-disable') {
     console.log('skill auto-distillation: off (--no-learn-skills)');
-  } else if (process.env['ATOMA_SKILL_LEARN'] === '0') {
+  } else if (learning.source === 'environment-disable') {
     console.log('skill auto-distillation: off (ATOMA_SKILL_LEARN=0)');
   } else {
-    process.env['ATOMA_SKILL_LEARN'] = '1';
     console.log('skill auto-distillation: ON (default — pass --no-learn-skills to disable)');
   }
   // Skill llm→script PROMOTION (#C2c). When a kind:llm skill crosses
@@ -255,7 +375,7 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // failure on the script form) restores the stashed llm body from the
   // `_fallback.md` sidecar, and the failures-must-be-zero gate then blocks
   // re-promotion until the operator resets the counters by hand.
-  const promotionEnv = process.env['ATOMA_SKILL_PROMOTE'];
+  const promotionEnv = hostEnv.promote;
   const promotion = resolveSkillPromotion(args, promotionEnv);
   process.env['ATOMA_SKILL_PROMOTE'] = promotion.enabled ? '1' : '0';
   if (promotion.source === 'cli-disable') {
@@ -281,10 +401,11 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // Unlike learn/promote this is a kill switch, not an opt-in — the lib
   // enables it whenever ATOMA_SKILL_DIRECT !== '0', because the path
   // costs nothing and is gated by trust counters.
-  if (args.noDirectSkills) {
-    process.env['ATOMA_SKILL_DIRECT'] = '0';
+  const direct = resolveDirectDispatch(args.noDirectSkills, hostEnv.direct);
+  process.env['ATOMA_SKILL_DIRECT'] = direct.enabled ? '1' : '0';
+  if (direct.source === 'cli-disable') {
     console.log('trusted script direct dispatch: off (--no-direct-skills)');
-  } else if (process.env['ATOMA_SKILL_DIRECT'] === '0') {
+  } else if (direct.source === 'environment-disable') {
     console.log('trusted script direct dispatch: off (ATOMA_SKILL_DIRECT=0)');
   } else {
     console.log(
@@ -335,14 +456,10 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     demotion: 0,
     'dispatch-fallback': 0,
   };
-  const baseClient = useOllama
-    ? new OllamaLlmClient({
-        baseUrl: process.env['OLLAMA_BASE_URL'],
-        defaultModel: process.env['OLLAMA_MODEL'],
-      })
-    : useClaudeCli
-      ? new ClaudeCliLlmClient()
-      : new AnthropicLlmClient(anthropic!);
+  // ONE construction switch, shared with curriculum (review §3.9): the
+  // hand-rolled ternary here and its drifted copy over there were the exact
+  // two-copies-of-one-rule class the repo has paid for twice.
+  const baseClient = makeBaseClient(provider, anthropic ? { anthropic } : {});
   // Per-tier PROVIDER routing: tier pins may carry a `provider:` prefix
   // (ATOMA_MODEL_L1=zai:glm-4.5-air → L1 on Z.ai, L2/L3 on the default
   // provider). Only referenced providers are constructed; with none, the
@@ -454,8 +571,8 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     // Mirror recordTrust for skill-pipeline events so the viz can render
     // a Skills lane (match / inject / learn / update / counter bumps).
     recordSkill: (info) => recorder.recordSkillEvent(info),
-    recordRunStat: (signal) => {
-      runSignals[signal] += 1;
+    recordRunStat: (signalName) => {
+      runSignals[signalName] += 1;
     },
     // Prefilter decisions replayed from the on-disk cache: the LLM call
     // that did NOT happen still deserves a card.
@@ -467,16 +584,20 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
 
   console.log(`\ntask: ${task.description}\n`);
 
-  // Keep the process alive until the user hits Ctrl+C so the static server
-  // stays reachable. Clean up child processes on exit.
+  // Graceful teardown, shared by the failed path and the handle's
+  // `shutdown()` (which the CLI wires to SIGINT/SIGTERM).
   //
-  // Run-state semantics on signal: if the recorder still has a current
-  // run (i.e. l3.handle hadn't resolved yet → the user cancelled the
-  // run mid-flight), we close it cleanly with `cancelled: true` so the
-  // viz can label it "✕ cancelled" instead of leaving it as "● LIVE"
-  // forever. If currentRun is null the run already ended (success or
-  // error) before the signal arrived — endRun would no-op anyway.
-  const shutdown = async (code = 0): Promise<void> => {
+  // Run-state semantics: if the recorder still has a current run (i.e. the
+  // task hadn't settled yet → the caller is cancelling mid-flight), close it
+  // with `cancelled: true` so the viz labels it "✕ cancelled" instead of
+  // leaving it "● LIVE" forever. If currentRun is null the run already ended
+  // (success or error) before teardown — flush any pending partial instead.
+  // Idempotent: the failed path tears down before settling, and a later
+  // shutdown() from a signal handler must not double-clean.
+  let torn = false;
+  const teardown = async (): Promise<void> => {
+    if (torn) return;
+    torn = true;
     console.log('\nshutting down sandbox children...');
     if (recorder.currentRun !== null) {
       recorder.endRun({
@@ -489,16 +610,13 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
     try {
       await backend.cleanup();
     } catch (err) {
-      // Exit must still progress so the synchronous Docker exit registry gets
-      // its final bounded attempt. Resolving cleanup failures silently would
-      // claim resources were gone; awaiting forever would defeat the watchdog.
+      // Teardown must still progress so the synchronous Docker exit registry
+      // gets its final bounded attempt. Resolving cleanup failures silently
+      // would claim resources were gone; awaiting forever would defeat the
+      // watchdog.
       console.error(`✖ sandbox cleanup incomplete: ${(err as Error).message}`);
-    } finally {
-      process.exit(code);
     }
   };
-  process.on('SIGINT', () => void shutdown(0));
-  process.on('SIGTERM', () => void shutdown(0));
 
   recorder.beginRun(task, `${profile.traceLabelPrefix}${goal.slice(0, 80)}`, {
     initialTypes: [
@@ -518,6 +636,14 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
   // period lets the normal abort path finish cleanly first — the watchdog
   // only fires when that path itself is stuck.
   const WATCHDOG_GRACE_MS = 60_000;
+  const onWedged =
+    opts?.onWedged ??
+    (() => {
+      // Synchronous exit on purpose: awaiting sandbox.cleanup() here would
+      // re-enter the same class of hang the watchdog exists to escape. The
+      // sandbox's process-level exit handler SIGKILLs tracked children.
+      process.exit(1);
+    });
   const watchdog = setTimeout(() => {
     console.error(
       `\n✗ watchdog: the run is still unfinished ${Math.round((timeoutMs + WATCHDOG_GRACE_MS) / 1000)}s in,` +
@@ -542,110 +668,140 @@ export async function runTask(profile: TaskProfile, argv: readonly string[]): Pr
       );
     }
     console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
-    // Synchronous exit on purpose: awaiting sandbox.cleanup() here would
-    // re-enter the same class of hang the watchdog exists to escape. The
-    // sandbox's process-level exit handler SIGKILLs tracked children.
-    process.exit(1);
+    onWedged();
   }, timeoutMs + WATCHDOG_GRACE_MS);
 
-  try {
-    const result = await handle(task, ctx);
-    clearTimeout(watchdog);
-    const persistedRun = recorder.endRun({
-      result: {
-        summary: result.summary,
-        output: result.output,
-        producedBy: result.producedBy,
-      },
-    });
+  const settled = (async (): Promise<RunOutcome> => {
+    try {
+      const result = await handle(task, ctx);
+      clearTimeout(watchdog);
+      const persistedRun = recorder.endRun({
+        result: {
+          summary: result.summary,
+          output: result.output,
+          producedBy: result.producedBy,
+        },
+      });
 
-    console.log('\n--- result ---');
-    console.log(
-      typeof result.output === 'string'
-        ? result.output
-        : JSON.stringify(result.output, null, 2)
-    );
-    console.log('\nsummary:', result.summary);
-    console.log('producedBy:', result.producedBy);
-
-    console.log(`\nregistry state:`);
-    for (const tier of [1, 2, 3] as const) {
-      const types = registry.listByTier(tier);
+      console.log('\n--- result ---');
       console.log(
-        `  tier ${tier}: ${
-          types
-            .map((t) => `${t.name}(v${t.version}, ✓${t.successes}/✗${t.failures})`)
-            .join(', ') || '(none)'
-        }`
+        typeof result.output === 'string'
+          ? result.output
+          : JSON.stringify(result.output, null, 2)
       );
-    }
+      console.log('\nsummary:', result.summary);
+      console.log('producedBy:', result.producedBy);
 
-    console.log(`\nLLM usage:`);
-    console.log(metrics.formatSummary());
-
-    if (persistedRun) {
-      console.log('');
-      console.log(formatDecompositionReport(persistedRun));
-    }
-
-    console.log(
-      `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
-    );
-    console.log(formatRunStatsEpilogue(machineRunStats('delivered', metrics, runSignals)));
-    console.log(
-      '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
-    );
-    console.log('  Press Ctrl+C when you are done testing.');
-    // Park forever until a signal comes in.
-    await new Promise(() => {});
-  } catch (err) {
-    // The run failed on its own terms (abort, transport error, crash):
-    // the watchdog's job is done, and leaving its timer armed would hold
-    // the event loop open for the whole grace period on a run that is
-    // already finished.
-    clearTimeout(watchdog);
-    // Format a richer post-mortem when the run aborts. #4 —
-    // the default AbortError / timeout message ("This operation was
-    // aborted") is unactionable; we dig into the partial run trace
-    // the recorder has kept to surface: which tier/atom was running
-    // last, which tool loops consumed the budget, and which
-    // validator rejections the supervise loop couldn't recover from.
-    // Everything stays best-effort: a diagnostic crash must not mask
-    // the underlying error.
-    const errMsg = (err as Error).message ?? String(err);
-    const isTimeout =
-      signal.aborted &&
-      (signal.reason instanceof Error
-        ? /timeout|aborted/i.test(signal.reason.message ?? '')
-        : true);
-    const run = recorder.currentRun;
-    let postMortem = '';
-    if (run) {
-      try {
-        postMortem = formatTimeoutPostMortem(run, {
-          budgetMs: timeoutMs,
-          isTimeout,
-        });
-      } catch {
-        // swallow — we're already in the error path, don't pile on
+      console.log(`\nregistry state:`);
+      for (const tier of [1, 2, 3] as const) {
+        const types = registry.listByTier(tier);
+        console.log(
+          `  tier ${tier}: ${
+            types
+              .map((t) => `${t.name}(v${t.version}, ✓${t.successes}/✗${t.failures})`)
+              .join(', ') || '(none)'
+          }`
+        );
       }
-    }
-    recorder.endRun({
-      error: isTimeout ? `run aborted after ${Math.round(timeoutMs / 1000)}s budget` : errMsg,
-    });
-    console.error('\n--- run failed ---');
-    console.error(isTimeout ? `⏱ TIMEOUT after ${Math.round(timeoutMs / 1000)}s — budget exhausted` : `✖ ${errMsg}`);
-    if (postMortem) {
+
+      console.log(`\nLLM usage:`);
+      console.log(metrics.formatSummary());
+
+      if (persistedRun) {
+        console.log('');
+        console.log(formatDecompositionReport(persistedRun));
+      }
+
+      console.log(
+        `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
+      );
+      console.log(formatRunStatsEpilogue(machineRunStats('delivered', metrics, runSignals)));
+      console.log(
+        '\n✓ build finished. Any server the run started is still reachable inside the sandbox.'
+      );
+      console.log('  Press Ctrl+C when you are done testing.');
+      return { outcome: 'delivered' };
+    } catch (err) {
+      // The run failed on its own terms (abort, transport error, crash):
+      // the watchdog's job is done, and leaving its timer armed would hold
+      // the event loop open for the whole grace period on a run that is
+      // already finished.
+      clearTimeout(watchdog);
+      // Format a richer post-mortem when the run aborts. #4 —
+      // the default AbortError / timeout message ("This operation was
+      // aborted") is unactionable; we dig into the partial run trace
+      // the recorder has kept to surface: which tier/atom was running
+      // last, which tool loops consumed the budget, and which
+      // validator rejections the supervise loop couldn't recover from.
+      // Everything stays best-effort: a diagnostic crash must not mask
+      // the underlying error.
+      const errMsg = (err as Error).message ?? String(err);
+      const isTimeout =
+        signal.aborted &&
+        (signal.reason instanceof Error
+          ? /timeout|aborted/i.test(signal.reason.message ?? '')
+          : true);
+      const run = recorder.currentRun;
+      let postMortem = '';
+      if (run) {
+        try {
+          postMortem = formatTimeoutPostMortem(run, {
+            budgetMs: timeoutMs,
+            isTimeout,
+          });
+        } catch {
+          // swallow — we're already in the error path, don't pile on
+        }
+      }
+      recorder.endRun({
+        error: isTimeout ? `run aborted after ${Math.round(timeoutMs / 1000)}s budget` : errMsg,
+      });
+      console.error('\n--- run failed ---');
+      console.error(isTimeout ? `⏱ TIMEOUT after ${Math.round(timeoutMs / 1000)}s — budget exhausted` : `✖ ${errMsg}`);
+      if (postMortem) {
+        console.error('');
+        console.error(postMortem);
+      }
       console.error('');
-      console.error(postMortem);
+      console.error(`LLM usage at abort:`);
+      console.error(metrics.formatSummary());
+      console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
+      console.error(
+        `\nrun enregistré dans ${recorder.runsDir} — ouvre le visualiseur pour plus de détails : npm run viz`
+      );
+      await teardown();
+      return { outcome: 'failed' };
     }
-    console.error('');
-    console.error(`LLM usage at abort:`);
-    console.error(metrics.formatSummary());
-    console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
-    console.error(
-      `\nrun enregistré dans ${recorder.runsDir} — ouvre le visualiseur pour plus de détails : npm run viz`
-    );
-    await shutdown(1);
+  })();
+
+  return { settled, shutdown: teardown };
+}
+
+/**
+ * Run one task end to end as a CLI process, for any family.
+ *
+ * The thin shell over `startTask` that owns everything about how the HOST
+ * PROCESS ends: config errors exit 2 (before any side effect — pinned by the
+ * real-subprocess tests), a failed run exits 1, a delivered run parks forever
+ * so any server the run started stays reachable, and SIGINT/SIGTERM tear the
+ * run down (trace closed as cancelled when mid-flight) before exiting 0.
+ */
+export async function runTask(profile: TaskProfile, argv: readonly string[]): Promise<void> {
+  let run: RunHandle;
+  try {
+    run = await startTask(profile, argv);
+  } catch (err) {
+    if (err instanceof RunnerConfigError) {
+      console.error(err.message);
+      process.exit(2);
+    }
+    throw err;
   }
+  process.on('SIGINT', () => void run.shutdown().finally(() => process.exit(0)));
+  process.on('SIGTERM', () => void run.shutdown().finally(() => process.exit(0)));
+  const { outcome } = await run.settled;
+  if (outcome === 'failed') process.exit(1);
+  // Keep the process alive until the user hits Ctrl+C so the static server
+  // stays reachable; the signal handlers above own the teardown.
+  await new Promise(() => {});
 }
