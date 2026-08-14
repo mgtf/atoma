@@ -185,6 +185,44 @@ export const CSV_HEADER =
   'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills,compile_errors';
 
 /**
+ * Create or reconcile the output CSV's header before ANY row is appended.
+ *
+ * Three cases:
+ *   - absent file → written with the current header;
+ *   - a LEGACY burn-in header (starts with `timestamp,task_id`) → migrated
+ *     in place (#10: lifecycle columns were appended to the row format while
+ *     old CSVs kept their old header — data rows are untouched, the viz
+ *     parser is position-tolerant for short legacy rows by design);
+ *   - a FOREIGN header (another writer's schema) → refused with an error.
+ *     Measured 2026-08-14: `--out` pointed at compare-frontier's CSV
+ *     (header `timestamp,arm,…`), the legacy check matched nothing, and the
+ *     batch appended 22-field standard rows under a 17-column header — every
+ *     header-driven consumer then read shifted columns and the arm
+ *     distinction was unrecoverable. A row written under a header it does
+ *     not match is worse than no row: refuse before the first append.
+ */
+export function ensureBurninCsvHeader(outAbsPath: string): void {
+  if (!existsSync(outAbsPath)) {
+    writeFileSync(outAbsPath, CSV_HEADER + '\n', 'utf8');
+    return;
+  }
+  const cur = readFileSync(outAbsPath, 'utf8');
+  const nl = cur.indexOf('\n');
+  const curHeader = nl === -1 ? cur : cur.slice(0, nl);
+  if (curHeader === CSV_HEADER) return;
+  if (curHeader.startsWith('timestamp,task_id')) {
+    writeFileSync(outAbsPath, CSV_HEADER + (nl === -1 ? '\n' : cur.slice(nl)), 'utf8');
+    console.log('ℹ results.csv header migrated to the current column set');
+    return;
+  }
+  throw new Error(
+    `refusing to append burn-in rows to ${outAbsPath}: its header does not match the burn-in schema ` +
+      `(found "${curHeader.slice(0, 80)}…", expected "${CSV_HEADER.slice(0, 80)}…"). ` +
+      `That file belongs to another writer — pick a different --out path.`
+  );
+}
+
+/**
  * Signature of a MISCONFIGURED launch, not a task failure: the run died
  * almost instantly and spent nothing (dead API key → 401 on the first
  * call, wrong provider env, missing login…). Observed live: `npm run
@@ -333,7 +371,23 @@ export function newestTraceName(runsDir: string, since: number): string {
 export const RUN_KILL_GRACE_MS = 5000;
 export const RUN_KILL_CONFIRM_MS = 2000;
 
+/**
+ * Group signals only ever target a REAL child process group. `process.kill`
+ * gives magic meanings to small values — `-1` signals every process the
+ * user owns, `0`/`-0` the caller's own group — so a pgid of 0 or 1 reaching
+ * these helpers is never a run: it is DB corruption, a hostile write to the
+ * lease store (the MCP run lock feeds `child_pgid` straight from
+ * ~/.atoma/mcp-run-lock.db, a file the run itself can reach by absolute
+ * path), or a recycled value. The owner-pid path already guarded `pid <= 0`
+ * (`processExists` in runLock.ts); the group helpers must too, or stale
+ * lease recovery becomes a user-wide SIGKILL primitive.
+ */
+function isValidRunPgid(pid: number): boolean {
+  return Number.isSafeInteger(pid) && pid > 1;
+}
+
 export function runProcessGroupExists(pid: number): boolean {
+  if (!isValidRunPgid(pid)) return false;
   try {
     process.kill(-pid, 0);
     return true;
@@ -349,6 +403,7 @@ export function runProcessGroupExists(pid: number): boolean {
 
 /** Signal a detached run's whole process group, then its leader as fallback. */
 export function signalRunProcessGroup(pid: number, signal: NodeJS.Signals): void {
+  if (!isValidRunPgid(pid)) return;
   try {
     process.kill(-pid, signal);
   } catch {
@@ -547,22 +602,11 @@ async function main(): Promise<void> {
   const logsDir = resolve('burnin/logs');
   mkdirSync(logsDir, { recursive: true });
   mkdirSync(dirname(resolve(outPath)), { recursive: true });
-  if (!existsSync(resolve(outPath))) {
-    writeFileSync(resolve(outPath), CSV_HEADER + '\n', 'utf8');
-  } else {
-    // HEADER MIGRATION (#10): the lifecycle columns (promotions, refusals,
-    // demotions, dispatch_fallbacks) were appended to the row format while
-    // an existing CSV kept its old header — silent mismatch that every new
-    // consumer had to rediscover. Rewrite the header line in place when it
-    // is outdated; data rows are untouched (the viz parser is
-    // position-tolerant for legacy 14-col rows by design).
-    const cur = readFileSync(resolve(outPath), 'utf8');
-    const nl = cur.indexOf('\n');
-    const curHeader = nl === -1 ? cur : cur.slice(0, nl);
-    if (curHeader !== CSV_HEADER && curHeader.startsWith('timestamp,task_id')) {
-      writeFileSync(resolve(outPath), CSV_HEADER + (nl === -1 ? '\n' : cur.slice(nl)), 'utf8');
-      console.log('ℹ results.csv header migrated to the current column set');
-    }
+  try {
+    ensureBurninCsvHeader(resolve(outPath));
+  } catch (err) {
+    console.error(String(err instanceof Error ? err.message : err));
+    process.exit(2);
   }
 
   const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? 'runs');

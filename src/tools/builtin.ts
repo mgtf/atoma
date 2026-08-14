@@ -48,6 +48,26 @@ export function withElementTaxonomy(tool: BuiltinTool): BuiltinTool {
   };
 }
 
+/**
+ * The manifest special-cases in write_file (merge) and edit_file (refuse)
+ * must key on the FILE, not the spelling: models routinely prepend `./`,
+ * and `'./.atoma-probes.json' !== '.atoma-probes.json'` while
+ * `sandbox.resolve()` maps both to the same bytes on disk — so a raw
+ * string comparison let a `./`-spelled write OVERWRITE every entry earlier
+ * phases had recorded, the exact cross-phase data loss the merge exists to
+ * prevent. Compare resolved absolute paths, exactly like the file op does.
+ */
+function isProbeManifestPath(sandbox: ToolSandbox, path: string): boolean {
+  if (path === PROBE_MANIFEST_FILENAME) return true;
+  try {
+    return sandbox.resolve(path) === sandbox.resolve(PROBE_MANIFEST_FILENAME);
+  } catch {
+    // A path the sandbox refuses to resolve is not the manifest; the file
+    // op itself will surface the real containment error.
+    return false;
+  }
+}
+
 export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
   return {
     declaration: {
@@ -69,7 +89,7 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
       const abs = opts.sandbox.resolve(path);
       mkdirSync(dirname(abs), { recursive: true });
       const finalContent =
-        path === PROBE_MANIFEST_FILENAME && existsSync(abs)
+        isProbeManifestPath(opts.sandbox, path) && existsSync(abs)
           ? mergeProbeManifestWrite(readFileSync(abs, 'utf8'), content)
           : content;
       writeFileSync(abs, finalContent, 'utf8');
@@ -197,7 +217,7 @@ export function editFileTool(opts: BuiltinToolOptions): BuiltinTool {
       // is stale by construction. Refused here rather than diagnosed, because
       // `record_probe` now does the merge correctly and a better error message
       // would still cost a wasted round-trip.
-      if (path === PROBE_MANIFEST_FILENAME) {
+      if (isProbeManifestPath(opts.sandbox, path)) {
         throw new Error(
           `edit_file: refuse to hand-edit "${PROBE_MANIFEST_FILENAME}". It is a merged record that ` +
             `compiled verification scripts also rewrite, so any span you remember from earlier is ` +

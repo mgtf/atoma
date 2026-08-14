@@ -18,6 +18,7 @@ import {
   signalActiveRunOnExit,
   startRun,
   validateStartInput,
+  waitForRunIdle,
   type RunDriver,
 } from '../src/mcp/run.js';
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
@@ -231,6 +232,27 @@ describe('MCP run tool — serialisation', () => {
 
     await startRun({ goal: 'build a thing' }, driver, acquire);
     expect(attachedPid).toBe(4242);
+  });
+
+  it('frees the slot even when the lease release throws', async () => {
+    // release() is a SQLite DELETE and can throw (busy, disk I/O, ~/.atoma
+    // gone). Before the guard, the throw escaped inside `void driven.then`,
+    // so `inFlight` was never cleared — every later start refused until a
+    // server restart — and the unhandledRejection killed the process. The
+    // failed row delete itself is fine: stale recovery handles it.
+    const throwingLease: RunLeaseAcquirer = async () => ({
+      path: '<test>',
+      attachChild() {},
+      release: () => {
+        throw new Error('SQLITE_BUSY: database is locked');
+      },
+    });
+    const instant: RunDriver = () => Promise.resolve('--- run failed ---');
+    await startRun({ goal: 'build a thing' }, instant, throwingLease);
+    await waitForRunIdle();
+    // The slot must be free: a second run starts instead of being refused.
+    const second = await startRun({ goal: 'build another' }, neverSettles, noLease);
+    expect(second.status).toBe('running');
   });
 
   it('leaves the lease stale on a hard control-plane exit', async () => {

@@ -6,6 +6,7 @@ import { ToolSandbox } from '../src/tools/sandbox.js';
 import { InMemoryToolRegistry } from '../src/tools/registry.js';
 import {
   defaultBuiltinTools,
+  editFileTool,
   fetchUrlTool,
   listFilesTool,
   readFileTool,
@@ -14,6 +15,7 @@ import {
   startNodeServerTool,
   writeFileTool,
 } from '../src/tools/builtin.js';
+import { PROBE_MANIFEST_FILENAME } from '../src/contracts/probeManifest.js';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -101,6 +103,37 @@ describe('writeFileTool + readFileTool', () => {
     await expect(w.execute({ path: '../outside.txt', content: 'nope' })).rejects.toThrow(
       /escapes sandbox/
     );
+  });
+
+  // The manifest protections must key on the FILE, not the spelling: models
+  // routinely prepend `./`, and a raw string comparison let that spelling
+  // skip the merge and OVERWRITE every entry earlier phases recorded.
+  it(`merges a ./-spelled ${PROBE_MANIFEST_FILENAME} write instead of overwriting`, async () => {
+    const w = writeFileTool({ sandbox });
+    const phase1 = { version: 1, entries: [{ cmd: 'node cli.js a', exitCode: 0, stdout: 'A' }] };
+    const phase2 = { version: 1, entries: [{ cmd: 'node cli.js b', exitCode: 0, stdout: 'B' }] };
+    await w.execute({ path: PROBE_MANIFEST_FILENAME, content: JSON.stringify(phase1) });
+    await w.execute({ path: `./${PROBE_MANIFEST_FILENAME}`, content: JSON.stringify(phase2) });
+    const merged = JSON.parse(readFileSync(join(root, PROBE_MANIFEST_FILENAME), 'utf8')) as {
+      entries: Array<{ cmd: string }>;
+    };
+    expect(merged.entries.map((e) => e.cmd).sort()).toEqual(['node cli.js a', 'node cli.js b']);
+  });
+
+  it(`refuses hand-edits of a ./-spelled ${PROBE_MANIFEST_FILENAME} too`, async () => {
+    const w = writeFileTool({ sandbox });
+    const e = editFileTool({ sandbox });
+    await w.execute({
+      path: PROBE_MANIFEST_FILENAME,
+      content: JSON.stringify({ version: 1, entries: [] }),
+    });
+    await expect(
+      e.execute({
+        path: `./${PROBE_MANIFEST_FILENAME}`,
+        old_string: '"entries"',
+        new_string: '"items"',
+      })
+    ).rejects.toThrow(/refuse to hand-edit/);
   });
 
   it('rejects non-string arguments', async () => {

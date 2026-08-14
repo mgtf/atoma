@@ -236,11 +236,26 @@ function remember(r: RunRecord): void {
 }
 
 function finishRun(record: RunRecord): void {
-  record.lease.release();
-  if (inFlight === record) inFlight = null;
-  if (!inFlight) {
-    for (const resolveIdle of idleWaiters) resolveIdle();
-    idleWaiters.clear();
+  // release() is a SQLite DELETE and can throw (SQLITE_BUSY past the
+  // busy_timeout, disk I/O, ~/.atoma removed mid-run). It must never keep
+  // the slot occupied: this function runs inside `void driven.then(...)`,
+  // so an escaping throw is an unhandledRejection that kills the server
+  // AND leaves `inFlight` set — every later start refused until restart.
+  // A lease row that failed to delete is exactly the stale case the next
+  // acquirer already recovers from, so log to stderr (stdout is the
+  // protocol stream) and move on.
+  try {
+    record.lease.release();
+  } catch (err) {
+    process.stderr.write(
+      `[atoma-mcp] run lease release failed for ${record.runId} (the next acquirer recovers the stale row): ${String(err)}\n`
+    );
+  } finally {
+    if (inFlight === record) inFlight = null;
+    if (!inFlight) {
+      for (const resolveIdle of idleWaiters) resolveIdle();
+      idleWaiters.clear();
+    }
   }
 }
 

@@ -57,12 +57,36 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
       }
     : undefined;
 
+  // Run-scoped memos must be the SAME reference on every fork, or their
+  // documented semantics silently narrow to branch-scoped: the memos are
+  // lazily initialised by whichever fork first touches them, and a lazy
+  // init on a child never reaches the root or sibling branches. Initialise
+  // them on the PARENT here (the field is mutable by design) so the root,
+  // this fork and every future fork share one map/set.
+  const dispatchedScriptSignatures = (ctx.dispatchedScriptSignatures ??= new Map<
+    string,
+    string[]
+  >());
+  const mechanicalPlanRejections = (ctx.mechanicalPlanRejections ??= new Set<string>());
+
   const out: RunContext = {
     logger: ctx.logger,
     signal: ctx.signal,
     llm: wrappedLlm,
     limits: ctx.limits,
+    dispatchedScriptSignatures,
+    mechanicalPlanRejections,
     ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
+    // Field-enumeration hazard, measured: this rebuild once dropped
+    // `requireObservedToolAction`, and because the flag is only SET on the
+    // root ctx while L2.validateResult reads it through a double fork, the
+    // fabricated-work gate was inert on every production run while its
+    // tests (which never fork) stayed green. Optional fields get no
+    // typecheck protection here — every RunContext field added later MUST
+    // be forwarded explicitly, and needs a fork-propagation test.
+    ...(ctx.requireObservedToolAction !== undefined
+      ? { requireObservedToolAction: ctx.requireObservedToolAction }
+      : {}),
     ...(wrappedRecordTrust !== undefined ? { recordTrust: wrappedRecordTrust } : {}),
     ...(wrappedRecordSkill !== undefined ? { recordSkill: wrappedRecordSkill } : {}),
     ...(wrappedRecordCacheHit !== undefined ? { recordCacheHit: wrappedRecordCacheHit } : {}),

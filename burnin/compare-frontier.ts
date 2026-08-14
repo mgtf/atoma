@@ -131,7 +131,21 @@ async function main(): Promise<void> {
   mkdirSync(LOGS_DIR, { recursive: true });
   mkdirSync(SCRATCH, { recursive: true });
   mkdirSync(dirname(CSV_PATH), { recursive: true });
-  if (!existsSync(CSV_PATH)) writeFileSync(CSV_PATH, HEADER + '\n', 'utf8');
+  if (!existsSync(CSV_PATH)) {
+    writeFileSync(CSV_PATH, HEADER + '\n', 'utf8');
+  } else {
+    // A row written under a header it does not match is worse than no row
+    // (measured 2026-08-14: standard burn-in rows landed under this compare
+    // header and the arm column became unrecoverable). Refuse foreign files.
+    const firstLine = readFileSync(CSV_PATH, 'utf8').split('\n', 1)[0];
+    if (firstLine !== HEADER) {
+      console.error(
+        `refusing to append: ${CSV_PATH} header does not match the compare schema — ` +
+          `found "${String(firstLine).slice(0, 80)}…". Pick a fresh output file.`
+      );
+      process.exit(2);
+    }
+  }
 
   console.log('== atoma vs frontier-direct (Opus) ==');
   console.log('control : ATOMA_LLM=anthropic --baseline L3=claude-opus-5 (throwaway store)');

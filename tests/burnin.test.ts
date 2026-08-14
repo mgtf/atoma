@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   parseRunLog,
   toCsvRow,
@@ -6,6 +9,7 @@ import {
   looksLikeConfigFailure,
   looksLikeProviderLimitFailure,
   burninProviderInfo,
+  ensureBurninCsvHeader,
   CSV_HEADER,
 } from '../src/cli/burnin.js';
 
@@ -192,5 +196,63 @@ describe('burnin CSV + summary', () => {
     ]);
     expect(out).toMatch(/cli\s+2\s+2\s+0\.2500/);
     expect(out).toMatch(/web\s+2\s+1\s+0\.8000/);
+  });
+});
+
+describe('burnin ensureBurninCsvHeader — the CSV belongs to ONE writer', () => {
+  // Measured 2026-08-14: `--out` pointed at compare-frontier's CSV (header
+  // `timestamp,arm,…`), the legacy-migration check matched nothing, and the
+  // batch appended 22-field standard rows under a 17-column header — every
+  // header-driven consumer read shifted columns and the arm distinction was
+  // unrecoverable. A row written under a header it does not match is worse
+  // than no row.
+  const withTmp = (fn: (dir: string) => void): void => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-burnin-csv-'));
+    try {
+      fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('creates an absent file with the current header', () => {
+    withTmp((dir) => {
+      const out = join(dir, 'results.csv');
+      ensureBurninCsvHeader(out);
+      expect(readFileSync(out, 'utf8')).toBe(CSV_HEADER + '\n');
+    });
+  });
+
+  it('migrates a legacy burn-in header in place, keeping data rows', () => {
+    withTmp((dir) => {
+      const out = join(dir, 'results.csv');
+      writeFileSync(out, 'timestamp,task_id,family,outcome\nrow1,a,cli,delivered\n', 'utf8');
+      ensureBurninCsvHeader(out);
+      const lines = readFileSync(out, 'utf8').split('\n');
+      expect(lines[0]).toBe(CSV_HEADER);
+      expect(lines[1]).toBe('row1,a,cli,delivered');
+    });
+  });
+
+  it("refuses another writer's file instead of appending misaligned rows", () => {
+    withTmp((dir) => {
+      const out = join(dir, 'results-compare.csv');
+      const foreign = 'timestamp,arm,task_id,family,outcome,cost_usd';
+      writeFileSync(out, foreign + '\n', 'utf8');
+      expect(() => ensureBurninCsvHeader(out)).toThrow(/another writer/);
+      // And the foreign file is left byte-identical.
+      expect(readFileSync(out, 'utf8')).toBe(foreign + '\n');
+    });
+  });
+
+  it('is a no-op on a file already carrying the current header', () => {
+    withTmp((dir) => {
+      const out = join(dir, 'results.csv');
+      const content = CSV_HEADER + '\nrow1\n';
+      writeFileSync(out, content, 'utf8');
+      ensureBurninCsvHeader(out);
+      expect(readFileSync(out, 'utf8')).toBe(content);
+      expect(existsSync(out)).toBe(true);
+    });
   });
 });
