@@ -19,26 +19,6 @@
       "id": "rpg-docs-and-config",
       "family": "files",
       "goal": "Create README.md with \"Overview\" and \"Usage\" headings, CONTRIBUTING.md with \"Setup\" and \"Workflow\" headings, and a config.json whose contents are exactly {\"project\":\"lantern\",\"stage\":\"alpha\",\"retainDays\":14}."
-    },
-    {
-      "id": "zine-crud-json-api",
-      "family": "http",
-      "goal": "Build a CRUD JSON API for a small zine catalog with documented create, read, list, and delete routes, then as a FINAL SEPARATE PHASE exercise the full lifecycle against the running service and confirm the expected status codes and response bodies."
-    },
-    {
-      "id": "coffee-blend-web-page",
-      "family": "web",
-      "goal": "Build a single-page web artifact that lets a user compare three fictional coffee blends with selectable cards, a detail panel, and a responsive layout."
-    },
-    {
-      "id": "museum-ticket-http-service",
-      "family": "http",
-      "goal": "Build a tiny HTTP service for a museum ticket kiosk that exposes deterministic JSON routes for today’s ticket availability and a preview endpoint, then as a FINAL SEPARATE PHASE probe the documented routes and verify the headers, status codes, and response fields."
-    },
-    {
-      "id": "reading-streak-app",
-      "family": "app",
-      "goal": "Build a small app that tracks a daily reading streak with add, complete, and reset actions, using a simple local data store and one runnable interface."
     }
   ]
 }

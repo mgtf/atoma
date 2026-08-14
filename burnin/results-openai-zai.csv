@@ -34,3 +34,11 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-12T23:40:11.469Z,app-guest-counter,app,failed,0.6049,900,12,0,0,0,0,0,0,0,0,0,0,2026-08-12T23-40-11-988-b6a6f68f.json,ollama+zai+codex,12,0,0
 2026-08-12T23:58:58.472Z,app-guest-counter,app,delivered,0.2971,573,19,0,0,0,0,0,0,0,0,1,1,2026-08-12T23-58-58-982-54d09e81.json,ollama+zai+codex,19,0,1
 2026-08-13T08:25:36.355Z,deploy-rollback-guides-compile-low,files,delivered,0.1574,126,11,0,0,0,1,0,0,1,0,0,0,2026-08-13T08-25-36-940-9c020c0a.json,ollama+zai+codex,11,0,0
+2026-08-14T00:15:27.294Z,roman-cli-package-readme,cli,delivered,0.1665,164,17,0,0,0,0,0,0,0,1,0,0,2026-08-14T00-15-27-897-b3b7cc39.json,ollama+zai+codex,17,0,0
+2026-08-14T00:18:12.035Z,birdwatching-markdown-set,files,delivered,0.1011,81,11,0,0,0,1,0,0,0,0,0,0,2026-08-14T00-18-12-577-b4551836.json,ollama+zai+codex,11,0,0
+2026-08-14T00:19:34.079Z,kebab-argv-cli,cli,delivered,0.0891,105,10,0,0,0,0,0,0,0,0,0,0,2026-08-14T00-19-34-633-c51e3c2c.json,ollama+zai+codex,10,0,0
+2026-08-14T00:21:19.247Z,rpg-docs-and-config,files,delivered,0.1329,135,11,0,0,0,0,0,0,1,0,0,0,2026-08-14T00-21-19-742-3521e44f.json,ollama+zai+codex,11,0,0
+2026-08-14T00:24:46.054Z,zine-crud-json-api,http,delivered,0.2151,215,17,0,0,0,0,0,0,0,1,0,0,2026-08-14T00-24-46-733-e3399937.json,ollama+zai+codex,17,0,0
+2026-08-14T00:28:23.796Z,coffee-blend-web-page,web,error,,817,,0,0,0,0,0,0,0,0,0,0,2026-08-14T00-28-24-433-44518465.json,ollama+zai+codex,0,0,0
+2026-08-14T00:42:01.874Z,museum-ticket-http-service,http,delivered,0.1854,254,17,0,0,0,0,0,0,0,0,0,0,2026-08-14T00-42-02-537-9d538371.json,ollama+zai+codex,17,1,0
+2026-08-14T00:46:17.791Z,reading-streak-app,app,error,,27,,0,0,0,0,0,0,0,0,0,0,2026-08-14T00-46-18-396-1e2a8964.json,ollama+zai+codex,0,0,0
