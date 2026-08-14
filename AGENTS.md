@@ -1777,7 +1777,37 @@ re-exports all the historical names so old imports keep working.
   the pane edge so hover scaling/glow cannot be clipped on the right. None of
   these effects adds DOM nodes. A Chromium/SwiftShader acceptance sample with
   all card shaders active measured 16.67ms mean / 17.60ms P95 over 120 frames
-  (~60fps). Stat tiles add renderer-native telemetry bars; agent controls keep
+  (~60fps). One logical pointer light spans the deliberate two-renderer
+  boundary without pretending one context can illuminate the other.
+  `pointer-light.ts` owns a
+  mutable screen-coordinate sample read once per frame (never Zustand/React
+  state): Three projects it into a real moving `PointLight` and feeds a radial
+  term into the otherwise-unlit backdrop shader, while Pixi applies ONE
+  persistent dual-WebGPU/WebGL root filter to relight panels, cards, controls
+  and text together. Do not attach one filter per widget or add a third canvas.
+  `AtomaCursor` is the sole visual DOM exception: a pointer-transparent SVG
+  arrow above the DOM input bridge, with black face, white bevel, blue rim and
+  hotspot-centred halo. It coalesces mouse movement to one DOM transform per
+  frame, hides the native cursor only while the replacement is visible, and
+  disables itself for coarse/touch, reduced-motion and forced-colors users.
+  Blur, pointer exit and hidden documents extinguish both cursor and light.
+  The compiled Chromium/SwiftShader smoke moves the pointer so both shader
+  paths compile; its active-light DPR-2 sample measured 16.88ms mean /
+  21.60ms P95 over 120 frames, while forced WebGL passes the same cursor/light
+  contract. Visual depth is deliberately asymmetric across those contexts:
+  the procedural field is the FAR plane (physically behind at z=-10, lower
+  contrast/alpha, finer/slower grid), decorative topology is behind the
+  z=0-aligned Runs rails, and Pixi panes/cards/navigation are the NEAR plane.
+  The Runs rails must stay aligned at their current viewport projection; do
+  not move the whole Three scene backward to fake depth. Pixi keeps its dim
+  ambient grid in a separate unfiltered `ambientRoot`, while the single
+  pointer-light filter applies only to the raised UI root. Rounded offset
+  shadows, opaque faces and top rims provide elevation without CSS perspective
+  or per-widget filters. The far shader still receives the same pointer
+  position, but through a broader 0.32-gain response so the background is
+  visibly illuminated without competing with foreground surfaces. Pure
+  contracts live in `visual-depth.ts` / `tests/viz-depth.test.ts`.
+  Stat tiles add renderer-native telemetry bars; agent controls keep
   their ENCLOSED nucleus/orbit/electrons (one particle per tier), which is
   useful rank encoding. The loose orbit incident was a Pixi pivot bug: the
   ellipse was drawn around `(10,height/2)` but the Graphics object rotated

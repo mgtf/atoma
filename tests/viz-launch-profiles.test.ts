@@ -54,6 +54,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
   const threeBackdrop = readFileSync('src/viz/client-gl/ThreeBackdrop.tsx', 'utf8');
+  const gpuCursor = readFileSync('src/viz/client-gl/AtomaCursor.tsx', 'utf8');
+  const pointerLight = readFileSync('src/viz/client-gl/pointer-light.ts', 'utf8');
   const timelineLayout = readFileSync('src/viz/client/timeline-layout.ts', 'utf8');
   const timelineRails = readFileSync('src/viz/client-gl/RunsTimelineRails.tsx', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
@@ -99,6 +101,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(buildLauncher).toMatch(/NODE_ENV:\s*'production'/);
     expect(server).toContain('res.writeHead(307');
     expect(gpuApp).toMatch(/ThreeBackdrop|GpuSurface|DomBridge/);
+    expect(gpuApp).toMatch(/AtomaCursor/);
     expect(gpuMain).toMatch(/GpuErrorBoundary/);
     expect(gpuRenderer).toMatch(
       /preference:\s*forceWebGl\s*\?\s*\['webgl'\]\s*:\s*\['webgpu', 'webgl'\]/
@@ -189,12 +192,21 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
+    expect(threeBackdrop).toMatch(/PointerPointLight|readPointerLight/);
+    expect(threeBackdrop).toMatch(/uPointerUv|uPointerStrength/);
+    expect(gpuRenderer).toMatch(/POINTER_LIGHT_GLSL|POINTER_LIGHT_WGSL/);
+    expect(gpuRenderer).toMatch(/installPointerLightFilter/);
+    expect(gpuRenderer).toMatch(/uInputPixel\.z|dpdx\(sampleLuminance\)/);
+    expect(gpuCursor).toMatch(/atoma-pointer-(halo|face)|atoma-pointer-tip-light/);
+    expect(gpuCursor).toMatch(/pointerType === 'touch'|REDUCED_MOTION_QUERY/);
+    expect(pointerLight).toMatch(/pointerClientToUv|pointerClientToRenderer/);
     expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
     expect(threeBackdrop).toMatch(/buildAtomMap\(run\)/);
     expect(gpuRenderer).toMatch(/if \(!entries\.length\) return \[\]/);
     expect(threeBackdrop).toMatch(/events=\{\(\) => \(\{ enabled: false, priority: 1 \}\)\}/);
     expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
     expect(gpuStyles).toMatch(/pointer-events: none !important;/);
+    expect(gpuStyles).not.toMatch(/contain:\s*layout paint/);
     expect(gpuRenderer).toMatch(/listMask\.eventMode = 'none'/);
     expect(gpuRenderer).toMatch(/listLayer\.hitArea = new Rectangle\(leftX \+ 1, listY/);
     expect(gpuRenderer).toMatch(/mask\.eventMode = 'none'/);

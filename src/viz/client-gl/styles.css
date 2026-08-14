@@ -38,15 +38,74 @@ button, input, textarea { font: inherit; }
   pointer-events: auto;
 }
 
+.atoma-pointer-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 20;
+  width: 52px;
+  height: 54px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate3d(-80px, -80px, 0);
+  transform-origin: 12px 12px;
+  transition: opacity 70ms linear;
+  will-change: transform, opacity;
+  contain: layout;
+}
+
+.atoma-pointer-cursor[data-visible="true"] { opacity: 1; }
+.atoma-pointer-cursor svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.atoma-pointer-tip-light { fill: #dff8ff; opacity: .92; }
+.atoma-pointer-halo {
+  fill: none;
+  stroke: #65c9ff;
+  stroke-width: 6;
+  stroke-linejoin: round;
+  opacity: .82;
+}
+.atoma-pointer-extrusion {
+  fill: #111c2c;
+  stroke: #7796bd;
+  stroke-width: 2.35;
+  stroke-linejoin: round;
+}
+.atoma-pointer-face {
+  fill: url("#atoma-cursor-face");
+  stroke: #ffffff;
+  stroke-width: 2.7;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.atoma-pointer-inner-rim {
+  fill: none;
+  stroke: rgba(167, 224, 255, .88);
+  stroke-width: .72;
+  stroke-linejoin: round;
+  transform: translate(.45px, .55px);
+}
+
+html.atoma-cursor-active,
+html.atoma-cursor-active * {
+  cursor: none !important;
+}
+
+@media (forced-colors: active), (prefers-reduced-motion: reduce) {
+  .atoma-pointer-cursor { display: none; }
+}
+
 .gpu-dom-input {
   position: fixed;
   z-index: 4;
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
   outline: 0;
-  background: rgba(11, 17, 30, .92);
+  background: rgba(11, 17, 30, .96);
   color: #e6edf7;
-  box-shadow: 0 0 0 1px rgba(110, 168, 255, .08), 0 10px 30px rgba(0, 0, 0, .2);
+  box-shadow:
+    0 0 0 1px rgba(110, 168, 255, .1),
+    0 3px 0 rgba(1, 4, 10, .52),
+    0 14px 34px rgba(0, 0, 0, .26);
 }
 
 .gpu-dom-input:hover { border-color: rgba(255, 255, 255, .75); }

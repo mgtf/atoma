@@ -1,4 +1,4 @@
-/* global document, HTMLButtonElement */
+/* global document, HTMLButtonElement, requestAnimationFrame */
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import puppeteer from 'puppeteer';
@@ -40,7 +40,7 @@ try {
   });
   try {
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
+    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
     const diagnostics = [];
     page.on('console', (message) => {
       if (message.type() === 'error' || message.type() === 'warn') {
@@ -58,6 +58,26 @@ try {
     });
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+    await page.mouse.move(640, 400);
+    await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const frameStats = await page.evaluate(() => new Promise((resolve) => {
+      const samples = [];
+      let previous;
+      const frame = (now) => {
+        if (previous !== undefined) samples.push(now - previous);
+        previous = now;
+        if (samples.length < 120) requestAnimationFrame(frame);
+        else {
+          const sorted = [...samples].sort((left, right) => left - right);
+          resolve({
+            meanMs: samples.reduce((sum, value) => sum + value, 0) / samples.length,
+            p95Ms: sorted[Math.floor(sorted.length * 0.95)],
+          });
+        }
+      };
+      requestAnimationFrame(frame);
+    }));
 
     const views = ['Registry', 'Skills', 'Burn-in', 'Launch', 'Runs'];
     for (const label of views) {
@@ -79,17 +99,22 @@ try {
       backend: document.querySelector('.gpu-ui-host')?.getAttribute('data-gpu-backend'),
       objects: Number(document.querySelector('.gpu-ui-host')?.getAttribute('data-gpu-objects')),
       hasLaunchTextarea: !!document.querySelector('.gpu-launch-input'),
+      cursorX: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-x'),
+      cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
     }));
     if (
       result.canvases !== 2 ||
       !['webgpu', 'webgl'].includes(result.backend ?? '') ||
       result.objects < 20 ||
+      result.cursorX !== '640' ||
+      result.cursorY !== '400' ||
+      frameStats.p95Ms > 35 ||
       diagnostics.length > 0
     ) {
-      throw new Error(`GPU smoke failed: ${JSON.stringify({ ...result, diagnostics })}`);
+      throw new Error(`GPU smoke failed: ${JSON.stringify({ ...result, frameStats, diagnostics })}`);
     }
     console.log(
-      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views`
+      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95`
     );
   } finally {
     await browser.close();
@@ -101,6 +126,7 @@ try {
   });
   try {
     const page = await fallbackBrowser.newPage();
+    await page.setViewport({ width: 1280, height: 800 });
     const diagnostics = [];
     page.on('console', (message) => {
       if (message.type() === 'error' || message.type() === 'warn') {
@@ -118,8 +144,21 @@ try {
     });
     await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'networkidle0' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]');
-    if (diagnostics.length > 0) {
-      throw new Error(`GPU fallback diagnostics: ${JSON.stringify(diagnostics)}`);
+    await page.mouse.move(640, 400);
+    await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const fallbackResult = await page.evaluate(() => ({
+      canvases: document.querySelectorAll('canvas').length,
+      cursorX: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-x'),
+      cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
+    }));
+    if (
+      fallbackResult.canvases !== 2 ||
+      fallbackResult.cursorX !== '640' ||
+      fallbackResult.cursorY !== '400' ||
+      diagnostics.length > 0
+    ) {
+      throw new Error(`GPU fallback diagnostics: ${JSON.stringify({ fallbackResult, diagnostics })}`);
     }
     console.log('viz GPU fallback ok: WebGL');
   } finally {

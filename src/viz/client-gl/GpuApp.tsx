@@ -12,6 +12,7 @@ import type {
   GpuRenderMetrics,
   GpuTimelineViewport,
 } from './gpu-renderer.js';
+import { AtomaCursor } from './AtomaCursor.js';
 import { DomBridge } from './DomBridge.js';
 import { GpuSurface } from './GpuSurface.js';
 import {
@@ -334,6 +335,7 @@ export function GpuApp() {
         onSelectRun={state.selectRun}
         onCopy={copyCommand}
       />
+      <AtomaCursor />
     </main>
   );
 }

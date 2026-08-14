@@ -51,8 +51,10 @@ import {
   buildAtomaMarkFrame,
   type AtomaMarkPoint,
 } from './brand-mark.js';
+import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
+import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import {
   buildSkillEventDetail,
   buildStructuredDetail,
@@ -430,6 +432,141 @@ export function gpuCardShaderMode(event: VizEvent): number {
   return 6;
 }
 
+export const POINTER_LIGHT_GLSL_VERTEX = /* glsl */ `
+  in vec2 aPosition;
+  out vec2 vTextureCoord;
+  out vec2 vScreenPx;
+  uniform vec4 uInputSize;
+  uniform vec4 uOutputFrame;
+  uniform vec4 uOutputTexture;
+
+  void main() {
+    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
+    position.y =
+      position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) -
+      uOutputTexture.z;
+    gl_Position = vec4(position, 0.0, 1.0);
+    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
+    vScreenPx = aPosition * uOutputFrame.zw + uOutputFrame.xy;
+  }
+`;
+
+export const POINTER_LIGHT_GLSL = /* glsl */ `
+  in vec2 vTextureCoord;
+  in vec2 vScreenPx;
+  out vec4 finalColor;
+  uniform sampler2D uTexture;
+  uniform vec4 uInputPixel;
+  uniform vec2 uLightPx;
+  uniform float uStrength;
+
+  float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+  }
+
+  void main() {
+    vec2 uv = vTextureCoord;
+    vec4 sampleColor = texture(uTexture, uv);
+    float sampleLuminance = luminance(sampleColor.rgb);
+    vec4 rightSample = texture(uTexture, uv + vec2(uInputPixel.z, 0.0));
+    vec4 downSample = texture(uTexture, uv + vec2(0.0, uInputPixel.w));
+    vec2 gradient = vec2(
+      luminance(rightSample.rgb) - sampleLuminance,
+      luminance(downSample.rgb) - sampleLuminance
+    );
+    vec2 alphaGradient = vec2(
+      rightSample.a - sampleColor.a,
+      downSample.a - sampleColor.a
+    );
+    vec2 outwardNormal = -(gradient + alphaGradient * 0.16);
+    vec2 toLight = normalize(uLightPx - vScreenPx + vec2(0.001));
+    float normalLength = length(outwardNormal);
+    float facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
+    float edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
+    float distancePx = length(vScreenPx - uLightPx);
+    float halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
+    float core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
+    vec3 lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
+    float illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
+    sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
+    finalColor = sampleColor;
+  }
+`;
+
+export const POINTER_LIGHT_WGSL = /* wgsl */ `
+  struct GlobalFilterUniforms {
+    uInputSize: vec4<f32>,
+    uInputPixel: vec4<f32>,
+    uInputClamp: vec4<f32>,
+    uOutputFrame: vec4<f32>,
+    uGlobalFrame: vec4<f32>,
+    uOutputTexture: vec4<f32>,
+  };
+
+  struct PointerLightUniforms {
+    uLightPx: vec2<f32>,
+    uStrength: f32,
+  };
+
+  @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
+  @group(0) @binding(1) var uTexture: texture_2d<f32>;
+  @group(0) @binding(2) var uSampler: sampler;
+  @group(1) @binding(0) var<uniform> pointerLight: PointerLightUniforms;
+
+  struct VSOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) screenPx: vec2<f32>,
+  };
+
+  fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
+    var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
+    position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
+    position.y = position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
+    return vec4(position, 0.0, 1.0);
+  }
+
+  fn filterTextureCoord(aPosition: vec2<f32>) -> vec2<f32> {
+    return aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
+  }
+
+  @vertex
+  fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
+    let screenPx = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
+    return VSOutput(filterVertexPosition(aPosition), filterTextureCoord(aPosition), screenPx);
+  }
+
+  fn luminance(color: vec3<f32>) -> f32 {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+  }
+
+  @fragment
+  fn mainFragment(
+    @location(0) uv: vec2<f32>,
+    @location(1) screenPx: vec2<f32>
+  ) -> @location(0) vec4<f32> {
+    var sampleColor = textureSample(uTexture, uSampler, uv);
+    let sampleLuminance = luminance(sampleColor.rgb);
+    let gradient = vec2(dpdx(sampleLuminance), dpdy(sampleLuminance));
+    let alphaGradient = vec2(dpdx(sampleColor.a), dpdy(sampleColor.a));
+    let outwardNormal = -(gradient + alphaGradient * 0.16);
+    let toLight = normalize(pointerLight.uLightPx - screenPx + vec2(0.001));
+    let normalLength = length(outwardNormal);
+    let facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
+    let edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
+    let distancePx = length(screenPx - pointerLight.uLightPx);
+    let halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
+    let core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
+    let lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
+    let illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
+    sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
+    sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
+    sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;
+    return sampleColor;
+  }
+`;
+
 export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
   in vec2 aPosition;
   out vec2 vTextureCoord;
@@ -758,6 +895,7 @@ function nowDescription(
 
 export class GpuRenderer {
   app = new Application();
+  readonly ambientRoot = new Container();
   readonly root = new Container();
   private host: HTMLElement | null = null;
   private initialized = false;
@@ -765,6 +903,12 @@ export class GpuRenderer {
   private readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
   private readonly frameFilters = new Set<Filter>();
+  private pointerLightFilter: Filter | null = null;
+  private pointerLightUniforms: {
+    uLightPx: Float32Array;
+    uStrength: number;
+  } | null = null;
+  private pointerLightStrength = 0;
   private previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -843,6 +987,71 @@ export class GpuRenderer {
     this.snapshot.onScroll(view, next - current);
   };
 
+  private readonly updatePointerLight = (ticker: Ticker) => {
+    const filter = this.pointerLightFilter;
+    const uniforms = this.pointerLightUniforms;
+    if (!filter || !uniforms) return;
+    const pointer = readPointerLight();
+    const target = pointer.active ? 1 : 0;
+    const response = 1 - Math.exp(-Math.max(0, ticker.deltaMS) * 0.018);
+    this.pointerLightStrength += (target - this.pointerLightStrength) * response;
+    if (!pointer.active && this.pointerLightStrength < 0.002) {
+      this.pointerLightStrength = 0;
+      uniforms.uStrength = 0;
+      filter.enabled = false;
+      return;
+    }
+
+    const bounds = this.app.canvas.getBoundingClientRect();
+    const local = pointerClientToRenderer(
+      pointer.clientX,
+      pointer.clientY,
+      bounds,
+      this.app.screen.width,
+      this.app.screen.height
+    );
+    uniforms.uLightPx[0] = local.x;
+    uniforms.uLightPx[1] = local.y;
+    uniforms.uStrength = this.pointerLightStrength;
+    filter.enabled = true;
+  };
+
+  private installPointerLightFilter() {
+    const filter = Filter.from({
+      gl: {
+        vertex: POINTER_LIGHT_GLSL_VERTEX,
+        fragment: POINTER_LIGHT_GLSL,
+      },
+      gpu: {
+        vertex: {
+          source: POINTER_LIGHT_WGSL,
+          entryPoint: 'mainVertex',
+        },
+        fragment: {
+          source: POINTER_LIGHT_WGSL,
+          entryPoint: 'mainFragment',
+        },
+      },
+      resources: {
+        pointerLight: {
+          uLightPx: { value: new Float32Array([0, 0]), type: 'vec2<f32>' },
+          uStrength: { value: 0, type: 'f32' },
+        },
+      },
+      padding: 0,
+      resolution: 'inherit',
+      antialias: 'inherit',
+    });
+    filter.enabled = false;
+    this.pointerLightFilter = filter;
+    this.pointerLightUniforms = filter.resources['pointerLight'].uniforms as {
+      uLightPx: Float32Array;
+      uStrength: number;
+    };
+    this.root.filters = [filter];
+    this.app.ticker.add(this.updatePointerLight);
+  }
+
   async init(host: HTMLElement) {
     this.host = host;
     const forceWebGl = new URLSearchParams(location.search).get('renderer') === 'webgl';
@@ -876,7 +1085,9 @@ export class GpuRenderer {
         : rendererType === Number(RendererType.WEBGL)
           ? 'webgl'
           : 'unknown';
-    this.app.stage.addChild(this.root);
+    this.ambientRoot.eventMode = 'none';
+    this.app.stage.addChild(this.ambientRoot, this.root);
+    this.installPointerLightFilter();
     this.app.canvas.className = 'gpu-ui-canvas';
     this.app.canvas.setAttribute('aria-hidden', 'true');
     host.appendChild(this.app.canvas);
@@ -886,6 +1097,13 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    this.app.ticker.remove(this.updatePointerLight);
+    this.root.filters = null;
+    this.root.filterArea = undefined;
+    this.pointerLightFilter?.destroy();
+    this.pointerLightFilter = null;
+    this.pointerLightUniforms = null;
+    this.pointerLightStrength = 0;
     for (const filter of this.frameFilters) filter.destroy();
     this.frameFilters.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
@@ -904,6 +1122,7 @@ export class GpuRenderer {
     this.tickerCallbacks.clear();
     for (const filter of this.frameFilters) filter.destroy();
     this.frameFilters.clear();
+    for (const child of this.ambientRoot.removeChildren()) child.destroy({ children: true });
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
@@ -938,7 +1157,8 @@ export class GpuRenderer {
     }
     const width = this.app.screen.width;
     const height = this.app.screen.height;
-    this.drawAmbientGrid(width, height);
+    this.root.filterArea = new Rectangle(0, 0, width, height);
+    this.drawAmbientGrid(this.ambientRoot, width, height);
     this.drawHeader(snapshot, width);
 
     if (snapshot.data.loading) {
@@ -982,7 +1202,8 @@ export class GpuRenderer {
     this.previousFilterBounds = this.currentFilterBounds;
     if (snapshot.state.view !== 'runs') this.roleRowTransition = null;
     this.previousEventIds = this.currentEventIds;
-    this.metrics.objectCount = this.countObjects(this.root);
+    this.metrics.objectCount =
+      this.countObjects(this.ambientRoot) + this.countObjects(this.root);
   }
 
   private countObjects(container: Container): number {
@@ -993,17 +1214,17 @@ export class GpuRenderer {
     return count;
   }
 
-  private drawAmbientGrid(width: number, height: number) {
+  private drawAmbientGrid(parent: Container, width: number, height: number) {
     const graphics = new Graphics();
-    graphics.alpha = 0.18;
-    for (let x = 0; x < width; x += 48) {
+    graphics.alpha = 0.12;
+    for (let x = 0; x < width; x += 40) {
       graphics.moveTo(x, GPU_LAYOUT.headerHeight).lineTo(x, height);
     }
-    for (let y = GPU_LAYOUT.headerHeight; y < height; y += 48) {
+    for (let y = GPU_LAYOUT.headerHeight; y < height; y += 40) {
       graphics.moveTo(0, y).lineTo(width, y);
     }
-    graphics.stroke({ color: 0x26334a, width: 1, alpha: 0.25 });
-    this.root.addChild(graphics);
+    graphics.stroke({ color: 0x26334a, width: 1, alpha: 0.18 });
+    parent.addChild(graphics);
   }
 
   private panel(
@@ -1014,14 +1235,56 @@ export class GpuRenderer {
     height: number,
     fill: number = GPU_COLORS.panel,
     border: number = GPU_COLORS.border,
-    radius: number = GPU_LAYOUT.radius
+    radius: number = GPU_LAYOUT.radius,
+    elevation: 0 | 1 | 2 = 1
   ) {
+    const safeWidth = Math.max(0, width);
+    const safeHeight = Math.max(0, height);
+    if (elevation > 0) {
+      const deepShadow = new Graphics();
+      deepShadow.roundRect(
+        x + VIZ_VISUAL_DEPTH.near.shadowX * elevation / 2,
+        y + VIZ_VISUAL_DEPTH.near.shadowY * elevation / 2,
+        safeWidth,
+        safeHeight,
+        radius
+      );
+      deepShadow.fill({ color: 0x01040a, alpha: 0.2 + elevation * 0.08 });
+      deepShadow.eventMode = 'none';
+      parent.addChild(deepShadow);
+
+      const nearShadow = new Graphics();
+      nearShadow.roundRect(x + elevation, y + elevation * 1.5, safeWidth, safeHeight, radius);
+      nearShadow.fill({ color: 0x07101d, alpha: 0.3 + elevation * 0.05 });
+      nearShadow.eventMode = 'none';
+      parent.addChild(nearShadow);
+    }
+
     const graphics = new Graphics();
-    graphics.roundRect(x, y, Math.max(0, width), Math.max(0, height), radius);
-    graphics.fill({ color: fill, alpha: 0.84 });
+    graphics.roundRect(x, y, safeWidth, safeHeight, radius);
+    graphics.fill({
+      color: fill,
+      alpha: elevation === 0
+        ? 0.84
+        : VIZ_VISUAL_DEPTH.near.panelAlpha - (2 - elevation) * 0.04,
+    });
     if (border !== fill) graphics.stroke({ color: border, width: 1, alpha: 0.9 });
     graphics.eventMode = 'none';
     parent.addChild(graphics);
+
+    if (elevation > 0 && safeWidth > 8) {
+      const rim = new Graphics();
+      rim
+        .moveTo(x + Math.max(3, radius), y + 0.7)
+        .lineTo(x + safeWidth - Math.max(3, radius), y + 0.7)
+        .stroke({
+          color: 0xc7e2ff,
+          width: 0.8,
+          alpha: 0.07 + elevation * 0.055,
+        });
+      rim.eventMode = 'none';
+      parent.addChild(rim);
+    }
     return graphics;
   }
 
@@ -1082,6 +1345,21 @@ export class GpuRenderer {
     return label;
   }
 
+  private addSurfaceShadow(
+    parent: Container,
+    width: number,
+    height: number,
+    radius = 8,
+    alpha = 0.44
+  ) {
+    const shadow = new Graphics();
+    shadow.roundRect(2.5, 3.5, width, height, radius);
+    shadow.fill({ color: 0x01040a, alpha });
+    shadow.eventMode = 'none';
+    parent.addChild(shadow);
+    return shadow;
+  }
+
   private button(
     parent: Container,
     id: string,
@@ -1098,11 +1376,12 @@ export class GpuRenderer {
   ) {
     const container = new Container();
     container.position.set(x, y);
+    this.addSurfaceShadow(container, width, height, 7, 0.4);
     const graphics = new Graphics();
     graphics.roundRect(0, 0, width, height, 7);
     graphics.fill({
       color: active ? accent : GPU_COLORS.panelRaised,
-      alpha: active ? 0.28 : 0.82,
+      alpha: active ? 0.32 : 0.9,
     });
     graphics.stroke({ color: active ? accent : GPU_COLORS.border, width: active ? 1.5 : 1 });
     container.addChild(graphics);
@@ -1172,6 +1451,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
+    this.addSurfaceShadow(container, width, height, 8, 0.42);
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -1183,7 +1463,7 @@ export class GpuRenderer {
     base.roundRect(0, 0, width, height, 8);
     base.fill({
       color: active ? accent : 0x111b2c,
-      alpha: active ? 0.27 : 0.9,
+      alpha: active ? 0.3 : 0.94,
     });
     base.stroke({
       color: active ? accent : 0x30405d,
@@ -1316,6 +1596,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
+    this.addSurfaceShadow(container, width, height, 8, 0.48);
 
     const glow = new Graphics();
     glow.roundRect(-4, -3, width + 8, height + 6, 11);
@@ -1325,7 +1606,10 @@ export class GpuRenderer {
 
     const base = new Graphics();
     base.roundRect(0, 0, width, height, 8);
-    base.fill({ color: active ? 0x183259 : 0x111b2c, alpha: 0.9 });
+    base.fill({
+      color: active ? 0x183259 : 0x111b2c,
+      alpha: VIZ_VISUAL_DEPTH.near.navAlpha,
+    });
     base.stroke({
       color: active ? GPU_COLORS.primary : 0x2d3d59,
       width: active ? 1.6 : 1,
@@ -1431,6 +1715,7 @@ export class GpuRenderer {
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
+    this.addSurfaceShadow(container, width, height, 8, 0.4);
 
     const glow = new Graphics();
     glow.roundRect(-2, -2, width + 4, height + 4, 10);
@@ -1522,6 +1807,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
+    this.addSurfaceShadow(container, width, height, 8, 0.42);
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -1531,7 +1817,7 @@ export class GpuRenderer {
 
     const base = new Graphics();
     base.roundRect(0, 0, width, height, 8);
-    base.fill({ color: active ? accent : 0x121c2d, alpha: active ? 0.22 : 0.9 });
+    base.fill({ color: active ? accent : 0x121c2d, alpha: active ? 0.26 : 0.94 });
     base.stroke({ color: active ? accent : 0x30405d, width: active ? 1.5 : 1 });
     container.addChild(base);
 
@@ -1689,7 +1975,7 @@ export class GpuRenderer {
     const extrusionX = 5 + zDepth * 7;
     const extrusionY = 5 + zDepth * 5;
     extrusion.roundRect(extrusionX, extrusionY, width, height, 8);
-    extrusion.fill({ color: 0x02050b, alpha: 0.38 + zDepth * 0.14 });
+    extrusion.fill({ color: 0x02050b, alpha: 0.44 + zDepth * 0.16 });
     extrusion.stroke({
       color: accent,
       width: 1,
@@ -1705,7 +1991,7 @@ export class GpuRenderer {
       height,
       8
     );
-    middleExtrusion.fill({ color: 0x08111f, alpha: 0.34 + zDepth * 0.1 });
+    middleExtrusion.fill({ color: 0x08111f, alpha: 0.4 + zDepth * 0.12 });
     middleExtrusion.stroke({
       color: accent,
       width: 0.8,
@@ -1721,7 +2007,10 @@ export class GpuRenderer {
 
     const base = new Graphics();
     base.roundRect(0, 0, width, height, 8);
-    base.fill({ color: selected ? 0x172a49 : 0x111a2b, alpha: 0.9 });
+    base.fill({
+      color: selected ? 0x172a49 : 0x111a2b,
+      alpha: VIZ_VISUAL_DEPTH.near.cardAlpha,
+    });
     base.stroke({ color: selected ? GPU_COLORS.primary : accent, width: selected ? 1.7 : 1.05, alpha: 0.9 });
     container.addChild(base);
 
@@ -2260,7 +2549,8 @@ export class GpuRenderer {
       GPU_LAYOUT.headerHeight,
       0x0b111e,
       GPU_COLORS.border,
-      0
+      0,
+      2
     );
     this.drawAtomaMark(10, 12);
     this.text(this.root, 'Atoma', 49, 17.5, {
@@ -2354,7 +2644,9 @@ export class GpuRenderer {
       popupWidth,
       popupHeight,
       0x0c1321,
-      GPU_COLORS.primary
+      GPU_COLORS.primary,
+      GPU_LAYOUT.radius,
+      2
     );
     this.text(
       this.root,
@@ -2457,7 +2749,17 @@ export class GpuRenderer {
     const leftX = GPU_LAYOUT.gap;
     const rightX = leftX + leftWidth + GPU_LAYOUT.gap;
 
-    this.panel(this.root, leftX, top, leftWidth, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      leftX,
+      top,
+      leftWidth,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     this.text(this.root, truncate(run.label, 95), leftX + 14, top + 12, {
       size: 14,
       weight: '700',
@@ -3028,7 +3330,17 @@ export class GpuRenderer {
     });
 
     if (twoPane) {
-      this.panel(this.root, rightX, top, rightWidth, height - top - GPU_LAYOUT.gap);
+      this.panel(
+        this.root,
+        rightX,
+        top,
+        rightWidth,
+        height - top - GPU_LAYOUT.gap,
+        GPU_COLORS.panel,
+        GPU_COLORS.border,
+        GPU_LAYOUT.radius,
+        2
+      );
       const summaryHeight = this.drawRunSummaryCard(
         snapshot,
         run,
@@ -3457,7 +3769,17 @@ export class GpuRenderer {
     const x = GPU_LAYOUT.gap;
     const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
     const leftWidth = Math.min(560, width * 0.45);
-    this.panel(this.root, x, top, leftWidth, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      x,
+      top,
+      leftWidth,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     this.text(this.root, snapshot.t('nav.registry'), x + 16, top + 14, {
       size: 16,
       weight: '700',
@@ -3518,7 +3840,17 @@ export class GpuRenderer {
       y += 8;
     }
     const rightX = x + leftWidth + GPU_LAYOUT.gap;
-    this.panel(this.root, rightX, top, width - rightX - GPU_LAYOUT.gap, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      rightX,
+      top,
+      width - rightX - GPU_LAYOUT.gap,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     const atom = payload.types.find((item) => item.name === snapshot.state.selectedRegistryAtom) ?? payload.types[0];
     if (atom) this.drawAtomDetail(snapshot, atom, rightX, top, width - rightX - GPU_LAYOUT.gap);
   }
@@ -3526,7 +3858,17 @@ export class GpuRenderer {
   private drawSkills(snapshot: GpuRenderSnapshot, width: number, height: number) {
     const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
     const leftWidth = Math.min(560, width * 0.45);
-    this.panel(this.root, GPU_LAYOUT.gap, top, leftWidth, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      GPU_LAYOUT.gap,
+      top,
+      leftWidth,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     this.text(this.root, snapshot.t('nav.skills'), 26, top + 14, { size: 16, weight: '700' });
     const query = snapshot.state.search.skills;
     let y = top + 100 - snapshot.state.scrollY.skills;
@@ -3563,7 +3905,17 @@ export class GpuRenderer {
     }
     const rightX = leftWidth + GPU_LAYOUT.gap * 2;
     const rightWidth = width - rightX - GPU_LAYOUT.gap;
-    this.panel(this.root, rightX, top, rightWidth, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      rightX,
+      top,
+      rightWidth,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     const skill = snapshot.data.skillDetail;
     if (!skill) {
       this.text(this.root, snapshot.t('pane.selectSkill'), rightX + 18, top + 20, {
@@ -3985,7 +4337,19 @@ export class GpuRenderer {
     const pageRows = rows.slice().reverse().slice((page - 1) * availableRows, page * availableRows);
     pageRows.forEach((row, index) => {
       const rowY = tableY + index * 25;
-      if (index % 2 === 0) this.panel(this.root, GPU_LAYOUT.gap, rowY, width - GPU_LAYOUT.gap * 2, 24, 0x0f1725, 0x0f1725, 0);
+      if (index % 2 === 0) {
+        this.panel(
+          this.root,
+          GPU_LAYOUT.gap,
+          rowY,
+          width - GPU_LAYOUT.gap * 2,
+          24,
+          0x0f1725,
+          0x0f1725,
+          0,
+          0
+        );
+      }
       this.text(this.root, row.outcome === 'delivered' ? '✓' : '✗', 18, rowY + 4, {
         size: 11,
         color: row.outcome === 'delivered' ? GPU_COLORS.success : GPU_COLORS.error,
@@ -4022,7 +4386,17 @@ export class GpuRenderer {
     const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
     const panelWidth = Math.min(920, width - GPU_LAYOUT.gap * 2);
     const x = (width - panelWidth) / 2;
-    this.panel(this.root, x, top, panelWidth, height - top - GPU_LAYOUT.gap);
+    this.panel(
+      this.root,
+      x,
+      top,
+      panelWidth,
+      height - top - GPU_LAYOUT.gap,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
     this.text(this.root, snapshot.t('nav.launch'), x + 22, top + 18, { size: 18, weight: '700' });
     this.text(this.root, snapshot.t('launch.help'), x + 22, top + 52, {
       size: 11,
