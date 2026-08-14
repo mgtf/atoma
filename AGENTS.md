@@ -1733,14 +1733,22 @@ re-exports all the historical names so old imports keep working.
   instances calling newly-added prototype methods, and `GpuErrorBoundary`
   provides a visible reload path instead of a blank canvas.
   The Atoma brand mark is one isometric crystal, not an atom/orbit cliché and
-  not a lattice of tiny facets: three large faces (teal molecule, amber cell,
-  violet tissue) meet at a bright core. That silhouette stays readable at
-  favicon size. The Pixi mark is one projected five-point crystal whose faces
-  are depth-sorted and relit every frame: fixed key light, bounded clearcoat/
-  rim highlights, a soft core pulse and a ~10-second turn make the material
-  read at 28px without texture maps or post-processing. Projection and light
-  math live in the pure `buildAtomaMarkFrame` helper so tests pin the three
-  rank colors, face ordering and motion bounds without a brittle screenshot.
+  not a lattice of tiny facets: three broad rank sides enclose a bright energy
+  bead.
+  Each side is a top/bottom triangle pair with distinct related colors
+  (teal→blue molecule, amber→orange cell, violet→magenta tissue), so both
+  halves remain visibly different at header size. The Pixi mark is one
+  projected five-point crystal whose faces are depth-sorted and relit every
+  frame: fixed key light, bounded clearcoat/
+  rim highlights and a ~10-second turn make the material read at 28px without
+  texture maps or post-processing. The smaller energy bead follows a
+  deterministic billiard: paired triangle waves reflect its direction, then
+  each frame maps that ray onto the current projected crystal hull with a
+  radius-and-stroke inset. The white bead therefore stays inside the rotating
+  silhouette while its bounded translucent halo can bleed softly across an
+  edge. Projection, light and bead motion live in the pure
+  `buildAtomaMarkFrame` helper so tests pin the three rank color pairs, face
+  ordering and full-bead containment without a brittle screenshot.
   Reduced-motion renders one static frame. Do NOT mount a second R3F logo over
   it: that double-composites two asynchronous crystals and creates a THIRD GPU
   context beyond the deliberate Pixi + backdrop pair. The static SVG remains

@@ -44,7 +44,13 @@ import type {
 import { taxonomyForTier } from '../../core/taxonomy.js';
 import { elementForTool } from '../../contracts/toolTaxonomy.js';
 import { currentDisplayName } from '../../registry/taxonomyNames.js';
-import { buildAtomaMarkFrame, type AtomaMarkPoint } from './brand-mark.js';
+import {
+  ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_CORE_RADIUS_PULSE,
+  ATOMA_MARK_CORE_STROKE_WIDTH,
+  buildAtomaMarkFrame,
+  type AtomaMarkPoint,
+} from './brand-mark.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import {
@@ -2211,16 +2217,25 @@ export class GpuRenderer {
           .stroke({ color: 0xffffff, width: 0.72, alpha: face.sheenAlpha * 1.25 });
       }
 
+      const { x: coreX, y: coreY } = frame.corePosition;
       core.clear();
       core
-        .circle(14, 14, 5.1 + frame.pulse * 0.75)
+        .circle(coreX, coreY, 4.4 + frame.pulse * 0.55)
         .fill({ color: GPU_COLORS.cyan, alpha: 0.035 + frame.pulse * 0.025 })
-        .circle(14, 14, 3.35 + frame.pulse * 0.28)
+        .circle(coreX, coreY, 2.8 + frame.pulse * 0.2)
         .fill({ color: 0x6ea8ff, alpha: 0.09 + frame.pulse * 0.055 })
-        .circle(14, 14, 2.18 + frame.pulse * 0.12)
+        .circle(
+          coreX,
+          coreY,
+          ATOMA_MARK_CORE_RADIUS + frame.pulse * ATOMA_MARK_CORE_RADIUS_PULSE
+        )
         .fill({ color: 0xf8fbff, alpha: 0.98 })
-        .stroke({ color: GPU_COLORS.cyan, width: 0.92, alpha: 0.96 })
-        .circle(13.35, 13.25, 0.56)
+        .stroke({
+          color: GPU_COLORS.cyan,
+          width: ATOMA_MARK_CORE_STROKE_WIDTH,
+          alpha: 0.96,
+        })
+        .circle(coreX - 0.45, coreY - 0.5, 0.45)
         .fill({ color: 0xffffff, alpha: 0.96 });
     };
 
