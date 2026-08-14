@@ -166,11 +166,10 @@ export class ClaudeCliLlmClient implements LlmClient {
     const budget = Math.max(1, req.maxToolIterations ?? this.maxIter);
 
     const abort = new AbortController();
+    const onAbort = (): void => abort.abort(req.signal?.reason);
     if (req.signal) {
       if (req.signal.aborted) throw req.signal.reason ?? new Error('aborted');
-      req.signal.addEventListener('abort', () => abort.abort(req.signal!.reason), {
-        once: true,
-      });
+      req.signal.addEventListener('abort', onAbort, { once: true });
     }
     // PER-CALL DEADLINE. The run-level `AbortSignal.timeout` is ADVISORY:
     // it can only cancel work that observes it, and a subprocess wedged on
@@ -193,77 +192,75 @@ export class ClaudeCliLlmClient implements LlmClient {
         abort.abort(new Error(`claude-cli call idle for ${this.callTimeoutMs}ms`));
       }, this.callTimeoutMs);
     };
-    bumpDeadline();
-
-    const toolOptions = hasTools
-      ? buildToolBridge(req.tools!, req)
-      : { mcpServers: undefined, allowedTools: undefined, toolAliases: undefined };
-
-    const stream = query({
-      prompt: req.userContent,
-      options: {
-        model: resolveCliModel(req.model),
-        systemPrompt: req.systemPrompt,
-        // SDK isolation: no CLAUDE.md / settings bleed, no built-in tools.
-        settingSources: [],
-        tools: [],
-        ...(toolOptions.mcpServers ? { mcpServers: toolOptions.mcpServers } : {}),
-        ...(toolOptions.allowedTools ? { allowedTools: toolOptions.allowedTools } : {}),
-        ...(toolOptions.toolAliases ? { toolAliases: toolOptions.toolAliases } : {}),
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        ...(cliEffortFor(req) ? { effort: cliEffortFor(req) } : {}),
-        ...(cliThinkingFor(req) ? { thinking: cliThinkingFor(req) } : {}),
-        maxTurns: hasTools ? budget : 2,
-        abortController: abort,
-        // Drop a (possibly stale) exported API key so the CLI's own OAuth
-        // login is what authenticates the subprocess.
-        env: { ...process.env, ANTHROPIC_API_KEY: undefined },
-      },
-    });
-
     let lastAssistantText = '';
     try {
-    for await (const msg of stream) {
       bumpDeadline();
-      if (msg.type === 'assistant') {
-        const blocks = msg.message?.content;
-        if (Array.isArray(blocks)) {
-          const text = blocks
-            .filter((b) => b.type === 'text')
-            .map((b) => (b as { text: string }).text)
-            .join('\n');
-          if (text.trim().length > 0) lastAssistantText = text;
+      const toolOptions = hasTools
+        ? buildToolBridge(req.tools!, req)
+        : { mcpServers: undefined, allowedTools: undefined, toolAliases: undefined };
+      const stream = query({
+        prompt: req.userContent,
+        options: {
+          model: resolveCliModel(req.model),
+          systemPrompt: req.systemPrompt,
+          // SDK isolation: no CLAUDE.md / settings bleed, no built-in tools.
+          settingSources: [],
+          tools: [],
+          ...(toolOptions.mcpServers ? { mcpServers: toolOptions.mcpServers } : {}),
+          ...(toolOptions.allowedTools ? { allowedTools: toolOptions.allowedTools } : {}),
+          ...(toolOptions.toolAliases ? { toolAliases: toolOptions.toolAliases } : {}),
+          permissionMode: 'bypassPermissions',
+          allowDangerouslySkipPermissions: true,
+          ...(cliEffortFor(req) ? { effort: cliEffortFor(req) } : {}),
+          ...(cliThinkingFor(req) ? { thinking: cliThinkingFor(req) } : {}),
+          maxTurns: hasTools ? budget : 2,
+          abortController: abort,
+          // Drop a (possibly stale) exported API key so the CLI's own OAuth
+          // login is what authenticates the subprocess.
+          env: { ...process.env, ANTHROPIC_API_KEY: undefined },
+        },
+      });
+
+      for await (const msg of stream) {
+        bumpDeadline();
+        if (msg.type === 'assistant') {
+          const blocks = msg.message?.content;
+          if (Array.isArray(blocks)) {
+            const text = blocks
+              .filter((b) => b.type === 'text')
+              .map((b) => (b as { text: string }).text)
+              .join('\n');
+            if (text.trim().length > 0) lastAssistantText = text;
+          }
+          continue;
         }
-        continue;
-      }
-      if (msg.type === 'result') {
-        const usage = msg.usage;
-        const mapped = {
-          inputTokens: usage.input_tokens ?? 0,
-          outputTokens: usage.output_tokens ?? 0,
-          cacheCreationInputTokens: usage.cache_creation_input_tokens || undefined,
-          cacheReadInputTokens: usage.cache_read_input_tokens || undefined,
-        };
-        if (msg.subtype === 'success') {
-          return {
-            text: msg.result || lastAssistantText,
-            stopReason: msg.stop_reason ?? 'end_turn',
-            usage: mapped,
+        if (msg.type === 'result') {
+          const usage = msg.usage;
+          const mapped = {
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            cacheCreationInputTokens: usage.cache_creation_input_tokens || undefined,
+            cacheReadInputTokens: usage.cache_read_input_tokens || undefined,
           };
+          if (msg.subtype === 'success') {
+            return {
+              text: msg.result || lastAssistantText,
+              stopReason: msg.stop_reason ?? 'end_turn',
+              usage: mapped,
+            };
+          }
+          // Non-success result (error_max_turns, error_during_execution, ...):
+          // salvage the last assistant text when there is one — the callers'
+          // JSON parsers are tolerant and a truncated-but-present payload
+          // beats a hard throw (mirrors the Anthropic client's graceful
+          // budget-exhausted finalization).
+          if (lastAssistantText) {
+            return { text: lastAssistantText, stopReason: msg.subtype, usage: mapped };
+          }
+          throw new Error(`claude-cli query ended without output: ${msg.subtype}`);
         }
-        // Non-success result (error_max_turns, error_during_execution, ...):
-        // salvage the last assistant text when there is one — the callers'
-        // JSON parsers are tolerant and a truncated-but-present payload
-        // beats a hard throw (mirrors the Anthropic client's graceful
-        // budget-exhausted finalization).
-        if (lastAssistantText) {
-          return { text: lastAssistantText, stopReason: msg.subtype, usage: mapped };
-        }
-        throw new Error(`claude-cli query ended without output: ${msg.subtype}`);
       }
-    }
-    throw new Error('claude-cli query stream ended without a result message');
+      throw new Error('claude-cli query stream ended without a result message');
     } catch (err) {
       // The abort surfaces here as whatever the SDK throws on cancellation;
       // re-label it so the cause is unmistakable in the trace instead of a
@@ -276,6 +273,7 @@ export class ClaudeCliLlmClient implements LlmClient {
       throw err;
     } finally {
       clearTimeout(timer);
+      req.signal?.removeEventListener('abort', onAbort);
     }
   }
 }

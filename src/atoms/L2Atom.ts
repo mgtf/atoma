@@ -207,7 +207,8 @@ export function buildNarrowL1Prompt(
 }
 
 export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
-  if (!/\b(?:conditional\s+styl|styling|style|class|colou?r)\b/i.test(task.description)) {
+  const phaseDescription = stripLiteralContractBlock(task.description);
+  if (!/\b(?:conditional\s+styl|styling|style|class|colou?r)\b/i.test(phaseDescription)) {
     return false;
   }
   if (!result.output || typeof result.output !== 'object' || Array.isArray(result.output)) {
@@ -239,13 +240,20 @@ export function webStylingEvidenceMissing(task: Task, result: Result): boolean {
   return !(milestoneStyling && resetStyling);
 }
 
+function expectedJsonContainer(description: string): 'object' | 'array' | null {
+  const phaseDescription = stripLiteralContractBlock(description);
+  const expectsObject = /\bJSON\s+object\b/i.test(phaseDescription);
+  const expectsArray = /\bJSON\s+array\b/i.test(phaseDescription);
+  if (expectsObject === expectsArray) return null;
+  return expectsObject ? 'object' : 'array';
+}
+
 function recordedJsonShapeMismatchFromProbes(
   task: Task,
   probes: readonly unknown[]
 ): string | null {
-  const expectsObject = /\bJSON\s+object\b/i.test(task.description);
-  const expectsArray = /\bJSON\s+array\b/i.test(task.description);
-  if (expectsObject === expectsArray) return null;
+  const expected = expectedJsonContainer(task.description);
+  if (!expected) return null;
   if (probes.length === 0) return null;
 
   let observed = 0;
@@ -261,14 +269,19 @@ function recordedJsonShapeMismatchFromProbes(
       observed++;
       const isArray = Array.isArray(parsed);
       const isObject = parsed !== null && typeof parsed === 'object' && !isArray;
-      if ((expectsObject && isObject) || (expectsArray && isArray)) matching++;
+      if (
+        (expected === 'object' && isObject) ||
+        (expected === 'array' && isArray)
+      ) {
+        matching++;
+      }
     } catch {
       // Non-JSON stdout is silent here; the normal validator decides whether
       // mixed/logged output satisfies the task.
     }
   }
   if (observed === 0 || matching > 0) return null;
-  return expectsObject
+  return expected === 'object'
     ? 'the task requires JSON object output, but every parseable successful probe returned a JSON array'
     : 'the task requires JSON array output, but every parseable successful probe returned a JSON object';
 }
@@ -292,9 +305,7 @@ async function checkRecordedJsonShape(
   const probes = resultRecordedProbes(result);
   const inlineMismatch = recordedJsonShapeMismatchFromProbes(task, probes);
   if (inlineMismatch) return inlineMismatch;
-  const expectsShape =
-    /\bJSON\s+object\b/i.test(task.description) !==
-    /\bJSON\s+array\b/i.test(task.description);
+  const expectsShape = expectedJsonContainer(task.description) !== null;
   if (!expectsShape || !ctx.tools?.has('read_file')) {
     return null;
   }
@@ -322,8 +333,9 @@ async function checkRecordedJsonShape(
 }
 
 export function requiredPassingCommands(description: string): string[] {
+  const phaseDescription = stripLiteralContractBlock(description);
   const commands = [
-    ...description.matchAll(
+    ...phaseDescription.matchAll(
       /\bnode\s+((?:[\w.-]+\/)*(?:(?:test|probe|verify|check|harness)[\w.-]*|[\w.-]+-(?:test|probe|verify|check|harness))\.(?:m?js|cjs))\b/gi
     ),
   ].map((match) => `node ${match[1]}`);
@@ -407,9 +419,10 @@ async function checkRequiredPortableHttpDocs(
   task: Task,
   ctx: RunContext
 ): Promise<string | null> {
+  const phaseDescription = stripLiteralContractBlock(task.description);
   if (
-    !/\bREADME\.md\b/i.test(task.description) ||
-    !/(?:<port>|portable|never[^.\n]{0,80}numeric port)/i.test(task.description) ||
+    !/\bREADME\.md\b/i.test(phaseDescription) ||
+    !/(?:<port>|portable|never[^.\n]{0,80}numeric port)/i.test(phaseDescription) ||
     !ctx.tools?.has('read_file')
   ) {
     return null;
@@ -2363,7 +2376,3 @@ export function buildTargetContext(
   }
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
-
-
-
-

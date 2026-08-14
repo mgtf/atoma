@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +67,24 @@ async function waitForResponse(url: string, init?: RequestInit): Promise<Respons
   return undefined;
 }
 
+async function rawRequestStatus(
+  port: number,
+  path: string,
+  headers: Record<string, string> = {}
+): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const req = request(
+      { hostname: '127.0.0.1', port, path, headers },
+      (res) => {
+        res.resume();
+        res.once('end', () => resolve(res.statusCode ?? 0));
+      }
+    );
+    req.once('error', reject);
+    req.end();
+  });
+}
+
 describe('GET /api/burnin', () => {
   it('normalizes legacy provider attribution and lifecycle defaults', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-viz-burnin-'));
@@ -129,5 +148,33 @@ describe('development UI routing', () => {
     const apiResponse = await fetch(`http://127.0.0.1:${port}/api/burnin`);
     expect(apiResponse.ok).toBe(true);
     expect(await apiResponse.json()).toMatchObject({ rows: [] });
+  }, 20_000);
+});
+
+describe('malformed encoded API paths', () => {
+  it('returns 400 for every decoded route and keeps serving afterwards', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'atoma-viz-uri-'));
+    roots.push(root);
+    const port = await freePort();
+    startViz(port, root, { ATOMA_BURNIN_CSV: join(root, 'missing.csv') });
+
+    const ready = await waitForResponse(`http://127.0.0.1:${port}/api/burnin`);
+    expect(ready?.ok).toBe(true);
+
+    // decodeURIComponent('%') throws URIError. Before the guard, the first
+    // request escaped createServer's callback and killed the viz process.
+    for (const path of ['/api/runs/%', '/api/skills/%', '/api/registry/%']) {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`);
+      expect(response.status, path).toBe(400);
+    }
+
+    // These inputs used to throw in `new URL(...)` before route decoding.
+    // Host is irrelevant to this loopback server, while an invalid network-
+    // path request target is rejected without escaping the request callback.
+    expect(await rawRequestStatus(port, '/api/burnin', { host: '%' })).toBe(200);
+    expect(await rawRequestStatus(port, '//%')).toBe(400);
+
+    const stillAlive = await fetch(`http://127.0.0.1:${port}/api/burnin`);
+    expect(stillAlive.ok).toBe(true);
   }, 20_000);
 });

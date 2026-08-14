@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   BENCHMARK_CSV_HEADER,
   analyse,
+  benchmarkOutputPaths,
+  createBenchmarkCsv,
+  ensureBenchmarkResultAvailable,
   formatAnalysis,
   mean,
   median,
   toBenchmarkCsvRow,
+  writeBenchmarkResult,
 } from '../src/cli/benchmark.js';
 import type { RunStats } from '../src/cli/burnin.js';
 
@@ -126,5 +133,66 @@ describe('held-out reporting', () => {
     const out = formatAnalysis(analyse([1], [0.5, 0.4]), { baseline: [1], atoma: [0.4] });
     expect(out).toContain('held-out');
     expect(out).toMatch(/memoris/i);
+  });
+});
+
+describe('benchmark report immutability', () => {
+  it('requires a paired fresh CSV and report for every paid round', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-benchmark-result-'));
+    try {
+      const csv = join(dir, 'round9.csv');
+      const report = join(dir, 'ROUND9.md');
+      expect(() => benchmarkOutputPaths([], dir, true)).toThrow(/requires both --out/);
+      expect(() => benchmarkOutputPaths(['--out', csv], dir, true)).toThrow(/requires both/);
+      expect(() => benchmarkOutputPaths(['--result', report], dir, true)).toThrow(
+        /requires both/
+      );
+      expect(benchmarkOutputPaths(['--out', csv, '--result', report], dir, true)).toEqual({
+        csvPath: csv,
+        resultPath: report,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reserves a fresh CSV once and never appends to existing evidence', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-benchmark-result-'));
+    try {
+      const path = join(dir, 'round9.csv');
+      createBenchmarkCsv(path);
+      expect(readFileSync(path, 'utf8')).toBe(BENCHMARK_CSV_HEADER + '\n');
+      expect(() => createBenchmarkCsv(path)).toThrow(/refusing to overwrite immutable benchmark CSV/);
+      expect(readFileSync(path, 'utf8')).toBe(BENCHMARK_CSV_HEADER + '\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses an existing report before a round can overwrite its evidence', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-benchmark-result-'));
+    try {
+      const path = join(dir, 'ROUND9.md');
+      writeFileSync(path, 'original evidence\n', 'utf8');
+      expect(() => ensureBenchmarkResultAvailable(path)).toThrow(/refusing to overwrite/);
+      expect(() => writeBenchmarkResult(path, 'replacement')).toThrow(/refusing to overwrite/);
+      expect(readFileSync(path, 'utf8')).toBe('original evidence\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes a fresh result once with the expected report envelope', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-benchmark-result-'));
+    try {
+      const path = join(dir, 'ROUND9.md');
+      expect(() => ensureBenchmarkResultAvailable(path)).not.toThrow();
+      writeBenchmarkResult(path, 'H1 SUPPORTED');
+      expect(readFileSync(path, 'utf8')).toBe(
+        '# Benchmark result\n\n```\nH1 SUPPORTED\n```\n'
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

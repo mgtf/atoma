@@ -166,4 +166,49 @@ describe('a wedged call cannot hang forever', () => {
     // here would cost twice the tokens and twice the wall time.
     expect(queryMock.mock.calls.length).toBe(1);
   });
+
+  it('detaches its listener from the run signal after the call settles', async () => {
+    queryMock.mockImplementation(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: 'PONG',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 5, output_tokens: 1 },
+        };
+      },
+    }));
+    const client = new ClaudeCliLlmClient({ callTimeoutMs: 5000 });
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+    await client.complete({ ...REQ, signal: controller.signal });
+
+    const abortRegistration = add.mock.calls.find(([type]) => type === 'abort');
+    expect(abortRegistration).toBeDefined();
+    expect(remove).toHaveBeenCalledWith('abort', abortRegistration![1]);
+  });
+
+  it('detaches the listener when the SDK throws before returning a stream', async () => {
+    queryMock.mockImplementation((opts?: unknown) => {
+      // Vitest may invoke a recorded mock implementation argument-less while
+      // tearing it down; production always supplies the query options.
+      if (opts === undefined) return { async *[Symbol.asyncIterator]() {} };
+      throw new Error('SDK setup failed');
+    });
+    const client = new ClaudeCliLlmClient({ callTimeoutMs: 5000 });
+    const controller = new AbortController();
+    const add = vi.spyOn(controller.signal, 'addEventListener');
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+
+    await expect(client.complete({ ...REQ, signal: controller.signal })).rejects.toThrow(
+      /SDK setup failed/
+    );
+
+    const abortRegistration = add.mock.calls.find(([type]) => type === 'abort');
+    expect(abortRegistration).toBeDefined();
+    expect(remove).toHaveBeenCalledWith('abort', abortRegistration![1]);
+  });
 });

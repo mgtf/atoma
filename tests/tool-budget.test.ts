@@ -270,6 +270,113 @@ describe('AnthropicLlmClient tool-iteration budget', () => {
     expect(resp.usage.inputTokens).toBe(2);
     expect(resp.usage.outputTokens).toBe(2);
   });
+
+  it('keeps sampling disabled after a deprecation 400 on a later tool-loop round', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    let toolUseId = 0;
+    const sdk = {
+      messages: {
+        create: async (params: Record<string, unknown>): Promise<unknown> => {
+          requests.push(params);
+          // Round 1 succeeds with sampling, so the fallback cannot be limited
+          // to iter=0. The provider only reveals the incompatibility on the
+          // second request in this simulated model rollout.
+          if (requests.length === 2) {
+            throw Object.assign(new Error('`temperature` is deprecated for this model'), {
+              status: 400,
+            });
+          }
+          if (requests.length === 4) {
+            return {
+              content: [{ type: 'text', text: 'finalized' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 1, output_tokens: 1 },
+            };
+          }
+          toolUseId += 1;
+          return {
+            content: [
+              { type: 'tool_use', id: `tu_${toolUseId}`, name: 'echo', input: {} },
+            ],
+            stop_reason: 'tool_use',
+            usage: { input_tokens: 1, output_tokens: 1 },
+          };
+        },
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+
+    const resp = await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: echoExecutor,
+      maxToolIterations: 2,
+    });
+
+    expect(resp.text).toBe('finalized');
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => Object.hasOwn(request, 'temperature'))).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect((requests[3]!['tool_choice'] as { type?: string }).type).toBe('none');
+  });
+
+  it('retries a sampling deprecation first reported by budget finalization', async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const sdk = {
+      messages: {
+        create: async (params: Record<string, unknown>): Promise<unknown> => {
+          requests.push(params);
+          if (requests.length === 1) {
+            return {
+              content: [{ type: 'tool_use', id: 'tu_1', name: 'echo', input: {} }],
+              stop_reason: 'tool_use',
+              usage: { input_tokens: 2, output_tokens: 3 },
+            };
+          }
+          if (requests.length === 2) {
+            throw Object.assign(new Error('temperature is deprecated for this model'), {
+              status: 400,
+            });
+          }
+          return {
+            content: [{ type: 'text', text: 'finalized without sampling' }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 5, output_tokens: 7 },
+          };
+        },
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = new AnthropicLlmClient(sdk as any);
+
+    const response = await client.complete({
+      model: 'claude-haiku-test',
+      systemPrompt: 's',
+      userContent: 'u',
+      tools: [echoTool],
+      executor: echoExecutor,
+      maxToolIterations: 1,
+    });
+
+    expect(response.text).toBe('finalized without sampling');
+    expect(response.usage.inputTokens).toBe(7);
+    expect(response.usage.outputTokens).toBe(10);
+    expect(requests.map((request) => Object.hasOwn(request, 'temperature'))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect(requests.slice(1).map((request) =>
+      (request['tool_choice'] as { type?: string }).type
+    )).toEqual(['none', 'none']);
+  });
 });
 
 describe('tool_result truncation', () => {

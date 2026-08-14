@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { basename, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
 import type { Tool, Logger } from '../core/types.js';
@@ -2353,6 +2353,74 @@ export function renderProbeCmd(command: string, argv: readonly string[]): string
   return [command, ...argv.map(quote)].join(' ').trim();
 }
 
+function interpreterExtension(command: string): RegExp | null {
+  const interpreter = basename(command).toLowerCase();
+  if (interpreter === 'node' || interpreter === 'nodejs') return /\.(?:[cm]?js)$/i;
+  if (interpreter === 'python' || /^python\d+(?:\.\d+)?$/.test(interpreter)) {
+    return /\.py$/i;
+  }
+  return null;
+}
+
+function interpreterScriptPaths(
+  command: string,
+  argv: readonly string[],
+  shellProgram: string
+): string[] {
+  const paths = new Set<string>();
+  const directExtension = interpreterExtension(command);
+  if (directExtension) {
+    // Inspect every plausible script argument. Node flags such as --require
+    // can name JavaScript before the actual entrypoint; taking only the first
+    // extension lets the entrypoint evade the server guard.
+    for (const arg of argv) {
+      if (directExtension.test(arg)) paths.add(arg);
+    }
+  }
+
+  // Shell execution is selected for env assignments, pipes and wrappers.
+  // Find interpreter clauses inside that source rather than inspecting the
+  // outer `bash -c`; this covers natural forms such as
+  // `PORT=3000 node server.js` and `bash -c "python3 app.py"`.
+  const clauseRe =
+    /(?:^|[\s;&|()])(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s+)*((?:[^\s;&|()]+\/)?(?:node(?:js)?|python\d*(?:\.\d+)?))\s+([^;&|\r\n]+)/gi;
+  for (const match of shellProgram.matchAll(clauseRe)) {
+    const interpreter = match[1] ?? '';
+    const extension = interpreterExtension(interpreter);
+    if (!extension) continue;
+    try {
+      for (const arg of splitCommandLine(match[2] ?? '')) {
+        if (extension.test(arg)) paths.add(arg);
+      }
+    } catch {
+      // The real shell remains authoritative for malformed quoting.
+    }
+  }
+  return [...paths];
+}
+
+function sourceStartsLongRunningServer(source: string, scriptPath: string): boolean {
+  if (/\.(?:[cm]?js)$/i.test(scriptPath)) {
+    // The canonical Node server contract emits the marker and calls listen.
+    // Keep both signals to avoid rejecting finite tests that briefly bind and
+    // close their own server.
+    const listenAt = source.search(/\.listen\s*\(/);
+    if (!/LISTENING_ON_PORT/.test(source) || listenAt < 0) return false;
+    // A small finite harness may bind, assert the readiness contract and
+    // immediately close. Recognise the local close, but not shutdown handlers
+    // (`process.on('SIGTERM', ...)`) used by real long-running servers.
+    const tail = source.slice(listenAt, listenAt + 800);
+    const closeAt = tail.search(/\.close\s*\(/);
+    const beforeClose = closeAt >= 0 ? tail.slice(0, closeAt) : '';
+    const closesImmediately =
+      closeAt >= 0 && !/process\.(?:once|on)\s*\(\s*['"]SIG(?:INT|TERM)['"]/i.test(beforeClose);
+    return !closesImmediately;
+  }
+  // Python servers do not share the Node readiness marker. These are the
+  // standard blocking entrypoints; merely importing Flask/uvicorn is not enough.
+  return /\.serve_forever\s*\(|\b(?:app|web)\.run\s*\(|\buvicorn\.run\s*\(/.test(source);
+}
+
 /**
  * Merge one shell entry into a probe manifest, by `cmd`.
  *
@@ -2545,10 +2613,11 @@ export function recordProbeTool(opts: BuiltinToolOptions): BuiltinTool {
       // healthy server, and persisted exit=1 plus a dead port. Detect the
       // project's explicit boot contract before spawning and route the model
       // to the lifecycle + machine-recorded HTTP path.
-      if (command === 'node' && argv.length === 1 && /\.m?js$/i.test(argv[0] ?? '')) {
+      const scriptPaths = interpreterScriptPaths(command, argv, shellProgram);
+      for (const scriptPath of scriptPaths) {
         try {
-          const source = readFileSync(opts.sandbox.resolve(argv[0]!), 'utf8');
-          if (/LISTENING_ON_PORT/.test(source) && /\.listen\s*\(/.test(source)) {
+          const source = readFileSync(opts.sandbox.resolve(scriptPath), 'utf8');
+          if (sourceStartsLongRunningServer(source, scriptPath)) {
             throw new Error(
               `record_probe: "${cmd}" starts a long-running server, not a finite probe. ` +
                 'Use start_node_server, then fetch_url with record=true for each endpoint request.'

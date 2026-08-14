@@ -163,6 +163,69 @@ describe('record_probe', () => {
     expect(() => manifest()).toThrow();
   });
 
+  it('refuses a Node server even when it carries runtime arguments', async () => {
+    writeFileSync(
+      join(root, 'server.mjs'),
+      "import http from 'node:http'; http.createServer((_q,r)=>r.end('ok')).listen(0,()=>console.log('LISTENING_ON_PORT=1'));"
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 50 });
+    await expect(t.execute({ cmd: 'node server.mjs --port 3000' })).rejects.toThrow(
+      /long-running server/
+    );
+    expect(() => manifest()).toThrow();
+  });
+
+  it('refuses a server hidden behind an env assignment and shell execution', async () => {
+    writeFileSync(
+      join(root, 'server.js'),
+      "require('http').createServer((_q,r)=>r.end('ok')).listen(process.env.PORT,()=>console.log('LISTENING_ON_PORT=' + process.env.PORT));"
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 50 });
+    await expect(t.execute({ cmd: 'PORT=3000 node server.js --port 3000' })).rejects.toThrow(
+      /long-running server/
+    );
+    expect(() => manifest()).toThrow();
+  });
+
+  it('checks the entrypoint after Node preload flags', async () => {
+    writeFileSync(join(root, 'setup.js'), "globalThis.ready = true;");
+    writeFileSync(
+      join(root, 'server.js'),
+      "require('http').createServer((_q,r)=>r.end('ok')).listen(0,()=>console.log('LISTENING_ON_PORT=1'));"
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 50 });
+    await expect(t.execute({ cmd: 'node --require setup.js server.js' })).rejects.toThrow(
+      /long-running server/
+    );
+    expect(() => manifest()).toThrow();
+  });
+
+  it('allows a finite Node harness that closes the listener it opened', async () => {
+    writeFileSync(
+      join(root, 'finite.js'),
+      [
+        "const server = require('http').createServer((_q,r)=>r.end('ok'));",
+        "server.listen(0, () => { console.log('LISTENING_ON_PORT=ephemeral'); server.close(); });",
+      ].join('\n')
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 1_000 });
+    const result = (await t.execute({ cmd: 'node finite.js' })) as { exitCode: number };
+    expect(result.exitCode).toBe(0);
+    expect(manifest().entries).toHaveLength(1);
+  });
+
+  it('refuses a Python server before trying to import its framework', async () => {
+    writeFileSync(
+      join(root, 'app.py'),
+      "from flask import Flask\napp = Flask(__name__)\napp.run(port=3000)\n"
+    );
+    const t = recordProbeTool({ sandbox, shellTimeoutMs: 50 });
+    await expect(t.execute({ cmd: 'python3 app.py --port 3000' })).rejects.toThrow(
+      /long-running server/
+    );
+    expect(() => manifest()).toThrow();
+  });
+
   it('routes HTTP evidence to fetch_url even when curl is hidden in bash', async () => {
     const t = recordProbeTool({ sandbox });
     await expect(t.execute({ cmd: 'curl http://localhost:3000/health' })).rejects.toThrow(

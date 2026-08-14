@@ -1,5 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -587,12 +597,11 @@ describe('L1Atom.skills() integration', () => {
 /**
  * A counter we cannot read is not a counter at zero.
  *
- * Every `_meta.json` write is a whole-object non-atomic `writeFileSync`, so a
- * crash mid-write leaves a torn file. `readMeta` used to answer 0/0 for that,
- * SILENTLY, and the next bump persisted `0 + 1` — months of earned trust
- * replaced by a plausible number with no error and no trace. This is the
- * concrete data-loss mode of a sidecar store, and the strongest present-day
- * argument for eventually moving skill counters into the transactional store.
+ * Every `_meta.json` write used to be a whole-object non-atomic
+ * `writeFileSync`, so a crash mid-write left a torn file. `readMeta` then
+ * answered 0/0, SILENTLY, and the next mutation persisted those fake zeroes —
+ * months of earned trust replaced by a plausible number with no error and no
+ * trace. All metadata writers now share one strict, atomic mutation path.
  */
 describe('a torn _meta.json never becomes a confident zero', () => {
   let dir: string;
@@ -606,6 +615,7 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     closeLedgerHandles();
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     closeLedgerHandles();
     if (savedLedger === undefined) delete process.env['ATOMA_LEDGER_DB'];
     else process.env['ATOMA_LEDGER_DB'] = savedLedger;
@@ -617,6 +627,25 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     reg.save('Water', { id: 'earned', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
     for (let i = 0; i < successes; i++) reg.recordSuccess('Water', 'earned');
     return { reg, metaPath: join(dir, 'Water', 'earned', '_meta.json') };
+  }
+
+  function snapshotSkillTree(root: string): string[] {
+    const snapshot: string[] = [];
+    const walk = (current: string, prefix = ''): void => {
+      for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) =>
+        a.name.localeCompare(b.name)
+      )) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) {
+          snapshot.push(`${relative}/`);
+          walk(join(current, entry.name), relative);
+        } else {
+          snapshot.push(`${relative}\0${readFileSync(join(current, entry.name), 'utf8')}`);
+        }
+      }
+    };
+    walk(root);
+    return snapshot;
   }
 
   it('refuses the bump instead of overwriting the earned counters with 1', () => {
@@ -637,6 +666,150 @@ describe('a torn _meta.json never becomes a confident zero', () => {
     reg.recordFailure('Water', 'earned');
     expect(readLedger().length).toBe(before);
   });
+
+  it('treats valid JSON with an invalid counter schema as corruption', () => {
+    const { reg, metaPath } = seedAt(9);
+    const malformed = JSON.stringify({
+      successes: '9',
+      failures: 0,
+      updatedAt: '2026-08-14T00:00:00.000Z',
+    });
+    writeFileSync(metaPath, malformed, 'utf8');
+    const before = readLedger().length;
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    reg.markMatched('Water', 'earned');
+
+    expect(readFileSync(metaPath, 'utf8')).toBe(malformed);
+    expect(readLedger().length).toBe(before);
+  });
+
+  it('replaces a valid sidecar atomically and leaves no temporary file behind', () => {
+    const { reg, metaPath } = seedAt(2);
+    const fd = openSync(metaPath, 'r');
+    try {
+      reg.markMatched('Water', 'earned');
+
+      // An fd opened before rename still addresses the old inode. A direct
+      // truncate/write would make this descriptor observe the new `matches`
+      // field and therefore fail the incident regression.
+      const replacedBytes = JSON.parse(readFileSync(fd, 'utf8')) as { matches?: number };
+      const liveBytes = JSON.parse(readFileSync(metaPath, 'utf8')) as { matches?: number };
+      expect(replacedBytes.matches).toBeUndefined();
+      expect(liveBytes.matches).toBe(1);
+      expect(
+        readdirSync(join(dir, 'Water', 'earned')).filter(
+          (name) => name.startsWith('_meta.json.') && name.endsWith('.tmp')
+        )
+      ).toEqual([]);
+    } finally {
+      closeSync(fd);
+    }
+  });
+
+  type CorruptMutationCase = {
+    name: string;
+    prepare?: (reg: SkillRegistry) => void;
+    run: (reg: SkillRegistry) => unknown;
+    throws?: RegExp;
+  };
+
+  const corruptMutationCases: CorruptMutationCase[] = [
+    {
+      name: 'success and failure bumps',
+      run: (reg) => {
+        reg.recordSuccess('Water', 'earned');
+        reg.recordFailure('Water', 'earned');
+      },
+    },
+    { name: 'match tracking', run: (reg) => reg.markMatched('Water', 'earned') },
+    { name: 'direct-failure tracking', run: (reg) => reg.markDirectFailure('Water', 'earned') },
+    {
+      name: 'promotion-refusal stamping',
+      run: (reg) => reg.markPromotionRefused('Water', 'earned', 'not script-shaped', 'g2'),
+    },
+    {
+      name: 'promotion-refusal clearing',
+      prepare: (reg) => {
+        reg.markPromotionRefused('Water', 'earned', 'not script-shaped', 'g1');
+      },
+      run: (reg) => reg.clearPromotionRefusal('Water', 'earned'),
+    },
+    {
+      name: 'direct-failure clearing',
+      prepare: (reg) => {
+        reg.markDirectFailure('Water', 'earned');
+      },
+      run: (reg) => reg.clearDirectFailures('Water', 'earned'),
+    },
+    { name: 'operator counter reset', run: (reg) => reg.resetCounters('Water', 'earned') },
+    {
+      name: 'body save',
+      run: (reg) =>
+        reg.save('Water', {
+          id: 'earned',
+          description: 'changed',
+          whenToUse: 'changed',
+          kind: 'llm',
+          body: 'changed',
+        }),
+      throws: /unreadable/,
+    },
+    {
+      name: 'merge',
+      prepare: (reg) => {
+        reg.save('Water', {
+          id: 'absorbed',
+          description: 'absorbed',
+          whenToUse: 'another case',
+          kind: 'llm',
+          body: 'absorbed body',
+        });
+      },
+      run: (reg) => reg.merge('Water', 'earned', 'absorbed'),
+    },
+    {
+      name: 'promotion',
+      run: (reg) =>
+        reg.promoteToScript({
+          l1Name: 'Water',
+          skillId: 'earned',
+          language: 'node',
+          scriptBody: 'console.log("compiled")',
+        }),
+      throws: /unreadable/,
+    },
+    {
+      name: 'demotion',
+      prepare: (reg) => {
+        reg.promoteToScript({
+          l1Name: 'Water',
+          skillId: 'earned',
+          language: 'node',
+          scriptBody: 'console.log("compiled")',
+        });
+      },
+      run: (reg) => reg.demoteToLlm('Water', 'earned'),
+    },
+  ];
+
+  it.each(corruptMutationCases)(
+    '$name leaves torn metadata, skill artefacts, and the ledger untouched',
+    ({ prepare, run, throws }) => {
+      const { reg, metaPath } = seedAt(9);
+      prepare?.(reg);
+      writeFileSync(metaPath, '{"successes": 9, "failures": 0, "updat', 'utf8');
+      const beforeTree = snapshotSkillTree(join(dir, 'Water'));
+      const beforeLedger = readLedger().length;
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      if (throws) expect(() => run(reg)).toThrow(throws);
+      else run(reg);
+
+      expect(snapshotSkillTree(join(dir, 'Water'))).toEqual(beforeTree);
+      expect(readLedger().length).toBe(beforeLedger);
+    }
+  );
 
   it('an ABSENT sidecar still initialises at zero — hand-written skills keep working', () => {
     const reg = new SkillRegistry(dir);

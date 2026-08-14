@@ -3,7 +3,8 @@
  * project's central claim.
  *
  *   npm run benchmark -- --dry-run     # print the protocol, spend nothing
- *   npm run benchmark                  # run it (sequential, ~2h)
+ *   npm run benchmark -- --out benchmark/results-round9.csv \
+ *     --result benchmark/ROUND9.md      # every round gets fresh artefacts
  *
  * THE QUESTION. Running the same task repeatedly, does atoma's cumulative
  * cost fall below a single frontier agent's, and after how many runs?
@@ -31,7 +32,7 @@
  * rather than take the timing at face value.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   looksLikeConfigFailure,
   newestTraceDuration,
@@ -76,6 +77,72 @@ export interface BenchmarkRow {
 
 export const BENCHMARK_CSV_HEADER =
   'timestamp,arm,task_id,run_index,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace';
+
+function immutableBenchmarkError(kind: 'CSV' | 'report', path: string): Error {
+  return new Error(
+    `refusing to overwrite immutable benchmark ${kind} ${path}; ` +
+      'choose fresh paths with both --out <csv> and --result <report>'
+  );
+}
+
+/** Fail before the first paid run when a round's report path is already taken. */
+export function ensureBenchmarkResultAvailable(path: string): void {
+  if (existsSync(path)) throw immutableBenchmarkError('report', path);
+}
+
+/** Reserve a new round CSV atomically, including its immutable schema header. */
+export function createBenchmarkCsv(path: string): void {
+  try {
+    writeFileSync(path, BENCHMARK_CSV_HEADER + '\n', {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw immutableBenchmarkError('CSV', path);
+    }
+    throw err;
+  }
+}
+
+/** Race-safe final write: another process cannot replace a pre-registered report. */
+export function writeBenchmarkResult(path: string, report: string): void {
+  try {
+    writeFileSync(path, `# Benchmark result\n\n\`\`\`\n${report}\n\`\`\`\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw immutableBenchmarkError('report', path);
+    }
+    throw err;
+  }
+}
+
+export function benchmarkOutputPaths(
+  argv: readonly string[],
+  outDir: string,
+  requireExplicit: boolean
+): { csvPath: string; resultPath: string } {
+  const outIdx = argv.indexOf('--out');
+  const resultIdx = argv.indexOf('--result');
+  const outValue = outIdx >= 0 ? argv[outIdx + 1] : undefined;
+  const resultValue = resultIdx >= 0 ? argv[resultIdx + 1] : undefined;
+  if ((outIdx >= 0 && (!outValue || outValue.startsWith('--'))) ||
+      (resultIdx >= 0 && (!resultValue || resultValue.startsWith('--')))) {
+    throw new Error('--out and --result each require a path');
+  }
+  if ((outIdx >= 0) !== (resultIdx >= 0) || (requireExplicit && outIdx < 0)) {
+    throw new Error(
+      'a real benchmark requires both --out <fresh.csv> and --result <fresh.md>'
+    );
+  }
+  return {
+    csvPath: outValue ? resolve(outValue) : join(outDir, 'results.csv'),
+    resultPath: resultValue ? resolve(resultValue) : join(outDir, 'RESULT.md'),
+  };
+}
 
 export function toBenchmarkCsvRow(r: BenchmarkRow): string {
   const s = r.stats;
@@ -283,8 +350,14 @@ async function main(): Promise<void> {
   const runsDir = resolve(process.env['ATOMA_RUNS_DIR'] ?? './runs');
   // A second round must not append into the first round's file: the two are
   // compared against each other, and RESULT.md cites results.csv by name.
-  const outIdx = argv.indexOf('--out');
-  const csvPath = outIdx >= 0 ? resolve(argv[outIdx + 1]!) : join(outDir, 'results.csv');
+  let csvPath: string;
+  let resultPath: string;
+  try {
+    ({ csvPath, resultPath } = benchmarkOutputPaths(argv, outDir, !dryRun));
+  } catch (err) {
+    console.error(`invalid benchmark outputs: ${(err as Error).message}`);
+    process.exit(2);
+  }
 
   const total =
     cfg.baselineRuns + cfg.atomaRuns + cfg.heldOutBaselineRuns + cfg.heldOutAtomaRuns;
@@ -299,6 +372,7 @@ async function main(): Promise<void> {
   );
   console.log(`budget/run   : ${Math.round(cfg.timeoutMs / 1000)}s`);
   console.log(`output       : ${csvPath}\n`);
+  console.log(`report       : ${resultPath}\n`);
 
   if (dryRun) {
     console.log('--dry-run: nothing executed.');
@@ -309,13 +383,23 @@ async function main(): Promise<void> {
 
   if ((process.env['ATOMA_LLM'] ?? '') === '') {
     console.error('✖ ATOMA_LLM is unset and the API key in .env is dead — every run would 401.');
-    console.error('  Launch with: ATOMA_LLM=claude-cli npm run benchmark');
+    console.error(
+      '  Launch with fresh artefacts: ATOMA_LLM=claude-cli npm run benchmark -- ' +
+        '--out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md'
+    );
     process.exit(2);
   }
 
+  // Refuse BEFORE spending on the first run. RESULT.md and ROUND<n>.md are
+  // immutable evidence for their registered CSV; silently replacing one was
+  // observed twice and required repository-history recovery both times.
+  ensureBenchmarkResultAvailable(resultPath);
+
   mkdirSync(logsDir, { recursive: true });
   mkdirSync(scratchDir, { recursive: true });
-  if (!existsSync(csvPath)) writeFileSync(csvPath, BENCHMARK_CSV_HEADER + '\n', 'utf8');
+  mkdirSync(dirname(csvPath), { recursive: true });
+  mkdirSync(dirname(resultPath), { recursive: true });
+  createBenchmarkCsv(csvPath);
 
   const rows: BenchmarkRow[] = [];
   const phases: { arm: Arm; task: BenchmarkTask; n: number; title: string }[] = [
@@ -358,8 +442,8 @@ async function main(): Promise<void> {
     atoma: costsOf(rows, 'atoma', cfg.heldOut.id),
   });
   console.log('\n' + report + '\n');
-  writeFileSync(join(outDir, 'RESULT.md'), `# Benchmark result\n\n\`\`\`\n${report}\n\`\`\`\n`, 'utf8');
-  console.log(`rows appended to ${csvPath}`);
+  writeBenchmarkResult(resultPath, report);
+  console.log(`rows written to ${csvPath}`);
 }
 
 // Only run as a CLI, never on import (tests import the pure helpers).

@@ -563,8 +563,27 @@ function getSkillById(
   };
 }
 
+/** Decode an untrusted URL path component without letting a malformed `%`
+ * escape the request handler and terminate the whole viz process. */
+function decodePathComponent(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
 const server = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+  let url: URL;
+  try {
+    // Host and the request-target are both untrusted wire input. A fixed base
+    // prevents an invalid Host header from becoming URL syntax; the catch
+    // contains invalid absolute/network-path request targets.
+    url = new URL(req.url ?? '/', 'http://localhost');
+  } catch {
+    sendJson(res, 400, { error: 'bad request URL' });
+    return;
+  }
   const pathname = url.pathname;
 
   if (pathname === '/' || pathname === '/index.html') {
@@ -593,8 +612,8 @@ const server = createServer((req, res) => {
   }
 
   if (pathname.startsWith('/api/runs/')) {
-    const id = decodeURIComponent(pathname.slice('/api/runs/'.length));
-    if (!/^[A-Za-z0-9_.:-]+$/.test(id)) {
+    const id = decodePathComponent(pathname.slice('/api/runs/'.length));
+    if (id === null || !/^[A-Za-z0-9_.:-]+$/.test(id)) {
       sendJson(res, 400, { error: 'bad id' });
       return;
     }
@@ -654,7 +673,11 @@ const server = createServer((req, res) => {
   }
 
   if (pathname.startsWith('/api/skills/')) {
-    const rest = decodeURIComponent(pathname.slice('/api/skills/'.length));
+    const rest = decodePathComponent(pathname.slice('/api/skills/'.length));
+    if (rest === null) {
+      sendJson(res, 400, { error: 'bad skill path' });
+      return;
+    }
     const parts = rest.split('/').filter(Boolean);
     // Validate every component up-front so a malformed segment can't
     // slip past the SkillRegistry path-component check (which throws
@@ -689,8 +712,8 @@ const server = createServer((req, res) => {
   }
 
   if (pathname.startsWith('/api/registry/')) {
-    const id = decodeURIComponent(pathname.slice('/api/registry/'.length));
-    if (!/^[A-Za-z0-9_.-]+$/.test(id)) {
+    const id = decodePathComponent(pathname.slice('/api/registry/'.length));
+    if (id === null || !/^[A-Za-z0-9_.-]+$/.test(id)) {
       sendJson(res, 400, { error: 'bad id' });
       return;
     }

@@ -38,6 +38,9 @@ const seed = {
   createdBy: 'test',
 };
 
+const withInheritedLiteralContract = (phase: string, contract: string): string =>
+  `${phase}\n\n== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\n${contract}`;
+
 function tool(name: string): Tool {
   return { name, description: name, inputSchema: { type: 'object', properties: {} } };
 }
@@ -161,6 +164,20 @@ describe('webStylingEvidenceMissing', () => {
       )
     ).toBe(false);
   });
+
+  it('ignores styling language inherited from another phase', () => {
+    expect(
+      webStylingEvidenceMissing(
+        {
+          description: withInheritedLiteralContract(
+            'Verify the CLI output and report the recorded values.',
+            'The browser UI uses conditional styling and changes class at the milestone.'
+          ),
+        },
+        result({ output: { files: ['cli.js'] }, summary: 'CLI verified' })
+      )
+    ).toBe(false);
+  });
 });
 
 describe('recordedJsonShapeMismatch', () => {
@@ -192,6 +209,20 @@ describe('recordedJsonShapeMismatch', () => {
       )
     ).toMatch(/requires JSON array.*returned a JSON object/);
   });
+
+  it('ignores a JSON container requirement inherited from another phase', () => {
+    expect(
+      recordedJsonShapeMismatch(
+        {
+          description: withInheritedLiteralContract(
+            'Verify word-frequency.js exists and report the file size.',
+            'The CLI must print a JSON object mapping words to counts.'
+          ),
+        },
+        probeResult('[{"word":"hello","count":2}]\n')
+      )
+    ).toBeNull();
+  });
 });
 
 describe('required passing command manifest gate', () => {
@@ -204,6 +235,17 @@ describe('required passing command manifest gate', () => {
         `${task} Start with node server.js. A file named contest.js is unrelated.`
       )
     ).toEqual(['node test-api.js']);
+  });
+
+  it('ignores a finite harness inherited from another phase', () => {
+    expect(
+      requiredPassingCommands(
+        withInheritedLiteralContract(
+          'Build server.js and record its bound URL.',
+          'A later verification phase must run node test-api.js and require it to pass.'
+        )
+      )
+    ).toEqual([]);
   });
 
   it('requires the latest exact recorded command to exit zero', () => {
@@ -348,6 +390,40 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(exec.calls).toEqual(['read_file']);
   });
 
+  it('does not load an inherited JSON shape requirement from the probe manifest', async () => {
+    const { l2, l1, ctx } = setup({
+      'word-frequency.js': 'console.log("ready")',
+      '.atoma-probes.json': JSON.stringify({
+        version: 1,
+        entries: [
+          {
+            cmd: 'node word-frequency.js input.txt',
+            exitCode: 0,
+            stdout: '[{"word":"hello","count":2}]\n',
+          },
+        ],
+      }),
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['word-frequency.js'] },
+        summary: 'word-frequency.js is present',
+        toolCallResults: [{ name: 'read_file', ok: true }],
+      }),
+      {
+        description: withInheritedLiteralContract(
+          'Inspect word-frequency.js and report its current state.',
+          'The CLI must print a JSON object mapping lowercase words to counts.'
+        ),
+      },
+      { ...ctx, requireObservedToolAction: true }
+    );
+
+    expect(verdict.approved).toBe(true);
+    expect(verdict.reasoning).toMatch(/trust fast-path/);
+  });
+
   it('rejects a required harness whose manifest entry still fails', async () => {
     const { l2, l1, ctx, exec } = setup({
       'test-api.js': 'process.exit(1)',
@@ -396,6 +472,31 @@ describe('trust fast-path × ground-truth probe', () => {
     expect(verdict.reasoning).toMatch(/README\.md contains a numeric/);
     expect(ctx.llm.calls).toHaveLength(0);
     expect(exec.calls).toEqual(['read_file']);
+  });
+
+  it('does not impose inherited portable-doc requirements on another phase', async () => {
+    const { l2, l1, ctx } = setup({
+      'server.js': 'console.log("LISTENING_ON_PORT=3000")',
+      'README.md': 'Start server at http://localhost:3000/',
+    });
+    const verdict = await l2.validateResult(
+      l1,
+      result({
+        output: { files: ['server.js'] },
+        summary: 'server.js built',
+        toolCallResults: [{ name: 'write_file', ok: true }],
+      }),
+      {
+        description: withInheritedLiteralContract(
+          'Build server.js and emit its readiness marker.',
+          'A later docs phase must keep README.md portable with <port>, never a numeric port.'
+        ),
+      },
+      { ...ctx, requireObservedToolAction: true }
+    );
+
+    expect(verdict.approved).toBe(true);
+    expect(verdict.reasoning).toMatch(/trust fast-path/);
   });
 
   it('preserves the fast-path (ZERO LLM calls) when the probe finds no contradiction', async () => {

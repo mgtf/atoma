@@ -167,6 +167,17 @@ describe('subtaskMutatesFiles — contingent repair is not an output requirement
     ).toBe(false);
   });
 
+  it('keeps inherited literal contracts out of the dispatch-time mutation classifier', () => {
+    const description =
+      'Re-run the recorded invocations and report their current outputs.\n\n' +
+      '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\n' +
+      'A separate phase must update README.md and create package.json.';
+
+    expect(subtaskMutatesFiles(description)).toBe(false);
+    expect(subtaskNamedFilePaths(description)).toEqual([]);
+    expect(subtaskMutationTargetPaths(description)).toEqual([]);
+  });
+
   it('still recognises unconditional repair and independent update clauses', () => {
     expect(subtaskMutatesFiles('fix docs/security.md then re-run the check')).toBe(true);
     expect(subtaskMutatesFiles('document the API in docs/security.md')).toBe(true);
@@ -202,6 +213,17 @@ describe('scriptCanServeSubtask — the match-time decision', () => {
       scriptCanServeSubtask(
         REAL_VERIFIER,
         'Re-execute every invocation documented in the README and report which produced output identical to the recorded run'
+      )
+    ).toBe(true);
+  });
+
+  it('OFFERS it when only an inherited literal-contract block is mutating', () => {
+    expect(
+      scriptCanServeSubtask(
+        REAL_VERIFIER,
+        'Re-execute every recorded invocation and report the result.\n\n' +
+          '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\n' +
+          'A separate phase must update README.md.'
       )
     ).toBe(true);
   });

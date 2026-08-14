@@ -47,7 +47,7 @@ export class AnthropicLlmClient implements LlmClient {
     ];
 
     const tools = toAnthropicTools(req.tools ?? [], req.cacheTools !== false);
-    const samplingOk = modelSupportsSamplingParams(req.model);
+    let samplingEnabled = modelSupportsSamplingParams(req.model);
     // `output_config: {effort}` — sent only when the caller asked for it
     // AND the model accepts it (Haiku 4.5 rejects the param with a 400).
     const effort =
@@ -117,6 +117,24 @@ export class AnthropicLlmClient implements LlmClient {
         sdkOptions
       );
 
+    const sendWithSamplingFallback = async (
+      opts: { disableTools?: boolean } = {}
+    ): Promise<Anthropic.Messages.Message> => {
+      try {
+        return await sendRequest({ ...opts, includeSampling: samplingEnabled });
+      } catch (err) {
+        if (samplingEnabled && isSamplingParamDeprecatedError(err)) {
+          samplingEnabled = false;
+          try {
+            return await sendRequest({ ...opts, includeSampling: false });
+          } catch (retryErr) {
+            return raise(retryErr);
+          }
+        }
+        return raise(err);
+      }
+    };
+
     const accumulate = (response: Anthropic.Messages.Message): void => {
       agg.inputTokens += response.usage.input_tokens;
       agg.outputTokens += response.usage.output_tokens;
@@ -135,27 +153,11 @@ export class AnthropicLlmClient implements LlmClient {
       if (req.signal?.aborted) {
         raise(req.signal.reason ?? new Error('aborted'));
       }
-      let response: Anthropic.Messages.Message;
-      try {
-        response = await sendRequest({ includeSampling: samplingOk });
-      } catch (err) {
-        // Defensive fallback: if the model rejects temperature/top_p (e.g. a
-        // newer reasoning model not yet listed in modelSupportsSamplingParams),
-        // retry once without sampling params instead of failing the whole run.
-        if (iter === 0 && samplingOk && isSamplingParamDeprecatedError(err)) {
-          response = await sendRequest({ includeSampling: false });
-        } else {
-          // KEEP THE `throw`. `only-throw-error` flags it because `raise`
-          // returns `never` rather than an Error — but removing it breaks the
-          // BUILD: TypeScript's never-returning-function control-flow analysis
-          // does not apply to `raise` here, so a bare call leaves `response`
-          // "used before being assigned" on three lines below. The lint rule
-          // and the type checker disagree, and the type checker is the one
-          // that has to be satisfied.
-          // eslint-disable-next-line @typescript-eslint/only-throw-error
-          throw raise(err);
-        }
-      }
+      // Defensive fallback: if a newly served model rejects temperature/top_p,
+      // retry once without them. The first rejection can arrive on any loop
+      // round or on the tools-disabled finalization request; once observed,
+      // later requests in this completion stay sampling-free.
+      const response = await sendWithSamplingFallback();
 
       accumulate(response);
 
@@ -313,10 +315,7 @@ export class AnthropicLlmClient implements LlmClient {
         if (req.signal?.aborted) {
           raise(req.signal.reason ?? new Error('aborted'));
         }
-        const finalResp = await sendRequest({
-          includeSampling: samplingOk,
-          disableTools: true,
-        });
+        const finalResp = await sendWithSamplingFallback({ disableTools: true });
         accumulate(finalResp);
         finalResponse = finalResp;
         break;

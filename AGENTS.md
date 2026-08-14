@@ -103,6 +103,7 @@ npm run curriculum
 npm run burnin
 npm run friction
 npm run benchmark -- --dry-run
+npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md
 ```
 
 ### Release contract

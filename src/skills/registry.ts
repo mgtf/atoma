@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { appendLedger } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
@@ -62,6 +72,27 @@ export class SkillRegistry {
 
   private skillDir(l1Name: string, skillId: string): string {
     return join(this.namespaceDir(l1Name), sanitise(skillId));
+  }
+
+  /**
+   * The single read-modify-write path for skill metadata.
+   *
+   * A missing sidecar is a legitimate hand-authored skill and starts at 0/0.
+   * An unreadable sidecar is data we do not understand: return null and leave
+   * its bytes untouched so an operator can recover the earned counters. A
+   * callback returning undefined is a checked read/no-op, used to fail closed
+   * before a multi-file lifecycle mutation touches SKILL.md or a fallback.
+   */
+  private mutateMeta(
+    metaPath: string,
+    mutate: (current: SkillMeta) => SkillMeta | undefined
+  ): SkillMeta | null {
+    const read = readMetaChecked(metaPath);
+    if (read.corrupt) return null;
+    const next = mutate(read.meta);
+    if (next === undefined) return read.meta;
+    writeMetaAtomic(metaPath, next);
+    return next;
   }
 
   /**
@@ -154,6 +185,13 @@ export class SkillRegistry {
     }
     const dir = this.skillDir(l1Name, skill.id);
     mkdirSync(dir, { recursive: true });
+    const metaPath = join(dir, '_meta.json');
+    // A body rewrite changes the meaning of several metadata fields. Check
+    // the sidecar BEFORE touching SKILL.md so a torn counter record cannot be
+    // silently paired with a new body or normalised to 0/0.
+    if (this.mutateMeta(metaPath, () => undefined) === null) {
+      throw new Error(`save: refusing to rewrite ${skill.id} while ${metaPath} is unreadable`);
+    }
     const md = renderFrontmatter(
       {
         id: skill.id,
@@ -166,11 +204,6 @@ export class SkillRegistry {
       skill.body
     );
     writeFileSync(join(dir, 'SKILL.md'), md, 'utf8');
-    appendLedger({
-      kind: 'skill-save',
-      entity: `${l1Name}/${skill.id}`,
-      detail: { kind: skill.kind, ...(provenance ? { mechanism: provenance.mechanism } : {}) },
-    });
     // Preserve existing counters if a meta file is already there.
     // INTENTIONALLY DROP `promotionRefusedAt`: a save() means the body
     // changed (or the kind flipped). Sonnet's prior refusal was a
@@ -178,23 +211,32 @@ export class SkillRegistry {
     // compile attempt next time the trust gate is crossed. Without
     // this clear, an `improveSkillBody`-revised recipe could never
     // earn promotion even if the rewrite makes it script-shaped.
-    const metaPath = join(dir, '_meta.json');
-    const existing = existsSync(metaPath) ? readMeta(metaPath) : { successes: 0, failures: 0, updatedAt: nowIso() };
-    const nextProvenance: SkillProvenance | undefined = provenance
-      ? { ...provenance, at: provenance.at ?? nowIso() }
-      : existing.provenance;
-    const meta: SkillMeta = {
-      successes: existing.successes,
-      failures: existing.failures,
-      updatedAt: nowIso(),
-      ...(nextProvenance ? { provenance: nextProvenance } : {}),
-      // Match history survives a body rewrite for the same reason the
-      // counters do: the stats gap (matches vs driven) compares against
-      // counters that save() preserves.
-      ...(existing.matches ? { matches: existing.matches } : {}),
-      ...(existing.lastMatchedAt ? { lastMatchedAt: existing.lastMatchedAt } : {}),
-    };
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+    const meta = this.mutateMeta(metaPath, (existing) => {
+      const nextProvenance: SkillProvenance | undefined = provenance
+        ? { ...provenance, at: provenance.at ?? nowIso() }
+        : existing.provenance;
+      return {
+        successes: existing.successes,
+        failures: existing.failures,
+        updatedAt: nowIso(),
+        ...(nextProvenance ? { provenance: nextProvenance } : {}),
+        // Match history survives a body rewrite for the same reason the
+        // counters do: the stats gap (matches vs driven) compares against
+        // counters that save() preserves.
+        ...(existing.matches ? { matches: existing.matches } : {}),
+        ...(existing.lastMatchedAt ? { lastMatchedAt: existing.lastMatchedAt } : {}),
+      };
+    });
+    // Every in-process writer goes through mutateMeta, so only an external
+    // edit in the tiny interval after the preflight can reach this branch.
+    if (meta === null) {
+      throw new Error(`save: ${metaPath} became unreadable during the rewrite`);
+    }
+    appendLedger({
+      kind: 'skill-save',
+      entity: `${l1Name}/${skill.id}`,
+      detail: { kind: skill.kind, ...(provenance ? { mechanism: provenance.mechanism } : {}) },
+    });
     return {
       id: skill.id,
       description: skill.description,
@@ -231,18 +273,16 @@ export class SkillRegistry {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
     const metaPath = join(dir, '_meta.json');
-    const cur = existsSync(metaPath)
-      ? readMeta(metaPath)
-      : { successes: 0, failures: 0, updatedAt: nowIso() };
     const trimmed = reason?.trim().slice(0, REFUSAL_REASON_MAX_CHARS);
-    const next: SkillMeta = {
+    const at = nowIso();
+    const next = this.mutateMeta(metaPath, (cur) => ({
       ...cur,
-      promotionRefusedAt: nowIso(),
+      promotionRefusedAt: at,
       ...(trimmed ? { promotionRefusedReason: trimmed } : {}),
       ...(generation ? { promotionRefusedGeneration: generation } : {}),
-      updatedAt: nowIso(),
-    };
-    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+      updatedAt: at,
+    }));
+    if (next === null) return null;
     appendLedger({
       kind: 'promotion-refused',
       entity: `${l1Name}/${skillId}`,
@@ -260,15 +300,12 @@ export class SkillRegistry {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return 0;
     const metaPath = join(dir, '_meta.json');
-    const cur = existsSync(metaPath)
-      ? readMeta(metaPath)
-      : { successes: 0, failures: 0, updatedAt: nowIso() };
-    const next: SkillMeta = {
+    const next = this.mutateMeta(metaPath, (cur) => ({
       ...cur,
       directFailures: (cur.directFailures ?? 0) + 1,
       updatedAt: nowIso(),
-    };
-    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+    }));
+    if (next === null) return 0;
     appendLedger({
       kind: 'direct-failure',
       entity: `${l1Name}/${skillId}`,
@@ -287,15 +324,16 @@ export class SkillRegistry {
     const dir = this.skillDir(l1Name, skillId);
     const metaPath = join(dir, '_meta.json');
     if (!existsSync(join(dir, 'SKILL.md')) || !existsSync(metaPath)) return;
-    const cur = readMeta(metaPath);
-    if (!cur.promotionRefusedAt) return;
-    const {
-      promotionRefusedAt: _a,
-      promotionRefusedReason: _r,
-      promotionRefusedGeneration: _g,
-      ...rest
-    } = cur;
-    writeFileSync(metaPath, JSON.stringify({ ...rest, updatedAt: nowIso() }, null, 2), 'utf8');
+    this.mutateMeta(metaPath, (cur) => {
+      if (!cur.promotionRefusedAt) return undefined;
+      const {
+        promotionRefusedAt: _a,
+        promotionRefusedReason: _r,
+        promotionRefusedGeneration: _g,
+        ...rest
+      } = cur;
+      return { ...rest, updatedAt: nowIso() };
+    });
   }
 
   /**
@@ -310,16 +348,13 @@ export class SkillRegistry {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return;
     const metaPath = join(dir, '_meta.json');
-    const cur = existsSync(metaPath)
-      ? readMeta(metaPath)
-      : { successes: 0, failures: 0, updatedAt: nowIso() };
-    const next: SkillMeta = {
+    const at = nowIso();
+    this.mutateMeta(metaPath, (cur) => ({
       ...cur,
       matches: (cur.matches ?? 0) + 1,
-      lastMatchedAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
+      lastMatchedAt: at,
+      updatedAt: at,
+    }));
   }
 
   /**
@@ -332,8 +367,8 @@ export class SkillRegistry {
   drop(l1Name: string, skillId: string): boolean {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return false;
-    appendLedger({ kind: 'skill-drop', entity: `${l1Name}/${skillId}` });
     rmSync(dir, { recursive: true, force: true });
+    appendLedger({ kind: 'skill-drop', entity: `${l1Name}/${skillId}` });
     return true;
   }
 
@@ -364,24 +399,25 @@ export class SkillRegistry {
     const mergedWhenToUse = keep.frontmatter.whenToUse.includes(absorb.frontmatter.whenToUse)
       ? keep.frontmatter.whenToUse
       : `${keep.frontmatter.whenToUse}; also: ${absorb.frontmatter.whenToUse}`;
+    // Validate the keeper metadata before changing either skill. Update its
+    // timestamp only after the body write succeeds, so a filesystem error does
+    // not publish a metadata mutation for a merge that never happened.
+    const metaPath = join(keepDir, '_meta.json');
+    if (this.mutateMeta(metaPath, () => undefined) === null) return null;
     writeFileSync(
       keepFile,
       renderFrontmatter({ ...keep.frontmatter, whenToUse: mergedWhenToUse }, keep.body),
       'utf8'
     );
-    // Touch updatedAt only — everything else in the keeper's meta
-    // (counters, stamps, provenance, match history) is preserved verbatim.
-    const metaPath = join(keepDir, '_meta.json');
-    const cur = existsSync(metaPath)
-      ? readMeta(metaPath)
-      : { successes: 0, failures: 0, updatedAt: nowIso() };
-    writeFileSync(metaPath, JSON.stringify({ ...cur, updatedAt: nowIso() }, null, 2), 'utf8');
+    if (this.mutateMeta(metaPath, (cur) => ({ ...cur, updatedAt: nowIso() })) === null) {
+      throw new Error(`merge: ${metaPath} became unreadable during the merge`);
+    }
+    rmSync(absorbDir, { recursive: true, force: true });
     appendLedger({
       kind: 'skill-merge',
       entity: `${l1Name}/${keepId}`,
       detail: { absorbed: absorbId },
     });
-    rmSync(absorbDir, { recursive: true, force: true });
     const merged = this.loadFor(l1Name).find((s) => s.id === keepId);
     return merged ?? null;
   }
@@ -395,14 +431,11 @@ export class SkillRegistry {
     const dir = this.skillDir(l1Name, skillId);
     const metaPath = join(dir, '_meta.json');
     if (!existsSync(join(dir, 'SKILL.md')) || !existsSync(metaPath)) return;
-    const cur = readMeta(metaPath);
-    if (!cur.directFailures) return;
-    const { directFailures: _dropped, ...rest } = cur;
-    writeFileSync(
-      metaPath,
-      JSON.stringify({ ...rest, updatedAt: nowIso() }, null, 2),
-      'utf8'
-    );
+    this.mutateMeta(metaPath, (cur) => {
+      if (!cur.directFailures) return undefined;
+      const { directFailures: _dropped, ...rest } = cur;
+      return { ...rest, updatedAt: nowIso() };
+    });
   }
 
   /**
@@ -450,6 +483,12 @@ export class SkillRegistry {
         `promoteToScript: skill ${args.skillId} is already kind:"${frontmatter.kind}"; refusing to overwrite`
       );
     }
+    const metaPath = join(dir, '_meta.json');
+    if (this.mutateMeta(metaPath, () => undefined) === null) {
+      throw new Error(
+        `promoteToScript: refusing to promote ${args.skillId} while ${metaPath} is unreadable`
+      );
+    }
     // CRASH-ORDERED writes (audit finding): the old sequence wrote
     // SKILL.md kind:script FIRST (via save, counters preserved at 5/0)
     // and zeroed the counters after — a crash in that window left a
@@ -471,7 +510,10 @@ export class SkillRegistry {
         at: nowIso(),
       },
     };
-    writeFileSync(join(dir, '_meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+    const writtenMeta = this.mutateMeta(metaPath, () => meta);
+    if (writtenMeta === null) {
+      throw new Error(`promoteToScript: ${metaPath} became unreadable during promotion`);
+    }
     const md = renderFrontmatter(
       {
         id: frontmatter.id,
@@ -495,11 +537,13 @@ export class SkillRegistry {
       kind: 'script',
       language: args.language,
       body: args.scriptBody,
-      successes: meta.successes,
-      failures: meta.failures,
-      updatedAt: meta.updatedAt,
-      ...(meta.compiledGeneration ? { compiledGeneration: meta.compiledGeneration } : {}),
-      ...(meta.provenance ? { provenance: meta.provenance } : {}),
+      successes: writtenMeta.successes,
+      failures: writtenMeta.failures,
+      updatedAt: writtenMeta.updatedAt,
+      ...(writtenMeta.compiledGeneration
+        ? { compiledGeneration: writtenMeta.compiledGeneration }
+        : {}),
+      ...(writtenMeta.provenance ? { provenance: writtenMeta.provenance } : {}),
     };
   }
 
@@ -528,6 +572,8 @@ export class SkillRegistry {
     if (!existsSync(fallbackPath)) return null;
     const fallbackBody = readFileSync(fallbackPath, 'utf8').trim();
     if (!fallbackBody) return null;
+    const metaPath = join(dir, '_meta.json');
+    if (this.mutateMeta(metaPath, () => undefined) === null) return null;
     // Preserve the script being retired BEFORE save() overwrites it. Never
     // fatal: a post-mortem aid must not be able to block the safety action it
     // documents.
@@ -536,14 +582,15 @@ export class SkillRegistry {
     } catch {
       /* best effort — demotion proceeds regardless */
     }
-    appendLedger({ kind: 'demote', entity: `${l1Name}/${skillId}` });
-    return this.save(l1Name, {
+    const demoted = this.save(l1Name, {
       id: frontmatter.id,
       description: frontmatter.description,
       whenToUse: frontmatter.whenToUse,
       kind: 'llm',
       body: fallbackBody,
     });
+    appendLedger({ kind: 'demote', entity: `${l1Name}/${skillId}` });
+    return demoted;
   }
 
   /**
@@ -562,21 +609,24 @@ export class SkillRegistry {
   resetCounters(l1Name: string, skillId: string): SkillMeta | null {
     const dir = this.skillDir(l1Name, skillId);
     if (!existsSync(join(dir, 'SKILL.md'))) return null;
-    appendLedger({ kind: 'counters-reset', entity: `${l1Name}/${skillId}`, detail: { reason: 'reset' } });
     // A reset zeroes COUNTERS and drops the refusal stamp — it does not
     // rewrite history about the body itself: compiledGeneration (which
     // compiler produced the current script) and provenance (who wrote the
     // body) describe the artefact, not its trust, and survive the reset.
     const metaPath = join(dir, '_meta.json');
-    const cur = existsSync(metaPath) ? readMeta(metaPath) : null;
-    const meta: SkillMeta = {
+    const meta = this.mutateMeta(metaPath, (cur) => ({
       successes: 0,
       failures: 0,
       updatedAt: nowIso(),
-      ...(cur?.compiledGeneration ? { compiledGeneration: cur.compiledGeneration } : {}),
-      ...(cur?.provenance ? { provenance: cur.provenance } : {}),
-    };
-    writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+      ...(cur.compiledGeneration ? { compiledGeneration: cur.compiledGeneration } : {}),
+      ...(cur.provenance ? { provenance: cur.provenance } : {}),
+    }));
+    if (meta === null) return null;
+    appendLedger({
+      kind: 'counters-reset',
+      entity: `${l1Name}/${skillId}`,
+      detail: { reason: 'reset' },
+    });
     return meta;
   }
 
@@ -650,18 +700,7 @@ export class SkillRegistry {
     // see persistent counters. Without this, hand-authored skills
     // never accumulate trust — observed when seeding a kind:script
     // skill via cat heredoc and watching its counter stay empty.
-    let cur: SkillMeta = { successes: 0, failures: 0, updatedAt: nowIso() };
-    if (existsSync(metaPath)) {
-      const read = readMetaChecked(metaPath);
-      // A counter we cannot read is not a counter at zero. Writing `0 + 1`
-      // over a torn sidecar is worse than not writing at all: it looks
-      // healthy forever. Refusing costs one uncounted run and keeps the file
-      // recoverable — and `bump` returning false means no ledger event
-      // either, so the projection does not claim a bump that never landed.
-      if (read.corrupt) return false;
-      cur = read.meta;
-    }
-    const next: SkillMeta = {
+    const next = this.mutateMeta(metaPath, (cur) => ({
       successes: cur.successes + (kind === 'success' ? 1 : 0),
       failures: cur.failures + (kind === 'failure' ? 1 : 0),
       updatedAt: nowIso(),
@@ -685,9 +724,11 @@ export class SkillRegistry {
       ...(cur.directFailures ? { directFailures: cur.directFailures } : {}),
       ...(cur.matches ? { matches: cur.matches } : {}),
       ...(cur.lastMatchedAt ? { lastMatchedAt: cur.lastMatchedAt } : {}),
-    };
-    writeFileSync(metaPath, JSON.stringify(next, null, 2), 'utf8');
-    return true;
+    }));
+    // A counter we cannot read is not a counter at zero. Refusing costs one
+    // uncounted run, preserves the torn bytes, and prevents a false ledger
+    // event because recordSuccess/recordFailure append only after true.
+    return next !== null;
   }
 }
 
@@ -717,10 +758,33 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+/**
+ * Replace a metadata sidecar atomically.
+ *
+ * The temporary file lives beside the target so rename cannot cross a
+ * filesystem boundary. `wx` prevents an astronomically unlikely UUID
+ * collision from truncating someone else's temp file; the finally cleanup is
+ * harmless after a successful rename and removes debris after any exception.
+ */
+function writeMetaAtomic(path: string, meta: SkillMeta): void {
+  const tempPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(meta, null, 2), {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+    renameSync(tempPath, path);
+  } finally {
+    rmSync(tempPath, { force: true });
+  }
+}
+
 function readMeta(path: string): SkillMeta {
   if (!existsSync(path)) return { successes: 0, failures: 0, updatedAt: nowIso() };
   try {
-    const obj = JSON.parse(readFileSync(path, 'utf8')) as Partial<SkillMeta>;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    assertSkillMetaShape(parsed);
+    const obj = parsed;
     const promotionRefusedAt =
       typeof obj.promotionRefusedAt === 'string' && obj.promotionRefusedAt.length > 0
         ? obj.promotionRefusedAt
@@ -738,9 +802,9 @@ function readMeta(path: string): SkillMeta {
         ? Math.floor(obj.directFailures)
         : undefined;
     return {
-      successes: typeof obj.successes === 'number' ? obj.successes : 0,
-      failures: typeof obj.failures === 'number' ? obj.failures : 0,
-      updatedAt: typeof obj.updatedAt === 'string' ? obj.updatedAt : nowIso(),
+      successes: obj.successes,
+      failures: obj.failures,
+      updatedAt: obj.updatedAt,
       ...(promotionRefusedAt ? { promotionRefusedAt } : {}),
       ...(promotionRefusedReason ? { promotionRefusedReason } : {}),
       ...(promotionRefusedAt && typeof obj.promotionRefusedGeneration === 'string' && obj.promotionRefusedGeneration.length > 0
@@ -764,17 +828,13 @@ function readMeta(path: string): SkillMeta {
         : {}),
     };
   } catch (err) {
-    // LOUD, and the caller is told. This used to return a silent 0/0, which
-    // is the concrete data-loss mode of a sidecar store: every write is a
-    // whole-object non-atomic `writeFileSync`, so a crash mid-write leaves a
-    // torn file, the next read calls it 0/0, and the next bump confidently
-    // persists `0 + 1` — months of earned trust replaced by a plausible
-    // number, no error, no trace. `readMetaChecked` lets the counter path
-    // refuse instead of overwriting; recovery is then a hand edit, or
-    // `npm run ledger -- check`, which can still project what the counters
-    // should be.
+    // LOUD, and mutation callers are told. This used to return a silent 0/0
+    // to direct whole-object writes: the next mutation then persisted fake
+    // zeroes over a torn sidecar. Every mutation now enters through
+    // `mutateMeta`, which refuses the write; recovery is a hand edit, or
+    // `npm run ledger -- check`, which can still project the counters.
     corruptMetaPaths.add(path);
-     
+
     console.warn(
       `[skills] unreadable ${path} (${(err as Error).message}) — counters left ALONE rather than reset. Repair it by hand or check \`npm run ledger -- tail\`.`
     );
@@ -782,10 +842,67 @@ function readMeta(path: string): SkillMeta {
   }
 }
 
+function assertSkillMetaShape(value: unknown): asserts value is SkillMeta {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('metadata root must be an object');
+  }
+  const obj = value as Record<string, unknown>;
+  for (const field of ['successes', 'failures'] as const) {
+    const count = obj[field];
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+      throw new Error(`metadata ${field} must be a non-negative safe integer`);
+    }
+  }
+  if (typeof obj['updatedAt'] !== 'string' || obj['updatedAt'].length === 0) {
+    throw new Error('metadata updatedAt must be a non-empty string');
+  }
+  for (const field of ['directFailures', 'matches'] as const) {
+    const count = obj[field];
+    if (
+      count !== undefined &&
+      (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
+    ) {
+      throw new Error(`metadata ${field} must be a non-negative safe integer when present`);
+    }
+  }
+  for (const field of [
+    'promotionRefusedAt',
+    'promotionRefusedReason',
+    'promotionRefusedGeneration',
+    'compiledGeneration',
+    'lastMatchedAt',
+  ] as const) {
+    const text = obj[field];
+    if (text !== undefined && (typeof text !== 'string' || text.length === 0)) {
+      throw new Error(`metadata ${field} must be a non-empty string when present`);
+    }
+  }
+  const provenance = obj['provenance'];
+  if (provenance !== undefined) {
+    if (!provenance || typeof provenance !== 'object' || Array.isArray(provenance)) {
+      throw new Error('metadata provenance must be an object when present');
+    }
+    const record = provenance as Record<string, unknown>;
+    if (
+      !['distilled', 'revised', 'compiled', 'hand-authored'].includes(
+        String(record['mechanism'])
+      )
+    ) {
+      throw new Error('metadata provenance.mechanism is invalid');
+    }
+    for (const field of ['model', 'at'] as const) {
+      const text = record[field];
+      if (text !== undefined && (typeof text !== 'string' || text.length === 0)) {
+        throw new Error(`metadata provenance.${field} must be a non-empty string when present`);
+      }
+    }
+  }
+}
+
 /**
- * Paths whose last read failed to parse. A set rather than a return flag so
- * the ten existing `readMeta` call sites keep their shape; the counter path
- * consults it through `readMetaChecked`.
+ * Paths whose last read failed to parse. `loadFor` keeps the tolerant
+ * read-and-warn contract; the single mutation path consults this state through
+ * `readMetaChecked` and fails closed.
  */
 const corruptMetaPaths = new Set<string>();
 

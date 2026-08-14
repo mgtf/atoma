@@ -962,6 +962,32 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(skills2.loadFor('Water')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
+  it('keeps inherited literal-contract mutations out of the direct-dispatch gate', async () => {
+    const { executor } = fsExecutor({ 'config.json': '{}' });
+    const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);
+    const base = makeCtx();
+    const events: SkillEventInfo[] = [];
+    const ctx = {
+      ...base,
+      tools: executor,
+      recordSkill: (event: SkillEventInfo) => events.push(event),
+    };
+    queuePrefilters(ctx);
+
+    await neuron.handleDirect(
+      {
+        description:
+          'Verify config.json against the template and report the result.\n\n' +
+          '== LITERAL CONTRACTS FROM TOP-LEVEL GOAL ==\n' +
+          'A separate phase must update README.md.',
+      },
+      ctx
+    );
+
+    expect(ctx.llm.calls).toHaveLength(2);
+    expect(events.some((event) => event.op === 'direct')).toBe(true);
+  });
+
   it('does not require a file mentioned only in a read-only negation', async () => {
     const { executor } = fsExecutor({ 'config.json': '{}' });
     const neuron = L2Atom.fromType(reg2.getByName('Tracheid')!, reg2, [], skills2);

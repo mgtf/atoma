@@ -116,12 +116,15 @@ Stated in advance so they cannot be discovered later as excuses.
 
 ```bash
 ATOMA_LLM=claude-cli npm run benchmark -- --dry-run   # protocol, spends nothing
-ATOMA_LLM=claude-cli npm run benchmark                # ~2h, machine to itself
+ATOMA_LLM=claude-cli npm run benchmark -- \
+  --out benchmark/results-round<N>.csv \
+  --result benchmark/ROUND<N>.md                      # ~2h, machine to itself
 ```
 
-Artefacts: `benchmark/results.csv` (one row per run), `benchmark/logs/`
-(full stdout per run), `benchmark/RESULT.md` (computed metrics), and a full
-JSON trace per run under `runs/`.
+Both output paths must be new: the driver reserves the CSV before the first paid
+run and creates the report without replacement after the last. Artefacts are the
+chosen CSV (one row per run), `benchmark/logs/` (full stdout per run), the chosen
+Markdown report (computed metrics), and a full JSON trace per run under `runs/`.
 
 The machine must be otherwise idle — this repository has measured twice that
 a loaded machine distorts run durations badly enough to invalidate rows.

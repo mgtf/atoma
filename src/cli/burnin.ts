@@ -487,6 +487,14 @@ export function spawnRun(opts: {
         detached: true,
         env: {
           ...process.env,
+          // Batch children must not inherit experiment-only runner modes from
+          // the operator's shell. A stale `export ATOMA_BASELINE=1` used to
+          // turn an entire burn-in into the control arm without any CSV field
+          // revealing it; ATOMA_SEED similarly made supposedly clean tasks
+          // inherit an unrelated fixture. Explicit caller overrides still win
+          // below (benchmarks pass their intent as CLI flags).
+          ATOMA_BASELINE: undefined,
+          ATOMA_SEED: undefined,
           ATOMA_BUILD_TIMEOUT_MS: String(timeoutMs),
           ...(opts.extraEnv ?? {}),
         },

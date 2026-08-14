@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -10,6 +17,7 @@ import {
   looksLikeProviderLimitFailure,
   burninProviderInfo,
   ensureBurninCsvHeader,
+  spawnRun,
   CSV_HEADER,
 } from '../src/cli/burnin.js';
 
@@ -254,5 +262,49 @@ describe('burnin ensureBurninCsvHeader — the CSV belongs to ONE writer', () =>
       expect(readFileSync(out, 'utf8')).toBe(content);
       expect(existsSync(out)).toBe(true);
     });
+  });
+});
+
+describe('spawnRun — experiment env isolation', () => {
+  it('does not leak shell-level baseline or seed settings into the child', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-burnin-env-'));
+    const fakeNpm = join(dir, 'npm');
+    const previous = {
+      path: process.env['PATH'],
+      baseline: process.env['ATOMA_BASELINE'],
+      seed: process.env['ATOMA_SEED'],
+    };
+    writeFileSync(
+      fakeNpm,
+      [
+        '#!/bin/sh',
+        'printf \'BASELINE=%s\\n\' "${ATOMA_BASELINE-unset}"',
+        'printf \'SEED=%s\\n\' "${ATOMA_SEED-unset}"',
+      ].join('\n') + '\n',
+      'utf8'
+    );
+    chmodSync(fakeNpm, 0o755);
+
+    try {
+      process.env['PATH'] = `${dir}:${previous.path ?? ''}`;
+      process.env['ATOMA_BASELINE'] = '1';
+      process.env['ATOMA_SEED'] = '/tmp/stale-benchmark-seed';
+      const log = await spawnRun({
+        goal: 'inspect inherited environment',
+        timeoutMs: 1_000,
+        logPath: join(dir, 'child.log'),
+        cleanWorkspace: false,
+      });
+      expect(log).toContain('BASELINE=unset');
+      expect(log).toContain('SEED=unset');
+    } finally {
+      if (previous.path === undefined) delete process.env['PATH'];
+      else process.env['PATH'] = previous.path;
+      if (previous.baseline === undefined) delete process.env['ATOMA_BASELINE'];
+      else process.env['ATOMA_BASELINE'] = previous.baseline;
+      if (previous.seed === undefined) delete process.env['ATOMA_SEED'];
+      else process.env['ATOMA_SEED'] = previous.seed;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

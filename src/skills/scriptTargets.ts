@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { extractResultFilePaths } from '../atoms/groundTruth.js';
+import { stripLiteralContractBlock } from '../atoms/prompts.js';
 
 /**
  * WHICH FILE does a compiled script write, and does the subtask need THAT one?
@@ -125,7 +126,8 @@ export function subtaskMutatesFiles(description: string): boolean {
   // Both word orders are recognised. The bounded single-clause patterns are
   // deliberately narrow: "fix README.md then re-run" remains mutating, as
   // does any independent update clause elsewhere in the description.
-  const unconditional = description
+  const phaseDescription = stripLiteralContractBlock(description);
+  const unconditional = phaseDescription
     .replace(TRAILING_CONDITIONAL_REPAIR_RE, '')
     .replace(LEADING_CONDITIONAL_REPAIR_RE, '')
     .replace(NEGATED_MUTATION_RE, '')
@@ -240,17 +242,18 @@ export function scriptWriteTargets(body: string): ScriptWriteTargets {
  * which under-extracts, and under-extracting is the safe direction here.
  */
 export function subtaskNamedFilePaths(description: string): string[] {
-  const lower = description.toLowerCase();
+  const phaseDescription = stripLiteralContractBlock(description);
+  const lower = phaseDescription.toLowerCase();
   const negatedBefore =
     /(?:\b(?:no|without)\s+(?:(?:a|an|the|any)\s+)?|\b(?:do|does|must|should)\s+not\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bnever\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?|\bdon't\s+(?:(?:create|write|add|include|produce|ship|generate|touch|modify|rewrite)\s+)?)$/i;
   return [
     ...new Set(
-      extractResultFilePaths({ summary: description })
+      extractResultFilePaths({ summary: phaseDescription })
         .filter((named) => {
           const needle = named.toLowerCase();
           let at = lower.indexOf(needle);
           while (at >= 0) {
-            const before = description.slice(Math.max(0, at - 64), at);
+            const before = phaseDescription.slice(Math.max(0, at - 64), at);
             if (!negatedBefore.test(before)) return true;
             at = lower.indexOf(needle, at + needle.length);
           }
@@ -288,7 +291,8 @@ export function subtaskMutationTargets(description: string): string[] {
 
 /** Full workspace-relative output paths for the runtime before/after gate. */
 export function subtaskMutationTargetPaths(description: string): string[] {
-  const lower = description.toLowerCase();
+  const phaseDescription = stripLiteralContractBlock(description);
+  const lower = phaseDescription.toLowerCase();
   const targets: string[] = [];
   const inputMarker =
     /(?:\b(?:from|using|read|inspect|parse|source)\s+|\bbased\s+on\s+)(?:the\s+)?(?:(?:current|existing|source)\s+)?(?:[\w.-]+\/)*$/i;
@@ -298,12 +302,12 @@ export function subtaskMutationTargetPaths(description: string): string[] {
     'i'
   );
 
-  for (const named of subtaskNamedFilePaths(description)) {
+  for (const named of subtaskNamedFilePaths(phaseDescription)) {
     const needle = named.toLowerCase();
     let at = lower.indexOf(needle);
     while (at >= 0) {
-      const before = description.slice(Math.max(0, at - 96), at);
-      const after = description.slice(at + named.length, at + named.length + 64);
+      const before = phaseDescription.slice(Math.max(0, at - 96), at);
+      const after = phaseDescription.slice(at + named.length, at + named.length + 64);
       if (!inputMarker.test(before) && (verbBefore.test(before) || verbAfter.test(after))) {
         targets.push(named);
         break;
@@ -325,11 +329,11 @@ export function subtaskMutationTargetPaths(description: string): string[] {
  * 14/14, ANY 12/14, and neither touches the 2 legitimate dispatches.
  */
 export function scriptCanServeSubtask(body: string, description: string): boolean {
-  if (!subtaskMutatesFiles(description)) return true; // nothing to protect
-  const targets = subtaskMutationTargets(description);
+  const phaseDescription = stripLiteralContractBlock(description);
+  if (!subtaskMutatesFiles(phaseDescription)) return true; // nothing to protect
+  const targets = subtaskMutationTargets(phaseDescription);
   if (targets.length === 0) return true; // no target proven
   const { paths, opaque } = scriptWriteTargets(body);
   if (opaque) return true; // not provable
   return targets.every((n) => paths.has(n));
 }
-

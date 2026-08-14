@@ -34,6 +34,14 @@ après-midi du 13/08).
 > à la demande. `npm run docs:check`, intégré au check et à l'archive de release,
 > borne la taille, vérifie l'import Claude unique et refuse les liens cassés.
 
+> **Statut 2026-08-14 (batch runtime 2)** : les correctifs 1.2, 1.5, 1.7, 1.8,
+> 1.10, 1.11 et 1.12 sont appliqués avec leurs régressions. Le signal 1.13
+> `decodeURIComponent` est également fermé : les trois routes paramétrées du
+> serveur viz répondent 400 aux URI malformées et le processus reste disponible.
+> Le registre de skills route désormais toutes les mutations de `_meta.json` par
+> une lecture stricte et un remplacement atomique ; le benchmark exige un nouveau
+> chemin `--result` par round au lieu de réécrire une preuve existante.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production
