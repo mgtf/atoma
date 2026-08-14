@@ -28,6 +28,12 @@ après-midi du 13/08).
 > et les DEUX writers refusent désormais un en-tête étranger. Suite complète :
 > 1433 passed / 8 skipped, typecheck + lint verts.
 
+> **Statut 2026-08-14 (soir)** : le refactoring 3.7 est appliqué. Les règles
+> actives tiennent désormais dans un `AGENTS.md` de ~500 lignes ; les 5 452
+> lignes antérieures sont préservées sous `docs/incidents/` et chargées seulement
+> à la demande. `npm run docs:check`, intégré au check et à l'archive de release,
+> borne la taille, vérifie l'import Claude unique et refuse les liens cassés.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production
@@ -265,7 +271,7 @@ commits (35 %) maintiennent le record plutôt que le produit.
    `parseRunLog` — retire la classe `/escalat/gi`, la fragilité stdout-as-API et le
    risque d'abort de batch sur texte modèle. La leçon record_probe (« le markdown
    modèle n'est pas une interface parsable ») appliquée à la propre sortie du runner.
-7. **Scinder AGENTS.md** : invariants + commandes + pointeurs (~1 500 lignes) /
+7. **✓ Scinder AGENTS.md** : invariants + commandes + pointeurs (~1 500 lignes) /
    `docs/incidents/` append-only, avec test de parité map↔sections. Récupère ~60k
    tokens par session.
 8. **Geler un des deux clients viz**, décomposer `gpu-renderer.ts` (shaders / widgets

@@ -12,7 +12,7 @@ import { eventTokens } from '../skills/events.js';
  * friction classes to date, zero were learnable technique — all six were
  * harness/environment defects fixed structurally, and a sensor live during
  * the ESM-leak window would have distilled a permanent workaround skill for
- * a bug that died the next day (see AGENTS.md, "Considered and rejected").
+ * a bug that died the next day (see the rejected-design record linked from AGENTS.md).
  *
  * What survives is the DIAGNOSTIC stage: this module reads the traces the
  * viz already persists (every tool invocation, untruncated — the runtime

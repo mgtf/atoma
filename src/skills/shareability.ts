@@ -18,8 +18,8 @@ import { undeclaredToolMentions } from '../atoms/verdict.js';
  * llm kind because it is an instruction set injected into another tenant's
  * system prompt. A clean verdict here means "a reviewer's time will not be
  * wasted", never "approved". The same rule the repo already applies to
- * `scanScriptBody` (AGENTS.md R5: never cite a hygiene filter as a security
- * control) applies to this file.
+ * `scanScriptBody` (R5 in the engineering record linked from AGENTS.md: never
+ * cite a hygiene filter as a security control) applies to this file.
  */
 
 export type ShareVerdict =

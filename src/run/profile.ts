@@ -21,7 +21,7 @@ import type { Task, Tool } from '../core/types.js';
  * Resisting the urge to add knobs "while we are here" is the point. There is
  * ONE profile today; an interface designed against a single implementation
  * earns its keep only by being a faithful cut of measured differences, never
- * by anticipating a second one. See AGENTS.md, "Considered and rejected".
+ * by anticipating a second one. See the rejected-design record linked from AGENTS.md.
  */
 /**
  * What a human needs in order to USE a family: how to phrase a goal for it.

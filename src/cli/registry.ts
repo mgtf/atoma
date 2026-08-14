@@ -127,8 +127,8 @@ const tableHeaders = [
 
 /**
  * The prefilter decision cache — now a table in this store, so the `rm` that
- * a sibling JSON file offered needs a verb, and the hit rate that AGENTS.md's
- * PLAN TEMPLATING entry names as a revisit gate ("exceeds 25% across two
+ * a sibling JSON file offered needs a verb, and the hit rate that the archived
+ * PLAN TEMPLATING entry linked from AGENTS.md names as a revisit gate ("exceeds 25% across two
  * consecutive batches") becomes a query instead of a hand-parsed blob.
  */
 function cmdCache(clear: boolean): void {

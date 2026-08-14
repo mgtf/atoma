@@ -28,7 +28,7 @@ jobs:
           set -euo pipefail
           root="atoma-${GITHUB_REF_NAME}"
           mkdir -p "release/${root}"
-          cp -R dist docker scripts "release/${root}/"
+          cp -R dist docker scripts docs "release/${root}/"
           cp package.json package-lock.json README.md AGENTS.md CLAUDE.md CHANGELOG.md "release/${root}/"
           tar -C release -czf "release/${root}.tar.gz" "${root}"
           (cd release && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
@@ -41,6 +41,7 @@ jobs:
           mkdir -p /tmp/atoma-release
           tar -C /tmp/atoma-release -xzf "release/${root}.tar.gz"
           cd "/tmp/atoma-release/${root}"
+          npm run docs:check
           npm ci --omit=dev
           node scripts/release-smoke.mjs
           npm run doctor -- --help

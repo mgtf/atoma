@@ -18,8 +18,8 @@ import {
  * probes, read claimed files back from the workspace, health-check the
  * probe manifest, and report whether the evidence CONTRADICTS the claims.
  * Zero LLM calls anywhere in this module — that is its entire point.
- * Behaviour-preserving move; the history lives in AGENTS.md (#F9, #9,
- * the manifest health check, the two-probe mutual exclusion).
+ * Behaviour-preserving move; the history lives in the engineering record
+ * linked from AGENTS.md (#F9, #9, manifest health, and probe selection).
  */
 
 /**
