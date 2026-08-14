@@ -199,6 +199,7 @@ export function ThreeBackdrop({
   return (
     <div className="three-backdrop" aria-hidden="true">
       <Canvas
+        events={false}
         camera={{ position: [0, 0, 15], fov: 42 }}
         dpr={[1, 1.5]}
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}

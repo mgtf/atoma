@@ -57,6 +57,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const timelineLayout = readFileSync('src/viz/client/timeline-layout.ts', 'utf8');
   const timelineRails = readFileSync('src/viz/client-gl/RunsTimelineRails.tsx', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
+  const gpuStyles = readFileSync('src/viz/client-gl/styles.css', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
   const buildLauncher = readFileSync('scripts/viz-build.mjs', 'utf8');
   const vite = readFileSync('vite.config.ts', 'utf8');
@@ -172,6 +173,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
     expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
+    expect(threeBackdrop).toMatch(/events=\{false\}/);
+    expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
+    expect(gpuStyles).toMatch(/pointer-events: none !important;/);
+    expect(gpuRenderer).toMatch(/listMask\.eventMode = 'none'/);
+    expect(gpuRenderer).toMatch(/listLayer\.hitArea = new Rectangle\(leftX \+ 1, listY/);
+    expect(gpuRenderer).toMatch(/mask\.eventMode = 'none'/);
     expect(timelineRails).toMatch(/visibleItems\.map|visibleBranches\.map/);
     expect(timelineRails).not.toMatch(/run\.events\.map/);
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);

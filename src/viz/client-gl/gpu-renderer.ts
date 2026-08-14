@@ -702,6 +702,14 @@ export class GpuRenderer {
     this.detailScrollMax = 0;
     this.scrollMax.runs = 0;
 
+    const hostWidth = this.host?.clientWidth ?? this.app.screen.width;
+    const hostHeight = this.host?.clientHeight ?? this.app.screen.height;
+    if (
+      Math.abs(this.app.screen.width - hostWidth) > 1 ||
+      Math.abs(this.app.screen.height - hostHeight) > 1
+    ) {
+      this.app.renderer.resize(hostWidth, hostHeight);
+    }
     const width = this.app.screen.width;
     const height = this.app.screen.height;
     this.drawAmbientGrid(width, height);
@@ -785,6 +793,7 @@ export class GpuRenderer {
     graphics.roundRect(x, y, Math.max(0, width), Math.max(0, height), radius);
     graphics.fill({ color: fill, alpha: 0.84 });
     if (border !== fill) graphics.stroke({ color: border, width: 1, alpha: 0.9 });
+    graphics.eventMode = 'none';
     parent.addChild(graphics);
     return graphics;
   }
@@ -807,6 +816,7 @@ export class GpuRenderer {
     });
     label.position.set(x, y);
     label.alpha = options.alpha ?? 1;
+    label.eventMode = 'none';
     parent.addChild(label);
     this.metrics.visibleLabels.push(value);
     return label;
@@ -2375,8 +2385,12 @@ export class GpuRenderer {
     // Keep vertical clipping strict (no overlap with filters) but use the full
     // pane width so right-side glow/scale is not guillotined.
     listMask.rect(leftX + 1, listY, leftWidth - 2, listHeight).fill(0xffffff);
+    listMask.eventMode = 'none';
     lowerControlsLayer.addChild(listMask);
     const listLayer = new Container();
+    listLayer.eventMode = 'static';
+    listLayer.interactiveChildren = true;
+    listLayer.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
     listLayer.mask = listMask;
     lowerControlsLayer.addChild(listLayer);
     const timeline = buildTimelineLayout(run.events, snapshot.state.runFilters);
@@ -2833,6 +2847,7 @@ export class GpuRenderer {
   private detailMask(x: number, y: number, width: number, height: number) {
     const mask = new Graphics();
     mask.rect(x, y, width, height).fill(0xffffff);
+    mask.eventMode = 'none';
     this.root.addChild(mask);
     return mask;
   }
