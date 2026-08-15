@@ -34,6 +34,7 @@
     "viz:build": "node scripts/viz-build.mjs gpu",
     "viz:build:mui": "node scripts/viz-build.mjs mui",
     "viz:smoke": "node scripts/viz-gpu-smoke.mjs",
+    "viz:smoke:gc": "node scripts/viz-gpu-gc-smoke.mjs",
     "viz:serve": "node dist/viz/server.js",
     "viz:demo": "tsx src/viz/demo.ts",
     "ledger": "tsx src/cli/ledger.ts",

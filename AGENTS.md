@@ -425,6 +425,19 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   exact count and both WebGPU and WebGL fallback.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
   read once per frame; do not rebuild the scene for pointer motion.
+- A Pixi filter that OUTLIVES one `render()` must never sit `enabled = false`
+  across a GC window without `buffer.autoGarbageCollect = false` on its uniform
+  buffer. Pixi skips disabled filters, so the buffer stops being touched, ages
+  out and is destroyed, while `BindGroupSystem._hash` keeps serving a cached
+  bind group that points at it — every later `queue.submit` is then a
+  validation error, permanently. Today only the pointer-light filter has that
+  lifetime; per-card filters are rebuilt each render and are safe.
+- GPU lifetime defects are invisible to `tests/` (mocked, no device) and to the
+  WebGL fallback (no bind groups). They are covered by `npm run viz:smoke:gc`,
+  which needs real Chrome plus a real WebGPU adapter and therefore stays OUT of
+  `release:check`; it skips loudly rather than reporting "cannot observe" as
+  "verified", and fails if its preconditions never arm. `?atomaDiag=1` exposes
+  the read-only renderer handle those smokes need; it is inert otherwise.
 - `isRunLive` / `isIndexEntryLive` are the only live predicates. The abandoned
   threshold exceeds plausible LLM/tool activity (currently 12 minutes).
 - Runs rails remain aligned to viewport projection. Never apply scene parallax

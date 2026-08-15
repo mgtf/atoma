@@ -153,6 +153,7 @@ export class GpuRenderer {
     uStrength: number;
   } | null = null;
   private pointerLightStrength = 0;
+  private pointerLightBufferPinned = false;
   previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -238,6 +239,29 @@ export class GpuRenderer {
     const filter = this.pointerLightFilter;
     const uniforms = this.pointerLightUniforms;
     if (!filter || !uniforms) return;
+    if (!this.pointerLightBufferPinned) {
+      // PIN THIS BUFFER AGAINST PIXI'S GC. Pixi SKIPS a disabled filter, so
+      // nothing calls getGPUBuffer() on its uniform buffer and `_gcLastUsed`
+      // stops advancing (BindGroup._touch refreshes the UniformGroup, not the
+      // Buffer under it). After gcMaxUnusedTime (60s idle) GCSystem unloads it
+      // and calls GPUBuffer.destroy() — but BindGroupSystem._hash is keyed on
+      // the UniformGroup's unchanged `_resourceId` and nothing sets
+      // BindGroup._dirty, so the cached GPUBindGroup keeps pointing at the
+      // dead buffer. Re-enabling the filter then makes EVERY queue.submit a
+      // validation error, forever ("[Buffer] used in submit while destroyed").
+      // Reproduced on Metal WebGPU: leave the window with the pointer away,
+      // come back, ~120 errors/s until reload. This filter lives for the whole
+      // session, so its buffer must survive idle periods.
+      // Written here, not at install time: Pixi creates `uniformGroup.buffer`
+      // lazily on the first sync.
+      const group = filter.resources['pointerLight'] as unknown as {
+        buffer?: { autoGarbageCollect: boolean };
+      };
+      if (group.buffer) {
+        group.buffer.autoGarbageCollect = false;
+        this.pointerLightBufferPinned = true;
+      }
+    }
     const pointer = readPointerLight();
     const target = pointer.active ? 1 : 0;
     // Reduced motion: the light still follows the pointer (user-driven), but
@@ -343,6 +367,22 @@ export class GpuRenderer {
     this.app.canvas.setAttribute('aria-hidden', 'true');
     host.appendChild(this.app.canvas);
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
+    // Diagnostics handle, INERT unless explicitly asked for with ?atomaDiag=1.
+    // GPU lifetime defects (Pixi's GC unloading a buffer whose bind group is
+    // still cached) are invisible to mocked tests and to the WebGL fallback,
+    // so the only honest regression test drives the real renderer — and it
+    // needs to reach the GC to force a collection instead of passing because
+    // nothing ever happened. Read-only by convention; nothing in the product
+    // reads it back.
+    if (
+      typeof location !== 'undefined' &&
+      new URLSearchParams(location.search).has('atomaDiag')
+    ) {
+      (window as unknown as { __ATOMA_GPU__?: unknown }).__ATOMA_GPU__ = {
+        app: this.app,
+        pointerLightFilter: () => this.pointerLightFilter,
+      };
+    }
     this.initialized = true;
   }
 
@@ -355,6 +395,8 @@ export class GpuRenderer {
     this.pointerLightFilter = null;
     this.pointerLightUniforms = null;
     this.pointerLightStrength = 0;
+    // A re-initialised renderer builds a NEW filter with a new buffer.
+    this.pointerLightBufferPinned = false;
     for (const filter of this.frameFilters) filter.destroy();
     this.frameFilters.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
