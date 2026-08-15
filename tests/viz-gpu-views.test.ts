@@ -924,7 +924,10 @@ describe('drawRuns behavior', () => {
     expect(listLayer).toBeDefined();
     expect(listLayer!.mask).toBeInstanceOf(Graphics);
     expect((listLayer!.mask as Graphics).eventMode).toBe('none');
-    // Scrolling to the reported max reaches the final event.
+    // Newest first: the most recent event is on screen unscrolled, and the
+    // OLDEST is what scrolling to the reported max reaches.
+    expect(ctx.eventCards.some((card) => card.id === 'bulk-199')).toBe(true);
+    expect(ctx.eventCards.some((card) => card.id === 'bulk-0')).toBe(false);
     const scrolled = createRecordingCtx();
     drawRuns(
       scrolled,
@@ -943,7 +946,7 @@ describe('drawRuns behavior', () => {
       WIDTH,
       HEIGHT
     );
-    expect(scrolled.eventCards.some((card) => card.id === 'bulk-199')).toBe(true);
+    expect(scrolled.eventCards.some((card) => card.id === 'bulk-0')).toBe(true);
   });
 
   it('keeps the summary card and event copy on the GPU right pane', () => {
@@ -1024,5 +1027,97 @@ describe('drawRuns behavior', () => {
       drawRuns(ctx, makeSnapshot({}, { run: makeRun(eventsWithRoles()) }), WIDTH, HEIGHT);
       expect(ctx.eventCards.length).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * What the run's own story looks like — the four defects a real cancelled
+ * run exposed on 2026-08-15: no status anywhere, chronological order when
+ * the reader wants the end first, a branch rail attached to nothing, and no
+ * explicit start/end steps.
+ */
+describe('drawRuns — run status and timeline bookends', () => {
+  const WIDTH = 1400;
+  const HEIGHT = 900;
+  const textsOf = (ctx: ReturnType<typeof createRecordingCtx>) =>
+    ctx.texts.map((entry) => entry.value);
+
+  it('states what happened to the run, cancellation included', () => {
+    const events = [makeLlmEvent('a'), makeLlmEvent('b')];
+    const cancelled = createRecordingCtx();
+    drawRuns(
+      cancelled,
+      makeSnapshot(
+        {},
+        {
+          run: makeRun(events, {
+            cancelled: true,
+            error: 'run cancelled by user (signal received)',
+          }),
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    const cancelledTexts = textsOf(cancelled);
+    expect(cancelledTexts).toContain(t('runs.flag.cancelled'));
+    // Never as a failure: a deliberate kill is not a fault.
+    expect(cancelledTexts).not.toContain(t('runs.flag.failed'));
+
+    const delivered = createRecordingCtx();
+    drawRuns(delivered, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    expect(textsOf(delivered)).toContain(t('runs.flag.delivered'));
+
+    const failed = createRecordingCtx();
+    drawRuns(
+      failed,
+      makeSnapshot({}, { run: makeRun(events, { error: 'boom' }) }),
+      WIDTH,
+      HEIGHT
+    );
+    expect(textsOf(failed)).toContain(t('runs.flag.failed'));
+  });
+
+  it('frames the events with a start and an end step, end first', () => {
+    const events = [makeLlmEvent('a'), makeLlmEvent('b')];
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({}, { run: makeRun(events, { cancelled: true }) }),
+      WIDTH,
+      HEIGHT
+    );
+    const ended = ctx.texts.find((entry) => entry.value.startsWith(t('timeline.runEnded')));
+    const started = ctx.texts.find((entry) => entry.value === t('timeline.runStarted'));
+    expect(ended).toBeDefined();
+    expect(started).toBeDefined();
+    // The end bookend carries the verdict, and newest-first puts it on top.
+    expect(ended!.value).toContain(t('runs.flag.cancelled'));
+    expect(ended!.y).toBeLessThan(started!.y);
+  });
+
+  it('says "not finished" instead of inventing an end for a live run', () => {
+    const ctx = createRecordingCtx();
+    const live = makeRun([makeLlmEvent('a', { ts: Date.now() })]);
+    delete (live as { endedAt?: string }).endedAt;
+    drawRuns(ctx, makeSnapshot({}, { run: live }), WIDTH, HEIGHT);
+    const texts = textsOf(ctx);
+    expect(texts).toContain(t('runs.flag.live'));
+    expect(texts.some((value) => value.startsWith(t('timeline.runUnfinished')))).toBe(true);
+    expect(texts.some((value) => value.startsWith(t('timeline.runEnded')))).toBe(false);
+  });
+
+  it('publishes the bookend row offset so overlays project on the same grid', () => {
+    const events = [makeLlmEvent('a'), makeLlmEvent('b'), makeLlmEvent('c')];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    const viewport = ctx.metrics.timelineViewport!;
+    expect(viewport.rowOffset).toBe(1);
+    // Two extra rows of content: the reader can always scroll to both ends.
+    expect(viewport.totalHeight).toBe(
+      (events.length + 2) * viewport.rowHeight +
+        viewport.contentTopPadding +
+        viewport.contentBottomPadding
+    );
   });
 });

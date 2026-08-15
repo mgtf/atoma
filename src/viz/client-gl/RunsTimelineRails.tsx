@@ -94,6 +94,9 @@ export function RunsTimelineRails({
     row * timelineViewport.rowHeight -
     timelineViewport.scrollY +
     (timelineViewport.rowHeight - 10) / 2;
+  // The view frames its events with bookend rows; overlays project onto the
+  // same grid or they drift by exactly one row.
+  const displayRow = (row: number) => row + timelineViewport.rowOffset;
   const railPx = (lane: number) =>
     timelineViewport.railBaseX + lane * timelineViewport.laneSpacing;
   const minRow = Math.max(
@@ -106,7 +109,7 @@ export function RunsTimelineRails({
     ) - 1
   );
   const maxRow = Math.min(
-    layout.items.length - 1,
+    layout.items.length + timelineViewport.rowOffset,
     Math.ceil(
       Math.max(
         0,
@@ -117,10 +120,14 @@ export function RunsTimelineRails({
     ) + 1
   );
   const visibleItems = layout.items.filter(
-    (item) => item.row >= minRow && item.row <= maxRow
+    (item) => displayRow(item.row) >= minRow && displayRow(item.row) <= maxRow
   );
   const visibleBranches = layout.branches
-    .filter((branch) => branch.lastRow >= minRow && branch.firstRow <= maxRow)
+    .filter(
+      (branch) =>
+        displayRow(branch.subtreeLastRow) >= minRow &&
+        displayRow(branch.subtreeFirstRow) <= maxRow
+    )
     .slice(0, 8);
   const shownBranchIds = new Set(visibleBranches.map((branch) => branch.id));
   const topPx = timelineViewport.top;
@@ -145,11 +152,11 @@ export function RunsTimelineRails({
             key={`rail-${branch.id}`}
             from={[
               worldX(railPx(branch.lane)),
-              worldY(clampY(rowCenterPx(branch.firstRow))),
+              worldY(clampY(rowCenterPx(displayRow(branch.subtreeFirstRow)))),
             ]}
             to={[
               worldX(railPx(branch.lane)),
-              worldY(clampY(rowCenterPx(branch.lastRow))),
+              worldY(clampY(rowCenterPx(displayRow(branch.subtreeLastRow)))),
             ]}
             z={-0.34 + branch.lane * 0.055}
             color={color}
@@ -162,8 +169,8 @@ export function RunsTimelineRails({
         .filter(
           (connector) =>
             shownBranchIds.has(connector.branchId) &&
-            connector.row >= minRow &&
-            connector.row <= maxRow
+            displayRow(connector.row) >= minRow &&
+            displayRow(connector.row) <= maxRow
         )
         .map((connector) => {
           const branch = layout.branches.find(
@@ -172,7 +179,7 @@ export function RunsTimelineRails({
           const color = branch
             ? BRANCH_COLORS[branch.colorIndex % BRANCH_COLORS.length]!
             : '#6ea8ff';
-          const y = worldY(clampY(rowCenterPx(connector.row)));
+          const y = worldY(clampY(rowCenterPx(displayRow(connector.row))));
           return (
             <Segment
               key={`${connector.kind}-${connector.branchId}-${connector.row}`}
@@ -195,7 +202,7 @@ export function RunsTimelineRails({
         const cardTop =
           timelineViewport.top +
           timelineViewport.contentTopPadding +
-          item.row * timelineViewport.rowHeight -
+          displayRow(item.row) * timelineViewport.rowHeight -
           timelineViewport.scrollY;
         const tierDepth =
           item.tier === 3 ? 0.18 : item.tier === 2 ? 0.1 : item.tier === 1 ? 0.03 : -0.03;

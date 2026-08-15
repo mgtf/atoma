@@ -21,6 +21,17 @@ export interface TimelineBranch {
   readonly path: readonly number[];
   readonly parallel: boolean;
   readonly colorIndex: number;
+  /**
+   * Display row range of this branch INCLUDING its descendants.
+   *
+   * A parent phase is still alive while its children run, so its rail has to
+   * reach them: drawing it over `firstRow..lastRow` alone left a child rail
+   * visually detached whenever the parent's own events stopped before the
+   * fork (observed on a real run, 2026-08-15). Forks and joins always land
+   * on a live rail when the parent is drawn over its subtree span.
+   */
+  readonly subtreeFirstRow: number;
+  readonly subtreeLastRow: number;
 }
 
 export interface TimelineItem {
@@ -48,7 +59,13 @@ export interface TimelineLayout {
   readonly maxLane: number;
   readonly rowHeight: number;
   readonly totalHeight: number;
-  readonly chronological: true;
+  /**
+   * True when row 0 is the OLDEST event. The GPU client asks for
+   * `newestFirst` (what happened last is what you came to read); the layout
+   * itself stays order-agnostic so rails, cards and connectors all derive
+   * from one row space whichever way it runs.
+   */
+  readonly chronological: boolean;
 }
 
 interface MutableBranch {
@@ -236,7 +253,7 @@ export function timelineBranchTitle(
 export function buildTimelineLayout(
   events: readonly VizEvent[],
   filters: EventFilters,
-  options: { rowHeight?: number } = {}
+  options: { rowHeight?: number; newestFirst?: boolean } = {}
 ): TimelineLayout {
   const lifecycle = new Map<
     string,
@@ -369,7 +386,13 @@ export function buildTimelineLayout(
   const branchById = new Map(branches.map((branch) => [branch.id, branch]));
   const firstRows = new Map<string, number>();
   const lastRows = new Map<string, number>();
-  const items = visible.map((event, row): TimelineItem => {
+  // Row assignment is the ONLY place order enters. `ordered` is what the
+  // screen reads top-down; `firstRows`/`lastRows` therefore mean top and
+  // bottom of a branch's rail segment, not earliest/latest in time — the
+  // causal ends are recovered below for the fork/join connectors.
+  const newestFirst = options.newestFirst === true;
+  const ordered = newestFirst ? [...visible].reverse() : visible;
+  const items = ordered.map((event, row): TimelineItem => {
     const branch = event.branchId ? branchById.get(event.branchId) : undefined;
     if (branch) {
       if (!firstRows.has(branch.id)) firstRows.set(branch.id, row);
@@ -393,6 +416,28 @@ export function buildTimelineLayout(
     branchEnd:
       item.branchId !== undefined && lastRows.get(item.branchId) === item.row,
   }));
+  // Subtree extents: a branch's rail must reach every descendant so forks
+  // and joins land on a live rail (see TimelineBranch.subtreeFirstRow).
+  const childrenOf = new Map<string, string[]>();
+  for (const branch of branches) {
+    if (!branch.parentId) continue;
+    const siblings = childrenOf.get(branch.parentId) ?? [];
+    siblings.push(branch.id);
+    childrenOf.set(branch.parentId, siblings);
+  }
+  const subtreeExtent = (id: string, seen = new Set<string>()): { first: number; last: number } => {
+    let first = firstRows.get(id) ?? 0;
+    let last = lastRows.get(id) ?? 0;
+    if (seen.has(id)) return { first, last };
+    seen.add(id);
+    for (const childId of childrenOf.get(id) ?? []) {
+      const child = subtreeExtent(childId, seen);
+      first = Math.min(first, child.first);
+      last = Math.max(last, child.last);
+    }
+    return { first, last };
+  };
+
   const publicBranches: TimelineBranch[] = branches.map((branch) => ({
     id: branch.id,
     lane: branch.lane,
@@ -422,6 +467,10 @@ export function buildTimelineLayout(
     })(),
     parallel: branch.parallel,
     colorIndex: branchColorIndex(branch.id),
+    ...(() => {
+      const extent = subtreeExtent(branch.id);
+      return { subtreeFirstRow: extent.first, subtreeLastRow: extent.last };
+    })(),
   }));
   const connectors: TimelineConnector[] = singleBranch
     ? []
@@ -429,17 +478,22 @@ export function buildTimelineLayout(
         const parentLane = branch.parentId
           ? branchById.get(branch.parentId)?.lane ?? 0
           : 0;
+        // Causal ends, not display ends: reversed order puts a branch's
+        // first event at its BOTTOM row, and a fork drawn at the top row
+        // would point at the wrong moment.
+        const forkRow = newestFirst ? branch.lastRow : branch.firstRow;
+        const joinRow = newestFirst ? branch.firstRow : branch.lastRow;
         return [
           {
             kind: 'fork' as const,
-            row: branch.firstRow,
+            row: forkRow,
             fromLane: parentLane,
             toLane: branch.lane,
             branchId: branch.id,
           },
           {
             kind: 'join' as const,
-            row: branch.lastRow,
+            row: joinRow,
             fromLane: branch.lane,
             toLane: parentLane,
             branchId: branch.id,
@@ -455,6 +509,6 @@ export function buildTimelineLayout(
     maxLane: publicBranches.reduce((max, branch) => Math.max(max, branch.lane), 0),
     rowHeight,
     totalHeight: finalizedItems.length * rowHeight,
-    chronological: true,
+    chronological: !newestFirst,
   };
 }

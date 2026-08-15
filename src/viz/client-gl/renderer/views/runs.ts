@@ -5,6 +5,7 @@ import {
   fmtCost,
   fmtMs,
   isRunLive,
+  runStatus,
   tryParseJson,
   visibleEventKindFilters,
 } from '../../../client/run-utils.js';
@@ -21,6 +22,7 @@ import {
   skillEventTitle,
   type StructuredDetailNode,
 } from '../../../client/structured-detail.js';
+import type { RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
@@ -43,6 +45,21 @@ import {
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { drawAtomDetail } from './atom-detail.js';
 import { gpuCardShaderMode } from '../shaders.js';
+
+const RUN_STATUS_COLOR: Record<RunStatus, number> = {
+  live: GPU_COLORS.success,
+  delivered: GPU_COLORS.success,
+  cancelled: GPU_COLORS.warning,
+  failed: GPU_COLORS.error,
+  abandoned: GPU_COLORS.warning,
+};
+
+/**
+ * Rows the view inserts ABOVE the first event row for its "run ended"
+ * bookend. Published on the viewport so the R3F rails project onto the same
+ * grid — they read rows, not indices.
+ */
+const TIMELINE_ROW_OFFSET = 1;
 
 /**
  * Runs view: causal branch timeline on the left, summary + event/atom detail
@@ -89,13 +106,24 @@ export function drawRuns(
     color: GPU_COLORS.muted,
     width: leftWidth - 28,
   });
-  if (isRunLive(run)) {
-    ctx.text(ctx.root, snapshot.t('runs.flag.live'), leftX + leftWidth - 72, top + 12, {
-      size: 11,
-      color: GPU_COLORS.success,
-      weight: '700',
-    });
-  }
+  // What happened to this run, always visible: the header used to flag only
+  // LIVE, so a cancelled or failed run looked exactly like a delivered one
+  // (2026-08-15 review of a real cancelled run).
+  const status = runStatus(run);
+  const statusColor = RUN_STATUS_COLOR[status];
+  const statusLabel = snapshot.t(`runs.flag.${status}`);
+  const statusWidth = Math.max(64, statusLabel.length * 6.4 + 16);
+  const statusChip = new Graphics();
+  statusChip.roundRect(leftX + leftWidth - statusWidth - 14, top + 8, statusWidth, 20, 6);
+  statusChip.fill({ color: statusColor, alpha: 0.16 });
+  statusChip.stroke({ color: statusColor, width: 1, alpha: 0.8 });
+  statusChip.eventMode = 'none';
+  ctx.root.addChild(statusChip);
+  ctx.text(ctx.root, statusLabel, leftX + leftWidth - statusWidth - 6, top + 12, {
+    size: 10,
+    color: statusColor,
+    weight: '700',
+  });
 
   const statsY = top + 76;
   const stats = [
@@ -436,14 +464,21 @@ export function drawRuns(
   listLayer.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
   listLayer.mask = listMask;
   lowerControlsLayer.addChild(listLayer);
-  const timeline = buildTimelineLayout(run.events, runFilters);
+  // Newest first: what happened last is what you opened the run to read.
+  const timeline = buildTimelineLayout(run.events, runFilters, { newestFirst: true });
   const rowHeight = timeline.rowHeight;
   const contentTopPadding = 18;
   const contentBottomPadding = 20;
   const cardRightPadding = 24;
+  // Two bookend rows frame the events: "run ended" on top (newest), "run
+  // started" at the bottom. They are rows like any other, so they scroll,
+  // cull and project with the rest.
+  const rowOffset = TIMELINE_ROW_OFFSET;
+  const totalRows = timeline.items.length + rowOffset + 1;
+  const displayRow = (row: number) => row + rowOffset;
   ctx.scrollMax.runs = Math.max(
     0,
-    timeline.totalHeight +
+    totalRows * rowHeight +
       contentTopPadding +
       contentBottomPadding -
       listHeight
@@ -457,6 +492,8 @@ export function drawRuns(
     Math.floor(Math.max(0, scrollY - contentTopPadding) / rowHeight)
   );
   const count = Math.ceil(listHeight / rowHeight) + 2;
+  // The window is expressed in DISPLAY rows; event indices sit one row lower.
+  const itemStart = Math.max(0, start - rowOffset);
   const laneSpacing =
     timeline.maxLane > 0
       ? Math.min(22, 96 / timeline.maxLane)
@@ -489,9 +526,9 @@ export function drawRuns(
     contentTopPadding,
     contentBottomPadding,
     rowHeight,
-    totalHeight:
-      timeline.totalHeight + contentTopPadding + contentBottomPadding,
+    totalHeight: totalRows * rowHeight + contentTopPadding + contentBottomPadding,
     scrollY,
+    rowOffset,
   };
   if (timeline.items.length === 0) {
     ctx.text(listLayer, snapshot.t('filters.noMatch'), leftX + 24, listY + 22, {
@@ -501,17 +538,29 @@ export function drawRuns(
     });
   }
   const graph = new Graphics();
-  if (timeline.items.length > 0) {
-    graph
-      .moveTo(railX(0), rowCenterY(0))
-      .lineTo(railX(0), rowCenterY(timeline.items.length - 1));
-    graph.stroke({ color: GPU_COLORS.primary, width: 2.2, alpha: 0.42 });
-  }
+  // The trunk runs the WHOLE row space, bookends included, so both ends of
+  // the run hang off the same spine.
+  graph
+    .moveTo(railX(0), rowCenterY(0))
+    .lineTo(railX(0), rowCenterY(totalRows - 1));
+  graph.stroke({ color: GPU_COLORS.primary, width: 2.2, alpha: 0.42 });
   for (const branch of timeline.branches) {
     const color = timelineBranchColor(branch);
+    // A parent is still alive while its children run: draw the subtree span
+    // faintly first so a child's fork always meets a live rail, then the
+    // branch's own events at full strength.
+    if (
+      branch.subtreeFirstRow < branch.firstRow ||
+      branch.subtreeLastRow > branch.lastRow
+    ) {
+      graph
+        .moveTo(railX(branch.lane), rowCenterY(displayRow(branch.subtreeFirstRow)))
+        .lineTo(railX(branch.lane), rowCenterY(displayRow(branch.subtreeLastRow)));
+      graph.stroke({ color, width: 1.4, alpha: 0.3 });
+    }
     graph
-      .moveTo(railX(branch.lane), rowCenterY(branch.firstRow))
-      .lineTo(railX(branch.lane), rowCenterY(branch.lastRow));
+      .moveTo(railX(branch.lane), rowCenterY(displayRow(branch.firstRow)))
+      .lineTo(railX(branch.lane), rowCenterY(displayRow(branch.lastRow)));
     graph.stroke({ color, width: 2.4, alpha: 0.72 });
   }
   for (const connector of timeline.connectors) {
@@ -521,29 +570,30 @@ export function drawRuns(
     const color = branch ? timelineBranchColor(branch) : GPU_COLORS.primary;
     const fromX = railX(connector.fromLane);
     const toX = railX(connector.toLane);
-    const connectorY = rowCenterY(connector.row);
-    const bend = Math.max(5, Math.abs(toX - fromX) * 0.45);
-    graph.moveTo(fromX, connectorY);
-    graph.bezierCurveTo(
-      fromX + Math.sign(toX - fromX) * bend,
-      connectorY,
-      toX - Math.sign(toX - fromX) * bend,
-      connectorY,
-      toX,
-      connectorY
-    );
+    const connectorY = rowCenterY(displayRow(connector.row));
+    // Anchor on the PARENT rail just outside the branch's own span, then
+    // elbow into the child rail. A flat line at the branch's first row sat
+    // exactly under its first dot and read as if the branch were floating
+    // free of the trunk (2026-08-15 review of a real run).
+    const branchTop = branch ? rowCenterY(displayRow(branch.firstRow)) : connectorY;
+    const branchBottom = branch ? rowCenterY(displayRow(branch.lastRow)) : connectorY;
+    const outward =
+      Math.abs(connectorY - branchTop) <= Math.abs(connectorY - branchBottom) ? -1 : 1;
+    const anchorY = connectorY + outward * rowHeight * 0.55;
+    graph.moveTo(fromX, anchorY);
+    graph.bezierCurveTo(fromX, connectorY, toX, anchorY, toX, connectorY);
     graph.stroke({
       color,
       width: connector.kind === 'fork' ? 1.8 : 1.2,
       alpha: connector.kind === 'fork' ? 0.78 : 0.48,
     });
   }
-  for (const item of timeline.items.slice(start, start + count)) {
+  for (const item of timeline.items.slice(itemStart, itemStart + count)) {
     const branch = item.branchId
       ? timeline.branches.find((candidate) => candidate.id === item.branchId)
       : undefined;
     graph
-      .circle(railX(item.lane), rowCenterY(item.row), item.branchStart ? 4 : 2.4);
+      .circle(railX(item.lane), rowCenterY(displayRow(item.row)), item.branchStart ? 4 : 2.4);
     graph.fill({
       color: branch ? timelineBranchColor(branch) : GPU_COLORS.primary,
       alpha: item.branchStart || item.branchEnd ? 0.95 : 0.62,
@@ -551,31 +601,83 @@ export function drawRuns(
   }
   listLayer.addChild(graph);
 
-  if (timeline.items.length > 0) {
-    const startY = rowCenterY(0);
-    const endY = rowCenterY(timeline.items.length - 1);
-    if (startY >= listY - 20 && startY <= listY + listHeight + 20) {
-      ctx.text(listLayer, snapshot.t('timeline.start').toUpperCase(), railX(0) + 7, startY - 7, {
-        size: 8,
-        color: GPU_COLORS.primary,
-        weight: '700',
+  // The two bookends: the run's own start and end are steps of the story,
+  // not decorations. They replace the tiny rail ticks that said "START" and
+  // "END" without ever saying WHAT ended (2026-08-15 review).
+  const clockTime = (ms: number): string =>
+    Number.isFinite(ms)
+      ? new Date(ms).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+      : '';
+  const bookend = (
+    row: number,
+    accent: number,
+    title: string,
+    facts: string
+  ): void => {
+    const y =
+      listY + contentTopPadding + row * rowHeight - scrollY;
+    if (y > listY + listHeight || y + rowHeight < listY) return;
+    const cardHeight = rowHeight - 10;
+    const panel = new Graphics();
+    panel.roundRect(cardBaseX, y, cardBaseWidth, cardHeight, 7);
+    panel.fill({ color: accent, alpha: 0.1 });
+    panel.stroke({ color: accent, width: 1.2, alpha: 0.75 });
+    panel.eventMode = 'none';
+    listLayer.addChild(panel);
+    ctx.text(listLayer, title, cardBaseX + 11, y + 8, {
+      size: 11,
+      weight: '700',
+      color: accent,
+    });
+    if (facts) {
+      ctx.text(listLayer, truncate(facts, 150), cardBaseX + 11, y + 28, {
+        size: 9,
+        color: GPU_COLORS.muted,
+        width: cardBaseWidth - 22,
       });
     }
-    if (endY >= listY - 20 && endY <= listY + listHeight + 20) {
-      ctx.text(listLayer, snapshot.t('timeline.end').toUpperCase(), railX(0) + 7, endY - 7, {
-        size: 8,
-        color: GPU_COLORS.primary,
-        weight: '700',
-      });
-    }
-  }
+    const marker = new Graphics();
+    marker.circle(railX(0), y + cardHeight / 2, 5);
+    marker.fill({ color: accent, alpha: 0.95 });
+    marker.eventMode = 'none';
+    listLayer.addChild(marker);
+  };
 
-  timeline.items.slice(start, start + count).forEach((item) => {
+  const endedMs = run.endedAt ? Date.parse(run.endedAt) : NaN;
+  const runOver = status !== 'live' && status !== 'abandoned';
+  bookend(
+    0,
+    statusColor,
+    `${runOver ? snapshot.t('timeline.runEnded') : snapshot.t('timeline.runUnfinished')} · ${statusLabel}`,
+    [
+      run.error,
+      fmtMs(run.durationMs),
+      snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
+      fmtCost(run.totals?.costUsd),
+      clockTime(endedMs),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  );
+  bookend(
+    totalRows - 1,
+    GPU_COLORS.primary,
+    snapshot.t('timeline.runStarted'),
+    [clockTime(Date.parse(run.startedAt)), run.task?.description ?? '']
+      .filter(Boolean)
+      .join(' · ')
+  );
+
+  timeline.items.slice(itemStart, itemStart + count).forEach((item) => {
     const event = item.event;
     const y =
       listY +
       contentTopPadding +
-      item.row * rowHeight -
+      displayRow(item.row) * rowHeight -
       scrollY;
     if (y > listY + listHeight || y + rowHeight < listY) return;
     const selected = snapshot.state.selectedEventId === event.id;
@@ -731,16 +833,35 @@ function drawRunSummaryCard(
     width: innerWidth - 8,
   });
   cursor += title.height + 6;
+  // The verdict leads the facts: this pane is where the eye lands, and it
+  // used to read identically for a delivered and a cancelled run.
+  const summaryStatus = runStatus(run);
+  const summaryStatusColor = RUN_STATUS_COLOR[summaryStatus];
+  const statusText = ctx.text(
+    block,
+    snapshot.t(`runs.flag.${summaryStatus}`),
+    padX,
+    cursor,
+    { size: 10, weight: '700', color: summaryStatusColor }
+  );
   const facts = [
     fmtMs(run.durationMs),
     snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
     fmtCost(run.totals?.costUsd),
   ].filter(Boolean).join('  ·  ');
-  ctx.text(block, facts, padX, cursor, {
+  ctx.text(block, facts, padX + statusText.width + 12, cursor, {
     size: 10,
     color: GPU_COLORS.muted,
   });
   cursor += 18;
+  if (run.error) {
+    const reason = ctx.text(block, truncate(run.error, 200), padX, cursor, {
+      size: 9,
+      color: summaryStatusColor,
+      width: innerWidth,
+    });
+    cursor += reason.height + 6;
+  }
   const goal = run.task?.description ?? '';
   if (goal) {
     ctx.text(block, snapshot.t('run.goal').toUpperCase(), padX, cursor, {

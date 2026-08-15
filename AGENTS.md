@@ -429,6 +429,19 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   threshold exceeds plausible LLM/tool activity (currently 12 minutes).
 - Runs rails remain aligned to viewport projection. Never apply scene parallax
   to causal timeline geometry.
+- `runStatus` is the ONE definition of what happened to a run, and every
+  surface that labels one uses it. Cancellation is not failure: a cancelled
+  run records an error message by design, so `cancelled` wins over `error`.
+- The runs timeline reads NEWEST FIRST and is framed by two bookend rows
+  (run ended / run started) that carry the verdict. Bookends are view rows:
+  the view publishes `rowOffset` on the timeline viewport and overlays add it,
+  or they drift by exactly one row. Ordering lives in `buildTimelineLayout`
+  (`newestFirst`) so cards, rails and connectors share one row space;
+  `firstRow`/`lastRow` are the DISPLAY range while fork/join connectors keep
+  causal rows.
+- A branch rail spans its SUBTREE (`subtreeFirstRow`/`subtreeLastRow`): a
+  parent is still alive while its children run, and a rail drawn over its own
+  events alone leaves child branches visually detached.
 - Pixi objects draw local geometry at local origin, then position the object.
   Avoid double-offset hit targets.
 - The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic

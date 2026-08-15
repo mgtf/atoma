@@ -146,7 +146,6 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(readFileSync('src/viz/client/features/RunsView.tsx', 'utf8')).toMatch(
       /timelineBranchHeading\(/
     );
-    expect(timelineLayout).toMatch(/chronological:\s*true/);
     expect(timelineLayout).toMatch(/inferParents|assignLanes/);
     // Widget interactivity and the filter exit/enter animation protocol stay
     // on the renderer class.

@@ -76,6 +76,12 @@ export interface GpuTimelineViewport {
   rowHeight: number;
   totalHeight: number;
   scrollY: number;
+  /**
+   * Display rows the view inserts above the first EVENT row (its "run ended"
+   * bookend). Overlays project `layout` rows onto this grid, so they must
+   * add it — the layout knows nothing about the view's bookends.
+   */
+  rowOffset: number;
 }
 
 export interface GpuRenderMetrics {

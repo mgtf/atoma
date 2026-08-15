@@ -213,3 +213,86 @@ describe('Runs timeline layout', () => {
     expect(timelineBranchTitle(branch, translate)).toBe('Phase 2 · Verify server.js as an HTTP API');
   });
 });
+
+/**
+ * Reverse order and rail continuity — the two defects a real cancelled run
+ * exposed on 2026-08-15: the reader wants the last thing that happened
+ * first, and a child branch whose parent's own events stopped before the
+ * fork was drawn floating, attached to nothing.
+ */
+describe('Runs timeline layout — newest-first and subtree rails', () => {
+  it('reverses the row space without disturbing lanes or height', () => {
+    const events = [event('old', 10), event('middle', 20), event('new', 30)];
+    const chronological = buildTimelineLayout(events, all);
+    const reversed = buildTimelineLayout(events, all, { newestFirst: true });
+
+    expect(chronological.chronological).toBe(true);
+    expect(reversed.chronological).toBe(false);
+    expect(reversed.items.map((item) => item.event.id)).toEqual(['new', 'middle', 'old']);
+    // Row 0 is what the eye lands on: the newest event.
+    expect(reversed.items[0]!.row).toBe(0);
+    expect(reversed.items[0]!.event.id).toBe('new');
+    expect(reversed.totalHeight).toBe(chronological.totalHeight);
+    expect(reversed.items.every((item) => item.lane === 0)).toBe(true);
+  });
+
+  it('forks at the branch\'s CAUSAL start whichever way the rows run', () => {
+    const events = [
+      event('trunk-1', 10),
+      event('child-1', 20, { branchId: 'child', actor: { tier: 2, name: 'Tracheid' } }),
+      event('child-2', 30, { branchId: 'child', child: { tier: 1, name: 'Water' } }),
+      event('trunk-2', 40),
+    ];
+    for (const newestFirst of [false, true]) {
+      const layout = buildTimelineLayout(events, all, { newestFirst });
+      const branch = layout.branches.find((b) => b.id === 'child')!;
+      const fork = layout.connectors.find(
+        (c) => c.kind === 'fork' && c.branchId === 'child'
+      )!;
+      const rowOf = (id: string) =>
+        layout.items.find((item) => item.event.id === id)!.row;
+      // The fork always points at the row where the branch's first event
+      // actually sits — the top row chronologically, the bottom row reversed.
+      expect(fork.row).toBe(rowOf('child-1'));
+      // Display range stays min..max so culling by row never inverts.
+      expect(branch.firstRow).toBeLessThanOrEqual(branch.lastRow);
+    }
+  });
+
+  it('extends a parent rail across its children so a fork lands on a live rail', () => {
+    // Declared parentage (what the runner emits), with the parent's own
+    // events both PRECEDING the child's: drawing the parent rail over its
+    // own rows alone leaves the child rail detached from everything.
+    const events = [
+      event('parent-meta', 5, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'parent',
+        actor: { tier: 3, name: 'Meristem' },
+      }),
+      event('parent-1', 10, { branchId: 'parent', actor: { tier: 3, name: 'Meristem' } }),
+      event('parent-2', 20, { branchId: 'parent', actor: { tier: 3, name: 'Meristem' } }),
+      event('child-meta', 25, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'child',
+        parentBranchId: 'parent',
+        actor: { tier: 2, name: 'Tracheid' },
+      }),
+      event('child-1', 30, { branchId: 'child', actor: { tier: 2, name: 'Tracheid' } }),
+      event('child-2', 40, { branchId: 'child', child: { tier: 1, name: 'Water' } }),
+    ];
+    const layout = buildTimelineLayout(events, all);
+    const parent = layout.branches.find((b) => b.id === 'parent')!;
+    const child = layout.branches.find((b) => b.id === 'child')!;
+    expect(child.parentId).toBe('parent');
+    // The parent's own span stops short of the child…
+    expect(parent.lastRow).toBeLessThan(child.firstRow);
+    // …but its subtree span reaches it, so the fork meets a drawn rail.
+    expect(parent.subtreeLastRow).toBeGreaterThanOrEqual(child.lastRow);
+    expect(parent.subtreeFirstRow).toBe(parent.firstRow);
+    // A leaf's subtree is itself.
+    expect(child.subtreeFirstRow).toBe(child.firstRow);
+    expect(child.subtreeLastRow).toBe(child.lastRow);
+  });
+});

@@ -17,6 +17,23 @@ export function isRunLive(run: VizRun, now = Date.now()): boolean {
   return !run.endedAt && !isAbandoned(run, now);
 }
 
+export type RunStatus = 'live' | 'abandoned' | 'cancelled' | 'failed' | 'delivered';
+
+/**
+ * ONE definition of "what happened to this run", for every surface that
+ * labels one (timeline bookends, run header, pickers).
+ *
+ * Cancellation takes precedence over the error flag on purpose: a
+ * signal-cancelled run records an error message BY DESIGN ("run cancelled by
+ * user (signal received)"), and reporting that as a failure is the same lie
+ * the burn-in CSV told until 2026-08-15 — a deliberate kill is not a fault.
+ */
+export function runStatus(run: VizRun, now = Date.now()): RunStatus {
+  if (run.cancelled) return 'cancelled';
+  if (!run.endedAt) return isAbandoned(run, now) ? 'abandoned' : 'live';
+  return run.error ? 'failed' : 'delivered';
+}
+
 export function isIndexEntryLive(entry: RunIndexEntry, now = Date.now()): boolean {
   if (entry.endedAt || !entry.inFlight) return false;
   const latest = entry.lastEventAt ?? Date.parse(entry.startedAt);
