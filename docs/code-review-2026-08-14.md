@@ -222,6 +222,27 @@ après-midi du 13/08).
 > maintenant vrai sur les trois transports. Suite complète : 1616 passed /
 > 8 skipped, typecheck ×2 + lint + docs:check verts.
 
+> **Validation live 2026-08-15** (deux runs réels, `ATOMA_LLM=claude-cli`,
+> état sauvegardé avant). (1) Run livré — goal CLI, `--clean-workspace <goal>`
+> comme le harnais : le goal complet arrive intact (le parseur réécrit tient
+> sur le chemin de production, classe du goal avalé fermée), épilogue
+> `delivered` **0,3141 $ / 10 appels = 1 Opus + 9 Haiku, zéro Sonnet** (un seul
+> appel top-tier pour la décomposition, L2 court-circuitées par prefilters à
+> haute confiance), deux skills LLM réutilisées, promotion gelée. Artefact
+> vérifié À LA MAIN, pas via la bannière : 3 clés/exit 0, usage/exit 1,
+> erreur/exit 1. Le cross-check `outputs`/`writes` du batch 5 filtre en vrai —
+> deux skills écartées parce qu'elles écrivent `.atoma-probes.json` quand le
+> subtask déclare `jsonkeycount.js`. (2) Run annulé — SIGTERM au groupe via
+> `terminateRunProcessGroup` après le premier appel outil L1 : épilogue
+> `cancelled` **0,0939 $ / 6 appels**, trace `cancelled:true` à 6 appels /
+> $0.0939315, **accord trace/CSV : OUI**. Avant le fix ce scénario donnait
+> `error` + coût null : les deux lignes de l'overnight du 14/08 sont
+> reproduites et fermées. Index viz correct (`cancelled` + `endedAt`, plus de
+> « ● LIVE » fantôme), `ledger check` sans compteur impossible.
+> `release:check` vert de bout en bout, dont le smoke GPU compilé : 2 canvases,
+> WebGPU + repli WebGL, **cinq vues** décomposées, 490 objets, lumière pointeur
+> 16,67 ms moyenne / 17,60 ms P95.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production
