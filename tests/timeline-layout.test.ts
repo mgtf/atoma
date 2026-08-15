@@ -49,6 +49,78 @@ describe('Runs timeline layout', () => {
     ]);
   });
 
+  it('treats a shared boundary instant as succession, not concurrency', () => {
+    // What the runner actually emits: the event that closes phase 1 opens
+    // phase 2, so the two branches meet at ONE identical millisecond. Read as
+    // closed intervals that counted as an overlap and pushed phase 2 out past
+    // both phase 1 and phase 1's child — two lanes deep with nothing running
+    // beside it (run 68cdf607, 2026-08-15).
+    const boundary = 2_000;
+    const events = [
+      event('p1-start', 1_000, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'p1',
+        index: 0,
+        aggregationMode: 'sequential',
+        actor: { tier: 3, name: 'Meristem' },
+      }),
+      event('p1-work', 1_100, { branchId: 'p1', actor: { tier: 3, name: 'Meristem' } }),
+      event('c1-start', 1_200, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'c1',
+        parentBranchId: 'p1',
+        actor: { tier: 2, name: 'Tracheid' },
+      }),
+      event('c1-work', 1_300, { branchId: 'c1', actor: { tier: 2, name: 'Tracheid' } }),
+      event('c1-end', boundary, { kind: 'branch', op: 'end', branchId: 'c1' }),
+      event('p1-end', boundary, { kind: 'branch', op: 'end', branchId: 'p1' }),
+      event('p2-start', boundary, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'p2',
+        index: 1,
+        aggregationMode: 'sequential',
+        actor: { tier: 3, name: 'Meristem' },
+      }),
+      event('p2-work', 2_100, { branchId: 'p2', actor: { tier: 3, name: 'Meristem' } }),
+      event('c2-start', 2_200, {
+        kind: 'branch',
+        op: 'start',
+        branchId: 'c2',
+        parentBranchId: 'p2',
+        actor: { tier: 2, name: 'Idioblast' },
+      }),
+      event('c2-work', 2_300, { branchId: 'c2', actor: { tier: 2, name: 'Idioblast' } }),
+      event('c2-end', 3_000, { kind: 'branch', op: 'end', branchId: 'c2' }),
+      event('p2-end', 3_000, { kind: 'branch', op: 'end', branchId: 'p2' }),
+    ];
+    const layout = buildTimelineLayout(events, all);
+    const laneOf = (id: string) =>
+      layout.branches.find((branch) => branch.id === id)!.lane;
+    // The second phase reclaims the first phase's lane, and its child the
+    // first child's: succession costs no horizontal room at all.
+    expect(laneOf('p1')).toBe(1);
+    expect(laneOf('c1')).toBe(2);
+    expect(laneOf('p2')).toBe(1);
+    expect(laneOf('c2')).toBe(2);
+    expect(layout.maxLane).toBe(2);
+  });
+
+  it('reads two inferred phases that merely touch as sequential, not parallel', () => {
+    // Same instant, no declared lifecycle: the parallel heuristic reads the
+    // intervals directly, so a shared boundary must not read as concurrency.
+    const layout = buildTimelineLayout([
+      event('a-1', 10, { branchId: 'a', actor: { tier: 2, name: 'Tracheid' } }),
+      event('a-2', 20, { branchId: 'a', child: { tier: 1, name: 'Water' } }),
+      event('b-1', 20, { branchId: 'b', actor: { tier: 2, name: 'Sclereid' } }),
+      event('b-2', 30, { branchId: 'b', child: { tier: 1, name: 'Methane' } }),
+    ], all);
+    expect(layout.branches.map((branch) => branch.parallel)).toEqual([false, false]);
+    expect(layout.branches.map((branch) => branch.lane)).toEqual([1, 1]);
+  });
+
   it('gives overlapping sibling branches separate lanes with fork/join edges', () => {
     const layout = buildTimelineLayout([
       event('trunk-plan', 5),

@@ -4,7 +4,9 @@ import {
   coerceEventFilters,
   fmtCost,
   fmtMs,
+  fmtTime,
   isRunLive,
+  runHeading,
   runStatus,
   tryParseJson,
   visibleEventKindFilters,
@@ -43,6 +45,7 @@ import {
   truncate,
 } from '../copy.js';
 import { drawScrollbarThumb } from '../scroll-pane.js';
+import { timelineConnectorGeometry } from '../timeline-rails.js';
 import { drawAtomDetail } from './atom-detail.js';
 import { gpuCardShaderMode } from '../shaders.js';
 
@@ -60,6 +63,12 @@ const RUN_STATUS_COLOR: Record<RunStatus, number> = {
  * grid — they read rows, not indices.
  */
 const TIMELINE_ROW_OFFSET = 1;
+
+/**
+ * Roughly two lines of the 13px summary title at the right pane's width.
+ * Collapsing is about giving the event detail room, not about hiding the run.
+ */
+const COLLAPSED_TITLE_CHARS = 110;
 
 /**
  * Runs view: causal branch timeline on the left, summary + event/atom detail
@@ -96,16 +105,26 @@ export function drawRuns(
     GPU_LAYOUT.radius,
     2
   );
-  ctx.text(ctx.root, truncate(run.label, 95), leftX + 14, top + 12, {
+  // The goal names the run, once. The line under it used to repeat that same
+  // sentence verbatim — `label` is only ever a cut copy of the goal plus the
+  // family — so it now carries what the title cannot: who ran it, and when.
+  const heading = runHeading(run);
+  ctx.text(ctx.root, truncate(heading.title, 95), leftX + 14, top + 12, {
     size: 14,
     weight: '700',
     width: leftWidth - 28,
   });
-  ctx.text(ctx.root, truncate(run.task?.description ?? '', 180), leftX + 14, top + 34, {
-    size: 11,
-    color: GPU_COLORS.muted,
-    width: leftWidth - 28,
-  });
+  ctx.text(
+    ctx.root,
+    [heading.family, fmtTime(run.startedAt)].filter(Boolean).join('  ·  '),
+    leftX + 14,
+    top + 34,
+    {
+      size: 11,
+      color: GPU_COLORS.muted,
+      width: leftWidth - 28,
+    }
+  );
   // What happened to this run, always visible: the header used to flag only
   // LIVE, so a cancelled or failed run looked exactly like a delivered one
   // (2026-08-15 review of a real cancelled run).
@@ -538,6 +557,8 @@ export function drawRuns(
     });
   }
   const graph = new Graphics();
+  // Labelled so a recording test can read back the rail/connector geometry.
+  graph.label = 'timeline-rails';
   // The trunk runs the WHOLE row space, bookends included, so both ends of
   // the run hang off the same spine.
   graph
@@ -568,20 +589,39 @@ export function drawRuns(
       (candidate) => candidate.id === connector.branchId
     );
     const color = branch ? timelineBranchColor(branch) : GPU_COLORS.primary;
-    const fromX = railX(connector.fromLane);
-    const toX = railX(connector.toLane);
-    const connectorY = rowCenterY(displayRow(connector.row));
     // Anchor on the PARENT rail just outside the branch's own span, then
-    // elbow into the child rail. A flat line at the branch's first row sat
-    // exactly under its first dot and read as if the branch were floating
-    // free of the trunk (2026-08-15 review of a real run).
-    const branchTop = branch ? rowCenterY(displayRow(branch.firstRow)) : connectorY;
-    const branchBottom = branch ? rowCenterY(displayRow(branch.lastRow)) : connectorY;
-    const outward =
-      Math.abs(connectorY - branchTop) <= Math.abs(connectorY - branchBottom) ? -1 : 1;
-    const anchorY = connectorY + outward * rowHeight * 0.55;
-    graph.moveTo(fromX, anchorY);
-    graph.bezierCurveTo(fromX, connectorY, toX, anchorY, toX, connectorY);
+    // elbow into the child rail at its causal end. Both ends land on a drawn
+    // rail: the parent's own span is clamping the anchor, and the branch end
+    // is the connector's row by construction.
+    const parent = branch?.parentId
+      ? timeline.branches.find((candidate) => candidate.id === branch.parentId)
+      : undefined;
+    const geometry = timelineConnectorGeometry({
+      kind: connector.kind,
+      fromLane: connector.fromLane,
+      toLane: connector.toLane,
+      connectorY: rowCenterY(displayRow(connector.row)),
+      rowHeight,
+      chronological: timeline.chronological,
+      // The trunk is the whole row space, bookends included.
+      parentTopY: parent
+        ? rowCenterY(displayRow(parent.subtreeFirstRow))
+        : rowCenterY(0),
+      parentBottomY: parent
+        ? rowCenterY(displayRow(parent.subtreeLastRow))
+        : rowCenterY(totalRows - 1),
+    });
+    const parentX = railX(geometry.parentLane);
+    const branchX = railX(geometry.branchLane);
+    graph.moveTo(parentX, geometry.parentY);
+    graph.bezierCurveTo(
+      parentX,
+      geometry.branchY,
+      branchX,
+      geometry.parentY,
+      branchX,
+      geometry.branchY
+    );
     graph.stroke({
       color,
       width: connector.kind === 'fork' ? 1.8 : 1.2,
@@ -819,19 +859,35 @@ function drawRunSummaryCard(
   const innerWidth = cardWidth - padX * 2;
   const block = new Container();
   let cursor = 12;
-  ctx.text(block, snapshot.t('run.summary').toUpperCase(), padX, cursor, {
-    size: 10,
-    weight: '700',
-    color: GPU_COLORS.cyan,
-  });
+  // The goal is the TITLE, and it appears exactly once: a run's stored label
+  // is a cut copy of that same sentence plus the family, so the old separate
+  // GOAL block said the very same thing twice. The family, the one piece the
+  // goal cannot carry, rides the eyebrow.
+  const heading = runHeading(run);
+  ctx.text(
+    block,
+    [snapshot.t('run.summary'), heading.family].filter(Boolean).join(' · ').toUpperCase(),
+    padX,
+    cursor,
+    { size: 10, weight: '700', color: GPU_COLORS.cyan }
+  );
   ctx.collapseCaret(block, cardWidth - padX, cursor + 1, expanded, GPU_COLORS.cyan);
   cursor += 18;
-  const title = ctx.text(block, truncate(run.label, 90), padX, cursor, {
-    size: 13,
-    weight: '700',
-    color: GPU_COLORS.text,
-    width: innerWidth - 8,
-  });
+  // Expanded, this card hides NOTHING. Collapsed, it keeps the goal to about
+  // two lines and the verdict alone — so the caret always changes something,
+  // which it did not when the goal happened to be short.
+  const title = ctx.text(
+    block,
+    expanded ? heading.title : truncate(heading.title, COLLAPSED_TITLE_CHARS),
+    padX,
+    cursor,
+    {
+      size: 13,
+      weight: '700',
+      color: GPU_COLORS.text,
+      width: innerWidth - 8,
+    }
+  );
   cursor += title.height + 6;
   // The verdict leads the facts: this pane is where the eye lands, and it
   // used to read identically for a delivered and a cancelled run.
@@ -844,47 +900,27 @@ function drawRunSummaryCard(
     cursor,
     { size: 10, weight: '700', color: summaryStatusColor }
   );
-  const facts = [
-    fmtMs(run.durationMs),
-    snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
-    fmtCost(run.totals?.costUsd),
-  ].filter(Boolean).join('  ·  ');
-  ctx.text(block, facts, padX + statusText.width + 12, cursor, {
-    size: 10,
-    color: GPU_COLORS.muted,
-  });
   cursor += 18;
-  if (run.error) {
-    const reason = ctx.text(block, truncate(run.error, 200), padX, cursor, {
-      size: 9,
-      color: summaryStatusColor,
-      width: innerWidth,
-    });
-    cursor += reason.height + 6;
-  }
-  const goal = run.task?.description ?? '';
-  if (goal) {
-    ctx.text(block, snapshot.t('run.goal').toUpperCase(), padX, cursor, {
-      size: 9,
-      weight: '700',
+  if (expanded) {
+    const facts = [
+      fmtMs(run.durationMs),
+      snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
+      fmtCost(run.totals?.costUsd),
+    ].filter(Boolean).join('  ·  ');
+    ctx.text(block, facts, padX + statusText.width + 12, cursor - 18, {
+      size: 10,
       color: GPU_COLORS.muted,
     });
-    cursor += 16;
-    const goalText = ctx.text(
-      block,
-      expanded ? goal : truncate(goal, 140),
-      padX,
-      cursor,
-      {
-        size: 11,
-        color: GPU_COLORS.text,
+    if (run.error) {
+      const reason = ctx.text(block, run.error, padX, cursor, {
+        size: 9,
+        color: summaryStatusColor,
         width: innerWidth,
-      }
-    );
-    cursor += goalText.height + 10;
-  } else {
-    cursor += 8;
+      });
+      cursor += reason.height + 6;
+    }
   }
+  cursor += 8;
   ctx.panel(
     ctx.root,
     x + 10,

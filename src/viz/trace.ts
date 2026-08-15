@@ -386,6 +386,19 @@ export interface VizRun {
   totals?: VizRunTotals;
 }
 
+/**
+ * A run's display NAME, derived from its goal.
+ *
+ * The goal itself always travels whole on `VizRun.task.description`; this is
+ * the short form for lists, headers and the picker. It exists as one exported
+ * function because a bare `goal.slice(0, n)` ends mid-word and reads as a
+ * complete goal — a real trace carried `"…tiles that swap colour w"`, and
+ * every surface repeated the lie (2026-08-15).
+ */
+export function runLabelFromGoal(goal: string, max: number): string {
+  return goal.length > max ? `${goal.slice(0, max)}…` : goal;
+}
+
 export class TraceRecorder {
   private run: VizRun | null = null;
   readonly runsDir: string;
@@ -415,7 +428,7 @@ export class TraceRecorder {
       .replace('Z', '')}-${randomUUID().slice(0, 8)}`;
     this.run = {
       id,
-      label: label ?? task.description.slice(0, 140),
+      label: label ?? runLabelFromGoal(task.description, 140),
       task,
       startedAt: new Date().toISOString(),
       events: [],

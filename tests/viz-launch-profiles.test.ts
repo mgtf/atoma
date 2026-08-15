@@ -205,6 +205,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/mask\.eventMode = 'none'/);
     expect(timelineRails).toMatch(/visibleItems\.map|visibleBranches\.map/);
     expect(timelineRails).not.toMatch(/run\.events\.map/);
+    // The backdrop rails project onto the Pixi timeline's rows. Both build the
+    // same row space or the overlay is mirrored: rails and branches end one
+    // whole run away from the cards they belong to.
+    expect(timelineRails).toMatch(/buildTimelineLayout\([\s\S]{0,80}newestFirst: true/);
+    expect(rendererRuns).toMatch(/buildTimelineLayout\([\s\S]{0,80}newestFirst: true/);
+    expect(timelineRails).toMatch(/rowOffset/);
     // Pixi survives Fast Refresh via one clean reload, never stateful HMR.
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);

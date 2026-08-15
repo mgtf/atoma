@@ -12,7 +12,7 @@ import { assertCurrentTaxonomy } from '../registry/taxonomyMigration.js';
 import { legacyStoreNotice, skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { TraceRecorder } from '../viz/trace.js';
+import { TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
@@ -637,7 +637,7 @@ export async function startTask(
     }
   };
 
-  recorder.beginRun(task, `${profile.traceLabelPrefix}${goal.slice(0, 80)}`, {
+  recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
     initialTypes: [
       ...registry.listByTier(1),
       ...registry.listByTier(2),

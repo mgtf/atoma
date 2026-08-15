@@ -25,6 +25,7 @@ import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
+import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
 import type { GpuUiState } from '../src/viz/client-gl/store.js';
 
 // ---------------------------------------------------------------------------
@@ -420,6 +421,41 @@ function scrollbarThumbs(root: Container): Container[] {
   };
   walk(root);
   return found;
+}
+
+function findByLabel(root: Container, label: string): Container | undefined {
+  const walk = (node: Container): Container | undefined => {
+    if (node.label === label) return node;
+    for (const child of node.children) {
+      if (child instanceof Container) {
+        const hit = walk(child);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  };
+  return walk(root);
+}
+
+/**
+ * Read a Graphics back as drawn paths. Pixi keeps one path per stroke/fill
+ * instruction, so a vertical rail comes back as moveTo+lineTo and a connector
+ * as moveTo+bezierCurveTo — enough to assert that every connector endpoint
+ * actually touches a rail.
+ */
+interface PathCommand {
+  action: string;
+  data: readonly (number | null)[];
+}
+
+function strokedPaths(graphics: Graphics): PathCommand[][] {
+  const instructions = graphics.context.instructions as readonly {
+    action: string;
+    data?: { path?: { instructions?: PathCommand[] } };
+  }[];
+  return instructions
+    .filter((entry) => entry.action === 'stroke')
+    .map((entry) => entry.data?.path?.instructions ?? []);
 }
 
 function findByCursor(root: Container, cursor: string): Container | undefined {
@@ -1107,6 +1143,143 @@ describe('drawRuns — run status and timeline bookends', () => {
     expect(texts.some((value) => value.startsWith(t('timeline.runEnded')))).toBe(false);
   });
 
+  /**
+   * Rail continuity, 2026-08-15: on a real run every branch END was drawn as a
+   * hook hanging half a row above its own rail, because the join connector
+   * anchored on the lane it came FROM (the child) instead of the parent.
+   */
+  it('ends every branch rail on a rail, not in mid-air', () => {
+    const at = (offset: number) =>
+      Date.parse('2026-08-14T10:00:00.000Z') + offset * 1000;
+    const events: VizEvent[] = [
+      {
+        id: 'p-start',
+        ts: at(0),
+        kind: 'branch',
+        op: 'start',
+        branchId: 'parent',
+        label: 'Build the files',
+        actor: { tier: 3, name: 'Meristem' },
+      },
+      makeLlmEvent('p-1', { ts: at(1), branchId: 'parent' }),
+      {
+        id: 'c-start',
+        ts: at(2),
+        kind: 'branch',
+        op: 'start',
+        branchId: 'child',
+        parentBranchId: 'parent',
+        label: 'Verify the files',
+        actor: { tier: 2, name: 'Idioblast' },
+      },
+      makeLlmEvent('c-1', {
+        ts: at(3),
+        branchId: 'child',
+        actor: { tier: 2, name: 'Idioblast' },
+      }),
+      makeLlmEvent('c-2', {
+        ts: at(4),
+        branchId: 'child',
+        actor: { tier: 1, name: 'Ammonia' },
+      }),
+      { id: 'c-end', ts: at(5), kind: 'branch', op: 'end', branchId: 'child' },
+      makeLlmEvent('p-2', { ts: at(6), branchId: 'parent' }),
+      { id: 'p-end', ts: at(7), kind: 'branch', op: 'end', branchId: 'parent' },
+    ];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+
+    const rails = findByLabel(ctx.root, 'timeline-rails');
+    expect(rails).toBeInstanceOf(Graphics);
+    const paths = strokedPaths(rails as Graphics);
+    const segments = paths
+      .filter((path) => path[1]?.action === 'lineTo')
+      .map((path) => ({
+        x: Number(path[0]!.data[0]),
+        top: Math.min(Number(path[0]!.data[1]), Number(path[1]!.data[1])),
+        bottom: Math.max(Number(path[0]!.data[1]), Number(path[1]!.data[1])),
+      }));
+    const connectors = paths
+      .filter((path) => path[1]?.action === 'bezierCurveTo')
+      .map((path) => [
+        { x: Number(path[0]!.data[0]), y: Number(path[0]!.data[1]) },
+        { x: Number(path[1]!.data[4]), y: Number(path[1]!.data[5]) },
+      ]);
+    // Trunk plus one rail per branch, and a fork/join for each branch.
+    expect(segments.length).toBeGreaterThanOrEqual(3);
+    expect(connectors).toHaveLength(4);
+
+    const onARail = (point: { x: number; y: number }) =>
+      segments.some(
+        (segment) =>
+          Math.abs(segment.x - point.x) < 0.5 &&
+          point.y >= segment.top - 0.5 &&
+          point.y <= segment.bottom + 0.5
+      );
+    for (const [anchor, landing] of connectors) {
+      expect(onARail(anchor!)).toBe(true);
+      expect(onARail(landing!)).toBe(true);
+      // Two different lanes, or it is not a connector at all.
+      expect(anchor!.x).not.toBe(landing!.x);
+    }
+  });
+
+  /**
+   * The run summary card is the one surface that answers "what was this run
+   * asked to do". It clamped the goal at 140 chars, so on a shorter goal the
+   * collapse caret flipped and NOTHING else moved (2026-08-15).
+   */
+  it('says the goal once, whole when expanded and clamped when collapsed', () => {
+    const description = `Build a dashboard that ${'reads every metric '.repeat(12)}`.trim();
+    const run = makeRun([makeLlmEvent('a')], {
+      label: `build-app: ${description.slice(0, 80)}`,
+      task: { description },
+      error: 'run cancelled by user (signal received)',
+    });
+    expect(description.length).toBeGreaterThan(140);
+
+    const expanded = createRecordingCtx();
+    drawRuns(expanded, makeSnapshot({ runSummaryExpanded: true }, { run }), WIDTH, HEIGHT);
+    const expandedTexts = expanded.texts.map((entry) => entry.value);
+    // The goal titles the card, verbatim and exactly once.
+    expect(expandedTexts).toContain(description);
+    expect(expandedTexts.filter((value) => value === description)).toHaveLength(1);
+    // The family — the only thing the label held that the goal cannot — rides
+    // the eyebrow, and the stored label itself is never shown.
+    expect(expandedTexts).toContain(`${t('run.summary')} · build-app`.toUpperCase());
+    expect(expandedTexts.some((value) => value.includes(`build-app: ${description.slice(0, 40)}`)))
+      .toBe(false);
+    expect(expandedTexts).toContain(run.error);
+
+    const collapsed = createRecordingCtx();
+    drawRuns(collapsed, makeSnapshot({ runSummaryExpanded: false }, { run }), WIDTH, HEIGHT);
+    const collapsedTexts = collapsed.texts.map((entry) => entry.value);
+    // The caret always changes something: the goal is clamped and says so, and
+    // the facts and the failure reason step aside for the event detail below.
+    expect(collapsedTexts).not.toContain(description);
+    expect(collapsedTexts).not.toContain(run.error);
+    expect(
+      collapsedTexts.some(
+        (value) => value.startsWith(description.slice(0, 60)) && value.endsWith('…')
+      )
+    ).toBe(true);
+  });
+
+  it('titles the card from the goal when the stored label was cut mid-word', () => {
+    // Exactly the bytes an older trace carries: label = family + bare slice.
+    const description =
+      'a single index.html page showing a 3x3 grid of coloured tiles that swap colour when clicked';
+    const run = makeRun([makeLlmEvent('a')], {
+      label: `build-app: ${description.slice(0, 80)}`,
+      task: { description },
+    });
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({ runSummaryExpanded: true }, { run }), WIDTH, HEIGHT);
+    const texts = ctx.texts.map((entry) => entry.value);
+    expect(texts).toContain(description);
+    expect(texts.some((value) => value.endsWith('colour w'))).toBe(false);
+  });
+
   it('publishes the bookend row offset so overlays project on the same grid', () => {
     const events = [makeLlmEvent('a'), makeLlmEvent('b'), makeLlmEvent('c')];
     const ctx = createRecordingCtx();
@@ -1119,5 +1292,77 @@ describe('drawRuns — run status and timeline bookends', () => {
         viewport.contentTopPadding +
         viewport.contentBottomPadding
     );
+  });
+});
+
+describe('timelineConnectorGeometry — which rail carries the anchor', () => {
+  const rail = {
+    rowHeight: 64,
+    connectorY: 300,
+    parentTopY: 0,
+    parentBottomY: 1000,
+  };
+
+  it('always lands on the branch rail and anchors on the parent rail', () => {
+    // The layout names lanes by travel direction: a fork goes parent → child,
+    // a join child → parent. Both must anchor on the PARENT.
+    const fork = timelineConnectorGeometry({
+      ...rail,
+      kind: 'fork',
+      fromLane: 0,
+      toLane: 2,
+      chronological: false,
+    });
+    const join = timelineConnectorGeometry({
+      ...rail,
+      kind: 'join',
+      fromLane: 2,
+      toLane: 0,
+      chronological: false,
+    });
+    for (const geometry of [fork, join]) {
+      expect(geometry.parentLane).toBe(0);
+      expect(geometry.branchLane).toBe(2);
+      // The branch end is the connector's own row: it touches the rail there.
+      expect(geometry.branchY).toBe(300);
+    }
+    // Newest first: the branch's causal start is BELOW it, its end ABOVE.
+    expect(fork.parentY).toBeGreaterThan(300);
+    expect(join.parentY).toBeLessThan(300);
+  });
+
+  it('mirrors the anchor when the rows run chronologically', () => {
+    const fork = timelineConnectorGeometry({
+      ...rail,
+      kind: 'fork',
+      fromLane: 0,
+      toLane: 1,
+      chronological: true,
+    });
+    const join = timelineConnectorGeometry({
+      ...rail,
+      kind: 'join',
+      fromLane: 1,
+      toLane: 0,
+      chronological: true,
+    });
+    expect(fork.parentY).toBeLessThan(300);
+    expect(join.parentY).toBeGreaterThan(300);
+  });
+
+  it('never anchors past the end of the parent rail', () => {
+    // A child that ends exactly where its parent's drawn span ends: half a row
+    // further would hang the anchor off the parent too.
+    const geometry = timelineConnectorGeometry({
+      ...rail,
+      kind: 'join',
+      fromLane: 1,
+      toLane: 0,
+      chronological: false,
+      parentTopY: 300,
+      parentBottomY: 900,
+    });
+    expect(geometry.parentY).toBe(300);
+    expect(geometry.branchY).toBe(300);
   });
 });

@@ -68,8 +68,11 @@ export function RunsTimelineRails({
 }) {
   const group = useRef<Group>(null);
   const { size, viewport } = useThree();
+  // Same row space as the Pixi timeline it projects behind, newest first
+  // included: a chronological layout mirrors every row and the backdrop rails
+  // end nowhere near the branch they belong to.
   const layout = useMemo(
-    () => buildTimelineLayout(run?.events ?? [], filters),
+    () => buildTimelineLayout(run?.events ?? [], filters, { newestFirst: true }),
     [filters, run?.events]
   );
   useFrame((state) => {

@@ -10,6 +10,7 @@ import {
   isRunLive,
   mergeRunDelta,
   projectRunTaxonomy,
+  runHeading,
   tryParseJson,
   usedAtomNames,
 } from '../src/viz/client/run-utils.js';
@@ -299,5 +300,61 @@ describe('React viz taxonomy projection', () => {
       }],
     }));
     expect(projected.initialTypes?.[0]?.name).toBe('CustomHydrogen');
+  });
+});
+
+/**
+ * A run's stored `label` is `<family>: <goal, cut>` — measured over the 204
+ * local traces, 202 are exactly that, so the only thing it holds that the goal
+ * does not is the family. Traces written before 2026-08-15 cut it with a bare
+ * slice too, ending mid-word ("…tiles that swap colour w"). The heading keeps
+ * the two apart and lets the goal speak for itself.
+ */
+describe('run heading — family apart, goal whole', () => {
+  const goal =
+    'a single index.html page showing a 3x3 grid of coloured tiles that swap colour when clicked';
+
+  it('splits the family off and titles the run with its whole goal', () => {
+    const cut = run({
+      label: `build-app: ${goal.slice(0, 80)}`,
+      task: { description: goal },
+    });
+    expect(cut.label.endsWith('colour w')).toBe(true);
+    expect(runHeading(cut)).toEqual({ family: 'build-app', title: goal });
+    // A label the writer marked as cut reads the same way.
+    expect(
+      runHeading(run({ label: `build-app: ${goal.slice(0, 80)}…`, task: { description: goal } }))
+    ).toEqual({ family: 'build-app', title: goal });
+  });
+
+  it('never lets a stale label override the goal it disagrees with', () => {
+    // The demo recorder writes its own name; the card still answers "what was
+    // this run asked to do".
+    expect(
+      runHeading(run({
+        label: 'demo — research brief (mocked)',
+        task: { description: 'Research the state of GPU dashboards' },
+      }))
+    ).toEqual({ family: null, title: 'Research the state of GPU dashboards' });
+  });
+
+  it('falls back to the label, family stripped, when the run carries no goal', () => {
+    expect(runHeading(run({ label: 'build-app: something else' }))).toEqual({
+      family: 'build-app',
+      title: 'something else',
+    });
+    expect(runHeading(run({ label: 'no family here' }))).toEqual({
+      family: null,
+      title: 'no family here',
+    });
+  });
+
+  it('only reads an identifier-shaped prefix as a family', () => {
+    // A goal that merely opens on a capitalised word plus a colon is not one.
+    const sentence = 'Fix: the lockfile drifts on install';
+    expect(runHeading(run({ label: sentence, task: { description: sentence } }))).toEqual({
+      family: null,
+      title: sentence,
+    });
   });
 });

@@ -84,8 +84,20 @@ interface MutableBranch {
   parallel: boolean;
 }
 
+/**
+ * Concurrency between two branches, as HALF-OPEN intervals.
+ *
+ * Sequential phases are back-to-back to the millisecond: the runner closes one
+ * branch and opens the next on the same event, so `phase 1.lastTs` and
+ * `phase 2.firstTs` are byte-identical (measured at exactly 0 ms apart on run
+ * 68cdf607, 2026-08-15). Comparing them as CLOSED intervals made that shared
+ * instant count as an overlap, which pushed phase 2 past both phase 1's lane
+ * and its child's — a branch indented two lanes deep with nothing running
+ * beside it — and would label two strictly sequential inferred phases as
+ * parallel siblings. Touching at one instant is succession, not concurrency.
+ */
 function overlaps(a: MutableBranch, b: MutableBranch): boolean {
-  return a.firstTs <= b.lastTs && b.firstTs <= a.lastTs;
+  return a.firstTs < b.lastTs && b.firstTs < a.lastTs;
 }
 
 function branchColorIndex(id: string): number {
