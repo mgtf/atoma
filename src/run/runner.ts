@@ -17,7 +17,7 @@ import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/repor
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
-import { runFrontierBaseline } from './baseline.js';
+import { baselineModel, runFrontierBaseline } from './baseline.js';
 import { resolveToolBackendMode } from './backendMode.js';
 import { parseArgTokens } from '../cli/args.js';
 import {
@@ -548,7 +548,7 @@ export async function startTask(
     // that mutated the treatment arm's registry or skill store would
     // invalidate the experiment, so we touch neither.
     console.log(
-      `\n⚖ BASELINE MODE — one ${modelForTier(3)} agent, no tiering, no learned recipes,` +
+      `\n⚖ BASELINE MODE — one ${baselineModel()} agent, no tiering, no learned recipes,` +
         ` no independent verification (it self-certifies).`
     );
     console.log('  Registry and skill store are NOT seeded and NOT written.\n');

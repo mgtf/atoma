@@ -10,8 +10,10 @@ verification — down to models that cost a fraction as much.*
 
 [![CI](https://github.com/mgtf/atoma/actions/workflows/ci.yml/badge.svg)](https://github.com/mgtf/atoma/actions/workflows/ci.yml)
 ![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)
-![benchmark](https://img.shields.io/badge/vs_frontier_direct-1.0–3.6×_over_8_rounds-success)
-![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_8_rounds-gold)
+![benchmark](https://img.shields.io/badge/vs_Opus_direct-1.0–3.6×-success)
+![benchmark2](https://img.shields.io/badge/vs_Sonnet_direct-1.05×-yellow)
+![benchmark3](https://img.shields.io/badge/vs_Haiku_direct-0.36×_(atoma_loses)-critical)
+![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_10_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
 **[→ How it works, in detail](docs/how-it-works.md)**
@@ -50,6 +52,12 @@ One measured run of the same maintenance task, both arms, [round 8](benchmark/RO
 |---|---|---|---|---|
 | single frontier agent | 1 | **$0.820** | — | $0.820 |
 | atoma, warm | 1 | **$0.027** | $0.192 | $0.219 |
+
+> **This comparison is against a frontier agent, and that choice does most of the
+> work.** [Rounds 9–11](#rounds-911--how-much-of-this-is-tiering-and-how-much-is-the-control-model)
+> re-ran the same task against Sonnet-direct and Haiku-direct: the advantage falls
+> to 1.05× and then reverses to a 2.8× loss. Read them before quoting the table
+> above.
 
 The baseline does the whole job inside one frontier call: read the files, edit, run five
 verification commands, rewrite the docs. Every tool result stays in the conversation and is
@@ -96,11 +104,11 @@ because it is load-bearing. Mechanisms 1 and 2 are the product.
 
 The same task, from an **empty registry and empty skill store**, given to atoma and to a single
 frontier agent — same sandbox, same tools, same budget, same token accounting,
-[registered before each run](benchmark/PROTOCOL.md). Eight rounds: four on a from-scratch build,
-four on a maintenance task.
+[registered before each run](benchmark/PROTOCOL.md). Eleven rounds: four on a from-scratch build,
+four on a maintenance task, then three that vary the control arm's model instead of the code.
 
 ![cost curve, round 1](docs/benchmark-cost-curve.svg)
-<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..8}.csv`.</sub>
+<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..11}.csv`.</sub>
 
 Mean cost per run on each round's main task, each against **its own same-day control**:
 
@@ -120,6 +128,36 @@ control arm is a **single observation**: its
 second run lost its LLM connection, so its cost is unrecoverable (the deliverable was correct).
 Round 5's 3.57× is the round whose deliverables were later found wrong — see below.
 
+### Rounds 9–11 — how much of this is tiering, and how much is the control model?
+
+Rounds 1–8 all compared atoma against **one Opus agent**. A sceptic's obvious reply is
+that they would simply run a cheaper model directly and pay less than either arm. Rounds
+9–11 ran exactly that experiment: the control arm's model was pinned independently
+(`ATOMA_BASELINE_MODEL`) while atoma kept its default `L1=haiku / L2=sonnet / L3=opus`
+gradient. Same task, same seed, same code path, **all measured on 2026-08-15**.
+
+| control arm | n | mean | correct | mean ÷ atoma |
+|---|---|---|---|---|
+| [Opus direct](benchmark/ROUND11.md) | 3 | $0.5104 | 3/3 | **1.78×** |
+| [Sonnet direct](benchmark/ROUND9.md) | 3 | $0.3012 | 3/3 | **1.05×** |
+| [Haiku direct](benchmark/ROUND10.md) | 6 | $0.1032 | 6/6 | **0.36×** — atoma loses |
+| atoma (12 runs, two series from empty state) | 12 | $0.2865 | 13/14 | — |
+
+**Both registered hypotheses were refuted, and they are published here as required by the
+protocol.** Against Sonnet, atoma never reached break-even inside six runs (H9, cost).
+Against Haiku, atoma was 2.5× more expensive *and* scored lower — one deliverable in seven
+left two probe-manifest entries pointing at a fixture it had deleted (H10, correctness).
+
+**What survives:** the structural claim. atoma really does spend one frontier call per task
+rather than one per step, visibly, in every trace. On this task that is worth about $0.22 a
+run against Opus-direct.
+
+**What does not:** the assumption underneath the architecture — that a cheap model needs
+supervision to be *correct*. Twelve of twelve unsupervised control deliverables were right,
+first try, at all three price points. **On this task the benefit of supervision is not
+merely small, it is unmeasured**, and the honest next step is a harder task family
+registered in advance, not a reinterpretation of rounds 9–11.
+
 **The frontier baseline is volatile; atoma is not.** Across the four build rounds the control
 swung **2.1×** ($0.82 → $1.68) while atoma stayed inside **$0.47–0.54**. atoma exposes one
 frontier call in roughly fifteen, so frontier variance is diluted; a single-agent baseline is
@@ -130,7 +168,7 @@ eight.
 | | frontier direct | atoma |
 |---|---|---|
 | A *novel* task in the same family | $1.18 <sub>(n=2, spanning 2.5×)</sub> | **$0.18–0.55, zero new recipes learned** |
-| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8)</sub> | 7/7 · 3/3 · 3/3 · 2/2 | **12/12 · 16/16 · 16/16 · 7/7** |
+| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8 · R9 · R10 · R11)</sub> | 7/7 · 3/3 · 3/3 · 2/2 · 3/3 · 6/6 · 3/3 | **12/12 · 16/16 · 16/16 · 7/7 · 7/7 · 6/7 · —** |
 
 Generalisation is the claim that has held most consistently: **eleven held-out runs across eight
 rounds, all in the same family as the trained task, all needing zero new recipes.** The frontier
@@ -139,7 +177,9 @@ comparison for it rests on two observations from round 1 and should be read as i
 Correctness is scored by [an executing scorer run outside both arms](benchmark/verify-maint.mjs)
 — it runs the artefact rather than reading claims about it. **Rounds 4–7 have no committed
 scorer output**, so their correctness figures are not reproducible from this repo; rounds 1–3 and
-8 are. That gap is recorded rather than papered over.
+8–11 are. That gap is recorded rather than papered over. From round 9 the run→workspace mapping
+is [computed from an anchor recorded before the round](benchmark/score-round.mjs) rather than
+reconstructed afterwards, which is how round 8 came to publish a false 83.3% before correcting it.
 
 **One headline in this table used to be wrong, and how it was caught matters more than the
 number.** Round 5 measured 4.7× — and the independent scorer found **7 of 9 deliverables shipping

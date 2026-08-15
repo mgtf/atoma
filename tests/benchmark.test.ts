@@ -95,6 +95,24 @@ describe('analyse — the pre-registered metric', () => {
     expect(a.cumulativeDeltaUsd).toBeNull();
     expect(() => formatAnalysis(a)).not.toThrow();
   });
+
+  it('names both arms in the report when the round pinned a control model', () => {
+    // A round whose control arm is no longer "the frontier model" must say so
+    // in its own artefact: results-round9.csv and ROUND9.md are read years
+    // apart from the env that produced them.
+    const report = formatAnalysis(analyse([0.5], [0.3, 0.25]), undefined, {
+      controlModel: 'claude-sonnet-5',
+      provider: 'claude-cli',
+      treatmentTiers: 'L1=claude-haiku-4-5 L2=claude-sonnet-5 L3=claude-opus-5',
+    });
+    expect(report).toContain('control  : one claude-sonnet-5 agent');
+    expect(report).toContain('L3=claude-opus-5');
+    expect(report).toContain('provider : claude-cli');
+  });
+
+  it('omits the arms block entirely when no context is supplied', () => {
+    expect(formatAnalysis(analyse([0.5], [0.3]))).not.toContain('control  :');
+  });
 });
 
 describe('csv shape', () => {

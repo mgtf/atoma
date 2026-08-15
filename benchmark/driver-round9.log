@@ -1,0 +1,57 @@
+
+> atoma@0.1.3 benchmark
+> tsx src/cli/benchmark.ts --config benchmark/experiment-round9.json --out benchmark/results-round9.csv --result benchmark/ROUND9.md
+
+== atoma cost-amortisation benchmark ==
+
+provider     : claude-cli
+control arm  : claude-sonnet-5
+treatment arm: L1=claude-haiku-4-5-20251001 L2=claude-sonnet-5 L3=claude-opus-5
+primary task : wclite-maint
+held-out task: wclite-maint-2
+workspace seed : benchmark/seeds/wclite
+plan         : 3 baseline + 6 atoma on the primary, then 0 + 1 on the held-out = 10 runs
+budget/run   : 900s
+output       : /Users/mgtf/dev/atoma/benchmark/results-round9.csv
+
+report       : /Users/mgtf/dev/atoma/benchmark/ROUND9.md
+
+
+── A. control arm — frontier direct, primary task ──
+▶ baseline-wclite-maint-01 … ✓ delivered  $0.4667  54s  llm=1  det=0  learned=0
+▶ baseline-wclite-maint-02 … ✓ delivered  $0.2149  71s  llm=1  det=0  learned=0
+▶ baseline-wclite-maint-03 … ✓ delivered  $0.2219  74s  llm=1  det=0  learned=0
+
+── B. treatment arm — atoma, primary task (state accumulates) ──
+▶ atoma-wclite-maint-01 … ✓ delivered  $0.4122  241s  llm=19  det=0  learned=2
+▶ atoma-wclite-maint-02 … ✓ delivered  $0.2501  201s  llm=12  det=0  learned=0
+▶ atoma-wclite-maint-03 … ✓ delivered  $0.4714  301s  llm=15  det=0  learned=0
+▶ atoma-wclite-maint-04 … ✓ delivered  $0.2614  192s  llm=9  det=0  learned=0
+▶ atoma-wclite-maint-05 … ✓ delivered  $0.1570  123s  llm=9  det=0  learned=0
+▶ atoma-wclite-maint-06 … ✓ delivered  $0.3087  242s  llm=13  det=0  learned=0
+
+── D. treatment arm — held-out task (memorisation control) ──
+▶ atoma-wclite-maint-2-01 … ✓ delivered  $0.2214  154s  llm=10  det=0  learned=0
+
+== PRE-REGISTERED RESULT ==
+
+provider : claude-cli
+control  : one claude-sonnet-5 agent, plain tool loop, self-certifying
+treatment: atoma, L1=claude-haiku-4-5-20251001 L2=claude-sonnet-5 L3=claude-opus-5
+
+baseline (frontier direct) n=3: mean $0.3012, median $0.2219
+  runs: 0.467, 0.215, 0.222
+atoma n=6: mean $0.3101, mean excluding run 1 $0.2897
+  runs: 0.412, 0.250, 0.471, 0.261, 0.157, 0.309
+
+H1 NOT SUPPORTED within the runs performed: cumulative atoma cost never fell below the baseline.
+cumulative delta after 6 runs: $-0.0538 (positive = atoma cheaper in total)
+trend across the atoma series: first half $0.3779 → second half $0.2424
+
+-- held-out task (novel, same family): memorisation control --
+  baseline n=0: mean —
+  atoma    n=1: mean $0.2214
+  If atoma is cheap here too, the learning generalised to the family.
+  If it is back at baseline cost, it had memorised the primary task.
+
+rows written to /Users/mgtf/dev/atoma/benchmark/results-round9.csv

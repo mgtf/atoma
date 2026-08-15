@@ -33,6 +33,8 @@
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { modelForTier } from '../core/models.js';
+import { baselineModel } from '../run/baseline.js';
 import {
   looksLikeConfigFailure,
   newestTraceDuration,
@@ -240,10 +242,37 @@ export function analyse(baselineCosts: readonly number[], atomaCosts: readonly n
 
 const usd = (n: number | null): string => (n === null ? '—' : `$${n.toFixed(4)}`);
 
-export function formatAnalysis(a: Analysis, heldOut?: { baseline: number[]; atoma: number[] }): string {
+/**
+ * What the control arm actually WAS, carried into the report.
+ *
+ * From round 9 the control model is a variable of the experiment
+ * (`ATOMA_BASELINE_MODEL`), so a report that only says "baseline" no longer
+ * identifies its own arm. Recorded here rather than in the CSV for the same
+ * reason `PROMOTE`/`TRUST` are: one round is one configuration, the CSV
+ * schema is immutable evidence, and a call-time input belongs beside the
+ * result it produced.
+ */
+export interface ArmsContext {
+  readonly controlModel: string;
+  readonly provider: string;
+  /** `L1=… L2=… L3=…`, the treatment arm's gradient. */
+  readonly treatmentTiers: string;
+}
+
+export function formatAnalysis(
+  a: Analysis,
+  heldOut?: { baseline: number[]; atoma: number[] },
+  arms?: ArmsContext
+): string {
   const L: string[] = [];
   L.push('== PRE-REGISTERED RESULT ==');
   L.push('');
+  if (arms) {
+    L.push(`provider : ${arms.provider}`);
+    L.push(`control  : one ${arms.controlModel} agent, plain tool loop, self-certifying`);
+    L.push(`treatment: atoma, ${arms.treatmentTiers}`);
+    L.push('');
+  }
   L.push(`baseline (frontier direct) n=${a.baselineCosts.length}: mean ${usd(a.baselineMean)}, median ${usd(a.baselineMedian)}`);
   if (a.baselineCosts.length > 0) {
     L.push(`  runs: ${a.baselineCosts.map((c) => c.toFixed(3)).join(', ')}`);
@@ -333,6 +362,15 @@ function costsOf(rows: readonly BenchmarkRow[], arm: Arm, taskId: string): numbe
     .map((r) => r.stats.costUsd!);
 }
 
+/** Resolve both arms exactly as the runner will, at driver start. */
+function armsContext(): ArmsContext {
+  return {
+    controlModel: baselineModel(),
+    provider: process.env['ATOMA_LLM'] ?? 'anthropic (default)',
+    treatmentTiers: ([1, 2, 3] as const).map((t) => `L${t}=${modelForTier(t)}`).join(' '),
+  };
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const dryRun = argv.includes('--dry-run');
@@ -361,8 +399,13 @@ async function main(): Promise<void> {
 
   const total =
     cfg.baselineRuns + cfg.atomaRuns + cfg.heldOutBaselineRuns + cfg.heldOutAtomaRuns;
+  const arms = armsContext();
   console.log('== atoma cost-amortisation benchmark ==\n');
-  console.log(`provider     : ${process.env['ATOMA_LLM'] ?? 'anthropic (default)'}`);
+  console.log(`provider     : ${arms.provider}`);
+  // Printed on the dry run too: a mis-set ATOMA_BASELINE_MODEL must be
+  // visible BEFORE the round spends, not inferred from the report after it.
+  console.log(`control arm  : ${arms.controlModel}`);
+  console.log(`treatment arm: ${arms.treatmentTiers}`);
   console.log(`primary task : ${cfg.primary.id}`);
   console.log(`held-out task: ${cfg.heldOut.id}`);
   if (cfg.primary.seed) console.log(`workspace seed : ${cfg.primary.seed}`);
@@ -437,10 +480,14 @@ async function main(): Promise<void> {
     costsOf(rows, 'baseline', cfg.primary.id),
     costsOf(rows, 'atoma', cfg.primary.id)
   );
-  const report = formatAnalysis(analysis, {
-    baseline: costsOf(rows, 'baseline', cfg.heldOut.id),
-    atoma: costsOf(rows, 'atoma', cfg.heldOut.id),
-  });
+  const report = formatAnalysis(
+    analysis,
+    {
+      baseline: costsOf(rows, 'baseline', cfg.heldOut.id),
+      atoma: costsOf(rows, 'atoma', cfg.heldOut.id),
+    },
+    armsContext()
+  );
   console.log('\n' + report + '\n');
   writeBenchmarkResult(resultPath, report);
   console.log(`rows written to ${csvPath}`);

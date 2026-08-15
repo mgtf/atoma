@@ -1,0 +1,53 @@
+{
+  "csv": "/Users/mgtf/dev/atoma/benchmark/results-round11.csv",
+  "firstArchive": 220,
+  "workspaces": "/Users/mgtf/.atoma/workspaces",
+  "base": "build",
+  "results": [
+    {
+      "ts": "2026-08-15T16:58:54.152Z",
+      "arm": "baseline",
+      "taskId": "wclite-maint",
+      "runIndex": 1,
+      "outcome": "delivered",
+      "costUsd": 0.722,
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev221",
+      "mappingOk": true,
+      "problems": [],
+      "score": 10,
+      "total": 10,
+      "full": true,
+      "failed": []
+    },
+    {
+      "ts": "2026-08-15T17:00:10.754Z",
+      "arm": "baseline",
+      "taskId": "wclite-maint",
+      "runIndex": 2,
+      "outcome": "delivered",
+      "costUsd": 0.4136,
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev222",
+      "mappingOk": true,
+      "problems": [],
+      "score": 10,
+      "total": 10,
+      "full": true,
+      "failed": []
+    },
+    {
+      "ts": "2026-08-15T17:01:35.702Z",
+      "arm": "baseline",
+      "taskId": "wclite-maint",
+      "runIndex": 3,
+      "outcome": "delivered",
+      "costUsd": 0.3956,
+      "dir": "/Users/mgtf/.atoma/workspaces/build",
+      "mappingOk": true,
+      "problems": [],
+      "score": 10,
+      "total": 10,
+      "full": true,
+      "failed": []
+    }
+  ]
+}

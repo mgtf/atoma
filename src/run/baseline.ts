@@ -45,6 +45,30 @@ export const BASELINE_MAX_TOKENS = 16000;
 export const BASELINE_ATOM_NAME = 'BaselineFrontierDirect';
 
 /**
+ * CONTROL-ARM MODEL PIN.
+ *
+ * The default is `modelForTier(3)` — the same resolver the top tier uses, so
+ * "frontier" means the same model on both arms and an operator pin
+ * (`ATOMA_MODEL_L3`) moves them together. That is exactly what rounds 1-8
+ * measured and nothing about it changes.
+ *
+ * `ATOMA_BASELINE_MODEL` overrides the CONTROL ARM ALONE, so a round can ask
+ * a different question: not "does the tiered pipeline beat a single agent on
+ * the same frontier model", but "does it beat a single agent on a CHEAPER
+ * one" — the comparison that decides whether tiering buys anything a user
+ * could not get by simply picking Sonnet or Haiku and looping tools on it.
+ * Doing that with `ATOMA_MODEL_L3` would move atoma's own top tier at the
+ * same time and change two things at once, which is not an experiment.
+ *
+ * Read at CALL time, like `modelForTier`, so per-run env changes behave.
+ */
+export function baselineModel(): string {
+  const env = process.env['ATOMA_BASELINE_MODEL'];
+  if (env && env.trim().length > 0) return env.trim();
+  return modelForTier(3);
+}
+
+/**
  * A competent, unremarkable engineer prompt — no atoma-specific technique,
  * no evidence contract, no probe manifest. Adding any of those would be
  * importing atoma's learned practice into its own control group.
@@ -95,9 +119,9 @@ export async function runFrontierBaseline(
   ctx: RunContext,
   tools: readonly Tool[]
 ): Promise<Result> {
-  // The SAME resolver the top tier uses, so "frontier" means the same model
-  // on both arms and an operator pin (ATOMA_MODEL_L3) moves them together.
-  const model = modelForTier(3);
+  // Defaults to the SAME resolver the top tier uses; ATOMA_BASELINE_MODEL is
+  // the one way to move the control arm alone. See baselineModel above.
+  const model = baselineModel();
 
   const res = await ctx.llm.complete({
     model,

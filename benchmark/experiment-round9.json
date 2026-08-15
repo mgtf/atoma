@@ -1,0 +1,18 @@
+{
+  "_comment": "ROUND 9 — identical primary/held-out goals and seed to rounds 5-8, so the treatment arm compares directly. The ONLY change is the control arm: ATOMA_BASELINE_MODEL=claude-sonnet-5 makes it one mid-tier agent instead of one frontier agent. 3 control runs rather than 2 because this round asks a correctness question of the control arm. See PROTOCOL.md#rounds-9-10.",
+  "primary": {
+    "id": "wclite-maint",
+    "seed": "benchmark/seeds/wclite",
+    "goal": "The workspace already contains a working wclite CLI (wclite.js), its README.md documenting five verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: --chars must now count characters EXCLUDING trailing newlines at the end of the file. Apply that change to wclite.js. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI, do not add features, and leave every other documented behaviour exactly as it is."
+  },
+  "heldOut": {
+    "id": "wclite-maint-2",
+    "seed": "benchmark/seeds/wclite",
+    "goal": "The workspace already contains a working wclite CLI (wclite.js), its README.md documenting five verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: passing a directory instead of a file must exit 2 with the message 'wclite: not a regular file: <path>' rather than the current read error. Apply that change to wclite.js. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI and do not add features."
+  },
+  "baselineRuns": 3,
+  "atomaRuns": 6,
+  "heldOutBaselineRuns": 0,
+  "heldOutAtomaRuns": 1,
+  "timeoutMs": 900000
+}

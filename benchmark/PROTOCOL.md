@@ -520,3 +520,193 @@ rather than mechanism.
 
 **Scale.** 2 baseline, 6 atoma, 1 held-out — same as rounds 6 and 7 so all
 three compare directly. Output: `benchmark/results-round8.csv`.
+
+---
+
+## ROUNDS 9-10 — pre-registration, 2026-08-15, written before any round-9 run
+
+Rounds 1-8 all asked ONE question: does the tiered pipeline beat a single
+agent **on the same frontier model**? The control arm resolved through
+`modelForTier(3)`, so "baseline" always meant Opus. That question is answered
+(N\* = 1-2 across five rounds), and it is also the question with the weakest
+sceptical value, because a reader can reply: *of course a mostly-Haiku
+pipeline is cheaper than an Opus agent — I would just run Sonnet, or Haiku,
+directly and pay less than either of you.*
+
+Rounds 9 and 10 put that reply on the record as a measurement. Nothing about
+atoma changes: the treatment arm keeps its default gradient
+(`L1=haiku`, `L2=sonnet`, `L3=opus`). Only the control arm's model moves,
+through `ATOMA_BASELINE_MODEL`, which was added for this and overrides the
+control arm ALONE — pinning `ATOMA_MODEL_L3` instead would have moved atoma's
+own top tier at the same time and changed two things at once.
+
+- **Round 9** — control arm = one `claude-sonnet-5` agent.
+- **Round 10** — control arm = one `claude-haiku-4-5` agent, registered
+  separately once round 9's data exists.
+
+### H9 — against a single Sonnet agent, tiering is cheaper AND no less correct
+
+Two conditions, both required:
+
+1. **Cost.** `N* ≤ 6` — the cumulative cost of the first N atoma runs falls
+   below N × the mean Sonnet-direct cost within the six-run series. Same
+   primary metric as H1, computed by the same pure `analyse()`.
+2. **Correctness.** atoma's full-mark rate on
+   [`verify-maint.mjs`](verify-maint.mjs) is **≥** the control arm's. This is
+   the standing rule since 2026-08-10: a cost advantage bought by shipping
+   less is not a cost advantage, and at `TRUST=3` the pipeline's own
+   validators are largely skipped so "delivered" proves almost nothing.
+
+**H9 is refuted if either condition fails**, and the refutation is published
+with the prominence a confirmation would get.
+
+**The refutation that is genuinely likely, stated now so it cannot be
+reframed later.** Sonnet is priced at 0.6× Opus for the same token profile
+(`$3/$15` against `$5/$25`). Round 8's Opus control measured $0.8197; the
+naive projection puts a Sonnet control near $0.49 against an atoma
+steady-state of $0.22-$0.31 — a win, but a far thinner one than the 2.6×
+rounds 6-8 reported, and thin enough that ONE expensive atoma cold start can
+swallow it. If H9 fails on cost while both arms score full marks, the honest
+conclusion is that a large part of atoma's published advantage over
+"frontier-direct" was the control arm's model choice rather than tiering, and
+the README must say so.
+
+### The scale, and why the atoma arm is re-run rather than reused
+
+**3 baseline, 6 atoma, 1 held-out atoma = 10 runs per round.**
+
+Six atoma runs plus one held-out is identical to rounds 6, 7 and 8, so the
+treatment arm compares directly with three prior rounds. Three control runs
+rather than two because this round asks a CORRECTNESS question of the control
+arm — whether a mid-tier agent actually completes a maintenance edit without
+breaking a documented invocation — and that cannot rest on n=2.
+
+The atoma arm is re-run from an empty store in each of rounds 9 and 10 rather
+than reusing round 8's numbers. That is deliberate and it costs ~40 minutes
+per round: this protocol's own rule is that both arms are measured on the same
+day and the same code path, because the subscription-served model shifts
+behind its alias and this checkout is eight commits past round 8. A ratio
+built from a Sonnet control measured today against an atoma arm measured on
+2026-08-11 would be exactly the kind of cross-round arithmetic the protocol
+forbids.
+
+### Workspace anchor, recorded BEFORE the round
+
+Round 8's correctness figure needed a hand-verified workspace mapping because
+the anchor was reconstructed afterwards and an off-by-one produced a false
+83.3%. The mapping is in fact fully determined by `prepareWorkspace`, so from
+round 9 it is computed by [`score-round.mjs`](score-round.mjs) from an anchor
+recorded in advance:
+
+- highest existing `~/.atoma/workspaces/build.prev<n>` before round 9: **196**
+- therefore `--first-archive 197`, and run *k* of 10 scores from
+  `build.prev(197+k)`, with run 10 scoring from the live `build/`.
+
+The scorer was validated before use by re-scoring round 8's archives, which
+are still on this machine: it reproduces 8 of that round's 9 deliverables at
+**10/10 on the current 10-check instrument** — a figure ROUND8.md explicitly
+declined to claim because it could not be regenerated — and REFUSES the ninth
+rather than mis-scoring it, because that run's live workspace has since been
+overwritten. An instrument that reports UNMAPPED instead of a number is the
+property that was missing in round 8.
+
+### Threats specific to these rounds
+
+1. **The control arm's variance is unmeasured at these models.** Opus-direct
+   swung $0.82-$1.68 across rounds 1-8. Sonnet's and Haiku's spread on this
+   task is unknown; n=3 is a weak estimate and is reported as one.
+2. **Round 10 is expected to LOSE on cost, and that is not a defect.** Haiku
+   direct is priced at $1/$5 against atoma's mixed basket; if it also scores
+   full marks, atoma has no case on this task at this difficulty and the
+   result must be published as such. If it scores lower, the round measures
+   what supervision buys, which is the more interesting number and the one
+   the README currently has no evidence for.
+3. **Under `claude-cli` every pin resolves to an alias** (`opus`/`sonnet`/
+   `haiku`) and is priced from the served alias by `DEFAULT_PRICES`. The
+   control arm's `claude-sonnet-5` therefore prices identically to atoma's own
+   L2, so no new pricing path is introduced by this change.
+4. **One task, one family, small n** — unchanged from every prior round.
+
+**Output.** `benchmark/results-round9.csv` / `ROUND9.md`, then
+`results-round10.csv` / `ROUND10.md`. Thresholds `PROMOTE=1`, `TRUST=3`, as
+rounds 6-8.
+
+---
+
+## ROUND 10 — pre-registration, 2026-08-15, written after round 9 and before any round-10 run
+
+Round 9 refuted H9: against a single Sonnet agent the cumulative cost never
+broke even inside six runs (deficit $0.0538, extrapolated `N* ≈ 11`), while
+both arms scored 10/10 on every deliverable. Its conclusion was that a large
+part of the published "vs frontier-direct" advantage is the CHOICE OF CONTROL
+MODEL rather than tiering.
+
+Round 10 pushes that to its limit. The control arm becomes **one
+`claude-haiku-4-5-20251001` agent** — the same model atoma itself runs at L1,
+so the control is now *the cheapest capable model, used directly*. On price
+alone atoma cannot win: it pays one Opus decomposition call per run plus 8-16
+Haiku calls, against a single agent billed entirely at Haiku rates. **The cost
+comparison is therefore NOT the hypothesis.** Registering it as one would be
+registering a foregone conclusion.
+
+### H10 — what supervision buys is CORRECTNESS, and that is what is tested
+
+**H10.** A single Haiku agent does not reliably complete this maintenance
+change, while atoma — running the same model underneath a supervisor — does.
+
+**Primary metric.** The full-mark rate on [`verify-maint.mjs`](verify-maint.mjs),
+the same 10-check executing scorer applied identically to both arms:
+
+```
+H10 holds if   fullMarkRate(atoma) > fullMarkRate(haiku-direct)
+```
+
+**H10 is refuted if** the Haiku control's full-mark rate is greater than or
+equal to atoma's. That outcome is a real possibility and it has a clear
+meaning, stated here before the data exists: **on this task, at this
+difficulty, atoma's supervision buys nothing that a $1/$5 model does not
+already deliver on its own, and its cost is pure overhead.** That would be the
+most damaging result any round of this protocol has produced, and it gets
+published with the same prominence as a confirmation.
+
+**Cost is reported, not registered.** atoma is expected to LOSE it. The number
+worth reading is the pair — what the cheap arm costs *and* what fraction of its
+deliverables are correct. A cheap wrong answer is not a cheap answer; that rule
+has been standing since 2026-08-10 and round 5 paid for it with seven wrong
+deliverables.
+
+**Secondary, reported:** whether the control arm's failures (if any) are
+*silent* — that is, whether it self-certifies a run as complete while the
+scorer finds a broken invocation. The control arm has no independent
+verification by construction, so a silent failure is the specific defect
+supervision is supposed to prevent, and it is more informative than the raw
+score.
+
+### Scale
+
+**6 control, 6 atoma, 1 held-out atoma = 13 runs.**
+
+Six control runs rather than round 9's three: this round asks a FAILURE-RATE
+question of the control arm, and round 9 registered its `n=3` as its weakest
+joint. A control run at Haiku rates takes about a minute, so the stronger
+estimate is nearly free in wall-clock — the reason not to do it in round 9 was
+never cost, and it is corrected here. The treatment arm stays at 6 + 1 so it
+compares directly with rounds 6-9.
+
+The atoma arm is again re-run from an empty store on the same day and code
+path, for the reason given in the round 9-10 registration.
+
+### Workspace anchor, recorded BEFORE the round
+
+Highest existing `~/.atoma/workspaces/build.prev<n>` before round 10: **206**,
+therefore `--first-archive 207`.
+
+### Planned continuation, registered now so it is not a post-hoc addition
+
+**Round 11** will re-measure the ORIGINAL Opus control arm (3 runs, control arm
+only, `atomaRuns: 0`) on this same day and code path, so that the three-model
+table — Opus, Sonnet, Haiku against one atoma arm — rests entirely on
+2026-08-15 data rather than quoting round 8 across five days. Its driver report
+will print an `H1 NOT SUPPORTED` line that is VACUOUS, because `analyse()`
+receives an empty treatment series; ROUND11.md will say so rather than let a
+generated line be read as a result.
