@@ -27,6 +27,7 @@ import {
   buildAtomaMarkFrame,
   type AtomaMarkPoint,
 } from './brand-mark.js';
+import { LabelCache } from './renderer/label-cache.js';
 import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
@@ -178,6 +179,22 @@ export class GpuRenderer {
   detailScrollY = 0;
   detailScrollMax = 0;
   private detailKey: string | null = null;
+  /** Shared immutable styles, keyed by visual style — see `textStyle()`. */
+  private readonly textStyles = new Map<string, TextStyle>();
+  /**
+   * Labels retained across the scene teardown in `render()`. `release` swaps
+   * in a throwaway style BEFORE destroying: Pixi's `AbstractText.destroy()`
+   * never unsubscribes from its style's `update` event, so an evicted label
+   * would otherwise leave a listener on the shared style holding it alive.
+   * The style setter does unsubscribe, which is why this goes through it.
+   */
+  private readonly labels = new LabelCache<Text>({
+    detach: (label) => label.removeFromParent(),
+    release: (label) => {
+      label.style = {};
+      label.destroy({ children: true, style: true });
+    },
+  });
   metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
@@ -399,6 +416,10 @@ export class GpuRenderer {
     this.pointerLightBufferPinned = false;
     for (const filter of this.frameFilters) filter.destroy();
     this.frameFilters.clear();
+    // Detach-then-destroy, BEFORE the app tears the stage down: a retained
+    // label still parented would otherwise be destroyed twice.
+    this.labels.clear();
+    this.textStyles.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
     this.app.destroy(true, { children: true });
     this.initialized = false;
@@ -415,6 +436,9 @@ export class GpuRenderer {
     this.tickerCallbacks.clear();
     for (const filter of this.frameFilters) filter.destroy();
     this.frameFilters.clear();
+    // Retained labels step out of the scene BEFORE it is torn down, so the
+    // recursive destroy below walks past them instead of through them.
+    this.labels.beginRender();
     for (const child of this.ambientRoot.removeChildren()) child.destroy({ children: true });
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
@@ -499,6 +523,10 @@ export class GpuRenderer {
     this.previousFilterBounds = this.currentFilterBounds;
     if (snapshot.state.view !== 'runs') this.roleRowTransition = null;
     this.previousEventIds = this.currentEventIds;
+    // Labels this render did not draw go idle, and idle keys are released.
+    // `countObjects` walks the live scene, and a retained label that was not
+    // re-attached is not in it, so retention never inflates objectCount.
+    this.labels.endRender();
     this.metrics.objectCount =
       this.countObjects(this.ambientRoot) + this.countObjects(this.root);
   }
@@ -618,22 +646,45 @@ export class GpuRenderer {
     return graphics;
   }
 
-  text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
-    const label = new Text({
-      text: value,
-      style: new TextStyle({
-        fill: options.color ?? GPU_COLORS.text,
-        fontFamily: options.mono
+  /**
+   * A SHARED `TextStyle` per visual style, never one per label. Pixi keys its
+   * text-texture cache on `${text}:${style.uid}-${style._tick}:${resolution}`
+   * — instance identity, not content — so a per-label style makes every key
+   * unique and the cache dead on arrival. Styles here are immutable once
+   * built: mutating one would invalidate every label drawn with it.
+   */
+  private textStyle(options: TextOptions): { style: TextStyle; key: string } {
+    const size = options.size ?? 12;
+    const weight = options.weight ?? '400';
+    const color = options.color ?? GPU_COLORS.text;
+    const mono = options.mono ?? false;
+    const key = `${size}|${weight}|${color}|${mono ? 'm' : 's'}|${options.width ?? ''}`;
+    let style = this.textStyles.get(key);
+    if (!style) {
+      style = new TextStyle({
+        fill: color,
+        fontFamily: mono
           ? 'ui-monospace, SFMono-Regular, Menlo, monospace'
           : '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
-        fontSize: options.size ?? 12,
-        fontWeight: options.weight ?? '400',
+        fontSize: size,
+        fontWeight: weight,
         wordWrap: options.width !== undefined,
         wordWrapWidth: options.width ?? 0,
         breakWords: true,
-        lineHeight: (options.size ?? 12) * 1.35,
-      }),
-    });
+        lineHeight: size * 1.35,
+      });
+      this.textStyles.set(key, style);
+    }
+    return { style, key };
+  }
+
+  text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
+    const { style, key } = this.textStyle(options);
+    // Retained across renders: a scroll tick rebuilds the scene, and
+    // re-rasterising every label was the cost that made it expensive.
+    const label = this.labels.acquire(`${key}\u0000${value}`, () =>
+      new Text({ text: value, style })
+    );
     label.position.set(x, y);
     label.alpha = options.alpha ?? 1;
     label.eventMode = 'none';

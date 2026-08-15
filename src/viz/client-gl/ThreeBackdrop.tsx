@@ -1,5 +1,5 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import {
   MathUtils,
   PointLight,
@@ -280,7 +280,7 @@ function TierTopology({ run, animate }: { run: VizRun | null; animate: boolean }
   );
 }
 
-export function ThreeBackdrop({
+function ThreeBackdropImpl({
   run,
   view,
   runFilters,
@@ -326,3 +326,13 @@ export function ThreeBackdrop({
     </div>
   );
 }
+
+/**
+ * MEMOISED, and every prop is reference-stable by construction: `GpuApp`
+ * subscribes to the whole store, so any `set()` — a wheel tick above all —
+ * re-runs its body. Without this the R3F tree is reconciled on every scroll
+ * for a backdrop whose inputs did not move. `run` is stable through
+ * react-query's structural sharing, `runFilters` through the store, and
+ * `timelineViewport` through `sameTimelineViewport` in `GpuApp`.
+ */
+export const ThreeBackdrop = memo(ThreeBackdropImpl);
