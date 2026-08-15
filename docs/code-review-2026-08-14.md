@@ -144,6 +144,36 @@ après-midi du 13/08).
 > `TIMEOUT after <N>s` dans le log au lieu d'un faux silence. Suite complète :
 > 1567 passed / 8 skipped, typecheck + lint + docs:check verts.
 
+> **Statut 2026-08-15 (batch runtime 8)** : le refactoring 3.8 (viz) est
+> appliqué. `gpu-renderer.ts` passe de 4 456 à ~2 050 lignes : layout pur,
+> copy d'événements, shaders, motion et le ScrollPane partagé vivent sous
+> `client-gl/renderer/` ; les cinq vues sont des fonctions libres dans
+> `renderer/views/` sur `RendererCtx` (un Pick sur la classe — source unique
+> de signatures ; `drawAtomDetail` unifié en un module partagé runs/registry).
+> Les quatre bugs GPU de §1 sont fermés : le wheel FAIL CLOSED sur `scrollMax`
+> (fini le scroll dans le vide — Registry/Skills ne déclaraient jamais leur
+> max), listes et panneaux de détail multi-Ko dans des ScrollPane masqués et
+> bornés (le culling avance le curseur au lieu de casser la boucle, donc le
+> max couvre les lignes non dessinées), `eventDecision`/`ALL ROLES` passent
+> par les catalogues (`outcome.*`, `filters.allRoles` ; clé `burnin.chartLabel`
+> ajoutée en/fr), et `prefersReducedMotion()` (une définition, MediaQueryList
+> cachée) est honoré par TOUS les systèmes d'animation : entrées de widgets
+> sautées, temps gelé, dissolutions/particules de sortie non créées,
+> transition de vue supprimée, lumière pointeur en suivi instantané. Les
+> panneaux de détail sont scrollables sur toutes les vues (routage wheel
+> `detailBounds` généralisé, reset au changement de sélection). Le test-grep
+> de ~80 regex est remplacé : 24 tests de comportement sur un ctx enregistreur
+> typé (`tests/viz-gpu-views.test.ts`) qui échouent si les correctifs
+> régressent ; ne survivent en grep que les présences architecturales
+> (contrats HMR/shaders GLSL+WGSL/deux contextes GPU), reciblées sur les
+> modules réels. Le client MUI est GELÉ (bugfixes only, `ATOMA_VIZ_UI=mui`) ;
+> ses modules partagés importés par le client GL restent vivants — consigné
+> dans AGENTS.md avec les nouvelles règles ScrollPane/motion/RendererCtx.
+> Résidus assumés : pas de scrollbar visuelle sur les panes registry/skills
+> (les panes runs en ont une), pager burnin ancré viewport sans masque, hauteur
+> des paragraphes wrappés de launch non mesurée. Suite complète : 1591 passed /
+> 8 skipped (154 fichiers), typecheck ×2 + lint + docs:check + build Vite verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

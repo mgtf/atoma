@@ -230,7 +230,7 @@ env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
 
 npm run viz                       # HMR UI :5173; API :4111 redirects its root there
-npm run viz:mui                   # retained DOM/MUI fallback
+npm run viz:mui                   # frozen DOM/MUI fallback (bugfixes only)
 npm run viz:serve                 # compiled visualizer after npm run build
 npm run skills -- list            # what it learned, and what it refused to compile
 npm run burnin                    # regenerate the economics table above
@@ -241,7 +241,8 @@ component system through WebGPU with a deterministic WebGL fallback, while
 React Three Fiber renders the tier topology behind it. Zustand owns scene/UI
 state and TanStack Query owns the read-only API state. Only text input,
 clipboard, IME and accessibility use a minimal DOM bridge. The previous
-MUI client remains available through `npm run viz:mui`.
+MUI client remains available through `npm run viz:mui` but is frozen:
+it receives bugfixes, not features.
 The compiled visualizer is installable as an **Atoma** PWA; its service worker
 caches only the application shell and static assets, never the live `/api/*`
 data backed by the local registry and traces.

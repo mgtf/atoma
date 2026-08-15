@@ -396,6 +396,23 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   defects require structural fixes rather than learned workarounds.
 - Viz projects immutable traces at the typed boundary. Do not mutate raw trace
   prose to display current taxonomy.
+- The GPU client (`src/viz/client-gl/`) is the product UI. The MUI client
+  (`src/viz/client/`) is FROZEN as a fallback (`ATOMA_VIZ_UI=mui`,
+  `npm run viz:mui`): fix breakage, add nothing. Modules under `client/` that
+  the GL client imports (types, run-utils, search, timeline-layout,
+  structured-detail, i18n, data-api, pwa) are shared library code and stay live.
+- `gpu-renderer.ts` holds the stateful renderer class only. Pure chip layout,
+  event copy, shaders, motion, and the scroll pane live under
+  `client-gl/renderer/`; views are free functions over the exported
+  `RendererCtx` (a Pick over the class) in `renderer/views/`. New view code
+  goes there, never back into the class.
+- Scrollable GPU content goes through `createScrollPane` (bounded + masked);
+  the wheel handler FAILS CLOSED on `scrollMax`, so a view that never declares
+  its max does not scroll. Cull by skipping draws, not by stopping the layout
+  cursor. Detail panes report `detailBounds`/`detailScrollMax`.
+- `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
+  source in the GL client. Every animation system consults it and JUMPS to its
+  final state — exit effects are skipped entirely, never left running.
 - The GPU client deliberately uses two GPU contexts: one R3F backdrop and one
   Pixi UI. Do not add a third context for a tiny widget. Smoke tests assert the
   exact count and both WebGPU and WebGL fallback.

@@ -9,6 +9,11 @@ import {
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
 } from '../src/viz/client-gl/gpu-renderer.js';
+import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
+
+// Decisions are catalog-backed (outcome.* keys); resolving through the real
+// EN catalog proves the copy path never falls back to hardcoded English.
+const t = (key: string): string => I18N_CATALOGS.en[key] ?? key;
 import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
 import {
   nextRunFilters,
@@ -109,7 +114,7 @@ describe('full-GL event cards preserve trace metadata', () => {
       args: { path: 'src/index.ts' },
       result: { ok: true },
       durationMs: 12,
-    });
+    }, t);
     expect(copy).toMatchObject({
       title: 'Li · read_file',
       meta: expect.stringContaining('L1 Ammonia'),
@@ -133,7 +138,7 @@ describe('full-GL event cards preserve trace metadata', () => {
       response: JSON.stringify({ approved: true, reasoning: 'clean' }),
       durationMs: 1500,
       costUsd: 0.0123,
-    });
+    }, t);
     expect(copy.title).toBe('validate-result');
     expect(copy.meta).toContain('L3 Meristem');
     expect(copy.meta).toContain('→ Erythrocyte');
@@ -151,11 +156,11 @@ describe('full-GL event cards preserve trace metadata', () => {
       actor: { tier: 2, name: 'Tracheid' },
       response: JSON.stringify({ outcome: 'reuse', target: 'Hydrogen' }),
     };
-    expect(gpuEventCardCopy(base).decision).toBe('→ Water');
+    expect(gpuEventCardCopy(base, t).decision).toBe('→ Water');
     expect(gpuEventCardCopy({
       ...base,
       systemPrompt: 'You match a subtask against a catalog of learned skills',
-    }).decision).toBe('→ Hydrogen');
+    }, t).decision).toBe('→ Hydrogen');
   });
 });
 

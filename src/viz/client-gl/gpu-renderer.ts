@@ -9,27 +9,7 @@ import {
   TextStyle,
   Ticker,
 } from 'pixi.js';
-import {
-  buildAtomMap,
-  coerceEventFilters,
-  fmtCost,
-  fmtMs,
-  isRunLive,
-  toolArgSummary,
-  tryParseJson,
-  visibleEventKindFilters,
-} from '../client/run-utils.js';
-import {
-  atomSearchText,
-  matchesSearchQuery,
-  runSearchText,
-  skillSearchText,
-} from '../client/search.js';
-import {
-  buildTimelineLayout,
-  timelineBranchHeading,
-  type TimelineBranch,
-} from '../client/timeline-layout.js';
+import { matchesSearchQuery, runSearchText } from '../client/search.js';
 import type {
   BurninRow,
   LaunchProfile,
@@ -38,12 +18,8 @@ import type {
   RunIndexEntry,
   SkillNamespace,
   SkillSummary,
-  VizEvent,
   VizRun,
 } from '../client/types.js';
-import { taxonomyForTier } from '../../core/taxonomy.js';
-import { elementForTool } from '../../contracts/toolTaxonomy.js';
-import { currentDisplayName } from '../../registry/taxonomyNames.js';
 import {
   ATOMA_MARK_CORE_RADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
@@ -55,16 +31,6 @@ import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
-import {
-  buildSkillEventDetail,
-  buildStructuredDetail,
-  eventRoleLabel,
-  filePathFromArgs,
-  skillEventSubtitle,
-  skillEventTitle,
-  type DetailTone,
-  type StructuredDetailNode,
-} from '../client/structured-detail.js';
 
 export interface GpuDataSnapshot {
   runs: RunIndexEntry[];
@@ -90,7 +56,7 @@ export interface GpuHitTarget {
   height: number;
 }
 
-interface FilterVisualTarget extends GpuHitTarget {
+export interface FilterVisualTarget extends GpuHitTarget {
   active: boolean;
   accent: number;
 }
@@ -139,759 +105,30 @@ interface TextOptions {
   alpha?: number;
 }
 
-const PAGE_SIZE = 50;
-
-function scalar(value: unknown, fallback = ''): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    return String(value);
-  }
-  if (value === undefined || value === null) return fallback;
-  return JSON.stringify(value) ?? fallback;
-}
-
-function truncate(value: string, max: number) {
-  return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`;
-}
-
-export function gpuFilterButtonWidth(label: string) {
-  // Uppercase filter labels use the 11px semibold face, whose wide glyphs
-  // average closer to 7px than the 6px estimate used for ordinary chips.
-  // Add enough horizontal padding that the generic button renderer never
-  // applies ellipsis to a semantic control.
-  return Math.max(52, Math.ceil(label.length * 7.2 + 24));
-}
-
-const CONTROL_HOVER_GAP = 14;
 const NAV_HOVER_GAP = 20;
 
-export const FILTER_BLOCK_PAD = 8;
-export const FILTER_BLOCK_GAP = 12;
-export const FILTER_BUTTON_HEIGHT = 27;
-export const ATOM_BUTTON_HEIGHT = 28;
-
-export function gpuLaneLabelWidth(label: string) {
-  return Math.min(132, Math.max(72, Math.ceil(label.length * 6 + 18)));
-}
-
-export interface FilterChipSpec {
-  id: string;
-  label: string;
-}
-
-export interface FilterChipLayout extends FilterChipSpec {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface FilterBlockLayout {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  chips: FilterChipLayout[];
-}
-
-function placeChipBlock(
-  chips: readonly FilterChipSpec[],
-  originX: number,
-  originY: number,
-  maxRow: number,
-  widthOf: (label: string) => number,
-  buttonH: number,
-  insetX = 0
-): FilterBlockLayout {
-  const pad = FILTER_BLOCK_PAD;
-  const gap = CONTROL_HOVER_GAP;
-  let x = 0;
-  let y = 0;
-  let innerW = insetX;
-  const placed: FilterChipLayout[] = [];
-  for (const chip of chips) {
-    const width = widthOf(chip.label);
-    if (x > 0 && insetX + x + width > maxRow) {
-      x = 0;
-      y += buttonH + gap;
-    }
-    placed.push({
-      ...chip,
-      x: originX + pad + insetX + x,
-      y: originY + pad + y,
-      width,
-      height: buttonH,
-    });
-    x += width + gap;
-    innerW = Math.max(innerW, insetX + x - gap);
-  }
-  return {
-    x: originX,
-    y: originY,
-    width: Math.max(innerW, insetX) + pad * 2,
-    height: (chips.length ? y + buttonH : 0) + pad * 2,
-    chips: placed,
-  };
-}
-
-export function layoutFilterChipBlock(
-  originX: number,
-  originY: number,
-  maxWidth: number,
-  chips: readonly FilterChipSpec[]
-): FilterBlockLayout {
-  return placeChipBlock(
-    chips,
-    originX,
-    originY,
-    Math.max(FILTER_BUTTON_HEIGHT, maxWidth - FILTER_BLOCK_PAD * 2),
-    gpuFilterButtonWidth,
-    FILTER_BUTTON_HEIGHT
-  );
-}
-
-export function layoutRunFilterBlocks(options: {
-  originX: number;
-  originY: number;
-  maxWidth: number;
-  kinds: readonly FilterChipSpec[];
-  roles: readonly FilterChipSpec[] | null;
-}): { kinds: FilterBlockLayout; roles: FilterBlockLayout | null; bottom: number } {
-  const pad = FILTER_BLOCK_PAD;
-  const buttonH = FILTER_BUTTON_HEIGHT;
-  const maxInner = Math.max(buttonH, options.maxWidth - pad * 2);
-  const kinds = placeChipBlock(
-    options.kinds,
-    options.originX,
-    options.originY,
-    maxInner,
-    gpuFilterButtonWidth,
-    buttonH
-  );
-  if (!options.roles?.length) {
-    return { kinds, roles: null, bottom: kinds.y + kinds.height };
-  }
-
-  const stackedRoles = placeChipBlock(
-    options.roles,
-    options.originX,
-    options.originY + kinds.height + FILTER_BLOCK_GAP,
-    maxInner,
-    gpuFilterButtonWidth,
-    buttonH
-  );
-  const inlineRoles = placeChipBlock(
-    options.roles,
-    options.originX + kinds.width + FILTER_BLOCK_GAP,
-    options.originY,
-    maxInner,
-    gpuFilterButtonWidth,
-    buttonH
-  );
-  const singleRow =
-    kinds.height === buttonH + pad * 2 &&
-    inlineRoles.height === buttonH + pad * 2 &&
-    inlineRoles.x + inlineRoles.width <= options.originX + options.maxWidth;
-  const roles = singleRow ? inlineRoles : stackedRoles;
-  return { kinds, roles, bottom: Math.max(kinds.y + kinds.height, roles.y + roles.height) };
-}
-
-export interface AtomLaneSpec {
-  tier: 1 | 2 | 3;
-  label: string;
-  names: readonly string[];
-}
-
-export interface AtomLaneBlockLayout extends FilterBlockLayout {
-  tier: 1 | 2 | 3;
-  label: string;
-  labelX: number;
-  labelY: number;
-}
-
-export function layoutAtomLaneBlocks(options: {
-  originX: number;
-  originY: number;
-  maxWidth: number;
-  lanes: readonly AtomLaneSpec[];
-}): { lanes: AtomLaneBlockLayout[]; bottom: number } {
-  const pad = FILTER_BLOCK_PAD;
-  const buttonH = ATOM_BUTTON_HEIGHT;
-  const maxInner = Math.max(buttonH, options.maxWidth - pad * 2);
-
-  const measure = (lane: AtomLaneSpec, originX: number, originY: number, maxRow: number) => {
-    const labelW = gpuLaneLabelWidth(lane.label);
-    const block = placeChipBlock(
-      lane.names.map((name) => ({ id: `atom.${name}`, label: name })),
-      originX,
-      originY,
-      maxRow,
-      gpuAtomButtonWidth,
-      buttonH,
-      labelW
-    );
-    return {
-      ...block,
-      tier: lane.tier,
-      label: lane.label,
-      labelX: originX + pad,
-      labelY: originY + pad + 7,
-    };
-  };
-
-  const natural = options.lanes.map((lane) => measure(lane, 0, 0, Number.POSITIVE_INFINITY));
-  const inlineWidth =
-    natural.reduce((sum, lane) => sum + lane.width, 0) +
-    FILTER_BLOCK_GAP * Math.max(0, options.lanes.length - 1);
-  const inline =
-    options.lanes.length > 0 &&
-    inlineWidth <= options.maxWidth &&
-    natural.every((lane) => lane.height === buttonH + pad * 2);
-
-  const lanes: AtomLaneBlockLayout[] = [];
-  if (inline) {
-    let x = options.originX;
-    for (const lane of options.lanes) {
-      const block = measure(lane, x, options.originY, Number.POSITIVE_INFINITY);
-      lanes.push(block);
-      x += block.width + FILTER_BLOCK_GAP;
-    }
-  } else {
-    let y = options.originY;
-    for (const lane of options.lanes) {
-      const block = measure(lane, options.originX, y, maxInner);
-      lanes.push(block);
-      y += block.height + FILTER_BLOCK_GAP;
-    }
-  }
-  const bottom = lanes.length
-    ? Math.max(...lanes.map((lane) => lane.y + lane.height))
-    : options.originY;
-  return { lanes, bottom };
-}
-
-export function gpuAtomButtonWidth(label: string) {
-  // 28px particle zone + 8px separation + 12px right padding.
-  return Math.min(160, Math.max(80, Math.ceil(label.length * 6.4 + 48)));
-}
-
-function quantile(values: number[], percentile: number) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(percentile * sorted.length) - 1))]!;
-}
-
-function eventAccent(event: VizEvent): number {
-  if (event.kind === 'tool') return 0x38bdf8;
-  if (event.kind === 'trust') return GPU_COLORS.warning;
-  if (event.kind === 'cache') return GPU_COLORS.cyan;
-  if (event.kind === 'skill') return event.op === 'quarantine' ? GPU_COLORS.error : GPU_COLORS.magenta;
-  if (event.kind === 'registry') return 0xa78bfa;
-  return GPU_COLORS.tiers[(event.actor?.tier ?? 1) as 1 | 2 | 3] ?? GPU_COLORS.primary;
-}
-
-function detailToneColor(tone: DetailTone): number {
-  if (tone === 'success') return GPU_COLORS.success;
-  if (tone === 'error') return GPU_COLORS.error;
-  if (tone === 'warning') return GPU_COLORS.warning;
-  if (tone === 'info') return GPU_COLORS.cyan;
-  return GPU_COLORS.muted;
-}
-
-const BRANCH_COLORS = [
-  0x22d3ee,
-  0xe879f9,
-  0x4ade80,
-  0xfbbf24,
-  0x6ea8ff,
-  0xfb7185,
-  0xa78bfa,
-  0x2dd4bf,
-] as const;
-
-function timelineBranchColor(branch: TimelineBranch): number {
-  return BRANCH_COLORS[branch.colorIndex % BRANCH_COLORS.length]!;
-}
-
-function timelineBranchLabel(
-  branch: TimelineBranch,
-  t: (key: string, vars?: Record<string, unknown>) => string
-): string {
-  const heading = timelineBranchHeading(branch, t);
-  if (heading.title === heading.eyebrow) return heading.eyebrow;
-  return `${heading.eyebrow} · ${truncate(heading.title, 28)}`;
-}
-
-export function gpuCardShaderMode(event: VizEvent): number {
-  if (event.kind === 'llm') return 0;
-  if (event.kind === 'tool') return 1;
-  if (event.kind === 'trust') return 2;
-  if (event.kind === 'skill') return 3;
-  if (event.kind === 'cache') return 4;
-  if (event.kind === 'registry') return 5;
-  return 6;
-}
-
-export const POINTER_LIGHT_GLSL_VERTEX = /* glsl */ `
-  in vec2 aPosition;
-  out vec2 vTextureCoord;
-  out vec2 vScreenPx;
-  uniform vec4 uInputSize;
-  uniform vec4 uOutputFrame;
-  uniform vec4 uOutputTexture;
-
-  void main() {
-    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-    position.y =
-      position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) -
-      uOutputTexture.z;
-    gl_Position = vec4(position, 0.0, 1.0);
-    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-    vScreenPx = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-  }
-`;
-
-export const POINTER_LIGHT_GLSL = /* glsl */ `
-  in vec2 vTextureCoord;
-  in vec2 vScreenPx;
-  out vec4 finalColor;
-  uniform sampler2D uTexture;
-  uniform vec4 uInputPixel;
-  uniform vec2 uLightPx;
-  uniform float uStrength;
-
-  float luminance(vec3 color) {
-    return dot(color, vec3(0.2126, 0.7152, 0.0722));
-  }
-
-  void main() {
-    vec2 uv = vTextureCoord;
-    vec4 sampleColor = texture(uTexture, uv);
-    float sampleLuminance = luminance(sampleColor.rgb);
-    vec4 rightSample = texture(uTexture, uv + vec2(uInputPixel.z, 0.0));
-    vec4 downSample = texture(uTexture, uv + vec2(0.0, uInputPixel.w));
-    vec2 gradient = vec2(
-      luminance(rightSample.rgb) - sampleLuminance,
-      luminance(downSample.rgb) - sampleLuminance
-    );
-    vec2 alphaGradient = vec2(
-      rightSample.a - sampleColor.a,
-      downSample.a - sampleColor.a
-    );
-    vec2 outwardNormal = -(gradient + alphaGradient * 0.16);
-    vec2 toLight = normalize(uLightPx - vScreenPx + vec2(0.001));
-    float normalLength = length(outwardNormal);
-    float facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
-    float edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
-    float distancePx = length(vScreenPx - uLightPx);
-    float halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
-    float core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
-    vec3 lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
-    float illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
-    sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
-    finalColor = sampleColor;
-  }
-`;
-
-export const POINTER_LIGHT_WGSL = /* wgsl */ `
-  struct GlobalFilterUniforms {
-    uInputSize: vec4<f32>,
-    uInputPixel: vec4<f32>,
-    uInputClamp: vec4<f32>,
-    uOutputFrame: vec4<f32>,
-    uGlobalFrame: vec4<f32>,
-    uOutputTexture: vec4<f32>,
-  };
-
-  struct PointerLightUniforms {
-    uLightPx: vec2<f32>,
-    uStrength: f32,
-  };
-
-  @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
-  @group(0) @binding(1) var uTexture: texture_2d<f32>;
-  @group(0) @binding(2) var uSampler: sampler;
-  @group(1) @binding(0) var<uniform> pointerLight: PointerLightUniforms;
-
-  struct VSOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) screenPx: vec2<f32>,
-  };
-
-  fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
-    var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
-    position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
-    position.y = position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
-    return vec4(position, 0.0, 1.0);
-  }
-
-  fn filterTextureCoord(aPosition: vec2<f32>) -> vec2<f32> {
-    return aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
-  }
-
-  @vertex
-  fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
-    let screenPx = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
-    return VSOutput(filterVertexPosition(aPosition), filterTextureCoord(aPosition), screenPx);
-  }
-
-  fn luminance(color: vec3<f32>) -> f32 {
-    return dot(color, vec3(0.2126, 0.7152, 0.0722));
-  }
-
-  @fragment
-  fn mainFragment(
-    @location(0) uv: vec2<f32>,
-    @location(1) screenPx: vec2<f32>
-  ) -> @location(0) vec4<f32> {
-    var sampleColor = textureSample(uTexture, uSampler, uv);
-    let sampleLuminance = luminance(sampleColor.rgb);
-    let gradient = vec2(dpdx(sampleLuminance), dpdy(sampleLuminance));
-    let alphaGradient = vec2(dpdx(sampleColor.a), dpdy(sampleColor.a));
-    let outwardNormal = -(gradient + alphaGradient * 0.16);
-    let toLight = normalize(pointerLight.uLightPx - screenPx + vec2(0.001));
-    let normalLength = length(outwardNormal);
-    let facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
-    let edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
-    let distancePx = length(screenPx - pointerLight.uLightPx);
-    let halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
-    let core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
-    let lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
-    let illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
-    sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
-    sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
-    sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;
-    return sampleColor;
-  }
-`;
-
-export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
-  in vec2 aPosition;
-  out vec2 vTextureCoord;
-  uniform vec4 uInputSize;
-  uniform vec4 uOutputFrame;
-  uniform vec4 uOutputTexture;
-
-  void main() {
-    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-    position.y =
-      position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) -
-      uOutputTexture.z;
-    gl_Position = vec4(position, 0.0, 1.0);
-    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-  }
-`;
-
-export const CARD_FILTER_GLSL = /* glsl */ `
-  in vec2 vTextureCoord;
-  out vec4 finalColor;
-  uniform sampler2D uTexture;
-  uniform float uTime;
-  uniform float uMode;
-  uniform float uHover;
-  uniform float uSelected;
-
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-  }
-
-  void main() {
-    vec2 uv = vTextureCoord;
-    vec4 sampleColor = texture(uTexture, uv);
-    float edge = 1.0 - smoothstep(0.0, 0.11, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
-    float t = uTime;
-    float fx = 0.0;
-    vec3 tint = vec3(0.22, 0.55, 1.0);
-
-    if (uMode < 0.5) {
-      // LLM: travelling reasoning waves and token bands.
-      float wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
-      float band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
-      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
-      tint = vec3(0.28, 0.48, 1.0);
-    } else if (uMode < 1.5) {
-      // Tool: terminal grid, packet scan and deterministic digital noise.
-      vec2 gridUv = abs(fract(uv * vec2(36.0, 9.0)) - 0.5);
-      float grid = step(gridUv.x, 0.025) + step(gridUv.y, 0.035);
-      float packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
-      float noise = hash(floor(uv * 120.0) + floor(t * 8.0));
-      fx = grid * 0.07 + packet * 0.24 + (noise - 0.5) * 0.025;
-      tint = vec3(0.05, 0.82, 0.96);
-    } else if (uMode < 2.5) {
-      // Trust: shield-like radial pulse with a stable gold edge.
-      vec2 p = uv - 0.5;
-      float ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
-      float shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
-      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
-      tint = vec3(1.0, 0.68, 0.12);
-    } else if (uMode < 3.5) {
-      // Skill: magenta plasma, deliberately organic rather than gridded.
-      float plasma =
-        sin(uv.x * 18.0 + t * 1.9) +
-        sin(uv.y * 15.0 - t * 1.5) +
-        sin((uv.x + uv.y) * 13.0 + t);
-      fx = plasma * 0.035 + edge * 0.09;
-      tint = vec3(0.92, 0.22, 0.82);
-    } else if (uMode < 4.5) {
-      // Cache: crystalline diagonals and a fast replay glint.
-      float crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
-      float replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
-      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
-      tint = vec3(0.08, 0.9, 0.92);
-    } else if (uMode < 5.5) {
-      // Registry: violet circuit traces with stable node intersections.
-      vec2 circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - 0.5);
-      float traces = step(circuitUv.x, 0.028) * step(0.17, circuitUv.y);
-      float nodes = step(length(circuitUv), 0.075);
-      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
-      tint = vec3(0.62, 0.35, 1.0);
-    } else {
-      // Lifecycle/other: restrained state pulse.
-      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
-      tint = vec3(0.45, 0.62, 0.92);
-    }
-
-    float intensity = 0.46 + uHover * 0.72 + uSelected * 0.58;
-    sampleColor.rgb += tint * fx * intensity * sampleColor.a;
-    sampleColor.rgb += tint * edge * (uHover * 0.055 + uSelected * 0.065) * sampleColor.a;
-    finalColor = sampleColor;
-  }
-`;
-
-export const CARD_FILTER_WGSL = /* wgsl */ `
-  struct GlobalFilterUniforms {
-    uInputSize: vec4<f32>,
-    uInputPixel: vec4<f32>,
-    uInputClamp: vec4<f32>,
-    uOutputFrame: vec4<f32>,
-    uGlobalFrame: vec4<f32>,
-    uOutputTexture: vec4<f32>,
-  };
-
-  struct CardUniforms {
-    uTime: f32,
-    uMode: f32,
-    uHover: f32,
-    uSelected: f32,
-  };
-
-  @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
-  @group(0) @binding(1) var uTexture: texture_2d<f32>;
-  @group(0) @binding(2) var uSampler: sampler;
-  @group(1) @binding(0) var<uniform> cardUniforms: CardUniforms;
-
-  struct VSOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-  };
-
-  fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
-    var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
-    position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
-    position.y = position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
-    return vec4(position, 0.0, 1.0);
-  }
-
-  fn filterTextureCoord(aPosition: vec2<f32>) -> vec2<f32> {
-    return aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
-  }
-
-  @vertex
-  fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
-    return VSOutput(filterVertexPosition(aPosition), filterTextureCoord(aPosition));
-  }
-
-  fn hash(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-  }
-
-  @fragment
-  fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    var sampleColor = textureSample(uTexture, uSampler, uv);
-    let edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    let edge = 1.0 - smoothstep(0.0, 0.11, edgeDistance);
-    let t = cardUniforms.uTime;
-    var fx = 0.0;
-    var tint = vec3(0.22, 0.55, 1.0);
-
-    if (cardUniforms.uMode < 0.5) {
-      let wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
-      let band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
-      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
-      tint = vec3(0.28, 0.48, 1.0);
-    } else if (cardUniforms.uMode < 1.5) {
-      let gridUv = abs(fract(uv * vec2(36.0, 9.0)) - vec2(0.5));
-      let grid = select(0.0, 1.0, gridUv.x <= 0.025) + select(0.0, 1.0, gridUv.y <= 0.035);
-      let packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
-      let digitalNoise = hash(floor(uv * 120.0) + floor(vec2(t * 8.0)));
-      fx = grid * 0.07 + packet * 0.24 + (digitalNoise - 0.5) * 0.025;
-      tint = vec3(0.05, 0.82, 0.96);
-    } else if (cardUniforms.uMode < 2.5) {
-      let p = uv - vec2(0.5);
-      let ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
-      let shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
-      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
-      tint = vec3(1.0, 0.68, 0.12);
-    } else if (cardUniforms.uMode < 3.5) {
-      let plasma =
-        sin(uv.x * 18.0 + t * 1.9) +
-        sin(uv.y * 15.0 - t * 1.5) +
-        sin((uv.x + uv.y) * 13.0 + t);
-      fx = plasma * 0.035 + edge * 0.09;
-      tint = vec3(0.92, 0.22, 0.82);
-    } else if (cardUniforms.uMode < 4.5) {
-      let crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
-      let replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
-      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
-      tint = vec3(0.08, 0.9, 0.92);
-    } else if (cardUniforms.uMode < 5.5) {
-      let circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - vec2(0.5));
-      let traces = select(0.0, 1.0, circuitUv.x <= 0.028) * select(0.0, 1.0, circuitUv.y >= 0.17);
-      let nodes = select(0.0, 1.0, length(circuitUv) <= 0.075);
-      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
-      tint = vec3(0.62, 0.35, 1.0);
-    } else {
-      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
-      tint = vec3(0.45, 0.62, 0.92);
-    }
-
-    let intensity = 0.46 + cardUniforms.uHover * 0.72 + cardUniforms.uSelected * 0.58;
-    sampleColor.r += tint.r * fx * intensity * sampleColor.a;
-    sampleColor.g += tint.g * fx * intensity * sampleColor.a;
-    sampleColor.b += tint.b * fx * intensity * sampleColor.a;
-    sampleColor.r += tint.r * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
-    sampleColor.g += tint.g * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
-    sampleColor.b += tint.b * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
-    return sampleColor;
-  }
-`;
-
-function eventDecision(event: VizEvent): string {
-  if (event.kind !== 'llm') return '';
-  const parsed = tryParseJson(event.response) as Record<string, unknown> | undefined;
-  if (!parsed || Array.isArray(parsed)) return '';
-  if (event.role === 'prefilter') {
-    const target = scalar(parsed['target'], 'reuse');
-    const isSkillPrefilter = event.systemPrompt?.includes(
-      'You match a subtask against a catalog of learned skills'
-    );
-    const childTier =
-      !isSkillPrefilter && (event.actor?.tier === 2 || event.actor?.tier === 3)
-        ? event.actor.tier - 1
-        : undefined;
-    return parsed['outcome'] === 'reuse'
-      ? `→ ${currentDisplayName(childTier, target) ?? target}`
-      : parsed['outcome'] === 'escalate'
-        ? '↑ escalate'
-        : '';
-  }
-  if (event.role === 'validate-plan' || event.role === 'validate-result') {
-    return parsed['approved'] === true ? '✓ approved' : parsed['approved'] === false ? '✕ rejected' : '';
-  }
-  return '';
-}
-
-export interface GpuEventCardCopy {
-  title: string;
-  meta: string;
-  body: string;
-  footer: string;
-  decision: string;
-}
-
-function resultFacts(result: unknown): string {
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return '';
-  const value = result as Record<string, unknown>;
-  const facts = [
-    typeof value['ok'] === 'boolean' ? `ok=${value['ok']}` : '',
-    typeof value['exitCode'] === 'number' ? `exit=${value['exitCode']}` : '',
-    typeof value['status'] === 'number' ? `status=${value['status']}` : '',
-    value['recorded'] === true ? 'recorded' : '',
-  ];
-  return facts.filter(Boolean).join(' · ');
-}
-
-export function gpuEventCardCopy(event: VizEvent): GpuEventCardCopy {
-  const toolElement = event.kind === 'tool' && event.name
-    ? elementForTool(event.name)
-    : undefined;
-  const title =
-    event.kind === 'llm'
-      ? event.role ?? 'llm'
-      : event.kind === 'tool'
-        ? toolElement
-          ? `${toolElement.symbol} · ${event.name}`
-          : event.name ?? 'tool'
-        : event.kind === 'skill'
-          ? event.op ?? 'skill'
-          : `${event.kind}${event.op ? ` · ${event.op}` : ''}`;
-  const meta = [
-    event.actor?.name ? `L${event.actor.tier ?? '?'} ${event.actor.name}` : '',
-    event.child?.name ? `→ ${event.child.name}` : '',
-    event.subject ?? '',
-    event.branchId ? `⑂ ${event.branchId.slice(0, 6)}` : '',
-  ].filter(Boolean).join(' · ');
-  let body = event.error ?? event.reasoning ?? '';
-  if (event.kind === 'tool' && !event.error) {
-    body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
-  } else if (event.kind === 'cache') {
-    body = [scalar(event.outcome), event.reasoning].filter(Boolean).join(' · ');
-  } else if (event.kind === 'registry' && !body) {
-    body = [
-      event.snapshot?.name ?? event.name,
-      event.snapshot?.description,
-    ].filter(Boolean).join(' · ');
-  }
-  const time = Number.isFinite(event.ts)
-    ? new Date(event.ts).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    })
-    : '';
-  const footer =
-    event.kind === 'llm'
-      ? [event.model, fmtMs(event.durationMs), fmtCost(event.costUsd), time].filter(Boolean).join(' · ')
-      : event.kind === 'tool'
-        ? [fmtMs(event.durationMs), time].filter(Boolean).join(' · ')
-        : event.kind === 'trust'
-          ? [`✓${scalar(event['successes'], '0')}/✗${scalar(event['failures'], '0')}`, time].filter(Boolean).join(' · ')
-          : event.kind === 'skill'
-            ? [`${event.l1Name ?? '?'}/${event.skillId ?? '?'}`, time].filter(Boolean).join(' · ')
-            : event.kind === 'registry'
-              ? [`v${event.snapshot?.version ?? scalar(event.version, '?')}`, time].filter(Boolean).join(' · ')
-              : [event.model, time].filter(Boolean).join(' · ');
-  return { title, meta, body, footer, decision: eventDecision(event) };
-}
-
-function nowDescription(
-  t: GpuRenderSnapshot['t'],
-  event: VizEvent
-): string {
-  const vars = { actor: event.actor?.name ?? '?', child: event.child?.name ?? '?' };
-  switch (event.role) {
-    case 'plan':
-      return t('now.doing.plan', vars);
-    case 'execute':
-      return t('now.doing.execute', vars);
-    case 'prefilter':
-      return t('now.doing.prefilter', vars);
-    case 'validate-plan':
-      return t('now.doing.validatePlan', vars);
-    case 'validate-result':
-      return t('now.doing.validateResult', vars);
-    case 'fallback-plan':
-    case 'fallback-execute':
-      return t('now.doing.fallback', vars);
-    case 'skill':
-      return t('now.doing.skill', vars);
-    default:
-      return t('now.doing.unknown', vars);
-  }
-}
+// Decomposed modules (2026-08-15): pure layout, copy, shaders, motion and the
+// shared scroll pane live under ./renderer/. This file keeps the stateful
+// renderer class. Re-exports preserve the public import surface.
+export * from './renderer/chip-layout.js';
+export * from './renderer/shaders.js';
+export { gpuEventCardCopy, type GpuEventCardCopy, type GpuTranslate } from './renderer/copy.js';
+import { type FilterBlockLayout } from './renderer/chip-layout.js';
+import { truncate } from './renderer/copy.js';
+import {
+  CARD_FILTER_GLSL,
+  CARD_FILTER_GLSL_VERTEX,
+  CARD_FILTER_WGSL,
+  POINTER_LIGHT_GLSL,
+  POINTER_LIGHT_GLSL_VERTEX,
+  POINTER_LIGHT_WGSL,
+} from './renderer/shaders.js';
+import { prefersReducedMotion } from './renderer/motion.js';
+import { drawRuns } from './renderer/views/runs.js';
+import { drawRegistry } from './renderer/views/registry.js';
+import { drawSkills } from './renderer/views/skills.js';
+import { drawBurnin } from './renderer/views/burnin.js';
+import { drawLaunch } from './renderer/views/launch.js';
 
 export class GpuRenderer {
   app = new Application();
@@ -900,7 +137,7 @@ export class GpuRenderer {
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
-  private readonly scrollMax: Partial<Record<ViewName, number>> = {};
+  readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
   private readonly frameFilters = new Set<Filter>();
   private pointerLightFilter: Filter | null = null;
@@ -909,16 +146,16 @@ export class GpuRenderer {
     uStrength: number;
   } | null = null;
   private pointerLightStrength = 0;
-  private previousFilterBounds = new Map<string, FilterVisualTarget>();
+  previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
-  private roleRowTransition: {
+  roleRowTransition: {
     phase: 'exit' | 'enter';
     targets: FilterVisualTarget[];
     distance: number;
     startedAt: number;
   } | null = null;
-  private readonly seenAnimatedControls = new Set<string>();
+  readonly seenAnimatedControls = new Set<string>();
   private previousView: ViewName | null = null;
   private activeViewTransition: {
     from: ViewName;
@@ -929,11 +166,11 @@ export class GpuRenderer {
   private currentEventIds = new Set<string>();
   private runPickerBounds: Rectangle | null = null;
   private runPickerScrollMax = 0;
-  private detailBounds: Rectangle | null = null;
-  private detailScrollY = 0;
-  private detailScrollMax = 0;
+  detailBounds: Rectangle | null = null;
+  detailScrollY = 0;
+  detailScrollMax = 0;
   private detailKey: string | null = null;
-  private metrics: GpuRenderMetrics = {
+  metrics: GpuRenderMetrics = {
     backend: 'unknown',
     objectCount: 0,
     runCollapseOffset: 0,
@@ -962,7 +199,7 @@ export class GpuRenderer {
         return;
       }
     }
-    if (this.snapshot.state.view === 'runs' && this.detailBounds) {
+    if (this.detailBounds) {
       const bounds = this.app.canvas.getBoundingClientRect();
       const localX =
         (event.clientX - bounds.left) * this.app.screen.width / Math.max(1, bounds.width);
@@ -982,7 +219,10 @@ export class GpuRenderer {
     }
     const view = this.snapshot.state.view;
     const current = this.snapshot.state.scrollY[view];
-    const maximum = this.scrollMax[view] ?? Number.POSITIVE_INFINITY;
+    // Fail closed: a view that declared no scrollable content does not
+    // scroll. Every draw sets its own max (Infinity here let Registry and
+    // Skills wheel into the void — 2026-08-14 review).
+    const maximum = this.scrollMax[view] ?? 0;
     const next = Math.max(0, Math.min(maximum, current + event.deltaY));
     this.snapshot.onScroll(view, next - current);
   };
@@ -993,7 +233,11 @@ export class GpuRenderer {
     if (!filter || !uniforms) return;
     const pointer = readPointerLight();
     const target = pointer.active ? 1 : 0;
-    const response = 1 - Math.exp(-Math.max(0, ticker.deltaMS) * 0.018);
+    // Reduced motion: the light still follows the pointer (user-driven), but
+    // without the trailing ease that reads as autonomous drift.
+    const response = prefersReducedMotion()
+      ? 1
+      : 1 - Math.exp(-Math.max(0, ticker.deltaMS) * 0.018);
     this.pointerLightStrength += (target - this.pointerLightStrength) * response;
     if (!pointer.active && this.pointerLightStrength < 0.002) {
       this.pointerLightStrength = 0;
@@ -1140,12 +384,16 @@ export class GpuRenderer {
           : snapshot.state.selectedAtomName
             ? `agent:${snapshot.state.selectedAtomName}`
             : null
-        : null;
+        : snapshot.state.view === 'registry'
+          ? `registry:${snapshot.state.selectedRegistryAtom ?? ''}`
+          : snapshot.state.view === 'skills'
+            ? `skill:${snapshot.state.selectedSkill?.l1Name ?? ''}::${snapshot.state.selectedSkill?.id ?? ''}`
+            : null;
     if (nextDetailKey !== this.detailKey) this.detailScrollY = 0;
     this.detailKey = nextDetailKey;
     this.detailBounds = null;
     this.detailScrollMax = 0;
-    this.scrollMax.runs = 0;
+    this.scrollMax[snapshot.state.view] = 0;
 
     const hostWidth = this.host?.clientWidth ?? this.app.screen.width;
     const hostHeight = this.host?.clientHeight ?? this.app.screen.height;
@@ -1172,19 +420,19 @@ export class GpuRenderer {
     } else {
       switch (snapshot.state.view) {
         case 'runs':
-          this.drawRuns(snapshot, width, height);
+          drawRuns(this, snapshot, width, height);
           break;
         case 'registry':
-          this.drawRegistry(snapshot, width, height);
+          drawRegistry(this, snapshot, width, height);
           break;
         case 'skills':
-          this.drawSkills(snapshot, width, height);
+          drawSkills(this, snapshot, width, height);
           break;
         case 'burnin':
-          this.drawBurnin(snapshot, width, height);
+          drawBurnin(this, snapshot, width, height);
           break;
         case 'launch':
-          this.drawLaunch(snapshot, width, height);
+          drawLaunch(this, snapshot, width, height);
           break;
       }
     }
@@ -1227,7 +475,7 @@ export class GpuRenderer {
     parent.addChild(graphics);
   }
 
-  private panel(
+  panel(
     parent: Container,
     x: number,
     y: number,
@@ -1288,7 +536,7 @@ export class GpuRenderer {
     return graphics;
   }
 
-  private filterBlockFrame(
+  filterBlockFrame(
     parent: Container,
     block: Pick<FilterBlockLayout, 'x' | 'y' | 'width' | 'height'>
   ) {
@@ -1300,7 +548,7 @@ export class GpuRenderer {
     return graphics;
   }
 
-  private collapseCaret(
+  collapseCaret(
     parent: Container,
     right: number,
     top: number,
@@ -1321,7 +569,7 @@ export class GpuRenderer {
     return graphics;
   }
 
-  private text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
+  text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
     const label = new Text({
       text: value,
       style: new TextStyle({
@@ -1360,7 +608,7 @@ export class GpuRenderer {
     return shadow;
   }
 
-  private button(
+  button(
     parent: Container,
     id: string,
     role: string,
@@ -1413,12 +661,12 @@ export class GpuRenderer {
     return container;
   }
 
-  private addTicker(callback: (ticker: Ticker) => void) {
+  addTicker(callback: (ticker: Ticker) => void) {
     this.tickerCallbacks.add(callback);
     this.app.ticker.add(callback);
   }
 
-  private filterButton(
+  filterButton(
     parent: Container,
     id: string,
     label: string,
@@ -1513,11 +761,11 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
-    let elapsed = wasVisible ? performance.now() : -appearanceDelay;
+    let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -appearanceDelay;
     let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
-    container.alpha = wasVisible ? 1 : 0;
+    container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 260));
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.955 : hovered ? 1.035 : 1;
@@ -1589,7 +837,7 @@ export class GpuRenderer {
     active: boolean,
     onActivate: (id: string) => void
   ) {
-    const firstAppearance = !this.seenAnimatedControls.has(id);
+    const firstAppearance = !prefersReducedMotion() && !this.seenAnimatedControls.has(id);
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
@@ -1649,7 +897,7 @@ export class GpuRenderer {
     container.alpha = firstAppearance ? 0 : 1;
     let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 280));
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.95 : hovered ? 1.045 : 1;
@@ -1700,7 +948,7 @@ export class GpuRenderer {
     return container;
   }
 
-  private statCard(
+  statCard(
     parent: Container,
     id: string,
     label: string,
@@ -1711,7 +959,7 @@ export class GpuRenderer {
     height: number,
     accent: number
   ) {
-    const firstAppearance = !this.seenAnimatedControls.has(id);
+    const firstAppearance = !prefersReducedMotion() && !this.seenAnimatedControls.has(id);
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
@@ -1762,7 +1010,7 @@ export class GpuRenderer {
     let elapsed = firstAppearance ? -Number(id.replace(/\D/g, '').slice(-1) || 0) * 35 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 320));
       const eased = 1 - (1 - entrance) ** 3;
       container.alpha = eased;
@@ -1786,7 +1034,7 @@ export class GpuRenderer {
     return container;
   }
 
-  private atomButton(
+  atomButton(
     parent: Container,
     id: string,
     label: string,
@@ -1800,7 +1048,7 @@ export class GpuRenderer {
   ) {
     const accent = GPU_COLORS.tiers[tier];
     const particleCenterX = 16;
-    const firstAppearance = !this.seenAnimatedControls.has(id);
+    const firstAppearance = !prefersReducedMotion() && !this.seenAnimatedControls.has(id);
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
@@ -1858,7 +1106,7 @@ export class GpuRenderer {
     let elapsed = firstAppearance ? -(x % 120) * 1.2 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 300));
       const eased = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.95 : hovered ? 1.04 : 1;
@@ -1946,7 +1194,7 @@ export class GpuRenderer {
     };
   }
 
-  private eventCard(
+  eventCard(
     parent: Container,
     id: string,
     x: number,
@@ -2044,10 +1292,10 @@ export class GpuRenderer {
     let pressed = false;
     let shaderHover = 0;
     let shaderSelected = selected ? 1 : 0;
-    let elapsed = wasVisible ? performance.now() : -entranceDelay;
-    container.alpha = wasVisible ? 1 : 0;
+    let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -entranceDelay;
+    container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 300));
       const easedEntrance = 1 - (1 - entrance) ** 3;
       const targetScale = pressed ? 0.992 : hovered ? 1.008 : 1;
@@ -2060,8 +1308,9 @@ export class GpuRenderer {
         y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
       );
       const pulse = 0.5 + Math.sin(elapsed / 190) * 0.5;
-      shaderHover += ((hovered ? 1 : 0) - shaderHover) * Math.min(1, ticker.deltaMS * 0.014);
-      shaderSelected += ((selected ? 1 : 0) - shaderSelected) * Math.min(1, ticker.deltaMS * 0.014);
+      const shaderLerp = prefersReducedMotion() ? 1 : Math.min(1, ticker.deltaMS * 0.014);
+      shaderHover += ((hovered ? 1 : 0) - shaderHover) * shaderLerp;
+      shaderSelected += ((selected ? 1 : 0) - shaderSelected) * shaderLerp;
       cardShader.uniforms.uTime = elapsed / 1000;
       cardShader.uniforms.uHover = shaderHover;
       cardShader.uniforms.uSelected = shaderSelected;
@@ -2115,13 +1364,21 @@ export class GpuRenderer {
     return 1 + (overshoot + 1) * shifted ** 3 + overshoot * shifted ** 2;
   }
 
-  private drawExitingFilterButtons(
+  drawExitingFilterButtons(
     targets: FilterVisualTarget[],
     collapsingLayer: Container,
     collapseDistance: number,
     startedAt = performance.now()
   ) {
     if (!targets.length) return;
+    if (prefersReducedMotion()) {
+      // Jump to the final layout: no dissolving copies, no collapse slide.
+      for (const target of targets) this.handledExitIds.add(target.id);
+      collapsingLayer.y = 0;
+      this.metrics.runCollapseOffset = 0;
+      this.roleRowTransition = null;
+      return;
+    }
     const snapshotAtStart = this.snapshot;
     const exitDuration = 460 + (targets.length - 1) * 18;
     const collapseDuration = 390;
@@ -2272,12 +1529,18 @@ export class GpuRenderer {
     this.addTicker(dissolve);
   }
 
-  private animateEnteringFilterSpace(
+  animateEnteringFilterSpace(
     layer: Container,
     distance: number,
     startedAt = performance.now()
   ) {
     if (distance <= 0) return;
+    if (prefersReducedMotion()) {
+      layer.y = 0;
+      this.metrics.runCollapseOffset = 0;
+      this.roleRowTransition = null;
+      return;
+    }
     const duration = 390;
     const apply = (elapsed: number) => {
       const progress = Math.min(1, elapsed / duration);
@@ -2308,6 +1571,12 @@ export class GpuRenderer {
     for (const [id, target] of this.previousFilterBounds) {
       if (this.currentFilterBounds.has(id)) continue;
       if (this.handledExitIds.has(id)) continue;
+      if (prefersReducedMotion()) {
+        // Decorative exit particles: under reduced motion the control simply
+        // disappears — never schedule a ticker that would outlive its cause.
+        this.handledExitIds.add(id);
+        continue;
+      }
       const particles = new Container();
       const centerX = target.x + target.width / 2;
       const centerY = target.y + target.height / 2;
@@ -2350,7 +1619,7 @@ export class GpuRenderer {
     const transition = this.activeViewTransition;
     if (!transition) return;
     const initialElapsed = performance.now() - transition.startedAt;
-    if (initialElapsed >= 560) {
+    if (initialElapsed >= 560 || prefersReducedMotion()) {
       this.activeViewTransition = null;
       return;
     }
@@ -2399,7 +1668,7 @@ export class GpuRenderer {
 
     let elapsed = initialElapsed;
     const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
+      if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const progress = Math.min(1, elapsed / 560);
       const eased = 1 - (1 - progress) ** 3;
       const sweepX = -width * 0.42 + eased * width * 1.55;
@@ -2528,9 +1797,7 @@ export class GpuRenderer {
         .fill({ color: 0xffffff, alpha: 0.96 });
     };
 
-    const reducedMotion =
-      typeof matchMedia !== 'undefined' &&
-      matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = prefersReducedMotion();
     paint(reducedMotion ? 0 : performance.now());
     if (!reducedMotion) {
       this.addTicker(() => {
@@ -2736,1002 +2003,7 @@ export class GpuRenderer {
     }
   }
 
-  private drawRuns(snapshot: GpuRenderSnapshot, width: number, height: number) {
-    const run = snapshot.data.run;
-    if (!run) {
-      this.text(this.root, snapshot.t('runs.none'), 18, 76, { size: 14 });
-      return;
-    }
-    const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const twoPane = width >= 1050;
-    const rightWidth = twoPane ? Math.min(GPU_LAYOUT.rightWidth, width * 0.4) : 0;
-    const leftWidth = width - rightWidth - GPU_LAYOUT.gap * (twoPane ? 3 : 2);
-    const leftX = GPU_LAYOUT.gap;
-    const rightX = leftX + leftWidth + GPU_LAYOUT.gap;
-
-    this.panel(
-      this.root,
-      leftX,
-      top,
-      leftWidth,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    this.text(this.root, truncate(run.label, 95), leftX + 14, top + 12, {
-      size: 14,
-      weight: '700',
-      width: leftWidth - 28,
-    });
-    this.text(this.root, truncate(run.task?.description ?? '', 180), leftX + 14, top + 34, {
-      size: 11,
-      color: GPU_COLORS.muted,
-      width: leftWidth - 28,
-    });
-    if (isRunLive(run)) {
-      this.text(this.root, snapshot.t('runs.flag.live'), leftX + leftWidth - 72, top + 12, {
-        size: 11,
-        color: GPU_COLORS.success,
-        weight: '700',
-      });
-    }
-
-    const statsY = top + 76;
-    const stats = [
-      [snapshot.t('summary.duration'), fmtMs(run.durationMs)],
-      [snapshot.t('summary.llmCalls'), scalar(run.totals?.calls, '0')],
-      [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
-      [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
-    ];
-    const statAccents = [
-      GPU_COLORS.cyan,
-      GPU_COLORS.tiers[3],
-      GPU_COLORS.primary,
-      GPU_COLORS.success,
-    ];
-    const statWidth = (leftWidth - 28 - GPU_LAYOUT.gap * 3) / 4;
-    stats.forEach(([label, value], index) => {
-      const x = leftX + 14 + index * (statWidth + GPU_LAYOUT.gap);
-      this.statCard(
-        this.root,
-        `runs.stat.${index}`,
-        label!,
-        value!,
-        x,
-        statsY,
-        statWidth,
-        55,
-        statAccents[index] ?? GPU_COLORS.primary
-      );
-    });
-
-    const atoms = buildAtomMap(run);
-    const atomLayout = layoutAtomLaneBlocks({
-      originX: leftX + 14,
-      originY: statsY + 55 + FILTER_BLOCK_GAP,
-      maxWidth: leftWidth - 28,
-      lanes: ([3, 2, 1] as const).flatMap((tier) => {
-        const entries = [...atoms.values()].filter((value) => value.snapshot.tier === tier);
-        if (!entries.length) return [];
-        return [{
-          tier,
-          label: snapshot.t(`lanes.l${tier}`),
-          names: entries.map((entry) => entry.snapshot.name),
-        }];
-      }),
-    });
-    for (const lane of atomLayout.lanes) {
-      this.filterBlockFrame(this.root, lane);
-      this.text(this.root, lane.label, lane.labelX, lane.labelY, {
-        size: 10,
-        color: GPU_COLORS.tiers[lane.tier],
-        weight: '700',
-      });
-      for (const chip of lane.chips) {
-        this.atomButton(
-          this.root,
-          chip.id,
-          chip.label,
-          lane.tier,
-          chip.x,
-          chip.y,
-          chip.width,
-          chip.height,
-          snapshot.state.selectedAtomName === chip.label,
-          snapshot.onActivate
-        );
-      }
-    }
-
-    const filterY = atomLayout.bottom + FILTER_BLOCK_GAP;
-    const runFilters = coerceEventFilters(run.events, snapshot.state.runFilters);
-    const kinds = visibleEventKindFilters(run.events);
-    const rolesVisible =
-      runFilters.kind === 'all' ||
-      runFilters.kind === 'llm';
-    const roleNames = rolesVisible
-      ? [...new Set(run.events.flatMap((event) => event.role ? [event.role] : []))]
-      : [];
-    const filterLayout = layoutRunFilterBlocks({
-      originX: leftX + 14,
-      originY: filterY,
-      maxWidth: leftWidth - 28,
-      kinds: kinds.map((kind) => ({
-        id: `run.filter.kind.${kind}`,
-        label: kind === 'tool' ? snapshot.t('filters.tools').toUpperCase() : kind.toUpperCase(),
-      })),
-      roles: roleNames.length
-        ? ['all', ...roleNames].map((role) => ({
-            id: `run.filter.role.${role}`,
-            label: role === 'all' ? 'ALL ROLES' : role.toUpperCase(),
-          }))
-        : null,
-    });
-    this.filterBlockFrame(this.root, filterLayout.kinds);
-    for (const chip of filterLayout.kinds.chips) {
-      this.filterButton(
-        this.root,
-        chip.id,
-        chip.label,
-        chip.x,
-        chip.y,
-        chip.width,
-        chip.height,
-        runFilters.kind === chip.id.slice('run.filter.kind.'.length),
-        snapshot.onActivate
-      );
-    }
-    if (filterLayout.roles) {
-      this.filterBlockFrame(this.root, filterLayout.roles);
-      for (const chip of filterLayout.roles.chips) {
-        this.filterButton(
-          this.root,
-          chip.id,
-          chip.label,
-          chip.x,
-          chip.y,
-          chip.width,
-          chip.height,
-          runFilters.role === chip.id.slice('run.filter.role.'.length),
-          snapshot.onActivate
-        );
-      }
-    }
-
-    const controlsBottomWithoutRoles = filterLayout.kinds.y + filterLayout.kinds.height + FILTER_BLOCK_GAP;
-    let controlsBottom = filterLayout.bottom + FILTER_BLOCK_GAP;
-    const roleWasVisible = [...this.previousFilterBounds.keys()].some((id) =>
-      id.startsWith('run.filter.role.')
-    );
-    const exitingRoleFilters = !rolesVisible
-      ? [...this.previousFilterBounds.values()].filter((target) =>
-          target.id.startsWith('run.filter.role.')
-        )
-      : [];
-    const enterDistance = Math.max(0, controlsBottom - controlsBottomWithoutRoles);
-    if (rolesVisible) {
-      if (this.roleRowTransition?.phase === 'exit') this.roleRowTransition = null;
-      if (enterDistance > 0 && !roleWasVisible && this.roleRowTransition?.phase !== 'enter') {
-        this.roleRowTransition = {
-          phase: 'enter',
-          targets: [],
-          distance: enterDistance,
-          startedAt: performance.now(),
-        };
-      }
-    } else if (exitingRoleFilters.length && this.roleRowTransition?.phase !== 'exit') {
-      const previousRoleBottom = Math.max(
-        ...exitingRoleFilters.map((target) => target.y + target.height + 4)
-      );
-      this.roleRowTransition = {
-        phase: 'exit',
-        targets: exitingRoleFilters,
-        distance: Math.max(0, previousRoleBottom - controlsBottom),
-        startedAt: performance.now(),
-      };
-    } else if (this.roleRowTransition?.phase === 'enter') {
-      this.roleRowTransition = null;
-    }
-    const lowerControlsLayer = new Container();
-    this.root.addChild(lowerControlsLayer);
-    const roleRowTransition = this.roleRowTransition;
-    if (roleRowTransition?.phase === 'exit') {
-      this.drawExitingFilterButtons(
-        roleRowTransition.targets,
-        lowerControlsLayer,
-        roleRowTransition.distance,
-        roleRowTransition.startedAt
-      );
-    } else if (roleRowTransition?.phase === 'enter') {
-      this.animateEnteringFilterSpace(
-        lowerControlsLayer,
-        roleRowTransition.distance,
-        roleRowTransition.startedAt
-      );
-    }
-    const branchOverview = buildTimelineLayout(run.events, {
-      ...runFilters,
-      branchId: 'all',
-    });
-    const overviewById = new Map(
-      branchOverview.branches.map((branch) => [branch.id, branch])
-    );
-    const branchIds = branchOverview.branches.map((branch) => branch.id);
-    const shownBranchIds = branchIds.slice(0, 6);
-    if (
-      runFilters.branchId !== 'all' &&
-      !shownBranchIds.includes(runFilters.branchId)
-    ) {
-      shownBranchIds.push(runFilters.branchId);
-    }
-    if (branchIds.length > 1) {
-      const branchBlock = layoutFilterChipBlock(
-        leftX + 14,
-        controlsBottom,
-        leftWidth - 28,
-        ['all', ...shownBranchIds].map((branchId) => {
-          const branch = overviewById.get(branchId);
-          return {
-            id: `run.filter.branch.${branchId}`,
-            label:
-              branchId === 'all'
-                ? snapshot.t('timeline.allBranches').toUpperCase()
-                : branch
-                  ? timelineBranchLabel(branch, snapshot.t).toUpperCase()
-                  : `⑂ ${branchId.slice(0, 6)}`,
-          };
-        })
-      );
-      this.filterBlockFrame(lowerControlsLayer, branchBlock);
-      for (const chip of branchBlock.chips) {
-        this.filterButton(
-          lowerControlsLayer,
-          chip.id,
-          chip.label,
-          chip.x,
-          chip.y,
-          chip.width,
-          chip.height,
-          runFilters.branchId === chip.id.slice('run.filter.branch.'.length),
-          snapshot.onActivate
-        );
-      }
-      controlsBottom = branchBlock.y + branchBlock.height + FILTER_BLOCK_GAP;
-    }
-
-    const completed = new Set(run.events.filter((event) => event.kind === 'llm').map((event) => event.id));
-    const inFlight = run.events.filter(
-      (event) =>
-        event.kind === 'llm-start' &&
-        typeof event.llmEventId === 'string' &&
-        !completed.has(event.llmEventId)
-    );
-    if (isRunLive(run) && inFlight.length) {
-      const liveY = controlsBottom + 5;
-      this.panel(lowerControlsLayer, leftX + 14, liveY, leftWidth - 28, 52, 0x10263b, GPU_COLORS.cyan);
-      const current = inFlight.at(-1)!;
-      const tools = run.events.filter(
-        (event) => event.kind === 'tool' && event.llmEventId === current.llmEventId
-      );
-      this.text(
-        lowerControlsLayer,
-        `${snapshot.t('now.title')} · ${(current.role ?? 'LLM').toUpperCase()} · ${current.actor?.name ?? '?'} · ${snapshot.t('now.elementCount', { count: tools.length })}`,
-        leftX + 24,
-        liveY + 11,
-        { size: 10, color: GPU_COLORS.cyan, weight: '700' }
-      );
-      this.text(
-        lowerControlsLayer,
-        truncate(nowDescription(snapshot.t, current), 130),
-        leftX + 24,
-        liveY + 29,
-        { size: 9, color: GPU_COLORS.muted, width: leftWidth - 48 }
-      );
-      controlsBottom = liveY + 57;
-    }
-
-    if (runFilters.branchId !== 'all') {
-      const selectedBranch = overviewById.get(runFilters.branchId);
-      const heading = selectedBranch
-        ? timelineBranchHeading(selectedBranch, snapshot.t)
-        : {
-            eyebrow: snapshot.t('filters.branch', { id: runFilters.branchId.slice(0, 8) }),
-            title: snapshot.t('filters.branch', { id: runFilters.branchId.slice(0, 8) }),
-            lines: [] as const,
-          };
-      const expanded = snapshot.state.branchHeadingExpanded;
-      const visibleLines = expanded ? heading.lines : [];
-      const accent = selectedBranch ? timelineBranchColor(selectedBranch) : GPU_COLORS.primary;
-      const blockX = leftX + 14;
-      const blockWidth = leftWidth - 28;
-      const padX = 14;
-      const padY = 10;
-      const innerWidth = blockWidth - padX * 2 - 36;
-      const block = new Container();
-      let cursor = padY;
-      const eyebrow = this.text(block, heading.eyebrow.toUpperCase(), padX, cursor, {
-        size: 10,
-        weight: '700',
-        color: accent,
-      });
-      this.collapseCaret(block, blockWidth - padX, cursor + 1, expanded, accent);
-      cursor += eyebrow.height + 5;
-      const title = this.text(block, heading.title, padX, cursor, {
-        size: 14,
-        weight: '700',
-        color: GPU_COLORS.text,
-        width: innerWidth,
-      });
-      cursor += title.height;
-      if (visibleLines.length) cursor += 8;
-      for (const line of visibleLines) {
-        const row = this.text(block, `·  ${line}`, padX, cursor, {
-          size: 11,
-          color: GPU_COLORS.muted,
-          width: innerWidth,
-        });
-        cursor += row.height + 3;
-      }
-      cursor += padY - 2;
-      this.panel(
-        lowerControlsLayer,
-        blockX,
-        controlsBottom,
-        blockWidth,
-        cursor,
-        GPU_COLORS.panelRaised,
-        accent
-      );
-      block.eventMode = 'static';
-      block.cursor = 'pointer';
-      block.hitArea = new Rectangle(0, 0, blockWidth, cursor);
-      block.on('pointertap', () => snapshot.onActivate('branch.heading.toggle'));
-      block.position.set(blockX, controlsBottom);
-      lowerControlsLayer.addChild(block);
-      this.metrics.hitTargets.push({
-        id: 'branch.heading.toggle',
-        role: 'button',
-        label: snapshot.t(expanded ? 'timeline.collapse' : 'timeline.expand'),
-        x: blockX,
-        y: controlsBottom,
-        width: blockWidth,
-        height: cursor,
-      });
-      controlsBottom += cursor + FILTER_BLOCK_GAP;
-    }
-
-    const listY = controlsBottom + 7;
-    const listHeight = height - listY - GPU_LAYOUT.gap;
-    const listMask = new Graphics();
-    // Card filters have 12px shader padding and hover-scale around center.
-    // Keep vertical clipping strict (no overlap with filters) but use the full
-    // pane width so right-side glow/scale is not guillotined.
-    listMask.rect(leftX + 1, listY, leftWidth - 2, listHeight).fill(0xffffff);
-    listMask.eventMode = 'none';
-    lowerControlsLayer.addChild(listMask);
-    const listLayer = new Container();
-    listLayer.eventMode = 'static';
-    listLayer.interactiveChildren = true;
-    listLayer.hitArea = new Rectangle(leftX + 1, listY, leftWidth - 2, listHeight);
-    listLayer.mask = listMask;
-    lowerControlsLayer.addChild(listLayer);
-    const timeline = buildTimelineLayout(run.events, runFilters);
-    const rowHeight = timeline.rowHeight;
-    const contentTopPadding = 18;
-    const contentBottomPadding = 20;
-    const cardRightPadding = 24;
-    this.scrollMax.runs = Math.max(
-      0,
-      timeline.totalHeight +
-        contentTopPadding +
-        contentBottomPadding -
-        listHeight
-    );
-    const scrollY = Math.min(
-      snapshot.state.scrollY.runs,
-      this.scrollMax.runs
-    );
-    const start = Math.max(
-      0,
-      Math.floor(Math.max(0, scrollY - contentTopPadding) / rowHeight)
-    );
-    const count = Math.ceil(listHeight / rowHeight) + 2;
-    const laneSpacing =
-      timeline.maxLane > 0
-        ? Math.min(22, 96 / timeline.maxLane)
-        : 22;
-    const railInset = 28;
-    const labelGutter = 46;
-    const branchCardOffset = 10;
-    const railX = (lane: number) => leftX + railInset + lane * laneSpacing;
-    const cardBaseX = railX(timeline.maxLane) + labelGutter;
-    const cardBaseWidth = Math.min(
-      520,
-      leftX + leftWidth - cardRightPadding - cardBaseX
-    );
-    const rowCenterY = (row: number) =>
-      listY +
-      contentTopPadding +
-      row * rowHeight -
-      scrollY +
-      (rowHeight - 10) / 2;
-    this.metrics.timelineViewport = {
-      left: leftX,
-      top: listY,
-      width: leftWidth,
-      height: listHeight,
-      railBaseX: railX(0),
-      laneSpacing,
-      cardBaseX,
-      cardBaseWidth,
-      branchCardOffset,
-      contentTopPadding,
-      contentBottomPadding,
-      rowHeight,
-      totalHeight:
-        timeline.totalHeight + contentTopPadding + contentBottomPadding,
-      scrollY,
-    };
-    if (timeline.items.length === 0) {
-      this.text(listLayer, snapshot.t('filters.noMatch'), leftX + 24, listY + 22, {
-        size: 11,
-        color: GPU_COLORS.muted,
-        width: leftWidth - 48,
-      });
-    }
-    const graph = new Graphics();
-    if (timeline.items.length > 0) {
-      graph
-        .moveTo(railX(0), rowCenterY(0))
-        .lineTo(railX(0), rowCenterY(timeline.items.length - 1));
-      graph.stroke({ color: GPU_COLORS.primary, width: 2.2, alpha: 0.42 });
-    }
-    for (const branch of timeline.branches) {
-      const color = timelineBranchColor(branch);
-      graph
-        .moveTo(railX(branch.lane), rowCenterY(branch.firstRow))
-        .lineTo(railX(branch.lane), rowCenterY(branch.lastRow));
-      graph.stroke({ color, width: 2.4, alpha: 0.72 });
-    }
-    for (const connector of timeline.connectors) {
-      const branch = timeline.branches.find(
-        (candidate) => candidate.id === connector.branchId
-      );
-      const color = branch ? timelineBranchColor(branch) : GPU_COLORS.primary;
-      const fromX = railX(connector.fromLane);
-      const toX = railX(connector.toLane);
-      const connectorY = rowCenterY(connector.row);
-      const bend = Math.max(5, Math.abs(toX - fromX) * 0.45);
-      graph.moveTo(fromX, connectorY);
-      graph.bezierCurveTo(
-        fromX + Math.sign(toX - fromX) * bend,
-        connectorY,
-        toX - Math.sign(toX - fromX) * bend,
-        connectorY,
-        toX,
-        connectorY
-      );
-      graph.stroke({
-        color,
-        width: connector.kind === 'fork' ? 1.8 : 1.2,
-        alpha: connector.kind === 'fork' ? 0.78 : 0.48,
-      });
-    }
-    for (const item of timeline.items.slice(start, start + count)) {
-      const branch = item.branchId
-        ? timeline.branches.find((candidate) => candidate.id === item.branchId)
-        : undefined;
-      graph
-        .circle(railX(item.lane), rowCenterY(item.row), item.branchStart ? 4 : 2.4);
-      graph.fill({
-        color: branch ? timelineBranchColor(branch) : GPU_COLORS.primary,
-        alpha: item.branchStart || item.branchEnd ? 0.95 : 0.62,
-      });
-    }
-    listLayer.addChild(graph);
-
-    if (timeline.items.length > 0) {
-      const startY = rowCenterY(0);
-      const endY = rowCenterY(timeline.items.length - 1);
-      if (startY >= listY - 20 && startY <= listY + listHeight + 20) {
-        this.text(listLayer, snapshot.t('timeline.start').toUpperCase(), railX(0) + 7, startY - 7, {
-          size: 8,
-          color: GPU_COLORS.primary,
-          weight: '700',
-        });
-      }
-      if (endY >= listY - 20 && endY <= listY + listHeight + 20) {
-        this.text(listLayer, snapshot.t('timeline.end').toUpperCase(), railX(0) + 7, endY - 7, {
-          size: 8,
-          color: GPU_COLORS.primary,
-          weight: '700',
-        });
-      }
-    }
-
-    timeline.items.slice(start, start + count).forEach((item) => {
-      const event = item.event;
-      const y =
-        listY +
-        contentTopPadding +
-        item.row * rowHeight -
-        scrollY;
-      if (y > listY + listHeight || y + rowHeight < listY) return;
-      const selected = snapshot.state.selectedEventId === event.id;
-      const branch = item.branchId
-        ? timeline.branches.find((candidate) => candidate.id === item.branchId)
-        : undefined;
-      const branchOffset = item.lane * branchCardOffset;
-      const cardX = cardBaseX + branchOffset;
-      const cardWidth = cardBaseWidth - branchOffset;
-      const cardHeight = rowHeight - 10;
-      const tierDepth = item.tier === 3 ? 0.9 : item.tier === 2 ? 0.58 : item.tier === 1 ? 0.3 : 0.12;
-      const zDepth = Math.min(1, tierDepth + item.lane * 0.08);
-      const cardContent = this.eventCard(
-        listLayer,
-        event.id,
-        cardX,
-        y,
-        cardWidth,
-        cardHeight,
-        eventAccent(event),
-        gpuCardShaderMode(event),
-        selected,
-        snapshot.onActivate,
-        zDepth
-      );
-      const copy = gpuEventCardCopy(event);
-      this.text(cardContent, truncate(copy.title, 28), 11, 6, {
-        size: 11,
-        weight: '700',
-        color: eventAccent(event),
-      });
-      const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
-      const actor = rawMeta.split(' · ')[0] ?? '';
-      if (actor) {
-        this.text(cardContent, truncate(actor, 28), 118, 7, {
-          size: 9,
-          color: GPU_COLORS.muted,
-          width: Math.max(80, cardWidth - 250),
-        });
-      }
-      if (copy.decision) {
-        this.text(cardContent, copy.decision, cardWidth - 118, 6, {
-          size: 10,
-          color: copy.decision.startsWith('✕') || copy.decision.startsWith('↑')
-            ? GPU_COLORS.warning
-            : GPU_COLORS.success,
-          weight: '700',
-        });
-      }
-      const detail = [copy.body, copy.footer].filter(Boolean).join(' · ');
-      this.text(cardContent, truncate(detail, 160), 11, 28, {
-        size: 9,
-        color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
-        width: cardWidth - 22,
-      });
-      if (item.branchStart && branch) {
-        this.text(
-          listLayer,
-          branch.parallel
-            ? `B${branch.path.join('.')}`
-            : `P${branch.path.join('.')}`,
-          railX(branch.lane) + 6,
-          y + 4,
-          {
-            size: 8,
-            color: timelineBranchColor(branch),
-            weight: '700',
-          }
-        );
-      }
-    });
-
-    if (twoPane) {
-      this.panel(
-        this.root,
-        rightX,
-        top,
-        rightWidth,
-        height - top - GPU_LAYOUT.gap,
-        GPU_COLORS.panel,
-        GPU_COLORS.border,
-        GPU_LAYOUT.radius,
-        2
-      );
-      const summaryHeight = this.drawRunSummaryCard(
-        snapshot,
-        run,
-        rightX,
-        top,
-        rightWidth
-      );
-      const detailTop = top + summaryHeight;
-      const event = run.events.find((value) => value.id === snapshot.state.selectedEventId);
-      const atom = snapshot.state.selectedAtomName
-        ? atoms.get(snapshot.state.selectedAtomName)
-        : undefined;
-      if (event) {
-        this.drawEventDetail(
-          snapshot,
-          event,
-          rightX,
-          detailTop,
-          rightWidth,
-          height - detailTop
-        );
-      } else if (atom) {
-        this.drawAtomDetail(snapshot, atom.snapshot, rightX, detailTop, rightWidth);
-      } else if (!snapshot.state.runSummaryExpanded) {
-        this.text(this.root, snapshot.t('pane.selectEvent'), rightX + 18, detailTop + 12, {
-          size: 12,
-          color: GPU_COLORS.muted,
-          width: rightWidth - 36,
-        });
-      }
-    }
-  }
-
-  private drawRunSummaryCard(
-    snapshot: GpuRenderSnapshot,
-    run: VizRun,
-    x: number,
-    y: number,
-    width: number
-  ): number {
-    const expanded = snapshot.state.runSummaryExpanded;
-    const padX = 16;
-    const cardWidth = width - 20;
-    const innerWidth = cardWidth - padX * 2;
-    const block = new Container();
-    let cursor = 12;
-    this.text(block, snapshot.t('run.summary').toUpperCase(), padX, cursor, {
-      size: 10,
-      weight: '700',
-      color: GPU_COLORS.cyan,
-    });
-    this.collapseCaret(block, cardWidth - padX, cursor + 1, expanded, GPU_COLORS.cyan);
-    cursor += 18;
-    const title = this.text(block, truncate(run.label, 90), padX, cursor, {
-      size: 13,
-      weight: '700',
-      color: GPU_COLORS.text,
-      width: innerWidth - 8,
-    });
-    cursor += title.height + 6;
-    const facts = [
-      fmtMs(run.durationMs),
-      snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
-      fmtCost(run.totals?.costUsd),
-    ].filter(Boolean).join('  ·  ');
-    this.text(block, facts, padX, cursor, {
-      size: 10,
-      color: GPU_COLORS.muted,
-    });
-    cursor += 18;
-    const goal = run.task?.description ?? '';
-    if (goal) {
-      this.text(block, snapshot.t('run.goal').toUpperCase(), padX, cursor, {
-        size: 9,
-        weight: '700',
-        color: GPU_COLORS.muted,
-      });
-      cursor += 16;
-      const goalText = this.text(
-        block,
-        expanded ? goal : truncate(goal, 140),
-        padX,
-        cursor,
-        {
-          size: 11,
-          color: GPU_COLORS.text,
-          width: innerWidth,
-        }
-      );
-      cursor += goalText.height + 10;
-    } else {
-      cursor += 8;
-    }
-    this.panel(
-      this.root,
-      x + 10,
-      y + 10,
-      width - 20,
-      cursor,
-      GPU_COLORS.panelRaised,
-      GPU_COLORS.cyan
-    );
-    block.eventMode = 'static';
-    block.cursor = 'pointer';
-    block.hitArea = new Rectangle(0, 0, width - 20, cursor);
-    block.on('pointertap', () => snapshot.onActivate('run.summary.toggle'));
-    block.position.set(x + 10, y + 10);
-    this.root.addChild(block);
-    this.metrics.hitTargets.push({
-      id: 'run.summary.toggle',
-      role: 'button',
-      label: snapshot.t(expanded ? 'run.collapse' : 'run.expand'),
-      x: x + 10,
-      y: y + 10,
-      width: width - 20,
-      height: cursor,
-    });
-    return cursor + 18;
-  }
-
-  private drawEventDetail(
-    snapshot: GpuRenderSnapshot,
-    event: VizEvent,
-    x: number,
-    y: number,
-    width: number,
-    height: number
-  ) {
-    if (event.kind === 'skill') {
-      const title = this.text(this.root, skillEventTitle(event, snapshot.t), x + 18, y + 16, {
-        size: 15,
-        weight: '700',
-        color: eventAccent(event),
-        width: width - 36,
-      });
-      const subtitle = this.text(this.root, skillEventSubtitle(event), x + 18, y + 22 + title.height, {
-        size: 10,
-        color: GPU_COLORS.muted,
-        width: width - 36,
-      });
-      const skill =
-        snapshot.data.skillDetail?.id === event.skillId ? snapshot.data.skillDetail : null;
-      const structured = buildSkillEventDetail(event, skill, snapshot.t);
-      const detailTop = y + 36 + title.height + subtitle.height;
-      const detailBottom = y + height - 62;
-      const detailHeight = Math.max(40, detailBottom - detailTop);
-      this.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
-      const detailLayer = new Container();
-      detailLayer.position.y = -this.detailScrollY;
-      this.root.addChild(detailLayer);
-      const mask = this.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
-      detailLayer.mask = mask;
-      const contentBottom = this.drawStructuredDetailNodes(
-        detailLayer,
-        structured,
-        x + 18,
-        detailTop,
-        width - 42
-      );
-      this.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
-      this.detailScrollY = Math.min(this.detailScrollY, this.detailScrollMax);
-      detailLayer.position.y = -this.detailScrollY;
-      if (this.detailScrollMax > 0) {
-        const trackHeight = detailHeight;
-        const thumbHeight = Math.max(
-          28,
-          trackHeight * Math.min(1, detailHeight / (detailHeight + this.detailScrollMax))
-        );
-        const thumbY =
-          detailTop +
-          (trackHeight - thumbHeight) * (this.detailScrollY / this.detailScrollMax);
-        const scrollbar = new Graphics();
-        scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
-        scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
-        scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
-        scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
-        this.root.addChild(scrollbar);
-      }
-      if (event.l1Name && event.skillId) {
-        this.button(
-          this.root,
-          `skill.open.${event.l1Name}::${event.skillId}`,
-          'button',
-          snapshot.t('registry.openSkill'),
-          x + 18,
-          y + height - 55,
-          width - 36,
-          34,
-          false,
-          snapshot.onActivate
-        );
-      }
-      return;
-    }
-    this.text(
-      this.root,
-      event.kind === 'llm' ? eventRoleLabel(event.role, snapshot.t) : event.kind,
-      x + 18,
-      y + 16,
-      {
-      size: 15,
-      weight: '700',
-      color: eventAccent(event),
-      }
-    );
-    this.text(this.root, `${event.actor?.name ?? ''} ${event.model ?? ''}`, x + 18, y + 42, {
-      size: 10,
-      color: GPU_COLORS.muted,
-      width: width - 36,
-    });
-    if (event.kind === 'cache') {
-      this.text(this.root, snapshot.t('detail.cache.title'), x + 18, y + 72, {
-        size: 13,
-        color: GPU_COLORS.cyan,
-        weight: '700',
-        width: width - 36,
-      });
-      this.text(this.root, scalar(event.outcome), x + 18, y + 108, {
-        size: 12,
-        weight: '700',
-        width: width - 36,
-      });
-      this.text(this.root, event.reasoning ?? '', x + 18, y + 142, {
-        size: 10,
-        color: GPU_COLORS.muted,
-        width: width - 36,
-      });
-      this.text(this.root, snapshot.t('detail.cache.explain'), x + 18, y + 220, {
-        size: 10,
-        color: GPU_COLORS.muted,
-        width: width - 36,
-      });
-      return;
-    }
-    const raw =
-      event.kind === 'llm'
-        ? event.response ?? event.error ?? ''
-        : event.error ?? event.reasoning ?? '';
-    const structured =
-      event.kind === 'llm'
-        ? tryParseJson(raw)
-        : event.kind === 'tool' && !event.error
-          ? { args: event.args ?? {}, result: event.result }
-          : !event.error
-            ? event
-            : undefined;
-    const detailTop = y + 68;
-    const detailBottom = y + height - 14;
-    const detailHeight = Math.max(40, detailBottom - detailTop);
-    this.detailBounds = new Rectangle(x + 12, detailTop - 6, width - 24, detailHeight + 6);
-    const detailLayer = new Container();
-    detailLayer.position.y = -this.detailScrollY;
-    this.root.addChild(detailLayer);
-    const mask = this.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
-    detailLayer.mask = mask;
-    const contentBottom =
-      structured === undefined
-        ? detailTop +
-          this.text(detailLayer, truncate(raw, 8000), x + 18, detailTop, {
-            size: 10,
-            mono: true,
-            color: 0xcbd5e1,
-            width: width - 42,
-          }).height
-        : this.drawStructuredDetailNodes(
-            detailLayer,
-            buildStructuredDetail(structured, snapshot.t, {
-              markdownPath: event.kind === 'tool' ? filePathFromArgs(event.args) : undefined,
-            }),
-            x + 18,
-            detailTop,
-            width - 42
-          );
-    this.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
-    this.detailScrollY = Math.min(this.detailScrollY, this.detailScrollMax);
-    detailLayer.position.y = -this.detailScrollY;
-    if (this.detailScrollMax > 0) {
-      const trackHeight = detailHeight;
-      const thumbHeight = Math.max(
-        28,
-        trackHeight * Math.min(1, detailHeight / (detailHeight + this.detailScrollMax))
-      );
-      const thumbY =
-        detailTop +
-        (trackHeight - thumbHeight) * (this.detailScrollY / this.detailScrollMax);
-      const scrollbar = new Graphics();
-      scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
-      scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
-      scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
-      scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
-      this.root.addChild(scrollbar);
-    }
-  }
-
-  private drawStructuredDetailNodes(
-    parent: Container,
-    nodes: readonly StructuredDetailNode[],
-    x: number,
-    startY: number,
-    width: number,
-    depth = 0
-  ): number {
-    let cursor = startY;
-    for (const node of nodes) {
-      const inset = depth * 12;
-      const nodeX = x + inset;
-      const nodeWidth = Math.max(120, width - inset);
-      if (node.kind === 'field') {
-        const background = new Graphics();
-        parent.addChild(background);
-        this.text(parent, node.label, nodeX + 10, cursor + 7, {
-          size: 9,
-          color: GPU_COLORS.muted,
-          weight: '600',
-          width: nodeWidth - 20,
-        });
-        if (node.presentation === 'badge') {
-          const accent = detailToneColor(node.tone);
-          const badgeWidth = Math.min(
-            nodeWidth - 20,
-            Math.max(72, node.value.length * 6.4 + 22)
-          );
-          const badge = new Graphics();
-          badge.roundRect(nodeX + 10, cursor + 25, badgeWidth, 24, 6);
-          badge.fill({ color: accent, alpha: node.tone === 'neutral' ? 0.08 : 0.18 });
-          badge.stroke({ color: accent, width: 1, alpha: 0.75 });
-          parent.addChild(badge);
-          this.text(parent, node.value, nodeX + 20, cursor + 30, {
-            size: 10,
-            color: node.tone === 'neutral' ? GPU_COLORS.text : accent,
-            weight: '700',
-            width: badgeWidth - 18,
-          });
-          background.roundRect(nodeX, cursor, nodeWidth, 59, 7);
-          background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-          background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-          cursor += 67;
-          continue;
-        }
-
-        const valueText = this.text(
-          parent,
-          truncate(node.value, 4000),
-          nodeX + 10,
-          cursor + 25,
-          {
-            size: 10,
-            mono: node.presentation === 'code',
-            color: node.tone === 'info' ? GPU_COLORS.cyan : 0xcbd5e1,
-            width: nodeWidth - 20,
-          }
-        );
-        const fieldHeight = Math.max(58, valueText.height + 36);
-        background.roundRect(nodeX, cursor, nodeWidth, fieldHeight, 7);
-        background.fill({ color: GPU_COLORS.panelRaised, alpha: 0.55 });
-        background.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.65 });
-        cursor += fieldHeight + 8;
-        continue;
-      }
-
-      const rail = new Graphics();
-      parent.addChild(rail);
-      const title = node.count === undefined ? node.label : `${node.label} · ${node.count}`;
-      this.text(parent, title, nodeX + 10, cursor + 3, {
-        size: depth === 0 ? 12 : 10,
-        color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.text,
-        weight: '700',
-        width: nodeWidth - 20,
-      });
-      const railTop = cursor + 25;
-      cursor += 29;
-      cursor = this.drawStructuredDetailNodes(
-        parent,
-        node.children,
-        x,
-        cursor,
-        width,
-        depth + 1
-      );
-      rail.moveTo(nodeX + 2, railTop).lineTo(nodeX + 2, Math.max(railTop, cursor - 7));
-      rail.stroke({
-        color: depth === 0 ? GPU_COLORS.primary : GPU_COLORS.border,
-        width: depth === 0 ? 2 : 1,
-        alpha: 0.65,
-      });
-      cursor += 5;
-    }
-    return cursor;
-  }
-
-  private detailMask(x: number, y: number, width: number, height: number) {
+  detailMask(x: number, y: number, width: number, height: number) {
     const mask = new Graphics();
     mask.rect(x, y, width, height).fill(0xffffff);
     mask.eventMode = 'none';
@@ -3739,712 +2011,6 @@ export class GpuRenderer {
     return mask;
   }
 
-  private drawAtomDetail(
-    snapshot: GpuRenderSnapshot,
-    atom: RegistryType,
-    x: number,
-    y: number,
-    width: number
-  ) {
-    const taxonomy = taxonomyForTier(atom.tier as 1 | 2 | 3);
-    this.text(this.root, atom.name, x + 18, y + 16, { size: 16, weight: '700' });
-    this.text(this.root, `L${atom.tier} ${snapshot.t(`rank.${taxonomy.rank}`)} · v${atom.version} · ✓${atom.successes}/✗${atom.failures}`, x + 18, y + 43, {
-      size: 10,
-      color: GPU_COLORS.tiers[atom.tier as 1 | 2 | 3],
-    });
-    this.text(this.root, atom.description, x + 18, y + 67, {
-      size: 11,
-      color: GPU_COLORS.muted,
-      width: width - 36,
-    });
-    this.text(this.root, truncate(atom.systemPrompt, 5000), x + 18, y + 130, {
-      size: 10,
-      mono: true,
-      width: width - 36,
-    });
-  }
-
-  private drawRegistry(snapshot: GpuRenderSnapshot, width: number, height: number) {
-    const payload = snapshot.data.registry;
-    const x = GPU_LAYOUT.gap;
-    const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const leftWidth = Math.min(560, width * 0.45);
-    this.panel(
-      this.root,
-      x,
-      top,
-      leftWidth,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    this.text(this.root, snapshot.t('nav.registry'), x + 16, top + 14, {
-      size: 16,
-      weight: '700',
-    });
-    let selectorX = x + 16;
-    for (const registry of snapshot.data.registries.slice(0, 4)) {
-      const buttonWidth = Math.max(70, registry.label.length * 7 + 24);
-      this.button(
-        this.root,
-        `registry.select.${registry.id}`,
-        'button',
-        `${registry.label} · ${registry.counts.total}`,
-        selectorX,
-        top + 44,
-        buttonWidth,
-        30,
-        snapshot.state.selectedRegistryId === registry.id,
-        snapshot.onActivate
-      );
-      selectorX += buttonWidth + 6;
-    }
-    if (!payload) {
-      this.text(this.root, snapshot.t('common.loading'), x + 16, top + 96);
-      return;
-    }
-    const query = snapshot.state.search.registry;
-    let y = top + 92 - snapshot.state.scrollY.registry;
-    for (const tier of [3, 2, 1]) {
-      const atoms = payload.types.filter(
-        (atom) =>
-          atom.tier === tier &&
-          matchesSearchQuery(atomSearchText(atom), query)
-      );
-      if (!atoms.length) continue;
-      this.text(this.root, snapshot.t(`lanes.l${tier}`), x + 16, y + 8, {
-        size: 11,
-        weight: '700',
-        color: GPU_COLORS.tiers[tier as 1 | 2 | 3],
-      });
-      y += 28;
-      for (const atom of atoms) {
-        if (y > height - 35) break;
-        this.button(
-          this.root,
-          `registry.atom.${atom.name}`,
-          'button',
-          `${atom.name} · ✓${atom.successes}/✗${atom.failures}`,
-          x + 16,
-          y,
-          leftWidth - 32,
-          32,
-          snapshot.state.selectedRegistryAtom === atom.name,
-          snapshot.onActivate,
-          GPU_COLORS.tiers[tier as 1 | 2 | 3]
-        );
-        y += 37;
-      }
-      y += 8;
-    }
-    const rightX = x + leftWidth + GPU_LAYOUT.gap;
-    this.panel(
-      this.root,
-      rightX,
-      top,
-      width - rightX - GPU_LAYOUT.gap,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    const atom = payload.types.find((item) => item.name === snapshot.state.selectedRegistryAtom) ?? payload.types[0];
-    if (atom) this.drawAtomDetail(snapshot, atom, rightX, top, width - rightX - GPU_LAYOUT.gap);
-  }
-
-  private drawSkills(snapshot: GpuRenderSnapshot, width: number, height: number) {
-    const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const leftWidth = Math.min(560, width * 0.45);
-    this.panel(
-      this.root,
-      GPU_LAYOUT.gap,
-      top,
-      leftWidth,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    this.text(this.root, snapshot.t('nav.skills'), 26, top + 14, { size: 16, weight: '700' });
-    const query = snapshot.state.search.skills;
-    let y = top + 100 - snapshot.state.scrollY.skills;
-    for (const namespace of snapshot.data.skillNamespaces) {
-      const skills = (snapshot.data.skillsByNamespace[namespace.l1Name] ?? []).filter((skill) =>
-        matchesSearchQuery(skillSearchText(skill, namespace.l1Name), query)
-      );
-      if (!skills.length) continue;
-      this.text(this.root, `${namespace.l1Name} (${skills.length})`, 26, y, {
-        size: 11,
-        weight: '700',
-        color: GPU_COLORS.tiers[1],
-      });
-      y += 24;
-      for (const skill of skills) {
-        if (y > height - 36) break;
-        this.button(
-          this.root,
-          `skill.select.${namespace.l1Name}::${skill.id}`,
-          'button',
-          `${skill.id} · ✓${skill.successes}/✗${skill.failures}`,
-          26,
-          y,
-          leftWidth - 32,
-          31,
-          snapshot.state.selectedSkill?.l1Name === namespace.l1Name &&
-            snapshot.state.selectedSkill.id === skill.id,
-          snapshot.onActivate,
-          skill.kind === 'script' ? GPU_COLORS.warning : GPU_COLORS.primary
-        );
-        y += 36;
-      }
-      y += 10;
-    }
-    const rightX = leftWidth + GPU_LAYOUT.gap * 2;
-    const rightWidth = width - rightX - GPU_LAYOUT.gap;
-    this.panel(
-      this.root,
-      rightX,
-      top,
-      rightWidth,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    const skill = snapshot.data.skillDetail;
-    if (!skill) {
-      this.text(this.root, snapshot.t('pane.selectSkill'), rightX + 18, top + 20, {
-        color: GPU_COLORS.muted,
-      });
-      return;
-    }
-    this.text(this.root, skill.id, rightX + 18, top + 16, { size: 16, weight: '700' });
-    this.text(this.root, `${skill.kind} · ✓${skill.successes}/✗${skill.failures}`, rightX + 18, top + 44, {
-      size: 10,
-      color: skill.kind === 'script' ? GPU_COLORS.warning : GPU_COLORS.primary,
-    });
-    this.text(this.root, skill.description, rightX + 18, top + 70, {
-      size: 11,
-      width: rightWidth - 36,
-    });
-    let bodyY = top + 132;
-    if (skill.shareability) {
-      const blocked = skill.shareability.verdict === 'blocked';
-      this.panel(
-        this.root,
-        rightX + 18,
-        top + 118,
-        rightWidth - 36,
-        58,
-        blocked ? 0x361921 : 0x112c25,
-        blocked ? GPU_COLORS.error : GPU_COLORS.success
-      );
-      this.text(
-        this.root,
-        snapshot.t(`skill.share.${skill.shareability.verdict}`),
-        rightX + 30,
-        top + 130,
-        {
-          size: 10,
-          color: blocked ? GPU_COLORS.error : GPU_COLORS.success,
-          weight: '700',
-          width: rightWidth - 60,
-        }
-      );
-      bodyY = top + 192;
-    }
-    this.text(this.root, truncate(skill.body ?? '', 6000), rightX + 18, bodyY, {
-      size: 10,
-      mono: true,
-      width: rightWidth - 36,
-    });
-  }
-
-  private drawBurninChart(
-    parent: Container,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    rows: BurninRow[]
-  ) {
-    const firstAppearance = !this.seenAnimatedControls.has('burnin.chart');
-    this.seenAnimatedControls.add('burnin.chart');
-    const chart = new Container();
-    chart.position.set(x, y);
-    chart.eventMode = 'static';
-    chart.cursor = 'crosshair';
-    chart.hitArea = new Rectangle(0, 0, width, height);
-
-    const frame = new Graphics();
-    frame.roundRect(0, 0, width, height, 8);
-    frame.fill({ color: 0x0d1626, alpha: 0.9 });
-    frame.stroke({ color: 0x263a5a, width: 1.1, alpha: 0.9 });
-    chart.addChild(frame);
-
-    const grid = new Graphics();
-    for (let index = 1; index < 6; index++) {
-      const gx = 28 + index / 6 * (width - 48);
-      grid.moveTo(gx, 14).lineTo(gx, height - 24);
-    }
-    for (let index = 1; index < 5; index++) {
-      const gy = 12 + index / 5 * (height - 38);
-      grid.moveTo(28, gy).lineTo(width - 14, gy);
-    }
-    grid.stroke({ color: 0x4e6d9f, width: 0.6, alpha: 0.16 });
-    chart.addChild(grid);
-
-    const timestamps = rows
-      .map((row) => Date.parse(row.ts))
-      .filter(Number.isFinite);
-    const minTime = Math.min(...timestamps);
-    const maxTime = Math.max(...timestamps);
-    const maxCost = Math.max(0.01, ...rows.map((row) => row.costUsd ?? 0));
-    const familyColors: Record<string, number> = {
-      app: 0x6ea8ff,
-      cli: 0x2dd4bf,
-      'cli-trio': 0x22d3ee,
-      files: 0xc084fc,
-      http: 0xfbbf24,
-      web: 0xe879f9,
-    };
-    const plotWidth = width - 48;
-    const plotHeight = height - 42;
-    const points = rows.flatMap((row, index) => {
-      if (row.costUsd === null) return [];
-      const timestamp = Date.parse(row.ts);
-      const px =
-        28 +
-        (Number.isFinite(timestamp) && maxTime > minTime
-          ? (timestamp - minTime) / (maxTime - minTime)
-          : index / Math.max(1, rows.length - 1)) *
-          plotWidth;
-      const py = 12 + plotHeight - row.costUsd / maxCost * plotHeight;
-      return [{
-        row,
-        x: px,
-        y: py,
-        color:
-          row.outcome === 'delivered'
-            ? familyColors[row.family] ?? GPU_COLORS.success
-            : GPU_COLORS.error,
-      }];
-    });
-    this.metrics.hitTargets.push({
-      id: 'burnin.chart',
-      role: 'figure',
-      label: 'Burn-in cost scatter',
-      x,
-      y,
-      width,
-      height,
-    });
-    for (const point of points) {
-      this.metrics.hitTargets.push({
-        id: `burnin.point.${point.row.taskId}`,
-        role: 'graphics-symbol',
-        label: point.row.taskId,
-        x: x + point.x - 8,
-        y: y + point.y - 8,
-        width: 16,
-        height: 16,
-      });
-    }
-
-    const pointGraphics = new Graphics();
-    for (const point of points) {
-      pointGraphics
-        .circle(point.x, point.y, point.row.outcome === 'delivered' ? 2.8 : 4.5)
-        .fill({ color: point.color, alpha: 0.88 });
-    }
-    chart.addChild(pointGraphics);
-
-    const sweepTrail = Array.from({ length: 5 }, (_, index) => {
-      const line = new Graphics();
-      line.rect(0, 12, 1.2 + index * 0.35, plotHeight).fill({
-        color: index % 2 ? GPU_COLORS.primary : GPU_COLORS.cyan,
-        alpha: 0.14,
-      });
-      line.alpha = 0.02 + index * 0.015;
-      chart.addChild(line);
-      return line;
-    });
-
-    const highlight = new Graphics();
-    highlight.circle(0, 0, 8).stroke({ color: 0xffffff, width: 1.4, alpha: 0.9 });
-    highlight.circle(0, 0, 4).fill(0xffffff);
-    highlight.alpha = 0;
-    chart.addChild(highlight);
-
-    const tooltip = new Container();
-    const tooltipBg = new Graphics();
-    tooltipBg.roundRect(0, 0, 210, 54, 7);
-    tooltipBg.fill({ color: 0x080e19, alpha: 0.96 });
-    tooltipBg.stroke({ color: GPU_COLORS.primary, width: 1.1, alpha: 0.9 });
-    tooltip.addChild(tooltipBg);
-    const tooltipTitle = this.text(tooltip, '', 10, 7, {
-      size: 10,
-      color: GPU_COLORS.text,
-      weight: '700',
-    });
-    const tooltipMeta = this.text(tooltip, '', 10, 28, {
-      size: 9,
-      color: GPU_COLORS.muted,
-    });
-    tooltip.alpha = 0;
-    chart.addChild(tooltip);
-
-    this.text(chart, `$${maxCost.toFixed(2)}`, 5, 8, {
-      size: 8,
-      color: GPU_COLORS.muted,
-    });
-    this.text(chart, '$0', 10, height - 25, {
-      size: 8,
-      color: GPU_COLORS.muted,
-    });
-    if (Number.isFinite(minTime) && Number.isFinite(maxTime)) {
-      this.text(chart, new Date(minTime).toLocaleDateString(), 28, height - 18, {
-        size: 8,
-        color: GPU_COLORS.muted,
-      });
-      const endLabel = this.text(
-        chart,
-        new Date(maxTime).toLocaleDateString(),
-        width - 14,
-        height - 18,
-        { size: 8, color: GPU_COLORS.muted }
-      );
-      endLabel.anchor.x = 1;
-    }
-
-    let hoveredPoint: typeof points[number] | null = null;
-    chart.on('pointermove', (event) => {
-      const local = event.getLocalPosition(chart);
-      let nearest: typeof points[number] | null = null;
-      let nearestDistance = 15 * 15;
-      for (const point of points) {
-        const dx = point.x - local.x;
-        const dy = point.y - local.y;
-        const distance = dx * dx + dy * dy;
-        if (distance < nearestDistance) {
-          nearest = point;
-          nearestDistance = distance;
-        }
-      }
-      hoveredPoint = nearest;
-      if (!nearest) {
-        tooltip.alpha = 0;
-        highlight.alpha = 0;
-        return;
-      }
-      highlight.position.set(nearest.x, nearest.y);
-      highlight.tint = nearest.color;
-      highlight.alpha = 1;
-      tooltipTitle.text = truncate(nearest.row.taskId, 32);
-      tooltipMeta.text =
-        `${nearest.row.family} · ${fmtCost(nearest.row.costUsd)} · ` +
-        `${nearest.row.durationS ?? '?'}s · ${nearest.row.outcome}`;
-      tooltip.position.set(
-        Math.max(8, Math.min(width - 218, nearest.x + 12)),
-        Math.max(8, Math.min(height - 62, nearest.y - 62))
-      );
-      tooltip.alpha = 1;
-    });
-    chart.on('pointerout', () => {
-      hoveredPoint = null;
-      tooltip.alpha = 0;
-      highlight.alpha = 0;
-    });
-
-    let elapsed = firstAppearance ? 0 : performance.now();
-    chart.alpha = firstAppearance ? 0 : 1;
-    const animate = (ticker: Ticker) => {
-      elapsed += ticker.deltaMS;
-      const entrance = Math.min(1, elapsed / 420);
-      chart.alpha = 1 - (1 - entrance) ** 3;
-      const sweep = 28 + (elapsed * 0.055) % Math.max(32, plotWidth);
-      sweepTrail.forEach((line, index) => {
-        line.x = sweep - index * 7;
-        line.alpha = (0.025 + index * 0.016) * (0.55 + Math.sin(elapsed / 230) * 0.25);
-      });
-      if (hoveredPoint) {
-        const pulse = 0.5 + Math.sin(elapsed / 110) * 0.5;
-        highlight.scale.set(0.9 + pulse * 0.28);
-        highlight.alpha = 0.62 + pulse * 0.38;
-      }
-    };
-    this.addTicker(animate);
-    parent.addChild(chart);
-    return chart;
-  }
-
-  private drawBurnin(snapshot: GpuRenderSnapshot, width: number, height: number) {
-    const payload = snapshot.data.burnin;
-    if (!payload?.rows.length) {
-      this.text(this.root, snapshot.t('burnin.empty', { path: payload?.csvPath ?? '' }), 20, 78, {
-        size: 13,
-      });
-      return;
-    }
-    const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const latestTimestamp = Math.max(
-      ...payload.rows.map((row) => Date.parse(row.ts)).filter(Number.isFinite)
-    );
-    const presetDays =
-      snapshot.state.burninPreset === 'all' ? null : Number(snapshot.state.burninPreset);
-    const rows = payload.rows.filter((row) => {
-      if (snapshot.state.burninFamily !== 'all' && row.family !== snapshot.state.burninFamily) return false;
-      if (
-        snapshot.state.burninOutcome !== 'all' &&
-        (snapshot.state.burninOutcome === 'delivered'
-          ? row.outcome !== 'delivered'
-          : row.outcome === 'delivered')
-      ) return false;
-      if (
-        presetDays !== null &&
-        Number.isFinite(latestTimestamp) &&
-        Date.parse(row.ts) < latestTimestamp - presetDays * 86_400_000
-      ) return false;
-      return true;
-    });
-    const families = [...new Set(payload.rows.map((row) => row.family))].sort();
-    let x = GPU_LAYOUT.gap;
-    let familyY = top;
-    const addFamilyFilter = (id: string, label: string, active: boolean) => {
-      const buttonWidth = gpuFilterButtonWidth(label);
-      if (x + buttonWidth > width - GPU_LAYOUT.gap && x > GPU_LAYOUT.gap) {
-        x = GPU_LAYOUT.gap;
-        familyY += 34;
-      }
-      this.filterButton(
-        this.root,
-        id,
-        label,
-        x,
-        familyY,
-        buttonWidth,
-        30,
-        active,
-        snapshot.onActivate
-      );
-      x += buttonWidth + 6;
-    };
-    addFamilyFilter('burnin.family.all', snapshot.t('burnin.all'), snapshot.state.burninFamily === 'all');
-    for (const family of families.slice(0, 7)) {
-      addFamilyFilter(`burnin.family.${family}`, family, snapshot.state.burninFamily === family);
-    }
-    let optionX = GPU_LAYOUT.gap;
-    let optionY = familyY + 36;
-    const addOptionFilter = (id: string, label: string, active: boolean) => {
-      const buttonWidth = gpuFilterButtonWidth(label);
-      if (optionX + buttonWidth > width - GPU_LAYOUT.gap && optionX > GPU_LAYOUT.gap) {
-        optionX = GPU_LAYOUT.gap;
-        optionY += 32;
-      }
-      this.filterButton(
-        this.root,
-        id,
-        label,
-        optionX,
-        optionY,
-        buttonWidth,
-        28,
-        active,
-        snapshot.onActivate
-      );
-      optionX += buttonWidth + 6;
-    };
-    for (const outcome of ['all', 'delivered', 'failed']) {
-      const label =
-        outcome === 'all'
-          ? snapshot.t('burnin.all')
-          : outcome === 'delivered'
-            ? snapshot.t('burnin.deliveredOnly')
-            : snapshot.t('burnin.failedOnly');
-      addOptionFilter(
-        `burnin.outcome.${outcome}`,
-        label,
-        snapshot.state.burninOutcome === outcome
-      );
-    }
-    optionX += 10;
-    for (const preset of ['all', '1', '7', '30']) {
-      const label =
-        preset === 'all'
-          ? snapshot.t('burnin.allTime')
-          : preset === '1'
-            ? snapshot.t('burnin.last24h')
-            : preset === '7'
-              ? snapshot.t('burnin.last7d')
-              : snapshot.t('burnin.last30d');
-      addOptionFilter(
-        `burnin.preset.${preset}`,
-        label,
-        snapshot.state.burninPreset === preset
-      );
-    }
-    const delivered = rows.filter((row) => row.outcome === 'delivered').length;
-    const costs = rows.flatMap((row) => row.costUsd === null ? [] : [row.costUsd]);
-    const durations = rows.flatMap((row) => row.durationS === null ? [] : [row.durationS]);
-    const stats = [
-      [snapshot.t('burnin.runsSelected'), String(rows.length)],
-      [snapshot.t('burnin.deliveryRate'), `${Math.round(delivered / Math.max(1, rows.length) * 100)}%`],
-      [snapshot.t('burnin.medianCost'), fmtCost(quantile(costs, 0.5))],
-      [snapshot.t('burnin.p90Duration'), `${quantile(durations, 0.9) ?? '—'}s`],
-    ];
-    const burninStatAccents = [
-      GPU_COLORS.primary,
-      GPU_COLORS.success,
-      GPU_COLORS.cyan,
-      GPU_COLORS.warning,
-    ];
-    const statsY = optionY + 38;
-    const statWidth = (width - GPU_LAYOUT.gap * 5) / 4;
-    stats.forEach(([label, value], index) => {
-      const statX = GPU_LAYOUT.gap + index * (statWidth + GPU_LAYOUT.gap);
-      this.statCard(
-        this.root,
-        `burnin.stat.${index}`,
-        label!,
-        value!,
-        statX,
-        statsY,
-        statWidth,
-        58,
-        burninStatAccents[index] ?? GPU_COLORS.primary
-      );
-    });
-    const chartY = statsY + 68;
-    const chartHeight = Math.min(280, height * 0.34);
-    this.drawBurninChart(
-      this.root,
-      GPU_LAYOUT.gap,
-      chartY,
-      width - GPU_LAYOUT.gap * 2,
-      chartHeight,
-      rows
-    );
-
-    const tableY = chartY + chartHeight + 10;
-    const availableRows = Math.min(PAGE_SIZE, Math.max(1, Math.floor((height - tableY - 40) / 25)));
-    const pageCount = Math.max(1, Math.ceil(rows.length / availableRows));
-    const page = Math.min(snapshot.state.burninPage, pageCount);
-    const pageRows = rows.slice().reverse().slice((page - 1) * availableRows, page * availableRows);
-    pageRows.forEach((row, index) => {
-      const rowY = tableY + index * 25;
-      if (index % 2 === 0) {
-        this.panel(
-          this.root,
-          GPU_LAYOUT.gap,
-          rowY,
-          width - GPU_LAYOUT.gap * 2,
-          24,
-          0x0f1725,
-          0x0f1725,
-          0,
-          0
-        );
-      }
-      this.text(this.root, row.outcome === 'delivered' ? '✓' : '✗', 18, rowY + 4, {
-        size: 11,
-        color: row.outcome === 'delivered' ? GPU_COLORS.success : GPU_COLORS.error,
-      });
-      this.text(this.root, truncate(row.taskId, 60), 40, rowY + 4, { size: 10, width: width * 0.5 });
-      this.text(this.root, `${fmtCost(row.costUsd)} · ${row.durationS ?? '?'}s`, width * 0.58, rowY + 4, {
-        size: 10,
-        color: GPU_COLORS.muted,
-      });
-      const lifecycle = [
-        row.deterministicPhases ? `⚡${row.deterministicPhases}` : '',
-        row.refusals ? `⛔${row.refusals}` : '',
-        row.compileErrors ? `⚠${row.compileErrors}` : '',
-        row.demotions ? `🛡${row.demotions}` : '',
-        row.dispatchFallbacks ? `↩${row.dispatchFallbacks}` : '',
-      ].filter(Boolean).join(' ');
-      this.text(this.root, lifecycle, width * 0.79, rowY + 4, {
-        size: 10,
-        color: row.compileErrors ? GPU_COLORS.error : GPU_COLORS.muted,
-      });
-      if (row.trace) {
-        this.button(this.root, `burnin.trace.${row.trace.replace(/\.json$/, '')}`, 'button', '', GPU_LAYOUT.gap, rowY, width - GPU_LAYOUT.gap * 2, 24, false, snapshot.onActivate).alpha = 0.001;
-      }
-    });
-    this.text(this.root, `${page}/${pageCount}`, width - 110, height - 26, {
-      size: 10,
-      color: GPU_COLORS.muted,
-    });
-    if (page > 1) this.button(this.root, 'burnin.page.prev', 'button', '‹', width - 172, height - 34, 34, 25, false, snapshot.onActivate);
-    if (page < pageCount) this.button(this.root, 'burnin.page.next', 'button', '›', width - 66, height - 34, 34, 25, false, snapshot.onActivate);
-  }
-
-  private drawLaunch(snapshot: GpuRenderSnapshot, width: number, height: number) {
-    const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const panelWidth = Math.min(920, width - GPU_LAYOUT.gap * 2);
-    const x = (width - panelWidth) / 2;
-    this.panel(
-      this.root,
-      x,
-      top,
-      panelWidth,
-      height - top - GPU_LAYOUT.gap,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    this.text(this.root, snapshot.t('nav.launch'), x + 22, top + 18, { size: 18, weight: '700' });
-    this.text(this.root, snapshot.t('launch.help'), x + 22, top + 52, {
-      size: 11,
-      color: GPU_COLORS.muted,
-      width: panelWidth - 44,
-    });
-    const profile = snapshot.data.profiles[0];
-    if (profile) {
-      this.text(this.root, profile.label, x + 22, top + 92, {
-        size: 13,
-        weight: '700',
-        color: GPU_COLORS.primary,
-      });
-      this.text(this.root, profile.help, x + 22, top + 122, {
-        size: 11,
-        color: GPU_COLORS.muted,
-        width: panelWidth - 44,
-      });
-      let exampleY = top + 240;
-      const exampleWidth = (panelWidth - 66) / 2;
-      profile.examples.forEach((example, index) => {
-        this.button(
-          this.root,
-          `launch.example.${index}`,
-          'button',
-          truncate(example, 90),
-          x + 22,
-          exampleY,
-          exampleWidth,
-          36,
-          false,
-          snapshot.onActivate
-        );
-        exampleY += 43;
-      });
-      const command = snapshot.state.search.launch.trim()
-        ? `npm run ${profile.npmScript} -- "${snapshot.state.search.launch.trim().replace(/"/g, '\\"')}"`
-        : snapshot.t('launch.empty');
-      const commandY = Math.min(height - 118, Math.max(top + 430, exampleY + 18));
-      this.panel(this.root, x + 22, commandY, panelWidth - 150, 68, 0x0b111e);
-      this.text(this.root, command, x + 34, commandY + 12, {
-        size: 10,
-        mono: true,
-        width: panelWidth - 180,
-      });
-      this.button(this.root, 'launch.copy', 'button', snapshot.t('launch.copy'), x + panelWidth - 114, commandY, 92, 68, false, snapshot.onActivate);
-    }
-  }
 }
 
 // Pixi owns an imperative object graph whose instances survive React Fast
@@ -4454,3 +2020,35 @@ export class GpuRenderer {
 if (import.meta.hot) {
   import.meta.hot.accept(() => window.location.reload());
 }
+
+/**
+ * The narrow surface views draw against. Views are free functions over this
+ * context: the renderer class implements it, and behavior tests implement a
+ * recording double without any GPU. Derived with Pick so the class stays the
+ * single source of member signatures.
+ */
+export type RendererCtx = Pick<
+  GpuRenderer,
+  | 'root'
+  | 'text'
+  | 'panel'
+  | 'button'
+  | 'filterButton'
+  | 'statCard'
+  | 'atomButton'
+  | 'eventCard'
+  | 'collapseCaret'
+  | 'filterBlockFrame'
+  | 'detailMask'
+  | 'addTicker'
+  | 'drawExitingFilterButtons'
+  | 'animateEnteringFilterSpace'
+  | 'metrics'
+  | 'scrollMax'
+  | 'detailScrollY'
+  | 'detailScrollMax'
+  | 'detailBounds'
+  | 'roleRowTransition'
+  | 'seenAnimatedControls'
+  | 'previousFilterBounds'
+>;

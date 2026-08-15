@@ -1,3 +1,10 @@
+/**
+ * FROZEN (2026-08-15): the MUI client is the fallback UI behind
+ * ATOMA_VIZ_UI=mui / `npm run viz:mui`. Bugfixes only — features land in the
+ * GPU client (src/viz/client-gl/). Shared modules in this directory (types,
+ * run-utils, search, timeline-layout, structured-detail, i18n, data-api, pwa)
+ * stay live because the GPU client imports them.
+ */
 import RefreshIcon from '@mui/icons-material/Refresh';
 import {
   AppBar,

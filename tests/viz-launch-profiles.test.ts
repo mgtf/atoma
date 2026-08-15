@@ -53,6 +53,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const gpuApp = readFileSync('src/viz/client-gl/GpuApp.tsx', 'utf8');
   const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
+  const rendererRuns = readFileSync('src/viz/client-gl/renderer/views/runs.ts', 'utf8');
+  const rendererShaders = readFileSync('src/viz/client-gl/renderer/shaders.ts', 'utf8');
+  const rendererChipLayout = readFileSync('src/viz/client-gl/renderer/chip-layout.ts', 'utf8');
   const threeBackdrop = readFileSync('src/viz/client-gl/ThreeBackdrop.tsx', 'utf8');
   const gpuCursor = readFileSync('src/viz/client-gl/AtomaCursor.tsx', 'utf8');
   const pointerLight = readFileSync('src/viz/client-gl/pointer-light.ts', 'utf8');
@@ -124,71 +127,63 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(picker).toMatch(/requestAnimationFrame\(\(\) => inputRef\.current\?\.focus\(\)\)/);
   });
 
+  // Drawing behavior (labels, cards, pagination, scroll bounds, masks, filter
+  // layout) is asserted behaviorally in tests/viz-gpu-views.test.ts against
+  // the exported view functions; layout/copy math in tests/viz-gpu-state.test.ts.
+  // Only architectural presence/absence that cannot be observed behaviorally
+  // stays greppable here, targeted at the file where the code actually lives.
   it('bounds full-GL rendering and keeps data-heavy widgets on the GPU', () => {
-    expect(gpuRenderer).toMatch(/const PAGE_SIZE = 50/);
-    expect(gpuRenderer).toMatch(/for \(const point of points\)/);
-    expect(gpuRenderer).toMatch(/slice\(start, start \+ count\)/);
-    expect(gpuRenderer).toMatch(/listLayer\.mask = listMask/);
-    expect(gpuRenderer).toMatch(/scrollMax\.runs = Math\.max/);
+    // Run picker overlay windows its matches instead of truncating the list.
     expect(gpuRenderer).toMatch(/runPickerScrollMax/);
     expect(gpuRenderer).toMatch(/matching\.slice\(start, start \+ visibleCount\)/);
     expect(gpuRenderer).not.toMatch(/\.slice\(0, 12\)/);
-    expect(gpuRenderer).toMatch(/gpuEventCardCopy\(event\)/);
-    expect(gpuRenderer).toMatch(/buildTimelineLayout\(run\.events/);
-    expect(gpuRenderer).toMatch(/timelineBranchHeading\(/);
-    expect(gpuRenderer).toMatch(/runFilters\.branchId !== 'all'/);
+    expect(rendererRuns).not.toMatch(/\.slice\(0, 12\)/);
+    // The GPU runs view and the MUI RunsView share ONE heading/detail source.
+    expect(rendererRuns).toMatch(/timelineBranchHeading\(/);
+    expect(rendererRuns).toMatch(/filePathFromArgs/);
+    expect(rendererRuns).toMatch(/buildSkillEventDetail\(event, skill, snapshot\.t\)/);
     expect(timelineLayout).toMatch(/export function timelineBranchHeading\(/);
     expect(readFileSync('src/viz/client/features/RunsView.tsx', 'utf8')).toMatch(
       /timelineBranchHeading\(/
     );
     expect(timelineLayout).toMatch(/chronological:\s*true/);
     expect(timelineLayout).toMatch(/inferParents|assignLanes/);
-    expect(gpuRenderer).toMatch(/private filterButton\(/);
+    // Widget interactivity and the filter exit/enter animation protocol stay
+    // on the renderer class.
     expect(gpuRenderer).toMatch(/pointerover|pointerdown/);
     expect(gpuRenderer).toMatch(/drawRemovedFilterEffects/);
     expect(gpuRenderer).toMatch(/drawExitingFilterButtons/);
     expect(gpuRenderer).toMatch(/animateEnteringFilterSpace/);
-    expect(gpuRenderer).toMatch(/exitingRoleFilters/);
-    expect(gpuRenderer).toMatch(/visibleEventKindFilters\(run\.events\)/);
     expect(gpuRenderer).toMatch(/roleRowTransition/);
     expect(gpuRenderer).toMatch(/startedAt/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
+    // The brand mark is one Pixi crystal in the header; no parallel R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
     expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(10, 12\)/);
     expect(gpuRenderer).toMatch(/crystal\.scale\.set\(frame\.scale \* 1\.12\)/);
     expect(gpuRenderer).toMatch(/buildAtomaMarkFrame\(/);
     expect(gpuApp).not.toMatch(/AtomaCrystal/);
     expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);
-    expect(gpuRenderer).toMatch(/branch\.heading\.toggle/);
-    expect(gpuRenderer).toMatch(/run\.summary\.toggle/);
-    expect(gpuRenderer).toMatch(/filePathFromArgs/);
     expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
     expect(gpuRenderer).toMatch(/let x = 160/);
-    expect(gpuRenderer).toMatch(/private statCard\(/);
-    expect(gpuRenderer).toMatch(/private atomButton\(/);
+    // Atom buttons draw local geometry at local origin (no double offsets).
     expect(gpuRenderer).toMatch(/ellipse\(0, 0, 7, 4\)/);
     expect(gpuRenderer).toMatch(/const particleCenterX = 16/);
     expect(gpuRenderer).toMatch(/orbit\.position\.set\(particleCenterX, height \/ 2\)/);
     expect(gpuRenderer).toMatch(/Array\.from\(\{ length: tier \}/);
     expect(gpuRenderer).not.toMatch(/ellipse\(10, height \/ 2, 7, 4\)/);
-    expect(gpuRenderer).toMatch(/gpuAtomButtonWidth/);
-    expect(gpuRenderer).toMatch(/const CONTROL_HOVER_GAP = 14/);
+    // Hover-scale gaps are pinned so scaled chips never overlap neighbours.
+    expect(rendererChipLayout).toMatch(/const CONTROL_HOVER_GAP = 14/);
     expect(gpuRenderer).toMatch(/const NAV_HOVER_GAP = 20/);
-    expect(gpuRenderer).toMatch(/layoutAtomLaneBlocks/);
-    expect(gpuRenderer).toMatch(/layoutRunFilterBlocks/);
-    expect(gpuRenderer).toMatch(/layoutFilterChipBlock/);
-    expect(gpuRenderer).toMatch(/filterBlockFrame/);
-    expect(gpuRenderer).toMatch(/x \+= width \+ gap/);
     expect(gpuRenderer).toMatch(/label\.length \* 7 \+ 22\) \+ NAV_HOVER_GAP/);
-    expect(gpuRenderer).toMatch(/private drawBurninChart\(/);
-    expect(gpuRenderer).toMatch(/cursor = 'crosshair'|pointermove/);
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
-    expect(gpuRenderer).toMatch(/private eventCard\(/);
+    // Card shaders and the pointer light ship BOTH GLSL and WGSL variants so
+    // the WebGL fallback renders what WebGPU renders.
     expect(gpuRenderer).toMatch(/CARD_FILTER_GLSL|CARD_FILTER_WGSL/);
-    expect(gpuRenderer).toMatch(/gpuCardShaderMode\(event\)/);
+    expect(rendererShaders).toMatch(/CARD_FILTER_GLSL/);
+    expect(rendererShaders).toMatch(/CARD_FILTER_WGSL/);
     expect(gpuRenderer).toMatch(/padding: 12/);
-    expect(gpuRenderer).toMatch(/listMask\.rect\(leftX \+ 1/);
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
@@ -196,30 +191,25 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(threeBackdrop).toMatch(/uPointerUv|uPointerStrength/);
     expect(gpuRenderer).toMatch(/POINTER_LIGHT_GLSL|POINTER_LIGHT_WGSL/);
     expect(gpuRenderer).toMatch(/installPointerLightFilter/);
-    expect(gpuRenderer).toMatch(/uInputPixel\.z|dpdx\(sampleLuminance\)/);
+    expect(rendererShaders).toMatch(/POINTER_LIGHT_GLSL/);
+    expect(rendererShaders).toMatch(/POINTER_LIGHT_WGSL/);
+    expect(rendererShaders).toMatch(/uInputPixel\.z|dpdx\(sampleLuminance\)/);
     expect(gpuCursor).toMatch(/atoma-pointer-(halo|face)|atoma-pointer-tip-light/);
     expect(gpuCursor).toMatch(/pointerType === 'touch'|REDUCED_MOTION_QUERY/);
     expect(pointerLight).toMatch(/pointerClientToUv|pointerClientToRenderer/);
     expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
     expect(threeBackdrop).toMatch(/buildAtomMap\(run\)/);
-    expect(gpuRenderer).toMatch(/if \(!entries\.length\) return \[\]/);
     expect(threeBackdrop).toMatch(/events=\{\(\) => \(\{ enabled: false, priority: 1 \}\)\}/);
     expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
     expect(gpuStyles).toMatch(/pointer-events: none !important;/);
     expect(gpuStyles).not.toMatch(/contain:\s*layout paint/);
-    expect(gpuRenderer).toMatch(/listMask\.eventMode = 'none'/);
-    expect(gpuRenderer).toMatch(/listLayer\.hitArea = new Rectangle\(leftX \+ 1, listY/);
     expect(gpuRenderer).toMatch(/mask\.eventMode = 'none'/);
     expect(timelineRails).toMatch(/visibleItems\.map|visibleBranches\.map/);
     expect(timelineRails).not.toMatch(/run\.events\.map/);
+    // Pixi survives Fast Refresh via one clean reload, never stateful HMR.
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
-    expect(gpuRenderer).toMatch(/row\.refusals/);
-    expect(gpuRenderer).toMatch(/row\.compileErrors/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);
-    expect(gpuRenderer).toMatch(/buildSkillEventDetail\(event, skill, snapshot\.t\)/);
     expect(gpuApp).toMatch(/runSkillSelection/);
-    expect(gpuRenderer).toMatch(/matchesSearchQuery\(skillSearchText\(skill, namespace\.l1Name\)/);
-    expect(gpuRenderer).not.toMatch(/whenToUse.*includes\(query\)|includes\(query\).*whenToUse/);
     expect(readFileSync('src/viz/client/features/RegistryView.tsx', 'utf8'))
       .not.toMatch(/systemPrompt.*filter|filter.*systemPrompt/);
     expect(readFileSync('src/viz/client/features/SkillsView.tsx', 'utf8'))
@@ -246,16 +236,16 @@ describe('viz i18n catalogs stay in parity', () => {
 
 describe('viz burn-in lifecycle visibility', () => {
   const burnin = readFileSync('src/viz/client/features/BurninView.tsx', 'utf8');
-  const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
   const server = readFileSync('src/viz/server.ts', 'utf8');
 
+  // The GPU client's rendering of these columns is asserted behaviorally in
+  // tests/viz-gpu-views.test.ts ('renders compiler refusals and transport
+  // errors present in the rows').
   it('renders compiler refusals and transport errors already present in the API', () => {
     expect(server).toMatch(/refusals:\s*num\(c\[14\]\)\s*\?\?\s*0/);
     expect(server).toMatch(/compileErrors:\s*num\(c\[21\]\)\s*\?\?\s*0/);
     expect(burnin).toContain("[row.refusals, '⛔', 'burnin.metric.refusals']");
     expect(burnin).toContain("[row.compileErrors, '⚠', 'burnin.metric.compileErrors']");
-    expect(gpuRenderer).toContain('row.refusals');
-    expect(gpuRenderer).toContain('row.compileErrors');
   });
 });
 
