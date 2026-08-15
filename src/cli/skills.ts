@@ -40,7 +40,9 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const { command, positional, flags } = parseCliArgs(argv);
+  // `force` is declared boolean so `drop --force <l1> <id>` no longer eats
+  // the molecule name as the flag's value (greedy-grammar swallowing bug).
+  const { command, positional, flags } = parseCliArgs(argv, { booleanFlags: ['force'] });
   if (command === null) return { command: 'help', positional, flags };
   if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'export', 'review', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };

@@ -1,4 +1,5 @@
 import { Container, Graphics } from 'pixi.js';
+import { GPU_COLORS } from '../theme.js';
 
 /**
  * A bounded, masked scroll region — THE way a GPU view presents content that
@@ -13,7 +14,9 @@ import { Container, Graphics } from 'pixi.js';
  * SKIPPING draws outside [scrollY - margin, scrollY + height + margin] while
  * still advancing your layout cursor, then `extend(bottomY)` with the full
  * content bottom — the returned max scroll must reflect content that was
- * culled, or the wheel can never reach it.
+ * culled, or the wheel can never reach it. `finish()` also draws the shared
+ * scrollbar thumb when the content overflows, so every pane advertises that
+ * it scrolls without per-view code.
  */
 export interface ScrollPaneOptions {
   x: number;
@@ -41,6 +44,43 @@ export interface ScrollPane {
 }
 
 const CULL_MARGIN = 48;
+
+/**
+ * THE scrollbar-thumb definition, shared by every scrollable region: scroll
+ * panes (drawn automatically by `finish()`), the runs event-detail layer and
+ * the run-picker popup. `x`/`width` describe the region the bar belongs to —
+ * the 3px track hugs its right edge, 8px in, spanning `y` to `y + height`.
+ * The thumb length is the region's visible share of the content and its ride
+ * follows `scrollY / maxScroll` (clamped: state-owned offsets may overshoot
+ * for one frame). No-ops when nothing scrolls, so callers invoke it
+ * unconditionally. Geometry/styling are the runs view's original thumb
+ * (2026-08-15 review residual: one definition, and Registry/Skills/detail
+ * panes had none).
+ */
+export interface ScrollbarThumbOptions {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  scrollY: number;
+  maxScroll: number;
+}
+
+export function drawScrollbarThumb(parent: Container, options: ScrollbarThumbOptions): void {
+  const { x, y, width, height, maxScroll } = options;
+  if (maxScroll <= 0 || height <= 0) return;
+  const thumbHeight = Math.max(28, height * Math.min(1, height / (height + maxScroll)));
+  const ratio = Math.min(1, Math.max(0, options.scrollY / maxScroll));
+  const thumbY = y + (height - thumbHeight) * ratio;
+  const scrollbar = new Graphics();
+  scrollbar.roundRect(x + width - 8, y, 3, height, 2);
+  scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
+  scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
+  scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
+  scrollbar.label = 'scrollbar-thumb';
+  scrollbar.eventMode = 'none';
+  parent.addChild(scrollbar);
+}
 
 export function createScrollPane(parent: Container, options: ScrollPaneOptions): ScrollPane {
   const { x, y, scrollY } = options;
@@ -74,7 +114,9 @@ export function createScrollPane(parent: Container, options: ScrollPaneOptions):
       mask.eventMode = 'none';
       parent.addChild(mask);
       layer.mask = mask;
-      return Math.max(0, contentBottom + bottomPadding - height);
+      const maxScroll = Math.max(0, contentBottom + bottomPadding - height);
+      drawScrollbarThumb(parent, { x, y, width, height, scrollY, maxScroll });
+      return maxScroll;
     },
   };
 }

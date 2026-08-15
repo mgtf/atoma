@@ -124,6 +124,7 @@ import {
   POINTER_LIGHT_WGSL,
 } from './renderer/shaders.js';
 import { prefersReducedMotion } from './renderer/motion.js';
+import { drawScrollbarThumb } from './renderer/scroll-pane.js';
 import { drawRuns } from './renderer/views/runs.js';
 import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
@@ -1973,28 +1974,17 @@ export class GpuRenderer {
       );
     });
 
-    if (this.runPickerScrollMax > 0) {
-      const track = new Graphics();
-      track.roundRect(0, 0, 3, visibleListHeight - 8, 1.5);
-      track.fill({ color: 0x2c3c58, alpha: 0.65 });
-      track.position.set(x + popupWidth - 8, listY + 4);
-      this.root.addChild(track);
-      const thumbHeight = Math.max(
-        24,
-        (visibleListHeight / contentHeight) * (visibleListHeight - 8)
-      );
-      const thumb = new Graphics();
-      thumb.roundRect(0, 0, 3, thumbHeight, 1.5);
-      thumb.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
-      thumb.position.set(
-        x + popupWidth - 8,
-        listY +
-          4 +
-          (scrollY / this.runPickerScrollMax) *
-            (visibleListHeight - 8 - thumbHeight)
-      );
-      this.root.addChild(thumb);
-    }
+    // ONE scrollbar-thumb definition (renderer/scroll-pane.ts) — the popup
+    // keeps its 4px-inset track but shares geometry/styling with every other
+    // scrollable region. No-ops when runPickerScrollMax is 0.
+    drawScrollbarThumb(this.root, {
+      x,
+      y: listY + 4,
+      width: popupWidth,
+      height: visibleListHeight - 8,
+      scrollY,
+      maxScroll: this.runPickerScrollMax,
+    });
     if (!matching.length) {
       this.text(this.root, snapshot.t('runs.none'), x + 14, listY + 12, {
         size: 11,

@@ -19,6 +19,7 @@ import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
 import { runFrontierBaseline } from './baseline.js';
 import { resolveToolBackendMode } from './backendMode.js';
+import { parseArgTokens } from '../cli/args.js';
 import {
   formatRunStatsEpilogue,
   type RunStats,
@@ -106,47 +107,60 @@ function machineRunStats(
 }
 
 /**
- * Argv parsing for a run.
+ * Argv parsing for a run — a THIN adapter over the shared parser.
  *
- * DELIBERATELY NOT `src/cli/args.ts`. AGENTS.md names `parseCliArgs` the
- * single source of truth for CLI flags, and this looks like a duplicate worth
- * collapsing — it is not. `parseCliArgs` treats `--clean-workspace` as a
- * flag-WITH-VALUE and would swallow the goal that follows it, so every
- * burn-in task would silently fall back to the default Minesweeper goal. The
- * divergence is load-bearing; leave it.
+ * This used to be a hand-rolled loop because the old `parseCliArgs` grammar
+ * was greedy: `--clean-workspace <goal>` swallowed the goal and every burn-in
+ * task silently fell back to the default Minesweeper build. The shared parser
+ * now takes DECLARED boolean/negatable/value flags, so the runner expresses
+ * its grammar as data instead of a second tokenizer. The grammar itself is
+ * LOAD-BEARING: burn-in spawns this argv shape and MCP `spawnRun` appends the
+ * goal LAST, so a declared boolean must never consume the following token and
+ * an unknown flag is warn-and-DISCARDED (never fed the goal as its value).
+ *
+ * Spellings keep their `--` prefix: tests/mcp-server.test.ts greps this file
+ * for the exact tokens the MCP server is allowed to emit.
  */
+const RUNNER_BOOLEAN_FLAGS = [
+  '--no-learn-skills',
+  '--no-promote-skills',
+  '--no-direct-skills',
+  '--clean-workspace',
+] as const;
+/** Booleans that also accept an explicit `--no-` form; the LAST spelling wins. */
+const RUNNER_NEGATABLE_FLAGS = ['--baseline', '--container', '--egress'] as const;
+
+const stripDashes = (flag: string): string => flag.slice(2);
+
 export function parseRunnerArgs(argv: readonly string[]): RunnerArgs {
+  // Container/egress stay OWNED by resolveToolBackendMode (doctor shares it,
+  // including the env precedence and egress→container implication). They are
+  // declared below only so the shared parser neither swallows the goal after
+  // them nor reports them unknown; the parsed values are ignored.
   const backendMode = resolveToolBackendMode(argv);
-  let goal: string | undefined;
-  let noLearnSkills = false;
-  let noPromoteSkills = false;
-  let noDirectSkills = false;
-  let cleanWorkspace = false;
-  let baseline = process.env['ATOMA_BASELINE'] === '1';
-  let seed: string | undefined = process.env['ATOMA_SEED'] || undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i]!;
-    if (a === '--seed') { seed = argv[++i]; continue; }
-    if (a === '--baseline') baseline = true;
-    else if (a === '--no-baseline') baseline = false;
-    else if (a === '--no-learn-skills') noLearnSkills = true;
-    else if (a === '--no-promote-skills') noPromoteSkills = true;
-    else if (a === '--no-direct-skills') noDirectSkills = true;
-    else if (a === '--clean-workspace') cleanWorkspace = true;
-    else if (
-      a === '--container' ||
-      a === '--no-container' ||
-      a === '--egress' ||
-      a === '--no-egress'
-    ) {
-      // Parsed once by resolveToolBackendMode above.
-    }
-    else if (a.startsWith('--')) console.warn(`unknown flag: ${a}`);
-    else if (goal === undefined) goal = a;
-  }
+  const { command, flags, undeclaredFlags } = parseArgTokens(argv, {
+    booleanFlags: RUNNER_BOOLEAN_FLAGS.map(stripDashes),
+    negatableFlags: RUNNER_NEGATABLE_FLAGS.map(stripDashes),
+    // `--seed` consumes the next token UNCONDITIONALLY (historical contract);
+    // a trailing `--seed` records '' and deliberately clobbers ATOMA_SEED.
+    valueFlags: ['seed'],
+    undeclared: 'discard',
+  });
+  for (const token of undeclaredFlags) console.warn(`unknown flag: ${token}`);
+  const seed =
+    'seed' in flags ? flags['seed'] || undefined : process.env['ATOMA_SEED'] || undefined;
+  const baseline =
+    flags['baseline'] !== undefined
+      ? flags['baseline'] === 'true'
+      : process.env['ATOMA_BASELINE'] === '1';
   return {
-    goal, noLearnSkills, noPromoteSkills, noDirectSkills,
-    cleanWorkspace, ...backendMode, baseline,
+    goal: command ?? undefined,
+    noLearnSkills: flags['no-learn-skills'] === 'true',
+    noPromoteSkills: flags['no-promote-skills'] === 'true',
+    noDirectSkills: flags['no-direct-skills'] === 'true',
+    cleanWorkspace: flags['clean-workspace'] === 'true',
+    ...backendMode,
+    baseline,
     ...(seed ? { seed } : {}),
   };
 }
@@ -604,6 +618,11 @@ export async function startTask(
         error: 'run cancelled by user (signal received)',
         cancelled: true,
       });
+      // The machine epilogue must survive cancellation: without it the
+      // burn-in CSV read this row as outcome 'error' with NULL economics
+      // while the trace held the real totals — trace and CSV disagreed
+      // about the same run's cost. Same pattern as the watchdog path.
+      console.error(formatRunStatsEpilogue(machineRunStats('cancelled', metrics, runSignals)));
     } else {
       recorder.flushPartial();
     }

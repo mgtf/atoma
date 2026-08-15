@@ -139,6 +139,13 @@ container. Do not add remote completion calls to doctor.
   its source and add a regression test. Preserve recovered-error evidence.
 - Archive `runs/`, `skills/`, and the starting store before restoring or
   replacing state. Live traces and stores are evidence, not scratch data.
+- COOLING-OFF: never design a new mechanical gate, heuristic, or validator
+  rule during the live session that surfaced the incident. Collect the
+  session's incidents, design the contract ONCE against all of them, land it
+  as one reviewed commit. Apply pre-construction adversarial review to
+  mechanisms you accept, not only to ideas you reject — the 2026-08-14 review
+  measured same-day gates as the main source of one-concept-two-definitions
+  drift and vocabulary-frozen detectors.
 
 ## Cost discipline
 

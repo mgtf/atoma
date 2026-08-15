@@ -216,6 +216,8 @@ export function ensureBurninCsvHeader(outAbsPath: string): void {
  */
 export function looksLikeConfigFailure(stats: RunStats, durationS: number | null): boolean {
   if (stats.outcome === 'delivered') return false;
+  // A deliberate kill is not a misconfigured launch, however fast and cheap.
+  if (stats.outcome === 'cancelled') return false;
   const fast = durationS !== null && durationS <= 15;
   const spentNothing = stats.costUsd === null || stats.costUsd === 0;
   return fast && spentNothing;

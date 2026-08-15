@@ -409,6 +409,33 @@ function containersWithMask(root: Container): Container[] {
   return found;
 }
 
+/** The shared thumb (scroll-pane.ts) labels its Graphics; count them. */
+function scrollbarThumbs(root: Container): Container[] {
+  const found: Container[] = [];
+  const walk = (node: Container) => {
+    if (node.label === 'scrollbar-thumb') found.push(node);
+    for (const child of node.children) {
+      if (child instanceof Container) walk(child);
+    }
+  };
+  walk(root);
+  return found;
+}
+
+function findByCursor(root: Container, cursor: string): Container | undefined {
+  const walk = (node: Container): Container | undefined => {
+    if (node.cursor === cursor) return node;
+    for (const child of node.children) {
+      if (child instanceof Container) {
+        const hit = walk(child);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  };
+  return walk(root);
+}
+
 afterEach(() => {
   setReducedMotionOverrideForTests(null);
 });
@@ -493,6 +520,29 @@ describe('drawRegistry scrolling honesty', () => {
     expect(containersWithMask(ctx.root).length).toBeGreaterThan(0);
   });
 
+  it('draws the shared scrollbar thumb only when the list overflows', () => {
+    const overflowing = createRecordingCtx();
+    drawRegistry(overflowing, makeSnapshot({ view: 'registry' }, data), WIDTH, HEIGHT);
+    // The list pane overflows (thumb); the default atom's short prompt does not.
+    expect(scrollbarThumbs(overflowing.root).length).toBe(1);
+
+    const fitting = createRecordingCtx();
+    drawRegistry(
+      fitting,
+      makeSnapshot(
+        { view: 'registry' },
+        {
+          registries: [REGISTRY_SUMMARY],
+          registry: { registry: REGISTRY_SUMMARY, types: [makeRegistryType('Sole')] },
+        }
+      ),
+      WIDTH,
+      900
+    );
+    expect(fitting.scrollMax.registry).toBe(0);
+    expect(scrollbarThumbs(fitting.root).length).toBe(0);
+  });
+
   it('scrolls a long system prompt inside the detail pane', () => {
     const ctx = createRecordingCtx();
     const longTypes = [
@@ -516,6 +566,8 @@ describe('drawRegistry scrolling honesty', () => {
     expect(ctx.detailBounds!.y).toBe(62);
     expect(ctx.detailBounds!.width).toBe(WIDTH - rightX - 10);
     expect(ctx.detailBounds!.height).toBe(HEIGHT - 62 - 10);
+    // One atom fits the list, so the only thumb is the detail pane's.
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
   });
 });
 
@@ -537,6 +589,8 @@ describe('drawSkills scrolling honesty and search', () => {
     drawSkills(ctx, makeSnapshot({ view: 'skills' }, data), WIDTH, HEIGHT);
     expect(ctx.scrollMax.skills).toBeGreaterThan(0);
     expect(containersWithMask(ctx.root).length).toBeGreaterThan(0);
+    // The overflowing namespace list advertises itself with the shared thumb.
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
   });
 
   it('scrolls a long skill body inside the masked detail pane', () => {
@@ -556,6 +610,8 @@ describe('drawSkills scrolling honesty and search', () => {
     expect(ctx.detailBounds).not.toBeNull();
     expect(ctx.detailBounds!.x).toBe(rightX);
     expect(ctx.detailBounds!.width).toBe(WIDTH - rightX - 10);
+    // Both the overflowing list and the long body get the shared thumb.
+    expect(scrollbarThumbs(ctx.root).length).toBe(2);
   });
 
   it('filters on visible identity, never on hidden when_to_use text', () => {
@@ -663,10 +719,47 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
     const ids = ctx.metrics.hitTargets.map((target) => target.id);
     expect(ids).toContain('burnin.chart');
     expect(ids.filter((id) => id.startsWith('burnin.point.')).length).toBe(rows.length);
-    const crosshair = ctx.root.children.find(
-      (child) => child instanceof Container && child.cursor === 'crosshair'
+    // The interactive chart now lives inside the masked scroll pane.
+    expect(findByCursor(ctx.root, 'crosshair')).toBeDefined();
+  });
+
+  it('masks the scrolled content under one pane and pins the pager to the viewport', () => {
+    setReducedMotionOverrideForTests(true);
+    const HEIGHT = 420;
+    const SCROLL = 13;
+    const ctx = createRecordingCtx();
+    drawBurnin(
+      ctx,
+      makeSnapshot(
+        {
+          view: 'burnin',
+          scrollY: { runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0 },
+        },
+        data
+      ),
+      WIDTH,
+      HEIGHT
     );
-    expect(crosshair).toBeDefined();
+    // One masked pane owns filters, stats, chart and table rows; the pane
+    // applies the wheel offset to its content layer so scrolled rows clip at
+    // the pane rect instead of sliding over the header or under the pager.
+    const masked = containersWithMask(ctx.root);
+    expect(masked.length).toBe(1);
+    const content = masked[0]!.children[0] as Container;
+    expect(content.position.y).toBe(-SCROLL);
+    expect(ctx.scrollMax.burnin).toBeGreaterThan(0);
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
+    // The pager never scrolls: viewport coordinates regardless of the wheel.
+    const next = ctx.buttons.find((button) => button.id === 'burnin.page.next');
+    expect(next).toBeDefined();
+    expect(next!.y).toBe(HEIGHT - 34);
+    const pageLabel = ctx.texts.find((text) => /^\d+\/\d+$/.test(text.value));
+    expect(pageLabel).toBeDefined();
+    expect(pageLabel!.y).toBe(HEIGHT - 26);
+    // A tall window has nothing to scroll and therefore no thumb.
+    const tall = createRecordingCtx();
+    drawBurnin(tall, makeSnapshot({ view: 'burnin' }, data), WIDTH, 1400);
+    expect(scrollbarThumbs(tall.root).length).toBe(0);
   });
 
   it('draws the same widgets under reduced motion', () => {
@@ -713,6 +806,38 @@ describe('drawLaunch scrolling honesty', () => {
       900
     );
     expect(ctx.scrollMax.launch).toBe(0);
+  });
+
+  it('extends layout and scroll max by the measured wrapped help height', () => {
+    const HEIGHT = 420;
+    // Both paragraphs wrap far past the historical fixed slot, so every
+    // downstream block must shift by exactly the measured height difference.
+    const mediumHelp = 'm'.repeat(800);
+    const longHelp = 'l'.repeat(2400);
+    const draw = (help: string) => {
+      const ctx = createRecordingCtx();
+      drawLaunch(
+        ctx,
+        makeSnapshot({ view: 'launch' }, { profiles: [{ ...LAUNCH_PROFILE, help }] }),
+        1000,
+        HEIGHT
+      );
+      return ctx;
+    };
+    const medium = draw(mediumHelp);
+    const long = draw(longHelp);
+    const heightDelta = textStub(longHelp).height - textStub(mediumHelp).height;
+    expect(heightDelta).toBeGreaterThan(0);
+    expect(long.scrollMax.launch! - medium.scrollMax.launch!).toBe(heightDelta);
+    // Examples start below the measured paragraph instead of overlapping it.
+    const helpText = long.texts.find((text) => text.value === longHelp)!;
+    const firstExample = long.buttons.find((button) => button.id === 'launch.example.0')!;
+    expect(firstExample.y).toBeGreaterThanOrEqual(helpText.y + textStub(longHelp).height);
+    // The backdrop panel is drawn into the z-slot reserved before the text,
+    // sized by the same layout cursor (one pass, no analytic duplicate).
+    const backdrop = long.root.children[0] as Container;
+    expect(backdrop.children.length).toBe(1);
+    expect(backdrop.children[0]).toBeInstanceOf(Graphics);
   });
 });
 
@@ -862,6 +987,8 @@ describe('drawRuns behavior', () => {
     expect(ctx.detailScrollMax).toBeGreaterThan(0);
     expect(ctx.detailBounds).not.toBeNull();
     expect(ctx.detailBounds!.x).toBeGreaterThan(WIDTH / 2);
+    // The overflowing detail draws the shared scrollbar thumb.
+    expect(scrollbarThumbs(ctx.root).length).toBe(1);
   });
 
   it('hands vanished role filters to the exit transition', () => {

@@ -7,6 +7,7 @@ import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { gpuFilterButtonWidth } from '../chip-layout.js';
 import { quantile, truncate } from '../copy.js';
 import { prefersReducedMotion } from '../motion.js';
+import { createScrollPane } from '../scroll-pane.js';
 
 /**
  * Burn-in view: filters, stat cards, cost scatter chart and the paginated
@@ -14,6 +15,13 @@ import { prefersReducedMotion } from '../motion.js';
  */
 
 const PAGE_SIZE = 50;
+
+/**
+ * Viewport pixels reserved below the scroll pane for the pager. The SAME
+ * constant bounds `availableRows`, so an unscrolled full page always fits
+ * above the pager — pagination math stays scroll-free by construction.
+ */
+const PAGER_RESERVE = 40;
 
 function drawBurninChart(
   ctx: RendererCtx,
@@ -249,10 +257,21 @@ export function drawBurnin(
     return;
   }
   const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-  // Layout runs in unscrolled coordinates; every draw subtracts the wheel
-  // offset so short windows can actually reach the chart and table
-  // (scroll honesty — 2026-08-14 review).
   const scroll = snapshot.state.scrollY.burnin;
+  // Everything except the pager scrolls inside ONE masked pane: table rows
+  // used to slide unmasked under the viewport-anchored pager and over the
+  // header (2026-08-15 review residual). Layout keeps its unscrolled screen
+  // coordinates; draws go pane-local (screenY - top) and the pane applies the
+  // wheel offset, so short windows can still reach the chart and table
+  // (scroll honesty — 2026-08-14 review).
+  const pane = createScrollPane(ctx.root, {
+    x: 0,
+    y: top,
+    width,
+    height: height - PAGER_RESERVE - top,
+    scrollY: scroll,
+    bottomPadding: 0,
+  });
   const latestTimestamp = Math.max(
     ...payload.rows.map((row) => Date.parse(row.ts)).filter(Number.isFinite)
   );
@@ -283,11 +302,11 @@ export function drawBurnin(
       familyY += 34;
     }
     ctx.filterButton(
-      ctx.root,
+      pane.content,
       id,
       label,
       x,
-      familyY - scroll,
+      familyY - top,
       buttonWidth,
       30,
       active,
@@ -308,11 +327,11 @@ export function drawBurnin(
       optionY += 32;
     }
     ctx.filterButton(
-      ctx.root,
+      pane.content,
       id,
       label,
       optionX,
-      optionY - scroll,
+      optionY - top,
       buttonWidth,
       28,
       active,
@@ -369,12 +388,12 @@ export function drawBurnin(
   stats.forEach(([label, value], index) => {
     const statX = GPU_LAYOUT.gap + index * (statWidth + GPU_LAYOUT.gap);
     ctx.statCard(
-      ctx.root,
+      pane.content,
       `burnin.stat.${index}`,
       label!,
       value!,
       statX,
-      statsY - scroll,
+      statsY - top,
       statWidth,
       58,
       burninStatAccents[index] ?? GPU_COLORS.primary
@@ -385,24 +404,27 @@ export function drawBurnin(
   drawBurninChart(
     ctx,
     snapshot,
-    ctx.root,
+    pane.content,
     GPU_LAYOUT.gap,
-    chartY - scroll,
+    chartY - top,
     width - GPU_LAYOUT.gap * 2,
     chartHeight,
     rows
   );
 
   const tableY = chartY + chartHeight + 10;
-  const availableRows = Math.min(PAGE_SIZE, Math.max(1, Math.floor((height - tableY - 40) / 25)));
+  const availableRows = Math.min(
+    PAGE_SIZE,
+    Math.max(1, Math.floor((height - tableY - PAGER_RESERVE) / 25))
+  );
   const pageCount = Math.max(1, Math.ceil(rows.length / availableRows));
   const page = Math.min(snapshot.state.burninPage, pageCount);
   const pageRows = rows.slice().reverse().slice((page - 1) * availableRows, page * availableRows);
   pageRows.forEach((row, index) => {
-    const rowY = tableY + index * 25 - scroll;
+    const rowY = tableY + index * 25 - top;
     if (index % 2 === 0) {
       ctx.panel(
-        ctx.root,
+        pane.content,
         GPU_LAYOUT.gap,
         rowY,
         width - GPU_LAYOUT.gap * 2,
@@ -413,12 +435,12 @@ export function drawBurnin(
         0
       );
     }
-    ctx.text(ctx.root, row.outcome === 'delivered' ? '✓' : '✗', 18, rowY + 4, {
+    ctx.text(pane.content, row.outcome === 'delivered' ? '✓' : '✗', 18, rowY + 4, {
       size: 11,
       color: row.outcome === 'delivered' ? GPU_COLORS.success : GPU_COLORS.error,
     });
-    ctx.text(ctx.root, truncate(row.taskId, 60), 40, rowY + 4, { size: 10, width: width * 0.5 });
-    ctx.text(ctx.root, `${fmtCost(row.costUsd)} · ${row.durationS ?? '?'}s`, width * 0.58, rowY + 4, {
+    ctx.text(pane.content, truncate(row.taskId, 60), 40, rowY + 4, { size: 10, width: width * 0.5 });
+    ctx.text(pane.content, `${fmtCost(row.costUsd)} · ${row.durationS ?? '?'}s`, width * 0.58, rowY + 4, {
       size: 10,
       color: GPU_COLORS.muted,
     });
@@ -429,19 +451,21 @@ export function drawBurnin(
       row.demotions ? `🛡${row.demotions}` : '',
       row.dispatchFallbacks ? `↩${row.dispatchFallbacks}` : '',
     ].filter(Boolean).join(' ');
-    ctx.text(ctx.root, lifecycle, width * 0.79, rowY + 4, {
+    ctx.text(pane.content, lifecycle, width * 0.79, rowY + 4, {
       size: 10,
       color: row.compileErrors ? GPU_COLORS.error : GPU_COLORS.muted,
     });
     if (row.trace) {
-      ctx.button(ctx.root, `burnin.trace.${row.trace.replace(/\.json$/, '')}`, 'button', '', GPU_LAYOUT.gap, rowY, width - GPU_LAYOUT.gap * 2, 24, false, snapshot.onActivate).alpha = 0.001;
+      ctx.button(pane.content, `burnin.trace.${row.trace.replace(/\.json$/, '')}`, 'button', '', GPU_LAYOUT.gap, rowY, width - GPU_LAYOUT.gap * 2, 24, false, snapshot.onActivate).alpha = 0.001;
     }
   });
   // Scroll honesty (2026-08-14 review): the wheel handler fails closed to
   // this max, so it must reflect the true content bottom — filters, stats,
-  // chart and the current table page — not just what a tall window fits.
-  const contentBottom = tableY + pageRows.length * 25;
-  ctx.scrollMax.burnin = Math.max(0, contentBottom + 12 - height);
+  // chart and the current table page — not just what the pane viewport fits.
+  pane.extend(tableY + pageRows.length * 25 - top);
+  ctx.scrollMax.burnin = pane.finish();
+  // The pager stays outside the pane, anchored to viewport coordinates in the
+  // PAGER_RESERVE strip the mask never covers.
   ctx.text(ctx.root, `${page}/${pageCount}`, width - 110, height - 26, {
     size: 10,
     color: GPU_COLORS.muted,

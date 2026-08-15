@@ -421,11 +421,14 @@ export async function startRun(
         const wasCancelled = record.status === 'cancelling';
         record.status = wasCancelled ? 'cancelled' : 'finished';
         if (wasCancelled) {
-          // A cancelled run prints neither completion banner nor failure
-          // banner, so `parseRunLog` — correctly, per its own contract —
-          // reports outcome 'error' with null economics.
+          // The runner's teardown emits the machine epilogue with outcome
+          // 'cancelled' and the run's REAL spend. A child killed too hard to
+          // print anything (SIGKILL escalation) still lands on the legacy
+          // 'error'/null shape, so the hint stays honest for both.
           record.hint =
-            'Cancelled on request. `stats.outcome` reads "error" and the economics are null because the run was terminated before printing its summary — that is the cancellation, not a failure. The trace is closed and marked cancelled.';
+            stats.outcome === 'cancelled'
+              ? 'Cancelled on request. `stats` carries the run\'s real spend up to termination — that is the cancellation, not a failure. The trace is closed and marked cancelled.'
+              : 'Cancelled on request. `stats.outcome` reads "error" and the economics are null because the run was terminated before printing its summary — that is the cancellation, not a failure. The trace is closed and marked cancelled.';
         } else if (looksLikeConfigFailure(stats, durationS)) {
           record.configFailureSuspected = true;
           record.hint =

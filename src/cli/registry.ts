@@ -52,7 +52,13 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const { command, positional, flags } = parseCliArgs(argv);
+  // Declared booleans never consume the next token, so `--apply dedupe`,
+  // `remove --force <name>`, `rebrand --all <name>` and `--clear cache` keep
+  // their command/positional instead of feeding it to the flag (the greedy
+  // grammar turned those into silent help/usage no-ops).
+  const { command, positional, flags } = parseCliArgs(argv, {
+    booleanFlags: ['apply', 'fuzzy', 'all', 'force', 'clear'],
+  });
   if (command === null) return { command: 'help', positional, flags };
   if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'migrate-taxonomy', 'cache', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };

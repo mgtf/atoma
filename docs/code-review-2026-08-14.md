@@ -174,6 +174,36 @@ après-midi du 13/08).
 > des paragraphes wrappés de launch non mesurée. Suite complète : 1591 passed /
 > 8 skipped (154 fichiers), typecheck ×2 + lint + docs:check + build Vite verts.
 
+> **Statut 2026-08-15 (batch runtime 9)** : les derniers items de la revue sont
+> traités. (a) Résidus viz fermés : `drawScrollbarThumb` est LA définition du
+> thumb (géométrie historique de la vue runs), dessinée automatiquement par
+> `createScrollPane.finish()` — registry/skills/détails l'ont gagnée sans code
+> par vue, les deux thumbs main-rolled de runs et du run-picker migrés ; le
+> contenu burnin scrolle dans UN pane masqué avec bande pager réservée
+> (`PAGER_RESERVE` borne aussi `availableRows`, pagination scroll-free par
+> construction) ; launch est UNE passe de layout mesurée (`.height` des
+> paragraphes wrappés) qui pilote positions ET `scrollMax`. (b) Parseurs CLI
+> unifiés : un tokenizer dans `args.ts` (grammaire déclarée booleanFlags /
+> negatableFlags opt-in / valueFlags, mode `discard` + `undeclaredFlags`),
+> `parseRunnerArgs` en adaptateur mince — équivalence prouvée par fuzz
+> différentiel (43 470 cas argv×env, 0 divergence) ; au passage `skills drop
+> --force <l1> <id>` et `registry --apply dedupe`/`--clear cache` n'avalent
+> plus leur positionnelle (classe silent-help). (c) Règle de REFROIDISSEMENT
+> dans AGENTS.md : plus de gate mécanique conçue dans la session live qui a
+> produit l'incident. (d) Wedging instruit puis corrigé : les « 2 lignes
+> error » de l'overnight du 14/08 étaient deux SIGTERM opérateur dont le
+> teardown n'émettait PAS l'épilogue machine — trace ($0.377/13 appels) et CSV
+> (error/null) se contredisaient. Fix : outcome `cancelled` first-class dans
+> `runStatsSchema`, teardown émet l'épilogue avec les totaux réels (motif du
+> chemin watchdog), `looksLikeConfigFailure` ignore les kills délibérés, le
+> hint MCP lit l'outcome au lieu de deviner ; test de régression qui tue un
+> VRAI child en vol via `terminateRunProcessGroup` (stub ollama local : 1
+> appel payé, 1 en vol) et vérifie l'accord trace/CSV. Trous résiduels nommés,
+> non traités faute d'instance vécue post-batch-7 : pas d'horloge d'inactivité
+> par appel sur le transport Ollama (seul des trois), pas de backstop sur le
+> settle-forever du burn-in (le MCP en a un). Suite complète : 1612 passed /
+> 8 skipped, typecheck ×2 + lint + docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

@@ -14,7 +14,12 @@ export const RUN_STATS_PREFIX = 'ATOMA_RUN_STATS ';
 const countSchema = z.number().int().nonnegative();
 
 export const runStatsSchema = z.object({
-  outcome: z.enum(['delivered', 'failed', 'error']),
+  // 'cancelled' is first-class: a signal-terminated run still emits the
+  // epilogue with its REAL totals. Before 2026-08-15 the teardown path
+  // printed nothing, so parseRunLog read 'error' with null economics while
+  // the trace held the actual spend — the CSV and the trace disagreed about
+  // the same run's cost (both overnight 2026-08-14 'error' rows were this).
+  outcome: z.enum(['delivered', 'failed', 'error', 'cancelled']),
   costUsd: z.number().finite().nonnegative().nullable(),
   llmCalls: countSchema.nullable(),
   opusCalls: countSchema,

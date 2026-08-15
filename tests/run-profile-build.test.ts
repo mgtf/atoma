@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
@@ -101,11 +101,13 @@ describe('build profile — the seeds survived the move byte-for-byte', () => {
   });
 });
 
-describe('runner CLI parsing — the divergence from parseCliArgs is load-bearing', () => {
+describe('runner CLI parsing — the declared grammar is load-bearing', () => {
   it('keeps the goal that FOLLOWS --clean-workspace', () => {
-    // src/cli/args.ts treats --clean-workspace as a flag-with-value and would
-    // swallow the goal, silently falling back to the default Minesweeper task
-    // on every burn-in run. That is why the runner keeps its own parser.
+    // The old greedy grammar treated --clean-workspace as a flag-with-value
+    // and swallowed the goal, silently falling back to the default
+    // Minesweeper task on every burn-in run. The runner now declares its
+    // booleans to the SHARED parser; this pin proves a declared boolean
+    // never consumes the token after it.
     const args = parseRunnerArgs(['--clean-workspace', 'Build a CSV merger CLI']);
     expect(args.cleanWorkspace).toBe(true);
     expect(args.goal).toBe('Build a CSV merger CLI');
@@ -133,6 +135,96 @@ describe('runner CLI parsing — the divergence from parseCliArgs is load-bearin
     ]);
     expect(args.seed).toBe('benchmark/fixtures/wclite');
     expect(args.goal).toBe('Maintain the seeded CLI');
+  });
+});
+
+/**
+ * Equivalence pins for the hand-rolled-loop → shared-parser adapter rewrite
+ * (review §3.9 residual). Every invocation below is one the old parser
+ * accepted — burn-in spawns them, MCP `spawnRun` orders flags before the
+ * goal — and each must parse byte-identically through `parseArgTokens`.
+ */
+describe('parseRunnerArgs equivalence — documented invocations', () => {
+  const ENV_KEYS = ['ATOMA_BASELINE', 'ATOMA_SEED', 'ATOMA_CONTAINER', 'ATOMA_EGRESS'] as const;
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of ENV_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+  afterEach(() => {
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    vi.restoreAllMocks();
+  });
+
+  it('goal only: everything defaults off, goal is the first positional', () => {
+    expect(parseRunnerArgs(['build a thing'])).toEqual({
+      goal: 'build a thing',
+      noLearnSkills: false,
+      noPromoteSkills: false,
+      noDirectSkills: false,
+      cleanWorkspace: false,
+      container: false,
+      egress: false,
+      baseline: false,
+    });
+  });
+
+  it('--baseline goal, and --no-baseline overrides ATOMA_BASELINE=1', () => {
+    const a = parseRunnerArgs(['--baseline', 'compare the arms']);
+    expect(a.baseline).toBe(true);
+    expect(a.goal).toBe('compare the arms');
+
+    process.env['ATOMA_BASELINE'] = '1';
+    expect(parseRunnerArgs(['g']).baseline).toBe(true);
+    expect(parseRunnerArgs(['--no-baseline', 'g']).baseline).toBe(false);
+    // Last spelling wins, exactly like the old sequential loop.
+    expect(parseRunnerArgs(['--no-baseline', '--baseline', 'g']).baseline).toBe(true);
+  });
+
+  it('--no-learn-skills is a bare boolean, never a value flag', () => {
+    const a = parseRunnerArgs(['--no-learn-skills', 'the goal']);
+    expect(a.noLearnSkills).toBe(true);
+    expect(a.goal).toBe('the goal');
+  });
+
+  it('--seed X goal: flag wins over ATOMA_SEED; env is the fallback', () => {
+    process.env['ATOMA_SEED'] = 'env/dir';
+    expect(parseRunnerArgs(['g']).seed).toBe('env/dir');
+    expect(parseRunnerArgs(['--seed', 'cli/dir', 'g']).seed).toBe('cli/dir');
+    // A trailing --seed clobbers the env default (historical contract: the
+    // old loop assigned `argv[++i]` — undefined — over the env value).
+    expect(parseRunnerArgs(['g', '--seed']).seed).toBeUndefined();
+  });
+
+  it('--container/--egress pass through resolveToolBackendMode unchanged', () => {
+    expect(parseRunnerArgs(['--container', 'g'])).toMatchObject({
+      container: true,
+      egress: false,
+      goal: 'g',
+    });
+    // Egress implies container — the implication lives in backendMode.ts,
+    // and the adapter must not shadow it with its own parsed values.
+    expect(parseRunnerArgs(['--egress', '--no-container', 'g'])).toMatchObject({
+      container: true,
+      egress: true,
+      goal: 'g',
+    });
+  });
+
+  it('an unknown flag is warn-and-DISCARDED and never eats the goal', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const a = parseRunnerArgs(['--contianer', 'build X']);
+    // The goal SURVIVES: swallowing it would silently run the profile's
+    // default goal instead (the failure mode pinned in mcp-server.test.ts).
+    expect(a.goal).toBe('build X');
+    expect(a.container).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('unknown flag: --contianer');
   });
 });
 

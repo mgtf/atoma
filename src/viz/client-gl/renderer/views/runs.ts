@@ -40,6 +40,7 @@ import {
   timelineBranchLabel,
   truncate,
 } from '../copy.js';
+import { drawScrollbarThumb } from '../scroll-pane.js';
 import { drawAtomDetail } from './atom-detail.js';
 import { gpuCardShaderMode } from '../shaders.js';
 
@@ -834,22 +835,14 @@ function drawEventDetail(
     ctx.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
     ctx.detailScrollY = Math.min(ctx.detailScrollY, ctx.detailScrollMax);
     detailLayer.position.y = -ctx.detailScrollY;
-    if (ctx.detailScrollMax > 0) {
-      const trackHeight = detailHeight;
-      const thumbHeight = Math.max(
-        28,
-        trackHeight * Math.min(1, detailHeight / (detailHeight + ctx.detailScrollMax))
-      );
-      const thumbY =
-        detailTop +
-        (trackHeight - thumbHeight) * (ctx.detailScrollY / ctx.detailScrollMax);
-      const scrollbar = new Graphics();
-      scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
-      scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
-      scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
-      scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
-      ctx.root.addChild(scrollbar);
-    }
+    drawScrollbarThumb(ctx.root, {
+      x,
+      y: detailTop,
+      width,
+      height: detailHeight,
+      scrollY: ctx.detailScrollY,
+      maxScroll: ctx.detailScrollMax,
+    });
     if (event.l1Name && event.skillId) {
       ctx.button(
         ctx.root,
@@ -949,22 +942,14 @@ function drawEventDetail(
   ctx.detailScrollMax = Math.max(0, contentBottom - detailBottom + 8);
   ctx.detailScrollY = Math.min(ctx.detailScrollY, ctx.detailScrollMax);
   detailLayer.position.y = -ctx.detailScrollY;
-  if (ctx.detailScrollMax > 0) {
-    const trackHeight = detailHeight;
-    const thumbHeight = Math.max(
-      28,
-      trackHeight * Math.min(1, detailHeight / (detailHeight + ctx.detailScrollMax))
-    );
-    const thumbY =
-      detailTop +
-      (trackHeight - thumbHeight) * (ctx.detailScrollY / ctx.detailScrollMax);
-    const scrollbar = new Graphics();
-    scrollbar.roundRect(x + width - 8, detailTop, 3, trackHeight, 2);
-    scrollbar.fill({ color: GPU_COLORS.border, alpha: 0.55 });
-    scrollbar.roundRect(x + width - 8, thumbY, 3, thumbHeight, 2);
-    scrollbar.fill({ color: GPU_COLORS.primary, alpha: 0.9 });
-    ctx.root.addChild(scrollbar);
-  }
+  drawScrollbarThumb(ctx.root, {
+    x,
+    y: detailTop,
+    width,
+    height: detailHeight,
+    scrollY: ctx.detailScrollY,
+    maxScroll: ctx.detailScrollMax,
+  });
 }
 
 function drawStructuredDetailNodes(
