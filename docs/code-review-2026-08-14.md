@@ -204,6 +204,24 @@ après-midi du 13/08).
 > settle-forever du burn-in (le MCP en a un). Suite complète : 1612 passed /
 > 8 skipped, typecheck ×2 + lint + docs:check verts.
 
+> **Statut 2026-08-15 (batch runtime 10)** : les deux trous résiduels de la
+> couche B sont fermés dans la foulée. (a) `OllamaLlmClient` a désormais
+> l'horloge d'inactivité par appel que les deux autres transports avaient
+> déjà — même bouton (`ATOMA_CLI_CALL_TIMEOUT_MS`, défaut 10 min, via
+> `cliCallTimeoutMs()`), helper `fetchChat` unique pour les deux sites
+> /api/chat, cleanup explicite des listeners en `finally`, erreur attribuée
+> qui préserve le `partialUsage` payé ; le signal extérieur garde la
+> précédence et sa raison survit verbatim (testé). (b) La boucle burn-in a
+> son backstop `withUnkillableBackstop` : quand un groupe de processus
+> survit au SIGKILL, `spawnRun` reste volontairement pendant (correct sous
+> le serveur MCP qui a son hard-exit) mais `npm run burnin` attendait pour
+> toujours sans timer armé — le wrapper jette désormais avec attribution à
+> `timeout + marge hard-kill (constante partagée DEFAULT_HARD_KILL_MARGIN_MS)
+> + 60 s` et le batch avorte au lieu d'empiler du travail sur une machine
+> empoisonnée. L'invariant « a transport cannot outlive its deadline » est
+> maintenant vrai sur les trois transports. Suite complète : 1616 passed /
+> 8 skipped, typecheck ×2 + lint + docs:check verts.
+
 ## 1. Bugs confirmés (par gravité)
 
 ### 1.1 ✓ HIGH — La gate anti-fabrication est inerte en production

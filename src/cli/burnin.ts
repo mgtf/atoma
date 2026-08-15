@@ -411,6 +411,46 @@ async function waitForRunProcessGroupGone(pid: number, timeoutMs: number): Promi
   return true;
 }
 
+export const DEFAULT_HARD_KILL_MARGIN_MS = 180_000;
+export const UNKILLABLE_BACKSTOP_EXTRA_MS = 60_000;
+
+/**
+ * Last-resort settle guard for the batch loop's per-task await.
+ *
+ * `spawnRun` FAILS CLOSED when a run's process group survives SIGKILL: the
+ * promise stays pending, which is correct under the MCP server (its own
+ * hard-exit backstop takes over) but left `npm run burnin` awaiting forever
+ * with no timer still armed — a silent batch wedge (2026-08-15 wedging
+ * investigation, layer B). An unkillable group is a machine fault, so this
+ * THROWS with attribution and the batch aborts instead of stacking more work
+ * on a poisoned host. The timer is always cleared on settle.
+ */
+export async function withUnkillableBackstop<T>(
+  work: Promise<T>,
+  totalMs: number,
+  label: string
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(
+            new Error(
+              `${label}: the runner's process group survived SIGKILL — spawnRun still unsettled ` +
+                `${Math.round(totalMs / 1000)}s after launch. The machine needs manual cleanup; ` +
+                'batch aborted (fail closed).'
+            )
+          );
+        }, totalMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /**
  * The one graceful termination primitive for detached run groups.
  *
@@ -475,7 +515,7 @@ export function spawnRun(opts: {
   readonly hardKillMarginMs?: number;
 }): Promise<string> {
   const { goal, timeoutMs, logPath } = opts;
-  const hardKillMarginMs = opts.hardKillMarginMs ?? 180_000;
+  const hardKillMarginMs = opts.hardKillMarginMs ?? DEFAULT_HARD_KILL_MARGIN_MS;
   return new Promise((resolveRun, rejectRun) => {
     // Ahead of the spawn: the write below happens on the settle path, and a
     // throw there is what used to strand the promise.
@@ -662,11 +702,15 @@ async function main(): Promise<void> {
     const ts = new Date().toISOString();
     const started = Date.now();
     console.log(`\n▶ ${task.id} (${task.family}) …`);
-    const log = await spawnRun({
-      goal: task.goal,
-      timeoutMs,
-      logPath: join(logsDir, `${task.id}-${ts.replace(/[:.]/g, '-')}.log`),
-    });
+    const log = await withUnkillableBackstop(
+      spawnRun({
+        goal: task.goal,
+        timeoutMs,
+        logPath: join(logsDir, `${task.id}-${ts.replace(/[:.]/g, '-')}.log`),
+      }),
+      timeoutMs + DEFAULT_HARD_KILL_MARGIN_MS + UNKILLABLE_BACKSTOP_EXTRA_MS,
+      task.id
+    );
     const stats = parseRunLog(log);
     const durationS = newestTraceDuration(runsDir, started) ?? Math.round((Date.now() - started) / 1000);
     const trace = newestTraceName(runsDir, started);

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { hardTimeoutLogEpilogue, parseRunLog, spawnRun } from '../src/cli/burnin.js';
+import { hardTimeoutLogEpilogue, parseRunLog, spawnRun, withUnkillableBackstop } from '../src/cli/burnin.js';
 
 /**
  * The hard-timeout reap used to be UNATTRIBUTED: a wedged runner prints none
@@ -59,4 +59,25 @@ describe('spawnRun — hard-timeout reap leaves a parseable marker', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+/**
+ * The settle-forever hole (2026-08-15 wedging investigation, layer B):
+ * spawnRun fails closed when a process group survives SIGKILL — correct
+ * under the MCP server's hard-exit backstop, but `npm run burnin` had no
+ * equivalent, so the batch loop awaited forever with no timer left armed.
+ */
+describe('withUnkillableBackstop — the batch loop cannot await forever', () => {
+  it('passes a normal settle through and clears its timer', async () => {
+    await expect(
+      withUnkillableBackstop(Promise.resolve('log text'), 60_000, 'task-x')
+    ).resolves.toBe('log text');
+  });
+
+  it('throws attributed when spawnRun never settles', async () => {
+    const never = new Promise<string>(() => {});
+    await expect(withUnkillableBackstop(never, 20, 'coffee-blend-web-page')).rejects.toThrow(
+      /coffee-blend-web-page: the runner's process group survived SIGKILL/
+    );
+  });
 });

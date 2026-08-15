@@ -10,6 +10,7 @@ import {
   offScopeToolMessage,
   truncateToolResultContent,
 } from './llm.js';
+import { cliCallTimeoutMs } from './llmClaudeCli.js';
 
 /**
  * `LlmClient` backed by Ollama's chat API. Lets atoma run against a
@@ -48,6 +49,13 @@ export interface OllamaLlmClientOptions {
   contextLength?: number;
   /** Default: 24 (mirrors AnthropicLlmClient's DEFAULT_MAX_TOOL_ITERATIONS). */
   maxToolIterations?: number;
+  /**
+   * Per-call inactivity clock, shared knob with the CLI transports
+   * (ATOMA_CLI_CALL_TIMEOUT_MS, default 10 min). Ollama was the only
+   * transport without one: a wedged non-streaming /api/chat held the await
+   * for the run's entire remaining budget (2026-08-15 wedging investigation).
+   */
+  callTimeoutMs?: number;
 }
 
 export const OLLAMA_DEFAULT_BASE_URL = 'http://localhost:11434';
@@ -112,12 +120,49 @@ export class OllamaLlmClient implements LlmClient {
   private readonly defaultModel: string;
   private readonly contextLength: number;
   private readonly maxIter: number;
+  private readonly callTimeoutMs: number;
 
   constructor(opts: OllamaLlmClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? OLLAMA_DEFAULT_BASE_URL).replace(/\/$/, '');
     this.defaultModel = opts.defaultModel ?? OLLAMA_DEFAULT_MODEL;
     this.contextLength = opts.contextLength ?? ollamaContextLength();
     this.maxIter = opts.maxToolIterations ?? DEFAULT_MAX_TOOL_ITERATIONS;
+    this.callTimeoutMs =
+      opts.callTimeoutMs && opts.callTimeoutMs > 0 ? opts.callTimeoutMs : cliCallTimeoutMs();
+  }
+
+  /**
+   * POST /api/chat under BOTH guards the transport rules require: the
+   * caller's outer signal AND a per-call inactivity clock. Explicit
+   * listener cleanup in finally; the clock aborts with an attributed Error
+   * so the existing raise() path keeps the paid partial usage.
+   */
+  private async fetchChat(body: unknown, outer: AbortSignal | undefined): Promise<Response> {
+    const controller = new AbortController();
+    const onOuterAbort = () =>
+      controller.abort(
+        outer?.reason instanceof Error ? outer.reason : new Error('aborted')
+      );
+    outer?.addEventListener('abort', onOuterAbort, { once: true });
+    const clock = setTimeout(() => {
+      controller.abort(
+        new Error(
+          `Ollama call exceeded the ${this.callTimeoutMs}ms per-call inactivity clock ` +
+            '(ATOMA_CLI_CALL_TIMEOUT_MS) — wedged /api/chat connection'
+        )
+      );
+    }, this.callTimeoutMs);
+    try {
+      return await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(clock);
+      outer?.removeEventListener('abort', onOuterAbort);
+    }
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
@@ -187,12 +232,7 @@ export class OllamaLlmClient implements LlmClient {
 
       let resp: Response;
       try {
-        resp = await fetch(`${this.baseUrl}/api/chat`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: req.signal,
-        });
+        resp = await this.fetchChat(body, req.signal);
       } catch (err) {
         // Mid-flight abort / connection failure: the rounds already
         // completed are still paid for.
@@ -324,10 +364,8 @@ export class OllamaLlmClient implements LlmClient {
       // ONE tools-disabled round-trip to force a final text reply.
       let resp: Response;
       try {
-        resp = await fetch(`${this.baseUrl}/api/chat`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
+        resp = await this.fetchChat(
+          {
             model,
             messages: [
               ...messages,
@@ -339,9 +377,9 @@ export class OllamaLlmClient implements LlmClient {
             ],
             stream: false,
             ...(Object.keys(options).length > 0 ? { options } : {}),
-          }),
-          signal: req.signal,
-        });
+          },
+          req.signal
+        );
       } catch (err) {
         return raise(err);
       }

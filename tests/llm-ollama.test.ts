@@ -490,3 +490,55 @@ describe('OllamaLlmClient', () => {
     expect(body.options.num_ctx).toBe(65_536);
   });
 });
+
+/**
+ * Per-call inactivity clock (2026-08-15 wedging investigation, layer B):
+ * Ollama was the ONLY transport without one — a wedged non-streaming
+ * /api/chat held the await for the run's entire remaining budget, invisible
+ * to the advisory abort and below the watchdog's deadline. The clock aborts
+ * the fetch with an attributed error; the caller's outer signal keeps
+ * precedence and its reason survives verbatim.
+ */
+describe('OllamaLlmClient — per-call inactivity clock', () => {
+  const hangRespectingSignal: Stub = (_input, init) =>
+    new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener(
+        'abort',
+        () => {
+          const reason: unknown = init.signal?.reason;
+          reject(reason instanceof Error ? reason : new Error('aborted'));
+        },
+        { once: true }
+      );
+    });
+
+  it('aborts a wedged /api/chat after callTimeoutMs with an attributed error', async () => {
+    const restore = installFetchStub(hangRespectingSignal);
+    try {
+      const client = new OllamaLlmClient({ defaultModel: 'stub', callTimeoutMs: 25 });
+      await expect(
+        client.complete({ model: 'stub', systemPrompt: 's', userContent: 'u' })
+      ).rejects.toThrow(/per-call inactivity clock/);
+    } finally {
+      restore();
+    }
+  });
+
+  it('the outer signal still wins, and its reason survives verbatim', async () => {
+    const restore = installFetchStub(hangRespectingSignal);
+    try {
+      const client = new OllamaLlmClient({ defaultModel: 'stub', callTimeoutMs: 60_000 });
+      const outer = new AbortController();
+      const pending = client.complete({
+        model: 'stub',
+        systemPrompt: 's',
+        userContent: 'u',
+        signal: outer.signal,
+      });
+      setTimeout(() => outer.abort(new Error('outer deadline says stop')), 10);
+      await expect(pending).rejects.toThrow(/outer deadline says stop/);
+    } finally {
+      restore();
+    }
+  });
+});
