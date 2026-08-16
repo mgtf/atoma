@@ -34,6 +34,7 @@ import {
 } from './renderer/cast-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
 import { NO_TINT, multiplyTint } from './renderer/label-tint.js';
+import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
 import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
@@ -2248,6 +2249,7 @@ export class GpuRenderer {
       x += Math.max(66, label.length * 7 + 22) + NAV_HOVER_GAP;
     }
 
+    this.drawFpsReadout(width - 114, 26);
     this.button(
       this.root,
       'locale.toggle',
@@ -2276,6 +2278,41 @@ export class GpuRenderer {
       GPU_COLORS.primary,
       true
     );
+  }
+
+  /**
+   * Live frame rate, right-aligned just left of the locale toggle.
+   *
+   * Deliberately NOT drawn through `text()`. That cache keys on the string
+   * itself, so a counter would mint a fresh pooled label for every value it
+   * ever displayed and never reuse one — the opposite of what the cache is
+   * for. This label is owned by the scene, destroyed with it, and mutated in
+   * place by a ticker at `FPS_REFRESH_MS`.
+   *
+   * `ticker.FPS` is Pixi's own smoothed rate, so the number does not flicker
+   * between two values the way a per-frame `1000/deltaMS` does.
+   */
+  private drawFpsReadout(right: number, y: number) {
+    const { style } = this.textStyle({ size: 10, color: GPU_COLORS.text, mono: true, weight: '600' });
+    const readout = new Text({ text: formatFps(this.app.ticker.FPS), style });
+    readout.anchor.set(1, 0.5);
+    readout.position.set(right, y);
+    readout.eventMode = 'none';
+    readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(this.app.ticker.FPS));
+    readout.label = 'fps-readout';
+    this.root.addChild(readout);
+
+    let sinceRefresh = 0;
+    this.addTicker((ticker) => {
+      sinceRefresh += ticker.deltaMS;
+      if (sinceRefresh < FPS_REFRESH_MS || readout.destroyed) return;
+      sinceRefresh = 0;
+      const fps = this.app.ticker.FPS;
+      const next = formatFps(fps);
+      // Assigning the same string still re-rasterises in Pixi; guard it.
+      if (next !== readout.text) readout.text = next;
+      readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(fps));
+    });
   }
 
   private drawOverlays(snapshot: GpuRenderSnapshot, width: number, height: number) {
