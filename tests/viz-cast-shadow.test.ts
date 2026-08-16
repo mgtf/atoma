@@ -116,19 +116,45 @@ describe('pointer-cast shadows', () => {
     expect(lengths[0]!).toBeLessThan(CAST_SHADOW_REACH_PX * 0.25);
   });
 
-  it("measures off-centre against each surface's own size", () => {
-    // The same absolute 30px puts a small surface most of the way along its
-    // ramp and a wide one barely onto its own, which is why "overhead" has to
-    // be relative: a fixed pixel threshold would make every large surface
-    // behave as though the light were permanently at its edge.
-    const cx = SURFACE.left + SURFACE.width / 2;
-    const cy = SURFACE.top + SURFACE.height / 2;
-    const small = cast({ lightX: cx - 30, lightY: cy });
-    const wide = castShadowOffset({
-      left: 0, top: 0, width: 900, height: 600,
-      lightX: 450 - 30, lightY: 300, strength: 1,
+  it('ramps on an absolute distance, not on how broad the surface is', () => {
+    // This test used to assert the OPPOSITE — that a wide surface ramps more
+    // slowly because the ramp was its own half-diagonal. That made the ramp
+    // ~450px long for a control frame, so a pointer just below one had barely
+    // started it and the downward ambient offset still won: the shadow fell
+    // toward the light. A lit plate's shadow shifts with the light's lateral
+    // distance and its own thickness; the plate's breadth does not enter into
+    // it.
+    const narrow = castShadowOffset({
+      left: 0, top: 0, width: 80, height: 30,
+      lightX: 40, lightY: 15 + 60, strength: 1,
     });
-    expect(Math.hypot(small.x, small.y)).toBeGreaterThan(Math.hypot(wide.x, wide.y));
+    const wide = castShadowOffset({
+      left: 0, top: 0, width: 900, height: 30,
+      lightX: 450, lightY: 15 + 60, strength: 1,
+    });
+    expect(Math.hypot(wide.x, wide.y)).toBeCloseTo(Math.hypot(narrow.x, narrow.y), 6);
+  });
+
+  it('throws a wide control frame UPWARD when the pointer sits below it', () => {
+    // The reported defect, at the geometry that produced it: a 900px group
+    // frame with the pointer just under its lower edge. The shadow must run
+    // away from the light — up — and must not be dragged back down by the
+    // ambient offset it is supposed to be overriding.
+    const frame = { left: 0, top: 200, width: 900, height: 44 };
+    for (const below of [10, 30, 60, 80]) {
+      const offset = castShadowOffset({
+        ...frame,
+        lightX: frame.left + frame.width / 2,
+        lightY: frame.top + frame.height + below,
+        strength: 1,
+        depth: 0.8,
+      });
+      // Substantially up, not merely non-positive: the broken model still
+      // produced -0.6px at the near distances — technically away from the
+      // light, visually nothing — before flipping downward past 60px. A test
+      // for the sign alone passes on the defect.
+      expect(offset.y).toBeLessThan(-2);
+    }
   });
 
   it('still reaches most of its length once the light is clear of the surface', () => {

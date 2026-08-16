@@ -21,6 +21,13 @@ export const CAST_SHADOW_REACH_PX = 13;
 /** Below this, the surface sits on the light and direction is meaningless. */
 const DEGENERATE_DISTANCE_PX = 0.5;
 
+/**
+ * How far the light must travel off a surface's centre before that surface
+ * throws its full shadow. Below it the shadow is short and lands more or less
+ * underneath, which is what "the light is overhead" looks like.
+ */
+export const CAST_SHADOW_RAMP_PX = 45;
+
 export interface CastShadowInput {
   /** Surface rect in stage coordinates. */
   left: number;
@@ -88,16 +95,21 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
     input.lightHeight && input.lightHeight > 0 ? input.lightHeight : 1;
   const blend =
     strength * pointerLightFalloff(gap, POINTER_LIGHT_RADIUS_PX * lightHeight);
-  // How far OFF-AXIS the light is, as a fraction of the surface's own size.
-  // Without this the reach depended only on the DIRECTION to the centre, so a
-  // light sitting on the middle of a button threw a full-length shadow to one
-  // side the moment it moved half a pixel off centre. A lamp directly overhead
-  // casts its shadow underneath itself, evenly all round; the shadow only
-  // slides out as the lamp moves off the object. Measuring against the
-  // surface's own half-diagonal is what makes "overhead" mean the same thing
-  // for a button and for a column.
-  const halfExtent = Math.hypot(width, height) / 2;
-  const offAxis = halfExtent > 0 ? Math.min(1, spread / halfExtent) : 1;
+  // How far OFF-AXIS the light is. A lamp directly overhead casts its shadow
+  // underneath itself, evenly all round; the shadow slides out as the lamp
+  // moves off to one side, in proportion to that lateral travel. Without this
+  // the reach depended only on the DIRECTION to the centre, so a light on the
+  // middle of a button threw a full-length shadow to one side the moment it
+  // moved half a pixel off centre.
+  //
+  // The ramp is an ABSOLUTE distance, deliberately NOT the surface's own size.
+  // Normalizing against a surface's half-diagonal — the first version of this
+  // — made the ramp 450px long for a wide control frame, so a pointer sitting
+  // just below one had barely started it and the downward AMBIENT offset still
+  // won: the shadow fell downward, toward the light. It is also wrong as
+  // physics. A lit plate's shadow shifts with the light's lateral distance and
+  // its own thickness, and it does not care how broad the plate is.
+  const offAxis = Math.min(1, spread / CAST_SHADOW_RAMP_PX);
   const reach = CAST_SHADOW_REACH_PX * depth * offAxis / lightHeight;
   // Sitting on the centre, the direction is undefined but the answer is not:
   // the shadow is directly underneath, length zero. This used to bail out to
