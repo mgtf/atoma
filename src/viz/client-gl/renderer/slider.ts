@@ -62,7 +62,15 @@ export class Slider extends Container {
 
   private updateFromPointer(e: { global: { x: number; y: number } }) {
     const globalPoint = e.global;
-    const localX = globalPoint.x - this.getGlobalPosition().x;
+    const globalPos = this.getGlobalPosition();
+
+    // If the slider is no longer in the stage, bail out
+    if (!globalPos || !Number.isFinite(globalPos.x)) {
+      activeSlider = null;
+      return;
+    }
+
+    const localX = globalPoint.x - globalPos.x;
     const clampedX = Math.max(0, Math.min(this.config.width, localX));
     let value = this.config.min +
       (clampedX / this.config.width) * (this.config.max - this.config.min);
