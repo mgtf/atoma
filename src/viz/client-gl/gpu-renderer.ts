@@ -751,7 +751,7 @@ export class GpuRenderer {
     const container = new Container();
     container.position.set(block.x, block.y);
     container.eventMode = 'none';
-    this.addSurfaceShadow(container, block.width, block.height, 10, 0.34, 0.5);
+    this.addSurfaceShadow(container, block.width, block.height, 10, 0.56, 0.8);
     const graphics = new Graphics();
     graphics.roundRect(0, 0, block.width, block.height, 10);
     graphics.fill({ color: GPU_COLORS.panelRaised, alpha: 0.38 });
