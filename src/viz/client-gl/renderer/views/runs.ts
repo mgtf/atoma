@@ -50,6 +50,7 @@ import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
 import { drawAtomDetail } from './atom-detail.js';
+import { drawDebugPanel } from './debug-panel.js';
 import { gpuCardShaderMode } from '../shaders.js';
 
 const RUN_STATUS_COLOR: Record<RunStatus, number> = {
@@ -889,6 +890,20 @@ export function drawRuns(
         color: GPU_COLORS.muted,
         width: rightWidth - 36,
       });
+    }
+
+    // Debug tuning panel: always visible at the bottom of the right pane
+    const debugPanelBottom = Math.max(detailTop + 12, height - GPU_LAYOUT.gap - 240);
+    const debugPanelHeight = Math.max(0, height - GPU_LAYOUT.gap - debugPanelBottom);
+    if (debugPanelHeight > 120) {
+      drawDebugPanel(
+        ctx,
+        ctx.root,
+        rightX + 8,
+        debugPanelBottom,
+        rightWidth - 16,
+        debugPanelHeight
+      );
     }
   }
 }
