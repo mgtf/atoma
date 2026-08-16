@@ -81,7 +81,6 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
   const dx = left + width / 2 - lightX;
   const dy = top + height / 2 - lightY;
   const spread = Math.hypot(dx, dy);
-  if (spread < DEGENERATE_DISTANCE_PX) return rest;
 
   // The light's own falloff, so a surface beyond its reach is simply unlit
   // rather than throwing a long shadow from a light it cannot see.
@@ -89,9 +88,23 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
     input.lightHeight && input.lightHeight > 0 ? input.lightHeight : 1;
   const blend =
     strength * pointerLightFalloff(gap, POINTER_LIGHT_RADIUS_PX * lightHeight);
-  const reach = CAST_SHADOW_REACH_PX * depth / lightHeight;
-  const castX = dx / spread * reach;
-  const castY = dy / spread * reach;
+  // How far OFF-AXIS the light is, as a fraction of the surface's own size.
+  // Without this the reach depended only on the DIRECTION to the centre, so a
+  // light sitting on the middle of a button threw a full-length shadow to one
+  // side the moment it moved half a pixel off centre. A lamp directly overhead
+  // casts its shadow underneath itself, evenly all round; the shadow only
+  // slides out as the lamp moves off the object. Measuring against the
+  // surface's own half-diagonal is what makes "overhead" mean the same thing
+  // for a button and for a column.
+  const halfExtent = Math.hypot(width, height) / 2;
+  const offAxis = halfExtent > 0 ? Math.min(1, spread / halfExtent) : 1;
+  const reach = CAST_SHADOW_REACH_PX * depth * offAxis / lightHeight;
+  // Sitting on the centre, the direction is undefined but the answer is not:
+  // the shadow is directly underneath, length zero. This used to bail out to
+  // the AMBIENT offset instead, so a pointer crossing a button's midpoint made
+  // its shadow jump sideways to the resting position for one pixel.
+  const castX = spread < DEGENERATE_DISTANCE_PX ? 0 : (dx / spread) * reach;
+  const castY = spread < DEGENERATE_DISTANCE_PX ? 0 : (dy / spread) * reach;
   return {
     x: rest.x + (castX - rest.x) * blend,
     y: rest.y + (castY - rest.y) * blend,

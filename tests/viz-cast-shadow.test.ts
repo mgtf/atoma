@@ -84,13 +84,57 @@ describe('pointer-cast shadows', () => {
     }
   });
 
-  it('rests rather than dividing by zero when the light is at the centre', () => {
+  it('lands directly underneath when the light is at the centre', () => {
+    // This test used to assert the AMBIENT offset here, which is what the
+    // divide-by-zero guard returned. That made a shadow JUMP sideways to its
+    // resting position for the one pixel the pointer crossed the middle, and
+    // it is not what a lamp held overhead does: it casts underneath itself.
+    // The direction is undefined at the centre; the length is not, it is zero.
     const offset = cast({
       lightX: SURFACE.left + SURFACE.width / 2,
       lightY: SURFACE.top + SURFACE.height / 2,
     });
     expect(Number.isFinite(offset.x)).toBe(true);
     expect(Number.isFinite(offset.y)).toBe(true);
-    expect(offset).toEqual(ambientShadowOffset());
+    expect(Math.hypot(offset.x, offset.y)).toBeLessThan(0.5);
+  });
+
+  it('slides the shadow out gradually as the light moves off centre', () => {
+    // The reported defect: with the pointer parked mid-button the shadow was
+    // already at full length on one side. Reach depended only on the DIRECTION
+    // to the centre, so half a pixel off centre bought the whole offset.
+    const cx = SURFACE.left + SURFACE.width / 2;
+    const cy = SURFACE.top + SURFACE.height / 2;
+    const lengths = [2, 8, 20, 40].map((d) => {
+      const offset = cast({ lightX: cx - d, lightY: cy });
+      return Math.hypot(offset.x, offset.y);
+    });
+    for (let i = 1; i < lengths.length; i += 1) {
+      expect(lengths[i]!).toBeGreaterThan(lengths[i - 1]!);
+    }
+    // Near the centre it is a small fraction of full reach, not most of it.
+    expect(lengths[0]!).toBeLessThan(CAST_SHADOW_REACH_PX * 0.25);
+  });
+
+  it("measures off-centre against each surface's own size", () => {
+    // The same absolute 30px puts a small surface most of the way along its
+    // ramp and a wide one barely onto its own, which is why "overhead" has to
+    // be relative: a fixed pixel threshold would make every large surface
+    // behave as though the light were permanently at its edge.
+    const cx = SURFACE.left + SURFACE.width / 2;
+    const cy = SURFACE.top + SURFACE.height / 2;
+    const small = cast({ lightX: cx - 30, lightY: cy });
+    const wide = castShadowOffset({
+      left: 0, top: 0, width: 900, height: 600,
+      lightX: 450 - 30, lightY: 300, strength: 1,
+    });
+    expect(Math.hypot(small.x, small.y)).toBeGreaterThan(Math.hypot(wide.x, wide.y));
+  });
+
+  it('still reaches most of its length once the light is clear of the surface', () => {
+    // Not exactly full: just outside the footprint the light's own falloff has
+    // begun, so the ramp being complete does not mean the blend is.
+    const offset = cast({ lightX: SURFACE.left - 20, lightY: SURFACE.top + SURFACE.height / 2 });
+    expect(Math.hypot(offset.x, offset.y)).toBeGreaterThan(CAST_SHADOW_REACH_PX * 0.9);
   });
 });
