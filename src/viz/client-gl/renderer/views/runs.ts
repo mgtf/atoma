@@ -80,6 +80,8 @@ const EVENT_COLUMN_GAP = 10;
 const EVENT_ACTOR_MIN_WIDTH = 64;
 /** Mean advance of 11px bold in the UI face; only bounds the truncation. */
 const EVENT_TITLE_CHAR_PX = 6.4;
+/** Characters the card's second line can show at 9px across the pane. */
+const EVENT_DETAIL_CHARS = 160;
 
 /**
  * Roughly two lines of the 13px summary title at the right pane's width.
@@ -805,8 +807,16 @@ export function drawRuns(
         weight: '700',
       });
     }
-    const detail = [copy.body, copy.footer].filter(Boolean).join(' · ');
-    ctx.text(cardContent, truncate(detail, 160), 11, 28, {
+    // The FOOTER is never the part that gets cut. It carries the facts the
+    // card exists to report — served model, tokens, cache read, cost — while
+    // the body is prose that survives truncation gracefully. Truncating the
+    // pair as one string dropped the numbers first whenever an event had
+    // reasoning attached, which is exactly when they were worth reading.
+    const bodyBudget = Math.max(24, EVENT_DETAIL_CHARS - copy.footer.length - 3);
+    const detail = [truncate(copy.body, bodyBudget), copy.footer]
+      .filter(Boolean)
+      .join(' · ');
+    ctx.text(cardContent, detail, 11, 28, {
       size: 9,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       width: cardWidth - 22,

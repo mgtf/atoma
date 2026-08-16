@@ -982,6 +982,31 @@ describe('drawRuns behavior', () => {
     expect(actor!.x).toBeGreaterThanOrEqual(titleEnd);
   });
 
+  it('truncates a long body rather than the facts after it', () => {
+    // The card's second line is body + footer. Truncating the pair as one
+    // string dropped the served model, tokens, cache read and cost first —
+    // exactly when an event had enough reasoning to be worth reading.
+    const events: VizEvent[] = [
+      makeLlmEvent('verbose', {
+        role: 'execute',
+        reasoning: 'x'.repeat(400),
+        model: 'claude-haiku-4-5-20251001',
+        servedModel: 'haiku',
+        costUsd: 0.0585,
+        usage: { inputTokens: 32, outputTokens: 2600, cacheReadInputTokens: 177_000 },
+      }),
+    ];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+
+    const detail = ctx.texts.find((text) =>
+      ctx.eventCards.some((card) => card.content === text.parent) && text.y === 28);
+    expect(detail, 'the card must draw a detail line').toBeDefined();
+    expect(detail!.value).toContain('cache 177k');
+    expect(detail!.value).toContain('$');
+    expect(detail!.value).toContain('⇢ haiku');
+  });
+
   it('windows the timeline, masks it, and reports the scroll bound', () => {
     const events = Array.from({ length: 200 }, (_, index) =>
       makeLlmEvent(`bulk-${index}`, {

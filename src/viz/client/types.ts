@@ -20,6 +20,14 @@ export interface VizEvent {
   role?: string;
   name?: string;
   model?: string;
+  /**
+   * What the transport ACTUALLY served. claude-cli, codex and ollama rewrite
+   * the tier pin, and cost is priced from this rather than from `model` — so a
+   * surface that shows one and prices the other is lying about the bill.
+   */
+  servedModel?: string;
+  /** `end_turn` is a finished answer; `max_tokens` is a truncated one. */
+  stopReason?: string;
   subject?: string;
   reasoning?: string;
   branchId?: string;

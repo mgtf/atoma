@@ -137,6 +137,74 @@ export function resultFacts(result: unknown): string {
   return facts.filter(Boolean).join(' · ');
 }
 
+
+/**
+ * Model ids carry a release date the card has no room for and the reader has
+ * no use for: `claude-haiku-4-5-20251001` → `claude-haiku-4-5`.
+ */
+export function compactModelName(model: string | undefined): string {
+  if (!model) return '';
+  return model.replace(/-\d{8}$/, '');
+}
+
+/**
+ * What was PINNED and what was actually SERVED.
+ *
+ * Under claude-cli, codex and ollama the transport rewrites the model, and
+ * this repository's accounting rule is explicit that cost follows the served
+ * model rather than the tier pin. The card showed the pin alone, so a run
+ * priced as `haiku` could display a Sonnet id. When they agree — the direct
+ * API — there is nothing to disambiguate and one name is shown.
+ */
+export function modelPairLabel(model?: string, servedModel?: string): string {
+  const pin = compactModelName(model);
+  const served = compactModelName(servedModel);
+  if (!served || served === pin) return pin;
+  if (!pin) return served;
+  return `${pin} ⇢ ${served}`;
+}
+
+/** 5842 → `5.8k`, 827777 → `828k`. Cards have no room for seven digits. */
+export function fmtTokenCount(value: number | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+  if (value < 1000) return String(Math.round(value));
+  if (value < 100_000) return `${(value / 1000).toFixed(1)}k`;
+  return `${Math.round(value / 1000)}k`;
+}
+
+/**
+ * The economics of one call: what it read, what it wrote, and how much of the
+ * input was served from cache. The cache figure is the load-bearing one — it
+ * is routinely two orders of magnitude larger than the fresh input and is the
+ * difference between a run that reuses its context and one that re-pays for
+ * it — and it was not on the card at all.
+ */
+export function llmUsageLabel(
+  usage: { inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number } | undefined,
+  t: GpuTranslate
+): string {
+  if (!usage) return '';
+  const parts = [
+    usage.inputTokens ? `${t('card.tokens.in')} ${fmtTokenCount(usage.inputTokens)}` : '',
+    usage.outputTokens ? `${t('card.tokens.out')} ${fmtTokenCount(usage.outputTokens)}` : '',
+    usage.cacheReadInputTokens
+      ? `${t('card.tokens.cache')} ${fmtTokenCount(usage.cacheReadInputTokens)}`
+      : '',
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
+/**
+ * Only an ABNORMAL stop is worth a card's width. `end_turn` is the model
+ * finishing its sentence; `max_tokens` is a truncated answer that looks
+ * identical on the card unless it is named, and it is the failure the
+ * validators then have to reason about.
+ */
+export function stopReasonLabel(stopReason: string | undefined, t: GpuTranslate): string {
+  if (!stopReason || stopReason === 'end_turn' || stopReason === 'stop') return '';
+  return `⚠ ${t('card.stopReason', { reason: stopReason })}`;
+}
+
 export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCardCopy {
   const toolElement = event.kind === 'tool' && event.name
     ? elementForTool(event.name)
@@ -177,7 +245,14 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
     : '';
   const footer =
     event.kind === 'llm'
-      ? [event.model, fmtMs(event.durationMs), fmtCost(event.costUsd), time].filter(Boolean).join(' · ')
+      ? [
+        modelPairLabel(event.model, event.servedModel),
+        llmUsageLabel(event.usage, t),
+        fmtMs(event.durationMs),
+        fmtCost(event.costUsd),
+        stopReasonLabel(event.stopReason, t),
+        time,
+      ].filter(Boolean).join(' · ')
       : event.kind === 'tool'
         ? [fmtMs(event.durationMs), time].filter(Boolean).join(' · ')
         : event.kind === 'trust'
