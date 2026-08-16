@@ -94,6 +94,14 @@ export class Slider extends Container {
   get value() {
     return this._value;
   }
+
+  /**
+   * Called by the global pointermove listener to update the slider position
+   * during a drag. Public so the listener can call it safely.
+   */
+  drag(globalX: number, globalY: number) {
+    this.updateFromPointer({ global: { x: globalX, y: globalY } });
+  }
 }
 
 // Global pointer up/move listeners for dragging across the screen
@@ -102,8 +110,12 @@ let activeSlider: Slider | null = null;
 if (typeof window !== 'undefined') {
   window.addEventListener('pointermove', (e: Event) => {
     if (activeSlider && e instanceof PointerEvent) {
-      const event = { global: { x: e.clientX, y: e.clientY } };
-      activeSlider['updateFromPointer'](event);
+      try {
+        activeSlider.drag(e.clientX, e.clientY);
+      } catch {
+        // If anything goes wrong, stop tracking this slider
+        activeSlider = null;
+      }
     }
   });
 
