@@ -116,11 +116,17 @@ describe('Atoma GPU brand mark', () => {
       ATOMA_MARK_CORE_EDGE_CLEARANCE + 0.06
     );
 
-    const beforeBounce = buildAtomaMarkFrame(1_800).corePosition.x;
-    const atBounce = buildAtomaMarkFrame(1_923).corePosition.x;
-    const afterBounce = buildAtomaMarkFrame(2_100).corePosition.x;
-    expect(atBounce).toBeGreaterThan(beforeBounce);
-    expect(atBounce).toBeGreaterThan(afterBounce);
+    // The bead REFLECTS off the hull rather than sliding along it or passing
+    // through. Found rather than hardcoded: the previous version pinned three
+    // timestamps that only bracketed a turning point at one particular bounce
+    // rate, so changing the rate broke a test about reflection.
+    const xs = Array.from({ length: 600 }, (_value, index) =>
+      buildAtomaMarkFrame(index * 20).corePosition.x);
+    const reversals = xs.filter((x, index) =>
+      index > 0 && index < xs.length - 1 &&
+      ((x > xs[index - 1]! && x > xs[index + 1]!) ||
+       (x < xs[index - 1]! && x < xs[index + 1]!)));
+    expect(reversals.length).toBeGreaterThan(2);
   });
 
   it('bounds its breathing motion and core pulse', () => {

@@ -21,11 +21,13 @@ import type {
   VizRun,
 } from '../client/types.js';
 import {
+  ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_CORE_STROKE_WIDTH,
   buildAtomaMarkFrame,
   type AtomaMarkPoint,
+  coreLightFalloff,
 } from './brand-mark.js';
 import {
   CAST_SHADOW_REACH_PX,
@@ -2185,7 +2187,10 @@ export class GpuRenderer {
 
     const paint = (elapsedMs: number) => {
       const frame = buildAtomaMarkFrame(elapsedMs);
-      crystal.scale.set(frame.scale * 1.12);
+      // A few pixels larger: the mark is the only brand surface in the bar and
+      // was reading small next to the wordmark. 1.24 keeps ~8px of air before
+      // the "Atoma" text at x=48.
+      crystal.scale.set(frame.scale * 1.24);
       aura
         .clear()
         .circle(14, 14, 12.6 + frame.pulse * 0.65)
@@ -2200,11 +2205,19 @@ export class GpuRenderer {
       facets.clear();
       clearcoat.clear();
 
+      const core3 = frame.corePosition;
       for (const face of frame.faces) {
+        // OMNI LIGHT. The bead lights the geometry around it rather than just
+        // wearing a halo: each face takes a white glaze proportional to how
+        // close its centroid is to the bead, so the illumination travels with
+        // it across the crystal.
+        const lit = coreLightFalloff(
+          Math.hypot(face.centroid.x - core3.x, face.centroid.y - core3.y)
+        );
         traceFace(faceGlow, face.points).stroke({
           color: face.edgeColor,
           width: 2.4,
-          alpha: face.glowAlpha,
+          alpha: face.glowAlpha + lit * 0.22,
         });
         traceFace(facets, face.points)
           .fill({ color: face.fillColor, alpha: 0.985 })
@@ -2222,6 +2235,12 @@ export class GpuRenderer {
           color: 0xffffff,
           alpha: face.sheenAlpha,
         });
+        if (lit > 0) {
+          traceFace(clearcoat, face.points).fill({
+            color: 0xdff1ff,
+            alpha: lit * 0.16,
+          });
+        }
         const highPoint = face.points.reduce((highest, point) =>
           point.y < highest.y ? point : highest
         );
@@ -2237,6 +2256,12 @@ export class GpuRenderer {
       const { x: coreX, y: coreY } = frame.corePosition;
       core.clear();
       core
+        // The light's own falloff, drawn as three soft steps so the bead reads
+        // as a source and not as a sticker.
+        .circle(coreX, coreY, ATOMA_MARK_CORE_LIGHT_RADIUS * 0.82)
+        .fill({ color: 0x9fd4ff, alpha: 0.028 + frame.pulse * 0.012 })
+        .circle(coreX, coreY, ATOMA_MARK_CORE_LIGHT_RADIUS * 0.5)
+        .fill({ color: 0xbfe4ff, alpha: 0.045 + frame.pulse * 0.018 })
         .circle(coreX, coreY, 4.4 + frame.pulse * 0.55)
         .fill({ color: GPU_COLORS.cyan, alpha: 0.035 + frame.pulse * 0.025 })
         .circle(coreX, coreY, 2.8 + frame.pulse * 0.2)

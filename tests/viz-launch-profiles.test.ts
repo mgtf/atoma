@@ -160,7 +160,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // The brand mark is one Pixi crystal in the header; no parallel R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
     expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(10, 12\)/);
-    expect(gpuRenderer).toMatch(/crystal\.scale\.set\(frame\.scale \* 1\.12\)/);
+    // Scaled FROM the frame, not pinned to a literal: the size is a design
+    // value that moves, the "one crystal driven by buildAtomaMarkFrame" is the
+    // contract this test exists to hold.
+    expect(gpuRenderer).toMatch(/crystal\.scale\.set\(frame\.scale \* [\d.]+\)/);
     expect(gpuRenderer).toMatch(/buildAtomaMarkFrame\(/);
     expect(gpuApp).not.toMatch(/AtomaCrystal/);
     expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);

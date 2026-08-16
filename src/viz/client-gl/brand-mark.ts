@@ -1,4 +1,28 @@
 export const ATOMA_MARK_TURN_MS = 10_000;
+
+/**
+ * Bounce rate of the core bead, as two triangle-wave frequencies. Kept
+ * deliberately incommensurate so the reflected path does not fall into a short
+ * repeating orbit — a mark that visibly loops every few seconds reads as a
+ * looping GIF rather than as something alive.
+ */
+export const ATOMA_MARK_CORE_SPEED_U = 0.85;
+export const ATOMA_MARK_CORE_SPEED_V = 0.6;
+
+/**
+ * The bead is a LIGHT, not just a dot: this is how far its illumination
+ * reaches across the crystal, in projected units (the whole mark is about 12
+ * units from centre to hull), and how it falls off.
+ */
+export const ATOMA_MARK_CORE_LIGHT_RADIUS = 9.5;
+
+/** Smooth 1→0 over the light's reach; 0 beyond it. */
+export function coreLightFalloff(distance: number): number {
+  if (!Number.isFinite(distance) || distance <= 0) return 1;
+  if (distance >= ATOMA_MARK_CORE_LIGHT_RADIUS) return 0;
+  const t = 1 - distance / ATOMA_MARK_CORE_LIGHT_RADIUS;
+  return t * t * (3 - 2 * t);
+}
 export const ATOMA_MARK_CORE_RADIUS = 1.82;
 export const ATOMA_MARK_CORE_RADIUS_PULSE = 0.08;
 export const ATOMA_MARK_CORE_STROKE_WIDTH = 0.78;
@@ -150,8 +174,8 @@ function bouncingCorePosition(
   seconds: number,
   projectedVertices: readonly AtomaMarkPoint[]
 ): AtomaMarkPoint {
-  const u = triangleWave(seconds * 0.52 + 1);
-  const v = triangleWave(seconds * 0.37 + 1);
+  const u = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_U + 1);
+  const v = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_V + 1);
   const raw = { x: (u + v) / 2, y: (u - v) / 2 };
   const distance = Math.hypot(raw.x, raw.y);
   if (distance < 1e-6) {
