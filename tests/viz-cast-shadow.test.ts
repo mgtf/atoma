@@ -73,14 +73,19 @@ describe('pointer-cast shadows', () => {
   });
 
   it('never throws further than its reach', () => {
-    for (const angle of [0, 0.7, 1.6, 2.4, 3.9, 5.2]) {
-      const offset = cast({
-        lightX: SURFACE.left + SURFACE.width / 2 + Math.cos(angle) * 30,
-        lightY: SURFACE.top + SURFACE.height / 2 + Math.sin(angle) * 30,
-      });
-      const rest = ambientShadowOffset();
-      const bound = CAST_SHADOW_REACH_PX + Math.hypot(rest.x, rest.y);
-      expect(Math.hypot(offset.x, offset.y)).toBeLessThanOrEqual(bound);
+    // 30px probes sit below the ramp, where the clamp never engages; the
+    // 100px probes force a raw offset of ~29px against a reach of 13, so this
+    // test pins the clamp itself, not just distances that never needed it.
+    for (const distance of [30, 100]) {
+      for (const angle of [0, 0.7, 1.6, 2.4, 3.9, 5.2]) {
+        const offset = cast({
+          lightX: SURFACE.left + SURFACE.width / 2 + Math.cos(angle) * distance,
+          lightY: SURFACE.top + SURFACE.height / 2 + Math.sin(angle) * distance,
+        });
+        const rest = ambientShadowOffset();
+        const bound = CAST_SHADOW_REACH_PX + Math.hypot(rest.x, rest.y);
+        expect(Math.hypot(offset.x, offset.y)).toBeLessThanOrEqual(bound);
+      }
     }
   });
 
@@ -154,6 +159,99 @@ describe('pointer-cast shadows', () => {
       // light, visually nothing — before flipping downward past 60px. A test
       // for the sign alone passes on the defect.
       expect(offset.y).toBeLessThan(-2);
+    }
+  });
+
+  it('throws UP wherever along a wide frame the pointer sits below, not sideways', () => {
+    // The second half of the same defect, reported after the first fix: aiming
+    // at the surface's geometric CENTRE meant a pointer below a 900px frame at
+    // x=200 aimed at a centre 250px to the right, so the shadow ran sideways
+    // with almost no lift. The light is local — it lights a patch, and that
+    // patch's shadow must go up wherever the patch is.
+    const frame = { left: 0, top: 200, width: 900, height: 44 };
+    for (const x of [200, 450, 700]) {
+      const offset = castShadowOffset({
+        ...frame,
+        lightX: x,
+        lightY: frame.top + frame.height + 30,
+        strength: 1,
+        depth: 0.8,
+      });
+      expect(offset.y).toBeLessThan(-2);
+      // Up must dominate: the lit patch sits symmetrically around the pointer
+      // here, so any sideways component is residual, not the direction.
+      expect(Math.abs(offset.x)).toBeLessThan(Math.abs(offset.y));
+    }
+  });
+
+  it('aims away from the lit patch near a frame end, never at the light', () => {
+    // Below the frame near its LEFT end: the lit patch is clipped on the left,
+    // so its centroid sits up and slightly right — the shadow may tilt right,
+    // but it must still rise, and it must never point back down at the light.
+    const frame = { left: 0, top: 200, width: 900, height: 44 };
+    const offset = castShadowOffset({
+      ...frame,
+      lightX: 40,
+      lightY: frame.top + frame.height + 30,
+      strength: 1,
+      depth: 0.8,
+    });
+    expect(offset.y).toBeLessThan(-2);
+  });
+
+  it('stays continuous across the empty-overlap boundary at a shrunken radius', () => {
+    // At lightHeight 0.3 the lit square is only 45px wide, so the overlap can
+    // empty out while the falloff is still ~0.29 — the one regime where the
+    // empty-overlap fallback in litSpanCentre is visible. Collapsing to the
+    // FAR end instead of the near one jumps 2.2px across this boundary; the
+    // wide sweep below never reaches it (its boundaries sit at ±150px), which
+    // is how that mutation survived the whole suite.
+    const frame = { left: 0, top: 200, width: 900, height: 44 };
+    const boundary = frame.left - POINTER_LIGHT_RADIUS_PX * 0.3;
+    const at = (lightX: number) =>
+      castShadowOffset({
+        ...frame,
+        lightX,
+        lightY: frame.top + frame.height + 10,
+        strength: 1,
+        lightHeight: 0.3,
+      });
+    const inside = at(boundary + 0.1);
+    const outside = at(boundary - 0.1);
+    expect(Math.hypot(inside.x - outside.x, inside.y - outside.y)).toBeLessThan(0.5);
+  });
+
+  it('answers ambient, not NaN, when an input is unplaceable', () => {
+    // A damped strength that ever went NaN would STAY NaN through exponential
+    // damping, so one poisoned frame would break the shadow forever.
+    const rest = ambientShadowOffset();
+    expect(cast({ lightX: 450, lightY: 430, strength: Number.NaN })).toEqual(rest);
+    expect(cast({ lightX: Number.NaN, lightY: 430 })).toEqual(rest);
+    expect(cast({ lightX: 450, lightY: Number.POSITIVE_INFINITY })).toEqual(rest);
+    const deep = castShadowOffset({
+      ...SURFACE, lightX: 450, lightY: 430, strength: 1, depth: Number.NaN,
+    });
+    expect(Number.isFinite(deep.x)).toBe(true);
+    expect(Number.isFinite(deep.y)).toBe(true);
+  });
+
+  it('moves continuously as the pointer sweeps under and past a wide frame', () => {
+    // The lit-span midpoint is what keeps direction from snapping at edge
+    // crossings; a jump here reads as the shadow twitching under the pointer.
+    const frame = { left: 0, top: 200, width: 900, height: 44 };
+    let previous: { x: number; y: number } | null = null;
+    for (let x = -120; x <= 1020; x += 4) {
+      const offset = castShadowOffset({
+        ...frame,
+        lightX: x,
+        lightY: frame.top + frame.height + 24,
+        strength: 1,
+        depth: 0.8,
+      });
+      if (previous) {
+        expect(Math.hypot(offset.x - previous.x, offset.y - previous.y)).toBeLessThan(2);
+      }
+      previous = offset;
     }
   });
 

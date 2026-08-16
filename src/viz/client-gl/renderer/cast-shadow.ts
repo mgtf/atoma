@@ -18,13 +18,10 @@ import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 /** How far a fully-lit surface pushes its shadow, in renderer pixels. */
 export const CAST_SHADOW_REACH_PX = 13;
 
-/** Below this, the surface sits on the light and direction is meaningless. */
-const DEGENERATE_DISTANCE_PX = 0.5;
-
 /**
- * How far the light must travel off a surface's centre before that surface
- * throws its full shadow. Below it the shadow is short and lands more or less
- * underneath, which is what "the light is overhead" looks like.
+ * How far the light must travel off the lit region's centroid before that
+ * surface throws its full shadow. Below it the shadow is short and lands more
+ * or less underneath, which is what "the light is overhead" looks like.
  */
 export const CAST_SHADOW_RAMP_PX = 45;
 
@@ -60,6 +57,19 @@ export interface CastShadowOffset {
   y: number;
 }
 
+/**
+ * Midpoint of the overlap between a surface's span on one axis and the
+ * light's span, i.e. the lit region's centre along that axis. With no
+ * overlap, the nearest end of the surface — the limit the overlap shrinks
+ * to, so the value stays continuous as the light leaves the surface behind.
+ */
+function litSpanCentre(min: number, max: number, light: number, radius: number): number {
+  const lo = Math.max(min, light - radius);
+  const hi = Math.min(max, light + radius);
+  if (lo > hi) return light < min ? min : max;
+  return (lo + hi) / 2;
+}
+
 /** The ambient offset: a fixed key light from above, used when unlit. */
 export function ambientShadowOffset(depth = 1): CastShadowOffset {
   return {
@@ -69,8 +79,22 @@ export function ambientShadowOffset(depth = 1): CastShadowOffset {
 }
 
 export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
-  const depth = input.depth ?? 1;
+  const depth = Number.isFinite(input.depth ?? 1) ? input.depth ?? 1 : 1;
   const rest = ambientShadowOffset(depth);
+  // NaN anywhere would otherwise ride through every formula below and land as
+  // a (NaN, NaN) position — and the caller's damped strength, once NaN, stays
+  // NaN, so the shadow would never recover. `lightHeight` already guards
+  // itself; the rest of the inputs deserve the same manners. Ambient is the
+  // honest answer to a light we cannot place.
+  if (
+    !Number.isFinite(input.strength) ||
+    !Number.isFinite(input.lightX) ||
+    !Number.isFinite(input.lightY) ||
+    !Number.isFinite(input.left) ||
+    !Number.isFinite(input.top)
+  ) {
+    return rest;
+  }
   const strength = Math.min(1, Math.max(0, input.strength));
   if (strength === 0) return rest;
 
@@ -83,40 +107,51 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
   const gapY = Math.max(top - lightY, 0, lightY - (top + height));
   const gap = Math.hypot(gapX, gapY);
 
-  // Direction is still from the light to the CENTRE: that is what the surface
-  // pivots around, so the shadow swings rather than snapping at the edges.
-  const dx = left + width / 2 - lightX;
-  const dy = top + height / 2 - lightY;
-  const spread = Math.hypot(dx, dy);
-
   // The light's own falloff, so a surface beyond its reach is simply unlit
   // rather than throwing a long shadow from a light it cannot see.
   const lightHeight =
     input.lightHeight && input.lightHeight > 0 ? input.lightHeight : 1;
-  const blend =
-    strength * pointerLightFalloff(gap, POINTER_LIGHT_RADIUS_PX * lightHeight);
-  // How far OFF-AXIS the light is. A lamp directly overhead casts its shadow
-  // underneath itself, evenly all round; the shadow slides out as the lamp
-  // moves off to one side, in proportion to that lateral travel. Without this
-  // the reach depended only on the DIRECTION to the centre, so a light on the
-  // middle of a button threw a full-length shadow to one side the moment it
-  // moved half a pixel off centre.
+  const radius = POINTER_LIGHT_RADIUS_PX * lightHeight;
+  const blend = strength * pointerLightFalloff(gap, radius);
+
+  // The shadow throws away from the light toward the centroid of the LIT
+  // REGION — the part of the surface inside the light's radius — not toward
+  // the surface's geometric centre. The pointer light is local: on a 900px
+  // control frame it lights a patch, and the only shadow the eye can see is
+  // that patch's, right where the light has brightened the page. Aiming at
+  // the geometric centre made a pointer sitting below such a frame throw the
+  // shadow SIDEWAYS at a centre 300px away instead of up, and that error was
+  // invisible on buttons, which fit inside the light entirely (there the lit
+  // centroid IS the centre, so small surfaces keep the exact behaviour that
+  // was verified on them).
   //
-  // The ramp is an ABSOLUTE distance, deliberately NOT the surface's own size.
-  // Normalizing against a surface's half-diagonal — the first version of this
-  // — made the ramp 450px long for a wide control frame, so a pointer sitting
-  // just below one had barely started it and the downward AMBIENT offset still
-  // won: the shadow fell downward, toward the light. It is also wrong as
-  // physics. A lit plate's shadow shifts with the light's lateral distance and
-  // its own thickness, and it does not care how broad the plate is.
-  const offAxis = Math.min(1, spread / CAST_SHADOW_RAMP_PX);
-  const reach = CAST_SHADOW_REACH_PX * depth * offAxis / lightHeight;
-  // Sitting on the centre, the direction is undefined but the answer is not:
-  // the shadow is directly underneath, length zero. This used to bail out to
-  // the AMBIENT offset instead, so a pointer crossing a button's midpoint made
-  // its shadow jump sideways to the resting position for one pixel.
-  const castX = spread < DEGENERATE_DISTANCE_PX ? 0 : (dx / spread) * reach;
-  const castY = spread < DEGENERATE_DISTANCE_PX ? 0 : (dy / spread) * reach;
+  // The centroid is per-axis: the lit span is the overlap of the surface with
+  // the light's square, and its midpoint moves continuously with the light —
+  // no edge crossing ever snaps the direction. An empty overlap collapses to
+  // the nearest edge; the falloff has mostly extinguished the blend out
+  // there, so only continuity matters, not the exact aim.
+  const litX = litSpanCentre(left, left + width, lightX, radius);
+  const litY = litSpanCentre(top, top + height, lightY, radius);
+  const dx = litX - lightX;
+  const dy = litY - lightY;
+
+  // Offset grows with the light's travel off the lit centroid and saturates at
+  // full reach. The ramp is an ABSOLUTE distance, deliberately NOT the
+  // surface's own size: a lit plate's shadow shifts with the light's lateral
+  // distance and the plate's own thickness, and it does not care how broad
+  // the plate is. (Normalizing by the half-diagonal — a previous version —
+  // gave a wide frame a ~450px ramp, so the ambient offset outweighed the
+  // cast and the frame's shadow fell downward, toward the light below it.)
+  // Directly overhead both components are zero and the shadow sits
+  // underneath; no degenerate-direction guard is needed because nothing here
+  // normalizes a vector.
+  const reach = CAST_SHADOW_REACH_PX * depth / lightHeight;
+  const rawX = (dx / CAST_SHADOW_RAMP_PX) * reach;
+  const rawY = (dy / CAST_SHADOW_RAMP_PX) * reach;
+  const rawLength = Math.hypot(rawX, rawY);
+  const scale = rawLength > reach ? reach / rawLength : 1;
+  const castX = rawX * scale;
+  const castY = rawY * scale;
   return {
     x: rest.x + (castX - rest.x) * blend,
     y: rest.y + (castY - rest.y) * blend,
