@@ -860,7 +860,11 @@ export class GpuRenderer {
     this.addSurfaceShadow(container, block.width, block.height, 10, 0.56, 0.8, 'frame');
     const graphics = new Graphics();
     graphics.roundRect(0, 0, block.width, block.height, 10);
-    graphics.fill({ color: GPU_COLORS.panelRaised, alpha: 0.38 });
+    // OPAQUE, not a tint. A surface that stands off the page and casts a
+    // shadow cannot also let the page — and its own shadow — show through it:
+    // that is what put a dark step across the frame's interior. Being solid is
+    // what makes it a surface rather than a wash of colour over the column.
+    graphics.fill({ color: GPU_COLORS.panelRaised });
     graphics.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.72 });
     graphics.eventMode = 'none';
     container.addChild(graphics);
