@@ -5,7 +5,7 @@
  * objects. The value is clamped to [min, max] and quantized by step if given.
  */
 
-import { Container, Graphics, Rectangle } from 'pixi.js';
+import { Container, Graphics, Rectangle, type FederatedPointerEvent } from 'pixi.js';
 
 export interface SliderConfig {
   x: number;
@@ -24,7 +24,6 @@ export class Slider extends Container {
   private thumb: Graphics;
   private config: SliderConfig;
   private _value: number;
-  private isDragging = false;
 
   constructor(config: SliderConfig) {
     super();
@@ -44,9 +43,11 @@ export class Slider extends Container {
     this.updateThumbPosition();
     this.addChild(this.thumb);
 
-    this.on('pointerdown', (e) => {
-      this.isDragging = true;
-      this.updateFromPointer(e);
+    this.on('pointerdown', (e: FederatedPointerEvent) => {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      activeSlider = this;
+      const event = { global: { x: e.global.x, y: e.global.y } };
+      this.updateFromPointer(event);
     });
   }
 
