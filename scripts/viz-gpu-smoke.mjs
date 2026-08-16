@@ -1,6 +1,9 @@
 /* global document, HTMLButtonElement, requestAnimationFrame, MutationObserver, WheelEvent */
 import { spawn } from 'node:child_process';
+import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import puppeteer from 'puppeteer';
 
 async function freePort() {
@@ -404,6 +407,12 @@ try {
         if (sample.offset !== 0) { midFlight = sample; break; }
         await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 15)));
       }
+      // Off the chips before the settled sample: hover scales a chip ±3.5%
+      // with centre compensation, which moves the shadow's parent ~1.4px
+      // while the pointer sits on it — real, bounded, and not the drift this
+      // arm hunts. The animation ticker re-anchors through it mid-flight; at
+      // rest nothing does, so the sample must be taken with nothing hovered.
+      await anchorPage.mouse.move(10, 780);
       await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
       const settled = await probe();
       anchorStats = { initial, hidden, midFlight, settled };
@@ -426,6 +435,114 @@ try {
     }
     console.log(
       `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled`
+    );
+
+    // A LIVE run's polling must not rebuild the GPU scene when nothing
+    // changed. The trace polls every 1s and the index every 2s; before the
+    // reference-stability fixes (spinner flag in the snapshot, per-render
+    // byNamespace object, mergeRunDelta returning a copy for an empty delta)
+    // that was ~2.5 full scene rebuilds per second — measured as the frame
+    // drops on live runs. The repo's own runs/ are all ended (polling stops),
+    // so this arm serves its OWN synthetic live run from a temp dir.
+    const liveDir = await mkdtemp(join(tmpdir(), 'viz-live-smoke-'));
+    const livePort = await freePort();
+    let liveServer = null;
+    let liveStats;
+    const livePage = await browser.newPage();
+    try {
+      const now = Date.now();
+      const liveRun = {
+        id: 'smoke-live-run',
+        label: 'smoke: synthetic live run',
+        startedAt: new Date(now - 60_000).toISOString(),
+        events: [
+          { id: 'ev1', kind: 'llm', role: 'plan', ts: now - 50_000, title: 'plan' },
+          { id: 'ev2', kind: 'tool', ts: now - 40_000, title: 'write_file' },
+          { id: 'ev3', kind: 'llm', role: 'execute', ts: now - 5_000, title: 'execute' },
+        ],
+      };
+      const runPath = join(liveDir, 'smoke-live-run.json');
+      const writeRun = async () => {
+        // Atomic: the server reads this file on every poll, and a torn JSON
+        // would surface as a spurious 500 in the diagnostics.
+        await writeFile(`${runPath}.tmp`, JSON.stringify(liveRun));
+        await rename(`${runPath}.tmp`, runPath);
+      };
+      await writeRun();
+      await writeFile(
+        join(liveDir, 'index.json'),
+        JSON.stringify([{
+          id: liveRun.id,
+          label: liveRun.label,
+          startedAt: liveRun.startedAt,
+          hasError: false,
+        }])
+      );
+      liveServer = spawn(
+        process.execPath,
+        ['dist/viz/server.js', '--host', '127.0.0.1', '--port', String(livePort), '--dir', liveDir],
+        { stdio: ['ignore', 'pipe', 'pipe'] }
+      );
+      const liveDeadline = Date.now() + 10_000;
+      while (Date.now() < liveDeadline) {
+        try {
+          const response = await fetch(`http://127.0.0.1:${livePort}/api/runs`);
+          if (response.ok) break;
+        } catch {
+          // Server still starting.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+
+      await livePage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      let tracePolls = 0;
+      livePage.on('request', (request) => {
+        if (request.url().includes('/api/runs/')) tracePolls += 1;
+      });
+      await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'networkidle0' });
+      await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+      await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1500)));
+
+      const readCount = () =>
+        livePage.evaluate(() =>
+          Number(document.querySelector('.gpu-ui-host').dataset.gpuRenderCount ?? 0));
+      const pollsBefore = tracePolls;
+      const idleStart = await readCount();
+      await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 5000)));
+      const idleEnd = await readCount();
+      const idlePolls = tracePolls - pollsBefore;
+
+      // A real event lands: the very next delta must rebuild the scene, or
+      // "no rebuilds" above would also pass on a UI that stopped updating.
+      liveRun.events.push({ id: 'ev4', kind: 'tool', ts: Date.now(), title: 'read_file' });
+      await writeRun();
+      await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2500)));
+      const afterEvent = await readCount();
+
+      liveStats = {
+        idlePolls,
+        idleRebuilds: idleEnd - idleStart,
+        rebuildsAfterEvent: afterEvent - idleEnd,
+      };
+    } finally {
+      await livePage.close();
+      if (liveServer) liveServer.kill('SIGTERM');
+      await rm(liveDir, { recursive: true, force: true });
+    }
+
+    if (
+      // ARMED: the 1s live poll was actually running — with no polls, zero
+      // rebuilds would be a scenario that never tested anything.
+      liveStats.idlePolls < 3 ||
+      // THE ASSERTION: empty polls leave the scene alone...
+      liveStats.idleRebuilds !== 0 ||
+      // ...and a real delta still reaches it.
+      liveStats.rebuildsAfterEvent < 1
+    ) {
+      throw new Error(`GPU live-poll stability failed: ${JSON.stringify(liveStats)}`);
+    }
+    console.log(
+      `viz GPU live poll ok: ${liveStats.idlePolls} empty polls, 0 rebuilds; real event rebuilt ${liveStats.rebuildsAfterEvent}x`
     );
   } finally {
     await browser.close();

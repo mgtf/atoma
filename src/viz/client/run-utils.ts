@@ -78,6 +78,19 @@ export function isIndexEntryLive(entry: RunIndexEntry, now = Date.now()): boolea
 
 export function mergeRunDelta(current: VizRun, incoming: VizRun): VizRun {
   const from = incoming.eventsFrom ?? 0;
+  // An empty delta with unchanged metadata returns CURRENT — the same
+  // reference, not an equal copy. Every consumer above (React Query's
+  // structural sharing, the snapshot memo, the GPU render effect) reads a new
+  // reference as "something changed" and rebuilds the whole scene; under a 1s
+  // live poll that was a rebuild per second for a run that had produced
+  // nothing. The reference is the contract that nothing did.
+  if (
+    incoming.events.length === 0 &&
+    from === current.events.length &&
+    sameRunMeta(current, incoming)
+  ) {
+    return current;
+  }
   return {
     ...current,
     ...incoming,
@@ -86,6 +99,21 @@ export function mergeRunDelta(current: VizRun, incoming: VizRun): VizRun {
         ? incoming.events
         : current.events.slice(0, from).concat(incoming.events),
   };
+}
+
+/**
+ * Field-by-field over the DELTA's own keys, so a field the server adds later
+ * automatically participates instead of silently freezing on screen. JSON
+ * compare per field: both sides came off the same serializer, so key order is
+ * stable, and `totals`/`result` are nested. Events are excluded — the caller
+ * already knows the delta carries none.
+ */
+function sameRunMeta(current: VizRun, incoming: VizRun): boolean {
+  for (const key of Object.keys(incoming) as (keyof VizRun)[]) {
+    if (key === 'events' || key === 'eventsFrom') continue;
+    if (JSON.stringify(current[key]) !== JSON.stringify(incoming[key])) return false;
+  }
+  return true;
 }
 
 export interface RunHeading {

@@ -4,7 +4,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { api } from '../client/data-api.js';
 import { isRunLive, mergeRunDelta } from '../client/run-utils.js';
 import type { SkillSummary, VizRun } from '../client/types.js';
@@ -76,11 +76,32 @@ export function useSkillLists(names: string[], active: boolean) {
       enabled: active,
     })),
   });
-  const byNamespace: Record<string, SkillSummary[]> = {};
-  names.forEach((name, index) => {
-    byNamespace[name] = results[index]?.data ?? [];
-  });
-  return { results, byNamespace };
+  // Reference-stable across renders whose inputs did not change. This object
+  // sits in the deps of the `data` memo the GPU snapshot is built from, and a
+  // fresh `{}` per render meant every React render — every poll notification
+  // included — produced a "new" snapshot and rebuilt the entire GPU scene.
+  // A ref-compare cache instead of useMemo because the dependency list
+  // (one data ref per namespace) has variable length.
+  const cache = useRef<{
+    names: readonly string[];
+    datas: readonly (SkillSummary[] | undefined)[];
+    value: Record<string, SkillSummary[]>;
+  } | null>(null);
+  const datas = results.map((result) => result.data);
+  const cached = cache.current;
+  if (
+    !cached ||
+    cached.names.length !== names.length ||
+    names.some((name, index) => name !== cached.names[index]) ||
+    datas.some((data, index) => data !== cached.datas[index])
+  ) {
+    const value: Record<string, SkillSummary[]> = {};
+    names.forEach((name, index) => {
+      value[name] = datas[index] ?? [];
+    });
+    cache.current = { names: [...names], datas, value };
+  }
+  return { results, byNamespace: cache.current!.value };
 }
 
 export function useSkillDetail(

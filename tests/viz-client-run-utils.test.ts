@@ -122,6 +122,65 @@ describe('React viz delta and filters', () => {
     })).events.map((event) => event.id)).toEqual(['fresh']);
   });
 
+  it('returns the SAME reference for an empty delta with unchanged metadata', () => {
+    // The reference is the contract: under the 1s live poll, every consumer
+    // above (React Query structural sharing, the snapshot memo, the GPU
+    // render effect) reads a new reference as "something changed" and
+    // rebuilds the whole GPU scene. An empty poll must therefore return
+    // `current` itself, not an equal copy — this is what stopped the
+    // rebuild-per-second frame drops on live runs.
+    const current = run({
+      events: [
+        { id: 'e1', kind: 'llm', ts: 1 },
+        { id: 'e2', kind: 'tool', ts: 2 },
+      ],
+      totals: { calls: 3 },
+    });
+    const emptyDelta = run({ eventsFrom: 2, events: [], totals: { calls: 3 } });
+    expect(mergeRunDelta(current, emptyDelta)).toBe(current);
+  });
+
+  it('still merges an empty delta whose metadata moved', () => {
+    // The run finishing produces exactly this shape: no new events, but
+    // endedAt/error/totals changed. Identity here would freeze the verdict.
+    const current = run({
+      events: [{ id: 'e1', kind: 'llm', ts: 1 }],
+      totals: { calls: 3 },
+    });
+    const finished = run({
+      eventsFrom: 1,
+      events: [],
+      totals: { calls: 3 },
+      endedAt: '2026-08-16T10:00:00.000Z',
+    });
+    const merged = mergeRunDelta(current, finished);
+    expect(merged).not.toBe(current);
+    expect(merged.endedAt).toBe('2026-08-16T10:00:00.000Z');
+    expect(merged.events.map((event) => event.id)).toEqual(['e1']);
+    // Nested metadata participates too: same shape, different leaf.
+    const totalsMoved = mergeRunDelta(current, run({
+      eventsFrom: 1,
+      events: [],
+      totals: { calls: 4 },
+    }));
+    expect(totalsMoved).not.toBe(current);
+    expect(totalsMoved.totals).toEqual({ calls: 4 });
+  });
+
+  it('never returns identity when the delta carries events or a resync', () => {
+    const current = run({ events: [{ id: 'e1', kind: 'llm', ts: 1 }] });
+    const withEvents = mergeRunDelta(current, run({
+      eventsFrom: 1,
+      events: [{ id: 'e2', kind: 'tool', ts: 2 }],
+    }));
+    expect(withEvents).not.toBe(current);
+    // A resync from zero — even to an EMPTY list (the trace was replaced) —
+    // must go through the merge: eventsFrom 0 with no events means the server
+    // now has none, not that nothing happened.
+    const resync = mergeRunDelta(current, run({ eventsFrom: 0, events: [] }));
+    expect(resync.events).toEqual([]);
+  });
+
   it('treats llm-start as llm while preserving role and branch filters', () => {
     const events = [
       { id: 's1', kind: 'llm-start', role: 'execute', branchId: 'a', ts: 1 },

@@ -257,7 +257,25 @@ export function GpuApp() {
   // requests the button causes. Unlike `loading` this covers refetches of
   // data already on screen, which is the entire point: on registry, skills,
   // burn-in and launch nothing polls, so a refetch is invisible without it.
-  const fetching = useIsFetching(activeViewQueryFilter(state.view)) > 0;
+  const inFlight = useIsFetching(activeViewQueryFilter(state.view)) > 0;
+  // ...but ONLY the button arms it. `fetching` sits in the snapshot the GPU
+  // scene is rebuilt from, and on a live run the background polls (trace
+  // every 1s, index every 2s) each flip an unfiltered in-flight count on and
+  // off — two full scene rebuilds per poll, ~2.5 per second, for a spinner
+  // nobody asked to spin. Measured as the source of the frame drops on live
+  // runs: 30 rebuilds in 12s of an otherwise idle view. Polls now leave the
+  // snapshot alone unless their DATA actually changed.
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    if (state.refreshNonce > 0) setRefreshing(true);
+  }, [state.refreshNonce]);
+  useEffect(() => {
+    // Disarm only once the button's requests have settled. This effect also
+    // runs while the arm above is still pending its re-render, in which case
+    // `refreshing` is still false and there is nothing to disarm.
+    if (refreshing && !inFlight) setRefreshing(false);
+  }, [refreshing, inFlight]);
+  const fetching = refreshing;
   const error = errorMessage([
     runsQuery.error,
     runQuery.error,
