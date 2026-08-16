@@ -62,15 +62,10 @@ export class Slider extends Container {
 
   private updateFromPointer(e: { global: { x: number; y: number } }) {
     const globalPoint = e.global;
-    const globalPos = this.getGlobalPosition();
-
-    // If the slider is no longer in the stage, bail out
-    if (!globalPos || !Number.isFinite(globalPos.x)) {
-      activeSlider = null;
-      return;
-    }
-
-    const localX = globalPoint.x - globalPos.x;
+    // Use the slider's local position (this.position) which is always correct,
+    // rather than getGlobalPosition() which can become invalid during rendering
+    const sliderScreenX = this.position.x;
+    const localX = globalPoint.x - sliderScreenX;
     const clampedX = Math.max(0, Math.min(this.config.width, localX));
     let value = this.config.min +
       (clampedX / this.config.width) * (this.config.max - this.config.min);
@@ -110,12 +105,7 @@ let activeSlider: Slider | null = null;
 if (typeof window !== 'undefined') {
   window.addEventListener('pointermove', (e: Event) => {
     if (activeSlider && e instanceof PointerEvent) {
-      try {
-        activeSlider.drag(e.clientX, e.clientY);
-      } catch {
-        // If anything goes wrong, stop tracking this slider
-        activeSlider = null;
-      }
+      activeSlider.drag(e.clientX, e.clientY);
     }
   });
 
