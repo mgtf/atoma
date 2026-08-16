@@ -1,0 +1,6 @@
+{
+  "name": "tabstat",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": { "tabstat": "./tabstat.js" }
+}

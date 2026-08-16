@@ -1,0 +1,6 @@
+region,units,delta,notes,reserve
+north,12,-4,solid,
+south,,7,,
+east,30,-1,late,
+west,8,,,
+central,15,2,steady,

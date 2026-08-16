@@ -1,0 +1,14 @@
+timestamp,arm,task_id,run_index,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace
+2026-08-15T22:55:49.572Z,baseline,tabstat-maint,1,delivered,0.3194,209,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T22-55-50-150-99d83078.json
+2026-08-15T22:59:19.316Z,baseline,tabstat-maint,2,delivered,0.2614,185,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T22-59-19-938-cebf32ff.json
+2026-08-15T23:02:24.543Z,baseline,tabstat-maint,3,delivered,0.1839,144,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T23-02-25-170-481844a3.json
+2026-08-15T23:04:49.261Z,baseline,tabstat-maint,4,delivered,0.2613,171,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T23-04-49-849-961c4e26.json
+2026-08-15T23:07:40.439Z,baseline,tabstat-maint,5,delivered,0.2158,145,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T23-07-41-065-d365afab.json
+2026-08-15T23:10:05.743Z,baseline,tabstat-maint,6,delivered,0.255,199,1,0,0,1,0,0,0,0,0,0,0,2026-08-15T23-10-06-331-3f2efa15.json
+2026-08-15T23:13:25.714Z,atoma,tabstat-maint,1,delivered,0.5786,473,23,1,1,21,0,0,2,0,0,0,0,2026-08-15T23-13-26-321-8ffd4e5d.json
+2026-08-15T23:21:19.736Z,atoma,tabstat-maint,2,delivered,0.4687,392,14,1,1,12,0,0,0,1,0,0,0,2026-08-15T23-21-20-483-70dc14cc.json
+2026-08-15T23:27:52.576Z,atoma,tabstat-maint,3,delivered,0.6899,724,17,1,2,14,0,0,0,0,1,0,0,2026-08-15T23-27-53-251-e5790169.json
+2026-08-15T23:39:56.807Z,atoma,tabstat-maint,4,delivered,0.3957,313,13,1,0,12,0,0,0,0,0,0,0,2026-08-15T23-39-57-529-62b10d4b.json
+2026-08-15T23:45:10.101Z,atoma,tabstat-maint,5,delivered,0.37,392,13,1,0,12,0,0,0,0,0,0,0,2026-08-15T23-45-10-753-dcef1da8.json
+2026-08-15T23:51:42.463Z,atoma,tabstat-maint,6,delivered,0.4256,405,13,1,0,12,0,0,0,0,0,0,0,2026-08-15T23-51-43-065-ba24b82d.json
+2026-08-15T23:58:28.110Z,atoma,tabstat-maint-2,1,delivered,0.3529,252,15,1,1,13,0,0,2,0,0,0,0,2026-08-15T23-58-28-855-b4c784b8.json

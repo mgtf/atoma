@@ -1,0 +1,18 @@
+{
+  "_comment": "ROUND 12 — the tabstat maintenance family, built because wclite-maint could not discriminate (see PROTOCOL.md#round-12). Control arm ATOMA_BASELINE_MODEL=claude-haiku-4-5-20251001, same as round 10, so the two rounds differ only in task difficulty.",
+  "primary": {
+    "id": "tabstat-maint",
+    "seed": "benchmark/seeds/tabstat",
+    "goal": "The workspace already contains a working tabstat CLI (tabstat.js with lib/columns.js and lib/stats.js), its README.md documenting eleven verified invocations, and .atoma-probes.json recording what each of them produced. Make one behavioural change, in three clauses: (1) empty cells must be EXCLUDED from the numeric statistics sum, mean, min and max, instead of counting as zero; (2) when a column has no numeric values at all, --format json must report null for sum, mean, min and max, and the default text format must print a single '-' for each of them; (3) count must keep its current meaning — the number of non-empty cells — and must NOT change. Apply that change to the implementation. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest ONLY for what legitimately changed: several documented values do not change at all and must be left exactly as they are. Do not rewrite the CLI, do not add features, and do not change the output layout."
+  },
+  "heldOut": {
+    "id": "tabstat-maint-2",
+    "seed": "benchmark/seeds/tabstat",
+    "goal": "The workspace already contains a working tabstat CLI (tabstat.js with lib/columns.js and lib/stats.js), its README.md documenting eleven verified invocations, and .atoma-probes.json recording what each of them produced. Make one change: --column must accept a 1-based column INDEX as well as a column name, so that --column 2 selects the second column and produces exactly the same output as selecting it by name. Every existing behaviour must be unchanged, including how empty cells are counted. Apply that change to the implementation. Then re-verify that every invocation documented in README.md and recorded in .atoma-probes.json still behaves as recorded, and update the README and the manifest only for what legitimately changed. Do not rewrite the CLI and do not add other features."
+  },
+  "baselineRuns": 6,
+  "atomaRuns": 6,
+  "heldOutBaselineRuns": 0,
+  "heldOutAtomaRuns": 1,
+  "timeoutMs": 900000
+}

@@ -1,0 +1,1059 @@
+{
+  "firstArchive": 223,
+  "results": [
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "1",
+      "cost": "0.3194",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev224",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "2",
+      "cost": "0.2614",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev225",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "3",
+      "cost": "0.1839",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev226",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "4",
+      "cost": "0.2613",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev227",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "5",
+      "cost": "0.2158",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev228",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "baseline",
+      "task": "tabstat-maint",
+      "run": "6",
+      "cost": "0.255",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev229",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "11 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "1",
+      "cost": "0.5786",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev230",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "17 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "2",
+      "cost": "0.4687",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev231",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "16 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "3",
+      "cost": "0.6899",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev232",
+      "spec": "tabstat-maint",
+      "score": 13,
+      "total": 14,
+      "full": false,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": false,
+          "detail": "still documents mean 13.00; still documents min 0; does not document the new mean 16.25"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "26 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "4",
+      "cost": "0.3957",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev233",
+      "spec": "tabstat-maint",
+      "score": 13,
+      "total": 14,
+      "full": false,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": false,
+          "detail": "still carries the seed's empty-cell sentence"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "15 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "5",
+      "cost": "0.37",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev234",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "13 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint",
+      "run": "6",
+      "cost": "0.4256",
+      "dir": "/Users/mgtf/.atoma/workspaces/build.prev235",
+      "spec": "tabstat-maint",
+      "score": 14,
+      "total": 14,
+      "full": true,
+      "checks": [
+        {
+          "id": "units-mean-excludes-empties",
+          "ok": true,
+          "detail": "mean 16.25 (expected 16.25)"
+        },
+        {
+          "id": "units-min-excludes-empties",
+          "ok": true,
+          "detail": "min 8 (expected 8)"
+        },
+        {
+          "id": "units-unchanged-stats-preserved",
+          "ok": true,
+          "detail": "sum 65 max 30 count 4 (expected 65 / 30 / 4)"
+        },
+        {
+          "id": "delta-mean-changed-rest-unchanged",
+          "ok": true,
+          "detail": "delta |   count 4 |   sum 4 |   mean 1.00 |   min -4 |   max 7"
+        },
+        {
+          "id": "count-clause-unchanged",
+          "ok": true,
+          "detail": "units\n  count 4"
+        },
+        {
+          "id": "empty-column-text-dashes",
+          "ok": true,
+          "detail": "reserve |   count 0 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "empty-column-json-nulls",
+          "ok": true,
+          "detail": "{ \"reserve\": { \"count\": 0, \"sum\": null, \"mean\": null, \"min\": null, \"max\": null } }"
+        },
+        {
+          "id": "non-numeric-column-keeps-count",
+          "ok": true,
+          "detail": "region |   count 5 |   sum - |   mean - |   min - |   max -"
+        },
+        {
+          "id": "json-units-values",
+          "ok": true,
+          "detail": "{ \"units\": { \"count\": 4, \"sum\": 65, \"mean\": 16.25, \"min\": 8, \"max\": 30 } }"
+        },
+        {
+          "id": "readme-updated",
+          "ok": true,
+          "detail": "superseded values gone, new value documented"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "15 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    },
+    {
+      "arm": "atoma",
+      "task": "tabstat-maint-2",
+      "run": "1",
+      "cost": "0.3529",
+      "dir": "/Users/mgtf/.atoma/workspaces/build",
+      "spec": "tabstat-maint-2",
+      "score": 9,
+      "total": 9,
+      "full": true,
+      "checks": [
+        {
+          "id": "index-selects-same-column",
+          "ok": true,
+          "detail": "index: units |   count 4 |   sum 65 |   mean 13.00 |   min 0 |   max 30"
+        },
+        {
+          "id": "index-works-for-last-column",
+          "ok": true,
+          "detail": "index 5: reserve |   count 0 |   sum 0 |   mean 0.00 |   min 0 |   max 0"
+        },
+        {
+          "id": "name-selection-still-works",
+          "ok": true,
+          "detail": "units |   count 4 |   sum 65 |   mean 13.00 |   min 0 |   max 30"
+        },
+        {
+          "id": "existing-statistics-unchanged",
+          "ok": true,
+          "detail": "units |   count 4 |   sum 65 |   mean 13.00 |   min 0 |   max 30"
+        },
+        {
+          "id": "unknown-column-still-exits-3",
+          "ok": true,
+          "detail": "exit 3"
+        },
+        {
+          "id": "help-and-error-paths-unchanged",
+          "ok": true,
+          "detail": "help exit 0, missing exit 2"
+        },
+        {
+          "id": "manifest-parses",
+          "ok": true,
+          "detail": "shape"
+        },
+        {
+          "id": "manifest-entries-preserved",
+          "ok": true,
+          "detail": "14 entries"
+        },
+        {
+          "id": "manifest-matches-live",
+          "ok": true,
+          "detail": "every recorded entry replays identically"
+        }
+      ]
+    }
+  ]
+}

@@ -13,7 +13,7 @@ verification — down to models that cost a fraction as much.*
 ![benchmark](https://img.shields.io/badge/vs_Opus_direct-1.0–3.6×-success)
 ![benchmark2](https://img.shields.io/badge/vs_Sonnet_direct-1.05×-yellow)
 ![benchmark3](https://img.shields.io/badge/vs_Haiku_direct-0.36×_(atoma_loses)-critical)
-![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_10_rounds-gold)
+![breakeven](https://img.shields.io/badge/break--even-run_1–2_in_7_of_11_rounds-gold)
 ![providers](https://img.shields.io/badge/LLM_routes-Anthropic_·_Claude_·_Ollama_·_Z.ai_·_Codex-8A2BE2)
 
 **[→ How it works, in detail](docs/how-it-works.md)**
@@ -92,10 +92,11 @@ patterns needing judgment, and records why — verbatim, from a benchmark run:
 > whatever edge cases a given spec names … is an irreducible per-task design/reasoning act that
 > cannot be replaced by a fixed deterministic script without hardcoding one particular grammar."*
 
-**Eight controlled rounds have not shown this mechanism paying.** Across every committed atoma
+**Twelve controlled rounds have not shown this mechanism paying.** Across every committed atoma
 row it fired once in 54 build runs, then 11 / 1 / 1 / 0 times across four maintenance rounds
-(10 / 1 / 1 / 0 on the primary tasks alone). Round 5 shipped seven wrong deliverables out of
-nine. Each fix since made the path more correct and none made it cheaper; the best remaining
+(10 / 1 / 1 / 0 on the primary tasks alone) — and **zero times in rounds 9, 10, 11 and 12**,
+despite four promotions, making seven consecutive rounds contributing nothing. Round 5 shipped
+seven wrong deliverables out of nine. Each fix since made the path more correct and none made it cheaper; the best remaining
 idea was designed, measured at a **$0.03/run ceiling** and
 [refused](docs/hybrid-skills-design.md). It is kept because it is sound and cheap to carry, not
 because it is load-bearing. Mechanisms 1 and 2 are the product.
@@ -104,11 +105,12 @@ because it is load-bearing. Mechanisms 1 and 2 are the product.
 
 The same task, from an **empty registry and empty skill store**, given to atoma and to a single
 frontier agent — same sandbox, same tools, same budget, same token accounting,
-[registered before each run](benchmark/PROTOCOL.md). Eleven rounds: four on a from-scratch build,
-four on a maintenance task, then three that vary the control arm's model instead of the code.
+[registered before each run](benchmark/PROTOCOL.md). Twelve rounds: four on a from-scratch build,
+four on a maintenance task, three that vary the control arm’s model instead of the code, and one on a
+harder maintenance family built after the eighth could no longer discriminate.
 
 ![cost curve, round 1](docs/benchmark-cost-curve.svg)
-<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..11}.csv`.</sub>
+<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..12}.csv`.</sub>
 
 Mean cost per run on each round's main task, each against **its own same-day control**:
 
@@ -154,9 +156,40 @@ run against Opus-direct.
 
 **What does not:** the assumption underneath the architecture — that a cheap model needs
 supervision to be *correct*. Twelve of twelve unsupervised control deliverables were right,
-first try, at all three price points. **On this task the benefit of supervision is not
-merely small, it is unmeasured**, and the honest next step is a harder task family
-registered in advance, not a reinterpretation of rounds 9–11.
+first try, at all three price points.
+
+### Round 12 — the harder task, and what it found
+
+Rounds 9–11 ran on a one-file, five-invocation maintenance edit that turned out not to
+discriminate: every deliverable of every arm scored full marks. [Round 12](benchmark/ROUND12.md)
+was built to be able to fail — `tabstat`, three source files, eleven documented invocations,
+three clauses one of which forbids a change, and **only three of ten documented statistics
+actually move**, so a deliverable can fail by leaving the record stale *or* by whitewashing
+values that never changed. The scorer was validated in four directions before the round.
+
+| | control (Haiku direct) | atoma |
+|---|---|---|
+| deliverables at full marks | **6 of 6** | **5 of 7** |
+| mean cost | **$0.2495** | $0.4881 |
+
+**The task discriminated, and it discriminated against atoma.** Both failures are the same
+class — the README contradicting the artefact — and the code was correct in 6 of 6 atoma runs.
+One run updated the README's prose and left all seven recorded output blocks stale; another
+updated every block and left the prose verbatim from the seed. **atoma updated each half of
+the file and never both.**
+
+Run 3's trace shows why, and it is a real architectural defect rather than bad luck. The plan
+was three sequential phases — implement, re-verify, document. Phase 2 re-recorded the probes
+*after* the edit, compared them against themselves and reported *"zero changed entries"*; phase
+3 was then told to update *"only the invocations whose output legitimately changed per the
+previous phase's change list"* — an empty list — and correctly did nothing. **The change list
+must be computed before the edit, not after it.** A single agent holding the whole job in one
+context never has that failure available.
+
+**So the correctness case for supervision is now refuted twice, in the same direction, on an
+easy task and a harder one.** It is not merely unmeasured — on this family of work, at this
+scale, it is absent. What round 12 did produce is the first finding in four rounds that is
+about supervision itself, and it is actionable.
 
 **The frontier baseline is volatile; atoma is not.** Across the four build rounds the control
 swung **2.1×** ($0.82 → $1.68) while atoma stayed inside **$0.47–0.54**. atoma exposes one
@@ -168,7 +201,7 @@ eight.
 | | frontier direct | atoma |
 |---|---|---|
 | A *novel* task in the same family | $1.18 <sub>(n=2, spanning 2.5×)</sub> | **$0.18–0.55, zero new recipes learned** |
-| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8 · R9 · R10 · R11)</sub> | 7/7 · 3/3 · 3/3 · 2/2 · 3/3 · 6/6 · 3/3 | **12/12 · 16/16 · 16/16 · 7/7 · 7/7 · 6/7 · —** |
+| Deliverable correctness, executing scorer <sub>(R1 · R2 · R3 · R8 · R9 · R10 · R11 · R12)</sub> | 7/7 · 3/3 · 3/3 · 2/2 · 3/3 · 6/6 · 3/3 · **6/6** | **12/12 · 16/16 · 16/16 · 7/7 · 7/7 · 6/7 · — · 5/7** |
 
 Generalisation is the claim that has held most consistently: **eleven held-out runs across eight
 rounds, all in the same family as the trained task, all needing zero new recipes.** The frontier

@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "cmd": "node tabstat.js data.csv",
+      "exitCode": 0,
+      "stdout": "units\n  count 4\n  sum 65\n  mean 13.00\n  min 0\n  max 30\ndelta\n  count 4\n  sum 4\n  mean 0.80\n  min -4\n  max 7\n",
+      "note": "invocation 1 of 11: summary of every numeric column"
+    },
+    {
+      "cmd": "node tabstat.js --column units data.csv",
+      "exitCode": 0,
+      "stdout": "units\n  count 4\n  sum 65\n  mean 13.00\n  min 0\n  max 30\n",
+      "note": "invocation 2 of 11: one column, all statistics"
+    },
+    {
+      "cmd": "node tabstat.js --column delta data.csv",
+      "exitCode": 0,
+      "stdout": "delta\n  count 4\n  sum 4\n  mean 0.80\n  min -4\n  max 7\n",
+      "note": "invocation 3 of 11: a column containing negative values"
+    },
+    {
+      "cmd": "node tabstat.js --column reserve data.csv",
+      "exitCode": 0,
+      "stdout": "reserve\n  count 0\n  sum 0\n  mean 0.00\n  min 0\n  max 0\n",
+      "note": "invocation 4 of 11: a column with no values at all"
+    },
+    {
+      "cmd": "node tabstat.js --column region data.csv",
+      "exitCode": 0,
+      "stdout": "region\n  count 5\n  sum 0\n  mean 0.00\n  min 0\n  max 0\n",
+      "note": "invocation 5 of 11: a non-numeric column"
+    },
+    {
+      "cmd": "node tabstat.js --stat mean --column units data.csv",
+      "exitCode": 0,
+      "stdout": "units\n  mean 13.00\n",
+      "note": "invocation 6 of 11: a single statistic"
+    },
+    {
+      "cmd": "node tabstat.js --stat count --column units data.csv",
+      "exitCode": 0,
+      "stdout": "units\n  count 4\n",
+      "note": "invocation 7 of 11: count of non-empty cells"
+    },
+    {
+      "cmd": "node tabstat.js --format json --column units data.csv",
+      "exitCode": 0,
+      "stdout": "{\n  \"units\": {\n    \"count\": 4,\n    \"sum\": 65,\n    \"mean\": 13,\n    \"min\": 0,\n    \"max\": 30\n  }\n}\n",
+      "note": "invocation 8 of 11: json output"
+    },
+    {
+      "cmd": "node tabstat.js --format json --column reserve data.csv",
+      "exitCode": 0,
+      "stdout": "{\n  \"reserve\": {\n    \"count\": 0,\n    \"sum\": 0,\n    \"mean\": 0,\n    \"min\": 0,\n    \"max\": 0\n  }\n}\n",
+      "note": "invocation 9 of 11: json for a column with no values"
+    },
+    {
+      "cmd": "node tabstat.js --help",
+      "exitCode": 0,
+      "stdout": "Usage: node tabstat.js [--column <name>] [--stat <name>] [--format text|json] <file.csv>\n  --column <name>   report one column only (default: every numeric column)\n  --stat <name>     report one statistic only: count, sum, mean, min, max\n  --format <fmt>    text (default) or json\n  --help            print this message\n",
+      "note": "invocation 10 of 11: usage text"
+    },
+    {
+      "cmd": "node tabstat.js missing.csv",
+      "exitCode": 2,
+      "stdout": "",
+      "note": "invocation 11 of 11: unreadable file",
+      "stderr": "tabstat: cannot read file: missing.csv\n"
+    }
+  ]
+}
