@@ -7,7 +7,7 @@ import {
   isIdentityTuning,
   normalizeTuning,
   trackXFromTuningValue,
-  tuningPanelRequested,
+  tuningPanelVisible,
   tuningValueFromTrack,
   type VizTuning,
 } from '../src/viz/client-gl/tuning.js';
@@ -206,12 +206,22 @@ describe('normalizeTuning', () => {
   });
 });
 
-describe('the panel is a developer surface', () => {
-  it('is off unless the URL asks for it', () => {
-    expect(tuningPanelRequested('')).toBe(false);
-    expect(tuningPanelRequested('?lang=fr')).toBe(false);
-    expect(tuningPanelRequested('?atomaTune')).toBe(true);
-    expect(tuningPanelRequested('?atomaTune=1')).toBe(true);
+describe('the panel is visible by default and dismissible by URL', () => {
+  it('shows with no query at all — it was asked for in the right column', () => {
+    expect(tuningPanelVisible('')).toBe(true);
+    expect(tuningPanelVisible('?lang=fr')).toBe(true);
+    expect(tuningPanelVisible('?atomaTune=1')).toBe(true);
+  });
+
+  it('hides only on an explicit off value', () => {
+    for (const value of ['0', 'off', 'false', 'no', 'OFF', ' 0 ']) {
+      expect(tuningPanelVisible(`?atomaTune=${value}`), value).toBe(false);
+    }
+  });
+
+  it('treats a bare or unrecognised value as ON rather than guessing', () => {
+    expect(tuningPanelVisible('?atomaTune')).toBe(true);
+    expect(tuningPanelVisible('?atomaTune=maybe')).toBe(true);
   });
 });
 

@@ -21,11 +21,11 @@ export function tuningPanelHeight(): number {
  * The scene tuning panel: six live knobs over the light and the three depth
  * stacks it throws shadows from.
  *
- * A DEVELOPER surface, drawn only when the URL asks for it (`?atomaTune=1`),
- * mirroring the `?atomaDiag=1` handle the smokes use. The values it edits are
- * read by the renderer whether or not this panel is on screen — they are the
- * identity when untouched — so the tuned path and the shipped path are the
- * same code and the panel cannot bit-rot behind its flag.
+ * Visible by default in the runs right column. `?atomaTune=0` hides it, for a
+ * clean screenshot or to judge the scene without its own controls sitting in
+ * it. The values it edits are read by the renderer whether or not the panel is
+ * on screen — they are the identity when untouched — so the tuned path and the
+ * shipped path are the same code and neither can bit-rot.
  */
 export function drawTuningPanel(
   ctx: RendererCtx,
@@ -47,9 +47,9 @@ export function drawTuningPanel(
     color: GPU_COLORS.primary,
     weight: '700',
   });
-  // Says how to turn it off, because a panel reached by a URL flag is also
-  // dismissed by one and nothing else on screen would tell you that.
-  ctx.text(parent, '?atomaTune', x + width - PANEL_PADDING - 58, y + PANEL_PADDING, {
+  // How to dismiss it. Nothing else on screen would tell you, and a panel you
+  // cannot turn off is in the way the moment you want to judge the scene.
+  ctx.text(parent, '?atomaTune=0', x + width - PANEL_PADDING - 66, y + PANEL_PADDING, {
     size: 8,
     color: GPU_COLORS.muted,
   });

@@ -79,15 +79,14 @@ interface RecordingCtx extends RendererCtx {
 }
 
 /**
- * Turn the developer tuning panel on for one draw. `tuningPanelRequested()`
- * reads `location.search`, the same way `prefersReducedMotion()` reads a media
- * query — a global read the render path is allowed, and one a test has to
- * stand in for rather than route around.
+ * Draw with a chosen `location.search`. `tuningPanelVisible()` reads it the
+ * same way `prefersReducedMotion()` reads a media query — a global the render
+ * path is allowed, and one a test has to stand in for rather than route around.
  */
-function withTuningPanel(body: () => void) {
+function withTuningPanel(body: () => void, search = '?atomaTune=1') {
   const original = Reflect.getOwnPropertyDescriptor(globalThis, 'location');
   Object.defineProperty(globalThis, 'location', {
-    value: { search: '?atomaTune=1' },
+    value: { search },
     configurable: true,
     writable: true,
   });
@@ -1044,17 +1043,25 @@ describe('drawRuns behavior', () => {
     expect(detail!.value).toContain('⇢ haiku');
   });
 
-  it('keeps the tuning panel out of the product UI unless the URL asks', () => {
-    // A developer surface drawn unconditionally is product chrome. The first
-    // version was, and it also swallowed ~188px of the detail pane.
+  it('draws the tuning panel by default — it is where it was asked for', () => {
     const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
     const ctx = createRecordingCtx();
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    expect(ctx.tuningRows.length).toBeGreaterThan(0);
+  });
+
+  it('drops it entirely on ?atomaTune=0, taking its hit targets with it', () => {
+    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
+    const ctx = createRecordingCtx();
+    withTuningPanel(() => {
+      drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    }, '?atomaTune=0');
     expect(ctx.tuningRows).toHaveLength(0);
+    // A hidden control that still answers the pointer is worse than no control.
     expect(ctx.metrics.hitTargets.filter((t) => t.id.startsWith('tuning:'))).toHaveLength(0);
   });
 
-  it('draws one row per knob, and registers each as a hit target, when asked', () => {
+  it('draws one row per knob, and registers each as a hit target', () => {
     const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
     const ctx = createRecordingCtx();
     withTuningPanel(() => {
@@ -1078,7 +1085,9 @@ describe('drawRuns behavior', () => {
     const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
     const state = { selectedEventId: 'a' };
     const plain = createRecordingCtx();
-    drawRuns(plain, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
+    withTuningPanel(() => {
+      drawRuns(plain, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
+    }, '?atomaTune=0');
     const tuned = createRecordingCtx();
     withTuningPanel(() => {
       drawRuns(tuned, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);

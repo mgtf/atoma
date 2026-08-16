@@ -30,7 +30,7 @@ import type { RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
-import { tuningPanelRequested } from '../../tuning.js';
+import { tuningPanelVisible } from '../../tuning.js';
 import {
   FILTER_BLOCK_GAP,
   layoutAtomLaneBlocks,
@@ -864,7 +864,7 @@ export function drawRuns(
     // Reserved BEFORE the detail is laid out, so the panel never draws over
     // the detail pane or steals its wheel. The first version was appended on
     // top of whatever was already there and swallowed ~188px of it.
-    const tuningHeight = tuningPanelRequested() ? tuningPanelHeight() + GPU_LAYOUT.gap : 0;
+    const tuningHeight = tuningPanelVisible() ? tuningPanelHeight() + GPU_LAYOUT.gap : 0;
     const detailHeight = height - detailTop - tuningHeight;
     const event = run.events.find((value) => value.id === snapshot.state.selectedEventId);
     const atom = snapshot.state.selectedAtomName
