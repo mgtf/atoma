@@ -50,3 +50,17 @@ export function multiplyTint(from: number, to: number): number {
 
 /** No-op tint: what a pooled label must be reset to before reuse. */
 export const NO_TINT = 0xffffff;
+
+/**
+ * Blend two colours per channel. Used to give a control a FAMILY identity
+ * without shouting it: a filter chip at rest carries its kind's colour mixed
+ * most of the way back toward the neutral idle grey, so five chips read as
+ * five categories rather than as five alerts.
+ */
+export function mixColor(from: number, to: number, amount: number): number {
+  const t = Math.max(0, Math.min(1, amount));
+  const [fr, fg, fb] = split(from);
+  const [tr, tg, tb] = split(to);
+  const blend = (a: number, b: number): number => channel(a + (b - a) * t);
+  return (blend(fr, tr) << 16) | (blend(fg, tg) << 8) | blend(fb, tb);
+}

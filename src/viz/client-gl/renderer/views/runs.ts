@@ -46,6 +46,7 @@ import {
   timelineBranchLabel,
   truncate,
 } from '../copy.js';
+import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette.js';
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
 import { drawAtomDetail } from './atom-detail.js';
@@ -271,12 +272,16 @@ export function drawRuns(
       chip.width,
       chip.height,
       runFilters.kind === chip.id.slice('run.filter.kind.'.length),
-      snapshot.onActivate
+      snapshot.onActivate,
+      // The chip wears the colour of the cards it selects — the control and
+      // its result were previously unrelated, every chip falling back to blue.
+      eventKindColor(chip.id.slice('run.filter.kind.'.length))
     );
   }
   if (filterLayout.roles) {
     ctx.filterBlockFrame(ctx.root, filterLayout.roles);
     for (const chip of filterLayout.roles.chips) {
+      const role = chip.id.slice('run.filter.role.'.length);
       ctx.filterButton(
         ctx.root,
         chip.id,
@@ -286,7 +291,9 @@ export function drawRuns(
         chip.width,
         chip.height,
         runFilters.role === chip.id.slice('run.filter.role.'.length),
-        snapshot.onActivate
+        snapshot.onActivate,
+        // Role chips ride the same yellow→orange ramp their LLM cards do.
+        role === 'all' ? LLM_FAMILY_COLOR : llmRoleColor(role)
       );
     }
   }

@@ -33,7 +33,7 @@ import {
   castShadowOffset,
 } from './renderer/cast-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
-import { NO_TINT, multiplyTint } from './renderer/label-tint.js';
+import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
 import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
 import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
@@ -1054,7 +1054,7 @@ export class GpuRenderer {
     height: number,
     active: boolean,
     onActivate: (id: string) => void,
-    accent = GPU_COLORS.primary
+    accent: number = GPU_COLORS.primary
   ) {
     const target: FilterVisualTarget = {
       id,
@@ -1092,7 +1092,10 @@ export class GpuRenderer {
       alpha: active ? 0.3 : 0.94,
     });
     base.stroke({
-      color: active ? accent : 0x30405d,
+      // At rest the border carries a THIRD of the family colour. Enough that
+      // five chips read as five categories at a glance; not so much that a
+      // row of unselected filters looks like a row of alerts.
+      color: active ? accent : mixColor(0x30405d, accent, 0.34),
       width: active ? 1.8 : 1,
       alpha: active ? 1 : 0.85,
     });
@@ -1117,7 +1120,7 @@ export class GpuRenderer {
       .moveTo(width - 9, height - 4)
       .lineTo(width - 4, height - 4)
       .lineTo(width - 4, height - 9)
-      .stroke({ color: accent, width: 1.2, alpha: active ? 0.9 : 0.25 });
+      .stroke({ color: accent, width: 1.2, alpha: active ? 0.9 : 0.45 });
     container.addChild(corner);
 
     const sparkles = Array.from({ length: 4 }, (_, index) => {
@@ -1144,7 +1147,10 @@ export class GpuRenderer {
     let pressed = false;
     let insetDepth = active ? 1 : 0;
     let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -appearanceDelay;
-    let currentLabelTint = active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+    // The idle label carries a little of the family colour too, so a chip is
+    // identifiable without being selected and without being loud.
+    const idleTint = multiplyTint(GPU_COLORS.text, mixColor(BUTTON_LABEL_IDLE, accent, 0.42));
+    let currentLabelTint = active ? NO_TINT : idleTint;
     labelText.tint = currentLabelTint;
     container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
     const animate = (ticker: Ticker) => {
@@ -1177,7 +1183,7 @@ export class GpuRenderer {
       insetShadow.alpha = insetDepth;
       insetShadow.visible = insetDepth > 0.02;
       dropShadow.alpha = 1 - insetDepth;
-      const nextLabelTint = pressed || hovered || active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+      const nextLabelTint = pressed || hovered || active ? NO_TINT : idleTint;
       if (nextLabelTint !== currentLabelTint) {
         currentLabelTint = nextLabelTint;
         labelText.tint = nextLabelTint;

@@ -5,6 +5,7 @@ import { timelineBranchHeading, type TimelineBranch } from '../../client/timelin
 import type { VizEvent } from '../../client/types.js';
 import type { DetailTone } from '../../client/structured-detail.js';
 import { GPU_COLORS } from '../theme.js';
+import { eventKindColor, llmRoleColor } from './event-palette.js';
 
 /** The snapshot's translate function — the only copy channel to the screen. */
 export type GpuTranslate = (key: string, vars?: Record<string, unknown>) => string;
@@ -37,13 +38,21 @@ export function quantile(values: number[], percentile: number) {
   return sorted[Math.max(0, Math.min(sorted.length - 1, Math.ceil(percentile * sorted.length) - 1))]!;
 }
 
+/**
+ * A card's accent, from the SAME table its filter chip uses — see
+ * `renderer/event-palette.ts`.
+ *
+ * LLM cards used to take the TIER colour (teal/amber/violet). They now take a
+ * position on the yellow→orange role ramp, so every model call reads as one
+ * family and its shade says which phase it was. The tier has not been lost: it
+ * is written on the card ("L1 Ammonia") and it still colours the atom lanes,
+ * which is where the L3→L1 gradient is actually being shown.
+ */
 export function eventAccent(event: VizEvent): number {
-  if (event.kind === 'tool') return 0x38bdf8;
-  if (event.kind === 'trust') return GPU_COLORS.warning;
-  if (event.kind === 'cache') return GPU_COLORS.cyan;
-  if (event.kind === 'skill') return event.op === 'quarantine' ? GPU_COLORS.error : GPU_COLORS.magenta;
-  if (event.kind === 'registry') return 0xa78bfa;
-  return GPU_COLORS.tiers[(event.actor?.tier ?? 1) as 1 | 2 | 3] ?? GPU_COLORS.primary;
+  if (event.kind === 'llm' || event.kind === 'llm-start') return llmRoleColor(event.role);
+  // A quarantined skill is the one case where the OUTCOME outranks the family.
+  if (event.kind === 'skill' && event.op === 'quarantine') return GPU_COLORS.error;
+  return eventKindColor(event.kind);
 }
 
 export function detailToneColor(tone: DetailTone): number {
