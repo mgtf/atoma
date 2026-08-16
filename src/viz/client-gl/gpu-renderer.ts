@@ -36,6 +36,7 @@ import {
   ambientShadowOffset,
   castShadowOffset,
 } from './renderer/cast-shadow.js';
+import { softShadowLayers } from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
 import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
 import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
@@ -1106,9 +1107,12 @@ export class GpuRenderer {
     const shadow = new Graphics();
     // Geometry at the local origin, offset by POSITION — the offset is what
     // the pointer light moves each frame, and baking it into the path would
-    // mean re-tessellating every shadow on every pointer move.
-    shadow.roundRect(0, 0, width, height, radius);
-    shadow.fill({ color: 0x01040a, alpha });
+    // mean re-tessellating every shadow on every pointer move. The penumbra
+    // is stacked geometry for the same reason: still one object, one position.
+    for (const layer of softShadowLayers(width, height, radius, alpha, depth)) {
+      shadow.roundRect(layer.x, layer.y, layer.width, layer.height, layer.radius);
+      shadow.fill({ color: 0x01040a, alpha: layer.alpha });
+    }
     shadow.eventMode = 'none';
     parent.addChild(shadow);
     this.registerCastShadow(shadow, parent, 0, 0, width, height, depth, surface);
