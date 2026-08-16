@@ -104,8 +104,10 @@ export const BACKDROP_FRAGMENT_SHADER = /* glsl */ `
     float pointerCore = exp(-2.8 * pow(pointerDistance / ${VIZ_VISUAL_DEPTH.far.pointerCoreRadius.toFixed(1)}, 2.0));
     float relief = clamp(abs(dFdx(fieldA)) + abs(dFdy(fieldA)) + abs(dFdx(fieldB)), 0.0, 0.55);
     vec3 pointerTint = mix(vec3(0.24, 0.58, 1.0), vec3(0.82, 0.96, 1.0), pointerCore);
+    // Relief only, no additive core — a bright centre on the far plane put a
+    // second lamp behind the cursor, competing with the foreground filter.
     color += pointerTint * uPointerStrength * ${VIZ_VISUAL_DEPTH.far.pointerGain.toFixed(2)} *
-      (pointerHalo * (0.025 + relief * 0.12) + pointerCore * 0.12);
+      (pointerHalo * (0.03 + relief * 0.16));
 
     float vignette = smoothstep(1.0, 0.12, length(p));
     gl_FragColor = vec4(

@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+  POINTER_LIGHT_CORE_RADIUS_PX,
+  POINTER_LIGHT_RADIUS_PX,
+} from '../src/viz/client-gl/pointer-light.js';
+import {
   effectiveFarAlpha,
   maximumTopologyWorldZ,
   VIZ_VISUAL_DEPTH,
@@ -47,8 +51,15 @@ describe('viz visual depth contract', () => {
       VIZ_VISUAL_DEPTH.far.topologyPointerIntensity /
       VIZ_VISUAL_DEPTH.mid.pointerIntensity
     ).toBeLessThanOrEqual(0.35);
-    expect(VIZ_VISUAL_DEPTH.far.pointerHaloRadius).toBeGreaterThan(220);
-    expect(VIZ_VISUAL_DEPTH.far.pointerCoreRadius).toBeGreaterThan(46);
+    // WIDER than the foreground light, whatever the foreground light is. The
+    // old form froze both sides as literals, so shrinking the near pool left
+    // the far one stranded at its former size around a smaller cursor light.
+    expect(VIZ_VISUAL_DEPTH.far.pointerHaloRadius).toBeGreaterThan(
+      POINTER_LIGHT_RADIUS_PX
+    );
+    expect(VIZ_VISUAL_DEPTH.far.pointerCoreRadius).toBeGreaterThan(
+      POINTER_LIGHT_CORE_RADIUS_PX
+    );
   });
 
   it('lights only the Pixi foreground while leaving the ambient grid on the far plane', () => {

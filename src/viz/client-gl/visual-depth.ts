@@ -1,3 +1,17 @@
+import {
+  POINTER_LIGHT_CORE_RADIUS_PX,
+  POINTER_LIGHT_RADIUS_PX,
+} from './pointer-light.js';
+
+/**
+ * The far field spreads the pointer WIDER and weaker than the Pixi foreground:
+ * distance softens a light, so the backdrop pools further out at lower gain.
+ * Derived rather than typed in, so shrinking the near light cannot leave a
+ * backdrop halo hanging around it — which is exactly how the pool came to
+ * dwarf everything it lit.
+ */
+const FAR_POINTER_SPREAD = 1.15;
+
 export const VIZ_VISUAL_DEPTH = {
   far: {
     fieldZ: -10,
@@ -17,8 +31,8 @@ export const VIZ_VISUAL_DEPTH = {
     motionRate: 0.035,
     gridFrequency: 24,
     pointerGain: 0.32,
-    pointerHaloRadius: 260,
-    pointerCoreRadius: 60,
+    pointerHaloRadius: POINTER_LIGHT_RADIUS_PX * FAR_POINTER_SPREAD,
+    pointerCoreRadius: POINTER_LIGHT_CORE_RADIUS_PX * FAR_POINTER_SPREAD,
   },
   mid: {
     threeZ: 0,

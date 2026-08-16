@@ -1,4 +1,17 @@
-export const POINTER_LIGHT_RADIUS_PX = 220;
+/**
+ * THE pointer-light geometry, in CSS pixels. One definition, consumed by the
+ * Pixi filter shaders (both GLSL and WGSL), by the far-field backdrop through
+ * `VIZ_VISUAL_DEPTH`, and by `pointerLightFalloff` for CPU-side reasoning.
+ * The shaders used to hardcode their own copies, which is how the pool ended
+ * up wider than anything it was lighting.
+ */
+export const POINTER_LIGHT_RADIUS_PX = 150;
+/**
+ * The near falloff. Deliberately NOT a bright core: the light is under the
+ * cursor, so this tightens the pool close in — it does not add a highlight
+ * that would read as a lamp sitting on top of the scene.
+ */
+export const POINTER_LIGHT_CORE_RADIUS_PX = 34;
 
 export interface PointerLightSnapshot {
   readonly clientX: number;

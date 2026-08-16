@@ -56,13 +56,14 @@ button, input, textarea { font: inherit; }
 
 .atoma-pointer-cursor[data-visible="true"] { opacity: 1; }
 .atoma-pointer-cursor svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.atoma-pointer-tip-light { fill: #dff8ff; opacity: .92; }
+/* Rim, not lamp: enough spread to keep the arrow legible on the dark field,
+   not enough to read as a light source of its own. */
 .atoma-pointer-halo {
   fill: none;
   stroke: #65c9ff;
-  stroke-width: 6;
+  stroke-width: 4.2;
   stroke-linejoin: round;
-  opacity: .82;
+  opacity: .55;
 }
 .atoma-pointer-extrusion {
   fill: #111c2c;

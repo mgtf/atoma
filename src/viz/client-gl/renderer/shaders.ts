@@ -1,4 +1,8 @@
 import type { VizEvent } from '../../client/types.js';
+import {
+  POINTER_LIGHT_CORE_RADIUS_PX,
+  POINTER_LIGHT_RADIUS_PX,
+} from '../pointer-light.js';
 
 /**
  * GPU shader sources and per-event shader-mode selection.
@@ -71,10 +75,13 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
     float facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
     float edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
     float distancePx = length(vScreenPx - uLightPx);
-    float halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
-    float core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
+    float halo = exp(-2.2 * pow(distancePx / ${POINTER_LIGHT_RADIUS_PX.toFixed(1)}, 2.0));
+    float core = exp(-2.8 * pow(distancePx / ${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)}, 2.0));
     vec3 lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
-    float illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
+    // NO additive core term. A bright centre reads as a lamp pasted on top of
+    // the scene; what sells a light under the cursor is edges catching it, so
+    // the response is carried by the facing/edge term alone.
+    float illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
     finalColor = sampleColor;
   }
@@ -142,10 +149,11 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     let facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
     let edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
     let distancePx = length(screenPx - pointerLight.uLightPx);
-    let halo = exp(-2.2 * pow(distancePx / 220.0, 2.0));
-    let core = exp(-2.8 * pow(distancePx / 46.0, 2.0));
+    let halo = exp(-2.2 * pow(distancePx / ${POINTER_LIGHT_RADIUS_PX.toFixed(1)}, 2.0));
+    let core = exp(-2.8 * pow(distancePx / ${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)}, 2.0));
     let lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
-    let illumination = halo * (0.075 + edgeResponse * (0.18 + facing * 0.28)) + core * 0.16;
+    // Twin of the GLSL above — no additive core, same edge-carried response.
+    let illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;

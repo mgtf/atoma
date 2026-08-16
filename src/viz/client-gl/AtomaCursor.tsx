@@ -125,17 +125,13 @@ export function AtomaCursor() {
           <filter id="atoma-cursor-halo" x="-100%" y="-100%" width="300%" height="300%">
             <feGaussianBlur stdDeviation="4.4" />
           </filter>
-          <filter id="atoma-cursor-tip-glow" x="-160%" y="-160%" width="420%" height="420%">
-            <feGaussianBlur stdDeviation="5.8" />
-          </filter>
         </defs>
-        <circle
-          className="atoma-pointer-tip-light"
-          cx={ATOMA_CURSOR_HOTSPOT.x}
-          cy={ATOMA_CURSOR_HOTSPOT.y}
-          r="8.5"
-          filter="url(#atoma-cursor-tip-glow)"
-        />
+        {/*
+          NO glow at the hotspot. The light sits UNDER the cursor: it belongs to
+          the scene, where the Pixi filter relights card edges and the backdrop
+          pools around the pointer. A blurred disc drawn here instead read as a
+          lamp stuck to the tip, floating above everything it was meant to lift.
+        */}
         <path
           className="atoma-pointer-halo"
           d={ATOMA_CURSOR_PATH}

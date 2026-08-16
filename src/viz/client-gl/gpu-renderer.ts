@@ -27,7 +27,13 @@ import {
   buildAtomaMarkFrame,
   type AtomaMarkPoint,
 } from './brand-mark.js';
+import {
+  CAST_SHADOW_REACH_PX,
+  ambientShadowOffset,
+  castShadowOffset,
+} from './renderer/cast-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
+import { NO_TINT, multiplyTint } from './renderer/label-tint.js';
 import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
@@ -147,6 +153,15 @@ const NAV_HOVER_GAP = 20;
 // Decomposed modules (2026-08-15): pure layout, copy, shaders, motion and the
 // shared scroll pane live under ./renderer/. This file keeps the stateful
 // renderer class. Re-exports preserve the public import surface.
+/**
+ * A button label at rest. Buttons are now BUILT at `GPU_COLORS.text` and
+ * tinted down to this, rather than built dim and re-coloured on hover: hover
+ * used to assign `style.fill`, and that style is shared across every label
+ * with the same size/weight, so one rollover lit up all of them.
+ */
+const BUTTON_LABEL_IDLE = 0xa9b5ca;
+const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
+
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
 export { gpuEventCardCopy, type GpuEventCardCopy, type GpuTranslate } from './renderer/copy.js';
@@ -184,6 +199,9 @@ export class GpuRenderer {
     uStrength: number;
   } | null = null;
   private pointerLightStrength = 0;
+  /** Light position in renderer pixels, published by `updatePointerLight`. */
+  private lightRendererX = 0;
+  private lightRendererY = 0;
   private pointerLightBufferPinned = false;
   previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
@@ -225,6 +243,22 @@ export class GpuRenderer {
       label.destroy({ children: true, style: true });
     },
   });
+  /**
+   * Surfaces that throw a shadow from the pointer light. Rebuilt with the
+   * scene — the Graphics are children of containers the next render destroys —
+   * and read every frame by `updateCastShadows`.
+   */
+  private castShadows: {
+    shadow: Graphics;
+    parent: Container;
+    localX: number;
+    localY: number;
+    width: number;
+    height: number;
+    depth: number;
+    left: number;
+    top: number;
+  }[] = [];
   metrics: GpuRenderMetrics = emptyRenderMetrics();
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
@@ -330,6 +364,11 @@ export class GpuRenderer {
     uniforms.uLightPx[1] = local.y;
     uniforms.uStrength = this.pointerLightStrength;
     filter.enabled = true;
+    // Published for the shadow cast, which runs right after on the same
+    // ticker. Recomputing it there would mean a SECOND
+    // getBoundingClientRect() per frame, and each one flushes layout.
+    this.lightRendererX = local.x;
+    this.lightRendererY = local.y;
   };
 
   private installPointerLightFilter() {
@@ -366,6 +405,8 @@ export class GpuRenderer {
     };
     this.root.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
+    // AFTER the light: it damps `pointerLightStrength`, which the cast reads.
+    this.app.ticker.add(this.updateCastShadows);
   }
 
   async init(host: HTMLElement) {
@@ -430,6 +471,8 @@ export class GpuRenderer {
   destroy() {
     if (!this.initialized) return;
     this.app.ticker.remove(this.updatePointerLight);
+    this.app.ticker.remove(this.updateCastShadows);
+    this.castShadows = [];
     this.root.filters = null;
     this.root.filterArea = undefined;
     this.pointerLightFilter?.destroy();
@@ -479,6 +522,9 @@ export class GpuRenderer {
     // Retained labels step out of the scene BEFORE it is torn down, so the
     // recursive destroy below walks past them instead of through them.
     this.labels.beginRender();
+    // Dropped with the scene that owns them; the ticker must not be left
+    // holding Graphics that are about to be destroyed.
+    this.castShadows = [];
     for (const child of this.ambientRoot.removeChildren()) child.destroy({ children: true });
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
@@ -567,6 +613,9 @@ export class GpuRenderer {
     // `countObjects` walks the live scene, and a retained label that was not
     // re-attached is not in it, so retention never inflates objectCount.
     this.labels.endRender();
+    // Anchors resolve only now: the containers are attached and positioned.
+    this.anchorCastShadows();
+    this.updateCastShadows();
     this.metrics.objectCount =
       this.countObjects(this.ambientRoot) + this.countObjects(this.root);
   }
@@ -606,22 +655,38 @@ export class GpuRenderer {
     const safeWidth = Math.max(0, width);
     const safeHeight = Math.max(0, height);
     if (elevation > 0) {
+      // Both layers draw at the panel's own rect and are OFFSET BY POSITION,
+      // so the pointer light can swing them. The deep layer carries the larger
+      // depth, so the two separate as the light moves instead of travelling
+      // as one hard smear.
       const deepShadow = new Graphics();
-      deepShadow.roundRect(
-        x + VIZ_VISUAL_DEPTH.near.shadowX * elevation / 2,
-        y + VIZ_VISUAL_DEPTH.near.shadowY * elevation / 2,
-        safeWidth,
-        safeHeight,
-        radius
-      );
+      deepShadow.roundRect(x, y, safeWidth, safeHeight, radius);
       deepShadow.fill({ color: 0x01040a, alpha: 0.2 + elevation * 0.08 });
       deepShadow.eventMode = 'none';
       parent.addChild(deepShadow);
+      this.registerCastShadow(
+        deepShadow,
+        parent,
+        x,
+        y,
+        safeWidth,
+        safeHeight,
+        elevation / 2
+      );
 
       const nearShadow = new Graphics();
-      nearShadow.roundRect(x + elevation, y + elevation * 1.5, safeWidth, safeHeight, radius);
+      nearShadow.roundRect(x, y, safeWidth, safeHeight, radius);
       nearShadow.fill({ color: 0x07101d, alpha: 0.3 + elevation * 0.05 });
       nearShadow.eventMode = 'none';
+      this.registerCastShadow(
+        nearShadow,
+        parent,
+        x,
+        y,
+        safeWidth,
+        safeHeight,
+        elevation * 0.28
+      );
       parent.addChild(nearShadow);
     }
 
@@ -727,6 +792,12 @@ export class GpuRenderer {
     );
     label.position.set(x, y);
     label.alpha = options.alpha ?? 1;
+    // A POOLED label arrives carrying whatever the last caller left on it.
+    // Position and alpha are reset above for exactly that reason, and tint is
+    // now a live per-label channel too (see renderer/label-tint.ts) — so a
+    // dimmed button label must not hand its dimming to the next thing drawn
+    // under the same key.
+    label.tint = NO_TINT;
     label.eventMode = 'none';
     parent.addChild(label);
     this.metrics.visibleLabels.push(value);
@@ -741,12 +812,147 @@ export class GpuRenderer {
     alpha = 0.44
   ) {
     const shadow = new Graphics();
-    shadow.roundRect(2.5, 3.5, width, height, radius);
+    // Geometry at the local origin, offset by POSITION — the offset is what
+    // the pointer light moves each frame, and baking it into the path would
+    // mean re-tessellating every shadow on every pointer move.
+    shadow.roundRect(0, 0, width, height, radius);
     shadow.fill({ color: 0x01040a, alpha });
     shadow.eventMode = 'none';
     parent.addChild(shadow);
+    this.registerCastShadow(shadow, parent, 0, 0, width, height);
     return shadow;
   }
+
+  /**
+   * The shadow a RECESSED surface casts into itself — what a pressed button
+   * looks like, and the inverse of `addSurfaceShadow`.
+   *
+   * The geometry is a large dark rectangle with the button's own rounded rect
+   * CUT OUT of it, masked back down to that same rounded rect. What survives
+   * is the sliver of the mask the hole does not cover, so moving the object
+   * moves the hole and the dark band lands on the opposite side. The cast
+   * offset therefore needs no inversion: it already points away from the
+   * light, which pushes the hole away and leaves the shadow banked against the
+   * inner wall NEAREST the light — where a real cavity is dark.
+   *
+   * Everything is built once at the local origin and only `position` moves per
+   * frame, the same contract `addSurfaceShadow` follows: re-cutting the hole
+   * on every pointer move would re-tessellate the path each frame.
+   *
+   * `visible` is toggled rather than left at `alpha = 0`, because a mask costs
+   * a stencil pass whether or not the thing it masks is transparent, and a
+   * button is unpressed almost always.
+   */
+  private addInsetShadow(
+    parent: Container,
+    width: number,
+    height: number,
+    radius = 8,
+    alpha = 0.55,
+    depth = 0.55
+  ) {
+    // Wide enough that the cut-out never slides off the mask at full reach,
+    // and — required by `GraphicsContext.cut` — that the hole stays entirely
+    // inside the shape it is cut from.
+    const pad = CAST_SHADOW_REACH_PX * 3;
+    const shadow = new Graphics();
+    shadow.rect(-pad, -pad, width + pad * 2, height + pad * 2);
+    shadow.fill({ color: 0x01040a, alpha });
+    shadow.roundRect(0, 0, width, height, radius);
+    shadow.cut();
+    shadow.eventMode = 'none';
+    shadow.visible = false;
+
+    const mask = new Graphics();
+    mask.roundRect(0, 0, width, height, radius).fill({ color: 0xffffff });
+    mask.eventMode = 'none';
+    parent.addChild(mask);
+    parent.addChild(shadow);
+    shadow.mask = mask;
+
+    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth);
+    return shadow;
+  }
+
+  /**
+   * Hand a shadow to the pointer light. `localX`/`localY` are the SURFACE's
+   * position inside `parent` — the light needs to know where the thing casting
+   * is, which is not where the shadow lands. The shadow's own geometry must
+   * sit at its local origin so only `position` moves per frame.
+   */
+  private registerCastShadow(
+    shadow: Graphics,
+    parent: Container,
+    localX: number,
+    localY: number,
+    width: number,
+    height: number,
+    depth = 1
+  ) {
+    // Named so the smoke can find them: where a shadow lands is only
+    // observable on a real renderer with a real pointer.
+    shadow.label = 'cast-shadow';
+    const rest = ambientShadowOffset(depth);
+    shadow.position.set(rest.x, rest.y);
+    // Anchored after the scene is built: `parent` is not on the stage yet, so
+    // its global transform is not knowable here.
+    this.castShadows.push({
+      shadow,
+      parent,
+      localX,
+      localY,
+      width,
+      height,
+      depth,
+      left: 0,
+      top: 0,
+    });
+  }
+
+  /**
+   * Resolve each registered shadow's surface centre in stage coordinates,
+   * ONCE per render rather than per frame. The scene is static between
+   * renders — scrolling rebuilds it — so these stay valid until the next one.
+   */
+  private anchorCastShadows() {
+    for (const entry of this.castShadows) {
+      if (entry.shadow.destroyed || !entry.parent.parent) continue;
+      // Top-left only: the scene translates but never scales, so the local
+      // width/height carry over to stage coordinates unchanged.
+      const origin = entry.parent.toGlobal({ x: entry.localX, y: entry.localY });
+      entry.left = origin.x;
+      entry.top = origin.y;
+    }
+  }
+
+  /**
+   * The scene's one movable light throws every registered shadow. Runs on the
+   * ticker and touches only `position`, so pointer motion never rebuilds the
+   * scene — the same contract the pointer-light filter follows.
+   */
+  private readonly updateCastShadows = () => {
+    if (this.castShadows.length === 0) return;
+    const strength = prefersReducedMotion() ? 0 : this.pointerLightStrength;
+    // Read, never recomputed — see `updatePointerLight`. When the light is
+    // off, strength is 0 and the cast returns the ambient offset whatever
+    // these hold, so a stale position cannot be observed.
+    const lightX = this.lightRendererX;
+    const lightY = this.lightRendererY;
+    for (const entry of this.castShadows) {
+      if (entry.shadow.destroyed) continue;
+      const offset = castShadowOffset({
+        left: entry.left,
+        top: entry.top,
+        width: entry.width,
+        height: entry.height,
+        lightX,
+        lightY,
+        strength,
+        depth: entry.depth,
+      });
+      entry.shadow.position.set(offset.x, offset.y);
+    }
+  };
 
   button(
     parent: Container,
@@ -839,7 +1045,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    this.addSurfaceShadow(container, width, height, 8, 0.42);
+    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.42);
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -859,6 +1065,7 @@ export class GpuRenderer {
       alpha: active ? 1 : 0.85,
     });
     container.addChild(base);
+    const insetShadow = this.addInsetShadow(container, width, height, 8);
 
     const inner = new Graphics();
     inner.roundRect(3, 3, width - 6, height - 6, 6);
@@ -892,8 +1099,10 @@ export class GpuRenderer {
     });
 
     const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
+      // Built BRIGHT and tinted down, never re-coloured through the style —
+      // the style is shared, so `style.fill = …` recolours every label using it.
       size: 11,
-      color: active ? GPU_COLORS.text : 0xa9b5ca,
+      color: GPU_COLORS.text,
       weight: active ? '700' : '600',
     });
     labelText.anchor.x = 0.5;
@@ -901,8 +1110,10 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
+    let insetDepth = active ? 1 : 0;
     let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -appearanceDelay;
-    let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
+    let currentLabelTint = active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+    labelText.tint = currentLabelTint;
     container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
     const animate = (ticker: Ticker) => {
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
@@ -925,10 +1136,19 @@ export class GpuRenderer {
       scanline.x = 4 + (Math.max(0, elapsed) * (hovered ? 0.12 : 0.045)) % Math.max(8, width - 10);
       scanline.alpha = active ? 0.12 + pulse * 0.12 : hovered ? 0.08 + pulse * 0.1 : 0.025;
       base.tint = pressed ? 0xb8d7ff : hovered ? 0xd6e7ff : 0xffffff;
-      const nextLabelColor = pressed || hovered || active ? GPU_COLORS.text : 0xa9b5ca;
-      if (nextLabelColor !== currentLabelColor) {
-        currentLabelColor = nextLabelColor;
-        labelText.style.fill = nextLabelColor;
+      // A pressed or selected surface is RECESSED: its drop shadow gives way
+      // to the one it casts into itself. The inner shadow stays registered
+      // with the pointer light, so moving the mouse over a sunk button moves
+      // the shadow around INSIDE it. Reduced motion jumps rather than damps.
+      insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
+        (prefersReducedMotion() ? 1 : 0.3);
+      insetShadow.alpha = insetDepth;
+      insetShadow.visible = insetDepth > 0.02;
+      dropShadow.alpha = 1 - insetDepth;
+      const nextLabelTint = pressed || hovered || active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+      if (nextLabelTint !== currentLabelTint) {
+        currentLabelTint = nextLabelTint;
+        labelText.tint = nextLabelTint;
       }
       sparkles.forEach((sparkle, index) => {
         const phase = elapsed / 430 + index * Math.PI / 2;
@@ -984,7 +1204,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    this.addSurfaceShadow(container, width, height, 8, 0.48);
+    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.48);
 
     const glow = new Graphics();
     glow.roundRect(-4, -3, width + 8, height + 6, 11);
@@ -1003,6 +1223,7 @@ export class GpuRenderer {
       width: active ? 1.6 : 1,
     });
     container.addChild(base);
+    const insetShadow = this.addInsetShadow(container, width, height, 8);
 
     const scanline = new Graphics();
     scanline.rect(0, 3, 2, height - 6).fill({ color: 0xffffff, alpha: 0.7 });
@@ -1018,7 +1239,8 @@ export class GpuRenderer {
 
     const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
       size: 11,
-      color: active ? GPU_COLORS.text : 0xa9b5ca,
+      // Built BRIGHT and tinted down — see the sibling button factory.
+      color: GPU_COLORS.text,
       weight: active ? '700' : '600',
     });
     labelText.anchor.x = 0.5;
@@ -1033,9 +1255,11 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
+    let insetDepth = active ? 1 : 0;
     let elapsed = firstAppearance ? -Math.max(0, x - 112) * 0.35 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
-    let currentLabelColor = active ? GPU_COLORS.text : 0xa9b5ca;
+    let currentLabelTint = active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+    labelText.tint = currentLabelTint;
     const animate = (ticker: Ticker) => {
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 280));
@@ -1061,10 +1285,19 @@ export class GpuRenderer {
       underline.alpha = active ? 0.95 : hovered ? 0.42 : 0;
       underline.scale.x = active ? 1 : hovered ? 0.65 + pulse * 0.15 : 0.2;
       base.tint = pressed ? 0xafd1ff : hovered ? 0xd7e8ff : 0xffffff;
-      const nextLabelColor = pressed || hovered || active ? GPU_COLORS.text : 0xa9b5ca;
-      if (nextLabelColor !== currentLabelColor) {
-        currentLabelColor = nextLabelColor;
-        labelText.style.fill = nextLabelColor;
+      // A pressed or selected surface is RECESSED: its drop shadow gives way
+      // to the one it casts into itself. The inner shadow stays registered
+      // with the pointer light, so moving the mouse over a sunk button moves
+      // the shadow around INSIDE it. Reduced motion jumps rather than damps.
+      insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
+        (prefersReducedMotion() ? 1 : 0.3);
+      insetShadow.alpha = insetDepth;
+      insetShadow.visible = insetDepth > 0.02;
+      dropShadow.alpha = 1 - insetDepth;
+      const nextLabelTint = pressed || hovered || active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
+      if (nextLabelTint !== currentLabelTint) {
+        currentLabelTint = nextLabelTint;
+        labelText.tint = nextLabelTint;
       }
       sparks.forEach((spark, index) => {
         const phase = elapsed / 350 + index * 2.1;
@@ -1195,7 +1428,7 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    this.addSurfaceShadow(container, width, height, 8, 0.42);
+    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.42);
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -1208,6 +1441,7 @@ export class GpuRenderer {
     base.fill({ color: active ? accent : 0x121c2d, alpha: active ? 0.26 : 0.94 });
     base.stroke({ color: active ? accent : 0x30405d, width: active ? 1.5 : 1 });
     container.addChild(base);
+    const insetShadow = this.addInsetShadow(container, width, height, 8);
 
     const nucleus = new Graphics();
     nucleus.circle(particleCenterX, height / 2, active ? 3 : 2.3).fill(accent);
@@ -1243,6 +1477,7 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
+    let insetDepth = active ? 1 : 0;
     let elapsed = firstAppearance ? -(x % 120) * 1.2 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
     const animate = (ticker: Ticker) => {
@@ -1264,6 +1499,15 @@ export class GpuRenderer {
           ? 0.08 + pulse * 0.16
           : 0;
       base.tint = pressed ? 0xbad9ff : hovered ? 0xdcecff : 0xffffff;
+      // A pressed or selected surface is RECESSED: its drop shadow gives way
+      // to the one it casts into itself. The inner shadow stays registered
+      // with the pointer light, so moving the mouse over a sunk button moves
+      // the shadow around INSIDE it. Reduced motion jumps rather than damps.
+      insetDepth += ((pressed || active ? 1 : 0) - insetDepth) *
+        (prefersReducedMotion() ? 1 : 0.3);
+      insetShadow.alpha = insetDepth;
+      insetShadow.visible = insetDepth > 0.02;
+      dropShadow.alpha = 1 - insetDepth;
       nucleus.scale.set(active ? 1 + pulse * 0.25 : hovered ? 1.15 : 1);
       orbit.rotation = elapsed * (tier % 2 ? 0.0012 : -0.001);
       orbit.alpha = active ? 0.75 : hovered ? 0.5 : 0.28;

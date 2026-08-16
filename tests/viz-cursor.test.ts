@@ -11,6 +11,7 @@ import {
 } from '../src/viz/client-gl/AtomaCursor.js';
 import {
   hidePointerLight,
+  POINTER_LIGHT_RADIUS_PX,
   pointerClientToRenderer,
   pointerClientToUv,
   pointerLightFalloff,
@@ -108,9 +109,12 @@ describe('Atoma pointer light geometry', () => {
       1_280,
       720
     )).toEqual({ x: 320, y: 240 });
+    // Anchored to the shared radius, not to a copy of it: the shaders now
+    // interpolate the same constant, so retuning the light must not need a
+    // number changed in two places to stay honest.
     expect(pointerLightFalloff(0)).toBe(1);
-    expect(pointerLightFalloff(220)).toBeCloseTo(Math.exp(-2.2));
-    expect(pointerLightFalloff(440)).toBeLessThan(0.001);
+    expect(pointerLightFalloff(POINTER_LIGHT_RADIUS_PX)).toBeCloseTo(Math.exp(-2.2));
+    expect(pointerLightFalloff(POINTER_LIGHT_RADIUS_PX * 2)).toBeLessThan(0.001);
   });
 });
 
