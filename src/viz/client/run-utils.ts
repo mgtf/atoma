@@ -17,6 +17,42 @@ export function isRunLive(run: VizRun, now = Date.now()): boolean {
   return !run.endedAt && !isAbandoned(run, now);
 }
 
+/**
+ * LLM calls that have STARTED and not yet returned.
+ *
+ * A tool-bearing L1 execute is ONE provider call that can run for minutes:
+ * `llm-start` is recorded when it is issued, dozens of `tool` events stream
+ * out during the loop, and the single `llm` event carrying usage/cost only
+ * lands when the call returns. `computeTotals` counts usage, so for the whole
+ * duration of that loop a live run legitimately reports 0 calls / 0 tokens /
+ * $0 — which reads as "nothing is happening" on the run header (2026-08-16
+ * report against a 3-minute build-app run). The started-but-unfinished set is
+ * the missing half of that picture.
+ */
+export function inFlightLlmEvents(run: VizRun): VizEvent[] {
+  const completed = new Set(
+    run.events.filter((event) => event.kind === 'llm').map((event) => event.id)
+  );
+  return run.events.filter(
+    (event) =>
+      event.kind === 'llm-start' &&
+      typeof event.llmEventId === 'string' &&
+      !completed.has(event.llmEventId)
+  );
+}
+
+/**
+ * How long the run has been going: the recorded duration once it ended, and
+ * the elapsed wall clock while it is still live. An abandoned run keeps the
+ * dash — we do not know when it stopped, so we do not keep counting.
+ */
+export function runElapsedMs(run: VizRun, now = Date.now()): number | undefined {
+  if (run.durationMs != null) return run.durationMs;
+  if (!isRunLive(run, now)) return undefined;
+  const started = Date.parse(run.startedAt);
+  return Number.isFinite(started) ? Math.max(0, now - started) : undefined;
+}
+
 export type RunStatus = 'live' | 'abandoned' | 'cancelled' | 'failed' | 'delivered';
 
 /**

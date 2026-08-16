@@ -5,11 +5,13 @@ import {
   coerceEventFilters,
   filterEvents,
   visibleEventKindFilters,
+  inFlightLlmEvents,
   isAbandoned,
   isIndexEntryLive,
   isRunLive,
   mergeRunDelta,
   projectRunTaxonomy,
+  runElapsedMs,
   runHeading,
   tryParseJson,
   usedAtomNames,
@@ -45,6 +47,47 @@ describe('React viz live predicates', () => {
       inFlight: true,
       lastEventAt: start,
     }, start + ABANDONED_AFTER_MS + 1)).toBe(false);
+  });
+});
+
+describe('live run progress', () => {
+  const start = Date.parse('2026-08-13T10:00:00.000Z');
+
+  /**
+   * The reported shape: one long tool-bearing L1 execute. `llm-start`, then
+   * a stream of tool events, and no usage at all until the call returns —
+   * the run header must not read as an idle run for those minutes.
+   */
+  const midToolLoop = run({
+    events: [
+      { id: 's1', kind: 'llm-start', ts: start + 500, llmEventId: 'c1' },
+      { id: 't1', kind: 'tool', ts: start + 900, llmEventId: 'c1' },
+    ],
+  });
+
+  it('counts a started call that has not returned as in flight', () => {
+    expect(inFlightLlmEvents(midToolLoop).map((event) => event.id)).toEqual(['s1']);
+  });
+
+  it('stops counting it once the matching llm event lands', () => {
+    const done = run({
+      events: [
+        ...midToolLoop.events,
+        { id: 'c1', kind: 'llm', ts: start + 2000 },
+      ],
+    });
+    expect(inFlightLlmEvents(done)).toEqual([]);
+  });
+
+  it('ticks the elapsed time while live and freezes it on the recorded duration', () => {
+    expect(runElapsedMs(midToolLoop, start + 4000)).toBe(4000);
+    expect(runElapsedMs(midToolLoop, start + 9000)).toBe(9000);
+    expect(runElapsedMs(run({ durationMs: 1234, endedAt: '2026-08-13T10:00:01.234Z' }), start + 9e6))
+      .toBe(1234);
+  });
+
+  it('stops the clock rather than counting forever on an abandoned run', () => {
+    expect(runElapsedMs(midToolLoop, start + 900 + ABANDONED_AFTER_MS + 1)).toBeUndefined();
   });
 });
 

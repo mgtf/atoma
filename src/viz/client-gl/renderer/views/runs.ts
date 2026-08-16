@@ -5,7 +5,9 @@ import {
   fmtCost,
   fmtMs,
   fmtTime,
+  inFlightLlmEvents,
   isRunLive,
+  runElapsedMs,
   runHeading,
   runStatus,
   tryParseJson,
@@ -144,10 +146,19 @@ export function drawRuns(
     weight: '700',
   });
 
+  // A tool-bearing L1 execute is one provider call that only reports its
+  // usage when it returns, so a live run's totals sit at zero for minutes
+  // while work streams past. The header says so: the duration ticks, and the
+  // call count carries the started-but-unfinished ones as `13 (+1)`.
+  const inFlight = inFlightLlmEvents(run);
   const statsY = top + 76;
+  const completedCalls = run.totals?.calls ?? 0;
   const stats = [
-    [snapshot.t('summary.duration'), fmtMs(run.durationMs)],
-    [snapshot.t('summary.llmCalls'), scalar(run.totals?.calls, '0')],
+    [snapshot.t('summary.duration'), fmtMs(runElapsedMs(run))],
+    [
+      snapshot.t('summary.llmCalls'),
+      inFlight.length ? `${completedCalls} (+${inFlight.length})` : scalar(run.totals?.calls, '0'),
+    ],
     [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
     [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
   ];
@@ -367,13 +378,6 @@ export function drawRuns(
     controlsBottom = branchBlock.y + branchBlock.height + FILTER_BLOCK_GAP;
   }
 
-  const completed = new Set(run.events.filter((event) => event.kind === 'llm').map((event) => event.id));
-  const inFlight = run.events.filter(
-    (event) =>
-      event.kind === 'llm-start' &&
-      typeof event.llmEventId === 'string' &&
-      !completed.has(event.llmEventId)
-  );
   if (isRunLive(run) && inFlight.length) {
     const liveY = controlsBottom + 5;
     ctx.panel(lowerControlsLayer, leftX + 14, liveY, leftWidth - 28, 52, 0x10263b, GPU_COLORS.cyan);
