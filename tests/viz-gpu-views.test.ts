@@ -61,6 +61,8 @@ interface RecordedEventCard {
   height: number;
   shaderMode: number;
   selected: boolean;
+  /** The card's content container, so a test can group its labels. */
+  content: Container;
 }
 
 interface RecordingCtx extends RendererCtx {
@@ -74,10 +76,14 @@ interface RecordingCtx extends RendererCtx {
   exitCalls: number;
 }
 
-function textStub(value: string): Text {
+function textStub(value: string, options?: { size?: number }): Text {
   const lines = value.length === 0 ? 1 : Math.ceil(value.length / 80);
   return {
     height: lines * 16,
+    // Layout that reads a label back — the event card places its actor column
+    // after the title's MEASURED width — needs a width here, or it computes
+    // NaN and the test proves nothing.
+    width: value.length * ((options?.size ?? 12) * 0.58),
     text: value,
     anchor: { x: 0 },
     position: { set() {} },
@@ -109,7 +115,7 @@ function createRecordingCtx(): RecordingCtx {
     text(parent, value, x, y, options) {
       ctx.texts.push({ parent, value, x, y, options });
       ctx.metrics.visibleLabels.push(value);
-      return textStub(value);
+      return textStub(value, options);
     },
     panel(parent, x, y, width, height) {
       const graphics = new Graphics();
@@ -179,7 +185,8 @@ function createRecordingCtx(): RecordingCtx {
       return container;
     },
     eventCard(parent, id, x, y, width, height, _accent, shaderMode, selected) {
-      ctx.eventCards.push({ id, x, y, width, height, shaderMode, selected });
+      const content = new Container();
+      ctx.eventCards.push({ id, x, y, width, height, shaderMode, selected, content });
       ctx.metrics.hitTargets.push({
         id,
         role: 'button',
@@ -189,9 +196,8 @@ function createRecordingCtx(): RecordingCtx {
         width,
         height,
       });
-      const container = new Container();
-      parent.addChild(container);
-      return container;
+      parent.addChild(content);
+      return content;
     },
     addTicker(callback) {
       ctx.tickers.push(callback);
@@ -936,6 +942,44 @@ describe('drawRuns behavior', () => {
     expect(laneLabels).toContain(t('lanes.l1'));
     expect(laneLabels).toContain(t('lanes.l3'));
     expect(laneLabels).not.toContain(t('lanes.l2'));
+  });
+
+  it('never lets a long event title run into the actor column', () => {
+    // `registry · recordSuccess` is ~24 characters of 11px bold, ~150px wide,
+    // and the actor used to be pinned at a fixed x=118 — so the molecule name
+    // was drawn straight through the end of the title.
+    const events: VizEvent[] = [
+      ...eventsWithRoles(),
+      {
+        id: 'long-title',
+        ts: Date.parse('2026-08-14T10:02:00.000Z'),
+        kind: 'tool',
+        name: 'reverify_recorded_probe_manifest',
+        actor: { tier: 1, name: 'Ammonia' },
+        args: { path: 'src/index.ts' },
+        result: { ok: true },
+      },
+    ];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+
+    const opts = (text: RecordedText) => (text.options ?? {}) as { weight?: string; size?: number };
+    const inCards = ctx.texts.filter((text) =>
+      ctx.eventCards.some((card) => card.content === text.parent));
+
+    // Target THE card, not "whatever cards happen to exist": a loop that
+    // skips cards without an actor passes whether or not the bug is present,
+    // which is exactly how the first version of this test proved nothing.
+    const title = inCards.find((text) => text.value.includes('reverify_recorded_probe'));
+    expect(title, 'fixture must produce the long title').toBeDefined();
+    const sameCard = inCards.filter((text) => text.parent === title!.parent);
+    const actor = sameCard.find((text) => opts(text).size === 9 && text.y === 7);
+    expect(actor, 'the card must draw an actor for this to mean anything').toBeDefined();
+
+    // The stub measures a label at size * 0.58 per character.
+    const titleEnd = title!.x + title!.value.length * 11 * 0.58;
+    expect(titleEnd).toBeGreaterThan(118); // the old fixed actor column
+    expect(actor!.x).toBeGreaterThanOrEqual(titleEnd);
   });
 
   it('windows the timeline, masks it, and reports the scroll bound', () => {

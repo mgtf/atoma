@@ -67,6 +67,20 @@ const RUN_STATUS_COLOR: Record<RunStatus, number> = {
 const TIMELINE_ROW_OFFSET = 1;
 
 /**
+ * Event-card column geometry. These were three magic numbers spread across the
+ * card body — a title truncated by CHARACTER COUNT, an actor pinned to a fixed
+ * x, and a decision column inset from the right — and nothing related them, so
+ * a long title simply drew over the actor. Named and related here so the three
+ * columns are laid out from one set of facts.
+ */
+const EVENT_TITLE_X = 11;
+const EVENT_DECISION_INSET = 118;
+const EVENT_COLUMN_GAP = 10;
+const EVENT_ACTOR_MIN_WIDTH = 64;
+/** Mean advance of 11px bold in the UI face; only bounds the truncation. */
+const EVENT_TITLE_CHAR_PX = 6.4;
+
+/**
  * Roughly two lines of the 13px summary title at the right pane's width.
  * Collapsing is about giving the event detail room, not about hiding the run.
  */
@@ -748,18 +762,31 @@ export function drawRuns(
       zDepth
     );
     const copy = gpuEventCardCopy(event, snapshot.t);
-    ctx.text(cardContent, truncate(copy.title, 28), 11, 6, {
-      size: 11,
-      weight: '700',
-      color: eventAccent(event),
-    });
+    // The title was capped at 28 CHARACTERS while the actor sat at a fixed
+    // x=118. Twenty-eight characters of 11px bold is ~180px, so any long title
+    // — `registry · recordSuccess` is the one that shows it — ran straight
+    // through the molecule name. Both ends are now driven by the geometry:
+    // the title gets the space that is actually free before the actor column,
+    // and the actor column starts after whatever the title really measured.
+    const decisionX = cardWidth - EVENT_DECISION_INSET;
+    const titleBudget = Math.max(70, decisionX - EVENT_TITLE_X - EVENT_ACTOR_MIN_WIDTH - EVENT_COLUMN_GAP);
+    const titleLabel = ctx.text(
+      cardContent,
+      truncate(copy.title, Math.max(8, Math.min(28, Math.floor(titleBudget / EVENT_TITLE_CHAR_PX)))),
+      EVENT_TITLE_X,
+      6,
+      { size: 11, weight: '700', color: eventAccent(event) }
+    );
     const rawMeta = copy.meta.replace(/(?: · )?⑂ [^ ·]+/g, '').trim();
     const actor = rawMeta.split(' · ')[0] ?? '';
-    if (actor) {
-      ctx.text(cardContent, truncate(actor, 28), 118, 7, {
+    // Measured, not estimated: the estimate above only bounds the truncation.
+    const actorX = Math.max(118, EVENT_TITLE_X + titleLabel.width + EVENT_COLUMN_GAP);
+    const actorWidth = decisionX - actorX - EVENT_COLUMN_GAP;
+    if (actor && actorWidth >= EVENT_ACTOR_MIN_WIDTH) {
+      ctx.text(cardContent, truncate(actor, 28), actorX, 7, {
         size: 9,
         color: GPU_COLORS.muted,
-        width: Math.max(80, cardWidth - 250),
+        width: actorWidth,
       });
     }
     if (copy.decision) {
