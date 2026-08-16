@@ -348,6 +348,85 @@ try {
     console.log(
       `viz GPU tuning ok: drag survived ${tuneStats.rendersAcross} scene rebuild(s) with the button down (${tuneStats.afterPress}° -> ${tuneStats.beforeRender}° -> ${tuneStats.afterRender}°), released clean`
     );
+
+    // Cast-shadow anchors must follow the role-row enter animation. The
+    // render anchors every shadow while the entering layer sits lifted; the
+    // expand ticker then eases the layer down between renders, and pointer
+    // moves never re-render — so without per-tick re-anchoring, every shadow
+    // under that layer stays aimed ~40px above its surface until some
+    // unrelated render. Only observable here: the mocked suite has no ticker
+    // and no stage transforms.
+    const anchorPage = await browser.newPage();
+    let anchorStats;
+    try {
+      await anchorPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      await anchorPage.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, {
+        waitUntil: 'networkidle0',
+      });
+      await anchorPage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+      await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
+
+      const clickTarget = async (id) => {
+        const spot = await anchorPage.evaluate((targetId) => {
+          const handle = globalThis.__ATOMA_GPU__;
+          const row = handle?.hitTargets().find((entry) => entry.id === targetId);
+          if (!row) return null;
+          const canvas = document.querySelector('.gpu-ui-canvas');
+          const box = canvas.getBoundingClientRect();
+          return {
+            x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
+            y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
+          };
+        }, id);
+        if (!spot) throw new Error(`anchor scenario: hit target ${id} not found`);
+        await anchorPage.mouse.click(spot.x, spot.y);
+      };
+      const probe = () =>
+        anchorPage.evaluate(() => ({
+          drift: globalThis.__ATOMA_GPU__.castShadowAnchorDrift(),
+          offset: globalThis.__ATOMA_GPU__.collapseOffset(),
+          roleRow: globalThis.__ATOMA_GPU__
+            .hitTargets()
+            .some((entry) => entry.id.startsWith('run.filter.role.')),
+        }));
+
+      const initial = await probe();
+      // Hide the role row (kind: tool), let the exit settle and re-render.
+      await clickTarget('run.filter.kind.tool');
+      await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const hidden = await probe();
+      // Bring it back (kind: llm) and catch the layer MID-FLIGHT: a zero
+      // drift is only evidence while the layer is actually displaced.
+      await clickTarget('run.filter.kind.llm');
+      let midFlight = null;
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const sample = await probe();
+        if (sample.offset !== 0) { midFlight = sample; break; }
+        await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 15)));
+      }
+      await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
+      const settled = await probe();
+      anchorStats = { initial, hidden, midFlight, settled };
+    } finally {
+      await anchorPage.close();
+    }
+
+    if (
+      // ARMED: the role row was there, left, came back, and the enter
+      // animation was actually caught displacing the layer.
+      !anchorStats.initial.roleRow ||
+      anchorStats.hidden.roleRow ||
+      !anchorStats.settled.roleRow ||
+      anchorStats.midFlight === null ||
+      // THE ASSERTION: anchors track the moving layer and its resting place.
+      !(anchorStats.midFlight.drift < 0.5) ||
+      !(anchorStats.settled.drift < 0.5)
+    ) {
+      throw new Error(`GPU shadow anchors drifted: ${JSON.stringify(anchorStats)}`);
+    }
+    console.log(
+      `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled`
+    );
   } finally {
     await browser.close();
   }

@@ -572,6 +572,28 @@ export class GpuRenderer {
         // survived the render that used to destroy it.
         hitTargets: () => this.metrics.hitTargets,
         tuning: () => ({ ...readTuning() }),
+        // How displaced the animated filter layer currently is. The anchor
+        // smoke reads it to prove its scenario ARMED: a zero drift only means
+        // something if the layer was actually mid-flight when sampled.
+        collapseOffset: () => this.metrics.runCollapseOffset,
+        // Worst distance between where a cast shadow was anchored and where
+        // its surface actually sits now. Anything beyond rounding means some
+        // animation moved a layer without re-anchoring — the shadows under it
+        // are aiming at a surface that is not there. Only observable on a
+        // real renderer: the mocked suite has no stage transforms to drift.
+        castShadowAnchorDrift: () => {
+          let drift = 0;
+          for (const entry of this.castShadows) {
+            if (entry.shadow.destroyed || !entry.parent.parent) continue;
+            const origin = entry.parent.toGlobal({ x: entry.localX, y: entry.localY });
+            drift = Math.max(
+              drift,
+              Math.abs(origin.x - entry.left),
+              Math.abs(origin.y - entry.top)
+            );
+          }
+          return drift;
+        },
       };
     }
     this.initialized = true;
@@ -1228,8 +1250,11 @@ export class GpuRenderer {
   private anchorCastShadows() {
     for (const entry of this.castShadows) {
       if (entry.shadow.destroyed || !entry.parent.parent) continue;
-      // Top-left only: the scene translates but never scales, so the local
-      // width/height carry over to stage coordinates unchanged.
+      // Top-left only: the scene translates but never scales beyond the ±3.5%
+      // hover/press pulse on chips, so the local width/height carry over to
+      // stage coordinates within a couple of pixels — and only while the
+      // pointer sits ON that chip, where the lit centroid is its centre and
+      // the rect barely matters.
       const origin = entry.parent.toGlobal({ x: entry.localX, y: entry.localY });
       entry.left = origin.x;
       entry.top = origin.y;
@@ -2237,6 +2262,11 @@ export class GpuRenderer {
         }
       }
       const collapseProgress = applyCollapse();
+      // Same contract as the enter animation: the layer is moving between
+      // renders, so the shadows it carries re-anchor per tick. This path
+      // self-heals through the completion re-render below, but a 390ms
+      // animation with misaimed shadows is still 390ms of wrong.
+      this.anchorCastShadows();
       if (!completed && collapseProgress >= 1) {
         completed = true;
         collapsingLayer.y = 0;
@@ -2288,6 +2318,14 @@ export class GpuRenderer {
         this.app.ticker.remove(expand);
         this.tickerCallbacks.delete(expand);
       }
+      // The render anchored every cast shadow while this layer sat at
+      // -distance, and pointer moves never re-render by design — so without
+      // re-anchoring as the layer travels, every shadow under it would stay
+      // aimed at a surface ~40px above the real one until some unrelated
+      // render, and a pointer ON a frame would throw its shadow as if the
+      // frame were somewhere else. After the final apply this also leaves the
+      // settled anchors behind.
+      this.anchorCastShadows();
     };
     this.addTicker(expand);
   }
