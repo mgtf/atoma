@@ -16,7 +16,9 @@ import type {
 import { AtomaCursor } from './AtomaCursor.js';
 import { DomBridge } from './DomBridge.js';
 import { GpuSurface } from './GpuSurface.js';
+import { useIsFetching } from '@tanstack/react-query';
 import {
+  activeViewQueryFilter,
   useBurnin,
   useProfiles,
   useRefreshBridge,
@@ -250,6 +252,12 @@ export function GpuApp() {
     (state.view === 'skills' && namespacesQuery.isLoading) ||
     (state.view === 'burnin' && burninQuery.isLoading) ||
     (state.view === 'launch' && profilesQuery.isLoading);
+  // Requests in flight for the ACTIVE view only — the same predicate the
+  // refresh button invalidates with, so the spinner reports on exactly the
+  // requests the button causes. Unlike `loading` this covers refetches of
+  // data already on screen, which is the entire point: on registry, skills,
+  // burn-in and launch nothing polls, so a refetch is invisible without it.
+  const fetching = useIsFetching(activeViewQueryFilter(state.view)) > 0;
   const error = errorMessage([
     runsQuery.error,
     runQuery.error,
@@ -272,8 +280,10 @@ export function GpuApp() {
     burnin: burninQuery.data ?? null,
     profiles: profilesQuery.data?.profiles ?? [],
     loading,
+    fetching,
     error,
   }), [
+    fetching,
     burninQuery.data,
     error,
     loading,

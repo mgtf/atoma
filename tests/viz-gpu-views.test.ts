@@ -270,6 +270,7 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     burnin: null,
     profiles: [],
     loading: false,
+    fetching: false,
     error: null,
     ...overrides,
   };

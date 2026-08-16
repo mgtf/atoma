@@ -51,6 +51,12 @@ export interface GpuDataSnapshot {
   burnin: { rows: BurninRow[]; csvPath: string } | null;
   profiles: LaunchProfile[];
   loading: boolean;
+  /**
+   * The active view has requests IN FLIGHT — including refetches of data
+   * already on screen, which `loading` (react-query's `isLoading`) never
+   * reports. This is what the refresh control spins on.
+   */
+  fetching: boolean;
   error: string | null;
 }
 
@@ -800,6 +806,12 @@ export class GpuRenderer {
     // dimmed button label must not hand its dimming to the next thing drawn
     // under the same key.
     label.tint = NO_TINT;
+    // Same reason, and the same class of defect: `anchor` and `rotation` are
+    // per-instance too, and callers set both (centred button labels, the
+    // spinning refresh glyph). A pooled label handed to the next caller with
+    // a stale anchor draws in the wrong place for no visible reason.
+    label.anchor.set(0, 0);
+    label.rotation = 0;
     label.eventMode = 'none';
     parent.addChild(label);
     this.metrics.visibleLabels.push(value);
@@ -968,7 +980,9 @@ export class GpuRenderer {
     active: boolean,
     onActivate: (id: string) => void,
     accent: number = GPU_COLORS.primary,
-    centerLabel = false
+    centerLabel = false,
+    /** Spin the glyph: real feedback that a request is actually in flight. */
+    spinning = false
   ) {
     const container = new Container();
     container.position.set(x, y);
@@ -994,6 +1008,22 @@ export class GpuRenderer {
     );
     if (centerLabel) labelText.anchor.x = 0.5;
     labelText.eventMode = 'none';
+    if (spinning) {
+      // Rotation needs the glyph centred on BOTH axes, so the label moves to
+      // the button's middle for the duration. `rotation` is a per-instance
+      // transform — nothing shared is touched, and `text()` resets it.
+      labelText.anchor.set(0.5, 0.5);
+      labelText.position.set(width / 2, height / 2);
+      if (prefersReducedMotion()) {
+        // No spin to watch: mark the in-flight state statically instead.
+        labelText.alpha = 0.55;
+      } else {
+        this.addTicker((ticker) => {
+          if (labelText.destroyed) return;
+          labelText.rotation += ticker.deltaMS * 0.006;
+        });
+      }
+    }
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
@@ -2276,7 +2306,8 @@ export class GpuRenderer {
       false,
       snapshot.onActivate,
       GPU_COLORS.primary,
-      true
+      true,
+      snapshot.data.fetching
     );
   }
 

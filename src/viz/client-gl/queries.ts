@@ -122,15 +122,25 @@ const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
   launch: ['profiles'],
 };
 
-export function invalidateActiveView(queryClient: QueryClient, view: ViewName) {
-  return queryClient.invalidateQueries({
-    predicate: (query) => {
+/**
+ * The queries the ACTIVE view is built from — one definition, used both to
+ * invalidate them on refresh and to know when they are in flight. Two copies
+ * of this predicate would drift, and the refresh button's spinner would then
+ * report on a different set of requests than the button actually triggers.
+ */
+export function activeViewQueryFilter(view: ViewName) {
+  return {
+    predicate: (query: { queryKey: readonly unknown[] }) => {
       const root = query.queryKey[1];
       return query.queryKey[0] === 'viz' &&
         typeof root === 'string' &&
         VIEW_QUERY_ROOTS[view].includes(root);
     },
-  });
+  };
+}
+
+export function invalidateActiveView(queryClient: QueryClient, view: ViewName) {
+  return queryClient.invalidateQueries(activeViewQueryFilter(view));
 }
 
 export function useRefreshBridge() {
