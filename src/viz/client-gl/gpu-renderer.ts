@@ -92,6 +92,36 @@ export interface GpuRenderMetrics {
   visibleLabels: string[];
   hitTargets: GpuHitTarget[];
   timelineViewport?: GpuTimelineViewport;
+  /**
+   * Wall time of the last `render()` — the scene REBUILD, not the frame. The
+   * two are measured separately on purpose: an rAF interval saturates at
+   * vsync, so it detects dropped frames but can never show the margin a
+   * rebuild eats. This is the number that moves when a wheel tick gets
+   * cheaper.
+   */
+  renderMs: number;
+  /** Labels built from scratch in the last render — see `LabelCache.created`. */
+  labelsCreated: number;
+  /** Labels served from the retention pool in the last render. */
+  labelsReused: number;
+}
+
+/**
+ * THE zero state for render metrics. The renderer, the app shell and the view
+ * tests all need one before a first render has happened; three hand-written
+ * literals meant every new counter had to be added in three places.
+ */
+export function emptyRenderMetrics(): GpuRenderMetrics {
+  return {
+    backend: 'unknown',
+    objectCount: 0,
+    runCollapseOffset: 0,
+    visibleLabels: [],
+    hitTargets: [],
+    renderMs: 0,
+    labelsCreated: 0,
+    labelsReused: 0,
+  };
 }
 
 export interface GpuRenderSnapshot {
@@ -195,13 +225,7 @@ export class GpuRenderer {
       label.destroy({ children: true, style: true });
     },
   });
-  metrics: GpuRenderMetrics = {
-    backend: 'unknown',
-    objectCount: 0,
-    runCollapseOffset: 0,
-    visibleLabels: [],
-    hitTargets: [],
-  };
+  metrics: GpuRenderMetrics = emptyRenderMetrics();
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
@@ -430,7 +454,23 @@ export class GpuRenderer {
     return this.metrics;
   }
 
+  /**
+   * Timed wrapper over the scene rebuild. `renderMs` is what a wheel tick
+   * actually costs, and it is the metric the smoke budgets — the rAF interval
+   * it also samples saturates at vsync and cannot show this.
+   */
   render(snapshot: GpuRenderSnapshot) {
+    const startedAt = performance.now();
+    try {
+      this.renderScene(snapshot);
+    } finally {
+      this.metrics.renderMs = performance.now() - startedAt;
+      this.metrics.labelsCreated = this.labels.created;
+      this.metrics.labelsReused = this.labels.reused;
+    }
+  }
+
+  private renderScene(snapshot: GpuRenderSnapshot) {
     this.snapshot = snapshot;
     for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
     this.tickerCallbacks.clear();

@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { translate } from '../client/i18n.js';
+import { emptyRenderMetrics } from './gpu-renderer.js';
 import type {
   GpuRenderMetrics,
   GpuTimelineViewport,
@@ -69,13 +70,7 @@ export function GpuApp() {
   const state = useGpuStore();
   const [timelineViewport, setTimelineViewport] =
     useState<GpuTimelineViewport | null>(null);
-  const metrics = useRef<GpuRenderMetrics>({
-    backend: 'unknown',
-    objectCount: 0,
-    runCollapseOffset: 0,
-    visibleLabels: [],
-    hitTargets: [],
-  });
+  const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const t = useCallback(
     (key: string, vars?: Record<string, unknown>) => translate(state.locale, key, vars),
     [state.locale]

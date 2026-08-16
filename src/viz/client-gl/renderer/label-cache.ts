@@ -60,6 +60,8 @@ export class LabelCache<T> {
   private readonly pools = new Map<string, LabelPool<T>>();
   private readonly hooks: LabelCacheHooks<T>;
   private readonly maxIdleRenders: number;
+  private createdThisRender = 0;
+  private reusedThisRender = 0;
 
   constructor(options: LabelCacheOptions<T>) {
     this.hooks = options;
@@ -68,6 +70,8 @@ export class LabelCache<T> {
 
   /** Detach every retained label and reset per-render use counts. */
   beginRender(): void {
+    this.createdThisRender = 0;
+    this.reusedThisRender = 0;
     for (const pool of this.pools.values()) {
       pool.used = 0;
       for (const label of pool.labels) this.hooks.detach(label);
@@ -86,7 +90,11 @@ export class LabelCache<T> {
     }
     const index = pool.used++;
     const pooled = pool.labels[index];
-    if (pooled !== undefined) return pooled;
+    if (pooled !== undefined) {
+      this.reusedThisRender++;
+      return pooled;
+    }
+    this.createdThisRender++;
     const label = create();
     pool.labels.push(label);
     return label;
@@ -127,5 +135,20 @@ export class LabelCache<T> {
     let total = 0;
     for (const pool of this.pools.values()) total += pool.labels.length;
     return total;
+  }
+
+  /**
+   * Labels built from scratch in the current render — the ones that paid a
+   * canvas measurement, a rasterisation and a texture upload. This is the
+   * direct measure of whether retention is working: on a scroll tick over
+   * already-seen content it should be a small fraction of `reused`.
+   */
+  get created(): number {
+    return this.createdThisRender;
+  }
+
+  /** Labels served from the pool in the current render. */
+  get reused(): number {
+    return this.reusedThisRender;
   }
 }

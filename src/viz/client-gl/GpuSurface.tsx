@@ -72,6 +72,12 @@ export function GpuSurface({
     if (host.current) {
       host.current.dataset['gpuBackend'] = metrics.backend;
       host.current.dataset['gpuObjects'] = String(metrics.objectCount);
+      // Rebuild cost and label retention, published for the smoke. Written on
+      // every render rather than sampled, because the interesting renders are
+      // the ones a wheel tick provokes — there is nothing to poll between them.
+      host.current.dataset['gpuRenderMs'] = metrics.renderMs.toFixed(3);
+      host.current.dataset['gpuLabelsCreated'] = String(metrics.labelsCreated);
+      host.current.dataset['gpuLabelsReused'] = String(metrics.labelsReused);
     }
     onMetrics(metrics);
   }, [data, onActivate, onMetrics, ready, resizeVersion, state, t]);

@@ -11,6 +11,7 @@ import type {
   VizEvent,
   VizRun,
 } from '../src/viz/client/types.js';
+import { emptyRenderMetrics } from '../src/viz/client-gl/gpu-renderer.js';
 import type {
   GpuDataSnapshot,
   GpuRenderSnapshot,
@@ -97,13 +98,7 @@ function createRecordingCtx(): RecordingCtx {
     eventCards: [],
     tickers: [],
     exitCalls: 0,
-    metrics: {
-      backend: 'unknown',
-      objectCount: 0,
-      runCollapseOffset: 0,
-      visibleLabels: [],
-      hitTargets: [],
-    },
+    metrics: emptyRenderMetrics(),
     scrollMax: {},
     detailScrollY: 0,
     detailScrollMax: 0,
