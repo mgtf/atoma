@@ -726,15 +726,37 @@ export class GpuRenderer {
     return graphics;
   }
 
+  /**
+   * The frame that groups a row of controls — filters, roles, branches, atom
+   * lanes.
+   *
+   * It used to be a bare stroked outline drawn straight into the parent at
+   * absolute coordinates, so it sat exactly ON the page: no surface, nothing
+   * for the pointer light to catch, no shadow. It is now a shallow SURFACE —
+   * its own container at the block's position, geometry at the local origin,
+   * with a cast shadow at a fraction of a card's depth. Enough lift to read as
+   * a group standing off the background; not so much that a container of
+   * buttons competes with the buttons.
+   *
+   * The local-origin move is what makes the shadow possible at all: the cast
+   * system moves a shadow by POSITION every frame, which requires the geometry
+   * not to have the offset baked into its path.
+   */
   filterBlockFrame(
     parent: Container,
     block: Pick<FilterBlockLayout, 'x' | 'y' | 'width' | 'height'>
   ) {
+    const container = new Container();
+    container.position.set(block.x, block.y);
+    container.eventMode = 'none';
+    this.addSurfaceShadow(container, block.width, block.height, 10, 0.34, 0.5);
     const graphics = new Graphics();
-    graphics.roundRect(block.x, block.y, block.width, block.height, 10);
+    graphics.roundRect(0, 0, block.width, block.height, 10);
+    graphics.fill({ color: GPU_COLORS.panelRaised, alpha: 0.38 });
     graphics.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.72 });
     graphics.eventMode = 'none';
-    parent.addChild(graphics);
+    container.addChild(graphics);
+    parent.addChild(container);
     return graphics;
   }
 
@@ -823,7 +845,9 @@ export class GpuRenderer {
     width: number,
     height: number,
     radius = 8,
-    alpha = 0.44
+    alpha = 0.44,
+    /** How far the surface stands off the page; scales offset AND reach. */
+    depth = 1
   ) {
     const shadow = new Graphics();
     // Geometry at the local origin, offset by POSITION — the offset is what
@@ -833,7 +857,7 @@ export class GpuRenderer {
     shadow.fill({ color: 0x01040a, alpha });
     shadow.eventMode = 'none';
     parent.addChild(shadow);
-    this.registerCastShadow(shadow, parent, 0, 0, width, height);
+    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth);
     return shadow;
   }
 
