@@ -39,6 +39,24 @@ export interface LabelCacheHooks<T> {
   detach(label: T): void;
   /** Evict for good: unsubscribe from shared state, then destroy. */
   release(label: T): void;
+  /**
+   * True when something OUTSIDE the cache destroyed this label.
+   *
+   * The cache lends labels out; it does not own what callers do with the
+   * containers it lends them into. An animation that outlives its render and
+   * ends in `container.destroy({ children: true })` walks straight through a
+   * retained label and destroys it, and the pool has no way to notice — the
+   * next `acquire` hands back a corpse whose `position` is null, and the
+   * renderer dies on `label.position.set(...)` several renders later, far from
+   * the code that caused it. Measured on RUNS↔SKILLS navigation once the view
+   * transition had time to complete (560ms) before the next one started.
+   *
+   * The two sites that did that now detach first, which is the real fix. This
+   * hook is the backstop that keeps the whole CLASS of mistake from reaching
+   * the renderer, because the cache is the one place every reuse passes
+   * through.
+   */
+  isDestroyed?(label: T): boolean;
 }
 
 export interface LabelCacheOptions<T> extends LabelCacheHooks<T> {
@@ -74,7 +92,12 @@ export class LabelCache<T> {
     this.reusedThisRender = 0;
     for (const pool of this.pools.values()) {
       pool.used = 0;
-      for (const label of pool.labels) this.hooks.detach(label);
+      // A label destroyed behind the cache's back cannot be detached or
+      // released; touching one throws inside Pixi. Skipping is safe: it is
+      // replaced in place on the next `acquire` for its slot.
+      for (const label of pool.labels) {
+        if (!this.hooks.isDestroyed?.(label)) this.hooks.detach(label);
+      }
     }
   }
 
@@ -90,13 +113,17 @@ export class LabelCache<T> {
     }
     const index = pool.used++;
     const pooled = pool.labels[index];
-    if (pooled !== undefined) {
+    if (pooled !== undefined && !this.hooks.isDestroyed?.(pooled)) {
       this.reusedThisRender++;
       return pooled;
     }
     this.createdThisRender++;
     const label = create();
-    pool.labels.push(label);
+    // Replace IN PLACE when a destroyed label is being evicted: `used` is
+    // already past this slot, so pushing would shift every later index and
+    // hand the next caller the wrong label.
+    if (pooled !== undefined) pool.labels[index] = label;
+    else pool.labels.push(label);
     return label;
   }
 
@@ -106,7 +133,9 @@ export class LabelCache<T> {
       if (pool.used === 0) {
         pool.idle++;
         if (pool.idle > this.maxIdleRenders) {
-          for (const label of pool.labels) this.hooks.release(label);
+          for (const label of pool.labels) {
+            if (!this.hooks.isDestroyed?.(label)) this.hooks.release(label);
+          }
           this.pools.delete(key);
         }
         continue;
@@ -115,7 +144,9 @@ export class LabelCache<T> {
       // Drawn fewer times than pooled for: the surplus is dead weight now.
       // Immediate, because the key stays hot and would otherwise never be
       // revisited by the idle sweep above.
-      for (const label of pool.labels.splice(pool.used)) this.hooks.release(label);
+      for (const label of pool.labels.splice(pool.used)) {
+        if (!this.hooks.isDestroyed?.(label)) this.hooks.release(label);
+      }
     }
   }
 
@@ -123,6 +154,7 @@ export class LabelCache<T> {
   clear(): void {
     for (const pool of this.pools.values()) {
       for (const label of pool.labels) {
+        if (this.hooks.isDestroyed?.(label)) continue;
         this.hooks.detach(label);
         this.hooks.release(label);
       }

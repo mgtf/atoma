@@ -100,6 +100,37 @@ try {
     // down and rebuilds it. Wheel ticks are dispatched on the UI canvas and
     // every resulting render is observed through the host's data attributes,
     // which the surface rewrites on each pass.
+
+    // ── VIEW-TRANSITION CRASH ────────────────────────────────────────────────
+    // Navigating RUNS↔SKILLS used to kill the renderer with "Cannot read
+    // properties of null (reading 'set')": the 560ms view-transition sweep
+    // borrows its label from the retained-label cache, then ended in
+    // `layer.destroy({ children: true })`, destroying that label behind the
+    // cache's back. A later render was handed the corpse and died on
+    // `label.position.set`.
+    //
+    // The settle MUST exceed the transition's 560ms — every faster cadence
+    // passes because the transition never completes, which is exactly how this
+    // was missed by hand. And the scenario has to ARM: if the click misses and
+    // the view never changes, the loop proves nothing.
+    const navStats = await (async () => {
+      const seen = new Set();
+      const before = diagnostics.length;
+      for (let i = 0; i < 6; i++) {
+        for (const name of ['Skills', 'Runs']) {
+          await page.evaluate((target) => {
+            [...document.querySelectorAll('[role="tab"]')]
+              .find((tab) => tab.textContent === target)?.click();
+          }, name);
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          seen.add(await page.evaluate(() =>
+            [...document.querySelectorAll('[role="tab"]')]
+              .find((tab) => tab.getAttribute('aria-selected') === 'true')?.textContent ?? '?'));
+        }
+      }
+      return { views: [...seen].sort(), newDiagnostics: diagnostics.length - before };
+    })();
+
     const scrollStats = await page.evaluate(async () => {
       const host = document.querySelector('.gpu-ui-host');
       const canvas = host?.querySelector('canvas');
@@ -184,14 +215,21 @@ try {
       // text path; losing it drops this straight to zero, where the timing
       // budget above would still pass.
       scrollStats.reused / Math.max(1, scrollStats.reused + scrollStats.created) < 0.8 ||
+      // Armed: both views actually rendered. Silent: the round-trips raised
+      // nothing new in the console.
+      navStats.views.join(',') !== 'Runs,Skills' ||
+      navStats.newDiagnostics !== 0 ||
       diagnostics.length > 0
     ) {
       throw new Error(
-        `GPU smoke failed: ${JSON.stringify({ ...result, frameStats, scrollStats, diagnostics })}`
+        `GPU smoke failed: ${JSON.stringify({ ...result, frameStats, scrollStats, navStats, diagnostics })}`
       );
     }
     console.log(
       `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95`
+    );
+    console.log(
+      `viz GPU nav ok: 6 RUNS<->SKILLS round-trips past the 560ms view transition, views ${navStats.views.join('/')}, no render error`
     );
     console.log(
       `viz GPU scroll ok: ${scrollStats.renders} rebuilds (${scrollStats.missed} ticks missed), ${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/${scrollStats.maxMs.toFixed(2)}ms max, labels ${scrollStats.reused} reused vs ${scrollStats.created} built`

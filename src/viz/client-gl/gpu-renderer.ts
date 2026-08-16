@@ -242,6 +242,7 @@ export class GpuRenderer {
       label.style = {};
       label.destroy({ children: true, style: true });
     },
+    isDestroyed: (label) => label.destroyed,
   });
   /**
    * Surfaces that throw a shadow from the pointer light. Rebuilt with the
@@ -1891,6 +1892,10 @@ export class GpuRenderer {
       if (!groupsRemoved && elapsed >= exitDuration) {
         groupsRemoved = true;
         for (const group of groups) {
+          // Same borrowed-label rule as the view transition below: this exit
+          // animation outlives its render, so its cache-owned label must be
+          // handed back before the container is destroyed recursively.
+          group.label.removeFromParent();
           group.container.removeFromParent();
           group.container.destroy({ children: true });
         }
@@ -2076,6 +2081,15 @@ export class GpuRenderer {
         this.activeViewTransition = null;
         this.app.ticker.remove(animate);
         this.tickerCallbacks.delete(animate);
+        // The label is BORROWED from the retained-label cache, and this
+        // teardown outlives the render that borrowed it — `renderScene`'s
+        // `beginRender()` detach has long since run. Destroying the layer
+        // recursively would walk straight through the label and destroy it
+        // behind the cache's back; the pool would then hand the corpse to a
+        // later render, which dies on `position.set` of null. Hand it back
+        // first. (This is the RUNS↔SKILLS crash, reproducible once a
+        // transition completes its 560ms before the next one begins.)
+        label.removeFromParent();
         layer.removeFromParent();
         layer.destroy({ children: true });
       }
