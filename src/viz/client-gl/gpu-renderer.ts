@@ -31,6 +31,8 @@ import {
 } from './brand-mark.js';
 import {
   CAST_SHADOW_REACH_PX,
+  type CastShadowSurface,
+  surfaceDepthScale,
   ambientShadowOffset,
   castShadowOffset,
 } from './renderer/cast-shadow.js';
@@ -98,6 +100,20 @@ export interface GpuTimelineViewport {
    * add it — the layout knows nothing about the view's bookends.
    */
   rowOffset: number;
+}
+
+type TuningKey = keyof VizTuning;
+
+/** Tuning panel row geometry. One row: label | track | readout. */
+const TUNING_ROW_HEIGHT = 22;
+const TUNING_LABEL_WIDTH = 116;
+const TUNING_READOUT_WIDTH = 54;
+export const TUNING_PANEL_ROW_HEIGHT = TUNING_ROW_HEIGHT;
+
+function formatTuningValue(key: TuningKey, value: number): string {
+  const range = TUNING_RANGE[key];
+  const decimals = range.step < 1 ? 2 : 0;
+  return `${value.toFixed(decimals)}${range.unit}`;
 }
 
 export interface GpuRenderMetrics {
@@ -184,6 +200,14 @@ import {
   POINTER_LIGHT_GLSL_VERTEX,
   POINTER_LIGHT_WGSL,
 } from './renderer/shaders.js';
+import { readTuning, setTuningValue } from './tuning-live.js';
+import {
+  TUNING_IDENTITY,
+  TUNING_RANGE,
+  trackXFromTuningValue,
+  tuningValueFromTrack,
+  type VizTuning,
+} from './tuning.js';
 import { prefersReducedMotion } from './renderer/motion.js';
 import { drawScrollbarThumb } from './renderer/scroll-pane.js';
 import { drawRuns } from './renderer/views/runs.js';
@@ -206,6 +230,8 @@ export class GpuRenderer {
   private pointerLightUniforms: {
     uLightPx: Float32Array;
     uStrength: number;
+    uRadiusScale: number;
+    uHueShift: number;
   } | null = null;
   private pointerLightStrength = 0;
   /** Light position in renderer pixels, published by `updatePointerLight`. */
@@ -258,6 +284,13 @@ export class GpuRenderer {
    * scene — the Graphics are children of containers the next render destroys —
    * and read every frame by `updateCastShadows`.
    */
+  /**
+   * The live tuning drag: a KEY and a track geometry, never a display object.
+   * Holding a Pixi object here is what broke the previous slider, since
+   * `render()` destroys the whole scene between two pointer moves.
+   */
+  private tuningDrag: { key: TuningKey; trackX: number; trackWidth: number } | null = null;
+
   private castShadows: {
     shadow: Graphics;
     parent: Container;
@@ -266,6 +299,7 @@ export class GpuRenderer {
     width: number;
     height: number;
     depth: number;
+    surface: CastShadowSurface;
     left: number;
     top: number;
   }[] = [];
@@ -320,6 +354,48 @@ export class GpuRenderer {
     this.snapshot.onScroll(view, next - current);
   };
 
+  /**
+   * The tuning drag lives on the CANVAS, not on the row.
+   *
+   * A pointer that leaves the 12px thumb — which it does immediately, because
+   * dragging is a horizontal gesture and the hand wanders vertically — must
+   * keep driving the value. Pixi delivers moves to the object under the
+   * pointer, so the row itself cannot see them. These listeners are installed
+   * in `init()` and removed in `destroy()` alongside the wheel handler, rather
+   * than at module import: the previous version registered window listeners as
+   * an import side effect, so every renderer ever constructed left a pair
+   * behind.
+   */
+  private readonly tuningPointerMove = (event: PointerEvent) => {
+    const drag = this.tuningDrag;
+    if (!drag) return;
+    // A release outside the window, or a pointercancel we never saw, leaves
+    // the button up with the drag still armed. Trust the event, not our state.
+    if (event.buttons === 0) {
+      this.tuningDrag = null;
+      return;
+    }
+    const bounds = this.app.canvas.getBoundingClientRect();
+    const local = pointerClientToRenderer(
+      event.clientX,
+      event.clientY,
+      bounds,
+      this.app.screen.width,
+      this.app.screen.height
+    );
+    // Both coordinates in RENDERER space. The bug this replaces compared a
+    // window clientX against a Pixi local position.x, which agreed only by
+    // accident on an unscaled canvas sitting at the window origin.
+    setTuningValue(
+      drag.key,
+      tuningValueFromTrack(drag.key, local.x, drag.trackX, drag.trackWidth)
+    );
+  };
+
+  private readonly tuningPointerUp = () => {
+    this.tuningDrag = null;
+  };
+
   private readonly updatePointerLight = (ticker: Ticker) => {
     const filter = this.pointerLightFilter;
     const uniforms = this.pointerLightUniforms;
@@ -370,9 +446,12 @@ export class GpuRenderer {
       this.app.screen.width,
       this.app.screen.height
     );
+    const tuning = readTuning();
     uniforms.uLightPx[0] = local.x;
     uniforms.uLightPx[1] = local.y;
-    uniforms.uStrength = this.pointerLightStrength;
+    uniforms.uStrength = this.pointerLightStrength * tuning.lightIntensity;
+    uniforms.uRadiusScale = tuning.lightHeight;
+    uniforms.uHueShift = tuning.lightHue;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
     // ticker. Recomputing it there would mean a SECOND
@@ -401,6 +480,11 @@ export class GpuRenderer {
         pointerLight: {
           uLightPx: { value: new Float32Array([0, 0]), type: 'vec2<f32>' },
           uStrength: { value: 0, type: 'f32' },
+          // Live tuning, read off the ticker sample every frame. Both default
+          // to the identity, so a session that never opens the panel renders
+          // exactly what it rendered before these existed.
+          uRadiusScale: { value: 1, type: 'f32' },
+          uHueShift: { value: 0, type: 'f32' },
         },
       },
       padding: 0,
@@ -412,6 +496,8 @@ export class GpuRenderer {
     this.pointerLightUniforms = filter.resources['pointerLight'].uniforms as {
       uLightPx: Float32Array;
       uStrength: number;
+      uRadiusScale: number;
+      uHueShift: number;
     };
     this.root.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
@@ -459,6 +545,12 @@ export class GpuRenderer {
     this.app.canvas.setAttribute('aria-hidden', 'true');
     host.appendChild(this.app.canvas);
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
+    // On window, not the canvas: a drag that wanders off the canvas must keep
+    // tracking, and its release must disarm wherever it happens.
+    window.addEventListener('pointermove', this.tuningPointerMove);
+    window.addEventListener('pointerup', this.tuningPointerUp);
+    window.addEventListener('pointercancel', this.tuningPointerUp);
+    window.addEventListener('blur', this.tuningPointerUp);
     // Diagnostics handle, INERT unless explicitly asked for with ?atomaDiag=1.
     // GPU lifetime defects (Pixi's GC unloading a buffer whose bind group is
     // still cached) are invisible to mocked tests and to the WebGL fallback,
@@ -473,6 +565,12 @@ export class GpuRenderer {
       (window as unknown as { __ATOMA_GPU__?: unknown }).__ATOMA_GPU__ = {
         app: this.app,
         pointerLightFilter: () => this.pointerLightFilter,
+        // Where the controls are, and what the live tuning holds. A drag is
+        // only observable on a real renderer — the mocked suite has no stage
+        // to hit-test against — so the smoke needs both to prove a drag
+        // survived the render that used to destroy it.
+        hitTargets: () => this.metrics.hitTargets,
+        tuning: () => ({ ...readTuning() }),
       };
     }
     this.initialized = true;
@@ -498,6 +596,11 @@ export class GpuRenderer {
     this.labels.clear();
     this.textStyles.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
+    window.removeEventListener('pointermove', this.tuningPointerMove);
+    window.removeEventListener('pointerup', this.tuningPointerUp);
+    window.removeEventListener('pointercancel', this.tuningPointerUp);
+    window.removeEventListener('blur', this.tuningPointerUp);
+    this.tuningDrag = null;
     this.app.destroy(true, { children: true });
     this.initialized = false;
     this.host = null;
@@ -681,7 +784,8 @@ export class GpuRenderer {
         y,
         safeWidth,
         safeHeight,
-        elevation / 2
+        elevation / 2,
+        'column'
       );
 
       const nearShadow = new Graphics();
@@ -695,7 +799,8 @@ export class GpuRenderer {
         y,
         safeWidth,
         safeHeight,
-        elevation * 0.28
+        elevation * 0.28,
+        'column'
       );
       parent.addChild(nearShadow);
     }
@@ -751,7 +856,7 @@ export class GpuRenderer {
     const container = new Container();
     container.position.set(block.x, block.y);
     container.eventMode = 'none';
-    this.addSurfaceShadow(container, block.width, block.height, 10, 0.56, 0.8);
+    this.addSurfaceShadow(container, block.width, block.height, 10, 0.56, 0.8, 'frame');
     const graphics = new Graphics();
     graphics.roundRect(0, 0, block.width, block.height, 10);
     graphics.fill({ color: GPU_COLORS.panelRaised, alpha: 0.38 });
@@ -760,6 +865,152 @@ export class GpuRenderer {
     container.addChild(graphics);
     parent.addChild(container);
     return graphics;
+  }
+
+  /**
+   * One tuning row: label, track, draggable thumb, live readout.
+   *
+   * Deliberately NOT a stateful `Slider` object. The previous one extended
+   * `Container` and was held across frames by a module-level `activeSlider`,
+   * but `render()` wipes the scene (`root.removeChildren()` + recursive
+   * destroy) — so the very first re-render during a drag destroyed the object
+   * the drag was holding, and the pointer kept moving against a corpse. That
+   * is the whole reason the slider "stopped sliding while the button was
+   * still down".
+   *
+   * Here the drag holds a KEY and a track geometry, never a display object,
+   * and the thumb is moved by a ticker that reads the live sample — the same
+   * contract the cast shadows and the pointer light already follow, so a drag
+   * costs zero scene rebuilds.
+   */
+  tuningRow(
+    parent: Container,
+    key: TuningKey,
+    x: number,
+    y: number,
+    width: number
+  ) {
+    const range = TUNING_RANGE[key];
+    const trackLocalX = x + TUNING_LABEL_WIDTH;
+    const trackWidth = Math.max(
+      40,
+      width - TUNING_LABEL_WIDTH - TUNING_READOUT_WIDTH - 16
+    );
+
+    this.text(parent, range.label, x, y + 4, {
+      size: 9,
+      color: GPU_COLORS.muted,
+      weight: '600',
+      width: TUNING_LABEL_WIDTH - 8,
+    });
+
+    const track = new Graphics();
+    track.roundRect(trackLocalX, y + TUNING_ROW_HEIGHT / 2 - 2, trackWidth, 4, 2);
+    track.fill({ color: 0x1f2937, alpha: 0.75 });
+    // The identity notch: where this knob sits when it is asking the renderer
+    // for nothing. Without it a panel of six sliders cannot tell you which
+    // ones you have actually moved away from the shipped look.
+    const identityX = trackXFromTuningValue(
+      key,
+      TUNING_IDENTITY[key],
+      trackLocalX,
+      trackWidth
+    );
+    track.rect(identityX - 0.5, y + TUNING_ROW_HEIGHT / 2 - 6, 1, 12);
+    track.fill({ color: GPU_COLORS.border, alpha: 0.9 });
+    track.eventMode = 'none';
+    parent.addChild(track);
+
+    // Geometry at the local origin, moved by POSITION — the same rule the cast
+    // shadows follow, so the per-frame update never re-tessellates a path.
+    const thumb = new Graphics();
+    thumb.roundRect(-6, -7, 12, 14, 3);
+    thumb.fill({ color: GPU_COLORS.primary, alpha: 0.95 });
+    thumb.stroke({ color: GPU_COLORS.text, width: 1, alpha: 0.55 });
+    thumb.eventMode = 'none';
+    thumb.label = `tuning-thumb:${key}`;
+    parent.addChild(thumb);
+
+    const { style } = this.textStyle({
+      size: 9,
+      color: GPU_COLORS.text,
+      mono: true,
+      weight: '600',
+    });
+    // A LIVE label, outside the retained pool on purpose: its text changes on
+    // every drag step, and a pool keyed on `key\0value` would allocate a new
+    // entry per step. Same reason `drawFpsReadout` owns its own Text.
+    const readout = new Text({ text: '', style });
+    readout.anchor.set(1, 0.5);
+    readout.position.set(x + width, y + TUNING_ROW_HEIGHT / 2);
+    readout.eventMode = 'none';
+    readout.label = `tuning-readout:${key}`;
+    parent.addChild(readout);
+
+    const hit = new Graphics();
+    hit.rect(trackLocalX - 8, y, trackWidth + 16, TUNING_ROW_HEIGHT);
+    hit.fill({ color: 0xffffff, alpha: 0.0001 });
+    hit.eventMode = 'static';
+    hit.cursor = 'ew-resize';
+    parent.addChild(hit);
+    // Registered like every other control, so the DOM a11y bridge and the
+    // hit-target metrics can see it. A control invisible to both is invisible
+    // to every observer this project has.
+    this.metrics.hitTargets.push({
+      id: `tuning:${key}`,
+      role: 'slider',
+      label: range.label,
+      x: trackLocalX,
+      y,
+      width: trackWidth,
+      height: TUNING_ROW_HEIGHT,
+    });
+
+    const trackOrigin = () => {
+      const origin = parent.toGlobal({ x: trackLocalX, y });
+      return { x: origin.x, width: trackWidth };
+    };
+    hit.on('pointerdown', (event: { global: { x: number } }) => {
+      const geometry = trackOrigin();
+      this.tuningDrag = { key, trackX: geometry.x, trackWidth: geometry.width };
+      setTuningValue(key, tuningValueFromTrack(key, event.global.x, geometry.x, geometry.width));
+    });
+    // Re-anchored on every render while a drag is live: the pane can scroll or
+    // the window resize mid-drag, and a cached track origin would silently
+    // start mapping the pointer to the wrong value.
+    if (this.tuningDrag?.key === key) {
+      const geometry = trackOrigin();
+      this.tuningDrag.trackX = geometry.x;
+      this.tuningDrag.trackWidth = geometry.width;
+    }
+
+    let lastRevision = -1;
+    this.addTicker(() => {
+      if (thumb.destroyed || readout.destroyed) return;
+      const tuning = readTuning();
+      if (tuning.revision === lastRevision) return;
+      lastRevision = tuning.revision;
+      thumb.position.set(
+        trackXFromTuningValue(key, tuning[key], trackLocalX, trackWidth),
+        y + TUNING_ROW_HEIGHT / 2
+      );
+      const next = formatTuningValue(key, tuning[key]);
+      // Assigning the same string still re-rasterises in Pixi; guard it.
+      if (next !== readout.text) readout.text = next;
+      readout.tint =
+        tuning[key] === TUNING_IDENTITY[key]
+          ? multiplyTint(GPU_COLORS.text, GPU_COLORS.muted)
+          : NO_TINT;
+    });
+    // The ticker only runs on the NEXT frame, and it early-outs when the
+    // revision has not moved — so paint the initial state here or a freshly
+    // built row shows an empty readout and a thumb at the origin.
+    thumb.position.set(
+      trackXFromTuningValue(key, readTuning()[key], trackLocalX, trackWidth),
+      y + TUNING_ROW_HEIGHT / 2
+    );
+    readout.text = formatTuningValue(key, readTuning()[key]);
+    return { trackLocalX, trackWidth };
   }
 
   collapseCaret(
@@ -849,7 +1100,8 @@ export class GpuRenderer {
     radius = 8,
     alpha = 0.44,
     /** How far the surface stands off the page; scales offset AND reach. */
-    depth = 1
+    depth = 1,
+    surface: CastShadowSurface = 'card'
   ) {
     const shadow = new Graphics();
     // Geometry at the local origin, offset by POSITION — the offset is what
@@ -859,7 +1111,7 @@ export class GpuRenderer {
     shadow.fill({ color: 0x01040a, alpha });
     shadow.eventMode = 'none';
     parent.addChild(shadow);
-    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth);
+    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth, surface);
     return shadow;
   }
 
@@ -910,7 +1162,9 @@ export class GpuRenderer {
     parent.addChild(shadow);
     shadow.mask = mask;
 
-    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth);
+    // 'card': an inset shadow belongs to the control it is carved into, and is
+    // not one of the three stacks the tuning panel lifts.
+    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth, 'card');
     return shadow;
   }
 
@@ -927,7 +1181,15 @@ export class GpuRenderer {
     localY: number,
     width: number,
     height: number,
-    depth = 1
+    depth = 1,
+    /**
+     * Which stack this surface belongs to, so the live tuning can lift buttons
+     * without lifting the column they sit on. Carried on the ENTRY rather than
+     * baked into `depth` at build time: `updateCastShadows` runs on the ticker
+     * and multiplies it there, which is what lets a drag change the scene
+     * without rebuilding it.
+     */
+    surface: CastShadowSurface = 'card'
   ) {
     // Named so the smoke can find them: where a shadow lands is only
     // observable on a real renderer with a real pointer.
@@ -944,6 +1206,7 @@ export class GpuRenderer {
       width,
       height,
       depth,
+      surface,
       left: 0,
       top: 0,
     });
@@ -978,6 +1241,7 @@ export class GpuRenderer {
     // these hold, so a stale position cannot be observed.
     const lightX = this.lightRendererX;
     const lightY = this.lightRendererY;
+    const tuning = readTuning();
     for (const entry of this.castShadows) {
       if (entry.shadow.destroyed) continue;
       const offset = castShadowOffset({
@@ -988,7 +1252,8 @@ export class GpuRenderer {
         lightX,
         lightY,
         strength,
-        depth: entry.depth,
+        depth: entry.depth * surfaceDepthScale(entry.surface, tuning),
+        lightHeight: tuning.lightHeight,
       });
       entry.shadow.position.set(offset.x, offset.y);
     }
@@ -1012,7 +1277,7 @@ export class GpuRenderer {
   ) {
     const container = new Container();
     container.position.set(x, y);
-    this.addSurfaceShadow(container, width, height, 7, 0.4);
+    this.addSurfaceShadow(container, width, height, 7, 0.4, 1, 'button');
     const graphics = new Graphics();
     graphics.roundRect(0, 0, width, height, 7);
     graphics.fill({
@@ -2549,6 +2814,7 @@ export type RendererCtx = Pick<
   | 'eventCard'
   | 'collapseCaret'
   | 'filterBlockFrame'
+  | 'tuningRow'
   | 'detailMask'
   | 'addTicker'
   | 'drawExitingFilterButtons'

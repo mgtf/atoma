@@ -50,9 +50,23 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform vec4 uInputPixel;
   uniform vec2 uLightPx;
   uniform float uStrength;
+  uniform float uRadiusScale;
+  uniform float uHueShift;
 
   float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
+  }
+
+  vec3 rotateHue(vec3 color, float degrees) {
+    if (abs(degrees) < 0.001) return color;
+    float angle = radians(degrees);
+    vec3 axis = vec3(0.57735027);
+    float cosA = cos(angle);
+    return max(
+      vec3(0.0),
+      color * cosA + cross(axis, color) * sin(angle) +
+        axis * dot(axis, color) * (1.0 - cosA)
+    );
   }
 
   void main() {
@@ -75,9 +89,13 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
     float facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
     float edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
     float distancePx = length(vScreenPx - uLightPx);
-    float halo = exp(-2.2 * pow(distancePx / ${POINTER_LIGHT_RADIUS_PX.toFixed(1)}, 2.0));
-    float core = exp(-2.8 * pow(distancePx / ${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)}, 2.0));
-    vec3 lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
+    float scale = max(0.05, uRadiusScale);
+    float halo = exp(-2.2 * pow(distancePx / (${POINTER_LIGHT_RADIUS_PX.toFixed(1)} * scale), 2.0));
+    float core = exp(-2.8 * pow(distancePx / (${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)} * scale), 2.0));
+    vec3 lightColor = rotateHue(
+      mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core),
+      uHueShift
+    );
     // NO additive core term. A bright centre reads as a lamp pasted on top of
     // the scene; what sells a light under the cursor is edges catching it, so
     // the response is carried by the facing/edge term alone.
@@ -100,6 +118,8 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
   struct PointerLightUniforms {
     uLightPx: vec2<f32>,
     uStrength: f32,
+    uRadiusScale: f32,
+    uHueShift: f32,
   };
 
   @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
@@ -112,6 +132,18 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     @location(0) uv: vec2<f32>,
     @location(1) screenPx: vec2<f32>,
   };
+
+  fn rotateHue(color: vec3<f32>, degrees: f32) -> vec3<f32> {
+    if (abs(degrees) < 0.001) { return color; }
+    let angle = radians(degrees);
+    let axis = vec3<f32>(0.57735027);
+    let cosA = cos(angle);
+    return max(
+      vec3<f32>(0.0),
+      color * cosA + cross(axis, color) * sin(angle) +
+        axis * dot(axis, color) * (1.0 - cosA)
+    );
+  }
 
   fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
     var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
@@ -149,9 +181,13 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     let facing = max(0.0, dot(outwardNormal / max(0.001, normalLength), toLight));
     let edgeResponse = clamp(normalLength * 4.4, 0.0, 1.0);
     let distancePx = length(screenPx - pointerLight.uLightPx);
-    let halo = exp(-2.2 * pow(distancePx / ${POINTER_LIGHT_RADIUS_PX.toFixed(1)}, 2.0));
-    let core = exp(-2.8 * pow(distancePx / ${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)}, 2.0));
-    let lightColor = mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core);
+    let scale = max(0.05, pointerLight.uRadiusScale);
+    let halo = exp(-2.2 * pow(distancePx / (${POINTER_LIGHT_RADIUS_PX.toFixed(1)} * scale), 2.0));
+    let core = exp(-2.8 * pow(distancePx / (${POINTER_LIGHT_CORE_RADIUS_PX.toFixed(1)} * scale), 2.0));
+    let lightColor = rotateHue(
+      mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core),
+      pointerLight.uHueShift
+    );
     // Twin of the GLSL above — no additive core, same edge-carried response.
     let illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
@@ -281,6 +317,18 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
   };
+
+  fn rotateHue(color: vec3<f32>, degrees: f32) -> vec3<f32> {
+    if (abs(degrees) < 0.001) { return color; }
+    let angle = radians(degrees);
+    let axis = vec3<f32>(0.57735027);
+    let cosA = cos(angle);
+    return max(
+      vec3<f32>(0.0),
+      color * cosA + cross(axis, color) * sin(angle) +
+        axis * dot(axis, color) * (1.0 - cosA)
+    );
+  }
 
   fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
     var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;

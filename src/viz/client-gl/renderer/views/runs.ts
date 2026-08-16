@@ -30,6 +30,7 @@ import type { RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
+import { tuningPanelRequested } from '../../tuning.js';
 import {
   FILTER_BLOCK_GAP,
   layoutAtomLaneBlocks,
@@ -50,7 +51,7 @@ import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
 import { drawAtomDetail } from './atom-detail.js';
-import { drawDebugPanel } from './debug-panel.js';
+import { drawTuningPanel, tuningPanelHeight } from './tuning-panel.js';
 import { gpuCardShaderMode } from '../shaders.js';
 
 const RUN_STATUS_COLOR: Record<RunStatus, number> = {
@@ -860,6 +861,11 @@ export function drawRuns(
       rightWidth
     );
     const detailTop = top + summaryHeight;
+    // Reserved BEFORE the detail is laid out, so the panel never draws over
+    // the detail pane or steals its wheel. The first version was appended on
+    // top of whatever was already there and swallowed ~188px of it.
+    const tuningHeight = tuningPanelRequested() ? tuningPanelHeight() + GPU_LAYOUT.gap : 0;
+    const detailHeight = height - detailTop - tuningHeight;
     const event = run.events.find((value) => value.id === snapshot.state.selectedEventId);
     const atom = snapshot.state.selectedAtomName
       ? atoms.get(snapshot.state.selectedAtomName)
@@ -872,7 +878,7 @@ export function drawRuns(
         rightX,
         detailTop,
         rightWidth,
-        height - detailTop
+        detailHeight
       );
     } else if (atom) {
       drawAtomDetail(
@@ -882,7 +888,7 @@ export function drawRuns(
         rightX,
         detailTop,
         rightWidth,
-        height - detailTop
+        detailHeight
       );
     } else if (!snapshot.state.runSummaryExpanded) {
       ctx.text(ctx.root, snapshot.t('pane.selectEvent'), rightX + 18, detailTop + 12, {
@@ -892,17 +898,13 @@ export function drawRuns(
       });
     }
 
-    // Debug tuning panel: always visible at the bottom of the right pane
-    const debugPanelBottom = Math.max(detailTop + 12, height - GPU_LAYOUT.gap - 240);
-    const debugPanelHeight = Math.max(0, height - GPU_LAYOUT.gap - debugPanelBottom);
-    if (debugPanelHeight > 120) {
-      drawDebugPanel(
+    if (tuningHeight > 0) {
+      drawTuningPanel(
         ctx,
         ctx.root,
-        rightX + 8,
-        debugPanelBottom,
-        rightWidth - 16,
-        debugPanelHeight
+        rightX + GPU_LAYOUT.gap,
+        height - GPU_LAYOUT.gap - tuningPanelHeight(),
+        rightWidth - GPU_LAYOUT.gap * 2
       );
     }
   }

@@ -24,6 +24,7 @@ import {
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
+import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
@@ -74,6 +75,28 @@ interface RecordingCtx extends RendererCtx {
   eventCards: RecordedEventCard[];
   tickers: ((ticker: Ticker) => void)[];
   exitCalls: number;
+  tuningRows: { key: string; x: number; y: number; width: number }[];
+}
+
+/**
+ * Turn the developer tuning panel on for one draw. `tuningPanelRequested()`
+ * reads `location.search`, the same way `prefersReducedMotion()` reads a media
+ * query — a global read the render path is allowed, and one a test has to
+ * stand in for rather than route around.
+ */
+function withTuningPanel(body: () => void) {
+  const original = Reflect.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', {
+    value: { search: '?atomaTune=1' },
+    configurable: true,
+    writable: true,
+  });
+  try {
+    body();
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'location', original);
+    else Reflect.deleteProperty(globalThis, 'location');
+  }
 }
 
 function textStub(value: string, options?: { size?: number }): Text {
@@ -99,6 +122,7 @@ function createRecordingCtx(): RecordingCtx {
     texts: [],
     buttons: [],
     filterButtons: [],
+    tuningRows: [],
     statCards: [],
     atomButtons: [],
     eventCards: [],
@@ -122,6 +146,19 @@ function createRecordingCtx(): RecordingCtx {
       graphics.rect(x, y, Math.max(0, width), Math.max(0, height));
       parent.addChild(graphics);
       return graphics;
+    },
+    tuningRow(parent, key, x, y, width) {
+      ctx.tuningRows.push({ key, x, y, width });
+      ctx.metrics.hitTargets.push({
+        id: `tuning:${key}`,
+        role: 'slider',
+        label: key,
+        x,
+        y,
+        width,
+        height: 22,
+      });
+      return { trackLocalX: x, trackWidth: width };
     },
     filterBlockFrame(parent, block) {
       const graphics = new Graphics();
@@ -1005,6 +1042,53 @@ describe('drawRuns behavior', () => {
     expect(detail!.value).toContain('cache 177k');
     expect(detail!.value).toContain('$');
     expect(detail!.value).toContain('⇢ haiku');
+  });
+
+  it('keeps the tuning panel out of the product UI unless the URL asks', () => {
+    // A developer surface drawn unconditionally is product chrome. The first
+    // version was, and it also swallowed ~188px of the detail pane.
+    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    expect(ctx.tuningRows).toHaveLength(0);
+    expect(ctx.metrics.hitTargets.filter((t) => t.id.startsWith('tuning:'))).toHaveLength(0);
+  });
+
+  it('draws one row per knob, and registers each as a hit target, when asked', () => {
+    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
+    const ctx = createRecordingCtx();
+    withTuningPanel(() => {
+      drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
+    });
+    expect(ctx.tuningRows.map((row) => row.key)).toEqual([...TUNING_KEYS]);
+    // Registered like every other control: a control no observer can see is a
+    // control no test and no a11y bridge can reach.
+    for (const key of TUNING_KEYS) {
+      expect(
+        ctx.metrics.hitTargets.some((target) => target.id === `tuning:${key}`),
+        key
+      ).toBe(true);
+    }
+  });
+
+  it('reserves the panel its own space instead of drawing over the detail pane', () => {
+    // An event must be SELECTED for the detail pane to exist at all — with
+    // nothing selected both runs report a null bound and the comparison would
+    // pass while proving nothing.
+    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
+    const state = { selectedEventId: 'a' };
+    const plain = createRecordingCtx();
+    drawRuns(plain, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
+    const tuned = createRecordingCtx();
+    withTuningPanel(() => {
+      drawRuns(tuned, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
+    });
+    expect(plain.detailBounds, 'the plain draw must have a detail pane').not.toBeNull();
+    const topRow = Math.min(...tuned.tuningRows.map((row) => row.y));
+    // Every row sits below the detail pane's new bottom, not on top of it.
+    expect(tuned.detailBounds?.height ?? HEIGHT)
+      .toBeLessThan(plain.detailBounds?.height ?? HEIGHT);
+    expect(topRow).toBeGreaterThan(0);
   });
 
   it('windows the timeline, masks it, and reports the scroll bound', () => {

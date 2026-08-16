@@ -21,6 +21,7 @@ export function GpuSurface({
   const renderer = useRef<GpuRenderer | null>(null);
   const [ready, setReady] = useState(false);
   const [resizeVersion, setResizeVersion] = useState(0);
+  const renderCount = useRef(0);
   const state = useGpuStore();
 
   useEffect(() => {
@@ -78,6 +79,11 @@ export function GpuSurface({
       host.current.dataset['gpuRenderMs'] = metrics.renderMs.toFixed(3);
       host.current.dataset['gpuLabelsCreated'] = String(metrics.labelsCreated);
       host.current.dataset['gpuLabelsReused'] = String(metrics.labelsReused);
+      // A monotonic rebuild count. The tuning smoke needs to prove a rebuild
+      // actually happened MID-DRAG — without it, "the value still changed"
+      // would pass on a page that never re-rendered at all.
+      renderCount.current += 1;
+      host.current.dataset['gpuRenderCount'] = String(renderCount.current);
     }
     onMetrics(metrics);
   }, [data, onActivate, onMetrics, ready, resizeVersion, state, t]);

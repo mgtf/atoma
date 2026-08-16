@@ -1,4 +1,4 @@
-import { pointerLightFalloff } from '../pointer-light.js';
+import { POINTER_LIGHT_RADIUS_PX, pointerLightFalloff } from '../pointer-light.js';
 import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 
 /**
@@ -38,6 +38,14 @@ export interface CastShadowInput {
    * separates them into a soft shadow instead of one hard smear.
    */
   depth?: number;
+  /**
+   * How high the light floats, 1 being the shipped height. A lifted lamp
+   * spreads its pool WIDER and throws SHORTER shadows, so one number scales
+   * the falloff radius up and the reach down. Both here rather than split
+   * across two call sites, because this module's whole premise is that the
+   * light's reach and its shadows' reach are the same fact.
+   */
+  lightHeight?: number;
 }
 
 export interface CastShadowOffset {
@@ -77,8 +85,11 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
 
   // The light's own falloff, so a surface beyond its reach is simply unlit
   // rather than throwing a long shadow from a light it cannot see.
-  const blend = strength * pointerLightFalloff(gap);
-  const reach = CAST_SHADOW_REACH_PX * depth;
+  const lightHeight =
+    input.lightHeight && input.lightHeight > 0 ? input.lightHeight : 1;
+  const blend =
+    strength * pointerLightFalloff(gap, POINTER_LIGHT_RADIUS_PX * lightHeight);
+  const reach = CAST_SHADOW_REACH_PX * depth / lightHeight;
   const castX = dx / spread * reach;
   const castY = dy / spread * reach;
   return {
@@ -86,3 +97,45 @@ export function castShadowOffset(input: CastShadowInput): CastShadowOffset {
     y: rest.y + (castY - rest.y) * blend,
   };
 }
+
+/**
+ * Which stack a surface belongs to. The tuning panel lifts these
+ * independently — a button rises off the frame that groups it, that frame
+ * rises off the column, the column rises off the page — so a shadow has to
+ * declare which of the three it is. `card` is everything else and is left
+ * alone by the panel, because cards already carry their own elevation.
+ */
+export type CastShadowSurface = 'button' | 'frame' | 'column' | 'card';
+
+/** The live multiplier for a surface class. Identity tuning returns 1 flat. */
+export function surfaceDepthScale(
+  surface: CastShadowSurface,
+  tuning: {
+    buttonDepth: number;
+    controlFrameDepth: number;
+    columnDepth: number;
+  }
+): number {
+  // Ratios against the shipped depth, so a slider sitting at the identity is
+  // exactly a no-op no matter what the build-time depth happened to be.
+  if (surface === 'button') return tuning.buttonDepth / TUNING_IDENTITY_BUTTON;
+  if (surface === 'frame') return tuning.controlFrameDepth / TUNING_IDENTITY_FRAME;
+  if (surface === 'column') return tuning.columnDepth / TUNING_IDENTITY_COLUMN;
+  return 1;
+}
+
+/**
+ * The shipped depths these knobs are ratios against. Declared here beside the
+ * consumer and asserted against `TUNING_IDENTITY` by a test, so the two cannot
+ * drift into a panel whose "default" silently restyles the app — which is
+ * exactly what the first version of this panel did.
+ */
+const TUNING_IDENTITY_BUTTON = 1;
+const TUNING_IDENTITY_FRAME = 0.8;
+const TUNING_IDENTITY_COLUMN = 1;
+
+export const CAST_SHADOW_IDENTITY_DEPTH = {
+  button: TUNING_IDENTITY_BUTTON,
+  frame: TUNING_IDENTITY_FRAME,
+  column: TUNING_IDENTITY_COLUMN,
+} as const;
