@@ -760,6 +760,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           const direct = await this.runScriptSkillDirect(
             skills.skill,
             skills.ownerNs,
+            // The atom that runs it, which under the shared catalog is not
+            // the atom whose namespace supplied it.
+            l1Type.name,
             subTask,
             ctx
           );
@@ -995,10 +998,19 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   private async runScriptSkillDirect(
     skill: Skill,
     l1Name: SkillNamespace,
+    executorName: string,
     subTask: Task,
     ctx: RunContext
   ): Promise<Result | null> {
-    return (await this.lifecycle()?.runScriptSkillDirect(skill, l1Name, subTask, ctx)) ?? null;
+    return (
+      (await this.lifecycle()?.runScriptSkillDirect(
+        skill,
+        l1Name,
+        executorName,
+        subTask,
+        ctx
+      )) ?? null
+    );
   }
 
   private resolveL1ForSubtask(

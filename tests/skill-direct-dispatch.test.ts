@@ -1,3 +1,5 @@
+import { SkillLifecycle } from '../src/skills/lifecycle.js';
+import { asStoredNamespace } from '../src/skills/namespace.js';
 import { subtaskMutatesFiles, subtaskMutationTargets } from '../src/skills/lifecycle.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -79,6 +81,52 @@ function makeExecutor(runShellResult: unknown): {
   };
   return { executor, calls };
 }
+
+describe('direct dispatch — attribution follows the EXECUTOR, not the namespace', () => {
+  let dir: string;
+  let skills: SkillRegistry;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-attrib-'));
+    skills = new SkillRegistry(dir);
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('reports the running atom when a script is matched from a DONOR namespace', async () => {
+    // Under the shared catalog a trusted script can be matched out of another
+    // atom's namespace. Attribution used to be stamped from that namespace, so
+    // the result claimed it was produced by an atom that never ran — and
+    // `producedBy.name` is rendered to the model as the phase author in the L2
+    // and L3 aggregation prompts.
+    skills.save(asStoredNamespace('Ammonia'), {
+      id: 'scaffold-config',
+      description: 'write a canonical config file',
+      whenToUse: 'when the subtask asks for the standard config scaffold',
+      kind: 'script',
+      language: 'node',
+      body: SCRIPT_BODY,
+    });
+    const skill = skills.loadFor(asStoredNamespace('Ammonia'))[0]!;
+    const { executor } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
+    const lifecycle = new SkillLifecycle(
+      { name: 'Water', model: 'm', params: {}, effectiveSystemPrompt: () => 'sys' },
+      skills
+    );
+    const ctx = { ...makeCtx(), tools: executor };
+
+    const result = await lifecycle.runScriptSkillDirect(
+      skill,
+      asStoredNamespace('Ammonia'), // where the recipe is FILED
+      'Water', // who actually RUNS it
+      { description: 'scaffold the config' },
+      ctx
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.producedBy).toEqual({ tier: 1, name: 'Water', viaFallback: false });
+    expect(result!.trace?.[0]?.atom).toBe('Water');
+  });
+});
 
 describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   let dir: string;

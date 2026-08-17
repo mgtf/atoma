@@ -1206,6 +1206,18 @@ export class SkillLifecycle {
   async runScriptSkillDirect(
     skill: Skill,
     l1Name: SkillNamespace,
+    /**
+     * DISPLAY name of the atom that actually runs this script, which is not
+     * the same thing as the namespace the script was filed under.
+     *
+     * Under the shared catalog a trusted script can be matched from a DONOR's
+     * namespace, and `l1Name` is that donor. Stamping it into `producedBy`
+     * and the trace made a result claim it came from an atom that never ran —
+     * visible in the L2/L3 aggregation prompts, which render `producedBy.name`
+     * as the author of the phase. The namespace still keys the store; only
+     * attribution moves to the executor.
+     */
+    executorName: string,
     subTask: Task,
     ctx: RunContext
   ): Promise<Result | null> {
@@ -1351,11 +1363,11 @@ export class SkillLifecycle {
           {
             kind: 'execute',
             ts: new Date().toISOString(),
-            atom: l1Name,
+            atom: executorName,
             payload: { directSkillDispatch: skill.id, interpreter, filename },
           },
         ],
-        producedBy: { tier: 1, name: l1Name, viaFallback: false },
+        producedBy: { tier: 1, name: executorName, viaFallback: false },
       };
     } catch (err) {
       ctx.logger.debug(
