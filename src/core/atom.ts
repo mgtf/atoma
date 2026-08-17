@@ -9,10 +9,25 @@ import type {
   Tool,
   Verdict,
 } from './types.js';
+import { newAtomId } from './atomId.js';
 
 export abstract class Atom {
   abstract readonly tier: Tier;
   abstract readonly model: string;
+  /**
+   * Surrogate identity (T4), carried so the layers that must key on identity
+   * rather than on a display label — the skill namespace and ledger
+   * attribution — can reach it without a registry lookup.
+   *
+   * OPTIONAL AT CONSTRUCTION, and deliberately so. `fromType` threads the
+   * registry's id, which is the case that matters: an atom rehydrated from a
+   * persisted type keeps the identity its skills and counters are filed
+   * under. An atom built ad hoc has no registry row and therefore no
+   * persistent identity to preserve, so a fresh id is the CORRECT value for
+   * it rather than a gap — `tests/atom-identity.test.ts` pins the
+   * preservation property instead of relying on the argument being required.
+   */
+  readonly atomId: string;
   readonly name: string;
   readonly ordinal: number;
 
@@ -23,12 +38,14 @@ export abstract class Atom {
   protected fallbackMode = false;
 
   constructor(args: {
+    atomId?: string;
     name: string;
     ordinal: number;
     systemPrompt: string;
     tools: Tool[];
     params: GenerationParams;
   }) {
+    this.atomId = args.atomId ?? newAtomId();
     this.name = args.name;
     this.ordinal = args.ordinal;
     this.systemPrompt = args.systemPrompt;

@@ -7,7 +7,7 @@ import type {
   Tool,
 } from '../core/types.js';
 import { RegistryNotFoundError } from '../core/errors.js';
-import { newAtomId } from './atomId.js';
+import { newAtomId } from '../core/atomId.js';
 import { nextAvailableMolecule } from './taxonomies/molecules.js';
 import { nextAvailableCell } from './taxonomies/cells.js';
 import { nextAvailableTissue } from './taxonomies/tissues.js';
@@ -29,8 +29,8 @@ export interface AtomType {
   /**
    * Surrogate identity (T4). Stable for the life of the type: patch,
    * rollback and counter bumps never change it, and it is never reissued.
-   * `name` beside it is a DISPLAY LABEL — see src/registry/atomId.ts for why
-   * the two are being separated and what the name's triple duty already cost.
+   * `name` beside it is a DISPLAY LABEL — see src/core/atomId.ts for why the
+   * two are being separated and what the name's triple duty already cost.
    */
   readonly atomId: string;
   readonly tier: Tier;

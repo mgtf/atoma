@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
-import { isAtomId, newAtomId } from '../src/registry/atomId.js';
+import { isAtomId, newAtomId } from '../src/core/atomId.js';
+import { L1Atom } from '../src/atoms/L1Atom.js';
+import { L2Atom } from '../src/atoms/L2Atom.js';
+import { L3Atom } from '../src/atoms/L3Atom.js';
 
 /**
  * Surrogate atom identity — invariant T4 in docs/saas-architecture.md.
@@ -101,6 +104,35 @@ describe('atom identity — a surrogate that never collides and never returns', 
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('carries the registry identity onto the atom, unchanged, at every tier', () => {
+    // The property that matters for the layers still to be migrated: an atom
+    // rehydrated from a persisted type is filed under the SAME identity its
+    // skills and counters are. The constructor argument is optional, so this
+    // is what stands in for the compiler enforcing it.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l1Type = reg.create(1, seed);
+    const l2Type = reg.create(2, seed);
+    const l3Type = reg.create(3, seed);
+
+    expect(L1Atom.fromType(l1Type).atomId).toBe(l1Type.atomId);
+    expect(L2Atom.fromType(l2Type, reg).atomId).toBe(l2Type.atomId);
+    expect(L3Atom.buildWithModel(l3Type, reg).atomId).toBe(l3Type.atomId);
+  });
+
+  it('gives an ad-hoc atom its own identity rather than an empty one', () => {
+    // No registry row means no persistent identity to preserve, so a fresh
+    // id is correct — but it must still BE an id, because the namespace and
+    // ledger work will use it as a key without asking where it came from.
+    const atom = new L1Atom({
+      name: 'Water',
+      ordinal: 1,
+      systemPrompt: 'sys',
+      tools: [],
+      params: {},
+    });
+    expect(isAtomId(atom.atomId)).toBe(true);
   });
 
   it('generates only path-safe ids (T5: no component ever traverses)', () => {

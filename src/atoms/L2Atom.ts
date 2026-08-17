@@ -244,6 +244,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   readonly skillRegistry: SkillRegistry | null;
 
   constructor(args: {
+    atomId?: string;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -256,6 +257,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     skillRegistry?: SkillRegistry | null;
   }) {
     super({
+      atomId: args.atomId,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -277,6 +279,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   ): L2Atom {
     if (type.tier !== 2) throw new Error(`L2Atom.fromType requires tier=2`);
     return new L2Atom({
+      atomId: type.atomId,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,

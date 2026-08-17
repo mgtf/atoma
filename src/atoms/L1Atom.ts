@@ -98,6 +98,7 @@ export class L1Atom extends Atom {
   private readonly skillsList: Skill[];
 
   constructor(args: {
+    atomId?: string;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -107,6 +108,7 @@ export class L1Atom extends Atom {
     skills?: readonly Skill[];
   }) {
     super({
+      atomId: args.atomId,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -191,6 +193,7 @@ export class L1Atom extends Atom {
       }
     }
     return new L1Atom({
+      atomId: type.atomId,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,

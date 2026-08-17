@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { importLegacyLedger, LEDGER_TABLE_DDL } from '../core/ledger.js';
-import { newAtomId } from './atomId.js';
+import { newAtomId } from '../core/atomId.js';
 import {
   initializeTaxonomyVersion,
   STORE_METADATA_DDL,

@@ -203,6 +203,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   readonly skillRegistry: SkillRegistry | null;
 
   private constructor(args: {
+    atomId?: string;
     name: string;
     ordinal: number;
     systemPrompt: string;
@@ -214,6 +215,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     skillRegistry?: SkillRegistry | null;
   }) {
     super({
+      atomId: args.atomId,
       name: args.name,
       ordinal: args.ordinal,
       systemPrompt: args.systemPrompt,
@@ -238,6 +240,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const pinned = modelForTier(3);
     const model = pinned !== FALLBACK_OPUS ? pinned : client ? await resolveLatestOpus(client) : FALLBACK_OPUS;
     return new L3Atom({
+      atomId: type.atomId,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
@@ -258,6 +261,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
   ): L3Atom {
     if (type.tier !== 3) throw new Error(`L3Atom.buildWithModel requires tier=3`);
     return new L3Atom({
+      atomId: type.atomId,
       name: type.name,
       ordinal: type.ordinal,
       systemPrompt: type.systemPrompt,
