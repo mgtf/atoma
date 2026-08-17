@@ -746,8 +746,18 @@ independent. It is sequenced early because it is conformance to an already
 documented invariant (see §1), it is testable in one process, and it touches no
 persisted identity.
 
-**Phase 3 — surrogate identity** (B1 → T4, T5). `atom_id` (ULID) becomes the key;
-`name` becomes a display label; skill namespaces key on the id.
+**Phase 3 — surrogate identity** (B1 → T4, T5). **DONE for skill namespaces.**
+`atom_id` (a UUID, not a ULID — see `core/atomId.ts` for why) is the key,
+`name` is a display label, and `registry migrate-identity` moves the store.
+What landed: the id column with backfill, `Atom.atomId` threaded by `fromType`,
+one derivation (`namespaceOf`) guarded by a branded type, a crash-convergent
+migration with its own version key, the flip itself, and display resolution at
+the CLI, MCP and viz so no operator surface prints a UUID. Verified end to end
+on a copy of the live store — 3 namespaces, 646 ledger rows.
+*Still name-keyed, deliberately:* ledger entities for ATOM events (they are the
+display label and `ledger check` projects type counters against them),
+`created_by`, and provenance prose inside system prompts. Those are the
+"name as display label" outcome, not leftovers.
 *Hard precedence:* must land **before any multi-tenant data exists**. §1 states
 the reason — re-keying persisted trust and skill references twice is the
 expensive mistake. This is the one phase whose deferral cost is strictly

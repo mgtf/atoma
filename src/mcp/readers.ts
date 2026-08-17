@@ -220,14 +220,45 @@ function skillNamespaces(reg: SkillRegistry, l1?: string): string[] {
   return l1 ? [l1] : reg.listNamespaces();
 }
 
+/**
+ * atom id → molecule name, for the MCP payloads.
+ *
+ * A namespace key is an atom id since T4, and these payloads are read by BOTH
+ * a model and a human. A bare UUID costs tokens, carries no signal a model can
+ * reason with, and cannot be typed back by a person. Missing store or removed
+ * atom degrades to the raw key.
+ */
+function displayNamesByAtomId(): Map<string, string> {
+  const out = new Map<string, string>();
+  const dbPath = storeDbPath();
+  if (!existsSync(dbPath)) return out;
+  const db = readonlyDb(dbPath);
+  try {
+    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+      atom_id: string | null;
+      name: string;
+    }[]) {
+      if (r.atom_id) out.set(r.atom_id, r.name);
+    }
+  } catch {
+    /* unreadable store — callers fall back to the raw key */
+  } finally {
+    db.close();
+  }
+  return out;
+}
+
 export function skillsList(opts: { l1?: string } = {}): unknown {
   const dir = skillsDirPath();
   const reg = new SkillRegistry(dir);
   const namespaces = skillNamespaces(reg, opts.l1);
+  const labels = displayNamesByAtomId();
   return {
     skillsDir: dir,
     namespaces: namespaces.map((ns) => ({
-      l1: ns,
+      // `l1` is the readable molecule name; `l1Key` is what addresses it.
+      l1: labels.get(ns) ?? ns,
+      l1Key: ns,
       skills: reg.loadFor(ns).map((s) => ({
         id: s.id,
         kind: s.kind,
