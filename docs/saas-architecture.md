@@ -10,7 +10,8 @@
 >
 > **Purpose of this document.** It exists so that design work done *before* the
 > SaaS is built does not dig the hole deeper. Section 7 is the operative part for
-> today; sections 3–6 are the target. Claims name their code symbol/file or an
+> today and section 9 is the build order; sections 3–6 are the target. Claims
+> name their code symbol/file or an
 > empirical reproduction; historical line numbers are not treated as stable
 > identifiers. Where a claim was tested and *failed*, that is recorded rather
 > than smoothed over.
@@ -22,9 +23,10 @@
 
 ## 1. The target in one paragraph
 
-atoma becomes a hosted service. Users log in via OAuth (Anthropic, OpenAI, xAI,
-…) and belong to an **organisation**, which is the billing and isolation
-boundary. **Runs are private to the organisation**: a user sees their entity's
+atoma becomes a hosted service. Users log in via OAuth and belong to an
+**organisation**, which is the billing and isolation boundary. **Provider login
+is an identity signal only, never an inference entitlement** — see "Login
+providers" below. **Runs are private to the organisation**: a user sees their entity's
 runs, traces, artefacts and cost, and nobody else's. **Skills and atoms are
 shared platform-wide, deliberately**, so that one org's learning makes every
 other org's runs cheaper — that is the product thesis and this document does not
@@ -82,6 +84,33 @@ skill references twice is the expensive mistake.
   verified-email signal. If not, it is login-only and cannot support domain
   auto-join.
 
+### Login providers: verified availability (2026-08-17)
+
+An earlier draft of this section listed "Anthropic, OpenAI, xAI" as
+interchangeable login providers. That is wrong for Anthropic and misleading for
+the others, so the provider registry must be built against these facts rather
+than against symmetry.
+
+| Provider | Login for a third-party app | User's subscription pays our inference |
+|---|---|---|
+| Anthropic | **Prohibited.** *"Anthropic does not permit third-party developers to offer Claude.ai login or to route requests through Free, Pro, or Max plan credentials on behalf of their users"* (`code.claude.com/docs/en/legal-and-compliance`, §Authentication and credential use). No third-party `client_id` registration exists. | No — same clause; server-side enforcement since Jan 2026 returns *"This credential is only authorized for use with Claude Code"*. |
+| OpenAI | **Available** — *Sign in with ChatGPT*, live beta since 2026-08-02. Returns name, email, avatar. | No. It is an OIDC identity provider; it grants no model usage on the user's plan. |
+| xAI | Unverified (see bullet above). | Not offered. |
+
+Two consequences for the design:
+
+- **The provider registry is an identity registry, not a billing registry.** No
+  provider row may ever imply an inference entitlement. Keep the two planes
+  separate in the schema so a future vendor offering does not arrive as a
+  cross-cutting change.
+- **MCP is not a third route.** `sampling/createMessage` — the one protocol
+  mechanism that would have let a host's subscription fund a server's model
+  calls — is **deprecated as of MCP protocol version `2026-07-28`** (SEP-2577,
+  with Roots and Logging), and the spec's stated replacement is *"integrate
+  directly with LLM provider APIs"*. It also never carried tool definitions and
+  returned no token-usage counters, so it could not have served L1 or fed
+  `estimateCostUsd` regardless. Do not re-propose it.
+
 ### Outbound credentials are a different plane — and today they are process-global
 
 `makeAnthropicClient` (`src/run/auth.ts:25-55`) resolves credentials from
@@ -93,6 +122,38 @@ it binds to a machine-local `claude /login` profile with no per-tenant dimension
 at all. **`ATOMA_LLM=claude-cli` is a single-machine developer transport and
 cannot be a SaaS transport.** Outbound credentials must move from process env to
 a per-run credential object threaded through `runner.ts`.
+
+Re-verified 2026-08-17: both defects are still present — the env mutation at
+`auth.ts:31` (`delete process.env['ANTHROPIC_API_KEY']`) and the process kill at
+`auth.ts:54` (`process.exit(1)`).
+
+**`claude-cli` is refused on the TENANT plane and kept on the OPERATOR plane.**
+A hosted atoma has two distinct consumers of LLM capacity, and conflating them
+is what makes this transport look like a simple yes/no:
+
+| Plane | Who the work is for | Credential | `claude-cli` |
+|---|---|---|---|
+| **Tenant** | a customer's run | API key (BYO or platform), per run | **refused** — driving a machine-local `claude /login` profile for a customer's work is exactly the "route requests through Free, Pro, or Max plan credentials on behalf of their users" the clause above prohibits, and no per-tenant dimension can engineer that away |
+| **Operator** | atoma monitoring and maintaining its OWN deployment | the operator's own Claude subscription | **kept** — ordinary first-party use of Claude Code by the account holder, on their own infrastructure |
+
+So A6 is "refuse `claude-cli` for tenant-plane runs", not "delete the
+transport". The operator plane is also where the compiled-skill machinery has
+its measured value (AGENTS.md: compilation "dispatched mainly on maintenance"),
+so removing the transport outright would delete a capability the platform needs
+for itself.
+
+**The refusal must be mechanical, not documentary.** A tenant-plane run that
+resolves to `claude-cli` has to fail at LAUNCH, the way a codex L1 pin already
+does (`RunnerConfigError`, before any spend) — a comment saying "don't do this"
+is not a boundary.
+
+**`process.exit(1)` also violates an invariant that already exists.** AGENTS.md
+splits the entry points: `startTask` "throws `RunnerConfigError` on bad input"
+and returns a handle that "never parks and never exits", while `runTask` is the
+CLI shell that "owns process death: exit 2 on config errors". A credential
+failure inside `makeAnthropicClient` is a config error reached through
+`startTask`, so A6 is not a new SaaS feature — it is conformance to the
+documented library/CLI split, and it is testable today with one process.
 
 ---
 
@@ -603,9 +664,15 @@ lands before the SaaS, key it on `(provider, subject)`.
    `kind: script` never globalises and the product thesis applies to `llm` bodies
    and the two saved LLM calls only. That is a real product decision, not an
    engineering one.
-2. **BYO-key or platform-key?** Per-org Anthropic credentials change A6 from
-   "thread a value" to "manage a secret store", and they change who absorbs the
-   cost of a runaway L1 tool loop.
+2. **BYO-key or platform-key?** NARROWED 2026-08-17, not closed. The third
+   option some designs assume — "the user's Claude/ChatGPT subscription pays" —
+   **does not exist at any vendor**, and MCP deprecated the one protocol
+   mechanism for it (see "Login providers" in §1). So the answer is one of
+   BYO-key per org or platform-key with metered re-billing; there is no
+   subscription passthrough to weigh against them. What remains genuinely open
+   is the original trade-off: per-org credentials change A6 from "thread a
+   value" to "manage a secret store", and they change who absorbs the cost of a
+   runaway L1 tool loop.
 3. **Does a paying org get its dynamic atoms globalised?** §2 says entity-scoped
    with a promotion path, on catalog-cost grounds ($0.065/run Opus plan, one
    unique uncacheable call). If the answer is "everything is global", the plan
@@ -620,7 +687,100 @@ lands before the SaaS, key it on `(provider, subject)`.
 
 ---
 
+## 9. The path (added 2026-08-17)
+
+§5 and §6 say what must be *true*. This section says in what *order*, and which
+steps are blocked on a decision rather than on engineering. §6's A/B numbering
+groups by category (blocking vs shared-learning), which is not a build order —
+two of its items have hard precedence constraints and the rest do not.
+
+### 9.1 Two tracks, and the one that is a strict subset
+
+The document assumes multi-tenant-with-shared-learning throughout. There is an
+intermediate product it does not consider: **one organisation per deployment**,
+no cross-org learning.
+
+| | Track A — dedicated instance | Track B — multi-tenant (this document's target) |
+|---|---|---|
+| Phases needed | 1, 2, 6 (+5 if concurrency bites) | all |
+| Invariants in scope | T1, T9, T10 | T1–T10 |
+| §4 (the central tension) | **does not arise** — no org boundary for a body to cross | load-bearing |
+| Review gate (T3) staffing | none | required, and it is open question 1 |
+| Product thesis (shared learning) | forfeited | delivered, post-review |
+
+Every phase of Track A is a strict subset of Track B, so A is not a detour.
+Applying §7's R1–R11 while building A is what keeps it that way — in particular
+R1: write "once *this org* has seen 3 successes" even while there is one org.
+
+### 9.2 Phase order
+
+**Phase 0 — decisions.** Close §8's open questions. Question 2 is narrowed by
+external constraint (see §1, "Login providers"); question 4 (SQLite/Postgres)
+gets more expensive with every deferral. **Question 1 — who reviews globalised
+bodies, at what latency — decides whether Track B has a product at all**: if the
+answer is "nobody, it must be automatic", then `kind: script` never globalises
+and the thesis reduces to the two saved LLM calls.
+
+**Phase 1 — the OS boundary becomes mandatory** (A1 → T1). The container worker
+and per-run egress proxy already exist as opt-in local primitives and are
+measured cost-neutral (§8: 4/5 delivered, $0.367/305s against $0.370/311s over
+141 prior runs). This phase removes the backend *choice* and applies destination
+policy to every network-capable tool; it is not new construction.
+*Hard precedence:* everything that claims isolation depends on it, because per
+§3 no column, repository layer or `WHERE org_id = ?` survives an L1 that can
+`cat` the database file.
+
+**Phase 2 — credentials leave process state** (A6 → T10). Per-run credential
+object threaded through `runner.ts`; `makeAnthropicClient` throws
+`RunnerConfigError` instead of `process.exit(1)`; `claude-cli` is refused on the
+tenant plane at launch and kept for the operator plane (see §1).
+*Not blocked by Phase 1* — the credential plane and the sandbox boundary are
+independent. It is sequenced early because it is conformance to an already
+documented invariant (see §1), it is testable in one process, and it touches no
+persisted identity.
+
+**Phase 3 — surrogate identity** (B1 → T4, T5). `atom_id` (ULID) becomes the key;
+`name` becomes a display label; skill namespaces key on the id.
+*Hard precedence:* must land **before any multi-tenant data exists**. §1 states
+the reason — re-keying persisted trust and skill references twice is the
+expensive mistake. This is the one phase whose deferral cost is strictly
+increasing.
+
+**Phase 4 — split bodies from trust** (B2 → T2; B3; B8). Counters keyed
+`(org_id, entity_id)`; scope column on atom types; home-namespace donor filters
+applied uniformly. Depends on Phase 3.
+
+**Phase 5 — storage concurrency** (A7, A8). Postgres or hardened SQLite; skill
+counters leave the filesystem. Independent of 4 and 6.
+
+**Phase 6 — control plane** (A2, A3, B5 → T7, T9). Auth and authorization on the
+viz/control plane; org discriminator on runs and traces; `store_id`/`org_id` on
+ledger events. Independent of 4 and 5.
+
+**Phase 7 — review workflow** (B4 → T3). Conditional on Phase 0's answer to
+question 1.
+
+### 9.3 Dependency summary
+
+```
+Phase 0 (decisions)
+   ├── Phase 1 (T1, mandatory OS boundary) ─── prerequisite for every isolation claim
+   ├── Phase 2 (T10, per-run credentials) ──── independent, cheap, conformance
+   └── Phase 3 (T4/T5, surrogate ids) ─────── MUST precede any tenant data
+          └── Phase 4 (T2, trust split)
+Phase 5 (storage) ┐
+Phase 6 (control plane) ┤ parallel with 4, and with each other
+Phase 7 (review) ── gated on Phase 0 / question 1
+```
+
+Track A stops after Phases 1, 2, 6. Track B continues through 3, 4, 5, 7.
+
+---
+
 *Every empirical claim in §3, §4.1 and §4.3 was reproduced against the code at
 the commit this document was written on. Where a defence was tested and passed,
 it appears in §4.2 or §5; where it was tested and failed, it appears in §4.1 with
-the result.*
+the result. §1's "Login providers" table and §9 were added 2026-08-17; the vendor
+claims there are quoted from the vendors' own published policy pages and the MCP
+`2026-07-28` specification, and the two `auth.ts` line references were re-verified
+against the working tree on that date.*
