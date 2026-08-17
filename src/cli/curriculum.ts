@@ -32,7 +32,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { SkillRegistry } from '../skills/registry.js';
-import { skillsDirPath } from '../core/stores.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import Database from 'better-sqlite3';
+import { existsSync as fsExistsSync } from 'node:fs';
 import { trustThreshold, promoteThreshold } from '../atoms/cost.js';
 import { refusalStampIsCurrent } from '../skills/generations.js';
 import { extractJson } from '../atoms/json.js';
@@ -319,6 +321,27 @@ function knownFamilies(csvPath: string, defaultTasksPath: string): string[] {
   return [...fams].sort();
 }
 
+/** atom id → molecule name; empty when the store is absent or unreadable. */
+function displayNamesByAtomId(): Map<string, string> {
+  const out = new Map<string, string>();
+  const dbPath = storeDbPath();
+  if (!fsExistsSync(dbPath)) return out;
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+      atom_id: string | null;
+      name: string;
+    }[]) {
+      if (r.atom_id) out.set(r.atom_id, r.name);
+    }
+  } catch {
+    /* unreadable store — targets fall back to the raw key */
+  } finally {
+    db.close();
+  }
+  return out;
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   let outPath = 'burnin/tasks-curriculum.json';
@@ -336,7 +359,14 @@ async function main(): Promise<void> {
   }
 
   const registry = new SkillRegistry(skillsDir);
-  const byL1 = new Map(registry.listNamespaces().map((ns) => [ns, registry.loadFor(ns)]));
+  // Keyed by the molecule NAME, not the namespace key. `l1` is carried into
+  // the generated task hint that an LLM reads ("compiled script X on <l1>…"),
+  // and an atom id there is a string with no meaning to the model and no
+  // meaning to the operator reading the printed target list.
+  const labels = displayNamesByAtomId();
+  const byL1 = new Map(
+    registry.listNamespaces().map((ns) => [labels.get(ns) ?? ns, registry.loadFor(ns)])
+  );
   const failedFamilies = existsSync(resolve(csvPath))
     ? parseBurninCsvFamilies(readFileSync(resolve(csvPath), 'utf8'))
     : [];

@@ -30,6 +30,42 @@ import { skillsDirPath, storeDbPath, legacyStoreNotice } from '../core/stores.js
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
 
+
+/**
+ * Render a ledger entity for a human.
+ *
+ * Entities come in two shapes: a bare molecule NAME for type events, and
+ * `<namespace>/<skill-id>` for skill events — where the namespace is an atom
+ * id since T4. `ledger tail` is an audit stream a person reads, so the id half
+ * is resolved back to the molecule name and the identity is shown alongside
+ * only when it resolved, which is what tells the reader the two are different
+ * things. An unresolvable key is printed as-is: an entity whose atom is gone
+ * is exactly what the raw key should communicate.
+ */
+function renderEntity(entity: string, labels: Map<string, string>): string {
+  const slash = entity.indexOf('/');
+  if (slash === -1) return entity;
+  const key = entity.slice(0, slash);
+  const label = labels.get(key);
+  return label ? `${label}${entity.slice(slash)}` : entity;
+}
+
+/** atom id → molecule name, read once from the open store. */
+function displayNamesByAtomId(db: Database.Database): Map<string, string> {
+  const out = new Map<string, string>();
+  try {
+    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+      atom_id: string | null;
+      name: string;
+    }[]) {
+      if (r.atom_id) out.set(r.atom_id, r.name);
+    }
+  } catch {
+    /* unreadable store — every entity falls back to its raw key */
+  }
+  return out;
+}
+
 function main(): void {
   const { command, positional, flags } = parseCliArgs(process.argv);
   const cmd = command ?? 'tail';
@@ -55,9 +91,12 @@ function main(): void {
       console.log(`(ledger empty in ${dbPath})`);
       return;
     }
+    const labels = displayNamesByAtomId(db);
     for (const ev of events.slice(-n)) {
       const detail = ev.detail ? `  ${JSON.stringify(ev.detail)}` : '';
-      console.log(`${ev.at}  ${ev.kind.padEnd(24)}  ${ev.entity}${detail}`);
+      console.log(
+        `${ev.at}  ${ev.kind.padEnd(24)}  ${renderEntity(ev.entity, labels)}${detail}`
+      );
     }
     console.log(`\n${events.length} event(s) total — ${dbPath}`);
     return;
