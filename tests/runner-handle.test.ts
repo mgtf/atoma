@@ -69,6 +69,8 @@ describe('startTask — typed config errors before any side effect', () => {
     buildProfile.envVars.timeoutMs,
     'ATOMA_MODEL_L1',
     'ATOMA_LLM',
+    'ATOMA_REQUIRE_ISOLATION',
+    'ATOMA_CONTAINER',
   ] as const;
   const before = new Map<string, string | undefined>();
   beforeEach(() => {
@@ -126,6 +128,37 @@ describe('startTask — typed config errors before any side effect', () => {
     await expect(
       startTask(buildProfile, ['goal'], { providerEnv: snapshot })
     ).rejects.toThrow(/cannot honour a supplied credential snapshot/);
+  });
+
+  it('refuses the local backend at LAUNCH when isolation is required (T1)', async () => {
+    process.env[buildProfile.envVars.timeoutMs] = '60000';
+    process.env['ATOMA_REQUIRE_ISOLATION'] = '1';
+    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(RunnerConfigError);
+    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/not a boundary/);
+  });
+
+  it('a run cannot unlock its own jail through the environment it supplies', async () => {
+    // The security property of the asymmetry in startTask: providerEnv drives
+    // every provider decision, but the isolation requirement is read from the
+    // HOST environment. A tenant handed control of both would simply switch
+    // the boundary off.
+    process.env[buildProfile.envVars.timeoutMs] = '60000';
+    process.env['ATOMA_REQUIRE_ISOLATION'] = '1';
+    await expect(
+      startTask(buildProfile, ['goal'], {
+        providerEnv: { ATOMA_LLM: 'ollama', ATOMA_REQUIRE_ISOLATION: '0' },
+      })
+    ).rejects.toThrow(/not a boundary/);
+  });
+
+  it('accepts the run once a container backend is selected', async () => {
+    // Proves the gate is passed rather than skipped: with the boundary
+    // satisfied, the launch proceeds to the next validation and fails on the
+    // deliberately invalid timeout instead.
+    process.env['ATOMA_REQUIRE_ISOLATION'] = '1';
+    process.env['ATOMA_CONTAINER'] = '1';
+    process.env[buildProfile.envVars.timeoutMs] = 'abc';
+    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
   });
 
   it('leaves the developer path alone: claude-cli with NO snapshot is accepted', async () => {

@@ -170,6 +170,34 @@ describe('atoma doctor', () => {
     );
   });
 
+  it('fails when a boundary is required but the mode resolves to local (T1)', async () => {
+    // Doctor's contract is to diagnose the mode the runner will ACTUALLY use.
+    // A deployment demanding isolation must hear about an unjailed run before
+    // it starts, not from the trace afterwards.
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: {
+        ATOMA_LLM: 'anthropic',
+        ANTHROPIC_API_KEY: 'configured',
+        ATOMA_REQUIRE_ISOLATION: '1',
+      },
+      dependencies: dependencies(),
+    });
+
+    expect(report.checks.find((c) => c.id === 'isolation')?.status).toBe('fail');
+    expect(report.ready).toBe(false);
+  });
+
+  it('raises no isolation check when the deployment does not require one', async () => {
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies(),
+    });
+
+    expect(report.checks.find((c) => c.id === 'isolation')).toBeUndefined();
+  });
+
   it('requires Docker and a bootable worker in container mode', async () => {
     const runCommand = async (
       command: string

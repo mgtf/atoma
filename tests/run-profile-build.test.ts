@@ -15,6 +15,11 @@ import {
   parseRunnerArgs,
   resolveSkillPromotion,
 } from '../src/run/runner.js';
+import {
+  assertIsolationBoundary,
+  resolveIsolationRequirement,
+} from '../src/run/backendMode.js';
+import { RunnerConfigError } from '../src/core/errors.js';
 
 /**
  * Guards for the generic-runner extraction (build-app.ts 541 lines -> a
@@ -214,6 +219,39 @@ describe('parseRunnerArgs equivalence — documented invocations', () => {
       egress: true,
       goal: 'g',
     });
+  });
+
+  it('isolation is off by default and switched on by the HOST environment', () => {
+    expect(resolveIsolationRequirement({})).toBe(false);
+    expect(resolveIsolationRequirement({ ATOMA_REQUIRE_ISOLATION: '1' })).toBe(true);
+    // Anything other than the exact opt-in leaves it off — the same
+    // fail-closed-on-invalid shape the other lifecycle toggles use.
+    expect(resolveIsolationRequirement({ ATOMA_REQUIRE_ISOLATION: 'true' })).toBe(false);
+    // An embedder's explicit choice outranks the environment in both
+    // directions.
+    expect(resolveIsolationRequirement({ ATOMA_REQUIRE_ISOLATION: '1' }, false)).toBe(false);
+    expect(resolveIsolationRequirement({}, true)).toBe(true);
+  });
+
+  it('refuses the local backend when a boundary is required (T1)', () => {
+    // The local backend was never a boundary: run_shell spawns an unjailed
+    // child with the workspace as cwd, so `../..` reaches the stores.
+    expect(() => assertIsolationBoundary({ container: false, egress: false }, true)).toThrow(
+      RunnerConfigError
+    );
+    expect(() => assertIsolationBoundary({ container: false, egress: false }, true)).toThrow(
+      /not a boundary/
+    );
+    // Both containerised modes satisfy it: `--network none` reaches nothing,
+    // and --egress routes through a per-run allowlisted proxy.
+    expect(() =>
+      assertIsolationBoundary({ container: true, egress: false }, true)
+    ).not.toThrow();
+    expect(() => assertIsolationBoundary({ container: true, egress: true }, true)).not.toThrow();
+    // Not required: the developer path is untouched.
+    expect(() =>
+      assertIsolationBoundary({ container: false, egress: false }, false)
+    ).not.toThrow();
   });
 
   it('an unknown flag is warn-and-DISCARDED and never eats the goal', () => {

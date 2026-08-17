@@ -509,7 +509,7 @@ distilled, reviewed body crosses the org boundary.
 
 | # | Change | Evidence |
 |---|---|---|
-| A1 | **Make per-run OS isolation mandatory.** The container worker and per-run default-deny egress proxy exist opt-in; SaaS must remove the local backend choice and apply destination policy to every network-capable tool. | §3; `tools/containerExecutor.ts`, `tools/egressSidecar.ts` |
+| A1 | **DONE locally:** `ATOMA_REQUIRE_ISOLATION=1` (or an embedder's `requireIsolation`) makes the OS boundary mandatory — `assertIsolationBoundary` refuses the local tool backend at LAUNCH with `RunnerConfigError`, before the workspace is touched or a store opened, and `doctor` reports the same condition as a hard failure. The requirement is read from the HOST environment and never from a run's own `providerEnv`, so a tenant cannot switch off its own jail. Destination policy needs no per-tool allowlist: both containerised modes are already default-deny at the OS layer (`--network none` reaches nothing; `--egress` routes through a per-run anchored-allowlist proxy), so adding one to `fetch_url` would be a second copy of one rule. REMAINING: nothing in the code forces a hosted deployment to *set* the switch — that is a deployment checklist item, and it is off by default so the developer path is unchanged. | §3; T1; `run/backendMode.ts`, `tools/containerExecutor.ts`, `tools/egressSidecar.ts` |
 | A2 | **Authentication + authorization on the viz/control plane.** Today the local viz has no auth and exposes the shared run corpus. | `viz/server.ts` |
 | A3 | **Org scoping on runs and traces.** `VizRun` carries no organisation discriminator. | `viz/trace.ts` |
 | A4 | **DONE locally:** `sanitise` rejects all-dot traversal and `branch` validates `overrideName`. Preserve these guards through the surrogate-id migration. | §4.3; `atom-name-path-escape.test.ts` |
@@ -721,14 +721,19 @@ bodies, at what latency — decides whether Track B has a product at all**: if t
 answer is "nobody, it must be automatic", then `kind: script` never globalises
 and the thesis reduces to the two saved LLM calls.
 
-**Phase 1 — the OS boundary becomes mandatory** (A1 → T1). The container worker
-and per-run egress proxy already exist as opt-in local primitives and are
-measured cost-neutral (§8: 4/5 delivered, $0.367/305s against $0.370/311s over
-141 prior runs). This phase removes the backend *choice* and applies destination
-policy to every network-capable tool; it is not new construction.
+**Phase 1 — the OS boundary becomes mandatory** (A1 → T1). **DONE** — see the A1
+row in §6.A. The container worker and per-run egress proxy already existed as
+opt-in local primitives, measured cost-neutral (§8: 4/5 delivered, $0.367/305s
+against $0.370/311s over 141 prior runs), so this was a refusal to build rather
+than new construction: a deployment that requires a boundary now cannot start a
+run without one.
 *Hard precedence:* everything that claims isolation depends on it, because per
 §3 no column, repository layer or `WHERE org_id = ?` survives an L1 that can
 `cat` the database file.
+*Note the shape it shares with Phase 2:* both are enforced at launch, both read
+their policy from the host rather than from the run, and both leave the
+unconfigured developer path exactly as it was. That is the pattern the
+remaining phases should follow.
 
 **Phase 2 — credentials leave process state** (A6 → T10). **DONE** — see the A6
 row in §6.A for what landed and what remains. The tenant-plane refusal of

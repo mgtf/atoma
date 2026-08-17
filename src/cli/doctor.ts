@@ -21,7 +21,11 @@ import {
   resolveBaseProviderKind,
   ZAI_DEFAULT_BASE_URL,
 } from '../run/providers.js';
-import { resolveToolBackendMode, type ToolBackendMode } from '../run/backendMode.js';
+import {
+  resolveIsolationRequirement,
+  resolveToolBackendMode,
+  type ToolBackendMode,
+} from '../run/backendMode.js';
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 
 const runFile = promisify(execFile);
@@ -529,6 +533,19 @@ export async function diagnoseDoctor(args: {
 
   for (const provider of providers) {
     checks.push(await checkProvider(provider, env, deps));
+  }
+  // Doctor's contract is to diagnose the mode the runner will ACTUALLY use,
+  // so a deployment that demands an OS boundary must hear about a run that
+  // would not get one — before the run, not from a trace afterwards.
+  if (resolveIsolationRequirement(env) && !args.mode.container) {
+    checks.push({
+      id: 'isolation',
+      label: 'Run isolation',
+      status: 'fail',
+      detail:
+        'ATOMA_REQUIRE_ISOLATION=1 but this mode resolves to the local tool backend, which is not a boundary',
+      remedy: 'Launch with --container (or --egress), or set ATOMA_CONTAINER=1.',
+    });
   }
   checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));
   if (args.mode.egress) {

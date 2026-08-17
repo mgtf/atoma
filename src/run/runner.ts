@@ -24,7 +24,11 @@ import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
 import { containerToolBackend, localToolBackend } from './toolBackend.js';
 import { baselineModel, runFrontierBaseline } from './baseline.js';
-import { resolveToolBackendMode } from './backendMode.js';
+import {
+  assertIsolationBoundary,
+  resolveIsolationRequirement,
+  resolveToolBackendMode,
+} from './backendMode.js';
 import { parseArgTokens } from '../cli/args.js';
 import {
   formatRunStatsEpilogue,
@@ -317,7 +321,11 @@ export function resetHostLifecycleSnapshotForTests(): void {
 export async function startTask(
   profile: TaskProfile,
   argv: readonly string[],
-  opts?: { onWedged?: () => void; providerEnv?: NodeJS.ProcessEnv }
+  opts?: {
+    onWedged?: () => void;
+    providerEnv?: NodeJS.ProcessEnv;
+    requireIsolation?: boolean;
+  }
 ): Promise<RunHandle> {
   // PROVIDER CREDENTIALS ARE A PER-RUN VALUE (invariant T10). `providerEnv`
   // is the snapshot every provider decision reads: which transport, which
@@ -352,6 +360,14 @@ export async function startTask(
   // opening stores or starting the container/egress backend. The old order
   // archived a valid deliverable before discovering a missing seed, and
   // could leave a proxy sidecar behind before rejecting a bad timeout.
+  //
+  // `process.env` and NOT `providerEnv`: whether a run must be jailed is the
+  // host's policy about the run, never something the run's own environment
+  // may relax. See resolveIsolationRequirement.
+  assertIsolationBoundary(
+    args,
+    resolveIsolationRequirement(process.env, opts?.requireIsolation)
+  );
   const timeoutRaw = process.env[profile.envVars.timeoutMs];
   const timeoutMs = Number(timeoutRaw ?? (useClaudeCli ? 15 * 60 * 1000 : 10 * 60 * 1000));
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
