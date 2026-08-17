@@ -5,6 +5,7 @@ import {
   initializeTaxonomyVersion,
   STORE_METADATA_DDL,
 } from './taxonomyMigration.js';
+import { initializeIdentityVersion } from './identityMigration.js';
 
 export type DB = Database.Database;
 
@@ -100,5 +101,9 @@ export function openDb(path: string): DB {
   // next to this file and the table is still empty. No-op for `:memory:`.
   importLegacyLedger(db, path);
   initializeTaxonomyVersion(db);
+  // Identity scheme (T4) is versioned separately from the taxonomy: the two
+  // migrations are orthogonal and the store already sits at the current
+  // taxonomy version. See registry/identityMigration.ts.
+  initializeIdentityVersion(db);
   return db;
 }
