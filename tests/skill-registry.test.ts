@@ -531,6 +531,7 @@ describe('L1Atom.skills() integration', () => {
 
   it('returns [] when no SkillRegistry is passed to fromType (legacy callers unchanged)', () => {
     const atom = L1Atom.fromType({
+      atomId: '00000000-0000-4000-8000-000000000001',
       tier: 1,
       ordinal: 1,
       name: 'Water',
@@ -557,6 +558,7 @@ describe('L1Atom.skills() integration', () => {
     });
     const atom = L1Atom.fromType(
       {
+        atomId: '00000000-0000-4000-8000-000000000001',
         tier: 1,
         ordinal: 1,
         name: 'Water',

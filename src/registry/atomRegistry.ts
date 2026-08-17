@@ -7,6 +7,7 @@ import type {
   Tool,
 } from '../core/types.js';
 import { RegistryNotFoundError } from '../core/errors.js';
+import { newAtomId } from './atomId.js';
 import { nextAvailableMolecule } from './taxonomies/molecules.js';
 import { nextAvailableCell } from './taxonomies/cells.js';
 import { nextAvailableTissue } from './taxonomies/tissues.js';
@@ -25,6 +26,13 @@ export function isSafeAtomName(s: string): boolean {
 }
 
 export interface AtomType {
+  /**
+   * Surrogate identity (T4). Stable for the life of the type: patch,
+   * rollback and counter bumps never change it, and it is never reissued.
+   * `name` beside it is a DISPLAY LABEL — see src/registry/atomId.ts for why
+   * the two are being separated and what the name's triple duty already cost.
+   */
+  readonly atomId: string;
   readonly tier: Tier;
   readonly ordinal: number;
   readonly name: string;
@@ -67,6 +75,7 @@ export interface CreateSeed {
 interface Row {
   tier: number;
   ordinal: number;
+  atom_id: string | null;
   name: string;
   description: string;
   system_prompt: string;
@@ -81,6 +90,10 @@ interface Row {
 
 function rowToType(row: Row): AtomType {
   return {
+    // Non-null in practice: every writer supplies one and `openDb` back-fills
+    // any legacy gap before a read can reach here. The fallback keeps a
+    // hand-edited or mid-migration store readable instead of throwing.
+    atomId: row.atom_id ?? '',
     tier: row.tier as Tier,
     ordinal: row.ordinal,
     name: row.name,
@@ -292,16 +305,18 @@ export class AtomRegistry {
       // we just assigned. Without this, Sonnet-authored seeds with a
       // hardcoded "You are Carbon" line silently pollute every future branch.
       const systemPrompt = rebrandPersona(seed.systemPrompt, name);
+      const atomId = newAtomId();
 
       this.db
         .prepare(
           `INSERT INTO atom_types
-           (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+           (tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
         )
         .run(
           tier,
           ordinal,
+          atomId,
           name,
           seed.description,
           systemPrompt,
@@ -312,6 +327,7 @@ export class AtomRegistry {
         );
 
       return {
+        atomId,
         tier,
         ordinal,
         name,
@@ -608,15 +624,20 @@ export class AtomRegistry {
       // runtime rewrite closes the loop for the `branchOnEscalation` hook
       // which cannot supply a systemPromptReplace itself.
       const systemPrompt = rebrandPersona(merged.systemPrompt, name);
+      // A branch is a NEW type, so it gets its OWN identity — it does not
+      // inherit the source's. That is what keeps trust, skills and ledger
+      // attribution from silently transferring to a derived atom.
+      const atomId = newAtomId();
       this.db
         .prepare(
           `INSERT INTO atom_types
-           (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+           (tier, ordinal, atom_id, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
         )
         .run(
           source.tier,
           ordinal,
+          atomId,
           name,
           finalDescription,
           systemPrompt,
@@ -627,6 +648,7 @@ export class AtomRegistry {
         );
 
       return {
+        atomId,
         tier: source.tier,
         ordinal,
         name,
