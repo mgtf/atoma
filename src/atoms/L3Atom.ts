@@ -378,9 +378,12 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `  ORTHOGONAL (parallel) — subtasks are INDEPENDENT, no shared state.`,
       `    Each runs in its own workspace lane and produces a separate`,
       `    artefact. Aggregation is "concat" or "llm-synthesize".`,
-      `    Examples: "research topic A" + "research topic B" + "summarise both";`,
-      `    "build library" + "write tests" + "draft README" (only when these`,
-      `    don't import each other).`,
+      `    Examples: "build three unrelated CLI tools, one per subdirectory";`,
+      `    "research topic A" + "research topic B" (only when neither reads`,
+      `    the other's output).`,
+      `    A step that CONSUMES the others NEVER belongs here: parallel lanes`,
+      `    cannot see each other's results, so "summarise all three" is a`,
+      `    later PHASED step, not a fourth orthogonal subtask.`,
       ``,
       `  PHASED (sequential) — subtasks SHARE the same evolving artefact.`,
       `    Step N starts from where step N-1 left off (same workspace files).`,
@@ -393,7 +396,32 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `    Use this whenever phases need to verify each other's work or`,
       `    when the artefact MUST go through review checkpoints.`,
       ``,
-      `When in doubt for an APP / GAME / FILE-BUILD task: prefer PHASED.`,
+      // ONE PHASE PER ORTHOGONAL GROUP, not one phase per artefact. A plan
+      // carries a SINGLE aggregation mode, so "3 independent parts, then a
+      // step consuming all 3" has no direct spelling at this tier: the only
+      // correct mode is "sequential", and the parallelism has to come from
+      // the L2 that receives one grouped phase and fans it out itself.
+      // Measured 2026-08-16 (docs/incidents/parallel-fanin-2026-08-16.md):
+      // on three fan-out+join tasks, the ONE run that grouped its orthogonal
+      // work into a single phase is the only live run in this repo's history
+      // — 247 traces — whose lanes ever genuinely overlapped. The two runs
+      // that emitted one phase per orthogonal artefact serialised work that
+      // shared no file. Both L3 plans had correctly IDENTIFIED the
+      // orthogonality in their own reasoning first; granularity, not
+      // recognition, is what decided the outcome.
+      `  ONE PHASE CAN CARRY A WHOLE ORTHOGONAL GROUP — and should. When N`,
+      `  artefacts share nothing but a later step consumes them all, emit ONE`,
+      `  phase naming all N ("create the three independent generators, each in`,
+      `  its own subdirectory") followed by the phases that depend on them.`,
+      `  The L2 receiving that phase splits the group into parallel lanes by`,
+      `  itself; one phase PER orthogonal artefact throws that away and`,
+      `  serialises work that had no reason to be serial. Group only artefacts`,
+      `  that genuinely share no file, and name every one of them in the phase`,
+      `  description so the L2 can tell them apart.`,
+      ``,
+      `When in doubt for an APP / GAME / FILE-BUILD task: prefer PHASED, with`,
+      `each orthogonal group kept inside ONE phase rather than spread across`,
+      `consecutive ones.`,
       `One big monolithic subtask delegates real reasoning to the L2 prompt`,
       `and skips the value of phase-by-phase smoke validation.`,
       ``,
@@ -442,6 +470,40 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `validator then whipsaws the worker between the two shapes (observed:`,
       `five rejection cycles on one run, alternating demands between the`,
       `phantom schema and the real one).`,
+      // A DOCUMENTATION PHASE DOCUMENTS EVIDENCE THAT ALREADY EXISTS. Measured
+      // 2026-08-16 across two consecutive batches on the same task
+      // (docs/incidents/parallel-fanin-2026-08-16.md): a phase told to "re-run
+      // each command to capture its actual output if needed, and make sure all
+      // three out.json files still exist at the end" spent ONE 567s execute
+      // loop re-running every generator, staging the failure case by moving an
+      // output file aside, restoring it, re-reading every source, and writing
+      // the README only at 741s — then kept verifying until the run budget
+      // died. Its sibling phases, which pointed at recorded evidence instead,
+      // cost 46-51s. The restated invariant is what turns a writer into a
+      // re-verifier: it makes the phase responsible for state it never
+      // touched, so it proves that state from scratch.
+      `A phase whose deliverable is DOCUMENTATION reports evidence that`,
+      `already exists: point it at the recorded probes and let it re-run`,
+      `only what is not recorded yet. Do NOT hand it re-verification duties`,
+      `or workspace invariants to uphold ("make sure X still exists",`,
+      `"re-run each command to capture its output"). A documentation phase`,
+      `asked to re-establish state stages destructive experiments to`,
+      `reproduce error cases it could have read, and can burn the whole run`,
+      `budget doing it.`,
+      // NOT "error cases belong to the build phase": that sentence was here for
+      // one run and made things worse. It relocated the destructive experiment
+      // instead of removing it — the build phase then had to MANUFACTURE the
+      // failure state, and for a writer whose only error path is "cannot write
+      // its output" that means deleting its own output. Measured on the
+      // 2026-08-17 05:21 run: four `rm` attempts, all correctly refused by the
+      // shell allowlist, one refused hand-edit of the probe manifest, and the
+      // build phase went 103s → 506s at 5x the whole-run cost while the
+      // documentation phase it was meant to relieve fell 598s → 117s. Where an
+      // error case runs is the plan's business; what matters is that NO phase
+      // is pushed into staging one destructively.
+      `An error path that can only be evidenced by destroying state is not`,
+      `worth a phase of either kind — prefer the artefact's non-destructive`,
+      `failure inputs (a missing argument, a path that does not exist).`,
       ``,
       MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,

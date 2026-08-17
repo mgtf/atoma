@@ -188,6 +188,11 @@ Read this section before changing any LLM call site.
 - Aggregation is behavioral: `concat` and `llm-synthesize` dispatch orthogonal
   subtasks in parallel; `sequential` dispatches shared-artifact phases in order
   and threads `previousStepSummary`. Do not parallelize coupled filesystem work.
+- A plan carries ONE aggregation mode, so fan-out + join has no direct spelling
+  at a single tier: L3 emits ONE phase per orthogonal GROUP and the L2 that
+  receives it fans the group out. One L3 phase per orthogonal artefact
+  serialises work that shares no file — see
+  [parallel fan-in 2026-08-16](docs/incidents/parallel-fanin-2026-08-16.md).
 - Prompt-cache thresholds are load-bearing. Keep the validation prompt above
   the cheapest model's minimum and confirm `cache_read` on multi-call runs.
 - Anthropic tool loops keep one rolling cache breakpoint: clear the prior
@@ -601,6 +606,7 @@ Read the archived sections before changing something that merely looks odd.
 The frozen record contains the full dated reasoning behind these rules:
 
 - [engineering record through 2026-08-14](docs/incidents/engineering-record-2026-08-14.md)
+- [fan-out + join, first live parallel lanes 2026-08-16](docs/incidents/parallel-fanin-2026-08-16.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
