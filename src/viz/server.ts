@@ -454,7 +454,17 @@ function dumpRegistry(id: string): { registry: RegistrySummary; types: RegistryT
 }
 
 interface SkillNamespaceSummary {
+  /**
+   * The stored namespace key — an atom id since T4. Clients pass it back on
+   * /api/skills/:l1Name, so it must stay the key and not the label.
+   */
   l1Name: string;
+  /**
+   * Display label for that key, resolved from the atom store. Falls back to
+   * the key itself when the atom is gone, which is what an orphaned namespace
+   * should look like rather than a crash.
+   */
+  l1Label: string;
   count: number;
 }
 
@@ -494,9 +504,11 @@ function listSkillNamespaces(): SkillNamespaceSummary[] {
     } catch {
       count = 0;
     }
-    if (count > 0) out.push({ l1Name: entry, count });
+    if (count > 0) out.push({ l1Name: entry, l1Label: displayNameForAtomId(entry) ?? entry, count });
   }
-  out.sort((a, b) => a.l1Name.localeCompare(b.l1Name));
+  // Sorted by the LABEL: the list is read by humans, and sorting by an
+  // opaque id would shuffle the Skills tab into an arbitrary order.
+  out.sort((a, b) => a.l1Label.localeCompare(b.l1Label));
   return out;
 }
 
@@ -519,13 +531,33 @@ function listSkillsForL1(l1Name: string): SkillSummary[] {
  * it. Needed to judge a skill body's scope; absent DB → empty, which makes
  * the shareability check skip its tool findings rather than invent them.
  */
-function toolNamesForAtom(atomName: string): string[] {
+/** Resolve a namespace key back to the molecule's display name. */
+function displayNameForAtomId(atomId: string): string | null {
   for (const reg of listRegistries()) {
     if (!reg.exists) continue;
     let db: Database.Database | null = null;
     try {
       db = new Database(reg.path, { readonly: true, fileMustExist: true });
-      const row = db.prepare('SELECT tools_json FROM atom_types WHERE name = ?').get(atomName) as
+      const row = db.prepare('SELECT name FROM atom_types WHERE atom_id = ?').get(atomId) as
+        | { name: string }
+        | undefined;
+      if (row) return row.name;
+    } catch {
+      /* unreadable registry — try the next one */
+    } finally {
+      db?.close();
+    }
+  }
+  return null;
+}
+
+function toolNamesForAtomId(atomName: string): string[] {
+  for (const reg of listRegistries()) {
+    if (!reg.exists) continue;
+    let db: Database.Database | null = null;
+    try {
+      db = new Database(reg.path, { readonly: true, fileMustExist: true });
+      const row = db.prepare('SELECT tools_json FROM atom_types WHERE atom_id = ?').get(atomName) as
         | { tools_json: string }
         | undefined;
       if (row) return (JSON.parse(row.tools_json) as { name: string }[]).map((t) => t.name);
@@ -559,7 +591,7 @@ function getSkillById(
     // reads a skill. Same data as `npm run skills -- review`; surfacing the
     // verdict here follows the viz's own rule that a card should show the
     // DECISION, not just the artefact.
-    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtom(l1Name) }),
+    shareability: assessShareability({ skill: found, ownerToolNames: toolNamesForAtomId(l1Name) }),
   };
 }
 

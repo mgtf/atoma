@@ -41,11 +41,12 @@ export function drawSkills(
   let y = 0;
   for (const namespace of snapshot.data.skillNamespaces) {
     const skills = (snapshot.data.skillsByNamespace[namespace.l1Name] ?? []).filter((skill) =>
-      matchesSearchQuery(skillSearchText(skill, namespace.l1Name), query)
+      // Search matches the LABEL a human typed, not the opaque key.
+      matchesSearchQuery(skillSearchText(skill, namespace.l1Label ?? namespace.l1Name), query)
     );
     if (!skills.length) continue;
     if (pane.visible(y, y + 24)) {
-      ctx.text(pane.content, `${namespace.l1Name} (${skills.length})`, 16, y, {
+      ctx.text(pane.content, `${namespace.l1Label ?? namespace.l1Name} (${skills.length})`, 16, y, {
         size: 11,
         weight: '700',
         color: GPU_COLORS.tiers[1],

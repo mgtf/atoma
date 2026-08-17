@@ -17,6 +17,7 @@ import type { SkillNamespace, SkillSummary } from '../types.js';
 
 export interface SkillSelection {
   l1Name: string;
+  l1Label?: string;
   id: string;
 }
 
@@ -75,7 +76,7 @@ function SkillDetail({ selection }: { selection: SkillSelection | null }) {
             variant="outlined"
           />
         </Stack>
-        <Typography color="text.secondary">{selection.l1Name}</Typography>
+        <Typography color="text.secondary">{selection.l1Label ?? selection.l1Name}</Typography>
       </Box>
       <Divider />
       <Box>

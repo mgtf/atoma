@@ -146,7 +146,13 @@ export interface SkillSummary {
 }
 
 export interface SkillNamespace {
+  /** Stored namespace key (an atom id) — what /api/skills/:l1Name expects. */
   l1Name: string;
+  /**
+   * Display label for that key. Optional so a client kept against an older
+   * server still renders something rather than `undefined`.
+   */
+  l1Label?: string;
   count: number;
 }
 
