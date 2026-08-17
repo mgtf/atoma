@@ -169,9 +169,17 @@ function cmdCache(clear: boolean): void {
   --clear empties it. The cache is disposable: correctness lives in the KEY.`);
 }
 
-function taxonomyBackup(db: DB, dbPath: string, skillsDir: string): string {
+/**
+ * Copy the store and the skills tree aside before a migration rewrites them.
+ *
+ * `label` names WHICH migration is about to run: both callers put the archive
+ * in the same place, and a directory called `pre-taxonomy-v2` holding the
+ * backup of an identity migration is the kind of small lie that costs an hour
+ * during a restore.
+ */
+function migrationBackup(db: DB, dbPath: string, skillsDir: string, label: string): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = join(homedir(), '.atoma', 'archive', `pre-taxonomy-v2-${stamp}`);
+  const dir = join(homedir(), '.atoma', 'archive', `pre-${label}-${stamp}`);
   mkdirSync(dir, { recursive: true });
   if (dbPath !== ':memory:') {
     db.pragma('wal_checkpoint(FULL)');
@@ -213,7 +221,7 @@ function cmdMigrateTaxonomy(
     return;
   }
 
-  const backup = taxonomyBackup(db, dbPath, skillsDir);
+  const backup = migrationBackup(db, dbPath, skillsDir, 'taxonomy-v2');
   const result = applyTaxonomyMigration(db, skillsDir, plan);
   console.log(`\nbackup: ${backup}`);
   console.log(
@@ -252,7 +260,7 @@ function cmdMigrateIdentity(db: DB, dbPath: string, skillsDir: string, apply: bo
     return;
   }
 
-  const backup = taxonomyBackup(db, dbPath, skillsDir);
+  const backup = migrationBackup(db, dbPath, skillsDir, `identity-v${IDENTITY_VERSION}`);
   const result = applyIdentityMigration(db, skillsDir, plan);
   console.log(`\nbackup: ${backup}`);
   console.log(

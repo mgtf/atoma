@@ -210,9 +210,17 @@ function cmdShow(registry: SkillRegistry, l1: string, id: string): void {
  */
 const DEFAULT_SIM_THRESHOLD = 0.5;
 
-function cmdStats(registry: SkillRegistry, l1Filter: string | undefined, simFlag: string | undefined): void {
+function cmdStats(
+  registry: SkillRegistry,
+  l1Filter: string | undefined,
+  simFlag: string | undefined,
+  dbFlag?: string
+): void {
+  const labels = displayNamesByAtomId(dbFlag);
   const namespaces = l1Filter ? [l1Filter] : registry.listNamespaces();
-  const byL1 = new Map(namespaces.map((ns) => [ns, registry.loadFor(ns)]));
+  // Keyed by the LABEL: these rows are a human report, and the stats table
+  // groups by whatever key it is handed.
+  const byL1 = new Map(namespaces.map((ns) => [labels.get(ns) ?? ns, registry.loadFor(ns)]));
   const rows = computeStatsRows(byL1, {
     trust: trustThreshold(),
     promote: promoteThreshold(),
@@ -427,6 +435,7 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
     console.log(`(no atom store at ${dbPath} — tool-scope findings skipped)\n`);
   }
 
+  const labels = displayNamesByAtomId(dbFlag);
   const namespaces = registry.listNamespaces().filter((n: string) => !l1Filter || n === l1Filter);
   const tally = { blocked: 0, review: 0, local: 0 };
   for (const ns of namespaces) {
@@ -438,7 +447,7 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
       else tally.review++;
 
       const mark = a.verdict === 'blocked' ? '✗' : a.verdict === 'not-shareable' ? '·' : '○';
-      console.log(`${mark} ${ns}/${skill.id}  [${skill.kind}]  ${a.verdict}`);
+      console.log(`${mark} ${labels.get(ns) ?? ns}/${skill.id}  [${skill.kind}]  ${a.verdict}`);
       for (const b of a.blockers) console.log(`    BLOCKER ${b.code} — ${b.detail}`);
       for (const w of a.warnings) console.log(`    warn    ${w.code} — ${w.detail}`);
       if (a.verdict === 'review-required') console.log(`    human: ${a.humanMustCheck}`);
@@ -469,7 +478,7 @@ function main(): void {
     case 'list':
       return cmdList(registry, moleculeFilter, args.flags['db']);
     case 'stats':
-      return cmdStats(registry, moleculeFilter, args.flags['sim']);
+      return cmdStats(registry, moleculeFilter, args.flags['sim'], args.flags['db']);
     case 'review':
       return cmdReview(registry, moleculeFilter, args.flags['db']);
     case 'show': {
