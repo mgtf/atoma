@@ -47,12 +47,10 @@ export function namespaceOf(atom: {
   readonly atomId: string;
   readonly name: string;
 }): SkillNamespace {
-  // FLIP POINT. Still the NAME, so wiring the call sites through this function
-  // changes no behaviour and can be verified on its own. Becomes `atom.atomId`
-  // in the same commit as the on-disk migration and not before: the moment this
-  // returns an id, the directories still called Water, Methane and Ammonia stop
-  // being found, and every skill in them goes silently missing.
-  return atom.name as SkillNamespace;
+  // FLIPPED. A store whose directories are still name-keyed is refused at
+  // launch by `assertCurrentIdentity` rather than silently returning no
+  // skills, and `registry migrate-identity --apply` is what moves them.
+  return atom.atomId as SkillNamespace;
 }
 
 /**

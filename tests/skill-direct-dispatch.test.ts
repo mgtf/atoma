@@ -12,7 +12,7 @@ import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import type { RunContext, SkillEventInfo, ToolExecutor } from '../src/core/types.js';
 import { MockLlmClient } from '../src/core/llm.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 /**
  * Tests for #C4 — DETERMINISTIC DISPATCH of trusted `kind: 'script'`
@@ -158,7 +158,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   }
 
   function saveScriptSkill(successes: number): void {
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -166,7 +166,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       language: 'node',
       body: SCRIPT_BODY,
     });
-    for (let i = 0; i < successes; i++) skills.recordSuccess('Water', 'scaffold-config');
+    for (let i = 0; i < successes; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'scaffold-config');
   }
 
   function makeCtxWith(
@@ -229,7 +229,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
 
     // Skill success counter bumped by the dispatch itself (the supervise
     // loop never ran, so its onApproved hook could not).
-    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
     expect(loaded.failures).toBe(0);
 
@@ -307,7 +307,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     });
 
     await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
-    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(1);
     expect(events.map((e) => e.op)).toEqual(['match', 'inject', 'success']);
   });
@@ -339,7 +339,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // A deterministic failure is NOT a skill failure. The fallback LLM
     // delivered, but it did not execute the injected script scratch body, so
     // that delivery cannot credit the script either.
-    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'scaffold-config')!;
     expect(loaded.failures).toBe(0);
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
   });
@@ -348,7 +348,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     trustAtomType();
     // Reach kind:script the production way — promotion writes _fallback.md,
     // which is what demotion restores.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -356,13 +356,13 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       body: '1. derive fields from the workspace.\n2. write_file config.\n3. read back.',
     });
     skills.promoteToScript({
-      l1Name: 'Water',
+      l1Name: nsOf(reg, 'Water'),
       skillId: 'scaffold-config',
       language: 'node',
       scriptBody: SCRIPT_BODY,
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills.recordSuccess('Water', 'scaffold-config');
+      skills.recordSuccess(nsOf(reg, 'Water'), 'scaffold-config');
     }
     // Brittle script: exits 1 on every run, LLM loop saves the subtask.
     const { executor } = makeExecutor({ exitCode: 1, stdout: '', stderr: 'REVERIFY-FAIL: nothing extracted' });
@@ -386,12 +386,12 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       expect(result.summary).toBe(`llm ok (${runLabel})`);
       if (runLabel === 'first') {
         // Streak at 1 — still a script, no demotion yet.
-        expect(skills.loadFor('Water')[0]!.kind).toBe('script');
-        expect(skills.loadFor('Water')[0]!.directFailures).toBe(1);
+        expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.kind).toBe('script');
+        expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.directFailures).toBe(1);
       } else {
         // Streak hit 2 — demoted, original llm recipe restored, and the
         // demotion is visible in the event stream.
-        const demoted = skills.loadFor('Water')[0]!;
+        const demoted = skills.loadFor(nsOf(reg, 'Water'))[0]!;
         expect(demoted.kind).toBe('llm');
         expect(demoted.body).toMatch(/derive fields from the workspace/);
         expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/derive fields from the workspace/);
@@ -411,8 +411,8 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
   it('a deterministic SUCCESS clears the failure streak', async () => {
     trustAtomType();
     saveScriptSkill(TRUST_THRESHOLD_SUCCESSES);
-    skills.markDirectFailure('Water', 'scaffold-config');
-    expect(skills.loadFor('Water')[0]!.directFailures).toBe(1);
+    skills.markDirectFailure(nsOf(reg, 'Water'), 'scaffold-config');
+    expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.directFailures).toBe(1);
     const { executor } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtxWith(executor);
@@ -424,7 +424,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     );
     const result = await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     expect(result.summary).toBe('script ran clean');
-    expect(skills.loadFor('Water')[0]!.directFailures).toBeUndefined();
+    expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.directFailures).toBeUndefined();
   });
 
   it('treats a self-reported FAILED envelope as off-contract even on exit 0', async () => {
@@ -478,7 +478,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     await neuron.handleDirect({ description: 'scaffold the config' }, ctx);
     // Neither the off-contract direct result nor an LLM fallback that ignored
     // the injected scratch body may credit the script.
-    const loaded = skills.loadFor('Water').find((s) => s.id === 'scaffold-config')!;
+    const loaded = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'scaffold-config')!;
     expect(loaded.successes).toBe(TRUST_THRESHOLD_SUCCESSES);
     expect(loaded.failures).toBe(0);
   });
@@ -512,7 +512,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
     // BEFORE the envelope parse could reject it, leaving the LLM loop to
     // clean up after a side effect it didn't cause. The gate must skip the
     // run entirely, not run-then-reject.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -526,7 +526,7 @@ describe('L2.runSubtask — deterministic script dispatch (C4)', () => {
       ].join('\n'),
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills.recordSuccess('Water', 'scaffold-config');
+      skills.recordSuccess(nsOf(reg, 'Water'), 'scaffold-config');
     }
     const { executor, calls } = makeExecutor({ exitCode: 0, stdout: 'wrote config.json', stderr: '' });
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
@@ -611,35 +611,35 @@ describe('SkillRegistry.resetCounters', () => {
   });
 
   it('zeroes counters AND clears the promotion-refusal stamp', () => {
-    skills.save('Water', {
+    skills.save(asStoredNamespace('Water'), {
       id: 'some-skill',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    skills.recordSuccess('Water', 'some-skill');
-    skills.recordFailure('Water', 'some-skill');
-    skills.markPromotionRefused('Water', 'some-skill');
+    skills.recordSuccess(asStoredNamespace('Water'), 'some-skill');
+    skills.recordFailure(asStoredNamespace('Water'), 'some-skill');
+    skills.markPromotionRefused(asStoredNamespace('Water'), 'some-skill');
 
-    const meta = skills.resetCounters('Water', 'some-skill');
+    const meta = skills.resetCounters(asStoredNamespace('Water'), 'some-skill');
     expect(meta).toEqual(
       expect.objectContaining({ successes: 0, failures: 0 })
     );
-    const loaded = skills.loadFor('Water').find((s) => s.id === 'some-skill')!;
+    const loaded = skills.loadFor(asStoredNamespace('Water')).find((s) => s.id === 'some-skill')!;
     expect(loaded.successes).toBe(0);
     expect(loaded.failures).toBe(0);
     expect(loaded.promotionRefusedAt).toBeUndefined();
   });
 
   it('returns null for a skill that does not exist', () => {
-    expect(skills.resetCounters('Water', 'ghost')).toBeNull();
+    expect(skills.resetCounters(asStoredNamespace('Water'), 'ghost')).toBeNull();
   });
 
   it('listNamespaces enumerates L1 folders (sorted), empty store yields []', () => {
     expect(skills.listNamespaces()).toEqual([]);
-    skills.save('Ammonia', { id: 'a-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
-    skills.save('Water', { id: 'b-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    skills.save(asStoredNamespace('Ammonia'), { id: 'a-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
+    skills.save(asStoredNamespace('Water'), { id: 'b-skill', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b' });
     expect(skills.listNamespaces()).toEqual(['Ammonia', 'Water']);
   });
 });
@@ -659,11 +659,11 @@ describe('anti-redispatch guard — a reproduced dispatch output routes to the L
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'verify-stuff', description: 'd', whenToUse: 'w', kind: 'script', language: 'node',
       body: 'console.log(JSON.stringify({output: "ok", summary: "done"}))',
     });
-    for (let i = 0; i < 3; i++) skills.recordSuccess('Water', 'verify-stuff');
+    for (let i = 0; i < 3; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'verify-stuff');
 
     const executor = {
       has: () => true,
@@ -797,7 +797,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     reg2.create(2, SEED2);
     reg2.create(1, { ...SEED2, description: 'builder', systemPrompt: 'You are an L1.' });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg2.recordSuccess('Water');
-    skills2.save('Water', {
+    skills2.save(nsOf(reg2, 'Water'), {
       id: 'scaffold-config',
       description: 'write a canonical config file',
       whenToUse: 'when the subtask asks for the standard config scaffold',
@@ -806,7 +806,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
       body: OPAQUE_SCRIPT_BODY,
     });
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) {
-      skills2.recordSuccess('Water', 'scaffold-config');
+      skills2.recordSuccess(nsOf(reg2, 'Water'), 'scaffold-config');
     }
     envBefore2 = process.env['ATOMA_SKILL_DIRECT'];
     delete process.env['ATOMA_SKILL_DIRECT'];
@@ -852,7 +852,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     expect(events.some((e) => e.op === 'direct')).toBe(false);
     // And NOT a directFailure either: the script is not broken, it was
     // matched to the wrong kind of subtask.
-    expect(skills2.loadFor('Water')[0]!.directFailures ?? 0).toBe(0);
+    expect(skills2.loadFor(nsOf(reg2, 'Water'))[0]!.directFailures ?? 0).toBe(0);
   });
 
   it('never OFFERS a read-only script for a write subtask — the round-7 filter', async () => {
@@ -861,7 +861,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     // after a wasted dispatch, five times in six runs, taking dispatches from
     // 10 to 1. Filtering the catalogue is cheaper and more precise than
     // rejecting the result.
-    skills2.save('Water', {
+    skills2.save(nsOf(reg2, 'Water'), {
       id: 'readonly-verifier',
       description: 'replay recorded invocations',
       whenToUse: 'confirm a CLI still behaves as recorded',
@@ -1016,7 +1016,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     await neuron.handleDirect({ description: 'Verify config.json against the template.' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2); // the two prefilters only
-    expect(skills2.loadFor('Water')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+    expect(skills2.loadFor(nsOf(reg2, 'Water'))[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 
   it('keeps inherited literal-contract mutations out of the direct-dispatch gate', async () => {
@@ -1071,7 +1071,7 @@ describe('deliverable gate — a script cannot report success for a file it neve
     await neuron.handleDirect({ description: 'Re-run the recorded invocations and report.' }, ctx);
 
     expect(ctx.llm.calls).toHaveLength(2);
-    expect(skills2.loadFor('Water')[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
+    expect(skills2.loadFor(nsOf(reg2, 'Water'))[0]!.successes).toBe(TRUST_THRESHOLD_SUCCESSES + 1);
   });
 });
 

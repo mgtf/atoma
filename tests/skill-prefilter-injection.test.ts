@@ -12,7 +12,7 @@ import {
   TRUST_THRESHOLD_SUCCESSES,
 } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
+import { makeCtx, jsonText, jsonTextPair , nsOf} from './helpers.js';
 
 /**
  * Tests for C2a — L2 runs a Haiku skill-prefilter against the
@@ -120,7 +120,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
 
   it('runs a skill prefilter when the L1 has skills, injects the matched body via injectContext', async () => {
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'write index.html, serve, validate',
       whenToUse: 'when the subtask is a single-file web artefact',
@@ -161,7 +161,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
 
   it('skips the skill body injection when the prefilter escalates (low-confidence guard)', async () => {
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated-skill',
       description: 'totally unrelated',
       whenToUse: 'never',
@@ -186,7 +186,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
 
   it('bumps the skill success counter through the onApproved hook on a clean run', async () => {
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
@@ -206,13 +206,13 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await neuron.handleDirect({ description: 'task' }, ctx);
-    const refreshed = skills.loadFor('Water');
+    const refreshed = skills.loadFor(nsOf(reg, 'Water'));
     expect(refreshed[0]!.successes).toBe(1);
     expect(refreshed[0]!.failures).toBe(0);
   });
 
   it('bumps the skill failure counter through the onFailed hook when the run escalates', async () => {
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
@@ -279,7 +279,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
 
     await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const refreshed = skills.loadFor('Water');
+    const refreshed = skills.loadFor(nsOf(reg, 'Water'));
     expect(refreshed[0]!.failures).toBeGreaterThanOrEqual(1);
     expect(refreshed[0]!.successes).toBe(0);
 
@@ -303,7 +303,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     const envBefore = process.env['ATOMA_SKILL_LEARN'];
     process.env['ATOMA_SKILL_LEARN'] = '1';
     try {
-      skills.save('Water', {
+      skills.save(nsOf(reg, 'Water'), {
         id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
       });
       const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
@@ -339,13 +339,13 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
       expect(
         ctx.llm.calls.some((c) => c.userContent.startsWith('You are distilling a successful run'))
       ).toBe(false);
-      expect(skills.loadFor('Water').filter((s) => !s.trigger).map((s) => s.id)).toEqual([
+      expect(skills.loadFor(nsOf(reg, 'Water')).filter((s) => !s.trigger).map((s) => s.id)).toEqual([
         'web-build-loop',
       ]);
       // R2 kill-shot: the legacy branch delivered WITHOUT the recipe — the
       // untagged fresh instance must credit nothing. (The failure recorded
       // during the tagged instance's escalation is EARNED and stays.)
-      const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+      const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
       expect(after.successes).toBe(0);
     } finally {
       if (envBefore === undefined) delete process.env['ATOMA_SKILL_LEARN'];
@@ -365,7 +365,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
 
     await neuron.handleDirect({ description: 'task' }, ctx);
-    expect(skills.loadFor('Water')).toEqual([]);
+    expect(skills.loadFor(nsOf(reg, 'Water'))).toEqual([]);
   });
 });
 
@@ -408,10 +408,10 @@ describe('skill revision: an UNCHANGED body is not a revision', () => {
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     const BODY = '1. do the thing\n2. verify it';
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'stable', description: 'd', whenToUse: 'w', kind: 'llm', body: BODY,
     });
-    skills.markPromotionRefused('Water', 'stable', 'irreducible', 'somegen');
+    skills.markPromotionRefused(nsOf(reg, 'Water'), 'stable', 'irreducible', 'somegen');
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
@@ -430,7 +430,7 @@ describe('skill revision: an UNCHANGED body is not a revision', () => {
     // test from encoding an unrelated call sequence.
     await neuron.handleDirect({ description: 'task' }, ctx).catch(() => undefined);
 
-    const after = skills.loadFor('Water')[0]!;
+    const after = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     // Body untouched AND the stamp survived — the anti-thrash guard holds.
     expect(after.body.trim()).toBe(BODY);
     expect(after.promotionRefusedAt).toBeTruthy();
@@ -450,7 +450,7 @@ describe('active skill survives a patch verdict (audit rank-7)', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'the-recipe', description: 'd', whenToUse: 'w', kind: 'llm', body: 'step 1: do it',
     });
 
@@ -472,7 +472,7 @@ describe('active skill survives a patch verdict (audit rank-7)', () => {
     await neuron.handleDirect({ description: 'task' }, ctx);
 
     // The attribution held: the skill's counter bumped despite the patch.
-    const after = skills.loadFor('Water')[0]!;
+    const after = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     expect(after.successes).toBe(1);
     // And the patched instance's prompts carried the recipe forward.
     const post = ctx.llm.calls.slice(4);

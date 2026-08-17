@@ -8,7 +8,7 @@ import { L2Atom } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import type { SkillEventInfo } from '../src/core/types.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 /**
  * The skill-pipeline events surfaced via `RunContext.recordSkill` are
@@ -52,7 +52,7 @@ describe('L2 — recordSkill events', () => {
 
   it('emits match + inject + success on a clean skill-driven run', async () => {
     trustChild();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'when web',
@@ -102,7 +102,7 @@ describe('L2 — recordSkill events', () => {
 
   it('emits no skill events when the prefilter escalates (no match)', async () => {
     trustChild();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'd',
       whenToUse: 'never',

@@ -683,12 +683,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         home: namespaceOf(l1Type),
         readerToolNames,
         namespaces: this.skillRegistry.listNamespaces(),
-        // BREAKS ON THE FLIP: `ns` becomes an atom id, and getByName will
-        // return null for every donor — turning the whole shared catalog into
-        // "orphaned namespaces" and silently emptying it. Needs a lookup by
-        // id when namespaceOf starts returning atomId.
+        // A namespace is an atom id now, so this MUST resolve by id: with
+        // getByName every donor came back null, every donor counted as an
+        // orphaned namespace, and the shared catalog emptied itself in
+        // silence. `getByAtomId` returns null only for a namespace whose atom
+        // really is gone, which is the case the null was meant to express.
         toolNamesFor: (ns: SkillNamespace) => {
-          const t = this.registry.getByName(ns);
+          const t = this.registry.getByAtomId(ns);
           return t ? (t.tools ?? []).map((x) => x.name) : null;
         },
       });
@@ -713,7 +714,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           ctx.recordSkill?.({
             op: 'quarantine',
-            l1Name: namespaceOf(l1Type),
+            l1Name: l1Type.name,
+            l1AtomId: l1Type.atomId,
             skillId: skills.skill.id,
             actorName: this.name,
             actorTier: 2,
@@ -733,7 +735,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         this.skillRegistry.markMatched(skills.ownerNs, skills.skill.id);
         ctx.recordSkill?.({
           op: 'match',
-          l1Name: skills.ownerNs,
+          l1Name: this.displayNameForNamespace(skills.ownerNs),
+          l1AtomId: skills.ownerNs,
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -826,7 +829,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // re-run the model with a fresh body.
         ctx.recordSkill?.({
           op: 'inject',
-          l1Name: namespaceOf(l1Type),
+          l1Name: l1Type.name,
+          l1AtomId: l1Type.atomId,
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -924,6 +928,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     return (
       (await this.lifecycle()?.matchSkill(namespaces, readerToolNames, subTask, ctx)) ?? null
     );
+  }
+
+  /**
+   * Turn a skill namespace back into the molecule NAME a human reads.
+   *
+   * Namespaces are atom ids since T4, and every recorded skill event feeds the
+   * viz, the CLI and MCP. Without this the Skills tab, the timeline meta line
+   * and search all show a UUID. Falls back to the raw key when the molecule is
+   * gone, which is strictly better on an operator surface than an exception.
+   */
+  private displayNameForNamespace(ns: SkillNamespace): string {
+    return this.registry.getByAtomId(ns)?.name ?? ns;
   }
 
   private async learnSkillFromRun(args: {
@@ -1205,7 +1221,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       );
       ctx.recordSkill?.({
         op: 'inject',
-        l1Name: skillCtx.l1Name,
+        l1Name: this.displayNameForNamespace(skillCtx.l1Name),
+        l1AtomId: skillCtx.l1Name,
         skillId: match.skill.id,
         actorName: this.name,
         actorTier: 2,
@@ -1390,7 +1407,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                 );
                 ctx.recordSkill?.({
                   op: 'update',
-                  l1Name: activeSkillNs,
+                  l1Name: this.displayNameForNamespace(activeSkillNs),
+                  l1AtomId: activeSkillNs,
                   skillId: activeSkillId,
                   actorName: this.name,
                   actorTier: 2,
@@ -1487,7 +1505,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           ctx.recordSkill?.({
             op: 'credit-withheld',
-            l1Name: skillNs,
+            l1Name: this.displayNameForNamespace(skillNs),
+            l1AtomId: skillNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1497,7 +1516,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           this.skillRegistry.recordSuccess(skillNs, skillId, { via: child.name });
           ctx.recordSkill?.({
             op: 'success',
-            l1Name: skillNs,
+            l1Name: this.displayNameForNamespace(skillNs),
+            l1AtomId: skillNs,
             skillId,
             actorName: this.name,
             actorTier: 2,

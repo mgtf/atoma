@@ -1,3 +1,4 @@
+import { asStoredNamespace } from '../src/skills/namespace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,7 +24,7 @@ import {
 } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { compileEffortForModel } from '../src/skills/lifecycle.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 describe('compile effort routing', () => {
   it('uses low only for provider-prefixed Codex compilation', () => {
@@ -87,7 +88,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     envBefore = process.env['ATOMA_SKILL_PROMOTE'];
     // Pre-seed a mature skill on Water: 5 successes / 0 failures,
     // kind:llm. That's the eligibility line for promotion.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'write index.html, serve, validate',
       whenToUse: 'when the subtask is a single-file web artefact build',
@@ -95,7 +96,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
       body: '1. write_file index.html\n2. start_static_server\n3. validate_html',
     });
     for (let i = 0; i < TRUST_PROMOTE_THRESHOLD_SUCCESSES; i++) {
-      skills.recordSuccess('Water', 'web-build-loop');
+      skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
     }
     // Trust the L1 type so its validators short-circuit.
     for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Water');
@@ -125,7 +126,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('llm');
     expect(after.successes).toBe(TRUST_PROMOTE_THRESHOLD_SUCCESSES + 1);
   });
@@ -151,7 +152,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('script');
     expect(after.language).toBe('node');
     expect(after.body).toMatch(/process\.argv\[2\]/);
@@ -165,7 +166,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // The original llm body was stashed in the fallback sidecar so a
     // future demotion can restore it verbatim.
     expect(after.fallbackBody).toMatch(/start_static_server/);
-    expect(existsSync(join(dir, 'Water', 'web-build-loop', '_fallback.md'))).toBe(true);
+    expect(existsSync(join(dir, nsOf(reg, 'Water'), 'web-build-loop', '_fallback.md'))).toBe(true);
 
     // The compile prompt must forbid baking task-specific literals into the
     // script. Observed defect: a promoted documentation script carried
@@ -273,7 +274,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('script');
     expect(after.declaredWrites).toEqual(['README.md', '.atoma-probes.json']);
   });
@@ -283,7 +284,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     // One failure puts the skill out of promotion eligibility even
     // though successes >= threshold. Simulates the "demoted earlier,
     // operator hasn't reset counters" state.
-    skills.recordFailure('Water', 'web-build-loop');
+    skills.recordFailure(nsOf(reg, 'Water'), 'web-build-loop');
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
@@ -302,7 +303,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('llm');
     expect(after.failures).toBe(1);
   });
@@ -326,11 +327,11 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('llm');
     // Original body still present, no fallback sidecar created.
     expect(after.body).toMatch(/start_static_server/);
-    expect(existsSync(join(dir, 'Water', 'web-build-loop', '_fallback.md'))).toBe(false);
+    expect(existsSync(join(dir, nsOf(reg, 'Water'), 'web-build-loop', '_fallback.md'))).toBe(false);
   });
 
   it('STAMPS promotionRefusedAt on Sonnet refusal so the next success short-circuits without a new Sonnet call', async () => {
@@ -350,7 +351,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     ctx1.llm.enqueueText(JSON.stringify({ promotable: false, reason: 'too LLM-shaped' }));
     await neuron.handleDirect({ description: 'first run' }, ctx1);
 
-    const stamped = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const stamped = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(stamped.promotionRefusedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // Sonnet's verbatim WHY is persisted next to the stamp — the operator
     // reads it via `skills show` instead of grepping run traces.
@@ -371,7 +372,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     ctx2.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'built' }));
     await neuron2.handleDirect({ description: 'second run' }, ctx2);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('llm');
     expect(after.successes).toBe(TRUST_PROMOTE_THRESHOLD_SUCCESSES + 2);
     // Stamp persisted across the bump.
@@ -395,7 +396,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
     });
     await neuron.handleDirect({ description: 'first run' }, ctx1);
 
-    const stamped = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const stamped = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(stamped.promotionRefusedAt).toBeTruthy();
     expect(stamped.promotionRefusedReason).toMatch(/compile attempt errored.*timeout/);
     expect(stamped.promotionRefusedGeneration).toBe(REFUSAL_GENERATION);
@@ -431,7 +432,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const after = skills.loadFor('Water').find((s) => s.id === 'web-build-loop')!;
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
     expect(after.kind).toBe('llm');
     // Run is still APPROVED — promotion failure is opportunistic.
     expect(after.successes).toBe(TRUST_PROMOTE_THRESHOLD_SUCCESSES + 1);
@@ -455,7 +456,7 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
 
-    const fallbackPath = join(dir, 'Water', 'web-build-loop', '_fallback.md');
+    const fallbackPath = join(dir, nsOf(reg, 'Water'), 'web-build-loop', '_fallback.md');
     expect(existsSync(fallbackPath)).toBe(true);
     const fallbackContent = readFileSync(fallbackPath, 'utf8');
     expect(fallbackContent).toMatch(/write_file index\.html/);
@@ -478,14 +479,14 @@ describe('post-approval bookkeeping — decoupled from the run deadline', () => 
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    for (let i = 0; i < 5; i++) skills.recordSuccess('Water', 'web-build-loop');
+    for (let i = 0; i < 5; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const runSignal = new AbortController().signal;
@@ -518,12 +519,12 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
     });
-    for (let i = 0; i < 5; i++) skills.recordSuccess('Water', 'web-build-loop');
+    for (let i = 0; i < 5; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
     // Stamp from a DIFFERENT (stale) generation.
-    skills.markPromotionRefused('Water', 'web-build-loop', 'old verdict', 'deadbeef');
+    skills.markPromotionRefused(nsOf(reg, 'Water'), 'web-build-loop', 'old verdict', 'deadbeef');
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
@@ -537,7 +538,7 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
 
     await neuron.handleDirect({ description: 'task' }, ctx);
     expect(ctx.llm.calls).toHaveLength(5); // the 5th IS the retried compile
-    const after = skills.loadFor('Water')[0]!;
+    const after = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     // Re-stamped with the CURRENT generation, so the next success skips.
     expect(after.promotionRefusedGeneration).toBe(REFUSAL_GENERATION);
     expect(after.promotionRefusedReason).toMatch(/still no/);
@@ -552,11 +553,11 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
     });
-    for (let i = 0; i < 5; i++) skills.recordSuccess('Water', 'web-build-loop');
-    skills.markPromotionRefused('Water', 'web-build-loop', 'current verdict', REFUSAL_GENERATION);
+    for (let i = 0; i < 5; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
+    skills.markPromotionRefused(nsOf(reg, 'Water'), 'web-build-loop', 'current verdict', REFUSAL_GENERATION);
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
@@ -585,13 +586,13 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     reg.create(2, { description: 'l2', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
     reg.create(1, { description: 'l1', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
     for (let i = 0; i < 3; i++) reg.recordSuccess('Water');
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b',
     });
-    for (let i = 0; i < 5; i++) skills.recordSuccess('Water', 'web-build-loop');
+    for (let i = 0; i < 5; i++) skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
     // Exactly what tryPromoteSkill's demotion path writes when the failing
     // script was compiled under the compiler in force NOW.
-    skills.markPromotionRefused('Water', 'web-build-loop', 'auto-demoted: …', COMPILE_PROMPT_GENERATION);
+    skills.markPromotionRefused(nsOf(reg, 'Water'), 'web-build-loop', 'auto-demoted: …', COMPILE_PROMPT_GENERATION);
 
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
@@ -602,7 +603,7 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     // NO compile reply enqueued: the stamp must hold.
     await neuron.handleDirect({ description: 'task' }, ctx);
     expect(ctx.llm.calls).toHaveLength(4);
-    const after = skills.loadFor('Water')[0]!;
+    const after = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     expect(after.promotionRefusedAt).toBeTruthy(); // not cleared as "stale"
     rmSync(dir, { recursive: true, force: true });
   });
@@ -624,22 +625,22 @@ describe('demotion stamps the COMPILING generation, not the current one', () => 
     // produced by compiler A failing says nothing about compiler B's output.
     const dir = mkdtempSync(join(tmpdir(), 'atoma-compgen-'));
     const skills = new SkillRegistry(dir);
-    skills.save('Water', {
+    skills.save(asStoredNamespace('Water'), {
       id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'recipe',
     });
     skills.promoteToScript({
-      l1Name: 'Water',
+      l1Name: asStoredNamespace('Water'),
       skillId: 's',
       language: 'node',
       scriptBody: 'console.log(1)',
       compiledGeneration: 'oldgen01',
     });
-    const promoted = skills.loadFor('Water')[0]!;
+    const promoted = skills.loadFor(asStoredNamespace('Water'))[0]!;
     expect(promoted.compiledGeneration).toBe('oldgen01');
 
     // Demotion path stamps the compiling generation…
-    skills.markPromotionRefused('Water', 's', 'auto-demoted: …', promoted.compiledGeneration);
-    const stamped = skills.loadFor('Water')[0]!;
+    skills.markPromotionRefused(asStoredNamespace('Water'), 's', 'auto-demoted: …', promoted.compiledGeneration);
+    const stamped = skills.loadFor(asStoredNamespace('Water'))[0]!;
     expect(stamped.promotionRefusedGeneration).toBe('oldgen01');
     // …which differs from today's compiler, so the gate treats it as stale.
     expect(stamped.promotionRefusedGeneration).not.toBe(REFUSAL_GENERATION);
@@ -662,29 +663,29 @@ describe('compiledGeneration + provenance survive the counter lifecycle (audit r
       { id: 's', description: 'd', whenToUse: 'w', kind: 'llm', body: 'recipe' },
       { mechanism: 'distilled', model: 'claude-sonnet-5' }
     );
-    expect(skills.loadFor('Water')[0]!.provenance).toMatchObject({
+    expect(skills.loadFor(asStoredNamespace('Water'))[0]!.provenance).toMatchObject({
       mechanism: 'distilled',
       model: 'claude-sonnet-5',
     });
 
     skills.promoteToScript({
-      l1Name: 'Water', skillId: 's', language: 'node',
+      l1Name: asStoredNamespace('Water'), skillId: 's', language: 'node',
       scriptBody: 'console.log(1)', compiledGeneration: 'oldgen01',
     });
     // The killer sequence: successes BETWEEN promotion and failure.
-    skills.recordSuccess('Water', 's');
-    skills.recordSuccess('Water', 's');
-    expect(skills.loadFor('Water')[0]!.compiledGeneration).toBe('oldgen01');
+    skills.recordSuccess(asStoredNamespace('Water'), 's');
+    skills.recordSuccess(asStoredNamespace('Water'), 's');
+    expect(skills.loadFor(asStoredNamespace('Water'))[0]!.compiledGeneration).toBe('oldgen01');
 
     // Operator reset keeps body facts too (counters ≠ body history).
-    skills.resetCounters('Water', 's');
-    const afterReset = skills.loadFor('Water')[0]!;
+    skills.resetCounters(asStoredNamespace('Water'), 's');
+    const afterReset = skills.loadFor(asStoredNamespace('Water'))[0]!;
     expect(afterReset.compiledGeneration).toBe('oldgen01');
 
     // Demotion restores the llm body — the script generation goes with it.
-    const demoted = skills.demoteToLlm('Water', 's');
+    const demoted = skills.demoteToLlm(asStoredNamespace('Water'), 's');
     expect(demoted!.kind).toBe('llm');
-    expect(skills.loadFor('Water')[0]!.compiledGeneration).toBeUndefined();
+    expect(skills.loadFor(asStoredNamespace('Water'))[0]!.compiledGeneration).toBeUndefined();
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -698,7 +699,7 @@ describe('a demotion preserves the script it retires', () => {
     const dir = mkdtempSync(join(tmpdir(), 'atoma-demote-keep-'));
     try {
       const reg = new SkillRegistry(dir);
-      reg.save('Ammonia', {
+      reg.save(asStoredNamespace('Ammonia'), {
         id: 'x-skill',
         description: 'd',
         whenToUse: 'w',
@@ -706,18 +707,18 @@ describe('a demotion preserves the script it retires', () => {
         body: 'original recipe steps',
       });
       reg.promoteToScript({
-        l1Name: 'Ammonia',
+        l1Name: asStoredNamespace('Ammonia'),
         skillId: 'x-skill',
         scriptBody: 'console.log("COMPILED BODY MARKER");',
         language: 'node',
         compiledGeneration: 'gen-1',
       });
-      reg.demoteToLlm('Ammonia', 'x-skill');
+      reg.demoteToLlm(asStoredNamespace('Ammonia'), 'x-skill');
 
-      const kept = readFileSync(join(dir, 'Ammonia', 'x-skill', '_demoted-script.md'), 'utf8');
+      const kept = readFileSync(join(dir, asStoredNamespace('Ammonia'), 'x-skill', '_demoted-script.md'), 'utf8');
       expect(kept).toContain('COMPILED BODY MARKER');
       // …and the demotion itself still did its job.
-      const back = reg.loadFor('Ammonia').find((s) => s.id === 'x-skill')!;
+      const back = reg.loadFor(asStoredNamespace('Ammonia')).find((s) => s.id === 'x-skill')!;
       expect(back.kind).toBe('llm');
       expect(back.body).toContain('original recipe steps');
     } finally {

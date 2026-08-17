@@ -15,6 +15,7 @@ import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
 import { assertCurrentTaxonomy } from '../registry/taxonomyMigration.js';
+import { assertCurrentIdentity } from '../registry/identityMigration.js';
 import { legacyStoreNotice, skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
@@ -484,6 +485,7 @@ export async function startTask(
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
   assertCurrentTaxonomy(db);
+  assertCurrentIdentity(db);
   const registry = new RecordingRegistry(db, recorder);
   // The Anthropic SDK client only exists on the direct-API path — it
   // feeds L3.fromType's Opus-resolution step. On the ollama and

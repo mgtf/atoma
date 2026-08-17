@@ -125,6 +125,27 @@ export function initializeIdentityVersion(db: DB): void {
   }
 }
 
+/**
+ * Refuse to start a run against a store whose skill namespaces are still
+ * name-keyed.
+ *
+ * Without this the flip fails SILENTLY and expensively: the code would look up
+ * `skills/<atomId>/` while the directories are still called `Water`, every
+ * lookup would return an empty list, and the run would proceed skill-less —
+ * paying full LLM cost for work a trusted script could have done, and learning
+ * duplicates of recipes it could not see. A loud refusal at launch is the only
+ * honest failure mode.
+ */
+export function assertCurrentIdentity(db: DB): void {
+  const version = identityVersion(db);
+  if (version !== null && version >= IDENTITY_VERSION) return;
+  throw new Error(
+    `skill namespaces are still keyed by atom name (identity ${
+      version === null ? 'unversioned' : `v${version}`
+    }); run \`npm run registry -- migrate-identity --apply\` before starting a run`
+  );
+}
+
 function liveAtoms(db: DB): AtomRow[] {
   return db.prepare('SELECT atom_id, name FROM atom_types').all() as AtomRow[];
 }

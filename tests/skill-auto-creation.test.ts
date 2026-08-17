@@ -7,7 +7,7 @@ import { openDb } from '../src/registry/db.js';
 import { L2Atom, parseSkillDraft, parseSkillDrafts, isSafeSkillId } from '../src/atoms/L2Atom.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 /**
  * Tests for C3 — when an L1 successfully completes a NOVEL task
@@ -191,7 +191,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     // Pre-seed a skill that the prefilter will escalate on, so we
     // exercise the "match attempted but no fit" code path AND the
     // env-flag-off branch in one shot.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'something else',
       whenToUse: 'never matches our task',
@@ -212,7 +212,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
 
     await neuron.handleDirect({ description: 'build a thing' }, ctx);
     // Still ONE pre-existing skill (no auto-creation).
-    const after = skills.loadFor('Water');
+    const after = skills.loadFor(nsOf(reg, 'Water'));
     expect(after).toHaveLength(1);
     expect(after[0]!.id).toBe('unrelated');
   });
@@ -228,7 +228,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     // before the loadFor check), but the prefilter LLM slot is
     // skipped entirely — keep the test queue aligned by including
     // a scarecrow skill.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'something else',
       whenToUse: 'never matches our task',
@@ -259,13 +259,13 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
-    const learned = skills.loadFor('Water').sort((a, b) => a.id.localeCompare(b.id));
+    const learned = skills.loadFor(nsOf(reg, 'Water')).sort((a, b) => a.id.localeCompare(b.id));
     expect(learned.map((s) => s.id)).toEqual(['unrelated', 'web-build-loop']);
     const created = learned.find((s) => s.id === 'web-build-loop')!;
     expect(created.body).toMatch(/start_static_server/);
     expect(created.successes).toBe(0);
     expect(created.failures).toBe(0);
-    expect(existsSync(join(dir, 'Water', 'web-build-loop', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(dir, nsOf(reg, 'Water'), 'web-build-loop', 'SKILL.md'))).toBe(true);
 
     // The distillation prompt must constrain the BODY to generalise, not
     // just `when_to_use`. A learned body that bakes in this run's literal
@@ -312,7 +312,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     // encoded the phantom. The mechanical filter is the code half of F2.
     process.env['ATOMA_SKILL_LEARN'] = '1';
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'something else',
       whenToUse: 'never matches our task',
@@ -338,13 +338,13 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
 
     await neuron.handleDirect({ description: 'build a small web thing' }, ctx);
     // The phantom draft was skipped; only the scarecrow remains.
-    expect(skills.loadFor('Water').map((s) => s.id)).toEqual(['unrelated']);
+    expect(skills.loadFor(nsOf(reg, 'Water')).map((s) => s.id)).toEqual(['unrelated']);
   });
 
   it('saves BOTH skills when the draft carries a verification split', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'something else',
       whenToUse: 'never matches our task',
@@ -376,11 +376,11 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
 
     await neuron.handleDirect({ description: 'build a small CLI' }, ctx);
-    const learned = skills.loadFor('Water').map((s) => s.id).sort();
+    const learned = skills.loadFor(nsOf(reg, 'Water')).map((s) => s.id).sort();
     expect(learned).toEqual(['build-node-cli', 'unrelated', 'verify-documented-invocations']);
     // Both are born kind:llm — the verification skill earns its compile at
     // the promotion threshold like any other, it is just SHAPED to pass it.
-    const verify = skills.loadFor('Water').find((s) => s.id === 'verify-documented-invocations')!;
+    const verify = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'verify-documented-invocations')!;
     expect(verify.kind).toBe('llm');
     expect(verify.successes).toBe(0);
   });
@@ -388,7 +388,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
   it('an unsafe verification id skips ONLY the verification draft', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     ensureChildIsTrusted();
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'unrelated',
       description: 'something else',
       whenToUse: 'never matches our task',
@@ -414,7 +414,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
 
     await neuron.handleDirect({ description: 'task' }, ctx);
-    const learned = skills.loadFor('Water').map((s) => s.id).sort();
+    const learned = skills.loadFor(nsOf(reg, 'Water')).map((s) => s.id).sort();
     expect(learned).toEqual(['good-primary', 'unrelated']);
   });
 
@@ -422,15 +422,15 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     // Pre-seed a skill that the prefilter will NOT match (different
     // description) so we still hit the no-match branch.
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'pre-existing canonical recipe',
       whenToUse: 'when the subtask references narrow legacy patterns',
       kind: 'llm',
       body: 'pre-existing body — must NOT be overwritten by the auto-creation.',
     });
-    skills.recordSuccess('Water', 'web-build-loop');
-    skills.recordSuccess('Water', 'web-build-loop');
+    skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
+    skills.recordSuccess(nsOf(reg, 'Water'), 'web-build-loop');
 
     ensureChildIsTrusted();
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
@@ -454,7 +454,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     );
 
     await neuron.handleDirect({ description: 'a different task' }, ctx);
-    const after = skills.loadFor('Water');
+    const after = skills.loadFor(nsOf(reg, 'Water'));
     expect(after).toHaveLength(1);
     expect(after[0]!.body).toMatch(/pre-existing body/);
     expect(after[0]!.body).not.toMatch(/NEW body/);
@@ -464,7 +464,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
 
   it('rejects an unsafe skill id (path-traversal guard)', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'scarecrow',
       description: 'unrelated',
       whenToUse: 'never',
@@ -492,13 +492,13 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
 
     await neuron.handleDirect({ description: 'task' }, ctx);
     // Only the scarecrow remains — no auto-created skill from a bad id.
-    const after = skills.loadFor('Water').map((s) => s.id);
+    const after = skills.loadFor(nsOf(reg, 'Water')).map((s) => s.id);
     expect(after).toEqual(['scarecrow']);
   });
 
   it('skips silently when Sonnet returns malformed JSON (run remains approved)', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'scarecrow',
       description: 'unrelated',
       whenToUse: 'never',
@@ -520,12 +520,12 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     const result = await neuron.handleDirect({ description: 'task' }, ctx);
     expect(result.summary).toBe('built');
     // Still only the scarecrow.
-    expect(skills.loadFor('Water').map((s) => s.id)).toEqual(['scarecrow']);
+    expect(skills.loadFor(nsOf(reg, 'Water')).map((s) => s.id)).toEqual(['scarecrow']);
   });
 
   it('does NOT learn when a skill DID match (no novelty signal to act on)', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
@@ -548,7 +548,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
 
     await neuron.handleDirect({ description: 'task' }, ctx);
     // Still exactly the one pre-seeded skill. No new auto-created entries.
-    const after = skills.loadFor('Water');
+    const after = skills.loadFor(nsOf(reg, 'Water'));
     expect(after).toHaveLength(1);
     expect(after[0]!.id).toBe('web-build-loop');
     expect(after[0]!.successes).toBe(1); // existing skill was used and approved

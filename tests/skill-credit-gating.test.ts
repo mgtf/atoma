@@ -1,4 +1,3 @@
-import { asStoredNamespace } from '../src/skills/namespace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,7 +15,7 @@ import {
 import { parseVerdict } from '../src/atoms/json.js';
 import { lastResultVerdictSkillFollowed } from '../src/atoms/capability.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { makeCtx, jsonText } from './helpers.js';
+import { makeCtx, jsonText , nsOf} from './helpers.js';
 
 /**
  * Usage-conditioned skill credit (adherence gate, CODESKILL R_A analog).
@@ -151,7 +150,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
       description: 'web builder',
       systemPrompt: 'You are an L1.',
     });
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'the-recipe',
       description: 'd',
       whenToUse: 'w',
@@ -203,7 +202,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok', activeSkillFollowed: true }));
 
     await neuron.handleDirect({ description: 'task' }, ctx);
-    expect(skills.loadFor('Water')[0]!.successes).toBe(1);
+    expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.successes).toBe(1);
   });
 
   it('WITHHOLDS skill credit on activeSkillFollowed: false — atom type still credited', async () => {
@@ -214,7 +213,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
 
     await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Water')[0]!;
+    const skill = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     expect(skill.successes).toBe(0);
     expect(skill.failures).toBe(0);
     // The match itself IS recorded (markMatched fires at match time), so
@@ -226,7 +225,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
   });
 
   it('marks an ignored script skill as not followed even on the type trust fast-path', async () => {
-    skills.save('Water', {
+    skills.save(nsOf(reg, 'Water'), {
       id: 'the-recipe',
       description: 'd',
       whenToUse: 'w',
@@ -239,7 +238,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     }
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const water = L1Atom.fromType(reg.getByName('Water')!);
-    water.setActiveSkill('the-recipe', asStoredNamespace('Water'));
+    water.setActiveSkill('the-recipe', nsOf(reg, 'Water'));
     const ctx = makeCtx();
     const verdict = await neuron.validateResult(
       water,
@@ -266,7 +265,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     ctx.llm.enqueueText(jsonText({ approved: true, reasoning: 'ok' }));
 
     await neuron.handleDirect({ description: 'task' }, ctx);
-    expect(skills.loadFor('Water')[0]!.successes).toBe(1);
+    expect(skills.loadFor(nsOf(reg, 'Water'))[0]!.successes).toBe(1);
   });
 
   it('WITHHOLDS skill blame and SKIPS the revision when the failing run ignored the recipe', async () => {
@@ -305,7 +304,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
 
     await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Water')[0]!;
+    const skill = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     // Blame withheld: the failure was not the recipe's.
     expect(skill.failures).toBe(0);
     // Revision skipped: no Sonnet improveSkillBody call was made, and the
@@ -343,7 +342,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
 
     await neuron.handleDirect({ description: 'task' }, ctx);
 
-    const skill = skills.loadFor('Water')[0]!;
+    const skill = skills.loadFor(nsOf(reg, 'Water'))[0]!;
     expect(skill.failures).toBe(1);
     expect(ctx.llm.calls.some((c) => c.userContent.includes('IMPROVED body'))).toBe(true);
     expect(skill.body).toBe('STEP 1: do the REVISED thing.\nSTEP 2: verify it better.');

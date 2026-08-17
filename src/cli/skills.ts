@@ -86,11 +86,43 @@ function formatSkill(l1: string, s: Skill): string[] {
   ];
 }
 
-function cmdList(registry: SkillRegistry, l1Filter: string | undefined): void {
+
+/**
+ * atom id → display name, read once from the store.
+ *
+ * Skill namespaces are keyed by atom id (T4), so every operator surface that
+ * prints a namespace prints a UUID unless it resolves it back. Missing store,
+ * unreadable row or removed atom all degrade to showing the raw key, which on
+ * a CLI table is strictly better than an exception.
+ */
+function displayNamesByAtomId(dbFlag?: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const dbPath = storeDbPath(dbFlag);
+  if (!existsSync(dbPath)) return out;
+  const db = new Database(dbPath, { readonly: true });
+  try {
+    for (const r of db.prepare('SELECT atom_id, name FROM atom_types').all() as {
+      atom_id: string | null;
+      name: string;
+    }[]) {
+      if (r.atom_id) out.set(r.atom_id, r.name);
+    }
+  } finally {
+    db.close();
+  }
+  return out;
+}
+
+function cmdList(
+  registry: SkillRegistry,
+  l1Filter: string | undefined,
+  dbFlag?: string
+): void {
+  const labels = displayNamesByAtomId(dbFlag);
   const namespaces = l1Filter ? [l1Filter] : registry.listNamespaces();
   const rows: string[][] = [];
   for (const ns of namespaces) {
-    rows.push(...registry.loadFor(ns).map((s) => formatSkill(ns, s)));
+    rows.push(...registry.loadFor(ns).map((s) => formatSkill(labels.get(ns) ?? ns, s)));
   }
   if (rows.length === 0) {
     console.log(
@@ -370,12 +402,20 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
   if (existsSync(dbPath)) {
     const db = new Database(dbPath, { readonly: true });
     try {
-      for (const r of db.prepare('SELECT name, tools_json FROM atom_types').all() as {
+      for (const r of db.prepare('SELECT atom_id, name, tools_json FROM atom_types').all() as {
+        atom_id: string | null;
         name: string;
         tools_json: string;
       }[]) {
         try {
-          toolsByAtom.set(r.name, (JSON.parse(r.tools_json) as { name: string }[]).map((t) => t.name));
+          // Keyed by atom id: `ns` is an id since T4, and keying by name
+        // silently skipped every tool-scope finding.
+        if (r.atom_id) {
+          toolsByAtom.set(
+            r.atom_id,
+            (JSON.parse(r.tools_json) as { name: string }[]).map((t) => t.name)
+          );
+        }
         } catch {
           /* unreadable row — treated as unknown tools below */
         }
@@ -427,7 +467,7 @@ function main(): void {
 
   switch (args.command) {
     case 'list':
-      return cmdList(registry, moleculeFilter);
+      return cmdList(registry, moleculeFilter, args.flags['db']);
     case 'stats':
       return cmdStats(registry, moleculeFilter, args.flags['sim']);
     case 'review':

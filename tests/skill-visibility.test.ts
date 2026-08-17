@@ -1,4 +1,4 @@
-import { asStoredNamespace } from '../src/skills/namespace.js';
+import { asStoredNamespace, namespaceOf } from '../src/skills/namespace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -132,9 +132,14 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
   });
 
   it("matches a donor's llm recipe and credits the DONOR namespace", async () => {
-    const [l1a, l1b] = reg.listByTier(1).map((t) => t.name);
+    // A prefilter TARGET is a display name (the model picks by name); a skill
+    // NAMESPACE is the atom id. Splitting them is the whole point of T4.
+    const [t1a, t1b] = reg.listByTier(1);
+    const l1aName = t1a!.name;
+    const l1a = namespaceOf(t1a!);
+    const l1b = namespaceOf(t1b!);
     // The donor (file-scribe) owns the only skill.
-    skills.save(l1b!, {
+    skills.save(l1b, {
       id: 'replay-recorded-probes',
       description: 'replay recorded shell probes',
       whenToUse: 'a probes manifest exists and needs re-verification',
@@ -144,7 +149,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     // Tier prefilter → the HTTP L1 (the reader).
-    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1a!, confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1aName, confidence: 'high', reasoning: 't' }));
     // Skill prefilter sees the donor's recipe in the merged catalog → match.
     ctx.llm.enqueueText(
       jsonText({ kind: 'reuse', target: 'replay-recorded-probes', confidence: 'high', reasoning: 'fit' })
@@ -157,20 +162,25 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
 
     await neuron.handleDirect({ description: 'confirm the recorded probes still pass' }, ctx);
 
-    const donorSkill = skills.loadFor(l1b!)[0]!;
+    const donorSkill = skills.loadFor(l1b)[0]!;
     expect(donorSkill.successes).toBe(1); // credit landed on the OWNER
     expect(donorSkill.matches).toBe(1);
-    expect(skills.loadFor(l1a!)).toHaveLength(0); // nothing materialised at the reader
+    expect(skills.loadFor(l1a)).toHaveLength(0); // nothing materialised at the reader
   });
 
   it('commit C: a draft whose id exists at a VISIBLE donor is never re-created at home', async () => {
     const envBefore = process.env['ATOMA_SKILL_LEARN'];
     process.env['ATOMA_SKILL_LEARN'] = '1';
     try {
-      const [l1a, l1b] = reg.listByTier(1).map((t) => t.name);
+      // A prefilter TARGET is a display name (the model picks by name); a skill
+    // NAMESPACE is the atom id. Splitting them is the whole point of T4.
+    const [t1a, t1b] = reg.listByTier(1);
+    const l1aName = t1a!.name;
+    const l1a = namespaceOf(t1a!);
+    const l1b = namespaceOf(t1b!);
       // The donor owns 'replay-recorded-probes'; the reader will try to
       // learn a draft with the SAME id after a novel run.
-      skills.save(l1b!, {
+      skills.save(l1b, {
         id: 'replay-recorded-probes',
         description: 'replay recorded shell probes',
         whenToUse: 'manifest exists',
@@ -178,17 +188,17 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
         body: '1. read_file the manifest\n2. run_shell each cmd',
       });
       // A scarecrow at home so the skill prefilter fires (and escalates).
-      skills.save(l1a!, {
+      skills.save(l1a, {
         id: 'unrelated',
         description: 'something else',
         whenToUse: 'never',
         kind: 'llm',
         body: 'b',
       });
-      for (let i = 0; i < 3; i++) reg.recordSuccess(l1a!);
+      for (let i = 0; i < 3; i++) reg.recordSuccess(l1aName);
       const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
       const ctx = makeCtx();
-      ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1a!, confidence: 'high', reasoning: 't' }));
+      ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: l1aName, confidence: 'high', reasoning: 't' }));
       ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
       ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
       ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
@@ -204,8 +214,8 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
 
       await neuron.handleDirect({ description: 'novel-ish verification task' }, ctx);
       // Not re-created at home; the donor's copy is untouched.
-      expect(skills.loadFor(l1a!).map((s) => s.id)).toEqual(['unrelated']);
-      expect(skills.loadFor(l1b!).map((s) => s.id)).toEqual(['replay-recorded-probes']);
+      expect(skills.loadFor(l1a).map((s) => s.id)).toEqual(['unrelated']);
+      expect(skills.loadFor(l1b).map((s) => s.id)).toEqual(['replay-recorded-probes']);
     } finally {
       if (envBefore === undefined) delete process.env['ATOMA_SKILL_LEARN'];
       else process.env['ATOMA_SKILL_LEARN'] = envBefore;
@@ -213,7 +223,7 @@ describe('L2.runSubtask — donor match with owner-routed credit', () => {
   });
 
   it('R1: a donor SCRIPT is invisible to a reader lacking the invocation ABI (run_shell)', async () => {
-    const [, l1b] = reg.listByTier(1).map((t) => t.name);
+    const [, l1b] = reg.listByTier(1).map((t) => namespaceOf(t));
     mkType(1, 'web builder', WEB_TOOLS); // third L1 — the ABI-less reader
     const webName = reg.listByTier(1).map((t) => t.name)[2]!;
     // Donor script (its body is Node source — the text filter cannot judge it).

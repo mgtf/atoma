@@ -392,7 +392,18 @@ export interface SkillEventInfo {
     | 'direct'
     | 'quarantine'
     | 'credit-withheld';
+  /**
+   * DISPLAY name of the molecule that owns the skill — what the viz renders
+   * and what an operator reads.
+   *
+   * Kept a name deliberately. Skill namespaces are keyed by atom id (T4), and
+   * feeding the key here turned every Skills-tab header, timeline meta line
+   * and search hit into a UUID. `l1AtomId` beside it carries the identity for
+   * anything that needs to look the molecule back up.
+   */
   l1Name: string;
+  /** Identity of that molecule; absent on events recorded before T4. */
+  l1AtomId?: string;
   skillId: string;
   actorName: string;
   actorTier: Tier;
