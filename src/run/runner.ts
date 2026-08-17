@@ -5,7 +5,12 @@ import { makeAnthropicClient } from './auth.js';
 import { RunnerConfigError } from '../core/errors.js';
 import { modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
-import { buildReferencedProviders, makeBaseClient, resolveBaseProviderKind } from './providers.js';
+import {
+  assertTransportHonoursCredentials,
+  buildReferencedProviders,
+  makeBaseClient,
+  resolveBaseProviderKind,
+} from './providers.js';
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
@@ -312,8 +317,21 @@ export function resetHostLifecycleSnapshotForTests(): void {
 export async function startTask(
   profile: TaskProfile,
   argv: readonly string[],
-  opts?: { onWedged?: () => void }
+  opts?: { onWedged?: () => void; providerEnv?: NodeJS.ProcessEnv }
 ): Promise<RunHandle> {
+  // PROVIDER CREDENTIALS ARE A PER-RUN VALUE (invariant T10). `providerEnv`
+  // is the snapshot every provider decision reads: which transport, which
+  // key, which base URL. Omit it and the run inherits `process.env`, which
+  // is what every CLI call site does and why nothing changes for them.
+  // Supply it and this call is independent of ambient process state — the
+  // one property a process serving more than one credential needs.
+  //
+  // Supplying it also arms `assertTransportHonoursCredentials`: a transport
+  // that cannot read the snapshot must fail here rather than silently bill
+  // somebody else's subscription.
+  const suppliedProviderEnv = opts?.providerEnv;
+  const providerEnv = suppliedProviderEnv ?? process.env;
+
   // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
   // run against a local Ollama install (or Ollama Cloud via a :cloud
   // tag). The Ollama path ignores ANTHROPIC_API_KEY and doesn't need a
@@ -321,7 +339,8 @@ export async function startTask(
   // (`resolveLatestOpus`) is also skipped — L3 falls back to its
   // FALLBACK_OPUS model id string, which the OllamaLlmClient then
   // silently substitutes with its configured default model.
-  const provider = resolveBaseProviderKind(process.env['ATOMA_LLM']);
+  const provider = resolveBaseProviderKind(providerEnv['ATOMA_LLM']);
+  if (suppliedProviderEnv) assertTransportHonoursCredentials(provider);
   const useOllama = provider === 'ollama';
   // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
   // Code installation (Claude Agent SDK) — subscription auth, no API key.
@@ -454,11 +473,13 @@ export async function startTask(
   // feeds L3.fromType's Opus-resolution step. On the ollama and
   // claude-cli paths we pass `undefined` so we never touch the API
   // (L3 falls back to FALLBACK_OPUS, which each provider then maps to
-  // its own model). Credential resolution happens inside
-  // makeAnthropicClient (API key → ANTHROPIC_AUTH_TOKEN → `ant auth
-  // login` CLI profile; ATOMA_AUTH=cli drops a stale exported key so
-  // the profile wins). Exits with guidance if nothing resolves.
-  const anthropic = useOllama || useClaudeCli ? undefined : makeAnthropicClient();
+  // its own model). Credential resolution reads the run's snapshot
+  // (API key → ANTHROPIC_AUTH_TOKEN → `ant auth login` CLI profile;
+  // ATOMA_AUTH=cli discounts a stale exported key so the profile wins).
+  // A missing credential is NOT detectable here — the SDK resolves on the
+  // first request — so this never fails the launch; `atoma doctor` is
+  // where credential presence is reported.
+  const anthropic = useOllama || useClaudeCli ? undefined : makeAnthropicClient(providerEnv);
   const metrics = new InMemoryMetrics();
   const runSignals: RunSignalCounts = {
     deterministic: 0,
@@ -474,13 +495,13 @@ export async function startTask(
   // ONE construction switch, shared with curriculum (review §3.9): the
   // hand-rolled ternary here and its drifted copy over there were the exact
   // two-copies-of-one-rule class the repo has paid for twice.
-  const baseClient = makeBaseClient(provider, anthropic ? { anthropic } : {});
+  const baseClient = makeBaseClient(provider, { anthropic, env: providerEnv });
   // Per-tier PROVIDER routing: tier pins may carry a `provider:` prefix
   // (ATOMA_MODEL_L1=zai:glm-4.5-air → L1 on Z.ai, L2/L3 on the default
   // provider). Only referenced providers are constructed; with none, the
   // router is a transparent passthrough. Observability wraps the ROUTER,
   // so calls are recorded once, with the vendor visible in the model id.
-  const providers = buildReferencedProviders();
+  const providers = buildReferencedProviders(providerEnv);
   const routedClient =
     Object.keys(providers).length > 0
       ? new RoutingLlmClient(baseClient, providers)

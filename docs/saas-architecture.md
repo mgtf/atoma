@@ -514,7 +514,7 @@ distilled, reviewed body crosses the org boundary.
 | A3 | **Org scoping on runs and traces.** `VizRun` carries no organisation discriminator. | `viz/trace.ts` |
 | A4 | **DONE locally:** `sanitise` rejects all-dot traversal and `branch` validates `overrideName`. Preserve these guards through the surrogate-id migration. | §4.3; `atom-name-path-escape.test.ts` |
 | A5 | **DONE locally:** `create` and `branch` share `usedOrdinals` over live ∪ history. | §4.3; `registry-remove.test.ts` |
-| A6 | **Per-run outbound credentials**; remove `process.exit(1)` from the auth path; drop `claude-cli` as a served transport. | `run/auth.ts:25-55` |
+| A6 | **DONE locally:** outbound credentials are a per-run snapshot — `startTask(profile, argv, {providerEnv})` threads one environment through transport selection, `makeAnthropicClient`, `makeBaseClient` and the tier-pinned provider factories, so a call is independent of ambient process state. `process.exit(1)` is gone from the auth path (`RunnerConfigError` instead). `claude-cli` is refused at LAUNCH whenever a snapshot is supplied, because it binds to a machine-local login and cannot read one — the developer path, which supplies nothing, is untouched. REMAINING for a hosted deployment: with no key and no bearer token in the snapshot, the SDK's profile/WIF fallback still resolves against the real process; redirecting that half means re-implementing the SDK's chain. | T10; `run/auth.ts`, `run/providers.ts`, `run/runner.ts` |
 | A7 | **Concurrency on the atom DB.** `openDb` runs schema/migration work on every open, so every connection can take a write lock at startup. Allocation transactions are deferred; two concurrent creates can compute the same gap and one loses without a retry. This fires on the hottest path: canonical seeders run on every run. Minimum: split migration from open, `BEGIN IMMEDIATE` for allocating transactions, explicit `busy_timeout`, retry-on-busy. **Recommendation: move to Postgres** — AGENTS.md already lists "Multi-process registry (SQLite local only)" as out of scope. | `src/registry/db.ts`; `AtomRegistry.create/branch` |
 | A8 | **Skill counters leave the filesystem.** `readMetaChecked` now refuses a torn sidecar instead of silently resetting trust, but whole-object filesystem writes still cannot provide atomic multi-writer counters or a transaction with body promotion. | `skills/registry.ts`; T6 |
 
@@ -730,10 +730,12 @@ policy to every network-capable tool; it is not new construction.
 §3 no column, repository layer or `WHERE org_id = ?` survives an L1 that can
 `cat` the database file.
 
-**Phase 2 — credentials leave process state** (A6 → T10). Per-run credential
-object threaded through `runner.ts`; `makeAnthropicClient` throws
-`RunnerConfigError` instead of `process.exit(1)`; `claude-cli` is refused on the
-tenant plane at launch and kept for the operator plane (see §1).
+**Phase 2 — credentials leave process state** (A6 → T10). **DONE** — see the A6
+row in §6.A for what landed and what remains. The tenant-plane refusal of
+`claude-cli` is expressed as a correctness rule rather than a tenancy policy:
+a supplied credential must be a used credential, so a transport that cannot
+read the snapshot fails at launch. That formulation holds under every tenancy
+model below, which is why it could ship before the track is chosen.
 *Not blocked by Phase 1* — the credential plane and the sandbox boundary are
 independent. It is sequenced early because it is conformance to an already
 documented invariant (see §1), it is testable in one process, and it touches no

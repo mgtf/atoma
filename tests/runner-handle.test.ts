@@ -109,4 +109,47 @@ describe('startTask — typed config errors before any side effect', () => {
       /ATOMA_MODEL_L1 cannot use codex/
     );
   });
+
+  it('refuses claude-cli at LAUNCH when the caller supplied a credential snapshot', async () => {
+    // claude-cli binds to the machine's `claude /login` session and reads no
+    // key, so a supplied credential would be silently ignored and the work
+    // would bill the host's subscription. Failing before any spend is the
+    // same shape as the codex L1 refusal above.
+    process.env[buildProfile.envVars.timeoutMs] = '60000';
+    const snapshot: NodeJS.ProcessEnv = {
+      ATOMA_LLM: 'claude-cli',
+      ANTHROPIC_API_KEY: 'sk-ant-tenant-key',
+    };
+    await expect(
+      startTask(buildProfile, ['goal'], { providerEnv: snapshot })
+    ).rejects.toThrow(RunnerConfigError);
+    await expect(
+      startTask(buildProfile, ['goal'], { providerEnv: snapshot })
+    ).rejects.toThrow(/cannot honour a supplied credential snapshot/);
+  });
+
+  it('leaves the developer path alone: claude-cli with NO snapshot is accepted', async () => {
+    // The guard triggers on the caller having supplied an environment, not on
+    // the transport itself. A developer running `ATOMA_LLM=claude-cli` against
+    // their own subscription supplies nothing, so selection proceeds and the
+    // run fails later — here on the deliberately invalid timeout, which only
+    // gets evaluated once the transport has been accepted.
+    process.env['ATOMA_LLM'] = 'claude-cli';
+    process.env[buildProfile.envVars.timeoutMs] = 'abc';
+    await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
+  });
+
+  it('reads the transport from the SNAPSHOT, not from process.env', async () => {
+    // The inverse of the guard: process.env says claude-cli, but the run was
+    // handed its own environment and must obey that one. It gets past the
+    // transport guard and fails later on the invalid timeout IN THE SNAPSHOT's
+    // absence — proving the snapshot, not the ambient value, drove selection.
+    process.env['ATOMA_LLM'] = 'claude-cli';
+    process.env[buildProfile.envVars.timeoutMs] = 'abc';
+    await expect(
+      startTask(buildProfile, ['goal'], {
+        providerEnv: { ATOMA_LLM: 'ollama' },
+      })
+    ).rejects.toThrow(/expected positive integer/);
+  });
 });

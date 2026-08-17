@@ -5,6 +5,7 @@ import { OllamaLlmClient } from '../core/llmOllama.js';
 import { ClaudeCliLlmClient } from '../core/llmClaudeCli.js';
 import { CodexCliLlmClient } from '../core/llmCodexCli.js';
 import { splitProviderModel } from '../core/llmRouting.js';
+import { RunnerConfigError } from '../core/errors.js';
 import { makeAnthropicClient } from './auth.js';
 
 /**
@@ -84,9 +85,9 @@ export function makeBaseClient(
  * constructed, so a missing ZAI_API_KEY only matters if a tier asks
  * for Z.ai.
  */
-const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
-  zai: () => {
-    const apiKey = process.env['ZAI_API_KEY'];
+const PROVIDER_FACTORIES: Record<string, (env: NodeJS.ProcessEnv) => LlmClient> = {
+  zai: (env) => {
+    const apiKey = env['ZAI_API_KEY'];
     if (!apiKey || apiKey.trim().length === 0) {
       throw new Error(
         'a tier model is pinned to "zai:…" but ZAI_API_KEY is not set — ' +
@@ -97,15 +98,18 @@ const PROVIDER_FACTORIES: Record<string, () => LlmClient> = {
     return new AnthropicLlmClient(
       new Anthropic({
         apiKey: apiKey.trim(),
-        baseURL: process.env['ZAI_BASE_URL']?.trim() || ZAI_DEFAULT_BASE_URL,
+        baseURL: env['ZAI_BASE_URL']?.trim() || ZAI_DEFAULT_BASE_URL,
       })
     );
   },
   // The three base kinds route through the ONE construction switch above —
   // a tier-pinned `anthropic:`/`ollama:`/`claude-cli:` client must be built
   // exactly like the ATOMA_LLM base client, or the two paths drift.
-  anthropic: () => makeBaseClient('anthropic', { anthropic: makeAnthropicClient() }),
-  ollama: () => makeBaseClient('ollama'),
+  anthropic: (env) => makeBaseClient('anthropic', { anthropic: makeAnthropicClient(env), env }),
+  ollama: (env) => makeBaseClient('ollama', { env }),
+  // Takes no env: it binds to a machine-local `claude /login`, which is
+  // exactly why `assertTransportHonoursCredentials` refuses it whenever the
+  // caller supplied a credential snapshot.
   'claude-cli': () => makeBaseClient('claude-cli'),
   // Local Codex CLI on a ChatGPT subscription (`codex login`) — TIERS 2/3
   // ONLY. It cannot host a tool loop (openai/codex#6049: Codex's own
@@ -146,8 +150,39 @@ export function referencedProviderNames(env: NodeJS.ProcessEnv = process.env): s
  * referenced clients. Returns the map to hand to RoutingLlmClient (empty
  * when no tier crosses providers — the router then costs nothing).
  */
-export function buildReferencedProviders(): Record<string, LlmClient> {
+export function buildReferencedProviders(
+  env: NodeJS.ProcessEnv = process.env
+): Record<string, LlmClient> {
   const out: Record<string, LlmClient> = {};
-  for (const name of referencedProviderNames()) out[name] = PROVIDER_FACTORIES[name]!();
+  for (const name of referencedProviderNames(env)) out[name] = PROVIDER_FACTORIES[name]!(env);
   return out;
+}
+
+/**
+ * A supplied credential must be a USED credential.
+ *
+ * `claude-cli` drives the machine's `claude /login` session: it takes no key,
+ * no bearer token and no base URL, so a caller-supplied credential snapshot
+ * is silently ignored and the work bills the host machine's subscription
+ * instead. For a single developer that is the point of the transport. For
+ * anything hosting a second credential it is a correctness failure that is
+ * invisible until the bill arrives — and, per docs/saas-architecture.md §1,
+ * serving another party's run through a consumer subscription is also
+ * prohibited by the vendor.
+ *
+ * So the refusal is mechanical and at LAUNCH, matching how a codex L1 pin
+ * already fails before any spend. It triggers on the caller having supplied
+ * a snapshot at all — not on a notion of "tenant" — which keeps it correct
+ * under every tenancy model the SaaS design might land on, and leaves the
+ * developer path (no snapshot, inherit the process) untouched.
+ */
+export function assertTransportHonoursCredentials(kind: BaseProviderKind): void {
+  if (kind === 'claude-cli') {
+    throw new RunnerConfigError(
+      'ATOMA_LLM=claude-cli cannot honour a supplied credential snapshot: it binds to the ' +
+        "machine's `claude /login` session, so the run would bill that subscription and ignore " +
+        'the credential passed to startTask. Use ATOMA_LLM=anthropic with ANTHROPIC_API_KEY ' +
+        '(or ANTHROPIC_AUTH_TOKEN) in the snapshot, or omit the snapshot to inherit the process.'
+    );
+  }
 }

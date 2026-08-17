@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
+  assertTransportHonoursCredentials,
+  buildReferencedProviders,
   makeBaseClient,
   referencedProviderNames,
   resolveBaseProviderKind,
 } from '../src/run/providers.js';
 import { makeAnthropicClient } from '../src/run/auth.js';
+import { RunnerConfigError } from '../src/core/errors.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
@@ -136,6 +139,36 @@ describe('makeAnthropicClient — credentials are a per-run value, not process s
     const client = makeAnthropicClient({ ANTHROPIC_AUTH_TOKEN: 'bearer-token' });
     expect(client.apiKey).toBeNull();
     expect(client.authToken).toBe('bearer-token');
+  });
+
+  it('builds tier-pinned providers from the SNAPSHOT, not from process.env', () => {
+    const previous = process.env['ATOMA_MODEL_L1'];
+    process.env['ATOMA_MODEL_L1'] = 'zai:from-process-env';
+    try {
+      // The snapshot pins no cross-provider tier, so nothing is built even
+      // though the ambient environment asks for Z.ai.
+      expect(buildReferencedProviders({})).toEqual({});
+      // …and a pin IN the snapshot is honoured, with its key read from the
+      // same snapshot rather than from the process.
+      const built = buildReferencedProviders({
+        ATOMA_MODEL_L1: 'zai:glm-4.5-air',
+        ZAI_API_KEY: 'zai-key-from-snapshot',
+      });
+      expect(Object.keys(built)).toEqual(['zai']);
+    } finally {
+      if (previous === undefined) delete process.env['ATOMA_MODEL_L1'];
+      else process.env['ATOMA_MODEL_L1'] = previous;
+    }
+  });
+
+  it('refuses a transport that cannot read the snapshot it was handed', () => {
+    expect(() => assertTransportHonoursCredentials('claude-cli')).toThrow(RunnerConfigError);
+    expect(() => assertTransportHonoursCredentials('claude-cli')).toThrow(
+      /cannot honour a supplied credential snapshot/
+    );
+    // The transports that CAN read it are untouched.
+    expect(() => assertTransportHonoursCredentials('anthropic')).not.toThrow();
+    expect(() => assertTransportHonoursCredentials('ollama')).not.toThrow();
   });
 
   it('returns a client with no credential rather than killing the process', () => {
