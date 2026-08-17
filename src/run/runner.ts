@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
+import { RunnerConfigError } from '../core/errors.js';
 import { modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
 import { buildReferencedProviders, makeBaseClient, resolveBaseProviderKind } from './providers.js';
@@ -219,13 +220,13 @@ export interface RunOutcome {
   readonly outcome: 'delivered' | 'failed';
 }
 
-/** Invalid launch input (timeout, seed, tier pin). The CLI maps it to exit 2. */
-export class RunnerConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RunnerConfigError';
-  }
-}
+/**
+ * Invalid launch input (timeout, seed, tier pin, credentials). The CLI maps
+ * it to exit 2. Defined in `core/errors.ts` so `run/auth.ts` can throw it
+ * without importing this module (which imports auth) — re-exported here
+ * because the library contract names it as the runner's config error.
+ */
+export { RunnerConfigError };
 
 export type LifecycleToggleSource = 'cli-disable' | 'environment-disable' | 'default-enable';
 

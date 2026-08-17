@@ -34,3 +34,19 @@ export class ValidationError extends Error {
     this.name = 'ValidationError';
   }
 }
+
+/**
+ * Invalid launch input (timeout, seed, tier pin, credentials). `startTask`
+ * throws it; the CLI shell maps it to exit 2.
+ *
+ * Lives here rather than in `run/runner.ts` so the credential path
+ * (`run/auth.ts`) can throw it without importing the runner it is imported
+ * BY — a cycle. `run/runner.ts` re-exports it, so the documented library
+ * contract ("startTask throws RunnerConfigError on bad input") is unchanged.
+ */
+export class RunnerConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RunnerConfigError';
+  }
+}

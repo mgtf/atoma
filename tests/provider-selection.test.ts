@@ -4,6 +4,7 @@ import {
   referencedProviderNames,
   resolveBaseProviderKind,
 } from '../src/run/providers.js';
+import { makeAnthropicClient } from '../src/run/auth.js';
 import { AnthropicLlmClient } from '../src/core/llm.js';
 import { ClaudeCliLlmClient } from '../src/core/llmClaudeCli.js';
 import { OllamaLlmClient } from '../src/core/llmOllama.js';
@@ -92,11 +93,58 @@ describe('makeBaseClient — ONE construction switch for runner and curriculum',
   });
 
   it('anthropic REQUIRES a constructed SDK client and throws a naming error without one', () => {
-    // makeAnthropicClient() exits the process when no credential resolves;
-    // only the caller knows whether demanding one is appropriate, so the
-    // switch never constructs it implicitly.
+    // The client carries a credential snapshot and only the caller knows
+    // whether an Anthropic credential should be demanded at all, so the
+    // switch never constructs one implicitly.
     expect(() => makeBaseClient('anthropic')).toThrow(/opts\.anthropic/);
     const fake = { messages: { create: async () => ({}) } } as unknown as Anthropic;
     expect(makeBaseClient('anthropic', { anthropic: fake })).toBeInstanceOf(AnthropicLlmClient);
+  });
+});
+
+describe('makeAnthropicClient — credentials are a per-run value, not process state', () => {
+  it('resolves the key from the SNAPSHOT, not from process.env', () => {
+    // T10 (docs/saas-architecture.md): one process must be able to serve two
+    // credentials. Reading process.env at construction time made that
+    // impossible; the snapshot argument is what makes it possible.
+    const previous = process.env['ANTHROPIC_API_KEY'];
+    process.env['ANTHROPIC_API_KEY'] = 'sk-ant-from-process-env';
+    try {
+      const client = makeAnthropicClient({ ANTHROPIC_API_KEY: 'sk-ant-from-snapshot' });
+      expect(client.apiKey).toBe('sk-ant-from-snapshot');
+    } finally {
+      if (previous === undefined) delete process.env['ANTHROPIC_API_KEY'];
+      else process.env['ANTHROPIC_API_KEY'] = previous;
+    }
+  });
+
+  it('ATOMA_AUTH=cli drops the key WITHOUT mutating the caller environment', () => {
+    // The defect: the old implementation ran `delete process.env['ANTHROPIC_API_KEY']`
+    // to make the SDK skip the env key. Mutating the parent process to steer a
+    // constructor makes the function unusable in any process serving a second
+    // credential, and leaks across every later call in the same process.
+    const snapshot: NodeJS.ProcessEnv = {
+      ATOMA_AUTH: 'cli',
+      ANTHROPIC_API_KEY: 'sk-ant-should-be-ignored',
+    };
+    const client = makeAnthropicClient(snapshot);
+    expect(client.apiKey).toBeNull();
+    expect(snapshot['ANTHROPIC_API_KEY']).toBe('sk-ant-should-be-ignored');
+  });
+
+  it('passes a bearer token through and never exits the process', () => {
+    const client = makeAnthropicClient({ ANTHROPIC_AUTH_TOKEN: 'bearer-token' });
+    expect(client.apiKey).toBeNull();
+    expect(client.authToken).toBe('bearer-token');
+  });
+
+  it('returns a client with no credential rather than killing the process', () => {
+    // The SDK resolves credentials on the first REQUEST, so construction
+    // cannot fail here. The old code caught a throw that never happens and
+    // called process.exit(1) — unreachable, and fatal to a hosted process if
+    // it ever became reachable.
+    const client = makeAnthropicClient({});
+    expect(client.apiKey).toBeNull();
+    expect(client.authToken).toBeNull();
   });
 });

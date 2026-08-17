@@ -47,9 +47,11 @@ export function resolveBaseProviderKind(raw?: string): BaseProviderKind {
  * the bare `claude` alias). Review 2026-08-14 §3.9.
  *
  * `anthropic` REQUIRES a constructed SDK client rather than building one:
- * `makeAnthropicClient()` exits the process when no credential resolves,
- * and only the caller knows whether an Anthropic credential should even be
- * demanded (an ollama/claude-cli session must never die on a missing key).
+ * only the caller knows whether an Anthropic credential should be demanded
+ * at all, and the client carries a credential SNAPSHOT (`makeAnthropicClient(env)`)
+ * that this switch has no business choosing on the caller's behalf. An
+ * ollama/claude-cli session must never acquire an Anthropic credential it
+ * will not use.
  */
 export function makeBaseClient(
   kind: BaseProviderKind,
