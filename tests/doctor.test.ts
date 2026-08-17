@@ -14,7 +14,6 @@ function dependencies(
 ): Partial<DoctorDependencies> {
   return {
     nodeVersion: 'v22.13.0',
-    nodeExecutable: '/test/node',
     runCommand: async (command, args) => {
       if (command === 'docker' && args[0] === 'version') {
         return { stdout: '28.0.0\n', stderr: '' };
@@ -114,19 +113,7 @@ describe('atoma doctor', () => {
     expect(report.checks.find((check) => check.id === 'docker')?.status).toBe('warn');
   });
 
-  it('models ATOMA_AUTH=cli when probing the Anthropic SDK chain', async () => {
-    let commandSeen = '';
-    let observedEnv: NodeJS.ProcessEnv | undefined;
-    const runCommand = async (
-      command: string,
-      _args: readonly string[],
-      options?: DoctorCommandOptions
-    ): Promise<{ stdout: string; stderr: string }> => {
-      if (command === 'docker') throw new Error('not installed');
-      commandSeen = command;
-      observedEnv = options?.env;
-      return { stdout: '', stderr: '' };
-    };
+  it('models ATOMA_AUTH=cli by discounting the shadowed key, not by claiming a profile', async () => {
     const report = await diagnoseDoctor({
       mode: { container: false, egress: false },
       env: {
@@ -134,12 +121,53 @@ describe('atoma doctor', () => {
         ATOMA_AUTH: 'cli',
         ANTHROPIC_API_KEY: 'shadowing-key',
       },
-      dependencies: dependencies({ runCommand }),
+      dependencies: dependencies(),
     });
 
-    expect(report.ready).toBe(true);
-    expect(commandSeen).toBe('/test/node');
-    expect(observedEnv?.['ANTHROPIC_API_KEY']).toBeUndefined();
+    // ATOMA_AUTH=cli means the exported key will be ignored at run time, so
+    // doctor must not count it as the credential source. What remains is an
+    // ant OAuth profile, which resolves on the first REQUEST and therefore
+    // cannot be proven by a quota-free check.
+    const check = report.checks.find((c) => c.id === 'provider:anthropic');
+    expect(check?.status).toBe('warn');
+    expect(check?.detail).toContain('ATOMA_AUTH=cli');
+    expect(check?.remedy).toContain('ant auth status');
+  });
+
+  it('never reports an unproven ant OAuth profile as a passing credential source', async () => {
+    // Regression: the check ran `new Anthropic()` in a child process and read
+    // exit 0 as proof. That constructor never throws — it resolves credentials
+    // on the first request — so a machine with NO credential at all reported
+    // `pass · credential source available · ant OAuth profile`.
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic' },
+      dependencies: dependencies(),
+    });
+
+    const check = report.checks.find((c) => c.id === 'provider:anthropic');
+    expect(check?.status).toBe('warn');
+    expect(check?.detail).not.toContain('credential source available');
+  });
+
+  it('passes and names the source when the environment actually carries one', async () => {
+    const withKey = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured' },
+      dependencies: dependencies(),
+    });
+    expect(withKey.checks.find((c) => c.id === 'provider:anthropic')?.detail).toBe(
+      'credential source available · ANTHROPIC_API_KEY'
+    );
+
+    const withToken = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_AUTH_TOKEN: 'bearer' },
+      dependencies: dependencies(),
+    });
+    expect(withToken.checks.find((c) => c.id === 'provider:anthropic')?.detail).toBe(
+      'credential source available · ANTHROPIC_AUTH_TOKEN'
+    );
   });
 
   it('requires Docker and a bootable worker in container mode', async () => {

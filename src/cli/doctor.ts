@@ -51,7 +51,6 @@ export interface DoctorCommandOptions {
 
 export interface DoctorDependencies {
   readonly nodeVersion: string;
-  readonly nodeExecutable: string;
   runCommand(
     command: string,
     args: readonly string[],
@@ -201,7 +200,6 @@ async function defaultProbeWorker(image: string): Promise<{ toolCount: number }>
 function defaultDependencies(): DoctorDependencies {
   return {
     nodeVersion: process.version,
-    nodeExecutable: process.execPath,
     runCommand: defaultRunCommand,
     fetchStatus: defaultFetchStatus,
     probeWorker: defaultProbeWorker,
@@ -286,26 +284,38 @@ async function checkProvider(
       };
     }
 
-    // Run the exact zero-request SDK constructor used by makeAnthropicClient
-    // in a child process. This sees API keys, bearer tokens and ant OAuth
-    // profiles without mutating this process or printing credential details.
-    const authEnv = { ...env };
+    // The SDK resolves credentials on the FIRST REQUEST, not at construction:
+    // `new Anthropic()` with no key, no bearer token, no ANTHROPIC_PROFILE and
+    // a nonexistent config dir returns a client with `apiKey === null` and
+    // exits 0 (measured 2026-08-17). The previous version of this check ran
+    // exactly that constructor in a child process and treated exit 0 as proof,
+    // then NAMED a source it had never observed — so a machine with no
+    // credential at all reported
+    // `pass · credential source available · ant OAuth profile`.
+    //
+    // Doctor is quota-free, so it cannot settle the question with a request
+    // either, and re-deriving the SDK's profile/WIF lookup here is the
+    // two-copies-of-one-rule drift this repo has been bitten by. It therefore
+    // reports only what it can actually see, and says so when it cannot see.
     const forceCli = (env['ATOMA_AUTH'] ?? '').trim().toLowerCase() === 'cli';
-    if (forceCli) delete authEnv['ANTHROPIC_API_KEY'];
-    await deps.runCommand(
-      deps.nodeExecutable,
-      [
-        '--input-type=module',
-        '-e',
-        "import Anthropic from '@anthropic-ai/sdk'; new Anthropic();",
-      ],
-      { env: authEnv, timeoutMs }
-    );
-    const source = nonEmpty(authEnv['ANTHROPIC_API_KEY'])
+    const apiKey = forceCli ? undefined : env['ANTHROPIC_API_KEY'];
+    const source = nonEmpty(apiKey)
       ? 'ANTHROPIC_API_KEY'
-      : nonEmpty(authEnv['ANTHROPIC_AUTH_TOKEN'])
+      : nonEmpty(env['ANTHROPIC_AUTH_TOKEN'])
         ? 'ANTHROPIC_AUTH_TOKEN'
-        : 'ant OAuth profile';
+        : null;
+    if (source === null) {
+      return {
+        id: 'provider:anthropic',
+        label,
+        status: 'warn',
+        detail: forceCli
+          ? 'ATOMA_AUTH=cli · no bearer token in the environment; an ant OAuth profile cannot be proven without a billable request'
+          : 'no ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN in the environment; an ant OAuth profile cannot be proven without a billable request',
+        remedy:
+          'Run `ant auth status` to confirm the active profile, or export ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN.',
+      };
+    }
     return {
       id: 'provider:anthropic',
       label,
