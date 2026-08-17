@@ -767,6 +767,75 @@ ledger events. Independent of 4 and 5.
 **Phase 7 — review workflow** (B4 → T3). Conditional on Phase 0's answer to
 question 1.
 
+### 9.2b What the name→id flip actually requires (mapped 2026-08-17)
+
+Before flipping skill namespaces from the atom name to `atomId`, six read-only
+sweeps and three adversarial reviews mapped every site where the name acts as
+identity: **221 sites, 163 of which break on the flip**. Three findings change
+the plan, and one of them corrects a claim made earlier in this document's own
+commit history.
+
+**(a) CORRECTION — the flip is NOT prompt-neutral.** An earlier commit message
+asserted that "the namespace string never reaches LLM-visible text", on the
+evidence that catalog lines carry the bare skill id and `ownerNs` is only used
+for attribution. That evidence is right and the conclusion drawn from it was
+too broad. `runScriptSkillDirect` stamps the namespace into
+`Result.producedBy.name` (`skills/lifecycle.ts`), which reaches the L2 and L3
+**aggregation prompts**; and `ctx.recordSkill`'s `l1Name` is a trace field the
+viz renders. The catalog is prompt-neutral; the system is not.
+
+**(b) The existing migration harness CANNOT carry this, and grafting onto it
+would be worse than writing a new one.** `taxonomyMigration.ts` looked like the
+natural vehicle — §6.A said so — but:
+
+- The live store is already at `taxonomy_version = 2`, which equals
+  `TAXONOMY_VERSION` (`taxonomyMigration.ts:19`), so `planTaxonomyMigration`
+  short-circuits to `alreadyCurrent: true` with an empty namespace plan
+  (`:244-249`). The migration would move nothing, silently.
+- Bumping that constant is not the fix: `assertCurrentTaxonomy` then throws at
+  every run start (`:104-111`) and directs the operator at a command that is
+  itself gated by the same counter.
+- Its atomicity is weaker than a store migration needs. Staging renames happen
+  BEFORE the `try` opens (`:328-333` vs `:341`); the DB transaction stamping the
+  version commits at `:469` while the temp→final rename loop runs at `:479`,
+  outside it. A crash between them leaves the DB claiming migrated with the
+  directories still staged. The rollback loop (`:471-475`) is unguarded, so a
+  throw part-way leaves the rest staged with the version unstamped, and the
+  next attempt trips the stale guard at `:329`.
+
+So identity versioning needs its own metadata key rather than a bump of
+`TAXONOMY_VERSION` — the two migrations are orthogonal and one integer cannot
+express both.
+
+**(c) There is no display-name resolution anywhere, and roughly two dozen
+surfaces need one.** `AtomRegistry` has no `getByAtomId`; nothing maps a key
+back to a label. Every one of these renders the namespace to a human or a
+model and would show a UUID after the flip: the `molecule` column of
+`cli/skills.ts`, `ledger tail` (`cli/ledger.ts`), the copy-pasteable
+`skills merge <l1> …` hint the CLI emits, curriculum's generated task prose,
+`atoma_skills_list` over MCP, `/api/skills`, the GL client's Skills-tab header
+and timeline meta line, the frozen MUI fallback, and viz search (typing
+"Water" would stop matching). Resolution must land BEFORE the flip, not after.
+
+Two silent-corruption modes are worth naming because they keep compiling:
+
+- **Spelling split inside one ledger row.** `entity` would become an id while
+  `detail.by` and `via` stay names (`registry/atomRegistry.ts`,
+  `skills/registry.ts`), so one row carries two identity schemes.
+- **Home/donor spelling mismatch.** `visibility.ts` excludes the reader's own
+  namespace with `ns !== args.home`. If `home` and `namespaces` are ever
+  spelled differently, an atom's own skills fall into the DONOR branch, pick up
+  donor-only filters, blind the duplicate-id guard, and the learner re-saves
+  donor recipes under the reader's own key. The `home: namespaceOf(l1Type)`
+  change already landed for this reason; the invariant is that both sides of
+  that comparison must come from the same derivation, forever.
+
+**Consequence for the order of work.** The flip is not one commit. It is:
+resolution layer (`getByAtomId` + a display helper at every surface in (c)) →
+its own migration with a separate version key and real atomicity → the
+one-line change in `namespaceOf` → ledger `detail` spellings aligned in the
+same commit as `entity`.
+
 ### 9.3 Dependency summary
 
 ```
