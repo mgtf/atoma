@@ -135,6 +135,30 @@ describe('atom identity — a surrogate that never collides and never returns', 
     expect(isAtomId(atom.atomId)).toBe(true);
   });
 
+  it('resolves a type back from its id, so a key can become a label again', () => {
+    // Without this there is no way back from an identity to a display name,
+    // and every operator surface that renders a namespace would print a UUID
+    // after the flip.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const created = reg.create(1, seed);
+    const found = reg.getByAtomId(created.atomId);
+    expect(found).not.toBeNull();
+    expect(found!.name).toBe(created.name);
+    expect(found!.atomId).toBe(created.atomId);
+  });
+
+  it('returns null for an unknown or empty id instead of throwing', () => {
+    // Operator surfaces call this to turn a key into a label; a removed atom
+    // or a mid-migration row must degrade to "show the raw key", never to a
+    // crashed CLI table or viz panel.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const created = reg.create(1, seed);
+    reg.remove(created.name);
+    expect(reg.getByAtomId(created.atomId)).toBeNull();
+    expect(reg.getByAtomId('')).toBeNull();
+    expect(reg.getByAtomId(newAtomId())).toBeNull();
+  });
+
   it('generates only path-safe ids (T5: no component ever traverses)', () => {
     // The id will become a filesystem namespace, so its shape is the whole
     // safety argument — it must not be able to express a separator or a dot

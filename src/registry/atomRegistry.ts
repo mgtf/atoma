@@ -255,6 +255,28 @@ export class AtomRegistry {
     return row ? rowToType(row) : null;
   }
 
+  /**
+   * Resolve a type by its surrogate identity (T4).
+   *
+   * The lookup the codebase did not have, and the first prerequisite of the
+   * name→id flip. Once a skill namespace is an `atomId`, roughly two dozen
+   * surfaces that render a namespace to a human or a model — the CLI's
+   * `molecule` column, `ledger tail`, `atoma_skills_list`, `/api/skills`, the
+   * GL client's Skills header, viz search — need a way back to the display
+   * label, and there is none: nothing maps a key to a name today.
+   *
+   * Returns null for an unknown id, including the empty string a
+   * mid-migration row can carry (see `rowToType`), so callers can fall back to
+   * showing the raw key rather than crashing an operator surface.
+   */
+  getByAtomId(atomId: string): AtomType | null {
+    if (atomId.length === 0) return null;
+    const row = this.db
+      .prepare('SELECT * FROM atom_types WHERE atom_id = ?')
+      .get(atomId) as Row | undefined;
+    return row ? rowToType(row) : null;
+  }
+
   getByTierOrdinal(tier: Tier, ordinal: number): AtomType | null {
     const row = this.db
       .prepare('SELECT * FROM atom_types WHERE tier = ? AND ordinal = ?')
