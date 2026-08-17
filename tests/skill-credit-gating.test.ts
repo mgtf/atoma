@@ -1,3 +1,4 @@
+import { asStoredNamespace } from '../src/skills/namespace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -238,7 +239,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     }
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const water = L1Atom.fromType(reg.getByName('Water')!);
-    water.setActiveSkill('the-recipe', 'Water');
+    water.setActiveSkill('the-recipe', asStoredNamespace('Water'));
     const ctx = makeCtx();
     const verdict = await neuron.validateResult(
       water,

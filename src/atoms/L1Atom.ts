@@ -14,6 +14,7 @@ import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload } from '../contracts/witness.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { type SkillNamespace } from '../skills/namespace.js';
 
 const LOOPBACK_HTTP_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
@@ -140,7 +141,7 @@ export class L1Atom extends Atom {
    * subtasks can resolve the SAME L1 type but pick DIFFERENT skills.
    */
   private activeSkillIdField: string | null = null;
-  private activeSkillOwnerField: string | null = null;
+  private activeSkillOwnerField: SkillNamespace | null = null;
 
   /**
    * Mark this instance as currently driven by `skillId`, owned by the
@@ -151,7 +152,7 @@ export class L1Atom extends Atom {
    * from the bucket-namespace adversarial review). `ownerNs` defaults to
    * null-with-id-null; callers set both together.
    */
-  setActiveSkill(skillId: string | null, ownerNs: string | null = null): void {
+  setActiveSkill(skillId: string | null, ownerNs: SkillNamespace | null = null): void {
     this.activeSkillIdField = skillId;
     this.activeSkillOwnerField = skillId === null ? null : ownerNs;
   }
@@ -166,7 +167,7 @@ export class L1Atom extends Atom {
    * live). Under the shared-catalog lattice this can differ from the
    * executing atom's name; credit/blame/revision must all land here.
    */
-  activeSkillOwner(): string | null {
+  activeSkillOwner(): SkillNamespace | null {
     return this.activeSkillOwnerField;
   }
 

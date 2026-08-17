@@ -1,3 +1,4 @@
+import { asStoredNamespace } from '../src/skills/namespace.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,7 +24,7 @@ const SCRIBE_TOOLS = ['write_file', 'read_file', 'run_shell', 'list_files'];
 const WEB_TOOLS = ['write_file', 'read_file', 'start_static_server', 'validate_html'];
 
 describe('visibleSkillNamespaces — the lattice, pure', () => {
-  const namespaces = ['Methane', 'Water', 'Ammonia', 'Ghost'];
+  const namespaces = ['Methane', 'Water', 'Ammonia', 'Ghost'].map(asStoredNamespace);
   const toolNamesFor = (ns: string): readonly string[] | null =>
     ns === 'Methane'
       ? HTTP_TOOLS
@@ -35,7 +36,7 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
 
   it('an http reader sees the file-scribe donor (required ⊆ reader), never the orphan', () => {
     const vis = visibleSkillNamespaces({
-      home: 'Methane',
+      home: asStoredNamespace('Methane'),
       readerToolNames: HTTP_TOOLS,
       namespaces,
       toolNamesFor,
@@ -47,7 +48,7 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
 
   it('a file-scribe reader does NOT see the http donor (cannot execute its class)', () => {
     const vis = visibleSkillNamespaces({
-      home: 'Ammonia',
+      home: asStoredNamespace('Ammonia'),
       readerToolNames: SCRIBE_TOOLS,
       namespaces,
       toolNamesFor,
@@ -58,7 +59,7 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
   it('a kitchen-sink reader sees every live bucket; home stays first', () => {
     const ALL = [...new Set([...HTTP_TOOLS, ...WEB_TOOLS, ...SCRIBE_TOOLS])];
     const vis = visibleSkillNamespaces({
-      home: 'Ammonia',
+      home: asStoredNamespace('Ammonia'),
       readerToolNames: ALL,
       namespaces,
       toolNamesFor,
@@ -70,9 +71,9 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
 
   it('a null-bucket reader (no write_file) sees home only', () => {
     const vis = visibleSkillNamespaces({
-      home: 'Weird',
+      home: asStoredNamespace('Weird'),
       readerToolNames: ['read_file'],
-      namespaces: [...namespaces, 'Weird'],
+      namespaces: [...namespaces, asStoredNamespace('Weird')],
       toolNamesFor: (ns) => (ns === 'Weird' ? ['read_file'] : toolNamesFor(ns)),
     });
     expect(vis).toEqual(['Weird']);
@@ -84,7 +85,7 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
     try {
       expect(
         visibleSkillNamespaces({
-          home: 'Methane',
+          home: asStoredNamespace('Methane'),
           readerToolNames: HTTP_TOOLS,
           namespaces,
           toolNamesFor,

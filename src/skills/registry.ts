@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { appendLedger } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
+import { asStoredNamespace, type SkillNamespace } from './namespace.js';
 
 /**
  * Sidecar filename holding the original `kind: 'llm'` body of a skill
@@ -645,7 +646,7 @@ export class SkillRegistry {
    * Enumerate the L1 namespaces that have at least one skill folder.
    * Used by the skills CLI to sweep the whole store.
    */
-  listNamespaces(): string[] {
+  listNamespaces(): SkillNamespace[] {
     if (!existsSync(this.rootDir)) return [];
     return readdirSync(this.rootDir)
       .filter((entry) => {
@@ -655,7 +656,9 @@ export class SkillRegistry {
           return false;
         }
       })
-      .sort((a, b) => a.localeCompare(b));
+      .sort((a, b) => a.localeCompare(b))
+      // Read back out of the store, so these ARE namespaces by construction.
+      .map(asStoredNamespace);
   }
 
   /**

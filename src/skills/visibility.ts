@@ -1,3 +1,4 @@
+import type { SkillNamespace } from './namespace.js';
 import { bucketIdForToolNames, bucketRequiredToolNames } from '../atoms/capability.js';
 
 /**
@@ -36,19 +37,19 @@ export function sharedCatalogEnabled(): boolean {
 }
 
 export function visibleSkillNamespaces(args: {
-  /** The resolved L1 type's name — the write target and always first. */
-  home: string;
+  /** The resolved L1's OWN namespace — the write target and always first. */
+  home: SkillNamespace;
   /** Declared tool names of the resolved L1 (the reader). */
   readerToolNames: readonly string[];
   /** All namespaces present in the skill store. */
-  namespaces: readonly string[];
+  namespaces: readonly SkillNamespace[];
   /**
    * Declared tool names of a namespace's L1 type, or null when the type
    * is no longer in the atom registry (orphaned namespace — never offered
    * as a donor: without a live toolset its bucket is unknowable).
    */
-  toolNamesFor: (ns: string) => readonly string[] | null;
-}): string[] {
+  toolNamesFor: (ns: SkillNamespace) => readonly string[] | null;
+}): SkillNamespace[] {
   if (!sharedCatalogEnabled()) return [args.home];
   const readerSet = new Set(args.readerToolNames);
   const donors = args.namespaces

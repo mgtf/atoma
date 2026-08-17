@@ -1,3 +1,4 @@
+import { asStoredNamespace } from '../src/skills/namespace.js';
 import { describe, it, expect } from 'vitest';
 import {
   L1Atom,
@@ -110,7 +111,7 @@ describe('L1Atom', () => {
       };
     });
     const atom = new L1Atom(base);
-    atom.setActiveSkill('package-and-document-cli', 'Ammonia');
+    atom.setActiveSkill('package-and-document-cli', asStoredNamespace('Ammonia'));
     const result = await atom.execute(
       { description: 'package' },
       makePlan({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }),

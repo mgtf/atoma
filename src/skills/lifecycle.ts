@@ -30,6 +30,7 @@ import { hostAllowsLoopbackNetwork, scanScriptBody } from './scriptScan.js';
 import { LEARNED_CONTENT_TRUST_BOUNDARY_LINES } from './events.js';
 import { REFUSAL_GENERATION, refusalStampIsCurrent } from './generations.js';
 import { undeclaredToolMentions } from '../atoms/verdict.js';
+import { type SkillNamespace } from './namespace.js';
 
 // Historical export home — the generation machinery lives in generations.ts
 // (stats/curriculum need the predicate without importing this whole engine).
@@ -329,7 +330,7 @@ export class SkillLifecycle {
    *    else is rejected to keep the on-disk filesystem layout safe.
    */
   async learnSkillFromRun(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     subTask: Task;
     result: Result;
     child: L1Atom;
@@ -554,7 +555,7 @@ export class SkillLifecycle {
    * Costs one Sonnet call per learning event.
    */
   async learnEventSkillFromRecovery(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     subTask: Task;
     /** Verbatim rejection diagnosis (extractBranchDiagnostic output). */
     diagnostic: string;
@@ -757,7 +758,7 @@ export class SkillLifecycle {
    * a sidecar `_meta.json` field. Future runs see it and skip.
    */
   async tryPromoteSkill(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     skillId: string;
     subTask: Task;
     result: Result;
@@ -1067,11 +1068,11 @@ export class SkillLifecycle {
    * sees BOTH the capability summary and the activation hint.
    */
   async matchSkill(
-    namespaces: readonly string[],
+    namespaces: readonly SkillNamespace[],
     readerToolNames: readonly string[],
     subTask: Task,
     ctx: RunContext
-  ): Promise<{ skill: Skill; ownerNs: string; reasoning: string } | null> {
+  ): Promise<{ skill: Skill; ownerNs: SkillNamespace; reasoning: string } | null> {
     // Event-driven skills (trigger set) are recovery guidance matched
     // against MID-RUN events, not task recipes — offering them to the
     // task prefilter would let Haiku "reuse" a rejection-recovery hint
@@ -1083,7 +1084,7 @@ export class SkillLifecycle {
     // world), then executable donor namespaces in deterministic order.
     const home = namespaces[0]!;
     const readerSet = new Set(readerToolNames);
-    const tagged: { skill: Skill; ownerNs: string }[] = [];
+    const tagged: { skill: Skill; ownerNs: SkillNamespace }[] = [];
     const seenIds = new Set<string>();
     for (const ns of namespaces) {
       for (const s of this.skills.loadFor(ns)) {
@@ -1204,7 +1205,7 @@ export class SkillLifecycle {
    */
   async runScriptSkillDirect(
     skill: Skill,
-    l1Name: string,
+    l1Name: SkillNamespace,
     subTask: Task,
     ctx: RunContext
   ): Promise<Result | null> {
@@ -1368,7 +1369,7 @@ export class SkillLifecycle {
   }
 
   /** Publish credit/events only after the caller accepts a direct result. */
-  commitScriptSkillDirect(skill: Skill, l1Name: string, ctx: RunContext): void {
+  commitScriptSkillDirect(skill: Skill, l1Name: SkillNamespace, ctx: RunContext): void {
     try {
       this.skills?.clearDirectFailures(l1Name, skill.id);
       this.skills?.recordSuccess(l1Name, skill.id);
@@ -1424,7 +1425,7 @@ export class SkillLifecycle {
    * deliberately do NOT come through this method; only the two contract
    * branches (non-zero exit / missing envelope) do.
    */
-  noteDirectFailure(l1Name: string, skill: Skill, ctx: RunContext): void {
+  noteDirectFailure(l1Name: SkillNamespace, skill: Skill, ctx: RunContext): void {
     const streak = this.skills.markDirectFailure(l1Name, skill.id);
     if (streak < demoteAfter()) return;
     const demoted = this.skills.demoteToLlm(l1Name, skill.id);

@@ -101,6 +101,7 @@ import {
 import type { Skill } from '../skills/types.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import { visibleSkillNamespaces } from '../skills/visibility.js';
+import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
 
 
 
@@ -679,10 +680,14 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // never offered. Kill switch: ATOMA_SKILL_SHARED_CATALOG=0.
       const readerToolNames = (l1Type.tools ?? []).map((t) => t.name);
       const visibleNs = visibleSkillNamespaces({
-        home: l1Type.name,
+        home: namespaceOf(l1Type),
         readerToolNames,
         namespaces: this.skillRegistry.listNamespaces(),
-        toolNamesFor: (ns: string) => {
+        // BREAKS ON THE FLIP: `ns` becomes an atom id, and getByName will
+        // return null for every donor — turning the whole shared catalog into
+        // "orphaned namespaces" and silently emptying it. Needs a lookup by
+        // id when namespaceOf starts returning atomId.
+        toolNamesFor: (ns: SkillNamespace) => {
           const t = this.registry.getByName(ns);
           return t ? (t.tools ?? []).map((x) => x.name) : null;
         },
@@ -708,7 +713,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           ctx.recordSkill?.({
             op: 'quarantine',
-            l1Name: l1Type.name,
+            l1Name: namespaceOf(l1Type),
             skillId: skills.skill.id,
             actorName: this.name,
             actorTier: 2,
@@ -818,7 +823,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // re-run the model with a fresh body.
         ctx.recordSkill?.({
           op: 'inject',
-          l1Name: l1Type.name,
+          l1Name: namespaceOf(l1Type),
           skillId: skills.skill.id,
           actorName: this.name,
           actorTier: 2,
@@ -839,7 +844,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // C3's "we looked and found nothing" rule).
     const eventState = { injected: false };
     const hooks = this.makeL1Hooks(ctx, subtask.description, {
-      l1Name: l1Type.name,
+      l1Name: namespaceOf(l1Type),
       subTask,
       skillMatchAttempted,
       matchedSkillId,
@@ -871,7 +876,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // errors are logged and swallowed, the run is already delivered.
       try {
         await this.maybeLearnEventSkill({
-          l1Name: l1Type.name,
+          l1Name: namespaceOf(l1Type),
           subTask,
           res,
           eventSkillInjected: eventState.injected,
@@ -908,18 +913,18 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   private async matchSkill(
-    namespaces: readonly string[],
+    namespaces: readonly SkillNamespace[],
     readerToolNames: readonly string[],
     subTask: Task,
     ctx: RunContext
-  ): Promise<{ skill: Skill; ownerNs: string; reasoning: string } | null> {
+  ): Promise<{ skill: Skill; ownerNs: SkillNamespace; reasoning: string } | null> {
     return (
       (await this.lifecycle()?.matchSkill(namespaces, readerToolNames, subTask, ctx)) ?? null
     );
   }
 
   private async learnSkillFromRun(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     subTask: Task;
     result: Result;
     child: L1Atom;
@@ -948,7 +953,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
    * WAS injected, the recovery is confounded with the existing skill).
    */
   private async maybeLearnEventSkill(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     subTask: Task;
     res: Result;
     eventSkillInjected: boolean;
@@ -977,7 +982,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
   }
 
   private async tryPromoteSkill(args: {
-    l1Name: string;
+    l1Name: SkillNamespace;
     skillId: string;
     subTask: Task;
     result: Result;
@@ -989,7 +994,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
 
   private async runScriptSkillDirect(
     skill: Skill,
-    l1Name: string,
+    l1Name: SkillNamespace,
     subTask: Task,
     ctx: RunContext
   ): Promise<Result | null> {
@@ -1137,7 +1142,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     subtaskDescription: string,
     skillCtx: {
       /** L1 atom-type name for this subtask (skills are namespaced by it). */
-      l1Name: string;
+      l1Name: SkillNamespace;
       /** The actual subtask Task, needed by skill-learning prompts. */
       subTask: Task;
       /**
@@ -1220,7 +1225,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           // the lookup used to silently miss, cutting the recipe AND the
           // attribution mid-loop.
           const ownerNs =
-            (child instanceof L1Atom ? child.activeSkillOwner() : null) ?? child.name;
+            (child instanceof L1Atom ? child.activeSkillOwner() : null) ?? namespaceOf(child);
           const skill = this.skillRegistry?.loadFor(ownerNs).find((k) => k.id === skillId);
           if (skill) {
             fresh.injectContext(skillContextBlock(skill));
@@ -1310,7 +1315,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // child was branched mid-loop (the lookup used to miss and skip the
         // revision silently) and, under the shared catalog, whenever the
         // match came from a donor namespace.
-        const activeSkillNs = child.activeSkillOwner() ?? child.name;
+        const activeSkillNs = child.activeSkillOwner() ?? namespaceOf(child);
         const skillWasIgnored = lastResultVerdictSkillFollowed(trace) === false;
         if (activeSkillId && skillWasIgnored) {
           ctx.logger.info(
@@ -1463,7 +1468,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // is the R2 guard: the legacy-branch path returns an untagged
         // instance, so a run the branch delivered without the recipe
         // credits nothing.
-        const skillNs = child.activeSkillOwner() ?? child.name;
+        const skillNs = child.activeSkillOwner() ?? namespaceOf(child);
         if (skillId && this.skillRegistry && verdict?.activeSkillFollowed === false) {
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" credit WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
@@ -1561,7 +1566,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         const skillId = child.activeSkillId();
         // Blame lands on the OWNER namespace, symmetric with the credit
         // side (R2): read the pair from the instance, never from context.
-        const blameNs = child.activeSkillOwner() ?? child.name;
+        const blameNs = child.activeSkillOwner() ?? namespaceOf(child);
         if (skillId && this.skillRegistry && lastResultVerdict?.activeSkillFollowed === false) {
           ctx.logger.info(
             `[${this.name}] skill "${skillId}" blame WITHHELD on ${child.name}: validator observed the run did not follow the recipe`
@@ -1936,7 +1941,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     const activeSkill =
       activeSkillId && this.skillRegistry
         ? this.skillRegistry
-            .loadFor(child.activeSkillOwner() ?? child.name)
+            .loadFor(child.activeSkillOwner() ?? namespaceOf(child))
             .find((s) => s.id === activeSkillId)
         : undefined;
     const activeScriptSkillIgnored =
