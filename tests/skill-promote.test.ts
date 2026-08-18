@@ -465,6 +465,76 @@ describe('L2 onApproved — skill promotion (#C2c)', () => {
   });
 });
 
+describe('L2 onApproved — promotion scan resolves host tools by atom id', () => {
+  let dir: string;
+  let skills: SkillRegistry;
+  let reg: AtomRegistry;
+  let envBefore: string | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-promote-id-'));
+    skills = new SkillRegistry(dir);
+    reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, seed);
+    reg.create(1, {
+      ...seed,
+      description: 'http builder',
+      systemPrompt: 'You are an L1.',
+      tools: [
+        { name: 'fetch_url', description: 'f', inputSchema: { type: 'object', properties: {} } },
+        { name: 'start_node_server', description: 's', inputSchema: { type: 'object', properties: {} } },
+      ],
+    });
+    envBefore = process.env['ATOMA_SKILL_PROMOTE'];
+    skills.save(nsOf(reg, 'Water'), {
+      id: 'probe-loopback',
+      description: 'boot the server and probe it',
+      whenToUse: 'when the subtask is an HTTP API probe',
+      kind: 'llm',
+      body: '1. start_node_server\n2. fetch_url the loopback health route',
+    });
+    for (let i = 0; i < TRUST_PROMOTE_THRESHOLD_SUCCESSES; i++) {
+      skills.recordSuccess(nsOf(reg, 'Water'), 'probe-loopback');
+    }
+    for (let i = 0; i < TRUST_THRESHOLD_SUCCESSES; i++) reg.recordSuccess('Water');
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    if (envBefore === undefined) delete process.env['ATOMA_SKILL_PROMOTE'];
+    else process.env['ATOMA_SKILL_PROMOTE'] = envBefore;
+  });
+
+  it('does not refuse a loopback fetch compile (review 2026-08-18 §1.2)', async () => {
+    // REGRESSION. tryPromoteSkill looked up hostTools via getByName(skillNs)
+    // after T4, with skillNs an atom id. The lookup was always null, the
+    // scan ran as a file-scribe host, and a legitimate HTTP compile was
+    // stamped refused.
+    process.env['ATOMA_SKILL_PROMOTE'] = '1';
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'probe-loopback', confidence: 'high', reasoning: 'fit' })
+    );
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    ctx.llm.enqueueText(jsonText({ output: 'http://localhost:8000/', summary: 'probed' }));
+    const SCRIPT_BODY =
+      'const r = await fetch("http://localhost:9/health");\n' +
+      'console.log(JSON.stringify({output: "ok", summary: "done"}));\n';
+    ctx.llm.enqueueText(
+      JSON.stringify({ promotable: true, language: 'node', body: SCRIPT_BODY })
+    );
+
+    await neuron.handleDirect({ description: 'probe the api' }, ctx);
+
+    const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'probe-loopback')!;
+    expect(after.kind).toBe('script');
+    expect(after.promotionRefusedAt).toBeUndefined();
+  });
+});
+
 describe('post-approval bookkeeping — decoupled from the run deadline', () => {
   it('the compile call carries its OWN signal, not the run signal', async () => {
     // Three live incidents showed that sharing the run signal can strand a

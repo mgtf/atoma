@@ -1065,10 +1065,11 @@ function drawEventDetail(
       scrollY: ctx.detailScrollY,
       maxScroll: ctx.detailScrollMax,
     });
-    if (event.l1Name && event.skillId) {
+    const skillKey = event.l1AtomId ?? event.l1Name;
+    if (skillKey && event.skillId) {
       ctx.button(
         ctx.root,
-        `skill.open.${event.l1Name}::${event.skillId}`,
+        `skill.open.${skillKey}::${event.skillId}`,
         'button',
         snapshot.t('registry.openSkill'),
         x + 18,

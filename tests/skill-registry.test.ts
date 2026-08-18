@@ -549,32 +549,29 @@ describe('L1Atom.skills() integration', () => {
   });
 
   it('hydrates skills() from the registry when one is provided', () => {
-    reg.save('Water', {
+    const type = {
+      atomId: '00000000-0000-4000-8000-000000000001',
+      tier: 1 as const,
+      ordinal: 1,
+      name: 'Water',
+      description: 'd',
+      systemPrompt: 'sys',
+      tools: [],
+      params: {},
+      version: 1,
+      successes: 0,
+      failures: 0,
+      createdBy: 'test',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    reg.save(type.atomId, {
       id: 'web-build-loop',
       description: 'd',
       whenToUse: 'w',
       kind: 'llm',
       body: 'b',
     });
-    const atom = L1Atom.fromType(
-      {
-        atomId: '00000000-0000-4000-8000-000000000001',
-        tier: 1,
-        ordinal: 1,
-        name: 'Water',
-        description: 'd',
-        systemPrompt: 'sys',
-        tools: [],
-        params: {},
-        version: 1,
-        successes: 0,
-        failures: 0,
-        createdBy: 'test',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      },
-      undefined,
-      reg
-    );
+    const atom = L1Atom.fromType(type, undefined, reg);
     expect(atom.skills().map((s) => s.id)).toEqual(['web-build-loop']);
   });
 

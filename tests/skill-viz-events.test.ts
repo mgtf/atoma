@@ -77,6 +77,7 @@ describe('L2 — recordSkill events', () => {
     const ops = seen.map((e) => e.op);
     expect(ops).toEqual(['match', 'inject', 'success']);
     expect(seen.every((e) => e.l1Name === 'Water' && e.skillId === 'web-build-loop')).toBe(true);
+    expect(seen.every((e) => e.l1AtomId === nsOf(reg, 'Water'))).toBe(true);
     expect(seen.every((e) => e.actorName === 'Tracheid' && e.actorTier === 2)).toBe(true);
     // Match carries the prefilter reasoning verbatim.
     expect(seen[0]!.reasoning).toMatch(/fits/);

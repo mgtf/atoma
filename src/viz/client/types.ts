@@ -44,6 +44,8 @@ export interface VizEvent {
   userContent?: string;
   op?: string;
   l1Name?: string;
+  /** Stored skill-namespace key (atom id). Address `/api/skills` with this, not `l1Name`. */
+  l1AtomId?: string;
   skillId?: string;
   snapshot?: RegistryType;
   modifications?: unknown;

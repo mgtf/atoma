@@ -206,8 +206,10 @@ export interface VizSkillEvent {
     | 'direct'
     | 'quarantine'
     | 'credit-withheld';
-  /** L1 atom-type name the skill is namespaced under. */
+  /** Display name of the molecule that owns the skill. */
   l1Name: string;
+  /** Stored namespace key (atom id) — what `/api/skills/:l1Name` expects. */
+  l1AtomId: string;
   /** Stable kebab-case skill id within that namespace. */
   skillId: string;
   /** Atom that triggered the event (usually the supervising L2). */
@@ -548,6 +550,7 @@ export class TraceRecorder {
       kind: 'skill',
       op: info.op,
       l1Name: info.l1Name,
+      l1AtomId: info.l1AtomId,
       skillId: info.skillId,
       actor: { name: info.actorName, tier: info.actorTier },
       ...(info.reasoning !== undefined ? { reasoning: info.reasoning } : {}),

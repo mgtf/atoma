@@ -7,14 +7,19 @@ manuelle des chemins de production à HEAD. Les findings de
 les batches runtime 1–10 ne sont pas re-litigés. Convention : **✓ = lu dans le
 code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 
-> **Working tree.** Quatre fichiers registry sont dirty
-> (`atomRegistry.ts`, `molecules.ts`, `cells.ts`, `tissues.ts`). Ils retirent
-> `isReservedTaxonomyName` et déplacent la collision sur `nextAvailable(...,
-> takenNames())`. C’est une autre thèse que 08fc043 : le LLM *garde* le nom
-> du pool, et `create()` saute l’entrée. Les tests commis ce matin
-> (`CarbonDioxide-2`, ordinal 4 reste canonique) et le contrat AGENTS.md
-> (« the branch collision guard reserves the whole taxonomy pool »)
-> échoueraient. Ne pas merger cet in-progress tel quel.
+> **Statut 2026-08-18 (après-midi)** : le delta nom↔id (§1.1–1.5, 1.7, 1.9)
+> est fermé. `resolveNamespaceKey` est le résolveur unique (nom ou id → clé
+> disque) ; MCP review indexe les outils par `atomId` ; `tryPromoteSkill`
+> lit `getByAtomId` ; `recordSkillEvent` persiste `l1AtomId` et open-skill /
+> prefetch l’utilisent ; `L2Atom.lifecycle()` injecte
+> `displayNameForNamespace` ; `L1Atom.fromType` charge sous `namespaceOf`.
+> Tests : `tests/skill-identity-surfaces.test.ts` (chemin production
+> create→dirname=`atomId`, MCP list/review/stats, filtre par nom) +
+> promotion HTTP loopback (`skill-promote.test.ts`). Le squat registry
+> (§ bandeau working-tree) a été tranché dans `c517b8e` : la garde est
+> sur l’allocator, le LLM garde le nom, le pool saute l’entrée prise.
+> Reste : T10 `modelForTier`/`providerEnv` (§1.6), `assertCurrentIdentity`
+> (§1.8).
 
 ## Vue d'ensemble de la fenêtre
 

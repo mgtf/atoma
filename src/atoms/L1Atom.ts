@@ -14,7 +14,7 @@ import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload } from '../contracts/witness.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { type SkillNamespace } from '../skills/namespace.js';
+import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
 
 const LOOPBACK_HTTP_URL_RE =
   /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?:[:/?#]|$)/i;
@@ -185,7 +185,7 @@ export class L1Atom extends Atom {
     let skills: readonly Skill[] = [];
     if (skillRegistry) {
       try {
-        skills = skillRegistry.loadFor(type.name);
+        skills = skillRegistry.loadFor(namespaceOf(type));
       } catch {
         // A malformed skills folder must not bring down atom
         // construction — the run should still proceed without

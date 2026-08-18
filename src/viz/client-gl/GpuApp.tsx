@@ -93,12 +93,13 @@ export function GpuApp() {
     () => runQuery.data?.events.find((event) => event.id === state.selectedEventId) ?? null,
     [runQuery.data, state.selectedEventId]
   );
+  const runSkillNs = selectedRunEvent?.l1AtomId ?? selectedRunEvent?.l1Name;
   const runSkillSelection =
     state.view === 'runs' &&
     selectedRunEvent?.kind === 'skill' &&
-    selectedRunEvent.l1Name &&
+    runSkillNs &&
     selectedRunEvent.skillId
-      ? { l1Name: selectedRunEvent.l1Name, id: selectedRunEvent.skillId }
+      ? { l1Name: runSkillNs, id: selectedRunEvent.skillId }
       : null;
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
   const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection));

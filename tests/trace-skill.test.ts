@@ -45,6 +45,7 @@ describe('TraceRecorder.recordSkillEvent', () => {
     expect(ev.kind).toBe('skill');
     expect(ev.op).toBe('match');
     expect(ev.l1Name).toBe('Ammonia');
+    expect(ev.l1AtomId).toBe('atom-id-for-test');
     expect(ev.skillId).toBe('scaffold-package-json');
     expect(ev.actor).toEqual({ name: 'Erythrocyte', tier: 2 });
     expect(ev.reasoning).toMatch(/matched the subtask/);

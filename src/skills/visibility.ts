@@ -4,7 +4,7 @@ import { bucketIdForToolNames, bucketRequiredToolNames } from '../atoms/capabili
 /**
  * SHARED-CATALOG VISIBILITY LATTICE (commit B of the bucket-namespace plan).
  * ==========================================================================
- * Skills stay stored per-L1 (`./skills/<l1-name>/` — ZERO migration; the
+ * Skills stay stored per-L1 (`./skills/<atom-id>/`; the
  * adversarial design pass rejected bucket directories: the flagship
  * duplicated replay recipes lived in DIFFERENT buckets, `sanitise` rejects
  * the `+` in bucket ids, and a re-key would have orphaned ~290 ledger

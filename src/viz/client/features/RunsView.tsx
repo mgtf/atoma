@@ -646,9 +646,10 @@ function SkillEventDetail({
   const [skill, setSkill] = useState<SkillSummary | null>(null);
   useEffect(() => {
     setSkill(null);
-    if (!event.l1Name || !event.skillId) return;
+    const skillKey = event.l1AtomId ?? event.l1Name;
+    if (!skillKey || !event.skillId) return;
     let cancelled = false;
-    void api.skill(event.l1Name, event.skillId)
+    void api.skill(skillKey, event.skillId)
       .then((detail) => {
         if (!cancelled) setSkill(detail);
       })
@@ -658,8 +659,9 @@ function SkillEventDetail({
     return () => {
       cancelled = true;
     };
-  }, [event.l1Name, event.skillId]);
+  }, [event.l1AtomId, event.l1Name, event.skillId]);
   const nodes = buildSkillEventDetail(event, skill, t);
+  const skillKey = event.l1AtomId ?? event.l1Name;
   return (
     <Stack spacing={1.5}>
       <Box>
@@ -675,8 +677,8 @@ function SkillEventDetail({
           />
         ))}
       </Stack>
-      {event.l1Name && event.skillId ? (
-        <Button variant="outlined" onClick={() => onOpenSkill(event.l1Name!, event.skillId!)}>
+      {skillKey && event.skillId ? (
+        <Button variant="outlined" onClick={() => onOpenSkill(skillKey, event.skillId!)}>
           {t('registry.openSkill')}
         </Button>
       ) : null}

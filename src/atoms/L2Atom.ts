@@ -913,7 +913,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           params: this.params,
           effectiveSystemPrompt: () => this.effectiveSystemPrompt(),
         },
-        this.skillRegistry
+        this.skillRegistry,
+        (ns) => this.displayNameForNamespace(ns)
       );
     }
     return this.lifecycleEngine;
@@ -1540,7 +1541,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               // deterministic across crediting hosts — a permissive reader
               // must not admit a compiled body that its file-scribe owner's
               // scan would refuse (order-dependent bifurcated trust).
-              hostTools: (this.registry.getByName(skillNs)?.tools ?? []).map((t) => t.name),
+              hostTools: (this.registry.getByAtomId(skillNs)?.tools ?? []).map((t) => t.name),
             });
           } catch (err) {
             ctx.logger.warn(

@@ -33,6 +33,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { SkillRegistry } from '../skills/registry.js';
+import { resolveNamespaceKey } from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { readLedger, projectCounters } from '../core/ledger.js';
 import { computeStatsRows, similarityPairs } from '../skills/stats.js';
@@ -217,7 +218,8 @@ export function registryShow(opts: { name: string }): unknown {
 /* -------------------------------------------------------------------- skills */
 
 function skillNamespaces(reg: SkillRegistry, l1?: string): string[] {
-  return l1 ? [l1] : reg.listNamespaces();
+  if (!l1) return reg.listNamespaces();
+  return [resolveNamespaceKey(l1, displayNamesByAtomId())];
 }
 
 /**
@@ -284,10 +286,17 @@ export function skillsList(opts: { l1?: string } = {}): unknown {
 export function skillsStats(opts: { l1?: string; sim?: number } = {}): unknown {
   const dir = skillsDirPath();
   const reg = new SkillRegistry(dir);
+  const labels = displayNamesByAtomId();
   const byL1 = new Map(skillNamespaces(reg, opts.l1).map((ns) => [ns, reg.loadFor(ns)]));
   const trust = trustThreshold();
   const promote = promoteThreshold();
-  const rows = computeStatsRows(byL1, { trust, promote, stampIsCurrent: refusalStampIsCurrent });
+  const rows = computeStatsRows(byL1, { trust, promote, stampIsCurrent: refusalStampIsCurrent }).map(
+    (r) => ({
+      ...r,
+      l1: labels.get(r.l1) ?? r.l1,
+      l1Key: r.l1,
+    })
+  );
   const sim = typeof opts.sim === 'number' && opts.sim > 0 && opts.sim <= 1 ? opts.sim : 0.5;
   return {
     skillsDir: dir,
@@ -296,7 +305,8 @@ export function skillsStats(opts: { l1?: string; sim?: number } = {}): unknown {
       'matches = prefilter picks; freeRides = matched but did not drive the run (credit withheld by the adherence gate)',
     rows,
     mergeCandidates: similarityPairs(byL1, sim).map((p) => ({
-      l1: p.l1,
+      l1: labels.get(p.l1) ?? p.l1,
+      l1Key: p.l1,
       a: p.a,
       b: p.b,
       score: Number(p.score.toFixed(3)),
@@ -325,7 +335,7 @@ export function skillsReview(opts: { l1?: string } = {}): unknown {
       for (const tier of [1, 2, 3] as const) {
         for (const a of reader.listByTier(tier)) {
           toolsByAtom.set(
-            a.name,
+            a.atomId,
             a.tools.map((t) => t.name)
           );
         }
@@ -334,6 +344,7 @@ export function skillsReview(opts: { l1?: string } = {}): unknown {
       db.close();
     }
   }
+  const labels = displayNamesByAtomId();
   const assessments: unknown[] = [];
   const tally = { blocked: 0, reviewRequired: 0, localOnly: 0 };
   for (const ns of skillNamespaces(reg, opts.l1)) {
@@ -342,7 +353,13 @@ export function skillsReview(opts: { l1?: string } = {}): unknown {
       if (a.verdict === 'blocked') tally.blocked++;
       else if (a.verdict === 'review-required') tally.reviewRequired++;
       else tally.localOnly++;
-      assessments.push({ l1: ns, id: skill.id, kind: skill.kind, ...a });
+      assessments.push({
+        l1: labels.get(ns) ?? ns,
+        l1Key: ns,
+        id: skill.id,
+        kind: skill.kind,
+        ...a,
+      });
     }
   }
   return {

@@ -47,9 +47,9 @@ export function namespaceOf(atom: {
   readonly atomId: string;
   readonly name: string;
 }): SkillNamespace {
-  // FLIPPED. A store whose directories are still name-keyed is refused at
-  // launch by `assertCurrentIdentity` rather than silently returning no
-  // skills, and `registry migrate-identity --apply` is what moves them.
+  // Directories are keyed by atomId. A leftover name-keyed tree is simply
+  // invisible (loadFor looks under the id). There is no launch-time
+  // refusal and no migrate-identity command after the 2026-08-18 reset.
   return atom.atomId as SkillNamespace;
 }
 
@@ -65,4 +65,24 @@ export function namespaceOf(atom: {
  */
 export function asStoredNamespace(raw: string): SkillNamespace {
   return raw as SkillNamespace;
+}
+
+/**
+ * Admit an operator / MCP / viz argument that may be a display name or an
+ * atom id, and return the stored namespace key.
+ *
+ * `idToName` is the atom-id → molecule-name map the operator surfaces
+ * already load for display. If `raw` is an id in that map, or a name that
+ * maps to one, we return the id. Otherwise the raw string — orphaned
+ * directories and tests that mint their own keys stay addressable.
+ */
+export function resolveNamespaceKey(
+  raw: string,
+  idToName: ReadonlyMap<string, string>
+): string {
+  if (idToName.has(raw)) return raw;
+  for (const [id, name] of idToName) {
+    if (name === raw) return id;
+  }
+  return raw;
 }

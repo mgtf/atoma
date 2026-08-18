@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { resolveNamespaceKey } from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
@@ -113,13 +114,17 @@ function displayNamesByAtomId(dbFlag?: string): Map<string, string> {
   return out;
 }
 
+function resolveL1(raw: string, dbFlag?: string): string {
+  return resolveNamespaceKey(raw, displayNamesByAtomId(dbFlag));
+}
+
 function cmdList(
   registry: SkillRegistry,
   l1Filter: string | undefined,
   dbFlag?: string
 ): void {
   const labels = displayNamesByAtomId(dbFlag);
-  const namespaces = l1Filter ? [l1Filter] : registry.listNamespaces();
+  const namespaces = l1Filter ? [resolveL1(l1Filter, dbFlag)] : registry.listNamespaces();
   const rows: string[][] = [];
   for (const ns of namespaces) {
     rows.push(...registry.loadFor(ns).map((s) => formatSkill(labels.get(ns) ?? ns, s)));
@@ -217,7 +222,7 @@ function cmdStats(
   dbFlag?: string
 ): void {
   const labels = displayNamesByAtomId(dbFlag);
-  const namespaces = l1Filter ? [l1Filter] : registry.listNamespaces();
+  const namespaces = l1Filter ? [resolveL1(l1Filter, dbFlag)] : registry.listNamespaces();
   // Keyed by the LABEL: these rows are a human report, and the stats table
   // groups by whatever key it is handed.
   const byL1 = new Map(namespaces.map((ns) => [labels.get(ns) ?? ns, registry.loadFor(ns)]));
@@ -436,7 +441,8 @@ function cmdReview(registry: SkillRegistry, l1Filter?: string, dbFlag?: string):
   }
 
   const labels = displayNamesByAtomId(dbFlag);
-  const namespaces = registry.listNamespaces().filter((n: string) => !l1Filter || n === l1Filter);
+  const filterKey = l1Filter ? resolveL1(l1Filter, dbFlag) : undefined;
+  const namespaces = registry.listNamespaces().filter((n: string) => !filterKey || n === filterKey);
   const tally = { blocked: 0, review: 0, local: 0 };
   for (const ns of namespaces) {
     const owner = toolsByAtom.get(ns);
@@ -487,7 +493,7 @@ function main(): void {
         console.error('usage: show <l1> <skill-id>');
         process.exit(2);
       }
-      return cmdShow(registry, l1, id);
+      return cmdShow(registry, resolveL1(l1, args.flags['db']), id);
     }
     case 'drop': {
       const [l1, id] = args.positional;
@@ -495,7 +501,7 @@ function main(): void {
         console.error('usage: drop <l1> <skill-id> [--force]');
         process.exit(2);
       }
-      return cmdDrop(registry, l1, id, 'force' in args.flags);
+      return cmdDrop(registry, resolveL1(l1, args.flags['db']), id, 'force' in args.flags);
     }
     case 'merge': {
       const [l1, keepId, absorbId] = args.positional;
@@ -503,7 +509,7 @@ function main(): void {
         console.error('usage: merge <l1> <keep-id> <absorb-id> [--force]');
         process.exit(2);
       }
-      return cmdMerge(registry, l1, keepId, absorbId, 'force' in args.flags);
+      return cmdMerge(registry, resolveL1(l1, args.flags['db']), keepId, absorbId, 'force' in args.flags);
     }
     case 'export': {
       const [l1, id] = args.positional;
@@ -511,7 +517,7 @@ function main(): void {
         console.error('usage: export <l1> <skill-id> [--out <dir>]');
         process.exit(2);
       }
-      return cmdExport(registry, l1, id, args.flags['out'] ?? './skills-export');
+      return cmdExport(registry, resolveL1(l1, args.flags['db']), id, args.flags['out'] ?? './skills-export');
     }
     case 'reset': {
       const [l1, id] = args.positional;
@@ -519,7 +525,7 @@ function main(): void {
         console.error('usage: reset <l1> <skill-id>');
         process.exit(2);
       }
-      return cmdReset(registry, l1, id);
+      return cmdReset(registry, resolveL1(l1, args.flags['db']), id);
     }
   }
 }
