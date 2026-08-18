@@ -189,7 +189,10 @@ Read this section before changing any LLM call site.
   omitted L3 aggregation defaults to `sequential`.
 - Aggregation is behavioral: `concat` and `llm-synthesize` dispatch orthogonal
   subtasks in parallel; `sequential` dispatches shared-artifact phases in order
-  and threads `previousStepSummary`. Do not parallelize coupled filesystem work.
+  and threads `previousStepSummary` plus declared `outputs` as
+  `inputs.previousStepOutputs`. Do not merge prior writes into the next
+  phase's `outputs` — skill/promotion gates read the current phase only.
+  Do not parallelize coupled filesystem work.
 - A plan carries ONE aggregation mode, so fan-out + join has no direct spelling
   at a single tier: L3 emits ONE phase per orthogonal GROUP and the L2 that
   receives it fans the group out. One L3 phase per orthogonal artefact
@@ -317,9 +320,10 @@ Read this section before changing any LLM call site.
 Skills follow learn → match/inject → earn credit → compile → trusted dispatch.
 
 - Skills live under owner namespaces on disk, keyed by atom id
-  (`skills/<atom-id>/`). Metadata sidecars are data: read them strictly
-  before mutation and write atomically. Never turn corruption into valid
-  zero counters.
+  (`skills/<atom-id>/`). Operator and MCP arguments go through
+  `resolveMoleculeRef` (name or id → `{ atomId, name }`). Metadata
+  sidecars are data: read them strictly before mutation and write
+  atomically. Never turn corruption into valid zero counters.
 - Match against reusable `when_to_use` capability language, not task theme or
   hidden workspace state the prefilter cannot inspect.
 - The skill prefilter runs only when candidates exist. Injection is guidance;

@@ -249,17 +249,22 @@ $0.366 with one. With n=1 in the single-lane arm, treat the magnitudes as
 indicative only — what the repetitions establish is the SIGN of the trade and
 the fact that both shapes are viable, not a ratio.
 
-## Open: one phase can outlive the whole run
+## Closed: one phase can outlive the whole run
 
-Underneath the documentation incident sits a budget mismatch worth fixing on
-its own terms: the L1 tool
-loop is bounded by ITERATIONS (40 when a validator is present,
+Underneath the documentation incident sat a budget mismatch: the L1 tool
+loop was bounded by ITERATIONS (40 when a validator is present,
 `src/atoms/L1Atom.ts`), never by the run's remaining wall clock. At the ~26 s
 per iteration this transport actually costs, 40 iterations is ~1040 s — more
-than the 900 s the whole run had. One phase can legally consume the entire
-budget. The per-call guard does not help: `DEFAULT_CLI_CALL_TIMEOUT_MS` is a
+than the 900 s the whole run had. One phase could legally consume the entire
+budget. The per-call guard did not help: `DEFAULT_CLI_CALL_TIMEOUT_MS` is a
 10-minute IDLE timeout, and a loop producing a tool call every 26 s never goes
 idle.
+
+**Closed 2026-08-18.** `RunContext.deadlineAt` is the run abort timestamp.
+`capToolIterations` shrinks the 40/24 iteration cap against remaining wall
+clock using this 26 s floor. The abort signal still stops the in-flight
+call; the cap only stops a phase from *scheduling* more iterations than
+the deadline can pay.
 
 ## Open: a hung transport costs the whole batch
 

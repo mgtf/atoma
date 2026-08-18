@@ -7,23 +7,23 @@ manuelle des chemins de production à HEAD. Les findings de
 les batches runtime 1–10 ne sont pas re-litigés. Convention : **✓ = lu dans le
 code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 
-> **Statut 2026-08-18 (après-midi)** : le delta nom↔id (§1.1–1.5, 1.7, 1.9)
-> est fermé. `resolveNamespaceKey` est le résolveur unique (nom ou id → clé
-> disque) ; MCP review indexe les outils par `atomId` ; `tryPromoteSkill`
-> lit `getByAtomId` ; `recordSkillEvent` persiste `l1AtomId` et open-skill /
-> prefetch l’utilisent ; `L2Atom.lifecycle()` injecte
-> `displayNameForNamespace` ; `L1Atom.fromType` charge sous `namespaceOf`.
-> Tests : `tests/skill-identity-surfaces.test.ts` (chemin production
-> create→dirname=`atomId`, MCP list/review/stats, filtre par nom) +
-> promotion HTTP loopback (`skill-promote.test.ts`). Le squat registry
-> (§ bandeau working-tree) a été tranché dans `c517b8e` : la garde est
-> sur l’allocator, le LLM garde le nom, le pool saute l’entrée prise.
-> T10 (§1.6) : `modelForTier(env)`, `applyTierPins` + snapshot hôte, garde
-> Codex L1 et `assertTransportHonoursCredentials` sur les pins de tier
-> (`claude-cli` / `codex`) aussi, pas seulement `ATOMA_LLM`.
-> §1.8 : retiré. Le reset a vidé `skills/` ; le contrat restant est
-> `namespaceOf` → atom id plus le test create→dirname. Pas de garde
-> launch/doctor (porte mécanique pour un incident déjà tranché).
+> **Statut 2026-08-18 (soir)** : tous les findings actionnables sont
+> absorbés. `resolveMoleculeRef` (nom ou id → `{ atomId, name }`) est le
+> couple que CLI / MCP / suggestion `merge` consomment ; `resolveNamespaceKey`
+> en est l’alias clé-seule. MCP review indexe les outils par `atomId` ;
+> `tryPromoteSkill` lit `getByAtomId` ; `recordSkillEvent` persiste
+> `l1AtomId` ; `L1Atom.fromType` charge sous `namespaceOf`. T10 :
+> `modelForTier(env)`, `applyTierPins` (pin manquant = delete), Codex L1
+> et `assertTransportHonoursCredentials` sur les pins `claude-cli` /
+> `codex`. Squat registry : `c517b8e` (garde sur l’allocator). §1.8 retiré
+> (pas de garde leftover name-keyed). §1.11 : RESET du panneau de tuning
+> oublie `localStorage`. Dispatch séquentiel file `previousStepOutputs`.
+> Le budget d’itérations outils est borné par `ctx.deadlineAt`.
+> `registry remove` / `dedupe` appellent `dropNamespace`. Doctor refuse un
+> store pré-T4. `runTrace` porte le caveat UNTRUSTED. Commentaires
+> `./skills/<l1-name>/` rattrapés. Accepté sans nouveau code : MUI poll
+> (§1.10, client gelé), cluster viz du 16 (§2.D), concat L3 explicite,
+> fan-out Haiku, OAuth machine hors snapshot (saas A6 REMAINING).
 
 ## Vue d'ensemble de la fenêtre
 
@@ -195,12 +195,21 @@ correctness. Mentionné parce que c’est le *même* incident que la revue du
 14 §F (« rebuild à chaque poll ») sur le client qu’on a choisi de garder
 en fallback.
 
+**Disposition : accepté.** `ATOMA_VIZ_UI=mui` / `npm run viz:mui` — fixer
+un breakage, n’ajouter rien. Le client GPU a déjà le delta + structural
+sharing (eea8345).
+
 ### 1.11 ✓ LOW — Tuning persisté, pas de reset UI
 
 `src/viz/client-gl/tuning-live.ts:28-60`. Le panneau est visible par
 défaut (f357a35). Chaque drag écrit `localStorage['atoma.viz.tuning']`.
 `TUNING_IDENTITY` n’est pas muté ; la *session suivante* recharge des
 décalages dev. Dérive visuelle « production » si on oublie `?atomaTune=0`.
+
+**Disposition : fermé.** Le panneau reste visible par défaut (choix
+produit) ; RESET ramène l’échantillon live à l’identité et
+`localStorage.removeItem('atoma.viz.tuning')`. `?atomaTune=0` cache le
+panneau.
 
 ## 2. Erreurs de conception
 
@@ -213,6 +222,9 @@ consommateurs qui *écrivent* la clé (filtre, merge, review, open-skill,
 `getByName`, `loadFor(type.name)`). C’est la classe
 un-concept-deux-définitions appliquée à l’identité elle-même.
 
+**Disposition : fermé.** `resolveMoleculeRef` est le couple unique ;
+les addressers CLI/MCP/merge le consomment.
+
 **B. T10 a le même trou que T4 : le snapshot est optionnel pour les
 lecteurs qui comptent.** Les clients sont construits depuis `providerEnv` ;
 les atomes choisissent le modèle via `modelForTier()` → `process.env` ; la
@@ -221,12 +233,21 @@ L2 les voient. Deux runs in-process concurrents (pas le MCP actuel, qui
 spawn un child) se marchent dessus. Le document dit DONE ; le code dit
 « CLI only, embedder best-effort ».
 
+**Disposition : fermé pour le produit local.** Pins et gardes lisent le
+snapshot. Deux runs in-process concurrents restent hors contrat (MCP
+spawn un child). OAuth machine sans clé dans le snapshot = saas
+REMAINING.
+
 **C. Les commentaires portent encore le contrat de la migration
 supprimée.** `visibility.ts:7` (« `./skills/<l1-name>/` — ZERO
 migration »), `atomRegistry.ts:18` et `:628-631` (« skill store namespaces
 by [name] »), `namespace.ts:50-52` (`assertCurrentIdentity`). Après un
 `refactor!` qui efface le migrator, un commentaire qui promet une garde
 est une régression opératoire.
+
+**Disposition : fermé.** `visibility.ts` et `namespace.ts` étaient déjà
+rattrapés ; `L1Atom.ts` et `skills/types.ts` décrivent maintenant
+`./skills/<atom-id>/`. `assertCurrentIdentity` n’est pas réintroduit.
 
 **D. Cluster viz du 16 août = même journée, même widget, six commits de
 drag.** `d7616d2` puis `5fbf662` / `b7598ac` / `3112f46` / `b01de43` /
@@ -235,29 +256,30 @@ rendu ; le motif (fixer le symptôme du tick suivant) est le même. Le
 pointer-light GC (e1050c1) et le poll sans rebuild (eea8345) sont au
 contraire des fermetures propres d’incidents nommés.
 
+**Disposition : accepté (récit).** Pas un defect live ; le refroidissement
+reste la règle pour les gates, pas un rollback du rendu.
+
 ## 3. Refactorings (rendement)
 
-1. **Un résolveur `resolveMoleculeRef(raw) → { atomId, name }`** consommé
+1. **✓ Un résolveur `resolveMoleculeRef(raw) → { atomId, name }`** consommé
    par CLI, MCP (`l1` / `--molecule` / positionnelles), et la suggestion
    `merge`. Entrée = nom *ou* id ; sortie toujours les deux. Corrige 1.4,
    1.5, 1.9.
-2. **Persister `l1AtomId` sur `VizSkillEvent`** et l’utiliser pour
+2. **✓ Persister `l1AtomId` sur `VizSkillEvent`** et l’utiliser pour
    `/api/skills` / `skill.open` / prefetch. Le label reste `l1Name`.
    Injecter `displayNameForNamespace` dans `L2Atom.lifecycle()`. Corrige
    1.3.
-3. **`getByAtomId(skillNs)` pour `hostTools`** (1.2) et `a.atomId` pour
+3. **✓ `getByAtomId(skillNs)` pour `hostTools`** (1.2) et `a.atomId` pour
    `toolsByAtom` MCP (1.1). Deux lignes, le CLI a déjà le patron.
-4. **`modelForTier(env = process.env)`** + garde Codex L1 + logs de pins
+4. **✓ `modelForTier(env = process.env)`** + garde Codex L1 + logs de pins
    sur le même snapshot que `buildReferencedProviders`. Étendre
    `assertTransportHonoursCredentials` à `referencedProviderNames(env)`,
    pas seulement le base kind. Corrige 1.6.
-5. **Implémenter ou retirer `assertCurrentIdentity`.** Un arbre
-   name-keyed doit échouer fort avec le mode d’emploi (`skills/` reset, ou
-   une vraie commande). Un test production-path create→lifecycle→dirname
-   = `atomId`. Corrige 1.7 / 1.8.
-6. **Ne pas atterrir le working tree registry** tant que les tests 08fc043
-   et le contrat « pool stays canonical » n’ont pas été soit honorés, soit
-   explicitement remplacés (un commit, une thèse).
+5. **✓ Retiré `assertCurrentIdentity`.** Le reset a vidé `skills/` ; une
+   porte leftover name-keyed n’a pas été remise. Test production-path
+   create→dirname = `atomId`. Corrige 1.7 / 1.8.
+6. **✓ Squat commis** dans `c517b8e` (LLM garde le nom, allocator saute
+   l’entrée prise) avec les tests réécrits.
 
 ## 4. Ce qui est remarquablement bien
 
@@ -294,7 +316,7 @@ contraire des fermetures propres d’incidents nommés.
 
 | Zone | Verdict à HEAD |
 |---|---|
-| Branch squat 08fc043 (code **commis**) | Fermé. Voir le bandeau working tree. |
+| Branch squat 08fc043 / `c517b8e` | Fermé (allocator, pas `branch`). |
 | Readers de migration / `SCHEMA_VERSION` | Absents. |
 | `fork` / rollback / patch : `atomId` stable, trust reset | OK (`atom-identity.test.ts`). |
 | Direct dispatch attribution (8f195ff) | Owner ns vs `producedBy.name` exécuteur, testé. |
@@ -305,40 +327,45 @@ contraire des fermetures propres d’incidents nommés.
 | Timeline newest-first / bookends / rails / `rowOffset` | Cohérent avec les tests `viz-gpu-views`. |
 | Pixi GC hors pointer-light | Filtres carte reconstruits chaque render. |
 
-## 6. Risques résiduels (non findings)
+## 6. Risques résiduels — dispositions
 
-- **`mergeInto` / dedupe** : `mergeInto` ne touche toujours pas le skill
+- **`mergeInto` / dedupe** — **fermé.** `mergeInto` ne touche pas le skill
   store (frontière registry). `registry remove` / `dedupe --apply`
   appellent `dropNamespace` sur les atom id absorbés.
-- **OAuth / CLI / Codex** : sans clé/bearer *explicites* dans le snapshot,
-  le SDK et les subprocess restent collés à l’identité machine. T10
-  complet = clés dans le snapshot + refus des pins CLI.
-- **L3 `aggregation: concat` explicite** : seule l’*omission* est forcée
-  en `sequential`. Un modèle qui parallélise un pipeline couplé n’a pas
-  de garde mécanique post-plan (le prompt grouping est la mitigation).
-- **`outputs` non filés entre phases** : seul `previousStepSummary` l’est.
-  Les gates skills/promotion ne voient que la phase courante.
-- **Budget phase vs run** : toujours ouvert
-  (`docs/incidents/parallel-fanin-2026-08-16.md`).
-- **Store pré-T4** : `CREATE TABLE IF NOT EXISTS` ne migrate pas. Doctor
-  refuse un fichier sans colonne `atom_id` (`inspectAtomStoreSchema`).
-- **`runTrace` errors** : tronqués ; le payload porte maintenant
+- **OAuth / CLI / Codex** — **accepté (hébergé).** Sans clé/bearer
+  *explicites* dans le snapshot, le SDK et les subprocess restent collés
+  à l’identité machine. saas A6 le dit déjà en REMAINING ; ce n’est pas
+  un trou du produit local.
+- **L3 `aggregation: concat` explicite** — **accepté.** Seule l’*omission*
+  est forcée en `sequential`. Une garde post-plan serait une nouvelle
+  gate mécanique (refroidissement). Le prompt grouping reste la
+  mitigation.
+- **`outputs` entre phases** — **fermé.** `dispatchWithAggregation`
+  file `inputs.previousStepOutputs` (phase immédiate précédente). Les
+  gates skills/promotion lisent encore uniquement `outputs` de la phase
+  courante — volontaire : fusionner mentirait sur ce que CETTE phase
+  écrit.
+- **Budget phase vs run** — **fermé.** `ctx.deadlineAt` +
+  `capToolIterations` bornent le 40-iteration validator loop au wall
+  clock restant (plancher 26 s, mesure fan-in 2026-08-16). Le signal
+  d’abort arrête encore l’appel en cours.
+- **Store pré-T4** — **fermé (doctor).** `CREATE TABLE IF NOT EXISTS` ne
+  migrate pas. `inspectAtomStoreSchema` refuse un fichier sans
+  `atom_id`. Pas de garde launch (fail-closed SQL à la première écriture
+  identité).
+- **`runTrace` errors** — **fermé.** Tronqués ; le payload porte
   `caveat` UNTRUSTED (même mitigation que `runStatus.progress.tail`).
-- **Fan-out non déterministe** : L2 `decomposable` reste un appel Haiku
-  (3/4 mesuré). Limite produit, pas un bug.
+- **Fan-out non déterministe** — **accepté.** L2 `decomposable` reste un
+  appel Haiku (3/4 mesuré). Limite produit, pas un bug.
 
-## 7. Trois priorités
+## 7. Trois priorités — fermées
 
-1. **Fermer le delta nom↔id (1.1–1.5, 1.9)** — le CLI review a déjà le
-   patron ; le recopier sur MCP review, `hostTools`, la trace viz, et un
-   `resolveMoleculeRef`. Surface petite, tests absents, incident déjà payé
-   deux fois (`getByName` sur un id vide le catalogue partagé ; review MCP
-   le refait).
-2. **Finir T10 ou le rétrograder** — `modelForTier(env)` + garde Codex +
-   `assertTransportHonoursCredentials` sur tous les providers référencés,
-   *ou* retirer le claim « DONE » de saas A6. Ne pas laisser un embedder
-   croire que le snapshot route.
-3. **Tranché le squat** — garder 08fc043 (pool canonique, LLM suffixé)
-   *ou* commettre l’in-progress (LLM garde le nom, allocator saute) avec
-   les tests réécrits. Pas les deux. Implémenter ou effacer
-   `assertCurrentIdentity`.
+1. **Delta nom↔id (1.1–1.5, 1.9)** — fermé, y compris
+   `resolveMoleculeRef`. Suggestion `merge` émet l’atom id.
+2. **T10** — fermé pour le produit local (`modelForTier(env)`, pins,
+   garde Codex / CLI). Le REMAINING OAuth machine est le claim saas, pas
+   un trou caché.
+3. **Squat + `assertCurrentIdentity`** — squat tranché (`c517b8e`).
+   La garde leftover name-keyed a été posée puis **retirée** : le reset
+   a vidé `skills/` ; une porte mécanique pour un incident déjà tranché
+   n’a pas à revenir.
