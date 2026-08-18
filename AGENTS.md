@@ -208,7 +208,9 @@ Read this section before changing any LLM call site.
   and the CSV must never disagree about one call's cost.
 - Provider construction has one switch: `makeBaseClient` in
   `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
-  the ollama/claude-cli/anthropic ternary again.
+  the ollama/claude-cli/anthropic ternary again. A `providerEnv` snapshot
+  must also drive the three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not
+  re-read `process.env` for pins the router already resolved from the snapshot.
 
 ## Contracts and storage
 
@@ -256,15 +258,22 @@ Read this section before changing any LLM call site.
   traces, skills, budgets, the watchdog and post-mortems, throws
   `RunnerConfigError` on bad input, resolves lifecycle env against the HOST
   snapshot (a run's own writes never become the next run's "operator intent"),
-  and returns a `RunHandle {settled, shutdown}` that never parks and never
-  exits. `runTask(profile, argv)` is the CLI shell that owns process death:
-  exit 2 on config errors, exit 1 on failure, park-forever on delivery,
-  SIGINT/SIGTERM → shutdown. Its stdout is an API (burn-in parses it) — the
-  handle refactor kept it byte-identical. A `TaskProfile` contributes only
-  family-specific workspace, seed, canonical catalog, constraints, and env names.
+  applies the same snapshot to `ATOMA_MODEL_L*` via `applyTierPins` so atom
+  `modelForTier()` calls agree with the router (a missing pin is deleted, not
+  left as leftover ambient state), and returns a `RunHandle {settled, shutdown}`
+  that never parks and never exits. `runTask(profile, argv)` is the CLI shell
+  that owns process death: exit 2 on config errors, exit 1 on failure,
+  park-forever on delivery, SIGINT/SIGTERM → shutdown. Its stdout is an API
+  (burn-in parses it) — the handle refactor kept it byte-identical. A
+  `TaskProfile` contributes only family-specific workspace, seed, canonical
+  catalog, constraints, and env names.
 - Codex tier pins are refused for L1 at LAUNCH (`RunnerConfigError`), not only
-  in doctor: a codex L1 would serve every text-only prefilter/validator and
-  detonate at the first tool-bearing execute, mid-run and mid-spend.
+  in doctor, and the check reads the pin AFTER `applyTierPins` so a
+  snapshot-only `codex:` L1 is caught and an ambient pin omitted from the
+  snapshot is not. A codex L1 would serve every text-only prefilter/validator
+  and detonate at the first tool-bearing execute, mid-run and mid-spend.
+  `assertTransportHonoursCredentials` refuses `claude-cli` / `codex` as the
+  base transport AND as a tier pin whenever a snapshot is supplied.
 - Canonical bootstrap is idempotent and bucket-specific. Prompt/tool changes
   patch and reset trust only when content genuinely differs.
 - Verification is read-only. Supervisors may run fixed probes they own, but
@@ -367,7 +376,10 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 ## LLM interaction conventions
 
 - Every call goes through `LlmClient`; never call a provider SDK from atoms.
-- Model IDs and tier defaults live in `src/core/models.ts`.
+- Model IDs and tier defaults live in `src/core/models.ts`. `modelForTier`
+  accepts an optional env; `applyTierPins` is how a snapshot reaches the
+  default (`process.env`) call sites. A missing pin is deleted on the
+  target, not left as leftover ambient state.
 - `parseLlmSelector` is the only parser for provider/model selectors. Preserve
   Ollama tags containing colons.
 - `RoutingLlmClient` owns cross-vendor tier routing. Record both requested and

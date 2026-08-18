@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { RunnerConfigError } from '../core/errors.js';
-import { modelForTier } from '../core/models.js';
+import { applyTierPins, modelForTier } from '../core/models.js';
 import { RoutingLlmClient } from '../core/llmRouting.js';
 import {
   assertTransportHonoursCredentials,
@@ -276,6 +276,9 @@ interface HostLifecycleEnv {
   readonly learn: string | undefined;
   readonly promote: string | undefined;
   readonly direct: string | undefined;
+  readonly modelL1: string | undefined;
+  readonly modelL2: string | undefined;
+  readonly modelL3: string | undefined;
 }
 let hostLifecycleEnv: HostLifecycleEnv | null = null;
 /** Exported for tests and embedders; production callers never need it. */
@@ -284,6 +287,9 @@ export function hostLifecycleSnapshot(): HostLifecycleEnv {
     learn: process.env['ATOMA_SKILL_LEARN'],
     promote: process.env['ATOMA_SKILL_PROMOTE'],
     direct: process.env['ATOMA_SKILL_DIRECT'],
+    modelL1: process.env['ATOMA_MODEL_L1'],
+    modelL2: process.env['ATOMA_MODEL_L2'],
+    modelL3: process.env['ATOMA_MODEL_L3'],
   };
   return hostLifecycleEnv;
 }
@@ -338,6 +344,33 @@ export async function startTask(
   // somebody else's subscription.
   const suppliedProviderEnv = opts?.providerEnv;
   const providerEnv = suppliedProviderEnv ?? process.env;
+  // HOST snapshot first — before any pin write — so a previous in-process
+  // run that applied a snapshot cannot become the next run's "operator
+  // intent". Same sticky-env fix as the lifecycle toggles, for the three
+  // tier pins that modelForTier and the router must read in lockstep (T10).
+  const hostEnv = hostLifecycleSnapshot();
+  applyTierPins(
+    suppliedProviderEnv ?? {
+      ATOMA_MODEL_L1: hostEnv.modelL1,
+      ATOMA_MODEL_L2: hostEnv.modelL2,
+      ATOMA_MODEL_L3: hostEnv.modelL3,
+    }
+  );
+  // Codex serves tiers 2/3 only — its transport cannot expose tools through
+  // ToolSandbox, so an L1 pin would happily serve every prefilter/validator
+  // (text-only) and detonate at the first tool-bearing execute, mid-run and
+  // mid-spend. Doctor has carried this check since v0.1.3; a wrong tier pin
+  // must fail at LAUNCH, not inside an optional diagnostic (review §3.9).
+  // Read AFTER applyTierPins so a snapshot-only pin is caught and an
+  // ambient pin omitted from the snapshot is not. Before the credential
+  // gate so the L1 tool-loop reason wins over the generic "cannot honour
+  // a snapshot" message a `codex:` pin would also trip.
+  const l1Pin = modelForTier(1).trim().toLowerCase();
+  if (l1Pin.startsWith('codex:')) {
+    throw new RunnerConfigError(
+      'ATOMA_MODEL_L1 cannot use codex because Codex cannot expose tools through ToolSandbox — pin L1 to a tool-capable provider (e.g. zai:glm-4.5-air) and keep codex on L2/L3'
+    );
+  }
 
   // Provider selection. Default is Anthropic; set ATOMA_LLM=ollama to
   // run against a local Ollama install (or Ollama Cloud via a :cloud
@@ -347,7 +380,7 @@ export async function startTask(
   // FALLBACK_OPUS model id string, which the OllamaLlmClient then
   // silently substitutes with its configured default model.
   const provider = resolveBaseProviderKind(providerEnv['ATOMA_LLM']);
-  if (suppliedProviderEnv) assertTransportHonoursCredentials(provider);
+  if (suppliedProviderEnv) assertTransportHonoursCredentials(provider, suppliedProviderEnv);
   const useOllama = provider === 'ollama';
   // ATOMA_LLM=claude-cli routes every LLM call through the local Claude
   // Code installation (Claude Agent SDK) — subscription auth, no API key.
@@ -378,29 +411,17 @@ export async function startTask(
   if (seedRoot && !existsSync(seedRoot)) {
     throw new RunnerConfigError(`--seed: no such directory: ${seedRoot}`);
   }
-  // Codex serves tiers 2/3 only — its transport cannot expose tools through
-  // ToolSandbox, so an L1 pin would happily serve every prefilter/validator
-  // (text-only) and detonate at the first tool-bearing execute, mid-run and
-  // mid-spend. Doctor has carried this check since v0.1.3; a wrong tier pin
-  // must fail at LAUNCH, not inside an optional diagnostic (review §3.9).
-  const l1Pin = process.env['ATOMA_MODEL_L1']?.trim().toLowerCase();
-  if (l1Pin?.startsWith('codex:')) {
-    throw new RunnerConfigError(
-      'ATOMA_MODEL_L1 cannot use codex because Codex cannot expose tools through ToolSandbox — pin L1 to a tool-capable provider (e.g. zai:glm-4.5-air) and keep codex on L2/L3'
-    );
-  }
   console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
   const signal = AbortSignal.timeout(timeoutMs);
   // Every LLM call + supervise-loop hop hangs an `abort` listener on this
   // signal; on long runs Node trips its default 10-listener warning.
   setMaxListeners(0, signal);
 
-  // Lifecycle toggles resolve against the HOST snapshot (see
-  // hostLifecycleSnapshot), then the env vars are written DETERMINISTICALLY
+  // Lifecycle toggles resolve against the HOST snapshot (taken above,
+  // before any pin write), then the env vars are written DETERMINISTICALLY
   // so the library hooks (which read them at call time) see the decision —
   // and so a second in-process run resolves from operator intent, not from
   // what the first run wrote.
-  const hostEnv = hostLifecycleSnapshot();
   // Auto-distillation is ON by default. Priority is CLI flag > env var >
   // default-on. The L2 onApproved hook reads ATOMA_SKILL_LEARN === '1' at
   // call time, so we just set the env var here and the lib stays unchanged.

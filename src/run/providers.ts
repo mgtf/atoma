@@ -176,7 +176,10 @@ export function buildReferencedProviders(
  * under every tenancy model the SaaS design might land on, and leaves the
  * developer path (no snapshot, inherit the process) untouched.
  */
-export function assertTransportHonoursCredentials(kind: BaseProviderKind): void {
+export function assertTransportHonoursCredentials(
+  kind: BaseProviderKind,
+  env: NodeJS.ProcessEnv = {}
+): void {
   if (kind === 'claude-cli') {
     throw new RunnerConfigError(
       'ATOMA_LLM=claude-cli cannot honour a supplied credential snapshot: it binds to the ' +
@@ -185,4 +188,17 @@ export function assertTransportHonoursCredentials(kind: BaseProviderKind): void 
         '(or ANTHROPIC_AUTH_TOKEN) in the snapshot, or omit the snapshot to inherit the process.'
     );
   }
+  // Tier pins can name the same machine-bound transports. The base-kind
+  // check above used to be the whole gate, so
+  // `{ ATOMA_LLM: 'anthropic', ATOMA_MODEL_L2: 'claude-cli:sonnet' }`
+  // constructed a CLI client that ignored the snapshot (review 2026-08-18 §1.6).
+  const pinned = referencedProviderNames(env).filter(
+    (name) => name === 'claude-cli' || name === 'codex'
+  );
+  if (pinned.length === 0) return;
+  throw new RunnerConfigError(
+    `tier pin ${pinned.map((name) => `"${name}:"`).join(', ')} cannot honour a supplied credential snapshot: ` +
+      'those transports bind to a machine-local login and ignore the credential passed to startTask. ' +
+      'Pin L2/L3 to a key-bearing provider (anthropic / zai / ollama) or omit the snapshot to inherit the process.'
+  );
 }

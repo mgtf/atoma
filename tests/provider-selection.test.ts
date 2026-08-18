@@ -169,6 +169,14 @@ describe('makeAnthropicClient — credentials are a per-run value, not process s
     // The transports that CAN read it are untouched.
     expect(() => assertTransportHonoursCredentials('anthropic')).not.toThrow();
     expect(() => assertTransportHonoursCredentials('ollama')).not.toThrow();
+    // A key-bearing base with a machine-bound TIER pin used to slip through
+    // (review 2026-08-18 §1.6): the gate only inspected ATOMA_LLM.
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L2: 'claude-cli:sonnet' })
+    ).toThrow(/tier pin "claude-cli:"/);
+    expect(() =>
+      assertTransportHonoursCredentials('anthropic', { ATOMA_MODEL_L3: 'codex:gpt-5.6-sol' })
+    ).toThrow(/tier pin "codex:"/);
   });
 
   it('returns a client with no credential rather than killing the process', () => {

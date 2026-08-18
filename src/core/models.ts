@@ -20,18 +20,39 @@ export const PIN_HAIKU = 'claude-haiku-4-5-20251001';
  *   ATOMA_MODEL_L2=...   default: claude-sonnet-5
  *   ATOMA_MODEL_L3=...   default: claude-opus-5 (or live-resolved Opus)
  *
- * Read at CALL time so tests and per-run env changes behave. Notes per
- * provider: under claude-cli, aliases work ('sonnet' for L3 is the
- * no-Opus-on-this-plan escape hatch — the L1/L2 gradient below survives);
- * under ollama, a non-`claude-*` value is honoured verbatim per tier
- * (see resolveOllamaModel); validators/prefilters always ride the L1
- * tier's model — validation is a yes/no, it belongs on the cheapest
- * capable model regardless of vendor.
+ * Read at CALL time so tests and per-run env changes behave. Pass `env`
+ * when the caller holds a snapshot (T10): `modelForTier` and
+ * `buildReferencedProviders` must see the same pins or the router
+ * constructs a client the atoms never request. Notes per provider: under
+ * claude-cli, aliases work ('sonnet' for L3 is the no-Opus-on-this-plan
+ * escape hatch — the L1/L2 gradient below survives); under ollama, a
+ * non-`claude-*` value is honoured verbatim per tier (see
+ * resolveOllamaModel); validators/prefilters always ride the L1 tier's
+ * model — validation is a yes/no, it belongs on the cheapest capable
+ * model regardless of vendor.
  */
-export function modelForTier(tier: 1 | 2 | 3): string {
-  const env = process.env[`ATOMA_MODEL_L${tier}`];
-  if (env && env.trim().length > 0) return env.trim();
+export function modelForTier(tier: 1 | 2 | 3, env: NodeJS.ProcessEnv = process.env): string {
+  const value = env[`ATOMA_MODEL_L${tier}`];
+  if (value && value.trim().length > 0) return value.trim();
   return tier === 1 ? PIN_HAIKU : tier === 2 ? PIN_SONNET : FALLBACK_OPUS;
+}
+
+/**
+ * Copy ATOMA_MODEL_L1/L2/L3 from `from` onto `to` (default `process.env`).
+ *
+ * A missing or blank pin is DELETED on the target, not left as a leftover:
+ * a snapshot that omits L1 must serve the default Haiku, not the host's
+ * ambient pin. `startTask` uses this so atom `modelForTier()` calls — which
+ * still read `process.env` at call time — agree with the snapshot the
+ * router was built from.
+ */
+export function applyTierPins(from: NodeJS.ProcessEnv, to: NodeJS.ProcessEnv = process.env): void {
+  for (const tier of [1, 2, 3] as const) {
+    const key = `ATOMA_MODEL_L${tier}`;
+    const value = from[key]?.trim();
+    if (value) to[key] = value;
+    else delete to[key];
+  }
 }
 
 /**

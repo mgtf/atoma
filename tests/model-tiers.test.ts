@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { modelForTier, PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
+import { applyTierPins, modelForTier, PIN_HAIKU, PIN_SONNET, FALLBACK_OPUS } from '../src/core/models.js';
 import { resolveOllamaModel } from '../src/core/llmOllama.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -45,6 +45,21 @@ describe('modelForTier — provider-agnostic tier pins', () => {
     expect(modelForTier(1)).toBe('qwen3:4b');
     expect(modelForTier(2)).toBe('glm-4.7');
     expect(modelForTier(3)).toBe('gpt-5.2');
+  });
+
+  it('reads a snapshot without touching process.env (T10)', () => {
+    process.env['ATOMA_MODEL_L1'] = 'ambient-haiku';
+    expect(modelForTier(1, { ATOMA_MODEL_L1: 'zai:glm-4.5-air' })).toBe('zai:glm-4.5-air');
+    expect(modelForTier(1)).toBe('ambient-haiku');
+    expect(modelForTier(1, {})).toBe(PIN_HAIKU);
+  });
+
+  it('applyTierPins writes present pins and deletes omitted ones', () => {
+    const target: NodeJS.ProcessEnv = { ATOMA_MODEL_L1: 'old', ATOMA_MODEL_L2: 'keep-until-deleted' };
+    applyTierPins({ ATOMA_MODEL_L1: 'zai:glm-4.5-air' }, target);
+    expect(target['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
+    expect(target['ATOMA_MODEL_L2']).toBeUndefined();
+    expect(target['ATOMA_MODEL_L3']).toBeUndefined();
   });
 
   it('an explicit ATOMA_MODEL_L3 pins L3 and SKIPS the live Opus discovery', async () => {

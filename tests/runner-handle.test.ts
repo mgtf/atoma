@@ -18,7 +18,12 @@ import { buildProfile } from '../src/run/profiles/build.js';
  * codes and stdout byte-for-byte; the real-subprocess suites pin those.
  */
 
-const LIFECYCLE_VARS = ['ATOMA_SKILL_LEARN', 'ATOMA_SKILL_PROMOTE', 'ATOMA_SKILL_DIRECT'] as const;
+const LIFECYCLE_VARS = [
+  'ATOMA_SKILL_LEARN',
+  'ATOMA_SKILL_PROMOTE',
+  'ATOMA_SKILL_DIRECT',
+  'ATOMA_MODEL_L1',
+] as const;
 
 describe('lifecycle toggles — pure resolvers over HOST intent', () => {
   it('CLI flag > env kill switch > default-on, for learning and direct dispatch', () => {
@@ -62,12 +67,22 @@ describe('host lifecycle snapshot — the sticky-env fix', () => {
     expect(second.learn).toBeUndefined();
     expect(resolveSkillLearning(false, second.learn).enabled).toBe(true);
   });
+
+  it('a snapshot writing ATOMA_MODEL_L1 cannot change the next run\'s host pin', () => {
+    delete process.env['ATOMA_MODEL_L1'];
+    const first = hostLifecycleSnapshot();
+    expect(first.modelL1).toBeUndefined();
+    process.env['ATOMA_MODEL_L1'] = 'zai:glm-4.5-air';
+    expect(hostLifecycleSnapshot().modelL1).toBeUndefined();
+  });
 });
 
 describe('startTask — typed config errors before any side effect', () => {
   const RUNNER_VARS = [
     buildProfile.envVars.timeoutMs,
     'ATOMA_MODEL_L1',
+    'ATOMA_MODEL_L2',
+    'ATOMA_MODEL_L3',
     'ATOMA_LLM',
     'ATOMA_REQUIRE_ISOLATION',
     'ATOMA_CONTAINER',
@@ -170,6 +185,40 @@ describe('startTask — typed config errors before any side effect', () => {
     process.env['ATOMA_LLM'] = 'claude-cli';
     process.env[buildProfile.envVars.timeoutMs] = 'abc';
     await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/expected positive integer/);
+  });
+
+  it('refuses a codex L1 pin that lives ONLY in the snapshot (review 2026-08-18 §1.6)', async () => {
+    process.env[buildProfile.envVars.timeoutMs] = '60000';
+    delete process.env['ATOMA_MODEL_L1'];
+    await expect(
+      startTask(buildProfile, ['goal'], {
+        providerEnv: { ATOMA_LLM: 'ollama', ATOMA_MODEL_L1: 'codex:gpt-5.4-mini' },
+      })
+    ).rejects.toThrow(/ATOMA_MODEL_L1 cannot use codex/);
+  });
+
+  it('an ambient Codex L1 pin does not fire when the snapshot omits it', async () => {
+    // Inverse: the host has a leftover pin; the run was handed its own
+    // environment without one and must serve the default, not inherit the
+    // ambient detonation.
+    process.env['ATOMA_MODEL_L1'] = 'codex:gpt-5.4-mini';
+    process.env[buildProfile.envVars.timeoutMs] = 'abc';
+    await expect(
+      startTask(buildProfile, ['goal'], { providerEnv: { ATOMA_LLM: 'ollama' } })
+    ).rejects.toThrow(/expected positive integer/);
+  });
+
+  it('refuses a machine-bound tier pin inside an otherwise key-bearing snapshot', async () => {
+    process.env[buildProfile.envVars.timeoutMs] = '60000';
+    await expect(
+      startTask(buildProfile, ['goal'], {
+        providerEnv: {
+          ATOMA_LLM: 'anthropic',
+          ANTHROPIC_API_KEY: 'sk-ant-tenant',
+          ATOMA_MODEL_L2: 'claude-cli:sonnet',
+        },
+      })
+    ).rejects.toThrow(/tier pin "claude-cli:"/);
   });
 
   it('reads the transport from the SNAPSHOT, not from process.env', async () => {

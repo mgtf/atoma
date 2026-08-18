@@ -18,8 +18,10 @@ code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 > promotion HTTP loopback (`skill-promote.test.ts`). Le squat registry
 > (§ bandeau working-tree) a été tranché dans `c517b8e` : la garde est
 > sur l’allocator, le LLM garde le nom, le pool saute l’entrée prise.
-> Reste : T10 `modelForTier`/`providerEnv` (§1.6), `assertCurrentIdentity`
-> (§1.8).
+> T10 (§1.6) : `modelForTier(env)`, `applyTierPins` + snapshot hôte, garde
+> Codex L1 et `assertTransportHonoursCredentials` sur les pins de tier
+> (`claude-cli` / `codex`) aussi, pas seulement `ATOMA_LLM`. Reste :
+> `assertCurrentIdentity` (§1.8).
 
 ## Vue d'ensemble de la fenêtre
 
