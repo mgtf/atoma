@@ -142,6 +142,43 @@ describe('AtomRegistry', () => {
     expect(r.getByName('Water')?.tier).toBe(1);
   });
 
+  it('an overrideName cannot squat a curated pool name the allocator has yet to issue', () => {
+    // REGRESSION. `nextAvailable` keys on ORDINALS, so it will still hand out
+    // molecule #4's curated name later; `branch`'s collision guard only saw
+    // names that were live AT BRANCH TIME. An LLM validator emitting
+    // `branchName: "CarbonDioxide"` therefore parked that name on ordinal 2,
+    // and the create() that eventually reached ordinal 4 died on
+    // `UNIQUE constraint failed: atom_types.name` — mid-run, mid-spend, on a
+    // path the model reaches just by picking a plausible chemical name.
+    const base = r.create(1, baseSeed);
+    const squatter = r.branch(base.name, {}, 'tester', 'CarbonDioxide');
+    expect(squatter.name).toBe('CarbonDioxide-2');
+
+    // The pool stays canonical: molecule #4 still gets its own name, and
+    // creation past that ordinal no longer throws.
+    const issued: string[] = [];
+    for (let i = 0; i < 4; i += 1) issued.push(r.create(1, baseSeed).name);
+    expect(issued).toContain('CarbonDioxide');
+    expect(r.getByName('CarbonDioxide')!.ordinal).toBe(4);
+  });
+
+  it('a `<Rank><n>` fallback-shaped overrideName suffixes without spinning', () => {
+    // The reserved-name test runs against the RAW name, not the normalized
+    // key: `Molecule5-2` normalizes to `molecule52`, which matches the
+    // fallback shape, so a key-based test would reject every suffix the
+    // suffix loop itself produces and never terminate.
+    const base = r.create(1, baseSeed);
+    expect(r.branch(base.name, {}, 'tester', 'Molecule5').name).toBe('Molecule5-2');
+    expect(r.branch(base.name, {}, 'tester', 'Molecule5').name).toBe('Molecule5-3');
+  });
+
+  it('a genuinely novel overrideName still passes through untouched', () => {
+    // The reservation must not swallow the case `registry dedupe` exists for:
+    // task-themed LLM names are exactly what enters the catalogue here.
+    const base = r.create(1, baseSeed);
+    expect(r.branch(base.name, {}, 'tester', 'Minesweeper-WebGL').name).toBe('Minesweeper-WebGL');
+  });
+
   describe('history + rollback (roll-forward to the past)', () => {
     it('rollback restores an archived version as a NEW live version with counters reset', () => {
       const h = r.create(1, { ...baseSeed, systemPrompt: 'v1 prompt', params: { maxTokens: 4000 } });

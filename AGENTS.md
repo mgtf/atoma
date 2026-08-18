@@ -582,6 +582,22 @@ Read the archived sections before changing something that merely looks odd.
   on maintenance and did not pay on from-scratch decomposition.
 - Keep one runner with profiles, one cost formula, one selector parser, one
   contract per shape, and one source of live-state truth.
+- Atom names are NOT all curated. `branch` accepts an LLM-authored
+  `overrideName` (`verdict.branchName`) and takes only the ORDINAL from
+  `nextAvailable`, so task-themed names enter the catalogue by design. That
+  is why `registry dedupe` exists and why its fuzzy key is the only thing
+  catching word-order variants the order-sensitive branch guard lets through.
+  Do not delete the dedupe surface on the grounds that names come from a pool.
+- The `branch` collision guard reserves the whole taxonomy pool, not just
+  live names: `nextAvailable` keys on ordinals and will still issue a curated
+  name later, so an override squatting one killed the next `create()` on
+  `UNIQUE constraint failed`. The fallback-shape check runs on the RAW name —
+  a normalized-key test would reject the suffixes the loop itself emits.
+- The MCP lease `ALTER TABLE` loop is corruption repair, not version
+  migration. The lock DB lives in `~/.atoma/` outside the product store, and
+  the burn-in pgid guard already documents it as writable by the run itself;
+  without the loop a foreign-shaped table makes every `atoma_run_start` throw
+  a raw SQLite error until a human deletes the file.
 
 ## Benchmark and documentation discipline
 

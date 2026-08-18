@@ -8,9 +8,9 @@ import type {
 } from '../core/types.js';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { newAtomId } from '../core/atomId.js';
-import { nextAvailableMolecule } from './taxonomies/molecules.js';
-import { nextAvailableCell } from './taxonomies/cells.js';
-import { nextAvailableTissue } from './taxonomies/tissues.js';
+import { MOLECULES, nextAvailableMolecule } from './taxonomies/molecules.js';
+import { CELLS, nextAvailableCell } from './taxonomies/cells.js';
+import { TISSUES, nextAvailableTissue } from './taxonomies/tissues.js';
 
 /**
  * Is this string safe to use as an atom NAME?
@@ -135,6 +135,54 @@ function nextAvailable(tier: Tier, used: Set<number>): { ordinal: number; name: 
  */
 export function normalizeNameKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Every name the taxonomy allocator can still issue for a tier: the curated
+ * pool (as normalized keys) plus the `<Rank><n>` fallback shape.
+ *
+ * `branch` must treat these as TAKEN even though no row holds them yet.
+ * `nextAvailable` keys on ORDINALS alone, so it issues the curated name for
+ * any ordinal that is merely unallocated — while an LLM-authored
+ * `overrideName` can already occupy a DIFFERENT ordinal under that same
+ * name. The two meet at `name TEXT UNIQUE` and the later `create()` throws
+ * `UNIQUE constraint failed: atom_types.name`, killing a run mid-spend on a
+ * path the model reaches just by picking a plausible name. REPRODUCED:
+ * `branch(overrideName: 'CarbonDioxide')` takes ordinal 2, then the third
+ * `create()` reaches molecule #4 — whose curated name is CarbonDioxide —
+ * and dies.
+ *
+ * Suffixing the override instead keeps the pool canonical (molecule #4 IS
+ * CarbonDioxide, which is what makes a taxonomy name mean anything in a
+ * trace) and reuses the auto-suffix path already built for live-name
+ * collisions, so `branch` stays total.
+ */
+const POOL_NAMES: Record<Tier, readonly string[]> = {
+  1: MOLECULES.map((m) => m.name),
+  2: CELLS.map((c) => c.name),
+  3: TISSUES.map((t) => t.name),
+};
+
+const POOL_KEYS: Record<Tier, Set<string>> = {
+  1: new Set(POOL_NAMES[1].map(normalizeNameKey)),
+  2: new Set(POOL_NAMES[2].map(normalizeNameKey)),
+  3: new Set(POOL_NAMES[3].map(normalizeNameKey)),
+};
+
+/** The `<Rank><n>` shape `nextAvailable` falls back to once a pool runs dry. */
+const FALLBACK_NAME: Record<Tier, RegExp> = {
+  1: /^molecule\d+$/i,
+  2: /^cell\d+$/i,
+  3: /^tissue\d+$/i,
+};
+
+function isReservedTaxonomyName(tier: Tier, candidate: string): boolean {
+  if (POOL_KEYS[tier].has(normalizeNameKey(candidate))) return true;
+  // Tested against the RAW name, not the normalized key, and that is
+  // load-bearing: `Molecule5-2` normalizes to `molecule52`, which matches
+  // the fallback shape, so a key-based test would reject every suffix this
+  // function's own caller generates and spin forever.
+  return FALLBACK_NAME[tier].test(candidate);
 }
 
 /**
@@ -611,7 +659,8 @@ export class AtomRegistry {
         name = overrideName;
         const collides = (candidate: string): boolean =>
           this.getByName(candidate) !== null ||
-          existingKeys.has(normalizeNameKey(candidate));
+          existingKeys.has(normalizeNameKey(candidate)) ||
+          isReservedTaxonomyName(source.tier, candidate);
         if (collides(name)) {
           let suffix = 2;
           while (collides(`${overrideName}-${suffix}`)) suffix++;
