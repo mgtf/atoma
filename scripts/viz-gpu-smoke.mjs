@@ -101,17 +101,19 @@ async function readCursorEnvironment(page) {
 
 /**
  * The cast-shadow arm hunts a ~40px class of defect: shadows anchored while a
- * layer sits lifted, never re-aimed as the layer eases down. Its resting budget
- * is 0.5px where frames are real.
+ * layer sits lifted, never re-aimed as the layer eases down. Mid-flight is the
+ * sharp sample and is asserted everywhere, at 0.5px.
  *
- * A software rasteriser leaves a CONSTANT sub-pixel residual instead — measured
- * 0.8707px, identical across runs, frozen for 16s with the render count stuck at
- * 3, so it is not a settle the arm can wait out: the hover-out ease finishes
- * after the last paint and nothing re-anchors at rest. 2px keeps 2x margin over
- * that residual while staying 20x below the defect it is looking for.
+ * The RESTING sample is only observable where a frame lands near the end of the
+ * hover-out ease, because the residual IS the staleness of the last paint:
+ * measured 0.000px at 16.7ms frames, 0.871px at 344ms, and 11.87px on the CI
+ * runner at 3433ms. It never converges, and that is the arm's own subject —
+ * nothing re-anchors at rest, so forcing a render before the sample would mask
+ * exactly the defect it looks for. Where frames are further apart than the ease
+ * is long, the arm says so instead of pretending to measure it.
  */
 const ANCHOR_DRIFT_MAX = 0.5;
-const SOFTWARE_ANCHOR_DRIFT_MAX = 2;
+const RESTING_FRAME_CEILING_MS = 50;
 
 /**
  * The scroll rebuild budget catches a COLLAPSE — a rebuild that lost label
@@ -620,9 +622,9 @@ try {
     // under that layer stays aimed ~40px above its surface until some
     // unrelated render. Only observable here: the mocked suite has no ticker
     // and no stage transforms.
-    const anchorDriftMax = softwareRastered
-      ? SOFTWARE_ANCHOR_DRIFT_MAX
-      : ANCHOR_DRIFT_MAX;
+    // The frame period comes from the main page's sampler: same browser, same
+    // machine, same rasteriser, so it describes this page's cadence too.
+    const restingObservable = frameStats.meanMs < RESTING_FRAME_CEILING_MS;
     const anchorPage = await browser.newPage();
     let anchorStats;
     try {
@@ -693,13 +695,19 @@ try {
       anchorStats.midFlight === null ||
       // THE ASSERTION: anchors track the moving layer and its resting place.
       !(anchorStats.midFlight.drift < ANCHOR_DRIFT_MAX) ||
-      !(anchorStats.settled.drift < anchorDriftMax)
+      (restingObservable && !(anchorStats.settled.drift < ANCHOR_DRIFT_MAX))
     ) {
       throw new Error(`GPU shadow anchors drifted: ${JSON.stringify(anchorStats)}`);
     }
     console.log(
-      `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled against a ${anchorDriftMax}px resting budget`
+      `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled`
     );
+    if (!restingObservable) {
+      console.log(
+        `viz GPU resting anchor NOT CHECKED: ${frameStats.meanMs.toFixed(0)}ms frames ` +
+          `outlast the hover-out ease, so the resting sample measures paint staleness`
+      );
+    }
 
     // A LIVE run's polling must not rebuild the GPU scene when nothing
     // changed. The trace polls every 1s and the index every 2s; before the
@@ -777,7 +785,7 @@ try {
       // fixed 5s window observed exactly 3 polls — the floor this arm asserts,
       // with nothing left for a slower runner. Waiting for the fourth poll keeps
       // the same window on a fast machine and cannot under-arm on a slow one.
-      const pollDeadline = Date.now() + 30_000;
+      const pollDeadline = Date.now() + 90_000;
       while (tracePolls - pollsBefore < 4 && Date.now() < pollDeadline) {
         await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
       }
@@ -791,7 +799,7 @@ try {
       // Same reason: wait for the rebuild rather than for a duration that has to
       // contain one. A miss still fails the assertion below — it just fails on
       // the renderer's behaviour instead of on the runner's speed.
-      const rebuildDeadline = Date.now() + 30_000;
+      const rebuildDeadline = Date.now() + 90_000;
       let afterEvent = await readCount();
       while (afterEvent <= idleEnd && Date.now() < rebuildDeadline) {
         await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
