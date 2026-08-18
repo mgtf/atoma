@@ -15,9 +15,10 @@ import { nextAvailableTissue } from './taxonomies/tissues.js';
 /**
  * Is this string safe to use as an atom NAME?
  *
- * Atom names are path components (leftover pre-T4 skill dirs still use
- * them; the live skill path is the atom id), so the answer is not "is it
- * pretty" but "can it escape a directory". Rejects
+ * Atom names must not traverse a directory. The live skill path is the
+ * atom id, but `overrideName` is LLM-authored and still becomes an
+ * identity at this boundary, so the answer is not "is it pretty" but
+ * "can it escape a directory". Rejects
  * anything outside [A-Za-z0-9._-], plus the all-dots strings (`.`, `..`)
  * that pass a charset test and still traverse. Exported so the same rule can
  * be asserted from tests.
@@ -628,16 +629,15 @@ export class AtomRegistry {
 
       let ordinal: number;
       let name: string;
-      // An atom NAME is also a path component: leftover pre-T4 skill
-      // trees still use it (`skills/<atom-name>/`); the live path is
-      // `skills/<atom-id>/`. `overrideName` is
-      // LLM-authored — it arrives as `verdict.branchName` from an L2/L3
-      // validator — so accepting it verbatim let a verdict of `".."` name an
-      // atom `..` and write a skill outside the skills root (reproduced).
-      // `sanitise` in the skill registry is the inner guard; this is the
-      // outer one, at the boundary where model output first becomes an
-      // identity. Falling back to the taxonomy rather than throwing keeps
-      // `branch` total, as the auto-suffix logic below already assumes.
+      // `overrideName` is LLM-authored — it arrives as `verdict.branchName`
+      // from an L2/L3 validator. Accepting it verbatim let a verdict of
+      // `".."` name an atom `..` and (when the skill path still used the
+      // name) write a skill outside the skills root. The live skill path
+      // is the atom id; this remains the outer guard at the boundary where
+      // model output first becomes an identity. `sanitise` in the skill
+      // registry is the inner one. Falling back to the taxonomy rather
+      // than throwing keeps `branch` total, as the auto-suffix logic
+      // below already assumes.
       if (overrideName !== undefined && !isSafeAtomName(overrideName)) {
         overrideName = undefined;
       }

@@ -315,14 +315,9 @@ Read this section before changing any LLM call site.
 Skills follow learn → match/inject → earn credit → compile → trusted dispatch.
 
 - Skills live under owner namespaces on disk, keyed by atom id
-  (`skills/<atom-id>/`). A leftover name-keyed tree (`skills/Water/` next
-  to an id-keyed store) is refused at launch and by doctor
-  (`assertCurrentIdentity`). There is no `migrate-identity` command: after
-  the 2026-08-18 reset, renaming a leftover directory onto a new atom id
-  would attach another identity's recipes. Archive or delete the leftover
-  directories. Metadata sidecars are data: read them strictly before
-  mutation and write atomically. Never turn corruption into valid zero
-  counters.
+  (`skills/<atom-id>/`). Metadata sidecars are data: read them strictly
+  before mutation and write atomically. Never turn corruption into valid
+  zero counters.
 - Match against reusable `when_to_use` capability language, not task theme or
   hidden workspace state the prefilter cannot inspect.
 - The skill prefilter runs only when candidates exist. Injection is guidance;

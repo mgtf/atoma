@@ -1,18 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import {
-  assertCurrentIdentity,
-  leftoverNameKeyedNamespaces,
-  namespaceOf,
-  readSkillOwners,
-  resolveNamespaceKey,
-} from '../src/skills/namespace.js';
-import { RunnerConfigError } from '../src/core/errors.js';
+import { namespaceOf, resolveNamespaceKey } from '../src/skills/namespace.js';
 import { skillsList, skillsReview, skillsStats } from '../src/mcp/readers.js';
 
 /**
@@ -49,51 +42,6 @@ describe('resolveNamespaceKey', () => {
 
   it('passes an unknown token through (orphaned directory / minted test key)', () => {
     expect(resolveNamespaceKey('orphan-ns', labels)).toBe('orphan-ns');
-  });
-});
-
-describe('assertCurrentIdentity — leftover name-keyed trees (review 2026-08-18 §1.8)', () => {
-  let dir: string;
-
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('flags a curated molecule directory even with an empty store (post-reset leftover)', () => {
-    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-leftover-'));
-    mkdirSync(join(dir, 'Water'));
-    mkdirSync(join(dir, 'orphan-custom'));
-    const leftovers = leftoverNameKeyedNamespaces(dir, []);
-    expect(leftovers).toEqual([{ name: 'Water' }]);
-    expect(() => assertCurrentIdentity(dir, [])).toThrow(RunnerConfigError);
-    expect(() => assertCurrentIdentity(dir, [])).toThrow(/skills\/Water\//);
-  });
-
-  it('pairs a leftover name with the live atom id and ignores the id-keyed dir', () => {
-    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-leftover-'));
-    mkdirSync(join(dir, 'Water'));
-    mkdirSync(join(dir, 'atom-water'));
-    const leftovers = leftoverNameKeyedNamespaces(dir, [
-      { atomId: 'atom-water', name: 'Water' },
-    ]);
-    expect(leftovers).toEqual([{ name: 'Water', atomId: 'atom-water' }]);
-  });
-
-  it('does not flag an id-keyed tree or an unknown orphan', () => {
-    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-leftover-'));
-    mkdirSync(join(dir, 'atom-water'));
-    mkdirSync(join(dir, 'orphan-custom'));
-    expect(
-      leftoverNameKeyedNamespaces(dir, [{ atomId: 'atom-water', name: 'Water' }])
-    ).toEqual([]);
-    expect(() =>
-      assertCurrentIdentity(dir, [{ atomId: 'atom-water', name: 'Water' }])
-    ).not.toThrow();
-  });
-
-  it('readSkillOwners is readonly and empty on a missing file', () => {
-    dir = mkdtempSync(join(tmpdir(), 'atoma-skill-owners-'));
-    expect(readSkillOwners(join(dir, 'nope.db'))).toEqual([]);
   });
 });
 
@@ -166,7 +114,6 @@ describe('MCP skill surfaces after the name→id flip', () => {
     expect(byName.namespaces[0]!.l1).toBe('Water');
     expect(byName.namespaces[0]!.l1Key).toBe(waterId);
     expect(byName.namespaces[0]!.skills.map((s) => s.id)).toEqual(['write-notes']);
-    expect('identityWarning' in byName).toBe(false);
 
     const byId = skillsList({ l1: waterId }) as { namespaces: Array<{ l1Key: string }> };
     expect(byId.namespaces[0]!.l1Key).toBe(waterId);
@@ -203,12 +150,5 @@ describe('MCP skill surfaces after the name→id flip', () => {
     expect(stats.rows[0]!.l1).toBe('Water');
     expect(stats.rows[0]!.l1Key).toBe(waterId);
     expect(stats.rows[0]!.id).toBe('write-notes');
-  });
-
-  it('skillsList warns in-band when a leftover name-keyed directory is present', () => {
-    mkdirSync(join(dir, 'skills', 'Water'));
-    const listed = skillsList() as { identityWarning?: string };
-    expect(listed.identityWarning).toMatch(/skills\/Water\//);
-    expect(listed.identityWarning).toMatch(waterId);
   });
 });

@@ -21,9 +21,9 @@ code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 > T10 (§1.6) : `modelForTier(env)`, `applyTierPins` + snapshot hôte, garde
 > Codex L1 et `assertTransportHonoursCredentials` sur les pins de tier
 > (`claude-cli` / `codex`) aussi, pas seulement `ATOMA_LLM`.
-> `assertCurrentIdentity` (§1.8) refuse un arbre encore name-keyed au
-> launch et dans doctor ; pas de commande `migrate-identity` (un rename
-> sur un nouvel uuid attacherait les recettes d’une autre identité).
+> §1.8 : retiré. Le reset a vidé `skills/` ; le contrat restant est
+> `namespaceOf` → atom id plus le test create→dirname. Pas de garde
+> launch/doctor (porte mécanique pour un incident déjà tranché).
 
 ## Vue d'ensemble de la fenêtre
 

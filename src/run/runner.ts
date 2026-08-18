@@ -14,10 +14,9 @@ import {
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
-import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { assertCurrentIdentity, readSkillOwners } from '../skills/namespace.js';
 import { TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
@@ -412,12 +411,6 @@ export async function startTask(
   if (seedRoot && !existsSync(seedRoot)) {
     throw new RunnerConfigError(`--seed: no such directory: ${seedRoot}`);
   }
-  // Leftover name-keyed skill dirs (`skills/Water/`) are invisible to
-  // loadFor(namespaceOf) after T4. Refuse here — before the store, the
-  // sandbox or any spend — so a reset leftover cannot silently serve
-  // an empty catalog (review 2026-08-18 §1.8). No migrator: renaming
-  // onto a new atom id would attach another identity's recipes.
-  assertCurrentIdentity(skillsDirPath(), readSkillOwners(storeDbPath()));
   console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
   const signal = AbortSignal.timeout(timeoutMs);
   // Every LLM call + supervise-loop hop hangs an `abort` listener on this

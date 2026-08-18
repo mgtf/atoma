@@ -5,9 +5,8 @@ import { randomUUID } from 'node:crypto';
  * docs/saas-architecture.md.
  *
  * WHAT THIS REPLACES. A taxonomy name used to do triple duty: display
- * label, identity, and filesystem namespace. The live skill path is now
- * `join(rootDir, sanitise(atomId))`; leftover name-keyed trees are refused
- * by `assertCurrentIdentity`. That coupling had already produced two
+ * label, identity, and filesystem namespace. The live skill path is
+ * `join(rootDir, sanitise(atomId))`. That coupling had already produced two
  * confirmed defects — `sanitise` accepting `..` while an LLM-authored
  * `overrideName` became a path component, and a post-`remove` `branch`
  * reissuing a dead name and inheriting its skill directory. Both are closed

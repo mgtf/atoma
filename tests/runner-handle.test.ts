@@ -1,6 +1,3 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   RunnerConfigError,
@@ -89,7 +86,6 @@ describe('startTask — typed config errors before any side effect', () => {
     'ATOMA_LLM',
     'ATOMA_REQUIRE_ISOLATION',
     'ATOMA_CONTAINER',
-    'ATOMA_SKILLS_DIR',
   ] as const;
   const before = new Map<string, string | undefined>();
   beforeEach(() => {
@@ -237,18 +233,5 @@ describe('startTask — typed config errors before any side effect', () => {
         providerEnv: { ATOMA_LLM: 'ollama' },
       })
     ).rejects.toThrow(/expected positive integer/);
-  });
-
-  it('refuses a leftover name-keyed skill tree at LAUNCH (review 2026-08-18 §1.8)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'atoma-skill-launch-'));
-    mkdirSync(join(dir, 'Water'));
-    process.env[buildProfile.envVars.timeoutMs] = '60000';
-    process.env['ATOMA_SKILLS_DIR'] = dir;
-    try {
-      await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(RunnerConfigError);
-      await expect(startTask(buildProfile, ['goal'])).rejects.toThrow(/skills\/Water\//);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
