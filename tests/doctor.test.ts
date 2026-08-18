@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   diagnoseDoctor,
@@ -348,5 +351,28 @@ describe('atoma doctor', () => {
     expect(fetched).toBe('http://ollama.example:11434/api/version');
     expect(renderDoctorReport(report)).toContain('READY');
     expect(renderDoctorReport(report)).not.toContain('API_KEY');
+  });
+
+  it('fails when the skill store still has a leftover name-keyed directory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-doctor-skills-'));
+    mkdirSync(join(dir, 'Water'));
+    try {
+      const report = await diagnoseDoctor({
+        mode: { container: false, egress: false },
+        env: {
+          ATOMA_LLM: 'anthropic',
+          ANTHROPIC_API_KEY: 'configured',
+          ATOMA_SKILLS_DIR: dir,
+          ATOMA_DB_PATH: join(dir, 'nope.db'),
+        },
+        dependencies: dependencies(),
+      });
+      const check = report.checks.find((c) => c.id === 'skill-identity');
+      expect(check?.status).toBe('fail');
+      expect(check?.detail).toMatch(/skills\/Water\//);
+      expect(report.ready).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

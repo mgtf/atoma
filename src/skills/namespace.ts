@@ -1,14 +1,18 @@
+import { existsSync, readdirSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { RunnerConfigError } from '../core/errors.js';
+import { MOLECULES } from '../registry/taxonomies/molecules.js';
+
 declare const brand: unique symbol;
 
 /**
  * The key a skill namespace is filed under on disk.
  *
- * WHAT THIS IS FOR. The atom NAME is being demoted from identity to display
- * label (T4). `SkillRegistry` keys directories by name today and must key them
- * by `atomId`. Both are `string`, so the swap is one TypeScript would wave
- * straight through: a production site left passing a name would typecheck, run,
- * and quietly file skills under a namespace nothing else reads. This brand
- * exists so the compiler refuses that.
+ * WHAT THIS IS FOR. The atom NAME is a display label (T4). `SkillRegistry`
+ * keys directories by `atomId`. Both are `string`, so a production site
+ * left passing a name would typecheck, run, and quietly file skills under
+ * a namespace nothing else reads. This brand exists so the compiler
+ * refuses that.
  *
  * WHERE THE BRAND APPLIES, AND WHERE IT DELIBERATELY DOES NOT. It types the
  * production CARRIERS — `ownerNs`, `activeSkillNs`, `blameNs`, `args.l1Name`
@@ -47,10 +51,123 @@ export function namespaceOf(atom: {
   readonly atomId: string;
   readonly name: string;
 }): SkillNamespace {
-  // Directories are keyed by atomId. A leftover name-keyed tree is simply
-  // invisible (loadFor looks under the id). There is no launch-time
-  // refusal and no migrate-identity command after the 2026-08-18 reset.
+  // Directories are keyed by atomId. A leftover name-keyed tree is
+  // refused at launch / doctor (`assertCurrentIdentity`); there is no
+  // migrate-identity command after the 2026-08-18 reset.
   return atom.atomId as SkillNamespace;
+}
+
+export interface SkillOwnerIdentity {
+  readonly atomId: string;
+  readonly name: string;
+}
+
+export interface LeftoverNameKeyedNamespace {
+  readonly name: string;
+  readonly atomId?: string;
+}
+
+/**
+ * Read L1 identities from a store without writing (doctor / launch peek).
+ *
+ * A missing or unreadable file is an empty list — the curated molecule
+ * pool still catches a leftover `skills/Water/` after a from-scratch
+ * reset. Do not use `openDb` here: it creates and migrates.
+ */
+export function readSkillOwners(dbPath: string): readonly SkillOwnerIdentity[] {
+  if (!existsSync(dbPath)) return [];
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const rows = db
+        .prepare(
+          `SELECT atom_id AS atomId, name FROM atom_types
+           WHERE tier = 1 AND atom_id IS NOT NULL`
+        )
+        .all() as { atomId: string | null; name: string }[];
+      const owners: SkillOwnerIdentity[] = [];
+      for (const row of rows) {
+        if (typeof row.atomId === 'string' && row.atomId.length > 0) {
+          owners.push({ atomId: row.atomId, name: row.name });
+        }
+      }
+      return owners;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Directories under the skill root that are still named as a molecule
+ * (curated pool or a live L1 label) rather than as an atom id.
+ *
+ * Those trees are invisible to `loadFor(namespaceOf(atom))`. An unknown
+ * orphan directory is left alone — `mergeInto` already leaves those, and
+ * tests mint their own keys.
+ */
+export function leftoverNameKeyedNamespaces(
+  skillRoot: string,
+  atoms: readonly SkillOwnerIdentity[] = []
+): readonly LeftoverNameKeyedNamespace[] {
+  if (!existsSync(skillRoot)) return [];
+  let entries: string[];
+  try {
+    entries = readdirSync(skillRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+  const allowed = new Set(atoms.map((atom) => atom.atomId));
+  const forbidden = new Set(MOLECULES.map((molecule) => molecule.name));
+  const atomIdByName = new Map<string, string>();
+  for (const atom of atoms) {
+    if (atom.name !== atom.atomId) forbidden.add(atom.name);
+    atomIdByName.set(atom.name, atom.atomId);
+  }
+  for (const id of allowed) forbidden.delete(id);
+  return entries
+    .filter((name) => forbidden.has(name))
+    .map((name) => {
+      const atomId = atomIdByName.get(name);
+      return atomId ? { name, atomId } : { name };
+    });
+}
+
+export function formatSkillIdentityWarning(
+  leftovers: readonly LeftoverNameKeyedNamespace[]
+): string {
+  const lines = leftovers.map((leftover) =>
+    leftover.atomId
+      ? `  skills/${leftover.name}/  (live atom "${leftover.name}" is filed at skills/${leftover.atomId}/)`
+      : `  skills/${leftover.name}/  (curated molecule name; the loader looks under the atom id)`
+  );
+  return (
+    'skill store still has name-keyed directories; they are invisible to the id-keyed loader:\n' +
+    `${lines.join('\n')}\n` +
+    'Archive or delete those directories. Do not rename them onto a new atom id — after the ' +
+    "2026-08-18 reset that would attach another identity's recipes. Fresh skills belong under " +
+    'skills/<atom-id>/.'
+  );
+}
+
+/**
+ * Refuse a leftover name-keyed skill tree at launch.
+ *
+ * There is no migrator: after the 2026-08-18 reset a leftover
+ * `skills/Water/` belongs to a deleted identity, and moving it onto the
+ * current Water uuid would attach another atom's recipes.
+ */
+export function assertCurrentIdentity(
+  skillRoot: string,
+  atoms: readonly SkillOwnerIdentity[] = []
+): void {
+  const leftovers = leftoverNameKeyedNamespaces(skillRoot, atoms);
+  if (leftovers.length === 0) return;
+  throw new RunnerConfigError(formatSkillIdentityWarning(leftovers));
 }
 
 /**

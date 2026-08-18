@@ -33,7 +33,11 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { resolveNamespaceKey } from '../skills/namespace.js';
+import {
+  formatSkillIdentityWarning,
+  leftoverNameKeyedNamespaces,
+  resolveNamespaceKey,
+} from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { readLedger, projectCounters } from '../core/ledger.js';
 import { computeStatsRows, similarityPairs } from '../skills/stats.js';
@@ -222,6 +226,15 @@ function skillNamespaces(reg: SkillRegistry, l1?: string): string[] {
   return [resolveNamespaceKey(l1, displayNamesByAtomId())];
 }
 
+function ownersFromLabels(labels: ReadonlyMap<string, string>): { atomId: string; name: string }[] {
+  return [...labels].map(([atomId, name]) => ({ atomId, name }));
+}
+
+function identityWarning(dir: string, labels: ReadonlyMap<string, string>): { identityWarning?: string } {
+  const leftovers = leftoverNameKeyedNamespaces(dir, ownersFromLabels(labels));
+  return leftovers.length > 0 ? { identityWarning: formatSkillIdentityWarning(leftovers) } : {};
+}
+
 /**
  * atom id → molecule name, for the MCP payloads.
  *
@@ -257,6 +270,7 @@ export function skillsList(opts: { l1?: string } = {}): unknown {
   const labels = displayNamesByAtomId();
   return {
     skillsDir: dir,
+    ...identityWarning(dir, labels),
     namespaces: namespaces.map((ns) => ({
       // `l1` is the readable molecule name; `l1Key` is what addresses it.
       l1: labels.get(ns) ?? ns,
@@ -300,6 +314,7 @@ export function skillsStats(opts: { l1?: string; sim?: number } = {}): unknown {
   const sim = typeof opts.sim === 'number' && opts.sim > 0 && opts.sim <= 1 ? opts.sim : 0.5;
   return {
     skillsDir: dir,
+    ...identityWarning(dir, labels),
     thresholdsInForce: { trust, promote },
     legend:
       'matches = prefilter picks; freeRides = matched but did not drive the run (credit withheld by the adherence gate)',
@@ -364,6 +379,7 @@ export function skillsReview(opts: { l1?: string } = {}): unknown {
   }
   return {
     skillsDir: dir,
+    ...identityWarning(dir, labels),
     caveat:
       'MECHANICAL PRE-SCREEN, NOT THE REVIEW GATE. A clean verdict means a human reviewer’s time will not be wasted; it never means the body is approved for sharing.',
     toolScopeFindingsAvailable: existsSync(dbPath),

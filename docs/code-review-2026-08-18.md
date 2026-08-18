@@ -20,8 +20,10 @@ code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 > sur l’allocator, le LLM garde le nom, le pool saute l’entrée prise.
 > T10 (§1.6) : `modelForTier(env)`, `applyTierPins` + snapshot hôte, garde
 > Codex L1 et `assertTransportHonoursCredentials` sur les pins de tier
-> (`claude-cli` / `codex`) aussi, pas seulement `ATOMA_LLM`. Reste :
-> `assertCurrentIdentity` (§1.8).
+> (`claude-cli` / `codex`) aussi, pas seulement `ATOMA_LLM`.
+> `assertCurrentIdentity` (§1.8) refuse un arbre encore name-keyed au
+> launch et dans doctor ; pas de commande `migrate-identity` (un rename
+> sur un nouvel uuid attacherait les recettes d’une autre identité).
 
 ## Vue d'ensemble de la fenêtre
 

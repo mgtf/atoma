@@ -20,7 +20,11 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
-import { resolveNamespaceKey } from '../skills/namespace.js';
+import {
+  formatSkillIdentityWarning,
+  leftoverNameKeyedNamespaces,
+  resolveNamespaceKey,
+} from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
@@ -478,6 +482,13 @@ function main(): void {
     return;
   }
   const registry = new SkillRegistry(dirFrom(args.flags));
+  const leftovers = leftoverNameKeyedNamespaces(
+    registry.rootDir,
+    [...displayNamesByAtomId(args.flags['db'])].map(([atomId, name]) => ({ atomId, name }))
+  );
+  if (leftovers.length > 0) {
+    console.error(formatSkillIdentityWarning(leftovers));
+  }
   const moleculeFilter = args.flags['molecule'] ?? args.flags['l1'];
 
   switch (args.command) {

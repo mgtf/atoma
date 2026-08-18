@@ -15,8 +15,9 @@ import { nextAvailableTissue } from './taxonomies/tissues.js';
 /**
  * Is this string safe to use as an atom NAME?
  *
- * Atom names are path components (the skill store namespaces by them), so
- * the answer is not "is it pretty" but "can it escape a directory". Rejects
+ * Atom names are path components (leftover pre-T4 skill dirs still use
+ * them; the live skill path is the atom id), so the answer is not "is it
+ * pretty" but "can it escape a directory". Rejects
  * anything outside [A-Za-z0-9._-], plus the all-dots strings (`.`, `..`)
  * that pass a charset test and still traverse. Exported so the same rule can
  * be asserted from tests.
@@ -627,8 +628,9 @@ export class AtomRegistry {
 
       let ordinal: number;
       let name: string;
-      // An atom NAME is also a path component: the skill store namespaces by
-      // it (`skills/<atom-name>/<skill-id>/`). `overrideName` is
+      // An atom NAME is also a path component: leftover pre-T4 skill
+      // trees still use it (`skills/<atom-name>/`); the live path is
+      // `skills/<atom-id>/`. `overrideName` is
       // LLM-authored — it arrives as `verdict.branchName` from an L2/L3
       // validator — so accepting it verbatim let a verdict of `".."` name an
       // atom `..` and write a skill outside the skills root (reproduced).

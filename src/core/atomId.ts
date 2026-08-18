@@ -4,9 +4,10 @@ import { randomUUID } from 'node:crypto';
  * Surrogate identity for an atom type — invariant T4 in
  * docs/saas-architecture.md.
  *
- * WHAT THIS REPLACES. A taxonomy name currently does triple duty: display
- * label, identity, and filesystem namespace (`SkillRegistry.namespaceDir` is
- * `join(rootDir, sanitise(l1Name))`). That coupling has already produced two
+ * WHAT THIS REPLACES. A taxonomy name used to do triple duty: display
+ * label, identity, and filesystem namespace. The live skill path is now
+ * `join(rootDir, sanitise(atomId))`; leftover name-keyed trees are refused
+ * by `assertCurrentIdentity`. That coupling had already produced two
  * confirmed defects — `sanitise` accepting `..` while an LLM-authored
  * `overrideName` became a path component, and a post-`remove` `branch`
  * reissuing a dead name and inheriting its skill directory. Both are closed

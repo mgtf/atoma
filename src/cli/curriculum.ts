@@ -32,6 +32,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { SkillRegistry } from '../skills/registry.js';
+import { assertCurrentIdentity } from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import Database from 'better-sqlite3';
 import { existsSync as fsExistsSync } from 'node:fs';
@@ -364,6 +365,10 @@ async function main(): Promise<void> {
   // and an atom id there is a string with no meaning to the model and no
   // meaning to the operator reading the printed target list.
   const labels = displayNamesByAtomId();
+  assertCurrentIdentity(
+    skillsDir,
+    [...labels].map(([atomId, name]) => ({ atomId, name }))
+  );
   const byL1 = new Map(
     registry.listNamespaces().map((ns) => [labels.get(ns) ?? ns, registry.loadFor(ns)])
   );

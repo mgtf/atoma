@@ -11,7 +11,7 @@
  * billable request.
  */
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -27,6 +27,12 @@ import {
   type ToolBackendMode,
 } from '../run/backendMode.js';
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
+import { DEFAULT_DB_PATH, DEFAULT_SKILLS_DIR } from '../core/stores.js';
+import {
+  formatSkillIdentityWarning,
+  leftoverNameKeyedNamespaces,
+  readSkillOwners,
+} from '../skills/namespace.js';
 
 const runFile = promisify(execFile);
 export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
@@ -547,6 +553,36 @@ export async function diagnoseDoctor(args: {
       remedy: 'Launch with --container (or --egress), or set ATOMA_CONTAINER=1.',
     });
   }
+  const skillsDir = env['ATOMA_SKILLS_DIR'] ?? DEFAULT_SKILLS_DIR;
+  const dbPath = env['ATOMA_DB_PATH'] ?? DEFAULT_DB_PATH;
+  if (!existsSync(skillsDir)) {
+    checks.push({
+      id: 'skill-identity',
+      label: 'Skill store identity',
+      status: 'pass',
+      detail: 'no skill store yet',
+    });
+  } else {
+    const leftovers = leftoverNameKeyedNamespaces(skillsDir, readSkillOwners(dbPath));
+    checks.push(
+      leftovers.length === 0
+        ? {
+            id: 'skill-identity',
+            label: 'Skill store identity',
+            status: 'pass',
+            detail: 'no leftover name-keyed directories',
+          }
+        : {
+            id: 'skill-identity',
+            label: 'Skill store identity',
+            status: 'fail',
+            detail: formatSkillIdentityWarning(leftovers).replace(/\n/g, ' '),
+            remedy:
+              'Archive or delete the leftover name-keyed directories. Do not rename them onto a new atom id.',
+          }
+    );
+  }
+
   checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));
   if (args.mode.egress) {
     checks.push({
