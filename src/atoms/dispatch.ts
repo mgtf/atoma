@@ -8,8 +8,9 @@ type Subtask = Plan['subtasks'][number];
  * The aggregation.mode → dispatch mapping was duplicated verbatim in
  * L2Atom and L3Atom (the files even said "mirror of" each other):
  *   - sequential  → one at a time, threading the previous step's summary
- *                   into the next subtask's inputs (narrative state; the
- *                   sandbox filesystem carries the bytes implicitly);
+ *                   AND its declared `outputs` into the next subtask's
+ *                   inputs (narrative + structured paths; the sandbox
+ *                   filesystem still carries the bytes implicitly);
  *   - concat / llm-synthesize → parallel Promise.all (orthogonal fan-out).
  * ONE implementation, parameterised by the per-subtask runner — the only
  * thing that genuinely differs between the tiers. Alias-map clearing and
@@ -27,6 +28,7 @@ export async function dispatchWithAggregation(
   if (plan.aggregation.mode === 'sequential') {
     const out: Result[] = [];
     let previousSummary: string | undefined;
+    let previousOutputs: readonly string[] | undefined;
     for (let idx = 0; idx < subtasks.length; idx++) {
       const baseSubtask = subtasks[idx]!;
       const subtask =
@@ -37,12 +39,20 @@ export async function dispatchWithAggregation(
                 ...(baseSubtask.inputs ?? {}),
                 previousStepSummary: previousSummary,
                 previousStepIndex: idx - 1,
+                ...(previousOutputs && previousOutputs.length > 0
+                  ? { previousStepOutputs: previousOutputs }
+                  : {}),
               },
             }
           : baseSubtask;
       const r = await runOne(subtask, idx);
       out.push(r);
       previousSummary = r.summary;
+      // Declared writes of THIS phase become the next phase's structured
+      // handover. Do not merge them into the next subtask's `outputs`:
+      // that field is what THIS phase creates, and skill/promotion gates
+      // must keep reading the current phase only.
+      previousOutputs = baseSubtask.outputs;
     }
     return out;
   }

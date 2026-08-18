@@ -60,8 +60,16 @@ describe('L2.execute — sequential dispatch', () => {
         {
           reasoning: 'phased build',
           subtasks: [
-            { description: 'phase-1: scaffold', preferredChild: 'Water' },
-            { description: 'phase-2: extend', preferredChild: 'Water' },
+            {
+              description: 'phase-1: scaffold',
+              preferredChild: 'Water',
+              outputs: ['index.html'],
+            },
+            {
+              description: 'phase-2: extend',
+              preferredChild: 'Water',
+              outputs: ['app.js'],
+            },
             { description: 'phase-3: smoke', preferredChild: 'Water' },
           ],
           aggregation: { mode: 'sequential' },
@@ -110,6 +118,11 @@ describe('L2.execute — sequential dispatch', () => {
     expect(planPhase2).toContain('summary-phase-1');
     expect(planPhase3).toContain('summary-phase-2');
     expect(planPhase3).not.toContain('summary-phase-1'); // only the IMMEDIATE prior step is threaded
+    // Structured handover rides the same immediate-prior channel.
+    expect(planPhase1).not.toContain('"previousStepOutputs"');
+    expect(planPhase2).toContain('index.html');
+    expect(planPhase3).toContain('app.js');
+    expect(planPhase3).not.toContain('index.html');
   });
 
   it('parallel modes (concat) still dispatch via Promise.all without threading', async () => {
@@ -157,6 +170,7 @@ describe('L2.execute — sequential dispatch', () => {
     // feature in human prose.
     for (const call of ctx.llm.calls) {
       expect(call.userContent).not.toContain('"previousStepSummary":');
+      expect(call.userContent).not.toContain('"previousStepOutputs"');
     }
   });
 });

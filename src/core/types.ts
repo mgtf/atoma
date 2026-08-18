@@ -80,13 +80,16 @@ export interface SubtaskSpec {
  *     fragments → the L2 synthesizer assembles them into `index.html`).
  *     Subtasks run in PARALLEL via Promise.all.
  *   - `sequential`: subtasks run ONE AT A TIME, with each step's summary
- *     threaded into the next step's `inputs.previousStepSummary`. The
- *     final aggregated result is the LAST step's output (no extra LLM
- *     call). Use when phases share an artefact that EVOLVES across
- *     steps (build-then-extend-then-smoke on the same file). The
- *     workspace filesystem is implicitly shared, so phases mutate the
- *     same on-disk artefact; the threaded `previousStepSummary` carries
- *     the narrative state, not the bytes.
+ *     threaded into the next step's `inputs.previousStepSummary` and its
+ *     declared `outputs` into `inputs.previousStepOutputs`. The final
+ *     aggregated result is the LAST step's output (no extra LLM call).
+ *     Use when phases share an artefact that EVOLVES across steps
+ *     (build-then-extend-then-smoke on the same file). The workspace
+ *     filesystem is implicitly shared, so phases mutate the same on-disk
+ *     artefact; the threaded summary is narrative state, the threaded
+ *     outputs are the structured paths. Skill/promotion gates still
+ *     read the CURRENT phase's `outputs` only — prior paths are inputs,
+ *     not a lie about what this phase writes.
  */
 export interface AggregationSpec {
   readonly mode: 'concat' | 'llm-synthesize' | 'sequential';

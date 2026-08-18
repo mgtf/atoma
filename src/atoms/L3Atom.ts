@@ -637,12 +637,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
   /**
    * Dispatch the subtasks of a plan according to its aggregation mode.
-   *   - sequential: for-of with await; each step's summary is threaded
-   *     into the next step's `inputs.previousStepSummary` so the next
-   *     L2 sees what the previous one accomplished. The workspace
-   *     filesystem is shared (same sandbox), so phases that mutate the
-   *     same artefact (build → extend → smoke) get implicit state
-   *     handover via disk; the threaded summary is the NARRATIVE state.
+   *   - sequential: for-of with await; each step's summary and declared
+   *     `outputs` are threaded into the next step's inputs so the next
+   *     L2 sees what the previous one accomplished and which paths it
+   *     named. The workspace filesystem is shared (same sandbox), so
+   *     phases that mutate the same artefact (build → extend → smoke)
+   *     get implicit state handover via disk; the threaded summary is
+   *     the NARRATIVE state and `previousStepOutputs` is the structured
+   *     path list.
    *   - concat / llm-synthesize: Promise.all (current behaviour).
    * The branch is in dispatch, not aggregate, because the dispatch
    * shape (parallel vs sequential) is what differs — the aggregate
