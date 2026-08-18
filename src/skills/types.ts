@@ -14,13 +14,14 @@
  * stays forward-compatible without adding migration churn later.
  *
  * Layout on disk (filesystem-first for diffability + git):
- *   ./skills/<l1-name>/<skill-id>/SKILL.md     — frontmatter + body
- *   ./skills/<l1-name>/<skill-id>/_meta.json   — runtime counters
+ *   ./skills/<atom-id>/<skill-id>/SKILL.md     — frontmatter + body
+ *   ./skills/<atom-id>/<skill-id>/_meta.json   — runtime counters
  *
- * The L1 name is the skill namespace; two L1s with the same name (rare
- * — naming comes from the global taxonomy) share their skills set.
- * Skill IDs are stable kebab-case identifiers within their namespace
- * ("write-package-json", "headless-smoke-loop").
+ * The atom id is the skill namespace (T4). The molecule name is a
+ * display label only — two L1s never share a namespace just because
+ * they were renamed to the same word. Skill IDs are stable kebab-case
+ * identifiers within their namespace ("write-package-json",
+ * "headless-smoke-loop").
  */
 
 export type SkillKind = 'llm' | 'script';

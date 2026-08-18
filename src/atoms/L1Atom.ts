@@ -87,10 +87,10 @@ export class L1Atom extends Atom {
   /**
    * Persistent skills the atom has accumulated across runs. Loaded
    * from a `SkillRegistry` (filesystem-backed by default at
-   * `./skills/<l1-name>/`) at construction time. Empty for fresh
+   * `./skills/<atom-id>/`) at construction time. Empty for fresh
    * atoms; populated for canonicals that have been seeded with
    * skill files or for atoms whose past supervised runs produced
-   * skills (auto-creation lands in a follow-up commit).
+   * skills.
    *
    * Use `skills()` for the public read accessor. The array is held
    * privately so a future patch path (e.g. a `learnSkill` mutator)
