@@ -81,7 +81,14 @@ export function resetTuning(): void {
     live[key] = TUNING_IDENTITY[key];
     changed = true;
   }
+  // Drop the persisted blob even when the live sample was already the
+  // identity: a stale localStorage entry would otherwise restyle the
+  // next visit after TUNING_IDENTITY itself moved.
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* same fail-open as persist() */
+  }
   if (!changed) return;
   live.revision += 1;
-  persist();
 }

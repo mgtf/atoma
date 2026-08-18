@@ -1076,6 +1076,7 @@ describe('drawRuns behavior', () => {
         key
       ).toBe(true);
     }
+    expect(ctx.metrics.hitTargets.some((target) => target.id === 'tuning:reset')).toBe(true);
   });
 
   it('reserves the panel its own space instead of drawing over the detail pane', () => {

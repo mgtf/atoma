@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   TUNING_IDENTITY,
   TUNING_KEYS,
@@ -279,5 +279,24 @@ describe('the live sample', () => {
     setTuningValue('buttonDepth', 3);
     resetTuning();
     for (const key of TUNING_KEYS) expect(readTuning()[key], key).toBe(TUNING_IDENTITY[key]);
+  });
+
+  it('forgets the persisted sample so the next visit is the identity', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+      removeItem: (key: string) => {
+        store.delete(key);
+      },
+    });
+    const { setTuningValue, resetTuning } = await import('../src/viz/client-gl/tuning-live.js');
+    setTuningValue('lightHue', 90);
+    expect(store.has('atoma.viz.tuning')).toBe(true);
+    resetTuning();
+    expect(store.has('atoma.viz.tuning')).toBe(false);
+    vi.unstubAllGlobals();
   });
 });
