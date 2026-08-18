@@ -1605,7 +1605,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           );
           ctx.recordSkill?.({
             op: 'credit-withheld',
-            l1Name: blameNs,
+            l1Name: this.displayNameForNamespace(blameNs),
+            l1AtomId: blameNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1615,7 +1616,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           this.skillRegistry.recordFailure(blameNs, skillId, { via: child.name });
           ctx.recordSkill?.({
             op: 'failure',
-            l1Name: blameNs,
+            l1Name: this.displayNameForNamespace(blameNs),
+            l1AtomId: blameNs,
             skillId,
             actorName: this.name,
             actorTier: 2,
@@ -1638,7 +1640,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               ctx.recordRunStat?.('demotion');
               ctx.recordSkill?.({
                 op: 'demote',
-                l1Name: blameNs,
+                l1Name: this.displayNameForNamespace(blameNs),
+                l1AtomId: blameNs,
                 skillId,
                 actorName: this.name,
                 actorTier: 2,

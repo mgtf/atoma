@@ -277,8 +277,8 @@ describe('AtomRegistry', () => {
       const db = (r as any).db as import('../src/registry/db.js').DB;
       const insert = db.prepare(
         `INSERT INTO atom_types
-         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, atom_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, lower(hex(randomblob(16))))`
       );
       const now = new Date().toISOString();
       insert.run(1, 1, 'Minesweeper-WebGL', 'd', 's', '[]', '{}', 't', now);
@@ -307,8 +307,8 @@ describe('AtomRegistry', () => {
       const db = (r as any).db as import('../src/registry/db.js').DB;
       const insert = db.prepare(
         `INSERT INTO atom_types
-         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, successes, failures)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+         (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, successes, failures, atom_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, lower(hex(randomblob(16))))`
       );
       const now = new Date().toISOString();
       insert.run(1, 1, 'Widget', 'd', 's', '[]', '{}', 't', now, 1, 0);

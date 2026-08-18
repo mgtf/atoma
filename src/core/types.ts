@@ -402,8 +402,8 @@ export interface SkillEventInfo {
    * anything that needs to look the molecule back up.
    */
   l1Name: string;
-  /** Identity of that molecule; absent on events recorded before T4. */
-  l1AtomId?: string;
+  /** Identity of that molecule, for anything that must look it back up. */
+  l1AtomId: string;
   skillId: string;
   actorName: string;
   actorTier: Tier;

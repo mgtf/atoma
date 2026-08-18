@@ -654,8 +654,8 @@ describe('drawSkills scrolling honesty and search', () => {
   const HEIGHT = 420;
   const skills = Array.from({ length: 24 }, (_, index) => makeSkill(`skill-${index}`));
   const data = {
-    skillNamespaces: [{ l1Name: 'Ammonia', count: skills.length }],
-    skillsByNamespace: { Ammonia: skills },
+    skillNamespaces: [{ l1Name: 'ammonia-atom-id', l1Label: 'Ammonia', count: skills.length }],
+    skillsByNamespace: { 'ammonia-atom-id': skills },
   };
 
   it('reports list overflow through scrollMax.skills', () => {
@@ -704,16 +704,16 @@ describe('drawSkills scrolling honesty and search', () => {
           search: { run: '', registry: '', skills: 'replay', launch: '' },
         },
         {
-          skillNamespaces: [{ l1Name: 'Ammonia', count: pair.length }],
-          skillsByNamespace: { Ammonia: pair },
+          skillNamespaces: [{ l1Name: 'ammonia-atom-id', l1Label: 'Ammonia', count: pair.length }],
+          skillsByNamespace: { 'ammonia-atom-id': pair },
         }
       ),
       WIDTH,
       800
     );
     const ids = ctx.buttons.map((button) => button.id);
-    expect(ids).toContain('skill.select.Ammonia::replay-recorded-shell-probes');
-    expect(ids).not.toContain('skill.select.Ammonia::recover-manifest-run');
+    expect(ids).toContain('skill.select.ammonia-atom-id::replay-recorded-shell-probes');
+    expect(ids).not.toContain('skill.select.ammonia-atom-id::recover-manifest-run');
   });
 });
 

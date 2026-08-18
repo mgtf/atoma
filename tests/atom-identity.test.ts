@@ -1,7 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { isAtomId, newAtomId } from '../src/core/atomId.js';
@@ -71,39 +68,6 @@ describe('atom identity — a surrogate that never collides and never returns', 
     const rebranched = reg.branch(secondBefore.name, {}, 'test');
     expect(rebranched.atomId).not.toBe(first.atomId);
     expect(rebranched.atomId).not.toBe(secondBefore.atomId);
-  });
-
-  it('back-fills a pre-migration store on open, with a distinct id per row', () => {
-    // Exercises the production path: openDb is what migrates, so the test
-    // reopens a real file rather than calling the backfill directly.
-    const dir = mkdtempSync(join(tmpdir(), 'atoma-atom-id-'));
-    const path = join(dir, 'store.db');
-    try {
-      const first = openDb(path);
-      const reg = new AtomRegistry(first);
-      reg.create(1, seed);
-      reg.create(1, seed);
-      reg.create(2, seed);
-      // Simulate a store written before the column existed.
-      first.exec('UPDATE atom_types SET atom_id = NULL');
-      expect(
-        (first.prepare('SELECT COUNT(*) AS n FROM atom_types WHERE atom_id IS NULL').get() as {
-          n: number;
-        }).n
-      ).toBe(3);
-      first.close();
-
-      const reopened = openDb(path);
-      const ids = (
-        reopened.prepare('SELECT atom_id FROM atom_types').all() as { atom_id: string | null }[]
-      ).map((r) => r.atom_id);
-      expect(ids).toHaveLength(3);
-      expect(ids.every((id) => id !== null && isAtomId(id))).toBe(true);
-      expect(new Set(ids).size).toBe(3);
-      reopened.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it('carries the registry identity onto the atom, unchanged, at every tier', () => {

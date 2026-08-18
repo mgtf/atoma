@@ -24,11 +24,6 @@ import {
   assertCurrentTaxonomy,
   planTaxonomyMigration,
 } from '../registry/taxonomyMigration.js';
-import {
-  applyIdentityMigration,
-  IDENTITY_VERSION,
-  planIdentityMigration,
-} from '../registry/identityMigration.js';
 
 import { taxonomyForTier } from '../core/taxonomy.js';
 import { elementForTool } from '../contracts/toolTaxonomy.js';
@@ -51,7 +46,6 @@ interface Args {
     | 'history'
     | 'rollback'
     | 'migrate-taxonomy'
-    | 'migrate-identity'
     | 'cache'
     | 'help';
   positional: string[];
@@ -67,7 +61,7 @@ function parseArgs(argv: string[]): Args {
     booleanFlags: ['apply', 'fuzzy', 'all', 'force', 'clear'],
   });
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'migrate-taxonomy', 'migrate-identity', 'cache', 'help'].includes(command)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'migrate-taxonomy', 'cache', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -227,45 +221,6 @@ function cmdMigrateTaxonomy(
   console.log(
     `migrated ${result.renamedTypes} type name(s), ${result.renamedSkillNamespaces} skill namespace(s); ` +
       `reset ${result.resetTypes} type trust record(s), cleared ${result.clearedPrefilterEntries} cached decision(s).`
-  );
-}
-
-/**
- * Move skill namespaces onto atom ids (T4). Dry-run by default, like every
- * other migration in this CLI, and it reuses `taxonomyBackup` because the
- * things at risk are the same two: the store and the skills tree.
- */
-function cmdMigrateIdentity(db: DB, dbPath: string, skillsDir: string, apply: boolean): void {
-  const plan = planIdentityMigration(db, skillsDir);
-  if (plan.alreadyCurrent) {
-    console.log(`skill namespaces are already keyed by atom id (v${IDENTITY_VERSION}).`);
-    return;
-  }
-
-  console.log('identity migration: skill namespaces move from atom NAME to atom id');
-  for (const move of plan.namespaceMoves) {
-    console.log(`  skills: ${move.name}/ → ${move.atomId}/`);
-  }
-  console.log(`  ${plan.ledgerRows} ledger row(s) will have their entity prefix rewritten.`);
-  for (const orphan of plan.unmatchedNamespaces) {
-    console.log(`  left alone (no live atom): ${orphan}/`);
-  }
-  console.log(
-    '  prompts, tool metadata, type versions and trust counters are NOT touched — an' +
-      ' identity changing spelling is not a change to what the atom is.'
-  );
-
-  if (!apply) {
-    console.log('\ndry run only; re-run with --apply to create a backup and migrate.');
-    return;
-  }
-
-  const backup = migrationBackup(db, dbPath, skillsDir, `identity-v${IDENTITY_VERSION}`);
-  const result = applyIdentityMigration(db, skillsDir, plan);
-  console.log(`\nbackup: ${backup}`);
-  console.log(
-    `moved ${result.movedNamespaces} skill namespace(s); ` +
-      `rewrote ${result.rewrittenLedgerRows} ledger entity prefix(es).`
   );
 }
 
@@ -688,13 +643,6 @@ function main(): void {
     }
     case 'migrate-taxonomy':
       return cmdMigrateTaxonomy(
-        db,
-        dbPath,
-        skillsDirPath(args.flags['skills-dir']),
-        args.flags['apply'] === 'true'
-      );
-    case 'migrate-identity':
-      return cmdMigrateIdentity(
         db,
         dbPath,
         skillsDirPath(args.flags['skills-dir']),

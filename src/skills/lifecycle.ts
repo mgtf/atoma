@@ -308,7 +308,17 @@ export function resultHasSuccessfulToolAction(
 export class SkillLifecycle {
   constructor(
     private readonly host: SkillLifecycleHost,
-    private readonly skills: SkillRegistry
+    private readonly skills: SkillRegistry,
+    /**
+     * Namespace key → molecule display name.
+     *
+     * Injected rather than looked up here: this class holds no atom registry,
+     * and every recorded event needs the readable name beside the key (the
+     * viz, the CLI and MCP all render `l1Name`). Same shape as
+     * `visibleSkillNamespaces` taking its namespaces as an argument — the
+     * resolution belongs to whoever owns the registry.
+     */
+    private readonly displayName: (ns: SkillNamespace) => string = (ns) => ns
   ) {}
 
   /**
@@ -528,7 +538,8 @@ export class SkillLifecycle {
       args.ctx.recordRunStat?.('learned-skill');
       args.ctx.recordSkill?.({
         op: 'learn',
-        l1Name: args.l1Name,
+        l1Name: this.displayName(args.l1Name),
+        l1AtomId: args.l1Name,
         skillId: draft.id,
         actorName: this.host.name,
         actorTier: 2,
@@ -649,7 +660,8 @@ export class SkillLifecycle {
     args.ctx.recordRunStat?.('learned-event-skill');
     args.ctx.recordSkill?.({
       op: 'learn',
-      l1Name: args.l1Name,
+      l1Name: this.displayName(args.l1Name),
+      l1AtomId: args.l1Name,
       skillId: draft.id,
       actorName: this.host.name,
       actorTier: 2,
@@ -836,7 +848,8 @@ export class SkillLifecycle {
       );
       args.ctx.recordSkill?.({
         op: 'promote',
-        l1Name: args.l1Name,
+        l1Name: this.displayName(args.l1Name),
+        l1AtomId: args.l1Name,
         skillId: args.skillId,
         actorName: this.host.name,
         actorTier: 2,
@@ -863,7 +876,8 @@ export class SkillLifecycle {
       );
       args.ctx.recordSkill?.({
         op: 'promote',
-        l1Name: args.l1Name,
+        l1Name: this.displayName(args.l1Name),
+        l1AtomId: args.l1Name,
         skillId: args.skillId,
         actorName: this.host.name,
         actorTier: 2,
@@ -894,7 +908,8 @@ export class SkillLifecycle {
       );
       args.ctx.recordSkill?.({
         op: 'promote',
-        l1Name: args.l1Name,
+        l1Name: this.displayName(args.l1Name),
+        l1AtomId: args.l1Name,
         skillId: args.skillId,
         actorName: this.host.name,
         actorTier: 2,
@@ -938,7 +953,8 @@ export class SkillLifecycle {
     args.ctx.recordRunStat?.('promotion');
     args.ctx.recordSkill?.({
       op: 'promote',
-      l1Name: args.l1Name,
+      l1Name: this.displayName(args.l1Name),
+      l1AtomId: args.l1Name,
       skillId: args.skillId,
       actorName: this.host.name,
       actorTier: 2,
@@ -1387,7 +1403,8 @@ export class SkillLifecycle {
       this.skills?.recordSuccess(l1Name, skill.id);
       ctx.recordSkill?.({
         op: 'direct',
-        l1Name,
+        l1Name: this.displayName(l1Name),
+        l1AtomId: l1Name,
         skillId: skill.id,
         actorName: this.host.name,
         actorTier: 2,
@@ -1395,7 +1412,8 @@ export class SkillLifecycle {
       });
       ctx.recordSkill?.({
         op: 'success',
-        l1Name,
+        l1Name: this.displayName(l1Name),
+        l1AtomId: l1Name,
         skillId: skill.id,
         actorName: this.host.name,
         actorTier: 2,
@@ -1472,7 +1490,8 @@ export class SkillLifecycle {
     );
     ctx.recordSkill?.({
       op: 'demote',
-      l1Name,
+      l1Name: this.displayName(l1Name),
+      l1AtomId: l1Name,
       skillId: skill.id,
       actorName: this.host.name,
       actorTier: 2,

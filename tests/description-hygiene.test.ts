@@ -62,8 +62,8 @@ describe('AtomRegistry.findDuplicateGroups({ fuzzy: true })', () => {
   function seed(db: DB): void {
     const insert = db.prepare(
       `INSERT INTO atom_types
-       (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+       (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, atom_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, lower(hex(randomblob(16))))`
     );
     const now = new Date().toISOString();
     insert.run(1, 1, 'WebGLMinesweeper', 'd', 's', '[]', '{}', 't', now);

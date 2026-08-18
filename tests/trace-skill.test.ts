@@ -31,6 +31,7 @@ describe('TraceRecorder.recordSkillEvent', () => {
     const info: SkillEventInfo = {
       op: 'match',
       l1Name: 'Ammonia',
+      l1AtomId: 'atom-id-for-test',
       skillId: 'scaffold-package-json',
       actorName: 'Erythrocyte',
       actorTier: 2,
@@ -59,6 +60,7 @@ describe('TraceRecorder.recordSkillEvent', () => {
       recorder.recordSkillEvent({
         op,
         l1Name: 'Ammonia',
+        l1AtomId: 'atom-id-for-test',
         skillId: 'foo',
         actorName: 'Erythrocyte',
         actorTier: 2,
@@ -77,6 +79,7 @@ describe('TraceRecorder.recordSkillEvent', () => {
     recorder.recordSkillEvent({
       op: 'success',
       l1Name: 'Ammonia',
+      l1AtomId: 'atom-id-for-test',
       skillId: 'foo',
       actorName: 'Erythrocyte',
       actorTier: 2,
@@ -103,6 +106,7 @@ describe('forkBranch propagates recordSkill', () => {
     branchCtx.recordSkill?.({
       op: 'match',
       l1Name: 'Ammonia',
+      l1AtomId: 'atom-id-for-test',
       skillId: 'foo',
       actorName: 'Erythrocyte',
       actorTier: 2,
@@ -113,6 +117,7 @@ describe('forkBranch propagates recordSkill', () => {
     baseCtx.recordSkill?.({
       op: 'success',
       l1Name: 'Ammonia',
+      l1AtomId: 'atom-id-for-test',
       skillId: 'foo',
       actorName: 'Erythrocyte',
       actorTier: 2,

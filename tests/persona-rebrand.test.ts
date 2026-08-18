@@ -148,8 +148,8 @@ describe('AtomRegistry.rebrand — retrofit legacy atoms', () => {
     const now = new Date().toISOString();
     rawDb.prepare(
       `INSERT INTO atom_types
-       (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`
+       (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, atom_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, lower(hex(randomblob(16))))`
     ).run(
       1,
       1,

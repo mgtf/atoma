@@ -71,11 +71,12 @@ describe('AtomRegistry success/failure counters', () => {
         description TEXT NOT NULL, system_prompt TEXT NOT NULL,
         tools_json TEXT NOT NULL DEFAULT '[]', params_json TEXT NOT NULL DEFAULT '{}',
         created_by TEXT NOT NULL, created_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+        atom_id TEXT NOT NULL,
         PRIMARY KEY (tier, ordinal)
       );
       INSERT INTO atom_types
-        (tier, ordinal, name, description, system_prompt, created_by, created_at, version)
-        VALUES (1, 1, 'LegacyH', 'legacy', 'p', 'pre', '2025-01-01', 1);
+        (tier, ordinal, name, description, system_prompt, created_by, created_at, version, atom_id)
+        VALUES (1, 1, 'LegacyH', 'legacy', 'p', 'pre', '2025-01-01', 1, lower(hex(randomblob(16))));
     `);
     raw.close();
 

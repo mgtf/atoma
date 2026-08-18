@@ -748,12 +748,17 @@ persisted identity.
 
 **Phase 3 — surrogate identity** (B1 → T4, T5). **DONE for skill namespaces.**
 `atom_id` (a UUID, not a ULID — see `core/atomId.ts` for why) is the key,
-`name` is a display label, and `registry migrate-identity` moves the store.
-What landed: the id column with backfill, `Atom.atomId` threaded by `fromType`,
-one derivation (`namespaceOf`) guarded by a branded type, a crash-convergent
-migration with its own version key, the flip itself, and display resolution at
-the CLI, MCP and viz so no operator surface prints a UUID. Verified end to end
-on a copy of the live store — 3 namespaces, 646 ledger rows.
+`name` is a display label. What landed: the id column, `Atom.atomId` threaded
+by `fromType`, one derivation (`namespaceOf`) guarded by a branded type, the
+flip itself, and display resolution at the CLI, MCP and viz so no operator
+surface prints a UUID.
+*The migration itself is gone.* It ran once against the only store that
+existed, and the project is pre-production with no second instance to migrate,
+so the module, its CLI command, the launch guard, the backfill and the
+`identity_version` key were all deleted rather than kept as permanent
+bridge code for a state that can no longer occur. `atom_id` is `NOT NULL` and
+the store's table was rebuilt to match, so a fresh store and the live one carry
+one definition. Recover the history from git if a second instance ever appears.
 *Still name-keyed, deliberately:* ledger entities for ATOM events (they are the
 display label and `ledger check` projects type counters against them),
 `created_by`, and provenance prose inside system prompts. Those are the

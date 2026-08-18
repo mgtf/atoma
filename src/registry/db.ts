@@ -1,11 +1,9 @@
 import Database from 'better-sqlite3';
 import { importLegacyLedger, LEDGER_TABLE_DDL } from '../core/ledger.js';
-import { newAtomId } from '../core/atomId.js';
 import {
   initializeTaxonomyVersion,
   STORE_METADATA_DDL,
 } from './taxonomyMigration.js';
-import { initializeIdentityVersion } from './identityMigration.js';
 
 export type DB = Database.Database;
 
@@ -13,11 +11,10 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS atom_types (
   tier          INTEGER NOT NULL CHECK(tier IN (1,2,3)),
   ordinal       INTEGER NOT NULL,
-  -- Surrogate identity (T4). Declared nullable so that a fresh table and a
-  -- back-filled legacy one carry the SAME column definition; presence is
-  -- guaranteed by every writer supplying one and by backfillAtomIds closing
-  -- any gap on open, and uniqueness by idx_atom_types_atom_id below.
-  atom_id       TEXT,
+  -- Surrogate identity (T4) — see src/core/atomId.ts. Uniqueness is carried by
+  -- idx_atom_types_atom_id below, which a UNIQUE column constraint could not
+  -- express alongside the composite primary key.
+  atom_id       TEXT NOT NULL,
   name          TEXT UNIQUE NOT NULL,
   description   TEXT NOT NULL,
   system_prompt TEXT NOT NULL,
@@ -48,27 +45,6 @@ CREATE INDEX IF NOT EXISTS idx_atom_types_name ON atom_types(name);
 CREATE INDEX IF NOT EXISTS idx_atom_types_tier ON atom_types(tier);
 `;
 
-/**
- * Give every pre-existing row a surrogate id (T4).
- *
- * The column is added NULLABLE because SQLite cannot add a NOT NULL column to
- * a populated table without a default, and a shared constant default would
- * defeat uniqueness. So the shape is: add nullable, fill each row with its own
- * id, then let a UNIQUE index carry the constraint. Runs inside one
- * transaction, and costs one indexed lookup returning nothing once the store
- * has been through it.
- */
-function backfillAtomIds(db: DB): void {
-  const pending = db
-    .prepare('SELECT tier, ordinal FROM atom_types WHERE atom_id IS NULL')
-    .all() as { tier: number; ordinal: number }[];
-  if (pending.length === 0) return;
-  const update = db.prepare('UPDATE atom_types SET atom_id = ? WHERE tier = ? AND ordinal = ?');
-  db.transaction(() => {
-    for (const row of pending) update.run(newAtomId(), row.tier, row.ordinal);
-  })();
-}
-
 function addColumnIfMissing(db: DB, table: string, column: string, ddl: string): void {
   const cols = db
     .prepare(`PRAGMA table_info(${table})`)
@@ -92,18 +68,10 @@ export function openDb(path: string): DB {
   // every open: no-op when the columns are already present.
   addColumnIfMissing(db, 'atom_types', 'successes', 'successes INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing(db, 'atom_types', 'failures', 'failures INTEGER NOT NULL DEFAULT 0');
-  // Surrogate identity (T4). Nullable column + backfill + UNIQUE index; see
-  // backfillAtomIds for why it cannot be declared NOT NULL in one step.
-  addColumnIfMissing(db, 'atom_types', 'atom_id', 'atom_id TEXT');
-  backfillAtomIds(db);
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_atom_types_atom_id ON atom_types(atom_id)');
   // Carry a pre-consolidation atoma-ledger.jsonl across, once, if one sits
   // next to this file and the table is still empty. No-op for `:memory:`.
   importLegacyLedger(db, path);
   initializeTaxonomyVersion(db);
-  // Identity scheme (T4) is versioned separately from the taxonomy: the two
-  // migrations are orthogonal and the store already sits at the current
-  // taxonomy version. See registry/identityMigration.ts.
-  initializeIdentityVersion(db);
   return db;
 }

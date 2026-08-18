@@ -33,8 +33,8 @@ function insertLegacyType(
   db.prepare(
     `INSERT INTO atom_types
       (tier, ordinal, name, description, system_prompt, tools_json, params_json,
-       created_by, created_at, version, successes, failures)
-     VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, 1, 3, 0)`
+       created_by, created_at, version, successes, failures, atom_id)
+     VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, 1, 3, 0, lower(hex(randomblob(16))))`
   ).run(
     tier,
     ordinal,

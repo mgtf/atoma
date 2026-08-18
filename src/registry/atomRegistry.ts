@@ -75,7 +75,7 @@ export interface CreateSeed {
 interface Row {
   tier: number;
   ordinal: number;
-  atom_id: string | null;
+  atom_id: string;
   name: string;
   description: string;
   system_prompt: string;
@@ -90,10 +90,7 @@ interface Row {
 
 function rowToType(row: Row): AtomType {
   return {
-    // Non-null in practice: every writer supplies one and `openDb` back-fills
-    // any legacy gap before a read can reach here. The fallback keeps a
-    // hand-edited or mid-migration store readable instead of throwing.
-    atomId: row.atom_id ?? '',
+    atomId: row.atom_id,
     tier: row.tier as Tier,
     ordinal: row.ordinal,
     name: row.name,
@@ -265,12 +262,11 @@ export class AtomRegistry {
    * GL client's Skills header, viz search — need a way back to the display
    * label, and there is none: nothing maps a key to a name today.
    *
-   * Returns null for an unknown id, including the empty string a
-   * mid-migration row can carry (see `rowToType`), so callers can fall back to
-   * showing the raw key rather than crashing an operator surface.
+   * Returns null for an unknown id — an atom that was removed while its skill
+   * namespace survived — so operator surfaces fall back to showing the raw key
+   * rather than crashing.
    */
   getByAtomId(atomId: string): AtomType | null {
-    if (atomId.length === 0) return null;
     const row = this.db
       .prepare('SELECT * FROM atom_types WHERE atom_id = ?')
       .get(atomId) as Row | undefined;
