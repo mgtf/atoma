@@ -142,38 +142,80 @@ describe('AtomRegistry', () => {
     expect(r.getByName('Water')?.tier).toBe(1);
   });
 
-  it('an overrideName cannot squat a curated pool name the allocator has yet to issue', () => {
-    // REGRESSION. `nextAvailable` keys on ORDINALS, so it will still hand out
-    // molecule #4's curated name later; `branch`'s collision guard only saw
-    // names that were live AT BRANCH TIME. An LLM validator emitting
-    // `branchName: "CarbonDioxide"` therefore parked that name on ordinal 2,
-    // and the create() that eventually reached ordinal 4 died on
+  it('the allocator skips a curated name an LLM branch already took', () => {
+    // REGRESSION. `nextAvailable` keyed on ORDINALS alone, so it still handed
+    // out molecule #4's curated name even though an LLM-authored
+    // `branchName: "CarbonDioxide"` had already parked that name on ordinal 2.
+    // The two met at `name TEXT UNIQUE` and create() threw
     // `UNIQUE constraint failed: atom_types.name` — mid-run, mid-spend, on a
     // path the model reaches just by picking a plausible chemical name.
     const base = r.create(1, baseSeed);
     const squatter = r.branch(base.name, {}, 'tester', 'CarbonDioxide');
-    expect(squatter.name).toBe('CarbonDioxide-2');
+    expect(squatter.name).toBe('CarbonDioxide'); // the LLM keeps its name
 
-    // The pool stays canonical: molecule #4 still gets its own name, and
-    // creation past that ordinal no longer throws.
     const issued: string[] = [];
     for (let i = 0; i < 4; i += 1) issued.push(r.create(1, baseSeed).name);
-    expect(issued).toContain('CarbonDioxide');
-    expect(r.getByName('CarbonDioxide')!.ordinal).toBe(4);
+    expect(issued).not.toContain('CarbonDioxide');
+    expect(new Set(issued).size).toBe(4);
   });
 
-  it('a `<Rank><n>` fallback-shaped overrideName suffixes without spinning', () => {
-    // The reserved-name test runs against the RAW name, not the normalized
-    // key: `Molecule5-2` normalizes to `molecule52`, which matches the
-    // fallback shape, so a key-based test would reject every suffix the
-    // suffix loop itself produces and never terminate.
+  it('the skip is GLOBAL, because the name constraint is', () => {
+    // `atom_types.name` is UNIQUE over the whole table while the pools are
+    // per-tier, so a guard scoped to the branching atom's own tier closes
+    // only a third of the hole. An L3 validator naming a tier-1 branch after
+    // a CELL is not exotic: the L3 prefilter catalog prints reachable L1
+    // molecule names verbatim, so the model is shown one rank's vocabulary
+    // while authoring another rank's name.
+    const l1 = r.create(1, baseSeed);
+    const branched = r.branch(l1.name, {}, 'tester', 'Sclereid'); // a CELL name
+    expect(branched.tier).toBe(1);
+    expect(branched.name).toBe('Sclereid');
+
+    const cells: string[] = [];
+    for (let i = 0; i < 3; i += 1) cells.push(r.create(2, baseSeed).name);
+    expect(cells).not.toContain('Sclereid');
+  });
+
+  it('a store that ALREADY holds a squatted name keeps allocating', () => {
+    // The guard belongs on the allocator that inserts, not on `branch`: a
+    // store written by an earlier build — or restored from a backup, or
+    // carried across a pool that has since grown — already contains the
+    // squatter, and no branch-time check can reach back in time to prevent
+    // it. Simulated with the raw insert such a store would hold.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (r as any).db as import('../src/registry/db.js').DB;
+    db.prepare(
+      `INSERT INTO atom_types
+       (tier, ordinal, name, description, system_prompt, tools_json, params_json, created_by, created_at, version, atom_id)
+       VALUES (1, 99, 'Ammonia', 'd', 's', '[]', '{}', 'older-build', ?, 1, lower(hex(randomblob(16))))`
+    ).run(new Date().toISOString());
+
+    const issued: string[] = [];
+    for (let i = 0; i < 3; i += 1) issued.push(r.create(1, baseSeed).name);
+    expect(issued).not.toContain('Ammonia');
+    expect(r.getByName('Ammonia')!.createdBy).toBe('older-build');
+  });
+
+  it('the suffix ladder stays inside the 64-character name cap', () => {
+    // `isSafeAtomName` caps a name at 64 — the same predicate `branch` applies
+    // to the raw override — so appending `-2` to a 64-character override must
+    // trim the base rather than overflow to 66. An over-long name is an
+    // over-long skill-namespace directory.
     const base = r.create(1, baseSeed);
-    expect(r.branch(base.name, {}, 'tester', 'Molecule5').name).toBe('Molecule5-2');
-    expect(r.branch(base.name, {}, 'tester', 'Molecule5').name).toBe('Molecule5-3');
+    const long = `Ldn${'x'.repeat(61)}`;
+    expect(isSafeAtomName(long)).toBe(true);
+    expect(long.length).toBe(64);
+
+    const first = r.branch(base.name, {}, 'tester', long);
+    expect(first.name).toBe(long);
+    const second = r.branch(base.name, {}, 'tester', long);
+    expect(second.name.length).toBeLessThanOrEqual(64);
+    expect(isSafeAtomName(second.name)).toBe(true);
+    expect(second.name.endsWith('-2')).toBe(true);
   });
 
   it('a genuinely novel overrideName still passes through untouched', () => {
-    // The reservation must not swallow the case `registry dedupe` exists for:
+    // The allocator must not swallow the case `registry dedupe` exists for:
     // task-themed LLM names are exactly what enters the catalogue here.
     const base = r.create(1, baseSeed);
     expect(r.branch(base.name, {}, 'tester', 'Minesweeper-WebGL').name).toBe('Minesweeper-WebGL');

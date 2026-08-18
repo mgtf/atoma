@@ -50,11 +50,16 @@ export const CELLS: readonly Cell[] = [
   { ordinal: 40, name: 'Bacterium' },
 ];
 
-export function nextAvailableCell(used: Set<number>): { ordinal: number; name: string } {
+export function nextAvailableCell(
+  used: Set<number>,
+  taken: ReadonlySet<string> = new Set()
+): { ordinal: number; name: string } {
   for (const cell of CELLS) {
-    if (!used.has(cell.ordinal)) return { ordinal: cell.ordinal, name: cell.name };
+    if (!used.has(cell.ordinal) && !taken.has(cell.name)) {
+      return { ordinal: cell.ordinal, name: cell.name };
+    }
   }
   let n = CELLS.length + 1;
-  while (used.has(n)) n++;
+  while (used.has(n) || taken.has(`Cell${n}`)) n++;
   return { ordinal: n, name: `Cell${n}` };
 }

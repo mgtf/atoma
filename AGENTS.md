@@ -588,11 +588,15 @@ Read the archived sections before changing something that merely looks odd.
   is why `registry dedupe` exists and why its fuzzy key is the only thing
   catching word-order variants the order-sensitive branch guard lets through.
   Do not delete the dedupe surface on the grounds that names come from a pool.
-- The `branch` collision guard reserves the whole taxonomy pool, not just
-  live names: `nextAvailable` keys on ordinals and will still issue a curated
-  name later, so an override squatting one killed the next `create()` on
-  `UNIQUE constraint failed`. The fallback-shape check runs on the RAW name —
-  a normalized-key test would reject the suffixes the loop itself emits.
+- `nextAvailable` takes the set of names already held and SKIPS pool entries
+  whose name is taken: ordinals and names are separate namespaces, because an
+  LLM `overrideName` occupies a name without consuming its ordinal. The check
+  belongs on the allocator that inserts, not on `branch` — only there does it
+  also cover a name squatted ACROSS tiers (`atom_types.name` is UNIQUE over
+  the whole table while the pools are per-tier) and a store that already
+  contains a squatter. Reserving the pool against `branch` instead was tried
+  and reverted: it closed one tier of three and renamed branches to orphan
+  `-2` names whose unsuffixed twin could never be issued.
 - The MCP lease `ALTER TABLE` loop is corruption repair, not version
   migration. The lock DB lives in `~/.atoma/` outside the product store, and
   the burn-in pgid guard already documents it as writable by the run itself;
@@ -628,6 +632,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [engineering record through 2026-08-14](docs/incidents/engineering-record-2026-08-14.md)
 - [fan-out + join, first live parallel lanes 2026-08-16](docs/incidents/parallel-fanin-2026-08-16.md)
 - [external code review](docs/code-review-2026-08-14.md)
+- [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
 - [release acceptance v0.1.3](docs/release-acceptance-v0.1.3.md)

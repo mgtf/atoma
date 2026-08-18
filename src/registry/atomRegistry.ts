@@ -8,9 +8,9 @@ import type {
 } from '../core/types.js';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { newAtomId } from '../core/atomId.js';
-import { MOLECULES, nextAvailableMolecule } from './taxonomies/molecules.js';
-import { CELLS, nextAvailableCell } from './taxonomies/cells.js';
-import { TISSUES, nextAvailableTissue } from './taxonomies/tissues.js';
+import { nextAvailableMolecule } from './taxonomies/molecules.js';
+import { nextAvailableCell } from './taxonomies/cells.js';
+import { nextAvailableTissue } from './taxonomies/tissues.js';
 
 /**
  * Is this string safe to use as an atom NAME?
@@ -21,6 +21,8 @@ import { TISSUES, nextAvailableTissue } from './taxonomies/tissues.js';
  * that pass a charset test and still traverse. Exported so the same rule can
  * be asserted from tests.
  */
+export const MAX_ATOM_NAME_LENGTH = 64;
+
 export function isSafeAtomName(s: string): boolean {
   return /^[A-Za-z0-9._-]{1,64}$/.test(s) && !/^\.+$/.test(s);
 }
@@ -106,14 +108,40 @@ function rowToType(row: Row): AtomType {
   };
 }
 
-function nextAvailable(tier: Tier, used: Set<number>): { ordinal: number; name: string } {
+/**
+ * Allocate the next free (ordinal, name) pair for a tier.
+ *
+ * `taken` is why this needs a second argument at all. The pools are keyed by
+ * ORDINAL, but `atom_types.name` is `TEXT UNIQUE` across the WHOLE table, and
+ * a name can be occupied without its ordinal being used: `branch` accepts an
+ * LLM-authored `overrideName` (`verdict.branchName`) and puts it on whatever
+ * ordinal comes next. A validator emitting `branchName: "CarbonDioxide"`
+ * therefore parked molecule #4's curated name on ordinal 2, and the later
+ * `create()` that reached ordinal 4 threw `UNIQUE constraint failed:
+ * atom_types.name` — aborting a run mid-spend on a path the model reaches
+ * just by picking a plausible name from the vocabulary its own catalogue
+ * shows it.
+ *
+ * Skipping is the right shape rather than reserving the pool against
+ * `branch`: the constraint is what actually bites, so the guard belongs on
+ * the allocator that inserts. It also covers what a branch-side guard cannot
+ * — a name squatted ACROSS tiers (the pools are per-tier, the constraint is
+ * not), and a store that already contains a squatter from an older build or
+ * a restored backup. The LLM keeps the name it chose; the pool simply moves
+ * past that entry.
+ */
+function nextAvailable(
+  tier: Tier,
+  used: Set<number>,
+  taken: ReadonlySet<string>
+): { ordinal: number; name: string } {
   switch (tier) {
     case 1:
-      return nextAvailableMolecule(used);
+      return nextAvailableMolecule(used, taken);
     case 2:
-      return nextAvailableCell(used);
+      return nextAvailableCell(used, taken);
     case 3:
-      return nextAvailableTissue(used);
+      return nextAvailableTissue(used, taken);
   }
 }
 
@@ -137,53 +165,6 @@ export function normalizeNameKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-/**
- * Every name the taxonomy allocator can still issue for a tier: the curated
- * pool (as normalized keys) plus the `<Rank><n>` fallback shape.
- *
- * `branch` must treat these as TAKEN even though no row holds them yet.
- * `nextAvailable` keys on ORDINALS alone, so it issues the curated name for
- * any ordinal that is merely unallocated — while an LLM-authored
- * `overrideName` can already occupy a DIFFERENT ordinal under that same
- * name. The two meet at `name TEXT UNIQUE` and the later `create()` throws
- * `UNIQUE constraint failed: atom_types.name`, killing a run mid-spend on a
- * path the model reaches just by picking a plausible name. REPRODUCED:
- * `branch(overrideName: 'CarbonDioxide')` takes ordinal 2, then the third
- * `create()` reaches molecule #4 — whose curated name is CarbonDioxide —
- * and dies.
- *
- * Suffixing the override instead keeps the pool canonical (molecule #4 IS
- * CarbonDioxide, which is what makes a taxonomy name mean anything in a
- * trace) and reuses the auto-suffix path already built for live-name
- * collisions, so `branch` stays total.
- */
-const POOL_NAMES: Record<Tier, readonly string[]> = {
-  1: MOLECULES.map((m) => m.name),
-  2: CELLS.map((c) => c.name),
-  3: TISSUES.map((t) => t.name),
-};
-
-const POOL_KEYS: Record<Tier, Set<string>> = {
-  1: new Set(POOL_NAMES[1].map(normalizeNameKey)),
-  2: new Set(POOL_NAMES[2].map(normalizeNameKey)),
-  3: new Set(POOL_NAMES[3].map(normalizeNameKey)),
-};
-
-/** The `<Rank><n>` shape `nextAvailable` falls back to once a pool runs dry. */
-const FALLBACK_NAME: Record<Tier, RegExp> = {
-  1: /^molecule\d+$/i,
-  2: /^cell\d+$/i,
-  3: /^tissue\d+$/i,
-};
-
-function isReservedTaxonomyName(tier: Tier, candidate: string): boolean {
-  if (POOL_KEYS[tier].has(normalizeNameKey(candidate))) return true;
-  // Tested against the RAW name, not the normalized key, and that is
-  // load-bearing: `Molecule5-2` normalizes to `molecule52`, which matches
-  // the fallback shape, so a key-based test would reject every suffix this
-  // function's own caller generates and spin forever.
-  return FALLBACK_NAME[tier].test(candidate);
-}
 
 /**
  * Fuzzy name key for the `dedupe --fuzzy` CLI flow. Strategy: reduce the
@@ -345,6 +326,19 @@ export class AtomRegistry {
    * Shared rather than duplicated so the two call sites cannot drift apart
    * again — the drift is the whole bug.
    */
+  /**
+   * Every name currently held, ACROSS TIERS — `atom_types.name` is
+   * `TEXT UNIQUE` over the whole table, so a tier-1 allocation collides with
+   * a tier-2 name just as hard. Exact spellings, matching SQLite's BINARY
+   * collation: near-duplicates such as `carbon-dioxide` vs `CarbonDioxide`
+   * do not violate the constraint and are `registry dedupe`'s job, not the
+   * allocator's.
+   */
+  private takenNames(): Set<string> {
+    const rows = this.db.prepare('SELECT name FROM atom_types').all() as { name: string }[];
+    return new Set(rows.map((r) => r.name));
+  }
+
   private usedOrdinals(tier: Tier): Set<number> {
     const rows = this.db
       .prepare(
@@ -365,7 +359,7 @@ export class AtomRegistry {
       // future atom silently inherit the dead atom's identity in old
       // run traces and skill namespaces.
       const used = this.usedOrdinals(tier);
-      const { ordinal, name } = nextAvailable(tier, used);
+      const { ordinal, name } = nextAvailable(tier, used, this.takenNames());
       const now = new Date().toISOString();
       // Align the persona baked into the seed prompt with the taxonomy name
       // we just assigned. Without this, Sonnet-authored seeds with a
@@ -659,17 +653,29 @@ export class AtomRegistry {
         name = overrideName;
         const collides = (candidate: string): boolean =>
           this.getByName(candidate) !== null ||
-          existingKeys.has(normalizeNameKey(candidate)) ||
-          isReservedTaxonomyName(source.tier, candidate);
+          existingKeys.has(normalizeNameKey(candidate));
         if (collides(name)) {
+          // The ladder must land back inside `isSafeAtomName`, which caps a
+          // name at 64 characters — the same predicate this method applied to
+          // the raw override 15 lines up. A 64-character override plus `-2`
+          // is 66, so the base is trimmed to make room rather than the tail
+          // dropped: an over-long name is an over-long skill-namespace
+          // directory and a broken invariant two tests already assert.
+          // Captured: `overrideName` is a reassignable parameter, so the
+          // closure would lose the narrowing this branch already proved.
+          const requested = overrideName;
+          const withSuffix = (n: number): string => {
+            const tail = `-${n}`;
+            return `${requested.slice(0, MAX_ATOM_NAME_LENGTH - tail.length)}${tail}`;
+          };
           let suffix = 2;
-          while (collides(`${overrideName}-${suffix}`)) suffix++;
-          name = `${overrideName}-${suffix}`;
+          while (collides(withSuffix(suffix))) suffix++;
+          name = withSuffix(suffix);
         }
-        const next = nextAvailable(source.tier, used);
+        const next = nextAvailable(source.tier, used, this.takenNames());
         ordinal = next.ordinal;
       } else {
-        const next = nextAvailable(source.tier, used);
+        const next = nextAvailable(source.tier, used, this.takenNames());
         ordinal = next.ordinal;
         name = next.name;
       }

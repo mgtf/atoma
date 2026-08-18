@@ -31,11 +31,16 @@ export const TISSUES: readonly Tissue[] = [
   { ordinal: 20, name: 'Cork' },
 ];
 
-export function nextAvailableTissue(used: Set<number>): { ordinal: number; name: string } {
+export function nextAvailableTissue(
+  used: Set<number>,
+  taken: ReadonlySet<string> = new Set()
+): { ordinal: number; name: string } {
   for (const tissue of TISSUES) {
-    if (!used.has(tissue.ordinal)) return { ordinal: tissue.ordinal, name: tissue.name };
+    if (!used.has(tissue.ordinal) && !taken.has(tissue.name)) {
+      return { ordinal: tissue.ordinal, name: tissue.name };
+    }
   }
   let n = TISSUES.length + 1;
-  while (used.has(n)) n++;
+  while (used.has(n) || taken.has(`Tissue${n}`)) n++;
   return { ordinal: n, name: `Tissue${n}` };
 }

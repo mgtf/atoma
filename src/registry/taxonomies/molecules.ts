@@ -125,11 +125,16 @@ export const MOLECULES: readonly Molecule[] = [
   { ordinal: 118, name: 'Lycopene' },
 ];
 
-export function nextAvailableMolecule(used: Set<number>): { ordinal: number; name: string } {
+export function nextAvailableMolecule(
+  used: Set<number>,
+  taken: ReadonlySet<string> = new Set()
+): { ordinal: number; name: string } {
   for (const m of MOLECULES) {
-    if (!used.has(m.ordinal)) return { ordinal: m.ordinal, name: m.name };
+    if (!used.has(m.ordinal) && !taken.has(m.name)) {
+      return { ordinal: m.ordinal, name: m.name };
+    }
   }
   let n = MOLECULES.length + 1;
-  while (used.has(n)) n++;
+  while (used.has(n) || taken.has(`Molecule${n}`)) n++;
   return { ordinal: n, name: `Molecule${n}` };
 }
