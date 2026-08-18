@@ -53,6 +53,19 @@ describe('viz GPU smoke — what CI can actually observe', () => {
     expect(dirFlags).toHaveLength(spawns.length);
   });
 
+  it('waits for the custom cursor only where the environment allows one', () => {
+    // `AtomaCursor` enables itself only for `(any-hover: hover) and
+    // (any-pointer: fine)`, so a headless runner with no pointing device keeps
+    // the cursor hidden — correctly — and an unconditional wait for it burns 30s
+    // and fails. Every wait must sit behind the environment read, and that read
+    // must go to the media queries rather than to the component's own attribute.
+    const waits = smoke.match(/'\.atoma-pointer-cursor\[data-visible="true"\]'/g) ?? [];
+    const guards = smoke.match(/if \(\w*[Cc]ursorEnv\.expected\)/g) ?? [];
+    expect(waits.length).toBeGreaterThan(0);
+    expect(guards).toHaveLength(waits.length);
+    expect(smoke).toMatch(/matchMedia\('\(any-hover: hover\) and \(any-pointer: fine\)'\)/);
+  });
+
   it('sizes the fixture against the travel the scroll arm dispatches', () => {
     // 16 ticks x 140px must all still move the list, and `views/runs.ts`
     // computes scrollMax as rows * 46px + 38 - listHeight with the pane never

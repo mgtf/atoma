@@ -1,4 +1,4 @@
-/* global document, HTMLButtonElement, requestAnimationFrame, MutationObserver, WheelEvent */
+/* global document, HTMLButtonElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent */
 import { spawn } from 'node:child_process';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -55,6 +55,32 @@ async function readRasteriser(page) {
 }
 
 const SOFTWARE_RASTERISERS = /swiftshader|llvmpipe|software|basic render/i;
+
+/**
+ * The custom cursor is ENVIRONMENT-GATED by design: `AtomaCursor` enables it
+ * only while `(any-hover: hover) and (any-pointer: fine)` matches with motion
+ * allowed and forced colours off. A headless runner with no pointing device to
+ * report does not match it, so on CI the page was RIGHT to keep the cursor
+ * hidden and this smoke waited 30s for something that was never coming.
+ *
+ * The gate reads the same media queries the component reads, never the
+ * component's own `data-enabled` — a cursor that breaks on a machine that does
+ * have a fine pointer must still fail here. Neither Puppeteer's
+ * `emulateMediaFeatures` (rejects `any-pointer`) nor raw
+ * `Emulation.setEmulatedMedia` nor `--blink-settings=availablePointerTypes`
+ * moves these queries; all three were measured doing nothing.
+ */
+async function readCursorEnvironment(page) {
+  const media = await page.evaluate(() => ({
+    finePointer: matchMedia('(any-hover: hover) and (any-pointer: fine)').matches,
+    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    forcedColors: matchMedia('(forced-colors: active)').matches,
+  }));
+  return {
+    ...media,
+    expected: media.finePointer && !media.reducedMotion && !media.forcedColors,
+  };
+}
 
 /**
  * The cast-shadow arm hunts a ~40px class of defect: shadows anchored while a
@@ -216,8 +242,16 @@ try {
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]');
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
+    const cursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
-    await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    if (cursorEnv.expected) {
+      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    } else {
+      console.log(
+        `viz GPU pointer cursor NOT CHECKED: this environment reports no usable ` +
+          `pointer (${JSON.stringify(cursorEnv)})`
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 180));
     const frameStats = await page.evaluate(() => new Promise((resolve) => {
       const samples = [];
@@ -359,8 +393,8 @@ try {
       result.canvases !== 2 ||
       !['webgpu', 'webgl'].includes(result.backend ?? '') ||
       result.objects < 20 ||
-      result.cursorX !== '640' ||
-      result.cursorY !== '400' ||
+      (cursorEnv.expected && result.cursorX !== '640') ||
+      (cursorEnv.expected && result.cursorY !== '400') ||
       // The pointer-light budget is a claim about the PRODUCT's animation
       // cost, so it is asserted where frames are real. Measured on the same
       // build: 17.5ms P95 on this machine's Metal-backed WebGPU against 357ms
@@ -762,8 +796,11 @@ try {
     });
     await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]');
+    const fallbackCursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
-    await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    if (fallbackCursorEnv.expected) {
+      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+    }
     await new Promise((resolve) => setTimeout(resolve, 180));
     const fallbackResult = await page.evaluate(() => ({
       canvases: document.querySelectorAll('canvas').length,
@@ -772,13 +809,15 @@ try {
     }));
     if (
       fallbackResult.canvases !== 2 ||
-      fallbackResult.cursorX !== '640' ||
-      fallbackResult.cursorY !== '400' ||
+      (fallbackCursorEnv.expected && fallbackResult.cursorX !== '640') ||
+      (fallbackCursorEnv.expected && fallbackResult.cursorY !== '400') ||
       diagnostics.length > 0
     ) {
       throw new Error(`GPU fallback diagnostics: ${JSON.stringify({ fallbackResult, diagnostics })}`);
     }
-    console.log('viz GPU fallback ok: WebGL');
+    console.log(
+      `viz GPU fallback ok: WebGL${fallbackCursorEnv.expected ? '' : ' (pointer cursor not checked)'}`
+    );
   } finally {
     await fallbackBrowser.close();
   }
