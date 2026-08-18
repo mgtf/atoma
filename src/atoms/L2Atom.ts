@@ -18,6 +18,7 @@ import {
   type AtomType,
 } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
+import { capToolIterations } from '../core/limits.js';
 import { L1Atom } from './L1Atom.js';
 import {
   type L2Strategy,
@@ -1840,7 +1841,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
       params: this.params,
       signal: ctx.signal,
-      maxToolIterations: hasValidator ? 40 : undefined,
+      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
     });
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {

@@ -75,6 +75,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   const out: RunContext = {
     logger: ctx.logger,
     signal: ctx.signal,
+    ...(ctx.deadlineAt !== undefined ? { deadlineAt: ctx.deadlineAt } : {}),
     llm: wrappedLlm,
     limits: ctx.limits,
     dispatchedScriptSignatures,

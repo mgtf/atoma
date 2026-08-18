@@ -110,6 +110,29 @@ describe('L2 fallback execute — tool access', () => {
     expect(call.maxToolIterations).toBe(40);
   });
 
+  it('shrinks the iteration cap when the run deadline cannot pay 40 loops', async () => {
+    const l2 = makeL2WithTools([writeTool, validatorTool]);
+    l2.setFallbackMode(true);
+    const executor = new RecordingExecutor();
+    const now = Date.now();
+    const ctx: MockCtx = {
+      ...makeCtx(),
+      tools: executor,
+      deadlineAt: now + 80_000,
+    };
+    ctx.llm.enqueueText(jsonText({ output: 'done', summary: 'ok' }));
+
+    await l2.execute(
+      { description: 'build' },
+      makePlan({ reasoning: 'r', proposedAction: 'p', expectedOutput: 'e' }),
+      ctx
+    );
+
+    const call = ctx.llm.calls[0]!;
+    expect(call.maxToolIterations).toBeGreaterThanOrEqual(1);
+    expect(call.maxToolIterations).toBeLessThan(40);
+  });
+
   it('selfPlan catalogs the tools so the LLM knows what it can call', async () => {
     const l2 = makeL2WithTools([writeTool]);
     l2.setFallbackMode(true);

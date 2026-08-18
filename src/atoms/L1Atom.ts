@@ -10,6 +10,7 @@ import type {
 } from '../core/types.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import { modelForTier } from '../core/models.js';
+import { capToolIterations } from '../core/limits.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
 import { witnessesFromPayload } from '../contracts/witness.js';
@@ -403,7 +404,7 @@ export class L1Atom extends Atom {
       // no-validator path; when we've wired a validator into the tool set,
       // give the loop enough room to actually converge before falling back
       // to the tools-disabled finalization round-trip.
-      maxToolIterations: hasValidator ? 40 : undefined,
+      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
     });
 
     // Tolerant parse: `parseWith(resultPayloadSchema,…)` now already scans

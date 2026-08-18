@@ -38,3 +38,30 @@ export const DEFAULT_LIMITS: Limits = {
   maxPlanIterations: 3,
   maxExecIterations: 5,
 };
+
+/**
+ * Conservative floor for one tool-loop iteration on the CLI transport that
+ * exposed the mismatch (`docs/incidents/parallel-fanin-2026-08-16.md`):
+ * ~26 s. Used only to CAP an already-declared iteration budget against the
+ * run deadline — never as a new reject gate.
+ */
+export const MIN_TOOL_ITERATION_MS = 26_000;
+
+/**
+ * Shrink a tool-loop iteration cap so it cannot out-plan the remaining
+ * run wall clock. Absent or invalid `deadlineAt` leaves `requested`
+ * unchanged. A deadline already in the past still returns 1 so the
+ * client can finalize instead of skipping `complete()` entirely; the
+ * abort signal is what actually stops the call.
+ */
+export function capToolIterations(
+  requested: number,
+  deadlineAt?: number,
+  now = Date.now()
+): number {
+  const want = Math.max(1, Math.floor(requested));
+  if (deadlineAt === undefined || !Number.isFinite(deadlineAt)) return want;
+  const remaining = deadlineAt - now;
+  if (!Number.isFinite(remaining) || remaining <= 0) return 1;
+  return Math.max(1, Math.min(want, Math.floor(remaining / MIN_TOOL_ITERATION_MS)));
+}

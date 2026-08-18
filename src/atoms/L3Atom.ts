@@ -15,6 +15,7 @@ import {
   type AtomType,
 } from '../registry/atomRegistry.js';
 import { modelForTier, resolveLatestOpus, FALLBACK_OPUS, type ModelListingClient } from '../core/models.js';
+import { capToolIterations } from '../core/limits.js';
 import { dispatchWithAggregation } from './dispatch.js';
 import { L2Atom } from './L2Atom.js';
 import {
@@ -1071,7 +1072,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
       params: this.params,
       signal: ctx.signal,
-      maxToolIterations: hasValidator ? 40 : undefined,
+      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
     });
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {

@@ -625,9 +625,11 @@ export async function startTask(
     handle = (t, c) => l3.handle(t, c);
   }
 
+  const deadlineAt = Date.now() + timeoutMs;
   const ctx: RunContext = {
     logger: consoleLogger,
     signal,
+    deadlineAt,
     llm,
     limits: DEFAULT_LIMITS,
     tools: backend.executor,

@@ -465,6 +465,14 @@ export interface RunContext {
    */
   mechanicalResultRejections?: Set<string>;
   readonly signal: AbortSignal;
+  /**
+   * Absolute timestamp (ms) the run signal will abort. Optional so library
+   * and test contexts stay backward-compatible. When set, tool-loop
+   * iteration caps shrink against the remaining wall clock
+   * (`capToolIterations`) so one phase cannot plan more iterations than
+   * the run can still pay. Forks must forward the same value.
+   */
+  readonly deadlineAt?: number;
   readonly llm: LlmClient;
   readonly limits: Limits;
   /** Optional: tool executor used by molecules when the LLM emits tool_use blocks. */

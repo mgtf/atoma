@@ -393,7 +393,10 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   deterministic and cheap.
 - A transport cannot outlive its deadline. Keep both per-call abort and outer
   watchdog guards, clean abort listeners in `finally`, and account partial usage
-  when a provider exposes it.
+  when a provider exposes it. Tool-loop iteration caps shrink against
+  remaining wall clock via `capToolIterations` / `ctx.deadlineAt` (26 s
+  floor from the 2026-08-16 fan-in measurement) so one phase cannot
+  *plan* more iterations than the run can still pay.
 - Claude CLI and Codex CLI transports run with user tools/config isolated.
   Project `.claude/settings.json` never grants shell permission; personal grants
   belong in ignored local settings. Codex MCP registration is local too.
