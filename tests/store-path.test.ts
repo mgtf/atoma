@@ -4,33 +4,23 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DEFAULT_DB_PATH, skillsDirPath, storeDbPath } from '../src/core/stores.js';
-import { openDb } from '../src/registry/db.js';
-import { AtomRegistry } from '../src/registry/atomRegistry.js';
 
 /**
- * ONE STORE, and the ramp that gets an existing installation there.
+ * ONE STORE, and ONE rule for where it lives.
  *
- * `storeDbPath` replaced four divergent copies of the rule — `cli/registry`,
- * `cli/skills`, `cli/ledger` and `viz/server` had each grown their own
- * `existsSync('./atoma-build.db')` probe, no two alike, because the runner
- * wrote `ATOMA_BUILD_DB_PATH` while every CLI read `ATOMA_DB_PATH`. Drift
- * between copies of one rule is the bug `usedOrdinals` was extracted to stop.
+ * `storeDbPath` replaced four divergent copies of that rule — `cli/registry`,
+ * `cli/skills`, `cli/ledger` and `viz/server` had each grown their own probe
+ * for a second store file, no two alike, because the runner wrote
+ * `ATOMA_BUILD_DB_PATH` while every CLI read `ATOMA_DB_PATH`. Drift between
+ * copies of one rule is the bug `usedOrdinals` was extracted to stop.
  *
- * The ramp is the part that can destroy something. The store is gitignored
- * runtime state holding counters earned over months, so picking the wrong
- * file does not error — it presents a working system that has forgotten
- * everything.
+ * Resolution is a pure function of flag/env/default and touches no disk. The
+ * store is gitignored runtime state holding counters earned over months, so
+ * picking the wrong file does not error — it presents a working system that
+ * has forgotten everything.
  */
 
 const ENV_KEYS = ['ATOMA_DB_PATH', 'ATOMA_BUILD_DB_PATH', 'ATOMA_SKILLS_DIR'] as const;
-
-function populate(path: string): void {
-  const db = openDb(path);
-  new AtomRegistry(db).create(1, {
-    description: 'x', systemPrompt: 'p', tools: [], params: {}, createdBy: 'test',
-  });
-  db.close();
-}
 
 describe('storeDbPath — one rule for where the store lives', () => {
   let dir: string;
@@ -69,12 +59,11 @@ describe('storeDbPath — one rule for where the store lives', () => {
     expect(storeDbPath()).toBe('./from-env.db');
   });
 
-  it('resolving a path never CREATES one — probing must not have side effects', () => {
-    populate('./atoma-build.db');
+  it('resolving a path never CREATES one — resolution must not touch disk', () => {
     storeDbPath();
     storeDbPath();
-    // No ./atoma.db conjured by the probe, and no -wal/-shm dropped beside
-    // the legacy store by opening it read-write.
+    // The default is a NAME, not a file: resolving it must not conjure
+    // ./atoma.db, nor drop a -wal/-shm beside it by opening it read-write.
     expect(() => new Database('./atoma.db', { fileMustExist: true })).toThrow();
   });
 

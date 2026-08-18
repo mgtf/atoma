@@ -116,7 +116,7 @@ describe('burnin parseRunLog', () => {
     });
   });
 
-  it('ignores a torn machine line and uses exact legacy escalation markers', () => {
+  it('ignores a torn machine line and uses exact prose escalation markers', () => {
     const s = parseRunLog(
       [
         'model prose asks whether to escalate this escalation',
@@ -291,7 +291,7 @@ describe('burnin CSV + summary', () => {
 
 describe('burnin ensureBurninCsvHeader — the CSV belongs to ONE writer', () => {
   // Measured 2026-08-14: `--out` pointed at compare-frontier's CSV (header
-  // `timestamp,arm,…`), the legacy-migration check matched nothing, and the
+  // `timestamp,arm,…`), nothing rejected the foreign header, and the
   // batch appended 22-field standard rows under a 17-column header — every
   // header-driven consumer read shifted columns and the arm distinction was
   // unrecoverable. A row written under a header it does not match is worse
@@ -310,17 +310,6 @@ describe('burnin ensureBurninCsvHeader — the CSV belongs to ONE writer', () =>
       const out = join(dir, 'results.csv');
       ensureBurninCsvHeader(out);
       expect(readFileSync(out, 'utf8')).toBe(CSV_HEADER + '\n');
-    });
-  });
-
-  it('migrates a legacy burn-in header in place, keeping data rows', () => {
-    withTmp((dir) => {
-      const out = join(dir, 'results.csv');
-      writeFileSync(out, 'timestamp,task_id,family,outcome\nrow1,a,cli,delivered\n', 'utf8');
-      ensureBurninCsvHeader(out);
-      const lines = readFileSync(out, 'utf8').split('\n');
-      expect(lines[0]).toBe(CSV_HEADER);
-      expect(lines[1]).toBe('row1,a,cli,delivered');
     });
   });
 

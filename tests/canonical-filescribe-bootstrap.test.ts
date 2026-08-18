@@ -140,9 +140,9 @@ describe('ensureCanonicalFileScribeL1 — bootstrap (#12)', () => {
     expect(same.version).toBe(created.version);
     expect(reg.getByName(created.name)!.successes).toBe(1);
     // Simulate a row persisted by an OLDER seed (different prompt).
-    reg.patch(created.name, { systemPromptReplace: 'stale legacy prompt' }, 'test');
+    reg.patch(created.name, { systemPromptReplace: 'stale drifted prompt' }, 'test');
     const healed = ensureCanonicalFileScribeL1(reg, KITCHEN_SINK);
     expect(healed.systemPrompt).toMatch(/== GROUND TRUTH ==/);
-    expect(healed.systemPrompt).not.toMatch(/stale legacy prompt/);
+    expect(healed.systemPrompt).not.toMatch(/stale drifted prompt/);
   });
 });

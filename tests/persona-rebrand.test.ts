@@ -138,10 +138,10 @@ describe('AtomRegistry.branch — auto-rebrand on branch descendants', () => {
   });
 });
 
-describe('AtomRegistry.rebrand — retrofit legacy atoms', () => {
+describe('AtomRegistry.rebrand — realign a drifted persona line', () => {
   it('rewrites the systemPrompt in place via a patch and bumps the version', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    // Simulate a legacy atom created BEFORE auto-rebrand landed — insert
+    // Simulate a persona line that no longer matches its name — insert
     // raw so `create()` doesn't auto-fix it.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const rawDb: any = (reg as any).db;
@@ -158,7 +158,7 @@ describe('AtomRegistry.rebrand — retrofit legacy atoms', () => {
       'You are Carbon, an L1 molecule. Build X.',
       '[]',
       '{}',
-      'legacy',
+      'drifted',
       now
     );
 

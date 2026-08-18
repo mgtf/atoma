@@ -686,7 +686,7 @@ describe('superviseLoop', () => {
       expect(result.producedBy.viaFallback).toBe(true);
     });
 
-    it('falls back to parent when branchOnEscalation returns void (legacy hook contract preserved)', async () => {
+    it('falls back to parent when branchOnEscalation returns void (void hook contract preserved)', async () => {
       const parent = new FakeParent();
       const child = new FakeChild('A');
       for (let i = 0; i < MAX_SAME_REASON_REJECTS; i++) {

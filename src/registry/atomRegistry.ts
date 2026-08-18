@@ -886,7 +886,7 @@ export class AtomRegistry {
    * Force-align an existing atom's systemPrompt persona with its taxonomy
    * name, using `rebrandPersona`. Returns the updated type if a rewrite
    * happened, or the untouched type otherwise. Used by the
-   * `registry rebrand` CLI to retrofit legacy atoms that were created
+   * `registry rebrand` CLI to retrofit atoms that were created
    * before the auto-rebrand landed. Internally a `patch` with a fresh
    * systemPromptReplace so the version history is preserved.
    */

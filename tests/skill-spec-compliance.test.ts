@@ -5,7 +5,7 @@ import type { Skill } from '../src/skills/types.js';
 
 /**
  * Agent Skills base-spec alignment (agentskills.io): the frontmatter's
- * canonical key is `name` (written), legacy `id` stores keep loading
+ * canonical key is `name` (written), `id` is accepted as a read alias
  * (read), and `skills export` emits a two-field SKILL.md portable to
  * every spec runtime including the strictest (claude.ai upload rejects
  * any key outside the base six — so the export carries name +

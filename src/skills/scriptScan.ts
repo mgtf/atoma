@@ -20,7 +20,7 @@
  *     with the scan verdict as the (generation-stamped) refusal reason —
  *     the anti-thrash machinery already knows how to park it;
  *   - match time (`L2.runSubtask`): a flagged script (hand-authored or
- *     legacy) is QUARANTINED — neither direct-dispatched NOR injected
+ *     hand-authored) is QUARANTINED — neither direct-dispatched NOR injected
  *     (the injected block instructs the L1 to run the body verbatim, so
  *     falling back to the LLM loop would still execute it). The run
  *     proceeds skill-less, exactly as if nothing had matched.

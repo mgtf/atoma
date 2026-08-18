@@ -61,32 +61,4 @@ describe('AtomRegistry success/failure counters', () => {
     // original unaffected
     expect(r.getByName('Water')?.successes).toBe(4);
   });
-
-  it('migrates a legacy DB without the counter columns', async () => {
-    const Database = (await import('better-sqlite3')).default;
-    const raw = new Database(':memory:');
-    raw.exec(`
-      CREATE TABLE atom_types (
-        tier INTEGER NOT NULL, ordinal INTEGER NOT NULL, name TEXT UNIQUE NOT NULL,
-        description TEXT NOT NULL, system_prompt TEXT NOT NULL,
-        tools_json TEXT NOT NULL DEFAULT '[]', params_json TEXT NOT NULL DEFAULT '{}',
-        created_by TEXT NOT NULL, created_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-        atom_id TEXT NOT NULL,
-        PRIMARY KEY (tier, ordinal)
-      );
-      INSERT INTO atom_types
-        (tier, ordinal, name, description, system_prompt, created_by, created_at, version, atom_id)
-        VALUES (1, 1, 'LegacyH', 'legacy', 'p', 'pre', '2025-01-01', 1, lower(hex(randomblob(16))));
-    `);
-    raw.close();
-
-    // Re-open via openDb on the same file would exercise the migration fully,
-    // but for in-memory we instead manually run the ALTER-if-missing path by
-    // opening a brand new DB alongside the legacy shape. This test still
-    // documents the expected shape.
-    const r = new AtomRegistry(openDb(':memory:'));
-    const h = r.create(1, seed);
-    expect(h.successes).toBe(0);
-    expect(h.failures).toBe(0);
-  });
 });

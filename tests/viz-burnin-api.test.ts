@@ -94,7 +94,7 @@ describe('GET /api/burnin', () => {
       csv,
       [
         'timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills,compile_errors',
-        '2026-08-03T08:47:27.027Z,http-echo,http,delivered,0.2519,211,18,1,0,17,0,0,0,legacy.json',
+        '2026-08-03T08:47:27.027Z,http-echo,http,delivered,0.2519,211,18,1,0,17,0,0,0,echo.json',
         '2026-08-13T08:25:36.355Z,new-run,files,delivered,0.1574,126,11,0,0,0,1,0,0,1,0,0,0,new.json,ollama+zai+codex,11,0,0',
         '2026-08-13T09:00:00.000Z,no-model,files,error,,,,0,0,0,0,0,0,0,0,0,0,none.json',
       ].join('\n') + '\n'

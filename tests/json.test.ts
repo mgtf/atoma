@@ -166,7 +166,7 @@ describe('nested ``` fence inside a JSON string (evidence-destruction regression
     // first BALANCED object up front made a short example envelope shown in
     // prose win over the real payload that follows. The balanced-object
     // recovery must therefore run only where the old code would have gone to
-    // a lossy repair — never ahead of the legacy slice.
+    // a lossy repair — never ahead of the slice path.
     const text =
       'Example of the shape: {"output":"e","summary":"s"} — and here is the real result:\n' +
       '{"output":"the real deliverable","summary":"the actual evidence block"}';
@@ -322,9 +322,9 @@ describe('verdictSchema', () => {
 });
 
 describe('parsePlanTolerant', () => {
-  // Legacy shape — coerced by planSchema.preprocess into a FanOutPlan with
+  // Single-action shape — coerced by planSchema.preprocess into a FanOutPlan with
   // a single degenerate subtask. Helper builds the expected post-coercion shape.
-  const legacyInput = {
+  const singleActionInput = {
     reasoning: 'because',
     proposedAction: 'write index.html',
     expectedOutput: 'live URL',
@@ -337,18 +337,18 @@ describe('parsePlanTolerant', () => {
     aggregation: { mode: 'concat' },
   };
 
-  it('coerces a legacy plan object into a single-subtask fan-out plan', () => {
-    expect(parsePlanTolerant(JSON.stringify(legacyInput))).toEqual(expectedCoerced);
+  it('coerces a single-action plan object into a single-subtask fan-out plan', () => {
+    expect(parsePlanTolerant(JSON.stringify(singleActionInput))).toEqual(expectedCoerced);
   });
 
   it('unwraps a [strategy, plan] array (L2 non-fallback shape leaking into fallback)', () => {
     const strategy = { strategy: 'reuse', target: 'Fluorine', reasoning: 'pf' };
-    const wrapped = JSON.stringify([strategy, legacyInput]);
+    const wrapped = JSON.stringify([strategy, singleActionInput]);
     expect(parsePlanTolerant(wrapped)).toEqual(expectedCoerced);
   });
 
   it('unwraps a single-element [plan] array', () => {
-    expect(parsePlanTolerant(JSON.stringify([legacyInput]))).toEqual(expectedCoerced);
+    expect(parsePlanTolerant(JSON.stringify([singleActionInput]))).toEqual(expectedCoerced);
   });
 
   it('surfaces a ValidationError on non-plan shapes', () => {
@@ -356,19 +356,19 @@ describe('parsePlanTolerant', () => {
   });
 
   it('tolerates JSON inside a ```json fence', () => {
-    const fenced = '```json\n' + JSON.stringify(legacyInput) + '\n```';
+    const fenced = '```json\n' + JSON.stringify(singleActionInput) + '\n```';
     expect(parsePlanTolerant(fenced)).toEqual(expectedCoerced);
   });
 
   it('unwraps a {plan: {...}} wrapper (observed in fallback regressions)', () => {
-    const wrapped = JSON.stringify({ plan: legacyInput });
+    const wrapped = JSON.stringify({ plan: singleActionInput });
     expect(parsePlanTolerant(wrapped)).toEqual(expectedCoerced);
   });
 
   it('unwraps a {strategy, plan} combined envelope', () => {
     const envelope = JSON.stringify({
       strategy: { strategy: 'reuse', target: 'Water', reasoning: 'pf' },
-      plan: legacyInput,
+      plan: singleActionInput,
     });
     expect(parsePlanTolerant(envelope)).toEqual(expectedCoerced);
   });
@@ -380,7 +380,7 @@ describe('parsePlanTolerant', () => {
 
 And here is the actual plan:
 
-${JSON.stringify(legacyInput)}`;
+${JSON.stringify(singleActionInput)}`;
     expect(parsePlanTolerant(text)).toEqual(expectedCoerced);
   });
 
@@ -417,7 +417,7 @@ describe('parsePlanWithFallback', () => {
     expectedOutput: 'SYN',
   };
   // Fallback is ALSO coerced through the schema — callers can pass a
-  // legacy shape and the returned Plan will have subtasks + aggregation.
+  // single-action shape and the returned Plan will have subtasks + aggregation.
   const fbCoerced = {
     reasoning: 'SYN',
     proposedAction: 'SYN',

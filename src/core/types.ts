@@ -29,7 +29,7 @@ export interface Tool {
   /**
    * Periodic-table identity for built-in atomic capabilities. `name` remains
    * the immutable invocation/wire contract; this is taxonomy metadata only.
-   * Optional so third-party declarations and legacy `tools_json` still load.
+   * Optional so third-party tool declarations still load.
    */
   readonly element?: import('../contracts/toolTaxonomy.js').Element;
 }
@@ -106,7 +106,7 @@ export interface Plan {
   readonly aggregation: AggregationSpec;
   readonly expectedOutput: string;
   /**
-   * Legacy single-action hint, kept for L1 plans (which still describe
+   * Single-action hint, used by L1 plans (which describe
    * a single direct action) and for backwards-compat with older
    * `{reasoning, proposedAction, expectedOutput}` shapes. Optional on
    * fan-out plans — the subtasks carry the detail.
@@ -138,7 +138,7 @@ export interface Result {
    * result carrying witnesses is structurally stronger evidence than one
    * carrying narrative alone — validators and projections read this typed
    * field instead of re-parsing `output`. Optional because fallback paths
-   * and legacy producers may not populate it; absence means "no
+   * and library producers may not populate it; absence means "no
    * machine-checkable evidence", never "verified".
    */
   readonly evidence?: readonly import('../contracts/witness.js').Witness[];
@@ -173,7 +173,7 @@ export type PositiveVerdict = {
    * when the child demonstrably followed the recipe, `false` when it
    * visibly ignored it and solved the task another way. `undefined`
    * means "unknown" (no skill active, validator omitted it, or the
-   * trust fast-path skipped the LLM) and preserves legacy behaviour —
+   * trust fast-path skipped the LLM) and preserves the default —
    * skill counters only stop moving on an EXPLICIT `false`. Orthogonal
    * to `approved`: adherence routes credit, it never gates approval.
    */
@@ -469,7 +469,7 @@ export interface RunContext {
   /**
    * Product-run integrity gate: when true, a production L1 Result that carries
    * an observed-action list but no successful action is mechanically rejected
-   * before trust/LLM validation. Optional keeps direct library and legacy test
+   * before trust/LLM validation. Optional keeps direct library and test
    * producers backward-compatible.
    */
   readonly requireObservedToolAction?: boolean;

@@ -314,7 +314,7 @@ describe('runner skill-promotion policy — pure, no provider calls', () => {
 describe('runner stdout contract — burn-in parses this', () => {
   const src = readFileSync('src/run/runner.ts', 'utf8');
 
-  // Legacy outcome markers remain stable for interrupted runs that cannot
+  // Prose outcome markers remain stable for interrupted runs that cannot
   // emit the structured epilogue.
   it.each([
     ['✓ build finished', 'delivered'],

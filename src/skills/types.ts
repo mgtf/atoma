@@ -184,7 +184,7 @@ export interface SkillMeta {
    * written. The stamp's premise — "recompiling this body reproduces the
    * same script" — holds only while the COMPILER is unchanged, so
    * `tryPromoteSkill` ignores a stamp whose generation differs from the
-   * current one (and clears it). Absent on legacy stamps, which are then
+   * current one (and clears it). Absent on unstamped refusals, which are then
    * treated as stale and retried once.
    */
   readonly promotionRefusedGeneration?: string;
@@ -238,7 +238,7 @@ export interface SkillMeta {
    * proven basename missing from the declaration is added, so the effective
    * set never under-claims). Consumed by the match-time capability test
    * (`scriptCanServeSubtask`) as an EXACT write list — no `opaque` escape
-   * hatch — where legacy scripts without it fall back to the static body
+   * hatch — where scripts without it fall back to the static body
    * scan. Rebuilt wholesale on every promotion; meaningless on `kind: llm`.
    */
   readonly declaredWrites?: readonly string[];

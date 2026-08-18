@@ -28,7 +28,7 @@ type Classification = Pick<VizLlmEvent, 'role' | 'actor' | 'child' | 'subject'>;
  * current prompt constants (VALIDATION_SYSTEM_PROMPT, PREFILTER_SYSTEM_PROMPT,
  * SKILL_PREFILTER_SYSTEM_PROMPT, and the tier-aware
  * `You are molecule|cell|tissue "X" (tier N)` preamble used by every
- * plan/execute userContent). Legacy `atom` traces remain accepted.
+ * plan/execute userContent). A bare `atom` preamble is accepted too.
  */
 function classify(req: LlmCompletionRequest): Classification {
   if (req.systemPrompt.startsWith(VALIDATION_MARKER)) {

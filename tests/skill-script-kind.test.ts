@@ -225,7 +225,7 @@ describe('skillContextBlock — kind: script (phase 2)', () => {
     expect(out).toMatch(/run_shell.*command: "bash"/);
   });
 
-  it('falls back to the legacy LLM-recipe prompt when kind is omitted (back-compat)', () => {
+  it('falls back to the LLM-recipe prompt when kind is omitted', () => {
     const out = skillContextBlock({ id: 'x', body: 'do step 1\ndo step 2' });
     expect(out).toMatch(/Follow this recipe step-by-step/);
     expect(out).not.toMatch(/EXECUTE THIS SCRIPT/i);

@@ -18,7 +18,7 @@ import { makeCtx, jsonText , nsOf} from './helpers.js';
 /**
  * Script-skill hardening (arxiv 2604.03081 mitigations mapped onto
  * atoma): a static deny-list scan gates compiled bodies at PROMOTION
- * and hand-authored/legacy bodies at MATCH time (quarantine — the body
+ * and hand-authored bodies at MATCH time (quarantine — the body
  * must not run through EITHER dispatch path), and every injected
  * learned-content block carries a trust-boundary annotation.
  */

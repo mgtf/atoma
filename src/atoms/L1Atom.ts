@@ -135,7 +135,7 @@ export class L1Atom extends Atom {
    * (`onApproved` / `onFailed`) so trust counters can bump on the
    * exact skill that drove the run, and by branchOnEscalation to
    * route a failed run into a skill-update path instead of the
-   * legacy registry.branch (commit 2b).
+   * registry.branch (commit 2b).
    *
    * Stored on the instance — not the type — because two parallel
    * subtasks can resolve the SAME L1 type but pick DIFFERENT skills.
@@ -146,7 +146,7 @@ export class L1Atom extends Atom {
   /**
    * Mark this instance as currently driven by `skillId`, owned by the
    * namespace `ownerNs`. The owner pair rides the INSTANCE (not skillCtx)
-   * deliberately: the legacy-branch escalation path returns an untagged
+   * deliberately: the registry-branch escalation path returns an untagged
    * fresh instance, and credit read from anywhere else would pay a skill
    * for a run the branch delivered without it (the R2 laundering channel
    * from the bucket-namespace adversarial review). `ownerNs` defaults to
@@ -181,7 +181,7 @@ export class L1Atom extends Atom {
     }
     // Skill loading is OPT-IN — passing a SkillRegistry hydrates the
     // atom with its persistent skill set. Tests that don't care
-    // about skills can omit the arg and get the legacy behaviour.
+    // about skills can omit the arg and get a skill-less atom.
     let skills: readonly Skill[] = [];
     if (skillRegistry) {
       try {
@@ -435,7 +435,7 @@ export class L1Atom extends Atom {
       trace: [],
       producedBy: { tier: 1, name: this.name, viaFallback: false },
       // Always present for production L1 results: [] is positive evidence
-      // that the transport observed NO tool action. Legacy/test producers may
+      // that the transport observed NO tool action. Test and library producers may
       // omit the field and remain backward-compatible at upper tiers.
       toolCallResults: observedToolCalls,
       ...(this.activeSkillIdField !== null ? { activeScriptSkillExecuted } : {}),

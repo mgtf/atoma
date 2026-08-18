@@ -46,7 +46,7 @@ export const REFUSAL_GENERATION = `${COMPILE_PROMPT_GENERATION}-${SCAN_GENERATIO
  * generation (compile/scan refusals) AND for the bare current compile
  * generation (demotion stamps — see module docstring for why the scan
  * hash is deliberately absent from that currency). Anything else —
- * legacy stamps, older generations of either currency — is stale and
+ * unstamped refusals, older generations of either currency — is stale and
  * grants the evolved compiler exactly one retry.
  */
 export function refusalStampIsCurrent(gen: string | undefined): boolean {

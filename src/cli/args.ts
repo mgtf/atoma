@@ -23,7 +23,7 @@
  *      historical `--seed` contract); a trailing declared value flag records
  *      the empty string so the caller can tell "seen without value" from
  *      "absent".
- *   4. undeclared → the legacy heuristic: `--key value` when the next token
+ *   4. undeclared → the greedy heuristic: `--key value` when the next token
  *      does not start with `--`, else bare `--key` → "true". With
  *      `undeclared: 'discard'` the token is instead dropped without touching
  *      `flags` or the next token — the runner's warn-and-discard contract,
@@ -49,7 +49,7 @@ export interface CliGrammar {
   readonly negatableFlags?: readonly string[];
   /** Flags that always consume the next token, even a `--`-looking one. */
   readonly valueFlags?: readonly string[];
-  /** How an undeclared flag behaves: legacy greedy (default) or discarded. */
+  /** How an undeclared flag behaves: greedy (default) or discarded. */
   readonly undeclared?: 'greedy' | 'discard';
 }
 

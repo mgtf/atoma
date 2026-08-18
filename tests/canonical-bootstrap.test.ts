@@ -76,24 +76,24 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(reg.listByTier(2)).toHaveLength(1);
   });
 
-  it('coexists with legacy task-themed entries without touching them', () => {
+  it('coexists with non-canonical task-themed entries without touching them', () => {
     const reg = new AtomRegistry(openDb(':memory:'));
-    // Simulate a legacy pre-capability registry: a task-themed L1 from
+    // A task-themed L1 that did not come from canonical bootstrap, from
     // an old run still lives in the catalog.
-    const legacy = reg.create(1, {
+    const themed = reg.create(1, {
       description: 'L1 for subtask: Build a chess puzzle with 8x8 grid',
-      systemPrompt: 'legacy',
+      systemPrompt: 'themed',
       tools: WEB_TOOLS,
       params: {},
       createdBy: 'Neuron',
     });
     const canonical = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
-    // Both present. Canonical is the new one; legacy is untouched.
+    // Both present. Canonical is the new one; the themed L1 is untouched.
     const all = reg.listByTier(1);
     expect(all).toHaveLength(2);
-    const stillLegacy = reg.getByName(legacy.name)!;
-    expect(stillLegacy.description).toBe(legacy.description);
-    expect(stillLegacy.createdBy).toBe('Neuron');
+    const stillThemed = reg.getByName(themed.name)!;
+    expect(stillThemed.description).toBe(themed.description);
+    expect(stillThemed.createdBy).toBe('Neuron');
     expect(canonical.createdBy).toBe(CANONICAL_BOOTSTRAP_MARKER);
     expect(canonical.description).toBe(capabilityDescription(WEB_TOOLS, 1));
   });

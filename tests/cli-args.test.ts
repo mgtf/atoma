@@ -37,7 +37,7 @@ describe('declared boolean flags — never consume the next token', () => {
     expect(p.flags['apply']).toBe('true');
   });
 
-  it('an UNDECLARED flag keeps the legacy greedy grammar next to a declared one', () => {
+  it('an UNDECLARED flag keeps the greedy grammar next to a declared one', () => {
     const p = parseCliArgs(['n', 'c', 'list', '--force', '--db', './x.db'], {
       booleanFlags: ['force'],
     });
@@ -65,7 +65,7 @@ describe('negatable flags — --no-<flag> is honored ONLY where declared', () =>
     // flags.force="false" would have INVERTED the check to force=on.
     const p = parseArgTokens(['drop', '--no-force', 'X', 'Y'], { booleanFlags: ['force'] });
     expect('force' in p.flags).toBe(false);
-    // Undeclared → legacy greedy grammar applies to the no- spelling itself.
+    // Undeclared → greedy grammar applies to the no- spelling itself.
     expect(p.flags['no-force']).toBe('X');
     expect(p.undeclaredFlags).toEqual(['--no-force']);
   });

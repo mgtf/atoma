@@ -188,13 +188,13 @@ describe('computeStatsRows — free-ride gap', () => {
         'Water',
         [
           fakeSkill({ id: 'rider', matches: 5, successes: 1, failures: 0 }),
-          fakeSkill({ id: 'legacy', successes: 2 }), // pre-matches era: no matches recorded
+          fakeSkill({ id: 'unmatched', successes: 2 }), // `matches` is optional: never matched
         ],
       ],
     ]);
     const rows = computeStatsRows(byL1, OPTS);
     expect(rows.find((r) => r.id === 'rider')!.freeRides).toBe(4);
-    expect(rows.find((r) => r.id === 'legacy')!.freeRides).toBe(0);
+    expect(rows.find((r) => r.id === 'unmatched')!.freeRides).toBe(0);
   });
 });
 

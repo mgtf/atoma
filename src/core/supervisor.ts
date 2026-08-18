@@ -25,7 +25,7 @@ export interface SupervisionHooks<C extends Atom> {
    * RETURN VALUE CONTRACT:
    *   - `void` / `undefined` — the registry was updated (if at all) and the
    *     loop should proceed straight to the parent-fallback path. This is
-   *     the legacy behaviour preserved for supervisors that only want to
+   *     the default preserved for supervisors that only want to
    *     record a lesson for future tasks.
    *   - `C` (a fresh child instance of the branched type) — the loop will
    *     INSTALL the replacement, reset its rejection-streak trackers, and

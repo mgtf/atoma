@@ -628,7 +628,7 @@ describe('record_probe accepts a whole command line — the round-3 defect', () 
   });
 
   it('keeps the {command,args} shape working for existing callers', async () => {
-    writeFileSync(join(root, 'x.js'), "console.log('legacy');");
+    writeFileSync(join(root, 'x.js'), "console.log('hello');");
     const t = recordProbeTool({ sandbox });
     await t.execute({ command: 'node', args: ['x.js'] });
     expect(manifest().entries[0]!['cmd']).toBe('node x.js');

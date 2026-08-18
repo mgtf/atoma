@@ -79,7 +79,7 @@ describe('visibleSkillNamespaces — the lattice, pure', () => {
     expect(vis).toEqual(['Weird']);
   });
 
-  it('kill switch restores the exact legacy behaviour', () => {
+  it('kill switch restores the exact per-L1 behaviour', () => {
     const before = process.env['ATOMA_SKILL_SHARED_CATALOG'];
     process.env['ATOMA_SKILL_SHARED_CATALOG'] = '0';
     try {

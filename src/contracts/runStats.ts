@@ -6,7 +6,7 @@ import { z } from 'zod';
  * Human logs are deliberately not part of this contract: task output and
  * validator prose are untrusted text and may contain any of the words used by
  * the lifecycle counters. The runner emits one final prefixed JSON object and
- * readers prefer the last valid object, while retaining the legacy log parser
+ * readers prefer the last valid object, while retaining the prose log parser
  * for runs killed before an epilogue can be written.
  */
 export const RUN_STATS_PREFIX = 'ATOMA_RUN_STATS ';
@@ -54,7 +54,7 @@ export function formatRunStatsEpilogue(stats: RunStats): string {
   return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse(stats));
 }
 
-/** Return the last valid runner-owned epilogue, or null for legacy logs. */
+/** Return the last valid runner-owned epilogue, or null when a run was cut short. */
 export function parseRunStatsEpilogue(log: string): RunStats | null {
   let parsed: RunStats | null = null;
   for (const line of log.split(/\r?\n/)) {
@@ -67,7 +67,7 @@ export function parseRunStatsEpilogue(log: string): RunStats | null {
       if (candidate.success) parsed = candidate.data;
     } catch {
       // A torn/malformed line is ignored. An earlier valid epilogue remains
-      // usable; if none exists, the burn-in reader falls back to legacy logs.
+      // usable; if none exists, the burn-in reader parses the prose log.
     }
   }
   return parsed;

@@ -395,7 +395,7 @@ function help(): void {
                                 version is bumped and counters are reset.
   rebrand <name>              — align the "You are <Name>…" first line of
     | rebrand --all             the systemPrompt with the agent's actual
-                                taxonomy name. Fixes legacy seeds that
+                                taxonomy name. Fixes seeds that
                                 hardcoded a persona ("You are Carbon…")
                                 that then contaminated every branch. Use
                                 --all to sweep the whole registry at once.

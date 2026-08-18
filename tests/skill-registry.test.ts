@@ -247,7 +247,7 @@ describe('SkillRegistry', () => {
     const text = readFileSync(join(dir, 'Water', 'foo', 'SKILL.md'), 'utf8');
     expect(text).toMatch(/^---/);
     // Spec-canonical key since the Agent Skills alignment: the writer emits
-    // `name:` (parseFrontmatter still reads legacy `id:` stores).
+    // `name:` (parseFrontmatter accepts `id:` as an alias on read).
     expect(text).toMatch(/name: foo/);
     expect(text).toMatch(/kind: llm/);
     expect(text).toMatch(/do the foo/);
@@ -448,7 +448,7 @@ describe('SkillRegistry', () => {
       });
       const long = reg.markPromotionRefused('Methane', 'bounded', 'x'.repeat(2000))!;
       expect(long.promotionRefusedReason).toHaveLength(REFUSAL_REASON_MAX_CHARS);
-      // A reason-less stamp (legacy callers, empty Sonnet reason) stays valid
+      // A reason-less stamp (no reason supplied, empty Sonnet reason) stays valid
       // and does not write an empty-string field.
       reg.save('Methane', { id: 'bounded', description: 'd', whenToUse: 'w', kind: 'llm', body: 'b2' });
       const bare = reg.markPromotionRefused('Methane', 'bounded')!;
@@ -529,7 +529,7 @@ describe('L1Atom.skills() integration', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns [] when no SkillRegistry is passed to fromType (legacy callers unchanged)', () => {
+  it('returns [] when no SkillRegistry is passed to fromType', () => {
     const atom = L1Atom.fromType({
       atomId: '00000000-0000-4000-8000-000000000001',
       tier: 1,

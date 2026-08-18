@@ -21,7 +21,7 @@
  *     terminates it once "✓ build finished" and the metrics table have been
  *     printed. Failed runs exit on their own.
  *   - Metrics and lifecycle counts come from the runner's final
- *     `ATOMA_RUN_STATS` JSON epilogue. Legacy/torn runs fall back to the
+ *     `ATOMA_RUN_STATS` JSON epilogue. Interrupted runs fall back to the
  *     human `TOTAL` table and exact log markers. Duration comes from the
  *     newest trace in ./runs when available, wall time otherwise.
  */
@@ -114,7 +114,7 @@ export function parseRunLog(log: string): RunStats {
     otherCalls:
       llmCalls === null ? 0 : Math.max(0, llmCalls - opusCalls - sonnetCalls - haikuCalls),
     deterministicPhases: (log.match(/ran via deterministic dispatch/g) ?? []).length,
-    // Legacy fallback only: count the runner-owned escalation marker, never
+    // Prose fallback only: count the runner-owned escalation marker, never
     // arbitrary model prose or routine prefilter decisions containing the
     // same word.
     escalations: (log.match(/\bescalation — branched\b/g) ?? []).length,
@@ -171,19 +171,15 @@ export const CSV_HEADER =
 /**
  * Create or reconcile the output CSV's header before ANY row is appended.
  *
- * Three cases:
+ * Two cases:
  *   - absent file → written with the current header;
- *   - a LEGACY burn-in header (starts with `timestamp,task_id`) → migrated
- *     in place (#10: lifecycle columns were appended to the row format while
- *     old CSVs kept their old header — data rows are untouched, the viz
- *     parser is position-tolerant for short legacy rows by design);
- *   - a FOREIGN header (another writer's schema) → refused with an error.
+ *   - any header that is not this exact one → refused with an error.
  *     Measured 2026-08-14: `--out` pointed at compare-frontier's CSV
- *     (header `timestamp,arm,…`), the legacy check matched nothing, and the
- *     batch appended 22-field standard rows under a 17-column header — every
- *     header-driven consumer then read shifted columns and the arm
- *     distinction was unrecoverable. A row written under a header it does
- *     not match is worse than no row: refuse before the first append.
+ *     (header `timestamp,arm,…`) and the batch appended 22-field rows under a
+ *     17-column header — every header-driven consumer then read shifted
+ *     columns and the arm distinction was unrecoverable. A row written under a
+ *     header it does not match is worse than no row: refuse before the first
+ *     append.
  */
 export function ensureBurninCsvHeader(outAbsPath: string): void {
   if (!existsSync(outAbsPath)) {
@@ -194,11 +190,6 @@ export function ensureBurninCsvHeader(outAbsPath: string): void {
   const nl = cur.indexOf('\n');
   const curHeader = nl === -1 ? cur : cur.slice(0, nl);
   if (curHeader === CSV_HEADER) return;
-  if (curHeader.startsWith('timestamp,task_id')) {
-    writeFileSync(outAbsPath, CSV_HEADER + (nl === -1 ? '\n' : cur.slice(nl)), 'utf8');
-    console.log('ℹ results.csv header migrated to the current column set');
-    return;
-  }
   throw new Error(
     `refusing to append burn-in rows to ${outAbsPath}: its header does not match the burn-in schema ` +
       `(found "${curHeader.slice(0, 80)}…", expected "${CSV_HEADER.slice(0, 80)}…"). ` +

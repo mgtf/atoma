@@ -180,7 +180,7 @@ describe('looksTaskThemed', () => {
     expect(looksTaskThemed('drag-and-drop builder')).toBe(true);
   });
 
-  it('flags the legacy "L1 for subtask:" preamble', () => {
+  it('flags the "L1 for subtask:" preamble', () => {
     expect(looksTaskThemed('L1 for subtask: fetch some URL')).toBe(true);
   });
 

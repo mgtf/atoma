@@ -697,7 +697,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       let skills = await this.matchSkill(visibleNs, readerToolNames, subTask, ctx);
       // STATIC-SCAN QUARANTINE for kind:script matches. Promotion already
       // refuses flagged compiler output, so this catches hand-authored and
-      // legacy scripts. Quarantine means neither path runs the body: the
+      // hand-authored scripts. Quarantine means neither path runs the body: the
       // deterministic dispatch would execute it directly, and the injected
       // block instructs the L1 to run it verbatim — falling back to the
       // LLM loop is NOT a mitigation here. The run proceeds skill-less,
@@ -1323,7 +1323,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // supervise-loop's `hasTriedBranch` mechanism gives that
         // instance ONE more clean cycle. If the second pass also
         // fails the loop falls through to the parent fallback path
-        // — same as the legacy branch flow.
+        // — same as the registry-branch flow.
         //
         // We require BOTH activeSkillId AND a non-empty diagnostic
         // before attempting an update: re-running the same skill
@@ -1336,7 +1336,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // against it would corrupt a recipe that was never tried, and
         // the save() would clear the promotion-refusal stamp for a body
         // change the failure never justified. Skip straight to the
-        // legacy registry-branch path (which fixes the ATOM, the thing
+        // registry-branch path (which fixes the ATOM, the thing
         // that actually failed).
         const activeSkillId = child.activeSkillId();
         // The revision must target the recipe that actually DROVE the run —
@@ -1369,7 +1369,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               // that the body changed, and retrying an identical recipe
               // against an identical diagnosis is a guaranteed-identical
               // outcome. Treat it as "no revision available" and let the
-              // legacy branch path take over.
+              // registry-branch path take over.
               let revised =
                 newBody && newBody.trim() !== oldSkill.body.trim() ? newBody : null;
               if (!revised && newBody) {
@@ -1382,7 +1382,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               // verified" invites Sonnet to append a step using a tool the
               // host cannot call — and save() would both persist the phantom
               // and clear the promotion-refusal stamp. Same fail-open shape
-              // as the draft filter: no revision → legacy branch path.
+              // as the draft filter: no revision → registry-branch path.
               if (revised) {
                 const outOfScope = undeclaredToolMentions(revised, child.toolNames());
                 if (outOfScope.length > 0) {
@@ -1428,7 +1428,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
               }
             } catch (err) {
               // Sonnet unavailable / parse error / network blip —
-              // fall through to the legacy branch path so the run
+              // fall through to the registry-branch path so the run
               // still has a recovery channel.
               ctx.logger.warn(
                 `[${this.name}] skill update failed: ${(err as Error).message}; falling back to standard branch`
@@ -1489,13 +1489,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         // recipe (`activeSkillFollowed === false`). A run the skill did not
         // drive proves nothing about the skill, and unearned successes arm
         // the promotion trigger on recipes that never demonstrably
-        // worked. `undefined` (no signal — trust fast-path, legacy verdict,
-        // model omission) keeps the legacy bump: false is an AFFIRMATIVE
+        // worked. `undefined` (no signal — trust fast-path, verdict without
+        // the field, model omission) keeps the default bump: false is AFFIRMATIVE
         // observation, absence of evidence is not evidence of free-riding.
         const skillId = child.activeSkillId();
         // Credit lands on the OWNER namespace — where the folder and the
         // counters live. Reading the pair from the INSTANCE (not skillCtx)
-        // is the R2 guard: the legacy-branch path returns an untagged
+        // is the R2 guard: the registry-branch path returns an untagged
         // instance, so a run the branch delivered without the recipe
         // credits nothing.
         const skillNs = child.activeSkillOwner() ?? namespaceOf(child);
@@ -2061,9 +2061,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
  * for injection into the validator's userContent.
  *
  * Fan-out aware: first checks `subtasks[].preferredChild` (authoritative
- * for multi-subtask plans since Phase 3). Falls back to legacy heuristics
+ * for multi-subtask plans since Phase 3). Falls back to prose heuristics
  * — `L\d "name"` patterns and whole-word catalog scan in
- * `proposedAction` + `expectedOutput` — for single-subtask legacy plans
+ * `proposedAction` + `expectedOutput` — for single-subtask plans
  * or plans that skip `preferredChild`. Returns `undefined` when no target
  * can be identified or the registry has no matching entry, so the verdict
  * skips the block entirely rather than inject noise.

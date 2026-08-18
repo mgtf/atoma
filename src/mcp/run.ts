@@ -423,8 +423,8 @@ export async function startRun(
         if (wasCancelled) {
           // The runner's teardown emits the machine epilogue with outcome
           // 'cancelled' and the run's REAL spend. A child killed too hard to
-          // print anything (SIGKILL escalation) still lands on the legacy
-          // 'error'/null shape, so the hint stays honest for both.
+          // print anything (SIGKILL escalation) leaves the 'error'/null shape
+          // instead, so the hint stays honest for both.
           record.hint =
             stats.outcome === 'cancelled'
               ? 'Cancelled on request. `stats` carries the run\'s real spend up to termination — that is the cancellation, not a failure. The trace is closed and marked cancelled.'

@@ -8,7 +8,7 @@ import {
 
 /**
  * Phase 1 — schema tests.
- * Asserts that the FanOutPlan shape is accepted, the legacy shape is
+ * Asserts that the FanOutPlan shape is accepted, the single-action shape is
  * coerced (with a single degenerate subtask), and invalid shapes are
  * rejected.
  */
@@ -97,8 +97,8 @@ describe('planSchema — fan-out native shape', () => {
   });
 });
 
-describe('planSchema — legacy coercion', () => {
-  it('coerces a legacy `{reasoning, proposedAction, expectedOutput}` into 1-subtask fan-out', () => {
+describe('planSchema — single-action coercion', () => {
+  it('coerces a single-action `{reasoning, proposedAction, expectedOutput}` into 1-subtask fan-out', () => {
     const plan = planSchema.parse({
       reasoning: 'r',
       proposedAction: 'write a file',
@@ -107,7 +107,7 @@ describe('planSchema — legacy coercion', () => {
     expect(plan.subtasks).toHaveLength(1);
     expect(plan.subtasks[0]!.description).toBe('write a file');
     expect(plan.aggregation).toEqual({ mode: 'concat' });
-    // Legacy fields are preserved for visibility.
+    // The single-action fields are preserved for visibility.
     expect(plan.proposedAction).toBe('write a file');
   });
 

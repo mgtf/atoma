@@ -317,7 +317,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
         ctx.llm.enqueueText(jsonText({ approved: false, reasoning: 'no good', scope: 'ephemeral' }));
       }
       // Skill-update path: Sonnet returns the body UNCHANGED -> "not a
-      // revision" -> falls through to the LEGACY branch path (fresh type,
+      // revision" -> falls through to the REGISTRY-BRANCH path (fresh type,
       // fresh instance, NO active-skill tag — the leak's precondition).
       ctx.llm.enqueueText('b');
       // The branched instance gets one clean validated cycle.
@@ -342,7 +342,7 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
       expect(skills.loadFor(nsOf(reg, 'Water')).filter((s) => !s.trigger).map((s) => s.id)).toEqual([
         'web-build-loop',
       ]);
-      // R2 kill-shot: the legacy branch delivered WITHOUT the recipe — the
+      // R2 kill-shot: the registry branch delivered WITHOUT the recipe — the
       // untagged fresh instance must credit nothing. (The failure recorded
       // during the tagged instance's escalation is EARNED and stays.)
       const after = skills.loadFor(nsOf(reg, 'Water')).find((s) => s.id === 'web-build-loop')!;
@@ -424,7 +424,7 @@ describe('skill revision: an UNCHANGED body is not a revision', () => {
     }
     // The revision call returns the SAME body (with incidental whitespace).
     ctx.llm.enqueueText('  ' + BODY + '  ');
-    // What happens AFTER the revision decision (legacy branch path, parent
+    // What happens AFTER the revision decision (registry-branch path, parent
     // fallback) is not what this test is about — the assertion is on the
     // skill store, so letting the mock run dry there is fine and keeps the
     // test from encoding an unrelated call sequence.

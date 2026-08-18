@@ -268,7 +268,7 @@ describe('the generated command quotes the goal', () => {
   });
 });
 
-describe('the component client contains no legacy DOM renderer', () => {
+describe('the component client contains no hand-rolled DOM renderer', () => {
   it('uses React roots and MUI components rather than the custom h() helper', () => {
     const sources = [
       'src/viz/client/App.tsx',

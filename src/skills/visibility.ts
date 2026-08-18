@@ -28,7 +28,7 @@ import { bucketIdForToolNames, bucketRequiredToolNames } from '../atoms/capabili
  * (id, owner) pair rides the L1 instance). Writes (learn, save, bumps)
  * always target a per-L1 namespace; the lattice is read-only.
  *
- * Kill switch: ATOMA_SKILL_SHARED_CATALOG=0 restores the exact legacy
+ * Kill switch: ATOMA_SKILL_SHARED_CATALOG=0 restores the exact per-L1
  * behaviour ([home] only) — same env-flag family as ATOMA_SKILL_DIRECT.
  */
 

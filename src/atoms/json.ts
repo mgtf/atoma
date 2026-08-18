@@ -631,7 +631,7 @@ export function parsePlanWithFallback(
     return parsePlanTolerant(text);
   } catch {
     // Run the fallback through the same preprocessor so callers can
-    // supply either the new fan-out shape OR the legacy
+    // supply either the fan-out shape OR the
     // `{proposedAction, expectedOutput}` — the schema's `z.preprocess`
     // normalises both into a well-formed FanOutPlan.
     return planSchema.parse(fallback);
@@ -693,7 +693,7 @@ export const aggregationSpecSchema = z.object({
 
 /**
  * Fan-out plan: always carries a `subtasks` list (minimum length 1).
- * Legacy single-action plans `{reasoning, proposedAction, expectedOutput}`
+ * Single-action plans `{reasoning, proposedAction, expectedOutput}`
  * are coerced into this shape via `z.preprocess` — their entire payload
  * becomes a single degenerate subtask, so every call site can assume
  * `plan.subtasks` is present and iterable.
@@ -704,7 +704,7 @@ export const planSchema = z.preprocess(
     const obj = raw as Record<string, unknown>;
     // Already in the new shape? Leave it alone.
     if (Array.isArray(obj['subtasks'])) return obj;
-    // Legacy shape with only proposedAction/expectedOutput — coerce into
+    // Single-action shape with only proposedAction/expectedOutput — coerce into
     // a single-subtask fan-out plan so downstream consumers stay uniform.
     // The supervisor's own task description is not available here, so we
     // reuse the proposedAction as the subtask's description (or

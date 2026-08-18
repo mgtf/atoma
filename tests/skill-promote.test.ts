@@ -613,7 +613,7 @@ describe('refusal stamps expire with the compiler OR the scan generation', () =>
     expect(refusalStampIsCurrent(COMPILE_PROMPT_GENERATION)).toBe(true);
     expect(refusalStampIsCurrent('deadbeef')).toBe(false); // older compile gen
     expect(refusalStampIsCurrent(`deadbeef-${SCAN_GENERATION}`)).toBe(false); // older combined
-    expect(refusalStampIsCurrent(undefined)).toBe(false); // legacy stamp
+    expect(refusalStampIsCurrent(undefined)).toBe(false); // unstamped
   });
 });
 

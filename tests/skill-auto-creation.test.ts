@@ -425,7 +425,7 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     skills.save(nsOf(reg, 'Water'), {
       id: 'web-build-loop',
       description: 'pre-existing canonical recipe',
-      whenToUse: 'when the subtask references narrow legacy patterns',
+      whenToUse: 'when the subtask references narrow vendor patterns',
       kind: 'llm',
       body: 'pre-existing body — must NOT be overwritten by the auto-creation.',
     });

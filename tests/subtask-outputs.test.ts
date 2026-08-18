@@ -13,7 +13,7 @@ import {
  * cost a live run plus a post-mortem, at the one point in the pipeline with
  * no validator beneath it. The plan call now declares `outputs` structurally
  * and the compiler declares `writes`; the lexical grammar and the static body
- * scan remain fallbacks for legacy plans/scripts.
+ * scan remain fallbacks for plans/scripts that declare neither.
  */
 describe('structured subtask outputs — the plan channel', () => {
   it('parses outputs, tolerating null and dropping blanks', () => {

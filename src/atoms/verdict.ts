@@ -634,7 +634,7 @@ export async function llmVerdict(args: {
   child: Atom;
   task: Task;
   payload: unknown;
-  /** Typed child evidence; payload parsing remains the legacy fallback. */
+  /** Typed child evidence; payload parsing remains the fallback. */
   evidence?: Result['evidence'];
   /**
    * Optional pre-formatted description of the atoms the plan references

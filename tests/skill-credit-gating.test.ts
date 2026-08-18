@@ -24,8 +24,8 @@ import { makeCtx, jsonText , nsOf} from './helpers.js';
  * run. The RESULT validator is shown the active recipe and asked for an
  * `activeSkillFollowed` signal; the supervise-loop hooks withhold the
  * counter bump (both directions) on an AFFIRMATIVE `false`. `undefined`
- * (trust fast-path, legacy verdicts, model omission) preserves the legacy
- * bump — absence of evidence is not evidence of free-riding.
+ * (trust fast-path, verdicts without the field, model omission) preserves
+ * the default bump — absence of evidence is not evidence of free-riding.
  *
  * Why it matters: counters are TRIGGERS, not stats. Unearned successes
  * arm the 5/0 script-compilation trigger on recipes that never worked;
@@ -258,7 +258,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
     expect(ctx.llm.calls).toHaveLength(0);
   });
 
-  it('keeps the legacy bump when the validator omits the signal', async () => {
+  it('keeps the default bump when the validator omits the signal', async () => {
     const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
     const ctx = makeCtx();
     enqueueHappyPathUpToResult(ctx);
@@ -294,7 +294,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
       );
     }
     // NO improveSkillBody stub here: the revision must be skipped outright
-    // (an unconsumed queue would throw on the Sonnet call). The legacy
+    // (an unconsumed queue would throw on the Sonnet call). The
     // registry-branch path fires instead and the branched L1 gets its
     // one-shot retry, which we let succeed.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r2', proposedAction: 'a2', expectedOutput: 'e2' }));
@@ -332,7 +332,7 @@ describe('L2 supervise loop — usage-conditioned skill credit (end-to-end)', ()
         jsonText({ approved: false, reasoning: 'deliverable is wrong', scope: 'ephemeral' })
       );
     }
-    // Legacy behaviour: the skill-update path fires (improveSkillBody).
+    // Default behaviour: the skill-update path fires (improveSkillBody).
     ctx.llm.enqueueText('STEP 1: do the REVISED thing.\nSTEP 2: verify it better.');
     // One-shot retry with the revised recipe — let it succeed.
     ctx.llm.enqueueText(jsonText({ reasoning: 'r2', proposedAction: 'a2', expectedOutput: 'e2' }));

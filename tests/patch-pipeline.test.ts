@@ -178,7 +178,7 @@ describe('prompt-update pipeline — from Haiku JSON to mutated DB prompt', () =
   });
 
   it('REJECTS a patch verdict with empty modifications at the schema boundary', async () => {
-    // This is the regression bite that matters: the 14 legacy patches we
+    // This is the regression bite that matters: the 14 empty patches we
     // found in the live registry all had `modifications: {}` — they
     // should never have been archived. With Zod superRefine now blocking
     // them, a validator emitting "scope: patch" with nothing concrete

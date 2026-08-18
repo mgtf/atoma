@@ -208,7 +208,7 @@ const TASK_THEME_PATTERNS: readonly RegExp[] = [
   /\b\d+\s*[x×]\s*\d+\b/i,
   // UI affordances that always come from the task, not the capability.
   /\b(drag[- ]and[- ]drop|right[- ]click|left[- ]click)\b/i,
-  // "L1 for subtask: …" preamble from the legacy fallback.
+  // "L1 for subtask: …" preamble from the prose fallback.
   /^L[123] for subtask:/i,
   // "Build a …" narrative from LLM-generated seeds.
   /^Build an?\s+/i,
@@ -270,9 +270,8 @@ export function resolveCreationDescription(
 
 /** Marker for the canonical WEB L1/L2 entries (single-file artefact + headless
  * validator) created by the example's bootstrap step. Kept as
- * `bootstrap-canonical` for backwards compatibility with legacy DBs — new
- * canonical bootstraps should use the bucket-scoped markers (WEB_MARKER,
- * HTTP_MARKER) instead. */
+ * `bootstrap-canonical` — the WEB bucket's marker, kept distinct from the
+ * HTTP one so both canonicals coexist in one registry. */
 export const CANONICAL_BOOTSTRAP_MARKER = 'bootstrap-canonical';
 
 /** Marker for the canonical HTTP L1/L2 entries (Node server builder + API

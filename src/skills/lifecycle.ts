@@ -681,7 +681,7 @@ export class SkillLifecycle {
    * the cited failure, keep the rest of the recipe stable, do not
    * balloon the length. Output is plain markdown; we trim and
    * return the raw text. A blank or whitespace-only response
-   * returns null so the caller can fall back to the legacy branch
+   * returns null so the caller can fall back to the registry-branch
    * path instead of saving an empty body.
    *
    * Sonnet (this.host.model) is the right model here:
@@ -801,7 +801,7 @@ export class SkillLifecycle {
       // (compile-only currency) as stale, defeating the anti-thrash guard
       // for freshly-compiled scripts that fail deterministically.
       args.ctx.logger.info(
-        `[${this.host.name}] skill "${args.skillId}" refusal stamp is from an older compiler/scan generation (${skill.promotionRefusedGeneration ?? 'legacy'} → ${REFUSAL_GENERATION}); retrying the compile`
+        `[${this.host.name}] skill "${args.skillId}" refusal stamp is from an older compiler/scan generation (${skill.promotionRefusedGeneration ?? 'unstamped'} → ${REFUSAL_GENERATION}); retrying the compile`
       );
       this.skills.clearPromotionRefusal(args.l1Name, args.skillId);
     } else if (skill.promotionRefusedAt) {
@@ -920,7 +920,7 @@ export class SkillLifecycle {
     // Cross-check the compiler's declared writes ONCE, here, against the
     // static resolver — the match-time capability test then consumes the
     // persisted list as EXACT and the ~150-line static grammar stays a
-    // legacy fallback. Direction of repair: a statically PROVEN basename
+    // prose fallback. Direction of repair: a statically PROVEN basename
     // missing from the declaration is ADDED (an under-claiming list would
     // turn into permanent false refusals at match time); extra declared
     // paths are kept verbatim (the compiler knows dynamic destinations the

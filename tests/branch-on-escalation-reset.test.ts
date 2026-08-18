@@ -43,7 +43,7 @@ const WEB_TOOLS = makeTools([
  */
 
 const seed = {
-  description: 'legacy platformer builder',
+  description: 'platformer builder',
   systemPrompt: 'You are Water, a WebGL platformer builder. Do platformer things.',
   tools: [],
   params: {},
@@ -320,7 +320,7 @@ describe('L3 branchOnEscalation — resets the L2 prompt to the current subtask'
   it('writes a systemPromptReplace aligned with the L2 subtask', async () => {
     const reg = new AtomRegistry(openDb(':memory:'));
     const parent = reg.create(2, {
-      description: 'l2 legacy',
+      description: 'l2 base',
       systemPrompt: 'You are a platformer orchestrator. Do platformer things.',
       tools: [],
       params: {},

@@ -108,7 +108,7 @@ export function scriptExtension(language: 'node' | 'python' | 'bash'): string {
   // the EXPLICIT extension; `.mjs` (over `.cjs`) is the house choice —
   // the repo itself is ESM (`"type": "module"`, NodeNext) and compiled
   // skills follow the same dialect. The compile prompt pins ESM (import,
-  // no __dirname); a legacy CommonJS body written to `.mjs` crashes
+  // no __dirname); a CommonJS body written to `.mjs` crashes
   // cleanly on first dispatch and the directFailures streak demotes it —
   // the self-healing path covers stragglers.
   if (language === 'node') return 'mjs';

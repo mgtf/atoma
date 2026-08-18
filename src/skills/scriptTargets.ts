@@ -336,7 +336,7 @@ export function subtaskMutationTargetPaths(description: string): string[] {
  * §3.3) an optional `outputs` array of workspace-relative paths the subtask
  * must create or modify. When present and non-empty it is AUTHORITATIVE:
  * mutation classification and the target set come from it verbatim, and the
- * incident-grown grammar below never runs. When absent (legacy plans, models
+ * incident-grown grammar below never runs. When absent (models
  * that ignore the field) the lexical grammar is the fallback. An empty or
  * blank-only array is treated as UNDECLARED, not as read-only: a lazy `[]`
  * on a genuinely mutating subtask would otherwise skip the before/after
@@ -380,7 +380,7 @@ export function subtaskOutputIntent(subTask: {
  * `opts.outputs` is the subtask's structured output declaration (wins over the
  * lexical grammar); `opts.declaredWrites` is the COMPILER-declared write list
  * persisted at promotion (wins over the static body scan — the scan stays the
- * fallback for legacy scripts, with its opaque escape hatch).
+ * fallback for scripts without declared writes, with its opaque escape hatch).
  */
 export function scriptCanServeSubtask(
   body: string,

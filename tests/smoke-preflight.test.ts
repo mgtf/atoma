@@ -290,8 +290,8 @@ describe('makeSmokeStuckTracker', () => {
     expect(t.isStuck('   x > 0')).toBe(true);
   });
 
-  it('accepts the legacy single-number signature (windowSize only, threshold defaults)', () => {
-    // Legacy callers that passed a raw number for window size keep
+  it('accepts the single-number signature (windowSize only, threshold defaults)', () => {
+    // Callers that pass a raw number for window size keep
     // working — the threshold defaults to SMOKE_STUCK_THRESHOLD.
     const t = makeSmokeStuckTracker(SMOKE_STUCK_WINDOW);
     const smoke = 'x > 0';

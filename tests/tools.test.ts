@@ -296,11 +296,11 @@ describe('run_shell accepts a whole command line', () => {
   });
 
   it('still accepts the {command,args} shape', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'atoma-line-legacy-'));
+    const root = mkdtempSync(join(tmpdir(), 'atoma-line-echo-'));
     try {
       const sh = runShellTool({ sandbox: new ToolSandbox(root) });
-      const res = (await sh.execute({ command: 'echo', args: ['legacy'] })) as { stdout: string };
-      expect(res.stdout.trim()).toBe('legacy');
+      const res = (await sh.execute({ command: 'echo', args: ['plain'] })) as { stdout: string };
+      expect(res.stdout.trim()).toBe('plain');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
