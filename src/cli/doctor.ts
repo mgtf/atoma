@@ -27,6 +27,8 @@ import {
   type ToolBackendMode,
 } from '../run/backendMode.js';
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
+import { DEFAULT_DB_PATH } from '../core/stores.js';
+import { inspectAtomStoreSchema } from '../registry/db.js';
 
 const runFile = promisify(execFile);
 export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
@@ -545,6 +547,40 @@ export async function diagnoseDoctor(args: {
       detail:
         'ATOMA_REQUIRE_ISOLATION=1 but this mode resolves to the local tool backend, which is not a boundary',
       remedy: 'Launch with --container (or --egress), or set ATOMA_CONTAINER=1.',
+    });
+  }
+  const dbPath = env['ATOMA_DB_PATH'] ?? DEFAULT_DB_PATH;
+  const storeSchema = inspectAtomStoreSchema(dbPath);
+  if (storeSchema === 'missing') {
+    checks.push({
+      id: 'store-schema',
+      label: 'Agent store',
+      status: 'pass',
+      detail: 'no store yet — the next run will create the current schema',
+    });
+  } else if (storeSchema === 'compatible') {
+    checks.push({
+      id: 'store-schema',
+      label: 'Agent store',
+      status: 'pass',
+      detail: 'store accepts the current schema',
+    });
+  } else if (storeSchema === 'pre-t4') {
+    checks.push({
+      id: 'store-schema',
+      label: 'Agent store',
+      status: 'fail',
+      detail: `${dbPath} predates the atom_id column; CREATE TABLE IF NOT EXISTS will not migrate it and the next open will throw on idx_atom_types_atom_id`,
+      remedy:
+        'The schema is the schema. Point ATOMA_DB_PATH at a post-reset store, or remove this file and start empty.',
+    });
+  } else {
+    checks.push({
+      id: 'store-schema',
+      label: 'Agent store',
+      status: 'fail',
+      detail: `${dbPath} exists but is not a readable SQLite atom store`,
+      remedy: 'Fix or replace ATOMA_DB_PATH.',
     });
   }
   checks.push(...(await checkDocker(args.mode.container, deps, args.mode.egress)));

@@ -11,7 +11,8 @@
  */
 
 import { openDb } from '../registry/db.js';
-import { storeDbPath } from '../core/stores.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
@@ -226,7 +227,15 @@ function cmdTop(
   console.log(renderTable(tableHeaders, sorted.slice(0, 20).map(formatType)));
 }
 
-function cmdDedupe(registry: AtomRegistry, apply: boolean, fuzzy: boolean): void {
+function dropLeftoverSkillNamespaces(skills: SkillRegistry, atomIds: readonly string[]): void {
+  for (const atomId of atomIds) {
+    if (skills.dropNamespace(atomId)) {
+      console.log(`    dropped leftover skills/${atomId}/`);
+    }
+  }
+}
+
+function cmdDedupe(registry: AtomRegistry, skills: SkillRegistry, apply: boolean, fuzzy: boolean): void {
   const groups = registry.findDuplicateGroups({ fuzzy });
   if (groups.length === 0) {
     console.log(
@@ -256,10 +265,12 @@ function cmdDedupe(registry: AtomRegistry, apply: boolean, fuzzy: boolean): void
       );
     }
     if (apply) {
+      const loserIds = losers.map((l) => l.atomId);
       const refreshed = registry.mergeInto(
         winner.name,
         losers.map((l) => l.name)
       );
+      dropLeftoverSkillNamespaces(skills, loserIds);
       console.log(
         `    ✓ merged — ${winner.name} now ✓${refreshed.successes}/✗${refreshed.failures}\n`
       );
@@ -274,6 +285,9 @@ function cmdDedupe(registry: AtomRegistry, apply: boolean, fuzzy: boolean): void
     );
     console.log(
       'history under the winner\'s (tier, ordinal) — the loser rows themselves are deleted.'
+    );
+    console.log(
+      'Leftover skill directories of absorbed atoms (skills/<atom-id>/) are dropped.'
     );
   } else {
     console.log('done. Re-run `registry list` to verify.');
@@ -350,7 +364,7 @@ function cmdDescribe(registry: AtomRegistry, name: string, newDescription: strin
  * (removing the only L3). Dynamic-creation debris (createdBy = an atom
  * name) deletes without friction — that's the intended use.
  */
-function cmdRemove(registry: AtomRegistry, name: string, force: boolean): void {
+function cmdRemove(registry: AtomRegistry, skills: SkillRegistry, name: string, force: boolean): void {
   const existing = registry.getByName(name);
   if (!existing) {
     console.error(`no agent type named "${name}"`);
@@ -366,6 +380,7 @@ function cmdRemove(registry: AtomRegistry, name: string, force: boolean): void {
     process.exit(2);
   }
   const removed = registry.remove(name)!;
+  dropLeftoverSkillNamespaces(skills, [removed.atomId]);
   console.log(
     `removed ${removed.name} (tier ${removed.tier}, v${removed.version}, ` +
       `${removed.successes}✓/${removed.failures}✗, createdBy: ${removed.createdBy})`
@@ -497,6 +512,7 @@ function main(): void {
   const dbPath = dbPathFrom(args.flags);
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
+  const skills = new SkillRegistry(skillsDirPath());
 
   switch (args.command) {
     case 'list':
@@ -514,6 +530,7 @@ function main(): void {
     case 'dedupe':
       return cmdDedupe(
         registry,
+        skills,
         args.flags['apply'] === 'true',
         args.flags['fuzzy'] === 'true'
       );
@@ -538,7 +555,7 @@ function main(): void {
         console.error('usage: remove <name> [--force]');
         process.exit(2);
       }
-      return cmdRemove(registry, name, args.flags['force'] === 'true');
+      return cmdRemove(registry, skills, name, args.flags['force'] === 'true');
     }
     case 'history': {
       const name = args.positional[0];

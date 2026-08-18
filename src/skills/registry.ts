@@ -377,6 +377,24 @@ export class SkillRegistry {
   }
 
   /**
+   * Delete a whole namespace directory (CLI `registry remove` / `dedupe`).
+   *
+   * After T4 the skill path is the atom id. `mergeInto` and `remove` delete
+   * the atom row and used to leave `skills/<loser-atom-id>/` behind — an
+   * orphan `listNamespaces` still shows and no live atom will `loadFor`.
+   * This is the operator reaper for that leftover, not a skill-body merge:
+   * the recipes die with the identity. Returns false when the directory
+   * is already gone.
+   */
+  dropNamespace(ns: string): boolean {
+    const dir = this.namespaceDir(ns);
+    if (!existsSync(dir)) return false;
+    rmSync(dir, { recursive: true, force: true });
+    appendLedger({ kind: 'skill-drop', entity: ns, detail: { namespace: true } });
+    return true;
+  }
+
+  /**
    * Consolidate two skills of one L1 (CLI `skills merge`): the KEEPER's
    * matching surface absorbs the other skill's `when_to_use`, and the
    * absorbed skill is deleted. Deliberately MECHANICAL, no LLM:

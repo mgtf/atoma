@@ -125,7 +125,9 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
 `atoma doctor` is quota-free. It proves configuration and local prerequisites,
 not that a provider will accept the next billable request. Local Docker failures
 are warnings; container/egress modes make them hard failures. Egress implies
-container. Do not add remote completion calls to doctor.
+container. A pre-T4 store (no `atom_id` column) is a hard failure — the schema
+is the schema and `CREATE TABLE IF NOT EXISTS` will not migrate it. Do not add
+remote completion calls to doctor.
 
 ### Safe working rules
 
@@ -370,7 +372,9 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - Event-recovery skills match failure classes mid-run and carry zero LLM cost.
   Their triggers describe reusable failure classes, never task themes.
 - `skills drop`, `merge`, `reset`, and review are operator-only lifecycle
-  actions. Preserve provenance and emit ledger events.
+  actions. Preserve provenance and emit ledger events. `registry remove` and
+  `registry dedupe --apply` drop the deleted atom's skill namespace
+  (`skills/<atom-id>/`); `mergeInto` itself does not touch the skill store.
 - Compilation's measured value is maintenance verification, not from-scratch
   builds. Do not spend new rounds tuning it unless task decomposition changes.
 

@@ -307,8 +307,9 @@ contraire des fermetures propres d’incidents nommés.
 
 ## 6. Risques résiduels (non findings)
 
-- **`mergeInto` / dedupe** : supprime la ligne atom, laisse
-  `skills/<loser-atom-id>/` orphelin. Pas de consolidation.
+- **`mergeInto` / dedupe** : `mergeInto` ne touche toujours pas le skill
+  store (frontière registry). `registry remove` / `dedupe --apply`
+  appellent `dropNamespace` sur les atom id absorbés.
 - **OAuth / CLI / Codex** : sans clé/bearer *explicites* dans le snapshot,
   le SDK et les subprocess restent collés à l’identité machine. T10
   complet = clés dans le snapshot + refus des pins CLI.
@@ -319,9 +320,8 @@ contraire des fermetures propres d’incidents nommés.
   Les gates skills/promotion ne voient que la phase courante.
 - **Budget phase vs run** : toujours ouvert
   (`docs/incidents/parallel-fanin-2026-08-16.md`).
-- **Store pré-T4** : `CREATE TABLE IF NOT EXISTS` ne migrate pas ; crash
-  sur `idx_atom_types_atom_id`. Aligné « schema is the schema », à
-  documenter dans doctor.
+- **Store pré-T4** : `CREATE TABLE IF NOT EXISTS` ne migrate pas. Doctor
+  refuse un fichier sans colonne `atom_id` (`inspectAtomStoreSchema`).
 - **`runTrace` errors** : tronqués ; le payload porte maintenant
   `caveat` UNTRUSTED (même mitigation que `runStatus.progress.tail`).
 - **Fan-out non déterministe** : L2 `decomposable` reste un appel Haiku

@@ -1,4 +1,9 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { inspectAtomStoreSchema } from '../src/registry/db.js';
 import {
   diagnoseDoctor,
   dockerVersionSupportsIsolatedGateway,
@@ -348,5 +353,39 @@ describe('atoma doctor', () => {
     expect(fetched).toBe('http://ollama.example:11434/api/version');
     expect(renderDoctorReport(report)).toContain('READY');
     expect(renderDoctorReport(report)).not.toContain('API_KEY');
+  });
+
+  it('fails when the store predates the atom_id column', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-doctor-store-'));
+    const dbPath = join(dir, 'old.db');
+    const db = new Database(dbPath);
+    db.exec(
+      `CREATE TABLE atom_types (
+        tier INTEGER NOT NULL,
+        ordinal INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        PRIMARY KEY (tier, ordinal)
+      )`
+    );
+    db.close();
+    try {
+      expect(inspectAtomStoreSchema(dbPath)).toBe('pre-t4');
+      expect(inspectAtomStoreSchema(join(dir, 'missing.db'))).toBe('missing');
+      const report = await diagnoseDoctor({
+        mode: { container: false, egress: false },
+        env: {
+          ATOMA_LLM: 'anthropic',
+          ANTHROPIC_API_KEY: 'configured',
+          ATOMA_DB_PATH: dbPath,
+        },
+        dependencies: dependencies(),
+      });
+      const check = report.checks.find((c) => c.id === 'store-schema');
+      expect(check?.status).toBe('fail');
+      expect(check?.detail).toMatch(/atom_id/);
+      expect(report.ready).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { LEDGER_TABLE_DDL } from '../core/ledger.js';
 
@@ -40,6 +41,32 @@ CREATE TABLE IF NOT EXISTS atom_type_versions (
 CREATE INDEX IF NOT EXISTS idx_atom_types_name ON atom_types(name);
 CREATE INDEX IF NOT EXISTS idx_atom_types_tier ON atom_types(tier);
 `;
+
+/**
+ * Readonly look at whether a store file can accept the current schema.
+ *
+ * `CREATE TABLE IF NOT EXISTS` is a no-op on a pre-T4 `atom_types` (no
+ * `atom_id` column); the next statement (`CREATE UNIQUE INDEX ... atom_id`)
+ * then throws. Doctor reports that before `startTask` hits it. A missing
+ * file is compatible — `openDb` will create the current schema.
+ */
+export type AtomStoreSchema = 'missing' | 'compatible' | 'pre-t4' | 'unreadable';
+
+export function inspectAtomStoreSchema(path: string): AtomStoreSchema {
+  if (!existsSync(path)) return 'missing';
+  try {
+    const db = new Database(path, { readonly: true, fileMustExist: true });
+    try {
+      const cols = db.prepare('PRAGMA table_info(atom_types)').all() as { name: string }[];
+      if (cols.length === 0) return 'compatible';
+      return cols.some((col) => col.name === 'atom_id') ? 'compatible' : 'pre-t4';
+    } finally {
+      db.close();
+    }
+  } catch {
+    return 'unreadable';
+  }
+}
 
 export function openDb(path: string): DB {
   const db = new Database(path);

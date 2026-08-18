@@ -3,6 +3,8 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SkillRegistry } from '../src/skills/registry.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
 import {
   UNDER_MATCHED_RATIO,
   UNDER_MATCHED_SIBLING_FLOOR,
@@ -82,6 +84,52 @@ describe('SkillRegistry.drop', () => {
     expect(reg.loadFor('Water')).toEqual([]);
     expect(existsSync(join(dir, 'Water', 'debris'))).toBe(false);
     expect(reg.drop('Water', 'debris')).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('dropNamespace removes the leftover tree mergeInto used to leave behind', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-drop-ns-'));
+    const skills = new SkillRegistry(dir);
+    const loserId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    skills.save(loserId, {
+      id: 'orphaned-recipe',
+      description: 'd',
+      whenToUse: 'w',
+      kind: 'llm',
+      body: 'b',
+    });
+    expect(existsSync(join(dir, loserId, 'orphaned-recipe'))).toBe(true);
+    expect(skills.dropNamespace(loserId)).toBe(true);
+    expect(existsSync(join(dir, loserId))).toBe(false);
+    expect(skills.dropNamespace(loserId)).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('mergeInto leaves the loser skill tree; dropNamespace is the operator reaper', () => {
+    const atoms = new AtomRegistry(openDb(':memory:'));
+    const seed = {
+      description: 'd',
+      systemPrompt: 's',
+      tools: [],
+      params: {},
+      createdBy: 'test',
+    };
+    const winner = atoms.create(1, seed);
+    const loser = atoms.create(1, seed);
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-merge-ns-'));
+    const skills = new SkillRegistry(dir);
+    skills.save(loser.atomId, {
+      id: 'orphaned-recipe',
+      description: 'd',
+      whenToUse: 'w',
+      kind: 'llm',
+      body: 'b',
+    });
+    atoms.mergeInto(winner.name, [loser.name]);
+    expect(atoms.getByName(loser.name)).toBeNull();
+    expect(existsSync(join(dir, loser.atomId, 'orphaned-recipe'))).toBe(true);
+    expect(skills.dropNamespace(loser.atomId)).toBe(true);
+    expect(existsSync(join(dir, loser.atomId))).toBe(false);
     rmSync(dir, { recursive: true, force: true });
   });
 });
