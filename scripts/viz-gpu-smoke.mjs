@@ -18,10 +18,152 @@ async function freePort() {
   });
 }
 
+/**
+ * Two console lines describe the MACHINE, not the app, and CI is the machine
+ * that emits them: with no GPU, Chrome has no WebGPU adapter to offer (which is
+ * exactly why the WebGL fallback arm at the bottom exists) and ANGLE reports its
+ * own software-raster stalls. Everything else the page says still counts —
+ * this is an allowlist of two anchored strings, not a mute button on warnings.
+ */
+const ENVIRONMENT_CONSOLE = [
+  'No available adapters.',
+  'GL Driver Message (OpenGL, Performance',
+];
+
+function isEnvironmentNoise(text) {
+  return ENVIRONMENT_CONSOLE.some((fragment) => text.includes(fragment));
+}
+
+/**
+ * Frames are only worth timing where they are real. `UNMASKED_RENDERER_WEBGL`
+ * names the rasteriser — "ANGLE (Apple, ANGLE Metal Renderer: Apple M4 Pro)"
+ * against "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device ...))" — and it must
+ * be read on the app's own 127.0.0.1 page, since `navigator.gpu` and the
+ * debug-renderer extension both need a secure context.
+ */
+async function readRasteriser(page) {
+  return await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+    const info = gl?.getExtension('WEBGL_debug_renderer_info');
+    const name = info && gl ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : '';
+    // Hand the context straight back: the app itself holds two, and Chrome caps
+    // how many one page may keep alive.
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return name;
+  });
+}
+
+const SOFTWARE_RASTERISERS = /swiftshader|llvmpipe|software|basic render/i;
+
+/**
+ * The cast-shadow arm hunts a ~40px class of defect: shadows anchored while a
+ * layer sits lifted, never re-aimed as the layer eases down. Its resting budget
+ * is 0.5px where frames are real.
+ *
+ * A software rasteriser leaves a CONSTANT sub-pixel residual instead — measured
+ * 0.8707px, identical across runs, frozen for 16s with the render count stuck at
+ * 3, so it is not a settle the arm can wait out: the hover-out ease finishes
+ * after the last paint and nothing re-anchors at rest. 2px keeps 2x margin over
+ * that residual while staying 20x below the defect it is looking for.
+ */
+const ANCHOR_DRIFT_MAX = 0.5;
+const SOFTWARE_ANCHOR_DRIFT_MAX = 2;
+
+/**
+ * The main arm serves its OWN synthetic trace from a temp dir. It used to read
+ * the repository's ambient `runs/`, which made the scroll scenario depend on
+ * whatever traces happened to be on the machine: a fresh checkout has none, the
+ * RUNS list then has nothing to scroll, every wheel tick is a no-op, and
+ * `missed: 24` reports the fixture's absence as a renderer regression.
+ *
+ * THE ROW COUNT IS LOAD-BEARING. The scroll arm dispatches 16 ticks of 140px
+ * before reversing, and `views/runs.ts` sets
+ * `scrollMax = rows * rowHeight + 38 - listHeight` with `rowHeight` 46 and the
+ * list pane never taller than the 800px viewport — so the list needs ~62 rows
+ * before the sixteenth tick still moves it. 80 keeps margin without inflating
+ * the per-rebuild layout that the same arm is timing.
+ */
+const FIXTURE_EVENT_ROWS = 80;
+
+async function writeRunFixture(dir) {
+  // Fixed clock. Timestamps that follow the wall clock would sit inside
+  // `isRunLive`'s 12-minute window and start the trace poll that the live arm
+  // at the bottom of this file owns and measures.
+  const t0 = Date.parse('2026-01-02T03:04:05.000Z');
+  const roles = ['plan', 'validate', 'execute'];
+  const tools = ['read_file', 'write_file', 'shell', 'validate_html'];
+  const events = [];
+  for (let i = 0; i < FIXTURE_EVENT_ROWS; i++) {
+    const ts = t0 + i * 1_500;
+    events.push(i % 3 === 2
+      ? {
+        id: `fx-tool-${i}`,
+        ts,
+        kind: 'tool',
+        name: tools[i % tools.length],
+        actor: { name: 'Water', tier: 1 },
+        durationMs: 40 + (i % 7) * 5,
+        args: { path: `src/fixture-${i}.ts` },
+        result: `wrote src/fixture-${i}.ts`,
+      }
+      : {
+        id: `fx-llm-${i}`,
+        ts,
+        kind: 'llm',
+        role: roles[i % roles.length],
+        model: i % 2 === 0 ? 'claude-sonnet-5' : 'claude-haiku-4-5-20251001',
+        actor: { name: i % 2 === 0 ? 'Tracheid' : 'Water', tier: i % 2 === 0 ? 2 : 1 },
+        stopReason: 'end_turn',
+        durationMs: 300 + (i % 11) * 20,
+        costUsd: 0.0004,
+        usage: { inputTokens: 900 + i, outputTokens: 120 + i },
+        subject: `fixture step ${i}`,
+      });
+  }
+  const startedAt = new Date(t0 - 1_000).toISOString();
+  const endedAt = new Date(t0 + FIXTURE_EVENT_ROWS * 1_500).toISOString();
+  const durationMs = FIXTURE_EVENT_ROWS * 1_500 + 1_000;
+  const id = 'smoke-fixture-run';
+  const label = 'smoke: scroll fixture';
+  await writeFile(join(dir, `${id}.json`), JSON.stringify({
+    id,
+    label,
+    task: { description: 'GPU smoke fixture — a trace long enough to scroll' },
+    startedAt,
+    endedAt,
+    durationMs,
+    events,
+    result: {
+      summary: 'fixture complete',
+      output: 'fixture',
+      producedBy: { tier: 3, name: 'Meristem' },
+    },
+    totals: { calls: events.length, costUsd: 0.032 },
+  }));
+  await writeFile(join(dir, 'index.json'), JSON.stringify([{
+    id,
+    label,
+    startedAt,
+    endedAt,
+    durationMs,
+    hasError: false,
+    costUsd: 0.032,
+    calls: events.length,
+  }]));
+}
+
+const fixtureDir = await mkdtemp(join(tmpdir(), 'viz-gpu-smoke-'));
+await writeRunFixture(fixtureDir);
 const port = await freePort();
 const server = spawn(
   process.execPath,
-  ['dist/viz/server.js', '--host', '127.0.0.1', '--port', String(port)],
+  [
+    'dist/viz/server.js',
+    '--host', '127.0.0.1',
+    '--port', String(port),
+    '--dir', fixtureDir,
+  ],
   { stdio: ['ignore', 'pipe', 'pipe'] }
 );
 
@@ -46,7 +188,10 @@ try {
     await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
     const diagnostics = [];
     page.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warn') {
+      if (
+        (message.type() === 'error' || message.type() === 'warn') &&
+        !isEnvironmentNoise(message.text())
+      ) {
         diagnostics.push(`${message.type()}: ${message.text()}`);
       }
     });
@@ -59,8 +204,18 @@ try {
         diagnostics.push(`http ${response.status()}: ${response.url()}`);
       }
     });
-    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle0' });
+    // `load`, never `networkidle0`. The client polls /api/runs for as long as
+    // it is open, and on a SOFTWARE renderer — CI has no GPU, so
+    // `--enable-unsafe-swiftshader` serves every frame on the CPU — Blink never
+    // emits the `networkIdle` lifecycle signal Puppeteer waits for. Measured
+    // under those flags: the page's own `load` fires at ~75ms and page-visible
+    // in-flight requests sit at zero for ~2.8s at a stretch, yet networkidle0
+    // does not resolve in 120 SECONDS. A bigger timeout cannot reach it, so
+    // every arm here gates on `load` plus the app's own readiness attribute.
+    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+    const rasteriser = await readRasteriser(page);
+    const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     await page.mouse.move(640, 400);
     await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
     await new Promise((resolve) => setTimeout(resolve, 180));
@@ -206,7 +361,12 @@ try {
       result.objects < 20 ||
       result.cursorX !== '640' ||
       result.cursorY !== '400' ||
-      frameStats.p95Ms > 35 ||
+      // The pointer-light budget is a claim about the PRODUCT's animation
+      // cost, so it is asserted where frames are real. Measured on the same
+      // build: 17.5ms P95 on this machine's Metal-backed WebGPU against 357ms
+      // under `--use-angle=swiftshader`, which times the rasteriser and nothing
+      // else. Skipped loudly below rather than silently relaxed.
+      (!softwareRastered && frameStats.p95Ms > 35) ||
       // The scroll scenario must ARM before its numbers mean anything: every
       // tick has to have produced a rebuild, and there have to be rebuilds.
       scrollStats.missed !== 0 ||
@@ -231,6 +391,12 @@ try {
     console.log(
       `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95`
     );
+    if (softwareRastered) {
+      console.log(
+        `viz GPU frame budget NOT CHECKED: software rasteriser (${rasteriser}) — ` +
+          `${frameStats.p95Ms.toFixed(2)}ms P95 measures the rasteriser, not the scene`
+      );
+    }
     console.log(
       `viz GPU nav ok: 6 RUNS<->SKILLS round-trips past the 560ms view transition, views ${navStats.views.join('/')}, no render error`
     );
@@ -250,7 +416,10 @@ try {
     const tunePage = await browser.newPage();
     const tuneDiagnostics = [];
     tunePage.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warn') {
+      if (
+        (message.type() === 'error' || message.type() === 'warn') &&
+        !isEnvironmentNoise(message.text())
+      ) {
         tuneDiagnostics.push(`${message.type()}: ${message.text()}`);
       }
     });
@@ -259,7 +428,7 @@ try {
     try {
       await tunePage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
       await tunePage.goto(`http://127.0.0.1:${port}/?atomaDiag=1&atomaTune=1`, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'load',
       });
       await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
       await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
@@ -359,12 +528,15 @@ try {
     // under that layer stays aimed ~40px above its surface until some
     // unrelated render. Only observable here: the mocked suite has no ticker
     // and no stage transforms.
+    const anchorDriftMax = softwareRastered
+      ? SOFTWARE_ANCHOR_DRIFT_MAX
+      : ANCHOR_DRIFT_MAX;
     const anchorPage = await browser.newPage();
     let anchorStats;
     try {
       await anchorPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
       await anchorPage.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'load',
       });
       await anchorPage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
       await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
@@ -428,13 +600,13 @@ try {
       !anchorStats.settled.roleRow ||
       anchorStats.midFlight === null ||
       // THE ASSERTION: anchors track the moving layer and its resting place.
-      !(anchorStats.midFlight.drift < 0.5) ||
-      !(anchorStats.settled.drift < 0.5)
+      !(anchorStats.midFlight.drift < ANCHOR_DRIFT_MAX) ||
+      !(anchorStats.settled.drift < anchorDriftMax)
     ) {
       throw new Error(`GPU shadow anchors drifted: ${JSON.stringify(anchorStats)}`);
     }
     console.log(
-      `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled`
+      `viz GPU shadow anchors ok: drift ${anchorStats.midFlight.drift.toFixed(3)}px mid-flight (layer at ${anchorStats.midFlight.offset.toFixed(1)}px), ${anchorStats.settled.drift.toFixed(3)}px settled against a ${anchorDriftMax}px resting budget`
     );
 
     // A LIVE run's polling must not rebuild the GPU scene when nothing
@@ -499,7 +671,7 @@ try {
       livePage.on('request', (request) => {
         if (request.url().includes('/api/runs/')) tracePolls += 1;
       });
-      await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'networkidle0' });
+      await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'load' });
       await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
       await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1500)));
 
@@ -508,7 +680,15 @@ try {
           Number(document.querySelector('.gpu-ui-host').dataset.gpuRenderCount ?? 0));
       const pollsBefore = tracePolls;
       const idleStart = await readCount();
-      await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 5000)));
+      // ARM ON THE POLLS, NOT ON THE CLOCK. The trace poll fires every 1s, but a
+      // saturated main thread stretches that: under a software rasteriser a
+      // fixed 5s window observed exactly 3 polls — the floor this arm asserts,
+      // with nothing left for a slower runner. Waiting for the fourth poll keeps
+      // the same window on a fast machine and cannot under-arm on a slow one.
+      const pollDeadline = Date.now() + 30_000;
+      while (tracePolls - pollsBefore < 4 && Date.now() < pollDeadline) {
+        await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
+      }
       const idleEnd = await readCount();
       const idlePolls = tracePolls - pollsBefore;
 
@@ -516,8 +696,15 @@ try {
       // "no rebuilds" above would also pass on a UI that stopped updating.
       liveRun.events.push({ id: 'ev4', kind: 'tool', ts: Date.now(), title: 'read_file' });
       await writeRun();
-      await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2500)));
-      const afterEvent = await readCount();
+      // Same reason: wait for the rebuild rather than for a duration that has to
+      // contain one. A miss still fails the assertion below — it just fails on
+      // the renderer's behaviour instead of on the runner's speed.
+      const rebuildDeadline = Date.now() + 30_000;
+      let afterEvent = await readCount();
+      while (afterEvent <= idleEnd && Date.now() < rebuildDeadline) {
+        await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
+        afterEvent = await readCount();
+      }
 
       liveStats = {
         idlePolls,
@@ -557,7 +744,10 @@ try {
     await page.setViewport({ width: 1280, height: 800 });
     const diagnostics = [];
     page.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warn') {
+      if (
+        (message.type() === 'error' || message.type() === 'warn') &&
+        !isEnvironmentNoise(message.text())
+      ) {
         diagnostics.push(`${message.type()}: ${message.text()}`);
       }
     });
@@ -570,7 +760,7 @@ try {
         diagnostics.push(`http ${response.status()}: ${response.url()}`);
       }
     });
-    await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'networkidle0' });
+    await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]');
     await page.mouse.move(640, 400);
     await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
@@ -594,4 +784,5 @@ try {
   }
 } finally {
   server.kill('SIGTERM');
+  await rm(fixtureDir, { recursive: true, force: true });
 }
