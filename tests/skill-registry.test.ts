@@ -57,14 +57,14 @@ describe('parseFrontmatter / renderFrontmatter', () => {
   });
 
   it('rejects when a required field is missing', () => {
-    const t = ['---', 'id: x', 'description: d', 'kind: llm', '---', 'body'].join('\n');
+    const t = ['---', 'name: x', 'description: d', 'kind: llm', '---', 'body'].join('\n');
     expect(() => parseFrontmatter(t)).toThrow(/when_to_use/);
   });
 
   it('rejects an unknown kind value', () => {
     const t = [
       '---',
-      'id: x',
+      'name: x',
       'description: d',
       'when_to_use: w',
       'kind: ghost',
@@ -77,7 +77,7 @@ describe('parseFrontmatter / renderFrontmatter', () => {
   it('strips surrounding quotes on values', () => {
     const t = [
       '---',
-      'id: x',
+      'name: x',
       'description: "quoted desc"',
       "when_to_use: 'quoted when'",
       'kind: llm',
@@ -92,7 +92,7 @@ describe('parseFrontmatter / renderFrontmatter', () => {
   it('defaults kind to llm when omitted (forwards-compatible)', () => {
     const t = [
       '---',
-      'id: x',
+      'name: x',
       'description: d',
       'when_to_use: w',
       '---',
@@ -209,7 +209,7 @@ describe('SkillRegistry', () => {
       join(skillDir, 'SKILL.md'),
       [
         '---',
-        'id: hand-written',
+        'name: hand-written',
         'description: a hand-written skill that bypassed save()',
         'when_to_use: whenever the test needs it',
         'kind: llm',

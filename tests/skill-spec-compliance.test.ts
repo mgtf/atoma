@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { SkillRegistry, parseFrontmatter, renderFrontmatter } from '../src/skills/registry.js';
+import { parseFrontmatter, renderFrontmatter } from '../src/skills/registry.js';
 import { exportSkillToSpec, SPEC_DESCRIPTION_MAX_CHARS } from '../src/skills/exportSpec.js';
 import type { Skill } from '../src/skills/types.js';
 
@@ -40,34 +37,6 @@ describe('frontmatter — spec-canonical name key', () => {
     expect(parseFrontmatter(md).frontmatter.id).toBe('build-cli');
   });
 
-  it('still reads a legacy id: store', () => {
-    const md = ['---', 'id: legacy-skill', 'description: d', 'when_to_use: w', 'kind: llm', '---', '', 'body'].join('\n');
-    expect(parseFrontmatter(md).frontmatter.id).toBe('legacy-skill');
-  });
-
-  it('name wins when a hand-edited file carries both', () => {
-    const md = ['---', 'name: canonical', 'id: stale', 'description: d', 'when_to_use: w', 'kind: llm', '---', '', 'b'].join('\n');
-    expect(parseFrontmatter(md).frontmatter.id).toBe('canonical');
-  });
-
-  it('a legacy on-disk store loads and migrates to name: on the next save', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'atoma-spec-'));
-    const reg = new SkillRegistry(dir);
-    const skillDir = join(dir, 'Hydrogen', 'old-era');
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(
-      join(skillDir, 'SKILL.md'),
-      ['---', 'id: old-era', 'description: d', 'when_to_use: w', 'kind: llm', '---', '', 'body'].join('\n'),
-      'utf8'
-    );
-    const loaded = reg.loadFor('Hydrogen');
-    expect(loaded[0]!.id).toBe('old-era');
-    reg.save('Hydrogen', { id: 'old-era', description: 'd2', whenToUse: 'w2', kind: 'llm', body: 'body v2' });
-    const text = readFileSync(join(skillDir, 'SKILL.md'), 'utf8');
-    expect(text).toMatch(/^name: old-era$/m);
-    expect(text).not.toMatch(/^id:/m);
-    rmSync(dir, { recursive: true, force: true });
-  });
 });
 
 describe('exportSkillToSpec — portable two-field SKILL.md', () => {

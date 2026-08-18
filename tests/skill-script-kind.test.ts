@@ -44,7 +44,7 @@ describe('parseFrontmatter / renderFrontmatter — kind: script (phase 2)', () =
   it('rejects kind:script WITHOUT a language', () => {
     const text = [
       '---',
-      'id: x',
+      'name: x',
       'description: d',
       'when_to_use: w',
       'kind: script',
@@ -57,7 +57,7 @@ describe('parseFrontmatter / renderFrontmatter — kind: script (phase 2)', () =
   it('rejects an unknown language value', () => {
     const text = [
       '---',
-      'id: x',
+      'name: x',
       'description: d',
       'when_to_use: w',
       'kind: script',
@@ -71,7 +71,7 @@ describe('parseFrontmatter / renderFrontmatter — kind: script (phase 2)', () =
   it('rejects language on a kind:llm skill (forbidden combination)', () => {
     const text = [
       '---',
-      'id: x',
+      'name: x',
       'description: d',
       'when_to_use: w',
       'kind: llm',

@@ -67,7 +67,7 @@ describe('frontmatter — trigger field', () => {
   it('rejects trigger on kind:script at parse AND at save', () => {
     const md = [
       '---',
-      'id: bad',
+      'name: bad',
       'description: d',
       'when_to_use: w',
       'kind: script',
