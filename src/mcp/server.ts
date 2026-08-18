@@ -337,7 +337,7 @@ export function buildServer(): McpServer {
     {
       title: 'Show one run trace',
       description:
-        'The event SHAPE of one trace — tiers, roles, models, tools, guard decisions — plus its totals. Event payloads (prompts, responses, tool results) are omitted on purpose: they are megabytes of model-authored text. Read those in the visualiser (npm run viz). Events are PAGED: the payload carries totalEvents and nextOffset — pass nextOffset back as offset until it is null. Per-event error strings are truncated.',
+        'The event SHAPE of one trace — tiers, roles, models, tools, guard decisions — plus its totals. Event payloads (prompts, responses, tool results) are omitted on purpose: they are megabytes of model-authored text. Read those in the visualiser (npm run viz). Events are PAGED: the payload carries totalEvents and nextOffset — pass nextOffset back as offset until it is null. Per-event error strings are truncated and marked UNTRUSTED on the payload.',
       inputSchema: {
         file: z.string().min(1).describe('Trace filename from atoma_runs_list, e.g. "2026-08-11T10-00-00.json".'),
         offset: z.number().int().min(0).optional().describe('Event index the page starts at. Default 0.'),

@@ -26,7 +26,7 @@ import {
   type RunDriver,
 } from '../src/mcp/run.js';
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
-import { families, friction, registryList, runTrace, skillsList } from '../src/mcp/readers.js';
+import { families, friction, registryList, runTrace, skillsList, TRACE_ERROR_CAVEAT } from '../src/mcp/readers.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -571,9 +571,12 @@ describe('MCP readers', () => {
       totalEvents: number;
       eventsFrom: number;
       nextOffset: number | null;
+      caveat?: string;
       events: { id: string; error?: string }[];
     };
     const first = runTrace({ file: 'big.json' }) as Page;
+    expect(first.caveat).toBe(TRACE_ERROR_CAVEAT);
+    expect(first.caveat).toMatch(/UNTRUSTED DATA/);
     expect(first.totalEvents).toBe(250);
     expect(first.eventsFrom).toBe(0);
     expect(first.events).toHaveLength(200); // the default page bound

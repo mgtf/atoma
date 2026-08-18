@@ -541,9 +541,10 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - MCP payloads are BOUNDED and honest about trust: `atoma_run_trace` pages its
   events (`offset`/`limit`, capped) and truncates error strings; `goal` has a
   hard length cap; run output/skill bodies/trace text are marked UNTRUSTED
-  model data (INSTRUCTIONS + `caveat` on runStatus). Stale-lease recovery is
-  VISIBLE: startRun reports what it reaped (`recovered`), and runStatus with
-  no in-memory match reports the cross-process lease row instead of amnesia.
+  model data (INSTRUCTIONS + `caveat` on runStatus and runTrace). Stale-lease
+  recovery is VISIBLE: startRun reports what it reaped (`recovered`), and
+  runStatus with no in-memory match reports the cross-process lease row
+  instead of amnesia.
 - The exported 13-tool surface is a compatibility contract. Add/remove tools only
   with protocol tests, docs, compiled smoke updates, and explicit rationale.
 

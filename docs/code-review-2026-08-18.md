@@ -322,8 +322,8 @@ contraire des fermetures propres d’incidents nommés.
 - **Store pré-T4** : `CREATE TABLE IF NOT EXISTS` ne migrate pas ; crash
   sur `idx_atom_types_atom_id`. Aligné « schema is the schema », à
   documenter dans doctor.
-- **`runTrace` errors** : tronqués, pas marqués UNTRUSTED par event
-  (`readers.ts:536-539`).
+- **`runTrace` errors** : tronqués ; le payload porte maintenant
+  `caveat` UNTRUSTED (même mitigation que `runStatus.progress.tail`).
 - **Fan-out non déterministe** : L2 `decomposable` reste un appel Haiku
   (3/4 mesuré). Limite produit, pas un bug.
 
