@@ -244,7 +244,12 @@ Read this section before changing any LLM call site.
 ## Architecture invariants
 
 - `superviseLoop` is the only plan → validate → execute → validate protocol.
-  L2 and L3 reuse it; never duplicate the loop in concrete atoms.
+  L2 and L3 reuse it for children; never duplicate that loop in concrete
+  atoms. The L3 root `handle` is plan → execute (no parent). A parallel
+  L3 plan whose declared `outputs` collide earns one coached Opus replan
+  (`acceptL3RootPlan`); a repeat is honoured. Do not copy this rule onto
+  L2 — child plans already go through FAN-OUT validation. Do not coerce
+  an explicit L3 `concat` into `sequential`.
 - Creation is fractal: application → L3 → L2 → L1. Registry creation/branching
   owns names and counters.
 - Escalation branches a type and toggles parent fallback in a `try/finally`.

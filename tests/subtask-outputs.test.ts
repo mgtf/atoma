@@ -108,7 +108,9 @@ describe('structured subtask outputs — the plan channel', () => {
   it('the plan guidance and the compile contract both teach the structured field', () => {
     expect(MUTATING_SUBTASK_FILE_GUIDANCE).toMatch(/"outputs"/);
     expect(MUTATING_SUBTASK_FILE_GUIDANCE).toMatch(/OUTPUTS only/);
+    expect(MUTATING_SUBTASK_FILE_GUIDANCE).toMatch(/MUST declare/);
     expect(MUTATING_SUBTASK_FILE_GUIDANCE).toMatch(/Omit the/);
+    expect(MUTATING_SUBTASK_FILE_GUIDANCE).toMatch(/plan defect/);
     const compile = buildCompileSkillPrompt({
       skillId: 's',
       skillDescription: 'd',

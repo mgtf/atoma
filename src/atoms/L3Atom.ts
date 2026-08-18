@@ -17,6 +17,7 @@ import {
 import { modelForTier, resolveLatestOpus, FALLBACK_OPUS, type ModelListingClient } from '../core/models.js';
 import { capToolIterations } from '../core/limits.js';
 import { dispatchWithAggregation } from './dispatch.js';
+import { acceptL3RootPlan } from './l3RootPlan.js';
 import { L2Atom } from './L2Atom.js';
 import {
   buildTargetContext,
@@ -276,7 +277,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
 
   /** Public entry: run the full supervised flow. */
   async handle(task: Task, ctx: RunContext): Promise<Result> {
-    const plan = await this.plan(task, ctx);
+    // No parent validator sits above this plan. `acceptL3RootPlan` is the
+    // one-shot collision check — see that module, not a second superviseLoop.
+    const plan = await acceptL3RootPlan({
+      plan: await this.plan(task, ctx),
+      task,
+      ctx,
+      replan: (next) => this.plan(next, ctx),
+    });
     return this.execute(task, plan, ctx);
   }
 
@@ -530,6 +538,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `    sub-results need synthesis.`,
       `  - "sequential": phases run one-at-a-time on a shared workspace; final`,
       `    phase's output is the deliverable. For PHASED.`,
+      `Parallel phases MUST declare disjoint "outputs". Shared paths mean the`,
+      `work is PHASED — use sequential. Omit "outputs" only on read-only phases.`,
       ``,
       `== STRATEGY OPTIONS (baseline when a subtask lacks preferredChild) ==`,
       `  - "reuse": pick an existing L2 cell from the catalog that fits`,
@@ -580,8 +590,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `Shape:`,
       `[`,
       `  {"strategy": "reuse"|"create", "target": "<name>"?, "seed"?: {"description": "...", "systemPrompt": "...", "tools": [], "params": {}}, "reasoning": "..."},`,
-      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?, "outputs": ["<file the subtask creates/modifies>", ...]?}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
+      `  {"reasoning": "...", "subtasks": [{"description": "...", "preferredChild": "<L2-name>"?, "inputs": {}?, "outputs": ["<file the subtask creates/modifies>", ...]}, ...], "aggregation": {"mode": "concat"|"llm-synthesize"|"sequential", "instruction": "..."?}, "expectedOutput": "..."}`,
       `]`,
+      `Every file-mutating subtask MUST include "outputs". Omit the key only on read-only phases.`,
       `The first character of your response MUST be "[". Do NOT call any tools.`,
     ]
       .filter(Boolean)

@@ -22,8 +22,9 @@ code actuel**. Les numéros de ligne référencent HEAD `08fc043`.
 > `registry remove` / `dedupe` appellent `dropNamespace`. Doctor refuse un
 > store pré-T4. `runTrace` porte le caveat UNTRUSTED. Commentaires
 > `./skills/<l1-name>/` rattrapés. Accepté sans nouveau code : MUI poll
-> (§1.10, client gelé), cluster viz du 16 (§2.D), concat L3 explicite,
-> fan-out Haiku, OAuth machine hors snapshot (saas A6 REMAINING).
+> (§1.10, client gelé), cluster viz du 16 (§2.D), fan-out Haiku, OAuth
+> machine hors snapshot (saas A6 REMAINING). Concat L3 explicite : honoré
+> + collision d’`outputs` = un replan coaché (`acceptL3RootPlan`).
 
 ## Vue d'ensemble de la fenêtre
 
@@ -336,10 +337,12 @@ reste la règle pour les gates, pas un rollback du rendu.
   *explicites* dans le snapshot, le SDK et les subprocess restent collés
   à l’identité machine. saas A6 le dit déjà en REMAINING ; ce n’est pas
   un trou du produit local.
-- **L3 `aggregation: concat` explicite** — **accepté.** Seule l’*omission*
-  est forcée en `sequential`. Une garde post-plan serait une nouvelle
-  gate mécanique (refroidissement). Le prompt grouping reste la
-  mitigation.
+- **L3 `aggregation: concat` explicite** — **fermé.** L’explicite reste
+  honoré (pas de coerce). Collision de `outputs` déclarés sur un plan
+  parallèle L3 : un replan Opus coaché, puis honore
+  (`acceptL3RootPlan`). Pas de validateur parent au-dessus du self-plan
+  (`handle` = plan → execute). Le FAN-OUT de `verdict.ts` reste la
+  seule définition pour les plans *enfants*.
 - **`outputs` entre phases** — **fermé.** `dispatchWithAggregation`
   file `inputs.previousStepOutputs` (phase immédiate précédente). Les
   gates skills/promotion lisent encore uniquement `outputs` de la phase
