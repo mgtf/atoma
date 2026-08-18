@@ -247,7 +247,10 @@ Read this section before changing any LLM call site.
   L2 and L3 reuse it for children; never duplicate that loop in concrete
   atoms. The L3 root `handle` is plan → execute (no parent). A parallel
   L3 plan whose declared `outputs` collide earns one coached Opus replan
-  (`acceptL3RootPlan`); a repeat is honoured. Do not copy this rule onto
+  (`acceptL3RootPlan`); a repeat is honoured, and so is a replan that
+  THROWS — the coaching may not turn a racy-but-executable plan into no
+  run at all. Both planning prompts demand `outputs` on file-mutating
+  subtasks, so the collision channel exists. Do not copy this rule onto
   L2 — child plans already go through FAN-OUT validation. Do not coerce
   an explicit L3 `concat` into `sequential`.
 - Creation is fractal: application → L3 → L2 → L1. Registry creation/branching

@@ -16,7 +16,9 @@ import type { Plan, RunContext, Task } from '../core/types.js';
  * replan (constraints, same task description). Whatever comes back is
  * executed — a second look would be a validator we do not have, or an
  * unbounded loop. Memoised on `ctx.mechanicalPlanRejections` under a
- * single class key so a repeat cannot spend another strategy call.
+ * single class key so a repeat cannot spend another strategy call. The
+ * replan is FAIL-OPEN: if it throws, the original plan runs, because a
+ * race that still delivers beats a run that never starts.
  *
  * Channel: DECLARED `outputs` only. The lexical grammar is a fallback
  * for skill/dispatch gates, not a trigger here — a planner that omitted
@@ -98,5 +100,21 @@ export async function acceptL3RootPlan(args: {
     ...args.task,
     constraints: [...(args.task.constraints ?? []), l3ParallelOutputCoaching(hit)],
   };
-  return args.replan(coached);
+  // FAIL-OPEN. The plan in hand is already executable — racy, but it
+  // delivers. A replan that throws (transport error, unparsable pair, or the
+  // watchdog abort firing on `ctx.signal` near the deadline, where an
+  // unguarded top-tier strategy call is likeliest to be cut) must not turn
+  // "delivers with a race" into "no run at all" — strictly worse than the
+  // defect being coached. The memo is already set, so the honour-the-repeat
+  // path stays coherent whichever branch we leave by.
+  try {
+    return await args.replan(coached);
+  } catch (err) {
+    args.ctx.logger.warn(
+      `[l3] coached replan failed (${err instanceof Error ? err.message : String(err)}) — ` +
+        `executing the original parallel ${hit.mode} plan; declared outputs collide: ` +
+        hit.paths.join(', ')
+    );
+    return args.plan;
+  }
 }

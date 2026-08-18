@@ -173,6 +173,30 @@ describe('acceptL3RootPlan', () => {
     expect(honoured).toBe(colliding);
     expect(replans).toBe(0);
   });
+
+  it('fails OPEN when the coached replan throws — the racy plan still runs', async () => {
+    const ctx = makeCtx();
+    const colliding = plan({
+      mode: 'concat',
+      subtasks: [
+        { description: 'build', outputs: ['index.html'] },
+        { description: 'docs', outputs: ['index.html'] },
+      ],
+    });
+    const accepted = await acceptL3RootPlan({
+      plan: colliding,
+      task: { description: 'a page' },
+      ctx,
+      replan: async () => {
+        throw new Error('aborted: deadline exceeded');
+      },
+    });
+    // A race that still delivers beats a run that never starts: the coaching
+    // is an improvement attempt, never a new way to lose the whole run.
+    expect(accepted).toBe(colliding);
+    // The one-shot is still spent — a later collision must not retry.
+    expect(ctx.mechanicalPlanRejections?.has(L3_PARALLEL_OUTPUT_COLLISION_KEY)).toBe(true);
+  });
 });
 
 describe('L3.handle — root plan has no parent validator', () => {
@@ -258,5 +282,38 @@ describe('L3.handle — root plan has no parent validator', () => {
     await l3.handle({ description: 'a coupled page' }, ctx);
     expect(executed?.aggregation.mode).toBe('sequential');
     expect(ctx.llm.calls.some((c) => c.userContent.includes('MECHANICAL:'))).toBe(true);
+  });
+
+  it('executes the original plan when the coached strategy call explodes', async () => {
+    const { l3 } = seed();
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
+        {
+          reasoning: 'r',
+          subtasks: [
+            { description: 'build', outputs: ['index.html'] },
+            { description: 'docs', outputs: ['index.html'] },
+          ],
+          aggregation: { mode: 'concat' },
+        }
+      )
+    );
+    // The replan reaches its prefilter, then the top-tier strategy call dies
+    // the way the watchdog kills one near the deadline.
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueue(() => {
+      throw new Error('aborted: deadline exceeded');
+    });
+    let executed: Plan | undefined;
+    l3.execute = async (_task, p) => {
+      executed = p;
+      return dummy;
+    };
+    await expect(l3.handle({ description: 'a coupled page' }, ctx)).resolves.toBe(dummy);
+    expect(executed?.aggregation.mode).toBe('concat');
+    expect(executed?.subtasks).toHaveLength(2);
   });
 });

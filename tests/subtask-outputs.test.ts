@@ -6,6 +6,11 @@ import {
   scriptCanServeSubtask,
   subtaskOutputIntent,
 } from '../src/skills/scriptTargets.js';
+import { AtomRegistry } from '../src/registry/atomRegistry.js';
+import { openDb } from '../src/registry/db.js';
+import { L2Atom } from '../src/atoms/L2Atom.js';
+import { L3Atom } from '../src/atoms/L3Atom.js';
+import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 
 /**
  * Review §3.3: output intent used to travel ONLY as prose and be
@@ -121,5 +126,64 @@ describe('structured subtask outputs — the plan channel', () => {
     });
     expect(compile).toMatch(/"writes"/);
     expect(compile).toMatch(/CREATES or MODIFIES/);
+  });
+});
+
+/**
+ * ONE statement per field, per prompt. `MUTATING_SUBTASK_FILE_GUIDANCE` is
+ * SHARED by the L2 and L3 planning prompts, so hardening it to "MUST declare"
+ * while a tier's own shape line still printed `"outputs": [...]?` left that
+ * prompt contradicting itself about the same field — the one-concept-two-
+ * definitions drift, inside a single user message. Both tiers now agree.
+ */
+describe('outputs is mandatory in BOTH planning prompts', () => {
+  function strategyPrompt(calls: readonly { userContent: string }[]): string {
+    const call = calls.find((c) => c.userContent.includes('Shape:'));
+    if (!call) throw new Error('no strategy call carrying the plan shape');
+    return call.userContent;
+  }
+
+  it('L2 asks for outputs without marking the field optional', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(2, { description: 'cell', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    reg.create(1, { description: 'leaf', systemPrompt: 'l1', tools: [], params: {}, createdBy: 't' });
+    const l2 = L2Atom.fromType(reg.getByName('Tracheid')!, reg, []);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no clear match' }));
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Water', reasoning: 'r' },
+        { reasoning: 'r', subtasks: [{ description: 'leaf work' }] }
+      )
+    );
+    await l2.plan({ description: 'a leaf task' }, ctx);
+    const prompt = strategyPrompt(ctx.llm.calls);
+    expect(prompt).toContain(MUTATING_SUBTASK_FILE_GUIDANCE);
+    expect(prompt).toContain('Every file-mutating subtask MUST include "outputs"');
+    expect(prompt).not.toContain('creates/modifies>", ...]?}');
+  });
+
+  it('L3 asks for outputs without marking the field optional', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    reg.create(3, { description: 'tissue', systemPrompt: 'l3', tools: [], params: {}, createdBy: 't' });
+    reg.create(2, { description: 'cell', systemPrompt: 'l2', tools: [], params: {}, createdBy: 't' });
+    const l3 = L3Atom.buildWithModel(reg.getByName('Meristem')!, reg, 'claude-opus-5');
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
+        {
+          reasoning: 'r',
+          subtasks: [{ description: 'phase 1' }],
+          aggregation: { mode: 'sequential' },
+        }
+      )
+    );
+    await l3.plan({ description: 'a phased build' }, ctx);
+    const prompt = strategyPrompt(ctx.llm.calls);
+    expect(prompt).toContain(MUTATING_SUBTASK_FILE_GUIDANCE);
+    expect(prompt).toContain('Every file-mutating subtask MUST include "outputs"');
+    expect(prompt).not.toContain('creates/modifies>", ...]?}');
   });
 });
