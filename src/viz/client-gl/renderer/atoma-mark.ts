@@ -56,9 +56,9 @@ const CORE_FILAMENT_FRACTION = 0.5;
 const TRANSMITTED_CORE_REACH = 1.85;
 const TRANSMITTED_CORE_STEPS = 96;
 const TRANSMITTED_CORE_PLATEAU = 0.34;
-const TRANSMITTED_CORE_PEAK_ALPHA = 0.52;
+const TRANSMITTED_CORE_PEAK_ALPHA = 0.26;
 const TRANSMITTED_POOL_STEPS = 140;
-const TRANSMITTED_POOL_PEAK_ALPHA = 0.3;
+const TRANSMITTED_POOL_PEAK_ALPHA = 0.15;
 
 /**
  * Edges. A shaded mesh alone reads as plastic: what makes a crystal a crystal is

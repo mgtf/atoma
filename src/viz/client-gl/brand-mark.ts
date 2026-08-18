@@ -307,12 +307,13 @@ function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkV
  */
 export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
   const seconds = Math.max(0, elapsedMs) / 1000;
-  const yaw =
-    0.42 +
-    seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000) +
-    Math.sin(seconds * 0.95) * 0.045;
-  const pitch = -0.2 + Math.sin(seconds * 1.22) * 0.085;
-  const roll = 0.08 + Math.cos(seconds * 0.72) * 0.032;
+  // RIGID POSE. The mesh turns at one constant rate about the vertical axis
+  // and nothing else: pitch, roll and scale are FIXED, so the silhouette is
+  // the same shape at every moment. The sinusoidal wobble this replaces read
+  // as the crystal flexing — a rigid solid must not appear to deform.
+  const yaw = 0.42 + seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000);
+  const pitch = -0.2;
+  const roll = 0.08;
   const pulse = 0.5 + Math.sin(seconds * 3.35) * 0.5;
   const rows = rotationRows(yaw, pitch, roll);
 
@@ -351,7 +352,7 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     coreScale: perspectiveAt(core3[2]),
     silhouette: convexHull(outerHull),
     pulse,
-    scale: 0.99 + Math.sin(seconds * 1.58) * 0.012,
+    scale: 1,
     yaw,
   };
 }

@@ -277,13 +277,37 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
-  it('bounds its breathing motion and core pulse', () => {
+  it('keeps a rigid pose: no breathing, pulse bounded to the light alone', () => {
+    // The mesh must not appear to deform: scale is pinned to 1 and pitch/roll
+    // are constants, so only the yaw advances and only the bead's light pulses.
     for (const elapsedMs of [0, 250, 1_000, 5_000, 30_000]) {
       const frame = buildAtomaMarkFrame(elapsedMs);
-      expect(frame.scale).toBeGreaterThanOrEqual(0.978);
-      expect(frame.scale).toBeLessThanOrEqual(1.002);
+      expect(frame.scale).toBe(1);
       expect(frame.pulse).toBeGreaterThanOrEqual(0);
       expect(frame.pulse).toBeLessThanOrEqual(1);
+    }
+    // RIGID MOTION: every pairwise distance between hull points is preserved
+    // across time. The silhouette's own width legitimately changes — a rigid
+    // octahedron presents a face, then an edge, as it turns — but the MESH
+    // cannot stretch, and pairwise distances are exactly what stretching breaks.
+    const start = buildAtomaMarkFrame(0);
+    for (const elapsedMs of [1_700, 9_999, 30_000]) {
+      const frame = buildAtomaMarkFrame(elapsedMs);
+      for (let i = 0; i < frame.points.length; i += 1) {
+        for (let j = i + 1; j < frame.points.length; j += 1) {
+          const before = Math.hypot(
+            start.points[i]![0] - start.points[j]![0],
+            start.points[i]![1] - start.points[j]![1],
+            start.points[i]![2] - start.points[j]![2]
+          );
+          const after = Math.hypot(
+            frame.points[i]![0] - frame.points[j]![0],
+            frame.points[i]![1] - frame.points[j]![1],
+            frame.points[i]![2] - frame.points[j]![2]
+          );
+          expect(after, `edge ${i}-${j} at ${elapsedMs}ms`).toBeCloseTo(before, 9);
+        }
+      }
     }
   });
 });

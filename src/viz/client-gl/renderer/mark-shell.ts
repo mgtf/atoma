@@ -162,7 +162,7 @@ export function createMarkShell(): MarkShell | null {
         uLightDir: { value: new Float32Array(LIGHT_DIRECTION), type: 'vec3<f32>' },
         uCoreTint: { value: new Float32Array([0.87, 0.945, 1]), type: 'vec3<f32>' },
         uCoreReach: { value: CORE_REACH_MODEL, type: 'f32' },
-        uCoreIntensity: { value: 1.35, type: 'f32' },
+        uCoreIntensity: { value: 0.68, type: 'f32' },
         uAmbient: { value: 0.34, type: 'f32' },
         uPulse: { value: 0, type: 'f32' },
       },
