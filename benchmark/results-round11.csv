@@ -1,4 +1,0 @@
-timestamp,arm,task_id,run_index,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace
-2026-08-15T16:58:54.152Z,baseline,wclite-maint,1,delivered,0.722,76,1,1,0,0,0,0,0,0,0,0,0,2026-08-15T16-58-54-692-3e5e707d.json
-2026-08-15T17:00:10.754Z,baseline,wclite-maint,2,delivered,0.4136,84,1,1,0,0,0,0,0,0,0,0,0,2026-08-15T17-00-11-264-bc3a9d17.json
-2026-08-15T17:01:35.702Z,baseline,wclite-maint,3,delivered,0.3956,80,1,1,0,0,0,0,0,0,0,0,0,2026-08-15T17-01-36-185-c572b73f.json

@@ -98,12 +98,7 @@ function loadBurnin(): {
     const haikuCalls = num(c[9]) ?? 0;
     const otherCalls = num(c[19]) ?? 0;
     const explicitProvider = c[18]?.trim();
-    const claudeCalls = opusCalls + sonnetCalls + haikuCalls;
-    const provider =
-      explicitProvider ||
-      (claudeCalls > 0 && otherCalls === 0 && (llmCalls === null || llmCalls === claudeCalls)
-        ? 'claude-legacy'
-        : 'unknown');
+    const provider = explicitProvider || 'unknown';
     rows.push({
       ts: c[0]!,
       taskId: c[1]!,

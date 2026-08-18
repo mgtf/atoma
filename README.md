@@ -105,12 +105,14 @@ because it is load-bearing. Mechanisms 1 and 2 are the product.
 
 The same task, from an **empty registry and empty skill store**, given to atoma and to a single
 frontier agent — same sandbox, same tools, same budget, same token accounting,
+> **Raw measurement CSVs are no longer in the repository.** The project was reset to a from-scratch state on 2026-08-18 — store, skills, traces and measurement CSVs were archived out of the tree so that no code has to accommodate a previous era. The round write-ups keep the reasoning and the numbers as recorded at the time; the rows behind them are in the archive, not reproducible from this checkout.
+
 [registered before each run](benchmark/PROTOCOL.md). Twelve rounds: four on a from-scratch build,
 four on a maintenance task, three that vary the control arm’s model instead of the code, and one on a
 harder maintenance family built after the eighth could no longer discriminate.
 
 ![cost curve, round 1](docs/benchmark-cost-curve.svg)
-<sub>Round 1 only. Later rounds are in `benchmark/results-round{2..12}.csv`.</sub>
+<sub>Round 1 only. Later rounds are written up in `benchmark/ROUND{2..12}.md`.</sub>
 
 Mean cost per run on each round's main task, each against **its own same-day control**:
 
@@ -225,8 +227,8 @@ never noticed.
 
 ## The longer-run picture
 
-Beyond the controlled experiment, `burnin/results.csv` holds 156 runs across 8 task families,
-regenerable with `npm run burnin`.
+Beyond the controlled experiment, a burn-in corpus of 156 runs across 8 task families was
+measured with `npm run burnin`. Its CSV is archived rather than committed — see the note above.
 
 | | |
 |---|---|

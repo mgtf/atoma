@@ -596,6 +596,10 @@ Read the archived sections before changing something that merely looks odd.
 - Threshold env vars are call-time inputs; always record them with results.
 - Public numeric claims must be reproducible from a repository artefact today.
   State sample size/window and prefer generated medians over pasted live values.
+  EXCEPTION, recorded 2026-08-18: the pre-reset measurement CSVs were archived
+  out of the tree with the store, skills and traces, so the round write-ups are
+  historical narrative rather than reproducible claims. New measurements
+  restore the rule.
 - `docs/saas-architecture.md` is a design boundary, not evidence that the local
   product is multi-tenant. Trust counters remain runtime-local.
 - Keep outward-facing docs aligned with actual supported commands and packaged

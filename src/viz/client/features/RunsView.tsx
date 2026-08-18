@@ -39,7 +39,6 @@ import type { SkillSummary, VizEvent, VizRun } from '../types.js';
 import { useRunTrace } from '../use-runs.js';
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
 import { taxonomyForTier } from '../../../core/taxonomy.js';
-import { currentDisplayName } from '../../../registry/taxonomyNames.js';
 import {
   buildTimelineLayout,
   timelineBranchHeading,
@@ -74,15 +73,7 @@ function OutcomeChips({ event }: { event: VizEvent }) {
   if (!parsed || Array.isArray(parsed)) return null;
   if (event.role === 'prefilter') {
     const outcome = typeof parsed['outcome'] === 'string' ? parsed['outcome'] : undefined;
-    const rawTarget = typeof parsed['target'] === 'string' ? parsed['target'] : '?';
-    const isSkillPrefilter = event.systemPrompt?.includes(
-      'You match a subtask against a catalog of learned skills'
-    );
-    const childTier =
-      !isSkillPrefilter && (event.actor?.tier === 2 || event.actor?.tier === 3)
-        ? event.actor.tier - 1
-        : undefined;
-    const target = currentDisplayName(childTier, rawTarget) ?? rawTarget;
+    const target = typeof parsed['target'] === 'string' ? parsed['target'] : '?';
     const confidence = typeof parsed['confidence'] === 'string' ? parsed['confidence'] : undefined;
     return (
       <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: 'wrap' }}>

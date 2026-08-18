@@ -1,5 +1,4 @@
 import { elementForTool } from '../../../contracts/toolTaxonomy.js';
-import { currentDisplayName } from '../../../registry/taxonomyNames.js';
 import { fmtCost, fmtMs, toolArgSummary, tryParseJson } from '../../client/run-utils.js';
 import { timelineBranchHeading, type TimelineBranch } from '../../client/timeline-layout.js';
 import type { VizEvent } from '../../client/types.js';
@@ -94,15 +93,8 @@ export function eventDecision(event: VizEvent, t: GpuTranslate): string {
   if (!parsed || Array.isArray(parsed)) return '';
   if (event.role === 'prefilter') {
     const target = scalar(parsed['target'], 'reuse');
-    const isSkillPrefilter = event.systemPrompt?.includes(
-      'You match a subtask against a catalog of learned skills'
-    );
-    const childTier =
-      !isSkillPrefilter && (event.actor?.tier === 2 || event.actor?.tier === 3)
-        ? event.actor.tier - 1
-        : undefined;
     return parsed['outcome'] === 'reuse'
-      ? `→ ${currentDisplayName(childTier, target) ?? target}`
+      ? `→ ${target}`
       : parsed['outcome'] === 'escalate'
         ? t('outcome.escalate')
         : '';

@@ -1,6 +1,5 @@
 import type { RegistryType, RunIndexEntry, VizEvent, VizRun } from './types.js';
 import { taxonomyForTier } from '../../core/taxonomy.js';
-import { currentDisplayName } from '../../registry/taxonomyNames.js';
 
 export const ABANDONED_AFTER_MS = 12 * 60 * 1000;
 
@@ -231,47 +230,28 @@ export function tryParseJson(text?: string): unknown {
 
 function projectRegistryType(snapshot: RegistryType): RegistryType {
   const tier = snapshot.tier;
-  const name = currentDisplayName(tier, snapshot.name, snapshot.ordinal) ?? snapshot.name;
-  const createdBy =
-    currentDisplayName(tier < 3 ? tier + 1 : undefined, snapshot.createdBy) ??
-    snapshot.createdBy;
   return {
     ...snapshot,
-    name,
-    createdBy,
     ...(tier === 1 || tier === 2 || tier === 3
       ? { rank: taxonomyForTier(tier).rank }
       : {}),
   };
 }
 
-function projectActor(
-  ref: { name?: string; tier?: number } | undefined
-): { name?: string; tier?: number } | undefined {
-  if (!ref) return undefined;
-  return {
-    ...ref,
-    name: currentDisplayName(ref.tier, ref.name),
-  };
-}
-
 /**
- * Present immutable pre-v2 traces through the current taxonomy.
+ * Fill in each event's actor/child from the registry snapshots the run
+ * carries.
  *
- * Raw prompt/response/result text remains untouched for auditability; only
- * structured identity fields are projected. The persisted trace on disk is
- * never rewritten.
+ * A registry event names its target and its initiator as bare strings; the
+ * typed viz boundary resolves them to `{name, tier}` refs so the timeline can
+ * colour and group by tier without every renderer re-deriving it. Nothing
+ * here rewrites the trace — it is read-only projection.
  */
 export function projectRunTaxonomy(run: VizRun): VizRun {
-  const rawRefs = new Map<string, { name?: string; tier?: number }>();
-  const projectedRefs = new Map<string, { name?: string; tier?: number }>();
-  let legacyRun = false;
+  const refs = new Map<string, { name?: string; tier?: number }>();
   const remember = (snapshot: RegistryType): RegistryType => {
     const projected = projectRegistryType(snapshot);
-    if (projected.name !== snapshot.name) legacyRun = true;
-    const ref = { name: projected.name, tier: projected.tier };
-    rawRefs.set(snapshot.name, ref);
-    projectedRefs.set(projected.name, ref);
+    refs.set(snapshot.name, { name: projected.name, tier: projected.tier });
     return projected;
   };
   const projectedInitialTypes = run.initialTypes?.map(remember);
@@ -287,21 +267,16 @@ export function projectRunTaxonomy(run: VizRun): VizRun {
       const recordedBy = typeof event['by'] === 'string' ? event['by'] : undefined;
       const registryActor =
         event.kind === 'registry' && recordedBy
-          ? (legacyRun ? rawRefs.get(recordedBy) : projectedRefs.get(recordedBy)) ??
-            rawRefs.get(recordedBy) ??
-            projectedRefs.get(recordedBy) ??
-            { name: recordedBy }
+          ? refs.get(recordedBy) ?? { name: recordedBy }
           : undefined;
       const registryChild =
         event.kind === 'registry'
           ? snapshot
             ? { name: snapshot.name, tier: snapshot.tier }
-            : (legacyRun ? rawRefs.get(event.name ?? '') : projectedRefs.get(event.name ?? '')) ??
-              rawRefs.get(event.name ?? '') ??
-              projectedRefs.get(event.name ?? '')
+            : refs.get(event.name ?? '')
           : undefined;
-      const actor = projectActor(event.actor) ?? registryActor;
-      const child = projectActor(event.child) ?? registryChild;
+      const actor = event.actor ?? registryActor;
+      const child = event.child ?? registryChild;
       const baseEvent: VizEvent = { ...event };
       delete baseEvent.actor;
       delete baseEvent.child;
@@ -309,36 +284,9 @@ export function projectRunTaxonomy(run: VizRun): VizRun {
         ...baseEvent,
         ...(actor ? { actor } : {}),
         ...(child ? { child } : {}),
-        ...(event.l1Name
-          ? { l1Name: currentDisplayName(1, event.l1Name) ?? event.l1Name }
-          : {}),
         ...(snapshot ? { snapshot } : {}),
-        ...(event.kind === 'registry' && event.name
-          ? {
-              name:
-                currentDisplayName(
-                  snapshot?.tier ?? event.actor?.tier,
-                  event.name,
-                  snapshot?.ordinal
-                ) ?? event.name,
-            }
-          : {}),
       };
     }),
-    result: run.result
-      ? {
-          ...run.result,
-          producedBy: run.result.producedBy
-            ? {
-                ...run.result.producedBy,
-                name: currentDisplayName(
-                  run.result.producedBy.tier,
-                  run.result.producedBy.name
-                ),
-              }
-            : undefined,
-        }
-      : undefined,
   };
 }
 

@@ -86,7 +86,7 @@ async function rawRequestStatus(
 }
 
 describe('GET /api/burnin', () => {
-  it('normalizes legacy provider attribution and lifecycle defaults', async () => {
+  it('defaults the lifecycle counters a short row omits', async () => {
     const root = mkdtempSync(join(tmpdir(), 'atoma-viz-burnin-'));
     roots.push(root);
     const csv = join(root, 'results.csv');
@@ -110,7 +110,7 @@ describe('GET /api/burnin', () => {
     expect(payload.rows).toHaveLength(3);
     expect(payload.rows[0]).toMatchObject({
       taskId: 'http-echo',
-      provider: 'claude-legacy',
+      provider: 'unknown',
       otherCalls: 0,
       refusals: 0,
       compileErrors: 0,

@@ -147,21 +147,6 @@ describe('full-GL event cards preserve trace metadata', () => {
     expect(copy.decision).toBe('✓ approved');
   });
 
-  it('projects a legacy atom-prefilter target without rewriting skill ids', () => {
-    const base = {
-      id: 'prefilter',
-      ts: 1,
-      kind: 'llm',
-      role: 'prefilter',
-      actor: { tier: 2, name: 'Tracheid' },
-      response: JSON.stringify({ outcome: 'reuse', target: 'Hydrogen' }),
-    };
-    expect(gpuEventCardCopy(base, t).decision).toBe('→ Water');
-    expect(gpuEventCardCopy({
-      ...base,
-      systemPrompt: 'You match a subtask against a catalog of learned skills',
-    }, t).decision).toBe('→ Hydrogen');
-  });
 });
 
 describe('full-GL filter controls preserve semantic labels', () => {
