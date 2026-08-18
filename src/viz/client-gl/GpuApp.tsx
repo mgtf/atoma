@@ -15,6 +15,7 @@ import type {
 } from './gpu-renderer.js';
 import { AtomaCursor } from './AtomaCursor.js';
 import { DomBridge } from './DomBridge.js';
+import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
 import { useIsFetching } from '@tanstack/react-query';
 import {
@@ -77,6 +78,7 @@ export function GpuApp() {
     (key: string, vars?: Record<string, unknown>) => translate(state.locale, key, vars),
     [state.locale]
   );
+  const { phase: entryPhase, begin: beginEnter } = useEntryFade();
   useRefreshBridge();
 
   const runsQuery = useRunsIndex(state.view === 'runs');
@@ -145,6 +147,10 @@ export function GpuApp() {
 
   const activate = useCallback((id: string) => {
     const store = useGpuStore.getState();
+    if (id === 'welcome.continue') {
+      beginEnter();
+      return;
+    }
     if (id.startsWith('nav.')) {
       store.setView(id.slice(4) as typeof store.view);
       return;
@@ -245,7 +251,7 @@ export function GpuApp() {
       return;
     }
     if (id === 'launch.copy') copyCommand();
-  }, [copyCommand, profilesQuery.data]);
+  }, [beginEnter, copyCommand, profilesQuery.data]);
 
   const loading =
     (state.view === 'runs' && (runsQuery.isLoading || runQuery.isLoading)) ||
@@ -348,6 +354,7 @@ export function GpuApp() {
         <ThreeBackdrop
           run={runQuery.data ?? null}
           view={state.view}
+          entered={state.entered}
           runFilters={state.runFilters}
           timelineViewport={timelineViewport}
         />
@@ -358,8 +365,10 @@ export function GpuApp() {
         t={t}
         onSelectRun={state.selectRun}
         onCopy={copyCommand}
+        onEnter={beginEnter}
       />
       <AtomaCursor />
+      <EntryVeilLayer phase={entryPhase} />
     </main>
   );
 }

@@ -53,6 +53,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const gpuApp = readFileSync('src/viz/client-gl/GpuApp.tsx', 'utf8');
   const gpuMain = readFileSync('src/viz/client-gl/main.tsx', 'utf8');
   const gpuRenderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
+  const atomaMarkDraw = readFileSync('src/viz/client-gl/renderer/atoma-mark.ts', 'utf8');
+  const welcomeView = readFileSync('src/viz/client-gl/renderer/views/welcome.ts', 'utf8');
   const rendererRuns = readFileSync('src/viz/client-gl/renderer/views/runs.ts', 'utf8');
   const rendererShaders = readFileSync('src/viz/client-gl/renderer/shaders.ts', 'utf8');
   const rendererChipLayout = readFileSync('src/viz/client-gl/renderer/chip-layout.ts', 'utf8');
@@ -157,16 +159,22 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/startedAt/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/private navButton\(/);
-    // The brand mark is one Pixi crystal in the header; no parallel R3F logo.
+    // The brand mark is one Pixi crystal (header + arrival gate); no R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
     expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(10, 12\)/);
+    expect(gpuRenderer).toMatch(/attachAtomaMark\(/);
+    expect(gpuRenderer).toMatch(/drawWelcome\(/);
+    expect(welcomeView).toMatch(/attachAtomaMark\(/);
     // Scaled FROM the frame, not pinned to a literal: the size is a design
     // value that moves, the "one crystal driven by buildAtomaMarkFrame" is the
     // contract this test exists to hold.
-    expect(gpuRenderer).toMatch(/crystal\.scale\.set\(frame\.scale \* [\d.]+\)/);
-    expect(gpuRenderer).toMatch(/buildAtomaMarkFrame\(/);
+    expect(atomaMarkDraw).toMatch(/crystal\.scale\.set\(frame\.scale \* /);
+    expect(atomaMarkDraw).toMatch(/buildAtomaMarkFrame\(/);
     expect(gpuApp).not.toMatch(/AtomaCrystal/);
+    expect(gpuApp).toMatch(/useEntryFade|EntryVeilLayer/);
+    expect(gpuApp).toMatch(/beginEnter/);
     expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);
+    expect(gpuStyles).toMatch(/\.gpu-entry-veil/);
     expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
     expect(gpuRenderer).toMatch(/let x = 160/);
     // Atom buttons draw local geometry at local origin (no double offsets).
@@ -200,6 +208,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuCursor).toMatch(/pointerType === 'touch'|REDUCED_MOTION_QUERY/);
     expect(pointerLight).toMatch(/pointerClientToUv|pointerClientToRenderer/);
     expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
+    expect(threeBackdrop).toMatch(/entered && view === 'runs'/);
     expect(threeBackdrop).toMatch(/buildAtomMap\(run\)/);
     expect(threeBackdrop).toMatch(/events=\{\(\) => \(\{ enabled: false, priority: 1 \}\)\}/);
     expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
@@ -235,7 +244,7 @@ describe('viz i18n catalogs stay in parity', () => {
   });
 
   it('the Launch tab keys are present in both', () => {
-    for (const key of ['nav.launch', 'launch.family', 'launch.goal', 'launch.command', 'pane.selectLaunch']) {
+    for (const key of ['nav.launch', 'launch.family', 'launch.goal', 'launch.command', 'pane.selectLaunch', 'welcome.continue']) {
       expect(I18N_CATALOGS.en[key], `en missing ${key}`).toBeTruthy();
       expect(I18N_CATALOGS.fr[key], `fr missing ${key}`).toBeTruthy();
     }

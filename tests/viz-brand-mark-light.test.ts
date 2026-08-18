@@ -3,6 +3,7 @@ import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_SPEED_U,
   ATOMA_MARK_CORE_SPEED_V,
+  ATOMA_MARK_CORE_SPEED_W,
   buildAtomaMarkFrame,
   coreLightFalloff,
 } from '../src/viz/client-gl/brand-mark.js';
@@ -40,10 +41,20 @@ describe('coreLightFalloff', () => {
 });
 
 describe('core bead motion', () => {
-  it('runs on incommensurate frequencies, so the path does not loop quickly', () => {
-    const ratio = ATOMA_MARK_CORE_SPEED_U / ATOMA_MARK_CORE_SPEED_V;
-    expect(Number.isInteger(ratio)).toBe(false);
-    expect(Number.isInteger(1 / ratio)).toBe(false);
+  it('runs its three axes on incommensurate frequencies, so the path does not loop quickly', () => {
+    const speeds = [
+      ATOMA_MARK_CORE_SPEED_U,
+      ATOMA_MARK_CORE_SPEED_V,
+      ATOMA_MARK_CORE_SPEED_W,
+    ];
+    for (const [index, speed] of speeds.entries()) {
+      expect(speed).toBeGreaterThan(0);
+      for (const other of speeds.slice(index + 1)) {
+        const ratio = speed / other;
+        expect(Number.isInteger(ratio)).toBe(false);
+        expect(Number.isInteger(1 / ratio)).toBe(false);
+      }
+    }
   });
 
   it('moves further per second than the previous rate', () => {
@@ -53,12 +64,14 @@ describe('core bead motion', () => {
   });
 
   it('keeps the bead inside the crystal at every sampled moment', () => {
-    // Faster motion must not let the bead escape the hull it reflects off.
+    // The bipyramid is THIN: its nearest wall sits about 4 projected units from
+    // the centre, so a bead confined to the volume can never reach out to the
+    // 12-unit hull the way one confined to the projected outline could.
     for (let ms = 0; ms < 20_000; ms += 97) {
       const frame = buildAtomaMarkFrame(ms);
       const dx = frame.corePosition.x - 14;
       const dy = frame.corePosition.y - 14;
-      expect(Math.hypot(dx, dy), `at ${ms}ms`).toBeLessThan(12);
+      expect(Math.hypot(dx, dy), `at ${ms}ms`).toBeLessThan(8);
     }
   });
 });

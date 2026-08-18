@@ -36,6 +36,12 @@ export interface GpuUiState {
   burninPage: number;
   scrollY: Record<ViewName, number>;
   refreshNonce: number;
+  /**
+   * Arrival gate. False until Continue (later: login). Not a nav view — the
+   * chrome and data views stay behind it so SaaS auth can replace `enter()`.
+   */
+  entered: boolean;
+  enter: () => void;
   setView: (view: ViewName) => void;
   setLocale: (locale: 'en' | 'fr') => void;
   selectRun: (id: string | null) => void;
@@ -91,6 +97,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninPage: 1,
   scrollY: { runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
   refreshNonce: 0,
+  entered: false,
+  enter: () => set({ entered: true }),
   setView: (view) => set({ view, focusedInput: null }),
   setLocale: (locale) => {
     try {

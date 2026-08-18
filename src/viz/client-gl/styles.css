@@ -38,6 +38,36 @@ button, input, textarea { font: inherit; }
   pointer-events: auto;
 }
 
+/* Covers both GPU contexts and survives the Pixi scene rebuild at enter(). */
+.gpu-entry-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition-property: opacity;
+  transition-timing-function: ease-in;
+}
+.gpu-entry-veil[data-phase="out"] {
+  opacity: 1;
+  pointer-events: auto;
+  will-change: opacity;
+  transition-timing-function: ease-in;
+}
+.gpu-entry-veil[data-phase="in"] {
+  opacity: 0;
+  pointer-events: auto;
+  will-change: opacity;
+  transition-timing-function: ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gpu-entry-veil {
+    transition-duration: 0ms !important;
+  }
+}
+
 .atoma-pointer-cursor {
   position: fixed;
   top: 0;

@@ -411,3 +411,192 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
   }
 `;
 
+
+// ---------------------------------------------------------------------------
+// Brand mark shell
+//
+// The mark is a MESH: a thick-shell regular octahedron, eight outer facets and
+// eight cavity facets, drawn by these two programs. Positions arrive already
+// projected by `buildAtomaMarkFrame` — the vertex stage only maps the local
+// 28×28 box through Pixi's matrices, so there is exactly one projection in the
+// codebase and a shader cannot drift from it.
+//
+// The fragment stage is where the bead becomes a real light: its falloff is the
+// same smoothstep as `coreLightFalloff` in `brand-mark.ts` (change one, change
+// the other), applied PER PIXEL against each facet's own flat normal. That is
+// what the 2D version could only fake with a flat glaze per face.
+//
+// Two programs, one behaviour: WGSL for the WebGPU backend, GLSL ES 3 for the
+// WebGL fallback. Pixi binds `globalUniforms` and `localUniforms` itself; the
+// mark's own values live in `markUniforms`.
+// ---------------------------------------------------------------------------
+
+export const MARK_SHELL_WGSL = /* wgsl */ `
+  struct GlobalUniforms {
+    uProjectionMatrix: mat3x3<f32>,
+    uWorldTransformMatrix: mat3x3<f32>,
+    uWorldColorAlpha: vec4<f32>,
+    uResolution: vec2<f32>,
+  }
+
+  struct LocalUniforms {
+    uTransformMatrix: mat3x3<f32>,
+    uColor: vec4<f32>,
+    uRound: f32,
+  }
+
+  struct MarkUniforms {
+    uCore: vec3<f32>,
+    uLightDir: vec3<f32>,
+    uCoreTint: vec3<f32>,
+    uCoreReach: f32,
+    uCoreIntensity: f32,
+    uAmbient: f32,
+    uPulse: f32,
+  }
+
+  @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+  @group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+  @group(2) @binding(0) var<uniform> markUniforms: MarkUniforms;
+
+  struct VertexInput {
+    @location(0) aPosition: vec2<f32>,
+    @location(1) aWorld: vec3<f32>,
+    @location(2) aNormal: vec3<f32>,
+    @location(3) aTint: vec3<f32>,
+    @location(4) aSurface: vec2<f32>,
+  }
+
+  struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) vWorld: vec3<f32>,
+    @location(1) vNormal: vec3<f32>,
+    @location(2) vTint: vec3<f32>,
+    @location(3) vSurface: vec2<f32>,
+    @location(4) vColor: vec4<f32>,
+  }
+
+  @vertex
+  fn mainVertex(input: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let matrix = globalUniforms.uProjectionMatrix *
+      globalUniforms.uWorldTransformMatrix *
+      localUniforms.uTransformMatrix;
+    let clip = matrix * vec3<f32>(input.aPosition, 1.0);
+    out.position = vec4<f32>(clip.xy, 0.0, 1.0);
+    out.vWorld = input.aWorld;
+    out.vNormal = input.aNormal;
+    out.vTint = input.aTint;
+    out.vSurface = input.aSurface;
+    out.vColor = localUniforms.uColor * globalUniforms.uWorldColorAlpha;
+    return out;
+  }
+
+  @fragment
+  fn mainFragment(
+    @location(0) vWorld: vec3<f32>,
+    @location(1) vNormal: vec3<f32>,
+    @location(2) vTint: vec3<f32>,
+    @location(3) vSurface: vec2<f32>,
+    @location(4) vColor: vec4<f32>,
+  ) -> @location(0) vec4<f32> {
+    let normal = normalize(vNormal);
+    let outer = vSurface.y;
+
+    let toCore = markUniforms.uCore - vWorld;
+    let distance = length(toCore);
+    let coreDir = toCore / max(distance, 1e-4);
+    let reach = clamp(1.0 - distance / markUniforms.uCoreReach, 0.0, 1.0);
+    let falloff = reach * reach * (3.0 - 2.0 * reach);
+    let incidence = max(dot(normal, coreDir), 0.0);
+    let core = falloff * (0.34 + 0.66 * incidence) *
+      markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse);
+
+    let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
+    let half = normalize(markUniforms.uLightDir + vec3<f32>(0.0, 0.0, 1.0));
+    let specular = pow(max(dot(normal, half), 0.0), 26.0) * outer;
+    // Grazing facets keep more of the light: it is what reads as a glassy edge,
+    // and it is also what keeps the silhouette crisp against a dark field.
+    let fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
+
+    let lit = vTint * (markUniforms.uAmbient + 0.86 * sun) +
+      markUniforms.uCoreTint * core +
+      vec3<f32>(specular * 0.85);
+    let alpha = clamp(vSurface.x + fresnel * 0.24 * outer + core * 0.2, 0.0, 1.0);
+    return vec4<f32>(lit * alpha, alpha) * vColor;
+  }
+`;
+
+export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
+  in vec2 aPosition;
+  in vec3 aWorld;
+  in vec3 aNormal;
+  in vec3 aTint;
+  in vec2 aSurface;
+
+  uniform mat3 uProjectionMatrix;
+  uniform mat3 uWorldTransformMatrix;
+  uniform mat3 uTransformMatrix;
+  uniform vec4 uColor;
+  uniform vec4 uWorldColorAlpha;
+
+  out vec3 vWorld;
+  out vec3 vNormal;
+  out vec3 vTint;
+  out vec2 vSurface;
+  out vec4 vColor;
+
+  void main() {
+    mat3 matrix = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
+    gl_Position = vec4((matrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+    vWorld = aWorld;
+    vNormal = aNormal;
+    vTint = aTint;
+    vSurface = aSurface;
+    vColor = uColor * uWorldColorAlpha;
+  }
+`;
+
+export const MARK_SHELL_GLSL = /* glsl */ `
+  precision highp float;
+
+  in vec3 vWorld;
+  in vec3 vNormal;
+  in vec3 vTint;
+  in vec2 vSurface;
+  in vec4 vColor;
+  out vec4 finalColor;
+
+  uniform vec3 uCore;
+  uniform vec3 uLightDir;
+  uniform vec3 uCoreTint;
+  uniform float uCoreReach;
+  uniform float uCoreIntensity;
+  uniform float uAmbient;
+  uniform float uPulse;
+
+  void main() {
+    vec3 normal = normalize(vNormal);
+    float outer = vSurface.y;
+
+    vec3 toCore = uCore - vWorld;
+    float dist = length(toCore);
+    vec3 coreDir = toCore / max(dist, 1e-4);
+    float reach = clamp(1.0 - dist / uCoreReach, 0.0, 1.0);
+    float falloff = reach * reach * (3.0 - 2.0 * reach);
+    float incidence = max(dot(normal, coreDir), 0.0);
+    float core = falloff * (0.34 + 0.66 * incidence) *
+      uCoreIntensity * (0.86 + 0.14 * uPulse);
+
+    float sun = max(dot(normal, uLightDir), 0.0);
+    vec3 halfVector = normalize(uLightDir + vec3(0.0, 0.0, 1.0));
+    float specular = pow(max(dot(normal, halfVector), 0.0), 26.0) * outer;
+    float fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
+
+    vec3 lit = vTint * (uAmbient + 0.86 * sun) +
+      uCoreTint * core +
+      vec3(specular * 0.85);
+    float alpha = clamp(vSurface.x + fresnel * 0.24 * outer + core * 0.2, 0.0, 1.0);
+    finalColor = vec4(lit * alpha, alpha) * vColor;
+  }
+`;

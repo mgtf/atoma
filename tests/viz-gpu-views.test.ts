@@ -23,6 +23,8 @@ import {
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
+import { attachAtomaMark } from '../src/viz/client-gl/renderer/atoma-mark.js';
+import { drawWelcome, welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
@@ -277,6 +279,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninPage: 1,
     scrollY: { runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
     refreshNonce: 0,
+    entered: true,
+    enter: noop,
     setView: noop,
     setLocale: noop,
     selectRun: noop,
@@ -847,6 +851,89 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
     expect(reduced.metrics.hitTargets.map((target) => target.id)).toEqual(
       animated.metrics.hitTargets.map((target) => target.id)
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Arrival gate
+// ---------------------------------------------------------------------------
+
+describe('drawWelcome gate', () => {
+  it('centers a catalog Continue control below the viewport midpoint', () => {
+    const WIDTH = 1280;
+    const HEIGHT = 800;
+    const ctx = createRecordingCtx();
+    drawWelcome(ctx, makeSnapshot(), WIDTH, HEIGHT);
+    const button = ctx.buttons.find((item) => item.id === 'welcome.continue');
+    expect(button).toBeTruthy();
+    expect(button!.label).toBe(I18N_CATALOGS.en['welcome.continue']);
+    const layout = welcomeLayout(WIDTH, HEIGHT);
+    expect(button!.x).toBe(layout.buttonX);
+    expect(button!.y).toBe(layout.buttonY);
+    expect(button!.y).toBeGreaterThan(HEIGHT / 2);
+    expect(button!.x + button!.width / 2).toBe(WIDTH / 2);
+    expect(ctx.tickers.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the button on-screen while the mark grows with the viewport', () => {
+    const compact = welcomeLayout(800, 600);
+    const wide = welcomeLayout(1920, 1080);
+    expect(wide.scale).toBeGreaterThan(compact.scale);
+    expect(compact.buttonY + compact.buttonHeight).toBeLessThan(600);
+    expect(wide.buttonY + wide.buttonHeight).toBeLessThan(1080);
+    expect(compact.markX + 14).toBe(400);
+    expect(compact.markY + 14).toBe(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Brand mark layering
+// ---------------------------------------------------------------------------
+
+describe('attachAtomaMark glass layering', () => {
+  it('paints the bead between the far walls and the near glass, clipped to the crystal', () => {
+    // The defect this pins: with the bead painted LAST it sat on top of the
+    // near faces at any size, and blown up to the arrival gate it read as a
+    // sticker on the outside of the crystal rather than a light inside it.
+    // The shell is a MESH; in the headless test environment its shader cannot
+    // compile (no canvas to probe), so the shell layers sit as EMPTY
+    // placeholders — the layer ORDER is the structure this test pins, and it
+    // holds whether or not a real adapter dropped the meshes into them.
+    const parent = new Container();
+    const tickers: ((ticker: Ticker) => void)[] = [];
+    const mark = attachAtomaMark(parent, (callback) => tickers.push(callback), 0, 0, 8);
+    const crystal = mark.children[0] as Container;
+    const labels = crystal.children.map((child) => child.label);
+    const layer = (label: string) => labels.indexOf(label);
+
+    expect(layer('mark-shell-back-layer')).toBeGreaterThanOrEqual(0);
+    expect(layer('mark-interior')).toBeGreaterThan(layer('mark-shell-back-layer'));
+    expect(layer('mark-shell-front-layer')).toBeGreaterThan(layer('mark-interior'));
+    expect(layer('mark-edges')).toBeGreaterThan(layer('mark-shell-front-layer'));
+    expect(layer('mark-glass-glow')).toBeGreaterThan(layer('mark-edges'));
+
+    const interior = crystal.children[layer('mark-interior')] as Container;
+    // Masked, so the bead and its light pool cannot spill past the outline.
+    expect(interior.mask).toBeTruthy();
+    expect(interior.children.map((child) => child.label))
+      .toEqual(['mark-core']);
+    const glassGlow = crystal.children[layer('mark-glass-glow')] as Container;
+    expect(glassGlow.mask).toBeTruthy();
+    expect(glassGlow.children.map((child) => child.label))
+      .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);
+  });
+
+  it('animates one crystal per attach and freezes it under reduced motion', () => {
+    const parent = new Container();
+    const moving: ((ticker: Ticker) => void)[] = [];
+    attachAtomaMark(parent, (callback) => moving.push(callback), 0, 0);
+    expect(moving).toHaveLength(1);
+
+    setReducedMotionOverrideForTests(true);
+    const still: ((ticker: Ticker) => void)[] = [];
+    attachAtomaMark(parent, (callback) => still.push(callback), 0, 0);
+    expect(still).toHaveLength(0);
+    expect(parent.children).toHaveLength(2);
   });
 });
 

@@ -285,11 +285,13 @@ function TierTopology({ run, animate }: { run: VizRun | null; animate: boolean }
 function ThreeBackdropImpl({
   run,
   view,
+  entered,
   runFilters,
   timelineViewport,
 }: {
   run: VizRun | null;
   view: ViewName;
+  entered: boolean;
   runFilters: EventFilters;
   timelineViewport: GpuTimelineViewport | null;
 }) {
@@ -308,22 +310,22 @@ function ThreeBackdropImpl({
         <pointLight position={[3, 7, 9]} intensity={8} color="#6ea8ff" />
         <PointerPointLight
           intensity={
-            view === 'runs'
+            entered && view === 'runs'
               ? VIZ_VISUAL_DEPTH.mid.pointerIntensity
               : VIZ_VISUAL_DEPTH.far.topologyPointerIntensity
           }
         />
         <ShaderField animate={animate} />
-        {view === 'runs' ? (
+        {entered && view === 'runs' ? (
           <RunsTimelineRails
             run={run}
             filters={run ? coerceEventFilters(run.events, runFilters) : runFilters}
             timelineViewport={timelineViewport}
             animate={animate}
           />
-        ) : (
+        ) : entered ? (
           <TierTopology run={run} animate={animate} />
-        )}
+        ) : null}
       </Canvas>
     </div>
   );

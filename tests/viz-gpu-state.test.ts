@@ -32,10 +32,17 @@ beforeEach(() => {
     burninPreset: 'all',
     burninPage: 1,
     scrollY: { runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+    entered: false,
   });
 });
 
 describe('full-GL Zustand scene state', () => {
+  it('starts behind the arrival gate and enter() admits the chrome', () => {
+    expect(useGpuStore.getState().entered).toBe(false);
+    useGpuStore.getState().enter();
+    expect(useGpuStore.getState().entered).toBe(true);
+  });
+
   it('keeps event and atom selections mutually exclusive', () => {
     const store = useGpuStore.getState();
     store.selectEvent('event-1');

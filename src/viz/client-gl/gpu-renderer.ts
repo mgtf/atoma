@@ -20,15 +20,7 @@ import type {
   SkillSummary,
   VizRun,
 } from '../client/types.js';
-import {
-  ATOMA_MARK_CORE_LIGHT_RADIUS,
-  ATOMA_MARK_CORE_RADIUS,
-  ATOMA_MARK_CORE_RADIUS_PULSE,
-  ATOMA_MARK_CORE_STROKE_WIDTH,
-  buildAtomaMarkFrame,
-  type AtomaMarkPoint,
-  coreLightFalloff,
-} from './brand-mark.js';
+import { attachAtomaMark } from './renderer/atoma-mark.js';
 import {
   CAST_SHADOW_REACH_PX,
   type CastShadowSurface,
@@ -216,6 +208,7 @@ import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
 import { drawLaunch } from './renderer/views/launch.js';
+import { drawWelcome } from './renderer/views/welcome.js';
 
 export class GpuRenderer {
   app = new Application();
@@ -701,6 +694,19 @@ export class GpuRenderer {
     const width = this.app.screen.width;
     const height = this.app.screen.height;
     this.root.filterArea = new Rectangle(0, 0, width, height);
+    if (!snapshot.state.entered) {
+      drawWelcome(this, snapshot, width, height);
+      this.previousView = null;
+      this.previousFilterBounds = this.currentFilterBounds;
+      this.roleRowTransition = null;
+      this.previousEventIds = this.currentEventIds;
+      this.labels.endRender();
+      this.anchorCastShadows();
+      this.updateCastShadows();
+      this.metrics.objectCount =
+        this.countObjects(this.ambientRoot) + this.countObjects(this.root);
+      return;
+    }
     this.drawAmbientGrid(this.ambientRoot, width, height);
     this.drawHeader(snapshot, width);
 
@@ -2472,134 +2478,7 @@ export class GpuRenderer {
   }
 
   private drawAtomaMark(x: number, y: number) {
-    const container = new Container();
-    container.position.set(x, y);
-    container.eventMode = 'none';
-    const crystal = new Container();
-    crystal.position.set(14, 14);
-    crystal.pivot.set(14, 14);
-    const aura = new Graphics();
-    const shadow = new Graphics();
-    const faceGlow = new Graphics();
-    const facets = new Graphics();
-    const clearcoat = new Graphics();
-    const core = new Graphics();
-    crystal.addChild(aura, shadow, faceGlow, facets, clearcoat, core);
-    container.addChild(crystal);
-
-    const traceFace = (
-      graphics: Graphics,
-      points: readonly [AtomaMarkPoint, AtomaMarkPoint, AtomaMarkPoint]
-    ) => graphics
-      .moveTo(points[0].x, points[0].y)
-      .lineTo(points[1].x, points[1].y)
-      .lineTo(points[2].x, points[2].y)
-      .closePath();
-
-    const paint = (elapsedMs: number) => {
-      const frame = buildAtomaMarkFrame(elapsedMs);
-      // A few pixels larger: the mark is the only brand surface in the bar and
-      // was reading small next to the wordmark. 1.24 keeps ~8px of air before
-      // the "Atoma" text at x=48.
-      crystal.scale.set(frame.scale * 1.24);
-      aura
-        .clear()
-        .circle(14, 14, 12.6 + frame.pulse * 0.65)
-        .fill({ color: 0x4169e1, alpha: 0.018 + frame.pulse * 0.014 })
-        .circle(14, 14, 9.6 + frame.pulse * 0.4)
-        .fill({ color: GPU_COLORS.cyan, alpha: 0.018 + frame.pulse * 0.012 });
-      shadow
-        .clear()
-        .ellipse(14.4, 25.2, 6.6, 1.35)
-        .fill({ color: 0x020817, alpha: 0.34 });
-      faceGlow.clear();
-      facets.clear();
-      clearcoat.clear();
-
-      const core3 = frame.corePosition;
-      for (const face of frame.faces) {
-        // OMNI LIGHT. The bead lights the geometry around it rather than just
-        // wearing a halo: each face takes a white glaze proportional to how
-        // close its centroid is to the bead, so the illumination travels with
-        // it across the crystal.
-        const lit = coreLightFalloff(
-          Math.hypot(face.centroid.x - core3.x, face.centroid.y - core3.y)
-        );
-        traceFace(faceGlow, face.points).stroke({
-          color: face.edgeColor,
-          width: 2.4,
-          alpha: face.glowAlpha + lit * 0.22,
-        });
-        traceFace(facets, face.points)
-          .fill({ color: face.fillColor, alpha: 0.985 })
-          .stroke({
-            color: face.edgeColor,
-            width: 0.82,
-            alpha: 0.48 + face.sheenAlpha * 0.9,
-          });
-
-        const inset = face.points.map((point) => ({
-          x: point.x + (face.centroid.x - point.x) * 0.22,
-          y: point.y + (face.centroid.y - point.y) * 0.22,
-        })) as [AtomaMarkPoint, AtomaMarkPoint, AtomaMarkPoint];
-        traceFace(clearcoat, inset).fill({
-          color: 0xffffff,
-          alpha: face.sheenAlpha,
-        });
-        if (lit > 0) {
-          traceFace(clearcoat, face.points).fill({
-            color: 0xdff1ff,
-            alpha: lit * 0.16,
-          });
-        }
-        const highPoint = face.points.reduce((highest, point) =>
-          point.y < highest.y ? point : highest
-        );
-        clearcoat
-          .moveTo(highPoint.x, highPoint.y)
-          .lineTo(
-            highPoint.x + (face.centroid.x - highPoint.x) * 0.58,
-            highPoint.y + (face.centroid.y - highPoint.y) * 0.58
-          )
-          .stroke({ color: 0xffffff, width: 0.72, alpha: face.sheenAlpha * 1.25 });
-      }
-
-      const { x: coreX, y: coreY } = frame.corePosition;
-      core.clear();
-      core
-        // The light's own falloff, drawn as three soft steps so the bead reads
-        // as a source and not as a sticker.
-        .circle(coreX, coreY, ATOMA_MARK_CORE_LIGHT_RADIUS * 0.82)
-        .fill({ color: 0x9fd4ff, alpha: 0.028 + frame.pulse * 0.012 })
-        .circle(coreX, coreY, ATOMA_MARK_CORE_LIGHT_RADIUS * 0.5)
-        .fill({ color: 0xbfe4ff, alpha: 0.045 + frame.pulse * 0.018 })
-        .circle(coreX, coreY, 4.4 + frame.pulse * 0.55)
-        .fill({ color: GPU_COLORS.cyan, alpha: 0.035 + frame.pulse * 0.025 })
-        .circle(coreX, coreY, 2.8 + frame.pulse * 0.2)
-        .fill({ color: 0x6ea8ff, alpha: 0.09 + frame.pulse * 0.055 })
-        .circle(
-          coreX,
-          coreY,
-          ATOMA_MARK_CORE_RADIUS + frame.pulse * ATOMA_MARK_CORE_RADIUS_PULSE
-        )
-        .fill({ color: 0xf8fbff, alpha: 0.98 })
-        .stroke({
-          color: GPU_COLORS.cyan,
-          width: ATOMA_MARK_CORE_STROKE_WIDTH,
-          alpha: 0.96,
-        })
-        .circle(coreX - 0.45, coreY - 0.5, 0.45)
-        .fill({ color: 0xffffff, alpha: 0.96 });
-    };
-
-    const reducedMotion = prefersReducedMotion();
-    paint(reducedMotion ? 0 : performance.now());
-    if (!reducedMotion) {
-      this.addTicker(() => {
-        paint(performance.now());
-      });
-    }
-    this.root.addChild(container);
+    attachAtomaMark(this.root, (callback) => this.addTicker(callback), x, y);
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {

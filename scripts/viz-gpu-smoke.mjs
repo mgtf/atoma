@@ -74,6 +74,23 @@ const FRAME_SAMPLES = 120;
 const FRAME_SAMPLE_BUDGET_MS = 10_000;
 
 /**
+ * The app opens on the ARRIVAL GATE: no header, no tabs, no data view until
+ * Continue is pressed. Every arm below drives the real UI, so each one passes
+ * the gate first, through the a11y bridge control — the same click a keyboard
+ * user makes, and the only path that does not need the diagnostic handle.
+ */
+async function passArrivalGate(page) {
+  await page.waitForSelector('.gpu-a11y-bridge button', { timeout: READY_TIMEOUT_MS });
+  await page.evaluate(() => {
+    if (document.querySelector('[role="tab"]')) return;
+    const gate = document.querySelector('.gpu-a11y-bridge button');
+    if (!(gate instanceof HTMLButtonElement)) throw new Error('arrival gate control missing');
+    gate.click();
+  });
+  await page.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+}
+
+/**
  * The custom cursor is ENVIRONMENT-GATED by design: `AtomaCursor` enables it
  * only while `(any-hover: hover) and (any-pointer: fine)` matches with motion
  * allowed and forced colours off. A headless runner with no pointing device to
@@ -276,6 +293,11 @@ try {
     // every arm here gates on `load` plus the app's own readiness attribute.
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+    // The gate GATES: nothing navigable exists behind it until it is passed.
+    if (await page.$('[role="tab"]')) {
+      throw new Error('arrival gate did not hold: nav tabs rendered before Continue');
+    }
+    await passArrivalGate(page);
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     const cursorEnv = await readCursorEnvironment(page);
@@ -525,6 +547,7 @@ try {
         waitUntil: 'load',
       });
       await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+      await passArrivalGate(tunePage);
       await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
       const target = await tunePage.evaluate(() => {
@@ -650,6 +673,16 @@ try {
         if (!spot) throw new Error(`anchor scenario: hit target ${id} not found`);
         await anchorPage.mouse.click(spot.x, spot.y);
       };
+      // This arm has the diagnostic handle, so it passes the gate through the
+      // PIXI control itself: proof that the arrival button is hit-testable on
+      // the canvas, not only that the a11y bridge mirrors it.
+      await clickTarget('welcome.continue');
+      await anchorPage.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+      // Settle AFTER the gate as well as before it: the 600ms above only buys a
+      // built splash, and this arm has to catch ONE animation mid-flight — the
+      // view's own entry transition running underneath would arm it on the
+      // wrong displacement, or hand the enter animation a layer already moving.
+      await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1_200)));
       const probe = () =>
         anchorPage.evaluate(() => ({
           drift: globalThis.__ATOMA_GPU__.castShadowAnchorDrift(),
@@ -773,6 +806,7 @@ try {
       });
       await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'load' });
       await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+      await passArrivalGate(livePage);
       await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1500)));
 
       const readCount = () =>
@@ -863,6 +897,7 @@ try {
     });
     await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]', { timeout: READY_TIMEOUT_MS });
+    await passArrivalGate(page);
     const fallbackCursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (fallbackCursorEnv.expected) {

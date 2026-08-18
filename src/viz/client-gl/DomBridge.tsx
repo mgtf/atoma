@@ -7,19 +7,23 @@ export function DomBridge({
   t,
   onSelectRun,
   onCopy,
+  onEnter,
 }: {
   runs: RunIndexEntry[];
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
   onCopy: () => void;
+  onEnter?: () => void;
 }) {
   const view = useGpuStore((state) => state.view);
+  const entered = useGpuStore((state) => state.entered);
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
   const focusedInput = useGpuStore((state) => state.focusedInput);
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
   const setView = useGpuStore((state) => state.setView);
+  const enter = useGpuStore((state) => state.enter);
   const refresh = useGpuStore((state) => state.refresh);
   const setLocale = useGpuStore((state) => state.setLocale);
   const setSearch = useGpuStore((state) => state.setSearch);
@@ -31,6 +35,18 @@ export function DomBridge({
   const filteredRuns = runs.filter((run) =>
     matchesSearchQuery(runSearchText(run), search.run)
   );
+
+  if (!entered) {
+    return (
+      <div
+        className="gpu-a11y-bridge"
+        role="application"
+        aria-label="Atoma"
+      >
+        <button onClick={() => (onEnter ?? enter)()}>{t('welcome.continue')}</button>
+      </div>
+    );
+  }
 
   return (
     <>
