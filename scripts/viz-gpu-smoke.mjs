@@ -57,6 +57,23 @@ async function readRasteriser(page) {
 const SOFTWARE_RASTERISERS = /swiftshader|llvmpipe|software|basic render/i;
 
 /**
+ * Every wait in this file is sized for a runner that paints in SECONDS, because
+ * CI does. Measured on the GitHub runner: 33s from `page.goto` to the app's
+ * readiness attribute, against Puppeteer's 30s default for a selector — and one
+ * frame there is slow enough that 120 unbounded frame samples ran past the 180s
+ * protocol timeout and killed the job with `Runtime.callFunctionOn timed out`.
+ *
+ * The frame sampler is BOUNDED BY WALL CLOCK as well as by count: on a software
+ * rasteriser its number is not asserted anyway, so spending three minutes
+ * collecting it was pure cost. `protocolTimeout` is raised because the work does
+ * complete there, just slowly — unlike `networkidle0`, which no timeout reaches.
+ */
+const READY_TIMEOUT_MS = 60_000;
+const PROTOCOL_TIMEOUT_MS = 300_000;
+const FRAME_SAMPLES = 120;
+const FRAME_SAMPLE_BUDGET_MS = 10_000;
+
+/**
  * The custom cursor is ENVIRONMENT-GATED by design: `AtomaCursor` enables it
  * only while `(any-hover: hover) and (any-pointer: fine)` matches with motion
  * allowed and forced colours off. A headless runner with no pointing device to
@@ -95,6 +112,22 @@ async function readCursorEnvironment(page) {
  */
 const ANCHOR_DRIFT_MAX = 0.5;
 const SOFTWARE_ANCHOR_DRIFT_MAX = 2;
+
+/**
+ * The scroll rebuild budget catches a COLLAPSE — a rebuild that lost label
+ * retention and went back through the canvas text path — not a drift. 12ms is
+ * calibrated against 2.2-3.3ms measured on hardware here, with one frame at
+ * 16.7ms.
+ *
+ * It is a CPU measurement, and a software rasteriser is competing for the same
+ * thread: the same build measured 1.6ms P95 idle and 8.1ms P95 under load on this
+ * machine, so a shared runner several times slower has no headroom under 12ms.
+ * 40ms keeps a collapse bound there — losing label reuse costs an order of
+ * magnitude, not a factor of three — while the reuse RATIO below stays the sharp
+ * detector, and it needs no clock at all.
+ */
+const SCROLL_REBUILD_P95_MAX = 12;
+const SOFTWARE_SCROLL_REBUILD_P95_MAX = 40;
 
 /**
  * The main arm serves its OWN synthetic trace from a temp dir. It used to read
@@ -208,6 +241,7 @@ try {
   const browser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
   });
   try {
     const page = await browser.newPage();
@@ -239,13 +273,15 @@ try {
     // does not resolve in 120 SECONDS. A bigger timeout cannot reach it, so
     // every arm here gates on `load` plus the app's own readiness attribute.
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
-    await page.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+    await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     const cursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (cursorEnv.expected) {
-      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]', {
+        timeout: READY_TIMEOUT_MS,
+      });
     } else {
       console.log(
         `viz GPU pointer cursor NOT CHECKED: this environment reports no usable ` +
@@ -253,24 +289,38 @@ try {
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 180));
-    const frameStats = await page.evaluate(() => new Promise((resolve) => {
-      const samples = [];
-      let previous;
-      const frame = (now) => {
-        if (previous !== undefined) samples.push(now - previous);
-        previous = now;
-        if (samples.length < 120) requestAnimationFrame(frame);
-        else {
-          const sorted = [...samples].sort((left, right) => left - right);
-          resolve({
-            meanMs: samples.reduce((sum, value) => sum + value, 0) / samples.length,
-            p95Ms: sorted[Math.floor(sorted.length * 0.95)],
-          });
-        }
-      };
-      requestAnimationFrame(frame);
-    }));
+    const frameStats = await page.evaluate(
+      (target, budgetMs) => new Promise((resolve) => {
+        const samples = [];
+        let previous;
+        const started = performance.now();
+        const frame = (now) => {
+          if (previous !== undefined) samples.push(now - previous);
+          previous = now;
+          // Bounded by the clock as well as the count: 120 frames is ~2s of a
+          // real display and over three minutes of a software rasteriser, which
+          // is past the protocol timeout — and a truncated sample still carries
+          // the P95 the budget below reads, over however many frames arrived.
+          if (samples.length < target && performance.now() - started < budgetMs) {
+            requestAnimationFrame(frame);
+          } else {
+            const sorted = [...samples].sort((left, right) => left - right);
+            resolve({
+              samples: samples.length,
+              meanMs: samples.reduce((sum, value) => sum + value, 0) / Math.max(1, samples.length),
+              p95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
+            });
+          }
+        };
+        requestAnimationFrame(frame);
+      }),
+      FRAME_SAMPLES,
+      FRAME_SAMPLE_BUDGET_MS
+    );
 
+    const scrollRebuildMax = softwareRastered
+      ? SOFTWARE_SCROLL_REBUILD_P95_MAX
+      : SCROLL_REBUILD_P95_MAX;
     const views = ['Registry', 'Skills', 'Burn-in', 'Launch', 'Runs'];
     for (const label of views) {
       await page.evaluate((name) => {
@@ -281,7 +331,7 @@ try {
       }, label);
       await page.waitForFunction(
         (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
-        {},
+        { timeout: READY_TIMEOUT_MS },
         label
       );
     }
@@ -344,10 +394,20 @@ try {
       // reaches the renderer through the store and React's scheduler, so a
       // fixed settle silently drops ticks — and drops MORE of them on a slower
       // build, which would flatter exactly the arm that is doing worse.
+      // Still waits FOR THE RENDER — never a fixed number of frames, which
+      // would drop more ticks the slower the build is and flatter exactly the
+      // arm doing worse. The cap is only a backstop, and it is expressed in
+      // frames because that is the unit the render arrives in: a 500ms window
+      // is 30 frames of a real display and less than one of a software
+      // rasteriser, where it would report the runner's speed as a dropped tick.
       const awaitRender = async () => {
         const before = samples.length;
-        const deadline = performance.now() + 500;
-        while (samples.length === before && performance.now() < deadline) await frame();
+        const deadline = performance.now() + 4_000;
+        let waited = 0;
+        while (samples.length === before && waited < 4 && performance.now() < deadline) {
+          await frame();
+          waited += 1;
+        }
         return samples.length > before;
       };
       // Left third: the event list, clear of the detail pane, whose wheel path
@@ -405,9 +465,7 @@ try {
       // tick has to have produced a rebuild, and there have to be rebuilds.
       scrollStats.missed !== 0 ||
       scrollStats.renders < 20 ||
-      // Generous against CI variance — measured P95 is 2.2-3.3ms and one frame
-      // is 16.7ms. This catches a collapse, not a drift.
-      scrollStats.p95Ms > 12 ||
+      scrollStats.p95Ms > scrollRebuildMax ||
       // The sharp one. Label retention is what keeps a rebuild off the canvas
       // text path; losing it drops this straight to zero, where the timing
       // budget above would still pass.
@@ -423,7 +481,7 @@ try {
       );
     }
     console.log(
-      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95`
+      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95 over ${frameStats.samples} frames`
     );
     if (softwareRastered) {
       console.log(
@@ -435,7 +493,7 @@ try {
       `viz GPU nav ok: 6 RUNS<->SKILLS round-trips past the 560ms view transition, views ${navStats.views.join('/')}, no render error`
     );
     console.log(
-      `viz GPU scroll ok: ${scrollStats.renders} rebuilds (${scrollStats.missed} ticks missed), ${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/${scrollStats.maxMs.toFixed(2)}ms max, labels ${scrollStats.reused} reused vs ${scrollStats.created} built`
+      `viz GPU scroll ok: ${scrollStats.renders} rebuilds (${scrollStats.missed} ticks missed), ${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/${scrollStats.maxMs.toFixed(2)}ms max against a ${scrollRebuildMax}ms ceiling, labels ${scrollStats.reused} reused vs ${scrollStats.created} built`
     );
 
     // THE REGRESSION SCENARIO. A tuning drag must keep driving the value
@@ -464,7 +522,7 @@ try {
       await tunePage.goto(`http://127.0.0.1:${port}/?atomaDiag=1&atomaTune=1`, {
         waitUntil: 'load',
       });
-      await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+      await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
       const target = await tunePage.evaluate(() => {
@@ -572,7 +630,7 @@ try {
       await anchorPage.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, {
         waitUntil: 'load',
       });
-      await anchorPage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+      await anchorPage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
       const clickTarget = async (id) => {
@@ -706,7 +764,7 @@ try {
         if (request.url().includes('/api/runs/')) tracePolls += 1;
       });
       await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'load' });
-      await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]');
+      await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1500)));
 
       const readCount = () =>
@@ -772,6 +830,7 @@ try {
   const fallbackBrowser = await puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+    protocolTimeout: PROTOCOL_TIMEOUT_MS,
   });
   try {
     const page = await fallbackBrowser.newPage();
@@ -795,11 +854,13 @@ try {
       }
     });
     await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'load' });
-    await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]');
+    await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]', { timeout: READY_TIMEOUT_MS });
     const fallbackCursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (fallbackCursorEnv.expected) {
-      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]');
+      await page.waitForSelector('.atoma-pointer-cursor[data-visible="true"]', {
+        timeout: READY_TIMEOUT_MS,
+      });
     }
     await new Promise((resolve) => setTimeout(resolve, 180));
     const fallbackResult = await page.evaluate(() => ({

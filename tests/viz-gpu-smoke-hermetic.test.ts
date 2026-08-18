@@ -66,6 +66,14 @@ describe('viz GPU smoke — what CI can actually observe', () => {
     expect(smoke).toMatch(/matchMedia\('\(any-hover: hover\) and \(any-pointer: fine\)'\)/);
   });
 
+  it('bounds the frame sampler by the clock, not only by a frame count', () => {
+    // 120 unbounded rAF samples are ~2s of a real display and over three minutes
+    // of a software rasteriser — past Puppeteer's 180s protocol timeout, which
+    // killed the CI job outright with `Runtime.callFunctionOn timed out`.
+    expect(smoke).toMatch(/const FRAME_SAMPLE_BUDGET_MS = [\d_]+;/);
+    expect(smoke).toMatch(/samples\.length < target && performance\.now\(\) - started < budgetMs/);
+  });
+
   it('sizes the fixture against the travel the scroll arm dispatches', () => {
     // 16 ticks x 140px must all still move the list, and `views/runs.ts`
     // computes scrollMax as rows * 46px + 38 - listHeight with the pane never
