@@ -10,20 +10,11 @@
  * Defaults: --db from ATOMA_DB_PATH env or ./atoma.db; --by success for `top`.
  */
 
-import { cpSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
 import { openDb } from '../registry/db.js';
-import { legacyStoreNotice, skillsDirPath, storeDbPath } from '../core/stores.js';
+import { storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
 import { AtomRegistry, type AtomType } from '../registry/atomRegistry.js';
 import type { Tier } from '../core/types.js';
-import type { DB } from '../registry/db.js';
-import {
-  applyTaxonomyMigration,
-  assertCurrentTaxonomy,
-  planTaxonomyMigration,
-} from '../registry/taxonomyMigration.js';
 
 import { taxonomyForTier } from '../core/taxonomy.js';
 import { elementForTool } from '../contracts/toolTaxonomy.js';
@@ -45,7 +36,6 @@ interface Args {
     | 'remove'
     | 'history'
     | 'rollback'
-    | 'migrate-taxonomy'
     | 'cache'
     | 'help';
   positional: string[];
@@ -61,7 +51,7 @@ function parseArgs(argv: string[]): Args {
     booleanFlags: ['apply', 'fuzzy', 'all', 'force', 'clear'],
   });
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'migrate-taxonomy', 'cache', 'help'].includes(command)) {
+  if (!['list', 'show', 'top', 'dedupe', 'describe', 'rebrand', 'remove', 'history', 'rollback', 'cache', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -69,8 +59,6 @@ function parseArgs(argv: string[]): Args {
 
 function dbPathFrom(flags: Record<string, string>): string {
   const p = storeDbPath(flags['db']);
-  const notice = legacyStoreNotice(p);
-  if (notice) console.error(notice);
   return p;
 }
 
@@ -161,67 +149,6 @@ function cmdCache(clear: boolean): void {
   }
   console.log(`
   --clear empties it. The cache is disposable: correctness lives in the KEY.`);
-}
-
-/**
- * Copy the store and the skills tree aside before a migration rewrites them.
- *
- * `label` names WHICH migration is about to run: both callers put the archive
- * in the same place, and a directory called `pre-taxonomy-v2` holding the
- * backup of an identity migration is the kind of small lie that costs an hour
- * during a restore.
- */
-function migrationBackup(db: DB, dbPath: string, skillsDir: string, label: string): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = join(homedir(), '.atoma', 'archive', `pre-${label}-${stamp}`);
-  mkdirSync(dir, { recursive: true });
-  if (dbPath !== ':memory:') {
-    db.pragma('wal_checkpoint(FULL)');
-    copyFileSync(resolve(dbPath), join(dir, basename(dbPath)));
-  }
-  if (existsSync(skillsDir)) {
-    cpSync(resolve(skillsDir), join(dir, 'skills'), { recursive: true });
-  }
-  return dir;
-}
-
-function cmdMigrateTaxonomy(
-  db: DB,
-  dbPath: string,
-  skillsDir: string,
-  apply: boolean
-): void {
-  const plan = planTaxonomyMigration(db, skillsDir);
-  if (plan.alreadyCurrent) {
-    console.log('registry taxonomy is already current (v2).');
-    return;
-  }
-
-  console.log(
-    `taxonomy migration: Element(tool) → Molecule(L1) → Cell(L2) → Tissue(L3)`
-  );
-  for (const rename of plan.renames) {
-    console.log(`  tier ${rename.tier} #${rename.ordinal}: ${rename.from} → ${rename.to}`);
-  }
-  for (const move of plan.skillNamespaces) {
-    console.log(`  skills: ${move.from}/ → ${move.to}/`);
-  }
-  console.log(
-    `  ${plan.affectedTypes} live type(s) will receive migrated prompts/tool metadata and reset trust.`
-  );
-
-  if (!apply) {
-    console.log('\ndry run only; re-run with --apply to create a backup and migrate.');
-    return;
-  }
-
-  const backup = migrationBackup(db, dbPath, skillsDir, 'taxonomy-v2');
-  const result = applyTaxonomyMigration(db, skillsDir, plan);
-  console.log(`\nbackup: ${backup}`);
-  console.log(
-    `migrated ${result.renamedTypes} type name(s), ${result.renamedSkillNamespaces} skill namespace(s); ` +
-      `reset ${result.resetTypes} type trust record(s), cleared ${result.clearedPrefilterEntries} cached decision(s).`
-  );
 }
 
 function cmdList(registry: AtomRegistry, tier: Tier | undefined): void {
@@ -486,11 +413,6 @@ function help(): void {
                                 re-earns trust). Prompt/tools/params are
                                 restored exactly; description is not
                                 versioned and is kept as-is.
-  migrate-taxonomy [--apply]  — move a legacy registry from
-                                Element(L1)/Molecule(L2)/Cell(L3) to
-                                Element(tool)/Molecule(L1)/Cell(L2)/
-                                Tissue(L3). Dry-run by default; --apply
-                                backs up DB + skills before migration.
   cache [--clear]             — prefilter decision cache (a table in the
                                 same store): size, how many entries were
                                 ever read back, total hits. --clear empties
@@ -575,13 +497,6 @@ function main(): void {
   const dbPath = dbPathFrom(args.flags);
   const db = openDb(dbPath);
   const registry = new AtomRegistry(db);
-  const mutatesRegistry =
-    args.command === 'describe' ||
-    args.command === 'rebrand' ||
-    args.command === 'remove' ||
-    args.command === 'rollback' ||
-    (args.command === 'dedupe' && args.flags['apply'] === 'true');
-  if (mutatesRegistry) assertCurrentTaxonomy(db);
 
   switch (args.command) {
     case 'list':
@@ -641,13 +556,6 @@ function main(): void {
       }
       return cmdRollback(registry, name, args.flags['to']);
     }
-    case 'migrate-taxonomy':
-      return cmdMigrateTaxonomy(
-        db,
-        dbPath,
-        skillsDirPath(args.flags['skills-dir']),
-        args.flags['apply'] === 'true'
-      );
     case 'cache':
       return cmdCache('clear' in args.flags);
   }

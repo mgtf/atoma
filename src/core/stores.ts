@@ -1,5 +1,4 @@
 import Database from 'better-sqlite3';
-import { existsSync } from 'node:fs';
 
 /**
  * WHERE THIS ATOMA INSTANCE KEEPS ITS STATE.
@@ -40,10 +39,8 @@ export const DEFAULT_SKILLS_DIR = './skills';
  * Pre-consolidation store name. Read ONLY as a migration ramp (below), never
  * as a second store.
  */
-const LEGACY_DB_PATH = './atoma-build.db';
 
 /** Pre-consolidation env var, honoured so an exported shell keeps working. */
-const LEGACY_DB_ENV = 'ATOMA_BUILD_DB_PATH';
 
 /**
  * Does this path hold a store with atom types in it?
@@ -55,23 +52,6 @@ const LEGACY_DB_ENV = 'ATOMA_BUILD_DB_PATH';
  * the table is "not populated", never an exception — a path resolver that
  * throws would take down every CLI on a corrupt sibling.
  */
-function hasAtomTypes(path: string): boolean {
-  if (!existsSync(path)) return false;
-  try {
-    // `readonly` matters: resolving a path must not create files, flip
-    // journal_mode, or drop -wal/-shm next to a store nobody asked to open.
-    const db = new Database(path, { readonly: true, fileMustExist: true });
-    try {
-      const row = db.prepare('SELECT COUNT(*) AS n FROM atom_types').get() as { n: number };
-      return row.n > 0;
-    } finally {
-      db.close();
-    }
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Resolve the store path: explicit flag → `ATOMA_DB_PATH` → legacy → default.
  *
@@ -99,9 +79,8 @@ function hasAtomTypes(path: string): boolean {
  */
 export function storeDbPath(explicit?: string): string {
   if (explicit) return explicit;
-  const env = process.env['ATOMA_DB_PATH'] ?? process.env[LEGACY_DB_ENV];
+  const env = process.env['ATOMA_DB_PATH'];
   if (env) return env;
-  if (!hasAtomTypes(DEFAULT_DB_PATH) && hasAtomTypes(LEGACY_DB_PATH)) return LEGACY_DB_PATH;
   return DEFAULT_DB_PATH;
 }
 
@@ -162,11 +141,3 @@ export function closeStoreHandles(): void {
  * running — the same reason `registry rollback` restores content rather than
  * rewriting history.
  */
-export function legacyStoreNotice(resolved: string): string | null {
-  if (resolved !== LEGACY_DB_PATH) return null;
-  return (
-    `[store] using the pre-consolidation ${LEGACY_DB_PATH}; there is one store now. ` +
-    `Stop every atoma process and run:  mv atoma-build.db atoma.db  ` +
-    `(also move atoma-build.db-wal / -shm if present).`
-  );
-}

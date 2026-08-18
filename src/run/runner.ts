@@ -14,8 +14,7 @@ import {
 import { InMemoryMetrics, MetricsLlmClient } from '../core/metrics.js';
 import { DEFAULT_LIMITS } from '../core/limits.js';
 import { openDb } from '../registry/db.js';
-import { assertCurrentTaxonomy } from '../registry/taxonomyMigration.js';
-import { legacyStoreNotice, skillsDirPath } from '../core/stores.js';
+import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
@@ -472,10 +471,6 @@ export async function startTask(
   // `ATOMA_DB_PATH`. See src/core/stores.ts for the four drifted copies this
   // replaced.
   const dbPath = process.env[profile.envVars.dbPath] ?? profile.defaults.dbPath;
-  // Loudest possible place for the migration ramp: a run is what earns the
-  // counters, so a run opening the pre-consolidation store must say so.
-  const storeNotice = legacyStoreNotice(dbPath);
-  if (storeNotice) console.log(storeNotice);
   const workspaceRoot = resolve(
     process.env[profile.envVars.workspace] ?? profile.defaults.workspace
   );
@@ -483,7 +478,6 @@ export async function startTask(
   const runsDir = process.env['ATOMA_RUNS_DIR'] ?? './runs';
   const recorder = new TraceRecorder(runsDir);
   const db = openDb(dbPath);
-  assertCurrentTaxonomy(db);
   const registry = new RecordingRegistry(db, recorder);
   // The Anthropic SDK client only exists on the direct-API path — it
   // feeds L3.fromType's Opus-resolution step. On the ollama and

@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { closeStoreHandles, openStoreHandle, storeDbPath } from './stores.js';
 
 /**
@@ -102,8 +101,6 @@ CREATE TABLE IF NOT EXISTS lifecycle_events (
 CREATE INDEX IF NOT EXISTS idx_lifecycle_entity ON lifecycle_events(entity);
 `;
 
-/** Pre-consolidation ledger file. Read once by the importer, never written. */
-export const LEGACY_LEDGER_FILENAME = 'atoma-ledger.jsonl';
 
 /**
  * Which store's ledger, when the caller has no handle of its own.
@@ -222,22 +219,6 @@ export function ledgerCount(db?: LedgerDb): number {
   }
 }
 
-/** Parse a pre-consolidation JSONL ledger. Skips torn lines rather than throwing. */
-export function readLegacyJsonl(path: string): LedgerEvent[] {
-  if (!existsSync(path)) return [];
-  const out: LedgerEvent[] = [];
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const obj = JSON.parse(t) as LedgerEvent;
-      if (typeof obj.kind === 'string' && typeof obj.entity === 'string') out.push(obj);
-    } catch {
-      // torn/corrupt line — skip, never crash the import
-    }
-  }
-  return out;
-}
 
 /**
  * Import a sibling `atoma-ledger.jsonl` into an empty `lifecycle_events`.
@@ -255,27 +236,6 @@ export function readLegacyJsonl(path: string): LedgerEvent[] {
  * inspected afterwards, and the whole point of the exercise is a ledger you
  * can believe.
  */
-export function importLegacyLedger(db: LedgerDb, dbPath: string): number {
-  if (dbPath === ':memory:' || dbPath.startsWith('file::memory:') || dbPath === '') return 0;
-  try {
-    const existing = db.prepare('SELECT COUNT(*) AS n FROM lifecycle_events').get() as { n: number };
-    if (existing.n > 0) return 0;
-    const explicit = process.env['ATOMA_LEDGER_PATH'];
-    const candidate = explicit
-      ? resolve(explicit)
-      : join(dirname(resolve(dbPath)), LEGACY_LEDGER_FILENAME);
-    const events = readLegacyJsonl(candidate);
-    if (events.length === 0) return 0;
-    const insertAll = db.transaction((rows: LedgerEvent[]) => {
-      for (const ev of rows) insertEvent(db, ev);
-    });
-    insertAll(events);
-    return events.length;
-  } catch (err) {
-    warnOnce(err);
-    return 0;
-  }
-}
 
 export interface ProjectedCounters {
   successes: number;

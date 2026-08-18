@@ -33,7 +33,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { skillsDirPath, storeDbPath, legacyStoreNotice } from '../core/stores.js';
+import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { readLedger, projectCounters } from '../core/ledger.js';
 import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import { refusalStampIsCurrent } from '../skills/generations.js';
@@ -161,7 +161,7 @@ export function registryList(opts: { tier?: 1 | 2 | 3 } = {}): unknown {
         description: a.description,
       }))
     );
-    return { store: dbPath, legacyNotice: legacyStoreNotice(dbPath), types };
+    return { store: dbPath, types };
   } finally {
     db.close();
   }

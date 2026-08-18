@@ -752,13 +752,19 @@ persisted identity.
 by `fromType`, one derivation (`namespaceOf`) guarded by a branded type, the
 flip itself, and display resolution at the CLI, MCP and viz so no operator
 surface prints a UUID.
-*The migration itself is gone.* It ran once against the only store that
-existed, and the project is pre-production with no second instance to migrate,
-so the module, its CLI command, the launch guard, the backfill and the
-`identity_version` key were all deleted rather than kept as permanent
-bridge code for a state that can no longer occur. `atom_id` is `NOT NULL` and
-the store's table was rebuilt to match, so a fresh store and the live one carry
-one definition. Recover the history from git if a second instance ever appears.
+*The migration itself is gone, and so is every other store-shape migration.*
+Each ran once against the only store that exists, and the project is
+pre-production with no second instance to migrate, so keeping them would mean
+carrying permanent code for states that can no longer occur. Deleted: the
+identity migration and its version key, `taxonomyMigration.ts` and
+`taxonomy_version` (with `store_metadata` itself, now empty), the
+pre-consolidation ledger importer, the `addColumnIfMissing` back-fill, and the
+`./atoma-build.db` path ramp. `atom_id` is `NOT NULL` and the live table was
+rebuilt to match, so a fresh store and this one carry one definition.
+§9.2b's account of the taxonomy harness's atomicity defect is kept as the
+record of WHY a migration is built around convergence rather than rollback —
+the code it described is gone, the lesson is not. Recover any of it from git if
+a second instance ever appears.
 *Still name-keyed, deliberately:* ledger entities for ATOM events (they are the
 display label and `ledger check` projects type counters against them),
 `created_by`, and provenance prose inside system prompts. Those are the

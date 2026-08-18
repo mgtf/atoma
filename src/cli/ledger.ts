@@ -26,7 +26,7 @@
 import Database from 'better-sqlite3';
 import { existsSync } from 'node:fs';
 import { ledgerDbPath, projectCounters, readLedger } from '../core/ledger.js';
-import { skillsDirPath, storeDbPath, legacyStoreNotice } from '../core/stores.js';
+import { skillsDirPath } from '../core/stores.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { parseCliArgs } from './args.js';
 
@@ -76,8 +76,6 @@ function main(): void {
   }
 
   const dbPath = flags['db'] ?? ledgerDbPath();
-  const notice = legacyStoreNotice(storeDbPath(flags['db']));
-  if (notice) console.log(notice);
   if (!existsSync(dbPath)) {
     console.log(`(no store at ${dbPath} — nothing to read)`);
     return;

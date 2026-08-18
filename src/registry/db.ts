@@ -1,9 +1,5 @@
 import Database from 'better-sqlite3';
-import { importLegacyLedger, LEDGER_TABLE_DDL } from '../core/ledger.js';
-import {
-  initializeTaxonomyVersion,
-  STORE_METADATA_DDL,
-} from './taxonomyMigration.js';
+import { LEDGER_TABLE_DDL } from '../core/ledger.js';
 
 export type DB = Database.Database;
 
@@ -45,15 +41,6 @@ CREATE INDEX IF NOT EXISTS idx_atom_types_name ON atom_types(name);
 CREATE INDEX IF NOT EXISTS idx_atom_types_tier ON atom_types(tier);
 `;
 
-function addColumnIfMissing(db: DB, table: string, column: string, ddl: string): void {
-  const cols = db
-    .prepare(`PRAGMA table_info(${table})`)
-    .all() as { name: string }[];
-  if (!cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-  }
-}
-
 export function openDb(path: string): DB {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
@@ -63,15 +50,6 @@ export function openDb(path: string): DB {
   // the counter it records can share a transaction and so that an in-memory
   // registry cannot append to the real store. See src/core/ledger.ts.
   db.exec(LEDGER_TABLE_DDL);
-  db.exec(STORE_METADATA_DDL);
-  // Forward migration for DBs that predate the counter columns. Safe to run
-  // every open: no-op when the columns are already present.
-  addColumnIfMissing(db, 'atom_types', 'successes', 'successes INTEGER NOT NULL DEFAULT 0');
-  addColumnIfMissing(db, 'atom_types', 'failures', 'failures INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_atom_types_atom_id ON atom_types(atom_id)');
-  // Carry a pre-consolidation atoma-ledger.jsonl across, once, if one sits
-  // next to this file and the table is still empty. No-op for `:memory:`.
-  importLegacyLedger(db, path);
-  initializeTaxonomyVersion(db);
   return db;
 }

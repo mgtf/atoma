@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { DEFAULT_DB_PATH, legacyStoreNotice, skillsDirPath, storeDbPath } from '../src/core/stores.js';
+import { DEFAULT_DB_PATH, skillsDirPath, storeDbPath } from '../src/core/stores.js';
 import { openDb } from '../src/registry/db.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 
@@ -57,7 +57,6 @@ describe('storeDbPath — one rule for where the store lives', () => {
 
   it('defaults to ./atoma.db on a clean tree', () => {
     expect(storeDbPath()).toBe(DEFAULT_DB_PATH);
-    expect(legacyStoreNotice(storeDbPath())).toBeNull();
   });
 
   it('an explicit path wins over everything', () => {
@@ -65,52 +64,9 @@ describe('storeDbPath — one rule for where the store lives', () => {
     expect(storeDbPath('./from-flag.db')).toBe('./from-flag.db');
   });
 
-  it('honours ATOMA_DB_PATH, and the pre-consolidation env var too', () => {
+  it('honours ATOMA_DB_PATH', () => {
     process.env['ATOMA_DB_PATH'] = './from-env.db';
     expect(storeDbPath()).toBe('./from-env.db');
-    delete process.env['ATOMA_DB_PATH'];
-    // An operator with the old var exported in their shell keeps working.
-    process.env['ATOMA_BUILD_DB_PATH'] = './legacy-env.db';
-    expect(storeDbPath()).toBe('./legacy-env.db');
-  });
-
-  it('ramps onto a populated legacy store when the new one is ABSENT', () => {
-    populate('./atoma-build.db');
-    expect(storeDbPath()).toBe('./atoma-build.db');
-    expect(legacyStoreNotice(storeDbPath())).toContain('mv atoma-build.db atoma.db');
-  });
-
-  it('ramps when the new store EXISTS BUT IS EMPTY — the state that actually occurs', () => {
-    // THE BUG THE FIRST VERSION HAD. `./atoma.db` already existed on the
-    // developer's machine holding zero rows, created by any bare
-    // `npm run registry -- list` (whose default was already ./atoma.db while
-    // every run wrote ./atoma-build.db). An absence test never fired, so the
-    // resolver picked the empty store and `tests/run-profile-build.test.ts`
-    // failed with "no Neuron in the build store" — the silent-loss scenario,
-    // caught only because one test still names the subject.
-    populate('./atoma-build.db');
-    openDb('./atoma.db').close(); // schema, zero rows — exactly what the CLI leaves
-    expect(storeDbPath()).toBe('./atoma-build.db');
-  });
-
-  it('STOPS ramping once the new store has content — the migration is over', () => {
-    populate('./atoma-build.db');
-    populate('./atoma.db');
-    expect(storeDbPath()).toBe(DEFAULT_DB_PATH);
-    expect(legacyStoreNotice(storeDbPath())).toBeNull();
-  });
-
-  it('never ramps onto an empty legacy store', () => {
-    openDb('./atoma-build.db').close();
-    expect(storeDbPath()).toBe(DEFAULT_DB_PATH);
-  });
-
-  it('treats an unreadable or non-SQLite legacy file as absent rather than throwing', () => {
-    // A path resolver that throws takes down every CLI over a corrupt
-    // sibling nobody asked to open.
-    writeFileSync('./atoma-build.db', 'this is not a database');
-    expect(() => storeDbPath()).not.toThrow();
-    expect(storeDbPath()).toBe(DEFAULT_DB_PATH);
   });
 
   it('resolving a path never CREATES one — probing must not have side effects', () => {
