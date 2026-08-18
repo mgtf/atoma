@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { SkillRegistry } from '../src/skills/registry.js';
-import { namespaceOf, resolveNamespaceKey } from '../src/skills/namespace.js';
+import { namespaceOf, resolveMoleculeRef, resolveNamespaceKey } from '../src/skills/namespace.js';
 import { skillsList, skillsReview, skillsStats } from '../src/mcp/readers.js';
 
 /**
@@ -42,6 +42,34 @@ describe('resolveNamespaceKey', () => {
 
   it('passes an unknown token through (orphaned directory / minted test key)', () => {
     expect(resolveNamespaceKey('orphan-ns', labels)).toBe('orphan-ns');
+  });
+});
+
+describe('resolveMoleculeRef', () => {
+  const labels = new Map([
+    ['atom-water', 'Water'],
+    ['atom-methane', 'Methane'],
+  ]);
+
+  it('returns both fields when given an atom id', () => {
+    expect(resolveMoleculeRef('atom-water', labels)).toEqual({
+      atomId: 'atom-water',
+      name: 'Water',
+    });
+  });
+
+  it('returns both fields when given a display name', () => {
+    expect(resolveMoleculeRef('Water', labels)).toEqual({
+      atomId: 'atom-water',
+      name: 'Water',
+    });
+  });
+
+  it('echoes an unknown token as both fields', () => {
+    expect(resolveMoleculeRef('orphan-ns', labels)).toEqual({
+      atomId: 'orphan-ns',
+      name: 'orphan-ns',
+    });
   });
 });
 

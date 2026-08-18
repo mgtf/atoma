@@ -80,9 +80,27 @@ export function resolveNamespaceKey(
   raw: string,
   idToName: ReadonlyMap<string, string>
 ): string {
-  if (idToName.has(raw)) return raw;
+  return resolveMoleculeRef(raw, idToName).atomId;
+}
+
+/**
+ * The pair every operator / MCP / merge surface needs after T4: the disk
+ * key (`atomId`) and the printed molecule name. `raw` may be either; an
+ * unknown token is returned as both fields so orphaned directories stay
+ * addressable.
+ */
+export interface MoleculeRef {
+  readonly atomId: string;
+  readonly name: string;
+}
+
+export function resolveMoleculeRef(
+  raw: string,
+  idToName: ReadonlyMap<string, string>
+): MoleculeRef {
+  if (idToName.has(raw)) return { atomId: raw, name: idToName.get(raw) ?? raw };
   for (const [id, name] of idToName) {
-    if (name === raw) return id;
+    if (name === raw) return { atomId: id, name };
   }
-  return raw;
+  return { atomId: raw, name: raw };
 }

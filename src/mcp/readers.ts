@@ -33,7 +33,7 @@ import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { AtomRegistry } from '../registry/atomRegistry.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { resolveNamespaceKey } from '../skills/namespace.js';
+import { resolveMoleculeRef } from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { readLedger, projectCounters } from '../core/ledger.js';
 import { computeStatsRows, similarityPairs } from '../skills/stats.js';
@@ -219,7 +219,7 @@ export function registryShow(opts: { name: string }): unknown {
 
 function skillNamespaces(reg: SkillRegistry, l1?: string): string[] {
   if (!l1) return reg.listNamespaces();
-  return [resolveNamespaceKey(l1, displayNamesByAtomId())];
+  return [resolveMoleculeRef(l1, displayNamesByAtomId()).atomId];
 }
 
 /**

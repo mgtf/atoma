@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
-import { resolveNamespaceKey } from '../skills/namespace.js';
+import { resolveMoleculeRef } from '../skills/namespace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { assessShareability } from '../skills/shareability.js';
 import { exportSkillToSpec } from '../skills/exportSpec.js';
@@ -114,8 +114,12 @@ function displayNamesByAtomId(dbFlag?: string): Map<string, string> {
   return out;
 }
 
+function resolveMolecule(raw: string, dbFlag?: string) {
+  return resolveMoleculeRef(raw, displayNamesByAtomId(dbFlag));
+}
+
 function resolveL1(raw: string, dbFlag?: string): string {
-  return resolveNamespaceKey(raw, displayNamesByAtomId(dbFlag));
+  return resolveMolecule(raw, dbFlag).atomId;
 }
 
 function cmdList(
@@ -267,8 +271,9 @@ function cmdStats(
     console.log('');
     console.log(`== merge candidates (matching-surface overlap ≥ ${threshold}) ==`);
     for (const p of pairs) {
+      const ref = resolveMolecule(p.l1, dbFlag);
       console.log(
-        `  ${p.l1}: "${p.a}" ↔ "${p.b}"  (${p.score.toFixed(2)})  → skills merge ${p.l1} <keep-id> <absorb-id>`
+        `  ${ref.name}: "${p.a}" ↔ "${p.b}"  (${p.score.toFixed(2)})  → skills merge ${ref.atomId} <keep-id> <absorb-id>`
       );
     }
   }
