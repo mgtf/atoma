@@ -552,6 +552,19 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let transmit = vFinish.y;
     let body = vFinish.z;
 
+    // VIEW. The mark is a 3D object, not an orthographic sticker. A ray from
+    // the camera to a pixel at the edge of the box is not the same ray as the
+    // one through the centre. On eight FLAT facets a constant view makes N·H
+    // constant too, so a directional key glazes a whole face at once — which
+    // is why the crystal read as painted triangles. Varying V across the face
+    // is what lets a highlight become a spot.
+    //
+    // 0.4 is the object's half-width in view units: radius ~1.28 at a camera
+    // sitting about 8 units back. vScreen is y-down Pixi; world Y is up.
+    let viewOffset = vec2<f32>(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.4;
+    let viewDir = normalize(vec3<f32>(viewOffset.x, viewOffset.y, 1.0));
+    let nDotV = min(abs(dot(normal, viewDir)), 1.0);
+
     // SOLID, not surfaced — but the two consequences of that are split on
     // purpose. OPACITY is Beer-Lambert at the material's REFERENCE depth, so a
     // wedge is exactly as dense as its own glass and stays that dense whichever
@@ -562,7 +575,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // from face-on to edge-on every turn, so a path-driven alpha made each of
     // the four wedges breathe between clear and solid on the rotation — read as
     // a pulsing opacity, which is not what a block of glass does.
-    let path = markUniforms.uWall / max(abs(normal.z), 0.16);
+    // Path uses N·V, not N·Z: the extra length is along the actual view ray.
+    let path = markUniforms.uWall / max(nDotV, 0.16);
     let opacity = (1.0 - exp(-absorption * markUniforms.uMinPath)) /
       max(markUniforms.uOpacityRef, 1e-4);
     let bulk = 1.0 - exp(-absorption * max(path - markUniforms.uMinPath, 0.0) * 0.35);
@@ -578,7 +592,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       transmit * mix(1.0, 0.45, bulk);
 
     let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
-    let half = normalize(markUniforms.uLightDir + vec3<f32>(0.0, 0.0, 1.0));
+    let half = normalize(markUniforms.uLightDir + viewDir);
     let facing = max(dot(normal, half), 0.0);
     // FIRE. The same highlight raised to three exponents: a tighter exponent is
     // a smaller spot, so blue collapses into the core while red keeps a wide
@@ -589,10 +603,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(facing, specularPower),
       pow(facing, specularPower * 1.5)
     );
-    // Schlick again, at the HALF angle: how much the surface reflects the key
-    // toward the eye. It replaces the hand-set specular gain — a glass does not
-    // choose its highlight brightness independently of its index.
-    let specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(normal, half), 0.0), 5.0);
+    // Schlick at V·H, the microfacet half-angle: how much the surface reflects
+    // the key toward the eye. N·H was a stand-in that made the Fresnel of the
+    // highlight disagree with the Fresnel of the body on the same pixel.
+    let specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, half), 0.0), 5.0);
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
       specF * markUniforms.uSpecular * outer;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
@@ -602,8 +616,13 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // fresnelGain instead, which had drifted to give obsidian stronger edges
     // than plain glass despite near-identical indices. F0 comes from the IOR
     // now, so diamond's edges are four times glass's because its index says so.
-    let cosTheta = min(abs(normal.z), 1.0);
-    let fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
+    // ENERGY. A dielectric reflects F of the light and lets 1-F into the body.
+    // Without this the body, the highlight and the transmitted interior were
+    // three independent adds, so grazing edges stacked a painted face, a
+    // highlight AND a full interior — the opposite of glass, which becomes a
+    // mirror there and hides what is behind it.
+    let bounce = 1.0 - fresnel;
 
     // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
     // the ray leaves the glass most obliquely — the rim of the silhouette and
@@ -673,7 +692,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // saturated. It survived a clamp, a grazing fade and 2x supersampling
     // because none of those break a feedback path; only refusing to sample
     // during the pass does.
-    let grazingFade = smoothstep(0.12, 0.42, cosTheta) * markUniforms.uRefractOn;
+    let grazingFade = smoothstep(0.12, 0.42, nDotV) * markUniforms.uRefractOn;
     let rawBend = normal.xy * markUniforms.uBend * iorBend *
       mix(0.35, 1.0, bulk) * outer * grazingFade;
     let bendLength = length(rawBend);
@@ -725,15 +744,17 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // The bead behind a diamond facet is therefore seen genuinely displaced,
     // not merely fringed: the displacement is the transmitted image itself.
     let attenuation = exp(-absorption * path);
-    let transmitted = straight.rgb * attenuation * transmit;
+    let transmitted = straight.rgb * attenuation * transmit * bounce;
 
     // The facet's OWN shading: body, highlights, edges. Deliberately without the
-    // bead's analytic light on outer facets — see below.
+    // bead's analytic light on outer facets — see below. Body and chromatic
+    // split ride BOUNCE so they yield to the mirror at grazing; the highlight
+    // and rim ARE that mirror.
     let surface = vTint * body * (markUniforms.uAmbient + 0.86 * sun) *
-        mix(1.0, 0.58, bulk) +
+        mix(1.0, 0.58, bulk) * bounce +
       highlight * 0.85 +
       fringe * 0.55 +
-      split * 0.9 +
+      split * 0.9 * bounce +
       vec3<f32>(fresnel * markUniforms.uRim);
 
     // CORE and TRANSMITTED are the SAME light counted two ways: CORE is the
@@ -865,9 +886,14 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float transmit = vFinish.y;
     float body = vFinish.z;
 
+    // Same view ray as the WGSL path; keep the two in step.
+    vec2 viewOffset = vec2(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.4;
+    vec3 viewDir = normalize(vec3(viewOffset.x, viewOffset.y, 1.0));
+    float nDotV = min(abs(dot(normal, viewDir)), 1.0);
+
     // Same volume model as the WGSL path; keep the two in step. Opacity at the
     // material's reference depth, bulk for the extra length a grazing ray takes.
-    float path = uWall / max(abs(normal.z), 0.16);
+    float path = uWall / max(nDotV, 0.16);
     float opacity = (1.0 - exp(-absorption * uMinPath)) / max(uOpacityRef, 1e-4);
     float bulk = 1.0 - exp(-absorption * max(path - uMinPath, 0.0) * 0.35);
 
@@ -881,25 +907,25 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
-    vec3 halfVector = normalize(uLightDir + vec3(0.0, 0.0, 1.0));
+    vec3 halfVector = normalize(uLightDir + viewDir);
     float facing = max(dot(normal, halfVector), 0.0);
     vec3 spectral = vec3(
       pow(facing, specularPower * 0.68),
       pow(facing, specularPower),
       pow(facing, specularPower * 1.5)
     );
-    float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(normal, halfVector), 0.0), 5.0);
+    float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, halfVector), 0.0), 5.0);
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
       specF * uSpecular * outer;
     // Same Schlick as the WGSL path; keep the two in step.
-    float cosTheta = min(abs(normal.z), 1.0);
-    float fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
+    float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
+    float bounce = 1.0 - fresnel;
 
     // Same chromatic transmission as the WGSL path; keep the two in step.
     // Same refraction/dispersion split as the WGSL path; keep the two in step.
     // Same texel clamp as the WGSL path; keep the two in step.
     // Same grazing fade as the WGSL path; keep the two in step.
-    float grazingFade = smoothstep(0.12, 0.42, cosTheta) * uRefractOn;
+    float grazingFade = smoothstep(0.12, 0.42, nDotV) * uRefractOn;
     vec2 rawBend = normal.xy * uBend * iorBend * mix(0.35, 1.0, bulk) * outer * grazingFade;
     float bendLength = length(rawBend);
     vec2 bend = bendLength > uMaxBend
@@ -918,7 +944,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
 
     // Same transmission as the WGSL path; keep the two in step.
     float attenuation = exp(-absorption * path);
-    vec3 transmitted = straight.rgb * attenuation * transmit;
+    vec3 transmitted = straight.rgb * attenuation * transmit * bounce;
 
     // Same edge fringe as the WGSL path; keep the two in step.
     float fringeBand = 1.0 - fresnel;
@@ -929,10 +955,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * dispersion * outer;
 
     // Same split as the WGSL path; keep the two in step.
-    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
+    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) * bounce +
       highlight * 0.85 +
       fringe * 0.55 +
-      split * 0.9 +
+      split * 0.9 * bounce +
       vec3(fresnel * uRim);
     vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
     vec3 lit = surface + interior;

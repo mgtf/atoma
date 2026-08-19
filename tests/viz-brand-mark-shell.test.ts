@@ -139,6 +139,30 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('lets a highlight become a spot by varying the view across a facet', () => {
+    // Eight flat facets plus a constant view made N·H constant, so the key
+    // glazed a whole face at once and the crystal read as painted triangles.
+    // Both programs must build a perspective view from vScreen and use it for
+    // the half vector — not (0,0,1).
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('viewDir');
+      expect(source).toContain('nDotV');
+      expect(source, 'orthographic view must not drive the half vector')
+        .not.toMatch(/\+\s*vec3(<f32>)?\(0\.0,\s*0\.0,\s*1\.0\)/);
+    }
+  });
+
+  it('conserves energy between reflection and transmission', () => {
+    // A dielectric reflects F and lets 1-F into the body. Without bounce the
+    // body, the highlight and the transmitted interior were three independent
+    // adds, so grazing edges stacked a painted face AND a full interior.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('bounce = 1.0 - fresnel');
+      expect(source).toContain('transmit * bounce');
+      expect(source).toMatch(/mix\(1\.0, 0\.58, bulk\) \* bounce/);
+    }
+  });
+
   it('counts the interior once, not twice', () => {
     // CORE (the bead solved analytically against this facet) and TRANSMITTED
     // (that same bead read out of the backdrop texture) are the same light. The
