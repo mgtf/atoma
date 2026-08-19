@@ -48,8 +48,12 @@ const CORE_HOT_COLOR = 0xffffff;
  */
 const CORE_BODY_STEPS = 30;
 const CORE_BLOOM_STEPS = 80;
-const CORE_BLOOM_REACH = 2.6;
-const CORE_BLOOM_PEAK_ALPHA = 0.28;
+// 2.6 filled a face-on table: the disc is larger than the octahedron inradius,
+// so a clear diamond facet transmitted a 150px white patch (frame 3 of the
+// turn film). The shell already scatters the bead onto the walls; this halo
+// only has to read as the filament's own glow.
+const CORE_BLOOM_REACH = 1.45;
+const CORE_BLOOM_PEAK_ALPHA = 0.2;
 const CORE_FILAMENT_FRACTION = 0.5;
 
 /**
