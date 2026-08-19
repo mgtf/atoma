@@ -486,6 +486,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(4) aSurface: vec2<f32>,
     @location(5) aMaterial: vec4<f32>,
     @location(6) aFinish: vec3<f32>,
+    @location(7) aBary: vec3<f32>,
   }
 
   struct VertexOutput {
@@ -501,6 +502,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // SAME clip position the rasteriser uses, so the sample cannot drift from
     // the geometry it belongs to.
     @location(7) vScreen: vec2<f32>,
+    @location(8) vBary: vec3<f32>,
   }
 
   @vertex
@@ -518,6 +520,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     out.vColor = localUniforms.uColor * globalUniforms.uWorldColorAlpha;
     out.vMaterial = input.aMaterial;
     out.vFinish = input.aFinish;
+    out.vBary = input.aBary;
     // The backdrop texture holds the mark's own 28x28 box and nothing else, so
     // the sampling coord comes from the LOCAL position — not from clip space,
     // which spans the whole viewport and would have every facet sampling an
@@ -536,6 +539,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(5) vMaterial: vec4<f32>,
     @location(6) vFinish: vec3<f32>,
     @location(7) vScreen: vec2<f32>,
+    @location(8) vBary: vec3<f32>,
   ) -> @location(0) vec4<f32> {
     let normal = normalize(vNormal);
     let outer = vSurface.y;
@@ -903,7 +907,15 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       0.0,
       1.0
     );
-    return vec4<f32>(lit * alpha, alpha) * vColor;
+    // COVERAGE AA, grazing outer edges only. Fading every barycentric edge
+    // punched dark aretes through the crystal: a shared crease is one triangle
+    // against the dark field, not against its neighbour. Grazing is the
+    // silhouette against that field, which is the stair-step the film shows.
+    let baryMin = min(vBary.x, min(vBary.y, vBary.z));
+    let edgeCover = smoothstep(0.0, max(fwidth(baryMin), 1e-5), baryMin);
+    let silhouette = 1.0 - smoothstep(0.12, 0.32, nDotV);
+    let alphaOut = alpha * mix(1.0, edgeCover, outer * silhouette);
+    return vec4<f32>(lit * alphaOut, alphaOut) * vColor;
   }
 `;
 
@@ -915,6 +927,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
   in vec2 aSurface;
   in vec4 aMaterial;
   in vec3 aFinish;
+  in vec3 aBary;
 
   uniform mat3 uProjectionMatrix;
   uniform mat3 uWorldTransformMatrix;
@@ -931,6 +944,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
   out vec4 vMaterial;
   out vec3 vFinish;
   out vec2 vScreen;
+  out vec3 vBary;
 
   void main() {
     mat3 matrix = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
@@ -942,6 +956,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
     vColor = uColor * uWorldColorAlpha;
     vMaterial = aMaterial;
     vFinish = aFinish;
+    vBary = aBary;
     vScreen = aPosition / uLocalSize;
   }
 `;
@@ -957,6 +972,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   in vec4 vMaterial;
   in vec3 vFinish;
   in vec2 vScreen;
+  in vec3 vBary;
   out vec4 finalColor;
 
   uniform sampler2D uBackdrop;
@@ -1123,6 +1139,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       0.0,
       1.0
     );
+    float baryMin = min(vBary.x, min(vBary.y, vBary.z));
+    float edgeCover = smoothstep(0.0, max(fwidth(baryMin), 1e-5), baryMin);
+    float silhouette = 1.0 - smoothstep(0.12, 0.32, nDotV);
+    alpha = alpha * mix(1.0, edgeCover, outer * silhouette);
     finalColor = vec4(lit * alpha, alpha) * vColor;
   }
 `;

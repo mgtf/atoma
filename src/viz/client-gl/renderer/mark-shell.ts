@@ -95,6 +95,7 @@ export const MARK_SHELL_ATTRIBUTES = [
   { name: 'aSurface', format: 'float32x2' },
   { name: 'aMaterial', format: 'float32x4' },
   { name: 'aFinish', format: 'float32x3' },
+  { name: 'aBary', format: 'float32x3' },
 ] as const;
 
 /**
@@ -268,6 +269,12 @@ export function createMarkShell(): MarkShell | null {
   // crystal, not of the frame, so these buffers are never touched again.
   const materials = new Float32Array(VERTEX_COUNT * 4);
   const finishes = new Float32Array(VERTEX_COUNT * 3);
+  const bary = new Float32Array(VERTEX_COUNT * 3);
+  const baryCorners: readonly [number, number, number][] = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
 
   // The outer/inner flag never changes; rank colour is fixed per facet but its
   // SHADE follows the facet's role in the current frame, so it is written with
@@ -296,6 +303,7 @@ export function createMarkShell(): MarkShell | null {
         [material.ior - 1, material.transmit, material.body],
         vertex * 3
       );
+      bary.set(baryCorners[corner]!, vertex * 3);
     }
   }
 
@@ -322,6 +330,7 @@ export function createMarkShell(): MarkShell | null {
   // Static, so no COPY_DST: nothing ever writes to these again.
   const materialBuffer = new Buffer({ data: materials, usage: BufferUsage.VERTEX });
   const finishBuffer = new Buffer({ data: finishes, usage: BufferUsage.VERTEX });
+  const baryBuffer = new Buffer({ data: bary, usage: BufferUsage.VERTEX });
 
   const buffers: Record<string, Buffer> = {
     aPosition: positionBuffer,
@@ -331,6 +340,7 @@ export function createMarkShell(): MarkShell | null {
     aSurface: surfaceBuffer,
     aMaterial: materialBuffer,
     aFinish: finishBuffer,
+    aBary: baryBuffer,
   };
   const attributes = Object.fromEntries(MARK_SHELL_ATTRIBUTES.map(({ name, format }) => [
     name,
