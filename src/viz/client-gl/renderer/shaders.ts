@@ -836,9 +836,17 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // that core as SURFACE, not as interior, is the wall glowing — a gradient
     // toward the bead, which is what a lit cavity does to the near glass.
     let scatter = vTint * core * bounce * outer * 0.28;
-    let surface = vTint * body *
-        (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun)) *
-        mix(1.0, 0.58, bulk) * bounce +
+    // COVER. Seeing through a clear table and painting Lambert on it are the
+    // same energy counted twice: the turn film clipped 16k RGB-255 pixels on
+    // a face the camera sees, and diamond's Blinn exponent is 200 so that
+    // glaze is not the key. Yield the body where transmission already
+    // carries the interior.
+    let interiorWeight = max(transmitted.x, max(transmitted.y, transmitted.z));
+    let cover = 1.0 - clamp(interiorWeight * outer * 0.85, 0.0, 1.0);
+    let shade = vec3<f32>(markUniforms.uAmbient) +
+      vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun);
+    let surface = vTint * body * shade *
+        mix(1.0, 0.58, bulk) * bounce * cover +
       scatter +
       highlight * 0.9 +
       windowHighlight +
@@ -1084,9 +1092,11 @@ export const MARK_SHELL_GLSL = /* glsl */ `
 
     // Same split as the WGSL path; keep the two in step.
     vec3 scatter = vTint * core * bounce * outer * 0.28;
-    vec3 surface = vTint * body *
-      (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun)) *
-      mix(1.0, 0.58, bulk) * bounce +
+    float interiorWeight = max(transmitted.x, max(transmitted.y, transmitted.z));
+    float cover = 1.0 - clamp(interiorWeight * outer * 0.85, 0.0, 1.0);
+    vec3 shade = vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun);
+    vec3 surface = vTint * body * shade *
+      mix(1.0, 0.58, bulk) * bounce * cover +
       scatter +
       highlight * 0.9 +
       windowHighlight +
