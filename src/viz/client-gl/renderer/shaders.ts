@@ -607,8 +607,18 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // the key toward the eye. N·H was a stand-in that made the Fresnel of the
     // highlight disagree with the Fresnel of the body on the same pixel.
     let specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, half), 0.0), 5.0);
+    // GEOMETRY. Specular on a face the key does not see is a glaze on the dark
+    // side. Smith's height-correlated form, in the cheap Schlick shape: N·L
+    // and N·V, correlated, so grazing and back-facing both go to zero.
+    // NORMALISATION. A tighter Blinn-Phong lobe packs the same energy into a
+    // smaller spot, which is why diamond fire is bright and obsidian's smear
+    // is not — without this the four glasses shared one peak and only differed
+    // in width. 51 is (glass's exponent + 2) / 2, so typical-pose geo * specNorm
+    // stays near 1 and uSpecular remains the scene-wide loudness.
+    let geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
+    let specNorm = (specularPower + 2.0) / 51.0;
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
-      specF * markUniforms.uSpecular * outer;
+      specF * geo * specNorm * markUniforms.uSpecular * outer;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
     //
     // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
@@ -915,8 +925,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(facing, specularPower * 1.5)
     );
     float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, halfVector), 0.0), 5.0);
+    float geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
+    float specNorm = (specularPower + 2.0) / 51.0;
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
-      specF * uSpecular * outer;
+      specF * geo * specNorm * uSpecular * outer;
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;

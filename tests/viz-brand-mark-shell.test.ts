@@ -152,6 +152,17 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('gates the key highlight on geometry and concentrates fire in tight lobes', () => {
+    // Specular on a face the key does not see is a glaze on the dark side, and
+    // four glasses that share one peak only differ in width — diamond fire has
+    // to be brighter because the energy is packed into a smaller spot.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4)');
+      expect(source).toContain('(specularPower + 2.0) / 51.0');
+      expect(source).toMatch(/specF \* geo \* specNorm/);
+    }
+  });
+
   it('conserves energy between reflection and transmission', () => {
     // A dielectric reflects F and lets 1-F into the body. Without bounce the
     // body, the highlight and the transmitted interior were three independent
