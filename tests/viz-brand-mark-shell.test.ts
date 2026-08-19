@@ -174,6 +174,19 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('throws traveling glints off the cavity walls, with TIR on high-index glass', () => {
+    // The bead is the only point light, so a specular term against it is a
+    // spot that moves as the bead bounces. Outer facets see that light as
+    // transmission; the cavity reflects it, and past the critical angle the
+    // reflection is total — diamond sparkles, glass does not, from the IOR.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('coreHalf');
+      expect(source).toContain('coreHighlight');
+      expect(source).toContain('cosCrit');
+      expect(source).toContain('(1.0 - outer)');
+    }
+  });
+
   it('counts the interior once, not twice', () => {
     // CORE (the bead solved analytically against this facet) and TRANSMITTED
     // (that same bead read out of the backdrop texture) are the same light. The
@@ -184,7 +197,7 @@ describe('mark shell shader contract', () => {
     // the sampled version, which is the one carrying the refracted
     // displacement; cavity facets have no backdrop and keep the analytic one.
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
-      expect(source).toMatch(/mix\(\s*\n?\s*(markUniforms\.)?uCoreTint \* core,/);
+      expect(source).toMatch(/mix\(\s*\n?\s*(markUniforms\.)?uCoreTint \* core/);
       expect(source, 'the two interior terms must not both be added')
         .not.toMatch(/uCoreTint \* core \+[\s\S]{0,200}transmitted \*/);
     }

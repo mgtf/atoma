@@ -634,6 +634,34 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // mirror there and hides what is behind it.
     let bounce = 1.0 - fresnel;
 
+    // INNER SPECULAR. The bead is the only point light, so L varies across a
+    // facet and the highlight is a spot that TRAVELS as the bead bounces —
+    // which is why a gem with a light inside looks alive. Outer facets see
+    // this light as TRANSMITTED, not as a reflection (the bead is behind the
+    // surface), so the glint is gated on the cavity.
+    let coreHalf = normalize(coreDir + viewDir);
+    let coreFacing = max(dot(normal, coreHalf), 0.0);
+    let coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
+    let coreGeo = incidence * nDotV /
+      max(incidence + nDotV - incidence * nDotV, 1e-4);
+    let coreSpectral = vec3<f32>(
+      pow(coreFacing, specularPower * 0.68),
+      pow(coreFacing, specularPower),
+      pow(coreFacing, specularPower * 1.5)
+    );
+    let coreHighlight = mix(vec3<f32>(coreSpectral.y), coreSpectral, dispersion) *
+      coreSpecF * coreGeo * specNorm * falloff *
+      markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse) *
+      (1.0 - outer);
+
+    // TIR. From inside glass looking out at air, rays steeper than the
+    // critical angle reflect totally. Diamond's critical angle is ~24 degrees,
+    // so most of its inner faces are mirrors of the bead; glass at ~41 still
+    // transmits. That is the sparkle the IOR was supposed to buy.
+    let ior = iorBend + 1.0;
+    let cosCrit = sqrt(max(1.0 - 1.0 / max(ior * ior, 1.0), 0.0));
+    let tir = (1.0 - outer) * (1.0 - smoothstep(cosCrit - 0.06, cosCrit + 0.02, nDotV));
+
     // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
     // the ray leaves the glass most obliquely — the rim of the silhouette and
     // every visible arete, never the middle of a face. FRESNEL already measures
@@ -761,8 +789,9 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // split ride BOUNCE so they yield to the mirror at grazing; the highlight
     // and rim ARE that mirror.
     let surface = vTint * body * (markUniforms.uAmbient + 0.86 * sun) *
-        mix(1.0, 0.58, bulk) * bounce +
+        mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
+      coreHighlight * (1.15 + 2.4 * tir) +
       fringe * 0.55 +
       split * 0.9 * bounce +
       vec3<f32>(fresnel * markUniforms.uRim);
@@ -778,7 +807,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // backdrop behind them and keep the analytic term, which is what gives the
     // crystal its lit interior.
     let interior = mix(
-      markUniforms.uCoreTint * core,
+      markUniforms.uCoreTint * core * (1.0 + 0.65 * tir),
       transmitted * markUniforms.uRefract,
       outer
     );
@@ -933,6 +962,25 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
 
+    // Same inner specular and TIR as the WGSL path; keep the two in step.
+    vec3 coreHalf = normalize(coreDir + viewDir);
+    float coreFacing = max(dot(normal, coreHalf), 0.0);
+    float coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
+    float coreGeo = incidence * nDotV /
+      max(incidence + nDotV - incidence * nDotV, 1e-4);
+    vec3 coreSpectral = vec3(
+      pow(coreFacing, specularPower * 0.68),
+      pow(coreFacing, specularPower),
+      pow(coreFacing, specularPower * 1.5)
+    );
+    vec3 coreHighlight = mix(vec3(coreSpectral.y), coreSpectral, dispersion) *
+      coreSpecF * coreGeo * specNorm * falloff *
+      uCoreIntensity * (0.86 + 0.14 * uPulse) *
+      (1.0 - outer);
+    float ior = iorBend + 1.0;
+    float cosCrit = sqrt(max(1.0 - 1.0 / max(ior * ior, 1.0), 0.0));
+    float tir = (1.0 - outer) * (1.0 - smoothstep(cosCrit - 0.06, cosCrit + 0.02, nDotV));
+
     // Same chromatic transmission as the WGSL path; keep the two in step.
     // Same refraction/dispersion split as the WGSL path; keep the two in step.
     // Same texel clamp as the WGSL path; keep the two in step.
@@ -967,12 +1015,13 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * dispersion * outer;
 
     // Same split as the WGSL path; keep the two in step.
-    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) * bounce +
+    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
+      coreHighlight * (1.15 + 2.4 * tir) +
       fringe * 0.55 +
       split * 0.9 * bounce +
       vec3(fresnel * uRim);
-    vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
+    vec3 interior = mix(uCoreTint * core * (1.0 + 0.65 * tir), transmitted * uRefract, outer);
     vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
