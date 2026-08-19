@@ -53,7 +53,7 @@ const ALPHA_INNER = 0.86;
  * reads as shading, which is what a turning solid does. It is not allowed to
  * move alpha, which reads as the material changing.
  */
-const SHADE_FAR = 0.72;
+const SHADE_FAR = 0.84;
 const SHADE_NEAR = 1;
 
 /** Model-space reach of the bead's light, converted from its projected radius. */
@@ -171,9 +171,9 @@ export const MARK_SHELL_UNIFORMS = [
 const CHROMATIC_SPLIT_FLOOR_PX = 2.4;
 const REFRACTION_BEND_FLOOR_PX = 5.5;
 const REFRACTION_MAX_BEND_FLOOR_PX = 3;
-const CHROMATIC_SPLIT_FRACTION = 0.006;
-const REFRACTION_BEND_FRACTION = 0.022;
-const REFRACTION_MAX_BEND_FRACTION = 0.014;
+const CHROMATIC_SPLIT_FRACTION = 0.01;
+const REFRACTION_BEND_FRACTION = 0.038;
+const REFRACTION_MAX_BEND_FRACTION = 0.024;
 
 /** Bend/split/ceiling for a backdrop of `widthPx`. */
 export function refractionForBackdrop(widthPx: number): {
@@ -199,7 +199,7 @@ const uniformValues: Record<
   uCoreTint: () => new Float32Array([0.87, 0.945, 1]),
   uCoreReach: () => CORE_REACH_MODEL,
   uCoreIntensity: () => 0.88,
-  uAmbient: () => 0.2,
+  uAmbient: () => 0.11,
   uPulse: () => 0,
   uWall: () => ATOMA_MARK_THICKNESS,
   uMinPath: () => ATOMA_MARK_MIN_PATH,
@@ -209,8 +209,8 @@ const uniformValues: Record<
   uMaxBend: () => REFRACTION_MAX_BEND_FLOOR_PX,
   uRefract: () => 1,
   uRefractOn: () => 1,
-  uSpecular: () => 2.6,
-  uRim: () => 0.9,
+  uSpecular: () => 4.2,
+  uRim: () => 1.15,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,

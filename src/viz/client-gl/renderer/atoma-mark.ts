@@ -245,6 +245,12 @@ export function attachAtomaMark(
 
   interior.mask = interiorMask;
   glassGlow.mask = glassMask;
+  // The front glass already DRAWS the transmitted interior. An additive disc
+  // composited after it is a sticker on the outside of the crystal — which is
+  // what the turn film showed at every pose. Keep the layer for the no-shader
+  // fallback (headless tests, missing canvas); hide it the moment a mesh can
+  // do the job.
+  if (shell) glassGlow.visible = false;
   /**
    * The interior, as its own subtree so it can be rendered TWICE: once into the
    * backdrop texture the front glass refracts, and once into the scene where it

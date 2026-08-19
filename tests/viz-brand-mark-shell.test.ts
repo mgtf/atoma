@@ -234,9 +234,22 @@ describe('mark shell shader contract', () => {
     expect(header.maxBend).toBe(3);
     expect(header.bend).toBe(5.5);
     const hero = refractionForBackdrop(800);
-    expect(hero.maxBend).toBeGreaterThan(10);
+    expect(hero.maxBend).toBeGreaterThan(15);
     expect(hero.bend).toBeGreaterThan(header.bend);
     expect(hero.maxBend).toBeLessThan(hero.bend);
+  });
+
+  it('keeps the body quieter than the highlights so facets are not painted flats', () => {
+    // Lambert is constant across a flat octahedron face. When it out-shouts
+    // the view-varying specular, every wedge reads as a solid triangle. The
+    // key body term is therefore a minority of the surface, and a scatter
+    // from the bead supplies the gradient the Lambert cannot.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toMatch(/0\.42 \* sun/);
+      expect(source).toContain('scatter');
+      expect(source).toMatch(/vScreen\.y\) \* 0\.72/);
+      expect(source).toMatch(/outer \* 0\.40/);
+    }
   });
 
   it('counts the interior once, not twice', () => {

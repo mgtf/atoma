@@ -560,9 +560,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // is why the crystal read as painted triangles. Varying V across the face
     // is what lets a highlight become a spot.
     //
-    // 0.4 is the object's half-width in view units: radius ~1.28 at a camera
-    // sitting about 8 units back. vScreen is y-down Pixi; world Y is up.
-    let viewOffset = vec2<f32>(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.4;
+    // 0.72 is a stylised half-width: the authored camera is farther than that,
+    // but a smaller offset left N·H almost constant across a flat facet, so
+    // the key glazed the whole triangle. Stretching V is what turns a glaze
+    // into a spot. vScreen is y-down Pixi; world Y is up.
+    let viewOffset = vec2<f32>(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.72;
     let viewDir = normalize(vec3<f32>(viewOffset.x, viewOffset.y, 1.0));
     let nDotV = min(abs(dot(normal, viewDir)), 1.0);
 
@@ -635,7 +637,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     let windowHighlight = vec3<f32>(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      markUniforms.uSpecular * outer * 0.22;
+      markUniforms.uSpecular * outer * 0.40;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
     //
     // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
@@ -753,12 +755,12 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // saturated. It survived a clamp, a grazing fade and 2x supersampling
     // because none of those break a feedback path; only refusing to sample
     // during the pass does.
-    let grazingFade = smoothstep(0.12, 0.42, nDotV) * markUniforms.uRefractOn;
+    let grazingFade = smoothstep(0.05, 0.24, nDotV) * markUniforms.uRefractOn;
     let eta = 1.0 / max(iorBend + 1.0, 1.001);
     let frontNormal = select(normal, -normal, dot(normal, viewDir) < 0.0);
     let refracted = refract(-viewDir, frontNormal, eta);
     let rawBend = refracted.xy * markUniforms.uBend *
-      mix(0.35, 1.0, bulk) * outer * grazingFade;
+      mix(0.55, 1.0, bulk) * outer * grazingFade;
     let bendLength = length(rawBend);
     let bend = select(
       rawBend,
@@ -810,14 +812,20 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let attenuation = exp(-absorption * path);
     let transmitted = straight.rgb * attenuation * transmit * bounce;
 
-    // The facet's OWN shading: body, highlights, edges. Deliberately without the
-    // bead's analytic light on outer facets — see below. Body and chromatic
-    // split ride BOUNCE so they yield to the mirror at grazing; the highlight
-    // and rim ARE that mirror.
+    // The facet's OWN shading: body, wall scatter, highlights, edges. Body and
+    // chromatic split ride BOUNCE so they yield to the mirror at grazing; the
+    // highlight and rim ARE that mirror.
+    // WALL SCATTER. The bead lights the glass it sits behind. Outer facets
+    // used to ignore the analytic core (it is the same light as TRANSMITTED),
+    // so a face the key did not hit was a flat painted triangle. A little of
+    // that core as SURFACE, not as interior, is the wall glowing — a gradient
+    // toward the bead, which is what a lit cavity does to the near glass.
+    let scatter = vTint * core * bounce * outer * 0.45;
     let surface = vTint * body *
-        (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.86 * sun)) *
+        (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun)) *
         mix(1.0, 0.58, bulk) * bounce +
-      highlight * 0.85 +
+      scatter +
+      highlight * 1.05 +
       windowHighlight +
       coreHighlight * 1.15 +
       fringe * 0.55 +
@@ -955,7 +963,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float body = vFinish.z;
 
     // Same view ray as the WGSL path; keep the two in step.
-    vec2 viewOffset = vec2(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.4;
+    vec2 viewOffset = vec2(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.72;
     vec3 viewDir = normalize(vec3(viewOffset.x, viewOffset.y, 1.0));
     float nDotV = min(abs(dot(normal, viewDir)), 1.0);
 
@@ -997,7 +1005,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     vec3 windowHighlight = vec3(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      uSpecular * outer * 0.22;
+      uSpecular * outer * 0.40;
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
@@ -1023,11 +1031,11 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same refraction/dispersion split as the WGSL path; keep the two in step.
     // Same texel clamp as the WGSL path; keep the two in step.
     // Same grazing fade as the WGSL path; keep the two in step.
-    float grazingFade = smoothstep(0.12, 0.42, nDotV) * uRefractOn;
+    float grazingFade = smoothstep(0.05, 0.24, nDotV) * uRefractOn;
     float eta = 1.0 / max(iorBend + 1.0, 1.001);
     vec3 frontNormal = dot(normal, viewDir) < 0.0 ? -normal : normal;
     vec3 refracted = refract(-viewDir, frontNormal, eta);
-    vec2 rawBend = refracted.xy * uBend * mix(0.35, 1.0, bulk) * outer * grazingFade;
+    vec2 rawBend = refracted.xy * uBend * mix(0.55, 1.0, bulk) * outer * grazingFade;
     float bendLength = length(rawBend);
     vec2 bend = bendLength > uMaxBend
       ? rawBend * uMaxBend / max(bendLength, 1e-4)
@@ -1056,10 +1064,12 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * dispersion * outer;
 
     // Same split as the WGSL path; keep the two in step.
+    vec3 scatter = vTint * core * bounce * outer * 0.45;
     vec3 surface = vTint * body *
-      (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.86 * sun)) *
+      (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun)) *
       mix(1.0, 0.58, bulk) * bounce +
-      highlight * 0.85 +
+      scatter +
+      highlight * 1.05 +
       windowHighlight +
       coreHighlight * 1.15 +
       fringe * 0.55 +

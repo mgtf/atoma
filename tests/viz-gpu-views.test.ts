@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Container, Graphics } from 'pixi.js';
 import type { Text, Ticker } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -944,6 +946,18 @@ describe('attachAtomaMark glass layering', () => {
     expect(glassGlow.mask).toBeTruthy();
     expect(glassGlow.children.map((child) => child.label))
       .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);
+  });
+
+  it('does not overlay a transmitted disc once the shell can draw it', () => {
+    // The turn film showed a circular sticker on every pose. The front glass
+    // already samples the bead out of the backdrop; an additive disc after it
+    // is a second copy on the OUTSIDE of the crystal. Hidden when a mesh
+    // compiled; kept for the headless fallback that has no shader.
+    const source = readFileSync(
+      resolve(import.meta.dirname, '../src/viz/client-gl/renderer/atoma-mark.ts'),
+      'utf8'
+    );
+    expect(source).toContain('if (shell) glassGlow.visible = false');
   });
 
   it('animates one crystal per attach and freezes it under reduced motion', () => {
