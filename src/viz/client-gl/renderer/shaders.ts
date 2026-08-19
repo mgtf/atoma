@@ -710,32 +710,48 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       vec3<f32>(0.25)
     ) * transmit;
 
-    // THE DISPLACED INTERIOR ITSELF, which is what makes this a distortion
-    // rather than a coloured rim. STRAIGHT is now read at the BENT position,
-    // so what the glass shows is the interior as the glass actually redirects
-    // it — a bead behind a facet is seen off its true position, and the far
-    // facets visibly shear across an oblique wedge.
+    // TRANSMISSION. The glass DRAWS what is behind it, rather than letting the
+    // alpha blend show it through.
     //
-    // Composited as the DIFFERENCE against the undisplaced interior, because
-    // the alpha blend underneath is already drawing that undisplaced interior:
-    // adding the sample outright would show it twice. REFRACTSTRENGTH fades
-    // the whole thing out where the facet is face-on, where there is no bend to
-    // pay for and the difference would only add noise.
-    let unbent = textureSample(uBackdrop, uBackdropSampler, backdropUv);
-    let refractStrength = clamp(length(bend) * 0.35, 0.0, 1.0);
-    let distortion = clamp(
-      (straight.rgb - unbent.rgb) * refractStrength * transmit,
-      vec3<f32>(-0.4),
-      vec3<f32>(0.4)
-    );
+    // This used to be a corrective difference against the undisplaced interior,
+    // which only worked because alpha was capped at 0.44 and the blend below
+    // was doing the real transmitting. That cap was the last arbitrary number
+    // in the material model: how much a glass hides is Beer-Lambert over the
+    // path, and nothing else. So the facet now samples the interior at the BENT
+    // position and attenuates it by the same absorption that drives its
+    // opacity — obsidian swallows what is behind it, diamond passes it almost
+    // whole — and alpha is free to approach 1.
+    //
+    // The bead behind a diamond facet is therefore seen genuinely displaced,
+    // not merely fringed: the displacement is the transmitted image itself.
+    let attenuation = exp(-absorption * path);
+    let transmitted = straight.rgb * attenuation * transmit;
 
-    let lit = vTint * body * (markUniforms.uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
-      markUniforms.uCoreTint * core +
+    // The facet's OWN shading: body, highlights, edges. Deliberately without the
+    // bead's analytic light on outer facets — see below.
+    let surface = vTint * body * (markUniforms.uAmbient + 0.86 * sun) *
+        mix(1.0, 0.58, bulk) +
       highlight * 0.85 +
       fringe * 0.55 +
       split * 0.9 +
-      distortion * markUniforms.uRefract +
       vec3<f32>(fresnel * markUniforms.uRim);
+
+    // CORE and TRANSMITTED are the SAME light counted two ways: CORE is the
+    // bead computed analytically against this facet, TRANSMITTED is that same
+    // bead read out of the backdrop texture. Adding both was double-counting —
+    // the interior came out twice as bright as it should and washed the rank
+    // tints out from underneath.
+    //
+    // Outer facets take the sampled version, which is the physical one and the
+    // only one that carries the refracted displacement. Cavity facets have no
+    // backdrop behind them and keep the analytic term, which is what gives the
+    // crystal its lit interior.
+    let interior = mix(
+      markUniforms.uCoreTint * core,
+      transmitted * markUniforms.uRefract,
+      outer
+    );
+    let lit = surface + interior;
     // The bead only NUDGES alpha. It crosses the cavity several times a second,
     // so whatever it adds here reads as flicker rather than as light; its
     // brightness belongs in LIT, where it lands on colour instead of density.
@@ -743,8 +759,19 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // moved alpha by half, and a facet goes from face-on to edge-on every turn:
     // that is a density swing wearing the costume of an edge highlight. It keeps
     // its full weight in LIT, where it belongs.
+    // ALPHA is COVERAGE, not density. The facet paints its own shading plus the
+    // interior it transmits, so it must replace the undistorted behind rather
+    // than let a second copy blend through. How much of the interior you SEE is
+    // in TRANSMITTED (Beer-Lambert over the path). Using 1 - attenuation *
+    // transmit as outer alpha punched a hole in diamond — its transmit is 1.32,
+    // so that expression went negative, and the undistorted bead ghosted next
+    // to the refracted one.
+    //
+    // The cavity facets keep the old behaviour: they have nothing behind them
+    // worth transmitting and are what gives the crystal its interior body, so
+    // vSurface.x still scales them.
     let alpha = clamp(
-      vSurface.x * opacity + fresnel * outer * markUniforms.uRim + core * 0.1,
+      mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
       0.0,
       1.0
     );
@@ -889,13 +916,9 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       0.25
     ) * transmit;
 
-    vec4 unbent = texture(uBackdrop, vScreen);
-    float refractStrength = clamp(length(bend) * 0.35, 0.0, 1.0);
-    vec3 distortion = clamp(
-      (straight.rgb - unbent.rgb) * refractStrength * transmit,
-      -0.4,
-      0.4
-    );
+    // Same transmission as the WGSL path; keep the two in step.
+    float attenuation = exp(-absorption * path);
+    vec3 transmitted = straight.rgb * attenuation * transmit;
 
     // Same edge fringe as the WGSL path; keep the two in step.
     float fringeBand = 1.0 - fresnel;
@@ -905,15 +928,17 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       exp(-fringeBand * fringeBand * 130.0)
     ) * dispersion * outer;
 
-    vec3 lit = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
-      uCoreTint * core +
+    // Same split as the WGSL path; keep the two in step.
+    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
       highlight * 0.85 +
       fringe * 0.55 +
       split * 0.9 +
-      distortion * uRefract +
       vec3(fresnel * uRim);
+    vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
+    vec3 lit = surface + interior;
+    // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
-      vSurface.x * opacity + fresnel * outer * uRim + core * 0.1,
+      mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
       0.0,
       1.0
     );

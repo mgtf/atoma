@@ -28,17 +28,17 @@ const VERTEX_COUNT = FACET_COUNT * 3;
 const INDEX_COUNT = VERTEX_COUNT;
 
 /**
- * How opaque a facet is, by WHICH HULL it belongs to and nothing else.
+ * How opaque a CAVITY facet is. The outer hull no longer has a counterpart:
+ * since the front glass draws the interior it transmits, what an outer facet
+ * hides is Beer-Lambert over its path and nothing else, so the hand-set ceiling
+ * that used to sit here (0.44) became dead weight and was removed.
  *
- * This used to be a two-value choice keyed on the facet's position — first
- * against the bead, then against its own depth — and both spellings are a pulse
- * on a solid that TURNS: every facet takes both roles once per revolution, so
- * whatever gap sits between the two values is a swing between clear and opaque
- * that the eye reads as the crystal breathing. Density is a property of the
- * glass, so it is settled by the material (see the shell shader's opacity) and
- * these two only say how much of the wall is wall and how much is cavity.
+ * The history is worth keeping because two earlier spellings were both bugs.
+ * Keying this on the facet's position — first against the bead, then against
+ * its own depth — is a pulse on a solid that TURNS: every facet takes both
+ * roles once per revolution, so any gap between two values reads as the crystal
+ * breathing between clear and opaque.
  */
-const ALPHA_OUTER = 0.44;
 const ALPHA_INNER = 0.86;
 
 /**
@@ -138,6 +138,9 @@ export const MARK_SHELL_UNIFORMS = [
   // glass here refracts, only diamond disperses much.
   { name: 'uBend', type: 'f32' },
   { name: 'uMaxBend', type: 'f32' },
+  // 1, and it should stay there: the facet now draws the transmitted image
+  // itself, so anything above unity is the interior counted more than once.
+  // It was 1.15 while the refraction was only a corrective difference.
   { name: 'uRefract', type: 'f32' },
   // 1 normally, 0 while the backdrop texture is being rendered — see
   // `setRefracting`. Both shells share this shader, so without the switch the
@@ -170,7 +173,7 @@ const uniformValues: Record<
   uSplit: () => CHROMATIC_SPLIT_PX,
   uBend: () => REFRACTION_BEND_PX,
   uMaxBend: () => REFRACTION_MAX_BEND_PX,
-  uRefract: () => 1.15,
+  uRefract: () => 1,
   uRefractOn: () => 1,
   uSpecular: () => 2.6,
   uRim: () => 0.9,
@@ -428,7 +431,8 @@ export function createMarkShell(): MarkShell | null {
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
         const shaded = frame.facets[index]!;
         const near = markFacetNearness(shaded.centroid[2]);
-        const alpha = facet.part === 'outer' ? ALPHA_OUTER : ALPHA_INNER;
+        // Outer facets ignore this: their coverage is derived in the shader.
+        const alpha = facet.part === 'outer' ? 0 : ALPHA_INNER;
         const shade = SHADE_FAR + (SHADE_NEAR - SHADE_FAR) * near;
         const rank = rankTints[index]!;
         for (const [corner, point] of facet.points.entries()) {

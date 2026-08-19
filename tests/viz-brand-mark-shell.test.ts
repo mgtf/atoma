@@ -23,6 +23,20 @@ describe('mark shell shader contract', () => {
   const wgslVertexInput = MARK_SHELL_WGSL.split('struct VertexInput')[1]
     ?.split('}')[0] ?? '';
 
+  it('keeps backticks out of the shader sources', () => {
+    // These are template literals. A backtick inside one — easy to type when
+    // quoting an identifier in a comment — terminates the string and the file
+    // stops parsing, which has happened three times while editing these
+    // shaders. Cheaper to assert than to rediscover from a TS1005.
+    for (const [name, source] of Object.entries({
+      MARK_SHELL_WGSL,
+      MARK_SHELL_GLSL_VERTEX,
+      MARK_SHELL_GLSL,
+    })) {
+      expect(source, `${name} must not contain a backtick`).not.toContain('`');
+    }
+  });
+
   it('declares every geometry attribute in both programs', () => {
     expect(MARK_SHELL_ATTRIBUTES.length).toBeGreaterThan(0);
     for (const { name, format } of MARK_SHELL_ATTRIBUTES) {
@@ -110,6 +124,35 @@ describe('mark shell shader contract', () => {
     expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toContain('uRefractOn');
     expect(MARK_SHELL_WGSL).toContain('markUniforms.uRefractOn');
     expect(MARK_SHELL_GLSL).toContain('* uRefractOn');
+  });
+
+  it('covers the undistorted interior so refraction cannot ghost', () => {
+    // Drawing the transmitted image at the bent UV only works if the facet
+    // REPLACES what is behind it. Using 1 - attenuation * transmit as outer
+    // alpha punched a hole in diamond (transmit 1.32, so the expression went
+    // negative) and let the undistorted bead show through next to the
+    // refracted one. Coverage is 1 on the hull; Beer-Lambert lives in RGB.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source, 'attenuation must not punch a hole in outer alpha')
+        .not.toMatch(/1\.0 - attenuation \* transmit/);
+      expect(source).toMatch(/mix\(\s*vSurface\.x \* opacity,\s*1\.0,\s*outer\)/);
+    }
+  });
+
+  it('counts the interior once, not twice', () => {
+    // CORE (the bead solved analytically against this facet) and TRANSMITTED
+    // (that same bead read out of the backdrop texture) are the same light. The
+    // lit sum added both when transmission landed, so the interior came out at
+    // double brightness and washed the rank tints out from underneath.
+    //
+    // They must be SELECTED between by hull, never summed: outer facets take
+    // the sampled version, which is the one carrying the refracted
+    // displacement; cavity facets have no backdrop and keep the analytic one.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toMatch(/mix\(\s*\n?\s*(markUniforms\.)?uCoreTint \* core,/);
+      expect(source, 'the two interior terms must not both be added')
+        .not.toMatch(/uCoreTint \* core \+[\s\S]{0,200}transmitted \*/);
+    }
   });
 
   it('keeps the refraction sample inside the mark box', () => {
