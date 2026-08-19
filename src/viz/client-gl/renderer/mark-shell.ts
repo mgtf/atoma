@@ -171,7 +171,7 @@ export const MARK_SHELL_UNIFORMS = [
 const CHROMATIC_SPLIT_FLOOR_PX = 2.4;
 const REFRACTION_BEND_FLOOR_PX = 5.5;
 const REFRACTION_MAX_BEND_FLOOR_PX = 3;
-const CHROMATIC_SPLIT_FRACTION = 0.01;
+const CHROMATIC_SPLIT_FRACTION = 0.0045;
 const REFRACTION_BEND_FRACTION = 0.038;
 const REFRACTION_MAX_BEND_FRACTION = 0.024;
 
@@ -199,7 +199,7 @@ const uniformValues: Record<
   uCoreTint: () => new Float32Array([0.87, 0.945, 1]),
   uCoreReach: () => CORE_REACH_MODEL,
   uCoreIntensity: () => 0.88,
-  uAmbient: () => 0.11,
+  uAmbient: () => 0.15,
   uPulse: () => 0,
   uWall: () => ATOMA_MARK_THICKNESS,
   uMinPath: () => ATOMA_MARK_MIN_PATH,

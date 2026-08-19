@@ -51,4 +51,8 @@ describe('viz mark-turn capture', () => {
     expect(script).toContain('.atoma-mark-turn');
     expect(gitignore).toContain('.atoma-mark-turn/');
   });
+
+  it('ships a pixel analyser for the film', () => {
+    expect(script).toContain('viz:mark-turn:analyze');
+  });
 });

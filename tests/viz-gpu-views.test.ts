@@ -958,6 +958,7 @@ describe('attachAtomaMark glass layering', () => {
       'utf8'
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
+    expect(source).toContain('behind.visible = false');
   });
 
   it('animates one crystal per attach and freezes it under reduced motion', () => {

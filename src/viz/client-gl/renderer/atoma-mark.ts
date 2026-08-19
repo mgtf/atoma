@@ -393,7 +393,17 @@ export function attachAtomaMark(
     transmittedCore.alpha = forward * (0.88 + frame.pulse * 0.12);
     // Last, so the texture holds THIS frame's interior: the front glass is
     // about to be drawn by the scene and will sample what we leave here.
-    backdropPass?.(elapsedMs);
+    //
+    // The same subtree must NOT also sit in the scene. It is the undistorted
+    // bead and far walls; leaving it on stage under the front glass is how a
+    // circular sticker survived every pose of the turn film. The front mesh
+    // already paints coverage 1 and draws that interior bent. Toggle around
+    // the pass: Pixi skips a hidden container even when it is the render target.
+    if (backdropPass) {
+      behind.visible = true;
+      backdropPass(elapsedMs);
+      behind.visible = false;
+    }
   };
 
   const reducedMotion = prefersReducedMotion();

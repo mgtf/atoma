@@ -11,6 +11,7 @@
  *
  *   npm run viz:mark-turn
  *   npm run viz:mark-turn -- --out .atoma-mark-turn
+ *   npm run viz:mark-turn:analyze
  *
  * Frames land in `.atoma-mark-turn/` (gitignored) as `frame-0000.png` …
  * `frame-0060.png` plus `manifest.json`.

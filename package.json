@@ -36,6 +36,7 @@
     "viz:smoke": "node scripts/viz-gpu-smoke.mjs",
     "viz:smoke:gc": "node scripts/viz-gpu-gc-smoke.mjs",
     "viz:mark-turn": "node scripts/viz-mark-turn.mjs",
+    "viz:mark-turn:analyze": "python3 scripts/viz-mark-turn-analyze.py",
     "viz:serve": "node dist/viz/server.js",
     "viz:demo": "tsx src/viz/demo.ts",
     "ledger": "tsx src/cli/ledger.ts",
