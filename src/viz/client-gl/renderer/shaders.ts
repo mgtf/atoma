@@ -708,9 +708,9 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // volume rather than to the surface; and OUTER, so only the hull refracts —
     // the cavity walls are already behind the bead and must not smear it twice.
     //
-    // The direction is the facet normal's screen-space tilt. A ray leaving an
-    // oblique facet is displaced along the way the surface leans, so a facet
-    // presenting flat displaces nothing however dispersive its glass.
+    // The direction is the refracted incident ray's screen-space remainder.
+    // A facet presenting flat to the view still displaces nothing; an oblique
+    // one shears the interior along Snell rather than along its own normal.
     // REFRACTION, and it is NOT the same thing as dispersion.
     //
     // Every glass here bends light: obsidian's index is 1.5, so it displaces
