@@ -818,11 +818,13 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // The bead behind a diamond facet is therefore seen genuinely displaced,
     // not merely fringed: the displacement is the transmitted image itself.
     let attenuation = exp(-absorption * path);
-    let transmitted = straight.rgb * attenuation * transmit * bounce;
+    let transmittedRaw = straight.rgb * attenuation * transmit * bounce;
     // The filament is authored at alpha 1, so a clear table copies 8-bit white
     // into a disc. Compress only the excess; midtones of the interior stay put.
-    let interiorPeak = max(transmitted.x, max(transmitted.y, transmitted.z));
-    transmitted = transmitted *
+    // WGSL let is immutable: assigning back to transmitted is a refused
+    // pipeline, and the turn film then captures only the aura (peak ~22).
+    let interiorPeak = max(transmittedRaw.x, max(transmittedRaw.y, transmittedRaw.z));
+    let transmitted = transmittedRaw *
       (1.0 / (1.0 + max(interiorPeak - 0.82, 0.0) * 1.6));
 
     // The facet's OWN shading: body, wall scatter, highlights, edges. Body and
