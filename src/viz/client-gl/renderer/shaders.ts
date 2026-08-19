@@ -628,8 +628,13 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // stays near 1 and uSpecular remains the scene-wide loudness.
     let geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
     let specNorm = (specularPower + 2.0) / 51.0;
+    let inPlane = vWorld - normal * dot(vWorld, normal);
+    // TABLE LOBE. Bending N toward the face centroid created NEW alignments
+    // (clip_px_max jumped 9k to 27k). Windowing the highlight by distance
+    // from that centroid can only shrink a glaze; it cannot invent one.
+    let tableLobe = exp(-dot(inPlane, inPlane) * 6.0);
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
-      specF * geo * specNorm * markUniforms.uSpecular * outer;
+      specF * geo * specNorm * markUniforms.uSpecular * outer * tableLobe;
     // STUDIO WINDOW. Specular only. A fill that lifts the body was tried and
     // reverted: on a near-black field what reads as transparency is seeing
     // the far facets through the near one, and any light that lifts the near
@@ -645,7 +650,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     let windowHighlight = vec3<f32>(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      markUniforms.uSpecular * outer * 0.28;
+      markUniforms.uSpecular * outer * 0.28 * tableLobe;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
     //
     // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
@@ -1018,8 +1023,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, halfVector), 0.0), 5.0);
     float geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
     float specNorm = (specularPower + 2.0) / 51.0;
+    vec3 inPlane = vWorld - normal * dot(vWorld, normal);
+    float tableLobe = exp(-dot(inPlane, inPlane) * 6.0);
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
-      specF * geo * specNorm * uSpecular * outer;
+      specF * geo * specNorm * uSpecular * outer * tableLobe;
     vec3 windowDir = normalize(vec3(0.85, 0.35, 0.15));
     vec3 windowHalf = normalize(windowDir + viewDir);
     float windowFacing = max(dot(shadeNormal, windowHalf), 0.0);
@@ -1030,7 +1037,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     vec3 windowHighlight = vec3(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      uSpecular * outer * 0.28;
+      uSpecular * outer * 0.28 * tableLobe;
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;

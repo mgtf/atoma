@@ -254,6 +254,7 @@ describe('mark shell shader contract', () => {
       expect(source).toContain('interiorWeight');
       expect(source).toMatch(/bounce \* cover/);
       expect(source).toMatch(/vScreen\.y, 0\.02\) \* 2\.8/);
+      expect(source).toContain('tableLobe');
     }
     expect(MARK_SHELL_WGSL, 'WGSL let bindings cannot be reassigned')
       .not.toMatch(/let transmitted =[\s\S]{0,400}?transmitted = transmitted/);
