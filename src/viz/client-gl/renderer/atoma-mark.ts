@@ -358,14 +358,21 @@ export function attachAtomaMark(
       .fill({ color: 0x4169e1, alpha: 0.018 + frame.pulse * 0.014 })
       .circle(14, 14, 9.6 + frame.pulse * 0.4)
       .fill({ color: GPU_COLORS.cyan, alpha: 0.018 + frame.pulse * 0.012 });
+    const { x: coreX, y: coreY } = frame.corePosition;
+    // The key throws the contact shadow down-right; the bead, being a light
+    // inside the gem, nudges that umbra as it travels. A frozen ellipse under
+    // a moving light reads as a sticker, not as a grounded object.
     shadow
       .clear()
-      .ellipse(14.4, 25.2, 6.6, 1.35)
-      .fill({ color: 0x020817, alpha: 0.34 });
+      .ellipse(
+        14.4 + (coreX - 14) * 0.12,
+        25.2 + (coreY - 14) * 0.05,
+        6.6 + frame.pulse * 0.2,
+        1.35
+      )
+      .fill({ color: 0x020817, alpha: 0.3 + frame.pulse * 0.06 });
     traceSilhouette(interiorMask, frame.silhouette);
     traceSilhouette(glassMask, frame.silhouette);
-
-    const { x: coreX, y: coreY } = frame.corePosition;
     core.position.set(coreX, coreY);
     core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035));
     bloom.alpha = 0.76 + frame.pulse * 0.24;
