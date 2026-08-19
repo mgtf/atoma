@@ -162,6 +162,33 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uCoreRadius', type: 'f32' },
 ] as const;
 
+/**
+ * Peak separation / displacement floors, in backdrop pixels. Authored against
+ * a header-sized texture (~70px). The arrival gate's backdrop is hundreds of
+ * pixels; a 3px ceiling there is a rounding error and the interior does not
+ * shear at all.
+ */
+const CHROMATIC_SPLIT_FLOOR_PX = 2.4;
+const REFRACTION_BEND_FLOOR_PX = 5.5;
+const REFRACTION_MAX_BEND_FLOOR_PX = 3;
+const CHROMATIC_SPLIT_FRACTION = 0.006;
+const REFRACTION_BEND_FRACTION = 0.022;
+const REFRACTION_MAX_BEND_FRACTION = 0.014;
+
+/** Bend/split/ceiling for a backdrop of `widthPx`. */
+export function refractionForBackdrop(widthPx: number): {
+  split: number;
+  bend: number;
+  maxBend: number;
+} {
+  const width = Math.max(0, widthPx);
+  return {
+    split: Math.max(CHROMATIC_SPLIT_FLOOR_PX, width * CHROMATIC_SPLIT_FRACTION),
+    bend: Math.max(REFRACTION_BEND_FLOOR_PX, width * REFRACTION_BEND_FRACTION),
+    maxBend: Math.max(REFRACTION_MAX_BEND_FLOOR_PX, width * REFRACTION_MAX_BEND_FRACTION),
+  };
+}
+
 /** Initial value per uniform, built fresh per shell so buffers are not shared. */
 const uniformValues: Record<
   (typeof MARK_SHELL_UNIFORMS)[number]['name'],
@@ -177,9 +204,9 @@ const uniformValues: Record<
   uWall: () => ATOMA_MARK_THICKNESS,
   uMinPath: () => ATOMA_MARK_MIN_PATH,
   uOpacityRef: () => ATOMA_MARK_OPACITY_REFERENCE,
-  uSplit: () => CHROMATIC_SPLIT_PX,
-  uBend: () => REFRACTION_BEND_PX,
-  uMaxBend: () => REFRACTION_MAX_BEND_PX,
+  uSplit: () => CHROMATIC_SPLIT_FLOOR_PX,
+  uBend: () => REFRACTION_BEND_FLOOR_PX,
+  uMaxBend: () => REFRACTION_MAX_BEND_FLOOR_PX,
   uRefract: () => 1,
   uRefractOn: () => 1,
   uSpecular: () => 2.6,
@@ -188,41 +215,6 @@ const uniformValues: Record<
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,
 };
-
-/**
- * Peak separation between the red and blue samples of the backdrop, in pixels
- * of that backdrop, at full dispersion and full obliquity.
- *
- * Small on purpose. Real chromatic separation through a wall this thin is a
- * fraction of a pixel; this is a STYLISED figure chosen to read at hero size
- * without turning the bead into three beads. The shell is a thin membrane
- * around mostly empty space, so a physically-derived offset would be invisible
- * and a large one would look like a broken video codec rather than like glass.
- */
-const CHROMATIC_SPLIT_PX = 2.4;
-
-/**
- * Peak displacement of the interior seen through a facet, in backdrop pixels,
- * at full obliquity and per unit of (IOR - 1).
- *
- * Stylised for the same reason as the split: a 0.1-unit wall genuinely displaces
- * a fraction of a pixel, which would be invisible. This is the figure at which
- * the shear across an oblique wedge reads at hero size without the bead sliding
- * far enough off its true position to look like a compositing bug.
- */
-const REFRACTION_BEND_PX = 5.5;
-
-/**
- * Hard ceiling on that displacement, in backdrop pixels.
- *
- * Not a taste control. The backdrop carries one texel per pixel, so a
- * displacement larger than a few of them makes neighbouring screen pixels
- * sample non-adjacent texels, and a grazing facet — where BULK saturates and
- * the raw bend runs away — breaks into a coloured checkerboard. The ceiling is
- * what the texture can resolve; lowering the gain instead only makes the
- * aliasing dimmer.
- */
-const REFRACTION_MAX_BEND_PX = 3;
 
 export interface MarkShell {
   /**
@@ -402,6 +394,9 @@ export function createMarkShell(): MarkShell | null {
     uPulse: number;
     uRefractOn: number;
     uBackdropTexel: Float32Array;
+    uSplit: number;
+    uBend: number;
+    uMaxBend: number;
   };
 
   const writeGroup = (
@@ -434,6 +429,10 @@ export function createMarkShell(): MarkShell | null {
       const texel = uniforms.uBackdropTexel;
       texel[0] = widthPx > 0 ? 1 / widthPx : 0;
       texel[1] = heightPx > 0 ? 1 / heightPx : 0;
+      const refraction = refractionForBackdrop(widthPx);
+      uniforms.uSplit = refraction.split;
+      uniforms.uBend = refraction.bend;
+      uniforms.uMaxBend = refraction.maxBend;
     },
     update(frame: AtomaMarkFrame) {
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {

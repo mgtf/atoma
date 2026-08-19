@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MARK_SHELL_ATTRIBUTES,
   MARK_SHELL_UNIFORMS,
+  refractionForBackdrop,
 } from '../src/viz/client-gl/renderer/mark-shell.js';
 import {
   MARK_SHELL_GLSL,
@@ -223,6 +224,19 @@ describe('mark shell shader contract', () => {
       expect(source, 'hollow-shell inner walls are air-to-glass, not TIR')
         .not.toContain('cosCrit');
     }
+  });
+
+  it('scales refraction with the backdrop so the hero actually bends', () => {
+    // The 3px ceiling was authored against a header-sized texture. The
+    // arrival gate's backdrop is hundreds of pixels; 3px there is a rounding
+    // error and the interior does not shear.
+    const header = refractionForBackdrop(70);
+    expect(header.maxBend).toBe(3);
+    expect(header.bend).toBe(5.5);
+    const hero = refractionForBackdrop(800);
+    expect(hero.maxBend).toBeGreaterThan(10);
+    expect(hero.bend).toBeGreaterThan(header.bend);
+    expect(hero.maxBend).toBeLessThan(hero.bend);
   });
 
   it('counts the interior once, not twice', () => {
