@@ -804,7 +804,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // bead's analytic light on outer facets — see below. Body and chromatic
     // split ride BOUNCE so they yield to the mirror at grazing; the highlight
     // and rim ARE that mirror.
-    let surface = vTint * body * (markUniforms.uAmbient + 0.86 * sun) *
+    let surface = vTint * body *
+        (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.86 * sun)) *
         mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
       windowHighlight +
@@ -1043,7 +1044,9 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * dispersion * outer;
 
     // Same split as the WGSL path; keep the two in step.
-    vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
+    vec3 surface = vTint * body *
+      (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.86 * sun)) *
+      mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
       windowHighlight +
       coreHighlight * (1.15 + 2.4 * tir) +

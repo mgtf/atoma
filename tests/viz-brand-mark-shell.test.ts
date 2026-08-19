@@ -174,6 +174,14 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('keeps the studio dark and the key warm against the cool window', () => {
+    // Two lights of the same white on a dark field collapse into a plastic
+    // fill. The key is tungsten, the window and rim are sky.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toMatch(/1\.0,\s*0\.94,\s*0\.84/);
+    }
+  });
+
   it('adds a specular-only studio window, never a diffuse fill', () => {
     // A body-lifting fill was tried and reverted: it buried the far facets
     // and the crystal read as solid. A second directional is allowed only as
