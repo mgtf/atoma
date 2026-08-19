@@ -251,13 +251,10 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/outer \* 0\.28/);
       expect(source).toContain('shadeNormal');
       expect(source).toContain('interiorPeak');
-      expect(source).toContain('litRaw');
       expect(source).toMatch(/vScreen\.y, 0\.02\) \* 2\.8/);
     }
     expect(MARK_SHELL_WGSL, 'WGSL let bindings cannot be reassigned')
       .not.toMatch(/let transmitted =[\s\S]{0,400}?transmitted = transmitted/);
-    expect(MARK_SHELL_WGSL, 'WGSL let bindings cannot be reassigned')
-      .not.toMatch(/let lit =[\s\S]{0,200}?lit = lit/);
   });
 
   it('counts the interior once, not twice', () => {

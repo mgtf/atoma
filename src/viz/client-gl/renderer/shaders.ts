@@ -862,17 +862,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       transmitted * markUniforms.uRefract,
       outer
     );
-    let litRaw = surface + interior;
-    // SHOULDER. SpecNorm times uSpecular still overshoots 1 on a diamond table
-    // the key sees, and an 8-bit target then paints a white rectangle (24k
-    // clipped pixels on frame 4 of the turn film, every one RGB 255). Compress
-    // only the excess; values below 0.9 are untouched, and the curve never
-    // crosses 1.
-    let litPeak = max(litRaw.x, max(litRaw.y, litRaw.z));
-    let knee = max(litPeak - 0.9, 0.0);
-    let compressed = 0.9 + 0.1 * (knee / (knee + 0.35));
-    let scale = select(1.0, compressed / max(litPeak, 1e-4), litPeak > 0.9);
-    let lit = litRaw * scale;
+    let lit = surface + interior;
     // The bead only NUDGES alpha. It crosses the cavity several times a second,
     // so whatever it adds here reads as flicker rather than as light; its
     // brightness belongs in LIT, where it lands on colour instead of density.
@@ -1105,12 +1095,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       split * 0.9 * bounce +
       vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
     vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
-    vec3 litRaw = surface + interior;
-    float litPeak = max(litRaw.x, max(litRaw.y, litRaw.z));
-    float knee = max(litPeak - 0.9, 0.0);
-    float compressed = 0.9 + 0.1 * (knee / (knee + 0.35));
-    float scale = litPeak > 0.9 ? compressed / max(litPeak, 1e-4) : 1.0;
-    vec3 lit = litRaw * scale;
+    vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
       mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
