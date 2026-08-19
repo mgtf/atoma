@@ -210,7 +210,7 @@ const uniformValues: Record<
   uRefract: () => 1,
   uRefractOn: () => 1,
   uSpecular: () => 2.7,
-  uRim: () => 1.15,
+  uRim: () => 1.4,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,

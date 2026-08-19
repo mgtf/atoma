@@ -843,7 +843,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       highlight * 0.9 +
       windowHighlight +
       coreHighlight * 1.15 +
-      fringe * 0.55 +
+      fringe * 0.32 +
       split * 0.9 * bounce +
       vec3<f32>(0.75, 0.88, 1.0) * (fresnel * markUniforms.uRim);
 
@@ -1091,7 +1091,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       highlight * 0.9 +
       windowHighlight +
       coreHighlight * 1.15 +
-      fringe * 0.55 +
+      fringe * 0.32 +
       split * 0.9 * bounce +
       vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
     vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
