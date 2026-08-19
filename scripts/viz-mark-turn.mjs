@@ -16,12 +16,15 @@
  * Frames land in `.atoma-mark-turn/` (gitignored) as `frame-0000.png` …
  * `frame-0060.png` plus `manifest.json`.
  */
-import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { spawn, execFile as execFileCb } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer';
+
+const execFile = promisify(execFileCb);
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -29,6 +32,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const TURN_MS = 15_000;
 export const STEP_MS = 250;
 export const FRAME_COUNT = Math.floor(TURN_MS / STEP_MS) + 1;
+/** Below this, the film is the aura on an empty field: the shell pipeline refused. */
+export const ALIVE_PEAK_MEAN_MIN = 40;
 
 const VIEW_WIDTH = 1280;
 const VIEW_HEIGHT = 800;
@@ -111,6 +116,29 @@ async function launchChrome() {
       headless: true,
       args: ['--no-sandbox', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
     });
+  }
+}
+
+async function assertFilmAlive(outDir) {
+  try {
+    const { stdout } = await execFile(
+      'python3',
+      [resolve(repoRoot, 'scripts/viz-mark-turn-analyze.py'), '--dir', outDir]
+    );
+    if (stdout) process.stdout.write(stdout);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      process.stdout.write('viz:mark-turn: python3 missing, skip alive check\n');
+      return;
+    }
+    throw error;
+  }
+  const analysis = JSON.parse(await readFile(resolve(outDir, 'analysis.json'), 'utf8'));
+  const peakMean = analysis.summary?.peak_mean;
+  if (!(peakMean > ALIVE_PEAK_MEAN_MIN)) {
+    throw new Error(
+      `mark looks dead (peak_mean=${peakMean}); the shell pipeline probably refused`
+    );
   }
 }
 
@@ -226,6 +254,7 @@ export async function captureMarkTurn(options = {}) {
     process.stdout.write(
       `viz:mark-turn wrote ${FRAME_COUNT} frames to ${outDir} (${backend})\n`
     );
+    await assertFilmAlive(outDir);
     return manifest;
   } finally {
     await browser.close();

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ATOMA_MARK_TURN_MS } from '../src/viz/client-gl/brand-mark.js';
-import { FRAME_COUNT, STEP_MS, TURN_MS, crystalClip, VIEW_HEIGHT, VIEW_WIDTH } from '../scripts/viz-mark-turn.mjs';
+import { FRAME_COUNT, STEP_MS, TURN_MS, ALIVE_PEAK_MEAN_MIN, crystalClip, VIEW_HEIGHT, VIEW_WIDTH } from '../scripts/viz-mark-turn.mjs';
 import { welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
 
 const script = readFileSync(
@@ -52,7 +52,11 @@ describe('viz mark-turn capture', () => {
     expect(gitignore).toContain('.atoma-mark-turn/');
   });
 
-  it('ships a pixel analyser for the film', () => {
-    expect(script).toContain('viz:mark-turn:analyze');
+  it('fails closed if the film is only the aura', () => {
+    // A WGSL let-reassignment refused the pipeline and every frame peaked at
+    // 22: the cyan halo, no crystal. Capture must notice.
+    expect(ALIVE_PEAK_MEAN_MIN).toBe(40);
+    expect(script).toContain('assertFilmAlive');
+    expect(script).toContain('peak_mean');
   });
 });
