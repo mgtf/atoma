@@ -126,6 +126,19 @@ describe('mark shell shader contract', () => {
     expect(MARK_SHELL_GLSL).toContain('* uRefractOn');
   });
 
+  it('bends the interior along Snell, not along the facet normal', () => {
+    // The small-angle stand-in `normal.xy * (IOR-1)` ignored the view, so two
+    // pixels on the same flat facet bent identically and the interior sheared
+    // as a rigid stamp. `refract` takes the incident ray; diamond's eta is
+    // what makes it bend further, so iorBend must not also scale the offset.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('refract(-viewDir');
+      expect(source).toContain('refracted.xy');
+      expect(source, 'the index must not scale the offset twice')
+        .not.toMatch(/refracted\.xy \* [^*]*iorBend/);
+    }
+  });
+
   it('covers the undistorted interior so refraction cannot ghost', () => {
     // Drawing the transmitted image at the bent UV only works if the facet
     // REPLACES what is behind it. Using 1 - attenuation * transmit as outer

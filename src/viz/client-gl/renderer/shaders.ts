@@ -720,10 +720,13 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // dispersion, so obsidian refracted nothing at all, which is wrong for a
     // material with an ordinary index.
     //
-    // Snell's law for a ray leaving a tilted surface reduces, at these small
-    // angles, to a displacement along the surface's screen-space tilt scaled by
-    // how far the index departs from air. IORBEND is that departure; the sine
-    // of the incidence angle is the tangential part of the normal.
+    // Snell's law, the real one. The small-angle stand-in was normal.xy *
+    // (IOR-1), which ignores the view: two pixels on the same flat facet
+    // bent identically, so the interior sheared as a rigid stamp. refract()
+    // takes the actual incident ray, so the displacement varies across a
+    // face the way a lens does, and diamond's eta is what makes it bend
+    // further than glass — iorBend must not also scale the offset or the
+    // index is counted twice.
     let backdropUv = vScreen;
     // CLAMPED in texel units. A grazing facet drives BULK to saturation and the
     // raw displacement past what the backdrop can resolve — the sampler then
@@ -751,7 +754,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // because none of those break a feedback path; only refusing to sample
     // during the pass does.
     let grazingFade = smoothstep(0.12, 0.42, nDotV) * markUniforms.uRefractOn;
-    let rawBend = normal.xy * markUniforms.uBend * iorBend *
+    let eta = 1.0 / max(iorBend + 1.0, 1.001);
+    let frontNormal = select(normal, -normal, dot(normal, viewDir) < 0.0);
+    let refracted = refract(-viewDir, frontNormal, eta);
+    let rawBend = refracted.xy * markUniforms.uBend *
       mix(0.35, 1.0, bulk) * outer * grazingFade;
     let bendLength = length(rawBend);
     let bend = select(
@@ -1018,7 +1024,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same texel clamp as the WGSL path; keep the two in step.
     // Same grazing fade as the WGSL path; keep the two in step.
     float grazingFade = smoothstep(0.12, 0.42, nDotV) * uRefractOn;
-    vec2 rawBend = normal.xy * uBend * iorBend * mix(0.35, 1.0, bulk) * outer * grazingFade;
+    float eta = 1.0 / max(iorBend + 1.0, 1.001);
+    vec3 frontNormal = dot(normal, viewDir) < 0.0 ? -normal : normal;
+    vec3 refracted = refract(-viewDir, frontNormal, eta);
+    vec2 rawBend = refracted.xy * uBend * mix(0.35, 1.0, bulk) * outer * grazingFade;
     float bendLength = length(rawBend);
     vec2 bend = bendLength > uMaxBend
       ? rawBend * uMaxBend / max(bendLength, 1e-4)
