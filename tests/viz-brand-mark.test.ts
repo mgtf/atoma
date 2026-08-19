@@ -150,6 +150,7 @@ describe('Atoma GPU brand mark', () => {
     expect(ATOMA_MARK_TURN_MS).toBe(15_000);
 
     const start = buildAtomaMarkFrame(0);
+    expect(start.yaw).toBeCloseTo(1.55, 5);
     const quarterTurn = buildAtomaMarkFrame(ATOMA_MARK_TURN_MS / 4);
     expect(quarterTurn.yaw - start.yaw).toBeCloseTo(Math.PI / 2, 9);
     // Constant rate: equal slices of time are equal slices of angle, so no

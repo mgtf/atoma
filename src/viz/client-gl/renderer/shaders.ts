@@ -819,6 +819,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // not merely fringed: the displacement is the transmitted image itself.
     let attenuation = exp(-absorption * path);
     let transmitted = straight.rgb * attenuation * transmit * bounce;
+    // The filament is authored at alpha 1, so a clear table copies 8-bit white
+    // into a disc. Compress only the excess; midtones of the interior stay put.
+    let interiorPeak = max(transmitted.x, max(transmitted.y, transmitted.z));
+    transmitted = transmitted *
+      (1.0 / (1.0 + max(interiorPeak - 0.82, 0.0) * 1.6));
 
     // The facet's OWN shading: body, wall scatter, highlights, edges. Body and
     // chromatic split ride BOUNCE so they yield to the mirror at grazing; the
@@ -1064,6 +1069,8 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same transmission as the WGSL path; keep the two in step.
     float attenuation = exp(-absorption * path);
     vec3 transmitted = straight.rgb * attenuation * transmit * bounce;
+    float interiorPeak = max(transmitted.x, max(transmitted.y, transmitted.z));
+    transmitted = transmitted * (1.0 / (1.0 + max(interiorPeak - 0.82, 0.0) * 1.6));
 
     // Same edge fringe as the WGSL path; keep the two in step.
     float fringeBand = 1.0 - fresnel;

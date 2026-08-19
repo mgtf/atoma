@@ -250,6 +250,7 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/vScreen\.y\) \* 0\.72/);
       expect(source).toMatch(/outer \* 0\.28/);
       expect(source).toContain('shadeNormal');
+      expect(source).toContain('interiorPeak');
     }
   });
 

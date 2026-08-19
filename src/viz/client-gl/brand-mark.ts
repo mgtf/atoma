@@ -467,8 +467,10 @@ function rotationRows(yaw: number, pitch: number, roll: number): [MarkVec3, Mark
   const sp = Math.sin(pitch);
   const cr = Math.cos(roll);
   const sr = Math.sin(roll);
-  // yaw about y, then pitch about x, then roll about z — the order the mark has
-  // always turned in, kept so the pose at t=0 is the pose it always had.
+  // yaw about y, then pitch about x, then roll about z. Rest yaw is 1.55, not
+  // the 0.42 the mark first shipped with: the 250 ms turn film showed that
+  // opening pose as a dead obsidian table, and 1.55 is the angle where a
+  // key-facing facet actually catches a glint.
   return [
     [cy * cr + sy * sp * sr, cp * sr, -sy * cr + cy * sp * sr],
     [-cy * sr + sy * sp * cr, cp * cr, sy * sr + cy * sp * cr],
@@ -551,7 +553,7 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
   // and nothing else: pitch, roll and scale are FIXED, so the silhouette stays
   // congruent with itself at every moment and only its aspect changes as the
   // octahedron presents a face, then an edge. Nothing here may flex.
-  const yaw = 0.42 + seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000);
+  const yaw = 1.55 + seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000);
   const pitch = -0.2;
   const roll = 0.08;
   const pulse = 0.5 + Math.sin(seconds * 3.35) * 0.5;
