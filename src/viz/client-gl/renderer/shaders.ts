@@ -858,7 +858,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +
-      vec3<f32>(0.75, 0.88, 1.0) * (fresnel * markUniforms.uRim);
+      // RIM is the grazing term only. Face-on Schlick is F0, which should
+      // reflect the near-black field, not a 0.20 white floor; that floor is
+      // why clip_px_max stayed at 8k after the key gain was pulled.
+      vec3<f32>(0.75, 0.88, 1.0) *
+        (pow(1.0 - nDotV, 5.0) * markUniforms.uRim);
 
     // CORE and TRANSMITTED are the SAME light counted two ways: CORE is the
     // bead computed analytically against this facet, TRANSMITTED is that same
@@ -1110,7 +1114,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +
-      vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
+      vec3(0.75, 0.88, 1.0) * (pow(1.0 - nDotV, 5.0) * uRim);
     vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
     vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.

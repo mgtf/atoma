@@ -256,6 +256,8 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/vScreen\.y, 0\.02\) \* 2\.8/);
       expect(source).toContain('tableLobe');
       expect(source).toMatch(/inPlane, inPlane\) \* 12\.0/);
+      expect(source).toMatch(/pow\(1\.0 - nDotV, 5\.0\) \* (markUniforms\.)?uRim/);
+      expect(source).not.toMatch(/fresnel \* (markUniforms\.)?uRim/);
     }
     expect(MARK_SHELL_WGSL, 'WGSL let bindings cannot be reassigned')
       .not.toMatch(/let transmitted =[\s\S]{0,400}?transmitted = transmitted/);
