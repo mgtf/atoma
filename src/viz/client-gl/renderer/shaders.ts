@@ -619,6 +619,22 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let specNorm = (specularPower + 2.0) / 51.0;
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * markUniforms.uSpecular * outer;
+    // STUDIO WINDOW. Specular only. A fill that lifts the body was tried and
+    // reverted: on a near-black field what reads as transparency is seeing
+    // the far facets through the near one, and any light that lifts the near
+    // facet's floor buries them. A highlight does not lift the floor. Aimed
+    // orthogonal to the key so the two catch different faces.
+    let windowDir = normalize(vec3<f32>(0.85, 0.35, 0.15));
+    let windowHalf = normalize(windowDir + viewDir);
+    let windowFacing = max(dot(normal, windowHalf), 0.0);
+    let windowNdotL = max(dot(normal, windowDir), 0.0);
+    let windowGeo = windowNdotL * nDotV /
+      max(windowNdotL + nDotV - windowNdotL * nDotV, 1e-4);
+    let windowSpecF = f0 + (1.0 - f0) *
+      pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
+    let windowHighlight = vec3<f32>(0.78, 0.88, 1.0) *
+      pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
+      markUniforms.uSpecular * outer * 0.22;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
     //
     // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
@@ -791,10 +807,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let surface = vTint * body * (markUniforms.uAmbient + 0.86 * sun) *
         mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
+      windowHighlight +
       coreHighlight * (1.15 + 2.4 * tir) +
       fringe * 0.55 +
       split * 0.9 * bounce +
-      vec3<f32>(fresnel * markUniforms.uRim);
+      vec3<f32>(0.75, 0.88, 1.0) * (fresnel * markUniforms.uRim);
 
     // CORE and TRANSMITTED are the SAME light counted two ways: CORE is the
     // bead computed analytically against this facet, TRANSMITTED is that same
@@ -958,6 +975,17 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float specNorm = (specularPower + 2.0) / 51.0;
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * uSpecular * outer;
+    vec3 windowDir = normalize(vec3(0.85, 0.35, 0.15));
+    vec3 windowHalf = normalize(windowDir + viewDir);
+    float windowFacing = max(dot(normal, windowHalf), 0.0);
+    float windowNdotL = max(dot(normal, windowDir), 0.0);
+    float windowGeo = windowNdotL * nDotV /
+      max(windowNdotL + nDotV - windowNdotL * nDotV, 1e-4);
+    float windowSpecF = f0 + (1.0 - f0) *
+      pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
+    vec3 windowHighlight = vec3(0.78, 0.88, 1.0) *
+      pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
+      uSpecular * outer * 0.22;
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
@@ -1017,10 +1045,11 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same split as the WGSL path; keep the two in step.
     vec3 surface = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
       highlight * 0.85 +
+      windowHighlight +
       coreHighlight * (1.15 + 2.4 * tir) +
       fringe * 0.55 +
       split * 0.9 * bounce +
-      vec3(fresnel * uRim);
+      vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
     vec3 interior = mix(uCoreTint * core * (1.0 + 0.65 * tir), transmitted * uRefract, outer);
     vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.

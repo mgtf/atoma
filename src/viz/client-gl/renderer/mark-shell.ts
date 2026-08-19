@@ -64,12 +64,14 @@ function unit(raw: [number, number, number]): [number, number, number] {
 }
 
 /**
- * The key, and the ONLY directional. A fill from the opposite side was tried
- * and reverted: on a near-black field what reads as transparency is not alpha
- * at all, it is seeing the far facets THROUGH the near one, and that is a
+ * The key, and the only DIFFUSE directional. A fill from the opposite side was
+ * tried and reverted: on a near-black field what reads as transparency is not
+ * alpha at all, it is seeing the far facets THROUGH the near one, and that is a
  * contrast between the two. Any light that lifts the near facet's floor buries
  * what is behind it, so the fill made the crystal read as solid — the brighter
  * it got, the more opaque it looked. On this mark, adding light SUBTRACTS glass.
+ * A second directional exists in the shader as a SPECULAR-ONLY window, aimed
+ * orthogonal to this key; a highlight does not lift the floor.
  */
 const LIGHT_DIRECTION = unit([-0.38, 0.72, 1.05]);
 

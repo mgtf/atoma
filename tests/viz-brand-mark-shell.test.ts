@@ -174,6 +174,20 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('adds a specular-only studio window, never a diffuse fill', () => {
+    // A body-lifting fill was tried and reverted: it buried the far facets
+    // and the crystal read as solid. A second directional is allowed only as
+    // a highlight, aimed off the key so the two catch different faces.
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('windowHighlight');
+      expect(source).toMatch(/vec3(<f32>)?\(0\.85,\s*0\.35,\s*0\.15\)/);
+      expect(source, 'the window must not add a Lambertian term')
+        .not.toMatch(/uAmbient \+ 0\.86 \* windowNdotL/);
+      expect(source, 'the rim is the cool sky, not a white edge')
+        .toMatch(/0\.75,\s*0\.88,\s*1\.0/);
+    }
+  });
+
   it('throws traveling glints off the cavity walls, with TIR on high-index glass', () => {
     // The bead is the only point light, so a specular term against it is a
     // spot that moves as the bead bounces. Outer facets see that light as
