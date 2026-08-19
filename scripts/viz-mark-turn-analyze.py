@@ -63,6 +63,7 @@ def analyse_frame(path: Path) -> dict[str, float | int | str]:
     for i, lum in enumerate(lums):
         if lum >= hot_floor and peak >= 40:
             hot.append((i % width, i // width))
+    clip = sum(1 for lum in lums if lum >= 254.0)
     return {
         "file": path.name,
         "peak": round(peak, 1),
@@ -71,6 +72,7 @@ def analyse_frame(path: Path) -> dict[str, float | int | str]:
         "mean_lit": round(sum(lit_lums) / len(lit_lums), 1),
         "mean_chroma": round(sum(lit_chroma) / len(lit_chroma), 1),
         "hot_px": len(hot),
+        "clip_px": clip,
         "hot_circularity": round(blob_circularity(hot), 3),
         "lit_px": len(lit),
     }
@@ -92,23 +94,26 @@ def main() -> int:
     rows = [analyse_frame(path) for path in frames]
     print(
         f"{'file':<16} {'peak':>6} {'p50':>6} {'p95':>6} {'mean':>6} "
-        f"{'chroma':>7} {'hot':>6} {'circ':>6}"
+        f"{'chroma':>7} {'hot':>6} {'clip':>6} {'circ':>6}"
     )
     for row in rows:
         print(
             f"{row['file']:<16} {row['peak']:6.1f} {row['p50']:6.1f} {row['p95']:6.1f} "
             f"{row['mean_lit']:6.1f} {row['mean_chroma']:7.1f} {row['hot_px']:6d} "
-            f"{row['hot_circularity']:6.3f}"
+            f"{row['clip_px']:6d} {row['hot_circularity']:6.3f}"
         )
     peaks = [row["peak"] for row in rows]
     circs = [row["hot_circularity"] for row in rows if row["hot_px"] >= 8]
     chromas = [row["mean_chroma"] for row in rows]
+    clips = [row["clip_px"] for row in rows]
     summary = {
         "frames": len(rows),
         "peak_min": min(peaks),
         "peak_max": max(peaks),
         "peak_mean": round(sum(peaks) / len(peaks), 1),
         "chroma_mean": round(sum(chromas) / len(chromas), 1),
+        "clip_frames": sum(1 for c in clips if c > 0),
+        "clip_px_max": max(clips),
         "hot_circularity_mean": round(sum(circs) / len(circs), 3) if circs else 0,
     }
     print("---")

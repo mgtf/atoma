@@ -595,8 +595,16 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       transmit * mix(1.0, 0.45, bulk);
 
     let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
+    // CONVEXITY. A perfectly flat facet has constant N, so a directional key
+    // that faces it glazes the whole triangle (the turn film clipped 45k
+    // pixels on one white face). A real table is never that planar. Pulling
+    // N a little toward the local screen centre is a cut, not a bump map, and
+    // it is used ONLY for the highlights — Lambert, path and refraction keep
+    // the true face so the solid stays faceted.
+    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.18) * 0.9;
+    let shadeNormal = normalize(normal + convex);
     let half = normalize(markUniforms.uLightDir + viewDir);
-    let facing = max(dot(normal, half), 0.0);
+    let facing = max(dot(shadeNormal, half), 0.0);
     // FIRE. The same highlight raised to three exponents: a tighter exponent is
     // a smaller spot, so blue collapses into the core while red keeps a wide
     // skirt — the order a prism throws. Dispersion is how far a material is
@@ -629,7 +637,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // orthogonal to the key so the two catch different faces.
     let windowDir = normalize(vec3<f32>(0.85, 0.35, 0.15));
     let windowHalf = normalize(windowDir + viewDir);
-    let windowFacing = max(dot(normal, windowHalf), 0.0);
+    let windowFacing = max(dot(shadeNormal, windowHalf), 0.0);
     let windowNdotL = max(dot(normal, windowDir), 0.0);
     let windowGeo = windowNdotL * nDotV /
       max(windowNdotL + nDotV - windowNdotL * nDotV, 1e-4);
@@ -983,8 +991,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
+    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.18) * 0.9;
+    vec3 shadeNormal = normalize(normal + convex);
     vec3 halfVector = normalize(uLightDir + viewDir);
-    float facing = max(dot(normal, halfVector), 0.0);
+    float facing = max(dot(shadeNormal, halfVector), 0.0);
     vec3 spectral = vec3(
       pow(facing, specularPower * 0.68),
       pow(facing, specularPower),
@@ -997,7 +1007,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       specF * geo * specNorm * uSpecular * outer;
     vec3 windowDir = normalize(vec3(0.85, 0.35, 0.15));
     vec3 windowHalf = normalize(windowDir + viewDir);
-    float windowFacing = max(dot(normal, windowHalf), 0.0);
+    float windowFacing = max(dot(shadeNormal, windowHalf), 0.0);
     float windowNdotL = max(dot(normal, windowDir), 0.0);
     float windowGeo = windowNdotL * nDotV /
       max(windowNdotL + nDotV - windowNdotL * nDotV, 1e-4);
