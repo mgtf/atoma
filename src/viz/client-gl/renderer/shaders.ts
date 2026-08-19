@@ -596,16 +596,12 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
 
     let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
     // CONVEXITY. A perfectly flat facet has constant N, so a directional key
-    // that faces it glazes the whole triangle. Screen-centre convexity failed
-    // here: on an off-centre table the cut is almost the same at every pixel,
-    // and the turn film still clipped a 163x206 RGB-255 patch. The octahedron
-    // face already has a centroid (the foot of the perpendicular from the
-    // origin). Offsetting N by the in-plane vector from that centroid is a
-    // crown, the same on every face, and it is used ONLY for the highlights —
-    // Lambert, path and refraction keep the true face so the solid stays
-    // faceted.
-    let inPlane = vWorld - normal * dot(vWorld, normal);
-    let convex = inPlane * 0.5;
+    // that faces it glazes the whole triangle (the turn film clipped 45k
+    // pixels on one white face). A real table is never that planar. Pulling
+    // N a little toward the local screen centre is a cut, not a bump map, and
+    // it is used ONLY for the highlights — Lambert, path and refraction keep
+    // the true face so the solid stays faceted.
+    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.02) * 2.8;
     let shadeNormal = normalize(normal + convex);
     let half = normalize(markUniforms.uLightDir + viewDir);
     let facing = max(dot(shadeNormal, half), 0.0);
@@ -1010,8 +1006,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
-    vec3 inPlane = vWorld - normal * dot(vWorld, normal);
-    vec3 convex = inPlane * 0.5;
+    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.02) * 2.8;
     vec3 shadeNormal = normalize(normal + convex);
     vec3 halfVector = normalize(uLightDir + viewDir);
     float facing = max(dot(shadeNormal, halfVector), 0.0);
