@@ -209,7 +209,9 @@ const uniformValues: Record<
   uMaxBend: () => REFRACTION_MAX_BEND_FLOOR_PX,
   uRefract: () => 1,
   uRefractOn: () => 1,
-  uSpecular: () => 2.7,
+  // 2.7 peaked the diamond key at ~1.7 on a face-on table; even a tight
+  // centroid lobe then clipped 8k pixels. 1.45 keeps fire without the glaze.
+  uSpecular: () => 1.45,
   uRim: () => 1.15,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
