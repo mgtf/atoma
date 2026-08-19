@@ -14,6 +14,7 @@ import {
   mixColor,
   type AtomaMarkPoint,
 } from '../brand-mark.js';
+import { markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
 import { GPU_COLORS } from '../theme.js';
@@ -390,10 +391,10 @@ export function attachAtomaMark(
   };
 
   const reducedMotion = prefersReducedMotion();
-  paint(reducedMotion ? 0 : performance.now());
+  paint(reducedMotion ? 0 : markElapsedMs());
   if (!reducedMotion) {
     addTicker(() => {
-      paint(performance.now());
+      paint(markElapsedMs());
     });
   }
   parent.addChild(container);

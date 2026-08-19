@@ -21,6 +21,7 @@ import type {
   VizRun,
 } from '../client/types.js';
 import { attachAtomaMark } from './renderer/atoma-mark.js';
+import { markElapsedMs, pinMarkElapsedMs } from './renderer/mark-clock.js';
 import {
   CAST_SHADOW_REACH_PX,
   type CastShadowSurface,
@@ -550,14 +551,20 @@ export class GpuRenderer {
     // still cached) are invisible to mocked tests and to the WebGL fallback,
     // so the only honest regression test drives the real renderer — and it
     // needs to reach the GC to force a collection instead of passing because
-    // nothing ever happened. Read-only by convention; nothing in the product
-    // reads it back.
+    // nothing ever happened. Read-only EXCEPT pinMarkElapsedMs, which the
+    // mark-turn capture script uses to step a rotation without waiting on the
+    // wall. Nothing in the product reads this handle back.
     if (
       typeof location !== 'undefined' &&
       new URLSearchParams(location.search).has('atomaDiag')
     ) {
       (window as unknown as { __ATOMA_GPU__?: unknown }).__ATOMA_GPU__ = {
         app: this.app,
+        // Capture script (`npm run viz:mark-turn`) steps a full crystal
+        // rotation at 250 ms without waiting on the wall. Null returns the
+        // clock to performance.now(). Inert unless this handle exists.
+        pinMarkElapsedMs,
+        markElapsedMs,
         pointerLightFilter: () => this.pointerLightFilter,
         // Where the controls are, and what the live tuning holds. A drag is
         // only observable on a real renderer — the mocked suite has no stage

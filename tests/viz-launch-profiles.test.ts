@@ -84,6 +84,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(pkg.scripts['viz:build:mui']).toMatch(/viz-build.*mui/);
     expect(pkg.scripts['viz:mui']).toMatch(/--ui mui/);
     expect(pkg.scripts['viz:smoke']).toMatch(/viz-gpu-smoke/);
+    expect(pkg.scripts['viz:mark-turn']).toMatch(/viz-mark-turn/);
     expect(pkg.scripts['viz:serve']).toBe('node dist/viz/server.js');
     expect(pkg.scripts['build']).toMatch(/viz:build/);
     expect(server).toMatch(/dist\/viz\/client|CLIENT_DIR/);
@@ -170,6 +171,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // contract this test exists to hold.
     expect(atomaMarkDraw).toMatch(/crystal\.scale\.set\(frame\.scale \* /);
     expect(atomaMarkDraw).toMatch(/buildAtomaMarkFrame\(/);
+    expect(atomaMarkDraw).toMatch(/markElapsedMs\(/);
+    expect(atomaMarkDraw).not.toMatch(/paint\(performance\.now\(\)\)/);
+    expect(gpuRenderer).toMatch(/pinMarkElapsedMs/);
     expect(gpuApp).not.toMatch(/AtomaCrystal/);
     expect(gpuApp).toMatch(/useEntryFade|EntryVeilLayer/);
     expect(gpuApp).toMatch(/beginEnter/);

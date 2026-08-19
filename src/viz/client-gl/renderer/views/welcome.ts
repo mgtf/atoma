@@ -3,6 +3,7 @@ import {
   ATOMA_MARK_LOCAL_CENTER,
   attachAtomaMark,
 } from '../atoma-mark.js';
+import { markClockIsPinned, markElapsedMs } from '../mark-clock.js';
 import { prefersReducedMotion } from '../motion.js';
 import { GPU_COLORS } from '../../theme.js';
 
@@ -73,7 +74,11 @@ export function drawWelcome(
   if (!prefersReducedMotion()) {
     ctx.addTicker(() => {
       if (mark.destroyed) return;
-      mark.y = baseY + Math.sin(performance.now() / FLOAT_PERIOD_MS) * FLOAT_AMPLITUDE_PX;
+      // A pinned clock is a capture stepping the TURN. Bobbing on top of
+      // that would mix two motions into every frame and make a 250 ms film
+      // unreadable as a rotation.
+      const elapsed = markClockIsPinned() ? 0 : markElapsedMs();
+      mark.y = baseY + Math.sin(elapsed / FLOAT_PERIOD_MS) * FLOAT_AMPLITUDE_PX;
     });
   }
   ctx.button(
