@@ -453,11 +453,23 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uCoreIntensity: f32,
     uAmbient: f32,
     uPulse: f32,
+    uWall: f32,
+    uMinPath: f32,
+    uOpacityRef: f32,
+    uSplit: f32,
+    uLocalSize: f32,
+    uBackdropTexel: vec2<f32>,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
   @group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
   @group(2) @binding(0) var<uniform> markUniforms: MarkUniforms;
+  // What is BEHIND this facet: the back half of the shell plus the bead, drawn
+  // into their own texture before the front half runs. Sampling it is the only
+  // way a facet can bend what it transmits, because nothing else in the pipeline
+  // knows what the interior looks like at this pixel.
+  @group(2) @binding(1) var uBackdrop: texture_2d<f32>;
+  @group(2) @binding(2) var uBackdropSampler: sampler;
 
   struct VertexInput {
     @location(0) aPosition: vec2<f32>,
@@ -465,6 +477,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(2) aNormal: vec3<f32>,
     @location(3) aTint: vec3<f32>,
     @location(4) aSurface: vec2<f32>,
+    @location(5) aMaterial: vec4<f32>,
+    @location(6) aFinish: vec3<f32>,
   }
 
   struct VertexOutput {
@@ -474,6 +488,12 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(2) vTint: vec3<f32>,
     @location(3) vSurface: vec2<f32>,
     @location(4) vColor: vec4<f32>,
+    @location(5) vMaterial: vec4<f32>,
+    @location(6) vFinish: vec3<f32>,
+    // Where this pixel lands in the backdrop texture, 0..1. Derived from the
+    // SAME clip position the rasteriser uses, so the sample cannot drift from
+    // the geometry it belongs to.
+    @location(7) vScreen: vec2<f32>,
   }
 
   @vertex
@@ -489,6 +509,13 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     out.vTint = input.aTint;
     out.vSurface = input.aSurface;
     out.vColor = localUniforms.uColor * globalUniforms.uWorldColorAlpha;
+    out.vMaterial = input.aMaterial;
+    out.vFinish = input.aFinish;
+    // The backdrop texture holds the mark's own 28x28 box and nothing else, so
+    // the sampling coord comes from the LOCAL position — not from clip space,
+    // which spans the whole viewport and would have every facet sampling an
+    // unrelated part of the screen.
+    out.vScreen = input.aPosition / markUniforms.uLocalSize;
     return out;
   }
 
@@ -499,9 +526,36 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(2) vTint: vec3<f32>,
     @location(3) vSurface: vec2<f32>,
     @location(4) vColor: vec4<f32>,
+    @location(5) vMaterial: vec4<f32>,
+    @location(6) vFinish: vec3<f32>,
+    @location(7) vScreen: vec2<f32>,
   ) -> @location(0) vec4<f32> {
     let normal = normalize(vNormal);
     let outer = vSurface.y;
+    // The glass this face is cut from: obsidian, glass, crystal or diamond, one
+    // per rank wedge. See ATOMA_MARK_RANK_MATERIALS for what each field means.
+    let specularPower = vMaterial.x;
+    let specularGain = vMaterial.y;
+    let fresnelGain = vMaterial.z;
+    let absorption = vMaterial.w;
+    let dispersion = vFinish.x;
+    let transmit = vFinish.y;
+    let body = vFinish.z;
+
+    // SOLID, not surfaced — but the two consequences of that are split on
+    // purpose. OPACITY is Beer-Lambert at the material's REFERENCE depth, so a
+    // wedge is exactly as dense as its own glass and stays that dense whichever
+    // way it turns. BULK is the EXTRA material a grazing ray crosses beyond
+    // that depth, and it is spent on COLOUR: obsidian goes black through the
+    // thick of the wedge while diamond stays clear through the same geometry.
+    // Alpha itself must not follow the live path. An octahedron facet swings
+    // from face-on to edge-on every turn, so a path-driven alpha made each of
+    // the four wedges breathe between clear and solid on the rotation — read as
+    // a pulsing opacity, which is not what a block of glass does.
+    let path = markUniforms.uWall / max(abs(normal.z), 0.16);
+    let opacity = (1.0 - exp(-absorption * markUniforms.uMinPath)) /
+      max(markUniforms.uOpacityRef, 1e-4);
+    let bulk = 1.0 - exp(-absorption * max(path - markUniforms.uMinPath, 0.0) * 0.35);
 
     let toCore = markUniforms.uCore - vWorld;
     let distance = length(toCore);
@@ -510,19 +564,100 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let falloff = reach * reach * (3.0 - 2.0 * reach);
     let incidence = max(dot(normal, coreDir), 0.0);
     let core = falloff * (0.34 + 0.66 * incidence) *
-      markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse);
+      markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse) *
+      transmit * mix(1.0, 0.45, bulk);
 
     let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
     let half = normalize(markUniforms.uLightDir + vec3<f32>(0.0, 0.0, 1.0));
-    let specular = pow(max(dot(normal, half), 0.0), 26.0) * outer;
+    let facing = max(dot(normal, half), 0.0);
+    // FIRE. The same highlight raised to three exponents: a tighter exponent is
+    // a smaller spot, so blue collapses into the core while red keeps a wide
+    // skirt — the order a prism throws. Dispersion is how far a material is
+    // allowed down that path; plain glass stays white.
+    let spectral = vec3<f32>(
+      pow(facing, specularPower * 0.68),
+      pow(facing, specularPower),
+      pow(facing, specularPower * 1.5)
+    );
+    let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
+      specularGain * outer;
     // Grazing facets keep more of the light: it is what reads as a glassy edge,
     // and it is also what keeps the silhouette crisp against a dark field.
     let fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
 
-    let lit = vTint * (markUniforms.uAmbient + 0.86 * sun) +
+    // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
+    // the ray leaves the glass most obliquely — the rim of the silhouette and
+    // every visible arete, never the middle of a face. FRESNEL already measures
+    // exactly that obliquity, so the fringe rides it rather than introducing a
+    // second, disagreeing notion of grazing.
+    //
+    // The three channels peak at three different obliquities: red turns least
+    // and so peaks a little inside the edge, blue turns most and hugs it. The
+    // result sweeps red-through-violet across the last few pixels of a facet.
+    // Width and strength are DISPERSION's alone, so obsidian gets nothing,
+    // plain glass a hint of warmth, and diamond a full spectrum.
+    let fringeBand = 1.0 - fresnel;
+    let fringe = vec3<f32>(
+      exp(-fringeBand * fringeBand * 42.0),
+      exp(-fringeBand * fringeBand * 78.0),
+      exp(-fringeBand * fringeBand * 130.0)
+    ) * dispersion * outer;
+
+    // CHROMATIC TRANSMISSION. The interior seen THROUGH this facet, sampled once
+    // per channel along the refraction direction. Offset scales with three
+    // things and each is load-bearing: DISPERSION, so obsidian bends nothing and
+    // diamond bends most; BULK, so the deeper the ray goes through the wedge the
+    // further the channels drift apart, which is what ties the effect to the
+    // volume rather than to the surface; and OUTER, so only the hull refracts —
+    // the cavity walls are already behind the bead and must not smear it twice.
+    //
+    // The direction is the facet normal's screen-space tilt. A ray leaving an
+    // oblique facet is displaced along the way the surface leans, so a facet
+    // presenting flat displaces nothing however dispersive its glass.
+    let bend = normal.xy * markUniforms.uSplit * dispersion *
+      mix(0.35, 1.0, bulk) * outer;
+    let backdropUv = vScreen;
+    let offset = bend * markUniforms.uBackdropTexel;
+    let straight = textureSample(uBackdrop, uBackdropSampler, backdropUv);
+    let shiftR = textureSample(uBackdrop, uBackdropSampler, backdropUv + offset).r;
+    let shiftB = textureSample(uBackdrop, uBackdropSampler, backdropUv - offset).b;
+    // What refraction ADDS is the difference between the displaced sample and
+    // the undisplaced one, PER CHANNEL — red against red, blue against blue.
+    //
+    // Subtracting the green channel from all three instead, as this first did,
+    // is not a colour difference at all: it zeroes green by construction and
+    // leaves red and blue carrying absolute brightness, so every lit part of the
+    // interior gained flat magenta whether or not anything was displaced. The
+    // rank hues did not survive it.
+    //
+    // Where the offset is zero — a facet presenting flat, or obsidian, which
+    // bends nothing — the two samples are the same texel and this is exactly
+    // zero. That is the property worth having: the effect cannot tint anything
+    // it did not actually displace.
+    let split = clamp(
+      vec3<f32>(shiftR - straight.r, 0.0, shiftB - straight.b),
+      vec3<f32>(-0.25),
+      vec3<f32>(0.25)
+    ) * transmit;
+
+    let lit = vTint * body * (markUniforms.uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
       markUniforms.uCoreTint * core +
-      vec3<f32>(specular * 0.85);
-    let alpha = clamp(vSurface.x + fresnel * 0.24 * outer + core * 0.2, 0.0, 1.0);
+      highlight * 0.85 +
+      fringe * 0.55 +
+      split * 0.9 +
+      vec3<f32>(fresnel * fresnelGain * 0.35);
+    // The bead only NUDGES alpha. It crosses the cavity several times a second,
+    // so whatever it adds here reads as flicker rather than as light; its
+    // brightness belongs in LIT, where it lands on colour instead of density.
+    // Fresnel is scaled DOWN into alpha. At full weight diamond's edges alone
+    // moved alpha by half, and a facet goes from face-on to edge-on every turn:
+    // that is a density swing wearing the costume of an edge highlight. It keeps
+    // its full weight in LIT, where it belongs.
+    let alpha = clamp(
+      vSurface.x * opacity + fresnel * fresnelGain * outer * 0.35 + core * 0.1,
+      0.0,
+      1.0
+    );
     return vec4<f32>(lit * alpha, alpha) * vColor;
   }
 `;
@@ -533,18 +668,24 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
   in vec3 aNormal;
   in vec3 aTint;
   in vec2 aSurface;
+  in vec4 aMaterial;
+  in vec3 aFinish;
 
   uniform mat3 uProjectionMatrix;
   uniform mat3 uWorldTransformMatrix;
   uniform mat3 uTransformMatrix;
   uniform vec4 uColor;
   uniform vec4 uWorldColorAlpha;
+  uniform float uLocalSize;
 
   out vec3 vWorld;
   out vec3 vNormal;
   out vec3 vTint;
   out vec2 vSurface;
   out vec4 vColor;
+  out vec4 vMaterial;
+  out vec3 vFinish;
+  out vec2 vScreen;
 
   void main() {
     mat3 matrix = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
@@ -554,6 +695,9 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
     vTint = aTint;
     vSurface = aSurface;
     vColor = uColor * uWorldColorAlpha;
+    vMaterial = aMaterial;
+    vFinish = aFinish;
+    vScreen = aPosition / uLocalSize;
   }
 `;
 
@@ -565,7 +709,12 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   in vec3 vTint;
   in vec2 vSurface;
   in vec4 vColor;
+  in vec4 vMaterial;
+  in vec3 vFinish;
+  in vec2 vScreen;
   out vec4 finalColor;
+
+  uniform sampler2D uBackdrop;
 
   uniform vec3 uCore;
   uniform vec3 uLightDir;
@@ -574,10 +723,30 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform float uCoreIntensity;
   uniform float uAmbient;
   uniform float uPulse;
+  uniform float uWall;
+  uniform float uMinPath;
+  uniform float uOpacityRef;
+  uniform float uSplit;
+  uniform float uLocalSize;
+  uniform vec2 uBackdropTexel;
 
   void main() {
     vec3 normal = normalize(vNormal);
     float outer = vSurface.y;
+    // Same four glasses as the WGSL path; keep the two in step.
+    float specularPower = vMaterial.x;
+    float specularGain = vMaterial.y;
+    float fresnelGain = vMaterial.z;
+    float absorption = vMaterial.w;
+    float dispersion = vFinish.x;
+    float transmit = vFinish.y;
+    float body = vFinish.z;
+
+    // Same volume model as the WGSL path; keep the two in step. Opacity at the
+    // material's reference depth, bulk for the extra length a grazing ray takes.
+    float path = uWall / max(abs(normal.z), 0.16);
+    float opacity = (1.0 - exp(-absorption * uMinPath)) / max(uOpacityRef, 1e-4);
+    float bulk = 1.0 - exp(-absorption * max(path - uMinPath, 0.0) * 0.35);
 
     vec3 toCore = uCore - vWorld;
     float dist = length(toCore);
@@ -586,17 +755,51 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float falloff = reach * reach * (3.0 - 2.0 * reach);
     float incidence = max(dot(normal, coreDir), 0.0);
     float core = falloff * (0.34 + 0.66 * incidence) *
-      uCoreIntensity * (0.86 + 0.14 * uPulse);
+      uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
     vec3 halfVector = normalize(uLightDir + vec3(0.0, 0.0, 1.0));
-    float specular = pow(max(dot(normal, halfVector), 0.0), 26.0) * outer;
+    float facing = max(dot(normal, halfVector), 0.0);
+    vec3 spectral = vec3(
+      pow(facing, specularPower * 0.68),
+      pow(facing, specularPower),
+      pow(facing, specularPower * 1.5)
+    );
+    vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
+      specularGain * outer;
     float fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
 
-    vec3 lit = vTint * (uAmbient + 0.86 * sun) +
+    // Same chromatic transmission as the WGSL path; keep the two in step.
+    vec2 bend = normal.xy * uSplit * dispersion * mix(0.35, 1.0, bulk) * outer;
+    vec2 offset = bend * uBackdropTexel;
+    vec4 straight = texture(uBackdrop, vScreen);
+    float shiftR = texture(uBackdrop, vScreen + offset).r;
+    float shiftB = texture(uBackdrop, vScreen - offset).b;
+    vec3 split = clamp(
+      vec3(shiftR - straight.r, 0.0, shiftB - straight.b),
+      -0.25,
+      0.25
+    ) * transmit;
+
+    // Same edge fringe as the WGSL path; keep the two in step.
+    float fringeBand = 1.0 - fresnel;
+    vec3 fringe = vec3(
+      exp(-fringeBand * fringeBand * 42.0),
+      exp(-fringeBand * fringeBand * 78.0),
+      exp(-fringeBand * fringeBand * 130.0)
+    ) * dispersion * outer;
+
+    vec3 lit = vTint * body * (uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
       uCoreTint * core +
-      vec3(specular * 0.85);
-    float alpha = clamp(vSurface.x + fresnel * 0.24 * outer + core * 0.2, 0.0, 1.0);
+      highlight * 0.85 +
+      fringe * 0.55 +
+      split * 0.9 +
+      vec3(fresnel * fresnelGain * 0.35);
+    float alpha = clamp(
+      vSurface.x * opacity + fresnel * fresnelGain * outer * 0.35 + core * 0.1,
+      0.0,
+      1.0
+    );
     finalColor = vec4(lit * alpha, alpha) * vColor;
   }
 `;

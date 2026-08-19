@@ -1,12 +1,18 @@
-import { Buffer, BufferUsage, Geometry, Mesh, Shader } from 'pixi.js';
+import { Buffer, BufferUsage, Geometry, Mesh, Shader, Texture } from 'pixi.js';
 
 /** A mesh with our own geometry and program, not Pixi's textured default. */
 type ShellMesh = Mesh<Geometry, Shader>;
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_MESH,
+  ATOMA_MARK_LOCAL_SIZE,
+  ATOMA_MARK_MIN_PATH,
+  ATOMA_MARK_OPACITY_REFERENCE,
   ATOMA_MARK_PROJECTION_SCALE,
+  ATOMA_MARK_THICKNESS,
   markColorForOctant,
+  markFacetNearness,
+  markMaterialForOctant,
   type AtomaMarkFrame,
 } from '../brand-mark.js';
 import {
@@ -20,34 +26,154 @@ const VERTEX_COUNT = FACET_COUNT * 3;
 const INDEX_COUNT = VERTEX_COUNT;
 
 /**
- * How opaque a facet is, by the role it plays in THIS frame rather than by
- * which hull it belongs to. Everything behind the bead is the interior the light
- * lands on and stays fairly solid; everything in front of it is the glass the
- * light is seen through. Swap them and the bead is a sticker again.
+ * How opaque a facet is, by WHICH HULL it belongs to and nothing else.
+ *
+ * This used to be a two-value choice keyed on the facet's position — first
+ * against the bead, then against its own depth — and both spellings are a pulse
+ * on a solid that TURNS: every facet takes both roles once per revolution, so
+ * whatever gap sits between the two values is a swing between clear and opaque
+ * that the eye reads as the crystal breathing. Density is a property of the
+ * glass, so it is settled by the material (see the shell shader's opacity) and
+ * these two only say how much of the wall is wall and how much is cavity.
  */
-const ALPHA_BEHIND_CORE = 0.88;
-const ALPHA_IN_FRONT_OF_CORE = 0.52;
+const ALPHA_OUTER = 0.44;
+const ALPHA_INNER = 0.86;
 
 /**
- * How much of its own colour a facet keeps by role. The far side is the INTERIOR
- * of a dark crystal: leave it at full tint and every near facet composites with
- * a complementary hue behind it, which averages to grey — the mark loses the
- * rank colours exactly where it has the most of them. Dark behind, saturated in
- * front, and the bead's light is what brings the interior back up.
+ * How much of its own colour a facet keeps, on the depth ramp. The far side is
+ * the INTERIOR of a dark crystal: leave it at full tint and every near facet
+ * composites with a complementary hue behind it, which averages to grey — the
+ * mark loses the rank colours exactly where it has the most of them. Dark
+ * behind, saturated in front, and the bead's light brings the interior back up.
+ *
+ * Depth is allowed to move COLOUR because a face that darkens as it swings away
+ * reads as shading, which is what a turning solid does. It is not allowed to
+ * move alpha, which reads as the material changing.
  */
-const SHADE_BEHIND_CORE = 0.4;
-const SHADE_IN_FRONT_OF_CORE = 1;
+const SHADE_FAR = 0.72;
+const SHADE_NEAR = 1;
 
 /** Model-space reach of the bead's light, converted from its projected radius. */
 const CORE_REACH_MODEL = ATOMA_MARK_CORE_LIGHT_RADIUS / ATOMA_MARK_PROJECTION_SCALE;
 
-const LIGHT_DIRECTION = ((): [number, number, number] => {
-  const raw: [number, number, number] = [-0.38, 0.72, 1.05];
+function unit(raw: [number, number, number]): [number, number, number] {
   const length = Math.hypot(...raw);
   return [raw[0] / length, raw[1] / length, raw[2] / length];
-})();
+}
+
+/**
+ * The key, and the ONLY directional. A fill from the opposite side was tried
+ * and reverted: on a near-black field what reads as transparency is not alpha
+ * at all, it is seeing the far facets THROUGH the near one, and that is a
+ * contrast between the two. Any light that lifts the near facet's floor buries
+ * what is behind it, so the fill made the crystal read as solid — the brighter
+ * it got, the more opaque it looked. On this mark, adding light SUBTRACTS glass.
+ */
+const LIGHT_DIRECTION = unit([-0.38, 0.72, 1.05]);
+
+/**
+ * The vertex attributes the shell's geometry supplies, by name and format.
+ *
+ * Pixi binds attributes BY NAME against whatever each shader declares, and the
+ * two backends disagree about what a mismatch costs: WebGL logs a warning and
+ * draws with the attribute missing, while WebGPU refuses the pipeline outright
+ * and the mark stops rendering entirely. Neither failure is visible to the
+ * headless view tests, which never build a shader — so the list is declared
+ * ONCE here, the geometry is built from it, and `viz-brand-mark-shell` holds
+ * both shader sources to it without needing a GPU.
+ */
+export const MARK_SHELL_ATTRIBUTES = [
+  { name: 'aPosition', format: 'float32x2' },
+  { name: 'aWorld', format: 'float32x3' },
+  { name: 'aNormal', format: 'float32x3' },
+  { name: 'aTint', format: 'float32x3' },
+  { name: 'aSurface', format: 'float32x2' },
+  { name: 'aMaterial', format: 'float32x4' },
+  { name: 'aFinish', format: 'float32x3' },
+] as const;
+
+/**
+ * The shell's uniform block: every member, IN ORDER, with its WGSL type.
+ *
+ * The order is load-bearing and its violation is silent. Pixi lays the WebGPU
+ * uniform buffer out from THIS list alone (`createUboElementsWGSL` walks the
+ * declaration order applying std140 alignment) and never reads the hand-written
+ * MarkUniforms struct in the shader — so if the two orders disagree, every
+ * member past the first difference reads its neighbour's bytes. WebGL is immune:
+ * it binds uniforms by name, one at a time, and does not care about order at all.
+ *
+ * That asymmetry already cost a whole debugging session. uPulse sat last here
+ * and fourth-from-last in the struct, so uOpacityRef — the DENOMINATOR of every
+ * facet's opacity — was served the pulse sine instead. It crosses zero, the
+ * max(x, 1e-4) guard turned that into a multiply by ten thousand, and the four
+ * wedges swung between clear and fully opaque every 1.9 seconds. On WebGPU only.
+ * Every fix aimed at the shading was aimed at the wrong thing.
+ *
+ * `viz-brand-mark-shell` holds this list, the WGSL struct and the GLSL uniforms
+ * to the same order and the same types, without needing a GPU.
+ */
+export const MARK_SHELL_UNIFORMS = [
+  { name: 'uCore', type: 'vec3<f32>' },
+  { name: 'uLightDir', type: 'vec3<f32>' },
+  { name: 'uCoreTint', type: 'vec3<f32>' },
+  { name: 'uCoreReach', type: 'f32' },
+  { name: 'uCoreIntensity', type: 'f32' },
+  { name: 'uAmbient', type: 'f32' },
+  { name: 'uPulse', type: 'f32' },
+  // The volume the four glasses are made OF: the wall's own depth, the shortest
+  // path any facet can present, and plain glass's opacity over that path — the
+  // reference every material is read against.
+  { name: 'uWall', type: 'f32' },
+  { name: 'uMinPath', type: 'f32' },
+  { name: 'uOpacityRef', type: 'f32' },
+  // CHROMATIC TRANSMISSION. How far apart the three channels are pulled when
+  // sampling what lies behind a facet, and the size of one texel step in the
+  // backdrop texture, so the offset is expressed in pixels rather than in a
+  // unit that changes with the mark's scale.
+  { name: 'uSplit', type: 'f32' },
+  { name: 'uLocalSize', type: 'f32' },
+  { name: 'uBackdropTexel', type: 'vec2<f32>' },
+] as const;
+
+/** Initial value per uniform, built fresh per shell so buffers are not shared. */
+const uniformValues: Record<
+  (typeof MARK_SHELL_UNIFORMS)[number]['name'],
+  () => Float32Array | number
+> = {
+  uCore: () => new Float32Array(3),
+  uLightDir: () => new Float32Array(LIGHT_DIRECTION),
+  uCoreTint: () => new Float32Array([0.87, 0.945, 1]),
+  uCoreReach: () => CORE_REACH_MODEL,
+  uCoreIntensity: () => 0.68,
+  uAmbient: () => 0.34,
+  uPulse: () => 0,
+  uWall: () => ATOMA_MARK_THICKNESS,
+  uMinPath: () => ATOMA_MARK_MIN_PATH,
+  uOpacityRef: () => ATOMA_MARK_OPACITY_REFERENCE,
+  uSplit: () => CHROMATIC_SPLIT_PX,
+  uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
+  uBackdropTexel: () => new Float32Array([0, 0]),
+};
+
+/**
+ * Peak separation between the red and blue samples of the backdrop, in pixels
+ * of that backdrop, at full dispersion and full obliquity.
+ *
+ * Small on purpose. Real chromatic separation through a wall this thin is a
+ * fraction of a pixel; this is a STYLISED figure chosen to read at hero size
+ * without turning the bead into three beads. The shell is a thin membrane
+ * around mostly empty space, so a physically-derived offset would be invisible
+ * and a large one would look like a broken video codec rather than like glass.
+ */
+const CHROMATIC_SPLIT_PX = 2.4;
 
 export interface MarkShell {
+  /**
+   * Hands the FRONT half the texture holding everything drawn behind it, plus
+   * the size of one of its texels. Called once per resize, not per frame: the
+   * texture object is stable, only its contents change.
+   */
+  setBackdrop(texture: Texture, widthPx: number, heightPx: number): void;
   /** Facets behind the bead. Added to the scene BEFORE it. */
   back: ShellMesh;
   /** Facets in front of the bead: the glass it is seen through. */
@@ -83,6 +209,10 @@ export function createMarkShell(): MarkShell | null {
   const normals = new Float32Array(VERTEX_COUNT * 3);
   const tints = new Float32Array(VERTEX_COUNT * 3);
   const surfaces = new Float32Array(VERTEX_COUNT * 2);
+  // The four glasses. Written ONCE: a rank's material is a property of the
+  // crystal, not of the frame, so these buffers are never touched again.
+  const materials = new Float32Array(VERTEX_COUNT * 4);
+  const finishes = new Float32Array(VERTEX_COUNT * 3);
 
   // The outer/inner flag never changes; rank colour is fixed per facet but its
   // SHADE follows the facet's role in the current frame, so it is written with
@@ -90,9 +220,23 @@ export function createMarkShell(): MarkShell | null {
   const rankTints = ATOMA_MARK_MESH.facets.map((facet) =>
     channels(markColorForOctant(facet.octant)));
   for (const facet of ATOMA_MARK_MESH.facets) {
+    const material = markMaterialForOctant(facet.octant);
     for (let corner = 0; corner < 3; corner += 1) {
       const vertex = facet.triangle * 3 + corner;
       surfaces[vertex * 2 + 1] = facet.part === 'outer' ? 1 : 0;
+      materials.set(
+        [
+          material.specularPower,
+          material.specularGain,
+          material.fresnelGain,
+          material.absorption,
+        ],
+        vertex * 4
+      );
+      finishes.set(
+        [material.dispersion, material.transmit, material.body],
+        vertex * 3
+      );
     }
   }
 
@@ -116,14 +260,23 @@ export function createMarkShell(): MarkShell | null {
     data: surfaces,
     usage: BufferUsage.VERTEX | BufferUsage.COPY_DST,
   });
+  // Static, so no COPY_DST: nothing ever writes to these again.
+  const materialBuffer = new Buffer({ data: materials, usage: BufferUsage.VERTEX });
+  const finishBuffer = new Buffer({ data: finishes, usage: BufferUsage.VERTEX });
 
-  const attributes = {
-    aPosition: { buffer: positionBuffer, format: 'float32x2' },
-    aWorld: { buffer: worldBuffer, format: 'float32x3' },
-    aNormal: { buffer: normalBuffer, format: 'float32x3' },
-    aTint: { buffer: tintBuffer, format: 'float32x3' },
-    aSurface: { buffer: surfaceBuffer, format: 'float32x2' },
-  } as const;
+  const buffers: Record<string, Buffer> = {
+    aPosition: positionBuffer,
+    aWorld: worldBuffer,
+    aNormal: normalBuffer,
+    aTint: tintBuffer,
+    aSurface: surfaceBuffer,
+    aMaterial: materialBuffer,
+    aFinish: finishBuffer,
+  };
+  const attributes = Object.fromEntries(MARK_SHELL_ATTRIBUTES.map(({ name, format }) => [
+    name,
+    { buffer: buffers[name]!, format },
+  ]));
 
   // Fixed-size index buffers, padded with DEGENERATE triangles: the draw count
   // is part of the geometry, so a shorter group has to rasterise nothing rather
@@ -157,17 +310,20 @@ export function createMarkShell(): MarkShell | null {
       fragment: { source: MARK_SHELL_WGSL, entryPoint: 'mainFragment' },
     },
     resources: {
-      markUniforms: {
-        uCore: { value: new Float32Array(3), type: 'vec3<f32>' },
-        uLightDir: { value: new Float32Array(LIGHT_DIRECTION), type: 'vec3<f32>' },
-        uCoreTint: { value: new Float32Array([0.87, 0.945, 1]), type: 'vec3<f32>' },
-        uCoreReach: { value: CORE_REACH_MODEL, type: 'f32' },
-        uCoreIntensity: { value: 0.68, type: 'f32' },
-        uAmbient: { value: 0.34, type: 'f32' },
-        uPulse: { value: 0, type: 'f32' },
-      },
+      markUniforms: Object.fromEntries(MARK_SHELL_UNIFORMS.map(({ name, type }) => [
+        name,
+        { value: uniformValues[name](), type },
+      ])),
     },
   });
+
+  // The backdrop starts EMPTY rather than absent. A resource that appears later
+  // would change the bind-group layout mid-life, which WebGPU refuses; a 1x1
+  // transparent texture keeps the layout fixed from the first draw, and a zero
+  // texel size makes every channel sample the same point until a real texture
+  // arrives — so the effect is inert, not wrong, before the first render pass.
+  shader.resources['uBackdrop'] = Texture.EMPTY.source;
+  shader.resources['uBackdropSampler'] = Texture.EMPTY.source.style;
 
   const back = new Mesh({ geometry: backGeometry, shader });
   back.label = 'mark-shell-back';
@@ -177,6 +333,7 @@ export function createMarkShell(): MarkShell | null {
   const uniforms = shader.resources['markUniforms'].uniforms as {
     uCore: Float32Array;
     uPulse: number;
+    uBackdropTexel: Float32Array;
   };
 
   const writeGroup = (
@@ -200,12 +357,19 @@ export function createMarkShell(): MarkShell | null {
   return {
     back,
     front,
+    setBackdrop(texture: Texture, widthPx: number, heightPx: number) {
+      shader.resources['uBackdrop'] = texture.source;
+      shader.resources['uBackdropSampler'] = texture.source.style;
+      const texel = uniforms.uBackdropTexel;
+      texel[0] = widthPx > 0 ? 1 / widthPx : 0;
+      texel[1] = heightPx > 0 ? 1 / heightPx : 0;
+    },
     update(frame: AtomaMarkFrame) {
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
         const shaded = frame.facets[index]!;
-        const behindCore = frame.order.indexOf(index) < frame.coreSplit;
-        const alpha = behindCore ? ALPHA_BEHIND_CORE : ALPHA_IN_FRONT_OF_CORE;
-        const shade = behindCore ? SHADE_BEHIND_CORE : SHADE_IN_FRONT_OF_CORE;
+        const near = markFacetNearness(shaded.centroid[2]);
+        const alpha = facet.part === 'outer' ? ALPHA_OUTER : ALPHA_INNER;
+        const shade = SHADE_FAR + (SHADE_NEAR - SHADE_FAR) * near;
         const rank = rankTints[index]!;
         for (const [corner, point] of facet.points.entries()) {
           const vertex = facet.triangle * 3 + corner;

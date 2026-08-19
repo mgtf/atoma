@@ -66,7 +66,8 @@ export function drawWelcome(
     (callback) => ctx.addTicker(callback),
     layout.markX,
     layout.markY,
-    layout.scale
+    layout.scale,
+    ctx.pixiRenderer
   );
   const baseY = layout.markY;
   if (!prefersReducedMotion()) {

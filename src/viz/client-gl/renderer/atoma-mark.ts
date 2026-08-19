@@ -1,13 +1,17 @@
-import { Container, Graphics, type Ticker } from 'pixi.js';
+import {
+  Container,
+  Graphics,
+  RenderTexture,
+  type Renderer,
+  type Ticker,
+} from 'pixi.js';
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
+  ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_CORE_RADIUS,
-  ATOMA_MARK_MESH,
   buildAtomaMarkFrame,
   coreLightFalloff,
-  markColorForOctant,
   mixColor,
-  type AtomaMarkFrame,
   type AtomaMarkPoint,
 } from '../brand-mark.js';
 import { createMarkShell } from './mark-shell.js';
@@ -61,18 +65,11 @@ const TRANSMITTED_POOL_STEPS = 140;
 const TRANSMITTED_POOL_PEAK_ALPHA = 0.15;
 
 /**
- * Edges. A shaded mesh alone reads as plastic: what makes a crystal a crystal is
- * that its facet boundaries catch light, and it is also the only thing that makes
- * the WALL legible — the outer outline and the cavity outline running a fraction
- * of the box apart is the thickness, and without a stroke on each it is two
- * antialiased colour changes nobody sees.
+ * No facet outlines. A stroke around each triangle reads as a wireframe — a
+ * border drawn ON the crystal rather than a property of the glass. The facet
+ * boundaries stay legible through shading alone: flat normals give each face
+ * its own tone, and the shader's specular and grazing terms catch the ridges.
  */
-const EDGE_WIDTH = 0.42;
-const EDGE_TO_WHITE = 0.62;
-const EDGE_ALPHA = 0.72;
-const CAVITY_EDGE_WIDTH = 0.26;
-const CAVITY_EDGE_ALPHA = 0.3;
-
 function smoothstep(t: number) {
   return t * t * (3 - 2 * t);
 }
@@ -192,34 +189,6 @@ function buildTransmittedPool(): Graphics {
 }
 
 /**
- * Facet outlines for the camera-facing half of each hull. Only that half: the
- * away-facing edges sit behind two translucent surfaces, and stroking them turns
- * the mark into a wireframe.
- */
-function paintEdges(edges: Graphics, frame: AtomaMarkFrame) {
-  edges.clear();
-  for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
-    const shaded = frame.facets[index]!;
-    // A cavity facet's normal points INTO the shell, so the near half of the
-    // cavity is the half whose normal faces away from the camera.
-    const outer = facet.part === 'outer';
-    if (outer ? shaded.normal[2] <= 0 : shaded.normal[2] >= 0) continue;
-    const corners = facet.points.map((point) => frame.projected[point]!);
-    const color = mixColor(markColorForOctant(facet.octant), 0xffffff, EDGE_TO_WHITE);
-    edges
-      .moveTo(corners[0]!.x, corners[0]!.y)
-      .lineTo(corners[1]!.x, corners[1]!.y)
-      .lineTo(corners[2]!.x, corners[2]!.y)
-      .closePath()
-      .stroke({
-        color,
-        width: outer ? EDGE_WIDTH : CAVITY_EDGE_WIDTH,
-        alpha: outer ? EDGE_ALPHA : CAVITY_EDGE_ALPHA,
-      });
-  }
-}
-
-/**
  * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
  * wordmark and the arrival gate — never a second R3F logo.
  *
@@ -235,7 +204,8 @@ export function attachAtomaMark(
   addTicker: (callback: (ticker: Ticker) => void) => void,
   x: number,
   y: number,
-  visualScale = ATOMA_MARK_HEADER_SCALE
+  visualScale = ATOMA_MARK_HEADER_SCALE,
+  renderer?: Renderer
 ): Container {
   const container = new Container();
   container.position.set(x, y);
@@ -264,9 +234,6 @@ export function attachAtomaMark(
   interior.addChild(core);
   const interiorMask = new Graphics();
 
-  const edges = new Graphics();
-  edges.label = 'mark-edges';
-
   const glassGlow = new Container();
   glassGlow.label = 'mark-glass-glow';
   const transmittedPool = buildTransmittedPool();
@@ -276,18 +243,94 @@ export function attachAtomaMark(
 
   interior.mask = interiorMask;
   glassGlow.mask = glassMask;
+  /**
+   * The interior, as its own subtree so it can be rendered TWICE: once into the
+   * backdrop texture the front glass refracts, and once into the scene where it
+   * composites normally. Grouping it is what makes the extra pass one call
+   * instead of a reshuffle of the display list every frame.
+   */
+  const behind = new Container();
+  behind.label = 'mark-behind-glass';
+  behind.addChild(shellBack, interior);
+
   crystal.addChild(
     aura,
     shadow,
-    shellBack,
-    interior,
+    behind,
     shellFront,
-    edges,
     glassGlow,
     interiorMask,
     glassMask
   );
   container.addChild(crystal);
+
+  /**
+   * The refraction pass. The front glass needs to know what is behind it at each
+   * pixel, and nothing else in the pipeline carries that — so the interior is
+   * drawn into a texture first, and the shell samples it three times per pixel.
+   *
+   * Sized from the mark's own box rather than the screen: the crystal occupies a
+   * fixed 28x28 local square, so a header mark at 1.24x needs a 35px texture
+   * while the arrival gate needs a few hundred. Sizing to the viewport would
+   * spend megabytes to refract a 35px logo.
+   *
+   * Skipped entirely without a renderer. The mark must keep working in the
+   * headless view tests and anywhere the caller has no renderer to lend, and
+   * the shell's own default — an empty texture with a zero texel size — makes
+   * the sampling inert rather than wrong when this never runs.
+   */
+  const backdropPass = ((): ((elapsedMs: number) => void) | null => {
+    if (!renderer || !shell) return null;
+    const resolution = renderer.resolution;
+    const sizePx = Math.max(
+      1,
+      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * visualScale * resolution)
+    );
+    /**
+     * TWO textures, alternating. WebGPU forbids a texture being bound for
+     * sampling and used as a render attachment inside the same synchronisation
+     * scope — and that is exactly what one texture would be here, since the
+     * shell samples the backdrop in the very frame it is written. It is not a
+     * warning: the command buffer is rejected and the mark stops drawing.
+     *
+     * So the shell always samples the texture written LAST frame while this
+     * frame renders into the other. The cost is a one-frame-old interior behind
+     * the glass, which at 60fps is 16ms of lag on a refraction — invisible, and
+     * the crystal turns once every 15 seconds.
+     */
+    const textures = [
+      RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
+      RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
+    ];
+    let writeIndex = 0;
+    shell.setBackdrop(textures[1]!, sizePx, sizePx);
+    /**
+     * `behind` ALONE is rendered, never the whole crystal.
+     *
+     * Rendering the crystal meant the aura and the drop shadow went into the
+     * texture as well — and, because the front glass composites its own sampled
+     * result back into the scene, the mark fed on its own output frame after
+     * frame. It built up as staircase artefacts and flat saturated colour, which
+     * is what a feedback loop looks like, not what a strong effect looks like.
+     * The subtree that must be in there is exactly the one the glass is in front
+     * of: the far facets and the bead.
+     */
+    const scale = ATOMA_MARK_LOCAL_SIZE > 0 ? sizePx / ATOMA_MARK_LOCAL_SIZE : 1;
+    return () => {
+      // Rendered in ISOLATION, so the transform maps the 28x28 local box onto
+      // the texture rather than onto wherever the mark sits on screen.
+      behind.position.set(0, 0);
+      behind.scale.set(scale);
+      const target = textures[writeIndex]!;
+      renderer.render({ container: behind, target, clear: true });
+      behind.position.set(0, 0);
+      behind.scale.set(1);
+      // Hand the shell what we just wrote; next frame writes to the other one,
+      // so nothing is ever sampled and rendered into at the same time.
+      shell.setBackdrop(target, sizePx, sizePx);
+      writeIndex = 1 - writeIndex;
+    };
+  })();
 
   const traceSilhouette = (
     graphics: Graphics,
@@ -317,7 +360,6 @@ export function attachAtomaMark(
       .fill({ color: 0x020817, alpha: 0.34 });
     traceSilhouette(interiorMask, frame.silhouette);
     traceSilhouette(glassMask, frame.silhouette);
-    paintEdges(edges, frame);
 
     const { x: coreX, y: coreY } = frame.corePosition;
     core.position.set(coreX, coreY);
@@ -331,6 +373,9 @@ export function attachAtomaMark(
     transmittedCore.position.set(coreX, coreY);
     transmittedCore.scale.set(frame.coreScale);
     transmittedCore.alpha = forward * (0.88 + frame.pulse * 0.12);
+    // Last, so the texture holds THIS frame's interior: the front glass is
+    // about to be drawn by the scene and will sample what we leave here.
+    backdropPass?.(elapsedMs);
   };
 
   const reducedMotion = prefersReducedMotion();

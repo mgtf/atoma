@@ -5,7 +5,13 @@ import {
   type MarkVec3,
 } from './mark-geometry.js';
 
-export const ATOMA_MARK_TURN_MS = 10_000;
+/**
+ * One full turn about the vertical axis. The crystal is a rigid solid: this is
+ * the ONLY thing time does to its pose, and a slow rate is the point — at a
+ * splash size a brisk turn reads as a spinning icon rather than as an object
+ * standing there being lit.
+ */
+export const ATOMA_MARK_TURN_MS = 15_000;
 
 /**
  * Bounce rate of the core bead, as three triangle-wave frequencies. Kept
@@ -37,8 +43,15 @@ export function coreLightFalloff(distance: number): number {
   return t * t * (3 - 2 * t);
 }
 
-export const ATOMA_MARK_CORE_RADIUS = 1.95;
-export const ATOMA_MARK_CORE_RADIUS_PULSE = 0.08;
+/**
+ * The bead, halved from the 1.95 it was authored at. Everything the bead emits
+ * is expressed as a MULTIPLE of this radius — its body gradient, its bloom, the
+ * hot centre the near glass transmits — so the whole light shrinks with it and
+ * only the reach it throws across the crystal (`ATOMA_MARK_CORE_LIGHT_RADIUS`)
+ * stays where it was: a smaller filament still lights the same room.
+ */
+export const ATOMA_MARK_CORE_RADIUS = 0.975;
+export const ATOMA_MARK_CORE_RADIUS_PULSE = 0.04;
 
 /**
  * A slice of glass the bead never crosses. The bead is a light seen THROUGH the
@@ -92,6 +105,108 @@ export function markColorForOctant(octant: MarkOctant): number {
   return octant[1] === 1 ? pair.top : pair.bottom;
 }
 
+/**
+ * What KIND of glass a rank's face is made of.
+ *
+ * The four quadrant faces — each one a top triangle and its bottom twin, so a
+ * rank owns a whole wedge of the crystal — are four different glasses, cut in
+ * ascending order of refinement along the composition chain: raw volcanic glass
+ * for the elements, drawn glass for the molecules, lead crystal for the cells,
+ * brilliant-cut diamond for the tissues. The rank COLOUR is untouched by this;
+ * taxonomy owns hue, material owns how the surface behaves in light, and mixing
+ * the two would make a rank unreadable the moment its material changed.
+ *
+ * Every field is a shading coefficient consumed by the shell shader, and all of
+ * them are per-facet CONSTANTS: they are uploaded once with the geometry, never
+ * per frame. What makes them visible is the bead — as the one light inside the
+ * crystal travels, each wedge answers it differently.
+ *
+ * - `specularPower` — highlight tightness. Low is a broad sheen on soft glass;
+ *   high is the pinpoint a hard, high-index surface returns.
+ * - `specularGain` — how bright that highlight is allowed to get.
+ * - `fresnelGain` — how much the grazing edges hold light, which is what reads
+ *   as the thickness of a cut edge.
+ * - `absorption` — how strongly a UNIT OF DEPTH of this material swallows light,
+ *   per model unit. This is the volumetric field: the shader multiplies it by
+ *   the distance the view ray actually travels through the wall, so the same
+ *   material is clear where the wall is presented flat and nearly solid where
+ *   the ray takes the long way through it. Obsidian goes black in the depth of
+ *   the wedge; diamond stays readable all the way to its edges.
+ * - `dispersion` — how far the highlight splits into colour. Diamond's fire; a
+ *   plain glass has almost none.
+ * - `transmit` — how much of the interior bead's light this glass carries to the
+ *   surface. Dark glass swallows it, diamond throws it.
+ * - `body` — how much of the rank tint the lit body keeps under the key light.
+ *   Diamond's colour is faint on purpose: its look lives in the highlights.
+ */
+export interface AtomaMarkMaterial {
+  /** Name of the glass, for tests and for the record — never rendered. */
+  glass: string;
+  specularPower: number;
+  specularGain: number;
+  fresnelGain: number;
+  absorption: number;
+  dispersion: number;
+  transmit: number;
+  body: number;
+}
+
+export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial> = {
+  // Obsidian: a natural glass that is almost a mirror. It drinks light by the
+  // millimetre, so the body of the wedge goes black away from its flat face,
+  // and it keeps the least of the bead — the darkest solid of the four.
+  element: {
+    glass: 'obsidian',
+    specularPower: 68,
+    specularGain: 1.15,
+    fresnelGain: 0.3,
+    absorption: 14,
+    dispersion: 0,
+    transmit: 0.45,
+    body: 0.58,
+  },
+  // Glass: the reference solid. Broad soft sheen, honest transmission through
+  // the depth of the wall, no fire. Its absorption is what the others read against.
+  molecule: {
+    glass: 'glass',
+    specularPower: 26,
+    specularGain: 0.85,
+    fresnelGain: 0.24,
+    absorption: 6,
+    dispersion: 0.08,
+    transmit: 1,
+    body: 1,
+  },
+  // Lead crystal: crisper highlight than glass, edges that hold light, and the
+  // first hint of colour splitting in the highlight.
+  cell: {
+    glass: 'crystal',
+    specularPower: 54,
+    specularGain: 1.1,
+    fresnelGain: 0.36,
+    absorption: 4.4,
+    dispersion: 0.34,
+    transmit: 1.15,
+    body: 1.04,
+  },
+  // Diamond: pinpoint highlight, the strongest edges, real fire, and so little
+  // absorption that the wedge stays clear through its whole depth.
+  tissue: {
+    glass: 'diamond',
+    specularPower: 132,
+    specularGain: 1.75,
+    fresnelGain: 0.52,
+    absorption: 3.2,
+    dispersion: 1,
+    transmit: 1.32,
+    body: 0.86,
+  },
+} as const;
+
+export function markMaterialForOctant(octant: MarkOctant): AtomaMarkMaterial {
+  return ATOMA_MARK_RANK_MATERIALS[markRankForOctant(octant)];
+}
+
 export interface AtomaMarkPoint {
   x: number;
   y: number;
@@ -106,8 +221,14 @@ export function mixColor(from: number, to: number, amount: number) {
   return channel(16) << 16 | channel(8) << 8 | channel(0);
 }
 
-/** Local box the mark is authored in; the renderer places its centre. */
+/**
+ * Local box the mark is authored in; the renderer places its centre. The full
+ * edge is exported because the shell's refraction pass renders this box into a
+ * texture and the shader normalises local positions against it — the projected
+ * geometry and the sampling coord have to agree on one number.
+ */
 const CENTER = { x: 14, y: 14 } as const;
+export const ATOMA_MARK_LOCAL_SIZE = CENTER.x * 2;
 /**
  * Projected units per model unit. Exported because the shell shader is fed
  * lengths in MODEL units while the bead's constants are authored in projected
@@ -124,14 +245,71 @@ export const ATOMA_MARK_RADIUS = 1.28;
  * still most of the volume — the bead lives in there — and thick enough that
  * the offset between the two outlines reads as a wall rather than as an
  * antialiasing artefact once the mark is a splash-sized hero.
+ *
+ * It is also the DEPTH OF MATERIAL each wedge is made of: absorption is
+ * measured along the ray's path through this wall, so a wafer-thin shell would
+ * make all four glasses look the same however different their coefficients are.
+ * The bead's travel room shrinks with every unit added here, which is the trade
+ * this number settles — `ATOMA_MARK_CAVITY_INRADIUS` minus the bead's clearance
+ * must stay comfortably positive.
+ *
+ * Halved from the 0.2 it was cut at. Thinner walls SATURATE less, so the four
+ * glasses actually separate a little further apart rather than all reaching
+ * near-solid: obsidian is the only one that ever fills up.
  */
-export const ATOMA_MARK_THICKNESS = 0.13;
+export const ATOMA_MARK_THICKNESS = 0.1;
 
 /** The shell, built ONCE: 8 outer facets, 8 inner facets, flat normals. */
 export const ATOMA_MARK_MESH = createThickOctahedron(
   ATOMA_MARK_RADIUS,
   ATOMA_MARK_THICKNESS
 );
+
+/**
+ * The SHORTEST path a view ray can take through the wall, in model units.
+ *
+ * The wedges are not textured planes: they are slabs of material, and what a
+ * slab does to light depends on how far through it the ray goes. An octahedron
+ * facet's normal is (±1, ±1, ±1)/sqrt(3), so the most face-on a facet can ever
+ * be to the camera is |n.z| = 1/sqrt(3) — that is the thinnest the material can
+ * look, and every other orientation is a longer path through the same solid.
+ * Everything volumetric in the shell shader is measured against this length.
+ */
+export const ATOMA_MARK_MIN_PATH = ATOMA_MARK_THICKNESS * Math.sqrt(3);
+
+/**
+ * Beer-Lambert opacity of PLAIN GLASS over that shortest path. Opacity is
+ * normalised by it, so glass at its thinnest presentation is exactly the mark's
+ * baseline density and every other material and angle is read as more or less
+ * solid than that one reference — rather than each material carrying a hand-set
+ * alpha that has nothing to do with its depth.
+ */
+export const ATOMA_MARK_OPACITY_REFERENCE =
+  1 - Math.exp(-ATOMA_MARK_RANK_MATERIALS.molecule.absorption * ATOMA_MARK_MIN_PATH);
+
+/**
+ * How near the camera a facet is: 0 at the far wall, 1 at the near one, from
+ * the facet's own rotated depth.
+ *
+ * The shell picks a facet's alpha and its tint shade from this. It used to pick
+ * them from a BINARY — whether the facet fell behind or in front of the bead —
+ * and the bead crosses the cavity several times a second, so every facet it
+ * passed flipped its alpha and dropped its tint to 40% in a single frame. That
+ * was the pulse: the crystal appeared to breathe between clear and opaque on
+ * the bead's rhythm rather than on its own rotation. A facet's own depth moves
+ * only as the mark turns, so the interior still reads dark behind and the glass
+ * still reads clear in front, and nothing jumps.
+ *
+ * The span is the depth of a facet centroid at full presentation: an outer
+ * centroid sits at radius/3 along each axis, so its length is radius/sqrt(3).
+ */
+export const ATOMA_MARK_FACET_DEPTH_SPAN = ATOMA_MARK_RADIUS / Math.sqrt(3);
+
+export function markFacetNearness(depth: number): number {
+  const t = clamp((depth + ATOMA_MARK_FACET_DEPTH_SPAN) /
+    (2 * ATOMA_MARK_FACET_DEPTH_SPAN));
+  return t * t * (3 - 2 * t);
+}
 
 /** Distance from the centre to a cavity wall: the room the bead bounces in. */
 export const ATOMA_MARK_CAVITY_INRADIUS =
@@ -308,9 +486,9 @@ function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkV
 export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
   const seconds = Math.max(0, elapsedMs) / 1000;
   // RIGID POSE. The mesh turns at one constant rate about the vertical axis
-  // and nothing else: pitch, roll and scale are FIXED, so the silhouette is
-  // the same shape at every moment. The sinusoidal wobble this replaces read
-  // as the crystal flexing — a rigid solid must not appear to deform.
+  // and nothing else: pitch, roll and scale are FIXED, so the silhouette stays
+  // congruent with itself at every moment and only its aspect changes as the
+  // octahedron presents a face, then an edge. Nothing here may flex.
   const yaw = 0.42 + seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000);
   const pitch = -0.2;
   const roll = 0.08;

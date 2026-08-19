@@ -2,13 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
+  ATOMA_MARK_FACET_DEPTH_SPAN,
   ATOMA_MARK_MESH,
   ATOMA_MARK_PROJECTION_SCALE,
   ATOMA_MARK_RANK_COLORS,
+  ATOMA_MARK_MIN_PATH,
+  ATOMA_MARK_OPACITY_REFERENCE,
+  ATOMA_MARK_RANK_MATERIALS,
+  ATOMA_MARK_THICKNESS,
   ATOMA_MARK_TURN_MS,
   buildAtomaMarkFrame,
   markColorForOctant,
+  markFacetNearness,
+  markMaterialForOctant,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
 
@@ -133,28 +141,175 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
-  it('turns briskly and changes face lighting without becoming frantic', () => {
-    expect(ATOMA_MARK_TURN_MS).toBeGreaterThanOrEqual(8_000);
-    expect(ATOMA_MARK_TURN_MS).toBeLessThanOrEqual(12_000);
+  it('turns once every fifteen seconds, slowly and at a constant rate', () => {
+    // A splash-sized mark that spins reads as a loading icon. Fifteen seconds
+    // is the rate; the bound is tight because "slower" is the whole point.
+    expect(ATOMA_MARK_TURN_MS).toBe(15_000);
 
     const start = buildAtomaMarkFrame(0);
     const quarterTurn = buildAtomaMarkFrame(ATOMA_MARK_TURN_MS / 4);
-    expect(quarterTurn.yaw - start.yaw).toBeGreaterThan(1.45);
-    expect(quarterTurn.yaw - start.yaw).toBeLessThan(1.75);
-
-    // A quarter turn must move the projection: the crystal visibly rotates,
-    // not wobbles. Rank colours are fixed per facet now, so the projection is
-    // where a turn shows up.
+    expect(quarterTurn.yaw - start.yaw).toBeCloseTo(Math.PI / 2, 9);
+    // Constant rate: equal slices of time are equal slices of angle, so no
+    // easing or wobble can hide inside the yaw.
+    for (const elapsedMs of [1_000, 4_000, 9_500]) {
+      expect(
+        buildAtomaMarkFrame(elapsedMs).yaw - start.yaw,
+        `yaw at ${elapsedMs}ms`
+      ).toBeCloseTo(elapsedMs / ATOMA_MARK_TURN_MS * Math.PI * 2, 9);
+    }
+    // A full turn brings the hull back to where it started.
     const key = (frame: ReturnType<typeof buildAtomaMarkFrame>) =>
       frame.projected.map((point) => `${point.x.toFixed(3)},${point.y.toFixed(3)}`);
+    expect(key(buildAtomaMarkFrame(ATOMA_MARK_TURN_MS))).toEqual(key(start));
+    // ...and a quarter of one visibly moves it.
     expect(key(quarterTurn).some(
       (position, index) => position !== key(start)[index]
     )).toBe(true);
   });
 
+  it('cuts each rank wedge from a different glass', () => {
+    // Four faces in the user's sense — a top triangle and its bottom twin —
+    // and four materials: obsidian, glass, crystal, diamond.
+    expect(Object.keys(ATOMA_MARK_RANK_MATERIALS).sort()).toEqual(
+      ['cell', 'element', 'molecule', 'tissue']
+    );
+    const materials = Object.values(ATOMA_MARK_RANK_MATERIALS);
+    expect(materials.map((material) => material.glass).sort()).toEqual(
+      ['crystal', 'diamond', 'glass', 'obsidian']
+    );
+
+    for (const material of materials) {
+      const { glass } = material;
+      expect(material.specularPower, `${glass} power`).toBeGreaterThan(1);
+      expect(material.specularGain, `${glass} gain`).toBeGreaterThan(0);
+      expect(material.absorption, `${glass} absorption`).toBeGreaterThan(0);
+      expect(material.dispersion, `${glass} dispersion`).toBeGreaterThanOrEqual(0);
+      expect(material.dispersion, `${glass} dispersion`).toBeLessThanOrEqual(1);
+      expect(material.transmit, `${glass} transmit`).toBeGreaterThan(0);
+      expect(material.body, `${glass} body`).toBeGreaterThan(0);
+    }
+
+    // The four must be TOLD APART on a 28px mark, so every shading coefficient
+    // is distinct across the set — a material table whose faces differ only in
+    // the third decimal is a table nobody can see.
+    for (const field of [
+      'specularPower', 'specularGain', 'fresnelGain', 'absorption', 'dispersion',
+      'transmit', 'body',
+    ] as const) {
+      expect(
+        new Set(materials.map((material) => material[field])),
+        `every rank differs in ${field}`
+      ).toHaveLength(4);
+    }
+
+    // Refinement ascends the composition chain: raw volcanic glass at the
+    // elements, brilliant-cut diamond at the tissues.
+    const { element, molecule, cell, tissue } = ATOMA_MARK_RANK_MATERIALS;
+    expect([element.glass, molecule.glass, cell.glass, tissue.glass]).toEqual(
+      ['obsidian', 'glass', 'crystal', 'diamond']
+    );
+    expect(tissue.specularPower).toBeGreaterThan(cell.specularPower);
+    expect(tissue.dispersion).toBeGreaterThan(cell.dispersion);
+    expect(cell.dispersion).toBeGreaterThan(molecule.dispersion);
+    expect(element.transmit).toBeLessThan(molecule.transmit);
+    expect(element.absorption).toBeGreaterThan(tissue.absorption);
+  });
+
+  it('makes each wedge a SOLID of its material, not a surfaced facet', () => {
+    // A face is a slab: what it does to light must depend on how far the ray
+    // travels through it. This pins the volume model the shell shader runs —
+    // Beer-Lambert over the path, normalised to plain glass at the thinnest
+    // presentation a facet can offer — so a wafer-thin wall or a per-material
+    // constant alpha cannot come back and flatten the four glasses into one.
+    expect(ATOMA_MARK_MIN_PATH).toBeCloseTo(ATOMA_MARK_THICKNESS * Math.sqrt(3), 12);
+    // Enough depth for absorption to separate the materials at all.
+    expect(ATOMA_MARK_THICKNESS).toBeGreaterThanOrEqual(0.09);
+    // ...and not so much that the bead loses the room it travels in.
+    expect(ATOMA_MARK_CAVITY_INRADIUS).toBeGreaterThan(
+      (ATOMA_MARK_CORE_RADIUS + ATOMA_MARK_CORE_RADIUS_PULSE + 0.45) /
+        ATOMA_MARK_PROJECTION_SCALE + 0.1
+    );
+
+    const opacity = (absorption: number, path: number) =>
+      (1 - Math.exp(-absorption * path)) / ATOMA_MARK_OPACITY_REFERENCE;
+    const { element, molecule, cell, tissue } = ATOMA_MARK_RANK_MATERIALS;
+    // Plain glass at its most face-on IS the baseline: that is what the
+    // reference normalises, and it is what the other three are read against.
+    expect(opacity(molecule.absorption, ATOMA_MARK_MIN_PATH)).toBeCloseTo(1, 12);
+    for (const material of [element, molecule, cell, tissue]) {
+      // Depth reads as substance: the long way through the same slab is always
+      // more solid than the short way, for every material.
+      const thin = opacity(material.absorption, ATOMA_MARK_MIN_PATH);
+      const deep = opacity(material.absorption, ATOMA_MARK_THICKNESS / 0.16);
+      expect(deep, `${material.glass} deepens`).toBeGreaterThan(thin);
+      expect(deep, `${material.glass} saturates`).toBeGreaterThan(0.95);
+    }
+    // At one and the same geometry the four are ORDERED by their material:
+    // obsidian nearly solid where diamond is still clear.
+    const thin = (material: { absorption: number }) =>
+      opacity(material.absorption, ATOMA_MARK_MIN_PATH);
+    expect(thin(element)).toBeGreaterThan(thin(molecule));
+    expect(thin(molecule)).toBeGreaterThan(thin(cell));
+    expect(thin(cell)).toBeGreaterThan(thin(tissue));
+  });
+
+  it('never lets a facet jump its density on the bead going past', () => {
+    // The reported defect: the shell chose alpha and tint from whether a facet
+    // fell behind or in front of the BEAD, and the bead crosses the cavity
+    // several times a second — so facets flipped density in one frame and the
+    // whole crystal read as pulsing between opaque and clear. Density now comes
+    // from the facet's OWN depth, which only the rotation moves.
+    expect(markFacetNearness(-ATOMA_MARK_FACET_DEPTH_SPAN)).toBeCloseTo(0, 12);
+    expect(markFacetNearness(ATOMA_MARK_FACET_DEPTH_SPAN)).toBeCloseTo(1, 12);
+    expect(markFacetNearness(0)).toBeCloseTo(0.5, 12);
+    // Bounded past the span rather than overshooting: a rotated centroid can
+    // sit a hair outside it once perspective is in play.
+    expect(markFacetNearness(-99)).toBe(0);
+    expect(markFacetNearness(99)).toBe(1);
+
+    // Continuous, and slow: over one frame at 60fps no facet may move its
+    // density by more than a few percent, whatever the bead is doing.
+    let worst = 0;
+    let previous = buildAtomaMarkFrame(0);
+    for (let ms = 16; ms <= ATOMA_MARK_TURN_MS; ms += 16) {
+      const frame = buildAtomaMarkFrame(ms);
+      for (const [index, facet] of frame.facets.entries()) {
+        worst = Math.max(worst, Math.abs(
+          markFacetNearness(facet.centroid[2]) -
+            markFacetNearness(previous.facets[index]!.centroid[2])
+        ));
+      }
+      previous = frame;
+    }
+    expect(worst).toBeLessThan(0.02);
+  });
+
+  it('gives a rank the same glass on both of its triangles', () => {
+    // Material follows the rank, so the top facet and the bottom facet of one
+    // wedge are the same glass while their colours differ. Colour is taxonomy;
+    // material is surface. Neither may start speaking for the other.
+    const octants: MarkOctant[] = [
+      [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
+      [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
+    ];
+    for (const octant of octants) {
+      const twin: MarkOctant = [octant[0], octant[1] === 1 ? -1 : 1, octant[2]];
+      expect(markMaterialForOctant(octant), octant.join(','))
+        .toBe(markMaterialForOctant(twin));
+      expect(markColorForOctant(octant)).not.toBe(markColorForOctant(twin));
+    }
+    // All four glasses actually reach the mesh.
+    expect(new Set(
+      ATOMA_MARK_MESH.facets.map((facet) => markMaterialForOctant(facet.octant).glass)
+    )).toHaveLength(4);
+  });
+
   it('keeps the whole bead inside the outline it lights', () => {
-    expect(ATOMA_MARK_CORE_RADIUS).toBeGreaterThanOrEqual(1.7);
-    expect(ATOMA_MARK_CORE_RADIUS).toBeLessThan(2);
+    // Half the bead it was authored at, and the pulse halved with it: the
+    // light's PROPORTIONS are the contract, not its absolute size.
+    expect(ATOMA_MARK_CORE_RADIUS).toBeCloseTo(0.975, 6);
+    expect(ATOMA_MARK_CORE_RADIUS_PULSE / ATOMA_MARK_CORE_RADIUS)
+      .toBeCloseTo(0.08 / 1.95, 6);
 
     const frames = Array.from(
       { length: 4_001 },

@@ -119,6 +119,10 @@ function textStub(value: string, options?: { size?: number }): Text {
 
 function createRecordingCtx(): RecordingCtx {
   const ctx: RecordingCtx = {
+    // No renderer here, on purpose. The crystal's refraction pass needs one and
+    // must SKIP itself without one — these tests are the standing proof that the
+    // mark still builds and lays out in a context that cannot render off-screen.
+    pixiRenderer: undefined as unknown as RecordingCtx['pixiRenderer'],
     root: new Container(),
     texts: [],
     buttons: [],
@@ -903,21 +907,40 @@ describe('attachAtomaMark glass layering', () => {
     const tickers: ((ticker: Ticker) => void)[] = [];
     const mark = attachAtomaMark(parent, (callback) => tickers.push(callback), 0, 0, 8);
     const crystal = mark.children[0] as Container;
-    const labels = crystal.children.map((child) => child.label);
+    // The far shell and the bead now live inside 'mark-behind-glass', which the
+    // refraction pass renders into its own texture. Grouping them changed the
+    // DEPTH of these nodes, never their order — so the order is still what this
+    // asserts, flattened so the structure may keep evolving under it.
+    const flatten = (node: Container): string[] =>
+      node.children.flatMap((child) => [
+        child.label,
+        ...(child instanceof Container ? flatten(child) : []),
+      ]);
+    const labels = flatten(crystal);
     const layer = (label: string) => labels.indexOf(label);
 
+    expect(layer('mark-behind-glass')).toBeGreaterThanOrEqual(0);
     expect(layer('mark-shell-back-layer')).toBeGreaterThanOrEqual(0);
     expect(layer('mark-interior')).toBeGreaterThan(layer('mark-shell-back-layer'));
     expect(layer('mark-shell-front-layer')).toBeGreaterThan(layer('mark-interior'));
-    expect(layer('mark-edges')).toBeGreaterThan(layer('mark-shell-front-layer'));
-    expect(layer('mark-glass-glow')).toBeGreaterThan(layer('mark-edges'));
+    // No 'mark-edges' layer: facet outlines were removed — a stroke around
+    // every triangle read as a wireframe border on the crystal.
+    expect(layer('mark-edges')).toBe(-1);
+    expect(layer('mark-glass-glow')).toBeGreaterThan(layer('mark-shell-front-layer'));
 
-    const interior = crystal.children[layer('mark-interior')] as Container;
+    const behind = crystal.children.find(
+      (child) => child.label === 'mark-behind-glass'
+    ) as Container;
+    const interior = behind.children.find(
+      (child) => child.label === 'mark-interior'
+    ) as Container;
     // Masked, so the bead and its light pool cannot spill past the outline.
     expect(interior.mask).toBeTruthy();
     expect(interior.children.map((child) => child.label))
       .toEqual(['mark-core']);
-    const glassGlow = crystal.children[layer('mark-glass-glow')] as Container;
+    const glassGlow = crystal.children.find(
+      (child) => child.label === 'mark-glass-glow'
+    ) as Container;
     expect(glassGlow.mask).toBeTruthy();
     expect(glassGlow.children.map((child) => child.label))
       .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);

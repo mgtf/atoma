@@ -2477,8 +2477,25 @@ export class GpuRenderer {
     this.addTicker(animate);
   }
 
+  /**
+   * The Pixi renderer, for the ONE view that needs an off-screen pass of its
+   * own: the arrival gate's crystal renders its interior into a texture so the
+   * front glass can refract it. Exposed as a getter rather than by widening the
+   * views' access to the Application.
+   */
+  get pixiRenderer() {
+    return this.app.renderer;
+  }
+
   private drawAtomaMark(x: number, y: number) {
-    attachAtomaMark(this.root, (callback) => this.addTicker(callback), x, y);
+    attachAtomaMark(
+      this.root,
+      (callback) => this.addTicker(callback),
+      x,
+      y,
+      undefined,
+      this.app.renderer
+    );
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
@@ -2752,4 +2769,5 @@ export type RendererCtx = Pick<
   | 'roleRowTransition'
   | 'seenAnimatedControls'
   | 'previousFilterBounds'
+  | 'pixiRenderer'
 >;
