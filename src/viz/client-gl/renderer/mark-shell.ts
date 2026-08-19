@@ -209,7 +209,7 @@ const uniformValues: Record<
   uMaxBend: () => REFRACTION_MAX_BEND_FLOOR_PX,
   uRefract: () => 1,
   uRefractOn: () => 1,
-  uSpecular: () => 4.2,
+  uSpecular: () => 2.7,
   uRim: () => 1.15,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),

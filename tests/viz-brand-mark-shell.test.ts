@@ -248,7 +248,7 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/0\.42 \* sun/);
       expect(source).toContain('scatter');
       expect(source).toMatch(/vScreen\.y\) \* 0\.72/);
-      expect(source).toMatch(/outer \* 0\.40/);
+      expect(source).toMatch(/outer \* 0\.28/);
     }
   });
 

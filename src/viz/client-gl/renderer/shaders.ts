@@ -637,7 +637,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     let windowHighlight = vec3<f32>(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      markUniforms.uSpecular * outer * 0.40;
+      markUniforms.uSpecular * outer * 0.28;
     // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
     //
     // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
@@ -825,7 +825,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
         (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun)) *
         mix(1.0, 0.58, bulk) * bounce +
       scatter +
-      highlight * 1.05 +
+      highlight * 0.9 +
       windowHighlight +
       coreHighlight * 1.15 +
       fringe * 0.55 +
@@ -1005,7 +1005,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(1.0 - max(dot(viewDir, windowHalf), 0.0), 5.0);
     vec3 windowHighlight = vec3(0.78, 0.88, 1.0) *
       pow(windowFacing, specularPower) * windowSpecF * windowGeo * specNorm *
-      uSpecular * outer * 0.40;
+      uSpecular * outer * 0.28;
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
@@ -1069,7 +1069,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun)) *
       mix(1.0, 0.58, bulk) * bounce +
       scatter +
-      highlight * 1.05 +
+      highlight * 0.9 +
       windowHighlight +
       coreHighlight * 1.15 +
       fringe * 0.55 +
