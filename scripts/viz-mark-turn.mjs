@@ -48,16 +48,21 @@ function crystalClip(width, height) {
   );
   const scale = Math.max(6, maxMarkPx / LOCAL_SIZE);
   const size = LOCAL_SIZE * scale;
-  const pad = size * 0.16;
+  const pad = size * 0.14;
   const cx = width / 2;
   const cy = height / 2;
+  // Top pad for the aura; a thin strip below for the contact shadow. Anything
+  // taller catches the Continue control, which is a Pixi button (not DOM) and
+  // cannot be hidden with a stylesheet.
   return {
     x: Math.max(0, cx - size / 2 - pad),
     y: Math.max(0, cy - size / 2 - pad),
     width: size + pad * 2,
-    height: size + pad * 2 + 28,
+    height: size + pad + 18,
   };
 }
+
+export { crystalClip, VIEW_HEIGHT, VIEW_WIDTH };
 
 async function freePort() {
   return await new Promise((resolvePort, reject) => {

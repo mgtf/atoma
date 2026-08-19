@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ATOMA_MARK_TURN_MS } from '../src/viz/client-gl/brand-mark.js';
-import { FRAME_COUNT, STEP_MS, TURN_MS } from '../scripts/viz-mark-turn.mjs';
+import { FRAME_COUNT, STEP_MS, TURN_MS, crystalClip, VIEW_HEIGHT, VIEW_WIDTH } from '../scripts/viz-mark-turn.mjs';
+import { welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
 
 const script = readFileSync(
   resolve(import.meta.dirname, '../scripts/viz-mark-turn.mjs'),
@@ -37,6 +38,13 @@ describe('viz mark-turn capture', () => {
   it('freezes the welcome float so the film is a rotation, not a bob', () => {
     expect(welcome).toContain('markClockIsPinned');
     expect(welcome).not.toMatch(/Math\.sin\(performance\.now\(\)/);
+  });
+
+  it('crops to the crystal, above the Continue control', () => {
+    const clip = crystalClip(VIEW_WIDTH, VIEW_HEIGHT);
+    const layout = welcomeLayout(VIEW_WIDTH, VIEW_HEIGHT);
+    expect(clip.y + clip.height).toBeLessThan(layout.buttonY);
+    expect(clip.x + clip.width).toBeLessThanOrEqual(VIEW_WIDTH);
   });
 
   it('writes into a gitignored capture directory', () => {
