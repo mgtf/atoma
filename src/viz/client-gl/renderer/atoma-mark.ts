@@ -28,6 +28,7 @@ export const ATOMA_MARK_LOCAL_CENTER = 14;
 /** Header size: a few pixels larger than the local box so the bar mark holds. */
 export const ATOMA_MARK_HEADER_SCALE = 1.24;
 
+
 /** Colour of everything the bead emits: its own body rim and its glow. */
 const LIGHT_COLOR = 0xdff1ff;
 const CORE_RIM_COLOR = 0x35b8f0;
@@ -322,7 +323,10 @@ export function attachAtomaMark(
       behind.position.set(0, 0);
       behind.scale.set(scale);
       const target = textures[writeIndex]!;
+      // Refraction OFF for the pass: the back facets share the front's shader.
+      shell.setRefracting(false);
       renderer.render({ container: behind, target, clear: true });
+      shell.setRefracting(true);
       behind.position.set(0, 0);
       behind.scale.set(1);
       // Hand the shell what we just wrote; next frame writes to the other one,

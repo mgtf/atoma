@@ -96,6 +96,22 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('can switch refraction off so the backdrop cannot feed itself', () => {
+    // The defect this pins, and it cost four wrong diagnoses. The back and
+    // front shells share ONE shader, and the back facets are outer facets too —
+    // so while the interior was being rendered into the backdrop texture, those
+    // facets ran the refraction sampler against the previous frame's copy of
+    // that same texture, and their output went straight back into it. A closed
+    // loop: the artefact compounded every frame into a saturated pixel grid.
+    //
+    // It survived a displacement clamp, a grazing fade, removing bulk from the
+    // bend, and 2x supersampling, because none of those break a feedback path.
+    // The uniform must exist and must gate the bend, in both programs.
+    expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toContain('uRefractOn');
+    expect(MARK_SHELL_WGSL).toContain('markUniforms.uRefractOn');
+    expect(MARK_SHELL_GLSL).toContain('* uRefractOn');
+  });
+
   it('keeps the refraction sample inside the mark box', () => {
     // vScreen must come from the LOCAL 28x28 position, not from clip space.
     // Clip space spans the whole viewport while the backdrop texture holds only

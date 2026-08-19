@@ -11,8 +11,10 @@ import {
   ATOMA_MARK_PROJECTION_SCALE,
   ATOMA_MARK_THICKNESS,
   markColorForOctant,
+  markF0,
   markFacetNearness,
   markMaterialForOctant,
+  markSpecularPower,
   type AtomaMarkFrame,
 } from '../brand-mark.js';
 import {
@@ -131,6 +133,21 @@ export const MARK_SHELL_UNIFORMS = [
   // backdrop texture, so the offset is expressed in pixels rather than in a
   // unit that changes with the mark's scale.
   { name: 'uSplit', type: 'f32' },
+  // How far a facet displaces what is behind it, and how strongly that
+  // displaced interior is composited. Separate from uSplit on purpose: every
+  // glass here refracts, only diamond disperses much.
+  { name: 'uBend', type: 'f32' },
+  { name: 'uMaxBend', type: 'f32' },
+  { name: 'uRefract', type: 'f32' },
+  // 1 normally, 0 while the backdrop texture is being rendered — see
+  // `setRefracting`. Both shells share this shader, so without the switch the
+  // back facets sample the texture they are being drawn into.
+  { name: 'uRefractOn', type: 'f32' },
+  // Scene-wide scales for the two Schlick terms. The MATERIAL decides the
+  // ratios between the four glasses; these only set how loud that whole family
+  // is against the dark field, and neither may vary per material.
+  { name: 'uSpecular', type: 'f32' },
+  { name: 'uRim', type: 'f32' },
   { name: 'uLocalSize', type: 'f32' },
   { name: 'uBackdropTexel', type: 'vec2<f32>' },
 ] as const;
@@ -151,6 +168,12 @@ const uniformValues: Record<
   uMinPath: () => ATOMA_MARK_MIN_PATH,
   uOpacityRef: () => ATOMA_MARK_OPACITY_REFERENCE,
   uSplit: () => CHROMATIC_SPLIT_PX,
+  uBend: () => REFRACTION_BEND_PX,
+  uMaxBend: () => REFRACTION_MAX_BEND_PX,
+  uRefract: () => 1.15,
+  uRefractOn: () => 1,
+  uSpecular: () => 2.6,
+  uRim: () => 0.9,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
 };
@@ -167,6 +190,29 @@ const uniformValues: Record<
  */
 const CHROMATIC_SPLIT_PX = 2.4;
 
+/**
+ * Peak displacement of the interior seen through a facet, in backdrop pixels,
+ * at full obliquity and per unit of (IOR - 1).
+ *
+ * Stylised for the same reason as the split: a 0.1-unit wall genuinely displaces
+ * a fraction of a pixel, which would be invisible. This is the figure at which
+ * the shear across an oblique wedge reads at hero size without the bead sliding
+ * far enough off its true position to look like a compositing bug.
+ */
+const REFRACTION_BEND_PX = 5.5;
+
+/**
+ * Hard ceiling on that displacement, in backdrop pixels.
+ *
+ * Not a taste control. The backdrop carries one texel per pixel, so a
+ * displacement larger than a few of them makes neighbouring screen pixels
+ * sample non-adjacent texels, and a grazing facet — where BULK saturates and
+ * the raw bend runs away — breaks into a coloured checkerboard. The ceiling is
+ * what the texture can resolve; lowering the gain instead only makes the
+ * aliasing dimmer.
+ */
+const REFRACTION_MAX_BEND_PX = 3;
+
 export interface MarkShell {
   /**
    * Hands the FRONT half the texture holding everything drawn behind it, plus
@@ -174,6 +220,12 @@ export interface MarkShell {
    * texture object is stable, only its contents change.
    */
   setBackdrop(texture: Texture, widthPx: number, heightPx: number): void;
+  /**
+   * Turns refraction sampling off for the duration of the backdrop pass. MUST
+   * wrap that render: the back facets are outer facets too and share this
+   * shader, so leaving it on feeds the texture back into itself.
+   */
+  setRefracting(on: boolean): void;
   /** Facets behind the bead. Added to the scene BEFORE it. */
   back: ShellMesh;
   /** Facets in front of the bead: the glass it is seen through. */
@@ -224,17 +276,21 @@ export function createMarkShell(): MarkShell | null {
     for (let corner = 0; corner < 3; corner += 1) {
       const vertex = facet.triangle * 3 + corner;
       surfaces[vertex * 2 + 1] = facet.part === 'outer' ? 1 : 0;
+      // The shader receives DERIVED quantities, never the authored ones: the
+      // exponent from roughness, the normal-incidence reflectance from the IOR,
+      // and the bend strength from the IOR too. The derivation happens ONCE, on
+      // the CPU, so the two shader programs cannot disagree about the formula.
       materials.set(
         [
-          material.specularPower,
-          material.specularGain,
-          material.fresnelGain,
+          markSpecularPower(material.roughness),
+          material.dispersion,
+          markF0(material.ior),
           material.absorption,
         ],
         vertex * 4
       );
       finishes.set(
-        [material.dispersion, material.transmit, material.body],
+        [material.ior - 1, material.transmit, material.body],
         vertex * 3
       );
     }
@@ -333,6 +389,7 @@ export function createMarkShell(): MarkShell | null {
   const uniforms = shader.resources['markUniforms'].uniforms as {
     uCore: Float32Array;
     uPulse: number;
+    uRefractOn: number;
     uBackdropTexel: Float32Array;
   };
 
@@ -357,6 +414,9 @@ export function createMarkShell(): MarkShell | null {
   return {
     back,
     front,
+    setRefracting(on: boolean) {
+      uniforms.uRefractOn = on ? 1 : 0;
+    },
     setBackdrop(texture: Texture, widthPx: number, heightPx: number) {
       shader.resources['uBackdrop'] = texture.source;
       shader.resources['uBackdropSampler'] = texture.source.style;

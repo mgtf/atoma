@@ -457,6 +457,12 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uMinPath: f32,
     uOpacityRef: f32,
     uSplit: f32,
+    uBend: f32,
+    uMaxBend: f32,
+    uRefract: f32,
+    uRefractOn: f32,
+    uSpecular: f32,
+    uRim: f32,
     uLocalSize: f32,
     uBackdropTexel: vec2<f32>,
   }
@@ -534,11 +540,15 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let outer = vSurface.y;
     // The glass this face is cut from: obsidian, glass, crystal or diamond, one
     // per rank wedge. See ATOMA_MARK_RANK_MATERIALS for what each field means.
+    // Derived on the CPU from the material's IOR and roughness; see
+    // ATOMA_MARK_RANK_MATERIALS. Nothing here is a free-floating look knob.
     let specularPower = vMaterial.x;
-    let specularGain = vMaterial.y;
-    let fresnelGain = vMaterial.z;
+    let dispersion = vMaterial.y;
+    let f0 = vMaterial.z;
     let absorption = vMaterial.w;
-    let dispersion = vFinish.x;
+    // IOR minus one: the strength of the bend, zero for a material that does
+    // not refract at all.
+    let iorBend = vFinish.x;
     let transmit = vFinish.y;
     let body = vFinish.z;
 
@@ -579,11 +589,21 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(facing, specularPower),
       pow(facing, specularPower * 1.5)
     );
+    // Schlick again, at the HALF angle: how much the surface reflects the key
+    // toward the eye. It replaces the hand-set specular gain — a glass does not
+    // choose its highlight brightness independently of its index.
+    let specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(normal, half), 0.0), 5.0);
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
-      specularGain * outer;
-    // Grazing facets keep more of the light: it is what reads as a glassy edge,
-    // and it is also what keeps the silhouette crisp against a dark field.
-    let fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
+      specF * markUniforms.uSpecular * outer;
+    // FRESNEL, Schlick's approximation proper: F0 + (1 - F0)(1 - cos0)^5.
+    //
+    // Both halves used to be wrong. The exponent was 2.2, a curve that rises far
+    // too early, and there was no F0 at all — the material carried a hand-set
+    // fresnelGain instead, which had drifted to give obsidian stronger edges
+    // than plain glass despite near-identical indices. F0 comes from the IOR
+    // now, so diamond's edges are four times glass's because its index says so.
+    let cosTheta = min(abs(normal.z), 1.0);
+    let fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
 
     // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
     // the ray leaves the glass most obliquely — the rim of the silhouette and
@@ -614,13 +634,63 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // The direction is the facet normal's screen-space tilt. A ray leaving an
     // oblique facet is displaced along the way the surface leans, so a facet
     // presenting flat displaces nothing however dispersive its glass.
-    let bend = normal.xy * markUniforms.uSplit * dispersion *
-      mix(0.35, 1.0, bulk) * outer;
+    // REFRACTION, and it is NOT the same thing as dispersion.
+    //
+    // Every glass here bends light: obsidian's index is 1.5, so it displaces
+    // what is behind it exactly as plain glass does. What it does not do is
+    // SPLIT that displacement by wavelength — that is dispersion, and only
+    // diamond has much of it. The two were fused before: BEND was gated on
+    // dispersion, so obsidian refracted nothing at all, which is wrong for a
+    // material with an ordinary index.
+    //
+    // Snell's law for a ray leaving a tilted surface reduces, at these small
+    // angles, to a displacement along the surface's screen-space tilt scaled by
+    // how far the index departs from air. IORBEND is that departure; the sine
+    // of the incidence angle is the tangential part of the normal.
     let backdropUv = vScreen;
+    // CLAMPED in texel units. A grazing facet drives BULK to saturation and the
+    // raw displacement past what the backdrop can resolve — the sampler then
+    // steps over whole texels between neighbouring pixels and the edge breaks
+    // into a coloured checkerboard. That is aliasing, not a strong effect, and
+    // no gain reduction fixes it: the ceiling has to be a distance the texture
+    // can actually supply.
+    // FADED OUT at grazing, on top of the clamp. Right at the silhouette the
+    // facet is edge-on, the wedge is only a few pixels wide, and the
+    // displacement swings hard between neighbouring pixels — the clamp caps its
+    // SIZE but not that swing. A real refraction has little to show there
+    // either, since the ray travels along the surface rather than through it.
+    //
+    // BULK stays in the product. Removing it was tried on the theory that it
+    // double-counted obliquity, and it measurably made the aliasing WORSE
+    // (high-frequency energy 90 -> 102 on the worst frame): its 0.35 floor is
+    // what holds the displacement down on face-on facets, which is most of the
+    // mark most of the time.
+    // uRefractOn is 0 WHILE THE BACKDROP IS BEING RENDERED. The back and front
+    // shells share one shader, and the back facets are OUTER too, so during
+    // the pass they were running this very sampler against last frame's texture
+    // and their output was written straight back into it. That closed loop is
+    // what the pixel-grid checkerboard was — it compounded every frame until it
+    // saturated. It survived a clamp, a grazing fade and 2x supersampling
+    // because none of those break a feedback path; only refusing to sample
+    // during the pass does.
+    let grazingFade = smoothstep(0.12, 0.42, cosTheta) * markUniforms.uRefractOn;
+    let rawBend = normal.xy * markUniforms.uBend * iorBend *
+      mix(0.35, 1.0, bulk) * outer * grazingFade;
+    let bendLength = length(rawBend);
+    let bend = select(
+      rawBend,
+      rawBend * markUniforms.uMaxBend / max(bendLength, 1e-4),
+      bendLength > markUniforms.uMaxBend
+    );
     let offset = bend * markUniforms.uBackdropTexel;
-    let straight = textureSample(uBackdrop, uBackdropSampler, backdropUv);
-    let shiftR = textureSample(uBackdrop, uBackdropSampler, backdropUv + offset).r;
-    let shiftB = textureSample(uBackdrop, uBackdropSampler, backdropUv - offset).b;
+    // The dispersive HALF-SPREAD around that common displacement: red bends
+    // least, blue most. Zero for obsidian, which refracts without splitting.
+    let spread = offset * dispersion * markUniforms.uSplit;
+    let straight = textureSample(uBackdrop, uBackdropSampler, backdropUv + offset);
+    let shiftR = textureSample(uBackdrop, uBackdropSampler,
+      backdropUv + offset - spread).r;
+    let shiftB = textureSample(uBackdrop, uBackdropSampler,
+      backdropUv + offset + spread).b;
     // What refraction ADDS is the difference between the displaced sample and
     // the undisplaced one, PER CHANNEL — red against red, blue against blue.
     //
@@ -640,12 +710,32 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       vec3<f32>(0.25)
     ) * transmit;
 
+    // THE DISPLACED INTERIOR ITSELF, which is what makes this a distortion
+    // rather than a coloured rim. STRAIGHT is now read at the BENT position,
+    // so what the glass shows is the interior as the glass actually redirects
+    // it — a bead behind a facet is seen off its true position, and the far
+    // facets visibly shear across an oblique wedge.
+    //
+    // Composited as the DIFFERENCE against the undisplaced interior, because
+    // the alpha blend underneath is already drawing that undisplaced interior:
+    // adding the sample outright would show it twice. REFRACTSTRENGTH fades
+    // the whole thing out where the facet is face-on, where there is no bend to
+    // pay for and the difference would only add noise.
+    let unbent = textureSample(uBackdrop, uBackdropSampler, backdropUv);
+    let refractStrength = clamp(length(bend) * 0.35, 0.0, 1.0);
+    let distortion = clamp(
+      (straight.rgb - unbent.rgb) * refractStrength * transmit,
+      vec3<f32>(-0.4),
+      vec3<f32>(0.4)
+    );
+
     let lit = vTint * body * (markUniforms.uAmbient + 0.86 * sun) * mix(1.0, 0.58, bulk) +
       markUniforms.uCoreTint * core +
       highlight * 0.85 +
       fringe * 0.55 +
       split * 0.9 +
-      vec3<f32>(fresnel * fresnelGain * 0.35);
+      distortion * markUniforms.uRefract +
+      vec3<f32>(fresnel * markUniforms.uRim);
     // The bead only NUDGES alpha. It crosses the cavity several times a second,
     // so whatever it adds here reads as flicker rather than as light; its
     // brightness belongs in LIT, where it lands on colour instead of density.
@@ -654,7 +744,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // that is a density swing wearing the costume of an edge highlight. It keeps
     // its full weight in LIT, where it belongs.
     let alpha = clamp(
-      vSurface.x * opacity + fresnel * fresnelGain * outer * 0.35 + core * 0.1,
+      vSurface.x * opacity + fresnel * outer * markUniforms.uRim + core * 0.1,
       0.0,
       1.0
     );
@@ -727,6 +817,12 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform float uMinPath;
   uniform float uOpacityRef;
   uniform float uSplit;
+  uniform float uBend;
+  uniform float uMaxBend;
+  uniform float uRefract;
+  uniform float uRefractOn;
+  uniform float uSpecular;
+  uniform float uRim;
   uniform float uLocalSize;
   uniform vec2 uBackdropTexel;
 
@@ -735,10 +831,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float outer = vSurface.y;
     // Same four glasses as the WGSL path; keep the two in step.
     float specularPower = vMaterial.x;
-    float specularGain = vMaterial.y;
-    float fresnelGain = vMaterial.z;
+    float dispersion = vMaterial.y;
+    float f0 = vMaterial.z;
     float absorption = vMaterial.w;
-    float dispersion = vFinish.x;
+    float iorBend = vFinish.x;
     float transmit = vFinish.y;
     float body = vFinish.z;
 
@@ -765,21 +861,41 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(facing, specularPower),
       pow(facing, specularPower * 1.5)
     );
+    float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(normal, halfVector), 0.0), 5.0);
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
-      specularGain * outer;
-    float fresnel = pow(1.0 - min(abs(normal.z), 1.0), 2.2);
+      specF * uSpecular * outer;
+    // Same Schlick as the WGSL path; keep the two in step.
+    float cosTheta = min(abs(normal.z), 1.0);
+    float fresnel = f0 + (1.0 - f0) * pow(1.0 - cosTheta, 5.0);
 
     // Same chromatic transmission as the WGSL path; keep the two in step.
-    vec2 bend = normal.xy * uSplit * dispersion * mix(0.35, 1.0, bulk) * outer;
+    // Same refraction/dispersion split as the WGSL path; keep the two in step.
+    // Same texel clamp as the WGSL path; keep the two in step.
+    // Same grazing fade as the WGSL path; keep the two in step.
+    float grazingFade = smoothstep(0.12, 0.42, cosTheta) * uRefractOn;
+    vec2 rawBend = normal.xy * uBend * iorBend * mix(0.35, 1.0, bulk) * outer * grazingFade;
+    float bendLength = length(rawBend);
+    vec2 bend = bendLength > uMaxBend
+      ? rawBend * uMaxBend / max(bendLength, 1e-4)
+      : rawBend;
     vec2 offset = bend * uBackdropTexel;
-    vec4 straight = texture(uBackdrop, vScreen);
-    float shiftR = texture(uBackdrop, vScreen + offset).r;
-    float shiftB = texture(uBackdrop, vScreen - offset).b;
+    vec2 spread = offset * dispersion * uSplit;
+    vec4 straight = texture(uBackdrop, vScreen + offset);
+    float shiftR = texture(uBackdrop, vScreen + offset - spread).r;
+    float shiftB = texture(uBackdrop, vScreen + offset + spread).b;
     vec3 split = clamp(
       vec3(shiftR - straight.r, 0.0, shiftB - straight.b),
       -0.25,
       0.25
     ) * transmit;
+
+    vec4 unbent = texture(uBackdrop, vScreen);
+    float refractStrength = clamp(length(bend) * 0.35, 0.0, 1.0);
+    vec3 distortion = clamp(
+      (straight.rgb - unbent.rgb) * refractStrength * transmit,
+      -0.4,
+      0.4
+    );
 
     // Same edge fringe as the WGSL path; keep the two in step.
     float fringeBand = 1.0 - fresnel;
@@ -794,9 +910,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       highlight * 0.85 +
       fringe * 0.55 +
       split * 0.9 +
-      vec3(fresnel * fresnelGain * 0.35);
+      distortion * uRefract +
+      vec3(fresnel * uRim);
     float alpha = clamp(
-      vSurface.x * opacity + fresnel * fresnelGain * outer * 0.35 + core * 0.1,
+      vSurface.x * opacity + fresnel * outer * uRim + core * 0.1,
       0.0,
       1.0
     );

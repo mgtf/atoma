@@ -121,11 +121,16 @@ export function markColorForOctant(octant: MarkOctant): number {
  * per frame. What makes them visible is the bead — as the one light inside the
  * crystal travels, each wedge answers it differently.
  *
- * - `specularPower` — highlight tightness. Low is a broad sheen on soft glass;
- *   high is the pinpoint a hard, high-index surface returns.
- * - `specularGain` — how bright that highlight is allowed to get.
- * - `fresnelGain` — how much the grazing edges hold light, which is what reads
- *   as the thickness of a cut edge.
+ * The table is now TWO physical quantities plus three behavioural ones. `ior`
+ * and `roughness` are measurements; everything the surface does with light is
+ * derived from them (`markF0`, `markSpecularPower`) rather than authored beside
+ * them. The three hand-set knobs this replaced — a specular gain, a fresnel
+ * gain and a free specular exponent — had drifted into contradicting each
+ * other, which is how obsidian ended up with brighter edges than plain glass.
+ *
+ * - `ior` — index of refraction. Drives edge reflectance AND how far the glass
+ *   displaces what is seen through it. See `markF0`.
+ * - `roughness` — surface polish; the specular exponent derives from it.
  * - `absorption` — how strongly a UNIT OF DEPTH of this material swallows light,
  *   per model unit. This is the volumetric field: the shader multiplies it by
  *   the distance the view ray actually travels through the wall, so the same
@@ -142,60 +147,117 @@ export function markColorForOctant(octant: MarkOctant): number {
 export interface AtomaMarkMaterial {
   /** Name of the glass, for tests and for the record — never rendered. */
   glass: string;
-  specularPower: number;
-  specularGain: number;
-  fresnelGain: number;
+  /**
+   * Index of refraction, the real one for this glass. THE physical parameter:
+   * it derives both how much light the surface reflects head-on (Schlick's F0)
+   * and how far the surface bends what passes through it. Nothing else in the
+   * table is allowed to restate either of those.
+   */
+  ior: number;
+  /**
+   * Microfacet roughness, 0 being an optically smooth polish, and the quantity
+   * the specular exponent is derived FROM rather than a second, independent
+   * spelling of the same idea.
+   *
+   * These are DELIBERATELY above the real figures. Optical glass sits near
+   * 0.01-0.05, which converts to exponents in the thousands and lands every one
+   * of the four on the same capped value — a mark whose glasses are no longer
+   * told apart by their highlight at all. Held between 0.097 and 0.17 the four
+   * exponents come out 211/149/100/67: distinct, ordered, and all clear of the
+   * cap. Unlike `ior`, this column is a rendering compromise, not a measurement.
+   */
+  roughness: number;
+  /** Beer-Lambert absorption per model unit of depth. */
   absorption: number;
+  /** How far the highlight splits into colour. Diamond's fire. */
   dispersion: number;
+  /** How much of the interior bead's light this glass carries to the surface. */
   transmit: number;
+  /** How much of the rank tint the lit body keeps under the key light. */
   body: number;
 }
 
+/**
+ * Reflectance at normal incidence, from the index of refraction.
+ *
+ * Schlick's F0 for a dielectric against air. This replaces the hand-set
+ * `fresnelGain` the table used to carry, which had drifted incoherent: obsidian
+ * was given 0.30 against plain glass's 0.24 even though the two have virtually
+ * the same IOR, so the mark's edge brightness was ordering the ranks by nothing
+ * physical at all.
+ */
+export function markF0(ior: number): number {
+  const ratio = (ior - 1) / (ior + 1);
+  return ratio * ratio;
+}
+
+/**
+ * Blinn-Phong exponent for a given roughness.
+ *
+ * The shell's highlight is still a Blinn-Phong lobe — a full microfacet BRDF
+ * buys nothing on eight flat facets lit by one key — but its exponent is no
+ * longer an independent knob. Roughness is the authored quantity and this is
+ * the conversion, so "smoother" cannot mean one thing in the table and another
+ * in the shader.
+ *
+ * CAPPED, and the cap is not a fudge. A true polish converts to exponents in
+ * the thousands, which is correct for glass and useless here: that lobe is
+ * narrower than a pixel, and the mark is lit by ONE point light with no
+ * environment to reflect. In a real renderer the missing highlight would be
+ * made up by the reflected surroundings; against a near-black field there are
+ * none, so an uncapped exponent means a crystal with no highlight at all. The
+ * cap is where the lobe stops being resolvable at hero size — the four glasses
+ * still order correctly beneath it.
+ */
+export const ATOMA_MARK_MAX_SPECULAR_POWER = 220;
+
+export function markSpecularPower(roughness: number): number {
+  const alpha = Math.max(roughness, 1e-3) ** 2;
+  return Math.min(2 / alpha - 2, ATOMA_MARK_MAX_SPECULAR_POWER);
+}
+
 export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial> = {
-  // Obsidian: a natural glass that is almost a mirror. It drinks light by the
-  // millimetre, so the body of the wedge goes black away from its flat face,
-  // and it keeps the least of the bead — the darkest solid of the four.
+  // Obsidian: natural volcanic glass. Its IOR is ordinary glass's — the two are
+  // chemically close — so it is NOT the edges that tell it apart. It drinks
+  // light by the millimetre, and that absorption is the whole of its identity.
   element: {
     glass: 'obsidian',
-    specularPower: 68,
-    specularGain: 1.15,
-    fresnelGain: 0.3,
+    ior: 1.5,
+    roughness: 0.17,
     absorption: 14,
     dispersion: 0,
     transmit: 0.45,
     body: 0.58,
   },
-  // Glass: the reference solid. Broad soft sheen, honest transmission through
-  // the depth of the wall, no fire. Its absorption is what the others read against.
+  // Glass: the reference solid. Honest transmission through the depth of the
+  // wall, no fire. Its absorption is what the others read against.
   molecule: {
     glass: 'glass',
-    specularPower: 26,
-    specularGain: 0.85,
-    fresnelGain: 0.24,
+    ior: 1.52,
+    roughness: 0.14,
     absorption: 6,
     dispersion: 0.08,
     transmit: 1,
     body: 1,
   },
-  // Lead crystal: crisper highlight than glass, edges that hold light, and the
-  // first hint of colour splitting in the highlight.
+  // Lead crystal: the lead raises the index well above plain glass, which is
+  // exactly why cut crystal holds light at its edges the way glass does not.
   cell: {
     glass: 'crystal',
-    specularPower: 54,
-    specularGain: 1.1,
-    fresnelGain: 0.36,
+    ior: 1.7,
+    roughness: 0.115,
     absorption: 4.4,
     dispersion: 0.34,
     transmit: 1.15,
     body: 1.04,
   },
-  // Diamond: pinpoint highlight, the strongest edges, real fire, and so little
-  // absorption that the wedge stays clear through its whole depth.
+  // Diamond: index 2.42, four times glass's reflectance at normal incidence and
+  // the strongest bend of the four. Real fire, and so little absorption that
+  // the wedge stays clear through its whole depth.
   tissue: {
     glass: 'diamond',
-    specularPower: 132,
-    specularGain: 1.75,
-    fresnelGain: 0.52,
+    ior: 2.42,
+    roughness: 0.097,
     absorption: 3.2,
     dispersion: 1,
     transmit: 1.32,

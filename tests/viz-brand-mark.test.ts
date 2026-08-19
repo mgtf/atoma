@@ -5,6 +5,7 @@ import {
   ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_FACET_DEPTH_SPAN,
+  ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
   ATOMA_MARK_PROJECTION_SCALE,
   ATOMA_MARK_RANK_COLORS,
@@ -15,8 +16,10 @@ import {
   ATOMA_MARK_TURN_MS,
   buildAtomaMarkFrame,
   markColorForOctant,
+  markF0,
   markFacetNearness,
   markMaterialForOctant,
+  markSpecularPower,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
 
@@ -180,8 +183,12 @@ describe('Atoma GPU brand mark', () => {
 
     for (const material of materials) {
       const { glass } = material;
-      expect(material.specularPower, `${glass} power`).toBeGreaterThan(1);
-      expect(material.specularGain, `${glass} gain`).toBeGreaterThan(0);
+      // Above air, and below diamond's 2.42 — the range real transparent
+      // solids occupy. A value outside it is a typo, not a material.
+      expect(material.ior, `${glass} ior`).toBeGreaterThan(1);
+      expect(material.ior, `${glass} ior`).toBeLessThanOrEqual(2.42);
+      expect(material.roughness, `${glass} roughness`).toBeGreaterThan(0);
+      expect(material.roughness, `${glass} roughness`).toBeLessThan(0.3);
       expect(material.absorption, `${glass} absorption`).toBeGreaterThan(0);
       expect(material.dispersion, `${glass} dispersion`).toBeGreaterThanOrEqual(0);
       expect(material.dispersion, `${glass} dispersion`).toBeLessThanOrEqual(1);
@@ -193,8 +200,7 @@ describe('Atoma GPU brand mark', () => {
     // is distinct across the set — a material table whose faces differ only in
     // the third decimal is a table nobody can see.
     for (const field of [
-      'specularPower', 'specularGain', 'fresnelGain', 'absorption', 'dispersion',
-      'transmit', 'body',
+      'ior', 'roughness', 'absorption', 'dispersion', 'transmit', 'body',
     ] as const) {
       expect(
         new Set(materials.map((material) => material[field])),
@@ -208,11 +214,42 @@ describe('Atoma GPU brand mark', () => {
     expect([element.glass, molecule.glass, cell.glass, tissue.glass]).toEqual(
       ['obsidian', 'glass', 'crystal', 'diamond']
     );
-    expect(tissue.specularPower).toBeGreaterThan(cell.specularPower);
+    // Index ascends the chain, and it is the REAL index of each glass. Obsidian
+    // and plain glass sit almost together on purpose: they are chemically close,
+    // so what tells them apart is absorption, never their edges.
+    expect(element.ior).toBeLessThan(molecule.ior);
+    expect(molecule.ior).toBeLessThan(cell.ior);
+    expect(cell.ior).toBeLessThan(tissue.ior);
+    expect(tissue.ior).toBeCloseTo(2.42, 6);
+    expect(Math.abs(element.ior - molecule.ior)).toBeLessThan(0.05);
+    // Smoother as it refines, so the derived exponent tightens the same way.
+    expect(markSpecularPower(tissue.roughness))
+      .toBeGreaterThan(markSpecularPower(cell.roughness));
     expect(tissue.dispersion).toBeGreaterThan(cell.dispersion);
     expect(cell.dispersion).toBeGreaterThan(molecule.dispersion);
     expect(element.transmit).toBeLessThan(molecule.transmit);
     expect(element.absorption).toBeGreaterThan(tissue.absorption);
+
+    // F0 is Schlick's, and the ordering it produces is the POINT of moving to
+    // an index: the old hand-set fresnelGain gave obsidian 0.30 against plain
+    // glass's 0.24 despite near-identical indices, so the mark's edges ordered
+    // the ranks by nothing physical. Diamond's edges are ~4x glass's now
+    // because 2.42 says so.
+    expect(markF0(1)).toBeCloseTo(0, 12);
+    expect(markF0(molecule.ior)).toBeCloseTo(0.0426, 3);
+    expect(markF0(tissue.ior)).toBeCloseTo(0.1724, 3);
+    expect(markF0(tissue.ior) / markF0(molecule.ior)).toBeGreaterThan(3.5);
+    expect(markF0(element.ior)).toBeLessThan(markF0(molecule.ior));
+
+    // The derived exponent stays resolvable. An optical polish converts to
+    // thousands, which on one point light and no environment is a crystal with
+    // no highlight at all — the cap is what keeps the four distinguishable.
+    for (const material of materials) {
+      expect(markSpecularPower(material.roughness), `${material.glass} power`)
+        .toBeLessThan(ATOMA_MARK_MAX_SPECULAR_POWER);
+      expect(markSpecularPower(material.roughness), `${material.glass} power`)
+        .toBeGreaterThan(1);
+    }
   });
 
   it('makes each wedge a SOLID of its material, not a surfaced facet', () => {
