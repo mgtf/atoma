@@ -465,6 +465,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uRim: f32,
     uLocalSize: f32,
     uBackdropTexel: vec2<f32>,
+    uCoreRadius: f32,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -660,10 +661,15 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
     let coreGeo = incidence * nDotV /
       max(incidence + nDotV - incidence * nDotV, 1e-4);
+    // AREA LIGHT. The bead has size. A point-light exponent stays needle-thin
+    // even when the filament is against the wall; the solid angle of a sphere
+    // of this radius at this distance is what widens the glint.
+    let coreSoft = specularPower * distance /
+      max(distance + markUniforms.uCoreRadius, 1e-4);
     let coreSpectral = vec3<f32>(
-      pow(coreFacing, specularPower * 0.68),
-      pow(coreFacing, specularPower),
-      pow(coreFacing, specularPower * 1.5)
+      pow(coreFacing, coreSoft * 0.68),
+      pow(coreFacing, coreSoft),
+      pow(coreFacing, coreSoft * 1.5)
     );
     let coreHighlight = mix(vec3<f32>(coreSpectral.y), coreSpectral, dispersion) *
       coreSpecF * coreGeo * specNorm * falloff *
@@ -930,6 +936,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform float uRim;
   uniform float uLocalSize;
   uniform vec2 uBackdropTexel;
+  uniform float uCoreRadius;
 
   void main() {
     vec3 normal = normalize(vNormal);
@@ -997,10 +1004,11 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
     float coreGeo = incidence * nDotV /
       max(incidence + nDotV - incidence * nDotV, 1e-4);
+    float coreSoft = specularPower * dist / max(dist + uCoreRadius, 1e-4);
     vec3 coreSpectral = vec3(
-      pow(coreFacing, specularPower * 0.68),
-      pow(coreFacing, specularPower),
-      pow(coreFacing, specularPower * 1.5)
+      pow(coreFacing, coreSoft * 0.68),
+      pow(coreFacing, coreSoft),
+      pow(coreFacing, coreSoft * 1.5)
     );
     vec3 coreHighlight = mix(vec3(coreSpectral.y), coreSpectral, dispersion) *
       coreSpecF * coreGeo * specNorm * falloff *

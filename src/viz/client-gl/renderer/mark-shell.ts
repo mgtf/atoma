@@ -4,6 +4,7 @@ import { Buffer, BufferUsage, Geometry, Mesh, Shader, Texture } from 'pixi.js';
 type ShellMesh = Mesh<Geometry, Shader>;
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
+  ATOMA_MARK_CORE_RADIUS,
   ATOMA_MARK_MESH,
   ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_MIN_PATH,
@@ -155,6 +156,10 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uRim', type: 'f32' },
   { name: 'uLocalSize', type: 'f32' },
   { name: 'uBackdropTexel', type: 'vec2<f32>' },
+  // Filament radius in MODEL units. The inner specular treats the bead as an
+  // area light of this size, so a glint widens when the bead is against a wall
+  // instead of staying a point-light needle.
+  { name: 'uCoreRadius', type: 'f32' },
 ] as const;
 
 /** Initial value per uniform, built fresh per shell so buffers are not shared. */
@@ -181,6 +186,7 @@ const uniformValues: Record<
   uRim: () => 0.9,
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
+  uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,
 };
 
 /**

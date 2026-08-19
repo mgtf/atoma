@@ -206,6 +206,7 @@ describe('mark shell shader contract', () => {
       expect(source).toContain('coreHighlight');
       expect(source).toContain('cosCrit');
       expect(source).toContain('(1.0 - outer)');
+      expect(source).toContain('coreSoft');
     }
   });
 
