@@ -560,11 +560,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // is why the crystal read as painted triangles. Varying V across the face
     // is what lets a highlight become a spot.
     //
-    // 0.72 is a stylised half-width: the authored camera is farther than that,
+    // 1.15 is a stylised half-width: the authored camera is farther than that,
     // but a smaller offset left N·H almost constant across a flat facet, so
     // the key glazed the whole triangle. Stretching V is what turns a glaze
     // into a spot. vScreen is y-down Pixi; world Y is up.
-    let viewOffset = vec2<f32>(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.72;
+    let viewOffset = vec2<f32>(vScreen.x - 0.5, 0.5 - vScreen.y) * 1.15;
     let viewDir = normalize(vec3<f32>(viewOffset.x, viewOffset.y, 1.0));
     let nDotV = min(abs(dot(normal, viewDir)), 1.0);
 
@@ -601,7 +601,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // N a little toward the local screen centre is a cut, not a bump map, and
     // it is used ONLY for the highlights — Lambert, path and refraction keep
     // the true face so the solid stays faceted.
-    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.08) * 1.35;
+    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.02) * 2.8;
     let shadeNormal = normalize(normal + convex);
     let half = normalize(markUniforms.uLightDir + viewDir);
     let facing = max(dot(shadeNormal, half), 0.0);
@@ -862,7 +862,17 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       transmitted * markUniforms.uRefract,
       outer
     );
-    let lit = surface + interior;
+    let litRaw = surface + interior;
+    // SHOULDER. SpecNorm times uSpecular still overshoots 1 on a diamond table
+    // the key sees, and an 8-bit target then paints a white rectangle (24k
+    // clipped pixels on frame 4 of the turn film, every one RGB 255). Compress
+    // only the excess; values below 0.9 are untouched, and the curve never
+    // crosses 1.
+    let litPeak = max(litRaw.x, max(litRaw.y, litRaw.z));
+    let knee = max(litPeak - 0.9, 0.0);
+    let compressed = 0.9 + 0.1 * (knee / (knee + 0.35));
+    let scale = select(1.0, compressed / max(litPeak, 1e-4), litPeak > 0.9);
+    let lit = litRaw * scale;
     // The bead only NUDGES alpha. It crosses the cavity several times a second,
     // so whatever it adds here reads as flicker rather than as light; its
     // brightness belongs in LIT, where it lands on colour instead of density.
@@ -978,7 +988,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float body = vFinish.z;
 
     // Same view ray as the WGSL path; keep the two in step.
-    vec2 viewOffset = vec2(vScreen.x - 0.5, 0.5 - vScreen.y) * 0.72;
+    vec2 viewOffset = vec2(vScreen.x - 0.5, 0.5 - vScreen.y) * 1.15;
     vec3 viewDir = normalize(vec3(viewOffset.x, viewOffset.y, 1.0));
     float nDotV = min(abs(dot(normal, viewDir)), 1.0);
 
@@ -998,7 +1008,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
-    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.08) * 1.35;
+    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.02) * 2.8;
     vec3 shadeNormal = normalize(normal + convex);
     vec3 halfVector = normalize(uLightDir + viewDir);
     float facing = max(dot(shadeNormal, halfVector), 0.0);
@@ -1095,7 +1105,12 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       split * 0.9 * bounce +
       vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
     vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
-    vec3 lit = surface + interior;
+    vec3 litRaw = surface + interior;
+    float litPeak = max(litRaw.x, max(litRaw.y, litRaw.z));
+    float knee = max(litPeak - 0.9, 0.0);
+    float compressed = 0.9 + 0.1 * (knee / (knee + 0.35));
+    float scale = litPeak > 0.9 ? compressed / max(litPeak, 1e-4) : 1.0;
+    vec3 lit = litRaw * scale;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
       mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
