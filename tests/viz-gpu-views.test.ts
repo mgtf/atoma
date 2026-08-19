@@ -27,6 +27,10 @@ import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { attachAtomaMark } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
+import {
+  pinMarkElapsedMs,
+  setMarkBeadVisible,
+} from '../src/viz/client-gl/renderer/mark-clock.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
@@ -166,6 +170,40 @@ function createRecordingCtx(): RecordingCtx {
         height: 22,
       });
       return { trackLocalX: x, trackWidth: width };
+    },
+    turnSlider(parent, x, y, width, label, liveLabel) {
+      ctx.text(parent, label, x, y);
+      ctx.text(parent, liveLabel, x + width - 40, y);
+      ctx.metrics.hitTargets.push({
+        id: 'welcome.turn',
+        role: 'slider',
+        label,
+        x,
+        y,
+        width,
+        height: 28,
+      });
+      ctx.metrics.hitTargets.push({
+        id: 'welcome.turnLive',
+        role: 'button',
+        label: liveLabel,
+        x: x + width - 40,
+        y,
+        width: 40,
+        height: 28,
+      });
+    },
+    markBeadCheck(parent, id, x, y, width, label) {
+      ctx.text(parent, label, x, y);
+      ctx.metrics.hitTargets.push({
+        id,
+        role: 'checkbox',
+        label,
+        x,
+        y,
+        width,
+        height: 28,
+      });
     },
     filterBlockFrame(parent, block) {
       const graphics = new Graphics();
@@ -522,6 +560,8 @@ function findByCursor(root: Container, cursor: string): Container | undefined {
 
 afterEach(() => {
   setReducedMotionOverrideForTests(null);
+  pinMarkElapsedMs(null);
+  setMarkBeadVisible(true);
 });
 
 // ---------------------------------------------------------------------------
@@ -879,6 +919,20 @@ describe('drawWelcome gate', () => {
     expect(button!.y).toBeGreaterThan(HEIGHT / 2);
     expect(button!.x + button!.width / 2).toBe(WIDTH / 2);
     expect(ctx.tickers.length).toBeGreaterThan(0);
+    const slider = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turn');
+    const live = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turnLive');
+    const bead = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.bead');
+    expect(slider).toBeTruthy();
+    expect(live).toBeTruthy();
+    expect(bead).toBeTruthy();
+    expect(slider!.role).toBe('slider');
+    expect(bead!.role).toBe('checkbox');
+    expect(slider!.label).toBe(I18N_CATALOGS.en['welcome.turn']);
+    expect(bead!.label).toBe(I18N_CATALOGS.en['welcome.bead']);
+    expect(slider!.y).toBe(layout.sliderY);
+    expect(bead!.x).toBe(layout.beadX);
+    expect(layout.sliderY).toBeGreaterThan(HEIGHT / 2);
+    expect(layout.buttonY).toBeGreaterThan(layout.sliderY + layout.sliderHeight);
   });
 
   it('keeps the button on-screen while the mark grows with the viewport', () => {
@@ -887,6 +941,8 @@ describe('drawWelcome gate', () => {
     expect(wide.scale).toBeGreaterThan(compact.scale);
     expect(compact.buttonY + compact.buttonHeight).toBeLessThan(600);
     expect(wide.buttonY + wide.buttonHeight).toBeLessThan(1080);
+    expect(compact.sliderY + compact.sliderHeight).toBeLessThan(compact.buttonY);
+    expect(compact.beadY).toBe(compact.sliderY);
     expect(compact.markX + 14).toBe(400);
     expect(compact.markY + 14).toBe(300);
   });
@@ -924,11 +980,16 @@ describe('attachAtomaMark glass layering', () => {
     expect(layer('mark-behind-glass')).toBeGreaterThanOrEqual(0);
     expect(layer('mark-shell-back-layer')).toBeGreaterThanOrEqual(0);
     expect(layer('mark-interior')).toBeGreaterThan(layer('mark-shell-back-layer'));
-    expect(layer('mark-shell-front-layer')).toBeGreaterThan(layer('mark-interior'));
+    expect(layer('mark-shell-mid-layer')).toBeGreaterThan(layer('mark-interior'));
+    expect(layer('mark-shell-front-layer')).toBeGreaterThan(layer('mark-shell-mid-layer'));
     // No 'mark-edges' layer: facet outlines were removed — a stroke around
     // every triangle read as a wireframe border on the crystal.
     expect(layer('mark-edges')).toBe(-1);
     expect(layer('mark-glass-glow')).toBeGreaterThan(layer('mark-shell-front-layer'));
+    // No Pixi floor disc: lantern light is written to the far-field sample
+    // the Three.js backdrop reads. A coloured ellipse under the gem read as
+    // a ground plane, which is the opposite of a wall facing the camera.
+    expect(layer('mark-rear-light')).toBe(-1);
 
     const behind = crystal.children.find(
       (child) => child.label === 'mark-behind-glass'
@@ -959,9 +1020,17 @@ describe('attachAtomaMark glass layering', () => {
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
     expect(source).toContain('behind.visible = false');
+    expect(source).toContain('shell?.update(frame, { beadVisible })');
+    expect(source).toContain('writeMarkFieldLight');
+    expect(source).toContain('clearMarkFieldLight');
+    expect(source).toContain('markHaloMinPx');
+    expect(source).not.toContain('mark-rear-light');
+    // A Pixi ellipse under the gem is a floor. Lantern light lives on the
+    // Three.js field; this file must not paint a disc in the foreground.
+    expect(source).not.toMatch(/\.ellipse\(/);
   });
 
-  it('animates one crystal per attach and freezes it under reduced motion', () => {
+  it('animates one crystal per attach and still ticks under reduced motion', () => {
     const parent = new Container();
     const moving: ((ticker: Ticker) => void)[] = [];
     attachAtomaMark(parent, (callback) => moving.push(callback), 0, 0);
@@ -970,8 +1039,26 @@ describe('attachAtomaMark glass layering', () => {
     setReducedMotionOverrideForTests(true);
     const still: ((ticker: Ticker) => void)[] = [];
     attachAtomaMark(parent, (callback) => still.push(callback), 0, 0);
-    expect(still).toHaveLength(0);
+    // Reduced motion freezes the turn at t=0 but must keep ticking so the
+    // welcome inspect knobs (pinned pose, bead checkbox) can still drive it.
+    expect(still).toHaveLength(1);
     expect(parent.children).toHaveLength(2);
+  });
+
+  it('hides the interior bead when the inspect flag is off', () => {
+    const parent = new Container();
+    const tickers: ((ticker: Ticker) => void)[] = [];
+    attachAtomaMark(parent, (callback) => tickers.push(callback), 0, 0);
+    const flatten = (node: Container): Container[] =>
+      node.children.flatMap((child) =>
+        child instanceof Container ? [child, ...flatten(child)] : []
+      );
+    const core = flatten(parent).find((child) => child.label === 'mark-core');
+    expect(core).toBeTruthy();
+    expect(core!.visible).toBe(true);
+    setMarkBeadVisible(false);
+    tickers[0]!({ deltaMS: 16 } as Ticker);
+    expect(core!.visible).toBe(false);
   });
 });
 

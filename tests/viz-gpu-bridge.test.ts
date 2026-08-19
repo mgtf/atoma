@@ -15,6 +15,13 @@ import {
 } from '../src/viz/client-gl/entry-fade.js';
 import { GpuErrorBoundary } from '../src/viz/client-gl/GpuErrorBoundary.js';
 import { setReducedMotionOverrideForTests } from '../src/viz/client-gl/renderer/motion.js';
+import {
+  markBeadVisible,
+  markClockIsPinned,
+  pinMarkElapsedMs,
+  pinMarkTurnDegrees,
+  setMarkBeadVisible,
+} from '../src/viz/client-gl/renderer/mark-clock.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 
 const runs = [
@@ -41,6 +48,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   setReducedMotionOverrideForTests(null);
+  pinMarkElapsedMs(null);
+  setMarkBeadVisible(true);
   vi.useRealTimers();
 });
 
@@ -163,6 +172,17 @@ describe('arrival entry fade', () => {
     fireEvent.click(screen.getByRole('button', { name: 'go' }));
     expect(useGpuStore.getState().entered).toBe(true);
     expect(screen.getByTestId('phase')).toHaveTextContent('idle');
+  });
+
+  it('clears welcome inspect knobs so the header mark is not left frozen', () => {
+    setReducedMotionOverrideForTests(true);
+    useGpuStore.setState({ entered: false });
+    pinMarkTurnDegrees(90);
+    setMarkBeadVisible(false);
+    render(createElement(EntryFadeProbe));
+    fireEvent.click(screen.getByRole('button', { name: 'go' }));
+    expect(markClockIsPinned()).toBe(false);
+    expect(markBeadVisible()).toBe(true);
   });
 
   it('keeps both beats short', () => {

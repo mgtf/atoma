@@ -171,7 +171,10 @@ describe('mark shell shader contract', () => {
     // four glasses that share one peak only differ in width — diamond fire has
     // to be brighter because the energy is packed into a smaller spot.
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
-      expect(source).toContain('sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4)');
+      expect(source).toContain(
+        'trueSun * nDotV / max(trueSun + nDotV - trueSun * nDotV, 1e-4)'
+      );
+      expect(source).toContain('bodyNormal');
       expect(source).toContain('(specularPower + 2.0) / 51.0');
       expect(source).toMatch(/specF \* geo \* specNorm/);
     }
@@ -252,6 +255,8 @@ describe('mark shell shader contract', () => {
       expect(source).toContain('shadeNormal');
       expect(source).toContain('interiorPeak');
       expect(source).toContain('interiorWeight');
+      expect(source).toContain('tableWindow');
+      expect(source).toMatch(/mix\(1\.0, attenuation, cavity\)/);
       expect(source).toMatch(/bounce \* cover/);
       expect(source).toMatch(/vScreen\.y, 0\.02\) \* 2\.8/);
       expect(source).toContain('tableLobe');

@@ -58,6 +58,8 @@ const SHADE_NEAR = 1;
 
 /** Model-space reach of the bead's light, converted from its projected radius. */
 const CORE_REACH_MODEL = ATOMA_MARK_CORE_LIGHT_RADIUS / ATOMA_MARK_PROJECTION_SCALE;
+/** Analytic filament loudness. Zero when the inspect checkbox hides the bead. */
+export const MARK_SHELL_CORE_INTENSITY = 0.88;
 
 function unit(raw: [number, number, number]): [number, number, number] {
   const length = Math.hypot(...raw);
@@ -199,7 +201,7 @@ const uniformValues: Record<
   uLightDir: () => new Float32Array(LIGHT_DIRECTION),
   uCoreTint: () => new Float32Array([0.87, 0.945, 1]),
   uCoreReach: () => CORE_REACH_MODEL,
-  uCoreIntensity: () => 0.88,
+  uCoreIntensity: () => MARK_SHELL_CORE_INTENSITY,
   uAmbient: () => 0.15,
   uPulse: () => 0,
   uWall: () => ATOMA_MARK_THICKNESS,
@@ -230,11 +232,13 @@ export interface MarkShell {
    * shader, so leaving it on feeds the texture back into itself.
    */
   setRefracting(on: boolean): void;
-  /** Facets behind the bead. Added to the scene BEFORE it. */
+  /** Far hull and cavity behind the bead. Backdrop pass only. */
   back: ShellMesh;
-  /** Facets in front of the bead: the glass it is seen through. */
+  /** Cavity walls in front of the bead, still behind the front glass. Backdrop. */
+  mid: ShellMesh;
+  /** Camera-facing outer hull: the glass drawn in the scene. */
   front: ShellMesh;
-  update(frame: AtomaMarkFrame): void;
+  update(frame: AtomaMarkFrame, options?: { beadVisible?: boolean }): void;
 }
 
 function channels(color: number): [number, number, number] {
@@ -246,10 +250,12 @@ function channels(color: number): [number, number, number] {
 }
 
 /**
- * The shell as two Pixi meshes over ONE set of vertex buffers, differing only in
- * which facets their index buffer selects. Two meshes rather than one because
- * the bead has to be drawn between them, and a mesh cannot be interleaved with
- * anything.
+ * The shell as three Pixi meshes over ONE set of vertex buffers, differing
+ * only in which facets their index buffer selects. Three rather than one
+ * because the bead has to sit BETWEEN the far cavity and the near cavity
+ * inside the backdrop, and the front glass has to stay in the scene even
+ * when the bead has overtaken a camera-facing face in Z. A mesh cannot be
+ * interleaved with a Pixi sprite, so the groups are separate draws.
  *
  * Returns null where no document exists: Pixi compiles a GLSL program by probing
  * a throwaway canvas, so the shader cannot be built in the headless view tests.
@@ -351,11 +357,20 @@ export function createMarkShell(): MarkShell | null {
   // is part of the geometry, so a shorter group has to rasterise nothing rather
   // than shrink the buffer and reallocate one every frame.
   const backIndices = new Uint32Array(INDEX_COUNT);
+  const midIndices = new Uint32Array(INDEX_COUNT);
   const frontIndices = new Uint32Array(INDEX_COUNT);
   const backGeometry = new Geometry({
     attributes,
     indexBuffer: new Buffer({
       data: backIndices,
+      usage: BufferUsage.INDEX | BufferUsage.COPY_DST,
+    }),
+    topology: 'triangle-list',
+  });
+  const midGeometry = new Geometry({
+    attributes,
+    indexBuffer: new Buffer({
+      data: midIndices,
       usage: BufferUsage.INDEX | BufferUsage.COPY_DST,
     }),
     topology: 'triangle-list',
@@ -396,11 +411,14 @@ export function createMarkShell(): MarkShell | null {
 
   const back = new Mesh({ geometry: backGeometry, shader });
   back.label = 'mark-shell-back';
+  const mid = new Mesh({ geometry: midGeometry, shader });
+  mid.label = 'mark-shell-mid';
   const front = new Mesh({ geometry: frontGeometry, shader });
   front.label = 'mark-shell-front';
 
   const uniforms = shader.resources['markUniforms'].uniforms as {
     uCore: Float32Array;
+    uCoreIntensity: number;
     uPulse: number;
     uRefractOn: number;
     uBackdropTexel: Float32Array;
@@ -409,15 +427,10 @@ export function createMarkShell(): MarkShell | null {
     uMaxBend: number;
   };
 
-  const writeGroup = (
-    indices: Uint32Array,
-    order: readonly number[],
-    from: number,
-    to: number
-  ) => {
+  const writeGroup = (indices: Uint32Array, group: readonly number[]) => {
     let cursor = 0;
-    for (let entry = from; entry < to; entry += 1) {
-      const base = order[entry]! * 3;
+    for (const facet of group) {
+      const base = facet * 3;
       indices[cursor] = base;
       indices[cursor + 1] = base + 1;
       indices[cursor + 2] = base + 2;
@@ -429,6 +442,7 @@ export function createMarkShell(): MarkShell | null {
 
   return {
     back,
+    mid,
     front,
     setRefracting(on: boolean) {
       uniforms.uRefractOn = on ? 1 : 0;
@@ -444,7 +458,8 @@ export function createMarkShell(): MarkShell | null {
       uniforms.uBend = refraction.bend;
       uniforms.uMaxBend = refraction.maxBend;
     },
-    update(frame: AtomaMarkFrame) {
+    update(frame: AtomaMarkFrame, options?: { beadVisible?: boolean }) {
+      const beadVisible = options?.beadVisible !== false;
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
         const shaded = frame.facets[index]!;
         const near = markFacetNearness(shaded.centroid[2]);
@@ -466,8 +481,11 @@ export function createMarkShell(): MarkShell | null {
           tints[vertex * 3 + 2] = rank[2] * shade;
         }
       }
-      writeGroup(backIndices, frame.order, 0, frame.coreSplit);
-      writeGroup(frontIndices, frame.order, frame.coreSplit, frame.order.length);
+      writeGroup(backIndices, beadVisible
+        ? frame.backOrder
+        : [...frame.backOrder, ...frame.midOrder]);
+      writeGroup(midIndices, beadVisible ? frame.midOrder : []);
+      writeGroup(frontIndices, frame.frontOrder);
 
       positionBuffer.update();
       worldBuffer.update();
@@ -475,12 +493,25 @@ export function createMarkShell(): MarkShell | null {
       surfaceBuffer.update();
       tintBuffer.update();
       backGeometry.indexBuffer.update();
+      midGeometry.indexBuffer.update();
       frontGeometry.indexBuffer.update();
 
-      uniforms.uCore[0] = frame.core3[0];
-      uniforms.uCore[1] = frame.core3[1];
-      uniforms.uCore[2] = frame.core3[2];
-      uniforms.uPulse = frame.pulse;
+      if (beadVisible) {
+        uniforms.uCore[0] = frame.core3[0];
+        uniforms.uCore[1] = frame.core3[1];
+        uniforms.uCore[2] = frame.core3[2];
+        uniforms.uCoreIntensity = MARK_SHELL_CORE_INTENSITY;
+        uniforms.uPulse = frame.pulse;
+      } else {
+        // Empty cavity: no filament in the texture, no analytic wall light,
+        // no Z to split the hull against. The inspect checkbox is a kill
+        // switch, not a hide-the-sprite.
+        uniforms.uCore[0] = 0;
+        uniforms.uCore[1] = 0;
+        uniforms.uCore[2] = 0;
+        uniforms.uCoreIntensity = 0;
+        uniforms.uPulse = 0;
+      }
     },
   };
 }

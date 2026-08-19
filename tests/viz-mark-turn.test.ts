@@ -40,11 +40,27 @@ describe('viz mark-turn capture', () => {
     expect(welcome).not.toMatch(/Math\.sin\(performance\.now\(\)/);
   });
 
-  it('crops to the crystal, above the Continue control', () => {
+  it('crops to the crystal, above the inspect row', () => {
     const clip = crystalClip(VIEW_WIDTH, VIEW_HEIGHT);
     const layout = welcomeLayout(VIEW_WIDTH, VIEW_HEIGHT);
+    expect(clip.y + clip.height).toBeLessThan(layout.sliderY);
     expect(clip.y + clip.height).toBeLessThan(layout.buttonY);
     expect(clip.x + clip.width).toBeLessThanOrEqual(VIEW_WIDTH);
+  });
+
+  it('keeps the film crop and welcome layout in lockstep', () => {
+    expect(script).toMatch(/MARK_TO_SLIDER = 22/);
+    expect(welcome).toMatch(/MARK_TO_SLIDER = 22/);
+    expect(script).toMatch(/SLIDER_HEIGHT = 28/);
+    expect(welcome).toMatch(/SLIDER_HEIGHT = 28/);
+    expect(script).toMatch(/SLIDER_TO_BUTTON = 18/);
+    expect(welcome).toMatch(/SLIDER_TO_BUTTON = 18/);
+  });
+
+  it('can capture a single degree instead of the 250 ms film', () => {
+    expect(script).toContain('--degree');
+    expect(script).toContain('degree-');
+    expect(gpuRenderer).toContain('pinMarkTurnDegrees');
   });
 
   it('writes into a gitignored capture directory', () => {

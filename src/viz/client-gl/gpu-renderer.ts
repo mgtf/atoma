@@ -21,7 +21,15 @@ import type {
   VizRun,
 } from '../client/types.js';
 import { attachAtomaMark } from './renderer/atoma-mark.js';
-import { markElapsedMs, pinMarkElapsedMs } from './renderer/mark-clock.js';
+import {
+  markElapsedMs,
+  markTurnDegrees,
+  pinMarkElapsedMs,
+  pinMarkTurnDegrees,
+  markBeadVisible,
+  setMarkBeadVisible,
+  markClockIsPinned,
+} from './renderer/mark-clock.js';
 import {
   CAST_SHADOW_REACH_PX,
   type CastShadowSurface,
@@ -108,6 +116,17 @@ function formatTuningValue(key: TuningKey, value: number): string {
   const range = TUNING_RANGE[key];
   const decimals = range.step < 1 ? 2 : 0;
   return `${value.toFixed(decimals)}${range.unit}`;
+}
+
+/** Linear 0..359 mapping for the welcome turn slider. 360 wraps to 0. */
+function markTurnDegreeFromTrack(localX: number, trackX: number, trackWidth: number): number {
+  const t = Math.max(0, Math.min(1, (localX - trackX) / Math.max(1, trackWidth)));
+  return Math.round(t * 359);
+}
+
+function trackXFromTurnDegree(degrees: number, trackX: number, trackWidth: number): number {
+  const wrapped = ((degrees % 360) + 360) % 360;
+  return trackX + wrapped / 360 * trackWidth;
 }
 
 export interface GpuRenderMetrics {
@@ -285,6 +304,14 @@ export class GpuRenderer {
    * `render()` destroys the whole scene between two pointer moves.
    */
   private tuningDrag: { key: TuningKey; trackX: number; trackWidth: number } | null = null;
+  /**
+   * Sibling of `tuningDrag` for the welcome turn slider. Same contract: a
+   * track geometry, never a display object — `render()` wipes the scene
+   * between pointer moves.
+   */
+  private turnDrag: { trackX: number; trackWidth: number } | null = null;
+  private turnSliderBounds: Rectangle | null = null;
+  private turnSliderLastTapAt = 0;
 
   private castShadows: {
     shadow: Graphics;
@@ -302,6 +329,24 @@ export class GpuRenderer {
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
+    if (!this.snapshot.state.entered && this.turnSliderBounds) {
+      const bounds = this.app.canvas.getBoundingClientRect();
+      const local = pointerClientToRenderer(
+        event.clientX,
+        event.clientY,
+        bounds,
+        this.app.screen.width,
+        this.app.screen.height
+      );
+      if (this.turnSliderBounds.contains(local.x, local.y)) {
+        const step = event.shiftKey ? 10 : 1;
+        const delta = event.deltaY > 0 ? step : event.deltaY < 0 ? -step : 0;
+        if (delta !== 0) {
+          pinMarkTurnDegrees((markTurnDegrees() + delta + 360) % 360);
+        }
+        return;
+      }
+    }
     if (
       this.snapshot.state.focusedInput === 'run' &&
       this.runPickerBounds
@@ -362,12 +407,12 @@ export class GpuRenderer {
    * behind.
    */
   private readonly tuningPointerMove = (event: PointerEvent) => {
-    const drag = this.tuningDrag;
-    if (!drag) return;
+    if (!this.tuningDrag && !this.turnDrag) return;
     // A release outside the window, or a pointercancel we never saw, leaves
     // the button up with the drag still armed. Trust the event, not our state.
     if (event.buttons === 0) {
       this.tuningDrag = null;
+      this.turnDrag = null;
       return;
     }
     const bounds = this.app.canvas.getBoundingClientRect();
@@ -381,14 +426,22 @@ export class GpuRenderer {
     // Both coordinates in RENDERER space. The bug this replaces compared a
     // window clientX against a Pixi local position.x, which agreed only by
     // accident on an unscaled canvas sitting at the window origin.
-    setTuningValue(
-      drag.key,
-      tuningValueFromTrack(drag.key, local.x, drag.trackX, drag.trackWidth)
-    );
+    const tuning = this.tuningDrag;
+    if (tuning) {
+      setTuningValue(
+        tuning.key,
+        tuningValueFromTrack(tuning.key, local.x, tuning.trackX, tuning.trackWidth)
+      );
+    }
+    const turn = this.turnDrag;
+    if (turn) {
+      pinMarkTurnDegrees(markTurnDegreeFromTrack(local.x, turn.trackX, turn.trackWidth));
+    }
   };
 
   private readonly tuningPointerUp = () => {
     this.tuningDrag = null;
+    this.turnDrag = null;
   };
 
   private readonly updatePointerLight = (ticker: Ticker) => {
@@ -541,7 +594,9 @@ export class GpuRenderer {
     host.appendChild(this.app.canvas);
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
     // On window, not the canvas: a drag that wanders off the canvas must keep
-    // tracking, and its release must disarm wherever it happens.
+    // tracking, and its release must disarm wherever it happens. Tuning and
+    // the welcome turn slider share these listeners — both hold a KEY (or a
+    // track geometry), never a display object.
     window.addEventListener('pointermove', this.tuningPointerMove);
     window.addEventListener('pointerup', this.tuningPointerUp);
     window.addEventListener('pointercancel', this.tuningPointerUp);
@@ -551,9 +606,9 @@ export class GpuRenderer {
     // still cached) are invisible to mocked tests and to the WebGL fallback,
     // so the only honest regression test drives the real renderer — and it
     // needs to reach the GC to force a collection instead of passing because
-    // nothing ever happened. Read-only EXCEPT pinMarkElapsedMs, which the
-    // mark-turn capture script uses to step a rotation without waiting on the
-    // wall. Nothing in the product reads this handle back.
+    // nothing ever happened. Read-only EXCEPT the mark inspect setters, which
+    // the mark-turn capture script and the welcome slider use to hold a pose
+    // without waiting on the wall. Nothing in the product reads this handle back.
     if (
       typeof location !== 'undefined' &&
       new URLSearchParams(location.search).has('atomaDiag')
@@ -564,7 +619,11 @@ export class GpuRenderer {
         // rotation at 250 ms without waiting on the wall. Null returns the
         // clock to performance.now(). Inert unless this handle exists.
         pinMarkElapsedMs,
+        pinMarkTurnDegrees,
         markElapsedMs,
+        markTurnDegrees,
+        markBeadVisible,
+        setMarkBeadVisible,
         pointerLightFilter: () => this.pointerLightFilter,
         // Where the controls are, and what the live tuning holds. A drag is
         // only observable on a real renderer — the mocked suite has no stage
@@ -624,6 +683,8 @@ export class GpuRenderer {
     window.removeEventListener('pointercancel', this.tuningPointerUp);
     window.removeEventListener('blur', this.tuningPointerUp);
     this.tuningDrag = null;
+    this.turnDrag = null;
+    this.turnSliderBounds = null;
     this.app.destroy(true, { children: true });
     this.initialized = false;
     this.host = null;
@@ -672,6 +733,7 @@ export class GpuRenderer {
     this.currentEventIds = new Set();
     this.runPickerBounds = null;
     this.runPickerScrollMax = 0;
+    this.turnSliderBounds = null;
     const nextDetailKey =
       snapshot.state.view === 'runs'
         ? snapshot.state.selectedEventId
@@ -1051,6 +1113,225 @@ export class GpuRenderer {
     );
     readout.text = formatTuningValue(key, readTuning()[key]);
     return { trackLocalX, trackWidth };
+  }
+
+  /**
+   * Welcome turn slider: label, track, thumb, live degree readout, Live to
+   * unpin. Same contract as `tuningRow` — the drag holds track geometry, never
+   * a display object, and the thumb is moved by a ticker that reads the clock.
+   *
+   * Drag or wheel (±1°, shift ±10°) pins the mark. Pointer-up KEEPS the pin
+   * so a pose can be inspected. Double-click the track, or click Live, returns
+   * the clock to the wall.
+   */
+  turnSlider(
+    parent: Container,
+    x: number,
+    y: number,
+    width: number,
+    label: string,
+    liveLabel: string
+  ) {
+    const rowHeight = 28;
+    const labelWidth = 72;
+    const readoutWidth = 46;
+    const liveWidth = 40;
+    const trackLocalX = x + labelWidth;
+    const trackWidth = Math.max(
+      40,
+      width - labelWidth - readoutWidth - liveWidth
+    );
+    const liveX = x + width - liveWidth;
+
+    this.text(parent, label, x, y + 7, {
+      size: 10,
+      color: GPU_COLORS.muted,
+      weight: '600',
+      width: labelWidth - 6,
+    });
+
+    const track = new Graphics();
+    track.roundRect(trackLocalX, y + rowHeight / 2 - 2, trackWidth, 4, 2);
+    track.fill({ color: 0x1f2937, alpha: 0.75 });
+    track.eventMode = 'none';
+    parent.addChild(track);
+
+    const thumb = new Graphics();
+    thumb.roundRect(-6, -7, 12, 14, 3);
+    thumb.fill({ color: GPU_COLORS.primary, alpha: 0.95 });
+    thumb.stroke({ color: GPU_COLORS.text, width: 1, alpha: 0.55 });
+    thumb.eventMode = 'none';
+    thumb.label = 'welcome-turn-thumb';
+    parent.addChild(thumb);
+
+    const { style } = this.textStyle({
+      size: 10,
+      color: GPU_COLORS.text,
+      mono: true,
+      weight: '600',
+    });
+    // LIVE label, outside the retained pool: the degree string ticks with
+    // the mark clock / drag. Same reason `tuningRow` owns its own Text.
+    const readout = new Text({ text: '', style });
+    readout.anchor.set(1, 0.5);
+    readout.position.set(liveX - 6, y + rowHeight / 2);
+    readout.eventMode = 'none';
+    readout.label = 'welcome-turn-readout';
+    parent.addChild(readout);
+
+    const liveText = this.text(parent, liveLabel, liveX, y + 7, {
+      size: 10,
+      color: GPU_COLORS.primary,
+      weight: '700',
+      width: liveWidth,
+    });
+
+    const hit = new Graphics();
+    hit.rect(trackLocalX - 8, y, trackWidth + 16, rowHeight);
+    hit.fill({ color: 0xffffff, alpha: 0.0001 });
+    hit.eventMode = 'static';
+    hit.cursor = 'ew-resize';
+    parent.addChild(hit);
+
+    const liveHit = new Graphics();
+    liveHit.rect(liveX, y, liveWidth, rowHeight);
+    liveHit.fill({ color: 0xffffff, alpha: 0.0001 });
+    liveHit.eventMode = 'static';
+    liveHit.cursor = 'pointer';
+    parent.addChild(liveHit);
+
+    this.metrics.hitTargets.push({
+      id: 'welcome.turn',
+      role: 'slider',
+      label,
+      x: trackLocalX,
+      y,
+      width: trackWidth,
+      height: rowHeight,
+    });
+    this.metrics.hitTargets.push({
+      id: 'welcome.turnLive',
+      role: 'button',
+      label: liveLabel,
+      x: liveX,
+      y,
+      width: liveWidth,
+      height: rowHeight,
+    });
+    this.turnSliderBounds = new Rectangle(x, y, width, rowHeight);
+
+    const trackOrigin = () => {
+      const origin = parent.toGlobal({ x: trackLocalX, y });
+      return { x: origin.x, width: trackWidth };
+    };
+    hit.on('pointerdown', (event: { global: { x: number } }) => {
+      const geometry = trackOrigin();
+      this.turnDrag = { trackX: geometry.x, trackWidth: geometry.width };
+      pinMarkTurnDegrees(
+        markTurnDegreeFromTrack(event.global.x, geometry.x, geometry.width)
+      );
+    });
+    hit.on('pointertap', () => {
+      const now = performance.now();
+      if (now - this.turnSliderLastTapAt < 400 && markClockIsPinned()) {
+        pinMarkElapsedMs(null);
+        this.turnSliderLastTapAt = 0;
+        return;
+      }
+      this.turnSliderLastTapAt = now;
+    });
+    liveHit.on('pointertap', () => {
+      pinMarkElapsedMs(null);
+    });
+    if (this.turnDrag) {
+      const geometry = trackOrigin();
+      this.turnDrag.trackX = geometry.x;
+      this.turnDrag.trackWidth = geometry.width;
+    }
+
+    const paint = () => {
+      if (thumb.destroyed || readout.destroyed || liveText.destroyed) return;
+      const degrees = markTurnDegrees();
+      thumb.position.set(
+        trackXFromTurnDegree(degrees, trackLocalX, trackWidth),
+        y + rowHeight / 2
+      );
+      const next = `${degrees}°`;
+      if (next !== readout.text) readout.text = next;
+      const pinned = markClockIsPinned();
+      readout.tint = pinned
+        ? NO_TINT
+        : multiplyTint(GPU_COLORS.text, GPU_COLORS.muted);
+      liveText.alpha = pinned ? 1 : 0.4;
+    };
+    this.addTicker(paint);
+    paint();
+  }
+
+  /**
+   * Welcome inspect checkbox: show or hide the interior bead. Toggles a
+   * module flag the mark ticker reads — no scene rebuild on click.
+   */
+  markBeadCheck(
+    parent: Container,
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    label: string
+  ) {
+    const rowHeight = 28;
+    const boxSize = 14;
+    const boxX = x;
+    const boxY = y + (rowHeight - boxSize) / 2;
+
+    const box = new Graphics();
+    box.roundRect(boxX, boxY, boxSize, boxSize, 3);
+    box.stroke({ color: GPU_COLORS.border, width: 1.2, alpha: 0.9 });
+    box.fill({ color: 0x1f2937, alpha: 0.55 });
+    box.eventMode = 'none';
+    parent.addChild(box);
+
+    const fill = new Graphics();
+    fill.roundRect(boxX + 3, boxY + 3, boxSize - 6, boxSize - 6, 2);
+    fill.fill({ color: GPU_COLORS.primary, alpha: 0.95 });
+    fill.eventMode = 'none';
+    fill.label = 'welcome-bead-check';
+    parent.addChild(fill);
+
+    this.text(parent, label, boxX + boxSize + 8, y + 7, {
+      size: 10,
+      color: GPU_COLORS.muted,
+      weight: '600',
+      width: Math.max(24, width - boxSize - 10),
+    });
+
+    const hit = new Graphics();
+    hit.rect(x, y, width, rowHeight);
+    hit.fill({ color: 0xffffff, alpha: 0.0001 });
+    hit.eventMode = 'static';
+    hit.cursor = 'pointer';
+    parent.addChild(hit);
+    this.metrics.hitTargets.push({
+      id,
+      role: 'checkbox',
+      label,
+      x,
+      y,
+      width,
+      height: rowHeight,
+    });
+
+    const paint = () => {
+      if (fill.destroyed) return;
+      fill.visible = markBeadVisible();
+    };
+    hit.on('pointertap', () => {
+      setMarkBeadVisible(!markBeadVisible());
+      paint();
+    });
+    this.addTicker(paint);
+    paint();
   }
 
   collapseCaret(
@@ -2506,25 +2787,25 @@ export class GpuRenderer {
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
-    this.panel(
-      this.root,
-      0,
-      0,
-      width,
-      GPU_LAYOUT.headerHeight,
-      0x0b111e,
-      GPU_COLORS.border,
-      0,
-      2
-    );
-    this.drawAtomaMark(10, 12);
-    this.text(this.root, 'Atoma', 49, 17.5, {
+    // Wash, not an opaque bar. A 0.94 panel hid the far field — and the
+    // lantern the crystal throws onto it — behind the wordmark. Nav buttons
+    // keep their own surfaces; the gem sits on the wall that faces the camera.
+    const bar = new Graphics();
+    bar.rect(0, 0, width, GPU_LAYOUT.headerHeight);
+    bar.fill({ color: 0x0b111e, alpha: 0.42 });
+    bar.moveTo(0, GPU_LAYOUT.headerHeight);
+    bar.lineTo(width, GPU_LAYOUT.headerHeight);
+    bar.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.55 });
+    bar.eventMode = 'none';
+    this.root.addChild(bar);
+    this.drawAtomaMark(20, 12);
+    this.text(this.root, 'Atoma', 63, 17.5, {
       size: 16,
       color: 0x263f68,
       weight: '700',
       alpha: 0.72,
     });
-    this.text(this.root, 'Atoma', 48, 16, {
+    this.text(this.root, 'Atoma', 62, 16, {
       size: 16,
       color: GPU_COLORS.text,
       weight: '700',
@@ -2764,6 +3045,8 @@ export type RendererCtx = Pick<
   | 'collapseCaret'
   | 'filterBlockFrame'
   | 'tuningRow'
+  | 'turnSlider'
+  | 'markBeadCheck'
   | 'detailMask'
   | 'addTicker'
   | 'drawExitingFilterButtons'

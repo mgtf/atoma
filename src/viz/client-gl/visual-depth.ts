@@ -33,6 +33,24 @@ export const VIZ_VISUAL_DEPTH = {
     pointerGain: 0.32,
     pointerHaloRadius: POINTER_LIGHT_RADIUS_PX * FAR_POINTER_SPREAD,
     pointerCoreRadius: POINTER_LIGHT_CORE_RADIUS_PX * FAR_POINTER_SPREAD,
+    /**
+     * How much wider a rear-face pool is on the far plane than in the mark's
+     * local box. The lantern lights the FIELD, which is metres behind the gem
+     * in this depth model, so the halo has to spread — a 1:1 copy would read
+     * as a sticker on the crystal again.
+     */
+    markHaloSpread: 1.35,
+    /**
+     * Floor, in CSS pixels, so a header-sized crystal still throws past the
+     * 52px bar onto the page field. Welcome scale already exceeds this.
+     */
+    markHaloMinPx: 168,
+    /**
+     * Loudness of stained lantern light on the aurora. Above the pointer so
+     * mix-blend screen still shows a tint; well below a second lamp. The
+     * 1.85 / hot-core pass washed the welcome field to a teal spotlight.
+     */
+    markGain: 0.88,
   },
   mid: {
     threeZ: 0,

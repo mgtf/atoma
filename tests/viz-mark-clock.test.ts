@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  markBeadVisible,
   markClockIsPinned,
   markElapsedMs,
+  markTurnDegrees,
   pinMarkElapsedMs,
+  pinMarkTurnDegrees,
+  setMarkBeadVisible,
 } from '../src/viz/client-gl/renderer/mark-clock.js';
+import { ATOMA_MARK_TURN_MS } from '../src/viz/client-gl/brand-mark.js';
 
 describe('mark clock', () => {
   afterEach(() => {
     pinMarkElapsedMs(null);
+    setMarkBeadVisible(true);
   });
 
   it('follows the wall until pinned, then holds the pin', () => {
@@ -36,5 +42,29 @@ describe('mark clock', () => {
   it('clamps a negative pin to the start of the turn', () => {
     pinMarkElapsedMs(-40);
     expect(markElapsedMs()).toBe(0);
+  });
+
+  it('pins by turn degrees and unwraps 360 to the rest pose', () => {
+    pinMarkTurnDegrees(90);
+    expect(markClockIsPinned()).toBe(true);
+    expect(markElapsedMs()).toBeCloseTo(ATOMA_MARK_TURN_MS / 4, 5);
+    expect(markTurnDegrees()).toBe(90);
+
+    pinMarkTurnDegrees(360);
+    expect(markElapsedMs()).toBeCloseTo(0, 5);
+    expect(markTurnDegrees()).toBe(0);
+
+    pinMarkTurnDegrees(null);
+    expect(markClockIsPinned()).toBe(false);
+    pinMarkTurnDegrees(Number.NaN);
+    expect(markClockIsPinned()).toBe(false);
+  });
+
+  it('hides the bead only while the inspect flag is off', () => {
+    expect(markBeadVisible()).toBe(true);
+    setMarkBeadVisible(false);
+    expect(markBeadVisible()).toBe(false);
+    setMarkBeadVisible(true);
+    expect(markBeadVisible()).toBe(true);
   });
 });

@@ -6,12 +6,14 @@ import {
   ShaderMaterial,
   Vector2,
   Vector3,
+  Vector4,
   type Group,
 } from 'three';
 import { buildAtomMap, coerceEventFilters, type EventFilters } from '../client/run-utils.js';
 import type { VizRun } from '../client/types.js';
 import type { GpuTimelineViewport } from './gpu-renderer.js';
 import { pointerClientToUv, readPointerLight } from './pointer-light.js';
+import { readMarkFieldLight } from './mark-field-light.js';
 import { RunsTimelineRails } from './RunsTimelineRails.js';
 import type { ViewName } from './store.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
@@ -39,6 +41,14 @@ export const BACKDROP_FRAGMENT_SHADER = /* glsl */ `
   uniform vec2 uResolution;
   uniform vec2 uPointerUv;
   uniform float uPointerStrength;
+  uniform vec4 uMark0;
+  uniform vec4 uMark1;
+  uniform vec4 uMark2;
+  uniform vec4 uMark3;
+  uniform vec3 uMarkColor0;
+  uniform vec3 uMarkColor1;
+  uniform vec3 uMarkColor2;
+  uniform vec3 uMarkColor3;
   varying vec2 vUv;
   varying vec2 vScreenUv;
 
@@ -66,6 +76,18 @@ export const BACKDROP_FRAGMENT_SHADER = /* glsl */ `
       amplitude *= 0.5;
     }
     return value;
+  }
+
+  vec3 stainedField(vec2 screenUv, vec2 resolution, vec4 mark, vec3 tint) {
+    if (mark.z < 0.001) return vec3(0.0);
+    vec2 delta = (screenUv - mark.xy) * resolution;
+    float dist = length(delta) / max(mark.w, 1.0);
+    float halo = exp(-3.2 * dist * dist);
+    float core = exp(-8.0 * dist * dist);
+    // A tint on the wall, not a lamp. The previous 0.82+0.55 core blew the
+    // welcome field out to a teal spotlight; keep a readable stain.
+    return tint * mark.z * ${VIZ_VISUAL_DEPTH.far.markGain.toFixed(2)} *
+      (halo * 0.48 + core * 0.18);
   }
 
   void main() {
@@ -109,6 +131,13 @@ export const BACKDROP_FRAGMENT_SHADER = /* glsl */ `
     color += pointerTint * uPointerStrength * ${VIZ_VISUAL_DEPTH.far.pointerGain.toFixed(2)} *
       (pointerHalo * (0.03 + relief * 0.16));
 
+    // Stained lantern light. The bead's output through a rear face lands HERE,
+    // on the plane that faces the camera, not on a disc under the gem in Pixi.
+    color += stainedField(vScreenUv, uResolution, uMark0, uMarkColor0);
+    color += stainedField(vScreenUv, uResolution, uMark1, uMarkColor1);
+    color += stainedField(vScreenUv, uResolution, uMark2, uMarkColor2);
+    color += stainedField(vScreenUv, uResolution, uMark3, uMarkColor3);
+
     float vignette = smoothstep(1.0, 0.12, length(p));
     gl_FragColor = vec4(
       color * (0.62 + vignette * 0.38),
@@ -124,6 +153,14 @@ function ShaderField({ animate }: { animate: boolean }) {
     uResolution: { value: new Vector2(1, 1) },
     uPointerUv: { value: new Vector2(-2, -2) },
     uPointerStrength: { value: 0 },
+    uMark0: { value: new Vector4(0, 0, 0, 1) },
+    uMark1: { value: new Vector4(0, 0, 0, 1) },
+    uMark2: { value: new Vector4(0, 0, 0, 1) },
+    uMark3: { value: new Vector4(0, 0, 0, 1) },
+    uMarkColor0: { value: new Vector3() },
+    uMarkColor1: { value: new Vector3() },
+    uMarkColor2: { value: new Vector3() },
+    uMarkColor3: { value: new Vector3() },
   }), []);
 
   useFrame((state, delta) => {
@@ -147,6 +184,34 @@ function ShaderField({ animate }: { animate: boolean }) {
       14,
       delta
     );
+    const lantern = readMarkFieldLight();
+    const markUniforms = [
+      material.current.uniforms['uMark0']!.value as Vector4,
+      material.current.uniforms['uMark1']!.value as Vector4,
+      material.current.uniforms['uMark2']!.value as Vector4,
+      material.current.uniforms['uMark3']!.value as Vector4,
+    ];
+    const markColors = [
+      material.current.uniforms['uMarkColor0']!.value as Vector3,
+      material.current.uniforms['uMarkColor1']!.value as Vector3,
+      material.current.uniforms['uMarkColor2']!.value as Vector3,
+      material.current.uniforms['uMarkColor3']!.value as Vector3,
+    ];
+    for (let index = 0; index < 4; index += 1) {
+      const spill = lantern[index];
+      if (!spill) {
+        markUniforms[index]!.z = 0;
+        continue;
+      }
+      const uv = pointerClientToUv(
+        spill.clientX,
+        spill.clientY,
+        state.size.width,
+        state.size.height
+      );
+      markUniforms[index]!.set(uv.x, uv.y, spill.intensity, spill.radiusPx);
+      markColors[index]!.set(spill.r, spill.g, spill.b);
+    }
   });
 
   return (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { pinMarkElapsedMs, setMarkBeadVisible } from './renderer/mark-clock.js';
 import { prefersReducedMotion } from './renderer/motion.js';
 import { useGpuStore } from './store.js';
 
@@ -16,6 +17,10 @@ export function useEntryFade() {
   const [phase, setPhase] = useState<EntryFadePhase>(null);
 
   const begin = useCallback(() => {
+    // Welcome inspect knobs must not follow the user into the product: the
+    // header mark would otherwise stay frozen or beadless after Continue.
+    pinMarkElapsedMs(null);
+    setMarkBeadVisible(true);
     if (useGpuStore.getState().entered) return;
     if (prefersReducedMotion()) {
       useGpuStore.getState().enter();

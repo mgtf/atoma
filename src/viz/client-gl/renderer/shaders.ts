@@ -598,7 +598,15 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse) *
       transmit * mix(1.0, 0.45, bulk);
 
-    let sun = max(dot(normal, markUniforms.uLightDir), 0.0);
+    // The camera sees the INSIDE of a back-facing outer wall. Lighting that
+    // surface with the outward normal leaves N·L negative against a camera-side
+    // key, so the far hull in the backdrop is ambient-only — a black cavity,
+    // and every near table a veil over nothing. Flip only the body; specular
+    // stays on the true outward N so the dark side does not grow a glaze.
+    let facingView = dot(normal, viewDir);
+    let trueSun = max(dot(normal, markUniforms.uLightDir), 0.0);
+    let bodyNormal = select(normal, -normal, outer > 0.5 && facingView < 0.0);
+    let sun = max(dot(bodyNormal, markUniforms.uLightDir), 0.0);
     // CONVEXITY. A perfectly flat facet has constant N, so a directional key
     // that faces it glazes the whole triangle (the turn film clipped 45k
     // pixels on one white face). A real table is never that planar. Pulling
@@ -630,7 +638,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // is not — without this the four glasses shared one peak and only differed
     // in width. 51 is (glass's exponent + 2) / 2, so typical-pose geo * specNorm
     // stays near 1 and uSpecular remains the scene-wide loudness.
-    let geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
+    let geo = trueSun * nDotV / max(trueSun + nDotV - trueSun * nDotV, 1e-4);
     let specNorm = (specularPower + 2.0) / 51.0;
     let inPlane = vWorld - normal * dot(vWorld, normal);
     // TABLE LOBE. Bending N toward the face centroid created NEW alignments
@@ -826,8 +834,15 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     //
     // The bead behind a diamond facet is therefore seen genuinely displaced,
     // not merely fringed: the displacement is the transmitted image itself.
+    // EMPTY CAVITY. Beer-Lambert on the near slab is the right model for a hot
+    // filament; applied to the far hull it eats those faces to black, and a
+    // table — especially the grey obsidian one — reads as a veil over the
+    // field. When the inspect checkbox has killed the bead, pass the far walls
+    // through as glass. The far faces already have their own material.
+    let cavity = smoothstep(0.0, 0.35, markUniforms.uCoreIntensity);
     let attenuation = exp(-absorption * path);
-    let transmittedRaw = straight.rgb * attenuation * transmit * bounce;
+    let slabPass = mix(1.0, attenuation, cavity);
+    let transmittedRaw = straight.rgb * slabPass * transmit * bounce;
     // The filament is authored at alpha 1, so a clear table copies 8-bit white
     // into a disc. Compress only the excess; midtones of the interior stay put.
     // WGSL let is immutable: assigning back to transmitted is a refused
@@ -851,7 +866,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // glaze is not the key. Yield the body where transmission already
     // carries the interior.
     let interiorWeight = max(transmitted.x, max(transmitted.y, transmitted.z));
-    let cover = 1.0 - clamp(interiorWeight * outer * 0.85, 0.0, 1.0);
+    // Face-on table as a window onto the far hull, only while the cavity is
+    // empty. With the bead lit, interiorWeight already yields Lambert; adding
+    // this then would punch a hole next to a bright filament.
+    let tableWindow = (1.0 - cavity) * outer * nDotV * mix(1.0, 0.4, bulk);
+    let cover = 1.0 - clamp(max(interiorWeight * outer, tableWindow) * 0.85, 0.0, 1.0);
     let shade = vec3<f32>(markUniforms.uAmbient) +
       vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun);
     let surface = vTint * body * shade *
@@ -1030,7 +1049,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float core = falloff * (0.34 + 0.66 * incidence) *
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
-    float sun = max(dot(normal, uLightDir), 0.0);
+    float facingView = dot(normal, viewDir);
+    float trueSun = max(dot(normal, uLightDir), 0.0);
+    vec3 bodyNormal = (outer > 0.5 && facingView < 0.0) ? -normal : normal;
+    float sun = max(dot(bodyNormal, uLightDir), 0.0);
     vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.02) * 2.8;
     vec3 shadeNormal = normalize(normal + convex);
     vec3 halfVector = normalize(uLightDir + viewDir);
@@ -1041,7 +1063,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       pow(facing, specularPower * 1.85)
     );
     float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, halfVector), 0.0), 5.0);
-    float geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
+    float geo = trueSun * nDotV / max(trueSun + nDotV - trueSun * nDotV, 1e-4);
     float specNorm = (specularPower + 2.0) / 51.0;
     vec3 inPlane = vWorld - normal * dot(vWorld, normal);
     float tableLobe = exp(-dot(inPlane, inPlane) * 12.0);
@@ -1104,8 +1126,10 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * transmit;
 
     // Same transmission as the WGSL path; keep the two in step.
+    float cavity = smoothstep(0.0, 0.35, uCoreIntensity);
     float attenuation = exp(-absorption * path);
-    vec3 transmitted = straight.rgb * attenuation * transmit * bounce;
+    float slabPass = mix(1.0, attenuation, cavity);
+    vec3 transmitted = straight.rgb * slabPass * transmit * bounce;
     float interiorPeak = max(transmitted.x, max(transmitted.y, transmitted.z));
     transmitted = transmitted * (1.0 / (1.0 + max(interiorPeak - 0.82, 0.0) * 1.6));
 
@@ -1120,7 +1144,8 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same split as the WGSL path; keep the two in step.
     vec3 scatter = vTint * core * bounce * outer * 0.28;
     float interiorWeight = max(transmitted.x, max(transmitted.y, transmitted.z));
-    float cover = 1.0 - clamp(interiorWeight * outer * 0.85, 0.0, 1.0);
+    float tableWindow = (1.0 - cavity) * outer * nDotV * mix(1.0, 0.4, bulk);
+    float cover = 1.0 - clamp(max(interiorWeight * outer, tableWindow) * 0.85, 0.0, 1.0);
     vec3 shade = vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun);
     vec3 surface = vTint * body * shade *
       mix(1.0, 0.58, bulk) * bounce * cover +

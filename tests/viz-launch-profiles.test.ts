@@ -162,7 +162,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/private navButton\(/);
     // The brand mark is one Pixi crystal (header + arrival gate); no R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
-    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(10, 12\)/);
+    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(20, 12\)/);
+    expect(gpuRenderer).toMatch(/alpha: 0\.42/);
     expect(gpuRenderer).toMatch(/attachAtomaMark\(/);
     expect(gpuRenderer).toMatch(/drawWelcome\(/);
     expect(welcomeView).toMatch(/attachAtomaMark\(/);
@@ -203,6 +204,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
     expect(threeBackdrop).toMatch(/PointerPointLight|readPointerLight/);
     expect(threeBackdrop).toMatch(/uPointerUv|uPointerStrength/);
+    expect(threeBackdrop).toMatch(/uMark0|stainedField|readMarkFieldLight/);
+    expect(threeBackdrop).toMatch(/spill\.clientX/);
     expect(gpuRenderer).toMatch(/POINTER_LIGHT_GLSL|POINTER_LIGHT_WGSL/);
     expect(gpuRenderer).toMatch(/installPointerLightFilter/);
     expect(rendererShaders).toMatch(/POINTER_LIGHT_GLSL/);
@@ -248,7 +251,17 @@ describe('viz i18n catalogs stay in parity', () => {
   });
 
   it('the Launch tab keys are present in both', () => {
-    for (const key of ['nav.launch', 'launch.family', 'launch.goal', 'launch.command', 'pane.selectLaunch', 'welcome.continue']) {
+    for (const key of [
+      'nav.launch',
+      'launch.family',
+      'launch.goal',
+      'launch.command',
+      'pane.selectLaunch',
+      'welcome.continue',
+      'welcome.turn',
+      'welcome.turnLive',
+      'welcome.bead',
+    ]) {
       expect(I18N_CATALOGS.en[key], `en missing ${key}`).toBeTruthy();
       expect(I18N_CATALOGS.fr[key], `fr missing ${key}`).toBeTruthy();
     }

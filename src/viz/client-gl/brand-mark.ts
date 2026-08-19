@@ -1,6 +1,7 @@
 import {
   createThickOctahedron,
   markInradius,
+  type MarkFacetPart,
   type MarkOctant,
   type MarkVec3,
 } from './mark-geometry.js';
@@ -12,6 +13,38 @@ import {
  * standing there being lit.
  */
 export const ATOMA_MARK_TURN_MS = 15_000;
+
+/**
+ * Rest yaw of the rigid pose, in radians. Not 0: the 250 ms turn film showed
+ * a face-on table as dead obsidian, and this is the angle where a key-facing
+ * facet actually catches a glint. Film frame 0 and slider 0° are this pose.
+ */
+export const ATOMA_MARK_REST_YAW = 1.55;
+
+/**
+ * Degrees of the authored turn at `elapsedMs`. 0 is the rest pose (film frame
+ * 0); a full period wraps back to 0 so the slider and `buildAtomaMarkFrame`
+ * cannot drift from each other.
+ */
+export function markTurnDegreesFromElapsedMs(elapsedMs: number): number {
+  if (!Number.isFinite(elapsedMs)) return 0;
+  const elapsed = Math.max(0, elapsedMs);
+  const turn = elapsed % ATOMA_MARK_TURN_MS;
+  return turn / ATOMA_MARK_TURN_MS * 360;
+}
+
+/** Inverse of `markTurnDegreesFromElapsedMs` on [0, 360). 360 wraps to 0. */
+export function markElapsedMsFromTurnDegrees(degrees: number): number {
+  if (!Number.isFinite(degrees)) return 0;
+  const wrapped = ((degrees % 360) + 360) % 360;
+  return wrapped / 360 * ATOMA_MARK_TURN_MS;
+}
+
+/** Integer degree the slider shows and `--degree` consumes: 0..359. */
+export function markTurnDegreesRounded(elapsedMs: number): number {
+  const rounded = Math.round(markTurnDegreesFromElapsedMs(elapsedMs));
+  return ((rounded % 360) + 360) % 360;
+}
 
 /**
  * Bounce rate of the core bead, as three triangle-wave frequencies. Kept
@@ -226,7 +259,7 @@ export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial>
     roughness: 0.17,
     absorption: 14,
     dispersion: 0,
-    transmit: 0.45,
+    transmit: 0.7,
     body: 0.58,
   },
   // Glass: the reference solid. Honest transmission through the depth of the
@@ -373,18 +406,74 @@ export function markFacetNearness(depth: number): number {
   return t * t * (3 - 2 * t);
 }
 
+/**
+ * The FRONT glass: an outer hull face that points at the camera. Those must
+ * be drawn in the scene mesh. The shell used to split on the bead's Z, so any
+ * camera-facing face the bead had overtaken went into the backdrop-only group
+ * — and that group is hidden after the refraction pass. The lower half of a
+ * wedge vanished around 255–260° of the turn, even with the bead undrawn:
+ * the bouncing light still owns a Z, and the split still read it.
+ */
+export function markFacetIsFrontGlass(part: MarkFacetPart, normalZ: number): boolean {
+  return part === 'outer' && normalZ > 0;
+}
+
+/**
+ * The cavity face of a camera-facing wedge. The front glass already volumes
+ * that slab; drawing this inner triangle into the 2D backdrop paints a card
+ * over the far hull, so a table reads as a veil over nothing instead of as
+ * glass you look through. Kept out of every draw group.
+ */
+export function markFacetIsNearCavityWall(part: MarkFacetPart, normalZ: number): boolean {
+  return part === 'inner' && normalZ < 0;
+}
+
+/**
+ * An outer hull face that points AWAY from the camera. The bead's light
+ * leaves the crystal through these, toward the scene field behind it. Front
+ * glass is the other half of the same partition; an exactly edge-on face
+ * (normal Z of 0) throws neither at the viewer nor at the field.
+ */
+export function markFacetIsRearGlass(part: MarkFacetPart, normalZ: number): boolean {
+  return part === 'outer' && normalZ < 0;
+}
+
+/**
+ * How far along a rear face's outward normal the stained pool sits, in model
+ * units. Past the hull, onto the field — not a second glow glued to the gem.
+ */
+export const ATOMA_MARK_REAR_LIGHT_THROW = ATOMA_MARK_RADIUS * 1.85;
+
+/**
+ * Local radius of one rear-face pool, in the 28×28 box. Converted to far-field
+ * pixels (`markHaloSpread`) so the Three.js backdrop, not a Pixi disc, is what
+ * receives the stained light.
+ */
+export const ATOMA_MARK_REAR_LIGHT_RADIUS = 20;
+
 /** Distance from the centre to a cavity wall: the room the bead bounces in. */
 export const ATOMA_MARK_CAVITY_INRADIUS =
   markInradius(ATOMA_MARK_RADIUS) * ATOMA_MARK_MESH.innerScale;
 
 const CORE_MODEL_CLEARANCE = ATOMA_MARK_CORE_EDGE_CLEARANCE / PROJECTION_SCALE;
 
+export interface AtomaMarkRearSpill {
+  /** Outer facet index this light escaped through. */
+  facet: number;
+  x: number;
+  y: number;
+  /** 0..1, material-weighted: diamond throws more than obsidian. */
+  intensity: number;
+  /** Rank colour of the face that stained this light. */
+  color: number;
+}
+
 export interface AtomaMarkFacetFrame {
   /** Index into `ATOMA_MARK_MESH.facets`. */
   facet: number;
   /** Rotated flat normal: outward for the hull, into the cavity for the wall. */
   normal: MarkVec3;
-  /** Rotated centroid; the depth sort and the bead split read its z. */
+  /** Rotated centroid; the depth sort and the cavity/bead groups read its z. */
   centroid: MarkVec3;
 }
 
@@ -397,11 +486,26 @@ export interface AtomaMarkFrame {
   /** Facet indices sorted far → near. */
   order: number[];
   /**
-   * How many entries of `order` sit BEHIND the bead. The renderer draws those,
-   * then the bead, then the rest — so the bead is inside the shell by
-   * construction rather than by tuning.
+   * Backdrop, behind the bead: far hull and the cavity walls the bead has
+   * not yet passed. Drawn into the refraction texture, then hidden.
    */
-  coreSplit: number;
+  backOrder: readonly number[];
+  /**
+   * Backdrop, in front of the bead but behind the front glass: near cavity
+   * walls. Same hidden pass, AFTER the bead, so the filament stays inside.
+   */
+  midOrder: readonly number[];
+  /**
+   * Scene mesh: every camera-facing outer facet. Independent of the bead —
+   * a light inside the crystal must not delete the glass in front of it.
+   */
+  frontOrder: readonly number[];
+  /**
+   * Light that left through a rear face, as pools on the scene field. One
+   * entry per camera-away outer facet the bead still reaches. Colour is the
+   * rank of that face; the renderer paints these BEHIND the crystal, unmasked.
+   */
+  rearSpills: readonly AtomaMarkRearSpill[];
   /** Bead centre, rotated model space: the shader's point light position. */
   core3: MarkVec3;
   /** Bead centre projected, for the glow the CPU paints. */
@@ -467,10 +571,8 @@ function rotationRows(yaw: number, pitch: number, roll: number): [MarkVec3, Mark
   const sp = Math.sin(pitch);
   const cr = Math.cos(roll);
   const sr = Math.sin(roll);
-  // yaw about y, then pitch about x, then roll about z. Rest yaw is 1.55, not
-  // the 0.42 the mark first shipped with: the 250 ms turn film showed that
-  // opening pose as a dead obsidian table, and 1.55 is the angle where a
-  // key-facing facet actually catches a glint.
+  // yaw about y, then pitch about x, then roll about z. Rest yaw is
+  // ATOMA_MARK_REST_YAW, not the 0.42 the mark first shipped with.
   return [
     [cy * cr + sy * sp * sr, cp * sr, -sy * cr + cy * sp * sr],
     [-cy * sr + sy * sp * cr, cp * cr, sy * sr + cy * sp * cr],
@@ -542,6 +644,60 @@ function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkV
   return [direction[0] * travel, direction[1] * travel, direction[2] * travel];
 }
 
+function collectRearSpills(
+  facets: readonly AtomaMarkFacetFrame[],
+  core3: MarkVec3,
+  pulse: number
+): AtomaMarkRearSpill[] {
+  // Diamond throws the most of the four; every other glass is read against it
+  // so the pools stay ordered the way the materials are.
+  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
+  const spills: AtomaMarkRearSpill[] = [];
+  for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
+    const shaded = facets[index]!;
+    if (!markFacetIsRearGlass(meshFacet.part, shaded.normal[2])) continue;
+    const toFace: MarkVec3 = [
+      shaded.centroid[0] - core3[0],
+      shaded.centroid[1] - core3[1],
+      shaded.centroid[2] - core3[2],
+    ];
+    const dist = Math.hypot(...toFace);
+    if (dist < 1e-6) continue;
+    const incidence = Math.max(dot(shaded.normal, [
+      toFace[0] / dist,
+      toFace[1] / dist,
+      toFace[2] / dist,
+    ]), 0);
+    if (incidence <= 0) continue;
+    // Octahedron |n.z| max is 1/sqrt(3); scale so a fully presented rear
+    // table is 1.
+    const rear = clamp(-shaded.normal[2] * Math.sqrt(3));
+    const material = markMaterialForOctant(meshFacet.octant);
+    // Colour is the stain. Absorption already made this glass darker in the
+    // shell; applying Beer-Lambert again here ate the obsidian pool to a
+    // smudge, so a lantern with four windows would only throw three.
+    const stain = 0.42 + 0.58 * (material.transmit / maxTransmit);
+    const intensity = clamp(
+      incidence * rear * stain * (0.82 + 0.18 * pulse)
+    );
+    if (intensity < 0.02) continue;
+    const thrown: MarkVec3 = [
+      shaded.centroid[0] + shaded.normal[0] * ATOMA_MARK_REAR_LIGHT_THROW,
+      shaded.centroid[1] + shaded.normal[1] * ATOMA_MARK_REAR_LIGHT_THROW,
+      shaded.centroid[2] + shaded.normal[2] * ATOMA_MARK_REAR_LIGHT_THROW,
+    ];
+    const pos = project(thrown);
+    spills.push({
+      facet: index,
+      x: pos.x,
+      y: pos.y,
+      intensity,
+      color: markColorForOctant(meshFacet.octant),
+    });
+  }
+  return spills;
+}
+
 /**
  * Builds one deterministic frame of the mark. Rotation, projection, depth order
  * and the bead's position are all pure, so the animated mark stays testable
@@ -553,7 +709,8 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
   // and nothing else: pitch, roll and scale are FIXED, so the silhouette stays
   // congruent with itself at every moment and only its aspect changes as the
   // octahedron presents a face, then an edge. Nothing here may flex.
-  const yaw = 1.55 + seconds * Math.PI * 2 / (ATOMA_MARK_TURN_MS / 1000);
+  const yaw = ATOMA_MARK_REST_YAW +
+    Math.max(0, elapsedMs) / ATOMA_MARK_TURN_MS * Math.PI * 2;
   const pitch = -0.2;
   const roll = 0.08;
   const pulse = 0.5 + Math.sin(seconds * 3.35) * 0.5;
@@ -571,19 +728,33 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
   const order = facets
     .map((_facet, index) => index)
     .sort((left, right) => facets[left]!.centroid[2] - facets[right]!.centroid[2]);
-  const coreSplit = order.filter(
-    (facet) => facets[facet]!.centroid[2] <= core3[2]
-  ).length;
+  const frontOrder = order.filter((index) =>
+    markFacetIsFrontGlass(ATOMA_MARK_MESH.facets[index]!.part, facets[index]!.normal[2])
+  );
+  const backOrder: number[] = [];
+  const midOrder: number[] = [];
+  for (const index of order) {
+    const part = ATOMA_MARK_MESH.facets[index]!.part;
+    const normalZ = facets[index]!.normal[2];
+    if (markFacetIsFrontGlass(part, normalZ)) continue;
+    if (markFacetIsNearCavityWall(part, normalZ)) continue;
+    if (facets[index]!.centroid[2] <= core3[2]) backOrder.push(index);
+    else midOrder.push(index);
+  }
 
   const outerHull = projected.filter(
     (_point, index) => index < ATOMA_MARK_MESH.outerPointCount
   );
+  const rearSpills = collectRearSpills(facets, core3, pulse);
   return {
     points,
     projected,
     facets,
     order,
-    coreSplit,
+    backOrder,
+    midOrder,
+    frontOrder,
+    rearSpills,
     core3,
     corePosition: project(core3),
     coreDepth: clamp(

@@ -14,12 +14,19 @@ import {
   ATOMA_MARK_RANK_MATERIALS,
   ATOMA_MARK_THICKNESS,
   ATOMA_MARK_TURN_MS,
+  ATOMA_MARK_REST_YAW,
   buildAtomaMarkFrame,
   markColorForOctant,
+  markElapsedMsFromTurnDegrees,
   markF0,
+  markFacetIsFrontGlass,
+  markFacetIsNearCavityWall,
+  markFacetIsRearGlass,
   markFacetNearness,
   markMaterialForOctant,
   markSpecularPower,
+  markTurnDegreesFromElapsedMs,
+  markTurnDegreesRounded,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
 
@@ -150,7 +157,7 @@ describe('Atoma GPU brand mark', () => {
     expect(ATOMA_MARK_TURN_MS).toBe(15_000);
 
     const start = buildAtomaMarkFrame(0);
-    expect(start.yaw).toBeCloseTo(1.55, 5);
+    expect(start.yaw).toBeCloseTo(ATOMA_MARK_REST_YAW, 5);
     const quarterTurn = buildAtomaMarkFrame(ATOMA_MARK_TURN_MS / 4);
     expect(quarterTurn.yaw - start.yaw).toBeCloseTo(Math.PI / 2, 9);
     // Constant rate: equal slices of time are equal slices of angle, so no
@@ -169,6 +176,21 @@ describe('Atoma GPU brand mark', () => {
     expect(key(quarterTurn).some(
       (position, index) => position !== key(start)[index]
     )).toBe(true);
+  });
+
+  it('maps turn degrees onto the same yaw the frame builder uses', () => {
+    expect(markElapsedMsFromTurnDegrees(90)).toBeCloseTo(ATOMA_MARK_TURN_MS / 4, 5);
+    expect(markTurnDegreesFromElapsedMs(ATOMA_MARK_TURN_MS / 4)).toBeCloseTo(90, 5);
+    expect(markTurnDegreesRounded(0)).toBe(0);
+    expect(markTurnDegreesRounded(ATOMA_MARK_TURN_MS)).toBe(0);
+    expect(markElapsedMsFromTurnDegrees(360)).toBeCloseTo(0, 5);
+    expect(markElapsedMsFromTurnDegrees(-90)).toBeCloseTo(ATOMA_MARK_TURN_MS * 0.75, 5);
+    expect(buildAtomaMarkFrame(markElapsedMsFromTurnDegrees(0)).yaw)
+      .toBeCloseTo(ATOMA_MARK_REST_YAW, 5);
+    expect(
+      buildAtomaMarkFrame(markElapsedMsFromTurnDegrees(90)).yaw -
+        buildAtomaMarkFrame(0).yaw
+    ).toBeCloseTo(Math.PI / 2, 9);
   });
 
   it('cuts each rank wedge from a different glass', () => {
@@ -438,6 +460,47 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
+  it('keeps every camera-facing outer facet in the front glass, even when the bead is nearer', () => {
+    // 255–260°: the bead sits near the camera, so a Z-split against it sent
+    // the LOWER triangle of each near wedge into the hidden backdrop pass.
+    // The user saw one (then two) upper faces and nothing else — with the
+    // bead undrawn. Front glass is camera-facing outer hull, full stop.
+    for (const degrees of [0, 90, 180, 250, 255, 256, 257, 258, 259, 260, 261, 359]) {
+      const frame = buildAtomaMarkFrame(markElapsedMsFromTurnDegrees(degrees));
+      const front = new Set(frame.frontOrder);
+      const back = new Set(frame.backOrder);
+      const mid = new Set(frame.midOrder);
+      let facingOuter = 0;
+      let nearCavity = 0;
+      for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
+        const normalZ = frame.facets[index]!.normal[2];
+        const isFront = markFacetIsFrontGlass(facet.part, normalZ);
+        const isNearCavity = markFacetIsNearCavityWall(facet.part, normalZ);
+        expect(front.has(index), `facet ${index} at ${degrees}°`).toBe(isFront);
+        expect(
+          back.has(index) || mid.has(index),
+          `near cavity ${index} at ${degrees}° must not occlude the far hull`
+        ).toBe(!isFront && !isNearCavity);
+        if (isFront) facingOuter += 1;
+        if (isNearCavity) nearCavity += 1;
+      }
+      expect(front.size + back.size + mid.size + nearCavity, `${degrees}° partition`)
+        .toBe(16);
+      expect(nearCavity, `${degrees}° near cavity`).toBeGreaterThan(0);
+      expect([...front].some((index) => back.has(index) || mid.has(index))).toBe(false);
+      expect(facingOuter, `${degrees}° has a hull toward the camera`).toBeGreaterThanOrEqual(2);
+      expect(frame.frontOrder).toHaveLength(facingOuter);
+      const tops = frame.frontOrder.filter(
+        (index) => ATOMA_MARK_MESH.facets[index]!.octant[1] === 1
+      );
+      const bottoms = frame.frontOrder.filter(
+        (index) => ATOMA_MARK_MESH.facets[index]!.octant[1] === -1
+      );
+      expect(tops.length, `${degrees}° top`).toBeGreaterThan(0);
+      expect(bottoms.length, `${degrees}° bottom`).toBeGreaterThan(0);
+    }
+  });
+
   it('travels its light across the facets instead of glazing all of them', () => {
     // The shader receives the bead as a point light in MODEL space with a reach
     // converted from the projected radius; this is the same falloff the CPU
@@ -500,6 +563,46 @@ describe('Atoma GPU brand mark', () => {
           );
           expect(after, `edge ${i}-${j} at ${elapsedMs}ms`).toBeCloseTo(before, 9);
         }
+      }
+    }
+  });
+
+  it('throws the bead through each rear face onto the field, stained by that face', () => {
+    // The bead is a lantern, not a marble: light that leaves through a rear
+    // table has to land ON THE SCENE, in that face's rank colour, instead of
+    // dying at the hull. Pools sit past the face that stained them.
+    for (const degrees of [0, 90, 180, 257, 359]) {
+      const frame = buildAtomaMarkFrame(markElapsedMsFromTurnDegrees(degrees));
+      let rearCount = 0;
+      for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
+        const z = frame.facets[index]!.normal[2];
+        const isRear = markFacetIsRearGlass(facet.part, z);
+        const isFront = markFacetIsFrontGlass(facet.part, z);
+        expect(isFront && isRear, `${degrees}° facet ${index} both`).toBe(false);
+        if (facet.part === 'outer' && z !== 0) {
+          expect(isFront || isRear, `${degrees}° facet ${index} neither`).toBe(true);
+        }
+        if (isRear) rearCount += 1;
+      }
+      expect(frame.rearSpills.length, `${degrees}°`).toBe(rearCount);
+      expect(rearCount, `${degrees}° has a back of the lantern`).toBeGreaterThanOrEqual(3);
+      const spilled = new Set(frame.rearSpills.map((spill) => spill.facet));
+      for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
+        if (!markFacetIsRearGlass(facet.part, frame.facets[index]!.normal[2])) continue;
+        expect(spilled.has(index), `${degrees}° missing rear ${index}`).toBe(true);
+      }
+      for (const spill of frame.rearSpills) {
+        const mesh = ATOMA_MARK_MESH.facets[spill.facet]!;
+        expect(spill.color).toBe(markColorForOctant(mesh.octant));
+        expect(spill.intensity).toBeGreaterThan(0);
+        expect(spill.intensity).toBeLessThanOrEqual(1);
+        const corners = mesh.points.map((point) => frame.projected[point]!);
+        const faceX = (corners[0]!.x + corners[1]!.x + corners[2]!.x) / 3;
+        const faceY = (corners[0]!.y + corners[1]!.y + corners[2]!.y) / 3;
+        const faceR = Math.hypot(faceX - 14, faceY - 14);
+        const poolR = Math.hypot(spill.x - 14, spill.y - 14);
+        expect(poolR, `${degrees}° pool ${spill.facet} on the field`)
+          .toBeGreaterThan(faceR);
       }
     }
   });

@@ -7,17 +7,23 @@ import {
 } from 'pixi.js';
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
-  ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_LOCAL_SIZE,
+  ATOMA_MARK_REAR_LIGHT_RADIUS,
   buildAtomaMarkFrame,
   coreLightFalloff,
   mixColor,
   type AtomaMarkPoint,
 } from '../brand-mark.js';
-import { markElapsedMs } from './mark-clock.js';
+import {
+  clearMarkFieldLight,
+  markColorToRgb,
+  writeMarkFieldLight,
+} from '../mark-field-light.js';
+import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
-import { GPU_COLORS } from '../theme.js';
+import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 
 /**
  * Local crystal origin. The mark is authored in a 28×28 box with its pivot
@@ -27,7 +33,7 @@ import { GPU_COLORS } from '../theme.js';
 export const ATOMA_MARK_LOCAL_CENTER = 14;
 
 /** Header size: a few pixels larger than the local box so the bar mark holds. */
-export const ATOMA_MARK_HEADER_SCALE = 1.24;
+export const ATOMA_MARK_HEADER_SCALE = 1.488;
 
 
 /** Colour of everything the bead emits: its own body rim and its glow. */
@@ -190,16 +196,41 @@ function buildTransmittedPool(): Graphics {
   return pool;
 }
 
+function markStageToClient(
+  renderer: Renderer,
+  stageX: number,
+  stageY: number
+): { clientX: number; clientY: number; pixelScale: number } {
+  const canvas = renderer.canvas;
+  const screen = renderer.screen;
+  if (
+    typeof HTMLCanvasElement !== 'undefined' &&
+    canvas instanceof HTMLCanvasElement &&
+    screen.width > 0 &&
+    screen.height > 0
+  ) {
+    const bounds = canvas.getBoundingClientRect();
+    return {
+      clientX: bounds.left + stageX * bounds.width / screen.width,
+      clientY: bounds.top + stageY * bounds.height / screen.height,
+      pixelScale: bounds.width / screen.width,
+    };
+  }
+  return { clientX: stageX, clientY: stageY, pixelScale: 1 };
+}
+
 /**
  * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
  * wordmark and the arrival gate — never a second R3F logo.
  *
  * The shell is a MESH: a thick-shell regular octahedron shaded by its own
- * WGSL/GLSL program, split into the facets behind the bead and the facets in
- * front of it. Layer order is the whole illusion — far shell, then the bead and
- * its bloom CLIPPED to the projected silhouette, then the near shell as glass
- * over it. The bead is therefore inside the crystal at every frame: it cannot be
- * painted outside the outline it lights, and the near facets pass over it.
+ * WGSL/GLSL program, split into the far cavity, the bead, the near cavity
+ * walls, then the camera-facing outer hull as glass over them. The front glass
+ * is every outer face that points at the camera — never "whatever the bead
+ * has not overtaken", because hiding the backdrop after the refraction pass
+ * would delete those faces from the scene. The bead is inside the crystal at
+ * every frame: it cannot be painted outside the outline it lights, and the
+ * near facets pass over it.
  */
 export function attachAtomaMark(
   parent: Container,
@@ -215,18 +246,19 @@ export function attachAtomaMark(
   const crystal = new Container();
   crystal.position.set(ATOMA_MARK_LOCAL_CENTER, ATOMA_MARK_LOCAL_CENTER);
   crystal.pivot.set(ATOMA_MARK_LOCAL_CENTER, ATOMA_MARK_LOCAL_CENTER);
-  const aura = new Graphics();
-  const shadow = new Graphics();
 
   const shell = createMarkShell();
   // Placeholders, so the layer order is one structure whether or not a shader
   // could be built: the meshes drop into these.
   const shellBack = new Container();
   shellBack.label = 'mark-shell-back-layer';
+  const shellMid = new Container();
+  shellMid.label = 'mark-shell-mid-layer';
   const shellFront = new Container();
   shellFront.label = 'mark-shell-front-layer';
   if (shell) {
     shellBack.addChild(shell.back);
+    shellMid.addChild(shell.mid);
     shellFront.addChild(shell.front);
   }
 
@@ -259,11 +291,9 @@ export function attachAtomaMark(
    */
   const behind = new Container();
   behind.label = 'mark-behind-glass';
-  behind.addChild(shellBack, interior);
+  behind.addChild(shellBack, interior, shellMid);
 
   crystal.addChild(
-    aura,
-    shadow,
     behind,
     shellFront,
     glassGlow,
@@ -278,9 +308,9 @@ export function attachAtomaMark(
    * drawn into a texture first, and the shell samples it three times per pixel.
    *
    * Sized from the mark's own box rather than the screen: the crystal occupies a
-   * fixed 28x28 local square, so a header mark at 1.24x needs a 35px texture
+   * fixed 28x28 local square, so a header mark at 1.488x needs a 42px texture
    * while the arrival gate needs a few hundred. Sizing to the viewport would
-   * spend megabytes to refract a 35px logo.
+   * spend megabytes to refract a 42px logo.
    *
    * Skipped entirely without a renderer. The mark must keep working in the
    * headless view tests and anywhere the caller has no renderer to lend, and
@@ -315,7 +345,7 @@ export function attachAtomaMark(
     /**
      * `behind` ALONE is rendered, never the whole crystal.
      *
-     * Rendering the crystal meant the aura and the drop shadow went into the
+     * Rendering the crystal meant extra layers went into the
      * texture as well — and, because the front glass composites its own sampled
      * result back into the scene, the mark fed on its own output frame after
      * frame. It built up as staircase artefacts and flat saturated colour, which
@@ -358,39 +388,52 @@ export function attachAtomaMark(
   const paint = (elapsedMs: number) => {
     const frame = buildAtomaMarkFrame(elapsedMs);
     crystal.scale.set(frame.scale * visualScale);
-    shell?.update(frame);
-    aura
-      .clear()
-      .circle(14, 14, 12.6 + frame.pulse * 0.65)
-      .fill({ color: 0x4169e1, alpha: 0.018 + frame.pulse * 0.014 })
-      .circle(14, 14, 9.6 + frame.pulse * 0.4)
-      .fill({ color: GPU_COLORS.cyan, alpha: 0.018 + frame.pulse * 0.012 });
+    const beadVisible = markBeadVisible();
+    shell?.update(frame, { beadVisible });
+    // Lantern light belongs on the Three.js field (the plane that faces the
+    // camera, behind this Pixi overlay). A coloured disc here reads as a floor
+    // under the gem — which is how the first attempt looked.
+    if (!beadVisible || !renderer) {
+      clearMarkFieldLight();
+    } else {
+      const scale = visualScale * frame.scale;
+      const localRadius = Math.max(
+        ATOMA_MARK_REAR_LIGHT_RADIUS * scale * VIZ_VISUAL_DEPTH.far.markHaloSpread,
+        VIZ_VISUAL_DEPTH.far.markHaloMinPx
+      );
+      writeMarkFieldLight(frame.rearSpills.map((spill) => {
+        const rgb = markColorToRgb(spill.color);
+        const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+          (spill.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+        const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+          (spill.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+        const client = markStageToClient(renderer, stageX, stageY);
+        return {
+          clientX: client.clientX,
+          clientY: client.clientY,
+          radiusPx: localRadius * client.pixelScale,
+          r: rgb.r,
+          g: rgb.g,
+          b: rgb.b,
+          intensity: spill.intensity,
+        };
+      }));
+    }
     const { x: coreX, y: coreY } = frame.corePosition;
-    // The key throws the contact shadow down-right; the bead, being a light
-    // inside the gem, nudges that umbra as it travels. A frozen ellipse under
-    // a moving light reads as a sticker, not as a grounded object.
-    shadow
-      .clear()
-      .ellipse(
-        14.4 + (coreX - 14) * 0.12,
-        25.2 + (coreY - 14) * 0.05,
-        6.6 + frame.pulse * 0.2,
-        1.35
-      )
-      .fill({ color: 0x020817, alpha: 0.3 + frame.pulse * 0.06 });
     traceSilhouette(interiorMask, frame.silhouette);
     traceSilhouette(glassMask, frame.silhouette);
     core.position.set(coreX, coreY);
     core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035));
+    core.visible = beadVisible;
     bloom.alpha = 0.76 + frame.pulse * 0.24;
-    // Light that made it through the near glass. It grows as the bead comes
-    // forward, which is the only depth cue a 6% perspective cannot give.
     const forward = 0.55 + (frame.coreDepth + 1) * 0.225;
     transmittedPool.position.set(coreX, coreY);
     transmittedPool.alpha = forward * (0.85 + frame.pulse * 0.15);
+    transmittedPool.visible = beadVisible;
     transmittedCore.position.set(coreX, coreY);
     transmittedCore.scale.set(frame.coreScale);
     transmittedCore.alpha = forward * (0.88 + frame.pulse * 0.12);
+    transmittedCore.visible = beadVisible;
     // Last, so the texture holds THIS frame's interior: the front glass is
     // about to be drawn by the scene and will sample what we leave here.
     //
@@ -407,12 +450,15 @@ export function attachAtomaMark(
   };
 
   const reducedMotion = prefersReducedMotion();
-  paint(reducedMotion ? 0 : markElapsedMs());
-  if (!reducedMotion) {
-    addTicker(() => {
-      paint(markElapsedMs());
-    });
-  }
+  // Always tick: reduced motion still has to honour a pinned pose and the
+  // bead checkbox. Unpinned + reduced freezes at t=0 rather than skipping
+  // the ticker — skipping would leave both inspect knobs dead.
+  const elapsedForPaint = () =>
+    reducedMotion && !markClockIsPinned() ? 0 : markElapsedMs();
+  paint(elapsedForPaint());
+  addTicker(() => {
+    paint(elapsedForPaint());
+  });
   parent.addChild(container);
   return container;
 }

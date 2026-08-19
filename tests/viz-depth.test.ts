@@ -60,6 +60,15 @@ describe('viz visual depth contract', () => {
     expect(VIZ_VISUAL_DEPTH.far.pointerCoreRadius).toBeGreaterThan(
       POINTER_LIGHT_CORE_RADIUS_PX
     );
+    // Stained lantern light tints the far field; it must stay above the
+    // pointer hint (mix-blend screen eats dim adds) and below a spotlight.
+    expect(VIZ_VISUAL_DEPTH.far.markGain).toBeGreaterThan(
+      VIZ_VISUAL_DEPTH.far.pointerGain
+    );
+    expect(VIZ_VISUAL_DEPTH.far.markGain).toBeLessThan(1);
+    expect(VIZ_VISUAL_DEPTH.far.markHaloSpread).toBeGreaterThan(1);
+    expect(VIZ_VISUAL_DEPTH.far.markHaloSpread).toBeLessThan(2);
+    expect(VIZ_VISUAL_DEPTH.far.markHaloMinPx).toBeGreaterThan(52);
   });
 
   it('lights only the Pixi foreground while leaving the ambient grid on the far plane', () => {

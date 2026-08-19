@@ -11,6 +11,7 @@
  *
  *   npm run viz:mark-turn
  *   npm run viz:mark-turn -- --out .atoma-mark-turn
+ *   npm run viz:mark-turn -- --degree 47
  *   npm run viz:mark-turn:analyze
  *
  * Frames land in `.atoma-mark-turn/` (gitignored) as `frame-0000.png` …
@@ -43,11 +44,13 @@ const READY_TIMEOUT_MS = 60_000;
 const LOCAL_SIZE = 28;
 const MARK_VIEWPORT_FRACTION = 0.52;
 const BUTTON_HEIGHT = 46;
-const GAP = 36;
+const SLIDER_HEIGHT = 28;
+const MARK_TO_SLIDER = 22;
+const SLIDER_TO_BUTTON = 18;
 const EDGE = 28;
 
 function crystalClip(width, height) {
-  const buttonBlock = GAP + BUTTON_HEIGHT + EDGE;
+  const buttonBlock = MARK_TO_SLIDER + SLIDER_HEIGHT + SLIDER_TO_BUTTON + BUTTON_HEIGHT + EDGE;
   const maxMarkPx = Math.min(
     Math.min(width, height) * MARK_VIEWPORT_FRACTION,
     Math.max(LOCAL_SIZE * 6, (height - buttonBlock - EDGE) * 0.92)
@@ -58,8 +61,8 @@ function crystalClip(width, height) {
   const cx = width / 2;
   const cy = height / 2;
   // Top pad for the aura; a thin strip below for the contact shadow. Anything
-  // taller catches the Continue control, which is a Pixi button (not DOM) and
-  // cannot be hidden with a stylesheet.
+  // taller catches the inspect row (turn slider + bead check) and Continue,
+  // which are Pixi controls (not DOM) and cannot be hidden with a stylesheet.
   return {
     x: Math.max(0, cx - size / 2 - pad),
     y: Math.max(0, cy - size / 2 - pad),
@@ -86,6 +89,17 @@ function parseOutDir(argv) {
   const flag = argv.indexOf('--out');
   if (flag >= 0 && argv[flag + 1]) return resolve(argv[flag + 1]);
   return resolve(repoRoot, '.atoma-mark-turn');
+}
+
+function parseDegree(argv) {
+  const flag = argv.indexOf('--degree');
+  if (flag < 0) return null;
+  const raw = argv[flag + 1];
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    throw new Error(`viz:mark-turn --degree needs a number, got ${raw ?? '(missing)'}`);
+  }
+  return ((value % 360) + 360) % 360;
 }
 
 async function waitForUrl(url, timeoutMs) {
@@ -145,7 +159,9 @@ async function assertFilmAlive(outDir) {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 
 export async function captureMarkTurn(options = {}) {
-  const outDir = options.outDir ?? parseOutDir(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const outDir = options.outDir ?? parseOutDir(argv);
+  const degree = options.degree ?? parseDegree(argv);
   const existingUrl = options.url ?? process.env['ATOMA_MARK_TURN_URL'];
   await mkdir(outDir, { recursive: true });
 
@@ -229,22 +245,37 @@ export async function captureMarkTurn(options = {}) {
     await settle(0);
     await settle(0);
 
-    for (let index = 0; index < FRAME_COUNT; index += 1) {
-      const elapsedMs = index * STEP_MS;
-      await settle(elapsedMs);
-      const file = `frame-${String(index).padStart(4, '0')}.png`;
-      const path = resolve(outDir, file);
+    const shots = degree === null
+      ? Array.from({ length: FRAME_COUNT }, (_, index) => ({
+        index,
+        elapsedMs: index * STEP_MS,
+        file: `frame-${String(index).padStart(4, '0')}.png`,
+        degree: index * STEP_MS / TURN_MS * 360,
+      }))
+      : [{
+        index: 0,
+        elapsedMs: degree / 360 * TURN_MS,
+        file: `degree-${String(Math.round(degree)).padStart(3, '0')}.png`,
+        degree,
+      }];
+
+    for (const shot of shots) {
+      await settle(shot.elapsedMs);
+      const path = resolve(outDir, shot.file);
       await page.screenshot({ path, type: 'png', clip, captureBeyondViewport: false });
-      frames.push({ index, elapsedMs, file });
-      if (index % 10 === 0) {
-        process.stdout.write(`viz:mark-turn ${file}  t=${elapsedMs}ms  backend=${backend}\n`);
+      frames.push(shot);
+      if (degree !== null || shot.index % 10 === 0) {
+        process.stdout.write(
+          `viz:mark-turn ${shot.file}  t=${shot.elapsedMs}ms  deg=${shot.degree.toFixed(1)}  backend=${backend}\n`
+        );
       }
     }
 
     const manifest = {
       turnMs: TURN_MS,
       stepMs: STEP_MS,
-      frameCount: FRAME_COUNT,
+      frameCount: shots.length,
+      degree,
       backend,
       viewport: { width: VIEW_WIDTH, height: VIEW_HEIGHT, deviceScaleFactor: DEVICE_SCALE },
       clip,
@@ -252,7 +283,7 @@ export async function captureMarkTurn(options = {}) {
     };
     await writeFile(resolve(outDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     process.stdout.write(
-      `viz:mark-turn wrote ${FRAME_COUNT} frames to ${outDir} (${backend})\n`
+      `viz:mark-turn wrote ${shots.length} frame${shots.length === 1 ? '' : 's'} to ${outDir} (${backend})\n`
     );
     await assertFilmAlive(outDir);
     return manifest;
