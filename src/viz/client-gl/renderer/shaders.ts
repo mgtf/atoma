@@ -676,13 +676,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse) *
       (1.0 - outer);
 
-    // TIR. From inside glass looking out at air, rays steeper than the
-    // critical angle reflect totally. Diamond's critical angle is ~24 degrees,
-    // so most of its inner faces are mirrors of the bead; glass at ~41 still
-    // transmits. That is the sparkle the IOR was supposed to buy.
-    let ior = iorBend + 1.0;
-    let cosCrit = sqrt(max(1.0 - 1.0 / max(ior * ior, 1.0), 0.0));
-    let tir = (1.0 - outer) * (1.0 - smoothstep(cosCrit - 0.06, cosCrit + 0.02, nDotV));
+    // TIR does not belong here. The cavity is air, so the inner walls are seen
+    // from air: air-to-glass, where TIR cannot happen. Applying the critical
+    // angle to N·V turned almost every octahedron face into a mirror (typical
+    // nDotV is 1/sqrt(3) = 0.577, and diamond's cos(critical) is 0.91), which
+    // is chrome, not glass. The inner specular above is the real reflection.
 
     // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
     // the ray leaves the glass most obliquely — the rim of the silhouette and
@@ -812,10 +810,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // and rim ARE that mirror.
     let surface = vTint * body *
         (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.86 * sun)) *
-        mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
+        mix(1.0, 0.58, bulk) * bounce +
       highlight * 0.85 +
       windowHighlight +
-      coreHighlight * (1.15 + 2.4 * tir) +
+      coreHighlight * 1.15 +
       fringe * 0.55 +
       split * 0.9 * bounce +
       vec3<f32>(0.75, 0.88, 1.0) * (fresnel * markUniforms.uRim);
@@ -831,7 +829,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // backdrop behind them and keep the analytic term, which is what gives the
     // crystal its lit interior.
     let interior = mix(
-      markUniforms.uCoreTint * core * (1.0 + 0.65 * tir),
+      markUniforms.uCoreTint * core,
       transmitted * markUniforms.uRefract,
       outer
     );
@@ -998,7 +996,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
 
-    // Same inner specular and TIR as the WGSL path; keep the two in step.
+    // Same inner specular as the WGSL path; keep the two in step.
     vec3 coreHalf = normalize(coreDir + viewDir);
     float coreFacing = max(dot(normal, coreHalf), 0.0);
     float coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
@@ -1014,9 +1012,6 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       coreSpecF * coreGeo * specNorm * falloff *
       uCoreIntensity * (0.86 + 0.14 * uPulse) *
       (1.0 - outer);
-    float ior = iorBend + 1.0;
-    float cosCrit = sqrt(max(1.0 - 1.0 / max(ior * ior, 1.0), 0.0));
-    float tir = (1.0 - outer) * (1.0 - smoothstep(cosCrit - 0.06, cosCrit + 0.02, nDotV));
 
     // Same chromatic transmission as the WGSL path; keep the two in step.
     // Same refraction/dispersion split as the WGSL path; keep the two in step.
@@ -1054,14 +1049,14 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same split as the WGSL path; keep the two in step.
     vec3 surface = vTint * body *
       (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.86 * sun)) *
-      mix(1.0, 0.58, bulk) * bounce * mix(1.0, 0.28, tir) +
+      mix(1.0, 0.58, bulk) * bounce +
       highlight * 0.85 +
       windowHighlight +
-      coreHighlight * (1.15 + 2.4 * tir) +
+      coreHighlight * 1.15 +
       fringe * 0.55 +
       split * 0.9 * bounce +
       vec3(0.75, 0.88, 1.0) * (fresnel * uRim);
-    vec3 interior = mix(uCoreTint * core * (1.0 + 0.65 * tir), transmitted * uRefract, outer);
+    vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
     vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(

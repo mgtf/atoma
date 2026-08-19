@@ -196,17 +196,19 @@ describe('mark shell shader contract', () => {
     }
   });
 
-  it('throws traveling glints off the cavity walls, with TIR on high-index glass', () => {
+  it('throws traveling glints off the cavity walls', () => {
     // The bead is the only point light, so a specular term against it is a
     // spot that moves as the bead bounces. Outer facets see that light as
-    // transmission; the cavity reflects it, and past the critical angle the
-    // reflection is total — diamond sparkles, glass does not, from the IOR.
+    // transmission; the cavity reflects it. TIR does not apply: the cavity is
+    // air, so the inner walls are seen from air, and a critical-angle test on
+    // N·V turned the octahedron into chrome.
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
       expect(source).toContain('coreHalf');
       expect(source).toContain('coreHighlight');
-      expect(source).toContain('cosCrit');
-      expect(source).toContain('(1.0 - outer)');
       expect(source).toContain('coreSoft');
+      expect(source).toContain('(1.0 - outer)');
+      expect(source, 'hollow-shell inner walls are air-to-glass, not TIR')
+        .not.toContain('cosCrit');
     }
   });
 
