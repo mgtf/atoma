@@ -601,7 +601,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // N a little toward the local screen centre is a cut, not a bump map, and
     // it is used ONLY for the highlights — Lambert, path and refraction keep
     // the true face so the solid stays faceted.
-    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.18) * 0.9;
+    let convex = vec3<f32>(vScreen.x - 0.5, 0.5 - vScreen.y, 0.08) * 1.35;
     let shadeNormal = normalize(normal + convex);
     let half = normalize(markUniforms.uLightDir + viewDir);
     let facing = max(dot(shadeNormal, half), 0.0);
@@ -610,9 +610,9 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // skirt — the order a prism throws. Dispersion is how far a material is
     // allowed down that path; plain glass stays white.
     let spectral = vec3<f32>(
-      pow(facing, specularPower * 0.68),
-      pow(facing, specularPower),
-      pow(facing, specularPower * 1.5)
+      pow(facing, specularPower * 0.85),
+      pow(facing, specularPower * 1.25),
+      pow(facing, specularPower * 1.85)
     );
     // Schlick at V·H, the microfacet half-angle: how much the surface reflects
     // the key toward the eye. N·H was a stand-in that made the Fresnel of the
@@ -828,7 +828,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // so a face the key did not hit was a flat painted triangle. A little of
     // that core as SURFACE, not as interior, is the wall glowing — a gradient
     // toward the bead, which is what a lit cavity does to the near glass.
-    let scatter = vTint * core * bounce * outer * 0.45;
+    let scatter = vTint * core * bounce * outer * 0.28;
     let surface = vTint * body *
         (vec3<f32>(markUniforms.uAmbient) + vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun)) *
         mix(1.0, 0.58, bulk) * bounce +
@@ -991,14 +991,14 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       uCoreIntensity * (0.86 + 0.14 * uPulse) * transmit * mix(1.0, 0.45, bulk);
 
     float sun = max(dot(normal, uLightDir), 0.0);
-    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.18) * 0.9;
+    vec3 convex = vec3(vScreen.x - 0.5, 0.5 - vScreen.y, 0.08) * 1.35;
     vec3 shadeNormal = normalize(normal + convex);
     vec3 halfVector = normalize(uLightDir + viewDir);
     float facing = max(dot(shadeNormal, halfVector), 0.0);
     vec3 spectral = vec3(
-      pow(facing, specularPower * 0.68),
-      pow(facing, specularPower),
-      pow(facing, specularPower * 1.5)
+      pow(facing, specularPower * 0.85),
+      pow(facing, specularPower * 1.25),
+      pow(facing, specularPower * 1.85)
     );
     float specF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, halfVector), 0.0), 5.0);
     float geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
@@ -1074,7 +1074,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     ) * dispersion * outer;
 
     // Same split as the WGSL path; keep the two in step.
-    vec3 scatter = vTint * core * bounce * outer * 0.45;
+    vec3 scatter = vTint * core * bounce * outer * 0.28;
     vec3 surface = vTint * body *
       (vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun)) *
       mix(1.0, 0.58, bulk) * bounce +
