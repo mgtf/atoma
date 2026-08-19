@@ -632,7 +632,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // TABLE LOBE. Bending N toward the face centroid created NEW alignments
     // (clip_px_max jumped 9k to 27k). Windowing the highlight by distance
     // from that centroid can only shrink a glaze; it cannot invent one.
-    let tableLobe = exp(-dot(inPlane, inPlane) * 6.0);
+    let tableLobe = exp(-dot(inPlane, inPlane) * 12.0);
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * markUniforms.uSpecular * outer * tableLobe;
     // STUDIO WINDOW. Specular only. A fill that lifts the body was tried and
@@ -1024,7 +1024,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float geo = sun * nDotV / max(sun + nDotV - sun * nDotV, 1e-4);
     float specNorm = (specularPower + 2.0) / 51.0;
     vec3 inPlane = vWorld - normal * dot(vWorld, normal);
-    float tableLobe = exp(-dot(inPlane, inPlane) * 6.0);
+    float tableLobe = exp(-dot(inPlane, inPlane) * 12.0);
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * uSpecular * outer * tableLobe;
     vec3 windowDir = normalize(vec3(0.85, 0.35, 0.15));
