@@ -1,7 +1,27 @@
 import { create } from 'zustand';
 import type { EventFilters } from '../client/run-utils.js';
 
-export type ViewName = 'projects' | 'runs' | 'registry' | 'skills' | 'burnin' | 'launch';
+export type ViewName = 'projects' | 'runs' | 'registry' | 'skills' | 'burnin' | 'launch' | 'admin';
+
+/**
+ * ONE definition of which nav tabs a viewer gets — the DOM tablist and the
+ * GL header both read it, or they drift.
+ *
+ * - Gate off (`auth` null): the classic operator developer path — every
+ *   instance surface, no admin plane (there are no organisations to manage).
+ * - Gated platform admin: everything, plus the admin plane.
+ * - Gated member: org-scoped surfaces only. Registry, skills and burn-in are
+ *   instance-global operator state; the server 403s them for non-admins, so
+ *   offering the tabs would poison the global data error the way the
+ *   ungated /api/projects 404 once did.
+ */
+export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null): ViewName[] {
+  if (!auth) return ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
+  if (auth.viewer.platformAdmin) {
+    return ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch', 'admin'];
+  }
+  return ['projects', 'runs', 'launch'];
+}
 export type InputKind =
   | 'run'
   | 'registry'
@@ -117,7 +137,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninOutcome: 'all',
   burninPreset: 'all',
   burninPage: 1,
-  scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+  scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
   refreshNonce: 0,
   entered: false,
   enter: () => set({ entered: true }),

@@ -251,3 +251,21 @@ export interface VizGitHubInstallation {
   status: 'active' | 'suspended' | 'deleted';
   repositorySelection: 'all' | 'selected';
 }
+
+/** Admin plane (platform admin only): one organisation with its members. */
+export interface VizAdminOrganisation {
+  orgId: string;
+  name: string;
+  createdAt: string;
+  members: Array<{ principalId: string; displayName: string; role: string }>;
+}
+
+/** Admin plane: a freshly minted one-use invitation. Shown once, never stored. */
+export interface VizAdminInvitation {
+  token: string;
+  url: string;
+  orgId: string;
+  orgName: string;
+  role: string;
+  expiresAt: string;
+}

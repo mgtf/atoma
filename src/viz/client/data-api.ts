@@ -6,6 +6,8 @@ import type {
   RunIndexEntry,
   SkillNamespace,
   SkillSummary,
+  VizAdminInvitation,
+  VizAdminOrganisation,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -59,6 +61,9 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/runs`,
       body
     ),
+  adminOrganisations: () => fetchJson<VizAdminOrganisation[]>('/api/admin/organisations'),
+  createAdminInvitation: (body: { orgId: string; role: string; ttlHours?: number }) =>
+    mutateJson<VizAdminInvitation>('/api/admin/invitations', body),
 };
 
 async function mutateJson<T>(path: string, body: unknown): Promise<T> {

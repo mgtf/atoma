@@ -41,7 +41,8 @@ import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
-import type { GpuUiState } from '../src/viz/client-gl/store.js';
+import { visibleViews, type GpuUiState } from '../src/viz/client-gl/store.js';
+import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
 
 // ---------------------------------------------------------------------------
 // Recording context: implements RendererCtx without a GPU. Pixi Container /
@@ -360,7 +361,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
     refreshNonce: 0,
     entered: true,
     enter: noop,
@@ -404,6 +405,9 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     projects: [],
     projectRuns: {},
     githubInstallations: [],
+    adminOrganisations: [],
+    adminInvitation: null,
+    adminError: null,
     loading: false,
     fetching: false,
     error: null,
@@ -623,6 +627,98 @@ describe('reduced-motion override', () => {
   });
 });
 
+describe('visibleViews', () => {
+  it('is one nav definition: dev path, gated member, platform admin', () => {
+    const viewer = {
+      displayName: 'A',
+      role: 'org:member',
+      activeOrganisation: null,
+      organisations: [],
+      platformAdmin: false,
+    };
+    const base = { failure: false, signingOut: false, switchingOrganisationId: null };
+    // Gate off: classic operator surfaces, no admin plane.
+    expect(visibleViews(null)).toEqual([
+      'projects', 'runs', 'registry', 'skills', 'burnin', 'launch',
+    ]);
+    // Gated member: no instance-global operator surfaces — the server 403s
+    // them, so the tabs must not exist to poison the global data error.
+    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'launch']);
+    expect(
+      visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })
+    ).toEqual(['projects', 'runs', 'registry', 'skills', 'burnin', 'launch', 'admin']);
+  });
+});
+
+describe('drawAdmin', () => {
+  const auth = {
+    viewer: {
+      displayName: 'Root',
+      role: 'org:owner',
+      activeOrganisation: { id: 'org-1', name: 'Org One', role: 'org:owner' },
+      organisations: [],
+      platformAdmin: true,
+    },
+    failure: false,
+    signingOut: false,
+    switchingOrganisationId: null,
+  };
+  const organisations = [
+    {
+      orgId: 'org-1',
+      name: 'Org One',
+      createdAt: '2026-08-20T00:00:00.000Z',
+      members: [
+        { principalId: 'p-1', displayName: 'Root', role: 'org:owner' },
+        { principalId: 'p-2', displayName: 'Worker', role: 'org:member' },
+      ],
+    },
+    {
+      orgId: 'org-2',
+      name: 'Org Two',
+      createdAt: '2026-08-20T01:00:00.000Z',
+      members: [{ principalId: 'p-3', displayName: 'Other', role: 'org:owner' }],
+    },
+  ];
+
+  it('lists every organisation with members and mints per-org owner/user invitations', () => {
+    const ctx = createRecordingCtx();
+    drawAdmin(ctx, makeSnapshot({ view: 'admin' }, { auth, adminOrganisations: organisations }), 1280, 720);
+    for (const name of ['Org One', 'Org Two', 'Root', 'Worker', 'Other']) {
+      expect(ctx.texts.some((text) => text.value === name)).toBe(true);
+    }
+    const buttonIds = ctx.buttons.map((button) => button.id);
+    expect(buttonIds).toContain('admin.invite.org:member.org-1');
+    expect(buttonIds).toContain('admin.invite.org:owner.org-1');
+    expect(buttonIds).toContain('admin.invite.org:member.org-2');
+    expect(buttonIds).toContain('admin.invite.org:owner.org-2');
+    expect(ctx.scrollMax.admin).not.toBeUndefined();
+  });
+
+  it('shows a minted invitation once, URL visible for manual transcription', () => {
+    const ctx = createRecordingCtx();
+    const invitation = {
+      token: 'tok',
+      url: 'https://viz.example/?invite=tok',
+      orgId: 'org-2',
+      orgName: 'Org Two',
+      role: 'org:member',
+      expiresAt: '2026-08-21T00:00:00.000Z',
+    };
+    drawAdmin(
+      ctx,
+      makeSnapshot(
+        { view: 'admin' },
+        { auth, adminOrganisations: organisations, adminInvitation: invitation }
+      ),
+      1280,
+      720
+    );
+    expect(ctx.texts.some((text) => text.value === invitation.url)).toBe(true);
+    expect(ctx.texts.some((text) => text.value.includes('Org Two'))).toBe(true);
+  });
+});
+
 describe('drawProjects', () => {
   it('tells an ungated viewer the gate is off instead of coaching a 404 connect flow', () => {
     const ctx = createRecordingCtx();
@@ -641,6 +737,7 @@ describe('drawProjects', () => {
         role: 'org:owner',
         activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
         organisations: [],
+          platformAdmin: false,
       },
       failure: false,
       signingOut: false,
@@ -753,6 +850,7 @@ describe('GPU account control', () => {
             { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
             { id: 'org-b', name: 'Difference Engines', role: 'org:member' },
           ],
+          platformAdmin: false,
         },
         failure: false,
         signingOut: false,
@@ -785,6 +883,7 @@ describe('GPU account control', () => {
           role: 'org:member',
           activeOrganisation: null,
           organisations: [],
+          platformAdmin: false,
         },
         failure: true,
         signingOut: false,
@@ -849,6 +948,7 @@ describe('drawRegistry scrolling honesty', () => {
             skills: 0,
             burnin: 0,
             launch: 0,
+            admin: 0,
           },
         },
         data
@@ -1038,7 +1138,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0, admin: 0 },
         },
         data
       ),
@@ -1089,7 +1189,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0, admin: 0 },
         },
         data
       ),
@@ -1650,6 +1750,7 @@ describe('drawRuns behavior', () => {
             skills: 0,
             burnin: 0,
             launch: 0,
+            admin: 0,
           },
         },
         { run: makeRun(events) }

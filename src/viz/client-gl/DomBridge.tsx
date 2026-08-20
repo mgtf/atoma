@@ -2,9 +2,12 @@ import { matchesSearchQuery, runSearchText } from '../client/search.js';
 import type { RunIndexEntry, VizGitHubInstallation } from '../client/types.js';
 import { useGpuStore, type ViewName } from './store.js';
 
+const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
+
 export function DomBridge({
   runs,
   releaseVersion,
+  views = DEFAULT_VIEWS,
   t,
   onSelectRun,
   onCopy,
@@ -18,6 +21,8 @@ export function DomBridge({
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
+  /** Nav tabs for this viewer — computed once by `visibleViews`, shared with the GL header. */
+  views?: ViewName[];
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
   onCopy: () => void;
@@ -78,7 +83,7 @@ export function DomBridge({
         aria-label="Atoma GPU visualizer"
       >
         <nav role="tablist" aria-label="Views">
-          {(['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'] as ViewName[]).map((name) => (
+          {views.map((name) => (
             <button
               key={name}
               role="tab"

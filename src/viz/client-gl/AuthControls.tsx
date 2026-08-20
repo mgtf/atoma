@@ -19,6 +19,8 @@ export interface AuthViewer {
   role: string;
   activeOrganisation: AuthOrganisation | null;
   organisations: AuthOrganisation[];
+  /** Instance-wide operator flag; the server is the authority, this only shapes the UI. */
+  platformAdmin: boolean;
 }
 
 export interface AuthOrganisation {
@@ -113,6 +115,7 @@ export function AuthControls({
             role: body['role'],
             activeOrganisation,
             organisations,
+            platformAdmin: body['platformAdmin'] === true,
           });
         }
       })

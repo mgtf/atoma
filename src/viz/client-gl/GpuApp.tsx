@@ -19,6 +19,7 @@ import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
 import {
   activeViewQueryFilter,
+  useAdminOrganisations,
   useBurnin,
   useGithubInstallations,
   useProfiles,
@@ -33,7 +34,8 @@ import {
   useSkillLists,
   useSkillNamespaces,
 } from './queries.js';
-import { nextRunFilters, useGpuStore } from './store.js';
+import { nextRunFilters, useGpuStore, visibleViews } from './store.js';
+import type { VizAdminInvitation } from '../client/types.js';
 
 const RELEASE_VERSION = __ATOMA_RELEASE_VERSION__;
 
@@ -93,16 +95,25 @@ function GpuAppContent({
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
   useRefreshBridge();
 
+  // Operator surfaces are admin-only behind the gate: the server 403s them
+  // for ordinary members, and a 403'd query would poison the global data
+  // error exactly the way the ungated /api/projects 404 once did. Ungated
+  // (auth null) keeps the classic developer path.
+  const operatorSurfaces = authSnapshot === null || authSnapshot.viewer.platformAdmin;
+  const isPlatformAdmin = authSnapshot?.viewer.platformAdmin === true;
   const runsQuery = useRunsIndex(state.view === 'runs');
   const runQuery = useRunTrace(state.selectedRunId, state.view === 'runs');
-  const registriesQuery = useRegistries(state.view === 'registry');
-  const registryQuery = useRegistry(state.selectedRegistryId, state.view === 'registry');
-  const namespacesQuery = useSkillNamespaces(state.view === 'skills');
+  const registriesQuery = useRegistries(state.view === 'registry' && operatorSurfaces);
+  const registryQuery = useRegistry(
+    state.selectedRegistryId,
+    state.view === 'registry' && operatorSurfaces
+  );
+  const namespacesQuery = useSkillNamespaces(state.view === 'skills' && operatorSurfaces);
   const namespaceNames = useMemo(
     () => (namespacesQuery.data ?? []).map((item) => item.l1Name),
     [namespacesQuery.data]
   );
-  const skillLists = useSkillLists(namespaceNames, state.view === 'skills');
+  const skillLists = useSkillLists(namespaceNames, state.view === 'skills' && operatorSurfaces);
   const selectedRunEvent = useMemo(
     () => runQuery.data?.events.find((event) => event.id === state.selectedEventId) ?? null,
     [runQuery.data, state.selectedEventId]
@@ -116,8 +127,8 @@ function GpuAppContent({
       ? { l1Name: runSkillNs, id: selectedRunEvent.skillId }
       : null;
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
-  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection));
-  const burninQuery = useBurnin(state.view === 'burnin');
+  const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && operatorSurfaces);
+  const burninQuery = useBurnin(state.view === 'burnin' && operatorSurfaces);
   const profilesQuery = useProfiles(state.view === 'launch');
   // Project routes exist only behind the auth gate; an ungated server 404s
   // them. Left enabled, those 404s poisoned the GLOBAL `data.error` below and
@@ -140,6 +151,35 @@ function GpuAppContent({
         : {},
     [projectRunsQuery.data, selectedProject]
   );
+
+  const adminOrganisationsQuery = useAdminOrganisations(
+    state.view === 'admin' && isPlatformAdmin
+  );
+  const [adminInvitation, setAdminInvitation] = useState<VizAdminInvitation | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const mintInvitation = useCallback(async (orgId: string, role: string) => {
+    setAdminError(null);
+    try {
+      const invitation = await api.createAdminInvitation({ orgId, role });
+      setAdminInvitation(invitation);
+      try {
+        // Best effort: the URL also stays visible in the admin view for
+        // manual transcription when the clipboard is unavailable.
+        await navigator.clipboard.writeText(invitation.url);
+      } catch {
+        // Display fallback covers it.
+      }
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'admin', 'organisations'] });
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : t('admin.actionFailed'));
+    }
+  }, [queryClient, t]);
+
+  // A viewer whose nav does not include the current view (role changed,
+  // admin revoked, stale state) lands back on runs instead of a dead tab.
+  useEffect(() => {
+    if (!visibleViews(authSnapshot).includes(state.view)) state.setView('runs');
+  }, [authSnapshot, state]);
 
   useEffect(() => {
     const runs = runsQuery.data ?? [];
@@ -380,8 +420,16 @@ function GpuAppContent({
       if (example) store.setSearch('launch', example);
       return;
     }
+    if (id.startsWith('admin.invite.')) {
+      const rest = id.slice('admin.invite.'.length);
+      const separator = rest.indexOf('.');
+      const role = rest.slice(0, separator);
+      const orgId = rest.slice(separator + 1);
+      if (role && orgId) void mintInvitation(orgId, role);
+      return;
+    }
     if (id === 'launch.copy') copyCommand();
-  }, [activateAuth, beginEnter, copyCommand, profilesQuery.data]);
+  }, [activateAuth, beginEnter, copyCommand, mintInvitation, profilesQuery.data]);
 
   const loading =
     (state.view === 'projects' && (projectsQuery.isLoading || githubInstallationsQuery.isLoading)) ||
@@ -389,7 +437,8 @@ function GpuAppContent({
     (state.view === 'registry' && (registriesQuery.isLoading || registryQuery.isLoading)) ||
     (state.view === 'skills' && namespacesQuery.isLoading) ||
     (state.view === 'burnin' && burninQuery.isLoading) ||
-    (state.view === 'launch' && profilesQuery.isLoading);
+    (state.view === 'launch' && profilesQuery.isLoading) ||
+    (state.view === 'admin' && adminOrganisationsQuery.isLoading);
   // Requests in flight for the ACTIVE view only — the same predicate the
   // refresh button invalidates with, so the spinner reports on exactly the
   // requests the button causes. Unlike `loading` this covers refetches of
@@ -427,6 +476,7 @@ function GpuAppContent({
     projectsQuery.error,
     githubInstallationsQuery.error,
     projectRunsQuery.error,
+    adminOrganisationsQuery.error,
   ]);
   const data = useMemo(() => ({
     auth: authSnapshot,
@@ -442,10 +492,16 @@ function GpuAppContent({
     projects: projectsQuery.data ?? [],
     projectRuns,
     githubInstallations: githubInstallationsQuery.data ?? [],
+    adminOrganisations: adminOrganisationsQuery.data ?? [],
+    adminInvitation,
+    adminError,
     loading,
     fetching,
     error,
   }), [
+    adminError,
+    adminInvitation,
+    adminOrganisationsQuery.data,
     authSnapshot,
     fetching,
     burninQuery.data,
@@ -496,6 +552,7 @@ function GpuAppContent({
       <DomBridge
         runs={runsQuery.data ?? []}
         releaseVersion={RELEASE_VERSION}
+        views={visibleViews(authSnapshot)}
         t={t}
         onSelectRun={state.selectRun}
         onCopy={copyCommand}

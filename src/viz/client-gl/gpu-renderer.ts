@@ -18,6 +18,8 @@ import type {
   RunIndexEntry,
   SkillNamespace,
   SkillSummary,
+  VizAdminInvitation,
+  VizAdminOrganisation,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -56,7 +58,7 @@ import {
   TUNING_ROW_HEIGHT,
 } from './renderer/tuning-layout.js';
 import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
-import type { GpuUiState, ViewName } from './store.js';
+import { visibleViews, type GpuUiState, type ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
@@ -75,6 +77,9 @@ export interface GpuDataSnapshot {
   projects: VizProject[];
   projectRuns: Record<string, VizProjectRun[]>;
   githubInstallations: VizGitHubInstallation[];
+  adminOrganisations: VizAdminOrganisation[];
+  adminInvitation: VizAdminInvitation | null;
+  adminError: string | null;
   loading: boolean;
   /**
    * The active view has requests IN FLIGHT — including refetches of data
@@ -178,6 +183,7 @@ import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
 import { drawLaunch } from './renderer/views/launch.js';
 import { drawProjects } from './renderer/views/projects.js';
+import { drawAdmin } from './renderer/views/admin.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAuthAccount } from './renderer/views/auth-account.js';
 
@@ -828,6 +834,9 @@ export class GpuRenderer {
       switch (snapshot.state.view) {
         case 'projects':
           drawProjects(this, snapshot, width, height);
+          break;
+        case 'admin':
+          drawAdmin(this, snapshot, width, height);
           break;
         case 'runs':
           drawRuns(this, snapshot, width, height);
@@ -2886,7 +2895,10 @@ export class GpuRenderer {
       weight: '700',
     });
 
-    const views: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
+    // ONE nav definition shared with the DOM tablist: which tabs exist is a
+    // function of the auth snapshot (operator dev path / gated member /
+    // platform admin), never a second hardcoded list.
+    const views: ViewName[] = visibleViews(snapshot.data.auth);
     let x = 160;
     for (const view of views) {
       const label = snapshot.t(`nav.${view}`).toUpperCase();

@@ -86,6 +86,15 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.emptyNoInstallation': 'No project yet — connect a GitHub App installation first.',
     'projects.gateOff':
       'Projects are organisation-scoped and need the login gate. Start the server with ATOMA_VIZ_AUTH=1 to use them.',
+    'nav.admin': 'Admin',
+    'admin.summary': '{{count}} organisation(s) on this instance',
+    'admin.empty': 'No organisation yet. The first login creates one.',
+    'admin.inviteUser': 'Invite user',
+    'admin.inviteOwner': 'Invite owner',
+    'admin.invitationReady': 'Invitation for {{role}} in {{name}} — expires {{expires}}.',
+    'admin.invitationCopied':
+      'The link was copied to your clipboard. It is a one-use credential shown only here.',
+    'admin.actionFailed': 'Admin action failed',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'No run yet for this project.',
     'projects.repoStatus.pending': 'repo pending',
@@ -594,6 +603,15 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.emptyNoInstallation': 'Aucun projet — connecte d’abord une installation GitHub App.',
     'projects.gateOff':
       'Les projets sont liés aux organisations et exigent la porte de connexion. Démarre le serveur avec ATOMA_VIZ_AUTH=1 pour les utiliser.',
+    'nav.admin': 'Admin',
+    'admin.summary': '{{count}} organisation(s) sur cette instance',
+    'admin.empty': 'Aucune organisation. La première connexion en crée une.',
+    'admin.inviteUser': 'Inviter un utilisateur',
+    'admin.inviteOwner': 'Inviter un propriétaire',
+    'admin.invitationReady': 'Invitation {{role}} pour {{name}} — expire {{expires}}.',
+    'admin.invitationCopied':
+      'Le lien a été copié dans le presse-papiers. C’est un identifiant à usage unique, affiché uniquement ici.',
+    'admin.actionFailed': 'Action d’administration échouée',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'Aucun run pour ce projet.',
     'projects.repoStatus.pending': 'dépôt en attente',

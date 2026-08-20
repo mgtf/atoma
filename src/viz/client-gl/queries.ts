@@ -171,6 +171,15 @@ export function useGithubInstallations(active: boolean) {
   });
 }
 
+export function useAdminOrganisations(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'admin', 'organisations'],
+    queryFn: api.adminOrganisations,
+    enabled: active,
+    staleTime: 5_000,
+  });
+}
+
 const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
   projects: ['projects', 'project', 'github'],
   runs: ['runs', 'run'],
@@ -178,6 +187,7 @@ const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
   skills: ['skills', 'skill'],
   burnin: ['burnin'],
   launch: ['profiles'],
+  admin: ['admin'],
 };
 
 /**
