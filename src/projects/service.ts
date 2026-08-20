@@ -10,7 +10,11 @@ import {
 } from '../contracts/projects.js';
 import { GitHubStore } from '../github/store.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
-import { ProjectRunBusy, ProjectRunConfigurationError, ProjectRunCoordinator } from './coordinator.js';
+import {
+  ProjectRunBusy,
+  ProjectRunConfigurationError,
+  ProjectRunCoordinator,
+} from './coordinator.js';
 
 /**
  * PROJECTS HTTP SERVICE — one boundary between the viz server and the
@@ -213,5 +217,32 @@ export class ProjectService {
     if (!cancelled) throw new ProjectHttpError(404, 'project run not found');
     const publication = this.store.getPublicationForRun(viewer.orgId, cancelled.projectRunId);
     return publicRun(cancelled, publication);
+  }
+
+  /** POST /api/projects/:id/runs/:runId/publish — org:member or above. */
+  async retryPublication(viewer: Viewer, projectId: string, projectRunId: string): Promise<unknown> {
+    if (!roleAtLeast(viewer.role, 'org:member')) {
+      throw new ProjectHttpError(403, 'org:member role or above is required to retry publication');
+    }
+    const run = this.store.getProjectRun(viewer.orgId, projectRunId);
+    if (!run || run.projectId !== projectId) throw new ProjectHttpError(404, 'project run not found');
+    try {
+      const retried = await this.coordinator.retryPublication(viewer.orgId, projectRunId);
+      if (!retried) throw new ProjectHttpError(404, 'project run not found');
+      const publication = this.store.getPublicationForRun(viewer.orgId, projectRunId);
+      return publicRun(retried, publication);
+    } catch (error) {
+      if (error instanceof ProjectHttpError) throw error;
+      if (error instanceof ProjectStateConflict) throw new ProjectHttpError(409, error.message);
+      if (error instanceof ProjectRunConfigurationError) {
+        throw new ProjectHttpError(503, error.message);
+      }
+      // The publisher already recorded the failure on the publication row;
+      // surface a bounded message so the operator can see why it failed.
+      throw new ProjectHttpError(
+        502,
+        `publication retry failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 500)}`
+      );
+    }
   }
 }

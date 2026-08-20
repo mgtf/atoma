@@ -91,7 +91,11 @@ function payload(installationId: string, slug = 'weather-lab') {
   };
 }
 
-function service(): { svc: ProjectService; start: ReturnType<typeof vi.fn> } {
+function service(): {
+  svc: ProjectService;
+  start: ReturnType<typeof vi.fn>;
+  retryPublication: ReturnType<typeof vi.fn>;
+} {
   const start = vi.fn(async (input: {
     orgId: string;
     projectId: string;
@@ -103,12 +107,13 @@ function service(): { svc: ProjectService; start: ReturnType<typeof vi.fn> } {
     }
     throw new Error('unexpected launch');
   });
+  const retryPublication = vi.fn();
   const svc = new ProjectService({
     store: projects,
     github,
-    coordinator: { start, cancel: vi.fn() } as unknown as ProjectRunCoordinator,
+    coordinator: { start, cancel: vi.fn(), retryPublication } as unknown as ProjectRunCoordinator,
   });
-  return { svc, start };
+  return { svc, start, retryPublication };
 }
 
 describe('ProjectService — roles, IDOR and slug identity', () => {
@@ -281,5 +286,48 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
       status: 400,
       message: expect.stringMatching(/ANTHROPIC_API_KEY/),
     } satisfies Partial<ProjectHttpError>);
+  });
+
+  it('binds publication retry to the project in the path and to org:member or above', async () => {
+    linkInstallation(alice, '501', 'alice-org');
+    const { svc, retryPublication } = service();
+    const created = await svc.createProject(jsonReq(payload('501')), alice) as { projectId: string };
+    const other = await svc.createProject(jsonReq(payload('501', 'other-lab')), alice) as {
+      projectId: string;
+    };
+    const reserved = projects.createProjectRun({
+      orgId: alice.orgId,
+      projectId: created.projectId,
+      principalId: alice.principalId,
+      request: { idempotencyKey: 'run-retry', goal: 'Build a dashboard.' },
+      projectRunId: randomUUID(),
+      hostPaths: {
+        workspacePath: '/secret/workspaces/run',
+        runsPath: '/secret/runs/run',
+        logPath: '/secret/logs/run.log',
+      },
+    })!;
+
+    const viewer = { ...alice, role: 'org:viewer' as const };
+    await expect(
+      svc.retryPublication(viewer, created.projectId, reserved.run.projectRunId)
+    ).rejects.toMatchObject({ status: 403 });
+
+    // The run exists in the org, but under ANOTHER project: the REST
+    // hierarchy must not lie (unlike the cancel route's looser lookup).
+    await expect(
+      svc.retryPublication(alice, other.projectId, reserved.run.projectRunId)
+    ).rejects.toMatchObject({ status: 404 });
+    expect(retryPublication).not.toHaveBeenCalled();
+
+    retryPublication.mockResolvedValue(reserved.run);
+    const result = await svc.retryPublication(
+      alice,
+      created.projectId,
+      reserved.run.projectRunId
+    );
+    expect(retryPublication).toHaveBeenCalledWith(alice.orgId, reserved.run.projectRunId);
+    expect(result).not.toHaveProperty('hostPaths');
+    expect(JSON.stringify(result)).not.toContain('/secret/');
   });
 });

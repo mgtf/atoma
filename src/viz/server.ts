@@ -1609,6 +1609,36 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       }
       return;
     }
+
+    const retryPublish = pathname.match(/^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/publish$/);
+    if (retryPublish) {
+      if (!methodAllowed(req, res, 'POST')) return;
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      if (!sameOrigin(req, res)) return;
+      const projectId = decodePathComponent(retryPublish[1]!);
+      const projectRunId = decodePathComponent(retryPublish[2]!);
+      if (!projectId || !projectRunId) {
+        sendJson(res, 400, { error: 'bad project run id' });
+        return;
+      }
+      try {
+        sendJson(
+          res,
+          200,
+          await PROJECTS_RUNTIME.projects.retryPublication(viewer, projectId, projectRunId)
+        );
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
   }
 
   if (pathname === '/api/runs') {

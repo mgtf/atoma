@@ -8,6 +8,7 @@ import { AUTH_TABLES_DDL } from '../src/auth/store.js';
 import { GitHubApiError, type GitHubAppClient, type GitHubRepository } from '../src/github/client.js';
 import { GitHubStore } from '../src/github/store.js';
 import { buildArtifactManifest } from '../src/projects/artifacts.js';
+import { ProjectRunCoordinator } from '../src/projects/coordinator.js';
 import { GitHubPublisher } from '../src/projects/publisher.js';
 import { ProjectStore } from '../src/projects/store.js';
 import type { RunStats } from '../src/contracts/runStats.js';
@@ -281,5 +282,84 @@ describe('GitHubPublisher token split', () => {
     // The failure is recorded and the publication stays retryable.
     const publication = store.getPublicationForRun(owner.orgId, run.projectRunId)!;
     expect(publication.status).toBe('failed');
+  });
+});
+
+describe('coordinator publication retry', () => {
+  it('re-drives a failed publication to published without creating a second repository', async () => {
+    const owner = actor('Alice');
+    const { project, run, workspace } = await deliveredRun(owner, 'User', 'alice');
+    const hash = run.artifactManifestHash!;
+
+    // First attempt: GitHub is down. The publication lands in 'failed'.
+    const downClient = mockClient({
+      createUserRepository: vi.fn(async () => {
+        throw apiError(500, '/user/repos');
+      }),
+    });
+    const failing = new GitHubPublisher({
+      client: downClient,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    await expect(
+      failing.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow();
+    expect(store.getPublicationForRun(owner.orgId, run.projectRunId)!.status).toBe('failed');
+
+    // Retry through the coordinator surface: same publication row is
+    // re-driven, one repository created, and a second retry is a no-op.
+    const upClient = mockClient();
+    const publisher = new GitHubPublisher({
+      client: upClient,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    const coordinator = new ProjectRunCoordinator({
+      store,
+      dbPath: join(root, 'product.db'),
+      projectsRoot: join(root, 'projects-root'),
+      publisher,
+    });
+    const retried = await coordinator.retryPublication(owner.orgId, run.projectRunId);
+    expect(retried?.projectRunId).toBe(run.projectRunId);
+    const published = store.getPublicationForRun(owner.orgId, run.projectRunId)!;
+    expect(published.status).toBe('published');
+    expect(upClient.createUserRepository).toHaveBeenCalledTimes(1);
+
+    await coordinator.retryPublication(owner.orgId, run.projectRunId);
+    expect(upClient.createUserRepository).toHaveBeenCalledTimes(1);
+    expect(upClient.publishInitialCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a retry without a configured publisher or a delivered run', async () => {
+    const owner = actor('Alice');
+    const { project, run } = await deliveredRun(owner, 'User', 'alice');
+    void project;
+    const bare = new ProjectRunCoordinator({
+      store,
+      dbPath: join(root, 'product.db'),
+      projectsRoot: join(root, 'projects-root'),
+    });
+    await expect(bare.retryPublication(owner.orgId, run.projectRunId)).rejects.toThrow(
+      /GitHub App is not configured/
+    );
+
+    const publisher = new GitHubPublisher({
+      client: mockClient(),
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    const coordinator = new ProjectRunCoordinator({
+      store,
+      dbPath: join(root, 'product.db'),
+      projectsRoot: join(root, 'projects-root'),
+      publisher,
+    });
+    // Unknown run → null; a run outside this org is invisible the same way.
+    await expect(coordinator.retryPublication(owner.orgId, randomUUID())).resolves.toBeNull();
   });
 });

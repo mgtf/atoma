@@ -20,7 +20,7 @@ import {
 } from '../mcp/runLock.js';
 import { repoRoot } from '../mcp/run.js';
 import { buildArtifactManifest } from './artifacts.js';
-import { ProjectStore } from './store.js';
+import { ProjectStateConflict, ProjectStore } from './store.js';
 
 const MAX_CONTROL_JSON_BYTES = 512 * 1024;
 
@@ -507,6 +507,36 @@ export class ProjectRunCoordinator {
         this.idleWaiters.clear();
       }
     }
+  }
+
+  /**
+   * Re-drive the publisher for a delivered run whose publication never made
+   * it to GitHub — the missing caller behind the 'a retry never creates a
+   * second repo' contract. The publication row stays the idempotency
+   * boundary: 'published' returns as-is, a concurrent 'publishing' is left
+   * alone, and only pending/failed rows are (re)driven. The publisher
+   * revalidates the manifest byte-for-byte against the workspace before any
+   * upload, so a workspace that changed since delivery is a refusal.
+   */
+  async retryPublication(orgId: string, projectRunId: string): Promise<ProjectRun | null> {
+    if (!this.publisher) {
+      throw new ProjectRunConfigurationError('GitHub App is not configured on this deployment');
+    }
+    const run = this.store.getProjectRun(orgId, projectRunId);
+    if (!run) return null;
+    if (run.status !== 'delivered' || !run.artifactManifest || !run.artifactManifestHash) {
+      throw new ProjectStateConflict('publication retry requires a delivered run with artifacts');
+    }
+    const project = this.store.getProject(orgId, run.projectId);
+    if (!project) return null;
+    await this.publisher.publish({
+      project,
+      run,
+      workspaceRoot: run.hostPaths.workspacePath,
+      manifest: run.artifactManifest,
+      manifestHash: run.artifactManifestHash,
+    });
+    return run;
   }
 
   cancel(orgId: string, projectRunId: string): ProjectRun | null {
