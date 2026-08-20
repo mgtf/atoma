@@ -82,6 +82,23 @@ npm run mcp
 npm run mcp:dev
 ```
 
+Visualizer. The GPU client is the product UI (`npm run viz`); MUI is the frozen
+fallback. `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
+film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
+
+```bash
+npm run viz
+npm run viz:mui
+npm run viz:serve
+npm run viz:demo
+npm run viz:smoke
+npm run viz:smoke:gc
+npm run viz:mark-turn
+npm run viz:mark-turn -- --degree 47
+npm run viz:mark-turn -- --pointer
+npm run viz:mark-turn:analyze
+```
+
 Registry, ledger, skills, burn-in, and diagnostics:
 
 ```bash

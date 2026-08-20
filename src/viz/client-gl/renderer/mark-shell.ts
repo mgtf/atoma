@@ -3,6 +3,7 @@ import { Buffer, BufferUsage, Geometry, Mesh, Shader, Texture } from 'pixi.js';
 /** A mesh with our own geometry and program, not Pixi's textured default. */
 type ShellMesh = Mesh<Geometry, Shader>;
 import {
+  ATOMA_MARK_CAMERA_Z,
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
   ATOMA_MARK_LAMP_Z,
@@ -164,8 +165,8 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uRim', type: 'f32' },
   { name: 'uLocalSize', type: 'f32' },
   { name: 'uBackdropTexel', type: 'vec2<f32>' },
-  // Filament radius in MODEL units. The inner specular treats the bead as an
-  // area light of this size, so a glint widens when the bead is against a wall
+  // Filament radius in MODEL units. The inner IMAGE treats the bead as a
+  // sphere of this size, so the ghost on a wall matches the real filament
   // instead of staying a point-light needle.
   { name: 'uCoreRadius', type: 'f32' },
   // Local UV of the cursor in the 28×28 box: the catch follows this, not a
@@ -182,6 +183,12 @@ export const MARK_SHELL_UNIFORMS = [
   // HTML cursor instead of under it. Packed as vec4 after two tightly packed
   // floats so WebGPU cannot insert padding between uEnvJump and this.
   { name: 'uPointerClip', type: 'vec4<f32>' },
+  // Same pinhole the CPU uses (`ATOMA_MARK_CAMERA_Z`). The bead's virtual
+  // image on an inner wall is the line from this camera through the mirrored
+  // filament, hit against that wall — a second camera here would park the
+  // ghost where the real bead is not.
+  { name: 'uCameraZ', type: 'f32' },
+  { name: 'uProjectScale', type: 'f32' },
 ] as const;
 
 /**
@@ -241,6 +248,8 @@ const uniformValues: Record<
   uEnvOn: () => 0,
   uEnvJump: () => 0.42,
   uPointerClip: () => new Float32Array([0, 0, 0, 0.018]),
+  uCameraZ: () => ATOMA_MARK_CAMERA_Z,
+  uProjectScale: () => ATOMA_MARK_PROJECTION_SCALE,
 };
 
 export interface MarkShell {

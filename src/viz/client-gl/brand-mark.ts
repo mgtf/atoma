@@ -341,10 +341,18 @@ const PROJECTION_SCALE = ATOMA_MARK_PROJECTION_SCALE;
  * a second directional from the camera.
  */
 export const ATOMA_MARK_LAMP_Z = 2.15;
-const PERSPECTIVE_DEPTH = 0.055;
 
 /** Model-space size of the shell. The projected hull lands just inside the box. */
 export const ATOMA_MARK_RADIUS = 1.28;
+/**
+ * Camera on +Z, looking at the origin. The ONE pinhole: hull vertices and
+ * the bead disc both scale by `CAMERA_Z / (CAMERA_Z - z)`. 2.5 radii puts
+ * the camera in front of the pointer lamp and close enough that a bead
+ * crossing the cavity, and a vertex swinging toward the lens, change size
+ * together instead of the hull barely foreshortening while the bead is
+ * faked larger on its own.
+ */
+export const ATOMA_MARK_CAMERA_Z = ATOMA_MARK_RADIUS * 2.5;
 /**
  * Wall thickness, inward from the face planes. Thin enough that the cavity is
  * still most of the volume — the bead lives in there — and thick enough that
@@ -430,9 +438,10 @@ export function markFacetIsFrontGlass(part: MarkFacetPart, normalZ: number): boo
 
 /**
  * The cavity face of a camera-facing wedge. The front glass already volumes
- * that slab; drawing this inner triangle into the 2D backdrop paints a card
- * over the far hull, so a table reads as a veil over nothing instead of as
- * glass you look through. Kept out of every draw group.
+ * that slab; drawing this inner triangle as a CARD over the far hull hid
+ * the interior. It still must not carry body or Lambert. It DOES carry the
+ * bead's virtual image, so a copy of the filament can sit on the glass you
+ * are looking through — the shader drops everything else on this predicate.
  */
 export function markFacetIsNearCavityWall(part: MarkFacetPart, normalZ: number): boolean {
   return part === 'inner' && normalZ < 0;
@@ -503,6 +512,7 @@ export interface AtomaMarkFrame {
   /**
    * Backdrop, in front of the bead but behind the front glass: near cavity
    * walls. Same hidden pass, AFTER the bead, so the filament stays inside.
+   * Near cavity walls are image-only (no body) so they cannot veil the hull.
    */
   midOrder: readonly number[];
   /**
@@ -522,7 +532,10 @@ export interface AtomaMarkFrame {
   corePosition: AtomaMarkPoint;
   /** Bead depth as -1 (far wall) → +1 (near wall) of its own travel room. */
   coreDepth: number;
-  /** Perspective factor at the bead's depth; the renderer scales the bead by it. */
+  /**
+   * Drawn size of the bead: the same pinhole scale `project` applies to a
+   * hull vertex at this Z. Not a second depth curve.
+   */
   coreScale: number;
   /** Convex outline of the projected hull: the mask that keeps light inside. */
   silhouette: AtomaMarkPoint[];
@@ -606,8 +619,12 @@ function applyTransposed(
   ];
 }
 
-function perspectiveAt(z: number) {
-  return 1 + z * PERSPECTIVE_DEPTH;
+/**
+ * Pinhole scale at model Z. `1` on the mid-plane; grows as a point comes
+ * toward the camera, shrinks as it recedes. Hull and bead both use this.
+ */
+export function markPerspectiveAt(z: number) {
+  return ATOMA_MARK_CAMERA_Z / Math.max(ATOMA_MARK_CAMERA_Z - z, 1e-4);
 }
 
 /**
@@ -615,7 +632,7 @@ function perspectiveAt(z: number) {
  * precisely so a second implementation cannot drift from this one.
  */
 function project(vertex: MarkVec3): AtomaMarkPoint {
-  const perspective = perspectiveAt(vertex[2]);
+  const perspective = markPerspectiveAt(vertex[2]);
   return {
     x: CENTER.x + vertex[0] * PROJECTION_SCALE * perspective,
     y: CENTER.y - vertex[1] * PROJECTION_SCALE * perspective,
@@ -906,7 +923,14 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     const part = ATOMA_MARK_MESH.facets[index]!.part;
     const normalZ = facets[index]!.normal[2];
     if (markFacetIsFrontGlass(part, normalZ)) continue;
-    if (markFacetIsNearCavityWall(part, normalZ)) continue;
+    // Near cavity walls carry only the bead's virtual image (the shader
+    // drops their body). Mid, so they sit in front of the real filament
+    // and behind the front glass — a reflection on the glass you look
+    // through, never a card over the far hull.
+    if (markFacetIsNearCavityWall(part, normalZ)) {
+      midOrder.push(index);
+      continue;
+    }
     if (facets[index]!.centroid[2] <= core3[2]) backOrder.push(index);
     else midOrder.push(index);
   }
@@ -915,6 +939,11 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     (_point, index) => index < ATOMA_MARK_MESH.outerPointCount
   );
   const rearSpills = collectRearSpills(facets, core3, pulse);
+  const coreDepth = clamp(
+    core3[2] / Math.max(1e-6, ATOMA_MARK_CAVITY_INRADIUS - CORE_MODEL_CLEARANCE),
+    -1,
+    1
+  );
   return {
     points,
     projected,
@@ -926,12 +955,8 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     rearSpills,
     core3,
     corePosition: project(core3),
-    coreDepth: clamp(
-      core3[2] / Math.max(1e-6, ATOMA_MARK_CAVITY_INRADIUS - CORE_MODEL_CLEARANCE),
-      -1,
-      1
-    ),
-    coreScale: perspectiveAt(core3[2]),
+    coreDepth,
+    coreScale: markPerspectiveAt(core3[2]),
     silhouette: convexHull(outerHull),
     pulse,
     scale: 1,

@@ -5,6 +5,7 @@ import {
   ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_FACET_DEPTH_SPAN,
+  ATOMA_MARK_CAMERA_Z,
   ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
@@ -24,6 +25,7 @@ import {
   markColorForOctant,
   markElapsedMsFromTurnDegrees,
   markF0,
+  markPerspectiveAt,
   markFacetIsFrontGlass,
   markFacetIsNearCavityWall,
   markFacetIsRearGlass,
@@ -98,21 +100,46 @@ describe('Atoma GPU brand mark', () => {
         `order index ${index}`
       ).toBeGreaterThanOrEqual(frame.facets[frame.order[index - 1]!]!.centroid[2]);
     }
-    // Every facet projects to a real triangle inside the 28×28 local box.
-    for (const facet of ATOMA_MARK_MESH.facets) {
-      const corners = facet.points.map((point) => frame.projected[point]!);
-      const a = corners[0]!;
-      const b = corners[1]!;
-      const c = corners[2]!;
-      const twiceArea = Math.abs(
-        a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)
-      );
-      expect(twiceArea, `facet ${facet.triangle}`).toBeGreaterThan(0.1);
-      for (const point of corners) {
-        expect(point.x).toBeGreaterThanOrEqual(0);
-        expect(point.x).toBeLessThanOrEqual(28);
-        expect(point.y).toBeGreaterThanOrEqual(0);
-        expect(point.y).toBeLessThanOrEqual(28);
+    // Every facet projects to a real triangle inside the 28×28 local box —
+    // including poses where a near vertex has grown under the pinhole.
+    for (const elapsedMs of [0, 640, 3_300, 7_500, 11_200, 17_900]) {
+      const pose = elapsedMs === 0 ? frame : buildAtomaMarkFrame(elapsedMs);
+      for (const facet of ATOMA_MARK_MESH.facets) {
+        const corners = facet.points.map((point) => pose.projected[point]!);
+        const a = corners[0]!;
+        const b = corners[1]!;
+        const c = corners[2]!;
+        const twiceArea = Math.abs(
+          a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y)
+        );
+        expect(twiceArea, `facet ${facet.triangle} @${elapsedMs}`).toBeGreaterThan(0.1);
+        for (const point of corners) {
+          expect(point.x).toBeGreaterThanOrEqual(0);
+          expect(point.x).toBeLessThanOrEqual(28);
+          expect(point.y).toBeGreaterThanOrEqual(0);
+          expect(point.y).toBeLessThanOrEqual(28);
+        }
+      }
+    }
+  });
+
+  it('projects the hull and the bead with one pinhole camera', () => {
+    // Camera sits in front of every vertex and in front of the pointer lamp,
+    // so nothing crosses the projection plane.
+    expect(ATOMA_MARK_CAMERA_Z).toBeGreaterThan(ATOMA_MARK_RADIUS);
+    expect(ATOMA_MARK_CAMERA_Z).toBeGreaterThan(ATOMA_MARK_LAMP_Z);
+    expect(markPerspectiveAt(0)).toBeCloseTo(1, 12);
+    expect(markPerspectiveAt(0.4)).toBeGreaterThan(markPerspectiveAt(-0.4));
+
+    for (const elapsedMs of [0, 640, 3_300, 17_900]) {
+      const pose = buildAtomaMarkFrame(elapsedMs);
+      expect(pose.coreScale).toBeCloseTo(markPerspectiveAt(pose.core3[2]), 12);
+      for (const [index, vertex] of pose.points.entries()) {
+        const scale = markPerspectiveAt(vertex[2]);
+        expect(pose.projected[index]!.x, `vx ${index}`)
+          .toBeCloseTo(14 + vertex[0] * ATOMA_MARK_PROJECTION_SCALE * scale, 10);
+        expect(pose.projected[index]!.y, `vy ${index}`)
+          .toBeCloseTo(14 - vertex[1] * ATOMA_MARK_PROJECTION_SCALE * scale, 10);
       }
     }
   });
@@ -395,11 +422,14 @@ describe('Atoma GPU brand mark', () => {
     // projected clearance is no longer the 2D constant it used to equal — what
     // has to hold is the visual claim: the drawn disc never reaches the
     // silhouette, so it can never be painted outside the crystal it lights.
-    const margins = frames.map(({ corePosition, silhouette }) =>
-      distanceFromHull(corePosition, silhouette));
-    expect(Math.min(...margins)).toBeGreaterThan(
-      ATOMA_MARK_CORE_RADIUS + ATOMA_MARK_CORE_RADIUS_PULSE
-    );
+    // Size is the hull's pinhole at the bead's Z, so the check is per frame:
+    // a near bead is larger, and that larger disc still has to fit.
+    for (const frame of frames) {
+      const drawn =
+        ATOMA_MARK_CORE_RADIUS * frame.coreScale * (1 + frame.pulse * 0.035);
+      expect(distanceFromHull(frame.corePosition, frame.silhouette))
+        .toBeGreaterThan(drawn);
+    }
     // Room to spare is not room unused: it must still cross the volume, in
     // measured depth as well as across the picture, or the light stops travelling.
     const travel = frames.map(({ corePosition }) =>
@@ -412,6 +442,16 @@ describe('Atoma GPU brand mark', () => {
       expect(depth).toBeGreaterThanOrEqual(-1);
       expect(depth).toBeLessThanOrEqual(1);
     }
+    const near = frames.reduce((left, right) =>
+      left.coreDepth > right.coreDepth ? left : right);
+    const far = frames.reduce((left, right) =>
+      left.coreDepth < right.coreDepth ? left : right);
+    expect(near.coreScale).toBeGreaterThan(far.coreScale);
+    expect(near.coreScale).toBeCloseTo(markPerspectiveAt(near.core3[2]), 12);
+    expect(far.coreScale).toBeCloseTo(markPerspectiveAt(far.core3[2]), 12);
+    expect(near.coreScale / far.coreScale).toBeGreaterThan(1.2);
+    expect(far.coreScale).toBeLessThan(1);
+    expect(near.coreScale).toBeGreaterThan(1);
 
     // The bead REFLECTS off the walls rather than sliding along them or passing
     // through. Found rather than hardcoded: the previous version pinned three
@@ -493,14 +533,21 @@ describe('Atoma GPU brand mark', () => {
         const isFront = markFacetIsFrontGlass(facet.part, normalZ);
         const isNearCavity = markFacetIsNearCavityWall(facet.part, normalZ);
         expect(front.has(index), `facet ${index} at ${degrees}°`).toBe(isFront);
-        expect(
-          back.has(index) || mid.has(index),
-          `near cavity ${index} at ${degrees}° must not occlude the far hull`
-        ).toBe(!isFront && !isNearCavity);
+        if (isNearCavity) {
+          expect(mid.has(index), `near cavity ${index} at ${degrees}° image-only`)
+            .toBe(true);
+          expect(back.has(index), `near cavity ${index} at ${degrees}° not far`)
+            .toBe(false);
+        } else {
+          expect(
+            back.has(index) || mid.has(index),
+            `facet ${index} at ${degrees}°`
+          ).toBe(!isFront);
+        }
         if (isFront) facingOuter += 1;
         if (isNearCavity) nearCavity += 1;
       }
-      expect(front.size + back.size + mid.size + nearCavity, `${degrees}° partition`)
+      expect(front.size + back.size + mid.size, `${degrees}° partition`)
         .toBe(16);
       expect(nearCavity, `${degrees}° near cavity`).toBeGreaterThan(0);
       expect([...front].some((index) => back.has(index) || mid.has(index))).toBe(false);

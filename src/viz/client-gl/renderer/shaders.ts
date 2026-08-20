@@ -472,6 +472,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uEnvOn: f32,
     uEnvJump: f32,
     uPointerClip: vec4<f32>,
+    uCameraZ: f32,
+    uProjectScale: f32,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -728,35 +730,43 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let lampHighlight = lampRaw *
       (1.0 / (1.0 + max(lampPeak - 0.22, 0.0) * 3.4));
 
-    // INNER SPECULAR. The bead is the INTERIOR point light, so L varies
-    // across a facet and the highlight travels as the bead bounces. The
-    // pointer lamp above is the matching exterior light, on the camera side.
-    // Outer facets see the bead as TRANSMITTED, not as a reflection.
-    let coreHalf = normalize(coreDir + viewDir);
-    let coreFacing = max(dot(normal, coreHalf), 0.0);
-    let coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
-    let coreGeo = incidence * nDotV /
-      max(incidence + nDotV - incidence * nDotV, 1e-4);
-    // AREA LIGHT. The bead has size. A point-light exponent stays needle-thin
-    // even when the filament is against the wall; the solid angle of a sphere
-    // of this radius at this distance is what widens the glint.
-    let coreSoft = specularPower * distance /
-      max(distance + markUniforms.uCoreRadius, 1e-4);
-    let coreSpectral = vec3<f32>(
-      pow(coreFacing, coreSoft * 0.68),
-      pow(coreFacing, coreSoft),
-      pow(coreFacing, coreSoft * 1.5)
+    // INNER IMAGE. A plane mirror of the filament, not a Blinn glint, in the
+    // SAME pinhole the CPU uses for the real bead. The virtual bead is the
+    // real one reflected across this inner wall; it is then projected like
+    // every other vertex so the ghost and the filament agree on size and
+    // place. Lighting-reach falloff does not belong here: that is how far
+    // the bead ILLUMINATES a surface, and it killed the ghost the moment
+    // the bead left the face. Outer facets see the bead as TRANSMITTED.
+    // TIR does not belong here either. The cavity is air, so these walls
+    // are air-to-glass; a critical-angle test on N·V turned the octahedron
+    // into chrome. Schlick on this image is the real reflection amount.
+    //
+    // Near inner walls (facingView < 0) used to be skipped: as a card they
+    // hid the far hull. They now carry ONLY this image, so a copy of the
+    // bead can sit on the glass you are looking through.
+    let nearInner = (1.0 - outer) * select(0.0, 1.0, facingView < 0.0);
+    let wallDist = dot(markUniforms.uCore - vWorld, normal);
+    let virtualCore = markUniforms.uCore - normal * (2.0 * wallDist);
+    let virtPersp = markUniforms.uCameraZ /
+      max(markUniforms.uCameraZ - virtualCore.z, 1e-4);
+    let virtUv = vec2<f32>(
+      0.5 + virtualCore.x * markUniforms.uProjectScale * virtPersp /
+        markUniforms.uLocalSize,
+      0.5 - virtualCore.y * markUniforms.uProjectScale * virtPersp /
+        markUniforms.uLocalSize
     );
-    let coreHighlight = mix(vec3<f32>(coreSpectral.y), coreSpectral, dispersion) *
-      coreSpecF * coreGeo * specNorm * falloff *
+    let imageR = markUniforms.uCoreRadius * markUniforms.uProjectScale *
+      virtPersp / markUniforms.uLocalSize *
+      (1.0 + 0.18 * markUniforms.uPulse);
+    let toGhost = vScreen - virtUv;
+    let coreImage = exp(-dot(toGhost, toGhost) / max(imageR * imageR * 1.7, 1e-8)) *
+      step(0.0, wallDist);
+    let coreImageF = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
+    let coreHighlight = markUniforms.uCoreTint *
+      mix(coreImage, 1.0, nearInner) *
+      mix(0.34, 1.0, coreImageF) *
       markUniforms.uCoreIntensity * (0.86 + 0.14 * markUniforms.uPulse) *
       (1.0 - outer);
-
-    // TIR does not belong here. The cavity is air, so the inner walls are seen
-    // from air: air-to-glass, where TIR cannot happen. Applying the critical
-    // angle to N·V turned almost every octahedron face into a mirror (typical
-    // nDotV is 1/sqrt(3) = 0.577, and diamond's cos(critical) is 0.91), which
-    // is chrome, not glass. The inner specular above is the real reflection.
 
     // EDGE FRINGE. A prism separates by ANGLE, so the separation is widest where
     // the ray leaves the glass most obliquely — the rim of the silhouette and
@@ -948,7 +958,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let shade = vec3<f32>(markUniforms.uAmbient) +
       vec3<f32>(1.0, 0.94, 0.84) * (0.42 * sun);
     let surface = vTint * body * shade *
-        mix(1.0, 0.58, bulk) * bounce * cover +
+        mix(1.0, 0.58, bulk) * bounce * cover * (1.0 - nearInner) +
       scatter +
       highlight * 0.9 +
       windowHighlight +
@@ -961,7 +971,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       // reflect the near-black field, not a 0.20 white floor; that floor is
       // why clip_px_max stayed at 8k after the key gain was pulled.
       vec3<f32>(0.75, 0.88, 1.0) *
-        (pow(1.0 - nDotV, 5.0) * markUniforms.uRim);
+        (pow(1.0 - nDotV, 5.0) * markUniforms.uRim) * (1.0 - nearInner);
 
     // CORE and TRANSMITTED are the SAME light counted two ways: CORE is the
     // bead computed analytically against this facet, TRANSMITTED is that same
@@ -974,7 +984,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // backdrop behind them and keep the analytic term, which is what gives the
     // crystal its lit interior.
     let interior = mix(
-      markUniforms.uCoreTint * core,
+      markUniforms.uCoreTint * core * (1.0 - nearInner),
       transmitted * markUniforms.uRefract,
       outer
     );
@@ -998,7 +1008,11 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // worth transmitting and are what gives the crystal its interior body, so
     // vSurface.x still scales them.
     let alpha = clamp(
-      mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
+      mix(
+        mix(coreImage, vSurface.x * opacity, 1.0 - nearInner),
+        1.0,
+        outer
+      ) + core * 0.1 * (1.0 - nearInner),
       0.0,
       1.0
     );
@@ -1102,6 +1116,8 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform float uEnvOn;
   uniform float uEnvJump;
   uniform vec4 uPointerClip;
+  uniform float uCameraZ;
+  uniform float uProjectScale;
 
   void main() {
     vec3 normal = normalize(vNormal);
@@ -1199,20 +1215,24 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     vec3 lampHighlight = lampRaw *
       (1.0 / (1.0 + max(lampPeak - 0.22, 0.0) * 3.4));
 
-    // Same inner specular as the WGSL path; keep the two in step.
-    vec3 coreHalf = normalize(coreDir + viewDir);
-    float coreFacing = max(dot(normal, coreHalf), 0.0);
-    float coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
-    float coreGeo = incidence * nDotV /
-      max(incidence + nDotV - incidence * nDotV, 1e-4);
-    float coreSoft = specularPower * dist / max(dist + uCoreRadius, 1e-4);
-    vec3 coreSpectral = vec3(
-      pow(coreFacing, coreSoft * 0.68),
-      pow(coreFacing, coreSoft),
-      pow(coreFacing, coreSoft * 1.5)
+    // Same inner image as the WGSL path; keep the two in step.
+    float nearInner = (1.0 - outer) * (facingView < 0.0 ? 1.0 : 0.0);
+    float wallDist = dot(uCore - vWorld, normal);
+    vec3 virtualCore = uCore - normal * (2.0 * wallDist);
+    float virtPersp = uCameraZ / max(uCameraZ - virtualCore.z, 1e-4);
+    vec2 virtUv = vec2(
+      0.5 + virtualCore.x * uProjectScale * virtPersp / uLocalSize,
+      0.5 - virtualCore.y * uProjectScale * virtPersp / uLocalSize
     );
-    vec3 coreHighlight = mix(vec3(coreSpectral.y), coreSpectral, dispersion) *
-      coreSpecF * coreGeo * specNorm * falloff *
+    float imageR = uCoreRadius * uProjectScale * virtPersp / uLocalSize *
+      (1.0 + 0.18 * uPulse);
+    vec2 toGhost = vScreen - virtUv;
+    float coreImage = exp(-dot(toGhost, toGhost) / max(imageR * imageR * 1.7, 1e-8)) *
+      step(0.0, wallDist);
+    float coreImageF = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
+    vec3 coreHighlight = uCoreTint *
+      mix(coreImage, 1.0, nearInner) *
+      mix(0.34, 1.0, coreImageF) *
       uCoreIntensity * (0.86 + 0.14 * uPulse) *
       (1.0 - outer);
 
@@ -1274,7 +1294,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float cover = 1.0 - clamp(max(interiorWeight * outer, tableWindow) * 0.85, 0.0, 1.0);
     vec3 shade = vec3(uAmbient) + vec3(1.0, 0.94, 0.84) * (0.42 * sun);
     vec3 surface = vTint * body * shade *
-      mix(1.0, 0.58, bulk) * bounce * cover +
+      mix(1.0, 0.58, bulk) * bounce * cover * (1.0 - nearInner) +
       scatter +
       highlight * 0.9 +
       windowHighlight +
@@ -1283,12 +1303,16 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +
-      vec3(0.75, 0.88, 1.0) * (pow(1.0 - nDotV, 5.0) * uRim);
-    vec3 interior = mix(uCoreTint * core, transmitted * uRefract, outer);
+      vec3(0.75, 0.88, 1.0) * (pow(1.0 - nDotV, 5.0) * uRim) * (1.0 - nearInner);
+    vec3 interior = mix(uCoreTint * core * (1.0 - nearInner), transmitted * uRefract, outer);
     vec3 lit = surface + interior;
     // Same coverage model as the WGSL path; keep the two in step.
     float alpha = clamp(
-      mix(vSurface.x * opacity, 1.0, outer) + core * 0.1,
+      mix(
+        mix(coreImage, vSurface.x * opacity, 1.0 - nearInner),
+        1.0,
+        outer
+      ) + core * 0.1 * (1.0 - nearInner),
       0.0,
       1.0
     );

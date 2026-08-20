@@ -150,7 +150,10 @@ describe('mark shell shader contract', () => {
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
       expect(source, 'attenuation must not punch a hole in outer alpha')
         .not.toMatch(/1\.0 - attenuation \* transmit/);
-      expect(source).toMatch(/mix\(\s*vSurface\.x \* opacity,\s*1\.0,\s*outer\)/);
+      // Hull coverage is still 1. Near cavity walls mix in coreImage so a
+      // transparent ghost cannot become an opaque card over the far hull.
+      expect(source).toMatch(/mix\(\s*(?:mix\(coreImage,\s*)?vSurface\.x \* opacity/);
+      expect(source).toMatch(/1\.0,\s*outer/);
     }
   });
 
@@ -237,17 +240,28 @@ describe('mark shell shader contract', () => {
     expect(MARK_SHELL_GLSL_VERTEX).toContain('vClipUv = clip.xy * 0.5 + 0.5');
   });
 
-  it('throws traveling glints off the cavity walls', () => {
-    // The bead is the INTERIOR point light, so a specular term against it is a
-    // spot that moves as the bead bounces. Outer facets see that light as
-    // transmission; the cavity reflects it. TIR does not apply: the cavity is
-    // air, so the inner walls are seen from air, and a critical-angle test on
-    // N·V turned the octahedron into chrome.
+  it('reflects the bead on the cavity walls as a virtual image', () => {
+    // A plane mirror of the filament, seen through the same pinhole as the
+    // hull. Blinn-Phong was a glint on the wall the bead was pressed against,
+    // and lighting-reach falloff killed it across the room. Outer facets see
+    // that light as transmission; the cavity reflects it. TIR does not apply:
+    // the cavity is air, so the inner walls are seen from air, and a
+    // critical-angle test on N·V turned the octahedron into chrome.
+    expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['uCameraZ', 'uProjectScale'])
+    );
     for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
-      expect(source).toContain('coreHalf');
+      expect(source).toContain('virtualCore');
+      expect(source).toContain('coreImage');
       expect(source).toContain('coreHighlight');
-      expect(source).toContain('coreSoft');
+      expect(source).toContain('uCameraZ');
+      expect(source).toContain('uProjectScale');
+      expect(source).toContain('nearInner');
       expect(source).toContain('(1.0 - outer)');
+      expect(source, 'a Blinn glint is not an image of the bead')
+        .not.toContain('coreHalf');
+      expect(source, 'lighting reach must not kill the ghost across the cavity')
+        .not.toMatch(/coreImage[\s\S]{0,200}falloff/);
       expect(source, 'hollow-shell inner walls are air-to-glass, not TIR')
         .not.toContain('cosCrit');
     }
