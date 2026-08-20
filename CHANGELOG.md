@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- Platform admin: an instance-wide operator flag granted only through the
+  CLI (`npm run auth -- grant-admin --principal <id-or-email>`), never from
+  a login's email. Behind the gate, the instance-global registry, skill and
+  burn-in APIs now answer the platform admin alone (403 for everyone else);
+  the admin reads every organisation's projects and run traces and manages
+  organisations and one-use invitations from the new Admin tab
+  (`/api/admin/organisations`, `/api/admin/invitations`). Ordinary
+  organisations keep the existing roles (owner/admin/member/viewer).
+- A failed GitHub publication can be retried:
+  `POST /api/projects/:id/runs/:runId/publish` re-drives the publication of
+  a delivered run through the same idempotent path (one repository, ever).
+
 ### Fixed
 
 - The GPU visualizer no longer lets Pixi 8.19.0's WebGPU garbage collector

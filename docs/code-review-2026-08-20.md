@@ -271,11 +271,13 @@ Contraste : `recordingLlm.ts` protège chaque enregistrement
 >   frontière d'idempotence (un seul dépôt, `published` inchangé,
 >   `publishing` concurrent laissé tranquille), le manifeste est re-validé
 >   octet par octet, et le run est lié au projet du chemin REST.
-> - **2.2 fermé (par divulgation)** — le scoping réel exigerait des lignes de
->   registre attribuées aux orgs (projet de schéma, pas un garde de route).
->   La limite est désormais énoncée dans AGENTS.md et le README : derrière la
->   gate, seules les traces sont isolées ; registre/skills/burn-in restent
->   instance-globaux et lisibles par tout membre invité de toute org.
+> - **2.2 fermé** — d'abord par divulgation, puis mécaniquement le même jour :
+>   les surfaces opérateur (`/api/registries`, `/api/registry/:id`,
+>   `/api/skills/*`, `/api/burnin`) répondent 403 derrière la gate à
+>   quiconque n'est pas PLATFORM ADMIN (drapeau accordé uniquement par le
+>   CLI `auth grant-admin`, jamais dérivé des claims OAuth). Un membre
+>   invité ne lit plus l'état opérateur. Le scoping per-org du registre
+>   lui-même reste un projet de schéma, documenté comme tel.
 > - **2.3 fermé** — le mode du manifeste voyage jusqu'à l'entrée d'arbre :
 >   `GitHubInitialFile.mode` → `publishInitialCommit` → `createTree`
 >   (défaut `100644`, autre valeur refusée) ; le publisher transmet

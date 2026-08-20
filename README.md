@@ -264,11 +264,13 @@ Verified across 156 runs: **single-page web applications**, **zero-dependency HT
 workspace with a machine-readable record of every command that was run to verify it.
 
 It is a **framework for building such systems**, not a finished product. There is no hosted
-service or multi-tenancy; the web console's opt-in single-organisation login is a deployment
-gate, not tenant isolation — see [Status](#status) below. Behind that gate, run traces are
-organisation-scoped but the agent registry, skill store and burn-in read APIs remain
-instance-global: every invited member of any organisation can read them in full, so do not
-invite mutually distrusting organisations onto one instance.
+service or multi-tenancy; the web console's opt-in login is a deployment gate, not tenant
+isolation — see [Status](#status) below. Behind that gate, run traces and projects are
+organisation-scoped, while the instance-global agent registry, skill store and burn-in
+surfaces answer only the **platform admin** — an operator flag granted exclusively through
+the CLI (`npm run auth -- grant-admin --principal <id-or-email>`), never from a login's
+email. The platform admin also reads every organisation's projects and traces and manages
+organisations and invitations from the Admin tab.
 
 ## Why a technical buyer should look closer
 

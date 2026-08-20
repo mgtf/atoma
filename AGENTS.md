@@ -78,6 +78,8 @@ npm run doctor -- --container
 npm run doctor:dev
 npm run auth -- list
 npm run auth -- invite --role org:owner --ttl-hours 24
+npm run auth -- grant-admin --principal <id-or-email>
+npm run auth -- revoke-admin --principal <id-or-email>
 npm run auth:dev -- list
 npm run auth:dev -- invite --role org:owner --ttl-hours 24
 npm run run:build -- "<goal>"
@@ -279,16 +281,22 @@ Read this section before changing any LLM call site.
   `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
   with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
   operator `./runs` corpus used by CLI, MCP and ungated viz.
-  KNOWN LIMIT (review 2026-08-20 §2.2): the registry, skill store and burn-in
-  read APIs (`/api/registries`, `/api/registry/:id`, `/api/skills/*`,
-  `/api/burnin`) are INSTANCE-GLOBAL behind the gate — org runs mutate the
-  shared registry, and any authenticated member of ANY organisation reads it
-  in full (atom names, system prompts, skill bodies). An invitation therefore
-  grants read access to operator-level state; org isolation covers run traces
-  only. Scoping these would need org-attributed registry rows — a schema
-  project, not a route guard. Do not present gated deployments as isolating
-  anything beyond traces, and do not invite mutually distrusting orgs onto
-  one instance.
+  PLATFORM ADMIN: one instance-wide operator flag on a principal
+  (`auth_platform_admins`), granted and revoked ONLY by the operator CLI
+  (`npm run auth -- grant-admin --principal <id-or-email>`), never derived
+  from OAuth claims — provider emails are display attributes and GitHub's is
+  not even a verified-email assertion. Behind the gate the instance-global
+  operator surfaces (`/api/registries`, `/api/registry/:id`, `/api/skills/*`,
+  `/api/burnin`) answer ONLY the platform admin (403 otherwise) — org runs
+  mutate the shared registry, so an invitation must not read operator-level
+  state (review 2026-08-20 §2.2). The admin also reads every organisation's
+  projects and run traces, and manages organisations through
+  `/api/admin/organisations` and `/api/admin/invitations` (same-origin
+  POST). Writes (create project, start/cancel runs) stay bound to the
+  viewer's ACTIVE organisation for admins too. `visibleViews` is the one nav
+  definition: gated members get org surfaces only; the ungated developer
+  path is unchanged. True per-org registry scoping would need
+  org-attributed registry rows — a schema project, not a route guard.
   The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
   GitHub login: register setup at `/auth/github/setup` and webhooks at
   `/webhooks/github`. Repositories are created only after a delivered,
