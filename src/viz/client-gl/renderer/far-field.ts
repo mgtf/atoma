@@ -74,7 +74,7 @@ const uniformValues: Record<
   uMarkColor3: () => new Float32Array(4),
 };
 
-export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `
+export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `#version 300 es
   in vec2 aPosition;
   uniform mat3 uProjectionMatrix;
   uniform mat3 uWorldTransformMatrix;
@@ -91,7 +91,7 @@ export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `
   }
 `;
 
-export const FAR_FIELD_GLSL = /* glsl */ `
+export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
   precision highp float;
   in vec2 vUv;
   in vec2 vScreenUv;

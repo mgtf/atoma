@@ -1028,7 +1028,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
   }
 `;
 
-export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
+export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `#version 300 es
   in vec2 aPosition;
   in vec3 aWorld;
   in vec3 aNormal;
@@ -1073,7 +1073,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
   }
 `;
 
-export const MARK_SHELL_GLSL = /* glsl */ `
+export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
   precision highp float;
 
   in vec3 vWorld;
