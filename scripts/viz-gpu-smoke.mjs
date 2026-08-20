@@ -1,10 +1,18 @@
 /* global document, HTMLButtonElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent */
 import { spawn } from 'node:child_process';
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import puppeteer from 'puppeteer';
+
+const packageMetadata = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8')
+);
+const releaseVersion = packageMetadata.version;
+if (typeof releaseVersion !== 'string' || releaseVersion.length === 0) {
+  throw new Error('package.json must declare a non-empty version');
+}
 
 async function freePort() {
   return await new Promise((resolve, reject) => {
@@ -81,6 +89,18 @@ const FRAME_SAMPLE_BUDGET_MS = 10_000;
  */
 async function passArrivalGate(page) {
   await page.waitForSelector('.gpu-a11y-bridge button', { timeout: READY_TIMEOUT_MS });
+  const arrivalVersion = await page.$eval(
+    '.gpu-a11y-bridge [data-release-version]',
+    (element) => ({
+      value: element.getAttribute('data-release-version'),
+      label: element.textContent?.trim() ?? '',
+    })
+  );
+  if (arrivalVersion.value !== releaseVersion || arrivalVersion.label !== `v${releaseVersion}`) {
+    throw new Error(
+      `arrival gate release version mismatch: expected v${releaseVersion}, got ${arrivalVersion.label}`
+    );
+  }
   await page.evaluate(() => {
     if (document.querySelector('[role="tab"]')) return;
     const gate = document.querySelector('.gpu-a11y-bridge button');

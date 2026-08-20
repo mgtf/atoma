@@ -16,6 +16,11 @@ const COPY_HEIGHT = 22;
 const COPY_TO_BUTTON = 22;
 const COPY_MAX_WIDTH = 640;
 const EDGE = 28;
+const VERSION_BOTTOM = 18;
+const VERSION_WIDTH = 160;
+const VERSION_HEIGHT = 14;
+const VERSION_GAP = 10;
+const MIN_MARK_SCALE = 4;
 const INSPECT_WIDTH = 400;
 const BEAD_CHECK_WIDTH = 92;
 /**
@@ -50,6 +55,10 @@ export interface WelcomeLayout {
   buttonY: number;
   buttonWidth: number;
   buttonHeight: number;
+  versionX: number;
+  versionY: number;
+  versionWidth: number;
+  versionHeight: number;
 }
 
 /**
@@ -63,12 +72,22 @@ export interface WelcomeLayout {
  * EDGE — keep them in lockstep (tests/viz-mark-turn.test.ts holds both).
  */
 export function welcomeLayout(width: number, height: number): WelcomeLayout {
-  const buttonBlock = MARK_TO_SLIDER + SLIDER_HEIGHT + SLIDER_TO_BUTTON + BUTTON_HEIGHT + EDGE;
+  const controlsHeight =
+    MARK_TO_SLIDER +
+    (WELCOME_SHOW_INSPECT ? SLIDER_HEIGHT + SLIDER_TO_BUTTON : 0) +
+    COPY_HEIGHT +
+    COPY_TO_BUTTON +
+    BUTTON_HEIGHT;
+  const footerTop = height - VERSION_BOTTOM - VERSION_HEIGHT;
+  const footerLimitedMarkPx = Math.max(
+    LOCAL_SIZE * MIN_MARK_SCALE,
+    (footerTop - VERSION_GAP - height / 2 - controlsHeight) * 2
+  );
   const maxMarkPx = Math.min(
     Math.min(width, height) * MARK_VIEWPORT_FRACTION,
-    Math.max(LOCAL_SIZE * 6, (height - buttonBlock - EDGE) * 0.92)
+    footerLimitedMarkPx
   );
-  const scale = Math.max(6, maxMarkPx / LOCAL_SIZE);
+  const scale = Math.max(MIN_MARK_SCALE, maxMarkPx / LOCAL_SIZE);
   const radius = ATOMA_MARK_LOCAL_CENTER * scale;
   const inspectWidth = Math.min(INSPECT_WIDTH, Math.max(240, width - EDGE * 2));
   const sliderWidth = Math.max(160, inspectWidth - 16 - BEAD_CHECK_WIDTH);
@@ -98,6 +117,10 @@ export function welcomeLayout(width: number, height: number): WelcomeLayout {
     buttonY: copyY + COPY_HEIGHT + COPY_TO_BUTTON,
     buttonWidth: BUTTON_WIDTH,
     buttonHeight: BUTTON_HEIGHT,
+    versionX: width / 2,
+    versionY: height - VERSION_BOTTOM,
+    versionWidth: VERSION_WIDTH,
+    versionHeight: VERSION_HEIGHT,
   };
 }
 
@@ -168,4 +191,19 @@ export function drawWelcome(
     GPU_COLORS.primary,
     true
   );
+  const version = ctx.text(
+    ctx.root,
+    snapshot.t('welcome.version', { version: snapshot.releaseVersion }),
+    layout.versionX,
+    layout.versionY,
+    {
+      size: 10,
+      color: GPU_COLORS.muted,
+      weight: '500',
+      width: layout.versionWidth,
+      mono: true,
+      alpha: 0.55,
+    }
+  );
+  version.anchor.set(0.5, 1);
 }

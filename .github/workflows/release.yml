@@ -20,6 +20,13 @@ jobs:
         with:
           node-version: 22.13.0
           cache: npm
+      - name: Verify release tag matches package version
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "${expected}" ]; then
+            echo "release tag ${GITHUB_REF_NAME} does not match package version ${expected}" >&2
+            exit 1
+          fi
       - run: npm ci
       - run: npm run release:check
 

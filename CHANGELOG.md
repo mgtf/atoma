@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.1.4 — 2026-08-20
+
 ### Added
 
 - Built-in tools now carry stable periodic-table element identities while
@@ -93,6 +95,13 @@
   event details, cross-view links, filters and read-only server semantics.
 
 ### Fixed
+
+- The arrival screen now displays the packaged release version, and release
+  automation rejects tags that disagree with `package.json`.
+- The stateful GPU renderer is once again a real lazy-loaded chunk; pure
+  metrics and tuning geometry no longer pull it into the initial bundle.
+- WebGL fallback shaders that use derivative intrinsics now pin GLSL ES 3.00
+  on both stages, matching Pixi's fragment-selected program dialect.
 
 - The GPU run picker no longer truncates its dataset to twelve entries. It
   virtualizes all runs behind an independent wheel scrollbar and supports

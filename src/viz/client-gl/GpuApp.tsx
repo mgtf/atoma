@@ -30,6 +30,8 @@ import {
 } from './queries.js';
 import { nextRunFilters, useGpuStore } from './store.js';
 
+const RELEASE_VERSION = __ATOMA_RELEASE_VERSION__;
+
 declare global {
   interface Window {
     __ATOMA_VIZ_TEST__?: {
@@ -322,9 +324,16 @@ export function GpuApp() {
 
   return (
     <main className="gpu-app">
-      <GpuSurface data={data} t={t} onActivate={activate} onMetrics={updateMetrics} />
+      <GpuSurface
+        data={data}
+        releaseVersion={RELEASE_VERSION}
+        t={t}
+        onActivate={activate}
+        onMetrics={updateMetrics}
+      />
       <DomBridge
         runs={runsQuery.data ?? []}
+        releaseVersion={RELEASE_VERSION}
         t={t}
         onSelectRun={state.selectRun}
         onCopy={copyCommand}

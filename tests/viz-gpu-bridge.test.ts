@@ -62,6 +62,7 @@ function renderBridge(
   render(
     createElement(DomBridge, {
       runs: runItems,
+      releaseVersion: '9.8.7',
       t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
       onSelectRun,
       onCopy,
@@ -88,6 +89,7 @@ describe('full-GL minimal DOM bridge', () => {
     const user = userEvent.setup();
     renderBridge();
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(screen.getByText('v9.8.7')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(useGpuStore.getState().entered).toBe(true);
     expect(screen.getAllByRole('tab')).toHaveLength(5);

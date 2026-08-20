@@ -8,11 +8,13 @@ import { useGpuStore } from './store.js';
 
 export function GpuSurface({
   data,
+  releaseVersion,
   t,
   onActivate,
   onMetrics,
 }: {
   data: GpuDataSnapshot;
+  releaseVersion: string;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onActivate: (id: string) => void;
   onMetrics: (metrics: GpuRenderMetrics) => void;
@@ -58,6 +60,7 @@ export function GpuSurface({
     current.render({
       state,
       data,
+      releaseVersion,
       t,
       onActivate,
       onScroll: (view, delta) => {
@@ -86,7 +89,7 @@ export function GpuSurface({
       host.current.dataset['gpuRenderCount'] = String(renderCount.current);
     }
     onMetrics(metrics);
-  }, [data, onActivate, onMetrics, ready, resizeVersion, state, t]);
+  }, [data, onActivate, onMetrics, ready, releaseVersion, resizeVersion, state, t]);
 
   return <div ref={host} className="gpu-ui-host" />;
 }

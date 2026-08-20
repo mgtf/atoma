@@ -4,12 +4,14 @@ import { useGpuStore, type ViewName } from './store.js';
 
 export function DomBridge({
   runs,
+  releaseVersion,
   t,
   onSelectRun,
   onCopy,
   onEnter,
 }: {
   runs: RunIndexEntry[];
+  releaseVersion: string;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
   onCopy: () => void;
@@ -43,6 +45,9 @@ export function DomBridge({
         role="application"
         aria-label="Atoma"
       >
+        <span data-release-version={releaseVersion}>
+          {t('welcome.version', { version: releaseVersion })}
+        </span>
         <button onClick={() => (onEnter ?? enter)()}>{t('welcome.continue')}</button>
       </div>
     );

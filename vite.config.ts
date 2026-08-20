@@ -1,6 +1,15 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+
+const packageMetadata = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8')
+) as { version?: unknown };
+if (typeof packageMetadata.version !== 'string' || packageMetadata.version.trim() === '') {
+  throw new Error('package.json must declare a non-empty version');
+}
+export const ATOMA_RELEASE_VERSION = packageMetadata.version;
 
 const apiPort = Number(process.env['ATOMA_VIZ_API_PORT'] ?? 4111);
 const devPort = Number(process.env['ATOMA_VIZ_DEV_PORT'] ?? 5173);
@@ -8,6 +17,9 @@ const clientName = process.env['ATOMA_VIZ_UI'] === 'mui' ? 'client' : 'client-gl
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __ATOMA_RELEASE_VERSION__: JSON.stringify(ATOMA_RELEASE_VERSION),
+  },
   root: fileURLToPath(new URL(`./src/viz/${clientName}`, import.meta.url)),
   publicDir: fileURLToPath(new URL('./src/viz/public', import.meta.url)),
   build: {

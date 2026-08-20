@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Container, Graphics } from 'pixi.js';
 import type { Text, Ticker } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
+import { I18N_CATALOGS, translate } from '../src/viz/client/i18n.js';
 import type {
   BurninRow,
   LaunchProfile,
@@ -306,7 +306,8 @@ function createRecordingCtx(): RecordingCtx {
 // hardcoded label diverging from i18n fails these tests.
 // ---------------------------------------------------------------------------
 
-const t = (key: string): string => I18N_CATALOGS.en[key] ?? key;
+const t = (key: string, vars?: Record<string, unknown>): string =>
+  translate('en', key, vars);
 
 function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
   const noop = () => {};
@@ -382,6 +383,7 @@ function makeSnapshot(
   return {
     state: makeState(state),
     data: makeData(data),
+    releaseVersion: '9.8.7',
     t,
     onActivate: () => {},
     onScroll: () => {},
@@ -938,18 +940,37 @@ describe('drawWelcome gate', () => {
     expect(layout.buttonY).toBeGreaterThan(layout.copyY + layout.copyHeight);
     expect(layout.sliderY).toBeGreaterThan(HEIGHT / 2);
     expect(WELCOME_SHOW_INSPECT).toBe(false);
+    const version = ctx.texts.find((text) => text.value === 'v9.8.7');
+    expect(version).toBeTruthy();
+    expect(version!.x).toBe(layout.versionX);
+    expect(version!.y).toBe(layout.versionY);
+    expect(version!.options).toMatchObject({ size: 10, mono: true, alpha: 0.55 });
     // Inspect knobs stay implemented, but the public gate does not mount them.
     expect(ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turn')).toBeUndefined();
     expect(ctx.metrics.hitTargets.find((target) => target.id === 'welcome.bead')).toBeUndefined();
   });
 
   it('keeps the button on-screen while the mark grows with the viewport', () => {
+    const short = welcomeLayout(800, 480);
     const compact = welcomeLayout(800, 600);
     const wide = welcomeLayout(1920, 1080);
     expect(wide.scale).toBeGreaterThan(compact.scale);
+    expect(compact.scale).toBeGreaterThan(short.scale);
     expect(compact.buttonY + compact.buttonHeight).toBeLessThan(600);
     expect(wide.buttonY + wide.buttonHeight).toBeLessThan(1080);
     expect(compact.copyY + compact.copyHeight).toBeLessThan(compact.buttonY);
+    expect(compact.buttonY + compact.buttonHeight)
+      .toBeLessThan(compact.versionY - compact.versionHeight);
+    expect(
+      compact.versionY - compact.versionHeight - compact.buttonY - compact.buttonHeight
+    ).toBeGreaterThanOrEqual(10);
+    expect(compact.versionY).toBeLessThan(600);
+    expect(wide.buttonY + wide.buttonHeight)
+      .toBeLessThan(wide.versionY - wide.versionHeight);
+    expect(wide.versionY).toBeLessThan(1080);
+    expect(short.buttonY + short.buttonHeight)
+      .toBeLessThan(short.versionY - short.versionHeight);
+    expect(short.versionY).toBeLessThan(480);
     expect(compact.beadY).toBe(compact.sliderY);
     expect(compact.markX + 14).toBe(400);
     expect(compact.markY + 14).toBe(300);

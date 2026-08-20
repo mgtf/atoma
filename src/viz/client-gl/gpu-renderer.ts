@@ -104,6 +104,7 @@ function trackXFromTurnDegree(degrees: number, trackX: number, trackWidth: numbe
 export interface GpuRenderSnapshot {
   state: GpuUiState;
   data: GpuDataSnapshot;
+  releaseVersion: string;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onActivate: (id: string) => void;
   onScroll: (view: ViewName, delta: number) => void;

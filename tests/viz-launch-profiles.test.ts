@@ -254,6 +254,7 @@ describe('viz i18n catalogs stay in parity', () => {
       'launch.command',
       'pane.selectLaunch',
       'welcome.continue',
+      'welcome.version',
       'welcome.turn',
       'welcome.turnLive',
       'welcome.bead',
