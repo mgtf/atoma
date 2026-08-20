@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* global document, requestAnimationFrame */
+/* global document, requestAnimationFrame, window */
 /**
  * Capture one full brand-mark rotation, one PNG every 250 ms of animation
  * time, so a lighting/shader change can be judged as a film instead of as a
