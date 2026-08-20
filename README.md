@@ -265,7 +265,10 @@ workspace with a machine-readable record of every command that was run to verify
 
 It is a **framework for building such systems**, not a finished product. There is no hosted
 service or multi-tenancy; the web console's opt-in single-organisation login is a deployment
-gate, not tenant isolation — see [Status](#status) below.
+gate, not tenant isolation — see [Status](#status) below. Behind that gate, run traces are
+organisation-scoped but the agent registry, skill store and burn-in read APIs remain
+instance-global: every invited member of any organisation can read them in full, so do not
+invite mutually distrusting organisations onto one instance.
 
 ## Why a technical buyer should look closer
 

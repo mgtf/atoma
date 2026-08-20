@@ -279,6 +279,16 @@ Read this section before changing any LLM call site.
   `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
   with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
   operator `./runs` corpus used by CLI, MCP and ungated viz.
+  KNOWN LIMIT (review 2026-08-20 §2.2): the registry, skill store and burn-in
+  read APIs (`/api/registries`, `/api/registry/:id`, `/api/skills/*`,
+  `/api/burnin`) are INSTANCE-GLOBAL behind the gate — org runs mutate the
+  shared registry, and any authenticated member of ANY organisation reads it
+  in full (atom names, system prompts, skill bodies). An invitation therefore
+  grants read access to operator-level state; org isolation covers run traces
+  only. Scoping these would need org-attributed registry rows — a schema
+  project, not a route guard. Do not present gated deployments as isolating
+  anything beyond traces, and do not invite mutually distrusting orgs onto
+  one instance.
   The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
   GitHub login: register setup at `/auth/github/setup` and webhooks at
   `/webhooks/github`. Repositories are created only after a delivered,
