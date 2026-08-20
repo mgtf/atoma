@@ -259,13 +259,34 @@ Contraste : `recordingLlm.ts` protège chaque enregistrement
 >   viewer est authentifié (`GpuApp`), la vue Projects non-gated affiche
 >   `projects.gateOff` (EN/FR) au lieu de coacher un flux connect qui 404.
 >   `viz:smoke` repasse : 24 rebuilds de scroll, 0 manqués, six vues.
-> - **2.1 partiellement fermé** — `ProjectStore.reconcileInterrupted` (runs
+> - **2.1 fermé** — `ProjectStore.reconcileInterrupted` (runs
 >   `queued`/`running` → `failed`, publications `publishing` → `failed`, via
 >   les transitions CAS normales), exposé par le coordinator (refus si des
 >   runs sont actifs en mémoire) et appelé au boot du serveur avec un log
 >   opérateur. Le chemin 422 d'`ensureRepository` refuse un dépôt homonyme de
->   visibilité différente. RESTE OUVERT : aucune surface de retry ne rappelle
->   `publish` sur une publication `failed` (le déblocage existe désormais,
->   l'appelant manque toujours).
+>   visibilité différente. Et la surface de retry existe :
+>   `POST /api/projects/:id/runs/:runId/publish` (org:member+, same-origin)
+>   re-conduit la publication d'un run `delivered` via
+>   `coordinator.retryPublication` — la ligne de publication reste la
+>   frontière d'idempotence (un seul dépôt, `published` inchangé,
+>   `publishing` concurrent laissé tranquille), le manifeste est re-validé
+>   octet par octet, et le run est lié au projet du chemin REST.
+> - **2.2 fermé (par divulgation)** — le scoping réel exigerait des lignes de
+>   registre attribuées aux orgs (projet de schéma, pas un garde de route).
+>   La limite est désormais énoncée dans AGENTS.md et le README : derrière la
+>   gate, seules les traces sont isolées ; registre/skills/burn-in restent
+>   instance-globaux et lisibles par tout membre invité de toute org.
+> - **2.3 fermé** — le mode du manifeste voyage jusqu'à l'entrée d'arbre :
+>   `GitHubInitialFile.mode` → `publishInitialCommit` → `createTree`
+>   (défaut `100644`, autre valeur refusée) ; le publisher transmet
+>   `file.mode`.
+> - **2.4 fermé** — `L3Atom.plan()` ne committe `pendingStrategy` qu'une fois
+>   le plan routé entièrement validé ; un replan coaché qui parse sa
+>   stratégie mais pas son plan laisse la paire d'origine intacte (test dans
+>   `l3-root-plan-collision.test.ts`).
+> - **2.5 fermé** — `persistDeclaredArtifactManifest` borne les `outputs`
+>   rédigés par le modèle aux limites du schéma (les entrées valides
+>   survivent), et le câblage `recordRootPlan` attrape et logge les échecs
+>   d'écriture — observer-only en pratique, pas seulement en commentaire.
 >
-> Les autres findings (2.2–2.5, section 3) restent ouverts.
+> Les findings de la section 3 restent ouverts.
