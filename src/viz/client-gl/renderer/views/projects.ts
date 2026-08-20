@@ -111,9 +111,14 @@ export function drawProjects(
 
   const contentTop = projectsGpuContentTop();
   if (projects.length === 0) {
-    const connectHint = installations.length === 0
-      ? snapshot.t('projects.emptyNoInstallation')
-      : snapshot.t('projects.empty');
+    // Ungated deployments have no organisations, so projects cannot exist and
+    // their API routes are absent — say that, instead of coaching the viewer
+    // toward a GitHub connect flow the server will 404.
+    const connectHint = snapshot.data.auth === null
+      ? snapshot.t('projects.gateOff')
+      : installations.length === 0
+        ? snapshot.t('projects.emptyNoInstallation')
+        : snapshot.t('projects.empty');
     ctx.text(ctx.root, connectHint, 20, contentTop, {
       size: 13,
       color: GPU_COLORS.muted,

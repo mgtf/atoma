@@ -84,6 +84,8 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.summarySelected': '{{count}} project(s) · viewing {{name}}',
     'projects.empty': 'No project yet. Create one to launch runs and publish artifacts.',
     'projects.emptyNoInstallation': 'No project yet — connect a GitHub App installation first.',
+    'projects.gateOff':
+      'Projects are organisation-scoped and need the login gate. Start the server with ATOMA_VIZ_AUTH=1 to use them.',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'No run yet for this project.',
     'projects.repoStatus.pending': 'repo pending',
@@ -590,6 +592,8 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.summarySelected': '{{count}} projet(s) · sélection : {{name}}',
     'projects.empty': 'Aucun projet. Crée-en un pour lancer des runs et publier des artefacts.',
     'projects.emptyNoInstallation': 'Aucun projet — connecte d’abord une installation GitHub App.',
+    'projects.gateOff':
+      'Les projets sont liés aux organisations et exigent la porte de connexion. Démarre le serveur avec ATOMA_VIZ_AUTH=1 pour les utiliser.',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'Aucun run pour ce projet.',
     'projects.repoStatus.pending': 'dépôt en attente',

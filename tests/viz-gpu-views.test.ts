@@ -624,9 +624,29 @@ describe('reduced-motion override', () => {
 });
 
 describe('drawProjects', () => {
+  it('tells an ungated viewer the gate is off instead of coaching a 404 connect flow', () => {
+    const ctx = createRecordingCtx();
+    // Default snapshot: `auth` is null, which in-app means the server runs
+    // ungated — project routes do not exist there.
+    drawProjects(ctx, makeSnapshot({ view: 'projects' }), 1280, 720);
+    expect(ctx.texts.some((text) => text.value.includes('ATOMA_VIZ_AUTH=1'))).toBe(true);
+    expect(ctx.texts.some((text) => text.value.includes('connect a GitHub App'))).toBe(false);
+  });
+
   it('keeps GPU empty-state copy below the DOM create form', () => {
     const ctx = createRecordingCtx();
-    drawProjects(ctx, makeSnapshot({ view: 'projects' }), 1280, 720);
+    const auth = {
+      viewer: {
+        displayName: 'Alice',
+        role: 'org:owner',
+        activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
+        organisations: [],
+      },
+      failure: false,
+      signingOut: false,
+      switchingOrganisationId: null,
+    };
+    drawProjects(ctx, makeSnapshot({ view: 'projects' }, { auth }), 1280, 720);
     const title = ctx.texts.find((text) => text.value === 'Projects');
     const empty = ctx.texts.find((text) => text.value.includes('connect a GitHub App'));
     expect(title?.y).toBeLessThan(PROJECTS_DOM_FORM_TOP);

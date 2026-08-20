@@ -119,8 +119,13 @@ function GpuAppContent({
   const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection));
   const burninQuery = useBurnin(state.view === 'burnin');
   const profilesQuery = useProfiles(state.view === 'launch');
-  const projectsQuery = useProjects(state.view === 'projects');
-  const githubInstallationsQuery = useGithubInstallations(state.view === 'projects');
+  // Project routes exist only behind the auth gate; an ungated server 404s
+  // them. Left enabled, those 404s poisoned the GLOBAL `data.error` below and
+  // the runs view then rendered an error banner instead of its list — the
+  // wheel handler fails closed on scrollMax, so scrolling died with it.
+  const authed = authSnapshot !== null;
+  const projectsQuery = useProjects(state.view === 'projects' && authed);
+  const githubInstallationsQuery = useGithubInstallations(state.view === 'projects' && authed);
   const selectedProject = state.view === 'projects'
     ? projectsQuery.data?.find((project) => project.projectId === state.selectedProjectId) ?? null
     : null;
