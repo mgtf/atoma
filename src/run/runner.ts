@@ -48,7 +48,13 @@ export const consoleLogger: Logger = {
 export const ARTIFACT_MANIFEST_PATH_ENV = 'ATOMA_ARTIFACT_MANIFEST_PATH';
 
 export function persistDeclaredArtifactManifest(path: string, runId: string, plan: Plan): void {
-  const outputs = [...new Set(plan.subtasks.flatMap((subtask) => subtask.outputs ?? []))];
+  // Declared outputs are MODEL-AUTHORED and unbounded on `planSchema`, while
+  // the manifest schema caps each path at 1024 chars and the list at 1000
+  // entries. Clamp instead of parse-exploding: an oversize path is junk the
+  // publisher could never match anyway, and the valid entries must survive it.
+  const outputs = [...new Set(plan.subtasks.flatMap((subtask) => subtask.outputs ?? []))]
+    .filter((output) => output.length <= 1_024)
+    .slice(0, 1_000);
   const manifest = declaredArtifactManifestSchema.parse({
     version: 1,
     runId,
@@ -679,8 +685,19 @@ export async function startTask(
     recordBranch: (info) => recorder.recordBranch(info),
     ...(artifactManifestPath && requestedRunId
       ? {
-          recordRootPlan: (plan: Plan) =>
-            persistDeclaredArtifactManifest(artifactManifestPath, requestedRunId, plan),
+          recordRootPlan: (plan: Plan) => {
+            // Observer-only, like every recorder hook: a manifest that cannot
+            // be written (full disk, unwritable dir) must not kill a run that
+            // already paid for its top-tier strategy call. The publisher
+            // treats a missing declared manifest as "nothing declared".
+            try {
+              persistDeclaredArtifactManifest(artifactManifestPath, requestedRunId, plan);
+            } catch (error) {
+              process.stderr.write(
+                `[atoma runner] failed to persist the declared artifact manifest at ${artifactManifestPath}: ${String(error)}\n`
+              );
+            }
+          },
         }
       : {}),
   };

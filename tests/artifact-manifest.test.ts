@@ -43,4 +43,38 @@ describe('declared artifact manifest contract', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('clamps model-authored outputs to the manifest bounds instead of exploding', () => {
+    // `outputs` come from the model and planSchema does not bound them, while
+    // the manifest schema caps paths at 1024 chars and the list at 1000. A
+    // single oversize path used to throw out of the zod parse — AFTER the
+    // paid strategy call. Junk is dropped; the valid entries survive.
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-artifact-manifest-'));
+    const path = join(dir, 'manifest.json');
+    try {
+      persistDeclaredArtifactManifest(path, 'project-run:abc123', {
+        reasoning: 'r',
+        subtasks: [
+          {
+            description: 'build',
+            outputs: ['index.html', `way/too/long/${'x'.repeat(1_024)}.html`],
+          },
+          {
+            description: 'fan out',
+            outputs: Array.from({ length: 1_200 }, (_, i) => `gen/file-${i}.txt`),
+          },
+        ],
+        aggregation: { mode: 'sequential' },
+        expectedOutput: 'runnable app',
+      });
+      const parsed = declaredArtifactManifestSchema.parse(
+        JSON.parse(readFileSync(path, 'utf8'))
+      );
+      expect(parsed.outputs).toHaveLength(1_000);
+      expect(parsed.outputs[0]).toBe('index.html');
+      expect(parsed.outputs.some((output) => output.length > 1_024)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
