@@ -24,6 +24,7 @@ export const EVENT_KIND_COLOR: Record<string, number> = {
   // `tool` wears, and tool is the most common event on screen. The palette
   // test measures that separation rather than trusting the eye.
   cache: 0x14b8a6,
+  context: 0xfb7185,
   registry: 0xa78bfa,
   branch: 0x94a3b8,
 };

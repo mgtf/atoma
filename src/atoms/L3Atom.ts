@@ -601,13 +601,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     // L3 is a pure reasoning / routing tier: no executor and no tool declarations
     // are passed to the LLM. Only L1 may actually execute tools. Cap output at
     // STRATEGY_MAX_TOKENS — the response is routing JSON, not content.
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('plan', {
+        userContent,
+        params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
+        signal: ctx.signal,
+      })
+    );
 
     const pair = parseTwoJson(resp.text);
     this.pendingStrategy = l3StrategySchema.parse(pair[0]);
@@ -987,13 +987,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ``,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: this.params,
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('execute', {
+        userContent,
+        params: this.params,
+        signal: ctx.signal,
+      })
+    );
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,
@@ -1030,13 +1030,13 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     ]
       .filter(Boolean)
       .join('\n');
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: this.params,
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('fallback-plan', {
+        userContent,
+        params: this.params,
+        signal: ctx.signal,
+      })
+    );
     // Tolerant parse WITH fallback: see L2Atom.selfPlan for rationale —
     // the routing-conditioned prompt sometimes produces responses that
     // don't include any plan-shaped fields. We synthesise a stub plan
@@ -1074,17 +1074,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     ]
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
-    const resp = await ctx.llm.complete({
-      // A tool-bearing last resort still needs the sandboxed L1 transport.
-      // Tier-3 Codex can plan this fallback but cannot safely execute tools.
-      model: hasTools ? modelForTier(1) : this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
-      params: this.params,
-      signal: ctx.signal,
-      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('fallback-execute', {
+        // A tool-bearing last resort still needs the sandboxed L1 transport.
+        // Tier-3 Codex can plan this fallback but cannot safely execute tools.
+        model: hasTools ? modelForTier(1) : this.model,
+        userContent,
+        ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
+        params: this.params,
+        signal: ctx.signal,
+        maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
+      })
+    );
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,

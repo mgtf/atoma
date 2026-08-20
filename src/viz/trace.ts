@@ -1,6 +1,7 @@
 import { writeFileSync, mkdirSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import type { ContextCitation, ContextSource } from '../contracts/llmTrace.js';
 import type { AtomType } from '../registry/atomRegistry.js';
 import type { Task, Tier } from '../core/types.js';
 
@@ -20,7 +21,7 @@ export interface VizLlmEvent {
   id: string;
   ts: number;
   kind: 'llm';
-  /** Coarse role inferred from the request prompts — drives the UI icon. */
+  /** Stamped at the call site. Absent stamp records as `unknown`. */
   role:
     | 'plan'
     | 'execute'
@@ -66,6 +67,10 @@ export interface VizLlmEvent {
    * supervisor's own plan/aggregation calls at the trunk level).
    */
   branchId?: string;
+  /** Names declared on this request — the executable surface the model saw. */
+  toolNames?: string[];
+  /** Injects folded into the system prompt for this call. */
+  context?: ContextCitation[];
 }
 
 export interface VizRegistrySnapshot {
@@ -265,6 +270,24 @@ export interface VizCacheEvent {
   branchId?: string;
 }
 
+/**
+ * One model-visible inject, recorded the first time a complete() cites it.
+ * The llm event cites the same `id`. Coaching and fallback-trace have no
+ * sibling skill event — this is their timeline row.
+ */
+export interface VizContextEvent {
+  id: string;
+  ts: number;
+  kind: 'context';
+  source: ContextSource;
+  chars: number;
+  preview: string;
+  skillId?: string;
+  actor?: VizAtomRef;
+  llmEventId: string;
+  branchId?: string;
+}
+
 export interface VizBranchEvent {
   id: string;
   ts: number;
@@ -287,6 +310,7 @@ export type VizEvent =
   | VizTrustEvent
   | VizSkillEvent
   | VizCacheEvent
+  | VizContextEvent
   | VizBranchEvent;
 
 export interface VizRunIndexEntry {

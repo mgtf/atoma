@@ -528,3 +528,79 @@ export function buildSkillEventDetail(
     t
   );
 }
+
+export function buildLlmEnvelopeDetail(
+  event: {
+    toolNames?: string[];
+    context?: Array<{
+      id?: string;
+      source?: string;
+      chars?: number;
+      preview?: string;
+      skillId?: string;
+    }>;
+  },
+  t: Translator
+): readonly StructuredDetailNode[] {
+  const nodes: StructuredDetailNode[] = [];
+  if (event.toolNames && event.toolNames.length > 0) {
+    nodes.push({
+      kind: 'field',
+      key: 'toolNames',
+      label: t('detail.field.toolNames'),
+      value: event.toolNames.join(', '),
+      tone: 'info',
+      presentation: 'badge',
+    });
+  }
+  if (event.context && event.context.length > 0) {
+    nodes.push({
+      kind: 'section',
+      key: 'context',
+      label: t('detail.field.context'),
+      count: event.context.length,
+      children: event.context.map((block, index) => {
+        const sourceKey = block.source
+          ? `detail.enum.contextSource.${block.source}`
+          : '';
+        const sourceLabel = sourceKey ? t(sourceKey) : t('detail.field.source');
+        return {
+          kind: 'section' as const,
+          key: 'contextBlock',
+          label: `${sourceLabel === sourceKey ? block.source : sourceLabel} ${index + 1}`,
+          children: [
+            ...(block.skillId
+              ? [
+                  {
+                    kind: 'field' as const,
+                    key: 'skillId',
+                    label: t('detail.field.skillId'),
+                    value: block.skillId,
+                    tone: 'info' as const,
+                    presentation: 'badge' as const,
+                  },
+                ]
+              : []),
+            {
+              kind: 'field' as const,
+              key: 'chars',
+              label: t('detail.field.chars'),
+              value: String(block.chars ?? 0),
+              tone: 'neutral' as const,
+              presentation: 'badge' as const,
+            },
+            {
+              kind: 'field' as const,
+              key: 'preview',
+              label: t('detail.field.preview'),
+              value: block.preview ?? '',
+              tone: 'neutral' as const,
+              presentation: 'text' as const,
+            },
+          ],
+        };
+      }),
+    });
+  }
+  return nodes;
+}

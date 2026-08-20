@@ -220,6 +220,18 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
   let body = event.error ?? event.reasoning ?? '';
   if (event.kind === 'tool' && !event.error) {
     body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
+  } else if (event.kind === 'llm' && Array.isArray(event.context) && event.context.length > 0) {
+    body = event.context
+      .map((block) => t(`detail.enum.contextSource.${block.source}`))
+      .join(' · ');
+  } else if (event.kind === 'context') {
+    body = [
+      t(`detail.enum.contextSource.${scalar(event.source)}`),
+      event.skillId,
+      event.preview,
+    ]
+      .filter(Boolean)
+      .join(' · ');
   } else if (event.kind === 'cache') {
     body = [scalar(event.outcome), event.reasoning].filter(Boolean).join(' · ');
   } else if (event.kind === 'registry' && !body) {
@@ -251,6 +263,13 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
           ? [`✓${scalar(event['successes'], '0')}/✗${scalar(event['failures'], '0')}`, time].filter(Boolean).join(' · ')
           : event.kind === 'skill'
             ? [`${event.l1Name ?? '?'}/${event.skillId ?? '?'}`, time].filter(Boolean).join(' · ')
+            : event.kind === 'context'
+              ? [
+                  t(`detail.enum.contextSource.${scalar(event.source)}`),
+                  event.skillId,
+                  typeof event.chars === 'number' ? `${event.chars}c` : '',
+                  time,
+                ].filter(Boolean).join(' · ')
             : event.kind === 'registry'
               ? [`v${event.snapshot?.version ?? scalar(event.version, '?')}`, time].filter(Boolean).join(' · ')
               : [event.model, time].filter(Boolean).join(' · ');

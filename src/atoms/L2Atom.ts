@@ -536,13 +536,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // L2 is a pure reasoning / routing tier: no executor, no tool declarations.
     // Only L1 may actually execute tools. Cap output at STRATEGY_MAX_TOKENS —
     // the response is a routing JSON pair, not content.
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('plan', {
+        userContent,
+        params: { ...this.params, maxTokens: STRATEGY_MAX_TOKENS, effort: 'medium' },
+        signal: ctx.signal,
+      })
+    );
 
     const pair = parseTwoJson(resp.text);
     this.pendingStrategy = l2StrategySchema.parse(pair[0]);
@@ -813,14 +813,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           }
         }
 
-        l1.injectContext(
-          skillContextBlock({
+        l1.injectContext({
+          source: 'skill',
+          skillId: skills.skill.id,
+          text: skillContextBlock({
             id: skills.skill.id,
             body: skills.skill.body,
             kind: skills.skill.kind,
             ...(skills.skill.language ? { language: skills.skill.language } : {}),
-          })
-        );
+          }),
+        });
         // The owner namespace rides the instance tag alongside the id —
         // under the lattice it can differ from l1Type.name (donor match).
         l1.setActiveSkill(skills.skill.id, skills.ownerNs);
@@ -1215,7 +1217,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       const candidates = this.skillRegistry.loadFor(skillCtx.l1Name).filter((s) => s.trigger);
       const match = matchEventSkill(eventText, candidates);
       if (!match || injectedEventSkills.get(match.skill.id) === child) return;
-      child.injectContext(eventSkillBlock(match.skill));
+      child.injectContext({
+        source: 'event-skill',
+        skillId: match.skill.id,
+        text: eventSkillBlock(match.skill),
+      });
       injectedEventSkills.set(match.skill.id, child);
       skillCtx.eventState.injected = true;
       this.skillRegistry.markMatched(skillCtx.l1Name, match.skill.id);
@@ -1260,7 +1266,11 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
             (child instanceof L1Atom ? child.activeSkillOwner() : null) ?? namespaceOf(child);
           const skill = this.skillRegistry?.loadFor(ownerNs).find((k) => k.id === skillId);
           if (skill) {
-            fresh.injectContext(skillContextBlock(skill));
+            fresh.injectContext({
+              source: 'skill',
+              skillId: skill.id,
+              text: skillContextBlock(skill),
+            });
             fresh.setActiveSkill(skillId, ownerNs);
           }
           return fresh;
@@ -1418,14 +1428,16 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
                   reasoning: diagnostic.slice(0, 400),
                 });
                 const fresh = L1Atom.fromType(childType);
-                fresh.injectContext(
-                  skillContextBlock({
+                fresh.injectContext({
+                  source: 'skill',
+                  skillId: activeSkillId,
+                  text: skillContextBlock({
                     id: activeSkillId,
                     body: newBody,
                     kind: oldSkill.kind,
                     ...(oldSkill.language ? { language: oldSkill.language } : {}),
-                  })
-                );
+                  }),
+                });
                 fresh.setActiveSkill(activeSkillId, activeSkillNs);
                 return fresh;
               }
@@ -1726,13 +1738,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ``,
       `Return JSON: {"output": <any>, "summary": "<one sentence>"}`,
     ].join('\n');
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: this.params,
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('execute', {
+        userContent,
+        params: this.params,
+        signal: ctx.signal,
+      })
+    );
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,
@@ -1786,13 +1798,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ]
       .filter(Boolean)
       .join('\n');
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: this.params,
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('fallback-plan', {
+        userContent,
+        params: this.params,
+        signal: ctx.signal,
+      })
+    );
     // Tolerant parse WITH fallback: even with the explicit "emit ONE
     // object" hint above, Sonnet's non-fallback routing prompt is
     // heavily conditioned to emit a `[strategy, plan]` pair. When it
@@ -1831,19 +1843,20 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     ]
       .filter((l): l is string => typeof l === 'string' && l.length > 0)
       .join('\n');
-    const resp = await ctx.llm.complete({
-      // Tool-bearing fallback is an L1 execution role even though the
-      // supervising object is L2. Codex routes are text-only at tiers 2/3 and
-      // structurally refuse tool loops, which turned the final recovery path
-      // into an instant provider error on a live web run.
-      model: hasTools ? modelForTier(1) : this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
-      params: this.params,
-      signal: ctx.signal,
-      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('fallback-execute', {
+        // Tool-bearing fallback is an L1 execution role even though the
+        // supervising object is L2. Codex routes are text-only at tiers 2/3 and
+        // structurally refuse tool loops, which turned the final recovery path
+        // into an instant provider error on a live web run.
+        model: hasTools ? modelForTier(1) : this.model,
+        userContent,
+        ...(hasTools ? { tools: [...this.tools], executor: ctx.tools } : {}),
+        params: this.params,
+        signal: ctx.signal,
+        maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
+      })
+    );
     const { output, summary } = parsePayloadTolerant(resp.text);
     return {
       output,

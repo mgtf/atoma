@@ -752,6 +752,10 @@ export async function llmVerdict(args: {
     userContent,
     params: VALIDATION_PARAMS,
     signal: args.ctx.signal,
+    role: args.subject === 'PLAN' ? 'validate-plan' : 'validate-result',
+    actor: { name: args.supervisorName, tier: args.supervisorTier },
+    child: { name: args.child.name, tier: args.child.tier },
+    subject: args.subject,
   });
 
   const raw = parseVerdict(resp.text);

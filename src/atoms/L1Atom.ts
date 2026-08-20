@@ -250,13 +250,13 @@ export class L1Atom extends Atom {
 
     // Plan is pure reasoning — don't pass the executor here or the LLM may
     // perform the work during planning and return prose instead of a plan JSON.
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      params: this.params,
-      signal: ctx.signal,
-    });
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('plan', {
+        userContent,
+        params: this.params,
+        signal: ctx.signal,
+      })
+    );
 
     return parseWith(planSchema, resp.text);
   }
@@ -389,23 +389,23 @@ export class L1Atom extends Atom {
       };
     };
 
-    const resp = await ctx.llm.complete({
-      model: this.model,
-      systemPrompt: this.effectiveSystemPrompt(),
-      userContent,
-      tools: this.tools,
-      params: this.params,
-      executor: ctx.tools ? withAutomaticLoopbackHttpRecording(ctx.tools) : undefined,
-      signal: ctx.signal,
-      onToolInvocation,
+    const resp = await ctx.llm.complete(
+      this.toLlmRequest('execute', {
+        userContent,
+        tools: this.tools,
+        params: this.params,
+        executor: ctx.tools ? withAutomaticLoopbackHttpRecording(ctx.tools) : undefined,
+        signal: ctx.signal,
+        onToolInvocation,
       // Iterative build-app style tasks (write_file → start_server →
       // validate_html → read_file → rewrite → re-validate, up to 5 loops)
       // burn through tool-use slots fast. The default (24) covers the
       // no-validator path; when we've wired a validator into the tool set,
       // give the loop enough room to actually converge before falling back
       // to the tools-disabled finalization round-trip.
-      maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
-    });
+        maxToolIterations: capToolIterations(hasValidator ? 40 : 24, ctx.deadlineAt),
+      })
+    );
 
     // Tolerant parse: `parseWith(resultPayloadSchema,…)` now already scans
     // every balanced {…} candidate in the text, so a narrative with one

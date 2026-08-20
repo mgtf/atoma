@@ -475,6 +475,7 @@ export class SkillLifecycle {
       model: this.host.model,
       systemPrompt: this.host.effectiveSystemPrompt(),
       userContent,
+      role: 'skill',
       // 1600, not 800: the optional verification split can double the JSON,
       // and on 5-series models adaptive thinking shares this cap with the
       // response — a truncated draft is a silently lost learning event.
@@ -619,6 +620,7 @@ export class SkillLifecycle {
       model: this.host.model,
       systemPrompt: this.host.effectiveSystemPrompt(),
       userContent,
+      role: 'skill',
       params: { ...this.host.params, maxTokens: 1200, temperature: 0 },
       // Post-approval bookkeeping: own budget, never the run deadline.
       signal: postApprovalSignal(),
@@ -736,6 +738,7 @@ export class SkillLifecycle {
       model: this.host.model,
       systemPrompt: this.host.effectiveSystemPrompt(),
       userContent,
+      role: 'skill',
       params: { ...this.host.params, maxTokens: 1500, temperature: 0 },
       signal: args.ctx.signal,
     });
@@ -996,6 +999,7 @@ export class SkillLifecycle {
       model: this.host.model,
       systemPrompt: this.host.effectiveSystemPrompt(),
       userContent,
+      role: 'skill',
       // `effort: 'medium'` is load-bearing on the claude-cli transport,
       // where maxTokens is advisory-only: at the default 'high' a compile
       // ran ~7 minutes / ~20k thinking+output tokens through the subprocess

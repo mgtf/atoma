@@ -50,6 +50,17 @@ export interface VizEvent {
   snapshot?: RegistryType;
   modifications?: unknown;
   llmEventId?: string;
+  toolNames?: string[];
+  context?: Array<{
+    id: string;
+    source: string;
+    chars: number;
+    preview: string;
+    skillId?: string;
+  }>;
+  source?: string;
+  chars?: number;
+  preview?: string;
   [key: string]: unknown;
 }
 

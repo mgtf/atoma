@@ -1,6 +1,10 @@
+import { randomUUID } from 'node:crypto';
+import type { ContextBlock, ContextBlockInput, LlmCallRole } from '../contracts/llmTrace.js';
+import { foldContextBlocks } from '../contracts/llmTrace.js';
 import type {
   AtomModifications,
   GenerationParams,
+  LlmCompletionRequest,
   Plan,
   Result,
   RunContext,
@@ -34,7 +38,7 @@ export abstract class Atom {
   protected systemPrompt: string;
   protected tools: Tool[];
   protected params: GenerationParams;
-  protected injectedContext: string[] = [];
+  protected injectedContext: ContextBlock[] = [];
   protected fallbackMode = false;
 
   constructor(args: {
@@ -74,12 +78,46 @@ export abstract class Atom {
       this.params = { ...this.params, ...mods.params };
     }
     if (mods.additionalContext) {
-      this.injectedContext.push(mods.additionalContext);
+      this.injectContext({ source: 'coaching', text: mods.additionalContext });
     }
   }
 
-  injectContext(text: string): void {
-    this.injectedContext.push(text);
+  injectContext(input: ContextBlockInput): ContextBlock {
+    const block: ContextBlock = {
+      id: input.id ?? randomUUID(),
+      source: input.source,
+      text: input.text,
+      ...(input.skillId !== undefined ? { skillId: input.skillId } : {}),
+    };
+    this.injectedContext.push(block);
+    return block;
+  }
+
+  contextBlocks(): readonly ContextBlock[] {
+    return this.injectedContext;
+  }
+
+  /**
+   * Build the request envelope so every atom `complete()` carries role,
+   * actor, the folded prompt, and the cited injects. Call sites pass only
+   * the per-call fields (userContent, tools, signal, …).
+   */
+  toLlmRequest(
+    role: LlmCallRole,
+    args: Omit<LlmCompletionRequest, 'systemPrompt' | 'role' | 'actor' | 'context' | 'model'> & {
+      model?: string;
+    }
+  ): LlmCompletionRequest {
+    const { model, ...rest } = args;
+    const context = this.injectedContext;
+    return {
+      ...rest,
+      model: model ?? this.model,
+      systemPrompt: this.effectiveSystemPrompt(),
+      role,
+      actor: { name: this.name, tier: this.tier },
+      ...(context.length > 0 ? { context: [...context] } : {}),
+    };
   }
 
   /**
@@ -101,10 +139,7 @@ export abstract class Atom {
   }
 
   protected effectiveSystemPrompt(): string {
-    if (this.injectedContext.length === 0) return this.systemPrompt;
-    return `${this.systemPrompt}\n\n${this.injectedContext
-      .map((c, i) => `<!-- context ${i + 1} -->\n${c}`)
-      .join('\n\n')}`;
+    return foldContextBlocks(this.systemPrompt, this.injectedContext);
   }
 }
 

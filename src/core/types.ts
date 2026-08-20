@@ -224,6 +224,20 @@ export interface LlmCompletionRequest {
   model: string;
   systemPrompt: string;
   userContent: string;
+  /**
+   * Stamped at the call site. The recorder stores this verbatim. Absent →
+   * `unknown`. Prompt text is not a fallback classifier.
+   */
+  role?: import('../contracts/llmTrace.js').LlmCallRole;
+  /** Caller identity when known — same shape the viz already stores. */
+  actor?: { name: string; tier: Tier };
+  child?: { name: string; tier: Tier };
+  subject?: 'PLAN' | 'RESULT';
+  /**
+   * Typed injects folded into `systemPrompt`. The recorder cites these on
+   * the llm event; they are the join between injectContext and complete().
+   */
+  context?: readonly import('../contracts/llmTrace.js').ContextBlock[];
   tools?: Tool[];
   params?: GenerationParams;
   cacheSystem?: boolean;

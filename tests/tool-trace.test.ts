@@ -66,16 +66,25 @@ function makeTmpRecorder(): { recorder: TraceRecorder; dir: string } {
   return { recorder, dir };
 }
 
+function stampedExecute(
+  over: Partial<LlmCompletionRequest> = {}
+): LlmCompletionRequest {
+  return {
+    model: 'stub',
+    systemPrompt: 'sys',
+    userContent: 'execute',
+    role: 'execute',
+    actor: { name: 'Water', tier: 1 },
+    ...over,
+  };
+}
+
 describe('RecordingLlmClient — in-flight llm-start markers', () => {
   it('records a start event BEFORE the call resolves, paired to the completion via llmEventId', async () => {
     const { recorder, dir } = makeTmpRecorder();
     try {
       const rec = new RecordingLlmClient(new InnerStubLlm(), recorder);
-      await rec.complete({
-        model: 'stub',
-        systemPrompt: 'sys',
-        userContent: 'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
-      });
+      await rec.complete(stampedExecute());
       const events = recorder.currentRun!.events;
       const start = events.find((e) => e.kind === 'llm-start');
       const done = events.find((e) => e.kind === 'llm');
@@ -83,7 +92,7 @@ describe('RecordingLlmClient — in-flight llm-start markers', () => {
       expect(done).toBeDefined();
       // Pairing contract the UI relies on to hide superseded starts.
       expect(start!.llmEventId).toBe(done!.id);
-      // Classification is available at start time — same role/actor.
+      // Stamp is available at start time — same role/actor.
       expect(start!.role).toBe('execute');
       expect(start!.actor).toEqual({ name: 'Water', tier: 1 });
       // Start precedes completion in the event stream.
@@ -124,12 +133,7 @@ describe('RecordingLlmClient — tool-call tracing', () => {
     const { recorder, dir } = makeTmpRecorder();
     try {
       const rec = new RecordingLlmClient(new InnerStubLlm(), recorder);
-      await rec.complete({
-        model: 'stub',
-        systemPrompt: 'sys',
-        userContent:
-          'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
-      });
+      await rec.complete(stampedExecute());
       const events = recorder.currentRun!.events;
       const toolEvents = events.filter(
         (e): e is VizToolEvent => e.kind === 'tool'
@@ -159,16 +163,11 @@ describe('RecordingLlmClient — tool-call tracing', () => {
     }
   });
 
-  it('attaches the actor inferred from the LLM request to each tool event', async () => {
+  it('attaches the stamped actor to each tool event', async () => {
     const { recorder, dir } = makeTmpRecorder();
     try {
       const rec = new RecordingLlmClient(new InnerStubLlm(), recorder);
-      await rec.complete({
-        model: 'stub',
-        systemPrompt: 'sys',
-        userContent:
-          'You are molecule "Water" (tier 1). Your plan has been APPROVED. Execute it now.',
-      });
+      await rec.complete(stampedExecute());
       const toolEv = recorder.currentRun!.events.find(
         (e): e is VizToolEvent => e.kind === 'tool'
       );
@@ -184,12 +183,12 @@ describe('RecordingLlmClient — tool-call tracing', () => {
     try {
       const rec = new RecordingLlmClient(new InnerStubLlm(), recorder);
       const seen: ToolInvocationInfo[] = [];
-      await rec.complete({
-        model: 'stub',
-        systemPrompt: 'sys',
-        userContent: 'You are molecule "X" (tier 1). Your plan has been APPROVED.',
-        onToolInvocation: (info) => seen.push(info),
-      });
+      await rec.complete(
+        stampedExecute({
+          actor: { name: 'X', tier: 1 },
+          onToolInvocation: (info) => seen.push(info),
+        })
+      );
       // Both the user's callback AND the recorder's internal one must fire.
       expect(seen.map((i) => i.name)).toEqual(['write_file', 'validate_html']);
       expect(

@@ -18,6 +18,7 @@ import {
   timelineBranchHeading,
 } from '../../../client/timeline-layout.js';
 import {
+  buildLlmEnvelopeDetail,
   buildSkillEventDetail,
   buildStructuredDetail,
   eventRoleLabel,
@@ -256,7 +257,12 @@ export function drawRuns(
     maxWidth: leftWidth - 28,
     kinds: kinds.map((kind) => ({
       id: `run.filter.kind.${kind}`,
-      label: kind === 'tool' ? snapshot.t('filters.tools').toUpperCase() : kind.toUpperCase(),
+      label:
+        kind === 'tool'
+          ? snapshot.t('filters.tools').toUpperCase()
+          : kind === 'context'
+            ? snapshot.t('filters.context').toUpperCase()
+            : kind.toUpperCase(),
     })),
     roles: roleNames.length
       ? ['all', ...roleNames].map((role) => ({
@@ -1122,6 +1128,36 @@ function drawEventDetail(
     });
     return;
   }
+  if (event.kind === 'context') {
+    const sourceKey = event.source
+      ? `detail.enum.contextSource.${event.source}`
+      : 'detail.field.source';
+    ctx.text(ctx.root, snapshot.t('detail.field.context'), x + 18, y + 72, {
+      size: 13,
+      color: eventAccent(event),
+      weight: '700',
+      width: width - 36,
+    });
+    ctx.text(
+      ctx.root,
+      [snapshot.t(sourceKey), event.skillId, typeof event.chars === 'number' ? `${event.chars}` : '']
+        .filter(Boolean)
+        .join(' · '),
+      x + 18,
+      y + 108,
+      {
+        size: 12,
+        weight: '700',
+        width: width - 36,
+      }
+    );
+    ctx.text(ctx.root, event.preview ?? '', x + 18, y + 142, {
+      size: 10,
+      color: GPU_COLORS.muted,
+      width: width - 36,
+    });
+    return;
+  }
   const raw =
     event.kind === 'llm'
       ? event.response ?? event.error ?? ''
@@ -1134,6 +1170,8 @@ function drawEventDetail(
         : !event.error
           ? event
           : undefined;
+  const envelope =
+    event.kind === 'llm' ? buildLlmEnvelopeDetail(event, snapshot.t) : [];
   const detailTop = y + 68;
   const detailBottom = y + height - 14;
   const detailHeight = Math.max(40, detailBottom - detailTop);
@@ -1143,8 +1181,25 @@ function drawEventDetail(
   ctx.root.addChild(detailLayer);
   const mask = ctx.detailMask(x + 12, detailTop - 6, width - 24, detailHeight + 6);
   detailLayer.mask = mask;
-  const contentBottom =
+  const bodyNodes =
     structured === undefined
+      ? raw
+        ? [
+            {
+              kind: 'field' as const,
+              key: 'response',
+              label: snapshot.t('detail.field.content'),
+              value: raw,
+              tone: 'neutral' as const,
+              presentation: 'code' as const,
+            },
+          ]
+        : []
+      : buildStructuredDetail(structured, snapshot.t, {
+          markdownPath: event.kind === 'tool' ? filePathFromArgs(event.args) : undefined,
+        });
+  const contentBottom =
+    envelope.length === 0 && bodyNodes.length === 0
       ? detailTop +
         ctx.text(detailLayer, truncate(raw, 8000), x + 18, detailTop, {
           size: 10,
@@ -1155,9 +1210,7 @@ function drawEventDetail(
       : drawStructuredDetailNodes(
           ctx,
           detailLayer,
-          buildStructuredDetail(structured, snapshot.t, {
-            markdownPath: event.kind === 'tool' ? filePathFromArgs(event.args) : undefined,
-          }),
+          [...envelope, ...bodyNodes],
           x + 18,
           detailTop,
           width - 42

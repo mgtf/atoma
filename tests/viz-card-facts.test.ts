@@ -118,6 +118,38 @@ describe('gpuEventCardCopy for an LLM call', () => {
     expect(gpuEventCardCopy(event({ stopReason: 'max_tokens' }), t).footer).toContain('⚠');
   });
 
+  it('names the inject sources on the card body', () => {
+    const { body } = gpuEventCardCopy(
+      event({
+        context: [
+          { id: 'c1', source: 'skill', chars: 20, preview: 'STEP 1', skillId: 'web-build' },
+          { id: 'c2', source: 'coaching', chars: 12, preview: 'fix the harness' },
+        ],
+      }),
+      t
+    );
+    expect(body).toBe('Skill · Coaching');
+  });
+
+  it('renders a context inject as its own card', () => {
+    const { title, body, footer } = gpuEventCardCopy(
+      {
+        id: 'c1',
+        ts: Date.parse('2026-08-16T10:00:00.000Z'),
+        kind: 'context',
+        source: 'skill',
+        skillId: 'web-build',
+        chars: 42,
+        preview: 'STEP 1: write_file',
+      },
+      t
+    );
+    expect(title).toContain('context');
+    expect(body).toContain('Skill');
+    expect(body).toContain('web-build');
+    expect(footer).toContain('42c');
+  });
+
   it('does not invent facts for a call that reported none', () => {
     const bare = gpuEventCardCopy(
       { id: 'e', ts: 0, kind: 'llm', role: 'plan' },

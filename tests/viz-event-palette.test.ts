@@ -107,7 +107,7 @@ describe('eventAccent', () => {
   });
 
   it('matches the chip for every non-LLM kind', () => {
-    for (const kind of ['tool', 'trust', 'cache', 'registry']) {
+    for (const kind of ['tool', 'trust', 'cache', 'context', 'registry']) {
       expect(eventAccent(event({ kind }))).toBe(eventKindColor(kind));
     }
   });

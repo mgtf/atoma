@@ -209,8 +209,8 @@ function collectL1ToolUsage(run: VizRun, limit: number): ToolActivity[] {
   for (const ev of run.events) {
     if (!isTool(ev)) continue;
     const actorName = ev.actor?.name ?? '(unknown)';
-    // Some tool events come with tier set via classify() echoing the owning
-    // LLM call; when the actor tier is missing we still group by name.
+    // Tool events inherit the stamped actor of the owning LLM call; when
+    // the actor tier is missing we still group by name.
     if (ev.actor && ev.actor.tier !== undefined && ev.actor.tier !== 1) {
       continue;
     }

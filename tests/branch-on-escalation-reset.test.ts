@@ -242,8 +242,8 @@ class FakeL2 extends (Object as unknown as new () => Atom)
   override setFallbackMode(_on: boolean): void {
     /* no-op */
   }
-  override injectContext(_text: string): void {
-    /* no-op */
+  override injectContext(input: import('../src/contracts/llmTrace.js').ContextBlockInput) {
+    return { id: 'unused', source: input.source, text: input.text };
   }
   override applyModifications(): void {
     /* no-op */

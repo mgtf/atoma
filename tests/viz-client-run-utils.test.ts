@@ -201,6 +201,9 @@ describe('React viz delta and filters', () => {
       'skill',
       'registry',
     ]);
+    expect(visibleEventKindFilters([...without, { id: 'x1', kind: 'context', ts: 4 }])).toContain(
+      'context'
+    );
     expect(visibleEventKindFilters([...without, { id: 'c1', kind: 'cache', ts: 3 }])).toContain(
       'cache'
     );

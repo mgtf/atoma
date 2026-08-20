@@ -132,6 +132,8 @@ export async function runFrontierBaseline(
     signal: ctx.signal,
     maxToolIterations: BASELINE_MAX_TOOL_ITERATIONS,
     params: { maxTokens: BASELINE_MAX_TOKENS },
+    role: 'execute',
+    actor: { name: BASELINE_ATOM_NAME, tier: 3 },
   });
 
   const text = (res.text ?? '').trim();

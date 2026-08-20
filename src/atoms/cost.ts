@@ -517,6 +517,8 @@ export async function prefilterStrategy(args: {
       userContent,
       params: PREFILTER_PARAMS,
       signal: args.ctx.signal,
+      role: 'prefilter',
+      ...(args.actor ? { actor: args.actor } : {}),
     });
     const outcome = parseWith(prefilterResponseSchema, resp.text);
     // The three parsed-outcome returns below all cache: each is a

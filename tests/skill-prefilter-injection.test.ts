@@ -155,8 +155,17 @@ describe('L2.runSubtask — skill prefilter + injection (C2a)', () => {
     expect(ctx.llm.calls[1]!.userContent).toMatch(/web-build-loop/);
     expect(ctx.llm.calls[1]!.userContent).toMatch(/single-file web artefact/);
     // L1.plan (call #3) gets the skill body injected via the system prompt.
+    expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/<!-- context source=skill skill=web-build-loop -->/);
     expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/== ACTIVE SKILL: web-build-loop ==/);
     expect(ctx.llm.calls[2]!.systemPrompt).toMatch(/STEP 1: write_file index\.html/);
+    expect(ctx.llm.calls[2]!.role).toBe('plan');
+    expect(ctx.llm.calls[2]!.context).toEqual([
+      expect.objectContaining({
+        source: 'skill',
+        skillId: 'web-build-loop',
+        text: expect.stringContaining('STEP 1: write_file index.html'),
+      }),
+    ]);
   });
 
   it('skips the skill body injection when the prefilter escalates (low-confidence guard)', async () => {

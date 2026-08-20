@@ -414,7 +414,10 @@ export async function superviseLoop<C extends Atom>(
         continue outer;
       }
 
-      parent.injectContext(renderTraceForContext(trace, current.name));
+      parent.injectContext({
+        source: 'fallback-trace',
+        text: renderTraceForContext(trace, current.name),
+      });
       parent.setFallbackMode(true);
       try {
         const plan = await parent.plan(task, ctx);

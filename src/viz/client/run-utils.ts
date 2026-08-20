@@ -399,6 +399,7 @@ export const EVENT_KIND_FILTERS = [
   'trust',
   'skill',
   'cache',
+  'context',
   'registry',
 ] as const;
 
@@ -406,7 +407,11 @@ export function visibleEventKindFilters(
   events: readonly { kind: string }[]
 ): string[] {
   const hasCache = events.some((event) => event.kind === 'cache');
-  return EVENT_KIND_FILTERS.filter((kind) => kind !== 'cache' || hasCache);
+  const hasContext = events.some((event) => event.kind === 'context');
+  return EVENT_KIND_FILTERS.filter(
+    (kind) =>
+      (kind !== 'cache' || hasCache) && (kind !== 'context' || hasContext)
+  );
 }
 
 export function coerceEventFilters(

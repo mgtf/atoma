@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from '../src/viz/client/i18n.js';
 import {
+  buildLlmEnvelopeDetail,
   buildSkillEventDetail,
   buildStructuredDetail,
   eventRoleLabel,
@@ -20,6 +21,8 @@ describe('structured detail presentation', () => {
   it('keeps the tool filter discoverable in both locales', () => {
     expect(en('filters.tools')).toBe('Tools');
     expect(fr('filters.tools')).toBe('Outils');
+    expect(en('filters.context')).toBe('Context');
+    expect(fr('filters.context')).toBe('Contexte');
   });
 
   it('turns verdict booleans and prose into readable fields', () => {
@@ -192,5 +195,36 @@ describe('structured detail presentation', () => {
       { markdownPath: 'README.md' }
     );
     expect(nodes[0]).toMatchObject({ kind: 'section', key: 'content', label: 'Content' });
+  });
+});
+
+describe('LLM envelope detail', () => {
+  it('lists tools and inject sources before the response body', () => {
+    const nodes = buildLlmEnvelopeDetail(
+      {
+        toolNames: ['write_file', 'run_shell'],
+        context: [
+          {
+            id: 'c1',
+            source: 'skill',
+            skillId: 'web-build',
+            chars: 24,
+            preview: 'STEP 1: write_file',
+          },
+        ],
+      },
+      en
+    );
+    expect(nodes[0]).toMatchObject({
+      kind: 'field',
+      key: 'toolNames',
+      value: 'write_file, run_shell',
+    });
+    expect(nodes[1]).toMatchObject({
+      kind: 'section',
+      key: 'context',
+      count: 1,
+      label: 'Model-visible context',
+    });
   });
 });
