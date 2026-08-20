@@ -31,7 +31,7 @@ beforeEach(() => {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
     entered: false,
   });
 });
