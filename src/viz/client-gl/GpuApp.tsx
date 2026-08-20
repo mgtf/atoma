@@ -6,8 +6,10 @@ import {
   useState,
 } from 'react';
 import { translate } from '../client/i18n.js';
-import { emptyRenderMetrics } from './gpu-renderer.js';
-import type { GpuRenderMetrics } from './gpu-renderer.js';
+import {
+  emptyRenderMetrics,
+  type GpuRenderMetrics,
+} from './renderer/metrics.js';
 import { AtomaCursor } from './AtomaCursor.js';
 import { DomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';

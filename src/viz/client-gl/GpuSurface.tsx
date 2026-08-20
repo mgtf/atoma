@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   GpuRenderer,
   GpuDataSnapshot,
-  GpuRenderMetrics,
 } from './gpu-renderer.js';
+import type { GpuRenderMetrics } from './renderer/metrics.js';
 import { useGpuStore } from './store.js';
 
 export function GpuSurface({

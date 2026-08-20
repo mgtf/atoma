@@ -1,9 +1,9 @@
 import { Graphics, type Container } from 'pixi.js';
 import type { RendererCtx } from '../../gpu-renderer.js';
-import { TUNING_PANEL_ROW_HEIGHT } from '../../gpu-renderer.js';
 import { GPU_COLORS } from '../../theme.js';
 import { TUNING_KEYS } from '../../tuning.js';
 import { resetTuning } from '../../tuning-live.js';
+import { TUNING_ROW_HEIGHT } from '../tuning-layout.js';
 
 const PANEL_PADDING = 12;
 const PANEL_HEADING = 20;
@@ -14,7 +14,7 @@ export function tuningPanelHeight(): number {
   return (
     PANEL_PADDING * 2 +
     PANEL_HEADING +
-    TUNING_KEYS.length * (TUNING_PANEL_ROW_HEIGHT + ROW_GAP)
+    TUNING_KEYS.length * (TUNING_ROW_HEIGHT + ROW_GAP)
   );
 }
 
@@ -75,6 +75,6 @@ export function drawTuningPanel(
   let cursor = y + PANEL_PADDING + PANEL_HEADING;
   for (const key of TUNING_KEYS) {
     ctx.tuningRow(parent, key, x + PANEL_PADDING, cursor, width - PANEL_PADDING * 2);
-    cursor += TUNING_PANEL_ROW_HEIGHT + ROW_GAP;
+    cursor += TUNING_ROW_HEIGHT + ROW_GAP;
   }
 }

@@ -42,6 +42,16 @@ import { softShadowLayers } from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
 import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
 import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
+import {
+  emptyRenderMetrics,
+  type GpuHitTarget,
+  type GpuRenderMetrics,
+} from './renderer/metrics.js';
+import {
+  TUNING_LABEL_WIDTH,
+  TUNING_READOUT_WIDTH,
+  TUNING_ROW_HEIGHT,
+} from './renderer/tuning-layout.js';
 import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
@@ -67,51 +77,12 @@ export interface GpuDataSnapshot {
   error: string | null;
 }
 
-export interface GpuHitTarget {
-  id: string;
-  role: string;
-  label: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
 export interface FilterVisualTarget extends GpuHitTarget {
   active: boolean;
   accent: number;
 }
 
-export interface GpuTimelineViewport {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  railBaseX: number;
-  laneSpacing: number;
-  cardBaseX: number;
-  cardBaseWidth: number;
-  branchCardOffset: number;
-  contentTopPadding: number;
-  contentBottomPadding: number;
-  rowHeight: number;
-  totalHeight: number;
-  scrollY: number;
-  /**
-   * Display rows the view inserts above the first EVENT row (its "run ended"
-   * bookend). Overlays project `layout` rows onto this grid, so they must
-   * add it — the layout knows nothing about the view's bookends.
-   */
-  rowOffset: number;
-}
-
 type TuningKey = keyof VizTuning;
-
-/** Tuning panel row geometry. One row: label | track | readout. */
-const TUNING_ROW_HEIGHT = 22;
-const TUNING_LABEL_WIDTH = 116;
-const TUNING_READOUT_WIDTH = 54;
-export const TUNING_PANEL_ROW_HEIGHT = TUNING_ROW_HEIGHT;
 
 function formatTuningValue(key: TuningKey, value: number): string {
   const range = TUNING_RANGE[key];
@@ -128,45 +99,6 @@ function markTurnDegreeFromTrack(localX: number, trackX: number, trackWidth: num
 function trackXFromTurnDegree(degrees: number, trackX: number, trackWidth: number): number {
   const wrapped = ((degrees % 360) + 360) % 360;
   return trackX + wrapped / 360 * trackWidth;
-}
-
-export interface GpuRenderMetrics {
-  backend: 'webgpu' | 'webgl' | 'unknown';
-  objectCount: number;
-  runCollapseOffset: number;
-  visibleLabels: string[];
-  hitTargets: GpuHitTarget[];
-  timelineViewport?: GpuTimelineViewport;
-  /**
-   * Wall time of the last `render()` — the scene REBUILD, not the frame. The
-   * two are measured separately on purpose: an rAF interval saturates at
-   * vsync, so it detects dropped frames but can never show the margin a
-   * rebuild eats. This is the number that moves when a wheel tick gets
-   * cheaper.
-   */
-  renderMs: number;
-  /** Labels built from scratch in the last render — see `LabelCache.created`. */
-  labelsCreated: number;
-  /** Labels served from the retention pool in the last render. */
-  labelsReused: number;
-}
-
-/**
- * THE zero state for render metrics. The renderer, the app shell and the view
- * tests all need one before a first render has happened; three hand-written
- * literals meant every new counter had to be added in three places.
- */
-export function emptyRenderMetrics(): GpuRenderMetrics {
-  return {
-    backend: 'unknown',
-    objectCount: 0,
-    runCollapseOffset: 0,
-    visibleLabels: [],
-    hitTargets: [],
-    renderMs: 0,
-    labelsCreated: 0,
-    labelsReused: 0,
-  };
 }
 
 export interface GpuRenderSnapshot {
@@ -204,6 +136,13 @@ const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
 export { gpuEventCardCopy, type GpuEventCardCopy, type GpuTranslate } from './renderer/copy.js';
+export {
+  emptyRenderMetrics,
+  type GpuHitTarget,
+  type GpuRenderMetrics,
+  type GpuTimelineViewport,
+} from './renderer/metrics.js';
+export { TUNING_ROW_HEIGHT as TUNING_PANEL_ROW_HEIGHT } from './renderer/tuning-layout.js';
 import { type FilterBlockLayout } from './renderer/chip-layout.js';
 import { truncate } from './renderer/copy.js';
 import {
