@@ -415,6 +415,143 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
     ).toEqual(published);
   });
 
+  it('reconciles crash-orphaned runs and publications to failed at boot, leaving terminal rows alone', () => {
+    // The defect this pins: the only writers that move `queued`/`running`
+    // runs and `publishing` publications are in-memory drivers in the viz
+    // server process. After a crash those rows were stuck forever — and the
+    // publisher short-circuits on `publishing`, so even a retry was blocked.
+    const alice = actor('Alice');
+    const bob = actor('Bob');
+    const aliceProject = createProject(alice);
+    const bobProject = (() => {
+      return store.createProject({
+        orgId: bob.orgId,
+        principalId: bob.principalId,
+        project: {
+          name: 'Bob Lab',
+          slug: 'bob-lab',
+          family: 'build',
+          repositoryTarget: {
+            installationId: '54321',
+            owner: 'atoma-test',
+            name: 'bob-lab',
+            visibility: 'private',
+          },
+        },
+      });
+    })();
+    const makeRun = (owner: Actor, projectId: string, key: string) =>
+      store.createProjectRun({
+        orgId: owner.orgId,
+        projectId,
+        principalId: owner.principalId,
+        request: runRequest(key),
+        hostPaths: hostPaths(key),
+      })!.run;
+    const advance = (owner: Actor, runId: string, to: 'running' | 'delivered') => {
+      store.transitionProjectRun({
+        orgId: owner.orgId,
+        projectRunId: runId,
+        from: 'queued',
+        to: 'running',
+      });
+      if (to === 'delivered') {
+        store.transitionProjectRun({
+          orgId: owner.orgId,
+          projectRunId: runId,
+          from: 'running',
+          to: 'delivered',
+          traceId: `trace-${runId}`,
+          stats: deliveredStats,
+        });
+      }
+    };
+
+    const orphanQueued = makeRun(alice, aliceProject.projectId, 'orphan-queued');
+    const orphanRunning = makeRun(alice, aliceProject.projectId, 'orphan-running');
+    advance(alice, orphanRunning.projectRunId, 'running');
+    const bobRunning = makeRun(bob, bobProject.projectId, 'bob-running');
+    advance(bob, bobRunning.projectRunId, 'running');
+    const deliveredStuck = makeRun(alice, aliceProject.projectId, 'delivered-stuck');
+    advance(alice, deliveredStuck.projectRunId, 'delivered');
+    store.saveArtifactManifest(alice.orgId, deliveredStuck.projectRunId, manifest);
+    const deliveredDone = makeRun(alice, aliceProject.projectId, 'delivered-done');
+    advance(alice, deliveredDone.projectRunId, 'delivered');
+    store.saveArtifactManifest(alice.orgId, deliveredDone.projectRunId, manifest);
+
+    const stuck = store.reservePublication({
+      orgId: alice.orgId,
+      projectRunId: deliveredStuck.projectRunId,
+      idempotencyKey: 'stuck',
+    })!.publication;
+    store.transitionPublication({
+      orgId: alice.orgId,
+      publicationId: stuck.publicationId,
+      from: 'pending',
+      to: 'publishing',
+    });
+    const done = store.reservePublication({
+      orgId: alice.orgId,
+      projectRunId: deliveredDone.projectRunId,
+      idempotencyKey: 'done',
+    })!.publication;
+    store.transitionPublication({
+      orgId: alice.orgId,
+      publicationId: done.publicationId,
+      from: 'pending',
+      to: 'publishing',
+    });
+    store.transitionPublication({
+      orgId: alice.orgId,
+      publicationId: done.publicationId,
+      from: 'publishing',
+      to: 'published',
+      receipt: {
+        repositoryId: '777',
+        fullName: 'atoma-test/weather-lab',
+        url: 'https://github.com/atoma-test/weather-lab',
+        defaultBranch: 'main',
+        commitSha: 'c'.repeat(40),
+      },
+    });
+
+    expect(store.reconcileInterrupted('interrupted by server restart')).toEqual({
+      runs: 3,
+      publications: 1,
+    });
+
+    for (const [owner, runId] of [
+      [alice, orphanQueued.projectRunId],
+      [alice, orphanRunning.projectRunId],
+      [bob, bobRunning.projectRunId],
+    ] as const) {
+      const failed = store.getProjectRun(owner.orgId, runId)!;
+      expect(failed.status).toBe('failed');
+      expect(failed.error).toBe('interrupted by server restart');
+      expect(failed.endedAt).not.toBeNull();
+    }
+    expect(store.getProjectRun(alice.orgId, deliveredStuck.projectRunId)!.status).toBe('delivered');
+    expect(store.getProjectRun(alice.orgId, deliveredDone.projectRunId)!.status).toBe('delivered');
+    const failedPublication = store.getPublication(alice.orgId, stuck.publicationId)!;
+    expect(failedPublication.status).toBe('failed');
+    expect(failedPublication.error).toBe('interrupted by server restart');
+    expect(store.getPublication(alice.orgId, done.publicationId)!.status).toBe('published');
+
+    // Idempotent, and the recovered publication is retryable again.
+    expect(store.reconcileInterrupted('interrupted by server restart')).toEqual({
+      runs: 0,
+      publications: 0,
+    });
+    expect(
+      store.transitionPublication({
+        orgId: alice.orgId,
+        publicationId: stuck.publicationId,
+        from: 'failed',
+        to: 'publishing',
+      })?.status
+    ).toBe('publishing');
+  });
+
   it('keeps repository creation separate and retryable', () => {
     const alice = actor('Alice');
     const project = createProject(alice);

@@ -367,6 +367,15 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
   });
+  // A previous process that died mid-run left rows only its in-memory
+  // drivers could ever move. Recover them BEFORE any new run can start,
+  // and say so — silent reaping hides the crash from the operator.
+  const recovered = coordinator.reconcileInterrupted();
+  if (recovered.runs > 0 || recovered.publications > 0) {
+    process.stderr.write(
+      `[atoma viz] recovered interrupted project state: ${recovered.runs} run(s) and ${recovered.publications} publication(s) marked failed\n`
+    );
+  }
   const projects = new ProjectService({
     store: projectStore,
     coordinator,

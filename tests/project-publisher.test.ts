@@ -242,4 +242,35 @@ describe('GitHubPublisher token split', () => {
     expect(client.getRepository).toHaveBeenCalledWith('ghu_user-token', 'alice', 'weather-lab');
     expect(publication?.repositoryId).toBe(existing.id);
   });
+
+  it('refuses the 422 idempotent path when the existing repository has the wrong visibility', async () => {
+    // The defect this pins: a project targeting a PRIVATE repository landed
+    // its artifacts in a pre-existing PUBLIC repository of the same name —
+    // the idempotent lookup never compared visibility to the target.
+    const owner = actor('Alice');
+    const { project, run, workspace, hash } = await deliveredRun(owner, 'User', 'alice');
+    const client = mockClient({
+      createUserRepository: vi.fn(async () => {
+        throw apiError(422, '/user/repos');
+      }),
+      getRepository: vi.fn(async () => ({
+        ...repository('alice', 'weather-lab'),
+        private: false,
+      })),
+    });
+    const publisher = new GitHubPublisher({
+      client,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+
+    await expect(
+      publisher.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow(/public while the project targets a private repository/);
+    expect(client.publishInitialCommit).not.toHaveBeenCalled();
+    // The failure is recorded and the publication stays retryable.
+    const publication = store.getPublicationForRun(owner.orgId, run.projectRunId)!;
+    expect(publication.status).toBe('failed');
+  });
 });

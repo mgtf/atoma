@@ -259,6 +259,18 @@ export class ProjectRunCoordinator {
     this.timeoutMs = options.timeoutMs ?? 15 * 60 * 1_000;
   }
 
+  /**
+   * Boot-time crash recovery: fail every run/publication a dead process left
+   * in flight (see `ProjectStore.reconcileInterrupted`). Refuses to run while
+   * anything is active in-memory — those rows have live drivers.
+   */
+  reconcileInterrupted(): { runs: number; publications: number } {
+    if (this.active.size > 0) {
+      throw new Error('reconcileInterrupted is a boot-time operation; runs are active');
+    }
+    return this.store.reconcileInterrupted('interrupted by server restart');
+  }
+
   async start(input: {
     readonly orgId: string;
     readonly principalId: string;

@@ -105,6 +105,16 @@ async function ensureRepository(
           `repository ${input.owner}/${input.name} already exists but is not accessible to this installation`
         );
       }
+      // The idempotent path must not silently change the audience: publishing
+      // a private-targeted artifact into a pre-existing PUBLIC repository (or
+      // the reverse) is a refusal, never a convergence.
+      if (existing.private !== (input.visibility === 'private')) {
+        throw new Error(
+          `repository ${existing.fullName} already exists but is ${
+            existing.private ? 'private' : 'public'
+          } while the project targets a ${input.visibility} repository`
+        );
+      }
       return {
         repositoryId: existing.id,
         fullName: existing.fullName,

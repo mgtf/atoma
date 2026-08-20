@@ -966,6 +966,63 @@ export class ProjectStore {
     return this.getPublication(orgId, publicationId)!;
   }
 
+  /**
+   * Boot-time crash recovery. The only writers that move a run out of
+   * `queued`/`running` or a publication out of `publishing` are in-memory
+   * drivers inside the viz server process (`ProjectRunCoordinator.finish`,
+   * `GitHubPublisher.publish`). After a crash no such driver exists, so those
+   * rows can never move again on their own — and the publisher short-circuits
+   * on `publishing`, which would block even a future retry forever. Fails
+   * each orphan through the normal CAS transitions so triggers, timestamps
+   * and validation all apply; a row that races a concurrent transition is
+   * skipped, not fatal.
+   */
+  reconcileInterrupted(errorInput: string): { runs: number; publications: number } {
+    const error = boundedError(errorInput) ?? 'interrupted';
+    let runs = 0;
+    const orphanRuns = this.db
+      .prepare(
+        `SELECT org_id, project_run_id, status FROM project_runs
+         WHERE status IN ('queued','running')`
+      )
+      .all() as { org_id: string; project_run_id: string; status: string }[];
+    for (const row of orphanRuns) {
+      try {
+        this.transitionProjectRun({
+          orgId: row.org_id,
+          projectRunId: row.project_run_id,
+          from: projectRunStatusSchema.parse(row.status),
+          to: 'failed',
+          error,
+        });
+        runs += 1;
+      } catch (transitionError) {
+        if (!(transitionError instanceof ProjectStateConflict)) throw transitionError;
+      }
+    }
+    let publications = 0;
+    const orphanPublications = this.db
+      .prepare(
+        `SELECT org_id, publication_id FROM project_publications WHERE status = 'publishing'`
+      )
+      .all() as { org_id: string; publication_id: string }[];
+    for (const row of orphanPublications) {
+      try {
+        this.transitionPublication({
+          orgId: row.org_id,
+          publicationId: row.publication_id,
+          from: 'publishing',
+          to: 'failed',
+          error,
+        });
+        publications += 1;
+      } catch (transitionError) {
+        if (!(transitionError instanceof ProjectStateConflict)) throw transitionError;
+      }
+    }
+    return { runs, publications };
+  }
+
   close(): void {
     if (this.closeOnClose) this.db.close();
   }
