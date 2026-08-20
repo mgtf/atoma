@@ -284,6 +284,49 @@ describe('L3.handle — root plan has no parent validator', () => {
     expect(ctx.llm.calls.some((c) => c.userContent.includes('MECHANICAL:'))).toBe(true);
   });
 
+  it('keeps the ORIGINAL strategy when the replan parses a strategy but not a plan', async () => {
+    // The desync this pins: `plan()` used to commit `pendingStrategy` BEFORE
+    // validating the plan half of the pair. A coached replan that answered a
+    // valid strategy plus a truncated/unparseable plan then failed open to
+    // the ORIGINAL plan — but `execute()` consumed the REPLAN's strategy,
+    // dispatching a reuse-shaped plan under a foreign strategy.
+    const { l3 } = seed();
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
+        {
+          reasoning: 'r',
+          subtasks: [
+            { description: 'build', outputs: ['index.html'] },
+            { description: 'docs', outputs: ['index.html'] },
+          ],
+          aggregation: { mode: 'concat' },
+        }
+      )
+    );
+    // Replan: prefilter, then a pair whose strategy half is valid (and
+    // DIFFERENT) while the plan half is missing `subtasks` — truncation.
+    ctx.llm.enqueueText(jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' }));
+    ctx.llm.enqueueText(
+      jsonTextPair({ strategy: 'create', reasoning: 'r' }, { reasoning: 'r' })
+    );
+    let executed: Plan | undefined;
+    let consumedStrategy: { strategy?: string; target?: string } | null = null;
+    l3.execute = async (_task, p) => {
+      consumedStrategy = (l3 as unknown as {
+        pendingStrategy: { strategy?: string; target?: string } | null;
+      }).pendingStrategy;
+      executed = p;
+      return dummy;
+    };
+    await expect(l3.handle({ description: 'a coupled page' }, ctx)).resolves.toBe(dummy);
+    expect(executed?.aggregation.mode).toBe('concat');
+    expect(executed?.subtasks).toHaveLength(2);
+    expect(consumedStrategy).toMatchObject({ strategy: 'reuse', target: 'Tracheid' });
+  });
+
   it('executes the original plan when the coached strategy call explodes', async () => {
     const { l3 } = seed();
     const ctx = makeCtx();

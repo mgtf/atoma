@@ -611,7 +611,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     );
 
     const pair = parseTwoJson(resp.text);
-    this.pendingStrategy = l3StrategySchema.parse(pair[0]);
+    const strategy = l3StrategySchema.parse(pair[0]);
     const plan = planSchema.parse(pair[1]);
     // TRUNCATION DEFAULT, L3 flavour. `planSchema` defaults a missing
     // `aggregation` to `concat` — the right degradation at L2 (concat is a
@@ -630,10 +630,18 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       rawPlan !== null &&
       (rawPlan as Record<string, unknown>)['aggregation'] === undefined;
     if (aggregationWasOmitted) plan.aggregation = { mode: 'sequential' };
-    return preservePlanLiteralContracts(
+    const routed = preservePlanLiteralContracts(
       routeCrossBucketVerification(plan, this.registry),
       task.description
     );
+    // Committed LAST, only once the plan this strategy belongs to is fully
+    // validated. `acceptL3RootPlan`'s coached replan is fail-open: if a
+    // replan died AFTER writing its strategy but before its plan parsed, the
+    // ORIGINAL plan was re-served while `execute()` consumed the REPLAN's
+    // strategy — a reuse-shaped plan dispatched under a `create` seed built
+    // for a different decomposition.
+    this.pendingStrategy = strategy;
+    return routed;
   }
 
   async execute(task: Task, plan: Plan, ctx: RunContext): Promise<Result> {
