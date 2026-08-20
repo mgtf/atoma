@@ -70,6 +70,8 @@ export interface GitHubRepository {
 export interface GitHubInitialFile {
   readonly path: string;
   readonly content: string | Uint8Array;
+  /** Git tree mode. Defaults to a regular file; '100755' publishes executable. */
+  readonly mode?: '100644' | '100755';
 }
 
 export interface PublishGitHubInitialCommitInput {
@@ -664,7 +666,11 @@ export class GitHubAppClient {
     readonly token: string;
     readonly owner: string;
     readonly repository: string;
-    readonly entries: readonly { readonly path: string; readonly sha: string }[];
+    readonly entries: readonly {
+      readonly path: string;
+      readonly sha: string;
+      readonly mode?: '100644' | '100755';
+    }[];
   }): Promise<string> {
     if (input.entries.length < 1 || input.entries.length > MAX_GITHUB_INITIAL_FILES) {
       throw new Error('GitHub tree has an invalid number of entries');
@@ -674,7 +680,15 @@ export class GitHubAppClient {
       const path = filePath(entry.path);
       if (seen.has(path)) throw new Error('GitHub tree contains duplicate paths');
       seen.add(path);
-      return { path, mode: '100644', type: 'blob', sha: sha(entry.sha, 'GitHub blob sha') };
+      if (entry.mode !== undefined && entry.mode !== '100644' && entry.mode !== '100755') {
+        throw new Error('GitHub tree entry has an invalid mode');
+      }
+      return {
+        path,
+        mode: entry.mode ?? '100644',
+        type: 'blob',
+        sha: sha(entry.sha, 'GitHub blob sha'),
+      };
     });
     const result = await this.request({
       method: 'POST',
@@ -734,6 +748,7 @@ export class GitHubAppClient {
     const files = input.files.map((file) => ({
       path: filePath(file.path),
       content: file.content,
+      mode: file.mode,
       bytes: typeof file.content === 'string'
         ? Buffer.byteLength(file.content, 'utf8')
         : file.content.byteLength,
@@ -751,10 +766,11 @@ export class GitHubAppClient {
     const existing = await this.getReference(input.token, owner, repository, branch);
     if (existing !== null) throw new GitHubDivergenceError(owner, repository, branch);
 
-    const entries: Array<{ path: string; sha: string }> = [];
+    const entries: Array<{ path: string; sha: string; mode?: '100644' | '100755' }> = [];
     for (const file of files) {
       entries.push({
         path: file.path,
+        ...(file.mode !== undefined ? { mode: file.mode } : {}),
         sha: await this.createBlob({
           token: input.token,
           owner,

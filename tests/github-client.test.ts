@@ -230,7 +230,9 @@ describe('Git Data initial commit publication', () => {
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit from Atoma',
       files: [
-        { path: 'src/z.ts', content: 'z' },
+        // Executable mode recorded by the artifact manifest must reach the
+        // tree entry — it used to be hardcoded to 100644 at this last link.
+        { path: 'src/z.ts', content: 'z', mode: '100755' },
         { path: 'README.md', content: '# Generated' },
       ],
     });
@@ -239,7 +241,7 @@ describe('Git Data initial commit publication', () => {
     expect(callBody(treeCall)).toEqual({
       tree: [
         { path: 'README.md', mode: '100644', type: 'blob', sha: SHA_A },
-        { path: 'src/z.ts', mode: '100644', type: 'blob', sha: SHA_B },
+        { path: 'src/z.ts', mode: '100755', type: 'blob', sha: SHA_B },
       ],
     });
     const commitCall = calls.find((call) => new URL(call.url).pathname.endsWith('/git/commits'))!;

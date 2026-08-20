@@ -254,8 +254,12 @@ export class GitHubPublisher {
         },
         branch: repository.defaultBranch || 'main',
         message: `atoma: publish artifacts for run ${run.projectRunId}`,
+        // The manifest's recorded mode travels all the way to the tree:
+        // `readManifestArtifact` refuses a file whose on-disk mode diverged,
+        // so dropping it here silently published executables as 100644.
         files: run.artifactManifest.files.map((file) => ({
           path: file.path,
+          mode: file.mode,
           content: readManifestArtifact({
             workspaceRoot: input.workspaceRoot,
             expected: file,

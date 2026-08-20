@@ -121,9 +121,10 @@ async function deliveredRun(
   const workspace = join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, 'index.html'), '<h1>ok</h1>\n');
+  writeFileSync(join(workspace, 'run.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
   const built = buildArtifactManifest({
     workspaceRoot: workspace,
-    declaredPaths: ['index.html'],
+    declaredPaths: ['index.html', 'run.sh'],
   });
   const reserved = store.createProjectRun({
     orgId: owner.orgId,
@@ -191,7 +192,15 @@ describe('GitHubPublisher token split', () => {
     );
     expect(client.createOrganisationRepository).not.toHaveBeenCalled();
     expect(client.publishInitialCommit).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'ghs_install-token' })
+      expect.objectContaining({
+        token: 'ghs_install-token',
+        // The manifest's recorded mode reaches the publish call: an
+        // executable script must not land as a plain 100644 file.
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: 'run.sh', mode: '100755' }),
+          expect.objectContaining({ path: 'index.html', mode: '100644' }),
+        ]),
+      })
     );
   });
 
