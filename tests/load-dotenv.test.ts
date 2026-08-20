@@ -2,7 +2,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { applyCheckoutDotenv, parseDotenv } from '../src/cli/loadDotenv.js';
+import {
+  applyCheckoutDotenv,
+  applyCheckoutDotenvForSourceEntry,
+  parseDotenv,
+} from '../src/cli/loadDotenv.js';
 
 const roots: string[] = [];
 
@@ -70,11 +74,35 @@ SINGLE='keep\\nraw'
   });
 });
 
+describe('source entry gate: compiled CLIs see only the injected process env', () => {
+  function envFile(): { cwd: string; env: NodeJS.ProcessEnv } {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, '.env'), 'ATOMA_VIZ_AUTH=1\n', 'utf8');
+    return { cwd, env: {} };
+  }
+
+  it('applies for a tsx source entrypoint', () => {
+    const { cwd, env } = envFile();
+    expect(applyCheckoutDotenvForSourceEntry(env, '/repo/src/cli/doctor.ts', { cwd })).toBe(
+      join(cwd, '.env')
+    );
+    expect(env['ATOMA_VIZ_AUTH']).toBe('1');
+  });
+
+  it('stays inert for the compiled release entrypoints and for no entry at all', () => {
+    for (const entry of ['/opt/atoma/dist/cli/doctor.js', '/opt/atoma/dist/cli/auth.js', undefined]) {
+      const { cwd, env } = envFile();
+      expect(applyCheckoutDotenvForSourceEntry(env, entry, { cwd })).toBeNull();
+      expect(env['ATOMA_VIZ_AUTH']).toBeUndefined();
+    }
+  });
+});
+
 describe('operator launchers apply checkout .env; the viz server does not', () => {
   it('keeps the load site on launchers that the operator actually runs', () => {
     expect(readFileSync('scripts/viz-dev.mjs', 'utf8')).toMatch(/applyCheckoutDotenv/);
-    expect(readFileSync('src/cli/doctor.ts', 'utf8')).toMatch(/applyCheckoutDotenv/);
-    expect(readFileSync('src/cli/auth.ts', 'utf8')).toMatch(/applyCheckoutDotenv/);
+    expect(readFileSync('src/cli/doctor.ts', 'utf8')).toMatch(/applyCheckoutDotenvForSourceEntry/);
+    expect(readFileSync('src/cli/auth.ts', 'utf8')).toMatch(/applyCheckoutDotenvForSourceEntry/);
     expect(readFileSync('src/viz/server.ts', 'utf8')).not.toMatch(/applyCheckoutDotenv/);
     expect(readFileSync('package.json', 'utf8')).toMatch(
       /"viz": "node --import tsx scripts\/viz-dev\.mjs"/

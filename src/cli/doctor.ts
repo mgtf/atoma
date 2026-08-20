@@ -33,7 +33,7 @@ import { authPublicOrigin, vizAuthEnabled } from '../auth/gate.js';
 import { snapshotProviderRegistry } from '../auth/providers.js';
 import { snapshotTrustedProxies } from '../auth/rate-limit.js';
 import { GITHUB_APP_ENV, snapshotGitHubAppConfig } from '../github/config.js';
-import { applyCheckoutDotenv } from './loadDotenv.js';
+import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 
 const runFile = promisify(execFile);
 export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
@@ -709,7 +709,7 @@ export function renderDoctorReport(report: DoctorReport): string {
 }
 
 async function main(): Promise<void> {
-  applyCheckoutDotenv();
+  applyCheckoutDotenvForSourceEntry();
   const parsed = parseDoctorOptions(process.argv.slice(2));
   if (parsed.help) {
     printHelp();

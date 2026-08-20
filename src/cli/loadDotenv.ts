@@ -142,3 +142,20 @@ export function applyCheckoutDotenv(
   }
   return file;
 }
+
+/**
+ * `.env` for SOURCE entrypoints only. The compiled CLIs (`node dist/cli/*.js`)
+ * are the release contract and must see exactly the injected process
+ * environment — otherwise `doctor` can pass an auth config that `viz:serve`
+ * (which never loads `.env`) will not receive, and the diagnostic disagrees
+ * with the product. A `tsx src/cli/*.ts` launch keeps the developer
+ * convenience.
+ */
+export function applyCheckoutDotenvForSourceEntry(
+  env: NodeJS.ProcessEnv = process.env,
+  entry: string | undefined = process.argv[1],
+  options: ApplyCheckoutDotenvOptions = {}
+): string | null {
+  if (!entry || !entry.endsWith('.ts')) return null;
+  return applyCheckoutDotenv(env, options);
+}

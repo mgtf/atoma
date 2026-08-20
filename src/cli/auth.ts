@@ -16,7 +16,7 @@ import { authPublicOrigin, VIZ_PUBLIC_ORIGIN_ENV } from '../auth/gate.js';
 import { AuthStore, ORG_ROLES, type OrgRole } from '../auth/store.js';
 import { storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
-import { applyCheckoutDotenv } from './loadDotenv.js';
+import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 
 const DEFAULT_INVITE_TTL_HOURS = 24;
 const MAX_INVITE_TTL_HOURS = 24 * 30;
@@ -217,6 +217,6 @@ export function runAuthCli(
 }
 
 if (process.argv[1] && /auth\.(ts|js)$/.test(process.argv[1])) {
-  applyCheckoutDotenv();
+  applyCheckoutDotenvForSourceEntry();
   process.exitCode = runAuthCli();
 }
