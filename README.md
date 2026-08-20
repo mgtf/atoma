@@ -264,7 +264,8 @@ Verified across 156 runs: **single-page web applications**, **zero-dependency HT
 workspace with a machine-readable record of every command that was run to verify it.
 
 It is a **framework for building such systems**, not a finished product. There is no hosted
-service, no user accounts, no multi-tenancy — see [Status](#status) below.
+service or multi-tenancy; the web console's opt-in single-organisation login is a deployment
+gate, not tenant isolation — see [Status](#status) below.
 
 ## Why a technical buyer should look closer
 
@@ -311,6 +312,51 @@ npm run skills -- list            # what it learned, and what it refused to comp
 npm run burnin                    # regenerate the economics table above
 ```
 
+### Optional single-organisation login
+
+The visualizer remains open on loopback by default. Copy `.env.example` to
+`.env` and set `ATOMA_VIZ_AUTH=1`, an exact `ATOMA_VIZ_PUBLIC_ORIGIN`, and at
+least one provider's canonical `ATOMA_AUTH_<PROVIDER>_CLIENT_ID` (plus its
+client secret for GitHub and Google; an approved ChatGPT client may use PKCE
+without one). `npm run viz`, `npm run doctor:dev` and `npm run auth:dev` apply
+unset keys from that file; `npm run viz:serve` still reads only the process
+environment, matching production. For the Vite HMR path the origin is
+`http://127.0.0.1:5173` (not the API port). Register `${origin}/auth/callback`
+at GitHub, Google or ChatGPT. ChatGPT login requires an approved client; login
+proves identity only and never grants model inference on the person's
+subscription. The legacy unprefixed provider credential names remain
+compatibility inputs, not the preferred configuration. Behind a reverse proxy,
+set `ATOMA_VIZ_TRUSTED_PROXIES` to its exact socket IP (or comma-separated
+chain); `X-Forwarded-For` is ignored by default.
+
+An optional GitHub App (`ATOMA_GITHUB_APP_ID`, slug, private key, webhook
+secret and token encryption key) lets an org:admin connect an installation
+separately from login. Register setup at `${origin}/auth/github/setup` and
+webhooks at `${origin}/webhooks/github`. Admitted members can then create
+organisation-scoped projects and start runs; a delivered, validated artifact
+manifest is published into one idempotent GitHub repository. Gated `/api/runs`
+lists that organisation's project traces from
+`orgs/<orgId>/projects/<projectId>/runs/<runId>/`.
+
+The first GitHub login creates an organisation and becomes its owner. Further
+admission is explicit and one-use. In a source checkout, mint an invitation
+for an existing org, then send the printed token only to its intended
+recipient:
+
+```bash
+npm run auth:dev -- invite --org <org-id> --role org:member --ttl-hours 24 --db ./atoma.db
+# open the clean invitation URL printed by the command, then choose a provider
+npm run auth:dev -- list --db ./atoma.db
+```
+
+The compiled equivalents are `npm run auth -- invite …` and
+`npm run auth -- list …` after `npm run build`. A principal may belong to more
+than one organisation; projects and GitHub installations follow the active
+org. Gated run traces follow the active org too. Ungated viz still reads the
+operator `./runs` directory.
+`npm run doctor` validates the auth switch, canonical origin, provider
+registry and optional GitHub App snapshot without contacting GitHub.
+
 The default visualizer is a full-GPU React 19 client: PixiJS renders the 2D
 component system through WebGPU with a deterministic WebGL fallback, while
 React Three Fiber renders the tier topology behind it. Zustand owns scene/UI
@@ -319,8 +365,9 @@ clipboard, IME and accessibility use a minimal DOM bridge. The previous
 MUI client remains available through `npm run viz:mui` but is frozen:
 it receives bugfixes, not features.
 The compiled visualizer is installable as an **Atoma** PWA; its service worker
-caches only the application shell and static assets, never the live `/api/*`
-data backed by the local registry and traces.
+will cache only cacheable application-shell and static responses. It always
+excludes live `/api/*`, authentication `/auth/*`, GitHub `/webhooks/*`, and
+every response marked `Cache-Control: no-store`.
 
 A local release keeps its learned state beside the checkout: `atoma.db`,
 `skills/` and `runs/`. Build artefacts live under `~/.atoma/workspaces/build`;
@@ -344,8 +391,9 @@ DB+skills backup before renaming identities.
 
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release includes MCP,
-its build-run path, doctor, and the read-only visualizer (`npm run viz:serve`);
-benchmark and mutation-oriented operator CLIs remain source-only.
+its build-run path, doctor, the identity/invitation CLI (`npm run auth`), and
+the read-only visualizer (`npm run viz:serve`);
+benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
 [`v0.1.1 container/egress acceptance matrix`](docs/release-acceptance-v0.1.1.md).
@@ -394,11 +442,13 @@ process group is confirmed gone and the trace has closed.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
-integrity checking, a web console, and a measurement harness.
+integrity checking, a web console with optional invitation-only single-organisation login, and a
+measurement harness.
 
-What does not: any notion of tenants, users or authentication, and no hosted service. This is a
-private repository, shared deliberately rather than published. The target multi-tenant design is
-written up in
+What does not: tenant-isolated data or runs, organisation-scoped authorization, and a hosted
+service. The authentication gate protects one dedicated instance; it does not turn the shared
+store or run corpus into a multi-tenant system. This is a private repository, shared deliberately
+rather than published. The target multi-tenant design is written up in
 [`docs/saas-architecture.md`](docs/saas-architecture.md) and explicitly marked as not built.
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**

@@ -51,5 +51,16 @@ describe('viz list search', () => {
     });
     expect(matchesSearchQuery(haystack, 'rpg docs')).toBe(true);
     expect(matchesSearchQuery(haystack, 'calls')).toBe(false);
+    expect(
+      matchesSearchQuery(
+        runSearchText({
+          id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+          label: 'bounce a ball',
+          projectSlug: 'weather-lab',
+          projectName: 'Weather Lab',
+        }),
+        'weather-lab'
+      )
+    ).toBe(true);
   });
 });

@@ -365,7 +365,7 @@ try {
     const scrollRebuildMax = softwareRastered
       ? SOFTWARE_SCROLL_REBUILD_P95_MAX
       : SCROLL_REBUILD_P95_MAX;
-    const views = ['Registry', 'Skills', 'Burn-in', 'Launch', 'Runs'];
+    const views = ['Projects', 'Registry', 'Skills', 'Burn-in', 'Launch', 'Runs'];
     for (const label of views) {
       await page.evaluate((name) => {
         const tabs = [...document.querySelectorAll('[role="tab"]')];
@@ -525,7 +525,7 @@ try {
       );
     }
     console.log(
-      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, five views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95 over ${frameStats.samples} frames`
+      `viz GPU smoke ok: ${result.canvases} canvases, ${result.backend}, ${result.objects} objects, six views, pointer light ${frameStats.meanMs.toFixed(2)}ms mean/${frameStats.p95Ms.toFixed(2)}ms P95 over ${frameStats.samples} frames`
     );
     if (softwareRastered) {
       console.log(

@@ -1,5 +1,12 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { applyCheckoutDotenv } from '../src/cli/loadDotenv.ts';
+
+// Checkout `.env` fills unset keys before children inherit the environment.
+// Skip under VITEST (inside applyCheckoutDotenv) so orphan/smoke harnesses
+// cannot pick up a developer's ATOMA_VIZ_AUTH=1. Production `viz:serve` does
+// not load this file: the process environment is the contract.
+applyCheckoutDotenv();
 
 const apiPort = process.env['ATOMA_VIZ_API_PORT'] ?? '4111';
 const devPort = process.env['ATOMA_VIZ_DEV_PORT'] ?? '5173';

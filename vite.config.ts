@@ -33,6 +33,8 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       '/api': `http://127.0.0.1:${apiPort}`,
+      '/auth': `http://127.0.0.1:${apiPort}`,
+      '/webhooks': `http://127.0.0.1:${apiPort}`,
     },
   },
 });

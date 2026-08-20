@@ -18,6 +18,9 @@ import type {
   RunIndexEntry,
   SkillNamespace,
   SkillSummary,
+  VizGitHubInstallation,
+  VizProject,
+  VizProjectRun,
   VizRun,
 } from '../client/types.js';
 import { attachAtomaMark } from './renderer/atoma-mark.js';
@@ -56,8 +59,10 @@ import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointe
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
+import type { AuthUiSnapshot } from './AuthControls.js';
 
 export interface GpuDataSnapshot {
+  auth: AuthUiSnapshot | null;
   runs: RunIndexEntry[];
   run: VizRun | null;
   registries: RegistrySummary[];
@@ -67,6 +72,9 @@ export interface GpuDataSnapshot {
   skillDetail: SkillSummary | null;
   burnin: { rows: BurninRow[]; csvPath: string } | null;
   profiles: LaunchProfile[];
+  projects: VizProject[];
+  projectRuns: Record<string, VizProjectRun[]>;
+  githubInstallations: VizGitHubInstallation[];
   loading: boolean;
   /**
    * The active view has requests IN FLIGHT — including refetches of data
@@ -169,7 +177,9 @@ import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
 import { drawLaunch } from './renderer/views/launch.js';
+import { drawProjects } from './renderer/views/projects.js';
 import { drawWelcome } from './renderer/views/welcome.js';
+import { drawAuthAccount } from './renderer/views/auth-account.js';
 
 export class GpuRenderer {
   app = new Application();
@@ -564,6 +574,19 @@ export class GpuRenderer {
         : rendererType === Number(RendererType.WEBGL)
           ? 'webgl'
           : 'unknown';
+    // Pixi 8.19.0 WebGPU GC unloads uniform buffers whose cached bind groups
+    // still point at them (pixijs#12080). Victims include the disabled
+    // pointer-light filter AND in-use static groups (global uniforms, batcher
+    // UBOs) whose values have not changed — sitting on a quiet view for ~60s
+    // then drawing again submits a destroyed GPUBuffer:
+    //   [Buffer (unlabeled)] used in submit while destroyed
+    // The engine fix (pixijs#12147, 2026-08-19) is not in a release. Pinning
+    // one filter cannot cover Pixi's own UBOs. Scene teardown already
+    // destroys per-frame resources; leave GC off on WebGPU until a Pixi
+    // release includes that fix. WebGL stamps last-used on every bind.
+    if (this.metrics.backend === 'webgpu') {
+      this.app.renderer.gc.enabled = false;
+    }
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
     this.app.stage.addChild(this.ambientRoot, this.root, this.markRoot);
@@ -785,6 +808,9 @@ export class GpuRenderer {
       });
     } else {
       switch (snapshot.state.view) {
+        case 'projects':
+          drawProjects(this, snapshot, width, height);
+          break;
         case 'runs':
           drawRuns(this, snapshot, width, height);
           break;
@@ -803,6 +829,7 @@ export class GpuRenderer {
       }
     }
     this.drawOverlays(snapshot, width, height);
+    drawAuthAccount(this, snapshot, width, height);
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
       this.activeViewTransition = {
@@ -2809,7 +2836,7 @@ export class GpuRenderer {
       weight: '700',
     });
 
-    const views: ViewName[] = ['runs', 'registry', 'skills', 'burnin', 'launch'];
+    const views: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
     let x = 160;
     for (const view of views) {
       const label = snapshot.t(`nav.${view}`).toUpperCase();
@@ -2968,7 +2995,7 @@ export class GpuRenderer {
         `run.select.${run.id}`,
         'option',
         `${status ? `${status} ` : ''}${truncate(
-          run.label.replace(/^(?:build-app|baseline):\s*/i, ''),
+          `${run.projectSlug ? `${run.projectSlug} · ` : ''}${run.label.replace(/^(?:build-app|baseline):\s*/i, '')}`,
           82
         )}`,
         x + 5,

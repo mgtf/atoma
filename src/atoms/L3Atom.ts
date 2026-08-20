@@ -285,6 +285,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       ctx,
       replan: (next) => this.plan(next, ctx),
     });
+    ctx.recordRootPlan?.(plan);
     return this.execute(task, plan, ctx);
   }
 

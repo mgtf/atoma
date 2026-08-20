@@ -4,11 +4,62 @@ import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
+import { sortRunIndex, summarizeTraceFile } from './runIndex.js';
+import type { VizRunIndexEntry } from './trace.js';
 import { skillsDirPath, storeDbPath } from '../core/stores.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 import { taxonomyForTier, type AgentRank } from '../core/taxonomy.js';
 import { elementForTool } from '../contracts/toolTaxonomy.js';
+import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js';
+import { AUTH_COPY } from '../auth/copy.js';
+import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
+import { sha256Hex, TooManyPendingOauthStatesError, type Viewer } from '../auth/store.js';
+import {
+  buildAuthorizeUrl,
+  exchangeCode,
+  fetchProviderIdentity,
+  newPkcePair,
+  newState,
+} from '../auth/oidc.js';
+import {
+  BoundedFixedWindowRateLimiter,
+  loginClientAddress,
+  snapshotTrustedProxies,
+  type TrustedProxySnapshot,
+} from '../auth/rate-limit.js';
+import {
+  OAUTH_TX_COOKIE,
+  OAUTH_TX_TTL_MS,
+  issueSession,
+  logoutSessionCandidatesFromCookieHeader,
+  sessionTokenFromCookieHeader,
+  retireSessionCookie,
+  serializeCookie,
+  parseCookieHeader,
+} from '../auth/sessions.js';
+import {
+  isAuthorizationCode,
+  isInvitationToken,
+  isOauthState,
+} from '../auth/values.js';
+import { snapshotGitHubAppConfig, type GitHubAppConfig } from '../github/config.js';
+import { GitHubAppClient } from '../github/client.js';
+import {
+  completeGitHubSetup,
+  completeGitHubUserCallback,
+  GITHUB_COPY,
+  handleGitHubWebhook,
+  startGitHubConnect,
+  startGitHubUserAuthorize,
+  type GitHubHttpResult,
+} from '../github/http.js';
+import { GitHubStore, isGitHubConnectState } from '../github/store.js';
+import { persistGitHubUserTokens, resolveGitHubUserAccessToken } from '../github/tokens.js';
+import { ProjectStore } from '../projects/store.js';
+import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
+import { GitHubPublisher } from '../projects/publisher.js';
+import { ProjectHttpError, ProjectService } from '../projects/service.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -35,18 +86,35 @@ interface Cli {
 function parseArgs(argv: string[]): Cli {
   const out: Cli = { dir: './runs', port: 4111, host: '127.0.0.1', dbs: [] };
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--dir' && argv[i + 1]) out.dir = argv[++i]!;
-    else if (a === '--port' && argv[i + 1]) out.port = Number(argv[++i]);
-    else if (a === '--host' && argv[i + 1]) out.host = argv[++i]!;
-    else if (a === '--db' && argv[i + 1]) out.dbs.push(argv[++i]!);
-    else if (a === '--skills-dir' && argv[i + 1]) out.skillsDir = argv[++i]!;
+    const flag = argv[i]!;
+    const takeValue = (): string => {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error(`${flag} requires a non-empty value`);
+      }
+      i += 1;
+      return value;
+    };
+    if (flag === '--dir') out.dir = takeValue();
+    else if (flag === '--port') {
+      const rawPort = takeValue();
+      if (!/^\d+$/.test(rawPort)) throw new Error('--port must be an integer from 0 to 65535');
+      const port = Number(rawPort);
+      if (!Number.isSafeInteger(port) || port > 65_535) {
+        throw new Error('--port must be an integer from 0 to 65535');
+      }
+      out.port = port;
+    } else if (flag === '--host') out.host = takeValue();
+    else if (flag === '--db') out.dbs.push(takeValue());
+    else if (flag === '--skills-dir') out.skillsDir = takeValue();
+    else throw new Error(`unknown viz argument: ${flag}`);
   }
   return out;
 }
 
 const cli = parseArgs(process.argv.slice(2));
 const RUNS_DIR = resolve(cli.dir);
+const PROJECTS_ROOT = resolve(process.env['ATOMA_PROJECTS_ROOT'] ?? DEFAULT_PROJECTS_ROOT);
 const BURNIN_CSV = resolve(process.env['ATOMA_BURNIN_CSV'] ?? './burnin/results.csv');
 
 /**
@@ -164,6 +232,195 @@ function resolveDbs(): { id: string; label: string; path: string; exists: boolea
 
 const DBS = resolveDbs();
 
+/**
+ * THE AUTH GATE (SaaS A2). Opt-in via the HOST environment
+ * (`ATOMA_VIZ_AUTH=1`), mirroring `ATOMA_REQUIRE_ISOLATION`: the developer
+ * path without the flag is byte-for-byte unchanged, and a deployment that
+ * wants the gate cannot get it silently disabled by a run's environment.
+ * Fail-closed at startup: the flag with zero configured providers would
+ * produce a server whose every /api/* answers 401 forever — refuse to boot
+ * that instead, with a message naming the env vars to set.
+ */
+interface VizAuthRuntime {
+  gate: NonNullable<ReturnType<typeof openAuthGate>>;
+  providers: readonly ProviderConfig[];
+  publicOrigin: URL;
+  redirectUri: string;
+  secureCookies: boolean;
+  trustedProxies: TrustedProxySnapshot;
+}
+
+const AUTH_RUNTIME: VizAuthRuntime | null = (() => {
+  if (!vizAuthEnabled()) return null;
+  const registry = snapshotProviderRegistry(process.env);
+  if (registry.diagnostics.length > 0) {
+    throw new Error(
+      `Invalid authentication provider configuration: ${registry.diagnostics.map((diagnostic) => diagnostic.message).join('; ')}`
+    );
+  }
+  const providers = registry.providers;
+  if (providers.length === 0) {
+    throw new Error(
+      'ATOMA_VIZ_AUTH is set but no complete login provider is configured. Set ATOMA_AUTH_<PROVIDER>_CLIENT_ID and CLIENT_SECRET (see .env.example).'
+    );
+  }
+  const publicOrigin = authPublicOrigin(process.env);
+  const trustedProxies = snapshotTrustedProxies(process.env);
+  const gate = openAuthGate({ env: process.env, dbPath: DBS[0]!.path });
+  if (!gate.store) throw new Error('authentication store did not open');
+  gate.store.sweep();
+  return {
+    gate,
+    providers,
+    publicOrigin,
+    redirectUri: new URL('/auth/callback', publicOrigin).href,
+    secureCookies: publicOrigin.protocol === 'https:',
+    trustedProxies,
+  };
+})();
+
+const AUTH = AUTH_RUNTIME?.gate ?? null;
+
+if (AUTH?.store) {
+  const sweepTimer = setInterval(() => {
+    try {
+      AUTH.store?.sweep();
+    } catch (error) {
+      console.error('[viz auth] failed to sweep expired auth records', error);
+    }
+  }, 5 * 60 * 1000);
+  sweepTimer.unref();
+}
+
+/**
+ * PROJECTS + GITHUB APP RUNTIME.
+ *
+ * The project control plane exists only when the auth gate is on: projects
+ * are organisation-owned, and an organisation is meaningless without a
+ * viewer. The GitHub App layer is optional beyond that — the server runs
+ * with projects read/run but no publication target when the App env vars
+ * are absent, and refuses to boot when they are HALF-present (the same
+ * fail-closed rule as the provider registry).
+ */
+interface ProjectsRuntime {
+  readonly store: ProjectStore;
+  readonly projects: ProjectService;
+  readonly coordinator: ProjectRunCoordinator;
+  readonly githubStore: GitHubStore;
+  readonly githubConfig: GitHubAppConfig | null;
+  readonly githubClient: GitHubAppClient | null;
+}
+
+const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
+  if (!AUTH_RUNTIME) return null;
+  const dbPath = DBS[0]!.path;
+  const projectStore = ProjectStore.open(dbPath);
+  // openStoreHandle's cache returns the same better-sqlite3 handle for the
+  // same path, so the GitHub tables join the one consolidated product store.
+  const githubStore = GitHubStore.open(dbPath);
+  const appConfigPresent = [
+    'ATOMA_GITHUB_APP_ID',
+    'ATOMA_GITHUB_APP_SLUG',
+    'ATOMA_GITHUB_APP_PRIVATE_KEY',
+    'ATOMA_GITHUB_APP_PRIVATE_KEY_PATH',
+    'ATOMA_GITHUB_WEBHOOK_SECRET',
+    'ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY',
+  ].some((name) => process.env[name] !== undefined);
+  let githubConfig: GitHubAppConfig | null = null;
+  if (appConfigPresent) {
+    const githubProvider = AUTH_RUNTIME.providers.find((provider) => provider.id === 'github');
+    githubConfig = snapshotGitHubAppConfig(process.env, {
+      ...(githubProvider
+        ? { oauth: { clientId: githubProvider.clientId, clientSecret: githubProvider.clientSecret ?? '' } }
+        : {}),
+    });
+  }
+  const githubClient = githubConfig
+    ? new GitHubAppClient({
+        appId: githubConfig.appId,
+        appSlug: githubConfig.appSlug,
+        privateKey: githubConfig.privateKey,
+        apiBaseUrl: githubConfig.apiBaseUrl,
+      })
+    : null;
+  const githubProvider = AUTH_RUNTIME.providers.find((provider) => provider.id === 'github');
+  const appConfig = githubConfig;
+  const publisher = appConfig && githubClient
+    ? new GitHubPublisher({
+        client: githubClient,
+        github: githubStore,
+        store: projectStore,
+        resolveUserAccessToken: githubProvider
+          ? (principalId) =>
+              resolveGitHubUserAccessToken({
+                github: githubStore,
+                config: appConfig,
+                provider: githubProvider,
+                principalId,
+              })
+          : undefined,
+      })
+    : undefined;
+  const coordinator = new ProjectRunCoordinator({
+    store: projectStore,
+    dbPath,
+    projectsRoot: PROJECTS_ROOT,
+    ...(publisher ? { publisher } : {}),
+  });
+  const projects = new ProjectService({
+    store: projectStore,
+    coordinator,
+    github: githubStore,
+  });
+  return { store: projectStore, projects, coordinator, githubStore, githubConfig, githubClient };
+})();
+
+/** Set-Cookie that removes the oauth transaction cookie. */
+function clearCookie(name: string, secure: boolean, path = '/'): string {
+  return serializeCookie(name, '', { secure, path, maxAgeSeconds: 0 });
+}
+
+/**
+ * Minimal login page served when the gate is on. The GL client gets a real
+ * login view later; this exists so the flow is testable and usable today
+ * without shipping an unauthenticated app shell to an unauthenticated
+ * browser. English, no external assets, no scripts.
+ */
+function loginPage(message?: string, invitationToken?: string): string {
+  const inviteParam = invitationToken ? `&amp;invite=${encodeURIComponent(invitationToken)}` : '';
+  const providers = (AUTH_RUNTIME?.providers ?? [])
+    .map((p) => `<a class="btn" href="/auth/login?provider=${p.id}${inviteParam}">${escapeHtml(p.label)}</a>`)
+    .join('');
+  const notice = message ? `<p class="msg">${escapeHtml(message)}</p>` : '';
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>${escapeHtml(AUTH_COPY.pageTitle)}</title>
+<style>
+body{font-family:ui-monospace,monospace;background:#0b0f14;color:#d8e2ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{background:#11161d;border:1px solid #223041;border-radius:12px;padding:32px 40px;max-width:420px}
+h1{font-size:18px;margin:0 0 4px;color:#7ee0c8}
+p.sub{color:#8fa3b8;margin:0 0 20px;font-size:13px}
+.btn{display:block;margin:8px 0;padding:10px 14px;border:1px solid #2d4157;border-radius:8px;color:#d8e2ec;text-decoration:none;font-size:14px}
+.btn:hover{background:#182230}
+.msg{color:#e8b84b;font-size:13px}
+</style></head>
+<body><div class="card">
+<h1>${escapeHtml(AUTH_COPY.brand)}</h1>
+<p class="sub">${escapeHtml(AUTH_COPY.signInSubtitle)}</p>
+${notice}
+${providers}
+</div></body></html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const CLIENT_DIR = join(HERE, 'client');
 const UI_HTML_PATH = join(CLIENT_DIR, 'index.html');
@@ -198,65 +455,177 @@ function assetContentType(file: string): string {
   }
 }
 
-function send(res: import('node:http').ServerResponse, code: number, body: string | Buffer, type: string): void {
+function send(
+  res: import('node:http').ServerResponse,
+  code: number,
+  body: string | Buffer,
+  type: string,
+  cacheControl = 'no-store'
+): void {
   res.writeHead(code, {
     'content-type': type,
+    'content-length': Buffer.byteLength(body),
+    'cache-control': cacheControl,
+  });
+  res.end(body);
+}
+
+function staticCacheControl(path: string): string {
+  const name = basename(path);
+  if (name === 'sw.js') return 'no-cache';
+  if (/[-.][A-Za-z0-9_-]{8,}\.(?:js|css)$/.test(name)) {
+    return 'public, max-age=31536000, immutable';
+  }
+  return 'public, max-age=3600';
+}
+
+const AUTH_SECURITY_HEADERS = {
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+} as const;
+
+function sendAuthHtml(
+  res: import('node:http').ServerResponse,
+  code: number,
+  body: string,
+  headers: import('node:http').OutgoingHttpHeaders = {}
+): void {
+  res.writeHead(code, {
+    ...AUTH_SECURITY_HEADERS,
+    ...headers,
+    'content-type': 'text/html; charset=utf-8',
     'content-length': Buffer.byteLength(body),
     'cache-control': 'no-store',
   });
   res.end(body);
 }
 
+function writeAuthRedirect(
+  res: import('node:http').ServerResponse,
+  location: string,
+  cookies: string | string[]
+): void {
+  res.writeHead(302, {
+    ...AUTH_SECURITY_HEADERS,
+    location,
+    'set-cookie': cookies,
+    'content-length': '0',
+    'cache-control': 'no-store',
+  });
+  res.end();
+}
+
+function githubNoticePage(message: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Atoma — GitHub</title>
+<style>
+body{font-family:ui-monospace,monospace;background:#0b0f14;color:#d8e2ec;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+.card{background:#11161d;border:1px solid #223041;border-radius:12px;padding:32px 40px;max-width:420px}
+h1{font-size:18px;margin:0 0 12px;color:#7ee0c8}
+p{color:#e8b84b;font-size:13px}
+a{color:#7ee0c8}
+</style></head>
+<body><div class="card">
+<h1>Atoma</h1>
+<p>${escapeHtml(message)}</p>
+<p><a href="/">Back to Atoma</a></p>
+</div></body></html>`;
+}
+
+function applyGitHubResult(
+  res: import('node:http').ServerResponse,
+  result: GitHubHttpResult,
+  extraCookies: string[] = []
+): void {
+  const cookies = [...(result.kind === 'redirect' || result.kind === 'html' ? result.cookies ?? [] : []), ...extraCookies];
+  if (result.kind === 'redirect') {
+    writeAuthRedirect(res, result.location, cookies);
+    return;
+  }
+  if (result.kind === 'html') {
+    sendAuthHtml(
+      res,
+      result.status,
+      githubNoticePage(result.body),
+      cookies.length > 0 ? { 'set-cookie': cookies } : {}
+    );
+    return;
+  }
+  sendJson(res, result.status, result.body);
+}
+
+function sameOrigin(
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse
+): boolean {
+  if (!AUTH_RUNTIME) return false;
+  if (req.headers.origin === AUTH_RUNTIME.publicOrigin.origin) return true;
+  sendJson(res, 403, { error: 'origin mismatch' });
+  return false;
+}
+
 function sendJson(res: import('node:http').ServerResponse, code: number, obj: unknown): void {
   send(res, code, JSON.stringify(obj), 'application/json; charset=utf-8');
 }
 
-function listIndex(): unknown {
+function listOperatorRunIndex(): VizRunIndexEntry[] {
   if (!existsSync(RUNS_DIR)) return [];
   const indexFile = join(RUNS_DIR, 'index.json');
   if (existsSync(indexFile)) {
     try {
-      return JSON.parse(readFileSync(indexFile, 'utf8'));
+      const parsed: unknown = JSON.parse(readFileSync(indexFile, 'utf8'));
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (entry): entry is VizRunIndexEntry =>
+            Boolean(entry && typeof entry === 'object' && 'id' in entry && typeof entry.id === 'string')
+        );
+      }
     } catch {
       // fall through to scanning directly
     }
   }
-  // Fallback: scan for *.json (excluding index.json) and return lightweight
-  // summaries — useful if the recorder crashed before writing the index.
-  const files = readdirSync(RUNS_DIR).filter(
-    (f) => f.endsWith('.json') && f !== 'index.json'
-  );
-  const entries = files
-    .map((f) => {
-      const p = join(RUNS_DIR, f);
-      try {
-        const run = JSON.parse(readFileSync(p, 'utf8')) as {
-          id: string;
-          label: string;
-          startedAt: string;
-          endedAt?: string;
-          durationMs?: number;
-          error?: string;
-          totals?: { calls: number; costUsd: number };
-        };
-        return {
-          id: run.id,
-          label: run.label,
-          startedAt: run.startedAt,
-          endedAt: run.endedAt,
-          durationMs: run.durationMs,
-          hasError: !!run.error,
-          calls: run.totals?.calls,
-          costUsd: run.totals?.costUsd,
-          mtime: statSync(p).mtimeMs,
-        };
-      } catch {
-        return null;
-      }
-    })
-    .filter((e): e is NonNullable<typeof e> => e !== null)
-    .sort((a, b) => b.mtime - a.mtime);
-  return entries.map(({ mtime: _mtime, ...rest }) => rest);
+  const files = readdirSync(RUNS_DIR).filter((f) => f.endsWith('.json') && f !== 'index.json');
+  const entries: VizRunIndexEntry[] = [];
+  for (const f of files) {
+    const entry = summarizeTraceFile(join(RUNS_DIR, f));
+    if (entry) entries.push(entry);
+  }
+  return sortRunIndex(entries);
+}
+
+function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
+  if (!PROJECTS_RUNTIME) return [];
+  const entries: VizRunIndexEntry[] = [];
+  for (const row of PROJECTS_RUNTIME.store.listOrgRunTraces(orgId)) {
+    const summary = summarizeTraceFile(row.file);
+    if (!summary) continue;
+    entries.push({
+      ...summary,
+      projectId: row.projectId,
+      projectName: row.projectName,
+      projectSlug: row.projectSlug,
+    });
+  }
+  return sortRunIndex(entries);
+}
+
+function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
+  if (AUTH) {
+    if (!PROJECTS_RUNTIME || !viewer) return [];
+    return listOrganisationRunIndex(viewer.orgId);
+  }
+  return listOperatorRunIndex();
+}
+
+function resolveRunFile(id: string, viewer: Viewer | null): string | null {
+  if (AUTH) {
+    if (!PROJECTS_RUNTIME || !viewer) return null;
+    return PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
+  }
+  const primary = join(RUNS_DIR, `${id}.json`);
+  return existsSync(primary) ? primary : null;
 }
 
 interface RegistryHistoryEntry {
@@ -601,6 +970,52 @@ function decodePathComponent(value: string): string | null {
 }
 
 const server = createServer((req, res) => {
+  void handle(req, res).catch((error: unknown) => {
+    console.error('[viz] request failed', error);
+    if (!res.headersSent) {
+      sendJson(res, 500, { error: 'internal server error' });
+    } else if (!res.writableEnded) {
+      res.destroy();
+    }
+  });
+});
+
+const LOGIN_RATE_WINDOW_MS = 60_000;
+const LOGIN_RATE_MAX = 20;
+const LOGIN_RATE_MAX_BUCKETS = 1_024;
+const loginRate = new BoundedFixedWindowRateLimiter(
+  LOGIN_RATE_MAX,
+  LOGIN_RATE_WINDOW_MS,
+  LOGIN_RATE_MAX_BUCKETS
+);
+
+function acceptLoginAttempt(
+  req: import('node:http').IncomingMessage,
+  trustedProxies: TrustedProxySnapshot
+): { accepted: boolean; retryAfterSeconds: number } {
+  return loginRate.attempt(loginClientAddress(req, trustedProxies));
+}
+
+function authProvider(id: string): ProviderConfig | null {
+  return AUTH_RUNTIME?.providers.find((provider) => provider.id === id) ?? null;
+}
+
+function invitationTokenFrom(value: string | null): string | null {
+  return isInvitationToken(value) ? value : null;
+}
+
+function methodAllowed(
+  req: import('node:http').IncomingMessage,
+  res: import('node:http').ServerResponse,
+  method: 'GET' | 'POST'
+): boolean {
+  if (req.method === method) return true;
+  res.writeHead(405, { allow: method, 'content-length': '0', 'cache-control': 'no-store' });
+  res.end();
+  return false;
+}
+
+async function handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
   let url: URL;
   try {
     // Host and the request-target are both untrusted wire input. A fixed base
@@ -613,7 +1028,447 @@ const server = createServer((req, res) => {
   }
   const pathname = url.pathname;
 
+  if (pathname === '/webhooks/github') {
+    if (!methodAllowed(req, res, 'POST')) return;
+    if (!PROJECTS_RUNTIME?.githubConfig) {
+      sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+    applyGitHubResult(
+      res,
+      await handleGitHubWebhook({
+        req,
+        store: PROJECTS_RUNTIME.githubStore,
+        config: PROJECTS_RUNTIME.githubConfig,
+      })
+    );
+    return;
+  }
+
+  // ------------------------------------------------------------- auth flow
+  // The read-only capability probe stays available when the gate is off so
+  // the shared GPU client can distinguish that normal state without causing
+  // a browser-console 404. Every mutating/authentication route remains absent.
+  if (!AUTH && pathname === '/auth/whoami') {
+    if (!methodAllowed(req, res, 'GET')) return;
+    sendJson(res, 200, { enabled: false, authenticated: false });
+    return;
+  }
+
+  if (AUTH) {
+    const authStore = AUTH.store;
+    if (!authStore || !AUTH_RUNTIME) throw new Error('authentication runtime is incomplete');
+
+    if (pathname === '/auth/login') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const providerId = url.searchParams.get('provider') ?? '';
+      const rawInvitation = url.searchParams.get('invite');
+      const invitationToken = invitationTokenFrom(rawInvitation);
+      if (rawInvitation && !invitationToken) {
+        sendAuthHtml(res, 400, loginPage(AUTH_COPY.invalidInvitation));
+        return;
+      }
+      if (!providerId) {
+        sendAuthHtml(res, 200, loginPage(undefined, invitationToken ?? undefined));
+        return;
+      }
+      const provider = authProvider(providerId);
+      if (!provider) {
+        sendJson(res, 400, { error: 'unknown provider', provider: providerId });
+        return;
+      }
+      const rate = acceptLoginAttempt(req, AUTH_RUNTIME.trustedProxies);
+      if (!rate.accepted) {
+        res.writeHead(429, {
+          ...AUTH_SECURITY_HEADERS,
+          'retry-after': String(rate.retryAfterSeconds),
+          'content-type': 'application/json; charset=utf-8',
+          'cache-control': 'no-store',
+        });
+        res.end(JSON.stringify({ error: 'too many login attempts' }));
+        return;
+      }
+
+      const state = newState();
+      const pkce = newPkcePair();
+      try {
+        authStore.createOauthState({
+          state,
+          provider: provider.id,
+          codeVerifier: pkce.verifier,
+          invitationHash: invitationToken ? sha256Hex(invitationToken) : null,
+          ttlMs: OAUTH_TX_TTL_MS,
+        });
+      } catch (error) {
+        if (error instanceof TooManyPendingOauthStatesError) {
+          sendJson(res, 429, { error: 'too many pending login transactions' });
+          return;
+        }
+        throw error;
+      }
+      const target = buildAuthorizeUrl({
+        provider,
+        redirectUri: AUTH_RUNTIME.redirectUri,
+        state,
+        codeChallenge: pkce.challenge,
+      });
+      writeAuthRedirect(
+        res,
+        target,
+        serializeCookie(OAUTH_TX_COOKIE, state, {
+          secure: AUTH_RUNTIME.secureCookies,
+          path: '/auth',
+          maxAgeSeconds: OAUTH_TX_TTL_MS / 1000,
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/auth/callback') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const code = url.searchParams.get('code');
+      const state = url.searchParams.get('state');
+      const errorParam = url.searchParams.get('error');
+      const txCookies = parseCookieHeader(req.headers.cookie).filter((cookie) => cookie.name === OAUTH_TX_COOKIE);
+      const txCookie = txCookies.length === 1 ? txCookies[0]!.value : null;
+      const fail = (message: string, status = 401): void => {
+        sendAuthHtml(res, status, loginPage(message), {
+          'set-cookie': clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
+        });
+      };
+
+      const viewer = AUTH.resolve(req);
+      if (
+        viewer &&
+        PROJECTS_RUNTIME?.githubConfig &&
+        PROJECTS_RUNTIME.githubClient &&
+        isGitHubConnectState(state) &&
+        PROJECTS_RUNTIME.githubStore.hasPendingConnectState(state)
+      ) {
+        if (!txCookie || txCookie !== state) {
+          fail(GITHUB_COPY.expiredState);
+          return;
+        }
+        const tx = authStore.consumeOauthState(state);
+        const provider = tx ? authProvider(tx.provider) : null;
+        if (!tx || !provider || provider.id !== 'github') {
+          fail(GITHUB_COPY.expiredState);
+          return;
+        }
+        if (errorParam) {
+          fail(AUTH_COPY.providerRefused);
+          return;
+        }
+        if (!isAuthorizationCode(code)) {
+          fail(AUTH_COPY.invalidAuthorizationCode);
+          return;
+        }
+        applyGitHubResult(
+          res,
+          await completeGitHubUserCallback({
+            viewer,
+            github: PROJECTS_RUNTIME.githubStore,
+            config: PROJECTS_RUNTIME.githubConfig,
+            provider,
+            redirectUri: AUTH_RUNTIME.redirectUri,
+            state,
+            code,
+            codeVerifier: tx.codeVerifier,
+            installationId: url.searchParams.get('installation_id'),
+            client: PROJECTS_RUNTIME.githubClient,
+            homePath: '/',
+          }),
+          [clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth')]
+        );
+        return;
+      }
+
+      if (!isOauthState(state)) {
+        fail(AUTH_COPY.invalidState);
+        return;
+      }
+      if (!txCookie || txCookie !== state) {
+        fail(AUTH_COPY.replayedState);
+        return;
+      }
+      const tx = authStore.consumeOauthState(state);
+      const provider = tx ? authProvider(tx.provider) : null;
+      if (!tx || !provider) {
+        fail(AUTH_COPY.expiredState);
+        return;
+      }
+      if (errorParam) {
+        fail(AUTH_COPY.providerRefused);
+        return;
+      }
+      if (!isAuthorizationCode(code)) {
+        fail(AUTH_COPY.invalidAuthorizationCode);
+        return;
+      }
+
+      try {
+        const tokens = await exchangeCode({
+          provider,
+          redirectUri: AUTH_RUNTIME.redirectUri,
+          code,
+          codeVerifier: tx.codeVerifier,
+        });
+        const identity = await fetchProviderIdentity({ provider, accessToken: tokens.accessToken });
+        const outcome = authStore.completeLogin(
+          {
+            provider: provider.id,
+            subject: identity.subject,
+            displayName: identity.displayName,
+            email: identity.email,
+            emailVerified: identity.emailVerified,
+          },
+          tx.invitationHash
+        );
+        if (!outcome) {
+          fail(AUTH_COPY.invitationRequired, 403);
+          return;
+        }
+        if (
+          provider.id === 'github' &&
+          PROJECTS_RUNTIME?.githubConfig &&
+          tokens.accessTokenExpiresInSeconds
+        ) {
+          try {
+            persistGitHubUserTokens({
+              github: PROJECTS_RUNTIME.githubStore,
+              config: PROJECTS_RUNTIME.githubConfig,
+              principalId: outcome.viewer.principalId,
+              githubSubject: identity.subject,
+              tokens,
+            });
+          } catch (error) {
+            console.error('[viz github] failed to persist login tokens', error);
+          }
+        }
+        const issued = issueSession(authStore, outcome.viewer, { secure: AUTH_RUNTIME.secureCookies });
+        writeAuthRedirect(res, '/', [
+          issued.setCookie,
+          clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
+        ]);
+      } catch (error) {
+        console.error('[viz auth] provider login failed', error);
+        fail(AUTH_COPY.providerFailure, 502);
+      }
+      return;
+    }
+
+    if (pathname === '/auth/logout') {
+      if (!methodAllowed(req, res, 'POST')) return;
+      if (req.headers.origin !== AUTH_RUNTIME.publicOrigin.origin) {
+        sendJson(res, 403, { error: 'origin mismatch' });
+        return;
+      }
+      const candidates = logoutSessionCandidatesFromCookieHeader(req.headers.cookie);
+      if (candidates.overflow) {
+        sendJson(res, 431, { error: 'too many session cookie candidates' });
+        return;
+      }
+      if (candidates.tokens.length > 0) {
+        authStore.revokeSessions(candidates.tokens);
+      }
+      writeAuthRedirect(res, '/', [
+        retireSessionCookie({ secure: AUTH_RUNTIME.secureCookies }),
+        clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
+      ]);
+      return;
+    }
+
+    if (pathname === '/auth/whoami') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const viewer = AUTH.resolve(req);
+      if (!viewer) {
+        sendJson(res, 401, { authenticated: false });
+        return;
+      }
+      const organisations = authStore.listOrganisationsForPrincipal(viewer.principalId);
+      sendJson(res, 200, {
+        enabled: true,
+        authenticated: true,
+        displayName: viewer.displayName,
+        orgName: viewer.orgName,
+        role: viewer.role,
+        activeOrganisation: {
+          id: viewer.orgId,
+          name: viewer.orgName,
+          role: viewer.role,
+        },
+        organisations: organisations.map((organisation) => ({
+          id: organisation.orgId,
+          name: organisation.orgName,
+          role: organisation.role,
+        })),
+        providers: AUTH_RUNTIME.providers.map((provider) => ({ id: provider.id, label: provider.label })),
+      });
+      return;
+    }
+
+    const organisationActivation = pathname.match(
+      /^\/auth\/organisations\/([^/]+)\/activate$/
+    );
+    if (organisationActivation) {
+      if (!methodAllowed(req, res, 'POST')) return;
+      if (req.headers.origin !== AUTH_RUNTIME.publicOrigin.origin) {
+        sendJson(res, 403, { error: 'origin mismatch' });
+        return;
+      }
+      const orgId = decodePathComponent(organisationActivation[1]!);
+      if (!orgId || !/^[A-Za-z0-9-]{1,128}$/.test(orgId)) {
+        sendJson(res, 400, { error: 'invalid organisation id' });
+        return;
+      }
+      const token = sessionTokenFromCookieHeader(req.headers.cookie);
+      if (!token) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const activated = authStore.setSessionOrganisation(token, orgId);
+      if (!activated) {
+        sendJson(res, 403, { error: 'organisation membership required' });
+        return;
+      }
+      sendJson(res, 200, {
+        activeOrganisation: {
+          id: activated.orgId,
+          name: activated.orgName,
+          role: activated.role,
+        },
+      });
+      return;
+    }
+
+    if (pathname === '/auth/github/connect') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const viewer = AUTH.resolve(req);
+      if (!viewer) {
+        sendJson(res, 401, { error: GITHUB_COPY.authenticationRequired });
+        return;
+      }
+      if (!PROJECTS_RUNTIME?.githubConfig) {
+        sendJson(res, 503, { error: GITHUB_COPY.notConfigured });
+        return;
+      }
+      applyGitHubResult(
+        res,
+        startGitHubConnect({
+          viewer,
+          github: PROJECTS_RUNTIME.githubStore,
+          config: PROJECTS_RUNTIME.githubConfig,
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/auth/github/setup') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const viewer = AUTH.resolve(req);
+      if (!viewer) {
+        sendAuthHtml(res, 401, githubNoticePage(GITHUB_COPY.authenticationRequired));
+        return;
+      }
+      if (!PROJECTS_RUNTIME?.githubConfig || !PROJECTS_RUNTIME.githubClient) {
+        sendAuthHtml(res, 503, githubNoticePage(GITHUB_COPY.notConfigured));
+        return;
+      }
+      applyGitHubResult(
+        res,
+        await completeGitHubSetup({
+          viewer,
+          github: PROJECTS_RUNTIME.githubStore,
+          client: PROJECTS_RUNTIME.githubClient,
+          state: url.searchParams.get('state'),
+          installationId: url.searchParams.get('installation_id'),
+          setupAction: url.searchParams.get('setup_action'),
+          authorizePath: '/auth/github/authorize',
+          homePath: '/',
+        })
+      );
+      return;
+    }
+
+    if (pathname === '/auth/github/authorize') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const viewer = AUTH.resolve(req);
+      if (!viewer) {
+        sendJson(res, 401, { error: GITHUB_COPY.authenticationRequired });
+        return;
+      }
+      const githubProvider = authProvider('github');
+      if (!PROJECTS_RUNTIME?.githubConfig || !githubProvider) {
+        sendJson(res, 503, { error: GITHUB_COPY.notConfigured });
+        return;
+      }
+      try {
+        applyGitHubResult(
+          res,
+          startGitHubUserAuthorize({
+            viewer,
+            github: PROJECTS_RUNTIME.githubStore,
+            provider: githubProvider,
+            redirectUri: AUTH_RUNTIME.redirectUri,
+            createOauthState: (state, codeVerifier) => {
+              authStore.createOauthState({
+                state,
+                provider: githubProvider.id,
+                codeVerifier,
+                invitationHash: null,
+                ttlMs: OAUTH_TX_TTL_MS,
+              });
+            },
+            serializeOauthCookie: (state) =>
+              serializeCookie(OAUTH_TX_COOKIE, state, {
+                secure: AUTH_RUNTIME.secureCookies,
+                path: '/auth',
+                maxAgeSeconds: OAUTH_TX_TTL_MS / 1000,
+              }),
+          })
+        );
+      } catch (error) {
+        if (error instanceof TooManyPendingOauthStatesError) {
+          sendJson(res, 429, { error: 'too many pending login transactions' });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+
+    if (pathname.startsWith('/auth/')) {
+      sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+  }
+
+  // ------------------------------------------------------------------- gate
+  if (AUTH && pathname.startsWith('/api/')) {
+    const viewer = AUTH.resolve(req);
+    if (!viewer) {
+      sendJson(res, 401, { error: 'authentication required' });
+      return;
+    }
+  }
+
   if (pathname === '/' || pathname === '/index.html') {
+    // With the gate on, an unauthenticated browser gets the login page, not
+    // the app shell: no point shipping the whole GL client (and its API
+    // hints) to someone who cannot call /api/* anyway.
+    if (AUTH && !AUTH.resolve(req)) {
+      const rawInvitation = url.searchParams.get('invite');
+      const invitationToken = invitationTokenFrom(rawInvitation);
+      sendAuthHtml(
+        res,
+        200,
+        loginPage(
+          rawInvitation && !invitationToken ? AUTH_COPY.invalidInvitation : undefined,
+          invitationToken ?? undefined
+        )
+      );
+      return;
+    }
     if (DEV_UI_URL) {
       const target = new URL(`${pathname}${url.search}`, DEV_UI_URL);
       res.writeHead(307, {
@@ -629,12 +1484,126 @@ const server = createServer((req, res) => {
       return;
     }
     const html = readFileSync(UI_HTML_PATH);
-    send(res, 200, html, 'text/html; charset=utf-8');
+    // The app shell contains no identity or run data. `no-cache` permits the
+    // service worker's offline copy while requiring normal HTTP caches to
+    // revalidate; the unauthenticated login page above remains `no-store`.
+    send(res, 200, html, 'text/html; charset=utf-8', 'no-cache');
     return;
   }
 
+  if (PROJECTS_RUNTIME && AUTH) {
+    const viewer = AUTH.resolve(req);
+    if (pathname === '/api/github/installations') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      sendJson(res, 200, PROJECTS_RUNTIME.projects.listInstallations(viewer));
+      return;
+    }
+
+    if (pathname === '/api/projects') {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      if (req.method === 'GET') {
+        sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjects(viewer));
+        return;
+      }
+      if (req.method === 'POST') {
+        if (!sameOrigin(req, res)) return;
+        try {
+          sendJson(res, 201, await PROJECTS_RUNTIME.projects.createProject(req, viewer));
+        } catch (error) {
+          if (error instanceof ProjectHttpError) {
+            sendJson(res, error.status, { error: error.message });
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+      res.writeHead(405, { allow: 'GET, POST', 'content-length': '0', 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+
+    const projectRuns = pathname.match(/^\/api\/projects\/([^/]+)\/runs$/);
+    if (projectRuns) {
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const projectId = decodePathComponent(projectRuns[1]!);
+      if (!projectId) {
+        sendJson(res, 400, { error: 'bad project id' });
+        return;
+      }
+      if (req.method === 'GET') {
+        try {
+          sendJson(res, 200, PROJECTS_RUNTIME.projects.listProjectRuns(viewer, projectId));
+        } catch (error) {
+          if (error instanceof ProjectHttpError) {
+            sendJson(res, error.status, { error: error.message });
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+      if (req.method === 'POST') {
+        if (!sameOrigin(req, res)) return;
+        try {
+          sendJson(res, 201, await PROJECTS_RUNTIME.projects.startProjectRun(req, viewer, projectId));
+        } catch (error) {
+          if (error instanceof ProjectHttpError) {
+            sendJson(res, error.status, { error: error.message });
+            return;
+          }
+          throw error;
+        }
+        return;
+      }
+      res.writeHead(405, { allow: 'GET, POST', 'content-length': '0', 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
+
+    const cancelRun = pathname.match(/^\/api\/projects\/([^/]+)\/runs\/([^/]+)\/cancel$/);
+    if (cancelRun) {
+      if (!methodAllowed(req, res, 'POST')) return;
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      if (!sameOrigin(req, res)) return;
+      const projectId = decodePathComponent(cancelRun[1]!);
+      const projectRunId = decodePathComponent(cancelRun[2]!);
+      if (!projectId || !projectRunId) {
+        sendJson(res, 400, { error: 'bad project run id' });
+        return;
+      }
+      try {
+        sendJson(
+          res,
+          200,
+          await PROJECTS_RUNTIME.projects.cancelProjectRun(viewer, projectId, projectRunId)
+        );
+      } catch (error) {
+        if (error instanceof ProjectHttpError) {
+          sendJson(res, error.status, { error: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
+  }
+
   if (pathname === '/api/runs') {
-    sendJson(res, 200, listIndex());
+    sendJson(res, 200, listIndex(AUTH?.resolve(req) ?? null));
     return;
   }
 
@@ -644,9 +1613,9 @@ const server = createServer((req, res) => {
       sendJson(res, 400, { error: 'bad id' });
       return;
     }
-    const file = join(RUNS_DIR, id + '.json');
-    if (!existsSync(file)) {
-      sendJson(res, 404, { error: 'not found', file });
+    const file = resolveRunFile(id, AUTH?.resolve(req) ?? null);
+    if (!file) {
+      sendJson(res, 404, { error: 'not found' });
       return;
     }
     const body = readFileSync(file);
@@ -793,18 +1762,39 @@ const server = createServer((req, res) => {
     existsSync(assetPath) &&
     statSync(assetPath).isFile()
   ) {
-    send(res, 200, readFileSync(assetPath), assetContentType(assetPath));
+    send(
+      res,
+      200,
+      readFileSync(assetPath),
+      assetContentType(assetPath),
+      staticCacheControl(assetPath)
+    );
     return;
   }
 
   send(res, 404, 'not found', 'text/plain; charset=utf-8');
-});
+}
 
 server.listen(cli.port, cli.host, () => {
   console.log(`Atoma viz server — http://${cli.host}:${cli.port}/`);
-  console.log(`serving runs from: ${RUNS_DIR}`);
-  if (!existsSync(RUNS_DIR)) {
-    console.log(`(directory does not exist yet — it will be created when a run is recorded)`);
+  if (AUTH) {
+    console.log(
+      `auth: REQUIRED (providers: ${AUTH_RUNTIME!.providers.map((provider) => provider.id).join(', ')}; origin: ${AUTH_RUNTIME!.publicOrigin.origin})`
+    );
+    console.log(
+      `project runs: ${join(PROJECTS_ROOT, 'orgs', '<orgId>', 'projects', '<projectId>', 'runs', '<runId>')}`
+    );
+  } else {
+    console.log('auth: none (set ATOMA_VIZ_AUTH=1 to require login)');
+    console.log(`serving runs from: ${RUNS_DIR}`);
+    if (!existsSync(RUNS_DIR)) {
+      console.log(`(directory does not exist yet — it will be created when a run is recorded)`);
+    }
+  }
+  if (PROJECTS_RUNTIME?.githubConfig) {
+    console.log(`github app: ${PROJECTS_RUNTIME.githubConfig.appSlug}`);
+  } else if (PROJECTS_RUNTIME) {
+    console.log('github app: not configured');
   }
   console.log('registries exposed:');
   for (const d of DBS) {

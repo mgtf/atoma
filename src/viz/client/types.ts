@@ -11,6 +11,9 @@ export interface RunIndexEntry {
   cancelled?: boolean;
   costUsd?: number;
   calls?: number;
+  projectId?: string;
+  projectName?: string;
+  projectSlug?: string;
 }
 
 export interface VizEvent {
@@ -197,4 +200,54 @@ export interface LaunchProfile {
   label: string;
   help: string;
   examples: string[];
+}
+
+/**
+ * Projects view projections. Server-owned slice of the contracts in
+ * `src/contracts/projects.ts`: host paths never cross this boundary.
+ */
+export interface VizProject {
+  projectId: string;
+  name: string;
+  slug: string;
+  status: 'active' | 'archived';
+  family: string;
+  repositoryTarget: {
+    installationId: string;
+    owner: string;
+    name: string;
+    visibility: 'private' | 'public';
+  };
+  repositoryStatus: 'pending' | 'creating' | 'ready' | 'failed';
+  repositoryFullName: string | null;
+  repositoryUrl: string | null;
+  repositoryError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VizProjectRun {
+  projectRunId: string;
+  projectId: string;
+  goal: string;
+  status: 'queued' | 'running' | 'delivered' | 'failed' | 'cancelled';
+  traceId: string | null;
+  costUsd: number | null;
+  durationS: number | null;
+  error: string | null;
+  createdAt: string;
+  endedAt: string | null;
+  publication: {
+    status: 'pending' | 'publishing' | 'published' | 'failed';
+    repositoryUrl: string | null;
+    commitSha: string | null;
+  } | null;
+}
+
+export interface VizGitHubInstallation {
+  installationId: string;
+  accountLogin: string;
+  targetType: 'User' | 'Organization';
+  status: 'active' | 'suspended' | 'deleted';
+  repositorySelection: 'all' | 'selected';
 }

@@ -60,7 +60,7 @@ describe('viz:dev — Ctrl-C frees both ports', () => {
       `ports ${API_PORT}/${DEV_PORT} busy before the test`
     ).toBe(true);
 
-    const child = spawn(process.execPath, ['scripts/viz-dev.mjs'], {
+    const child = spawn(process.execPath, ['--import', 'tsx', 'scripts/viz-dev.mjs'], {
       // Own process group: this stands in for the terminal's foreground group.
       detached: true,
       stdio: 'ignore',

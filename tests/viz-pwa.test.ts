@@ -79,12 +79,16 @@ describe('Atoma visualizer PWA assets', () => {
     }
   });
 
-  it('registers only in production and never caches API responses', () => {
+  it('registers only in production and never caches API or auth responses', () => {
     expect(registration).toMatch(/import\.meta\.env\.PROD/);
     expect(registration).toContain("register('/sw.js'");
     expect(serviceWorker).toContain("url.pathname.startsWith('/api/')");
+    expect(serviceWorker).toContain("url.pathname.startsWith('/auth/')");
+    expect(serviceWorker).toContain("url.pathname.startsWith('/webhooks/')");
+    expect(serviceWorker).toContain("cache-control");
+    expect(serviceWorker).toContain("no-store");
     expect(serviceWorker).toContain('request.mode === \'navigate\'');
-    expect(serviceWorker).toContain('atoma-viz-shell-v1');
+    expect(serviceWorker).toContain('atoma-viz-shell-v2');
   });
 
   it('shares one public directory and serves every required MIME type', () => {

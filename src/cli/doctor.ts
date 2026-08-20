@@ -29,6 +29,11 @@ import {
 import { ContainerToolExecutor, DEFAULT_WORKER_IMAGE } from '../tools/containerExecutor.js';
 import { DEFAULT_DB_PATH } from '../core/stores.js';
 import { inspectAtomStoreSchema } from '../registry/db.js';
+import { authPublicOrigin, vizAuthEnabled } from '../auth/gate.js';
+import { snapshotProviderRegistry } from '../auth/providers.js';
+import { snapshotTrustedProxies } from '../auth/rate-limit.js';
+import { GITHUB_APP_ENV, snapshotGitHubAppConfig } from '../github/config.js';
+import { applyCheckoutDotenv } from './loadDotenv.js';
 
 const runFile = promisify(execFile);
 export const NODE_ENGINE_RANGE = '^22.13.0 || >=24';
@@ -88,7 +93,8 @@ flags:
   --help                         show this help
 
 The same ATOMA_LLM, ATOMA_MODEL_L1/L2/L3, ATOMA_CONTAINER and ATOMA_EGRESS
-variables used by run:build determine what doctor checks.`);
+variables used by run:build determine what doctor checks. When visualizer auth
+is enabled, its public origin and provider registry are checked offline too.`);
 }
 
 export function parseDoctorOptions(
@@ -155,6 +161,84 @@ function safeUrlLabel(raw: string): string {
 
 function unavailableStatus(required: boolean): DoctorStatus {
   return required ? 'fail' : 'warn';
+}
+
+function checkVisualizerAuth(env: NodeJS.ProcessEnv): DoctorCheck {
+  try {
+    if (!vizAuthEnabled(env)) {
+      return {
+        id: 'viz-auth',
+        label: 'Visualizer authentication',
+        status: 'pass',
+        detail: 'disabled',
+      };
+    }
+    const origin = authPublicOrigin(env);
+    const registry = snapshotProviderRegistry(env);
+    if (registry.diagnostics.length > 0) {
+      throw new Error(registry.diagnostics.map((diagnostic) => diagnostic.message).join('; '));
+    }
+    if (registry.providers.length === 0) {
+      throw new Error('no complete login provider is configured');
+    }
+    const trustedProxies = snapshotTrustedProxies(env);
+    return {
+      id: 'viz-auth',
+      label: 'Visualizer authentication',
+      status: 'pass',
+      detail:
+        `required · ${origin.origin} · ${registry.providers.map((provider) => provider.id).join(', ')}` +
+        (trustedProxies.addresses.length > 0
+          ? ` · ${trustedProxies.addresses.length} trusted proxy IP${trustedProxies.addresses.length === 1 ? '' : 's'}`
+          : ''),
+    };
+  } catch (error) {
+    return {
+      id: 'viz-auth',
+      label: 'Visualizer authentication',
+      status: 'fail',
+      detail: failureDetail(error),
+      remedy:
+        'Set ATOMA_VIZ_AUTH to 0/false or correct ATOMA_VIZ_PUBLIC_ORIGIN, ATOMA_VIZ_TRUSTED_PROXIES, and one complete ATOMA_AUTH_<PROVIDER> client.',
+    };
+  }
+}
+
+function checkGitHubApp(env: NodeJS.ProcessEnv): DoctorCheck {
+  const appConfigPresent = [
+    GITHUB_APP_ENV.appId,
+    GITHUB_APP_ENV.appSlug,
+    GITHUB_APP_ENV.privateKey,
+    GITHUB_APP_ENV.privateKeyPath,
+    GITHUB_APP_ENV.webhookSecret,
+    GITHUB_APP_ENV.tokenEncryptionKey,
+  ].some((name) => env[name] !== undefined);
+  if (!appConfigPresent) {
+    return {
+      id: 'github-app',
+      label: 'GitHub App',
+      status: 'pass',
+      detail: 'disabled',
+    };
+  }
+  try {
+    const config = snapshotGitHubAppConfig(env);
+    return {
+      id: 'github-app',
+      label: 'GitHub App',
+      status: 'pass',
+      detail: `configured · ${config.appSlug} · ${config.apiBaseUrl}`,
+    };
+  } catch (error) {
+    return {
+      id: 'github-app',
+      label: 'GitHub App',
+      status: 'fail',
+      detail: failureDetail(error),
+      remedy:
+        'Set a complete GitHub App snapshot (ATOMA_GITHUB_APP_ID, ATOMA_GITHUB_APP_SLUG, exactly one private key source, ATOMA_GITHUB_WEBHOOK_SECRET, ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY) plus GitHub OAuth client credentials.',
+    };
+  }
 }
 
 function failureDetail(error: unknown): string {
@@ -507,6 +591,9 @@ export async function diagnoseDoctor(args: {
         }
   );
 
+  checks.push(checkVisualizerAuth(env));
+  checks.push(checkGitHubApp(env));
+
   const anthropicKeyIgnored =
     nonEmpty(env['ANTHROPIC_API_KEY']) &&
     (providers.includes('claude-cli') ||
@@ -622,6 +709,7 @@ export function renderDoctorReport(report: DoctorReport): string {
 }
 
 async function main(): Promise<void> {
+  applyCheckoutDotenv();
   const parsed = parseDoctorOptions(process.argv.slice(2));
   if (parsed.help) {
     printHelp();

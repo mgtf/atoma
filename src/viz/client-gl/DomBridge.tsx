@@ -1,5 +1,5 @@
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
-import type { RunIndexEntry } from '../client/types.js';
+import type { RunIndexEntry, VizGitHubInstallation } from '../client/types.js';
 import { useGpuStore, type ViewName } from './store.js';
 
 export function DomBridge({
@@ -9,6 +9,12 @@ export function DomBridge({
   onSelectRun,
   onCopy,
   onEnter,
+  githubInstallations = [],
+  onCreateProject,
+  onStartRun,
+  projectBusy = false,
+  projectError = null,
+  selectedProjectName = null,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -16,6 +22,12 @@ export function DomBridge({
   onSelectRun: (id: string) => void;
   onCopy: () => void;
   onEnter?: () => void;
+  githubInstallations?: VizGitHubInstallation[];
+  onCreateProject?: () => void;
+  onStartRun?: () => void;
+  projectBusy?: boolean;
+  projectError?: string | null;
+  selectedProjectName?: string | null;
 }) {
   const view = useGpuStore((state) => state.view);
   const entered = useGpuStore((state) => state.entered);
@@ -32,6 +44,11 @@ export function DomBridge({
   const setFocusedInput = useGpuStore((state) => state.setFocusedInput);
   const setRunPickerActiveIndex = useGpuStore((state) => state.setRunPickerActiveIndex);
   const setRunPickerScrollY = useGpuStore((state) => state.setRunPickerScrollY);
+  const selectedGithubInstallationId = useGpuStore((state) => state.selectedGithubInstallationId);
+  const selectGithubInstallation = useGpuStore((state) => state.selectGithubInstallation);
+  const activeGithubInstallations = githubInstallations.filter(
+    (installation) => installation.status === 'active'
+  );
   const selectedRun = runs.find((run) => run.id === selectedRunId);
   const runValue = focusedInput === 'run' ? search.run : selectedRun?.label ?? '';
   const filteredRuns = runs.filter((run) =>
@@ -61,7 +78,7 @@ export function DomBridge({
         aria-label="Atoma GPU visualizer"
       >
         <nav role="tablist" aria-label="Views">
-          {(['runs', 'registry', 'skills', 'burnin', 'launch'] as ViewName[]).map((name) => (
+          {(['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'] as ViewName[]).map((name) => (
             <button
               key={name}
               role="tab"
@@ -171,6 +188,74 @@ export function DomBridge({
             {t('launch.copy')}
           </button>
         </>
+      ) : null}
+      {view === 'projects' ? (
+        <form
+          className={`gpu-project-form${selectedProjectName ? ' gpu-project-form--run' : ''}`}
+          onSubmit={(event) => event.preventDefault()}
+        >
+          <input
+            className="gpu-dom-input gpu-project-name"
+            aria-label={t('projects.name')}
+            value={search.projectName}
+            placeholder={t('projects.name')}
+            onFocus={() => setFocusedInput('projectName')}
+            onBlur={() => setFocusedInput(null)}
+            onChange={(event) => setSearch('projectName', event.target.value)}
+          />
+          <input
+            className="gpu-dom-input gpu-project-repo"
+            aria-label={t('projects.repository')}
+            value={search.projectRepository}
+            placeholder={t('projects.repository')}
+            onFocus={() => setFocusedInput('projectRepository')}
+            onBlur={() => setFocusedInput(null)}
+            onChange={(event) => setSearch('projectRepository', event.target.value)}
+          />
+          <select
+            className="gpu-dom-input gpu-project-install"
+            aria-label={t('projects.installation')}
+            value={selectedGithubInstallationId ?? ''}
+            onChange={(event) => selectGithubInstallation(event.target.value || null)}
+          >
+            <option value="">{t('projects.installation')}</option>
+            {activeGithubInstallations.map((installation) => (
+              <option key={installation.installationId} value={installation.installationId}>
+                {installation.accountLogin} ({installation.targetType})
+              </option>
+            ))}
+          </select>
+          {selectedProjectName ? (
+            <textarea
+              className="gpu-dom-input gpu-project-prompt"
+              aria-label={t('projects.prompt')}
+              value={search.projectPrompt}
+              placeholder={t('projects.promptPlaceholder')}
+              onFocus={() => setFocusedInput('projectPrompt')}
+              onBlur={() => setFocusedInput(null)}
+              onChange={(event) => setSearch('projectPrompt', event.target.value)}
+            />
+          ) : null}
+          <div className="gpu-project-actions">
+            {activeGithubInstallations.length === 0 ? (
+              <a href="/auth/github/connect">{t('projects.connectGithub')}</a>
+            ) : null}
+            <button type="button" disabled={projectBusy} onClick={() => onCreateProject?.()}>
+              {t('projects.create')}
+            </button>
+            {selectedProjectName ? (
+              <button type="button" disabled={projectBusy} onClick={() => onStartRun?.()}>
+                {t('projects.startRunOn', { name: selectedProjectName })}
+              </button>
+            ) : null}
+            {projectError ? <span role="alert">{projectError}</span> : null}
+          </div>
+          <p className="gpu-project-hint">
+            {selectedProjectName
+              ? t('projects.actionsHint.ready', { name: selectedProjectName })
+              : t('projects.actionsHint.new')}
+          </p>
+        </form>
       ) : null}
     </>
   );

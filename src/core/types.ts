@@ -525,6 +525,12 @@ export interface RunContext {
   /** Exact subtask lifecycle metadata for timeline fork/join rendering. */
   readonly recordBranch?: (info: BranchEventInfo) => void;
   /**
+   * Receives the accepted L3 root plan as structured control-plane data.
+   * Project publication uses it to persist declared output paths without
+   * reparsing model-authored trace prose. It is observer-only.
+   */
+  readonly recordRootPlan?: (plan: Plan) => void;
+  /**
    * Timeline lane identifier (uuid) of the subtask currently executing.
    * Set by L2/L3 for parallel and sequential dispatch alike — each subtask
    * gets its own shallow-cloned ctx with a unique id, so

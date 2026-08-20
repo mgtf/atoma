@@ -1,5 +1,5 @@
-import { resolve } from 'node:path';
-import { cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { makeAnthropicClient } from './auth.js';
 import { RunnerConfigError } from '../core/errors.js';
@@ -17,7 +17,7 @@ import { openDb } from '../registry/db.js';
 import { skillsDirPath } from '../core/stores.js';
 import { L3Atom } from '../atoms/L3Atom.js';
 import { SkillRegistry } from '../skills/registry.js';
-import { TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
+import { isTraceRunId, TraceRecorder, runLabelFromGoal } from '../viz/trace.js';
 import { formatDecompositionReport, formatTimeoutPostMortem } from '../viz/report.js';
 import { RecordingLlmClient } from '../viz/recordingLlm.js';
 import { RecordingRegistry } from '../viz/recordingRegistry.js';
@@ -34,7 +34,8 @@ import {
   type RunStats,
   type RunStatSignal,
 } from '../contracts/runStats.js';
-import type { Logger, Result, RunContext, Task } from '../core/types.js';
+import { declaredArtifactManifestSchema } from '../contracts/artifactManifest.js';
+import type { Logger, Plan, Result, RunContext, Task } from '../core/types.js';
 import type { TaskProfile } from './profile.js';
 
 export const consoleLogger: Logger = {
@@ -43,6 +44,23 @@ export const consoleLogger: Logger = {
   warn: (m, meta) => console.warn(`⚠ ${m}`, meta ?? ''),
   error: (m, meta) => console.error(`✖ ${m}`, meta ?? ''),
 };
+
+export const ARTIFACT_MANIFEST_PATH_ENV = 'ATOMA_ARTIFACT_MANIFEST_PATH';
+
+export function persistDeclaredArtifactManifest(path: string, runId: string, plan: Plan): void {
+  const outputs = [...new Set(plan.subtasks.flatMap((subtask) => subtask.outputs ?? []))];
+  const manifest = declaredArtifactManifestSchema.parse({
+    version: 1,
+    runId,
+    generatedAt: new Date().toISOString(),
+    outputs,
+  });
+  const target = resolve(path);
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.${process.pid}.tmp`;
+  writeFileSync(temporary, JSON.stringify(manifest, null, 2), { encoding: 'utf8', mode: 0o600 });
+  renameSync(temporary, target);
+}
 
 export interface RunnerArgs {
   goal?: string;
@@ -388,6 +406,18 @@ export async function startTask(
 
   const args = parseRunnerArgs(argv);
   const goal = args.goal ?? profile.defaultGoal;
+  const requestedRunId = process.env['ATOMA_RUN_ID'];
+  const artifactManifestPath = process.env[ARTIFACT_MANIFEST_PATH_ENV];
+  if (requestedRunId !== undefined && !isTraceRunId(requestedRunId)) {
+    throw new RunnerConfigError(
+      'ATOMA_RUN_ID must contain 1-128 safe filename characters'
+    );
+  }
+  if (artifactManifestPath && !requestedRunId) {
+    throw new RunnerConfigError(
+      `${ARTIFACT_MANIFEST_PATH_ENV} requires ATOMA_RUN_ID for correlation`
+    );
+  }
   // Validate every fallible launch argument BEFORE mutating the workspace,
   // opening stores or starting the container/egress backend. The old order
   // archived a valid deliverable before discovering a missing seed, and
@@ -647,6 +677,12 @@ export async function startTask(
     // that did NOT happen still deserves a card.
     recordCacheHit: (info) => recorder.recordCacheHit(info),
     recordBranch: (info) => recorder.recordBranch(info),
+    ...(artifactManifestPath && requestedRunId
+      ? {
+          recordRootPlan: (plan: Plan) =>
+            persistDeclaredArtifactManifest(artifactManifestPath, requestedRunId, plan),
+        }
+      : {}),
   };
 
   const task = profile.buildTask(goal);
@@ -693,6 +729,7 @@ export async function startTask(
   };
 
   recorder.beginRun(task, `${profile.traceLabelPrefix}${runLabelFromGoal(goal, 80)}`, {
+    ...(requestedRunId ? { runId: requestedRunId } : {}),
     initialTypes: [
       ...registry.listByTier(1),
       ...registry.listByTier(2),

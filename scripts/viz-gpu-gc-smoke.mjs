@@ -16,6 +16,12 @@
  * Reported from a real session ("lose focus on Chrome, come back later"),
  * reproduced on Metal WebGPU at ~120 errors/s until reload.
  *
+ * Pixi 8.19.0 also collects in-use *static* UBOs (global uniforms, batcher)
+ * after the same window (pixijs#12080). The product therefore leaves
+ * `renderer.gc.enabled = false` on WebGPU until a release includes
+ * pixijs#12147. This smoke still forces a collection so the pointer-light
+ * pin remains proven if GC is ever turned back on.
+ *
  * This check is DELIBERATELY NOT in `release:check`: it needs a real WebGPU
  * adapter, and the bundled headless Chromium falls back to SwiftShader/WebGL
  * where bind groups do not exist and the defect CANNOT appear. Run it on a
@@ -125,6 +131,16 @@ try {
   }
   await page.waitForFunction(() => window.__ATOMA_GPU__ !== undefined, { timeout: 10_000 });
 
+  const gcEnabled = await page.evaluate(() => window.__ATOMA_GPU__.app.renderer.gc.enabled);
+  if (gcEnabled !== false) {
+    finish(
+      1,
+      'WebGPU GC was left enabled — Pixi 8.19.0 collects in-use static uniform ' +
+        'buffers whose bind groups stay cached (pixijs#12080). Keep renderer.gc.enabled = false ' +
+        'until a Pixi release includes pixijs#12147.'
+    );
+  }
+
   // 1. Light the pointer filter so Pixi caches its bind group. PROVE it armed:
   //    without this the whole check would pass because nothing ever happened.
   await page.mouse.move(700, 500);
@@ -183,7 +199,7 @@ try {
   }
   finish(
     0,
-    `viz GPU gc smoke ok: webgpu, pointer light armed then idled across a ${MAX_UNUSED_MS}ms GC ` +
+    `viz GPU gc smoke ok: webgpu, GC disabled, pointer light armed then idled across a ${MAX_UNUSED_MS}ms GC ` +
       'clock with a forced collection, 0 destroyed-buffer submits after the pointer returned'
   );
 } catch (error) {

@@ -135,7 +135,44 @@ export function useProfiles(active: boolean) {
   });
 }
 
+export function useProjects(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'projects'],
+    queryFn: api.projects,
+    enabled: active,
+    refetchInterval: active ? 5_000 : false,
+    staleTime: 2_000,
+  });
+}
+
+export function useProjectRuns(projectId: string | null, active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'project', projectId, 'runs'],
+    enabled: active && !!projectId,
+    queryFn: () => {
+      if (!projectId) throw new Error('project id is required');
+      return api.projectRuns(projectId);
+    },
+    refetchInterval: (query) => {
+      const runs = query.state.data;
+      const live = runs?.some((run) => run.status === 'queued' || run.status === 'running');
+      return live ? 2_000 : false;
+    },
+    staleTime: 1_000,
+  });
+}
+
+export function useGithubInstallations(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'github', 'installations'],
+    queryFn: api.githubInstallations,
+    enabled: active,
+    staleTime: 30_000,
+  });
+}
+
 const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
+  projects: ['projects', 'project', 'github'],
   runs: ['runs', 'run'],
   registry: ['registries', 'registry'],
   skills: ['skills', 'skill'],

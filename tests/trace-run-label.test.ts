@@ -42,4 +42,24 @@ describe('run labels admit when they are cut', () => {
     // The goal is never the casualty of the label.
     expect(run.task.description).toBe(description);
   });
+
+  it('uses a safe control-plane id verbatim and rejects path-shaped ids', () => {
+    dir = mkdtempSync(join(osTmpdir(), 'atoma-run-id-'));
+    const recorder = new TraceRecorder(dir);
+    expect(
+      recorder.beginRun(
+        { description: 'tenant project run' },
+        undefined,
+        { runId: 'project-run:7f5c9d6e' }
+      ).id
+    ).toBe('project-run:7f5c9d6e');
+    recorder.endRun();
+    expect(() =>
+      recorder.beginRun(
+        { description: 'bad tenant project run' },
+        undefined,
+        { runId: '../escape' }
+      )
+    ).toThrow(/safe filename/);
+  });
 });

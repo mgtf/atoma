@@ -51,6 +51,8 @@ jobs:
           npm run docs:check
           npm ci --omit=dev
           node scripts/release-smoke.mjs
+          node scripts/auth-release-smoke.mjs
+          npm run auth -- --help
           npm run doctor -- --help
           npm run build:worker
           npm run release:container-smoke

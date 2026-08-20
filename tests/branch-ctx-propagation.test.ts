@@ -79,4 +79,10 @@ describe('forkBranch — field propagation', () => {
     forkBranch(forkBranch(root, 'outer'), 'inner').recordRunStat?.('escalation');
     expect(seen).toEqual(['escalation']);
   });
+
+  it('forwards the accepted-root-plan observer by reference', () => {
+    const observer = () => undefined;
+    const root = { ...makeCtx(), recordRootPlan: observer };
+    expect(forkBranch(forkBranch(root, 'outer'), 'inner').recordRootPlan).toBe(observer);
+  });
 });

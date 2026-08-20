@@ -1,3 +1,4 @@
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +85,121 @@ describe('atoma doctor', () => {
       }).mode
     ).toEqual({ container: true, egress: false });
     expect(parseDoctorOptions(['unexpected'], {}).error).toContain('unexpected');
+  });
+
+  it('preflights visualizer auth without contacting an identity provider', async () => {
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: {
+        ATOMA_LLM: 'anthropic',
+        ANTHROPIC_API_KEY: 'configured',
+        ATOMA_VIZ_AUTH: '1',
+        ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
+        ATOMA_AUTH_GITHUB_CLIENT_ID: 'client-id',
+        ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'client-secret',
+      },
+      dependencies: dependencies(),
+    });
+
+    expect(report.checks.find((check) => check.id === 'viz-auth')).toMatchObject({
+      status: 'pass',
+      detail: 'required · https://viz.example · github',
+    });
+    expect(report.checks.find((check) => check.id === 'github-app')).toMatchObject({
+      status: 'pass',
+      detail: 'disabled',
+    });
+    expect(renderDoctorReport(report)).not.toContain('client-secret');
+  });
+
+  it('treats a complete GitHub App snapshot as configured and a half-present one as a hard failure', async () => {
+    const pem = generateKeyPairSync('rsa', { modulusLength: 2048 })
+      .privateKey.export({ format: 'pem', type: 'pkcs8' })
+      .toString();
+    const configured = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: {
+        ATOMA_LLM: 'anthropic',
+        ANTHROPIC_API_KEY: 'configured',
+        ATOMA_VIZ_AUTH: '1',
+        ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
+        ATOMA_AUTH_GITHUB_CLIENT_ID: 'client-id',
+        ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'client-secret',
+        ATOMA_GITHUB_APP_ID: '123456',
+        ATOMA_GITHUB_APP_SLUG: 'atoma-test',
+        ATOMA_GITHUB_APP_PRIVATE_KEY: pem,
+        ATOMA_GITHUB_WEBHOOK_SECRET: 'w'.repeat(32),
+        ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+      },
+      dependencies: dependencies(),
+    });
+    expect(configured.checks.find((check) => check.id === 'github-app')).toMatchObject({
+      status: 'pass',
+      detail: expect.stringMatching(/^configured · atoma-test · /),
+    });
+    expect(renderDoctorReport(configured)).not.toContain(pem.slice(0, 40));
+
+    const half = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: {
+        ATOMA_LLM: 'anthropic',
+        ANTHROPIC_API_KEY: 'configured',
+        ATOMA_GITHUB_APP_ID: '123456',
+      },
+      dependencies: dependencies(),
+    });
+    expect(half.checks.find((check) => check.id === 'github-app')).toMatchObject({
+      status: 'fail',
+      remedy: expect.stringContaining('ATOMA_GITHUB_APP_ID'),
+    });
+    expect(half.ready).toBe(false);
+  });
+
+  it.each([
+    [
+      { ATOMA_VIZ_AUTH: 'yes' },
+      /must be one of/,
+    ],
+    [
+      {
+        ATOMA_VIZ_AUTH: '1',
+        ATOMA_VIZ_PUBLIC_ORIGIN: 'http://public.example',
+        ATOMA_AUTH_GITHUB_CLIENT_ID: 'client-id',
+        ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'client-secret',
+      },
+      /must use https/,
+    ],
+    [
+      {
+        ATOMA_VIZ_AUTH: '1',
+        ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
+        ATOMA_AUTH_GITHUB_CLIENT_ID: 'client-id',
+      },
+      /must both be configured/,
+    ],
+    [
+      {
+        ATOMA_VIZ_AUTH: '1',
+        ATOMA_VIZ_PUBLIC_ORIGIN: 'https://viz.example',
+        ATOMA_VIZ_TRUSTED_PROXIES: 'proxy.internal',
+        ATOMA_AUTH_GITHUB_CLIENT_ID: 'client-id',
+        ATOMA_AUTH_GITHUB_CLIENT_SECRET: 'client-secret',
+      },
+      /IP literals/,
+    ],
+  ])('fails closed on invalid visualizer auth configuration', async (authEnv, pattern) => {
+    const report = await diagnoseDoctor({
+      mode: { container: false, egress: false },
+      env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured', ...authEnv },
+      dependencies: dependencies(),
+    });
+
+    expect(report.checks.find((check) => check.id === 'viz-auth')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringMatching(pattern),
+      remedy: expect.stringContaining('ATOMA_VIZ_TRUSTED_PROXIES'),
+    });
+    expect(report.ready).toBe(false);
   });
 
   it('checks Claude CLI in the API-key-free environment the transport uses', async () => {

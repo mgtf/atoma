@@ -33,11 +33,16 @@ export const DEFAULT_SKILLS_DIR = './skills';
 
 /**
  * Resolve the product store path: explicit flag → `ATOMA_DB_PATH` → default.
+ * Callers that already own an environment snapshot can supply it explicitly;
+ * the default preserves the process-global operator path for existing CLIs.
  */
-export function storeDbPath(explicit?: string): string {
+export function storeDbPath(
+  explicit?: string,
+  env: NodeJS.ProcessEnv = process.env
+): string {
   if (explicit) return explicit;
-  const env = process.env['ATOMA_DB_PATH'];
-  if (env) return env;
+  const configured = env['ATOMA_DB_PATH'];
+  if (configured) return configured;
   return DEFAULT_DB_PATH;
 }
 

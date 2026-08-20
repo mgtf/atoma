@@ -486,6 +486,13 @@ export function spawnRun(opts: {
   readonly logPath: string;
   readonly extraArgs?: readonly string[];
   readonly extraEnv?: Readonly<Record<string, string>>;
+  /**
+   * Complete child environment. Omitted by operator/burn-in callers so their
+   * historical host snapshot is preserved; the authenticated project control
+   * plane supplies an allowlisted snapshot so unrelated host secrets cannot
+   * cross into a tenant worker.
+   */
+  readonly env?: NodeJS.ProcessEnv;
   /** npm script to execute. Defaults to the source-level run:build:dev. */
   readonly npmScript?: string;
   /** Working directory for `npm run`. Defaults to `process.cwd()`. */
@@ -530,7 +537,7 @@ export function spawnRun(opts: {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
         env: {
-          ...process.env,
+          ...(opts.env ?? process.env),
           // Batch children must not inherit experiment-only runner modes from
           // the operator's shell. A stale `export ATOMA_BASELINE=1` used to
           // turn an entire burn-in into the control arm without any CSV field

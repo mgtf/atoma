@@ -59,6 +59,13 @@ describe('storeDbPath — one rule for where the store lives', () => {
     expect(storeDbPath()).toBe('./from-env.db');
   });
 
+  it('can resolve from an injected snapshot without consulting process state', () => {
+    process.env['ATOMA_DB_PATH'] = './ambient.db';
+    expect(storeDbPath(undefined, { ATOMA_DB_PATH: './snapshot.db' })).toBe('./snapshot.db');
+    expect(storeDbPath('./explicit.db', { ATOMA_DB_PATH: './snapshot.db' })).toBe('./explicit.db');
+    expect(storeDbPath(undefined, {})).toBe(DEFAULT_DB_PATH);
+  });
+
   it('resolving a path never CREATES one — resolution must not touch disk', () => {
     storeDbPath();
     storeDbPath();

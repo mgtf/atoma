@@ -8,7 +8,7 @@
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: #070b13; }
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 
 .gpu-app,
 .gpu-ui-host {
@@ -156,6 +156,90 @@ html.atoma-cursor-active * {
   padding: 12px;
   resize: none;
   line-height: 1.45;
+}
+
+/* `top` must match PROJECTS_DOM_FORM_TOP. Fields are a grid, not six
+   independent fixed boxes — those stacked GPU empty-copy under the inputs. */
+.gpu-project-form {
+  position: fixed;
+  z-index: 4;
+  top: 128px;
+  left: 20px;
+  width: min(720px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1fr) minmax(160px, 1fr);
+  grid-template-areas:
+    "name repo install"
+    "actions actions actions"
+    "hint hint hint";
+  gap: 8px;
+  padding: 10px;
+  box-sizing: border-box;
+  background: rgba(11, 17, 30, .96);
+  border: 1px solid rgba(38, 51, 74, .9);
+  border-radius: 8px;
+}
+
+.gpu-project-form--run {
+  grid-template-areas:
+    "name repo install"
+    "prompt prompt prompt"
+    "actions actions actions"
+    "hint hint hint";
+}
+
+.gpu-project-form .gpu-dom-input {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.gpu-project-name { grid-area: name; height: 32px; padding: 6px 11px; }
+.gpu-project-repo { grid-area: repo; height: 32px; padding: 6px 11px; }
+.gpu-project-install {
+  grid-area: install;
+  height: 32px;
+  padding: 4px 8px;
+}
+.gpu-project-prompt {
+  grid-area: prompt;
+  height: 72px;
+  padding: 8px 11px;
+  resize: none;
+  line-height: 1.4;
+}
+
+.gpu-project-actions {
+  grid-area: actions;
+  position: relative;
+  z-index: auto;
+  top: auto;
+  left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gpu-project-actions a,
+.gpu-project-actions button {
+  border: 1px solid rgba(110, 168, 255, .62);
+  border-radius: 7px;
+  background: rgba(11, 17, 30, .96);
+  color: #e6edf7;
+  padding: 6px 12px;
+  font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+  text-decoration: none;
+}
+
+.gpu-project-hint {
+  grid-area: hint;
+  margin: 0;
+  font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+  color: #8a96ae;
 }
 
 .gpu-copy-bridge,

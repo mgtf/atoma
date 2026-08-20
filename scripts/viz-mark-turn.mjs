@@ -212,7 +212,7 @@ export async function captureMarkTurn(options = {}) {
     const devPort = await freePort();
     child = spawn(
       process.execPath,
-      ['scripts/viz-dev.mjs', '--ui', 'gpu'],
+      ['--import', 'tsx', 'scripts/viz-dev.mjs', '--ui', 'gpu'],
       {
         cwd: repoRoot,
         stdio: ['ignore', 'pipe', 'pipe'],

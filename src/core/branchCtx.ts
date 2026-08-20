@@ -97,6 +97,7 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     ...(ctx.recordRunStat !== undefined ? { recordRunStat: ctx.recordRunStat } : {}),
     ...(wrappedRecordCacheHit !== undefined ? { recordCacheHit: wrappedRecordCacheHit } : {}),
     ...(ctx.recordBranch !== undefined ? { recordBranch: ctx.recordBranch } : {}),
+    ...(ctx.recordRootPlan !== undefined ? { recordRootPlan: ctx.recordRootPlan } : {}),
     currentBranchId: branchId,
   };
   return out;

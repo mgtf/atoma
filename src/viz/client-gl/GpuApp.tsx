@@ -11,14 +11,19 @@ import {
   type GpuRenderMetrics,
 } from './renderer/metrics.js';
 import { AtomaCursor } from './AtomaCursor.js';
+import { AuthControls, useAuthController } from './AuthControls.js';
 import { DomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
-import { useIsFetching } from '@tanstack/react-query';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { api } from '../client/data-api.js';
 import {
   activeViewQueryFilter,
   useBurnin,
+  useGithubInstallations,
   useProfiles,
+  useProjectRuns,
+  useProjects,
   useRefreshBridge,
   useRegistries,
   useRegistry,
@@ -52,12 +57,39 @@ function errorMessage(errors: unknown[]) {
 }
 
 export function GpuApp() {
-  const state = useGpuStore();
-  const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
+  const locale = useGpuStore((snapshot) => snapshot.locale);
+  const entered = useGpuStore((snapshot) => snapshot.entered);
   const t = useCallback(
-    (key: string, vars?: Record<string, unknown>) => translate(state.locale, key, vars),
-    [state.locale]
+    (key: string, vars?: Record<string, unknown>) => translate(locale, key, vars),
+    [locale]
   );
+  return (
+    <AuthControls active={entered} t={t}>
+      <GpuAppContent t={t} />
+    </AuthControls>
+  );
+}
+
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63);
+}
+
+function GpuAppContent({
+  t,
+}: {
+  t: (key: string, vars?: Record<string, unknown>) => string;
+}) {
+  const state = useGpuStore();
+  const queryClient = useQueryClient();
+  const { snapshot: authSnapshot, activate: activateAuth } = useAuthController();
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
   useRefreshBridge();
 
@@ -87,13 +119,26 @@ export function GpuApp() {
   const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection));
   const burninQuery = useBurnin(state.view === 'burnin');
   const profilesQuery = useProfiles(state.view === 'launch');
+  const projectsQuery = useProjects(state.view === 'projects');
+  const githubInstallationsQuery = useGithubInstallations(state.view === 'projects');
+  const selectedProject = state.view === 'projects'
+    ? projectsQuery.data?.find((project) => project.projectId === state.selectedProjectId) ?? null
+    : null;
+  const projectRunsQuery = useProjectRuns(
+    selectedProject?.projectId ?? null,
+    state.view === 'projects' && !!selectedProject
+  );
+  const projectRuns = useMemo<Record<string, import('../client/types.js').VizProjectRun[]>>(
+    () =>
+      selectedProject && projectRunsQuery.data
+        ? { [selectedProject.projectId]: projectRunsQuery.data }
+        : {},
+    [projectRunsQuery.data, selectedProject]
+  );
 
   useEffect(() => {
     const runs = runsQuery.data ?? [];
     if (!state.selectedRunId && runs[0]) state.selectRun(runs[0].id);
-    else if (state.selectedRunId && runs.length && !runs.some((run) => run.id === state.selectedRunId)) {
-      state.selectRun(runs[0]!.id);
-    }
   }, [runsQuery.data, state]);
 
   useEffect(() => {
@@ -117,6 +162,29 @@ export function GpuApp() {
     }
   }, [namespaceNames, skillLists.byNamespace, state]);
 
+  useEffect(() => {
+    const projects = projectsQuery.data ?? [];
+    if (state.view !== 'projects') return;
+    if (!state.selectedProjectId && projects[0]) state.selectProject(projects[0].projectId);
+    else if (
+      state.selectedProjectId &&
+      projects.length &&
+      !projects.some((project) => project.projectId === state.selectedProjectId) &&
+      projects[0]
+    ) {
+      state.selectProject(projects[0].projectId);
+    }
+  }, [projectsQuery.data, state]);
+
+  useEffect(() => {
+    const installations = githubInstallationsQuery.data ?? [];
+    const active = installations.filter((installation) => installation.status === 'active');
+    if (state.view !== 'projects') return;
+    if (!state.selectedGithubInstallationId && active[0]) {
+      state.selectGithubInstallation(active[0].installationId);
+    }
+  }, [githubInstallationsQuery.data, state]);
+
   const copyCommand = useCallback(() => {
     const profile = profilesQuery.data?.profiles[0];
     const goal = useGpuStore.getState().search.launch.trim();
@@ -125,8 +193,76 @@ export function GpuApp() {
     void navigator.clipboard.writeText(command);
   }, [profilesQuery.data]);
 
+  const createProject = useCallback(async (): Promise<void> => {
+    if (projectBusy) return;
+    const name = useGpuStore.getState().search.projectName.trim();
+    const repository = useGpuStore.getState().search.projectRepository.trim();
+    const installationId = useGpuStore.getState().selectedGithubInstallationId;
+    const installation = githubInstallationsQuery.data?.find(
+      (candidate) => candidate.installationId === installationId
+    );
+    const slug = slugify(name);
+    if (!name || !slug || !installation) {
+      setProjectError(t('projects.actionFailed'));
+      return;
+    }
+    setProjectBusy(true);
+    setProjectError(null);
+    try {
+      const created = await api.createProject({
+        name,
+        slug,
+        repositoryTarget: {
+          installationId: installation.installationId,
+          owner: installation.accountLogin,
+          name: repository || slug,
+          visibility: 'private',
+        },
+      });
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'projects'] });
+      useGpuStore.getState().selectProject(created.projectId);
+    } catch {
+      setProjectError(t('projects.actionFailed'));
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [githubInstallationsQuery.data, projectBusy, queryClient, t]);
+
+  const startProjectRun = useCallback(async (): Promise<void> => {
+    if (projectBusy) return;
+    const projectId = useGpuStore.getState().selectedProjectId;
+    const goal = useGpuStore.getState().search.projectPrompt.trim();
+    if (!projectId) {
+      setProjectError(t('projects.actionFailed'));
+      return;
+    }
+    if (!goal) {
+      setProjectError(t('projects.promptRequired'));
+      return;
+    }
+    setProjectBusy(true);
+    setProjectError(null);
+    try {
+      await api.startProjectRun(projectId, {
+        idempotencyKey: crypto.randomUUID(),
+        goal,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'project', projectId, 'runs'] });
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'projects'] });
+      await queryClient.invalidateQueries({ queryKey: ['viz', 'runs'] });
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : t('projects.actionFailed'));
+    } finally {
+      setProjectBusy(false);
+    }
+  }, [projectBusy, queryClient, t]);
+
   const activate = useCallback((id: string) => {
     const store = useGpuStore.getState();
+    if (id.startsWith('auth.')) {
+      activateAuth(id);
+      return;
+    }
     if (id === 'welcome.continue') {
       beginEnter();
       return;
@@ -182,6 +318,15 @@ export function GpuApp() {
       store.toggleRunSummary();
       return;
     }
+    if (id.startsWith('project.select.')) {
+      store.selectProject(id.slice('project.select.'.length));
+      return;
+    }
+    if (id.startsWith('project.run.')) {
+      store.selectRun(id.slice('project.run.'.length));
+      store.setView('runs');
+      return;
+    }
     if (id.startsWith('registry.select.')) {
       store.selectRegistry(id.slice('registry.select.'.length));
       return;
@@ -231,9 +376,10 @@ export function GpuApp() {
       return;
     }
     if (id === 'launch.copy') copyCommand();
-  }, [beginEnter, copyCommand, profilesQuery.data]);
+  }, [activateAuth, beginEnter, copyCommand, profilesQuery.data]);
 
   const loading =
+    (state.view === 'projects' && (projectsQuery.isLoading || githubInstallationsQuery.isLoading)) ||
     (state.view === 'runs' && (runsQuery.isLoading || runQuery.isLoading)) ||
     (state.view === 'registry' && (registriesQuery.isLoading || registryQuery.isLoading)) ||
     (state.view === 'skills' && namespacesQuery.isLoading) ||
@@ -273,8 +419,12 @@ export function GpuApp() {
     skillDetailQuery.error,
     burninQuery.error,
     profilesQuery.error,
+    projectsQuery.error,
+    githubInstallationsQuery.error,
+    projectRunsQuery.error,
   ]);
   const data = useMemo(() => ({
+    auth: authSnapshot,
     runs: runsQuery.data ?? [],
     run: runQuery.data ?? null,
     registries: registriesQuery.data ?? [],
@@ -284,16 +434,23 @@ export function GpuApp() {
     skillDetail: skillDetailQuery.data ?? null,
     burnin: burninQuery.data ?? null,
     profiles: profilesQuery.data?.profiles ?? [],
+    projects: projectsQuery.data ?? [],
+    projectRuns,
+    githubInstallations: githubInstallationsQuery.data ?? [],
     loading,
     fetching,
     error,
   }), [
+    authSnapshot,
     fetching,
     burninQuery.data,
     error,
+    githubInstallationsQuery.data,
     loading,
     namespacesQuery.data,
     profilesQuery.data,
+    projectRuns,
+    projectsQuery.data,
     registriesQuery.data,
     registryQuery.data,
     runQuery.data,
@@ -338,6 +495,12 @@ export function GpuApp() {
         onSelectRun={state.selectRun}
         onCopy={copyCommand}
         onEnter={beginEnter}
+        githubInstallations={githubInstallationsQuery.data ?? []}
+        onCreateProject={() => { void createProject(); }}
+        onStartRun={() => { void startProjectRun(); }}
+        projectBusy={projectBusy}
+        projectError={projectError}
+        selectedProjectName={selectedProject?.name ?? null}
       />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />

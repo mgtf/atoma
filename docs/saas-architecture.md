@@ -1,11 +1,14 @@
 # atoma as a multi-tenant SaaS — target architecture
 
-> **STATUS: TENANCY TARGET, NOT BUILT.** There is still no organisation,
-> principal, membership, tenant-scoped store or authenticated control plane in
-> `src/`. The viz server listens without authentication and serves the shared
-> runs directory. Some deployment prerequisites described below now DO exist
-> as opt-in local primitives — container isolation, per-run egress proxying,
-> one consolidated store and an MCP stdio control surface — and are labelled
+> **STATUS: TENANCY TARGET, NOT BUILT.** An opt-in dedicated-instance identity
+> substrate now exists in `src/auth/`: one organisation, principals keyed by
+> provider subject, memberships, one-use invitations, server-side sessions and
+> a login gate over the viz surface. It is disabled by default and protects the
+> shared instance as a whole. Runs, traces, stores, trust and ledger events are
+> still not organisation-scoped, so this is Track A admission control, not
+> multi-tenancy. Other deployment prerequisites described below also exist as
+> opt-in local primitives — container isolation, per-run egress proxying, one
+> consolidated store and an MCP stdio control surface — and are labelled
 > accordingly. They are substrate, not tenancy.
 >
 > **Purpose of this document.** It exists so that design work done *before* the
@@ -69,12 +72,16 @@ skill references twice is the expensive mistake.
 
 ### Identity: link on subject, never on email
 
-- Internal `principal_id` (ULID) is the **only** identifier that flows into data.
-  No table, path or ledger event ever stores a provider subject or an email.
-  Adding a provider is a row in a provider registry, not a schema change.
-- Link only on `(provider, provider_subject)`. First login on an unknown pair
-  **creates a new principal; never merges**.
-- Linking a second provider requires an authenticated session on the first.
+- Internal `principal_id` (UUID) is the **only** identifier that flows into
+  product data. Provider subjects and email snapshots live only in the
+  dedicated `auth_identities` table; paths, domain tables and ledger events
+  key on `principal_id`. Adding a provider is a registry entry, not a schema
+  change.
+- Link only on `(provider, provider_subject)`. Once a one-use invitation admits
+  an unknown pair, its first login **creates a new principal; never merges**.
+- Linking a second provider requires an authenticated session on the first;
+  that account-linking flow remains part of the multi-tenant target and is not
+  exposed by the dedicated-instance gate yet.
 - Email is a display attribute snapshotted at link time, explicitly not a join
   key. Auto-linking on an unverified email claim from provider A hands an
   attacker provider B's account.
@@ -84,7 +91,7 @@ skill references twice is the expensive mistake.
   verified-email signal. If not, it is login-only and cannot support domain
   auto-join.
 
-### Login providers: verified availability (2026-08-17)
+### Login providers: operator contract (updated 2026-08-20)
 
 An earlier draft of this section listed "Anthropic, OpenAI, xAI" as
 interchangeable login providers. That is wrong for Anthropic and misleading for
@@ -94,7 +101,7 @@ than against symmetry.
 | Provider | Login for a third-party app | User's subscription pays our inference |
 |---|---|---|
 | Anthropic | **Prohibited.** *"Anthropic does not permit third-party developers to offer Claude.ai login or to route requests through Free, Pro, or Max plan credentials on behalf of their users"* (`code.claude.com/docs/en/legal-and-compliance`, §Authentication and credential use). No third-party `client_id` registration exists. | No — same clause; server-side enforcement since Jan 2026 returns *"This credential is only authorized for use with Claude Code"*. |
-| OpenAI | **Available** — *Sign in with ChatGPT*, live beta since 2026-08-02. Returns name, email, avatar. | No. It is an OIDC identity provider; it grants no model usage on the user's plan. |
+| ChatGPT | **Conditional.** The local registry supports an approved client; its defaults follow the provider's official discovery metadata and remain operator-overridable. Possessing ordinary ChatGPT credentials is not client approval. | No. Login is an identity signal and grants no model usage on the user's plan. |
 | xAI | Unverified (see bullet above). | Not offered. |
 
 Two consequences for the design:
@@ -510,8 +517,8 @@ distilled, reviewed body crosses the org boundary.
 | # | Change | Evidence |
 |---|---|---|
 | A1 | **DONE locally:** `ATOMA_REQUIRE_ISOLATION=1` (or an embedder's `requireIsolation`) makes the OS boundary mandatory — `assertIsolationBoundary` refuses the local tool backend at LAUNCH with `RunnerConfigError`, before the workspace is touched or a store opened, and `doctor` reports the same condition as a hard failure. The requirement is read from the HOST environment and never from a run's own `providerEnv`, so a tenant cannot switch off its own jail. Destination policy needs no per-tool allowlist: both containerised modes are already default-deny at the OS layer (`--network none` reaches nothing; `--egress` routes through a per-run anchored-allowlist proxy), so adding one to `fetch_url` would be a second copy of one rule. REMAINING: nothing in the code forces a hosted deployment to *set* the switch — that is a deployment checklist item, and it is off by default so the developer path is unchanged. | §3; T1; `run/backendMode.ts`, `tools/containerExecutor.ts`, `tools/egressSidecar.ts` |
-| A2 | **Authentication + authorization on the viz/control plane.** Today the local viz has no auth and exposes the shared run corpus. | `viz/server.ts` |
-| A3 | **Org scoping on runs and traces.** `VizRun` carries no organisation discriminator. | `viz/trace.ts` |
+| A2 | **DONE locally for Track A:** the opt-in viz gate requires an operator-owned public origin, a complete approved provider client and a one-use invitation; it persists opaque revocable sessions and an organisation role in the consolidated store. The disabled developer path remains open. Projects, GitHub App installations and publications are organisation-scoped (create/start require `org:member+`; connect requires `org:admin+`). Gated `/api/runs` lists the viewer's org project traces; ungated viz still reads the operator `./runs` directory. | `auth/`, `cli/auth.ts`, `github/`, `projects/`, `viz/server.ts` |
+| A3 | **DONE locally for the viz surface:** gated run index/fetch are organisation-scoped via `project_runs` (a run belongs to one project). Trace JSON is still not stamped with `org_id`; membership is the SQLite lookup, not a field the file could spoof. Remaining for hosted multi-tenancy: stamp ledger/skill events. | `viz/server.ts`, `projects/store.ts` |
 | A4 | **DONE locally:** `sanitise` rejects all-dot traversal and `branch` validates `overrideName`. Preserve these guards through the surrogate-id migration. | §4.3; `atom-name-path-escape.test.ts` |
 | A5 | **DONE locally:** `create` and `branch` share `usedOrdinals` over live ∪ history. | §4.3; `registry-remove.test.ts` |
 | A6 | **DONE locally:** outbound credentials are a per-run snapshot — `startTask(profile, argv, {providerEnv})` threads one environment through transport selection, `makeAnthropicClient`, `makeBaseClient` and the tier-pinned provider factories, so a call is independent of ambient process state. `process.exit(1)` is gone from the auth path (`RunnerConfigError` instead). `claude-cli` (base or tier pin) and `codex` (tier pin) are refused at LAUNCH whenever a snapshot is supplied, because they bind to a machine-local login and cannot read one — the developer path, which supplies nothing, is untouched. Tier pins (`ATOMA_MODEL_L*`) ride the same snapshot: `modelForTier` accepts an env, `applyTierPins` copies it onto `process.env` so atom call sites agree with the router, and the host snapshot (same sticky-env fix as the lifecycle toggles) restores the operator's pins for the next in-process run. REMAINING for a hosted deployment: with no key and no bearer token in the snapshot, the SDK's profile/WIF fallback still resolves against the real process; redirecting that half means re-implementing the SDK's chain. | T10; `run/auth.ts`, `run/providers.ts`, `run/runner.ts`, `core/models.ts` |
@@ -781,9 +788,13 @@ applied uniformly. Depends on Phase 3.
 **Phase 5 — storage concurrency** (A7, A8). Postgres or hardened SQLite; skill
 counters leave the filesystem. Independent of 4 and 6.
 
-**Phase 6 — control plane** (A2, A3, B5 → T7, T9). Auth and authorization on the
-viz/control plane; org discriminator on runs and traces; `store_id`/`org_id` on
-ledger events. Independent of 4 and 5.
+**Phase 6 — control plane** (A2, A3, B5 → T7, T9). **PARTIAL:** Track A's
+invitation-only authentication gate has landed, including principals,
+memberships and revocable sessions in the primary store. Organisation-scoped
+projects, GitHub App connect, post-delivery publication and gated `/api/runs`
+(one run, one project, one org) have landed locally. Remaining for hosted
+multi-tenancy: stamp ledger events with `store_id`/`org_id`. Independent of
+4 and 5.
 
 **Phase 7 — review workflow** (B4 → T3). Conditional on Phase 0's answer to
 question 1.

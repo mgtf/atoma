@@ -76,6 +76,10 @@ npm run release:check
 npm run doctor
 npm run doctor -- --container
 npm run doctor:dev
+npm run auth -- list
+npm run auth -- invite --role org:owner --ttl-hours 24
+npm run auth:dev -- list
+npm run auth:dev -- invite --role org:owner --ttl-hours 24
 npm run run:build -- "<goal>"
 npm run run:build:dev -- "<goal>"
 npm run mcp
@@ -85,6 +89,9 @@ npm run mcp:dev
 Visualizer. The GPU client is the product UI (`npm run viz`); MUI is the frozen
 fallback. `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
 film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
+`npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
+so a local GitHub-gated visualizer does not need a shell export. Compiled
+`viz:serve` does not load `.env`: production injects the process environment.
 
 ```bash
 npm run viz
@@ -128,6 +135,8 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
 
 - Supported source verification is `npm ci` then `npm run release:check`.
 - Supported compiled MCP entrypoint is `node dist/mcp/stdio.js`.
+- `npm run auth` is the compiled identity/invitation CLI
+  (`node dist/cli/auth.js`); contributors use `npm run auth:dev` for source.
 - `release:check` is the release-readiness definition: full check, audit,
   build, compiled MCP/viz smoke, and doctor help smoke.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
@@ -250,6 +259,30 @@ Read this section before changing any LLM call site.
   must be surfaced by `ledger check`.
 - The registry is one tier-keyed table. Migrations, backups, skill namespaces,
   provenance, and trust resets are part of identity changes.
+- Visualizer authentication is an opt-in deployment gate, not multi-tenancy
+  of the run corpus. `ATOMA_VIZ_AUTH=1` requires the operator-owned
+  `ATOMA_VIZ_PUBLIC_ORIGIN`, at least one complete provider configuration
+  (GitHub/Google require client ID + secret; an approved ChatGPT client may
+  use PKCE without a secret). The first login without an invitation creates
+  an organisation owned by that principal; a one-use invitation joins an
+  existing organisation.
+  OAuth identities join only on `(provider, subject)`, never email; provider
+  login conveys no model-inference entitlement. Auth rows live in the primary
+  product store selected by viz, and browser redirects always use
+  `${ATOMA_VIZ_PUBLIC_ORIGIN}/auth/callback`, never request Host headers.
+  Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
+  unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
+  process-level tests spawn it from the repository cwd with a cleaned env.
+  Projects, GitHub App installations and publications are organisation-scoped;
+  a run belongs to exactly one project and a project to exactly one
+  organisation. Gated `/api/runs` lists that org's project traces from
+  `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
+  with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
+  operator `./runs` corpus used by CLI, MCP and ungated viz.
+  The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
+  GitHub login: register setup at `/auth/github/setup` and webhooks at
+  `/webhooks/github`. Repositories are created only after a delivered,
+  validated artifact manifest, and a retry never creates a second repo.
 - Probe manifests are structured records. Normalize paths before recognizing
   `.atoma-probes.json`; machine writers merge entries, and model hand-edits are
   refused.
@@ -486,6 +519,13 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   bind group that points at it — every later `queue.submit` is then a
   validation error, permanently. Today only the pointer-light filter has that
   lifetime; per-card filters are rebuilt each render and are safe.
+- Pixi 8.19.0 WebGPU GC also unloads in-use static uniform buffers (global
+  uniforms, batcher UBOs) whose values have not changed, with the same
+  destroyed-buffer submit (pixijs#12080). The engine fix (pixijs#12147) is
+  not in a release. Until it is, WebGPU init sets `renderer.gc.enabled =
+  false`. Do not re-enable GC on WebGPU without that Pixi release; keep the
+  pointer-light pin either way. Scene resources are destroyed explicitly in
+  `render()`. WebGL GC may stay on.
 - GPU lifetime defects are invisible to `tests/` (mocked, no device) and to the
   WebGL fallback (no bind groups). They are covered by `npm run viz:smoke:gc`,
   which needs real Chrome plus a real WebGPU adapter and therefore stays OUT of
@@ -515,8 +555,10 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   relighting, reduced-motion support, and no overlapping R3F logo.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
-- PWA/service-worker registration is production-only. Keep responses no-store
-  where live data must not be hidden by an offline shell.
+- PWA/service-worker registration is production-only. `/api/*`, `/auth/*`,
+  `/webhooks/*`, and every response marked `Cache-Control: no-store` stay
+  outside the cache so live data, identity state and GitHub deliveries cannot
+  be hidden by an offline shell.
 - Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
 - The Launch tab describes families and intentionally does not start runs.
 

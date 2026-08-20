@@ -1,8 +1,16 @@
 import { create } from 'zustand';
 import type { EventFilters } from '../client/run-utils.js';
 
-export type ViewName = 'runs' | 'registry' | 'skills' | 'burnin' | 'launch';
-export type InputKind = 'run' | 'registry' | 'skills' | 'launch' | null;
+export type ViewName = 'projects' | 'runs' | 'registry' | 'skills' | 'burnin' | 'launch';
+export type InputKind =
+  | 'run'
+  | 'registry'
+  | 'skills'
+  | 'launch'
+  | 'projectName'
+  | 'projectPrompt'
+  | 'projectRepository'
+  | null;
 
 export function nextRunFilters(
   current: EventFilters,
@@ -23,6 +31,8 @@ export interface GpuUiState {
   selectedRegistryId: string | null;
   selectedRegistryAtom: string | null;
   selectedSkill: { l1Name: string; id: string } | null;
+  selectedProjectId: string | null;
+  selectedGithubInstallationId: string | null;
   runFilters: EventFilters;
   branchHeadingExpanded: boolean;
   runSummaryExpanded: boolean;
@@ -50,6 +60,8 @@ export interface GpuUiState {
   selectRegistry: (id: string | null) => void;
   selectRegistryAtom: (name: string | null) => void;
   selectSkill: (selection: { l1Name: string; id: string } | null) => void;
+  selectProject: (id: string | null) => void;
+  selectGithubInstallation: (id: string | null) => void;
   setRunFilters: (filters: EventFilters) => void;
   toggleBranchHeading: () => void;
   toggleRunSummary: () => void;
@@ -84,10 +96,20 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   selectedRegistryId: null,
   selectedRegistryAtom: null,
   selectedSkill: null,
+  selectedProjectId: null,
+  selectedGithubInstallationId: null,
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
   branchHeadingExpanded: true,
   runSummaryExpanded: true,
-  search: { run: '', registry: '', skills: '', launch: '' },
+  search: {
+    run: '',
+    registry: '',
+    skills: '',
+    launch: '',
+    projectName: '',
+    projectPrompt: '',
+    projectRepository: '',
+  },
   focusedInput: null,
   runPickerScrollY: 0,
   runPickerActiveIndex: 0,
@@ -95,7 +117,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninOutcome: 'all',
   burninPreset: 'all',
   burninPage: 1,
-  scrollY: { runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+  scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
   refreshNonce: 0,
   entered: false,
   enter: () => set({ entered: true }),
@@ -136,6 +158,9 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     set({ selectedRegistryId, selectedRegistryAtom: null }),
   selectRegistryAtom: (selectedRegistryAtom) => set({ selectedRegistryAtom }),
   selectSkill: (selectedSkill) => set({ selectedSkill }),
+  selectProject: (selectedProjectId) => set({ selectedProjectId }),
+  selectGithubInstallation: (selectedGithubInstallationId) =>
+    set({ selectedGithubInstallationId }),
   setRunFilters: (runFilters) =>
     set((state) => ({
       runFilters,

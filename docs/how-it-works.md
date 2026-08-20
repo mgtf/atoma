@@ -457,8 +457,10 @@ check that it is still working.
 
 Recorded so nobody has to discover it in a demo:
 
-- **No tenancy of any kind.** No users, no organisations, no authentication. The web console
-  binds to localhost and has no auth at all. The target design exists in
+- **No multi-tenancy.** The web console is open on loopback by default and now has an optional,
+  invitation-only login gate for one organisation per deployment. It records principals,
+  provider identities, memberships and roles, but runs, traces, stores and trust are still shared
+  across that instance rather than scoped by organisation. The target isolation model exists in
   [`saas-architecture.md`](saas-architecture.md) and is explicitly marked as not built.
 - **No hosted service.** This is a private repository, not a published project.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so

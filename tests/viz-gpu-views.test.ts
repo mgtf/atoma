@@ -25,6 +25,11 @@ import {
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
+import { drawProjects, PROJECTS_DOM_FORM_HEIGHT, PROJECTS_DOM_FORM_TOP, projectsGpuContentTop } from '../src/viz/client-gl/renderer/views/projects.js';
+import {
+  authAccountLayout,
+  drawAuthAccount,
+} from '../src/viz/client-gl/renderer/views/auth-account.js';
 import { attachAtomaMark, ATOMA_MARK_ENV_MIN_SCALE, ATOMA_MARK_HEADER_SCALE } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
@@ -60,6 +65,7 @@ interface RecordedButton {
   width: number;
   height: number;
   active: boolean;
+  onActivate?: (id: string) => void;
 }
 
 interface RecordedEventCard {
@@ -232,8 +238,8 @@ function createRecordingCtx(): RecordingCtx {
       ctx.root.addChild(mask);
       return mask;
     },
-    button(parent, id, role, label, x, y, width, height, active) {
-      ctx.buttons.push({ id, label, x, y, width, height, active });
+    button(parent, id, role, label, x, y, width, height, active, onActivate) {
+      ctx.buttons.push({ id, label, x, y, width, height, active, onActivate });
       ctx.metrics.hitTargets.push({ id, role, label, x, y, width, height });
       const container = new Container();
       parent.addChild(container);
@@ -320,10 +326,20 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectedRegistryId: null,
     selectedRegistryAtom: null,
     selectedSkill: null,
+    selectedProjectId: null,
+    selectedGithubInstallationId: null,
     runFilters: { kind: 'all', role: 'all', branchId: 'all' },
     branchHeadingExpanded: true,
     runSummaryExpanded: true,
-    search: { run: '', registry: '', skills: '', launch: '' },
+    search: {
+      run: '',
+      registry: '',
+      skills: '',
+      launch: '',
+      projectName: '',
+      projectPrompt: '',
+      projectRepository: '',
+    },
     focusedInput: null,
     runPickerScrollY: 0,
     runPickerActiveIndex: 0,
@@ -331,7 +347,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0 },
     refreshNonce: 0,
     entered: true,
     enter: noop,
@@ -343,6 +359,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectRegistry: noop,
     selectRegistryAtom: noop,
     selectSkill: noop,
+    selectProject: noop,
+    selectGithubInstallation: noop,
     setRunFilters: noop,
     toggleBranchHeading: noop,
     toggleRunSummary: noop,
@@ -360,6 +378,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
 
 function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
   return {
+    auth: null,
     runs: [],
     run: null,
     registries: [],
@@ -369,6 +388,9 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     skillDetail: null,
     burnin: null,
     profiles: [],
+    projects: [],
+    projectRuns: {},
+    githubInstallations: [],
     loading: false,
     fetching: false,
     error: null,
@@ -588,6 +610,163 @@ describe('reduced-motion override', () => {
   });
 });
 
+describe('drawProjects', () => {
+  it('keeps GPU empty-state copy below the DOM create form', () => {
+    const ctx = createRecordingCtx();
+    drawProjects(ctx, makeSnapshot({ view: 'projects' }), 1280, 720);
+    const title = ctx.texts.find((text) => text.value === 'Projects');
+    const empty = ctx.texts.find((text) => text.value.includes('connect a GitHub App'));
+    expect(title?.y).toBeLessThan(PROJECTS_DOM_FORM_TOP);
+    expect((title?.y ?? 0) + 40).toBeLessThanOrEqual(PROJECTS_DOM_FORM_TOP);
+    expect(empty?.y).toBe(projectsGpuContentTop());
+    expect(empty?.y).toBeGreaterThanOrEqual(PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_HEIGHT);
+    expect(readFileSync('src/viz/client-gl/styles.css', 'utf8')).toMatch(
+      new RegExp(`\\.gpu-project-form\\s*\\{[\\s\\S]*?top:\\s*${PROJECTS_DOM_FORM_TOP}px`)
+    );
+  });
+
+  it('renders a project row and expands its runs when selected', () => {
+    const ctx = createRecordingCtx();
+    const projectId = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
+    drawProjects(
+      ctx,
+      makeSnapshot(
+        { view: 'projects', selectedProjectId: projectId },
+        {
+          projects: [
+            {
+              projectId,
+              name: 'Weather Lab',
+              slug: 'weather-lab',
+              status: 'active',
+              family: 'build',
+              repositoryTarget: {
+                installationId: '501',
+                owner: 'atoma-org',
+                name: 'weather-lab',
+                visibility: 'private',
+              },
+              repositoryStatus: 'ready',
+              repositoryFullName: 'atoma-org/weather-lab',
+              repositoryUrl: 'https://github.com/atoma-org/weather-lab',
+              repositoryError: null,
+              createdAt: '2026-08-20T00:00:00.000Z',
+              updatedAt: '2026-08-20T00:00:00.000Z',
+            },
+          ],
+          projectRuns: {
+            [projectId]: [
+              {
+                projectRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+                projectId,
+                goal: 'Build a weather dashboard.',
+                status: 'delivered',
+                traceId: 'trace-1',
+                costUsd: 0.12,
+                durationS: 12,
+                error: null,
+                createdAt: '2026-08-20T00:01:00.000Z',
+                endedAt: '2026-08-20T00:02:00.000Z',
+                publication: {
+                  status: 'published',
+                  repositoryUrl: 'https://github.com/atoma-org/weather-lab',
+                  commitSha: 'a'.repeat(40),
+                },
+              },
+              {
+                projectRunId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+                projectId,
+                goal: 'Broken scene.',
+                status: 'failed',
+                traceId: null,
+                costUsd: null,
+                durationS: null,
+                error: '401 API key is invalid.',
+                createdAt: '2026-08-20T00:03:00.000Z',
+                endedAt: '2026-08-20T00:03:02.000Z',
+                publication: null,
+              },
+            ],
+          },
+        }
+      ),
+      1280,
+      720
+    );
+    expect(ctx.metrics.visibleLabels).toContain('Projects');
+    expect(ctx.metrics.visibleLabels.some((label) => label.includes('Weather Lab'))).toBe(true);
+    expect(ctx.buttons.some((button) => button.id === `project.select.${projectId}` && button.label === 'Weather Lab')).toBe(true);
+    expect(ctx.buttons.some((button) => button.id === 'project.run.trace-1')).toBe(true);
+    expect(
+      ctx.buttons.some((button) => button.id === 'project.run.bbbbbbbb-cccc-dddd-eeee-ffffffffffff')
+    ).toBe(true);
+    expect(ctx.texts.some((text) => String(text.value).includes('401 API key is invalid'))).toBe(true);
+    expect(ctx.scrollMax.projects).toBeGreaterThanOrEqual(0);
+    expect(ctx.scrollMax.projects).toBeLessThan(200);
+  });
+});
+
+describe('GPU account control', () => {
+  it('projects the account and logout action into Pixi', () => {
+    const ctx = createRecordingCtx();
+    const activated: string[] = [];
+    const snapshot = makeSnapshot({}, {
+      auth: {
+        viewer: {
+          displayName: 'Ada Lovelace',
+          role: 'org:owner',
+          activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+          organisations: [
+            { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+            { id: 'org-b', name: 'Difference Engines', role: 'org:member' },
+          ],
+        },
+        failure: false,
+        signingOut: false,
+        switchingOrganisationId: null,
+      },
+    });
+    snapshot.onActivate = (id) => activated.push(id);
+
+    drawAuthAccount(ctx, snapshot, 1280, 720);
+
+    expect(ctx.metrics.visibleLabels).toContain('Signed in as Ada Lovelace');
+    expect(ctx.metrics.visibleLabels).toContain('Organisation: Analytical Engines');
+    expect(ctx.buttons.find((button) => button.id === 'org.switch.org-b')).toBeTruthy();
+    const logout = ctx.buttons.find((button) => button.id === 'auth.signOut');
+    expect(logout?.label).toBe('Sign out');
+    logout?.onActivate?.(logout.id);
+    expect(activated).toEqual(['auth.signOut']);
+  });
+
+  it('stays absent without a viewer and keeps its failure panel on-screen', () => {
+    const hidden = createRecordingCtx();
+    drawAuthAccount(hidden, makeSnapshot(), 360, 240);
+    expect(hidden.buttons).toHaveLength(0);
+
+    const failed = createRecordingCtx();
+    drawAuthAccount(failed, makeSnapshot({}, {
+      auth: {
+        viewer: {
+          displayName: 'Grace Hopper',
+          role: 'org:member',
+          activeOrganisation: null,
+          organisations: [],
+        },
+        failure: true,
+        signingOut: false,
+        switchingOrganisationId: null,
+      },
+    }), 360, 240);
+    expect(failed.metrics.visibleLabels).toContain('Account action failed');
+    const layout = authAccountLayout(360, 240, true);
+    expect(layout.x).toBeGreaterThanOrEqual(0);
+    expect(layout.y).toBeGreaterThanOrEqual(0);
+    expect(layout.x + layout.width).toBeLessThanOrEqual(360);
+    expect(layout.y + layout.height).toBeLessThanOrEqual(240);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Registry view
 // ---------------------------------------------------------------------------
@@ -631,6 +810,7 @@ describe('drawRegistry scrolling honesty', () => {
         {
           view: 'registry',
           scrollY: {
+            projects: 0,
             runs: 0,
             registry: unscrolled.scrollMax.registry!,
             skills: 0,
@@ -762,7 +942,15 @@ describe('drawSkills scrolling honesty and search', () => {
       makeSnapshot(
         {
           view: 'skills',
-          search: { run: '', registry: '', skills: 'replay', launch: '' },
+          search: {
+            run: '',
+            registry: '',
+            skills: 'replay',
+            launch: '',
+            projectName: '',
+            projectPrompt: '',
+            projectRepository: '',
+          },
         },
         {
           skillNamespaces: [{ l1Name: 'ammonia-atom-id', l1Label: 'Ammonia', count: pair.length }],
@@ -817,7 +1005,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0 },
         },
         data
       ),
@@ -868,7 +1056,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0 },
         },
         data
       ),
@@ -1395,6 +1583,7 @@ describe('drawRuns behavior', () => {
       makeSnapshot(
         {
           scrollY: {
+            projects: 0,
             runs: ctx.scrollMax.runs!,
             registry: 0,
             skills: 0,

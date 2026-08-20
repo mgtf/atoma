@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n.js';
 import { DomBridge } from '../src/viz/client-gl/DomBridge.js';
+import type { VizGitHubInstallation } from '../src/viz/client/types.js';
 import {
   ENTRY_FADE_IN_MS,
   ENTRY_FADE_OUT_MS,
@@ -40,7 +41,15 @@ beforeEach(() => {
     focusedInput: null,
     runPickerActiveIndex: 0,
     runPickerScrollY: 0,
-    search: { run: '', registry: '', skills: '', launch: '' },
+    search: {
+      run: '',
+      registry: '',
+      skills: '',
+      launch: '',
+      projectName: '',
+      projectPrompt: '',
+      projectRepository: '',
+    },
     entered: true,
   });
 });
@@ -57,7 +66,9 @@ function renderBridge(
   onSelectRun = vi.fn(),
   onCopy = vi.fn(),
   runItems = runs,
-  onEnter?: () => void
+  onEnter?: () => void,
+  githubInstallations: VizGitHubInstallation[] = [],
+  selectedProjectName: string | null = null
 ) {
   render(
     createElement(DomBridge, {
@@ -67,6 +78,8 @@ function renderBridge(
       onSelectRun,
       onCopy,
       onEnter,
+      githubInstallations,
+      selectedProjectName,
     })
   );
   return { onSelectRun, onCopy, onEnter };
@@ -92,7 +105,7 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.getByText('v9.8.7')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(useGpuStore.getState().entered).toBe(true);
-    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    expect(screen.getAllByRole('tab')).toHaveLength(6);
   });
 
   it('routes Continue through onEnter so the fade can own admission', async () => {
@@ -106,14 +119,50 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.queryAllByRole('tab')).toHaveLength(0);
   });
 
-  it('keeps all five canvas views reachable to assistive technology', async () => {
+  it('keeps all six canvas views reachable to assistive technology', async () => {
     const user = userEvent.setup();
     renderBridge();
     const tabs = screen.getAllByRole('tab');
-    expect(tabs).toHaveLength(5);
+    expect(tabs).toHaveLength(6);
+    await user.click(screen.getByRole('tab', { name: 'Projects' }));
+    expect(useGpuStore.getState().view).toBe('projects');
+    expect(screen.getByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Project name' })).toBeInTheDocument();
+    expect(document.querySelector('.gpu-project-form')).toContainElement(
+      screen.getByRole('textbox', { name: 'Project name' })
+    );
+    expect(screen.getByRole('link', { name: 'Connect GitHub' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Start run/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/Name the project first/)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Run prompt' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Registry' }));
     expect(useGpuStore.getState().view).toBe('registry');
     expect(screen.getByText('Registry')).toBeInTheDocument();
+  });
+
+  it('hides Connect GitHub once an App installation is active', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), vi.fn(), runs, undefined, [
+      {
+        installationId: '501',
+        accountLogin: 'mgtf',
+        targetType: 'User',
+        status: 'active',
+        repositorySelection: 'all',
+      },
+    ]);
+    expect(screen.queryByRole('link', { name: 'Connect GitHub' })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'GitHub installation' })).toHaveTextContent('mgtf');
+  });
+
+  it('offers Start run only after a project is selected', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), vi.fn(), runs, undefined, [], 'Weather Lab');
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start run on Weather Lab' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Run prompt' })).toBeInTheDocument();
+    expect(screen.getByText(/This prompt is for the next run on Weather Lab/)).toBeInTheDocument();
   });
 
   it('uses a real text input for IME/search and a textarea for Launch', async () => {

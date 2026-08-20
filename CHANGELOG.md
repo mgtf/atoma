@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### Fixed
+
+- The GPU visualizer no longer lets Pixi 8.19.0's WebGPU garbage collector
+  destroy uniform buffers that cached bind groups still reference, which
+  crashed the canvas after about a minute with
+  `used in submit while destroyed`.
+- Starting a project run no longer 500s: the public run projection strips
+  host filesystem paths instead of rejecting them as unrecognized keys.
+- Gated `/api/runs` lists the viewer's organisation only. Each project run
+  lives at `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (workspace,
+  traces, log) and is not copied into the operator `./runs` directory.
+
+### Changed
+
+- `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout
+  `.env` so a local GitHub-gated visualizer does not need a shell export.
+  Compiled `viz:serve` still reads only the process environment.
+
+### Added
+
+- The visualizer can opt into an invitation-only OAuth gate with GitHub,
+  Google or an approved Sign in with ChatGPT client.
+- `atoma auth` lists linked principals and mints hashed, expiring, one-use
+  invitations without persisting their bearer tokens.
+- An optional GitHub App connect flow (`/auth/github/connect`, setup URL and
+  `/webhooks/github`) links an installation to the viewer's organisation
+  separately from login.
+- Organisation-scoped projects can start runs and, after a delivered and
+  validated artifact manifest, publish those files into one idempotent GitHub
+  repository (user-to-server token for personal repos; installation token for
+  organisations).
+- `atoma doctor` reports the GitHub App snapshot as disabled, configured, or
+  a hard failure when the env is only half-present.
+- The GPU visualizer adds a Projects tab (six views in `viz:smoke`).
+
+### Security
+
+- OAuth uses PKCE S256, single-use server-side state, a canonical configured
+  redirect origin, bounded provider requests and opaque revocable sessions.
+  The first unknown identity creates an organisation; further admission is
+  invitation-only.
+- The service worker excludes authentication, API and GitHub webhook traffic
+  and will not cache responses marked `no-store`.
+- Project mutations require a same-origin `Origin` header; webhooks verify
+  `X-Hub-Signature-256` and never sit behind the session gate.
+
 ## v0.1.4 — 2026-08-20
 
 ### Added

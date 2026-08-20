@@ -215,6 +215,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(farField).toMatch(/spill\.clientX/);
     expect(gpuRenderer).toMatch(/POINTER_LIGHT_GLSL|POINTER_LIGHT_WGSL/);
     expect(gpuRenderer).toMatch(/installPointerLightFilter/);
+    expect(gpuRenderer).toMatch(/autoGarbageCollect = false/);
+    expect(gpuRenderer).toMatch(/gc\.enabled = false/);
     expect(rendererShaders).toMatch(/POINTER_LIGHT_GLSL/);
     expect(rendererShaders).toMatch(/POINTER_LIGHT_WGSL/);
     expect(rendererShaders).toMatch(/uInputPixel\.z|dpdx\(sampleLuminance\)/);

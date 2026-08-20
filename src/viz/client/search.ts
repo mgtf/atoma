@@ -18,8 +18,13 @@ export function matchesSearchQuery(haystack: string, query: string): boolean {
   return tokens.every((token) => text.includes(token));
 }
 
-export function runSearchText(run: { id: string; label: string }): string {
-  return `${run.id} ${run.label}`;
+export function runSearchText(run: {
+  id: string;
+  label: string;
+  projectSlug?: string;
+  projectName?: string;
+}): string {
+  return [run.id, run.label, run.projectSlug, run.projectName].filter(Boolean).join(' ');
 }
 
 export function atomSearchText(atom: {

@@ -363,6 +363,10 @@ export interface VizRunIndexEntry {
   cancelled?: boolean;
   costUsd?: number;
   calls?: number;
+  /** Present when the index row is a project run (gated viz). */
+  projectId?: string;
+  projectName?: string;
+  projectSlug?: string;
 }
 
 export interface VizRunTotals {
@@ -425,6 +429,10 @@ export function runLabelFromGoal(goal: string, max: number): string {
   return goal.length > max ? `${goal.slice(0, max)}…` : goal;
 }
 
+export function isTraceRunId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
+}
+
 export class TraceRecorder {
   private run: VizRun | null = null;
   readonly runsDir: string;
@@ -446,12 +454,16 @@ export class TraceRecorder {
   beginRun(
     task: Task,
     label?: string,
-    opts?: { initialTypes?: readonly AtomType[] }
+    opts?: { initialTypes?: readonly AtomType[]; runId?: string }
   ): VizRun {
-    const id = `${new Date()
+    const generatedId = `${new Date()
       .toISOString()
       .replace(/[:.]/g, '-')
       .replace('Z', '')}-${randomUUID().slice(0, 8)}`;
+    const id = opts?.runId ?? generatedId;
+    if (!isTraceRunId(id)) {
+      throw new Error('trace run id must be 1-128 safe filename characters');
+    }
     this.run = {
       id,
       label: label ?? runLabelFromGoal(task.description, 140),

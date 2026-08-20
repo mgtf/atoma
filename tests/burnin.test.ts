@@ -378,4 +378,36 @@ describe('spawnRun — experiment env isolation', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('can replace the inherited environment with a caller-owned allowlist', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atoma-burnin-allowlist-'));
+    const fakeNpm = join(dir, 'npm');
+    writeFileSync(
+      fakeNpm,
+      [
+        '#!/bin/sh',
+        'printf \'ALLOWED=%s\\n\' "${ATOMA_ALLOWED-unset}"',
+        'printf \'HOST_SECRET=%s\\n\' "${ATOMA_HOST_SECRET-unset}"',
+      ].join('\n') + '\n',
+      'utf8'
+    );
+    chmodSync(fakeNpm, 0o755);
+    const previousSecret = process.env['ATOMA_HOST_SECRET'];
+    try {
+      process.env['ATOMA_HOST_SECRET'] = 'must-not-cross';
+      const log = await spawnRun({
+        goal: 'inspect allowlisted environment',
+        timeoutMs: 1_000,
+        logPath: join(dir, 'child.log'),
+        cleanWorkspace: false,
+        env: { PATH: `${dir}:${process.env['PATH'] ?? ''}`, ATOMA_ALLOWED: 'yes' },
+      });
+      expect(log).toContain('ALLOWED=yes');
+      expect(log).toContain('HOST_SECRET=unset');
+    } finally {
+      if (previousSecret === undefined) delete process.env['ATOMA_HOST_SECRET'];
+      else process.env['ATOMA_HOST_SECRET'] = previousSecret;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
