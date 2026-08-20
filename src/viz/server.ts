@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, extname, relative, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +15,13 @@ import { elementForTool } from '../contracts/toolTaxonomy.js';
 import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js';
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
-import { sha256Hex, TooManyPendingOauthStatesError, type Viewer } from '../auth/store.js';
+import {
+  ORG_ROLES,
+  sha256Hex,
+  TooManyPendingOauthStatesError,
+  type OrgRole,
+  type Viewer,
+} from '../auth/store.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -575,6 +582,22 @@ function sameOrigin(
   return false;
 }
 
+/** Read a request body, refusing anything past `maxBytes` (413 is the caller's job). */
+async function readBodyBounded(
+  req: import('node:http').IncomingMessage,
+  maxBytes: number
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let length = 0;
+  for await (const chunk of req) {
+    const bytes = Buffer.from(chunk as Buffer);
+    length += bytes.length;
+    if (length > maxBytes) throw new Error('request body too large');
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks);
+}
+
 function sendJson(res: import('node:http').ServerResponse, code: number, obj: unknown): void {
   send(res, code, JSON.stringify(obj), 'application/json; charset=utf-8');
 }
@@ -620,10 +643,27 @@ function listOrganisationRunIndex(orgId: string): VizRunIndexEntry[] {
   return sortRunIndex(entries);
 }
 
+function listAllRunIndex(): VizRunIndexEntry[] {
+  if (!PROJECTS_RUNTIME) return [];
+  const entries: VizRunIndexEntry[] = [];
+  for (const row of PROJECTS_RUNTIME.store.listAllRunTraces()) {
+    const summary = summarizeTraceFile(row.file);
+    if (!summary) continue;
+    entries.push({
+      ...summary,
+      projectId: row.projectId,
+      projectName: row.projectName,
+      projectSlug: row.projectSlug,
+    });
+  }
+  return sortRunIndex(entries);
+}
+
 function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return [];
-    return listOrganisationRunIndex(viewer.orgId);
+    // The platform admin reads every organisation's project traces.
+    return viewer.platformAdmin ? listAllRunIndex() : listOrganisationRunIndex(viewer.orgId);
   }
   return listOperatorRunIndex();
 }
@@ -631,7 +671,9 @@ function listIndex(viewer: Viewer | null): VizRunIndexEntry[] {
 function resolveRunFile(id: string, viewer: Viewer | null): string | null {
   if (AUTH) {
     if (!PROJECTS_RUNTIME || !viewer) return null;
-    return PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
+    return viewer.platformAdmin
+      ? PROJECTS_RUNTIME.store.findAnyRunTraceFile(id)
+      : PROJECTS_RUNTIME.store.findOrgRunTraceFile(viewer.orgId, id);
   }
   const primary = join(RUNS_DIR, `${id}.json`);
   return existsSync(primary) ? primary : null;
@@ -1301,6 +1343,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         displayName: viewer.displayName,
         orgName: viewer.orgName,
         role: viewer.role,
+        platformAdmin: viewer.platformAdmin,
         activeOrganisation: {
           id: viewer.orgId,
           name: viewer.orgName,
@@ -1457,6 +1500,89 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
     const viewer = AUTH.resolve(req);
     if (!viewer) {
       sendJson(res, 401, { error: 'authentication required' });
+      return;
+    }
+
+    // OPERATOR SURFACES. The registry, skill store and burn-in APIs are
+    // instance-global: org runs mutate the shared registry and these routes
+    // read it in full (atom names, system prompts, skill bodies). Behind the
+    // org gate they belong to the PLATFORM ADMIN alone — an invitation must
+    // not grant read access to operator-level state (review 2026-08-20 §2.2).
+    const operatorApi =
+      pathname === '/api/registries' ||
+      pathname.startsWith('/api/registry/') ||
+      pathname === '/api/skills' ||
+      pathname.startsWith('/api/skills/') ||
+      pathname === '/api/burnin';
+    if (operatorApi && !viewer.platformAdmin) {
+      sendJson(res, 403, { error: 'platform admin required' });
+      return;
+    }
+
+    // ADMIN CONTROL PLANE — organisations and invitations, admin-only.
+    if (pathname.startsWith('/api/admin/')) {
+      if (!viewer.platformAdmin) {
+        sendJson(res, 403, { error: 'platform admin required' });
+        return;
+      }
+      const authStore = AUTH.store!;
+      if (pathname === '/api/admin/organisations') {
+        if (!methodAllowed(req, res, 'GET')) return;
+        sendJson(res, 200, authStore.listOrganisationsWithMembers());
+        return;
+      }
+      if (pathname === '/api/admin/invitations') {
+        if (!methodAllowed(req, res, 'POST')) return;
+        if (!sameOrigin(req, res)) return;
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const input = body as { orgId?: unknown; role?: unknown; ttlHours?: unknown };
+        const orgId = typeof input.orgId === 'string' ? input.orgId.trim() : '';
+        const role = typeof input.role === 'string' ? input.role : 'org:member';
+        const ttlHours = input.ttlHours === undefined ? 24 : Number(input.ttlHours);
+        if (!orgId || !ORG_ROLES.includes(role as OrgRole)) {
+          sendJson(res, 400, { error: 'orgId and a valid role are required' });
+          return;
+        }
+        if (!Number.isFinite(ttlHours) || ttlHours <= 0 || ttlHours > 24 * 30) {
+          sendJson(res, 400, { error: 'ttlHours must be within (0, 720]' });
+          return;
+        }
+        if (!authStore.listOrganisations().some((organisation) => organisation.orgId === orgId)) {
+          sendJson(res, 404, { error: 'unknown organisation' });
+          return;
+        }
+        const token = randomBytes(32).toString('base64url');
+        try {
+          const invitation = authStore.createInvitation({
+            orgId,
+            token,
+            role: role as OrgRole,
+            ttlMs: ttlHours * 60 * 60 * 1_000,
+          });
+          sendJson(res, 200, {
+            token,
+            url: AUTH_RUNTIME
+              ? new URL(`/?invite=${encodeURIComponent(token)}`, AUTH_RUNTIME.publicOrigin).href
+              : `/?invite=${encodeURIComponent(token)}`,
+            orgId: invitation.orgId,
+            orgName: invitation.orgName,
+            role,
+            expiresAt: invitation.expiresAt,
+          });
+        } catch (error) {
+          sendJson(res, 400, {
+            error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          });
+        }
+        return;
+      }
+      sendJson(res, 404, { error: 'not found' });
       return;
     }
   }

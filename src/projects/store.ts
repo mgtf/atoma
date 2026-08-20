@@ -488,6 +488,106 @@ export class ProjectStore {
     ).map(projectFromRow);
   }
 
+  /**
+   * PLATFORM-ADMIN READS. Every method below deliberately drops the org
+   * filter; callers must gate them on `viewer.platformAdmin`. They exist so
+   * the admin surface reuses the exact same row shapes as the org-scoped
+   * reads instead of growing a parallel projection.
+   */
+  listAllProjects(): Array<Project & { orgName: string | null }> {
+    return (
+      this.db
+        .prepare(
+          `SELECT p.*, o.name AS org_name
+           FROM projects p
+           LEFT JOIN auth_organisations o ON o.org_id = p.org_id
+           ORDER BY p.updated_at DESC, p.project_id ASC`
+        )
+        .all() as Array<ProjectRow & { org_name: string | null }>
+    ).map((row) => ({ ...projectFromRow(row), orgName: row.org_name }));
+  }
+
+  /** Resolve a project by id across ALL organisations (admin reads only). */
+  getProjectAnyOrg(projectIdInput: string): Project | null {
+    const projectId = projectIdSchema.parse(projectIdInput);
+    const row = this.db
+      .prepare('SELECT * FROM projects WHERE project_id = ?')
+      .get(projectId) as ProjectRow | undefined;
+    return row ? projectFromRow(row) : null;
+  }
+
+  listAllRunTraces(): Array<{
+    id: string;
+    file: string;
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.project_id, p.name AS project_name, p.slug AS project_slug
+         FROM project_runs r
+         JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
+         ORDER BY r.created_at DESC, r.project_run_id ASC`
+      )
+      .all() as Array<{
+      project_run_id: string;
+      trace_id: string | null;
+      runs_path: string;
+      project_id: string;
+      project_name: string;
+      project_slug: string;
+    }>;
+    const out: Array<{
+      id: string;
+      file: string;
+      projectId: string;
+      projectName: string;
+      projectSlug: string;
+    }> = [];
+    for (const row of rows) {
+      const file = resolveProjectRunTraceFile({
+        projectRunId: row.project_run_id,
+        runsPath: row.runs_path,
+        traceId: row.trace_id,
+      });
+      if (!file) continue;
+      out.push({
+        id: row.project_run_id,
+        file,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        projectSlug: row.project_slug,
+      });
+    }
+    return out;
+  }
+
+  findAnyRunTraceFile(idInput: string): string | null {
+    if (!isRunLookupId(idInput)) return null;
+    const asUuid = projectRunIdSchema.safeParse(idInput);
+    const row = (
+      asUuid.success
+        ? this.db
+            .prepare(
+              `SELECT project_run_id, trace_id, runs_path FROM project_runs
+               WHERE project_run_id = ? OR trace_id = ?`
+            )
+            .get(asUuid.data, asUuid.data)
+        : this.db
+            .prepare(
+              `SELECT project_run_id, trace_id, runs_path FROM project_runs WHERE trace_id = ?`
+            )
+            .get(idInput)
+    ) as { project_run_id: string; trace_id: string | null; runs_path: string } | undefined;
+    if (!row) return null;
+    return resolveProjectRunTraceFile({
+      projectRunId: row.project_run_id,
+      runsPath: row.runs_path,
+      traceId: row.trace_id,
+    });
+  }
+
   transitionRepository(input: {
     readonly orgId: string;
     readonly projectId: string;

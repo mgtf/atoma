@@ -129,9 +129,26 @@ export class ProjectService {
     }));
   }
 
-  /** GET /api/projects */
+  /** GET /api/projects — a platform admin reads ALL organisations' projects. */
   listProjects(viewer: Viewer): unknown {
+    if (viewer.platformAdmin) {
+      return this.store.listAllProjects().map((project) => ({
+        ...publicProject(project),
+        orgId: project.orgId,
+        orgName: project.orgName,
+      }));
+    }
     return this.store.listProjects(viewer.orgId).map(publicProject);
+  }
+
+  /**
+   * The organisation whose rows this viewer may read for `projectId`: their
+   * own — or, for a platform admin, whichever organisation owns the project.
+   * Reads only; writes stay bound to the viewer's active organisation.
+   */
+  private readOrgFor(viewer: Viewer, projectId: string): string {
+    if (!viewer.platformAdmin) return viewer.orgId;
+    return this.store.getProjectAnyOrg(projectId)?.orgId ?? viewer.orgId;
   }
 
   /** POST /api/projects — org:member or above. */
@@ -170,10 +187,11 @@ export class ProjectService {
 
   /** GET /api/projects/:id/runs */
   listProjectRuns(viewer: Viewer, projectId: string): unknown {
-    const runs = this.store.listProjectRuns(viewer.orgId, projectId);
+    const orgId = this.readOrgFor(viewer, projectId);
+    const runs = this.store.listProjectRuns(orgId, projectId);
     if (!runs) throw new ProjectHttpError(404, 'project not found');
     return runs.map((run) => {
-      const publication = this.store.getPublicationForRun(viewer.orgId, run.projectRunId);
+      const publication = this.store.getPublicationForRun(orgId, run.projectRunId);
       return publicRun(run, publication);
     });
   }

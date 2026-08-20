@@ -486,6 +486,98 @@ describe('viz auth gate (process level)', () => {
     }
   });
 
+  it('reserves operator surfaces and the admin control plane to a CLI-granted platform admin', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 202 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+
+    // Before the grant: an ordinary org owner is NOT the platform operator.
+    const whoamiBefore = await fetch(`${base}/auth/whoami`, { headers: cookie });
+    expect(await whoamiBefore.json()).toMatchObject({ authenticated: true, platformAdmin: false });
+    for (const path of ['/api/registries', '/api/skills', '/api/burnin', '/api/admin/organisations']) {
+      const refused = await fetch(`${base}${path}`, { headers: cookie });
+      expect(refused.status).toBe(403);
+    }
+
+    // A second organisation exists (created directly against the store, the
+    // way any other login would): the admin must see it, its owner must not
+    // see the admin's.
+    const otherDb = new Database(instance.dbPath);
+    try {
+      const store = new AuthStore(otherDb);
+      expect(
+        store.completeLogin({
+          provider: 'github',
+          subject: 'other-org-owner',
+          displayName: 'Other Owner',
+          email: 'other@example.com',
+          emailVerified: false,
+        }, null)
+      ).not.toBeNull();
+    } finally {
+      otherDb.close();
+    }
+
+    // The grant is CLI-only, by unique identity email, against the store on
+    // disk — the exact operator gesture the feature specifies.
+    const { runAuthCli } = await import('../src/cli/auth.js');
+    expect(
+      runAuthCli(['node', 'auth', 'grant-admin', '--principal', 'fake@example.com', '--db', instance.dbPath], {})
+    ).toBe(0);
+
+    // The flag rides the very next request: no re-login, no session refresh.
+    const whoamiAfter = await fetch(`${base}/auth/whoami`, { headers: cookie });
+    expect(await whoamiAfter.json()).toMatchObject({ authenticated: true, platformAdmin: true });
+    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(200);
+
+    const organisations = await fetch(`${base}/api/admin/organisations`, { headers: cookie });
+    expect(organisations.status).toBe(200);
+    const listed = await organisations.json() as Array<{
+      orgId: string;
+      name: string;
+      members: unknown[];
+    }>;
+    expect(listed).toHaveLength(2);
+    for (const organisation of listed) expect(organisation.members).toHaveLength(1);
+
+    // Invitations from the admin plane: same-origin enforced, token minted
+    // once, bound to the named organisation and role.
+    const targetOrg = listed[1]!.orgId;
+    const crossSite = await fetch(`${base}/api/admin/invitations`, {
+      method: 'POST',
+      headers: { ...cookie, 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ orgId: targetOrg, role: 'org:member' }),
+    });
+    expect(crossSite.status).toBe(403);
+    const minted = await fetch(`${base}/api/admin/invitations`, {
+      method: 'POST',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ orgId: targetOrg, role: 'org:member', ttlHours: 1 }),
+    });
+    expect(minted.status).toBe(200);
+    const invitation = await minted.json() as { token: string; url: string; orgId: string; role: string };
+    expect(invitation.orgId).toBe(targetOrg);
+    expect(invitation.role).toBe('org:member');
+    expect(invitation.url).toContain(`invite=${encodeURIComponent(invitation.token)}`);
+
+    // Revocation closes the door again on the next request.
+    expect(
+      runAuthCli(['node', 'auth', 'revoke-admin', '--principal', 'fake@example.com', '--db', instance.dbPath], {})
+    ).toBe(0);
+    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(403);
+    expect((await fetch(`${base}/api/admin/organisations`, { headers: cookie })).status).toBe(403);
+  });
+
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {
     const instance = tempInstance();
     const invitation = 'A'.repeat(43);
