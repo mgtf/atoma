@@ -328,6 +328,28 @@ function fieldSpillsToSample(
 }
 
 /**
+ * What `attachAtomaMark` hands back so the renderer can RETAIN the mark
+ * across scene rebuilds instead of leaking it. `renderScene` rebuilds the
+ * scene on every render (wheel tick, hover, live poll) and `Mesh.destroy()`
+ * does not release render textures, geometries or the shader — with WebGPU
+ * GC pinned off, an attach-per-render mark grows VRAM without bound.
+ */
+export interface AtomaMarkHandle {
+  container: Container;
+  /**
+   * Every display object the mark owns on the parent — the mark container
+   * plus the cursor echo the env pass parks NEXT TO it (the echo must stay
+   * visible while the mark hides for its own capture, so it cannot live
+   * inside `container`). A retaining teardown must skip these.
+   */
+  retained: readonly Container[];
+  /** Re-adds the retained objects and re-registers the paint ticker after a scene rebuild. */
+  resume(parent: Container, addTicker: (callback: (ticker: Ticker) => void) => void): void;
+  /** Releases render textures, shader, geometries and the display subtree. Idempotent. */
+  destroy(): void;
+}
+
+/**
  * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
  * wordmark and the arrival gate — never a second R3F logo.
  *
@@ -348,7 +370,10 @@ export function attachAtomaMark(
   visualScale = ATOMA_MARK_HEADER_SCALE,
   renderer?: Renderer,
   options?: { bobPx?: number; bobPeriodMs?: number }
-): Container {
+): AtomaMarkHandle {
+  /** Render textures alive right now; resize swaps entries, destroy drains it. */
+  const ownedTextures = new Set<RenderTexture>();
+  let cursorEcho: Graphics | null = null;
   const container = new Container();
   container.position.set(x, y);
   container.eventMode = 'none';
@@ -449,6 +474,8 @@ export function attachAtomaMark(
       RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
       RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
     ];
+    ownedTextures.add(textures[0]!);
+    ownedTextures.add(textures[1]!);
     let writeIndex = 0;
     shell.setBackdrop(textures[1]!, sizePx, sizePx);
     /**
@@ -500,12 +527,13 @@ export function attachAtomaMark(
     if (visualScale < ATOMA_MARK_ENV_MIN_SCALE) return null;
     const stage = parent.parent;
     if (!stage) return null;
-    const cursorEcho = new Graphics();
-    cursorEcho.label = 'mark-cursor-echo';
-    cursorEcho.eventMode = 'none';
-    cursorEcho.visible = false;
-    paintCursorEcho(cursorEcho);
-    parent.addChild(cursorEcho);
+    const echo = new Graphics();
+    echo.label = 'mark-cursor-echo';
+    echo.eventMode = 'none';
+    echo.visible = false;
+    paintCursorEcho(echo);
+    parent.addChild(echo);
+    cursorEcho = echo;
     const transform = new Matrix();
     let textures: RenderTexture[] | null = null;
     let writeIndex = 0;
@@ -513,14 +541,17 @@ export function attachAtomaMark(
     let envH = 0;
     const ensureTextures = (widthPx: number, heightPx: number) => {
       if (textures && widthPx === envW && heightPx === envH) return;
-      textures?.[0]?.destroy(true);
-      textures?.[1]?.destroy(true);
+      for (const texture of textures ?? []) {
+        ownedTextures.delete(texture);
+        texture.destroy(true);
+      }
       envW = widthPx;
       envH = heightPx;
       textures = [
         RenderTexture.create({ width: envW, height: envH, resolution: 1 }),
         RenderTexture.create({ width: envW, height: envH, resolution: 1 }),
       ];
+      for (const texture of textures) ownedTextures.add(texture);
       writeIndex = 0;
     };
     return () => {
@@ -539,19 +570,19 @@ export function attachAtomaMark(
           pointer.clientX,
           pointer.clientY
         );
-        cursorEcho.position.set(
+        echo.position.set(
           stagePos.x - ATOMA_CURSOR_HOTSPOT.x,
           stagePos.y - ATOMA_CURSOR_HOTSPOT.y
         );
-        cursorEcho.visible = true;
+        echo.visible = true;
       } else {
-        cursorEcho.visible = false;
+        echo.visible = false;
       }
       container.visible = false;
       const target = textures![writeIndex]!;
       renderer.render({ container: stage, target, transform, clear: true });
       container.visible = true;
-      cursorEcho.visible = false;
+      echo.visible = false;
       shell.setEnv(target, true);
       writeIndex = 1 - writeIndex;
     };
@@ -684,10 +715,35 @@ export function attachAtomaMark(
   // the ticker — skipping would leave both inspect knobs dead.
   const elapsedForPaint = () =>
     reducedMotion && !markClockIsPinned() ? 0 : markElapsedMs();
-  paint(elapsedForPaint());
-  addTicker(() => {
+  const tick = () => {
     paint(elapsedForPaint());
-  });
+  };
+  paint(elapsedForPaint());
+  addTicker(tick);
   parent.addChild(container);
-  return container;
+
+  // The echo BEFORE the container, mirroring the attach order above, so a
+  // resume rebuilds the same z-order the first attach produced.
+  const retained: readonly Container[] = cursorEcho ? [cursorEcho, container] : [container];
+  let destroyed = false;
+  return {
+    container,
+    retained,
+    resume(nextParent, nextAddTicker) {
+      if (destroyed) return;
+      for (const child of retained) nextParent.addChild(child);
+      nextAddTicker(tick);
+    },
+    destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      // Display subtree first (meshes detach from geometry/shader), then the
+      // shell's GPU resources, then the textures the passes ping-pong.
+      cursorEcho?.destroy();
+      container.destroy({ children: true });
+      shell?.destroy();
+      for (const texture of ownedTextures) texture.destroy(true);
+      ownedTextures.clear();
+    },
+  };
 }

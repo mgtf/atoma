@@ -23,7 +23,7 @@ import type {
   VizProjectRun,
   VizRun,
 } from '../client/types.js';
-import { attachAtomaMark } from './renderer/atoma-mark.js';
+import { attachAtomaMark, type AtomaMarkHandle } from './renderer/atoma-mark.js';
 import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
 import {
   markElapsedMs,
@@ -192,6 +192,15 @@ export class GpuRenderer {
    * bar rather than under it.
    */
   readonly markRoot = new Container();
+  /**
+   * The one crystal, RETAINED across scene rebuilds like the far field.
+   * Attaching per render leaked its render textures, geometries and shader —
+   * `Mesh.destroy()` only nulls those references, and WebGPU GC is pinned
+   * off. The key captures every attach parameter; a mismatch (view change,
+   * resize, resolution change) destroys the old mark properly and builds a
+   * new one.
+   */
+  private atomaMark: { key: string; handle: AtomaMarkHandle } | null = null;
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
@@ -686,6 +695,8 @@ export class GpuRenderer {
     this.frameFilters.clear();
     // Detach-then-destroy, BEFORE the app tears the stage down: a retained
     // label still parented would otherwise be destroyed twice.
+    this.atomaMark?.handle.destroy();
+    this.atomaMark = null;
     this.labels.clear();
     this.textStyles.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
@@ -740,7 +751,14 @@ export class GpuRenderer {
     }
     this.retainFarField();
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
-    for (const child of this.markRoot.removeChildren()) child.destroy({ children: true });
+    // The crystal steps out like the far field: its render textures, shader
+    // and geometries survive the rebuild; `retainAtomaMark` re-adds or
+    // replaces it.
+    const keepMark = new Set<Container>(this.atomaMark?.handle.retained ?? []);
+    for (const child of this.markRoot.removeChildren()) {
+      if (keepMark.has(child)) continue;
+      child.destroy({ children: true });
+    }
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
     this.metrics.runCollapseOffset = 0;
@@ -2801,14 +2819,46 @@ export class GpuRenderer {
   }
 
   private drawAtomaMark(x: number, y: number) {
-    attachAtomaMark(
-      this.markRoot,
-      (callback) => this.addTicker(callback),
+    this.retainAtomaMark(x, y);
+  }
+
+  /**
+   * Attach-or-reuse for the crystal. When every attach parameter matches the
+   * retained mark, the existing subtree is re-parented and its paint ticker
+   * re-registered (renderScene cleared all tickers); otherwise the old mark
+   * releases its GPU resources and a fresh one is built.
+   */
+  retainAtomaMark(
+    x: number,
+    y: number,
+    visualScale?: number,
+    options?: { bobPx?: number; bobPeriodMs?: number }
+  ) {
+    const key = [
       x,
       y,
-      undefined,
-      this.app.renderer
-    );
+      visualScale ?? '',
+      options?.bobPx ?? '',
+      options?.bobPeriodMs ?? '',
+      this.app.renderer.resolution,
+    ].join('|');
+    if (this.atomaMark?.key === key) {
+      this.atomaMark.handle.resume(this.markRoot, (callback) => this.addTicker(callback));
+      return;
+    }
+    this.atomaMark?.handle.destroy();
+    this.atomaMark = {
+      key,
+      handle: attachAtomaMark(
+        this.markRoot,
+        (callback) => this.addTicker(callback),
+        x,
+        y,
+        visualScale,
+        this.app.renderer,
+        options
+      ),
+    };
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
@@ -3075,6 +3125,7 @@ export type RendererCtx = Pick<
   | 'markBeadCheck'
   | 'detailMask'
   | 'addTicker'
+  | 'retainAtomaMark'
   | 'drawExitingFilterButtons'
   | 'animateEnteringFilterSpace'
   | 'metrics'

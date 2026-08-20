@@ -169,7 +169,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/alpha: 0\.42/);
     expect(gpuRenderer).toMatch(/attachAtomaMark\(/);
     expect(gpuRenderer).toMatch(/drawWelcome\(/);
-    expect(welcomeView).toMatch(/attachAtomaMark\(/);
+    // The renderer class is the ONLY attach site: it retains one handle so
+    // scene rebuilds reuse the crystal instead of leaking its GPU resources.
+    // Views go through ctx.retainAtomaMark.
+    expect(welcomeView).not.toMatch(/attachAtomaMark\(/);
+    expect(welcomeView).toMatch(/ctx\.retainAtomaMark\(/);
+    expect(gpuRenderer).toMatch(/retainAtomaMark\(/);
     // Scaled FROM the frame, not pinned to a literal: the size is a design
     // value that moves, the "one crystal driven by buildAtomaMarkFrame" is the
     // contract this test exists to hold.

@@ -289,6 +289,15 @@ export interface MarkShell {
       on: number;
     };
   }): void;
+  /**
+   * Releases the shader, the three geometries and every vertex/index buffer.
+   * `Mesh.destroy()` only NULLS its geometry/shader references, so without
+   * this call each mark rebuild leaks its GPU buffers — and WebGPU runs with
+   * `renderer.gc.enabled = false`, so nothing else ever reclaims them. The
+   * compiled GLSL/WGSL programs are cache-shared by source (`GlProgram.from`)
+   * and deliberately survive.
+   */
+  destroy(): void;
 }
 
 function channels(color: number): [number, number, number] {
@@ -607,6 +616,21 @@ export function createMarkShell(): MarkShell | null {
       } else {
         uniforms.uPointerClip[2] = 0;
       }
+    },
+    destroy() {
+      // Buffers exactly once each: the three geometries SHARE the attribute
+      // buffers, so `geometry.destroy(true)` would destroy them three times
+      // and `Buffer.destroy` has no re-entry guard.
+      const indexBuffers = [
+        backGeometry.indexBuffer,
+        midGeometry.indexBuffer,
+        frontGeometry.indexBuffer,
+      ];
+      backGeometry.destroy();
+      midGeometry.destroy();
+      frontGeometry.destroy();
+      for (const buffer of [...Object.values(buffers), ...indexBuffers]) buffer.destroy();
+      shader.destroy();
     },
   };
 }

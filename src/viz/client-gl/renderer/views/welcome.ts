@@ -1,8 +1,5 @@
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
-import {
-  ATOMA_MARK_LOCAL_CENTER,
-  attachAtomaMark,
-} from '../atoma-mark.js';
+import { ATOMA_MARK_LOCAL_CENTER } from '../atoma-mark.js';
 import { GPU_COLORS } from '../../theme.js';
 
 const BUTTON_WIDTH = 200;
@@ -136,15 +133,10 @@ export function drawWelcome(
   height: number
 ): void {
   const layout = welcomeLayout(width, height);
-  attachAtomaMark(
-    ctx.markRoot,
-    (callback) => ctx.addTicker(callback),
-    layout.markX,
-    layout.markY,
-    layout.scale,
-    ctx.pixiRenderer,
-    { bobPx: FLOAT_AMPLITUDE_PX, bobPeriodMs: FLOAT_PERIOD_MS }
-  );
+  ctx.retainAtomaMark(layout.markX, layout.markY, layout.scale, {
+    bobPx: FLOAT_AMPLITUDE_PX,
+    bobPeriodMs: FLOAT_PERIOD_MS,
+  });
   if (WELCOME_SHOW_INSPECT) {
     ctx.turnSlider(
       ctx.root,

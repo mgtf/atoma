@@ -155,6 +155,19 @@ function createRecordingCtx(): RecordingCtx {
     tickers: [],
     exitCalls: 0,
     metrics: emptyRenderMetrics(),
+    // Headless retention stub: no renderer, so no textures to retain — every
+    // call attaches a fresh mark, which is what the layout assertions read.
+    retainAtomaMark(x, y, visualScale, options) {
+      attachAtomaMark(
+        ctx.markRoot,
+        (callback) => ctx.tickers.push(callback),
+        x,
+        y,
+        visualScale,
+        undefined,
+        options
+      );
+    },
     scrollMax: {},
     detailScrollY: 0,
     detailScrollMax: 0,
@@ -1181,7 +1194,7 @@ describe('attachAtomaMark glass layering', () => {
     const parent = new Container();
     const tickers: ((ticker: Ticker) => void)[] = [];
     const mark = attachAtomaMark(parent, (callback) => tickers.push(callback), 0, 0, 8);
-    const crystal = mark.children[0] as Container;
+    const crystal = mark.container.children[0] as Container;
     // The far shell and the bead now live inside 'mark-behind-glass', which the
     // refraction pass renders into its own texture. Grouping them changed the
     // DEPTH of these nodes, never their order — so the order is still what this
@@ -1285,6 +1298,34 @@ describe('attachAtomaMark glass layering', () => {
     // welcome inspect knobs (pinned pose, bead checkbox) can still drive it.
     expect(still).toHaveLength(1);
     expect(parent.children).toHaveLength(2);
+  });
+
+  it('returns a retainable handle: resume re-parents and re-ticks, destroy is terminal', () => {
+    // The leak this pins: renderScene rebuilds the scene on every render, and
+    // an attach-per-render mark leaked its render textures, geometries and
+    // shader (Mesh.destroy only NULLS those references; WebGPU GC is pinned
+    // off). The renderer now retains ONE handle and resumes it across
+    // rebuilds, destroying it properly only when the attach key changes.
+    const parent = new Container();
+    const tickers: ((ticker: Ticker) => void)[] = [];
+    const mark = attachAtomaMark(parent, (callback) => tickers.push(callback), 0, 0);
+    expect(mark.retained).toContain(mark.container);
+    expect(parent.children).toContain(mark.container);
+
+    // A scene rebuild detaches children and clears every ticker.
+    parent.removeChildren();
+    const resumed: ((ticker: Ticker) => void)[] = [];
+    mark.resume(parent, (callback) => resumed.push(callback));
+    expect(parent.children).toContain(mark.container);
+    expect(resumed).toHaveLength(1);
+    // Same paint callback, not a second animation on the same crystal.
+    expect(resumed[0]).toBe(tickers[0]);
+
+    mark.destroy();
+    expect(mark.container.destroyed).toBe(true);
+    mark.destroy();
+    mark.resume(parent, (callback) => resumed.push(callback));
+    expect(resumed).toHaveLength(1);
   });
 
   it('hides the interior bead when the inspect flag is off', () => {
