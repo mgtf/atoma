@@ -26,16 +26,25 @@ const USAGE = `atoma auth — identity admission and inspection
 usage:
   npm run auth -- list [--db path]
   npm run auth -- invite --org <org-id> [--role <role>] [--ttl-hours <hours>] [--db path]
+  npm run auth -- grant-admin --principal <id-or-email> [--db path]
+  npm run auth -- revoke-admin --principal <id-or-email> [--db path]
 
 roles:
   org:owner | org:admin | org:member | org:viewer
 
+platform admin:
+  grant-admin/revoke-admin set the instance-wide operator flag on ONE
+  principal. The flag is never derived from OAuth claims — only this CLI,
+  run by the operator against the store on disk, can mint it. An email
+  reference must match exactly one principal.
+
 flags:
-  --db <path>          use this product store
-  --org <org-id>       target organisation (required for invite)
-  --role <role>        invitation role (default org:member)
-  --ttl-hours <hours>  invitation lifetime, 0 < hours <= 720 (default 24)
-  --help               show this help`;
+  --db <path>              use this product store
+  --org <org-id>           target organisation (required for invite)
+  --role <role>            invitation role (default org:member)
+  --ttl-hours <hours>      invitation lifetime, 0 < hours <= 720 (default 24)
+  --principal <id-or-email> principal to grant/revoke platform admin
+  --help                   show this help`;
 
 function safeTerminal(value: string): string {
   return Array.from(value, (character) => {
@@ -80,6 +89,16 @@ function list(store: AuthStore, dbPath: string): void {
     (invitation) => invitation.consumedAt === null && new Date(invitation.expiresAt).getTime() > now
   );
   console.log(`${activeInvitations.length} active invitation(s)`);
+
+  const admins = store.listPlatformAdmins();
+  if (admins.length === 0) {
+    console.log('0 platform admin(s)');
+  } else {
+    console.log(`${admins.length} platform admin(s):`);
+    for (const admin of admins) {
+      console.log(`  ${safeTerminal(admin.displayName)} (${admin.principalId}) since ${admin.grantedAt}`);
+    }
+  }
 }
 
 export function runAuthCli(
@@ -88,7 +107,7 @@ export function runAuthCli(
 ): number {
   const parsed = parseCliArgs(argv, {
     booleanFlags: ['help'],
-    valueFlags: ['db', 'org', 'role', 'ttl-hours'],
+    valueFlags: ['db', 'org', 'role', 'ttl-hours', 'principal'],
     undeclared: 'discard',
   });
   const command = parsed.command ?? 'list';
@@ -102,24 +121,35 @@ export function runAuthCli(
     console.error(USAGE);
     return 1;
   }
-  if (parsed.positional.length > 0 || (command !== 'list' && command !== 'invite')) {
+  const KNOWN_COMMANDS = ['list', 'invite', 'grant-admin', 'revoke-admin'];
+  if (parsed.positional.length > 0 || !KNOWN_COMMANDS.includes(command)) {
     console.error(`unknown auth command or argument: ${safeTerminal(parsed.positional[0] ?? command)}`);
     console.error(USAGE);
     return 1;
   }
-  const missingValue = ['db', 'org', 'role', 'ttl-hours'].find(
+  const missingValue = ['db', 'org', 'role', 'ttl-hours', 'principal'].find(
     (flag) => parsed.flags[flag] !== undefined && parsed.flags[flag].trim().length === 0
   );
   if (missingValue) {
     console.error(`--${missingValue} requires a non-empty value`);
     return 1;
   }
-  if (command === 'list' && (
+  if (command !== 'invite' && (
     parsed.flags['org'] !== undefined ||
     parsed.flags['role'] !== undefined ||
     parsed.flags['ttl-hours'] !== undefined
   )) {
     console.error('--org, --role and --ttl-hours are valid only with auth invite');
+    return 1;
+  }
+  const adminCommand = command === 'grant-admin' || command === 'revoke-admin';
+  if (!adminCommand && parsed.flags['principal'] !== undefined) {
+    console.error('--principal is valid only with auth grant-admin / revoke-admin');
+    return 1;
+  }
+  const principalRef = parsed.flags['principal']?.trim() ?? '';
+  if (adminCommand && !principalRef) {
+    console.error(`--principal is required with auth ${command}`);
     return 1;
   }
   const orgId = parsed.flags['org']?.trim() ?? '';
@@ -171,6 +201,28 @@ export function runAuthCli(
         list(store, dbPath);
       } finally {
         store.close();
+      }
+      return 0;
+    }
+
+    if (adminCommand) {
+      if (!existsSync(dbPath)) {
+        console.error(`no store at ${dbPath} — the principal must sign in first`);
+        return 1;
+      }
+      const store = AuthStore.open(dbPath);
+      const result = command === 'grant-admin'
+        ? store.grantPlatformAdmin(principalRef)
+        : store.revokePlatformAdmin(principalRef);
+      const verb = command === 'grant-admin' ? 'granted to' : 'revoked from';
+      if (result.already) {
+        console.log(
+          command === 'grant-admin'
+            ? `${safeTerminal(result.displayName)} (${result.principalId}) is already a platform admin.`
+            : `${safeTerminal(result.displayName)} (${result.principalId}) was not a platform admin.`
+        );
+      } else {
+        console.log(`Platform admin ${verb} ${safeTerminal(result.displayName)} (${result.principalId}).`);
       }
       return 0;
     }

@@ -46,6 +46,10 @@ describe('auth operator CLI', () => {
     expect(runAuthCli(['node', 'auth', 'list', '--mystery'], {})).toBe(1);
     expect(runAuthCli(['node', 'auth', 'list', '--db'], {})).toBe(1);
     expect(runAuthCli(['node', 'auth', 'list', '--role', 'org:viewer'], {})).toBe(1);
+    // Platform-admin commands: --principal is required there and only there.
+    expect(runAuthCli(['node', 'auth', 'grant-admin'], {})).toBe(1);
+    expect(runAuthCli(['node', 'auth', 'revoke-admin'], {})).toBe(1);
+    expect(runAuthCli(['node', 'auth', 'list', '--principal', 'x@y.z'], {})).toBe(1);
     expect(error.mock.calls.flat().join('\n')).toMatch(/unknown auth command|unknown flag/);
   });
 

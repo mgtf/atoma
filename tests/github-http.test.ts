@@ -49,6 +49,7 @@ function seed(label: string, role: Viewer['role']): Viewer {
     orgId,
     orgName: `${label} Org`,
     role,
+    platformAdmin: false,
   };
 }
 

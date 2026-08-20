@@ -88,6 +88,11 @@ CREATE TABLE IF NOT EXISTS auth_oauth_states (
   created_at      TEXT NOT NULL,
   expires_at      TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auth_platform_admins (
+  principal_id TEXT PRIMARY KEY REFERENCES auth_principals(principal_id),
+  granted_at   TEXT NOT NULL,
+  granted_by   TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS auth_invitations_expires_idx ON auth_invitations(expires_at);
 CREATE INDEX IF NOT EXISTS auth_oauth_states_expires_idx ON auth_oauth_states(expires_at);
@@ -131,6 +136,13 @@ export interface Viewer {
   orgId: string;
   orgName: string;
   role: OrgRole;
+  /**
+   * Instance-wide operator flag, NEVER derived from OAuth claims: it is
+   * granted only through the operator CLI (`auth grant-admin`) against the
+   * store on disk. Emails are display attributes — a provider-supplied email
+   * must not mint platform power.
+   */
+  platformAdmin: boolean;
 }
 
 export interface LoginOutcome {
@@ -602,6 +614,7 @@ export class AuthStore {
             orgId: membership.org_id,
             orgName: org.name,
             role: membership.role,
+            platformAdmin: this.isPlatformAdmin(principal.principal_id),
           },
           createdPrincipal: false,
         };
@@ -651,6 +664,8 @@ export class AuthStore {
           orgId,
           orgName,
           role,
+          // A brand-new principal can never already hold the operator flag.
+          platformAdmin: false,
         },
         createdPrincipal: true,
       };
@@ -796,7 +811,95 @@ export class AuthStore {
       orgId: row.org_id,
       orgName: org.name,
       role: membership.role,
+      platformAdmin: this.isPlatformAdmin(principal.principal_id),
     };
+  }
+
+  /**
+   * PLATFORM ADMIN — instance-wide operator flag.
+   *
+   * Granted and revoked ONLY through the operator CLI against the store on
+   * disk, never from anything a login flow supplies: OAuth emails are display
+   * attributes (GitHub's is not even a verified-email assertion), so an email
+   * must never mint platform power. The flag rides the Viewer on every
+   * request; what it unlocks is decided at the HTTP boundary.
+   */
+  isPlatformAdmin(principalId: string): boolean {
+    return this.db
+      .prepare('SELECT 1 FROM auth_platform_admins WHERE principal_id = ?')
+      .get(principalId) !== undefined;
+  }
+
+  /**
+   * Resolve an operator-supplied reference to exactly one principal: a
+   * principal id first, else a unique match on an identity email. Zero or
+   * several matches are refusals — the CLI must never guess an identity.
+   */
+  resolvePrincipalRef(ref: string): { principalId: string; displayName: string } {
+    const trimmed = ref.trim();
+    if (!trimmed) throw new Error('a principal id or identity email is required');
+    const byId = this.db
+      .prepare('SELECT principal_id, display_name FROM auth_principals WHERE principal_id = ?')
+      .get(trimmed) as { principal_id: string; display_name: string } | undefined;
+    if (byId) return { principalId: byId.principal_id, displayName: byId.display_name };
+    const byEmail = this.db
+      .prepare(
+        `SELECT DISTINCT p.principal_id, p.display_name
+         FROM auth_identities i
+         JOIN auth_principals p ON p.principal_id = i.principal_id
+         WHERE i.email = ?`
+      )
+      .all(trimmed) as Array<{ principal_id: string; display_name: string }>;
+    if (byEmail.length === 1) {
+      return { principalId: byEmail[0]!.principal_id, displayName: byEmail[0]!.display_name };
+    }
+    if (byEmail.length > 1) {
+      throw new Error(`email ${trimmed} matches ${byEmail.length} principals; use the principal id`);
+    }
+    throw new Error(`no principal matches ${trimmed}`);
+  }
+
+  grantPlatformAdmin(ref: string): { principalId: string; displayName: string; already: boolean } {
+    const principal = this.resolvePrincipalRef(ref);
+    const changed = this.db
+      .prepare(
+        `INSERT INTO auth_platform_admins (principal_id, granted_at, granted_by)
+         VALUES (?, ?, 'cli')
+         ON CONFLICT(principal_id) DO NOTHING`
+      )
+      .run(principal.principalId, new Date().toISOString()).changes;
+    return { ...principal, already: changed === 0 };
+  }
+
+  revokePlatformAdmin(ref: string): { principalId: string; displayName: string; already: boolean } {
+    const principal = this.resolvePrincipalRef(ref);
+    const changed = this.db
+      .prepare('DELETE FROM auth_platform_admins WHERE principal_id = ?')
+      .run(principal.principalId).changes;
+    return { ...principal, already: changed === 0 };
+  }
+
+  listPlatformAdmins(): Array<{ principalId: string; displayName: string; grantedAt: string }> {
+    // Read-only opens (CLI `list`) may see a store written before the table
+    // existed; DDL cannot run there, and "no admins yet" is the honest read.
+    const present = this.db
+      .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_platform_admins'`)
+      .get();
+    if (!present) return [];
+    return (
+      this.db
+        .prepare(
+          `SELECT a.principal_id, a.granted_at, p.display_name
+           FROM auth_platform_admins a
+           JOIN auth_principals p ON p.principal_id = a.principal_id
+           ORDER BY a.granted_at ASC`
+        )
+        .all() as Array<{ principal_id: string; granted_at: string; display_name: string }>
+    ).map((row) => ({
+      principalId: row.principal_id,
+      displayName: row.display_name,
+      grantedAt: row.granted_at,
+    }));
   }
 
   /**
@@ -953,6 +1056,37 @@ export class AuthStore {
       orgId: organisation.org_id,
       name: organisation.name,
       createdAt: organisation.created_at,
+    }));
+  }
+
+  /** Admin surface: every organisation with its members. Gate on `platformAdmin`. */
+  listOrganisationsWithMembers(): Array<{
+    orgId: string;
+    name: string;
+    createdAt: string;
+    members: Array<{ principalId: string; displayName: string; role: OrgRole }>;
+  }> {
+    const members = this.db
+      .prepare(
+        `SELECT m.org_id, m.principal_id, m.role, p.display_name
+         FROM auth_memberships m
+         JOIN auth_principals p ON p.principal_id = m.principal_id
+         ORDER BY m.org_id ASC, m.created_at ASC, m.principal_id ASC`
+      )
+      .all() as Array<{ org_id: string; principal_id: string; role: OrgRole; display_name: string }>;
+    const byOrg = new Map<string, Array<{ principalId: string; displayName: string; role: OrgRole }>>();
+    for (const member of members) {
+      const list = byOrg.get(member.org_id) ?? [];
+      list.push({
+        principalId: member.principal_id,
+        displayName: member.display_name,
+        role: member.role,
+      });
+      byOrg.set(member.org_id, list);
+    }
+    return this.listOrganisations().map((organisation) => ({
+      ...organisation,
+      members: byOrg.get(organisation.orgId) ?? [],
     }));
   }
 
