@@ -107,7 +107,10 @@ export const ATOMA_MARK_CORE_EDGE_CLEARANCE =
  * regular octahedron divide evenly by taxonomy instead of by convenience.
  */
 export const ATOMA_MARK_RANK_COLORS = {
-  element: { top: 0x7fb3cc, bottom: 0x3d5a75 },
+  // Gold-sheen obsidian: volcanic glass with a brass flash, not a steel card.
+  // The other three wedges already own teal, amber and violet; this one is
+  // the warm metal the grey pair was failing to be.
+  element: { top: 0xefc14a, bottom: 0xa35d12 },
   molecule: { top: 0x0f9f92, bottom: 0x2563eb },
   cell: { top: 0xf59e0b, bottom: 0xea580c },
   tissue: { top: 0x8b5cf6, bottom: 0xdb2777 },
@@ -260,7 +263,7 @@ export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial>
     absorption: 14,
     dispersion: 0,
     transmit: 0.7,
-    body: 0.58,
+    body: 0.76,
   },
   // Glass: the reference solid. Honest transmission through the depth of the
   // wall, no fire. Its absorption is what the others read against.
@@ -331,6 +334,13 @@ export const ATOMA_MARK_LOCAL_SIZE = CENTER.x * 2;
  */
 export const ATOMA_MARK_PROJECTION_SCALE = 9.8;
 const PROJECTION_SCALE = ATOMA_MARK_PROJECTION_SCALE;
+/**
+ * Model-space Z of the pointer lamp. Camera-side is +Z; the hull's radius is
+ * `ATOMA_MARK_RADIUS`, so this sits clearly in FRONT of every vertex. Close
+ * enough that L varies across a facet (a traveling glint) instead of becoming
+ * a second directional from the camera.
+ */
+export const ATOMA_MARK_LAMP_Z = 2.15;
 const PERSPECTIVE_DEPTH = 0.055;
 
 /** Model-space size of the shell. The projected hull lands just inside the box. */
@@ -681,12 +691,7 @@ function collectRearSpills(
       incidence * rear * stain * (0.82 + 0.18 * pulse)
     );
     if (intensity < 0.02) continue;
-    const thrown: MarkVec3 = [
-      shaded.centroid[0] + shaded.normal[0] * ATOMA_MARK_REAR_LIGHT_THROW,
-      shaded.centroid[1] + shaded.normal[1] * ATOMA_MARK_REAR_LIGHT_THROW,
-      shaded.centroid[2] + shaded.normal[2] * ATOMA_MARK_REAR_LIGHT_THROW,
-    ];
-    const pos = project(thrown);
+    const pos = throwRearPool(shaded);
     spills.push({
       facet: index,
       x: pos.x,
@@ -696,6 +701,170 @@ function collectRearSpills(
     });
   }
   return spills;
+}
+
+function throwRearPool(shaded: AtomaMarkFacetFrame): AtomaMarkPoint {
+  return project([
+    shaded.centroid[0] + shaded.normal[0] * ATOMA_MARK_REAR_LIGHT_THROW,
+    shaded.centroid[1] + shaded.normal[1] * ATOMA_MARK_REAR_LIGHT_THROW,
+    shaded.centroid[2] + shaded.normal[2] * ATOMA_MARK_REAR_LIGHT_THROW,
+  ]);
+}
+
+function pointInTriangle(
+  point: AtomaMarkPoint,
+  a: AtomaMarkPoint,
+  b: AtomaMarkPoint,
+  c: AtomaMarkPoint
+): boolean {
+  const ab = cross2d(a, b, point);
+  const bc = cross2d(b, c, point);
+  const ca = cross2d(c, a, point);
+  const hasNeg = ab < 0 || bc < 0 || ca < 0;
+  const hasPos = ab > 0 || bc > 0 || ca > 0;
+  return !(hasNeg && hasPos);
+}
+
+function triangleCoverage(
+  point: AtomaMarkPoint,
+  a: AtomaMarkPoint,
+  b: AtomaMarkPoint,
+  c: AtomaMarkPoint
+): number {
+  if (pointInTriangle(point, a, b, c)) return 1;
+  const cx = (a.x + b.x + c.x) / 3;
+  const cy = (a.y + b.y + c.y) / 3;
+  const reach = Math.max(
+    Math.hypot(a.x - cx, a.y - cy),
+    Math.hypot(b.x - cx, b.y - cy),
+    Math.hypot(c.x - cx, c.y - cy)
+  );
+  if (reach < 1e-6) return 0;
+  const dist = Math.hypot(point.x - cx, point.y - cy);
+  const t = dist / (reach * 1.35);
+  if (t >= 1) return 0;
+  return Math.exp(-t * t * 2.2);
+}
+
+/**
+ * Pointer lamp as a 3D light in FRONT of the gem. Local coordinates are the
+ * 28×28 box; inverse of `project` at z=0 for XY, then parked at
+ * `ATOMA_MARK_LAMP_Z`. `on` falls off away from the silhouette so a cursor
+ * across the screen does not become a second studio key.
+ */
+export function pointerLampForLocal(
+  localX: number,
+  localY: number
+): { position: MarkVec3; uv: [number, number]; on: number } {
+  if (!Number.isFinite(localX) || !Number.isFinite(localY)) {
+    return { position: [0, 0, ATOMA_MARK_LAMP_Z], uv: [0.5, 0.5], on: 0 };
+  }
+  const position: MarkVec3 = [
+    (localX - CENTER.x) / PROJECTION_SCALE,
+    (CENTER.y - localY) / PROJECTION_SCALE,
+    ATOMA_MARK_LAMP_Z,
+  ];
+  const uv: [number, number] = [
+    localX / ATOMA_MARK_LOCAL_SIZE,
+    localY / ATOMA_MARK_LOCAL_SIZE,
+  ];
+  const fromCenter = Math.hypot(localX - CENTER.x, localY - CENTER.y);
+  // Hull is ~12.5 projected units. Wider than that, the lamp is a nearby
+  // studio key and paints the whole gem; bob-at-the-silhouette still couples.
+  const gemReach = ATOMA_MARK_RADIUS * PROJECTION_SCALE * 1.65;
+  const t = fromCenter / gemReach;
+  const on = t >= 1 ? 0 : Math.exp(-t * t * 2.0);
+  return { position, uv, on };
+}
+
+/**
+ * Pointer lamp in FRONT of the gem, shining through onto the far field.
+ * Local coordinates are the 28×28 box. Coverage of a front table is the
+ * window the lamp enters; each rear table is the window it leaves, stained
+ * by both glasses. Far from the silhouette this is empty. The glass itself
+ * reflects the lamp in the shell shader, not here.
+ */
+export function collectPointerFieldSpills(
+  frame: AtomaMarkFrame,
+  localX: number,
+  localY: number
+): AtomaMarkRearSpill[] {
+  if (!Number.isFinite(localX) || !Number.isFinite(localY)) return [];
+  const pointer: AtomaMarkPoint = { x: localX, y: localY };
+  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
+  const fromCenter = Math.hypot(localX - CENTER.x, localY - CENTER.y);
+  // Hull spans ~12.5 projected units from centre. A little extra so grazing
+  // the aura still couples into the glass instead of cutting off at the edge.
+  const gemReach = ATOMA_MARK_RADIUS * PROJECTION_SCALE * 1.35;
+  const t = fromCenter / gemReach;
+  const fromGem = t >= 1 ? 0 : Math.exp(-t * t * 2.2);
+
+  let entryCoverage = 0;
+  let entryColor = 0xdff1ff;
+  let entryStain = 0.7;
+  for (const index of frame.frontOrder) {
+    const meshFacet = ATOMA_MARK_MESH.facets[index]!;
+    const corners = meshFacet.points.map((point) => frame.projected[point]!);
+    const a = corners[0];
+    const b = corners[1];
+    const c = corners[2];
+    if (!a || !b || !c) continue;
+    const coverage = triangleCoverage(pointer, a, b, c);
+    if (coverage <= entryCoverage) continue;
+    entryCoverage = coverage;
+    entryColor = markColorForOctant(meshFacet.octant);
+    const material = markMaterialForOctant(meshFacet.octant);
+    entryStain = 0.42 + 0.58 * (material.transmit / maxTransmit);
+  }
+
+  const gemEnter = clamp(fromGem * 0.4 + entryCoverage * 0.85);
+  if (gemEnter < 0.02) return [];
+
+  const spills: AtomaMarkRearSpill[] = [];
+  for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
+    const shaded = frame.facets[index]!;
+    if (!markFacetIsRearGlass(meshFacet.part, shaded.normal[2])) continue;
+    const rear = clamp(-shaded.normal[2] * Math.sqrt(3));
+    const material = markMaterialForOctant(meshFacet.octant);
+    const exitStain = 0.42 + 0.58 * (material.transmit / maxTransmit);
+    const intensity = clamp(gemEnter * rear * (entryStain * 0.45 + exitStain * 0.55));
+    if (intensity < 0.02) continue;
+    const pos = throwRearPool(shaded);
+    spills.push({
+      facet: index,
+      x: pos.x,
+      y: pos.y,
+      intensity,
+      color: mixColor(entryColor, markColorForOctant(meshFacet.octant), 0.55),
+    });
+  }
+  return spills;
+}
+
+/** Same rear window, two lamps: add intensities and mix the stain. */
+export function mergeFieldSpills(
+  ...groups: readonly (readonly AtomaMarkRearSpill[])[]
+): AtomaMarkRearSpill[] {
+  const byFacet = new Map<number, AtomaMarkRearSpill>();
+  for (const group of groups) {
+    for (const spill of group) {
+      const previous = byFacet.get(spill.facet);
+      if (!previous) {
+        byFacet.set(spill.facet, { ...spill });
+        continue;
+      }
+      const total = previous.intensity + spill.intensity;
+      const mix = total > 1e-6 ? spill.intensity / total : 0.5;
+      byFacet.set(spill.facet, {
+        facet: spill.facet,
+        x: previous.x,
+        y: previous.y,
+        intensity: clamp(total),
+        color: mixColor(previous.color, spill.color, mix),
+      });
+    }
+  }
+  return [...byFacet.values()];
 }
 
 /**

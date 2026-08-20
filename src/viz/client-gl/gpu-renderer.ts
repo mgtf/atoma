@@ -41,7 +41,7 @@ import { softShadowLayers } from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
 import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
 import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
-import { pointerClientToRenderer, readPointerLight } from './pointer-light.js';
+import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
@@ -234,6 +234,13 @@ export class GpuRenderer {
   app = new Application();
   readonly ambientRoot = new Container();
   readonly root = new Container();
+  /**
+   * Crystals live HERE, not under `root`. The pointer-light filter flattens
+   * `root` and its interior wash is a disc on any filled mesh — including the
+   * arrival gem. Sibling, drawn after, so the header gem still sits on the
+   * bar rather than under it.
+   */
+  readonly markRoot = new Container();
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
@@ -587,7 +594,8 @@ export class GpuRenderer {
           ? 'webgl'
           : 'unknown';
     this.ambientRoot.eventMode = 'none';
-    this.app.stage.addChild(this.ambientRoot, this.root);
+    this.markRoot.eventMode = 'none';
+    this.app.stage.addChild(this.ambientRoot, this.root, this.markRoot);
     this.installPointerLightFilter();
     this.app.canvas.className = 'gpu-ui-canvas';
     this.app.canvas.setAttribute('aria-hidden', 'true');
@@ -624,6 +632,8 @@ export class GpuRenderer {
         markTurnDegrees,
         markBeadVisible,
         setMarkBeadVisible,
+        movePointerLight,
+        hidePointerLight,
         pointerLightFilter: () => this.pointerLightFilter,
         // Where the controls are, and what the live tuning holds. A drag is
         // only observable on a real renderer — the mocked suite has no stage
@@ -724,6 +734,7 @@ export class GpuRenderer {
     this.castShadows = [];
     for (const child of this.ambientRoot.removeChildren()) child.destroy({ children: true });
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
+    for (const child of this.markRoot.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
     this.metrics.runCollapseOffset = 0;
@@ -773,7 +784,9 @@ export class GpuRenderer {
       this.anchorCastShadows();
       this.updateCastShadows();
       this.metrics.objectCount =
-        this.countObjects(this.ambientRoot) + this.countObjects(this.root);
+        this.countObjects(this.ambientRoot) +
+        this.countObjects(this.root) +
+        this.countObjects(this.markRoot);
       return;
     }
     this.drawAmbientGrid(this.ambientRoot, width, height);
@@ -828,7 +841,9 @@ export class GpuRenderer {
     this.anchorCastShadows();
     this.updateCastShadows();
     this.metrics.objectCount =
-      this.countObjects(this.ambientRoot) + this.countObjects(this.root);
+      this.countObjects(this.ambientRoot) +
+      this.countObjects(this.root) +
+      this.countObjects(this.markRoot);
   }
 
   private countObjects(container: Container): number {
@@ -2777,7 +2792,7 @@ export class GpuRenderer {
 
   private drawAtomaMark(x: number, y: number) {
     attachAtomaMark(
-      this.root,
+      this.markRoot,
       (callback) => this.addTicker(callback),
       x,
       y,
@@ -3035,6 +3050,7 @@ if (import.meta.hot) {
 export type RendererCtx = Pick<
   GpuRenderer,
   | 'root'
+  | 'markRoot'
   | 'text'
   | 'panel'
   | 'button'

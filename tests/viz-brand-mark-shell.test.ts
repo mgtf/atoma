@@ -75,6 +75,7 @@ describe('mark shell shader contract', () => {
     // the fragment program never declares is a feature that silently does
     // nothing on the WebGL fallback — the other half of the same asymmetry.
     const glslTypes: Record<string, string> = {
+      'vec4<f32>': 'vec4',
       'vec3<f32>': 'vec3',
       'vec2<f32>': 'vec2',
       f32: 'float',
@@ -214,7 +215,7 @@ describe('mark shell shader contract', () => {
   });
 
   it('throws traveling glints off the cavity walls', () => {
-    // The bead is the only point light, so a specular term against it is a
+    // The bead is the INTERIOR point light, so a specular term against it is a
     // spot that moves as the bead bounces. Outer facets see that light as
     // transmission; the cavity reflects it. TIR does not apply: the cavity is
     // air, so the inner walls are seen from air, and a critical-angle test on
@@ -226,6 +227,34 @@ describe('mark shell shader contract', () => {
       expect(source).toContain('(1.0 - outer)');
       expect(source, 'hollow-shell inner walls are air-to-glass, not TIR')
         .not.toContain('cosCrit');
+    }
+  });
+
+  it('reflects the pointer lamp on the outer glass, never as a body fill', () => {
+    // The 2D Pixi filter washes the UI; it is not a specular on the crystal.
+    // A Lambert term from this lamp would lift the near table and bury the
+    // far facets — the same fill that was tried and reverted for the window.
+    // Packed as vec4 so `on` cannot vanish into vec3 padding on WebGPU.
+    expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['uLamp', 'uLampUv'])
+    );
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('lampHighlight');
+      expect(source).toContain('lampDist');
+      expect(source).toContain('lampSoft');
+      expect(source).toContain('uLampUv');
+      expect(source).toMatch(/windowHighlight \+\s*\n\s*lampHighlight \+/);
+      expect(source, 'the lamp must not add a Lambertian term')
+        .not.toMatch(/0\.42 \* lampNdotL/);
+      expect(source, 'an anisotropic UV ellipse is still pinned as the whole catch')
+        .not.toContain('axisU');
+      expect(source).not.toMatch(/lampR \* 22/);
+      expect(source).toMatch(/mix\(14\.0,\s*32\.0/);
+      expect(source).toContain('lampShade');
+      expect(source).toContain('lampDir * 0.55');
+      expect(source).toContain('lampWindow');
+      expect(source).toMatch(/dot\(lampDelta, lampDelta\) \* 280\.0/);
+      expect(source).toContain('lampPeak');
     }
   });
 
@@ -260,7 +289,7 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/bounce \* cover/);
       expect(source).toMatch(/vScreen\.y, 0\.02\) \* 2\.8/);
       expect(source).toContain('tableLobe');
-      expect(source).toMatch(/inPlane, inPlane\) \* 12\.0/);
+      expect(source).toMatch(/inPlane, inPlane\) \* 36\.0/);
       expect(source).toMatch(/pow\(1\.0 - nDotV, 5\.0\) \* (markUniforms\.)?uRim/);
       expect(source).not.toMatch(/fresnel \* (markUniforms\.)?uRim/);
       expect(source).toContain('baryMin');

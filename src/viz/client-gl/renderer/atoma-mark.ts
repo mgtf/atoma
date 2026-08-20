@@ -8,18 +8,24 @@ import {
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_REAR_LIGHT_RADIUS,
   buildAtomaMarkFrame,
+  collectPointerFieldSpills,
   coreLightFalloff,
+  mergeFieldSpills,
   mixColor,
+  pointerLampForLocal,
   type AtomaMarkPoint,
+  type AtomaMarkRearSpill,
 } from '../brand-mark.js';
 import {
   clearMarkFieldLight,
   markColorToRgb,
   writeMarkFieldLight,
 } from '../mark-field-light.js';
+import { readPointerLight } from '../pointer-light.js';
 import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
@@ -219,6 +225,62 @@ function markStageToClient(
   return { clientX: stageX, clientY: stageY, pixelScale: 1 };
 }
 
+function markClientToLocal(
+  renderer: Renderer,
+  container: { x: number; y: number },
+  scale: number,
+  clientX: number,
+  clientY: number
+): { x: number; y: number } {
+  const canvas = renderer.canvas;
+  const screen = renderer.screen;
+  let stageX = clientX;
+  let stageY = clientY;
+  if (
+    typeof HTMLCanvasElement !== 'undefined' &&
+    canvas instanceof HTMLCanvasElement &&
+    screen.width > 0 &&
+    screen.height > 0
+  ) {
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width > 0 && bounds.height > 0) {
+      stageX = (clientX - bounds.left) * screen.width / bounds.width;
+      stageY = (clientY - bounds.top) * screen.height / bounds.height;
+    }
+  }
+  const safeScale = scale === 0 ? 1 : scale;
+  return {
+    x: (stageX - container.x - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
+    y: (stageY - container.y - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
+  };
+}
+
+function fieldSpillsToSample(
+  spills: readonly AtomaMarkRearSpill[],
+  container: { x: number; y: number },
+  scale: number,
+  radiusPx: number,
+  renderer: Renderer
+) {
+  return spills.map((spill) => {
+    const rgb = markColorToRgb(spill.color);
+    const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+      (spill.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+    const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+      (spill.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+    const client = markStageToClient(renderer, stageX, stageY);
+    return {
+      clientX: client.clientX,
+      clientY: client.clientY,
+      radiusPx: radiusPx * client.pixelScale,
+      r: rgb.r,
+      g: rgb.g,
+      b: rgb.b,
+      intensity: spill.intensity,
+    };
+  });
+}
+
 /**
  * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
  * wordmark and the arrival gate — never a second R3F logo.
@@ -238,7 +300,8 @@ export function attachAtomaMark(
   x: number,
   y: number,
   visualScale = ATOMA_MARK_HEADER_SCALE,
-  renderer?: Renderer
+  renderer?: Renderer,
+  options?: { bobPx?: number; bobPeriodMs?: number }
 ): Container {
   const container = new Container();
   container.position.set(x, y);
@@ -385,39 +448,69 @@ export function attachAtomaMark(
     graphics.closePath().fill({ color: 0xffffff, alpha: 1 });
   };
 
+  const reducedMotion = prefersReducedMotion();
   const paint = (elapsedMs: number) => {
+    // Bob lives HERE, before the pointer sample, so a parked mouse still
+    // sees the lamp XY drift as the gem floats. A second ticker after paint
+    // left the glint one frame behind — and, worse, glued it to the cursor
+    // in UV because the lamp never learned the gem had moved.
+    const bobPx = options?.bobPx ?? 0;
+    const bobPeriodMs = options?.bobPeriodMs ?? 1800;
+    if (bobPx !== 0 && !markClockIsPinned() && !reducedMotion) {
+      container.y = y + Math.sin(markElapsedMs() / bobPeriodMs) * bobPx;
+    } else {
+      container.y = y;
+    }
     const frame = buildAtomaMarkFrame(elapsedMs);
     crystal.scale.set(frame.scale * visualScale);
     const beadVisible = markBeadVisible();
-    shell?.update(frame, { beadVisible });
-    // Lantern light belongs on the Three.js field (the plane that faces the
-    // camera, behind this Pixi overlay). A coloured disc here reads as a floor
-    // under the gem — which is how the first attempt looked.
-    if (!beadVisible || !renderer) {
+    const scale = visualScale * frame.scale;
+    let pointerSpills: AtomaMarkRearSpill[] = [];
+    let lamp: {
+      position: readonly [number, number, number];
+      uv: readonly [number, number];
+      on: number;
+    } = {
+      position: [0, 0, ATOMA_MARK_LAMP_Z],
+      uv: [0.5, 0.5],
+      on: 0,
+    };
+    if (renderer) {
+      const pointer = readPointerLight();
+      if (pointer.active) {
+        const local = markClientToLocal(
+          renderer,
+          container,
+          scale,
+          pointer.clientX,
+          pointer.clientY
+        );
+        pointerSpills = collectPointerFieldSpills(frame, local.x, local.y);
+        lamp = pointerLampForLocal(local.x, local.y);
+      }
+    }
+    shell?.update(frame, { beadVisible, lamp });
+    // Lantern light belongs on the Three.js field. The bead throws from
+    // inside; the pointer lamp sits in front and has to go THROUGH the glass
+    // to reach the same wall — same rear windows, stained by the faces.
+    if (!renderer) {
       clearMarkFieldLight();
     } else {
-      const scale = visualScale * frame.scale;
       const localRadius = Math.max(
         ATOMA_MARK_REAR_LIGHT_RADIUS * scale * VIZ_VISUAL_DEPTH.far.markHaloSpread,
         VIZ_VISUAL_DEPTH.far.markHaloMinPx
       );
-      writeMarkFieldLight(frame.rearSpills.map((spill) => {
-        const rgb = markColorToRgb(spill.color);
-        const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
-          (spill.x - ATOMA_MARK_LOCAL_CENTER) * scale;
-        const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
-          (spill.y - ATOMA_MARK_LOCAL_CENTER) * scale;
-        const client = markStageToClient(renderer, stageX, stageY);
-        return {
-          clientX: client.clientX,
-          clientY: client.clientY,
-          radiusPx: localRadius * client.pixelScale,
-          r: rgb.r,
-          g: rgb.g,
-          b: rgb.b,
-          intensity: spill.intensity,
-        };
-      }));
+      const merged = mergeFieldSpills(
+        beadVisible ? frame.rearSpills : [],
+        pointerSpills
+      );
+      if (merged.length === 0) {
+        clearMarkFieldLight();
+      } else {
+        writeMarkFieldLight(
+          fieldSpillsToSample(merged, container, scale, localRadius, renderer)
+        );
+      }
     }
     const { x: coreX, y: coreY } = frame.corePosition;
     traceSilhouette(interiorMask, frame.silhouette);
@@ -449,7 +542,6 @@ export function attachAtomaMark(
     }
   };
 
-  const reducedMotion = prefersReducedMotion();
   // Always tick: reduced motion still has to honour a pinned pose and the
   // bead checkbox. Unpinned + reduced freezes at t=0 rather than skipping
   // the ticker — skipping would leave both inspect knobs dead.

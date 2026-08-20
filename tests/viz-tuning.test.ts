@@ -243,6 +243,15 @@ describe('both shader backends carry the tuning uniforms', () => {
       expect(source).not.toMatch(/distancePx \/ 34\.0/);
     }
   });
+
+  it('lights filled UI from the pointer, never the crystal', () => {
+    // Interior wash is what makes cards and buttons read as lit. It is also
+    // a disc on any filled mesh, so the arrival gem must not sit under this
+    // filter — the shell shader does that reflection.
+    for (const source of [POINTER_LIGHT_GLSL, POINTER_LIGHT_WGSL]) {
+      expect(source).toMatch(/halo \* \(0\.075 \+ edgeResponse \* \(0\.24 \+ facing \* 0\.36\)\)/);
+    }
+  });
 });
 
 describe('the live sample', () => {

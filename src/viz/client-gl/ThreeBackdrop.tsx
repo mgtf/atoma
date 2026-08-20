@@ -126,10 +126,10 @@ export const BACKDROP_FRAGMENT_SHADER = /* glsl */ `
     float pointerCore = exp(-2.8 * pow(pointerDistance / ${VIZ_VISUAL_DEPTH.far.pointerCoreRadius.toFixed(1)}, 2.0));
     float relief = clamp(abs(dFdx(fieldA)) + abs(dFdy(fieldA)) + abs(dFdx(fieldB)), 0.0, 0.55);
     vec3 pointerTint = mix(vec3(0.24, 0.58, 1.0), vec3(0.82, 0.96, 1.0), pointerCore);
-    // Relief only, no additive core — a bright centre on the far plane put a
-    // second lamp behind the cursor, competing with the foreground filter.
+    // A pool on the wall, not a second lamp. Relief-only at 0.03 vanished
+    // next to the crystal; a modest halo+core is the cursor lighting the field.
     color += pointerTint * uPointerStrength * ${VIZ_VISUAL_DEPTH.far.pointerGain.toFixed(2)} *
-      (pointerHalo * (0.03 + relief * 0.16));
+      (pointerHalo * (0.14 + relief * 0.18) + pointerCore * 0.10);
 
     // Stained lantern light. The bead's output through a rear face lands HERE,
     // on the plane that faces the camera, not on a disc under the gem in Pixi.

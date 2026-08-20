@@ -12,6 +12,7 @@
  *   npm run viz:mark-turn
  *   npm run viz:mark-turn -- --out .atoma-mark-turn
  *   npm run viz:mark-turn -- --degree 47
+ *   npm run viz:mark-turn -- --pointer
  *   npm run viz:mark-turn:analyze
  *
  * Frames land in `.atoma-mark-turn/` (gitignored) as `frame-0000.png` …
@@ -88,6 +89,7 @@ async function freePort() {
 function parseOutDir(argv) {
   const flag = argv.indexOf('--out');
   if (flag >= 0 && argv[flag + 1]) return resolve(argv[flag + 1]);
+  if (argv.includes('--pointer')) return resolve(repoRoot, '.atoma-mark-pointer');
   return resolve(repoRoot, '.atoma-mark-turn');
 }
 
@@ -101,6 +103,41 @@ function parseDegree(argv) {
   }
   return ((value % 360) + 360) % 360;
 }
+
+function parsePointer(argv) {
+  return argv.includes('--pointer');
+}
+
+/**
+ * Welcome-mark local (28×28) → CSS pixels. Same scale as `crystalClip` /
+ * `welcomeLayout`, rest pose `frame.scale === 1`.
+ */
+function localToClient(localX, localY, width, height) {
+  const buttonBlock = MARK_TO_SLIDER + SLIDER_HEIGHT + SLIDER_TO_BUTTON + BUTTON_HEIGHT + EDGE;
+  const maxMarkPx = Math.min(
+    Math.min(width, height) * MARK_VIEWPORT_FRACTION,
+    Math.max(LOCAL_SIZE * 6, (height - buttonBlock - EDGE) * 0.92)
+  );
+  const scale = Math.max(6, maxMarkPx / LOCAL_SIZE);
+  return {
+    x: width / 2 + (localX - LOCAL_SIZE / 2) * scale,
+    y: height / 2 + (localY - LOCAL_SIZE / 2) * scale,
+  };
+}
+
+/** Rest-pose pointer stations: off the gem, then on the tables. */
+const POINTER_SHOTS = [
+  { name: 'off', local: null },
+  { name: 'center', local: [14, 14] },
+  { name: 'up', local: [14, 7] },
+  { name: 'down', local: [14, 21] },
+  { name: 'left', local: [7, 14] },
+  { name: 'right', local: [21, 14] },
+  { name: 'ul', local: [8, 8] },
+  { name: 'ur', local: [20, 8] },
+  { name: 'll', local: [8, 20] },
+  { name: 'lr', local: [20, 20] },
+];
 
 async function waitForUrl(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -210,7 +247,7 @@ export async function captureMarkTurn(options = {}) {
       timeout: READY_TIMEOUT_MS,
     });
     await page.waitForFunction(
-      () => window.__ATOMA_GPU__?.pinMarkElapsedMs,
+      () => window.__ATOMA_GPU__?.pinMarkElapsedMs && window.__ATOMA_GPU__?.movePointerLight,
       { timeout: READY_TIMEOUT_MS }
     );
     const backend = await page.$eval(
@@ -241,30 +278,72 @@ export async function captureMarkTurn(options = {}) {
       }, elapsedMs);
     };
 
+    const placePointer = async (local) => {
+      await page.evaluate(async (coords) => {
+        const handle = window.__ATOMA_GPU__;
+        if (!coords) handle.hidePointerLight();
+        else handle.movePointerLight(coords.x, coords.y);
+        const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        await frame();
+        await frame();
+        handle.app?.render?.();
+        await frame();
+      }, local);
+    };
+
     // Prime the ping-pong backdrop at t=0 so frame 0000 is not last-pose junk.
     await settle(0);
     await settle(0);
 
-    const shots = degree === null
-      ? Array.from({ length: FRAME_COUNT }, (_, index) => ({
-        index,
-        elapsedMs: index * STEP_MS,
-        file: `frame-${String(index).padStart(4, '0')}.png`,
-        degree: index * STEP_MS / TURN_MS * 360,
-      }))
-      : [{
-        index: 0,
-        elapsedMs: degree / 360 * TURN_MS,
-        file: `degree-${String(Math.round(degree)).padStart(3, '0')}.png`,
-        degree,
-      }];
+    const pointer = options.pointer ?? parsePointer(process.argv.slice(2));
+    const host = await page.$eval('.gpu-ui-host', (el) => {
+      const box = el.getBoundingClientRect();
+      return { left: box.left, top: box.top, width: box.width, height: box.height };
+    });
+
+    let shots;
+    if (pointer) {
+      const elapsedMs = (degree ?? 0) / 360 * TURN_MS;
+      await settle(elapsedMs);
+      shots = POINTER_SHOTS.map((shot, index) => {
+        const client = shot.local
+          ? localToClient(shot.local[0], shot.local[1], host.width, host.height)
+          : null;
+        return {
+          index,
+          elapsedMs,
+          file: `pointer-${shot.name}.png`,
+          degree: degree ?? 0,
+          pointer: client
+            ? { x: host.left + client.x, y: host.top + client.y }
+            : null,
+        };
+      });
+    } else {
+      shots = degree === null
+        ? Array.from({ length: FRAME_COUNT }, (_, index) => ({
+          index,
+          elapsedMs: index * STEP_MS,
+          file: `frame-${String(index).padStart(4, '0')}.png`,
+          degree: index * STEP_MS / TURN_MS * 360,
+          pointer: undefined,
+        }))
+        : [{
+          index: 0,
+          elapsedMs: degree / 360 * TURN_MS,
+          file: `degree-${String(Math.round(degree)).padStart(3, '0')}.png`,
+          degree,
+          pointer: undefined,
+        }];
+    }
 
     for (const shot of shots) {
-      await settle(shot.elapsedMs);
+      if (!pointer) await settle(shot.elapsedMs);
+      if (pointer) await placePointer(shot.pointer);
       const path = resolve(outDir, shot.file);
       await page.screenshot({ path, type: 'png', clip, captureBeyondViewport: false });
       frames.push(shot);
-      if (degree !== null || shot.index % 10 === 0) {
+      if (pointer || degree !== null || shot.index % 10 === 0) {
         process.stdout.write(
           `viz:mark-turn ${shot.file}  t=${shot.elapsedMs}ms  deg=${shot.degree.toFixed(1)}  backend=${backend}\n`
         );
@@ -276,6 +355,7 @@ export async function captureMarkTurn(options = {}) {
       stepMs: STEP_MS,
       frameCount: shots.length,
       degree,
+      pointer,
       backend,
       viewport: { width: VIEW_WIDTH, height: VIEW_HEIGHT, deviceScaleFactor: DEVICE_SCALE },
       clip,

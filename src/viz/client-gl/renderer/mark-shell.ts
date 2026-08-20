@@ -5,6 +5,7 @@ type ShellMesh = Mesh<Geometry, Shader>;
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_MESH,
   ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_MIN_PATH,
@@ -124,6 +125,10 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uCore', type: 'vec3<f32>' },
   { name: 'uLightDir', type: 'vec3<f32>' },
   { name: 'uCoreTint', type: 'vec3<f32>' },
+  // Pointer lamp in FRONT of the gem. xyz is model-space position; w is 0
+  // when the cursor is away or inactive. Packed as vec4 so WebGPU cannot
+  // hide `on` in the padding after a vec3 — that was a silent no-op.
+  { name: 'uLamp', type: 'vec4<f32>' },
   { name: 'uCoreReach', type: 'f32' },
   { name: 'uCoreIntensity', type: 'f32' },
   { name: 'uAmbient', type: 'f32' },
@@ -163,6 +168,9 @@ export const MARK_SHELL_UNIFORMS = [
   // area light of this size, so a glint widens when the bead is against a wall
   // instead of staying a point-light needle.
   { name: 'uCoreRadius', type: 'f32' },
+  // Local UV of the cursor in the 28×28 box: the catch follows this, not a
+  // Blinn lobe the octahedron almost never fires.
+  { name: 'uLampUv', type: 'vec2<f32>' },
 ] as const;
 
 /**
@@ -200,6 +208,7 @@ const uniformValues: Record<
   uCore: () => new Float32Array(3),
   uLightDir: () => new Float32Array(LIGHT_DIRECTION),
   uCoreTint: () => new Float32Array([0.87, 0.945, 1]),
+  uLamp: () => new Float32Array([0, 0, ATOMA_MARK_LAMP_Z, 0]),
   uCoreReach: () => CORE_REACH_MODEL,
   uCoreIntensity: () => MARK_SHELL_CORE_INTENSITY,
   uAmbient: () => 0.15,
@@ -217,6 +226,7 @@ const uniformValues: Record<
   uLocalSize: () => ATOMA_MARK_LOCAL_SIZE,
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,
+  uLampUv: () => new Float32Array([0.5, 0.5]),
 };
 
 export interface MarkShell {
@@ -238,7 +248,14 @@ export interface MarkShell {
   mid: ShellMesh;
   /** Camera-facing outer hull: the glass drawn in the scene. */
   front: ShellMesh;
-  update(frame: AtomaMarkFrame, options?: { beadVisible?: boolean }): void;
+  update(frame: AtomaMarkFrame, options?: {
+    beadVisible?: boolean;
+    lamp?: {
+      position: readonly [number, number, number];
+      uv: readonly [number, number];
+      on: number;
+    };
+  }): void;
 }
 
 function channels(color: number): [number, number, number] {
@@ -425,6 +442,8 @@ export function createMarkShell(): MarkShell | null {
     uSplit: number;
     uBend: number;
     uMaxBend: number;
+    uLamp: Float32Array;
+    uLampUv: Float32Array;
   };
 
   const writeGroup = (indices: Uint32Array, group: readonly number[]) => {
@@ -458,7 +477,14 @@ export function createMarkShell(): MarkShell | null {
       uniforms.uBend = refraction.bend;
       uniforms.uMaxBend = refraction.maxBend;
     },
-    update(frame: AtomaMarkFrame, options?: { beadVisible?: boolean }) {
+    update(frame: AtomaMarkFrame, options?: {
+      beadVisible?: boolean;
+      lamp?: {
+        position: readonly [number, number, number];
+        uv: readonly [number, number];
+        on: number;
+      };
+    }) {
       const beadVisible = options?.beadVisible !== false;
       for (const [index, facet] of ATOMA_MARK_MESH.facets.entries()) {
         const shaded = frame.facets[index]!;
@@ -511,6 +537,18 @@ export function createMarkShell(): MarkShell | null {
         uniforms.uCore[2] = 0;
         uniforms.uCoreIntensity = 0;
         uniforms.uPulse = 0;
+      }
+      const lamp = options?.lamp;
+      const lampOn = lamp && Number.isFinite(lamp.on) ? Math.max(0, lamp.on) : 0;
+      if (lamp && lampOn > 0) {
+        uniforms.uLamp[0] = lamp.position[0];
+        uniforms.uLamp[1] = lamp.position[1];
+        uniforms.uLamp[2] = lamp.position[2];
+        uniforms.uLamp[3] = lampOn;
+        uniforms.uLampUv[0] = lamp.uv[0];
+        uniforms.uLampUv[1] = lamp.uv[1];
+      } else {
+        uniforms.uLamp[3] = 0;
       }
     },
   };

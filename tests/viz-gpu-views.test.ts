@@ -26,7 +26,7 @@ import {
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { attachAtomaMark } from '../src/viz/client-gl/renderer/atoma-mark.js';
-import { drawWelcome, welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
+import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
   pinMarkElapsedMs,
   setMarkBeadVisible,
@@ -108,6 +108,14 @@ function withTuningPanel(body: () => void, search = '?atomaTune=1') {
 
 function textStub(value: string, options?: { size?: number }): Text {
   const lines = value.length === 0 ? 1 : Math.ceil(value.length / 80);
+  const anchor = {
+    x: 0,
+    y: 0,
+    set(x: number, y = 0) {
+      this.x = x;
+      this.y = y;
+    },
+  };
   return {
     height: lines * 16,
     // Layout that reads a label back — the event card places its actor column
@@ -115,7 +123,7 @@ function textStub(value: string, options?: { size?: number }): Text {
     // NaN and the test proves nothing.
     width: value.length * ((options?.size ?? 12) * 0.58),
     text: value,
-    anchor: { x: 0 },
+    anchor,
     position: { set() {} },
     style: {},
     alpha: 1,
@@ -130,6 +138,7 @@ function createRecordingCtx(): RecordingCtx {
     // mark still builds and lays out in a context that cannot render off-screen.
     pixiRenderer: undefined as unknown as RecordingCtx['pixiRenderer'],
     root: new Container(),
+    markRoot: new Container(),
     texts: [],
     buttons: [],
     filterButtons: [],
@@ -919,20 +928,19 @@ describe('drawWelcome gate', () => {
     expect(button!.y).toBeGreaterThan(HEIGHT / 2);
     expect(button!.x + button!.width / 2).toBe(WIDTH / 2);
     expect(ctx.tickers.length).toBeGreaterThan(0);
-    const slider = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turn');
-    const live = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turnLive');
-    const bead = ctx.metrics.hitTargets.find((target) => target.id === 'welcome.bead');
-    expect(slider).toBeTruthy();
-    expect(live).toBeTruthy();
-    expect(bead).toBeTruthy();
-    expect(slider!.role).toBe('slider');
-    expect(bead!.role).toBe('checkbox');
-    expect(slider!.label).toBe(I18N_CATALOGS.en['welcome.turn']);
-    expect(bead!.label).toBe(I18N_CATALOGS.en['welcome.bead']);
-    expect(slider!.y).toBe(layout.sliderY);
-    expect(bead!.x).toBe(layout.beadX);
+    expect(ctx.markRoot.children.length).toBe(1);
+    expect(ctx.root.children.length).toBeGreaterThan(0);
+    const tagline = ctx.texts.find((text) => text.value === I18N_CATALOGS.en['welcome.tagline']);
+    expect(tagline).toBeTruthy();
+    expect(tagline!.x).toBe(layout.copyX);
+    expect(tagline!.y).toBe(layout.copyY);
+    expect(layout.copyY).toBe(layout.sliderY);
+    expect(layout.buttonY).toBeGreaterThan(layout.copyY + layout.copyHeight);
     expect(layout.sliderY).toBeGreaterThan(HEIGHT / 2);
-    expect(layout.buttonY).toBeGreaterThan(layout.sliderY + layout.sliderHeight);
+    expect(WELCOME_SHOW_INSPECT).toBe(false);
+    // Inspect knobs stay implemented, but the public gate does not mount them.
+    expect(ctx.metrics.hitTargets.find((target) => target.id === 'welcome.turn')).toBeUndefined();
+    expect(ctx.metrics.hitTargets.find((target) => target.id === 'welcome.bead')).toBeUndefined();
   });
 
   it('keeps the button on-screen while the mark grows with the viewport', () => {
@@ -941,7 +949,7 @@ describe('drawWelcome gate', () => {
     expect(wide.scale).toBeGreaterThan(compact.scale);
     expect(compact.buttonY + compact.buttonHeight).toBeLessThan(600);
     expect(wide.buttonY + wide.buttonHeight).toBeLessThan(1080);
-    expect(compact.sliderY + compact.sliderHeight).toBeLessThan(compact.buttonY);
+    expect(compact.copyY + compact.copyHeight).toBeLessThan(compact.buttonY);
     expect(compact.beadY).toBe(compact.sliderY);
     expect(compact.markX + 14).toBe(400);
     expect(compact.markY + 14).toBe(300);
@@ -1020,9 +1028,20 @@ describe('attachAtomaMark glass layering', () => {
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
     expect(source).toContain('behind.visible = false');
-    expect(source).toContain('shell?.update(frame, { beadVisible })');
+    expect(source).toContain('shell?.update(frame, { beadVisible, lamp })');
+    expect(source).toContain('pointerLampForLocal');
+    expect(source).toContain('bobPx');
+    const paintStart = source.indexOf('const paint = ');
+    const paint = source.slice(
+      paintStart,
+      source.indexOf('const elapsedForPaint', paintStart)
+    );
+    expect(paint.indexOf('container.y')).toBeGreaterThan(-1);
+    expect(paint.indexOf('container.y')).toBeLessThan(paint.indexOf('pointerLampForLocal'));
     expect(source).toContain('writeMarkFieldLight');
     expect(source).toContain('clearMarkFieldLight');
+    expect(source).toContain('collectPointerFieldSpills');
+    expect(source).toContain('readPointerLight');
     expect(source).toContain('markHaloMinPx');
     expect(source).not.toContain('mark-rear-light');
     // A Pixi ellipse under the gem is a floor. Lantern light lives on the

@@ -18,6 +18,10 @@ const welcome = readFileSync(
   resolve(import.meta.dirname, '../src/viz/client-gl/renderer/views/welcome.ts'),
   'utf8'
 );
+const atomaMark = readFileSync(
+  resolve(import.meta.dirname, '../src/viz/client-gl/renderer/atoma-mark.ts'),
+  'utf8'
+);
 
 describe('viz mark-turn capture', () => {
   it('steps a full turn at 250 ms, matching the mark\'s authored period', () => {
@@ -36,8 +40,11 @@ describe('viz mark-turn capture', () => {
   });
 
   it('freezes the welcome float so the film is a rotation, not a bob', () => {
-    expect(welcome).toContain('markClockIsPinned');
+    expect(welcome).toContain('bobPx:');
+    expect(atomaMark).toContain('bobPx');
+    expect(atomaMark).toContain('markClockIsPinned');
     expect(welcome).not.toMatch(/Math\.sin\(performance\.now\(\)/);
+    expect(atomaMark).not.toMatch(/Math\.sin\(performance\.now\(\)/);
   });
 
   it('crops to the crystal, above the inspect row', () => {
@@ -63,9 +70,17 @@ describe('viz mark-turn capture', () => {
     expect(gpuRenderer).toContain('pinMarkTurnDegrees');
   });
 
+  it('can park the pointer on the gem for catch-light stills', () => {
+    expect(script).toContain('--pointer');
+    expect(script).toContain('movePointerLight');
+    expect(gpuRenderer).toContain('movePointerLight');
+    expect(gpuRenderer).toContain('hidePointerLight');
+  });
+
   it('writes into a gitignored capture directory', () => {
     expect(script).toContain('.atoma-mark-turn');
     expect(gitignore).toContain('.atoma-mark-turn/');
+    expect(gitignore).toContain('.atoma-mark-pointer/');
   });
 
   it('fails closed if the film is only the aura', () => {

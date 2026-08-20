@@ -5,17 +5,22 @@ import {
   ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_FACET_DEPTH_SPAN,
+  ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
   ATOMA_MARK_PROJECTION_SCALE,
   ATOMA_MARK_RANK_COLORS,
   ATOMA_MARK_MIN_PATH,
   ATOMA_MARK_OPACITY_REFERENCE,
+  ATOMA_MARK_RADIUS,
   ATOMA_MARK_RANK_MATERIALS,
   ATOMA_MARK_THICKNESS,
   ATOMA_MARK_TURN_MS,
   ATOMA_MARK_REST_YAW,
   buildAtomaMarkFrame,
+  collectPointerFieldSpills,
+  mergeFieldSpills,
+  pointerLampForLocal,
   markColorForOctant,
   markElapsedMsFromTurnDegrees,
   markF0,
@@ -128,6 +133,17 @@ describe('Atoma GPU brand mark', () => {
     for (const pair of pairs) {
       expect(colorDistance(pair.top, pair.bottom)).toBeGreaterThan(60);
     }
+    const chroma = (color: number) => {
+      const r = color >> 16 & 0xff;
+      const g = color >> 8 & 0xff;
+      const b = color & 0xff;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      return max === 0 ? 0 : (max - min) / max;
+    };
+    // Gold-sheen, not the steel-grey card the element wedge used to be.
+    expect(chroma(ATOMA_MARK_RANK_COLORS.element.top)).toBeGreaterThan(0.55);
+    expect(chroma(ATOMA_MARK_RANK_COLORS.element.bottom)).toBeGreaterThan(0.55);
   });
 
   it('keys facet color on the octant, with the y sign picking top or bottom', () => {
@@ -605,5 +621,73 @@ describe('Atoma GPU brand mark', () => {
           .toBeGreaterThan(faceR);
       }
     }
+  });
+
+  it('throws the pointer through the gem onto the field when the lamp is over it', () => {
+    const frame = buildAtomaMarkFrame(0);
+    const through = collectPointerFieldSpills(frame, 14, 14);
+    expect(through.length).toBeGreaterThan(0);
+    expect(collectPointerFieldSpills(frame, 80, 80)).toEqual([]);
+    const front = frame.frontOrder[0]!;
+    const mesh = ATOMA_MARK_MESH.facets[front]!;
+    const corners = mesh.points.map((point) => frame.projected[point]!);
+    const over = {
+      x: (corners[0]!.x + corners[1]!.x + corners[2]!.x) / 3,
+      y: (corners[0]!.y + corners[1]!.y + corners[2]!.y) / 3,
+    };
+    const stained = collectPointerFieldSpills(frame, over.x, over.y);
+    expect(stained.length).toBeGreaterThan(0);
+    const entry = markColorForOctant(mesh.octant);
+    const channelDelta = (color: number) => Math.abs((color >> 16 & 0xff) - (entry >> 16 & 0xff));
+    const mean = stained.reduce((sum, spill) => sum + channelDelta(spill.color), 0)
+      / stained.length;
+    const unstained = frame.rearSpills.reduce((sum, spill) => sum + channelDelta(spill.color), 0)
+      / Math.max(1, frame.rearSpills.length);
+    expect(mean, 'pointer beam keeps the entry-face stain').toBeLessThan(unstained + 1e-6);
+    for (const spill of through) {
+      const cornersOf = ATOMA_MARK_MESH.facets[spill.facet]!.points
+        .map((point) => frame.projected[point]!);
+      const faceR = Math.hypot(
+        (cornersOf[0]!.x + cornersOf[1]!.x + cornersOf[2]!.x) / 3 - 14,
+        (cornersOf[0]!.y + cornersOf[1]!.y + cornersOf[2]!.y) / 3 - 14
+      );
+      expect(Math.hypot(spill.x - 14, spill.y - 14)).toBeGreaterThan(faceR);
+    }
+  });
+
+  it('parks the pointer lamp in front of the gem, not on its surface', () => {
+    const centre = pointerLampForLocal(14, 14);
+    expect(centre.position[0]).toBeCloseTo(0);
+    expect(centre.position[1]).toBeCloseTo(0);
+    expect(centre.position[2]).toBe(ATOMA_MARK_LAMP_Z);
+    expect(centre.position[2]).toBeGreaterThan(ATOMA_MARK_RADIUS);
+    expect(centre.on).toBeGreaterThan(0.9);
+    expect(centre.uv[0]).toBeCloseTo(0.5);
+    expect(centre.uv[1]).toBeCloseTo(0.5);
+
+    const right = pointerLampForLocal(14 + ATOMA_MARK_PROJECTION_SCALE, 14);
+    expect(right.position[0]).toBeCloseTo(1);
+    expect(right.position[1]).toBeCloseTo(0);
+
+    const up = pointerLampForLocal(14, 14 - ATOMA_MARK_PROJECTION_SCALE);
+    expect(up.position[1]).toBeCloseTo(1);
+
+    expect(pointerLampForLocal(80, 80).on).toBe(0);
+    expect(pointerLampForLocal(Number.NaN, 14).on).toBe(0);
+    // A cursor standing off to the side of the gem must not still be a
+    // studio key aimed at the middle of the crystal.
+    expect(pointerLampForLocal(0, 14).on).toBeLessThan(0.45);
+  });
+
+  it('adds pointer and bead lamps on the same rear window instead of dropping one', () => {
+    const merged = mergeFieldSpills(
+      [{ facet: 1, x: 10, y: 10, intensity: 0.4, color: 0xff0000 }],
+      [{ facet: 1, x: 99, y: 99, intensity: 0.3, color: 0x0000ff }]
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.intensity).toBeCloseTo(0.7);
+    expect(merged[0]!.x).toBe(10);
+    expect(merged[0]!.color).not.toBe(0xff0000);
+    expect(merged[0]!.color).not.toBe(0x0000ff);
   });
 });

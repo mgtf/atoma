@@ -96,9 +96,9 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
       mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core),
       uHueShift
     );
-    // NO additive core term. A bright centre reads as a lamp pasted on top of
-    // the scene; what sells a light under the cursor is edges catching it, so
-    // the response is carried by the facing/edge term alone.
+    // Interior wash + edges. The 0.075 term is what lights filled UI
+    // (buttons, cards, header). It is a disc on ANY filled mesh, so the
+    // crystal must NOT live under this filter — it sits on markRoot.
     float illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
     finalColor = sampleColor;
@@ -188,7 +188,8 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
       mix(vec3(0.20, 0.56, 1.0), vec3(0.78, 0.95, 1.0), core),
       pointerLight.uHueShift
     );
-    // Twin of the GLSL above — no additive core, same edge-carried response.
+    // Twin of the GLSL above — interior wash for UI, crystal is not in this
+    // filtered layer.
     let illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
@@ -449,6 +450,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uCore: vec3<f32>,
     uLightDir: vec3<f32>,
     uCoreTint: vec3<f32>,
+    uLamp: vec4<f32>,
     uCoreReach: f32,
     uCoreIntensity: f32,
     uAmbient: f32,
@@ -466,6 +468,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uLocalSize: f32,
     uBackdropTexel: vec2<f32>,
     uCoreRadius: f32,
+    uLampUv: vec2<f32>,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -644,7 +647,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // TABLE LOBE. Bending N toward the face centroid created NEW alignments
     // (clip_px_max jumped 9k to 27k). Windowing the highlight by distance
     // from that centroid can only shrink a glaze; it cannot invent one.
-    let tableLobe = exp(-dot(inPlane, inPlane) * 12.0);
+    let tableLobe = exp(-dot(inPlane, inPlane) * 36.0);
     let highlight = mix(vec3<f32>(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * markUniforms.uSpecular * outer * tableLobe;
     // STUDIO WINDOW. Specular only. A fill that lifts the body was tried and
@@ -678,11 +681,44 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // mirror there and hides what is behind it.
     let bounce = 1.0 - fresnel;
 
-    // INNER SPECULAR. The bead is the only point light, so L varies across a
-    // facet and the highlight is a spot that TRAVELS as the bead bounces —
-    // which is why a gem with a light inside looks alive. Outer facets see
-    // this light as TRANSMITTED, not as a reflection (the bead is behind the
-    // surface), so the glint is gated on the cavity.
+    // POINTER LAMP. A point light parked in FRONT of the gem, in model space.
+    // The catch must sit NEAR THE LAMP, not at the screen centre: convexity
+    // toward vScreen 0.5 parked a circular wash in the middle of the gem
+    // even when the mouse stood off to the left. A tight UV window keeps
+    // it local; the 3D term still travels and resizes as the solid turns.
+    // Specular only — Lambert from this lamp buried the far facets.
+    let toLamp = markUniforms.uLamp.xyz - vWorld;
+    let lampDist = length(toLamp);
+    let lampDir = toLamp / max(lampDist, 1e-4);
+    let lampNdotL = max(dot(normal, lampDir), 0.0);
+    let lampHalf = normalize(lampDir + viewDir);
+    let lampShade = normalize(normal + lampDir * 0.55);
+    let lampFacing = max(dot(lampShade, lampHalf), 0.0);
+    let lampSpecF = f0 + (1.0 - f0) *
+      pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
+    let lampFres = mix(0.38, 1.0, lampSpecF);
+    let lampGate = smoothstep(0.0, 0.08, lampNdotL);
+    let lampDelta = vScreen - markUniforms.uLampUv;
+    let lampWindow = exp(-dot(lampDelta, lampDelta) * 280.0);
+    let lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
+    let lampNorm = (lampSoft + 2.0) / 22.0;
+    let lampSpectral = vec3<f32>(
+      pow(lampFacing, lampSoft * 0.88),
+      pow(lampFacing, lampSoft),
+      pow(lampFacing, lampSoft * 1.18)
+    );
+    let lampRaw = mix(vec3<f32>(lampSpectral.y), lampSpectral, dispersion * 0.4) *
+      lampFres * lampGate * lampWindow * lampNorm *
+      vec3<f32>(0.86, 0.96, 1.0) *
+      markUniforms.uSpecular * markUniforms.uLamp.w * outer * 2.15;
+    let lampPeak = max(lampRaw.x, max(lampRaw.y, lampRaw.z));
+    let lampHighlight = lampRaw *
+      (1.0 / (1.0 + max(lampPeak - 0.22, 0.0) * 3.4));
+
+    // INNER SPECULAR. The bead is the INTERIOR point light, so L varies
+    // across a facet and the highlight travels as the bead bounces. The
+    // pointer lamp above is the matching exterior light, on the camera side.
+    // Outer facets see the bead as TRANSMITTED, not as a reflection.
     let coreHalf = normalize(coreDir + viewDir);
     let coreFacing = max(dot(normal, coreHalf), 0.0);
     let coreSpecF = f0 + (1.0 - f0) * pow(1.0 - max(dot(viewDir, coreHalf), 0.0), 5.0);
@@ -878,6 +914,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       scatter +
       highlight * 0.9 +
       windowHighlight +
+      lampHighlight +
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +
@@ -999,6 +1036,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform vec3 uCore;
   uniform vec3 uLightDir;
   uniform vec3 uCoreTint;
+  uniform vec4 uLamp;
   uniform float uCoreReach;
   uniform float uCoreIntensity;
   uniform float uAmbient;
@@ -1016,6 +1054,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform float uLocalSize;
   uniform vec2 uBackdropTexel;
   uniform float uCoreRadius;
+  uniform vec2 uLampUv;
 
   void main() {
     vec3 normal = normalize(vNormal);
@@ -1066,7 +1105,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float geo = trueSun * nDotV / max(trueSun + nDotV - trueSun * nDotV, 1e-4);
     float specNorm = (specularPower + 2.0) / 51.0;
     vec3 inPlane = vWorld - normal * dot(vWorld, normal);
-    float tableLobe = exp(-dot(inPlane, inPlane) * 12.0);
+    float tableLobe = exp(-dot(inPlane, inPlane) * 36.0);
     vec3 highlight = mix(vec3(spectral.y), spectral, dispersion) *
       specF * geo * specNorm * uSpecular * outer * tableLobe;
     vec3 windowDir = normalize(vec3(0.85, 0.35, 0.15));
@@ -1083,6 +1122,35 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     // Same Schlick as the WGSL path; keep the two in step.
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
+
+    // Same pointer lamp as the WGSL path; keep the two in step.
+    vec3 toLamp = uLamp.xyz - vWorld;
+    float lampDist = length(toLamp);
+    vec3 lampDir = toLamp / max(lampDist, 1e-4);
+    float lampNdotL = max(dot(normal, lampDir), 0.0);
+    vec3 lampHalf = normalize(lampDir + viewDir);
+    vec3 lampShade = normalize(normal + lampDir * 0.55);
+    float lampFacing = max(dot(lampShade, lampHalf), 0.0);
+    float lampSpecF = f0 + (1.0 - f0) *
+      pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
+    float lampFres = mix(0.38, 1.0, lampSpecF);
+    float lampGate = smoothstep(0.0, 0.08, lampNdotL);
+    vec2 lampDelta = vScreen - uLampUv;
+    float lampWindow = exp(-dot(lampDelta, lampDelta) * 280.0);
+    float lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
+    float lampNorm = (lampSoft + 2.0) / 22.0;
+    vec3 lampSpectral = vec3(
+      pow(lampFacing, lampSoft * 0.88),
+      pow(lampFacing, lampSoft),
+      pow(lampFacing, lampSoft * 1.18)
+    );
+    vec3 lampRaw = mix(vec3(lampSpectral.y), lampSpectral, dispersion * 0.4) *
+      lampFres * lampGate * lampWindow * lampNorm *
+      vec3(0.86, 0.96, 1.0) *
+      uSpecular * uLamp.w * outer * 2.15;
+    float lampPeak = max(lampRaw.x, max(lampRaw.y, lampRaw.z));
+    vec3 lampHighlight = lampRaw *
+      (1.0 / (1.0 + max(lampPeak - 0.22, 0.0) * 3.4));
 
     // Same inner specular as the WGSL path; keep the two in step.
     vec3 coreHalf = normalize(coreDir + viewDir);
@@ -1152,6 +1220,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       scatter +
       highlight * 0.9 +
       windowHighlight +
+      lampHighlight +
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +

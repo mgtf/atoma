@@ -73,9 +73,11 @@ describe('viz visual depth contract', () => {
 
   it('lights only the Pixi foreground while leaving the ambient grid on the far plane', () => {
     const renderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
-    expect(renderer).toMatch(/stage\.addChild\(this\.ambientRoot, this\.root\)/);
+    expect(renderer).toMatch(/stage\.addChild\(this\.ambientRoot, this\.root, this\.markRoot\)/);
     expect(renderer).toMatch(/drawAmbientGrid\(this\.ambientRoot/);
     expect(renderer).toMatch(/this\.root\.filters = \[filter\]/);
     expect(renderer).not.toMatch(/this\.ambientRoot\.filters\s*=/);
+    expect(renderer).not.toMatch(/this\.markRoot\.filters\s*=/);
+    expect(renderer).toMatch(/attachAtomaMark\(\s*this\.markRoot/);
   });
 });

@@ -87,7 +87,9 @@ def main() -> int:
     )
     args = parser.parse_args()
     folder = Path(args.dir)
-    frames = sorted(folder.glob("frame-*.png")) or sorted(folder.glob("degree-*.png"))
+    frames = sorted(folder.glob("frame-*.png")) or sorted(folder.glob("degree-*.png")) or sorted(
+        folder.glob("pointer-*.png")
+    )
     if not frames:
         print(f"viz:mark-turn-analyze: no frames in {folder}", file=sys.stderr)
         return 1
