@@ -171,6 +171,17 @@ export const MARK_SHELL_UNIFORMS = [
   // Local UV of the cursor in the 28×28 box: the catch follows this, not a
   // Blinn lobe the octahedron almost never fires.
   { name: 'uLampUv', type: 'vec2<f32>' },
+  // Scene reflection. 1 when a Pixi env capture is bound; 0 on the header
+  // mark and during the interior backdrop pass (shared shader).
+  { name: 'uEnvOn', type: 'f32' },
+  // How far a reflected ray travels across the env texture, in UV. Authored
+  // so a downward facet on the arrival gate reaches the tagline and Continue.
+  { name: 'uEnvJump', type: 'f32' },
+  // Screen-space pointer in the SAME UV as vClipUv. z is 0 when the cursor
+  // is away; w is a short jump so the reflected silhouette sits next to the
+  // HTML cursor instead of under it. Packed as vec4 after two tightly packed
+  // floats so WebGPU cannot insert padding between uEnvJump and this.
+  { name: 'uPointerClip', type: 'vec4<f32>' },
 ] as const;
 
 /**
@@ -227,6 +238,9 @@ const uniformValues: Record<
   uBackdropTexel: () => new Float32Array([0, 0]),
   uCoreRadius: () => ATOMA_MARK_CORE_RADIUS / ATOMA_MARK_PROJECTION_SCALE,
   uLampUv: () => new Float32Array([0.5, 0.5]),
+  uEnvOn: () => 0,
+  uEnvJump: () => 0.42,
+  uPointerClip: () => new Float32Array([0, 0, 0, 0.018]),
 };
 
 export interface MarkShell {
@@ -236,6 +250,12 @@ export interface MarkShell {
    * texture object is stable, only its contents change.
    */
   setBackdrop(texture: Texture, widthPx: number, heightPx: number): void;
+  /**
+   * Hands the FRONT glass a screen-space capture of the Pixi scene WITHOUT
+   * the gem. Empty texture + uEnvOn 0 keeps the layout valid when the header
+   * mark skips the pass.
+   */
+  setEnv(texture: Texture, on: boolean): void;
   /**
    * Turns refraction sampling off for the duration of the backdrop pass. MUST
    * wrap that render: the back facets are outer facets too and share this
@@ -252,6 +272,10 @@ export interface MarkShell {
     beadVisible?: boolean;
     lamp?: {
       position: readonly [number, number, number];
+      uv: readonly [number, number];
+      on: number;
+    };
+    pointerClip?: {
       uv: readonly [number, number];
       on: number;
     };
@@ -425,6 +449,8 @@ export function createMarkShell(): MarkShell | null {
   // arrives — so the effect is inert, not wrong, before the first render pass.
   shader.resources['uBackdrop'] = Texture.EMPTY.source;
   shader.resources['uBackdropSampler'] = Texture.EMPTY.source.style;
+  shader.resources['uEnv'] = Texture.EMPTY.source;
+  shader.resources['uEnvSampler'] = Texture.EMPTY.source.style;
 
   const back = new Mesh({ geometry: backGeometry, shader });
   back.label = 'mark-shell-back';
@@ -444,6 +470,8 @@ export function createMarkShell(): MarkShell | null {
     uMaxBend: number;
     uLamp: Float32Array;
     uLampUv: Float32Array;
+    uEnvOn: number;
+    uPointerClip: Float32Array;
   };
 
   const writeGroup = (indices: Uint32Array, group: readonly number[]) => {
@@ -477,10 +505,19 @@ export function createMarkShell(): MarkShell | null {
       uniforms.uBend = refraction.bend;
       uniforms.uMaxBend = refraction.maxBend;
     },
+    setEnv(texture: Texture, on: boolean) {
+      shader.resources['uEnv'] = texture.source;
+      shader.resources['uEnvSampler'] = texture.source.style;
+      uniforms.uEnvOn = on ? 1 : 0;
+    },
     update(frame: AtomaMarkFrame, options?: {
       beadVisible?: boolean;
       lamp?: {
         position: readonly [number, number, number];
+        uv: readonly [number, number];
+        on: number;
+      };
+      pointerClip?: {
         uv: readonly [number, number];
         on: number;
       };
@@ -549,6 +586,17 @@ export function createMarkShell(): MarkShell | null {
         uniforms.uLampUv[1] = lamp.uv[1];
       } else {
         uniforms.uLamp[3] = 0;
+      }
+      const pointerClip = options?.pointerClip;
+      const pointerOn = pointerClip && Number.isFinite(pointerClip.on)
+        ? Math.max(0, pointerClip.on)
+        : 0;
+      if (pointerClip && pointerOn > 0) {
+        uniforms.uPointerClip[0] = pointerClip.uv[0];
+        uniforms.uPointerClip[1] = pointerClip.uv[1];
+        uniforms.uPointerClip[2] = pointerOn;
+      } else {
+        uniforms.uPointerClip[2] = 0;
       }
     },
   };

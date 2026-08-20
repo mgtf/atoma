@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { hidePointerLight, movePointerLight } from './pointer-light.js';
+import {
+  ATOMA_CURSOR_HOTSPOT,
+  ATOMA_CURSOR_PATH,
+} from './pointer-cursor.js';
 
-export const ATOMA_CURSOR_HOTSPOT = { x: 12, y: 12 } as const;
-export const ATOMA_CURSOR_PATH =
-  'M12 12 L13.15 31.7 L18.45 27.15 L22.15 35.45 L26.3 33.55 L22.55 25.55 L30.85 24.25 Z';
+export { ATOMA_CURSOR_HOTSPOT, ATOMA_CURSOR_PATH };
 
 const FINE_POINTER_QUERY = '(any-hover: hover) and (any-pointer: fine)';
 const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';

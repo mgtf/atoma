@@ -21,6 +21,7 @@ import type {
   VizRun,
 } from '../client/types.js';
 import { attachAtomaMark } from './renderer/atoma-mark.js';
+import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
 import {
   markElapsedMs,
   markTurnDegrees,
@@ -259,6 +260,7 @@ export class GpuRenderer {
   private lightRendererX = 0;
   private lightRendererY = 0;
   private pointerLightBufferPinned = false;
+  private farField: FarField | null = null;
   previousFilterBounds = new Map<string, FilterVisualTarget>();
   private currentFilterBounds = new Map<string, FilterVisualTarget>();
   private handledExitIds = new Set<string>();
@@ -560,6 +562,35 @@ export class GpuRenderer {
     this.app.ticker.add(this.updateCastShadows);
   }
 
+  /**
+   * Aurora lives on ambientRoot for the session. Scene rebuilds wipe that
+   * container; skip the field mesh or the shader is compiled again every
+   * render — and the welcome gem's env capture would miss the field for a
+   * frame after every rebuild.
+   */
+  private retainFarField() {
+    const keep = this.farField?.mesh;
+    if (!keep || keep.destroyed) return;
+    if (keep.parent !== this.ambientRoot) {
+      this.ambientRoot.addChildAt(keep, 0);
+      return;
+    }
+    if (this.ambientRoot.getChildIndex(keep) !== 0) {
+      this.ambientRoot.setChildIndex(keep, 0);
+    }
+  }
+
+  private readonly tickFarField = (ticker: Ticker) => {
+    if (!this.farField) return;
+    const canvas = this.app.canvas;
+    this.farField.tick(
+      ticker.deltaMS / 1000,
+      this.app.screen.width,
+      this.app.screen.height,
+      canvas.getBoundingClientRect()
+    );
+  };
+
   async init(host: HTMLElement) {
     this.host = host;
     const forceWebGl = new URLSearchParams(location.search).get('renderer') === 'webgl';
@@ -596,6 +627,11 @@ export class GpuRenderer {
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
     this.app.stage.addChild(this.ambientRoot, this.root, this.markRoot);
+    this.farField = createFarField();
+    if (this.farField) {
+      this.ambientRoot.addChild(this.farField.mesh);
+      this.app.ticker.add(this.tickFarField);
+    }
     this.installPointerLightFilter();
     this.app.canvas.className = 'gpu-ui-canvas';
     this.app.canvas.setAttribute('aria-hidden', 'true');
@@ -672,6 +708,8 @@ export class GpuRenderer {
     if (!this.initialized) return;
     this.app.ticker.remove(this.updatePointerLight);
     this.app.ticker.remove(this.updateCastShadows);
+    this.app.ticker.remove(this.tickFarField);
+    this.farField = null;
     this.castShadows = [];
     this.root.filters = null;
     this.root.filterArea = undefined;
@@ -732,7 +770,12 @@ export class GpuRenderer {
     // Dropped with the scene that owns them; the ticker must not be left
     // holding Graphics that are about to be destroyed.
     this.castShadows = [];
-    for (const child of this.ambientRoot.removeChildren()) child.destroy({ children: true });
+    const keepFarField = this.farField?.mesh ?? null;
+    for (const child of this.ambientRoot.removeChildren()) {
+      if (child === keepFarField || child.label === FAR_FIELD_LABEL) continue;
+      child.destroy({ children: true });
+    }
+    this.retainFarField();
     for (const child of this.root.removeChildren()) child.destroy({ children: true });
     for (const child of this.markRoot.removeChildren()) child.destroy({ children: true });
     this.metrics.visibleLabels = [];

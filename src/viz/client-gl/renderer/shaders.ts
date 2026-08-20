@@ -469,6 +469,9 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     uBackdropTexel: vec2<f32>,
     uCoreRadius: f32,
     uLampUv: vec2<f32>,
+    uEnvOn: f32,
+    uEnvJump: f32,
+    uPointerClip: vec4<f32>,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -480,6 +483,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
   // knows what the interior looks like at this pixel.
   @group(2) @binding(1) var uBackdrop: texture_2d<f32>;
   @group(2) @binding(2) var uBackdropSampler: sampler;
+  // The Pixi scene WITHOUT the gem, in screen UV. Fresnel samples this,
+  // including the aurora field on ambientRoot.
+  @group(2) @binding(3) var uEnv: texture_2d<f32>;
+  @group(2) @binding(4) var uEnvSampler: sampler;
 
   struct VertexInput {
     @location(0) aPosition: vec2<f32>,
@@ -506,6 +513,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // the geometry it belongs to.
     @location(7) vScreen: vec2<f32>,
     @location(8) vBary: vec3<f32>,
+    // Clip UV of this pixel in the viewport, 0..1. The env capture is a scaled
+    // screenshot of the Pixi stage, so a reflected ray walks THIS space, not
+    // the 28x28 backdrop box vScreen is for.
+    @location(9) vClipUv: vec2<f32>,
   }
 
   @vertex
@@ -529,6 +540,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // which spans the whole viewport and would have every facet sampling an
     // unrelated part of the screen.
     out.vScreen = input.aPosition / markUniforms.uLocalSize;
+    out.vClipUv = clip.xy * 0.5 + 0.5;
     return out;
   }
 
@@ -543,6 +555,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     @location(6) vFinish: vec3<f32>,
     @location(7) vScreen: vec2<f32>,
     @location(8) vBary: vec3<f32>,
+    @location(9) vClipUv: vec2<f32>,
   ) -> @location(0) vec4<f32> {
     let normal = normalize(vNormal);
     let outer = vSurface.y;
@@ -819,6 +832,31 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let grazingFade = smoothstep(0.05, 0.24, nDotV) * markUniforms.uRefractOn;
     let eta = 1.0 / max(iorBend + 1.0, 1.001);
     let frontNormal = select(normal, -normal, dot(normal, viewDir) < 0.0);
+    let bounceDir = reflect(-viewDir, frontNormal);
+    // SCENE REFLECTION. F of the dielectric, not TIR. A critical-angle test
+    // on N·V turned every octahedron face into chrome; Schlick keeps face-on
+    // tables as windows and only the grazing rim as a mirror. The sample is
+    // the Pixi stage without the gem. Gated on uRefractOn so the interior
+    // backdrop pass cannot write the env into itself, and on uEnvOn so the
+    // header mark (too small to read a card, too expensive to recapture one)
+    // stays inert.
+    let envUv = vClipUv + vec2<f32>(bounceDir.x, -bounceDir.y) *
+      markUniforms.uEnvJump;
+    let envSample = textureSample(uEnv, uEnvSampler, envUv);
+    var envHighlight = envSample.rgb * envSample.a * fresnel * outer *
+      markUniforms.uEnvOn * markUniforms.uRefractOn;
+    // Local pointer reflection. The long uEnvJump looks at the tagline; when
+    // the cursor sits ON the gem that sample misses the echo, and Fresnel
+    // hides face-on tables anyway. A short hop from the pointer UV, gated to
+    // facets near it, is the silhouette in the glass — not a Lambert fill.
+    let toPointer = markUniforms.uPointerClip.xy - vClipUv;
+    let cursorNear = exp(-dot(toPointer, toPointer) * 110.0) *
+      markUniforms.uPointerClip.z;
+    let cursorUv = markUniforms.uPointerClip.xy +
+      vec2<f32>(bounceDir.x, -bounceDir.y) * markUniforms.uPointerClip.w;
+    let cursorSample = textureSample(uEnv, uEnvSampler, cursorUv);
+    envHighlight += cursorSample.rgb * cursorSample.a * cursorNear * outer *
+      markUniforms.uEnvOn * markUniforms.uRefractOn;
     let refracted = refract(-viewDir, frontNormal, eta);
     let rawBend = refracted.xy * markUniforms.uBend *
       mix(0.55, 1.0, bulk) * outer * grazingFade;
@@ -915,6 +953,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       highlight * 0.9 +
       windowHighlight +
       lampHighlight +
+      envHighlight +
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +
@@ -1001,10 +1040,12 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
   out vec3 vFinish;
   out vec2 vScreen;
   out vec3 vBary;
+  out vec2 vClipUv;
 
   void main() {
     mat3 matrix = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-    gl_Position = vec4((matrix * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+    vec3 clip = matrix * vec3(aPosition, 1.0);
+    gl_Position = vec4(clip.xy, 0.0, 1.0);
     vWorld = aWorld;
     vNormal = aNormal;
     vTint = aTint;
@@ -1014,6 +1055,7 @@ export const MARK_SHELL_GLSL_VERTEX = /* glsl */ `
     vFinish = aFinish;
     vBary = aBary;
     vScreen = aPosition / uLocalSize;
+    vClipUv = clip.xy * 0.5 + 0.5;
   }
 `;
 
@@ -1029,9 +1071,11 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   in vec3 vFinish;
   in vec2 vScreen;
   in vec3 vBary;
+  in vec2 vClipUv;
   out vec4 finalColor;
 
   uniform sampler2D uBackdrop;
+  uniform sampler2D uEnv;
 
   uniform vec3 uCore;
   uniform vec3 uLightDir;
@@ -1055,6 +1099,9 @@ export const MARK_SHELL_GLSL = /* glsl */ `
   uniform vec2 uBackdropTexel;
   uniform float uCoreRadius;
   uniform vec2 uLampUv;
+  uniform float uEnvOn;
+  uniform float uEnvJump;
+  uniform vec4 uPointerClip;
 
   void main() {
     vec3 normal = normalize(vNormal);
@@ -1176,6 +1223,17 @@ export const MARK_SHELL_GLSL = /* glsl */ `
     float grazingFade = smoothstep(0.05, 0.24, nDotV) * uRefractOn;
     float eta = 1.0 / max(iorBend + 1.0, 1.001);
     vec3 frontNormal = dot(normal, viewDir) < 0.0 ? -normal : normal;
+    vec3 bounceDir = reflect(-viewDir, frontNormal);
+    vec2 envUv = vClipUv + vec2(bounceDir.x, -bounceDir.y) * uEnvJump;
+    vec4 envSample = texture(uEnv, envUv);
+    vec3 envHighlight = envSample.rgb * envSample.a * fresnel * outer *
+      uEnvOn * uRefractOn;
+    vec2 toPointer = uPointerClip.xy - vClipUv;
+    float cursorNear = exp(-dot(toPointer, toPointer) * 110.0) * uPointerClip.z;
+    vec2 cursorUv = uPointerClip.xy + vec2(bounceDir.x, -bounceDir.y) * uPointerClip.w;
+    vec4 cursorSample = texture(uEnv, cursorUv);
+    envHighlight += cursorSample.rgb * cursorSample.a * cursorNear * outer *
+      uEnvOn * uRefractOn;
     vec3 refracted = refract(-viewDir, frontNormal, eta);
     vec2 rawBend = refracted.xy * uBend * mix(0.55, 1.0, bulk) * outer * grazingFade;
     float bendLength = length(rawBend);
@@ -1221,6 +1279,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `
       highlight * 0.9 +
       windowHighlight +
       lampHighlight +
+      envHighlight +
       coreHighlight * 1.15 +
       fringe * 0.32 +
       split * 0.9 * bounce +

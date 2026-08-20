@@ -474,7 +474,7 @@ try {
       cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
     }));
     if (
-      result.canvases !== 2 ||
+      result.canvases !== 1 ||
       !['webgpu', 'webgl'].includes(result.backend ?? '') ||
       result.objects < 20 ||
       (cursorEnv.expected && result.cursorX !== '640') ||
@@ -912,7 +912,7 @@ try {
       cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
     }));
     if (
-      fallbackResult.canvases !== 2 ||
+      fallbackResult.canvases !== 1 ||
       (fallbackCursorEnv.expected && fallbackResult.cursorX !== '640') ||
       (fallbackCursorEnv.expected && fallbackResult.cursorY !== '400') ||
       diagnostics.length > 0

@@ -2,14 +2,12 @@
  * Stained light the brand mark throws onto the FAR field.
  *
  * The bead is a lantern inside the crystal. Light that leaves through a rear
- * face has to land on the Three.js backdrop — the plane that faces the camera,
- * behind the Pixi UI. Pixi cannot light that plane: the two GPU contexts do
- * not share a scene, and a disc painted under the gem reads as a floor.
+ * face lands on the Pixi aurora mesh — the plane that faces the camera,
+ * behind the UI. A disc painted under the gem still reads as a floor, so
+ * this sample is what the field shader reads, not a second Pixi sprite.
  *
  * Same contract as the pointer light: a mutable sample, written by the mark,
- * read once per frame by the backdrop. Stored on globalThis so the dynamically
- * imported renderer chunk and the lazy Three backdrop cannot each hold an
- * empty copy of the array — that split is why the field stayed dark.
+ * read once per frame by the field tick.
  */
 
 export const MARK_FIELD_LIGHT_MAX = 4;

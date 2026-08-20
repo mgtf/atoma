@@ -58,11 +58,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const rendererRuns = readFileSync('src/viz/client-gl/renderer/views/runs.ts', 'utf8');
   const rendererShaders = readFileSync('src/viz/client-gl/renderer/shaders.ts', 'utf8');
   const rendererChipLayout = readFileSync('src/viz/client-gl/renderer/chip-layout.ts', 'utf8');
-  const threeBackdrop = readFileSync('src/viz/client-gl/ThreeBackdrop.tsx', 'utf8');
+  const farField = readFileSync('src/viz/client-gl/renderer/far-field.ts', 'utf8');
   const gpuCursor = readFileSync('src/viz/client-gl/AtomaCursor.tsx', 'utf8');
   const pointerLight = readFileSync('src/viz/client-gl/pointer-light.ts', 'utf8');
   const timelineLayout = readFileSync('src/viz/client/timeline-layout.ts', 'utf8');
-  const timelineRails = readFileSync('src/viz/client-gl/RunsTimelineRails.tsx', 'utf8');
   const gpuStore = readFileSync('src/viz/client-gl/store.ts', 'utf8');
   const gpuStyles = readFileSync('src/viz/client-gl/styles.css', 'utf8');
   const devLauncher = readFileSync('scripts/viz-dev.mjs', 'utf8');
@@ -94,10 +93,13 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(pkg.devDependencies['pixi.js']).toBeTruthy();
     expect(pkg.devDependencies['zustand']).toBeTruthy();
     expect(pkg.devDependencies['@tanstack/react-query']).toBeTruthy();
-    expect(pkg.devDependencies['three']).toBeTruthy();
-    expect(pkg.devDependencies['three']).toMatch(/0\.182/);
-    expect(pkg.devDependencies['@react-three/fiber']).toBeTruthy();
+    expect(pkg.devDependencies['three']).toBeUndefined();
+    expect(pkg.devDependencies['@react-three/fiber']).toBeUndefined();
+    expect(pkg.devDependencies['@types/three']).toBeUndefined();
     expect(pkg.devDependencies['@pixi/react']).toBeUndefined();
+    expect(existsSync('src/viz/client-gl/ThreeBackdrop.tsx')).toBe(false);
+    expect(existsSync('src/viz/client-gl/RunsTimelineRails.tsx')).toBe(false);
+    expect(existsSync('src/viz/client-gl/AtomaCrystal.tsx')).toBe(false);
     expect(vite).toMatch(/plugin-react/);
     expect(vite).toMatch(/client-gl/);
     expect(app).toMatch(/ThemeProvider|lazy\(/);
@@ -106,7 +108,8 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(devLauncher).not.toMatch(/npm['"],\s*\['exec'|npm exec/);
     expect(buildLauncher).toMatch(/NODE_ENV:\s*'production'/);
     expect(server).toContain('res.writeHead(307');
-    expect(gpuApp).toMatch(/ThreeBackdrop|GpuSurface|DomBridge/);
+    expect(gpuApp).toMatch(/GpuSurface|DomBridge/);
+    expect(gpuApp).not.toMatch(/ThreeBackdrop|@react-three|from 'three'/);
     expect(gpuApp).toMatch(/AtomaCursor/);
     expect(gpuMain).toMatch(/GpuErrorBoundary/);
     expect(gpuRenderer).toMatch(
@@ -200,12 +203,16 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(rendererShaders).toMatch(/CARD_FILTER_WGSL/);
     expect(gpuRenderer).toMatch(/padding: 12/);
     expect(gpuRenderer).toMatch(/drawViewTransition/);
-    expect(threeBackdrop).toMatch(/BACKDROP_FRAGMENT_SHADER/);
-    expect(threeBackdrop).toMatch(/float fbm|<shaderMaterial/);
-    expect(threeBackdrop).toMatch(/PointerPointLight|readPointerLight/);
-    expect(threeBackdrop).toMatch(/uPointerUv|uPointerStrength/);
-    expect(threeBackdrop).toMatch(/uMark0|stainedField|readMarkFieldLight/);
-    expect(threeBackdrop).toMatch(/spill\.clientX/);
+    expect(gpuRenderer).toMatch(/createFarField/);
+    expect(gpuRenderer).toMatch(/tickFarField/);
+    expect(gpuRenderer).toMatch(/FAR_FIELD_LABEL/);
+    expect(farField).toMatch(/fn fbm|float fbm/);
+    expect(farField).toMatch(/stainedField/);
+    expect(farField).toMatch(/readMarkFieldLight/);
+    expect(farField).toMatch(/readPointerLight/);
+    expect(farField).toMatch(/uPointerUv|uPointerStrength/);
+    expect(farField).toMatch(/uMark0/);
+    expect(farField).toMatch(/spill\.clientX/);
     expect(gpuRenderer).toMatch(/POINTER_LIGHT_GLSL|POINTER_LIGHT_WGSL/);
     expect(gpuRenderer).toMatch(/installPointerLightFilter/);
     expect(rendererShaders).toMatch(/POINTER_LIGHT_GLSL/);
@@ -214,22 +221,11 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuCursor).toMatch(/atoma-pointer-(halo|face)|atoma-pointer-tip-light/);
     expect(gpuCursor).toMatch(/pointerType === 'touch'|REDUCED_MOTION_QUERY/);
     expect(pointerLight).toMatch(/pointerClientToUv|pointerClientToRenderer/);
-    expect(threeBackdrop).toMatch(/view === 'runs'[\s\S]*RunsTimelineRails/);
-    expect(threeBackdrop).toMatch(/entered && view === 'runs'/);
-    expect(threeBackdrop).toMatch(/buildAtomMap\(run\)/);
-    expect(threeBackdrop).toMatch(/events=\{\(\) => \(\{ enabled: false, priority: 1 \}\)\}/);
-    expect(gpuStyles).toMatch(/\.three-backdrop \* \{/);
-    expect(gpuStyles).toMatch(/pointer-events: none !important;/);
+    expect(gpuStyles).not.toMatch(/\.three-backdrop/);
     expect(gpuStyles).not.toMatch(/contain:\s*layout paint/);
     expect(gpuRenderer).toMatch(/mask\.eventMode = 'none'/);
-    expect(timelineRails).toMatch(/visibleItems\.map|visibleBranches\.map/);
-    expect(timelineRails).not.toMatch(/run\.events\.map/);
-    // The backdrop rails project onto the Pixi timeline's rows. Both build the
-    // same row space or the overlay is mirrored: rails and branches end one
-    // whole run away from the cards they belong to.
-    expect(timelineRails).toMatch(/buildTimelineLayout\([\s\S]{0,80}newestFirst: true/);
     expect(rendererRuns).toMatch(/buildTimelineLayout\([\s\S]{0,80}newestFirst: true/);
-    expect(timelineRails).toMatch(/rowOffset/);
+    expect(rendererRuns).toMatch(/rowOffset/);
     // Pixi survives Fast Refresh via one clean reload, never stateful HMR.
     expect(gpuRenderer).toMatch(/import\.meta\.hot\.accept/);
     expect(gpuApp).toMatch(/useRunTrace|useBurnin|useSkillLists/);

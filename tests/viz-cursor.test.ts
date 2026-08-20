@@ -9,6 +9,7 @@ import {
   ATOMA_CURSOR_PATH,
   AtomaCursor,
 } from '../src/viz/client-gl/AtomaCursor.js';
+import { atomaCursorPoints } from '../src/viz/client-gl/pointer-cursor.js';
 import {
   hidePointerLight,
   POINTER_LIGHT_RADIUS_PX,
@@ -173,5 +174,11 @@ describe('Atoma 3D cursor', () => {
     expect(cursor).toHaveAttribute('data-visible', 'false');
     expect(readPointerLight().active).toBe(false);
     expect(document.documentElement).not.toHaveClass('atoma-cursor-active');
+  });
+
+  it('parses the shared silhouette into the Pixi echo polygon', () => {
+    const points = atomaCursorPoints();
+    expect(points[0]).toEqual(ATOMA_CURSOR_HOTSPOT);
+    expect(points).toHaveLength(7);
   });
 });

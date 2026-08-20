@@ -14,20 +14,13 @@ const FAR_POINTER_SPREAD = 1.15;
 
 export const VIZ_VISUAL_DEPTH = {
   far: {
-    fieldZ: -10,
-    fieldScale: [48, 27] as const,
-    topologyZ: -2.8,
-    topologyPitch: -0.08,
-    topologyPitchAmplitude: 0.025,
-    topologyYawAmplitude: 0.035,
-    topologyPointerIntensity: 10,
-    topologyBounds: {
-      halfX: 7.85,
-      halfY: 3.65,
-      halfZ: 1.55,
-    },
     colorGain: 0.7,
     alpha: 0.64,
+    /**
+     * Was CSS opacity on the Three.js canvas. Baked into the Pixi field so
+     * one canvas still composites as dark as the old two-layer stack.
+     */
+    compositeOpacity: 0.52,
     motionRate: 0.035,
     gridFrequency: 24,
     pointerGain: 0.32,
@@ -35,9 +28,8 @@ export const VIZ_VISUAL_DEPTH = {
     pointerCoreRadius: POINTER_LIGHT_CORE_RADIUS_PX * FAR_POINTER_SPREAD,
     /**
      * How much wider a rear-face pool is on the far plane than in the mark's
-     * local box. The lantern lights the FIELD, which is metres behind the gem
-     * in this depth model, so the halo has to spread — a 1:1 copy would read
-     * as a sticker on the crystal again.
+     * local box. The lantern lights the FIELD behind the gem, so the halo
+     * has to spread — a 1:1 copy would read as a sticker on the crystal.
      */
     markHaloSpread: 1.35,
     /**
@@ -47,14 +39,10 @@ export const VIZ_VISUAL_DEPTH = {
     markHaloMinPx: 168,
     /**
      * Loudness of stained lantern light on the aurora. Above the pointer so
-     * mix-blend screen still shows a tint; well below a second lamp. The
-     * 1.85 / hot-core pass washed the welcome field to a teal spotlight.
+     * a tint still reads; well below a second lamp. The 1.85 / hot-core pass
+     * washed the welcome field to a teal spotlight.
      */
     markGain: 0.88,
-  },
-  mid: {
-    threeZ: 0,
-    pointerIntensity: 30,
   },
   near: {
     panelAlpha: 0.94,
@@ -65,16 +53,6 @@ export const VIZ_VISUAL_DEPTH = {
   },
 } as const;
 
-export function effectiveFarAlpha(backdropOpacity: number) {
-  return backdropOpacity * VIZ_VISUAL_DEPTH.far.alpha;
-}
-
-export function maximumTopologyWorldZ() {
-  const far = VIZ_VISUAL_DEPTH.far;
-  const pitch = Math.abs(far.topologyPitch) + far.topologyPitchAmplitude;
-  const yaw = far.topologyYawAmplitude;
-  return far.topologyZ +
-    Math.abs(Math.sin(yaw)) * far.topologyBounds.halfX +
-    Math.abs(Math.cos(yaw) * Math.sin(pitch)) * far.topologyBounds.halfY +
-    Math.abs(Math.cos(yaw) * Math.cos(pitch)) * far.topologyBounds.halfZ;
+export function effectiveFarAlpha() {
+  return VIZ_VISUAL_DEPTH.far.compositeOpacity * VIZ_VISUAL_DEPTH.far.alpha;
 }

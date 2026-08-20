@@ -11,22 +11,9 @@ body { background: #070b13; }
 button, input, textarea { font: inherit; }
 
 .gpu-app,
-.three-backdrop,
 .gpu-ui-host {
   position: fixed;
   inset: 0;
-}
-
-.three-backdrop {
-  z-index: 0;
-  opacity: .52;
-  mix-blend-mode: screen;
-  pointer-events: none;
-}
-
-.three-backdrop,
-.three-backdrop * {
-  pointer-events: none !important;
 }
 
 .gpu-ui-host { z-index: 1; }
@@ -38,7 +25,7 @@ button, input, textarea { font: inherit; }
   pointer-events: auto;
 }
 
-/* Covers both GPU contexts and survives the Pixi scene rebuild at enter(). */
+/* Covers the Pixi canvas and survives the scene rebuild at enter(). */
 .gpu-entry-veil {
   position: fixed;
   inset: 0;

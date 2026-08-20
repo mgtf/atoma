@@ -456,7 +456,7 @@ export const ATOMA_MARK_REAR_LIGHT_THROW = ATOMA_MARK_RADIUS * 1.85;
 
 /**
  * Local radius of one rear-face pool, in the 28×28 box. Converted to far-field
- * pixels (`markHaloSpread`) so the Three.js backdrop, not a Pixi disc, is what
+ * pixels (`markHaloSpread`) so the aurora field, not a Pixi disc, is what
  * receives the stained light.
  */
 export const ATOMA_MARK_REAR_LIGHT_RADIUS = 20;

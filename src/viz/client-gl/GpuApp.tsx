@@ -1,6 +1,4 @@
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -9,10 +7,7 @@ import {
 } from 'react';
 import { translate } from '../client/i18n.js';
 import { emptyRenderMetrics } from './gpu-renderer.js';
-import type {
-  GpuRenderMetrics,
-  GpuTimelineViewport,
-} from './gpu-renderer.js';
+import type { GpuRenderMetrics } from './gpu-renderer.js';
 import { AtomaCursor } from './AtomaCursor.js';
 import { DomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
@@ -33,10 +28,6 @@ import {
 } from './queries.js';
 import { nextRunFilters, useGpuStore } from './store.js';
 
-const ThreeBackdrop = lazy(() =>
-  import('./ThreeBackdrop.js').then((module) => ({ default: module.ThreeBackdrop }))
-);
-
 declare global {
   interface Window {
     __ATOMA_VIZ_TEST__?: {
@@ -46,19 +37,6 @@ declare global {
       dispatch: (id: string) => void;
     };
   }
-}
-
-function sameTimelineViewport(
-  left: GpuTimelineViewport | null,
-  right: GpuTimelineViewport | null
-): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return Object.keys(left).every(
-    (key) =>
-      left[key as keyof GpuTimelineViewport] ===
-      right[key as keyof GpuTimelineViewport]
-  );
 }
 
 function errorMessage(errors: unknown[]) {
@@ -71,8 +49,6 @@ function errorMessage(errors: unknown[]) {
 
 export function GpuApp() {
   const state = useGpuStore();
-  const [timelineViewport, setTimelineViewport] =
-    useState<GpuTimelineViewport | null>(null);
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const t = useCallback(
     (key: string, vars?: Record<string, unknown>) => translate(state.locale, key, vars),
@@ -324,12 +300,6 @@ export function GpuApp() {
 
   const updateMetrics = useCallback((next: GpuRenderMetrics) => {
     metrics.current = next;
-    const nextTimeline = next.timelineViewport
-      ? { ...next.timelineViewport }
-      : null;
-    setTimelineViewport((current) =>
-      sameTimelineViewport(current, nextTimeline) ? current : nextTimeline
-    );
     if (import.meta.env.DEV && window.__ATOMA_VIZ_TEST__) {
       window.__ATOMA_VIZ_TEST__.renderer = next;
     }
@@ -350,15 +320,6 @@ export function GpuApp() {
 
   return (
     <main className="gpu-app">
-      <Suspense fallback={null}>
-        <ThreeBackdrop
-          run={runQuery.data ?? null}
-          view={state.view}
-          entered={state.entered}
-          runFilters={state.runFilters}
-          timelineViewport={timelineViewport}
-        />
-      </Suspense>
       <GpuSurface data={data} t={t} onActivate={activate} onMetrics={updateMetrics} />
       <DomBridge
         runs={runsQuery.data ?? []}

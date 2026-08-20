@@ -214,6 +214,29 @@ describe('mark shell shader contract', () => {
     }
   });
 
+  it('reflects the Pixi scene through Fresnel, never as TIR chrome', () => {
+    // Glass reflects F of the environment and transmits 1-F of the interior.
+    // A critical-angle test on N·V made every octahedron face a mirror
+    // (chrome). The env is a screen-space capture of the Pixi stage without
+    // the gem; the aurora field is on the same GPU and is in this capture.
+    expect(MARK_SHELL_UNIFORMS.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['uEnvOn', 'uEnvJump', 'uPointerClip'])
+    );
+    for (const source of [MARK_SHELL_WGSL, MARK_SHELL_GLSL]) {
+      expect(source).toContain('envHighlight');
+      expect(source).toContain('cursorNear');
+      expect(source).toContain('reflect(-viewDir');
+      expect(source).toContain('vClipUv');
+      expect(source).toMatch(/uEnvOn \* (markUniforms\.)?uRefractOn/);
+      expect(source, 'env must not lift the Lambertian body')
+        .not.toMatch(/0\.42 \* env/);
+    }
+    expect(MARK_SHELL_WGSL).toContain('textureSample(uEnv');
+    expect(MARK_SHELL_GLSL).toContain('texture(uEnv');
+    expect(MARK_SHELL_WGSL).toContain('out.vClipUv = clip.xy * 0.5 + 0.5');
+    expect(MARK_SHELL_GLSL_VERTEX).toContain('vClipUv = clip.xy * 0.5 + 0.5');
+  });
+
   it('throws traveling glints off the cavity walls', () => {
     // The bead is the INTERIOR point light, so a specular term against it is a
     // spot that moves as the bead bounces. Outer facets see that light as

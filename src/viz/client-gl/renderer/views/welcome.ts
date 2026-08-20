@@ -102,7 +102,7 @@ export function welcomeLayout(width: number, height: number): WelcomeLayout {
 }
 
 /**
- * Arrival gate: one floating Pixi crystal on the Three.js field, a one-line
+ * Arrival gate: one floating Pixi crystal on the aurora field, a one-line
  * pitch, and the continue control that will become login when tenancy lands.
  * Not a nav view. Inspect knobs remain behind `WELCOME_SHOW_INSPECT`.
  */

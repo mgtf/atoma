@@ -13,10 +13,7 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL('./dist/viz/client', import.meta.url)),
     emptyOutDir: true,
-    // The default 2D application remains below 500 KB minified. The optional
-    // lazy R3F/Three topology chunk is intentionally larger and loads only
-    // after first paint.
-    chunkSizeWarningLimit: 1100,
+    chunkSizeWarningLimit: 500,
   },
   server: {
     host: '127.0.0.1',

@@ -8,9 +8,9 @@
   retaining their existing invocation names.
 - `registry migrate-taxonomy` dry-runs or applies the backed-up, in-place
   migration of registry identities, ledger provenance and skill namespaces.
-- A full-GPU visualizer is now the default client: PixiJS 8 renders the 2D
-  design system through WebGPU/WebGL, R3F renders a lazy Three.js tier
-  topology, Zustand owns scene state, and TanStack Query owns API state.
+- A full-GPU visualizer is now the default client: PixiJS 8 renders the UI
+  and the aurora field through one WebGPU/WebGL context, Zustand owns scene
+  state, and TanStack Query owns API state.
 - `npm run viz:smoke` exercises the compiled client in a real browser across
   all five views and verifies both WebGPU and forced-WebGL rendering.
 - `npm run viz:mui` and `npm run viz:build:mui` retain the previous MUI client

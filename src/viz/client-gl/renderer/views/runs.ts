@@ -65,7 +65,7 @@ const RUN_STATUS_COLOR: Record<RunStatus, number> = {
 
 /**
  * Rows the view inserts ABOVE the first event row for its "run ended"
- * bookend. Published on the viewport so the R3F rails project onto the same
+ * bookend. Published on the viewport so overlays project onto the same
  * grid — they read rows, not indices.
  */
 const TIMELINE_ROW_OFFSET = 1;

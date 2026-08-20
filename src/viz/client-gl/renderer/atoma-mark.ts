@@ -1,6 +1,7 @@
 import {
   Container,
   Graphics,
+  Matrix,
   RenderTexture,
   type Renderer,
   type Ticker,
@@ -30,6 +31,7 @@ import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
 import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
+import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
 
 /**
  * Local crystal origin. The mark is authored in a 28×28 box with its pivot
@@ -40,6 +42,16 @@ export const ATOMA_MARK_LOCAL_CENTER = 14;
 
 /** Header size: a few pixels larger than the local box so the bar mark holds. */
 export const ATOMA_MARK_HEADER_SCALE = 1.488;
+
+/**
+ * Below this visual scale the gem is a header wordmark: too small to read a
+ * reflected card, and recapturing the whole Pixi stage would redraw every
+ * filtered card. The arrival gate is >= 6.
+ */
+export const ATOMA_MARK_ENV_MIN_SCALE = 4;
+
+/** Longest side of the env capture. Screen-space reflection, not a cubemap. */
+const MARK_ENV_MAX_PX = 512;
 
 
 /** Colour of everything the bead emits: its own body rim and its glow. */
@@ -225,17 +237,13 @@ function markStageToClient(
   return { clientX: stageX, clientY: stageY, pixelScale: 1 };
 }
 
-function markClientToLocal(
+function markClientToStage(
   renderer: Renderer,
-  container: { x: number; y: number },
-  scale: number,
   clientX: number,
   clientY: number
 ): { x: number; y: number } {
   const canvas = renderer.canvas;
   const screen = renderer.screen;
-  let stageX = clientX;
-  let stageY = clientY;
   if (
     typeof HTMLCanvasElement !== 'undefined' &&
     canvas instanceof HTMLCanvasElement &&
@@ -244,15 +252,53 @@ function markClientToLocal(
   ) {
     const bounds = canvas.getBoundingClientRect();
     if (bounds.width > 0 && bounds.height > 0) {
-      stageX = (clientX - bounds.left) * screen.width / bounds.width;
-      stageY = (clientY - bounds.top) * screen.height / bounds.height;
+      return {
+        x: (clientX - bounds.left) * screen.width / bounds.width,
+        y: (clientY - bounds.top) * screen.height / bounds.height,
+      };
     }
   }
+  return { x: clientX, y: clientY };
+}
+
+function markClientToLocal(
+  renderer: Renderer,
+  container: { x: number; y: number },
+  scale: number,
+  clientX: number,
+  clientY: number
+): { x: number; y: number } {
+  const stage = markClientToStage(renderer, clientX, clientY);
   const safeScale = scale === 0 ? 1 : scale;
   return {
-    x: (stageX - container.x - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
-    y: (stageY - container.y - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
+    x: (stage.x - container.x - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
+    y: (stage.y - container.y - ATOMA_MARK_LOCAL_CENTER) / safeScale + ATOMA_MARK_LOCAL_CENTER,
   };
+}
+
+function paintCursorEcho(graphics: Graphics) {
+  const points = atomaCursorPoints();
+  const first = points[0];
+  if (!first) return;
+  const trace = (dx: number, dy: number) => {
+    graphics.moveTo(first.x + dx, first.y + dy);
+    for (const point of points.slice(1)) graphics.lineTo(point.x + dx, point.y + dy);
+    graphics.closePath();
+  };
+  graphics.clear();
+  // Cyan rim first, then the extruded body, then the white-edged face — the
+  // same stack as the HTML cursor, so the glass sees the pointer the user sees.
+  trace(0, 0);
+  graphics.stroke({ color: 0x65c9ff, width: 8, alpha: 0.5, join: 'round', cap: 'round' });
+  trace(1.35, 1.6);
+  graphics.fill({ color: 0x111c2c }).stroke({ color: 0x7796bd, width: 2.35, join: 'round' });
+  trace(0, 0);
+  graphics.fill({ color: 0x010308 }).stroke({
+    color: 0xffffff,
+    width: 2.7,
+    join: 'round',
+    cap: 'round',
+  });
 }
 
 function fieldSpillsToSample(
@@ -436,6 +482,81 @@ export function attachAtomaMark(
     };
   })();
 
+  /**
+   * Screen-space env of the Pixi scene, WITHOUT the gem. The aurora field
+   * sits on ambientRoot so this capture includes it. Cards on in-app views
+   * are skipped with the header mark (see ATOMA_MARK_ENV_MIN_SCALE).
+   *
+   * The HTML cursor is a DOM overlay, so it is not in the stage. A Pixi
+   * echo of the same silhouette is shown only for this pass — otherwise the
+   * glass would reflect the field and the Continue control but never the
+   * pointer that is lighting them.
+   *
+   * Ping-pong: same WebGPU rule as the interior backdrop. Hide the gem so the
+   * capture cannot feed on its own output.
+   */
+  const envPass = ((): ((elapsedMs: number) => void) | null => {
+    if (!renderer || !shell) return null;
+    if (visualScale < ATOMA_MARK_ENV_MIN_SCALE) return null;
+    const stage = parent.parent;
+    if (!stage) return null;
+    const cursorEcho = new Graphics();
+    cursorEcho.label = 'mark-cursor-echo';
+    cursorEcho.eventMode = 'none';
+    cursorEcho.visible = false;
+    paintCursorEcho(cursorEcho);
+    parent.addChild(cursorEcho);
+    const transform = new Matrix();
+    let textures: RenderTexture[] | null = null;
+    let writeIndex = 0;
+    let envW = 0;
+    let envH = 0;
+    const ensureTextures = (widthPx: number, heightPx: number) => {
+      if (textures && widthPx === envW && heightPx === envH) return;
+      textures?.[0]?.destroy(true);
+      textures?.[1]?.destroy(true);
+      envW = widthPx;
+      envH = heightPx;
+      textures = [
+        RenderTexture.create({ width: envW, height: envH, resolution: 1 }),
+        RenderTexture.create({ width: envW, height: envH, resolution: 1 }),
+      ];
+      writeIndex = 0;
+    };
+    return () => {
+      const screenW = Math.max(1, renderer.screen.width);
+      const screenH = Math.max(1, renderer.screen.height);
+      const fit = Math.min(1, MARK_ENV_MAX_PX / Math.max(screenW, screenH));
+      ensureTextures(
+        Math.max(1, Math.ceil(screenW * fit)),
+        Math.max(1, Math.ceil(screenH * fit))
+      );
+      transform.set(envW / screenW, 0, 0, envH / screenH, 0, 0);
+      const pointer = readPointerLight();
+      if (pointer.active) {
+        const stagePos = markClientToStage(
+          renderer,
+          pointer.clientX,
+          pointer.clientY
+        );
+        cursorEcho.position.set(
+          stagePos.x - ATOMA_CURSOR_HOTSPOT.x,
+          stagePos.y - ATOMA_CURSOR_HOTSPOT.y
+        );
+        cursorEcho.visible = true;
+      } else {
+        cursorEcho.visible = false;
+      }
+      container.visible = false;
+      const target = textures![writeIndex]!;
+      renderer.render({ container: stage, target, transform, clear: true });
+      container.visible = true;
+      cursorEcho.visible = false;
+      shell.setEnv(target, true);
+      writeIndex = 1 - writeIndex;
+    };
+  })();
+
   const traceSilhouette = (
     graphics: Graphics,
     outline: readonly AtomaMarkPoint[]
@@ -475,6 +596,10 @@ export function attachAtomaMark(
       uv: [0.5, 0.5],
       on: 0,
     };
+    let pointerClip: {
+      uv: readonly [number, number];
+      on: number;
+    } = { uv: [0, 0], on: 0 };
     if (renderer) {
       const pointer = readPointerLight();
       if (pointer.active) {
@@ -487,10 +612,21 @@ export function attachAtomaMark(
         );
         pointerSpills = collectPointerFieldSpills(frame, local.x, local.y);
         lamp = pointerLampForLocal(local.x, local.y);
+        const stagePos = markClientToStage(
+          renderer,
+          pointer.clientX,
+          pointer.clientY
+        );
+        const screenW = Math.max(1, renderer.screen.width);
+        const screenH = Math.max(1, renderer.screen.height);
+        pointerClip = {
+          uv: [stagePos.x / screenW, stagePos.y / screenH],
+          on: 1,
+        };
       }
     }
-    shell?.update(frame, { beadVisible, lamp });
-    // Lantern light belongs on the Three.js field. The bead throws from
+    shell?.update(frame, { beadVisible, lamp, pointerClip });
+    // Lantern light belongs on the far-field mesh. The bead throws from
     // inside; the pointer lamp sits in front and has to go THROUGH the glass
     // to reach the same wall — same rear windows, stained by the faces.
     if (!renderer) {
@@ -540,6 +676,7 @@ export function attachAtomaMark(
       backdropPass(elapsedMs);
       behind.visible = false;
     }
+    if (envPass) envPass(elapsedMs);
   };
 
   // Always tick: reduced motion still has to honour a pinned pose and the

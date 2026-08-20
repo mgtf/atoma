@@ -457,9 +457,9 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
   source in the GL client. Every animation system consults it and JUMPS to its
   final state — exit effects are skipped entirely, never left running.
-- The GPU client deliberately uses two GPU contexts: one R3F backdrop and one
-  Pixi UI. Do not add a third context for a tiny widget. Smoke tests assert the
-  exact count and both WebGPU and WebGL fallback.
+- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add
+  a second context for a tiny widget. Smoke tests assert exactly one canvas and
+  both backends.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
   read once per frame; do not rebuild the scene for pointer motion.
 - A Pixi filter that OUTLIVES one `render()` must never sit `enabled = false`

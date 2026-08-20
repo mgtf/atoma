@@ -25,7 +25,7 @@ import {
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
-import { attachAtomaMark } from '../src/viz/client-gl/renderer/atoma-mark.js';
+import { attachAtomaMark, ATOMA_MARK_ENV_MIN_SCALE, ATOMA_MARK_HEADER_SCALE } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
   pinMarkElapsedMs,
@@ -995,7 +995,7 @@ describe('attachAtomaMark glass layering', () => {
     expect(layer('mark-edges')).toBe(-1);
     expect(layer('mark-glass-glow')).toBeGreaterThan(layer('mark-shell-front-layer'));
     // No Pixi floor disc: lantern light is written to the far-field sample
-    // the Three.js backdrop reads. A coloured ellipse under the gem read as
+    // the aurora mesh reads. A coloured ellipse under the gem read as
     // a ground plane, which is the opposite of a wall facing the camera.
     expect(layer('mark-rear-light')).toBe(-1);
 
@@ -1017,6 +1017,20 @@ describe('attachAtomaMark glass layering', () => {
       .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);
   });
 
+  it('captures scene reflections only on the hero mark, never by redrawing in-app cards', () => {
+    expect(ATOMA_MARK_ENV_MIN_SCALE).toBeGreaterThan(ATOMA_MARK_HEADER_SCALE);
+    const source = readFileSync(
+      resolve('src/viz/client-gl/renderer/atoma-mark.ts'),
+      'utf8'
+    );
+    expect(source).toContain('container.visible = false');
+    expect(source).toContain('visualScale < ATOMA_MARK_ENV_MIN_SCALE');
+    expect(source).toContain('shell.setEnv');
+    expect(source).toContain('mark-cursor-echo');
+    expect(source).toContain('paintCursorEcho');
+    expect(source).toContain('pointerClip');
+  });
+
   it('does not overlay a transmitted disc once the shell can draw it', () => {
     // The turn film showed a circular sticker on every pose. The front glass
     // already samples the bead out of the backdrop; an additive disc after it
@@ -1028,7 +1042,7 @@ describe('attachAtomaMark glass layering', () => {
     );
     expect(source).toContain('if (shell) glassGlow.visible = false');
     expect(source).toContain('behind.visible = false');
-    expect(source).toContain('shell?.update(frame, { beadVisible, lamp })');
+    expect(source).toContain('shell?.update(frame, { beadVisible, lamp, pointerClip })');
     expect(source).toContain('pointerLampForLocal');
     expect(source).toContain('bobPx');
     const paintStart = source.indexOf('const paint = ');
@@ -1045,7 +1059,7 @@ describe('attachAtomaMark glass layering', () => {
     expect(source).toContain('markHaloMinPx');
     expect(source).not.toContain('mark-rear-light');
     // A Pixi ellipse under the gem is a floor. Lantern light lives on the
-    // Three.js field; this file must not paint a disc in the foreground.
+    // aurora field; this file must not paint a disc in the foreground.
     expect(source).not.toMatch(/\.ellipse\(/);
   });
 

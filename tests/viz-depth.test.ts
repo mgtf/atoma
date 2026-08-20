@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   POINTER_LIGHT_CORE_RADIUS_PX,
@@ -6,32 +5,22 @@ import {
 } from '../src/viz/client-gl/pointer-light.js';
 import {
   effectiveFarAlpha,
-  maximumTopologyWorldZ,
   VIZ_VISUAL_DEPTH,
 } from '../src/viz/client-gl/visual-depth.js';
+import { readFileSync } from 'node:fs';
 
 describe('viz visual depth contract', () => {
-  it('keeps the decorative field and topology behind the aligned Three midground', () => {
-    expect(VIZ_VISUAL_DEPTH.far.fieldZ).toBeLessThan(
-      VIZ_VISUAL_DEPTH.far.topologyZ
-    );
-    expect(VIZ_VISUAL_DEPTH.far.topologyZ).toBeLessThan(
-      VIZ_VISUAL_DEPTH.mid.threeZ
-    );
-    expect(maximumTopologyWorldZ()).toBeLessThan(
-      VIZ_VISUAL_DEPTH.mid.threeZ - 0.4
-    );
+  it('keeps the aurora field slower and finer-grained than a UI grid', () => {
     expect(VIZ_VISUAL_DEPTH.far.motionRate).toBeLessThanOrEqual(0.055 * 0.65);
     expect(VIZ_VISUAL_DEPTH.far.gridFrequency).toBeGreaterThan(18);
+    expect(VIZ_VISUAL_DEPTH.far.compositeOpacity).toBeGreaterThan(0);
+    expect(VIZ_VISUAL_DEPTH.far.compositeOpacity).toBeLessThan(1);
   });
 
   it('makes near surfaces more opaque than the composited far field', () => {
     const styles = readFileSync('src/viz/client-gl/styles.css', 'utf8');
-    const backdropOpacity = Number(
-      /\.three-backdrop\s*\{[^}]*opacity:\s*([\d.]+)/s.exec(styles)?.[1]
-    );
-    expect(backdropOpacity).toBeGreaterThan(0);
-    const farAlpha = effectiveFarAlpha(backdropOpacity);
+    expect(styles).not.toMatch(/\.three-backdrop/);
+    const farAlpha = effectiveFarAlpha();
     expect(farAlpha).toBeLessThanOrEqual(0.34);
     expect(VIZ_VISUAL_DEPTH.near.panelAlpha / farAlpha).toBeGreaterThan(2.7);
     expect(VIZ_VISUAL_DEPTH.near.navAlpha).toBeGreaterThanOrEqual(
@@ -47,21 +36,12 @@ describe('viz visual depth contract', () => {
 
   it('keeps a wider, weaker pointer contribution on the far field', () => {
     expect(VIZ_VISUAL_DEPTH.far.pointerGain).toBeLessThanOrEqual(0.35);
-    expect(
-      VIZ_VISUAL_DEPTH.far.topologyPointerIntensity /
-      VIZ_VISUAL_DEPTH.mid.pointerIntensity
-    ).toBeLessThanOrEqual(0.35);
-    // WIDER than the foreground light, whatever the foreground light is. The
-    // old form froze both sides as literals, so shrinking the near pool left
-    // the far one stranded at its former size around a smaller cursor light.
     expect(VIZ_VISUAL_DEPTH.far.pointerHaloRadius).toBeGreaterThan(
       POINTER_LIGHT_RADIUS_PX
     );
     expect(VIZ_VISUAL_DEPTH.far.pointerCoreRadius).toBeGreaterThan(
       POINTER_LIGHT_CORE_RADIUS_PX
     );
-    // Stained lantern light tints the far field; it must stay above the
-    // pointer hint (mix-blend screen eats dim adds) and below a spotlight.
     expect(VIZ_VISUAL_DEPTH.far.markGain).toBeGreaterThan(
       VIZ_VISUAL_DEPTH.far.pointerGain
     );
@@ -71,7 +51,7 @@ describe('viz visual depth contract', () => {
     expect(VIZ_VISUAL_DEPTH.far.markHaloMinPx).toBeGreaterThan(52);
   });
 
-  it('lights only the Pixi foreground while leaving the ambient grid on the far plane', () => {
+  it('lights only the Pixi foreground while leaving the ambient field unfiltered', () => {
     const renderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
     expect(renderer).toMatch(/stage\.addChild\(this\.ambientRoot, this\.root, this\.markRoot\)/);
     expect(renderer).toMatch(/drawAmbientGrid\(this\.ambientRoot/);
@@ -79,5 +59,8 @@ describe('viz visual depth contract', () => {
     expect(renderer).not.toMatch(/this\.ambientRoot\.filters\s*=/);
     expect(renderer).not.toMatch(/this\.markRoot\.filters\s*=/);
     expect(renderer).toMatch(/attachAtomaMark\(\s*this\.markRoot/);
+    expect(renderer).toMatch(/createFarField\(/);
+    expect(renderer).toMatch(/FAR_FIELD_LABEL/);
+    expect(renderer).toMatch(/ticker\.add\(this\.tickFarField\)/);
   });
 });
