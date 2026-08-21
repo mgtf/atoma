@@ -260,6 +260,42 @@ export interface VizAdminOrganisation {
   members: Array<{ principalId: string; displayName: string; role: string }>;
 }
 
+/**
+ * One row of the platform audit journal.
+ *
+ * `kind` and `severity` are DELIBERATELY plain strings, not the server's
+ * unions: a viewer may be running an older bundle than the server, and the
+ * journal must render an unfamiliar label rather than hide the rows around
+ * it. Same tolerance the server reader applies.
+ */
+export interface VizPlatformEvent {
+  seq: number;
+  at: string;
+  kind: string;
+  severity: string;
+  actorType: string;
+  actorId: string | null;
+  orgId: string | null;
+  projectId: string | null;
+  runId: string | null;
+  summary: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface VizPlatformEventPage {
+  events: VizPlatformEvent[];
+  /** Exclusive `seq` cursor for the next (older) page, or null at the end. */
+  nextBefore: number | null;
+}
+
+/** The product ledger's tail — a separate journal, never merged with the above. */
+export interface VizLedgerEvent {
+  at: string;
+  kind: string;
+  entity: string;
+  detail?: Record<string, unknown>;
+}
+
 /** Admin plane: a freshly minted one-use invitation. Shown once, never stored. */
 export interface VizAdminInvitation {
   token: string;

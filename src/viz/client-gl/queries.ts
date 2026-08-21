@@ -180,6 +180,31 @@ export function useAdminOrganisations(active: boolean) {
   });
 }
 
+/**
+ * The audit journal. Polled on a 10s cadence rather than the 2s the runs
+ * index uses: an audit trail is read, not watched, and every refetch here is
+ * a full page of rows the operator did not ask to re-render.
+ */
+export function useAdminEvents(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'admin', 'events'],
+    queryFn: () => api.adminEvents(),
+    enabled: active,
+    staleTime: 10_000,
+    refetchInterval: active ? 10_000 : false,
+  });
+}
+
+/** The product ledger's tail. Static enough to fetch once per visit. */
+export function useAdminLedger(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'admin', 'ledger'],
+    queryFn: () => api.adminLedger(),
+    enabled: active,
+    staleTime: 30_000,
+  });
+}
+
 const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
   projects: ['projects', 'project', 'github'],
   runs: ['runs', 'run'],

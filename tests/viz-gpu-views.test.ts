@@ -406,6 +406,8 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     projectRuns: {},
     githubInstallations: [],
     adminOrganisations: [],
+    adminEvents: [],
+    adminLedger: [],
     adminInvitation: null,
     adminError: null,
     login: null,
@@ -795,6 +797,114 @@ describe('drawAdmin', () => {
     );
     expect(ctx.texts.some((text) => text.value === invitation.url)).toBe(true);
     expect(ctx.texts.some((text) => text.value.includes('Org Two'))).toBe(true);
+  });
+
+  it('renders the platform journal newest-first beside the catalogue ledger', () => {
+    const ctx = createRecordingCtx();
+    drawAdmin(
+      ctx,
+      makeSnapshot(
+        { view: 'admin' },
+        {
+          auth,
+          adminOrganisations: organisations,
+          adminEvents: [
+            {
+              seq: 9,
+              at: '2026-08-21T10:30:00.000Z',
+              kind: 'publication.failed',
+              severity: 'error',
+              actorType: 'principal',
+              actorId: 'p-1',
+              orgId: 'org-1',
+              projectId: 'proj-1',
+              runId: 'run-1',
+              summary: 'Publication failed: repository unreachable',
+            },
+            {
+              seq: 8,
+              at: '2026-08-21T10:00:00.000Z',
+              kind: 'org.created',
+              severity: 'info',
+              actorType: 'principal',
+              actorId: 'p-3',
+              orgId: 'org-2',
+              projectId: null,
+              runId: null,
+              summary: 'New organisation "Org Two" founded by its first login',
+            },
+          ],
+          adminLedger: [
+            { at: '2026-08-21T09:00:00.000Z', kind: 'promote', entity: 'Water/web-build-loop' },
+          ],
+        }
+      ),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    expect(values).toContain('publication.failed');
+    expect(values).toContain('org.created');
+    // Newest first: the later event is drawn above the earlier one.
+    const failed = ctx.texts.find((text) => text.value === 'publication.failed')!;
+    const created = ctx.texts.find((text) => text.value === 'org.created')!;
+    expect(failed.y).toBeLessThan(created.y);
+    // Times render as a clock, not a raw ISO instant.
+    expect(values).toContain('10:30:00');
+    // The two journals are both present and separately headed.
+    expect(values.some((value) => value.includes('Platform journal'))).toBe(true);
+    expect(values.some((value) => value.includes('Catalogue ledger'))).toBe(true);
+    expect(values).toContain('Water/web-build-loop');
+    expect(ctx.scrollMax.admin).not.toBeUndefined();
+  });
+
+  it('renders a kind and severity this bundle does not know, rather than hiding the row', () => {
+    // The server's vocabulary can be newer than the client's. Blinding the
+    // audit surface is a worse failure than an unfamiliar label.
+    const ctx = createRecordingCtx();
+    drawAdmin(
+      ctx,
+      makeSnapshot(
+        { view: 'admin' },
+        {
+          auth,
+          adminOrganisations: [],
+          adminEvents: [
+            {
+              seq: 1,
+              at: 'not-an-instant',
+              kind: 'quota.exceeded',
+              severity: 'critical',
+              actorType: 'system',
+              actorId: null,
+              orgId: null,
+              projectId: null,
+              runId: null,
+              summary: 'from a newer build',
+            },
+          ],
+        }
+      ),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    expect(values).toContain('quota.exceeded');
+    expect(values).toContain('from a newer build');
+    // An unparseable instant degrades to its raw text, never to "Invalid Date".
+    expect(values.some((value) => value.includes('Invalid'))).toBe(false);
+    expect(values).toContain('not-an-instant');
+  });
+
+  it('says so when nothing has been recorded yet', () => {
+    const ctx = createRecordingCtx();
+    drawAdmin(
+      ctx,
+      makeSnapshot({ view: 'admin' }, { auth, adminOrganisations: organisations }),
+      1280,
+      720
+    );
+    expect(ctx.texts.some((text) => text.value.includes('Nothing recorded yet'))).toBe(true);
   });
 });
 

@@ -20,6 +20,8 @@ import type {
   SkillSummary,
   VizAdminInvitation,
   VizAdminOrganisation,
+  VizLedgerEvent,
+  VizPlatformEvent,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -80,6 +82,10 @@ export interface GpuDataSnapshot {
   adminOrganisations: VizAdminOrganisation[];
   adminInvitation: VizAdminInvitation | null;
   adminError: string | null;
+  /** The platform audit journal, newest first. */
+  adminEvents: VizPlatformEvent[];
+  /** The product ledger's tail — a separate journal in the same tab. */
+  adminLedger: VizLedgerEvent[];
   /**
    * Non-null when the gate is on and this browser holds no session: the
    * arrival gate offers these providers instead of Continue, and `notice`

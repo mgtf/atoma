@@ -20,6 +20,27 @@ const MEMBER_ROW_HEIGHT = 20;
 const INVITE_ROW_HEIGHT = 40;
 const ORG_GAP = 18;
 const INVITE_PANEL_HEIGHT = 84;
+const SECTION_HEADING_HEIGHT = 30;
+const JOURNAL_ROW_HEIGHT = 34;
+const LEDGER_ROW_HEIGHT = 18;
+
+/**
+ * Severity → colour. Read through a lookup with a FALLBACK because the
+ * server's vocabulary can be newer than this bundle: an unknown severity
+ * renders in the muted colour rather than crashing the row.
+ */
+const SEVERITY_COLORS: Record<string, number> = {
+  info: GPU_COLORS.muted,
+  warning: GPU_COLORS.warning,
+  error: GPU_COLORS.error,
+  security: GPU_COLORS.magenta,
+};
+
+/** `HH:MM:SS` from an ISO instant, or the raw value if it will not parse. */
+function clockTime(at: string): string {
+  const parsed = new Date(at);
+  return Number.isNaN(parsed.getTime()) ? truncate(at, 19) : parsed.toISOString().slice(11, 19);
+}
 
 export function drawAdmin(
   ctx: RendererCtx,
@@ -181,6 +202,133 @@ export function drawAdmin(
       snapshot.onActivate
     );
     cursor += orgHeight + ORG_GAP;
+  }
+
+  // ------------------------------------------------- the platform journal
+  // What happened on this deployment, newest first. Rows are rendered
+  // TOLERANTLY: an unknown kind or severity from a newer server shows its
+  // raw label rather than hiding the rows around it.
+  const events = snapshot.data.adminEvents ?? [];
+  ctx.text(pane.content, snapshot.t('admin.journal'), columnX, cursor + 6, {
+    size: 13,
+    weight: '700',
+  });
+  ctx.text(
+    pane.content,
+    snapshot.t('admin.journalSummary', { count: events.length }),
+    columnX + 220,
+    cursor + 8,
+    { size: 10, color: GPU_COLORS.muted, width: innerWidth - 240 }
+  );
+  cursor += SECTION_HEADING_HEIGHT;
+
+  if (events.length === 0) {
+    ctx.text(pane.content, snapshot.t('admin.journalEmpty'), columnX, cursor, {
+      size: 11,
+      color: GPU_COLORS.muted,
+      width: innerWidth,
+    });
+    cursor += 24;
+  } else {
+    const journalHeight = events.length * JOURNAL_ROW_HEIGHT + 12;
+    ctx.panel(
+      pane.content,
+      x,
+      cursor,
+      panelWidth,
+      journalHeight,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
+    let rowY = cursor + 8;
+    for (const event of events) {
+      // Cull by skipping the DRAW, never the cursor: a layout that stops
+      // advancing would collapse everything below it.
+      if (pane.visible(rowY, rowY + JOURNAL_ROW_HEIGHT)) {
+        const color = SEVERITY_COLORS[event.severity] ?? GPU_COLORS.muted;
+        ctx.text(pane.content, clockTime(event.at), columnX + 8, rowY, {
+          size: 9,
+          color: GPU_COLORS.muted,
+          mono: true,
+          width: 64,
+        });
+        ctx.text(pane.content, truncate(event.kind, 28), columnX + 78, rowY, {
+          size: 10,
+          color,
+          mono: true,
+          width: 200,
+        });
+        ctx.text(pane.content, truncate(event.summary, 96), columnX + 8, rowY + 15, {
+          size: 10,
+          color: GPU_COLORS.text,
+          width: innerWidth - 120,
+        });
+        ctx.text(pane.content, event.actorType, columnX + innerWidth - 84, rowY, {
+          size: 9,
+          color: GPU_COLORS.muted,
+          mono: true,
+          width: 84,
+        });
+      }
+      rowY += JOURNAL_ROW_HEIGHT;
+    }
+    cursor += journalHeight + ORG_GAP;
+  }
+
+  // ------------------------------------------- the product ledger's tail
+  // A SEPARATE journal in the same tab, deliberately not merged with the
+  // one above: this one records what the CATALOGUE learned (trust counters,
+  // promotions), and it keeps its own integrity checker.
+  const ledger = snapshot.data.adminLedger ?? [];
+  if (ledger.length > 0) {
+    ctx.text(pane.content, snapshot.t('admin.ledger'), columnX, cursor + 6, {
+      size: 13,
+      weight: '700',
+    });
+    ctx.text(pane.content, snapshot.t('admin.ledgerHint'), columnX + 220, cursor + 8, {
+      size: 10,
+      color: GPU_COLORS.muted,
+      width: innerWidth - 240,
+    });
+    cursor += SECTION_HEADING_HEIGHT;
+    const ledgerHeight = ledger.length * LEDGER_ROW_HEIGHT + 12;
+    ctx.panel(
+      pane.content,
+      x,
+      cursor,
+      panelWidth,
+      ledgerHeight,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
+    let ledgerY = cursor + 8;
+    for (const entry of ledger) {
+      if (pane.visible(ledgerY, ledgerY + LEDGER_ROW_HEIGHT)) {
+        ctx.text(pane.content, clockTime(entry.at), columnX + 8, ledgerY, {
+          size: 9,
+          color: GPU_COLORS.muted,
+          mono: true,
+          width: 64,
+        });
+        ctx.text(pane.content, truncate(entry.kind, 26), columnX + 78, ledgerY, {
+          size: 9,
+          color: GPU_COLORS.primary,
+          mono: true,
+          width: 180,
+        });
+        ctx.text(pane.content, truncate(entry.entity, 48), columnX + 268, ledgerY, {
+          size: 9,
+          color: GPU_COLORS.text,
+          width: innerWidth - 280,
+        });
+      }
+      ledgerY += LEDGER_ROW_HEIGHT;
+    }
+    cursor += ledgerHeight + ORG_GAP;
   }
 
   pane.extend(cursor + 8);

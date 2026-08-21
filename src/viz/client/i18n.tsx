@@ -95,6 +95,11 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'admin.invitationCopied':
       'The link was copied to your clipboard. It is a one-use credential shown only here.',
     'admin.actionFailed': 'Admin action failed',
+    'admin.journal': 'Platform journal',
+    'admin.journalSummary': '{{count}} recent event(s), newest first',
+    'admin.journalEmpty': 'Nothing recorded yet.',
+    'admin.ledger': 'Catalogue ledger',
+    'admin.ledgerHint': 'What the agent catalogue learned — a separate record.',
     'welcome.signInWith': 'Continue with {{label}}',
     'login.noProviders': 'No sign-in provider is configured on this deployment.',
     'login.notice.generic': 'Sign-in failed — try again.',
@@ -634,6 +639,11 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'admin.invitationCopied':
       'Le lien a été copié dans le presse-papiers. C’est un identifiant à usage unique, affiché uniquement ici.',
     'admin.actionFailed': 'Action d’administration échouée',
+    'admin.journal': 'Journal de la plateforme',
+    'admin.journalSummary': '{{count}} événement(s) récents, du plus récent au plus ancien',
+    'admin.journalEmpty': 'Rien d’enregistré pour l’instant.',
+    'admin.ledger': 'Registre du catalogue',
+    'admin.ledgerHint': 'Ce que le catalogue d’agents a appris — un registre distinct.',
     'welcome.signInWith': 'Continuer avec {{label}}',
     'login.noProviders': 'Aucun fournisseur de connexion n’est configuré sur ce déploiement.',
     'login.notice.generic': 'Connexion impossible — réessaie.',

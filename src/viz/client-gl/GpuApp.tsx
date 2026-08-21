@@ -22,6 +22,8 @@ import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
 import {
   activeViewQueryFilter,
+  useAdminEvents,
+  useAdminLedger,
   useAdminOrganisations,
   useBurnin,
   useGithubInstallations,
@@ -218,6 +220,11 @@ function GpuAppContent({
   const adminOrganisationsQuery = useAdminOrganisations(
     state.view === 'admin' && isPlatformAdmin
   );
+  // The journal and the ledger tail ride the same admin-only gate as the
+  // organisation list: the server 403s them for anyone else, and a poisoned
+  // query would take the whole view's error banner with it.
+  const adminEventsQuery = useAdminEvents(state.view === 'admin' && isPlatformAdmin);
+  const adminLedgerQuery = useAdminLedger(state.view === 'admin' && isPlatformAdmin);
   const [adminInvitation, setAdminInvitation] = useState<VizAdminInvitation | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
   const mintInvitation = useCallback(async (orgId: string, role: string) => {
@@ -551,6 +558,8 @@ function GpuAppContent({
     githubInstallationsQuery.error,
     projectRunsQuery.error,
     adminOrganisationsQuery.error,
+    adminEventsQuery.error,
+    adminLedgerQuery.error,
   ]);
   const data = useMemo(() => ({
     auth: authSnapshot,
@@ -567,6 +576,8 @@ function GpuAppContent({
     projectRuns,
     githubInstallations: githubInstallationsQuery.data ?? [],
     adminOrganisations: adminOrganisationsQuery.data ?? [],
+    adminEvents: adminEventsQuery.data?.events ?? [],
+    adminLedger: adminLedgerQuery.data?.events ?? [],
     adminInvitation,
     adminError,
     login,
@@ -577,6 +588,8 @@ function GpuAppContent({
     adminError,
     adminInvitation,
     adminOrganisationsQuery.data,
+    adminEventsQuery.data,
+    adminLedgerQuery.data,
     authSnapshot,
     fetching,
     login,

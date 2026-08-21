@@ -8,6 +8,8 @@ import type {
   SkillSummary,
   VizAdminInvitation,
   VizAdminOrganisation,
+  VizLedgerEvent,
+  VizPlatformEventPage,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -71,6 +73,14 @@ export const api = {
   unsubscribePush: (body: { endpoint: string }) =>
     mutateJson<{ removed: boolean }>('/api/push/unsubscribe', body),
   adminOrganisations: () => fetchJson<VizAdminOrganisation[]>('/api/admin/organisations'),
+  adminEvents: (limit = 60) =>
+    fetchJson<VizPlatformEventPage>(`/api/admin/events?limit=${encodeURIComponent(limit)}`),
+  // A SEPARATE read of the product ledger, never a merge with the journal
+  // above: the two answer different questions and only share a tab.
+  adminLedger: (limit = 20) =>
+    fetchJson<{ events: VizLedgerEvent[] }>(
+      `/api/admin/ledger?limit=${encodeURIComponent(limit)}`
+    ),
   createAdminInvitation: (body: { orgId: string; role: string; ttlHours?: number }) =>
     mutateJson<VizAdminInvitation>('/api/admin/invitations', body),
 };
