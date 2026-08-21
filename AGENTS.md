@@ -851,6 +851,7 @@ The frozen record contains the full dated reasoning behind these rules:
 
 - [engineering record through 2026-08-14](docs/incidents/engineering-record-2026-08-14.md)
 - [fan-out + join, first live parallel lanes 2026-08-16](docs/incidents/parallel-fanin-2026-08-16.md)
+- [burn-in session 2026-08-21: four batches, 20 runs, six defects](docs/incidents/burn-in-2026-08-21.md)
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
