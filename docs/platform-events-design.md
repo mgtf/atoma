@@ -1,8 +1,12 @@
 # Platform events and notification routing — design
 
-Status: **proposed, not implemented** (planned 2026-08-21, open questions below
-still unanswered). Companion to the web-push base landed the same day
-(`src/viz/push/`, `onRunFinished` hook on `ProjectRunCoordinator`).
+Status: **accepted 2026-08-21**, implementation in progress. Companion to the
+web-push base landed the same day (`src/viz/push/`, `onRunFinished` hook on
+`ProjectRunCoordinator`).
+
+The five questions that gated implementation were settled by the operator on
+2026-08-21; each decision is folded into the sections below and restated in
+[Settled decisions](#settled-decisions).
 
 ## Problem
 
@@ -45,7 +49,7 @@ Naming convention: `domain.action`. "Push" means a Web Push notification;
 
 | Event | Anchor | Push | Priority |
 |---|---|---|---|
-| `org.member_joined` (invitation consumed) | `completeLogin` with invitation | ✅ owners | P1 |
+| `org.member_joined` (invitation consumed) | `completeLogin` with invitation | ✅ owners **and the platform admin** (decision 2) | P1 |
 | `publication.failed` | as above | ✅ owners (in addition to the requester) | P0 |
 | `github.installation_status` (suspended/deleted) | webhook (`src/github/webhook.ts` `installationMutation`) | ✅ owners — the publication pipeline just broke | P1 |
 | `project.created`, `run.started`, `run.cancelled`, `github.installation_linked` | `ProjectService.*`, `completeGitHubSetup` | ❌ audit only (noise) | P1–P2 |
@@ -58,7 +62,8 @@ Naming convention: `domain.action`. "Push" means a Web Push notification;
 | `server.recovered` (runs/publications reconciled at boot) | `reconcileInterrupted` call in `src/viz/server.ts` | ✅ — a prior crash happened | **P0** |
 | `admin.granted` / `admin.revoked` | `AuthStore.grant/revokePlatformAdmin` (CLI) | ✅ other admins (security) | **P0** |
 | `auth.state_flood` (`TooManyPendingOauthStatesError`) | server.ts login + github authorize paths | ✅ (attack signal) | P1 |
-| `run.finished` failed (any org — org runs mutate the shared registry) | already emitted | ❌ audit only by default, optional threshold | P1 |
+| `org.member_joined` (any org) | `completeLogin` with invitation | ✅ (decision 2) | P1 |
+| `run.finished` failed (any org — org runs mutate the shared registry) | already emitted | ❌ audit only (decision 1) | P1 |
 | `webhook.rejected` (invalid signature), `auth.rate_limited`, `invitation.created`, `push.subscribed/unsubscribed` | github/http.ts, webhook.ts, server.ts, CLI | ❌ audit only | P1–P2 |
 
 **Anti-noise rules**: never notify the actor of their own administrative
@@ -113,24 +118,50 @@ A `NotificationRouter` (`src/viz/push/router.ts`, server-only) subscribes to
 the bus: `kind` → audience rule → principals (owners resolved via
 `auth_memberships`, admins via `auth_platform_admins`) → `PushNotifier`,
 which gains a generic `notifyPrincipals(principalIds, notification)`. The
-current `run.finished` path is re-plumbed through this single pipeline: the
-coordinator's `onRunFinished` hook **stays as is** (a clean domain contract);
-server.ts adapts it into an event emission — one delivery path instead of
-two. Two light touch-ups along the way: expose
+audience table is typed `Record<PlatformEventKind, AudienceRule>` so adding a
+kind cannot compile until its routing is decided. The current `run.finished`
+path is re-plumbed through this single pipeline: the coordinator's
+`onRunFinished` hook **stays as is** (a clean domain contract); server.ts
+adapts it into an event emission — one delivery path instead of two. Two
+light touch-ups along the way: expose
 `createdOrganisation`/`invitationConsumed` on `LoginOutcome`, and emit
 `run.cancelled` at the service layer (`coordinator.cancel` does not know the
 principal).
 
+**Severity is a property of the kind**, not a per-call-site argument: one
+`Record<PlatformEventKind, PlatformEventSeverity>` table in the contract, so
+the same kind can never be journaled at two severities. It is still stored on
+the row, so a reader can filter without importing the map and history stays
+honest if the map later changes.
+
+### Localised push copy (decision 3)
+
+The server cannot infer a browser's language, so the browser tells it once: a
+`locale` column on `push_subscriptions`, sent at subscribe time. Rendering
+uses a server-side frozen copy map (`PUSH_COPY`, the `AUTH_COPY` /
+`GITHUB_COPY` precedent) with `en` and `fr`, not the client i18n catalog —
+that module is a `.tsx` carrying a React provider and must not be imported
+into the server. An unknown or absent locale falls back to `en`.
+
 ## Admin audit surface
 
-- **API**: `GET /api/admin/events?after=<seq>&limit=&kind=&orgId=&severity=`
-  — admin-only, inside the existing `/api/admin/*` block, cursor-paged on
-  descending `seq`, `limit` clamped to ≤ 200 (the MCP precedent), response
-  `{ events, nextAfter }`.
+- **API**: `GET /api/admin/events?before=<seq>&limit=&kind=&orgId=&severity=`
+  — admin-only, inside the existing `/api/admin/*` block, cursor-paged
+  newest-first (`before` is an exclusive `seq`, matching the newest-first
+  runs timeline), `limit` clamped to ≤ 200 (the MCP precedent), response
+  `{ events, nextBefore }`.
+- **API**: `GET /api/admin/ledger?limit=` — admin-only read of the product
+  ledger's tail (decision 4), a **separate query over `lifecycle_events`**.
+  The two tables are never joined or merged; they answer two different
+  questions and only share a tab.
 - **UI**: a new "Journal" section in the GL Admin tab
   (`renderer/views/admin.ts`, same `createScrollPane`, activation ids
-  `admin.events.*`, severity filter chips in P2), strings in the en/fr i18n
-  catalogs.
+  `admin.events.*`, severity filter chips in P2) followed by a compact
+  product-ledger tail, strings in the en/fr i18n catalogs.
+- Readers **tolerate unknown kinds**: an event row whose `kind` this build
+  does not know is rendered raw rather than dropped. Blinding the audit
+  surface is worse than showing an unfamiliar label, and the same rule
+  already governs the ledger's unparseable `detail`.
 
 ## Explicitly out of scope
 
@@ -153,14 +184,29 @@ CLI/MCP) stay out of scope.
 4. **Admin audit**: API + GL UI + i18n + tests (non-admin 403, pagination).
 5. **AGENTS.md**: the contract bullet.
 
-## Open questions (to settle before implementing)
+## Settled decisions
 
-1. **Admin push on org run failures**: audit-only by default seems right — is
-   a push wanted, possibly thresholded (e.g. ≥3 failures/24h)?
-2. **`org.member_joined`**: push to owners, or audit only?
-3. **Retention**: 90 days / 50,000 rows acceptable?
-4. **Push language**: the server does not know the browser locale — stay
-   English everywhere?
-5. **Admin journal scope**: `platform_events` only, or also a read-only view
-   of the product ledger (skill promotions/demotions) in the same tab —
-   separate read, never a table merge?
+Answered by the operator on 2026-08-21; these are the contract now, not
+preferences.
+
+1. **Admin push on org run failures: audit only.** Every failure is journaled
+   and visible in the Admin tab; none of them pushes. The admin push list
+   stays short — and therefore credible: `org.created`, `org.member_joined`,
+   `server.recovered`, `admin.granted`, `admin.revoked`, `auth.state_flood`.
+   No sliding failure counter is built.
+2. **`org.member_joined`: push to the org's owners AND the platform admin.**
+   An admission is a security-relevant fact for the owner and a growth signal
+   for the operator; neither should have to poll the UI for it.
+3. **Push language: stored per subscription.** See
+   [Localised push copy](#localised-push-copy-decision-3). English-only was
+   rejected: the operator reads French, and the locale is known for free at
+   subscribe time.
+4. **Admin journal: `platform_events` plus a read-only product-ledger tail**
+   in the same tab, as two separate queries. The tables are never merged —
+   `lifecycle_events` keeps its counter-checking semantics and its own
+   `ledger check` consumer.
+5. **Retention: 90 days AND a 50,000-row cap** (`ATOMA_EVENTS_RETENTION_DAYS`
+   overrides the age half), swept from the server's existing 5-minute timer.
+   Settled by default rather than asked — it matches the existing
+   `prefilter_cache` and `push_subscriptions` caps and is adjustable without
+   a migration.

@@ -19,6 +19,12 @@ import {
   parseScriptEnvelope,
   scriptEnvelopeSchema,
 } from '../src/contracts/scriptEnvelope.js';
+import {
+  EXAMPLE_PLATFORM_EVENT,
+  EXAMPLE_PLATFORM_EVENT_INPUT,
+  platformEventInputSchema,
+  platformEventSchema,
+} from '../src/contracts/platformEvents.js';
 
 /**
  * THE GLUE TESTS: one definition, three consumers. The probe-manifest
@@ -170,6 +176,20 @@ describe('contracts — schema/validator/prompt agreement', () => {
     ).toBe(false);
     expect(shellEntrySchema.safeParse({ cmd: '', exitCode: 0 }).success).toBe(false);
     expect(httpEntrySchema.safeParse({ probe: 'http', method: 'GET', path: '/a' }).success).toBe(false);
+  });
+
+  it('platform events: the load-time examples round-trip both schemas', () => {
+    // The audit journal's emitter shape and its stored shape must agree, or
+    // the router listens to rows the reader cannot parse.
+    expect(platformEventInputSchema.safeParse(EXAMPLE_PLATFORM_EVENT_INPUT).success).toBe(true);
+    expect(platformEventSchema.safeParse(EXAMPLE_PLATFORM_EVENT).success).toBe(true);
+    // A stored row is an input plus the three host-owned fields, so stripping
+    // them must leave something the emitter side still accepts.
+    const { seq, at, severity, ...scope } = EXAMPLE_PLATFORM_EVENT;
+    expect(typeof seq).toBe('number');
+    expect(typeof at).toBe('string');
+    expect(typeof severity).toBe('string');
+    expect(platformEventInputSchema.safeParse(scope).success).toBe(true);
   });
 
   it('envelope: schema and strict parse agree on the failure guards', () => {
