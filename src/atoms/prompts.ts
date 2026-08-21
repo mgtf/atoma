@@ -26,6 +26,26 @@ import type { Plan } from '../core/types.js';
  *       puzzle asserting `statusText.includes('Checkmate')` after
  *       random clicks that could not produce a mate.
  */
+/**
+ * The canonical async smoke for reading a TRANSITIONED computed value.
+ *
+ * Exported as a CONSTANT rather than left as prose inside the guidance
+ * because guidance that teaches a smoke the tool would refuse is worse than
+ * no guidance: `tests/smoke-guidance.test.ts` feeds this exact string to the
+ * real validate_html pre-flight guards, so a future edit to either side
+ * cannot silently start advertising a rejected shape.
+ */
+export const SMOKE_ASYNC_TRANSITION_EXAMPLE = [
+  `(async () => {`,
+  `  const before = getComputedStyle(el).color;`,
+  `  el.click();`,
+  `  await new Promise((r) => setTimeout(r, transitionMsFromSource + 100));`,
+  `  const after = getComputedStyle(el).color;`,
+  `  const checks = { colourChanged: after !== before };`,
+  `  return { ok: Object.values(checks).every(Boolean), checks, before, after };`,
+  `})()`,
+].join('\n');
+
 export const SMOKE_DESIGN_GUIDANCE = [
   `== SMOKE-TEST DESIGN (read carefully — this is where runs go wrong) ==`,
   `The \`smoke\` arg of validate_html is evaluated inside`,
@@ -124,9 +144,32 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `  })()`,
   `Derive exactElement id, threshold, labels and class names by reading the`,
   `CURRENT source first. Never query an id or expect a label you did not read.`,
-  `If you inspect a computed color/style, compare milestone against the captured`,
-  `initial value unless the exact computed value is proven by the source. Never`,
-  `guess an RGB literal; CSS transitions and inheritance make guesses brittle.`,
+  ``,
+  `== TRANSITIONED PROPERTIES: A SYNCHRONOUS COMPUTED READ IS ALWAYS STALE ==`,
+  `Before asserting ANY colour, size or opacity, read the source for`,
+  `\`transition\`. If the property you are about to inspect is transitioned, a`,
+  `getComputedStyle() read taken right after the click or class toggle returns`,
+  `the value from BEFORE the animation: the class is already on the element and`,
+  `the computed value has not moved yet. VERIFIED in Chrome against`,
+  `\`#count{transition:all .3s ease}\` + \`#count.negative{color:red}\`:`,
+  `    synchronous read -> { cls:true, computed:"rgb(51, 51, 51)" }   STALE`,
+  `    after await 400ms -> { cls:true, computed:"rgb(255, 0, 0)" }   settled`,
+  `MEASURED 2026-08-21: a click-counter run spent 19 validate_html calls and`,
+  `$0.52 of execute tokens here. Five consecutive smokes asserted the computed`,
+  `colour, each received the stale value, and the model "repaired" its already`,
+  `correct CSS by adding \`!important\` — which does nothing to an animation.`,
+  `In order of preference:`,
+  `  1. ASSERT THE MARKER THE SOURCE TOGGLES — \`classList.contains('negative')\``,
+  `     or the inline \`el.style.color\` the script assigns. Deterministic, no`,
+  `     timing, and it is what the pre-flight guard means by "the exact`,
+  `     source-defined class/style marker".`,
+  `  2. Only if the COMPUTED value is itself the claim, make the smoke async and`,
+  `     wait past the declared duration — the tool awaits your promise:`,
+  ...SMOKE_ASYNC_TRANSITION_EXAMPLE.split('\n').map((line) => `         ${line}`),
+  `Never compare a computed value to an rgb()/rgba() LITERAL: that smoke is`,
+  `refused pre-flight, before the page is even loaded. Compare milestone`,
+  `against the captured initial value instead.`,
+  ``,
   ``,
   `== STATE-HEAVY APPS: expose a __test hook, do NOT simulate inputs ==`,
   `For games with rules (chess, minesweeper, roguelikes), for`,

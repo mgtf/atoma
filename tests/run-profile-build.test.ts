@@ -324,6 +324,14 @@ describe('runner stdout contract — burn-in parses this', () => {
     expect(src).toContain(marker);
   });
 
+  // The runner's stdout is an operator-facing API (burn-in parses it, and
+  // `docs`/README quote it). It shipped two FRENCH lines on an otherwise
+  // English stream — the user speaks French, the product does not.
+  it('keeps the trace-recorded line English on both the delivered and failed paths', () => {
+    expect(src.match(/run recorded in \$\{recorder\.runsDir\}/g)).toHaveLength(2);
+    expect(src).not.toMatch(/enregistr|visualiseur|d\u00e9marre/);
+  });
+
   it('emits the machine stats epilogue on delivered and failed paths', () => {
     expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('delivered'/g)).toHaveLength(1);
     expect(src.match(/formatRunStatsEpilogue\(machineRunStats\('failed'/g)).toHaveLength(2);

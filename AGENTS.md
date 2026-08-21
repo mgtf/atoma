@@ -495,6 +495,13 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - `when_to_use` matches subtask text alone. State-on-disk requirements belong
   in the body/preflight, not the match trigger.
 - Prefer a sibling compilable skill over overwriting a useful LLM recipe.
+- The distiller SEES the visible namespaces' skill ids and `when_to_use` lines
+  and is told not to re-learn them. The only mechanical guard is exact-id
+  equality, so a SEMANTIC TWIN under a fresh name is the failure mode to
+  design against: promotion needs the threshold successes on ONE id, and two
+  half-credited twins never reach it while both compete for every match.
+  Measured 2026-08-21: one 6-task batch learned 11 skills, 6 of them three
+  twin pairs.
 - `validateProbeManifest` gates malformed machine input before dispatch.
 - Anti-redispatch state is run-scoped. A repeated deterministic output rejected
   for content must not earn credit or be dispatched again in a later phase.
@@ -669,7 +676,14 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   head/tail retained. Budget-exhausted finalization keeps tools declared so the
   provider transcript remains valid.
 - Shared smoke guidance lives in one constant. Do not duplicate or specialize
-  it around one widget vocabulary.
+  it around one widget vocabulary. The guidance and the `validate_html`
+  pre-flight guards are ONE contract: `SMOKE_ASYNC_TRANSITION_EXAMPLE` is
+  exported so `tests/smoke-guidance.test.ts` can feed it to the real guards.
+  Never teach a smoke shape the tool refuses. A SYNCHRONOUS `getComputedStyle`
+  read on a TRANSITIONED property returns the pre-transition value (verified
+  in Chrome, 2026-08-21): assert the class/inline marker the source toggles,
+  or make the smoke async and await past the declared duration — the tool
+  awaits the returned promise.
 
 ## MCP stdio server
 

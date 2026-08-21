@@ -373,6 +373,19 @@ export class SkillLifecycle {
       );
       return;
     }
+    // The namespaces the no-overwrite guard will consult (home first). Read
+    // ONCE, here, because the model needs to SEE them: a draft is refused
+    // by id below, and a model that cannot read the ids it must avoid can
+    // only collide by accident.
+    const guardNamespaces = args.visibleNamespaces?.length
+      ? args.visibleNamespaces
+      : [args.l1Name];
+    const ownedSkills = new Map<string, string>();
+    for (const ns of guardNamespaces) {
+      for (const owned of this.skills.loadFor(ns)) {
+        if (!ownedSkills.has(owned.id)) ownedSkills.set(owned.id, owned.whenToUse);
+      }
+    }
     const userContent = [
       `You are distilling a successful run into a reusable SKILL — a markdown`,
       `recipe attached to a tier-1 molecule so future runs on a similar task can`,
@@ -392,6 +405,31 @@ export class SkillLifecycle {
       `== L1 SUMMARY OF WHAT IT DID ==`,
       args.result.summary,
       ``,
+      ...(ownedSkills.size > 0
+        ? [
+            `== SKILLS THIS MOLECULE ALREADY OWNS (id: when_to_use) ==`,
+            ...[...ownedSkills.entries()].map(([id, when]) => `- ${id}: ${when}`),
+            ``,
+            `HARD RULE — NO SEMANTIC TWINS. If one of the recipes listed above`,
+            `already covers the pattern you are about to describe, DO NOT give it a`,
+            `fresh name. Emit that EXACT existing id (the caller keeps the earned`,
+            `recipe untouched, which is the outcome you want) or omit the draft.`,
+            `A twin under a new name is the single most expensive thing you can`,
+            `produce here, because promotion to a zero-token script needs N clean`,
+            `successes on ONE id: two half-credited twins never reach it, and both`,
+            `sit in the catalogue competing for every future match.`,
+            `MEASURED 2026-08-21, one 6-task batch, 6 of 11 learned skills were`,
+            `three twin pairs: "recheck-recorded-cli-probes" beside`,
+            `"recheck-cli-invocations-match-manifest", "zero-dep-http-crud-api"`,
+            `beside "build-zero-dep-http-service", "probe-crud-api-routes" beside`,
+            `"probe-http-route-contracts" — same molecule, same steps, split credit.`,
+            `Judge by what the recipe DOES, not by how this run's task was worded:`,
+            `"re-run the documented invocations and compare" is ONE pattern however`,
+            `many ways a subtask can ask for it. Emit a new id only for a pattern`,
+            `none of the when_to_use lines above already claims.`,
+            ``,
+          ]
+        : []),
       `HARD RULE — TOOLSET SCOPE: every step of every draft must be executable`,
       `with the DECLARED TOOLS above and nothing else. Distil what the run's`,
       `ACTIONS demonstrate, never what the subtask text or the summary merely`,
@@ -512,10 +550,7 @@ export class SkillLifecycle {
         );
         continue;
       }
-      const guardNs = args.visibleNamespaces?.length
-        ? args.visibleNamespaces
-        : [args.l1Name];
-      const existingNs = guardNs.find((ns) =>
+      const existingNs = guardNamespaces.find((ns) =>
         this.skills.loadFor(ns).some((s) => s.id === draft.id)
       );
       if (existingNs) {

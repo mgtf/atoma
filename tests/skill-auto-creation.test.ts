@@ -462,6 +462,70 @@ describe('L2 onApproved — skill auto-creation (C3)', () => {
     expect(after[0]!.successes).toBe(2);
   });
 
+  // MEASURED 2026-08-21: one 6-task burn-in batch learned 11 skills of which
+  // 6 were three semantic twin pairs on the same molecule. The only duplicate
+  // guard is exact-id equality, and the distiller was never SHOWN the ids it
+  // had to avoid — so every twin was created by a model that could not have
+  // known better. Promotion needs N clean successes on ONE id; two
+  // half-credited twins never get there.
+  it('shows the molecule OWNED skills in the distill prompt and forbids twins', async () => {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    skills.save(nsOf(reg, 'Water'), {
+      id: 'recheck-recorded-cli-probes',
+      description: 'Re-run documented invocations and confirm recorded exit codes hold.',
+      whenToUse: 'Task asks to re-check a built CLI still produces the recorded stdout',
+      kind: 'llm',
+      body: '1. read_file .atoma-probes.json\n2. run_shell each command',
+    });
+    ensureChildIsTrusted();
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no fit' }));
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
+    ctx.llm.enqueueText('not json — the prompt is what this test reads');
+
+    await neuron.handleDirect({ description: 'confirm the CLI still behaves' }, ctx);
+
+    const distill = ctx.llm.calls.find((c) =>
+      c.userContent.includes('SPLIT OUT MECHANICAL VERIFICATION')
+    );
+    expect(distill).toBeDefined();
+    const prompt = distill!.userContent;
+    expect(prompt).toContain('== SKILLS THIS MOLECULE ALREADY OWNS');
+    // id AND when_to_use, because the model judges overlap by trigger shape.
+    expect(prompt).toContain(
+      '- recheck-recorded-cli-probes: Task asks to re-check a built CLI still produces the recorded stdout'
+    );
+    expect(prompt).toContain('HARD RULE \u2014 NO SEMANTIC TWINS');
+  });
+
+  it('omits the owned-skills section entirely when the molecule owns none', async () => {
+    process.env['ATOMA_SKILL_LEARN'] = '1';
+    ensureChildIsTrusted();
+    const neuron = L2Atom.fromType(reg.getByName('Tracheid')!, reg, [], skills);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Water', confidence: 'high', reasoning: 't' })
+    );
+    // No skills on disk: matchSkill short-circuits, so no prefilter LLM slot.
+    ctx.llm.enqueueText(jsonText({ reasoning: 'r', proposedAction: 'a', expectedOutput: 'e' }));
+    enqueueExecutedResult(ctx, { output: 'ok', summary: 'built' });
+    ctx.llm.enqueueText('not json');
+
+    await neuron.handleDirect({ description: 'build a thing' }, ctx);
+
+    const distill = ctx.llm.calls.find((c) =>
+      c.userContent.includes('SPLIT OUT MECHANICAL VERIFICATION')
+    );
+    expect(distill).toBeDefined();
+    expect(distill!.userContent).not.toContain('SKILLS THIS MOLECULE ALREADY OWNS');
+    expect(distill!.userContent).not.toContain('NO SEMANTIC TWINS');
+  });
+
   it('rejects an unsafe skill id (path-traversal guard)', async () => {
     process.env['ATOMA_SKILL_LEARN'] = '1';
     skills.save(nsOf(reg, 'Water'), {

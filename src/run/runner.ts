@@ -852,7 +852,7 @@ export async function startTask(
       }
 
       console.log(
-        `\nrun enregistré dans ${recorder.runsDir} — démarre le visualiseur : npm run viz`
+        `\nrun recorded in ${recorder.runsDir} — start the visualizer: npm run viz`
       );
       console.log(formatRunStatsEpilogue(machineRunStats('delivered', metrics, runSignals)));
       console.log(
@@ -906,7 +906,7 @@ export async function startTask(
       console.error(metrics.formatSummary());
       console.error(formatRunStatsEpilogue(machineRunStats('failed', metrics, runSignals)));
       console.error(
-        `\nrun enregistré dans ${recorder.runsDir} — ouvre le visualiseur pour plus de détails : npm run viz`
+        `\nrun recorded in ${recorder.runsDir} — open the visualizer for details: npm run viz`
       );
       await teardown();
       return { outcome: 'failed' };
