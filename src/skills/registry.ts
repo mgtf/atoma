@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { appendLedger } from '../core/ledger.js';
+import { appendLedger, appendLedgerStrict } from '../core/ledger.js';
 import { join, resolve } from 'node:path';
 import type { Skill, SkillFrontmatter, SkillLanguage, SkillMeta, SkillProvenance } from './types.js';
 import { asStoredNamespace, type SkillNamespace } from './namespace.js';
@@ -657,6 +657,74 @@ export class SkillRegistry {
       entity: `${l1Name}/${skillId}`,
       detail: { reason: 'reset' },
     });
+    return meta;
+  }
+
+  /**
+   * Retract MISATTRIBUTED counter increments without discarding the rest —
+   * the surgical sibling of `resetCounters`, mirroring
+   * `AtomRegistry.compensateCounters` exactly (negative integer deltas, a
+   * mandatory reason, a floor at zero, and a ledger event `projectCounters`
+   * understands, so `ledger check` stays exact instead of reporting the
+   * store as impossibly below the ledger).
+   *
+   * MEASURED 2026-08-21: `build-inline-html-widget` stood at 7 clean
+   * successes and 2 failures inherited from a run killed by its wall-clock
+   * budget — an environment failure, which is "not evidence against the
+   * recipe". With failures > 0 the recipe could never become
+   * promotion-eligible again, and the only surface was all-or-nothing
+   * `reset`: removing 2 wrong failures cost 7 right successes.
+   *
+   * Refusal stamps, compiledGeneration and provenance are untouched — they
+   * describe the body, not its trust; clearing the stamp stays `reset`'s job.
+   */
+  compensateCounters(
+    l1Name: string,
+    skillId: string,
+    args: { successes?: number; failures?: number; reason: string }
+  ): SkillMeta | null {
+    const successes = args.successes ?? 0;
+    const failures = args.failures ?? 0;
+    if (
+      !Number.isInteger(successes) ||
+      !Number.isInteger(failures) ||
+      successes > 0 ||
+      failures > 0 ||
+      (successes === 0 && failures === 0)
+    ) {
+      throw new Error('counter compensation requires at least one negative integer delta');
+    }
+    if (args.reason.trim().length === 0) {
+      throw new Error('counter compensation requires a reason');
+    }
+    const dir = this.skillDir(l1Name, skillId);
+    if (!existsSync(join(dir, 'SKILL.md'))) return null;
+    const metaPath = join(dir, '_meta.json');
+    // Validate against the CURRENT store first (strict read, no write)...
+    const current = this.mutateMeta(metaPath, () => undefined);
+    if (current === null) return null;
+    if (current.successes + successes < 0 || current.failures + failures < 0) {
+      throw new Error(
+        `counter compensation would make ${l1Name}/${skillId} negative (store ${current.successes}\u2713/${current.failures}\u2717)`
+      );
+    }
+    // ...then JOURNAL FIRST, fail closed. For a negative delta the safe-loss
+    // direction inverts (see appendLedgerStrict): an append failure must
+    // abort with the store untouched, while a store-write failure after the
+    // append lands in the benign store>ledger direction. Same operator
+    // discipline as reset/drop/merge: never against a live run — the
+    // read-modify-write on _meta.json is not locked against one.
+    appendLedgerStrict({
+      kind: 'skill-counter-compensation',
+      entity: `${l1Name}/${skillId}`,
+      detail: { successes, failures, reason: args.reason.trim() },
+    });
+    const meta = this.mutateMeta(metaPath, (cur) => ({
+      ...cur,
+      successes: Math.max(0, cur.successes + successes),
+      failures: Math.max(0, cur.failures + failures),
+      updatedAt: nowIso(),
+    }));
     return meta;
   }
 

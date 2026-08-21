@@ -6,6 +6,7 @@
  *   tsx src/cli/skills.ts list [--l1 <name>] [--dir path]
  *   tsx src/cli/skills.ts show  <l1> <skill-id>  [--dir path]
  *   tsx src/cli/skills.ts reset <l1> <skill-id>  [--dir path]
+ *   tsx src/cli/skills.ts forgive <l1> <skill-id> --failures N [--successes M] --reason "..."
  *
  * Defaults: --dir from ATOMA_SKILLS_DIR env or ./skills.
  *
@@ -35,7 +36,7 @@ import { computeStatsRows, similarityPairs } from '../skills/stats.js';
 import type { Skill } from '../skills/types.js';
 
 interface Args {
-  command: 'list' | 'show' | 'reset' | 'stats' | 'drop' | 'merge' | 'export' | 'review' | 'help';
+  command: 'list' | 'show' | 'reset' | 'forgive' | 'stats' | 'drop' | 'merge' | 'export' | 'review' | 'help';
   positional: string[];
   flags: Record<string, string>;
 }
@@ -43,9 +44,17 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   // `force` is declared boolean so `drop --force <l1> <id>` no longer eats
   // the molecule name as the flag's value (greedy-grammar swallowing bug).
-  const { command, positional, flags } = parseCliArgs(argv, { booleanFlags: ['force'] });
+  // `reason` is a declared VALUE flag: the greedy default maps a bare
+  // trailing `--reason` to the string 'true', which then passes the
+  // non-empty guard and lands in the AUDIT ROW as the operator's reason
+  // (found by adversarial review, 2026-08-21). Declared, a trailing
+  // `--reason` records '' and fails the guard as it should.
+  const { command, positional, flags } = parseCliArgs(argv, {
+    booleanFlags: ['force'],
+    valueFlags: ['reason'],
+  });
   if (command === null) return { command: 'help', positional, flags };
-  if (!['list', 'show', 'reset', 'stats', 'drop', 'merge', 'export', 'review', 'help'].includes(command)) {
+  if (!['list', 'show', 'reset', 'forgive', 'stats', 'drop', 'merge', 'export', 'review', 'help'].includes(command)) {
     return { command: 'help', positional: [command, ...positional], flags };
   }
   return { command: command as Args['command'], positional, flags };
@@ -346,6 +355,42 @@ function cmdExport(registry: SkillRegistry, l1: string, id: string, outDir: stri
   console.log(`  counters/refusal stamps stay home in _meta.json — trust is runtime-local.`);
 }
 
+function cmdForgive(
+  registry: SkillRegistry,
+  l1: string,
+  id: string,
+  failures: number,
+  successes: number,
+  reason: string
+): void {
+  const before = findSkill(registry, l1, id);
+  if (!before) {
+    console.error(`no skill "${id}" for molecule "${l1}" under ${registry.rootDir}`);
+    process.exit(1);
+  }
+  try {
+    const meta = registry.compensateCounters(l1, id, {
+      failures: -failures,
+      successes: -successes,
+      reason,
+    });
+    if (!meta) {
+      console.error(`forgive: ${l1}/${id} has an unreadable _meta.json — repair it before mutating counters`);
+      process.exit(1);
+    }
+    console.log(
+      `forgave ${l1}/${id}: counters ${before.successes}\u2713/${before.failures}\u2717 \u2192 ${meta.successes}\u2713/${meta.failures}\u2717`
+    );
+    console.log(`  reason: ${reason}`);
+    console.log(
+      '  audited as a skill-counter-compensation ledger event; refusal stamps and provenance untouched.'
+    );
+  } catch (err) {
+    console.error(String(err instanceof Error ? err.message : err));
+    process.exit(1);
+  }
+}
+
 function cmdReset(registry: SkillRegistry, l1: string, id: string): void {
   const before = findSkill(registry, l1, id);
   if (!before) {
@@ -396,6 +441,14 @@ function help(unknown?: string): void {
       '                              the failures>0 / promotionRefusedAt',
       '                              dead-ends; the skill re-earns trust from',
       '                              scratch.',
+    '  forgive <l1> <skill-id> --failures N [--successes M] --reason "..."',
+    '                            — retract N misattributed failure(s)',
+    '                              (and/or M successes): environment or',
+    '                              executor failures are not evidence',
+    '                              against a recipe, and reset would',
+    '                              discard every earned counter with',
+    '                              them. Audited as a ledger event;',
+    '                              refusal stamps stay untouched.',
       '',
       'Common flags:',
       '  --dir <path>   override ATOMA_SKILLS_DIR (default: ./skills)',
@@ -523,6 +576,23 @@ function main(): void {
         process.exit(2);
       }
       return cmdExport(registry, resolveL1(l1, args.flags['db']), id, args.flags['out'] ?? './skills-export');
+    }
+    case 'forgive': {
+      const [l1, id] = args.positional;
+      const failures = Number(args.flags['failures'] ?? '0');
+      const successes = Number(args.flags['successes'] ?? '0');
+      const reason = (args.flags['reason'] ?? '').trim();
+      if (
+        !l1 || !id || !reason || reason.startsWith('-') ||
+        !Number.isInteger(failures) || !Number.isInteger(successes) ||
+        failures < 0 || successes < 0 || failures + successes === 0
+      ) {
+        console.error(
+          'usage: forgive <l1> <skill-id> --failures N [--successes M] --reason "why these increments were misattributed"'
+        );
+        process.exit(2);
+      }
+      return cmdForgive(registry, resolveL1(l1, args.flags['db']), id, failures, successes, reason);
     }
     case 'reset': {
       const [l1, id] = args.positional;

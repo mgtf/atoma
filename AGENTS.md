@@ -524,8 +524,17 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   dispatch. Never manufacture a fallback after trust was already lost.
 - Event-recovery skills match failure classes mid-run and carry zero LLM cost.
   Their triggers describe reusable failure classes, never task themes.
-- `skills drop`, `merge`, `reset`, and review are operator-only lifecycle
-  actions. Preserve provenance and emit ledger events. `registry remove` and
+- `skills drop`, `merge`, `reset`, `forgive`, and review are operator-only
+  lifecycle actions. Preserve provenance and emit ledger events. `forgive`
+  retracts MISATTRIBUTED increments surgically (negative integer deltas,
+  mandatory reason, floor at zero). It JOURNALS FIRST through the fail-closed
+  `appendLedgerStrict` — for a negative delta the safe-loss direction
+  inverts: mutate-then-lose-the-append leaves the store BELOW the ledger,
+  the direction `check` reports as IMPOSSIBLE — and `projectCounters` folds
+  the `skill-counter-compensation` event clamped at zero; refusal stamps
+  stay untouched — clearing them remains `reset`'s job. Measured 2026-08-21:
+  an environment failure is not evidence against a recipe, yet erasing 2
+  budget-kill failures via all-or-nothing `reset` cost 7 earned successes. `registry remove` and
   `registry dedupe --apply` drop the deleted atom's skill namespace
   (`skills/<atom-id>/`); `mergeInto` itself does not touch the skill store.
 - Compilation's measured value is maintenance verification, not from-scratch
@@ -682,6 +691,18 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 - `validate_html` treats smoke input as a JS expression, bounds every supplied
   duration, and ignores Chrome's own favicon 404. Browser console errors remain
   evidence but not every one is a mechanical failure.
+- Do not relax `detectBrittleComputedStyleLiteral` (the rgb()/rgba()-literal
+  pre-flight refusal). Measured across six batches on 2026-08-21 (15 firings
+  over seven web runs): every refusal was followed by in-run compliance at
+  ~one model turn each, every run delivered, and the expensive streak blamed
+  on it (batch 5, seven calls on one unreachable check) was an AWAITED
+  before/after comparison on a background-color transition that never
+  progressed in the headless page — removing the transition made the
+  identical check pass with a 100ms wait — plus an over-specified aggregate:
+  shapes the guard neither causes nor could catch. The allowed routes (source-toggled class/inline
+  marker; captured before/after comparison) are strictly more robust, and a
+  conditional relaxation would need colour-space resolution against the page
+  source for marginal gain.
 - Tool results are truncated before returning to the model, with the relevant
   head/tail retained. Budget-exhausted finalization keeps tools declared so the
   provider transcript remains valid.

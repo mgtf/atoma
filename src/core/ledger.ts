@@ -60,6 +60,11 @@ export type LedgerEventKind =
   | 'direct-failures-cleared'
   | 'counters-reset'
   | 'type-counter-compensation'
+  // `skills forgive` — the skill-side twin of type-counter-compensation:
+  // negative deltas retract MISATTRIBUTED increments with a mandatory
+  // reason, so an environment failure (not evidence against a recipe) no
+  // longer costs every earned success the way all-or-nothing reset does.
+  | 'skill-counter-compensation'
   // Catalog-hygiene verbs (CLI `skills drop` / `skills merge`). The entity
   // disappears from the store afterwards; `ledger check` iterates the STORE,
   // so a dropped entity's stale projection is never compared — no special
@@ -156,6 +161,27 @@ export function appendLedger(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb): voi
   } catch (err) {
     warnOnce(err);
   }
+}
+
+/**
+ * Append one event or THROW — the fail-closed sibling of `appendLedger`, for
+ * OPERATOR audit ops whose safe-loss direction is inverted.
+ *
+ * The fail-open contract exists so a ledger failure can never take down run
+ * execution, and for the counter bumps that ordering is also safe: a lost
+ * POSITIVE increment leaves the store ABOVE the ledger, the direction `check`
+ * tolerates as expected drift. A NEGATIVE compensation inverts that: mutate
+ * the store first and lose the append, and the store sits BELOW the ledger —
+ * the direction `check` reports as IMPOSSIBLE — while the CLI has already
+ * claimed an audit row that does not exist (found by adversarial review,
+ * 2026-08-21). So the compensation path journals FIRST through this strict
+ * append and mutates only afterwards: an append failure aborts with the
+ * store untouched, and a store-write failure after the append lands in the
+ * benign store>ledger direction.
+ */
+export function appendLedgerStrict(event: Omit<LedgerEvent, 'at'>, db?: LedgerDb): void {
+  const target = db ?? handleFor(ledgerDbPath());
+  insertEvent(target, { at: new Date().toISOString(), ...event });
 }
 
 /** The raw insert, so a caller inside a transaction can reuse it. THROWS. */
@@ -310,11 +336,23 @@ export function projectCounters(events: LedgerEvent[]): Map<string, ProjectedCou
         if (typeof d['failures'] === 'number') c.failures += d['failures'];
         break;
       }
-      case 'type-counter-compensation': {
-        c.successes +=
-          typeof ev.detail?.['successes'] === 'number' ? ev.detail['successes'] : 0;
-        c.failures +=
-          typeof ev.detail?.['failures'] === 'number' ? ev.detail['failures'] : 0;
+      case 'type-counter-compensation':
+      case 'skill-counter-compensation': {
+        // Clamped at zero: both stores floor their counters, so a projection
+        // driven negative (possible when the compensated increments predate
+        // the ledger and were never journaled) is a state no honest history
+        // produces — and a negative residue would silently absorb that many
+        // later phantom events on the same axis. On any fully-journaled
+        // history projection <= store per axis, so the clamp can never
+        // manufacture a false IMPOSSIBLE (adversarial review, 2026-08-21).
+        c.successes = Math.max(
+          0,
+          c.successes + (typeof ev.detail?.['successes'] === 'number' ? ev.detail['successes'] : 0)
+        );
+        c.failures = Math.max(
+          0,
+          c.failures + (typeof ev.detail?.['failures'] === 'number' ? ev.detail['failures'] : 0)
+        );
         break;
       }
       default:
