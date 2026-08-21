@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import { translate } from '../client/i18n.js';
+import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
 import {
   emptyRenderMetrics,
   type GpuRenderMetrics,
@@ -88,7 +89,29 @@ function GpuAppContent({
 }) {
   const state = useGpuStore();
   const queryClient = useQueryClient();
-  const { snapshot: authSnapshot, activate: activateAuth } = useAuthController();
+  const {
+    snapshot: authSnapshot,
+    gate: authGate,
+    providers: authProviders,
+    activate: activateAuth,
+  } = useAuthController();
+  // The arrival gate doubles as the login when the server says the gate is
+  // on and this browser holds no session. Every data query stays dark until
+  // the gate is KNOWN ('off' or 'authenticated'): firing /api/* while whoami
+  // is still in flight earned a 401 whose handler reloads '/', which re-ran
+  // the race — an infinite reload loop the first gated screenshot caught.
+  const gateBlocked = authGate === 'unauthenticated';
+  const apiReady = authGate === 'off' || authGate === 'authenticated';
+  // Bounce parameters from the server's auth flow, read once per page load:
+  // ?authNotice=<code> names a login failure to display, ?invite=<token>
+  // must ride every provider link so the invitation admits the account the
+  // visitor signs in with. Parsing and href building are the unit-tested
+  // helpers in auth-session.ts.
+  const loginParams = useMemo(() => loginBounceParams(window.location.search), []);
+  const loginHref = useCallback(
+    (providerId: string) => providerLoginHref(providerId, loginParams.invite),
+    [loginParams.invite]
+  );
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
@@ -99,10 +122,11 @@ function GpuAppContent({
   // for ordinary members, and a 403'd query would poison the global data
   // error exactly the way the ungated /api/projects 404 once did. Ungated
   // (auth null) keeps the classic developer path.
-  const operatorSurfaces = authSnapshot === null || authSnapshot.viewer.platformAdmin;
+  const operatorSurfaces =
+    apiReady && (authSnapshot === null || authSnapshot.viewer.platformAdmin);
   const isPlatformAdmin = authSnapshot?.viewer.platformAdmin === true;
-  const runsQuery = useRunsIndex(state.view === 'runs');
-  const runQuery = useRunTrace(state.selectedRunId, state.view === 'runs');
+  const runsQuery = useRunsIndex(state.view === 'runs' && apiReady);
+  const runQuery = useRunTrace(state.selectedRunId, state.view === 'runs' && apiReady);
   const registriesQuery = useRegistries(state.view === 'registry' && operatorSurfaces);
   const registryQuery = useRegistry(
     state.selectedRegistryId,
@@ -129,7 +153,7 @@ function GpuAppContent({
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
   const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && operatorSurfaces);
   const burninQuery = useBurnin(state.view === 'burnin' && operatorSurfaces);
-  const profilesQuery = useProfiles(state.view === 'launch');
+  const profilesQuery = useProfiles(state.view === 'launch' && apiReady);
   // Project routes exist only behind the auth gate; an ungated server 404s
   // them. Left enabled, those 404s poisoned the GLOBAL `data.error` below and
   // the runs view then rendered an error banner instead of its list — the
@@ -150,6 +174,11 @@ function GpuAppContent({
         ? { [selectedProject.projectId]: projectRunsQuery.data }
         : {},
     [projectRunsQuery.data, selectedProject]
+  );
+
+  const login = useMemo(
+    () => (gateBlocked ? { providers: authProviders, notice: loginParams.notice } : null),
+    [authProviders, gateBlocked, loginParams.notice]
   );
 
   const adminOrganisationsQuery = useAdminOrganisations(
@@ -180,6 +209,13 @@ function GpuAppContent({
   useEffect(() => {
     if (!visibleViews(authSnapshot).includes(state.view)) state.setView('runs');
   }, [authSnapshot, state]);
+
+  // A very fast Continue click while whoami was still in flight could enter
+  // the app before the gate resolved to 'unauthenticated'. Send that visitor
+  // back to the arrival gate — it is the login.
+  useEffect(() => {
+    if (gateBlocked && state.entered) useGpuStore.setState({ entered: false });
+  }, [gateBlocked, state.entered]);
 
   useEffect(() => {
     const runs = runsQuery.data ?? [];
@@ -420,6 +456,10 @@ function GpuAppContent({
       if (example) store.setSearch('launch', example);
       return;
     }
+    if (id.startsWith('login.provider.')) {
+      window.location.assign(loginHref(id.slice('login.provider.'.length)));
+      return;
+    }
     if (id.startsWith('admin.invite.')) {
       const rest = id.slice('admin.invite.'.length);
       const separator = rest.indexOf('.');
@@ -429,7 +469,7 @@ function GpuAppContent({
       return;
     }
     if (id === 'launch.copy') copyCommand();
-  }, [activateAuth, beginEnter, copyCommand, mintInvitation, profilesQuery.data]);
+  }, [activateAuth, beginEnter, copyCommand, loginHref, mintInvitation, profilesQuery.data]);
 
   const loading =
     (state.view === 'projects' && (projectsQuery.isLoading || githubInstallationsQuery.isLoading)) ||
@@ -495,6 +535,7 @@ function GpuAppContent({
     adminOrganisations: adminOrganisationsQuery.data ?? [],
     adminInvitation,
     adminError,
+    login,
     loading,
     fetching,
     error,
@@ -504,6 +545,7 @@ function GpuAppContent({
     adminOrganisationsQuery.data,
     authSnapshot,
     fetching,
+    login,
     burninQuery.data,
     error,
     githubInstallationsQuery.data,
@@ -553,6 +595,15 @@ function GpuAppContent({
         runs={runsQuery.data ?? []}
         releaseVersion={RELEASE_VERSION}
         views={visibleViews(authSnapshot)}
+        loginLinks={
+          login
+            ? login.providers.map((provider) => ({
+                id: provider.id,
+                label: provider.label,
+                href: loginHref(provider.id),
+              }))
+            : null
+        }
         t={t}
         onSelectRun={state.selectRun}
         onCopy={copyCommand}

@@ -408,6 +408,7 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     adminOrganisations: [],
     adminInvitation: null,
     adminError: null,
+    login: null,
     loading: false,
     fetching: false,
     error: null,
@@ -624,6 +625,84 @@ describe('reduced-motion override', () => {
     expect(prefersReducedMotion()).toBe(true);
     setReducedMotionOverrideForTests(false);
     expect(prefersReducedMotion()).toBe(false);
+  });
+});
+
+describe('drawWelcome as the login gate', () => {
+  const WIDTH = 1280;
+  const HEIGHT = 800;
+
+  it('offers one provider button per configured provider instead of Continue', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(
+      ctx,
+      makeSnapshot(
+        { entered: false },
+        {
+          login: {
+            providers: [
+              { id: 'github', label: 'GitHub' },
+              { id: 'google', label: 'Google' },
+            ],
+            notice: null,
+          },
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    const ids = ctx.buttons.map((button) => button.id);
+    expect(ids).toContain('login.provider.github');
+    expect(ids).toContain('login.provider.google');
+    expect(ids).not.toContain('welcome.continue');
+    // The crystal and the tagline stay: the login IS the arrival gate.
+    expect(ctx.markRoot.children.length).toBe(1);
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.tagline'])).toBe(true);
+  });
+
+  it('renders a bounced auth notice from the catalogs, falling back to the generic line', () => {
+    const known = createRecordingCtx();
+    drawWelcome(
+      known,
+      makeSnapshot(
+        { entered: false },
+        { login: { providers: [{ id: 'github', label: 'GitHub' }], notice: 'providerRefused' } }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(
+      known.texts.some((text) => text.value === I18N_CATALOGS.en['login.notice.providerRefused'])
+    ).toBe(true);
+
+    const unknown = createRecordingCtx();
+    drawWelcome(
+      unknown,
+      makeSnapshot(
+        { entered: false },
+        { login: { providers: [{ id: 'github', label: 'GitHub' }], notice: 'madeUpCode' } }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(
+      unknown.texts.some((text) => text.value === I18N_CATALOGS.en['login.notice.generic'])
+    ).toBe(true);
+    expect(unknown.texts.some((text) => text.value.includes('madeUpCode'))).toBe(false);
+  });
+
+  it('says so when the gate is on but no provider is configured', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(
+      ctx,
+      makeSnapshot({ entered: false }, { login: { providers: [], notice: null } }),
+      WIDTH,
+      HEIGHT
+    );
+    expect(ctx.buttons.map((button) => button.id)).not.toContain('welcome.continue');
+    expect(
+      ctx.texts.some((text) => text.value === I18N_CATALOGS.en['login.noProviders'])
+    ).toBe(true);
   });
 });
 

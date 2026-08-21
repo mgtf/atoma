@@ -15,6 +15,15 @@
 - A failed GitHub publication can be retried:
   `POST /api/projects/:id/runs/:runId/publish` re-drives the publication of
   a delivered run through the same idempotent path (one repository, ever).
+- The arrival gate is the login. A gated deployment now serves the GL app
+  shell (crystal, tagline) to unauthenticated visitors with one
+  "Continue with …" button per configured provider, instead of a bare
+  server-rendered form; login failures bounce back onto the gate as bounded
+  notice codes rendered from the i18n catalogs, and the plain selector
+  remains at `/auth/login` as the no-JS fallback. The compiled auth release
+  smoke now drives the real product flow (founder sign-in without an
+  invitation, CLI `invite --org`, invited member admission) — its previous
+  incarnation minted an invitation on an empty store and could never pass.
 
 ### Fixed
 

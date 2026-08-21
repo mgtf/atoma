@@ -593,14 +593,31 @@ describe('viz auth gate (process level)', () => {
     await waitReady(running, `${base}/auth/whoami`);
 
     expect((await fetch(`${base}/api/runs`)).status).toBe(401);
+    // A new visitor's first touch is the APP SHELL — the arrival gate is the
+    // login (crystal, tagline, provider buttons), not a bare server form.
+    // The login-capable shell still pins that it cannot be framed.
     const root = await fetch(`${base}/?invite=${invitation}`);
     expect(root.status).toBe(200);
     expect(root.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
     expect(root.headers.get('referrer-policy')).toBe('no-referrer');
-    const loginPage = await root.text();
-    expect(loginPage).toContain(`<title>${AUTH_COPY.pageTitle}</title>`);
-    expect(loginPage).toContain(`<h1>${AUTH_COPY.brand}</h1>`);
-    expect(loginPage).toContain(`invite=${invitation}`);
+    const shell = await root.text();
+    expect(shell).not.toContain(AUTH_COPY.pageTitle);
+    expect(shell).toContain('<script');
+    // The capability probe tells the shell which providers to offer, without
+    // a session and without a 401 that would loop it back here.
+    const anonWhoami = await fetch(`${base}/auth/whoami`);
+    expect(anonWhoami.status).toBe(200);
+    expect(await anonWhoami.json()).toEqual({
+      enabled: true,
+      authenticated: false,
+      providers: [{ id: 'github', label: 'GitHub' }],
+    });
+    // The no-JS fallback selector stays server-rendered at /auth/login.
+    const fallback = await fetch(`${base}/auth/login?invite=${invitation}`);
+    expect(fallback.status).toBe(200);
+    const fallbackPage = await fallback.text();
+    expect(fallbackPage).toContain(`<title>${AUTH_COPY.pageTitle}</title>`);
+    expect(fallbackPage).toContain(`invite=${invitation}`);
 
     const poisoned = await fetch(`${base}/auth/login?provider=github`, {
       redirect: 'manual',
@@ -777,8 +794,15 @@ describe('viz auth gate (process level)', () => {
       headers: { cookie: jar.header(callback)! },
     });
 
-    expect(refused.status).toBe(401);
-    expect(await refused.text()).toContain(AUTH_COPY.providerRefused);
+    // Failures bounce back to the app shell's arrival gate with a bounded
+    // notice code — the GL welcome renders the message from its catalogs —
+    // and the transaction cookie is CLEARED, never re-issued.
+    expect(refused.status).toBe(302);
+    expect(refused.headers.get('location')).toBe('/?authNotice=providerRefused');
+    const clearedTx = (refused.headers.getSetCookie?.() ?? []).find((line) =>
+      line.startsWith('atoma_oauth_tx=')
+    );
+    expect(clearedTx).toContain('Max-Age=0');
   });
 
   it('consumes OAuth state exactly once even if the original transaction cookie is replayed', async () => {
@@ -809,8 +833,8 @@ describe('viz auth gate (process level)', () => {
       redirect: 'manual',
       headers: { cookie: originalTransactionCookie },
     });
-    expect(replay.status).toBe(401);
-    expect(await replay.text()).toContain('expired login transaction');
+    expect(replay.status).toBe(302);
+    expect(replay.headers.get('location')).toBe('/?authNotice=expiredState');
   }, 30_000);
 
   it('derives Secure and redirect_uri only from the configured HTTPS public origin', async () => {

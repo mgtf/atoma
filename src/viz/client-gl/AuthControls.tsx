@@ -9,7 +9,6 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  AUTH_LOGIN_PATH,
   redirectIfAuthenticationRequired,
   type AuthNavigator,
 } from '../client/auth-session.js';
@@ -36,8 +35,23 @@ export interface AuthUiSnapshot {
   switchingOrganisationId: string | null;
 }
 
+/**
+ * Where this browser stands with the gate. `unknown` is the pre-whoami
+ * instant and network failure; `off` is the ungated developer path;
+ * `unauthenticated` means the arrival gate must offer the providers below
+ * instead of Continue.
+ */
+export type AuthGateStatus = 'unknown' | 'off' | 'unauthenticated' | 'authenticated';
+
+export interface AuthProviderOption {
+  id: string;
+  label: string;
+}
+
 interface AuthController {
   snapshot: AuthUiSnapshot | null;
+  gate: AuthGateStatus;
+  providers: AuthProviderOption[];
   activate: (id: string) => void;
 }
 
@@ -67,6 +81,8 @@ export function AuthControls({
   navigate?: AuthNavigator;
 }) {
   const [viewer, setViewer] = useState<AuthViewer | null>(null);
+  const [gate, setGate] = useState<AuthGateStatus>('unknown');
+  const [providers, setProviders] = useState<AuthProviderOption[]>([]);
   const [failure, setFailure] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [switchingOrganisationId, setSwitchingOrganisationId] = useState<string | null>(null);
@@ -80,15 +96,42 @@ export function AuthControls({
       headers: { accept: 'application/json' },
     })
       .then(async (response) => {
+        // Compiled servers older than the shell-as-login change answered an
+        // unauthenticated whoami with 401 — the server-owned selector is the
+        // right landing there.
         if (redirectIfAuthenticationRequired(response.status, navigate)) return;
         if (!response.ok) return;
         const body = await response.json() as Record<string, unknown>;
+        if (active && body['enabled'] === false) {
+          setGate('off');
+          return;
+        }
+        if (active && body['enabled'] === true && body['authenticated'] === false) {
+          // The arrival gate becomes the login: remember which providers to
+          // offer. The server remains the authority on every /api call.
+          setGate('unauthenticated');
+          setProviders(
+            Array.isArray(body['providers'])
+              ? body['providers'].flatMap((candidate): AuthProviderOption[] => {
+                  if (
+                    candidate === null ||
+                    typeof candidate !== 'object' ||
+                    typeof (candidate as Record<string, unknown>)['id'] !== 'string' ||
+                    typeof (candidate as Record<string, unknown>)['label'] !== 'string'
+                  ) return [];
+                  return [candidate as AuthProviderOption];
+                })
+              : []
+          );
+          return;
+        }
         if (
           active &&
           body['authenticated'] === true &&
           typeof body['displayName'] === 'string' &&
           typeof body['role'] === 'string'
         ) {
+          setGate('authenticated');
           const organisations = Array.isArray(body['organisations'])
             ? body['organisations'].flatMap((candidate): AuthOrganisation[] => {
                 if (
@@ -162,7 +205,8 @@ export function AuthControls({
         headers: { accept: 'text/html' },
       });
       if (!response.ok) throw new Error('logout failed');
-      navigate(AUTH_LOGIN_PATH);
+      // Back to the arrival gate: signed out, it offers the providers again.
+      navigate('/');
     } catch {
       setFailure(true);
     } finally {
@@ -182,7 +226,10 @@ export function AuthControls({
     signingOut,
     switchingOrganisationId,
   } : null, [failure, signingOut, switchingOrganisationId, viewer]);
-  const controller = useMemo<AuthController>(() => ({ snapshot, activate }), [activate, snapshot]);
+  const controller = useMemo<AuthController>(
+    () => ({ snapshot, gate, providers, activate }),
+    [activate, gate, providers, snapshot]
+  );
 
   return (
     <AuthContext.Provider value={controller}>

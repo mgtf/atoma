@@ -95,6 +95,21 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'admin.invitationCopied':
       'The link was copied to your clipboard. It is a one-use credential shown only here.',
     'admin.actionFailed': 'Admin action failed',
+    'welcome.signInWith': 'Continue with {{label}}',
+    'login.noProviders': 'No sign-in provider is configured on this deployment.',
+    'login.notice.generic': 'Sign-in failed — try again.',
+    'login.notice.invalidInvitation': 'Invalid invitation token.',
+    'login.notice.invalidState': 'Missing or invalid login state.',
+    'login.notice.replayedState': 'Login transaction expired or replayed — start again.',
+    'login.notice.expiredState': 'Unknown or expired login transaction — start again.',
+    'login.notice.providerRefused':
+      'Login was refused by the provider. If you used an invitation, reopen its original link before trying again.',
+    'login.notice.invalidAuthorizationCode': 'Missing or invalid authorization code.',
+    'login.notice.invitationRequired': 'This account has not been invited to this instance.',
+    'login.notice.providerFailure':
+      'Login could not be completed. If you used an invitation, reopen its original link before trying again.',
+    'login.notice.githubConnectExpired':
+      'GitHub connect transaction expired or was replayed — start again.',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'No run yet for this project.',
     'projects.repoStatus.pending': 'repo pending',
@@ -612,6 +627,21 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'admin.invitationCopied':
       'Le lien a été copié dans le presse-papiers. C’est un identifiant à usage unique, affiché uniquement ici.',
     'admin.actionFailed': 'Action d’administration échouée',
+    'welcome.signInWith': 'Continuer avec {{label}}',
+    'login.noProviders': 'Aucun fournisseur de connexion n’est configuré sur ce déploiement.',
+    'login.notice.generic': 'Connexion impossible — réessaie.',
+    'login.notice.invalidInvitation': 'Jeton d’invitation invalide.',
+    'login.notice.invalidState': 'État de connexion manquant ou invalide.',
+    'login.notice.replayedState': 'Transaction de connexion expirée ou rejouée — recommence.',
+    'login.notice.expiredState': 'Transaction de connexion inconnue ou expirée — recommence.',
+    'login.notice.providerRefused':
+      'Le fournisseur a refusé la connexion. Si tu utilisais une invitation, rouvre son lien d’origine avant de réessayer.',
+    'login.notice.invalidAuthorizationCode': 'Code d’autorisation manquant ou invalide.',
+    'login.notice.invitationRequired': 'Ce compte n’a pas été invité sur cette instance.',
+    'login.notice.providerFailure':
+      'La connexion n’a pas pu aboutir. Si tu utilisais une invitation, rouvre son lien d’origine avant de réessayer.',
+    'login.notice.githubConnectExpired':
+      'La transaction de connexion GitHub a expiré ou a été rejouée — recommence.',
     'projects.runsHeading': 'Runs ({{count}})',
     'projects.noRuns': 'Aucun run pour ce projet.',
     'projects.repoStatus.pending': 'dépôt en attente',

@@ -80,6 +80,12 @@ export interface GpuDataSnapshot {
   adminOrganisations: VizAdminOrganisation[];
   adminInvitation: VizAdminInvitation | null;
   adminError: string | null;
+  /**
+   * Non-null when the gate is on and this browser holds no session: the
+   * arrival gate offers these providers instead of Continue, and `notice`
+   * names a login failure bounced back by the server (`?authNotice=`).
+   */
+  login: { providers: { id: string; label: string }[]; notice: string | null } | null;
   loading: boolean;
   /**
    * The active view has requests IN FLIGHT — including refetches of data

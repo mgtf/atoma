@@ -10,9 +10,11 @@ import { translate } from '../src/viz/client/i18n.js';
 import {
   AUTH_LOGIN_PATH,
   authLoginPath,
+  loginBounceParams,
+  providerLoginHref,
   redirectIfAuthenticationRequired,
 } from '../src/viz/client/auth-session.js';
-import { AuthControls } from '../src/viz/client-gl/AuthControls.js';
+import { AuthControls, useAuthController } from '../src/viz/client-gl/AuthControls.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -39,15 +41,35 @@ afterEach(() => {
 });
 
 describe('viz authentication session navigation', () => {
-  it('uses the canonical server-owned login path without an invitation', () => {
-    expect(authLoginPath('?view=runs')).toBe(AUTH_LOGIN_PATH);
+  it('returns to the app shell — the arrival gate is the login', () => {
+    expect(authLoginPath('?view=runs')).toBe('/');
+    // The server-owned no-JS selector keeps its canonical path for hrefs.
+    expect(AUTH_LOGIN_PATH).toBe('/auth/login');
 
     const navigate = vi.fn();
     expect(redirectIfAuthenticationRequired(404, navigate, '?view=runs')).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('preserves only the invitation when a 401 returns to login', () => {
+  it('parses only bounded bounce parameters and threads the invitation onto provider hrefs', () => {
+    // The invitation is the bearer that admits the invitee: dropping it from
+    // the shell-built href would refuse the login or found a stray org.
+    const bounce = loginBounceParams('?authNotice=providerRefused&invite=tok%2Fwith%20space&x=1');
+    expect(bounce).toEqual({ notice: 'providerRefused', invite: 'tok/with space' });
+    expect(providerLoginHref('github', bounce.invite)).toBe(
+      '/auth/login?provider=github&invite=tok%2Fwith%20space'
+    );
+    expect(providerLoginHref('github', null)).toBe('/auth/login?provider=github');
+
+    // The notice is DISPLAY STEERING only: anything but a short letter code
+    // is dropped, and an oversized invitation never rides a link.
+    expect(loginBounceParams('?authNotice=<img%20src=x>').notice).toBeNull();
+    expect(loginBounceParams('?authNotice=a1').notice).toBeNull();
+    expect(loginBounceParams(`?invite=${'A'.repeat(513)}`).invite).toBeNull();
+    expect(loginBounceParams('').notice).toBeNull();
+  });
+
+  it('preserves only the invitation when a 401 returns to the gate', () => {
     const navigate = vi.fn();
 
     expect(
@@ -57,7 +79,7 @@ describe('viz authentication session navigation', () => {
         '?view=runs&invite=invite%2Fwith%20spaces&state=discard-me'
       )
     ).toBe(true);
-    expect(navigate).toHaveBeenCalledWith('/auth/login?invite=invite%2Fwith%20spaces');
+    expect(navigate).toHaveBeenCalledWith('/?invite=invite%2Fwith%20spaces');
   });
 });
 
@@ -97,6 +119,50 @@ describe('GPU authentication controls', () => {
     });
   });
 
+  it('exposes the unauthenticated gate and its providers from a 200 whoami', async () => {
+    // The arrival gate is the login: a 200 {enabled, authenticated:false}
+    // whoami must set gate 'unauthenticated' and surface only well-shaped
+    // providers — no redirect, no account aside.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      enabled: true,
+      authenticated: false,
+      providers: [
+        { id: 'github', label: 'GitHub' },
+        { id: 42, label: 'broken' },
+        'garbage',
+        { id: 'google' },
+      ],
+    }));
+    function Probe() {
+      const { gate, providers } = useAuthController();
+      return createElement(
+        'output',
+        { 'data-testid': 'gate-probe' },
+        `${gate}:${providers.map((provider) => provider.id).join(',')}`
+      );
+    }
+    const navigate = vi.fn();
+    render(
+      createElement(
+        AuthControls,
+        {
+          t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+          fetchImpl: fetchMock as unknown as typeof fetch,
+          navigate,
+        },
+        createElement(Probe)
+      )
+    );
+
+    await waitFor(() =>
+      // Exact match: a mis-filtered provider list (e.g. the label-less
+      // entry surviving) must fail, not hide behind substring semantics.
+      expect(screen.getByTestId('gate-probe')).toHaveTextContent(/^unauthenticated:github$/)
+    );
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+  });
+
   it('stays hidden when authentication is disabled', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ enabled: false, authenticated: false }));
     const { navigate } = renderControls(fetchMock);
@@ -112,12 +178,12 @@ describe('GPU authentication controls', () => {
     const { navigate } = renderControls(fetchMock);
 
     await waitFor(() => {
-      expect(navigate).toHaveBeenCalledWith('/auth/login?invite=first-admission');
+      expect(navigate).toHaveBeenCalledWith('/?invite=first-admission');
     });
     expect(screen.queryByRole('complementary', { name: 'Account' })).not.toBeInTheDocument();
   });
 
-  it('posts logout and returns to the canonical login selector on success', async () => {
+  it('posts logout and returns to the arrival gate on success', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         authenticated: true,
@@ -135,7 +201,7 @@ describe('GPU authentication controls', () => {
       credentials: 'same-origin',
       headers: { accept: 'text/html' },
     });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith(AUTH_LOGIN_PATH));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
   });
 
   it('keeps the account control available when logout fails', async () => {

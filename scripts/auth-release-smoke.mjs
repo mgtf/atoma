@@ -89,17 +89,26 @@ async function startProvider() {
           return;
         }
         verifiedPkce += 1;
+        // One distinct token per exchange, so the smoke can drive TWO
+        // identities through one provider: the first login founds the
+        // organisation, the second is admitted by invitation.
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ access_token: 'release-access-token' }));
+        response.end(JSON.stringify({ access_token: `release-access-token-${verifiedPkce}` }));
         return;
       }
       if (request.method === 'GET' && url.pathname === '/userinfo') {
-        if (request.headers.authorization !== 'Bearer release-access-token') {
+        const bearer = /^Bearer release-access-token-(\d+)$/.exec(
+          request.headers.authorization ?? ''
+        );
+        if (!bearer) {
           response.writeHead(401).end();
           return;
         }
+        const identity = bearer[1] === '1'
+          ? { id: 4242, name: 'Release Smoke Owner' }
+          : { id: 4300, name: 'Release Smoke Member' };
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ id: 4242, name: 'Release Smoke Owner' }));
+        response.end(JSON.stringify(identity));
         return;
       }
       response.writeHead(404).end();
@@ -197,10 +206,40 @@ function cleanEnv(overrides) {
   return { ...env, ...overrides };
 }
 
-function createInvitationUrl(baseUrl) {
+/**
+ * The organisation the FIRST login founded, read back through the compiled
+ * CLI — the same list surface an operator uses to find the id.
+ */
+function listedOrganisationId() {
   const result = spawnSync(
     process.execPath,
-    [authCliEntry, 'invite', '--db', dbPath, '--role', 'org:owner', '--ttl-hours', '1'],
+    [authCliEntry, 'list', '--db', dbPath],
+    { cwd: root, env: cleanEnv({}), encoding: 'utf8' }
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `compiled auth list exited ${result.status ?? result.signal}: ${result.stderr.slice(-800)}`
+    );
+  }
+  const match = /\(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/.exec(
+    result.stdout
+  );
+  if (!match) throw new Error('compiled auth list did not print an organisation id');
+  return match[1];
+}
+
+function createInvitationUrl(baseUrl, orgId) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      authCliEntry,
+      'invite',
+      '--db', dbPath,
+      '--org', orgId,
+      '--role', 'org:member',
+      '--ttl-hours', '1',
+    ],
     {
       cwd: root,
       env: cleanEnv({ ATOMA_VIZ_PUBLIC_ORIGIN: baseUrl }),
@@ -234,24 +273,28 @@ function createInvitationUrl(baseUrl) {
   return { invitationUrl, invitationToken: invitationTokens[0] };
 }
 
-function providerLoginUrl(selectorHtml, invitationUrl, invitationToken) {
+function providerLoginUrl(selectorHtml, pageUrl, invitationToken) {
   const hrefs = [...selectorHtml.matchAll(/<a\b[^>]*\bhref="([^"]+)"/gi)]
     .map((match) => match[1].replaceAll('&amp;', '&'));
   for (const href of hrefs) {
-    const candidate = new URL(href, invitationUrl);
+    const candidate = new URL(href, pageUrl);
     if (
-      candidate.origin === invitationUrl.origin &&
+      candidate.origin === new URL(pageUrl).origin &&
       candidate.pathname === '/auth/login' &&
       candidate.searchParams.get('provider') === 'github'
     ) {
       const inviteValues = candidate.searchParams.getAll('invite');
-      if (inviteValues.length !== 1 || inviteValues[0] !== invitationToken) {
+      if (invitationToken === null) {
+        if (inviteValues.length !== 0) {
+          throw new Error('compiled auth selector attached an invitation nobody supplied');
+        }
+      } else if (inviteValues.length !== 1 || inviteValues[0] !== invitationToken) {
         throw new Error('compiled auth provider href did not preserve the CLI invitation');
       }
       return candidate;
     }
   }
-  throw new Error('compiled auth root did not expose the GitHub provider href');
+  throw new Error('compiled auth selector did not expose the GitHub provider href');
 }
 
 async function waitForServer(baseUrl, child, stderr) {
@@ -307,7 +350,6 @@ try {
   provider = await startProvider();
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const { invitationUrl, invitationToken } = createInvitationUrl(baseUrl);
   let stderr = '';
   viz = spawn(
     process.execPath,
@@ -337,11 +379,33 @@ try {
     throw new Error(`compiled auth gate exposed /api/runs with HTTP ${anonymousApi.status}`);
   }
 
+  // A new visitor's first touch is the APP SHELL: the arrival gate is the
+  // login. The shell carries no data; whoami names the providers to offer.
+  const anonymousRoot = await fetch(`${baseUrl}/`, { redirect: 'manual' });
+  const anonymousHtml = await anonymousRoot.text();
+  if (!anonymousRoot.ok || !/<script[^>]+src="\/[^"]+\.js"/.test(anonymousHtml)) {
+    throw new Error('compiled unauthenticated root did not serve the GPU app shell');
+  }
+  const anonymousWhoami = await fetch(`${baseUrl}/auth/whoami`, { redirect: 'manual' });
+  const anonymousCapabilities = await anonymousWhoami.json();
+  if (
+    !anonymousWhoami.ok ||
+    anonymousCapabilities.enabled !== true ||
+    anonymousCapabilities.authenticated !== false ||
+    !Array.isArray(anonymousCapabilities.providers) ||
+    !anonymousCapabilities.providers.some((entry) => entry?.id === 'github')
+  ) {
+    throw new Error('compiled anonymous whoami did not offer the configured providers');
+  }
+
+  // FIRST admission: no invitation exists yet — the first sign-in founds the
+  // owner's organisation. The no-JS selector at /auth/login provides the
+  // provider href the shell would otherwise build itself.
   const jar = new CookieJar();
-  const selector = await request(jar, invitationUrl.href);
+  const selector = await request(jar, `${baseUrl}/auth/login`);
   const selectorHtml = await selector.text();
-  if (!selector.ok) throw new Error(`compiled auth root failed with HTTP ${selector.status}`);
-  const loginUrl = providerLoginUrl(selectorHtml, invitationUrl, invitationToken);
+  if (!selector.ok) throw new Error(`compiled auth selector failed with HTTP ${selector.status}`);
+  const loginUrl = providerLoginUrl(selectorHtml, baseUrl, null);
 
   const started = await request(jar, loginUrl.href);
   const authorizeUrl = started.headers.get('location');
@@ -416,7 +480,57 @@ try {
   });
   if (revoked.status !== 401) throw new Error('compiled logout did not revoke the server session');
 
-  process.stdout.write('auth release smoke ok: invite, PKCE, session gate, GPU shell, logout\n');
+  // SECOND admission: the operator mints a one-use invitation for the
+  // founded organisation through the compiled CLI, and a NEW identity joins
+  // with the invited role.
+  const orgId = listedOrganisationId();
+  const { invitationUrl, invitationToken } = createInvitationUrl(baseUrl, orgId);
+  if (invitationUrl.origin !== baseUrl) {
+    throw new Error('compiled auth invite did not target the public origin');
+  }
+  const memberJar = new CookieJar();
+  const memberSelector = await request(
+    memberJar,
+    `${baseUrl}/auth/login?invite=${encodeURIComponent(invitationToken)}`
+  );
+  const memberSelectorHtml = await memberSelector.text();
+  if (!memberSelector.ok) {
+    throw new Error(`compiled invited selector failed with HTTP ${memberSelector.status}`);
+  }
+  const memberLoginUrl = providerLoginUrl(memberSelectorHtml, baseUrl, invitationToken);
+  const memberStarted = await request(memberJar, memberLoginUrl.href);
+  const memberAuthorizeUrl = memberStarted.headers.get('location');
+  if (memberStarted.status !== 302 || !memberAuthorizeUrl) {
+    throw new Error('compiled invited login did not redirect to the provider');
+  }
+  const memberAuthorized = await request(memberJar, memberAuthorizeUrl);
+  const memberCallbackUrl = memberAuthorized.headers.get('location');
+  if (memberAuthorized.status !== 302 || !memberCallbackUrl) {
+    throw new Error('fake provider did not authorize the invited login');
+  }
+  const memberCallback = await request(memberJar, memberCallbackUrl);
+  if (memberCallback.status !== 302 || memberCallback.headers.get('location') !== '/') {
+    throw new Error(`compiled invited callback failed with HTTP ${memberCallback.status}`);
+  }
+  const memberWhoami = await request(memberJar, `${baseUrl}/auth/whoami`);
+  const member = await memberWhoami.json();
+  if (
+    !memberWhoami.ok ||
+    member.displayName !== 'Release Smoke Member' ||
+    member.role !== 'org:member' ||
+    // The invitation must admit into the FOUNDER's organisation — the right
+    // role in a wrong or freshly minted organisation is still a failure.
+    member.activeOrganisation?.id !== orgId
+  ) {
+    throw new Error('compiled invitation did not admit the member into the founded organisation');
+  }
+  if (provider.verifiedPkce() !== 2) {
+    throw new Error('compiled invited flow did not verify a second PKCE exchange');
+  }
+
+  process.stdout.write(
+    'auth release smoke ok: shell login, founder admission, CLI invite, member admission, PKCE, session gate, logout\n'
+  );
 } finally {
   if (viz) await stopChild(viz);
   if (provider) await provider.close();

@@ -108,6 +108,27 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(6);
   });
 
+  it('replaces Continue with real provider anchors when the gate is a login', () => {
+    useGpuStore.setState({ entered: false });
+    render(
+      createElement(DomBridge, {
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+        onCopy: vi.fn(),
+        loginLinks: [
+          { id: 'github', label: 'GitHub', href: '/auth/login?provider=github&invite=tok' },
+        ],
+      })
+    );
+    // Real anchors, so keyboard and assistive tech reach the provider flow
+    // without the GL canvas — and the invitation rides the href.
+    const anchor = screen.getByRole('link', { name: 'Continue with GitHub' });
+    expect(anchor).toHaveAttribute('href', '/auth/login?provider=github&invite=tok');
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
   it('routes Continue through onEnter so the fade can own admission', async () => {
     useGpuStore.setState({ entered: false });
     const onEnter = vi.fn();

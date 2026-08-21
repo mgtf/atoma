@@ -8,6 +8,7 @@ export function DomBridge({
   runs,
   releaseVersion,
   views = DEFAULT_VIEWS,
+  loginLinks = null,
   t,
   onSelectRun,
   onCopy,
@@ -23,6 +24,8 @@ export function DomBridge({
   releaseVersion: string;
   /** Nav tabs for this viewer — computed once by `visibleViews`, shared with the GL header. */
   views?: ViewName[];
+  /** Non-null when the arrival gate is a login: real anchors, one per provider. */
+  loginLinks?: { id: string; label: string; href: string }[] | null;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
   onCopy: () => void;
@@ -70,7 +73,17 @@ export function DomBridge({
         <span data-release-version={releaseVersion}>
           {t('welcome.version', { version: releaseVersion })}
         </span>
-        <button onClick={() => (onEnter ?? enter)()}>{t('welcome.continue')}</button>
+        {loginLinks ? (
+          // The arrival gate is the login: real anchors so keyboard and
+          // assistive tech reach the provider flow without the GL canvas.
+          loginLinks.map((link) => (
+            <a key={link.id} href={link.href}>
+              {t('welcome.signInWith', { label: link.label })}
+            </a>
+          ))
+        ) : (
+          <button onClick={() => (onEnter ?? enter)()}>{t('welcome.continue')}</button>
+        )}
       </div>
     );
   }

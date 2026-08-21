@@ -501,6 +501,35 @@ const AUTH_SECURITY_HEADERS = {
   'referrer-policy': 'no-referrer',
 } as const;
 
+/**
+ * Headers for the APP SHELL when the gate is on. Unlike the auth pages the
+ * shell must run its own scripts, so the CSP pins only what the login-capable
+ * page needs pinned: it cannot be framed. Script/style policy stays with the
+ * shell itself.
+ */
+const SHELL_SECURITY_HEADERS = {
+  'content-security-policy': "frame-ancestors 'none'",
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+} as const;
+
+/**
+ * Bounded notice vocabulary the callback may bounce back to the shell.
+ * The GL client maps each code to its catalogs; an unknown code renders the
+ * generic failure line, so the query parameter is display steering, never
+ * markup or free text.
+ */
+type AuthNoticeCode =
+  | 'invalidInvitation'
+  | 'invalidState'
+  | 'replayedState'
+  | 'expiredState'
+  | 'providerRefused'
+  | 'invalidAuthorizationCode'
+  | 'invitationRequired'
+  | 'providerFailure'
+  | 'githubConnectExpired';
+
 function sendAuthHtml(
   res: import('node:http').ServerResponse,
   code: number,
@@ -1116,7 +1145,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       const rawInvitation = url.searchParams.get('invite');
       const invitationToken = invitationTokenFrom(rawInvitation);
       if (rawInvitation && !invitationToken) {
-        sendAuthHtml(res, 400, loginPage(AUTH_COPY.invalidInvitation));
+        writeAuthRedirect(res, '/?authNotice=invalidInvitation', []);
         return;
       }
       if (!providerId) {
@@ -1182,10 +1211,14 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       const errorParam = url.searchParams.get('error');
       const txCookies = parseCookieHeader(req.headers.cookie).filter((cookie) => cookie.name === OAUTH_TX_COOKIE);
       const txCookie = txCookies.length === 1 ? txCookies[0]!.value : null;
-      const fail = (message: string, status = 401): void => {
-        sendAuthHtml(res, status, loginPage(message), {
-          'set-cookie': clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
-        });
+      // Login failures land back on the APP SHELL's arrival gate with a
+      // bounded notice code — the GL welcome renders the message from its
+      // catalogs. The old-school server HTML page is reserved for the no-JS
+      // fallback at /auth/login; a redirected browser flow never sees it.
+      const fail = (notice: AuthNoticeCode): void => {
+        writeAuthRedirect(res, `/?authNotice=${notice}`, [
+          clearCookie(OAUTH_TX_COOKIE, AUTH_RUNTIME.secureCookies, '/auth'),
+        ]);
       };
 
       const viewer = AUTH.resolve(req);
@@ -1197,21 +1230,21 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         PROJECTS_RUNTIME.githubStore.hasPendingConnectState(state)
       ) {
         if (!txCookie || txCookie !== state) {
-          fail(GITHUB_COPY.expiredState);
+          fail('githubConnectExpired');
           return;
         }
         const tx = authStore.consumeOauthState(state);
         const provider = tx ? authProvider(tx.provider) : null;
         if (!tx || !provider || provider.id !== 'github') {
-          fail(GITHUB_COPY.expiredState);
+          fail('githubConnectExpired');
           return;
         }
         if (errorParam) {
-          fail(AUTH_COPY.providerRefused);
+          fail('providerRefused');
           return;
         }
         if (!isAuthorizationCode(code)) {
-          fail(AUTH_COPY.invalidAuthorizationCode);
+          fail('invalidAuthorizationCode');
           return;
         }
         applyGitHubResult(
@@ -1235,25 +1268,25 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       }
 
       if (!isOauthState(state)) {
-        fail(AUTH_COPY.invalidState);
+        fail('invalidState');
         return;
       }
       if (!txCookie || txCookie !== state) {
-        fail(AUTH_COPY.replayedState);
+        fail('replayedState');
         return;
       }
       const tx = authStore.consumeOauthState(state);
       const provider = tx ? authProvider(tx.provider) : null;
       if (!tx || !provider) {
-        fail(AUTH_COPY.expiredState);
+        fail('expiredState');
         return;
       }
       if (errorParam) {
-        fail(AUTH_COPY.providerRefused);
+        fail('providerRefused');
         return;
       }
       if (!isAuthorizationCode(code)) {
-        fail(AUTH_COPY.invalidAuthorizationCode);
+        fail('invalidAuthorizationCode');
         return;
       }
 
@@ -1276,7 +1309,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           tx.invitationHash
         );
         if (!outcome) {
-          fail(AUTH_COPY.invitationRequired, 403);
+          fail('invitationRequired');
           return;
         }
         if (
@@ -1303,7 +1336,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         ]);
       } catch (error) {
         console.error('[viz auth] provider login failed', error);
-        fail(AUTH_COPY.providerFailure, 502);
+        fail('providerFailure');
       }
       return;
     }
@@ -1333,7 +1366,17 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       if (!methodAllowed(req, res, 'GET')) return;
       const viewer = AUTH.resolve(req);
       if (!viewer) {
-        sendJson(res, 401, { authenticated: false });
+        // 200, not 401: the app shell IS the login surface now, and this
+        // capability probe tells it which providers to offer on the arrival
+        // gate. A 401 here would bounce the client into a redirect loop.
+        sendJson(res, 200, {
+          enabled: true,
+          authenticated: false,
+          providers: AUTH_RUNTIME.providers.map((provider) => ({
+            id: provider.id,
+            label: provider.label,
+          })),
+        });
         return;
       }
       const organisations = authStore.listOrganisationsForPrincipal(viewer.principalId);
@@ -1588,22 +1631,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/' || pathname === '/index.html') {
-    // With the gate on, an unauthenticated browser gets the login page, not
-    // the app shell: no point shipping the whole GL client (and its API
-    // hints) to someone who cannot call /api/* anyway.
-    if (AUTH && !AUTH.resolve(req)) {
-      const rawInvitation = url.searchParams.get('invite');
-      const invitationToken = invitationTokenFrom(rawInvitation);
-      sendAuthHtml(
-        res,
-        200,
-        loginPage(
-          rawInvitation && !invitationToken ? AUTH_COPY.invalidInvitation : undefined,
-          invitationToken ?? undefined
-        )
-      );
-      return;
-    }
+    // The app shell goes to EVERY browser, authenticated or not: the arrival
+    // gate (crystal, tagline) IS the login surface — a new visitor's first
+    // touch is the product, not a bare server form. The shell contains no
+    // identity or run data, /api/* stays 401 without a session, and whoami
+    // only names the configured providers; the no-JS fallback keeps the
+    // plain selector at /auth/login.
     if (DEV_UI_URL) {
       const target = new URL(`${pathname}${url.search}`, DEV_UI_URL);
       res.writeHead(307, {
@@ -1619,9 +1652,19 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
     const html = readFileSync(UI_HTML_PATH);
-    // The app shell contains no identity or run data. `no-cache` permits the
-    // service worker's offline copy while requiring normal HTTP caches to
-    // revalidate; the unauthenticated login page above remains `no-store`.
+    // `no-cache` permits the service worker's offline copy while requiring
+    // normal HTTP caches to revalidate. With the gate on, the login-capable
+    // shell also pins that it cannot be framed.
+    if (AUTH) {
+      res.writeHead(200, {
+        ...SHELL_SECURITY_HEADERS,
+        'content-type': 'text/html; charset=utf-8',
+        'content-length': Buffer.byteLength(html),
+        'cache-control': 'no-cache',
+      });
+      res.end(html);
+      return;
+    }
     send(res, 200, html, 'text/html; charset=utf-8', 'no-cache');
     return;
   }

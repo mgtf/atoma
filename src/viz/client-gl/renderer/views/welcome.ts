@@ -169,20 +169,69 @@ export function drawWelcome(
     }
   );
   tagline.anchor.set(0.5, 0);
-  ctx.button(
-    ctx.root,
-    'welcome.continue',
-    'button',
-    snapshot.t('welcome.continue'),
-    layout.buttonX,
-    layout.buttonY,
-    layout.buttonWidth,
-    layout.buttonHeight,
-    false,
-    snapshot.onActivate,
-    GPU_COLORS.primary,
-    true
-  );
+  const login = snapshot.data.login;
+  if (login) {
+    // TENANCY LANDED: the continue control IS the login now. One button per
+    // configured provider, and a bounced login failure renders under them
+    // from the catalogs — never raw query-string text.
+    login.providers.forEach((provider, index) => {
+      ctx.button(
+        ctx.root,
+        `login.provider.${provider.id}`,
+        'button',
+        snapshot.t('welcome.signInWith', { label: provider.label }),
+        layout.buttonX,
+        layout.buttonY + index * (layout.buttonHeight + 12),
+        layout.buttonWidth,
+        layout.buttonHeight,
+        index === 0,
+        snapshot.onActivate,
+        GPU_COLORS.primary,
+        true
+      );
+    });
+    const noticeY =
+      layout.buttonY + Math.max(1, login.providers.length) * (layout.buttonHeight + 12) + 6;
+    if (login.providers.length === 0) {
+      const unconfigured = ctx.text(
+        ctx.root,
+        snapshot.t('login.noProviders'),
+        layout.copyX,
+        noticeY,
+        { size: 12, color: GPU_COLORS.warning, width: layout.copyWidth }
+      );
+      unconfigured.anchor.set(0.5, 0);
+    }
+    if (login.notice) {
+      const noticeKey = `login.notice.${login.notice}`;
+      const message = snapshot.t(noticeKey);
+      const notice = ctx.text(
+        ctx.root,
+        // An unknown bounce code falls back to the generic failure line
+        // rather than leaking the raw key on the arrival gate.
+        message === noticeKey ? snapshot.t('login.notice.generic') : message,
+        layout.copyX,
+        noticeY,
+        { size: 12, color: GPU_COLORS.error, width: layout.copyWidth }
+      );
+      notice.anchor.set(0.5, 0);
+    }
+  } else {
+    ctx.button(
+      ctx.root,
+      'welcome.continue',
+      'button',
+      snapshot.t('welcome.continue'),
+      layout.buttonX,
+      layout.buttonY,
+      layout.buttonWidth,
+      layout.buttonHeight,
+      false,
+      snapshot.onActivate,
+      GPU_COLORS.primary,
+      true
+    );
+  }
   const version = ctx.text(
     ctx.root,
     snapshot.t('welcome.version', { version: snapshot.releaseVersion }),
