@@ -229,8 +229,13 @@ export class ProjectService {
     if (!roleAtLeast(viewer.role, 'org:member')) {
       throw new ProjectHttpError(403, 'org:member role or above is required to cancel runs');
     }
-    const runs = this.store.listProjectRuns(viewer.orgId, projectId);
-    if (!runs) throw new ProjectHttpError(404, 'project not found');
+    // Bind the run to the project NAMED IN THE PATH, like the publish-retry
+    // route: a run under another project of the same org must be a 404, or
+    // the REST hierarchy lies.
+    const run = this.store.getProjectRun(viewer.orgId, projectRunId);
+    if (!run || run.projectId !== projectId) {
+      throw new ProjectHttpError(404, 'project run not found');
+    }
     const cancelled = this.coordinator.cancel(viewer.orgId, projectRunId);
     if (!cancelled) throw new ProjectHttpError(404, 'project run not found');
     const publication = this.store.getPublicationForRun(viewer.orgId, cancelled.projectRunId);

@@ -7,6 +7,7 @@ import {
   GitHubStore,
   GitHubWebhookDeliveryCollisionError,
   newGitHubConnectState,
+  WEBHOOK_DELIVERY_RETENTION_MS,
 } from '../src/github/store.js';
 
 const AUTH_FIXTURE_DDL = `
@@ -281,13 +282,42 @@ describe('GitHub installation ownership and webhook deliveries', () => {
       event: 'installation',
       payloadSha256: digest,
       mutation: { kind: 'transition', installationId: '501', status: 'active' },
+      receivedAt: 1_700_000_003_000,
     })).toEqual({ duplicate: true, applied: false });
     expect(store.getInstallation('501')?.status).toBe('suspended');
     expect(() => store.recordWebhookDelivery({
       deliveryId: 'delivery-1',
       event: 'installation',
       payloadSha256: 'b'.repeat(64),
+      receivedAt: 1_700_000_004_000,
     })).toThrow(GitHubWebhookDeliveryCollisionError);
+  });
+
+  it('prunes deliveries past the replay-dedup window instead of growing forever', () => {
+    link();
+    const digest = 'c'.repeat(64);
+    const first = 1_700_000_000_000;
+    expect(store.recordWebhookDelivery({
+      deliveryId: 'old-delivery',
+      event: 'installation',
+      payloadSha256: digest,
+      receivedAt: first,
+    })).toEqual({ duplicate: false, applied: false });
+    // Inside the window the row still deduplicates…
+    expect(store.recordWebhookDelivery({
+      deliveryId: 'old-delivery',
+      event: 'installation',
+      payloadSha256: digest,
+      receivedAt: first + WEBHOOK_DELIVERY_RETENTION_MS - 1,
+    })).toEqual({ duplicate: true, applied: false });
+    // …and past it the insert prunes the stale row, so the same id records
+    // as a fresh delivery: dedup is bounded by traffic, not deployment age.
+    expect(store.recordWebhookDelivery({
+      deliveryId: 'old-delivery',
+      event: 'installation',
+      payloadSha256: digest,
+      receivedAt: first + WEBHOOK_DELIVERY_RETENTION_MS + 1,
+    })).toEqual({ duplicate: false, applied: false });
   });
 
   it('treats deleted as terminal and records unknown installations without linking them', () => {

@@ -572,7 +572,15 @@ export class AuthStore {
             name: invitation.org_name,
             created_at: '',
           };
-          if (!consumeInvitation()) return null;
+          if (!consumeInvitation()) {
+            // A throw, NEVER `return null`: better-sqlite3 COMMITS a
+            // transaction that returns — this branch would otherwise commit
+            // the membership above while reporting a failed login.
+            // Unreachable today (the invitation is re-read unconsumed inside
+            // this same immediate transaction), which is exactly why it must
+            // fail loudly and atomically if that invariant ever breaks.
+            throw new Error('invitation disappeared mid-login transaction');
+          }
         } else {
           membership = this.db
             .prepare(
@@ -654,7 +662,11 @@ export class AuthStore {
       this.db
         .prepare('INSERT INTO auth_memberships (org_id, principal_id, role, created_at) VALUES (?, ?, ?, ?)')
         .run(orgId, principalId, role, now);
-      if (!consumeInvitation()) return null;
+      if (!consumeInvitation()) {
+        // Same rule as above: a return would COMMIT the freshly inserted
+        // principal, identity and membership while reporting a failed login.
+        throw new Error('invitation disappeared mid-login transaction');
+      }
 
       return {
         viewer: {

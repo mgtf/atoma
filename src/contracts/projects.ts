@@ -46,6 +46,10 @@ export const idempotencyKeySchema = z
 export const githubInstallationIdSchema = z
   .string()
   .regex(/^[1-9][0-9]{0,19}$/, 'expected a positive decimal GitHub installation id');
+/** Same wire shape as an installation id, but named for what it holds. */
+export const githubRepositoryIdSchema = z
+  .string()
+  .regex(/^[1-9][0-9]{0,19}$/, 'expected a positive decimal GitHub repository id');
 export const githubOwnerSchema = z
   .string()
   .min(1)
@@ -116,7 +120,7 @@ export const projectSchema = z
     status: projectStatusSchema,
     repositoryTarget: repositoryTargetSchema,
     repositoryStatus: repositoryStatusSchema,
-    repositoryId: githubInstallationIdSchema.nullable(),
+    repositoryId: githubRepositoryIdSchema.nullable(),
     repositoryFullName: z.string().min(3).max(201).nullable(),
     repositoryUrl: httpsUrlSchema.nullable(),
     defaultBranch: z.string().min(1).max(255).nullable(),
@@ -225,7 +229,7 @@ export const projectRunPublicSchema = projectRunSchema.omit({ hostPaths: true })
 
 export const repositoryReceiptSchema = z
   .object({
-    repositoryId: githubInstallationIdSchema,
+    repositoryId: githubRepositoryIdSchema,
     fullName: z.string().min(3).max(201),
     url: httpsUrlSchema,
     defaultBranch: z.string().min(1).max(255),
@@ -246,7 +250,7 @@ export const publicationSchema = z
     idempotencyKey: idempotencyKeySchema,
     manifestHash: sha256Schema,
     status: publicationStatusSchema,
-    repositoryId: githubInstallationIdSchema.nullable(),
+    repositoryId: githubRepositoryIdSchema.nullable(),
     repositoryFullName: z.string().min(3).max(201).nullable(),
     repositoryUrl: httpsUrlSchema.nullable(),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/).nullable(),

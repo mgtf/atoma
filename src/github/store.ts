@@ -10,6 +10,8 @@ import {
 
 export const MAX_ACTIVE_GITHUB_CONNECT_STATES = 500;
 export const GITHUB_CONNECT_STATE_TTL_MAX_MS = 30 * 60 * 1_000;
+/** Replay-dedup window; GitHub redelivers within days, never months. */
+export const WEBHOOK_DELIVERY_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 
 export const GITHUB_TABLES_DDL = `
 CREATE TABLE IF NOT EXISTS github_connect_states (
@@ -584,6 +586,13 @@ export class GitHubStore {
     }
     const receivedAt = timestamp(input.receivedAt);
     const record = this.db.transaction((): GitHubWebhookDeliveryResult => {
+      // RETENTION: the delivery table exists for replay dedup, and GitHub
+      // redelivers within days, not months. Pruning on every insert keeps the
+      // table bounded by traffic instead of by deployment age — it used to
+      // grow forever.
+      this.db.prepare(
+        'DELETE FROM github_webhook_deliveries WHERE received_at < ?'
+      ).run(new Date(Date.parse(receivedAt) - WEBHOOK_DELIVERY_RETENTION_MS).toISOString());
       const prior = this.db.prepare(
         'SELECT delivery_id, event, payload_sha256 FROM github_webhook_deliveries WHERE delivery_id = ?'
       ).get(input.deliveryId) as DeliveryRow | undefined;

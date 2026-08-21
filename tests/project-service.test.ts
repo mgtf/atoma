@@ -330,5 +330,11 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     expect(retryPublication).toHaveBeenCalledWith(alice.orgId, reserved.run.projectRunId);
     expect(result).not.toHaveProperty('hostPaths');
     expect(JSON.stringify(result)).not.toContain('/secret/');
+
+    // Cancel binds the same way: the run under ANOTHER project of the same
+    // org is a 404 through that project's path.
+    await expect(
+      svc.cancelProjectRun(alice, other.projectId, reserved.run.projectRunId)
+    ).rejects.toMatchObject({ status: 404 });
   });
 });
