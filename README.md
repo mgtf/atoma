@@ -282,8 +282,9 @@ organisations and invitations from the Admin tab.
   page in a real browser, and cross-checks the machine-readable record of the commands the worker
   ran. It never re-runs those commands itself — that was considered and rejected, and the reason
   is written down. This costs no tokens and it runs *even on the most-trusted path*.
-- **The engineering record is unusually explicit.** `AGENTS.md` keeps active
-  contracts and routes to an archived record documenting not only what the
+- **The engineering record is unusually explicit.** `AGENTS.md` keeps the
+  cross-cutting contracts and routes to a per-subsystem `AGENTS.md` beside the
+  code it governs, and to an archived record documenting not only what the
   system does but which observed failure motivated each mechanism, and a "considered and
   rejected" section records optimisations that were designed, measured, and refused. Reversals
   are recorded rather than quietly deleted — including several in the benchmark above.

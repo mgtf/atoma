@@ -2,29 +2,63 @@
 
 Project guidance for coding agents. Read this file before making changes.
 
-This is the single normative source for repository rules. `CLAUDE.md` imports
-this file so Codex and Claude Code receive the same guidance. Keep active
-contracts here; put incident narratives, measurements, and dated rationale in
-`docs/incidents/` and link them rather than copying them into the prompt.
+This is the ROOT contract. `CLAUDE.md` imports it so Codex and Claude Code
+receive the same guidance. It keeps what is cross-cutting: taxonomy, commands,
+the release and safe-working contracts, cost and architecture principles,
+testing, and the two maps below. A rule that belongs to ONE subsystem lives in
+that subsystem's own `AGENTS.md`, beside the code it governs, and is NOT
+repeated here — one rule, one home.
 
-The former 5,452-line engineering record is preserved verbatim (apart from its
-archive banner) in
+**Read the subsystem file before editing that subtree.** Claude Code loads the
+sibling `CLAUDE.md` on its own when it opens a file there; Codex merges
+`AGENTS.md` from the repository root down to its working directory, so
+per-file discovery is guaranteed by neither. The map is an instruction, not a
+convenience.
+
+Incident narratives, measurements and dated rationale live under
+`docs/incidents/` and are linked, never copied into the prompt. The former
+5,452-line engineering record is preserved verbatim (apart from its archive
+banner) in
 [`docs/incidents/engineering-record-2026-08-14.md`](docs/incidents/engineering-record-2026-08-14.md).
 Use it when a rule's rationale matters, not as default session context.
 
-## Routing map
+## Subsystem map
+
+| Editing | Read first | What it owns |
+|---|---|---|
+| `src/atoms/` | [src/atoms/AGENTS.md](src/atoms/AGENTS.md) | supervision loop, planning, prefilter, trust, validation, ground truth, result gates |
+| `src/core/` | [src/core/AGENTS.md](src/core/AGENTS.md) | LLM client and transports, models and tier pins, cost accounting, ledger, metrics |
+| `src/run/` | [src/run/AGENTS.md](src/run/AGENTS.md) | `startTask`/`runTask`, task profiles, provider construction, run accounting |
+| `src/registry/` | [src/registry/AGENTS.md](src/registry/AGENTS.md) | atom-type identity, names and ordinals, bootstrap, trust counters |
+| `src/skills/` | [src/skills/AGENTS.md](src/skills/AGENTS.md) | learn, match, credit, compile, trusted dispatch, operator lifecycle |
+| `src/tools/` | [src/tools/AGENTS.md](src/tools/AGENTS.md) | elements, sandbox, worker, container isolation, egress, browser probes |
+| `src/contracts/` | [src/contracts/AGENTS.md](src/contracts/AGENTS.md) | one schema per shape, probe manifest identity and merge semantics |
+| `src/mcp/` | [src/mcp/AGENTS.md](src/mcp/AGENTS.md) | stdio control plane, run lease, bounded readers, the 13-tool surface |
+| `src/viz/` | [src/viz/AGENTS.md](src/viz/AGENTS.md) | trace projection, GPU client, frozen MUI fallback, gated surfaces, push |
+| `src/auth/` | [src/auth/AGENTS.md](src/auth/AGENTS.md) | OAuth gate, organisations, invitations, the platform-admin flag |
+| `src/projects/` | [src/projects/AGENTS.md](src/projects/AGENTS.md) | org-scoped projects, their run corpus, artifact manifests, publication |
+| `src/github/` | [src/github/AGENTS.md](src/github/AGENTS.md) | GitHub App install, webhooks, repository creation |
+| `src/platform/` | [src/platform/AGENTS.md](src/platform/AGENTS.md) | the control-plane audit journal and the one source of notifications |
+| `src/cli/` | [src/cli/AGENTS.md](src/cli/AGENTS.md) | operator commands, doctor, burn-in and friction reporting |
+
+Every subsystem file names its own neighbours, so one hop is usually enough.
+`npm run docs:check` enforces the shape: each subsystem `AGENTS.md` is listed
+above, each has a sibling `CLAUDE.md` holding exactly the import, links resolve,
+and no file exceeds its budget.
+
+## Evidence map
 
 | Need | Read here | Deeper evidence |
 |---|---|---|
-| Run, test, release, registry, skills | [Commands and workflow](#commands-and-workflow) | [Commands / Testing record](docs/incidents/engineering-record-2026-08-14.md#commands) |
+| Run, test, release, backup | [Commands and workflow](#commands-and-workflow) | [Commands / Testing record](docs/incidents/engineering-record-2026-08-14.md#commands) |
 | Tier names and persisted identities | [Domain taxonomy](#domain-taxonomy) | [Taxonomy record](docs/incidents/engineering-record-2026-08-14.md#domain-taxonomy) |
-| Change an LLM call or validator | [Cost discipline](#cost-discipline); [LLM interaction](#llm-interaction-conventions) | [Cost record](docs/incidents/engineering-record-2026-08-14.md#cost-discipline-load-bearing--read-before-changing-any-llm-call-site) |
-| Change supervision, routing, trust | [Architecture invariants](#architecture-invariants) | [Architecture record](docs/incidents/engineering-record-2026-08-14.md#architecture-invariants-dont-violate-these) |
-| Change learn/compile/dispatch | [Skills lifecycle](#skills-lifecycle) | [Skills record](docs/incidents/engineering-record-2026-08-14.md#skills-persistent-task-patterns) |
-| Change tools, worker, sandbox | [Tools and runtime isolation](#tools-and-runtime-isolation) | [Tools record](docs/incidents/engineering-record-2026-08-14.md#tools-l1-side-effects) |
-| Change MCP lifecycle | [MCP stdio server](#mcp-stdio-server) | [MCP record](docs/incidents/engineering-record-2026-08-14.md#atoma-as-an-mcp-server-stdio--srcmcp) |
-| Change metrics, traces, burn-in, viz | [Observability and viz](#observability-and-viz) | [Observability record](docs/incidents/engineering-record-2026-08-14.md#observability) |
-| Understand an odd choice | [Intentional choices](#intentional-choices-and-rejected-shortcuts) | [Rejected-design record](docs/incidents/engineering-record-2026-08-14.md#considered-and-rejected-do-not-re-propose-naively) |
+| Change an LLM call or validator | [src/atoms](src/atoms/AGENTS.md), [src/core](src/core/AGENTS.md) | [Cost record](docs/incidents/engineering-record-2026-08-14.md#cost-discipline-load-bearing--read-before-changing-any-llm-call-site) |
+| Change supervision, routing, trust | [src/atoms](src/atoms/AGENTS.md), [src/registry](src/registry/AGENTS.md) | [Architecture record](docs/incidents/engineering-record-2026-08-14.md#architecture-invariants-dont-violate-these) |
+| Change learn/compile/dispatch | [src/skills](src/skills/AGENTS.md) | [Skills record](docs/incidents/engineering-record-2026-08-14.md#skills-persistent-task-patterns) |
+| Change tools, worker, sandbox | [src/tools](src/tools/AGENTS.md) | [Tools record](docs/incidents/engineering-record-2026-08-14.md#tools-l1-side-effects) |
+| Change MCP lifecycle | [src/mcp](src/mcp/AGENTS.md) | [MCP record](docs/incidents/engineering-record-2026-08-14.md#atoma-as-an-mcp-server-stdio--srcmcp) |
+| Change metrics, traces, viz | [src/viz](src/viz/AGENTS.md), [src/core](src/core/AGENTS.md) | [Observability record](docs/incidents/engineering-record-2026-08-14.md#observability) |
+| Understand an odd choice | the subsystem file's own intentional-choices section | [Rejected-design record](docs/incidents/engineering-record-2026-08-14.md#considered-and-rejected-do-not-re-propose-naively) |
 | Interpret benchmark claims | [Benchmark discipline](#benchmark-and-documentation-discipline) | [Benchmark record](docs/incidents/engineering-record-2026-08-14.md#the-controlled-benchmark-benchmark--four-rounds-and-what-they-settled) |
 
 ## What this is
@@ -88,25 +122,7 @@ npm run mcp
 npm run mcp:dev
 ```
 
-Visualizer. The GPU client is the product UI (`npm run viz`); MUI is the frozen
-fallback. `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
-film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
-`npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
-so a local GitHub-gated visualizer does not need a shell export. Compiled
-`viz:serve` does not load `.env`: production injects the process environment.
-
-```bash
-npm run viz
-npm run viz:mui
-npm run viz:serve
-npm run viz:demo
-npm run viz:smoke
-npm run viz:smoke:gc
-npm run viz:mark-turn
-npm run viz:mark-turn -- --degree 47
-npm run viz:mark-turn -- --pointer
-npm run viz:mark-turn:analyze
-```
+Visualizer commands and their preconditions: [src/viz/AGENTS.md](src/viz/AGENTS.md).
 
 Registry, ledger, skills, burn-in, and diagnostics:
 
@@ -152,12 +168,7 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
   closure. Container tests must prove allowed egress and denied control-plane
   access, not merely that an image exists.
 
-`atoma doctor` is quota-free. It proves configuration and local prerequisites,
-not that a provider will accept the next billable request. Local Docker failures
-are warnings; container/egress modes make them hard failures. Egress implies
-container. A pre-T4 store (no `atom_id` column) is a hard failure — the schema
-is the schema and `CREATE TABLE IF NOT EXISTS` will not migrate it. Do not add
-remote completion calls to doctor.
+`atoma doctor` is quota-free; its rules live in [src/cli/AGENTS.md](src/cli/AGENTS.md).
 
 ### Safe working rules
 
@@ -181,577 +192,67 @@ remote completion calls to doctor.
 
 ## Cost discipline
 
-Read this section before changing any LLM call site.
+Read the subsystem file before changing any LLM call site. The cost rules are
+load-bearing and they are stated once, where the call sites are.
 
 - Use the cheapest rank/model that can answer. Planning is reasoning;
   validation is usually a bounded yes/no decision.
-- L2/L3 planning runs `prefilterStrategy` first. Only a high-confidence reuse
-  can shortcut L2; low/omitted confidence becomes `escalate`. L3 always performs
-  its strategy call because top-tier decomposition is the product.
-- L2 may synthesize a one-subtask plan only for high-confidence,
-  non-decomposable reuse. Coupled outputs are sequential, not falsely parallel.
-- Enrich the L3 prefilter catalog with reachable L1 capabilities; a narrow L2
-  may still be the correct router through its children.
-- Prefilter caching is exact only. The key includes every decision input and
-  error outcomes are not cached. Its measured ceiling is 1.7%; do not tune cap
-  or expiry, and never introduce fuzzy/embedding matching without first adding
-  validation above the prefilter fast path.
-- `viaPrefilter` is internal and omitted from `planSchema`; an LLM must not be
-  able to spoof validator bypass.
-- Trust fast paths require the configured success threshold (default 3) and zero
-  failures. Read it through `trustThreshold()`; invalid or non-positive values
-  fall back to the default. Result approval still runs the zero-token ground-truth
-  probe first. Contradictions and malformed manifests force review; heuristics
-  never reject alone.
-- Patching or rolling back a type resets its trust counters.
-- `VALIDATION_SYSTEM_PROMPT`, `PREFILTER_SYSTEM_PROMPT`, and
-  `SKILL_PREFILTER_SYSTEM_PROMPT` are shared constants. Do not inline per-call
-  system prompts and destroy caching.
-- Keep remediation feedback bounded (`REMEDIATION_FEEDBACK_MAX_CHARS`) and
-  actionable; diagnosis leads so head truncation remains useful.
-- Validation parameters stay deterministic and bounded. Raise token caps only
-  after observing real truncation.
-- Normal L2/L3 plan and validation calls never receive tools/executors. Their
-  last-resort tool-bearing self-execution must use `modelForTier(1)` while
-  retaining supervisor provenance.
-- Strategy calls use `STRATEGY_MAX_TOKENS` and medium effort. The cap includes
-  adaptive thinking. Defaults in `planSchema` protect against truncation;
-  omitted L3 aggregation defaults to `sequential`.
-- Aggregation is behavioral: `concat` and `llm-synthesize` dispatch orthogonal
-  subtasks in parallel; `sequential` dispatches shared-artifact phases in order
-  and threads `previousStepSummary` plus declared `outputs` as
-  `inputs.previousStepOutputs`. Do not merge prior writes into the next
-  phase's `outputs` — skill/promotion gates read the current phase only.
-  Do not parallelize coupled filesystem work.
-- A plan carries ONE aggregation mode, so fan-out + join has no direct spelling
-  at a single tier: L3 emits ONE phase per orthogonal GROUP and the L2 that
-  receives it fans the group out. One L3 phase per orthogonal artefact
-  serialises work that shares no file — see
-  [parallel fan-in 2026-08-16](docs/incidents/parallel-fanin-2026-08-16.md).
-- Prompt-cache thresholds are load-bearing. Keep the validation prompt above
-  the cheapest model's minimum and confirm `cache_read` on multi-call runs.
-- Anthropic tool loops keep one rolling cache breakpoint: clear the prior
-  marker before marking the latest tool result. Never exceed four breakpoints.
-- `estimateCostUsd` is the only cost formula. Anthropic input, cache-read, and
-  cache-creation counters are disjoint; never subtract one from another.
-- Accounting follows the SERVED model, not the tier pin: transports that
-  rewrite the model (codex slug mapping, ollama collapse, claude-cli aliases)
-  report `servedModel` on the response, and metrics/recording price
-  `servedModel ?? req.model`. The pin stays the routing identity in events.
-- Errors keep their paid tokens on EVERY transport: a throw from a tool loop
-  carries `partialUsage`, and both observability layers read it — the trace
-  and the CSV must never disagree about one call's cost.
-- Provider construction has one switch: `makeBaseClient` in
-  `src/run/providers.ts`, consumed by runner and curriculum. Never hand-roll
-  the ollama/claude-cli/anthropic ternary again. A `providerEnv` snapshot
-  must also drive the three `ATOMA_MODEL_L*` pins (`applyTierPins`); do not
-  re-read `process.env` for pins the router already resolved from the snapshot.
+- [src/atoms](src/atoms/AGENTS.md) — planning, the prefilter, trust fast paths,
+  shared system prompts, strategy caps, aggregation shape.
+- [src/core](src/core/AGENTS.md) — the one cost formula, served-model
+  accounting, partial usage on errors, cache breakpoints.
+- [src/run](src/run/AGENTS.md) — provider construction, `ATOMA_MODEL_L*` pins.
 
 ## Contracts and storage
 
 - `src/contracts/` owns shared runtime shapes. Define a schema once, infer
   types from it, and import it everywhere; do not duplicate interfaces.
-- Contract examples are parsed at module load. A schema/example mismatch must
-  fail tests immediately.
-- CLI unknown commands print help and exit non-zero; `--help` exits zero.
 - `src/core/stores.ts` defines the primary product SQLite store for atom types,
   atom trust, ledger, history, and prefilter cache. Skill `_meta.json` sidecars
   and the operational MCP lease DB are explicit exceptions; do not add another
   product store or silently migrate disposable cache data.
-- Ledger writes are fail-open for run execution but attributable and ordered.
-  A ledger failure cannot take down the product; impossible counter directions
-  must be surfaced by `ledger check`.
 - The registry is one tier-keyed table. Migrations, backups, skill namespaces,
   provenance, and trust resets are part of identity changes.
-- Visualizer authentication is an opt-in deployment gate, not multi-tenancy
-  of the run corpus. `ATOMA_VIZ_AUTH=1` requires the operator-owned
-  `ATOMA_VIZ_PUBLIC_ORIGIN`, at least one complete provider configuration
-  (GitHub/Google require client ID + secret; an approved ChatGPT client may
-  use PKCE without a secret). The first login without an invitation creates
-  an organisation owned by that principal; a one-use invitation joins an
-  existing organisation.
-  OAuth identities join only on `(provider, subject)`, never email; provider
-  login conveys no model-inference entitlement. Auth rows live in the primary
-  product store selected by viz, and browser redirects always use
-  `${ATOMA_VIZ_PUBLIC_ORIGIN}/auth/callback`, never request Host headers.
-  Operator source launchers (`npm run viz`, `doctor:dev`, `auth:dev`) fill
-  unset keys from checkout `.env`. Do not load `.env` inside `src/viz/server.ts`:
-  process-level tests spawn it from the repository cwd with a cleaned env.
-  Projects, GitHub App installations and publications are organisation-scoped;
-  a run belongs to exactly one project and a project to exactly one
-  organisation. Gated `/api/runs` lists that org's project traces from
-  `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
-  with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
-  operator `./runs` corpus used by CLI, MCP and ungated viz.
-  PLATFORM ADMIN: one instance-wide operator flag on a principal
-  (`auth_platform_admins`), granted and revoked ONLY by the operator CLI
-  (`npm run auth -- grant-admin --principal <id-or-email>`), never derived
-  from OAuth claims — provider emails are display attributes and GitHub's is
-  not even a verified-email assertion. Behind the gate the instance-global
-  operator surfaces (`/api/registries`, `/api/registry/:id`, `/api/skills/*`,
-  `/api/burnin`) answer ONLY the platform admin (403 otherwise) — org runs
-  mutate the shared registry, so an invitation must not read operator-level
-  state (review 2026-08-20 §2.2). The admin also reads every organisation's
-  projects and run traces, and manages organisations through
-  `/api/admin/organisations` and `/api/admin/invitations` (same-origin
-  POST). Writes (create project, start/cancel runs) stay bound to the
-  viewer's ACTIVE organisation for admins too. `visibleViews` is the one nav
-  definition: gated members get org surfaces only; the ungated developer
-  path is unchanged. True per-org registry scoping would need
-  org-attributed registry rows — a schema project, not a route guard.
-  The optional GitHub App (`ATOMA_GITHUB_APP_*`) is a separate install from
-  GitHub login: register setup at `/auth/github/setup` and webhooks at
-  `/webhooks/github`. Repositories are created only after a delivered,
-  validated artifact manifest, and a retry never creates a second repo.
-- Web push notifications exist only behind the viz auth gate. The VAPID
-  keypair is generated once and persisted in the product store
-  (`push_vapid_keys`); rotating it orphans every browser subscription.
-  `ATOMA_VIZ_VAPID_SUBJECT` optionally overrides the JWT subject (default:
-  the public origin). Subscriptions (`push_subscriptions`) are
-  principal-scoped self-service rows behind same-origin `/api/push/*`
-  POSTs; a 404/410 from the push service prunes the row.
-  `src/viz/push/webpush.ts` is the ONE RFC 8291/8292 implementation
-  (node:crypto only — no web-push dependency), pinned by the RFC 8291
-  Appendix A known-answer test. Payloads are bounded and secret-free
-  (status title, bounded excerpt, same-origin path — never trace prose).
-  The browser permission ask lives in the FIRST LIVE RUN
-  (`shouldOfferPushPrompt`), never in the login or signup flow — login
-  stays zero-friction; the run is where the value shows. The subscriber's
-  language rides the subscription (`locale` column, captured at subscribe
-  time) because a push is generated from an event with no request left to
-  read a header off; rendering uses the server-side frozen `PUSH_COPY`
-  map in `src/viz/push/routes.ts`, never the client i18n catalog (a
-  `.tsx` carrying a React provider must not reach the server).
-- PLATFORM EVENTS are the control-plane audit journal (`platform_events`,
-  gated deployments only) and the ONE source of notifications. Emitters
-  journal a fact; `PUSH_ROUTES` decides who hears about it. Nothing may
-  call the notifier directly — that is what keeps every push attributable.
-  - `src/contracts/platformEvents.ts` owns the closed kind vocabulary.
-    Severity is derived from the kind in one exhaustive
-    `Record<PlatformEventKind, …>`, so one kind can never be journaled at
-    two severities, and `PUSH_ROUTES` is exhaustive too: a new kind does
-    not compile until its severity AND its audience are stated. `null`
-    means journal-only, which is the answer for most kinds — a short push
-    list is a credible one.
-  - `PlatformEventLog.append` is FAIL-OPEN like the ledger, but louder:
-    each distinct failure reason warns once on one compacted line, with
-    the reason set bounded. Every untrusted string entering a `summary`
-    goes through `eventLabel` — the log drops what it cannot store, so an
-    unbounded display name would silently lose the audit row.
-  - `summary` is operator-facing English; `detail` is the machine-readable
-    payload push copy renders from. Never a token (not even hashed), never
-    a credential, never model-authored prose.
-  - Domain modules (`src/projects/`, `src/github/`) take an injected
-    `PlatformEventSink`, never a store: the dependency arrow points from
-    the server at the domain, and an absent sink means "no journal".
-  - The operator CLI writes its rows from its own process — audited,
-    notifying nobody — so operator power changing hands survives in the
-    journal with no server running.
-  - Readers TOLERATE foreign rows: an unknown kind or a torn `detail`
-    renders raw rather than blinding the page around it. Retention cuts by
-    age (`ATOMA_EVENTS_RETENTION_DAYS`, 90d) AND by a 50k row cap, swept
-    from the viz server's existing 5-minute timer.
-  - `/api/admin/events` and `/api/admin/ledger` are platform-admin only,
-    beside the registry and skill surfaces. They are two SEPARATE reads:
-    `lifecycle_events` keeps its counter-checking semantics and its own
-    `ledger check` consumer, and the two tables are never joined.
-  - Design record and the five settled decisions:
-    [platform events](docs/platform-events-design.md).
-- Probe manifests are structured records. Normalize paths before recognizing
-  `.atoma-probes.json`; machine writers merge entries, and model hand-edits are
-  refused.
-- Manifest MERGE semantics have one definition: `src/contracts/probeManifest.ts`
-  owns entry identity per shape (shell by `cmd`, web by `file`+`smoke`, http =
-  ordered append) and documents the three writers' corrupt-input policies side
-  by side. Never re-implement a merge in a tool.
-- `write_file` REFUSES an unparseable `.atoma-probes.json`
-  (`probeManifestWriteRefusal`) before touching disk. The verbatim
-  pass-through exists so the model can REPAIR a broken manifest, and only the
-  INCOMING document is checked, so repair still works — but a repair that does
-  not itself parse is corruption, and no writer may leave a record no reader
-  can read back. Measured 2026-08-21: a hand-authored 10857-byte document with
-  a raw newline inside a string reached disk, the ground-truth probe reported
-  MALFORMED, the validator rejected, and the run paid an extra execute cycle
-  to repair our own write. `edit_file` refuses manifest edits and points at
-  this path, so the two halves must hold the same standard.
+- The gated deployment surfaces are storage contracts too, one file each:
+  - [src/auth](src/auth/AGENTS.md) — identity, organisations, invitations
+  - [src/projects](src/projects/AGENTS.md) — org-scoped run storage
+  - [src/platform](src/platform/AGENTS.md) — the audit journal
+  - [src/viz](src/viz/AGENTS.md) — the HTTP surfaces and push
+  - [src/contracts](src/contracts/AGENTS.md) — probe manifests
 
 ## Architecture invariants
 
-- `superviseLoop` is the only plan → validate → execute → validate protocol.
-  L2 and L3 reuse it for children; never duplicate that loop in concrete
-  atoms. The L3 root `handle` is plan → execute (no parent). A parallel
-  L3 plan whose declared `outputs` collide earns one coached Opus replan
-  (`acceptL3RootPlan`); a repeat is honoured, and so is a replan that
-  THROWS — the coaching may not turn a racy-but-executable plan into no
-  run at all. Both planning prompts demand `outputs` on file-mutating
-  subtasks, so the collision channel exists. Do not copy this rule onto
-  L2 — child plans already go through FAN-OUT validation. Do not coerce
-  an explicit L3 `concat` into `sequential`.
+- `superviseLoop` is the only plan → validate → execute → validate protocol, and
+  L2/L3 reuse it for children; never duplicate that loop in concrete atoms. The
+  full protocol contract is in [src/atoms](src/atoms/AGENTS.md).
 - Creation is fractal: application → L3 → L2 → L1. Registry creation/branching
   owns names and counters.
-- Escalation branches a type and toggles parent fallback in a `try/finally`.
-- `pendingStrategy` couples `plan()` and `execute()` on the same instance. Never
-  call `execute()` without the corresponding plan.
-- `fallbackMode` bypasses registry delegation and calls self-plan/self-execute.
-- Mutation scopes flow through `applyByScope`; update the union and every hook
-  together when adding a scope.
-- Per-task child memos prevent immediate reuse loops. Initialize task state,
-  mark committed children, and pass exclusions to prefilters.
-- Run-scoped integrity flags and memos must retain the same reference across
-  every `forkBranch`; add fork-propagation coverage for new optional fields.
-- Registry descriptions are reusable capability labels, never task narratives.
-  Route creation descriptions through `resolveCreationDescription`.
-- `startTask(profile, argv)` is the library entry: it owns provider, sandbox,
-  traces, skills, budgets, the watchdog and post-mortems, throws
-  `RunnerConfigError` on bad input, resolves lifecycle env against the HOST
-  snapshot (a run's own writes never become the next run's "operator intent"),
-  applies the same snapshot to `ATOMA_MODEL_L*` via `applyTierPins` so atom
-  `modelForTier()` calls agree with the router (a missing pin is deleted, not
-  left as leftover ambient state), and returns a `RunHandle {settled, shutdown}`
-  that never parks and never exits. `runTask(profile, argv)` is the CLI shell
-  that owns process death: exit 2 on config errors, exit 1 on failure,
-  park-forever on delivery, SIGINT/SIGTERM → shutdown. Its stdout is an API
-  (burn-in parses it) — the handle refactor kept it byte-identical. A
-  `TaskProfile` contributes only family-specific workspace, seed, canonical
-  catalog, constraints, and env names.
-- Codex tier pins are refused for L1 at LAUNCH (`RunnerConfigError`), not only
-  in doctor, and the check reads the pin AFTER `applyTierPins` so a
-  snapshot-only `codex:` L1 is caught and an ambient pin omitted from the
-  snapshot is not. A codex L1 would serve every text-only prefilter/validator
-  and detonate at the first tool-bearing execute, mid-run and mid-spend.
-  `assertTransportHonoursCredentials` refuses `claude-cli` / `codex` as the
-  base transport AND as a tier pin whenever a snapshot is supplied.
-- Canonical bootstrap is idempotent and bucket-specific. Prompt/tool changes
-  patch and reset trust only when content genuinely differs.
 - Verification is read-only. Supervisors may run fixed probes they own, but
   never replay model-authored shell commands.
-- L1 plans express intent in prose; actual tool calls happen during execute.
-  Do not encourage large literal `toolCalls` payloads in plans.
-- Tool scopes are bucket-specific and enforced twice: prompts/plans must name
-  only declared tools, and the executor rejects undeclared tool use.
-- Match verification to the artefact: browser UI uses static server plus
-  browser validation; HTTP APIs use node server plus fetch; CLI/files use shell
-  execution plus read-back. Do not force every artefact through HTML tooling.
-- HTTP servers bind `process.env.PORT`, accept port 0, and emit
-  `LISTENING_ON_PORT=<N>` once ready.
-- Recorded probes support cross-checking but do not make non-zero exits errors.
-  Only explicit `match:false` or unequal expected/actual values are mechanical
-  contradictions.
-- Ground-truth reporting must quote observed tool bytes. Narrative self-report
-  alone is not evidence.
-- Browser and non-browser ground-truth probes are normally exclusive by bucket.
-  A loopback HTTP server that actually returns HTML keeps the file probe and
-  appends a browser probe; never replace read-back evidence or browse external URLs.
-- Quoted-span checks walk summaries before noisy payloads, ignore diff `OLD:`
-  and headers, and treat truncated excerpts as silent rather than refuting.
-- Already-satisfied idempotent work is compliant when current ground truth proves
-  the requested end state; do not demand meaningless rewrites.
-- Keep `VALIDATION_SYSTEM_PROMPT` explicit that L1 plans should contain concrete
-  tool-oriented proposed actions while L2/L3 must delegate.
-- Mechanical RESULT gates live in ONE declarative table
-  (`src/atoms/resultGates.ts`) with an explicit disposition per gate:
-  result-declared failures reject outright; disk-evidence gates reject ONCE per
-  task (`ctx.mechanicalResultRejections`, fork-shared) and hand byte-identical
-  repeats to the LLM; prose-triggered gates never reject — they override the
-  trust fast-path and attach a `MECHANICAL GATE FINDINGS` block to the full
-  verdict. Workspace reads are cached per validation cycle. A new incident adds
-  a table row with a stated disposition, never a new inline `if`.
+- Tools belong to L1 only, and only [src/tools](src/tools/AGENTS.md) may declare
+  or execute them. The MCP control plane is not an element surface:
+  [src/mcp](src/mcp/AGENTS.md).
 
 ## Skills lifecycle
 
-Skills follow learn → match/inject → earn credit → compile → trusted dispatch.
-
-- Skills live under owner namespaces on disk, keyed by atom id
-  (`skills/<atom-id>/`). Operator and MCP arguments go through
-  `resolveMoleculeRef` (name or id → `{ atomId, name }`). Metadata
-  sidecars are data: read them strictly before mutation and write
-  atomically. Never turn corruption into valid zero counters.
-- Match against reusable `when_to_use` capability language, not task theme or
-  hidden workspace state the prefilter cannot inspect.
-- The skill prefilter runs only when candidates exist. Injection is guidance;
-  it never guarantees adherence or credit.
-- Credit is usage-conditioned. Atom-type counters move with child outcomes;
-  skill counters move only when the skill demonstrably drove the attempt.
-- Updates after failure are opportunistic. Invalid skill JSON must not fail an
-  otherwise valid run, and an unchanged body is not a revision.
-- Auto-created/revised skill bodies must stay within the owner's toolset and
-  generalize beyond the triggering task. No task-specific literals.
-- Promotion compiles an LLM recipe to a deterministic script only after earned
-  successes. Promotion resets script trust; the new executable must earn trust.
-- Promotion is frozen by default on from-scratch runs. A seeded workspace is
-  the current maintenance-mode signal and enables promotion by default;
-  `ATOMA_SKILL_PROMOTE=1` is the exact opt-in anywhere, while any other explicit
-  value disables it. `--no-promote-skills` is the final veto over both env and
-  seed. MCP `promoteSkills:true` maps to the same explicit env opt-in.
-- Untrusted scripts run through the normal L1 tool loop. Trusted scripts may
-  dispatch deterministically only after all preflight gates pass.
-- Output intent is STRUCTURED first: plans declare `outputs` on every
-  file-mutating subtask (threaded onto the child Task) and compilers declare
-  `writes` in the promotion envelope, cross-checked once against the static
-  resolver and persisted in `_meta.json`. The lexical grammar in
-  `scriptTargets.ts` is the FALLBACK for legacy plans/scripts — never grow it
-  a new clause for a phrasing the declared field would have carried.
-- Script stdout ends with exactly one JSON envelope containing non-null `output`
-  and string `summary`. Malformed envelopes and `FAILED`/`ERROR` summary prefixes
-  fall back to the validated LLM path; do not invent a separate `ok` field.
-- Compiled verification consumes `.atoma-probes.json`; if the manifest exists,
-  it is the authority over prose. Preserve each entry's recorded semantics.
-- Scratch Node scripts use `.mjs`. The workspace may define incompatible `.js`
-  semantics and is fenced from the repository module system.
-- Static scanning and compile/refusal stamps are generation-aware. Compare via
-  `refusalStampIsCurrent`, never raw constants; fail closed on invalid config.
-- Manifest entry shapes are bucket-specific. Shell commands are bare commands,
-  not decorated exit-code wrappers. HTTP manifests are ordered sequences.
-- `when_to_use` matches subtask text alone. State-on-disk requirements belong
-  in the body/preflight, not the match trigger.
-- Prefer a sibling compilable skill over overwriting a useful LLM recipe.
-- The distiller SEES the visible namespaces' skill ids and `when_to_use` lines
-  and is told not to re-learn them. The only mechanical guard is exact-id
-  equality, so a SEMANTIC TWIN under a fresh name is the failure mode to
-  design against: promotion needs the threshold successes on ONE id, and two
-  half-credited twins never reach it while both compete for every match.
-  Measured 2026-08-21: one 6-task batch learned 11 skills, 6 of them three
-  twin pairs.
-- `validateProbeManifest` gates malformed machine input before dispatch.
-- Anti-redispatch state is run-scoped. A repeated deterministic output rejected
-  for content must not earn credit or be dispatched again in a later phase.
-- Deterministic failure streaks demote brittle scripts, but environment/executor
-  failures are not evidence against the recipe.
-- A deterministic dispatch must prove the deliverable, not merely that named
-  files already exist. Mutating work needs relevant before/after change or
-  equivalent evidence; pure verification may remain read-only.
-- A script without `_fallback.md` is undemotable and must be refused before
-  dispatch. Never manufacture a fallback after trust was already lost.
-- Event-recovery skills match failure classes mid-run and carry zero LLM cost.
-  Their triggers describe reusable failure classes, never task themes.
-- `skills drop`, `merge`, `reset`, `forgive`, and review are operator-only
-  lifecycle actions. Preserve provenance and emit ledger events. `forgive`
-  retracts MISATTRIBUTED increments surgically (negative integer deltas,
-  mandatory reason, floor at zero). It JOURNALS FIRST through the fail-closed
-  `appendLedgerStrict` — for a negative delta the safe-loss direction
-  inverts: mutate-then-lose-the-append leaves the store BELOW the ledger,
-  the direction `check` reports as IMPOSSIBLE — and `projectCounters` folds
-  the `skill-counter-compensation` event clamped at zero; refusal stamps
-  stay untouched — clearing them remains `reset`'s job. Measured 2026-08-21:
-  an environment failure is not evidence against a recipe, yet erasing 2
-  budget-kill failures via all-or-nothing `reset` cost 7 earned successes. `registry remove` and
-  `registry dedupe --apply` drop the deleted atom's skill namespace
-  (`skills/<atom-id>/`); `mergeInto` itself does not touch the skill store.
-- Compilation's measured value is maintenance verification, not from-scratch
-  builds. Do not spend new rounds tuning it unless task decomposition changes.
-
-## LLM interaction conventions
-
-- Every call goes through `LlmClient`; never call a provider SDK from atoms.
-- Model IDs and tier defaults live in `src/core/models.ts`. `modelForTier`
-  accepts an optional env; `applyTierPins` is how a snapshot reaches the
-  default (`process.env`) call sites. A missing pin is deleted on the
-  target, not left as leftover ambient state.
-- `parseLlmSelector` is the only parser for provider/model selectors. Preserve
-  Ollama tags containing colons.
-- `RoutingLlmClient` owns cross-vendor tier routing. Record both requested and
-  served model so cost attribution follows the actual transport.
-- Effort settings belong on strategy calls only. Validators and prefilters are
-  deterministic and cheap.
-- A transport cannot outlive its deadline. Keep both per-call abort and outer
-  watchdog guards, clean abort listeners in `finally`, and account partial usage
-  when a provider exposes it. Tool-loop iteration caps shrink against
-  remaining wall clock via `capToolIterations` / `ctx.deadlineAt` (26 s
-  floor from the 2026-08-16 fan-in measurement) so one phase cannot
-  *plan* more iterations than the run can still pay.
-- Claude CLI and Codex CLI transports run with user tools/config isolated.
-  Project `.claude/settings.json` never grants shell permission; personal grants
-  belong in ignored local settings. Codex MCP registration is local too.
-- Do not confuse interactive Codex with the Codex transport. The transport uses
-  explicit safe flags and never inherits the interactive agent's tools.
-- Auth checks must match the selected transport without leaking credentials.
-- All model-output JSON parsing lives in `src/atoms/json.ts`. Preserve raw text
-  on parse failure; never guess a structure.
-- Nested Markdown fences can hide evidence. Keep fence-aware extraction and its
-  adversarial tests.
-
-## Observability and viz
-
-- `InMemoryMetrics` and `MetricsLlmClient` wrap calls; traces record requested
-  model, served model, usage, cost, cache, decisions, and tool actions.
-- `RecordingLlmClient` preserves partial and failed attempts. A failure after
-  usage is still billable evidence.
-- The lifecycle ledger is attributable; registry events distinguish initiator
-  from target. Cache hits have their own event kind.
-- Burn-in CSVs belong to exactly one writer/schema. Refuse foreign headers
-  before append. Measurements committed to the repo must remain parseable.
-- The runner's `ATOMA_RUN_STATS` JSON epilogue is the burn-in accounting
-  contract. `parseRunLog` keeps text parsing only for interrupted legacy runs;
-  never add global regexes over model-authored prose.
-- The friction report is offline and includes recency. Fix recurring real tool
-  errors at their source; do not erase successful recovery evidence.
-- Act on friction signatures only when they recur across two consecutive batches
-  and their root cause lives inside the sandbox. Host, repository, and harness
-  defects require structural fixes rather than learned workarounds.
-- Viz projects immutable traces at the typed boundary. Do not mutate raw trace
-  prose to display current taxonomy.
-- The GPU client (`src/viz/client-gl/`) is the product UI. The MUI client
-  (`src/viz/client/`) is FROZEN as a fallback (`ATOMA_VIZ_UI=mui`,
-  `npm run viz:mui`): fix breakage, add nothing. Modules under `client/` that
-  the GL client imports (types, run-utils, search, timeline-layout,
-  structured-detail, i18n, data-api, pwa) are shared library code and stay live.
-- `gpu-renderer.ts` holds the stateful renderer class only. Pure chip layout,
-  event copy, shaders, motion, and the scroll pane live under
-  `client-gl/renderer/`; views are free functions over the exported
-  `RendererCtx` (a Pick over the class) in `renderer/views/`. New view code
-  goes there, never back into the class.
-- Scrollable GPU content goes through `createScrollPane` (bounded + masked);
-  the wheel handler FAILS CLOSED on `scrollMax`, so a view that never declares
-  its max does not scroll. Cull by skipping draws, not by stopping the layout
-  cursor. Detail panes report `detailBounds`/`detailScrollMax`.
-- `prefersReducedMotion()` (`renderer/motion.ts`) is the only reduced-motion
-  source in the GL client. Every animation system consults it and JUMPS to its
-  final state — exit effects are skipped entirely, never left running.
-- The GPU client uses one Pixi context (WebGPU with WebGL fallback). Do not add
-  a second context for a tiny widget. Smoke tests assert exactly one canvas and
-  both backends.
-- Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
-  read once per frame; do not rebuild the scene for pointer motion.
-- A Pixi filter that OUTLIVES one `render()` must never sit `enabled = false`
-  across a GC window without `buffer.autoGarbageCollect = false` on its uniform
-  buffer. Pixi skips disabled filters, so the buffer stops being touched, ages
-  out and is destroyed, while `BindGroupSystem._hash` keeps serving a cached
-  bind group that points at it — every later `queue.submit` is then a
-  validation error, permanently. Today only the pointer-light filter has that
-  lifetime; per-card filters are rebuilt each render and are safe.
-- Pixi 8.19.0 WebGPU GC also unloads in-use static uniform buffers (global
-  uniforms, batcher UBOs) whose values have not changed, with the same
-  destroyed-buffer submit (pixijs#12080). The engine fix (pixijs#12147) is
-  not in a release. Until it is, WebGPU init sets `renderer.gc.enabled =
-  false`. Do not re-enable GC on WebGPU without that Pixi release; keep the
-  pointer-light pin either way. Scene resources are destroyed explicitly in
-  `render()`. WebGL GC may stay on.
-- GPU lifetime defects are invisible to `tests/` (mocked, no device) and to the
-  WebGL fallback (no bind groups). They are covered by `npm run viz:smoke:gc`,
-  which needs real Chrome plus a real WebGPU adapter and therefore stays OUT of
-  `release:check`; it skips loudly rather than reporting "cannot observe" as
-  "verified", and fails if its preconditions never arm. `?atomaDiag=1` exposes
-  the read-only renderer handle those smokes need; it is inert otherwise.
-- `isRunLive` / `isIndexEntryLive` are the only live predicates. The abandoned
-  threshold exceeds plausible LLM/tool activity (currently 12 minutes).
-- Runs rails remain aligned to viewport projection. Never apply scene parallax
-  to causal timeline geometry.
-- `runStatus` is the ONE definition of what happened to a run, and every
-  surface that labels one uses it. Cancellation is not failure: a cancelled
-  run records an error message by design, so `cancelled` wins over `error`.
-- The runs timeline reads NEWEST FIRST and is framed by two bookend rows
-  (run ended / run started) that carry the verdict. Bookends are view rows:
-  the view publishes `rowOffset` on the timeline viewport and overlays add it,
-  or they drift by exactly one row. Ordering lives in `buildTimelineLayout`
-  (`newestFirst`) so cards, rails and connectors share one row space;
-  `firstRow`/`lastRow` are the DISPLAY range while fork/join connectors keep
-  causal rows.
-- A branch rail spans its SUBTREE (`subtreeFirstRow`/`subtreeLastRow`): a
-  parent is still alive while its children run, and a rail drawn over its own
-  events alone leaves child branches visually detached.
-- Pixi objects draw local geometry at local origin, then position the object.
-  Avoid double-offset hit targets.
-- The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic
-  relighting, reduced-motion support, and no overlapping R3F logo.
-- The UI is English and catalog-backed; add strings to i18n catalogs rather than
-  hardcoding. Tests enforce representative parity, not every incidental string.
-- PWA/service-worker registration is production-only. `/api/*`, `/auth/*`,
-  `/webhooks/*`, and every response marked `Cache-Control: no-store` stay
-  outside the cache so live data, identity state and GitHub deliveries cannot
-  be hidden by an offline shell.
-- Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
-- The Launch tab describes families and intentionally does not start runs.
+Orientation only — the contract lives in [src/skills](src/skills/AGENTS.md).
+Skills follow learn → match/inject → earn credit → compile → trusted dispatch,
+under owner namespaces keyed by atom id (`skills/<atom-id>/`). Compilation's
+measured value is maintenance verification, not from-scratch builds, and every
+operator lifecycle action is attributable.
 
 ## Tools and runtime isolation
 
-- L1 is the only tier with tools. `src/tools/` owns declarations, registry,
-  sandbox, builtins, worker protocol, and execution backends.
-- `ToolSandbox` is the filesystem/process boundary. Resolve paths through it;
-  do not compare raw user spellings for protected files.
-- Default builtins and the closed tool vocabulary must stay in lockstep. Tests
-  compare names/order; executor scope is the ultimate permission gate.
-- `record_probe` writes the manifest from machine-observed results. Models choose
-  what to probe; they do not transcribe the record.
-- Worker and in-process backends share contracts from `src/contracts/`; never
-  fork protocol shapes.
-- Container execution uses `network none` unless explicit egress is selected.
-  Proxied egress requires Docker Engine 28+: its per-run internal bridge uses
-  isolated IPv4 and IPv6 gateway modes, because plain `--internal` can still
-  reach host services through the bridge address. Fail closed on older engines.
-- The worker receives an allowlisted environment, not a spread parent env.
-  Credentials and control-plane store paths never cross the boundary.
-- Network allowlists compare parsed hostnames; lookalikes and IP literals fail.
-- Cleanup is mandatory on success, failure, timeout, signal, and hard-exit paths.
-  Network teardown races need bounded retry.
-- Docker image packaging is verified statically against the worker import graph
-  and dynamically by booting the real image.
-- `start_static_server` and `start_node_server` use OS-selected ports and explicit
-  readiness markers. Do not kill arbitrary process groups; only safe integer
-  PGIDs greater than 1 may reach group syscalls.
-- `validate_html` treats smoke input as a JS expression, bounds every supplied
-  duration, and ignores Chrome's own favicon 404. Browser console errors remain
-  evidence but not every one is a mechanical failure.
-- Do not relax `detectBrittleComputedStyleLiteral` (the rgb()/rgba()-literal
-  pre-flight refusal). Measured across six batches on 2026-08-21 (15 firings
-  over seven web runs): every refusal was followed by in-run compliance at
-  ~one model turn each, every run delivered, and the expensive streak blamed
-  on it (batch 5, seven calls on one unreachable check) was an AWAITED
-  before/after comparison on a background-color transition that never
-  progressed in the headless page — removing the transition made the
-  identical check pass with a 100ms wait — plus an over-specified aggregate:
-  shapes the guard neither causes nor could catch. The allowed routes (source-toggled class/inline
-  marker; captured before/after comparison) are strictly more robust, and a
-  conditional relaxation would need colour-space resolution against the page
-  source for marginal gain.
-- Tool results are truncated before returning to the model, with the relevant
-  head/tail retained. Budget-exhausted finalization keeps tools declared so the
-  provider transcript remains valid.
-- Shared smoke guidance lives in one constant. Do not duplicate or specialize
-  it around one widget vocabulary. The guidance and the `validate_html`
-  pre-flight guards are ONE contract: `SMOKE_ASYNC_TRANSITION_EXAMPLE` is
-  exported so `tests/smoke-guidance.test.ts` can feed it to the real guards.
-  Never teach a smoke shape the tool refuses. A SYNCHRONOUS `getComputedStyle`
-  read on a TRANSITIONED property returns the pre-transition value (verified
-  in Chrome, 2026-08-21): assert the class/inline marker the source toggles,
-  or make the smoke async and await past the declared duration — the tool
-  awaits the returned promise.
-- That await is BOUNDED to one repaint or transition. It is not a way to wait
-  for real time: a smoke still running at `CDP_PROTOCOL_TIMEOUT_MS` is killed
-  and returns NOTHING, and `diagnoseSmokeEvaluationError` replaces Puppeteer's
-  `protocolTimeout` advice (addressed to the harness author, not the caller)
-  with the remedy the `holdMs` description already gives — drive
-  `window.__test.advance(ms)`. Measured 2026-08-21: teaching the await without
-  the bound made a countdown task await 33s and 35s inside two smokes, both
-  killed after burning ~45s each, and the run failed on its whole budget.
+Orientation only — the contract lives in [src/tools](src/tools/AGENTS.md). L1 is
+the only tier with tools; `ToolSandbox` is the filesystem/process boundary;
+container execution is `network none` unless egress is explicitly selected; and
+cleanup is mandatory on every exit path.
 
 ## MCP stdio server
 
-- Stdio is the safety boundary. Do not add an HTTP port to the MCP control plane.
-- Stdout is JSON-RPC only and must be claimed before importing modules that may
-  log. Diagnostics go to stderr.
-- `spawnRun` is the sole sanctioned run launcher. Keep compiled/source paths and
-  flag ordering aligned; the goal is always the last argument.
-- Resolve the repository root once before touching relative store, skill, run,
-  or workspace paths.
-- Runs are serialized by both in-memory state and the SQLite lease. A second
-  start is refused; stale lease recovery must validate PIDs/PGIDs safely.
-- Cancellation is a state, not successful completion. Signal the whole validated
-  child group, bound termination, and retain trace/status evidence.
-- `finishRun` must free the in-memory slot in `finally` even if lease deletion
-  fails. Failed cleanup is stderr-only and recoverable as a stale row.
-- Hard server backstops bound driver promises that never settle. Partial status
-  remains observable rather than becoming a false success.
-- MCP readers carry mechanical-review caveats in-band; they do not claim semantic
-  approval.
-- MCP payloads are BOUNDED and honest about trust: `atoma_run_trace` pages its
-  events (`offset`/`limit`, capped) and truncates error strings; `goal` has a
-  hard length cap; run output/skill bodies/trace text are marked UNTRUSTED
-  model data (INSTRUCTIONS + `caveat` on runStatus and runTrace). Stale-lease
-  recovery is VISIBLE: startRun reports what it reaped (`recovered`), and
-  runStatus with no in-memory match reports the cross-process lease row
-  instead of amnesia.
-- The exported 13-tool surface is a compatibility contract. Add/remove tools only
-  with protocol tests, docs, compiled smoke updates, and explicit rationale.
+Orientation only — the contract lives in [src/mcp](src/mcp/AGENTS.md). Stdio is
+the safety boundary, runs are serialised by memory state and a SQLite lease, and
+the exported 13-tool surface is a compatibility contract.
 
 ## Testing and linting
 
@@ -781,68 +282,11 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
 
 Read the archived sections before changing something that merely looks odd.
 
-- `DEFAULT_LIMITS.maxExecIterations` and its comparison are pinned by tests;
-  change semantics only with an explicit migration of the effective budget.
-- L3 construction is async because it may resolve the latest Opus model alias;
-  L2 construction has no equivalent lookup and may remain synchronous.
-- Context injection appends and is composed later; do not mutate base prompts.
-- Registry rollback is roll-forward-to-old-content and resets trust.
-- `Atom.toolNames()` is public while tool objects remain protected by design.
-- Capability bucket order is semantic; HTTP precedes web when signatures overlap.
-- Do not restore the L3 skeletal prefilter shortcut. Decomposition quality was
-  worth the one top-tier strategy call.
-- Do not add semantic prefilter caching. It removes exactness directly below an
-  unvalidated fast path.
-- Do not introduce plan templating until a typed instantiation/validation layer
-  exists; free-form substitution is another unvalidated router.
 - Do not blindly replay child commands for verification or add supervisor egress.
-- Do not report compilation as the source of build-task savings. Eight rounds
-  support tiering, earned trust, and recipe reuse; compilation dispatched mainly
-  on maintenance and did not pay on from-scratch decomposition.
 - Keep one runner with profiles, one cost formula, one selector parser, one
   contract per shape, and one source of live-state truth.
-- Atom names are NOT all curated. `branch` accepts an LLM-authored
-  `overrideName` (`verdict.branchName`) and takes only the ORDINAL from
-  `nextAvailable`, so task-themed names enter the catalogue by design. That
-  is why `registry dedupe` exists and why its fuzzy key is the only thing
-  catching word-order variants the order-sensitive branch guard lets through.
-  Do not delete the dedupe surface on the grounds that names come from a pool.
-- `nextAvailable` takes the set of names already held and SKIPS pool entries
-  whose name is taken: ordinals and names are separate namespaces, because an
-  LLM `overrideName` occupies a name without consuming its ordinal. The check
-  belongs on the allocator that inserts, not on `branch` — only there does it
-  also cover a name squatted ACROSS tiers (`atom_types.name` is UNIQUE over
-  the whole table while the pools are per-tier) and a store that already
-  contains a squatter. Reserving the pool against `branch` instead was tried
-  and reverted: it closed one tier of three and renamed branches to orphan
-  `-2` names whose unsuffixed twin could never be issued.
-- A SYNCHRONOUS smoke observes only what the page has already committed, so
-  the canonical state-driving shape (`SMOKE_CANONICAL_STATE_SHAPE`) is ASYNC
-  and keeps its `settle()` awaits. Measured 2026-08-21 twice in one batch: a
-  transitioned colour read back stale (`rgb(51, 51, 51)` with the class
-  already applied) and a stopwatch display stuck at `"00:00.00"` while
-  `elapsed` reached 988ms, because the `setInterval` tick could not run. Both
-  runs retried an assertion that could not become true.
-- Do NOT lower the `skills stats --sim` default to catch semantic twins.
-  Measured 2026-08-21 against three known pairs: they score 0.41, 0.39 and
-  0.26 while a build-vs-probe FALSE positive scores 0.31, so no threshold on
-  matching-surface overlap separates them and the 0.5 default surfaces none of
-  the three. The lexical metric cannot tell "build a Node http service" from
-  "probe a Node http service" — same vocabulary. Prevention belongs at learn
-  time, where the distiller judges each recipe's claim.
-- Do NOT batch the `validate_html` pre-flight refusals into one response.
-  Measured across both 2026-08-21 web runs: every refused payload violated
-  exactly ONE guard, so reporting all of them at once would have saved zero
-  round-trips. They arrive in sequence because the model fixes one rule and
-  then breaks a different one.
-- Moving smoke guidance closer to the call site is NOT the untried variable.
-  The erased-intermediate-state rule already sits in the `smoke` PARAMETER
-  description and the model still violated it six times across two batches.
-- The MCP lease `ALTER TABLE` loop is corruption repair, not version
-  migration. The lock DB lives in `~/.atoma/` outside the product store, and
-  the burn-in pgid guard already documents it as writable by the run itself;
-  without the loop a foreign-shaped table makes every `atoma_run_start` throw
-  a raw SQLite error until a human deletes the file.
+- Every subsystem file carries its own intentional-choices section listing the
+  shortcuts already tried and reverted there. Read it before re-proposing one.
 
 ## Benchmark and documentation discipline
 
@@ -882,5 +326,6 @@ The frozen record contains the full dated reasoning behind these rules:
 - [SaaS architecture boundary](docs/saas-architecture.md)
 
 Archive files are evidence, not normative imports. Never use an unquoted
-`@path` import from this file: recursive imports would put the entire history
-back into every Claude Code session and defeat this restructuring.
+`@path` import from this file or from a subsystem file: recursive imports would
+put the entire history back into every Claude Code session and defeat this
+restructuring.

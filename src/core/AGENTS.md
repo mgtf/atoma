@@ -1,0 +1,73 @@
+# Core — AGENTS.md
+
+`src/core/` owns the LLM client and its transports, model and tier resolution,
+the cost formula, the product store, the ledger, metrics and limits.
+
+Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
+Everything below is stated once, here, and is not repeated at the root.
+
+Neighbours:
+
+- [`src/atoms`](../atoms/AGENTS.md) — the call sites
+- [`src/run`](../run/AGENTS.md) — provider construction and tier pins
+- [`src/viz`](../viz/AGENTS.md) — the consumer of what metrics record
+
+## LLM interaction conventions
+
+- Every call goes through `LlmClient`; never call a provider SDK from atoms.
+- Model IDs and tier defaults live in `src/core/models.ts`. `modelForTier`
+  accepts an optional env; `applyTierPins` is how a snapshot reaches the
+  default (`process.env`) call sites. A missing pin is deleted on the
+  target, not left as leftover ambient state.
+- `parseLlmSelector` is the only parser for provider/model selectors. Preserve
+  Ollama tags containing colons.
+- `RoutingLlmClient` owns cross-vendor tier routing. Record both requested and
+  served model so cost attribution follows the actual transport.
+- Effort settings belong on strategy calls only. Validators and prefilters are
+  deterministic and cheap.
+- A transport cannot outlive its deadline. Keep both per-call abort and outer
+  watchdog guards, clean abort listeners in `finally`, and account partial usage
+  when a provider exposes it. Tool-loop iteration caps shrink against
+  remaining wall clock via `capToolIterations` / `ctx.deadlineAt` (26 s
+  floor from the 2026-08-16 fan-in measurement) so one phase cannot
+  *plan* more iterations than the run can still pay.
+- Claude CLI and Codex CLI transports run with user tools/config isolated.
+  Project `.claude/settings.json` never grants shell permission; personal grants
+  belong in ignored local settings. Codex MCP registration is local too.
+- Do not confuse interactive Codex with the Codex transport. The transport uses
+  explicit safe flags and never inherits the interactive agent's tools.
+- Auth checks must match the selected transport without leaking credentials.
+
+## Cost accounting
+
+- Anthropic tool loops keep one rolling cache breakpoint: clear the prior
+  marker before marking the latest tool result. Never exceed four breakpoints.
+- `estimateCostUsd` is the only cost formula. Anthropic input, cache-read, and
+  cache-creation counters are disjoint; never subtract one from another.
+- Accounting follows the SERVED model, not the tier pin: transports that
+  rewrite the model (codex slug mapping, ollama collapse, claude-cli aliases)
+  report `servedModel` on the response, and metrics/recording price
+  `servedModel ?? req.model`. The pin stays the routing identity in events.
+- Errors keep their paid tokens on EVERY transport: a throw from a tool loop
+  carries `partialUsage`, and both observability layers read it — the trace
+  and the CSV must never disagree about one call's cost.
+
+## Ledger
+
+- Ledger writes are fail-open for run execution but attributable and ordered.
+  A ledger failure cannot take down the product; impossible counter directions
+  must be surfaced by `ledger check`.
+
+## Metrics and traces
+
+- `InMemoryMetrics` and `MetricsLlmClient` wrap calls; traces record requested
+  model, served model, usage, cost, cache, decisions, and tool actions.
+- `RecordingLlmClient` preserves partial and failed attempts. A failure after
+  usage is still billable evidence.
+- The lifecycle ledger is attributable; registry events distinguish initiator
+  from target. Cache hits have their own event kind.
+
+## Intentional choices and rejected shortcuts
+
+- `DEFAULT_LIMITS.maxExecIterations` and its comparison are pinned by tests;
+  change semantics only with an explicit migration of the effective budget.
