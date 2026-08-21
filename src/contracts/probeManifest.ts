@@ -684,6 +684,49 @@ export function matchesWebIdentity(candidate: unknown, file: unknown, smoke: unk
 }
 
 /**
+ * Refusal check for a MODEL-authored whole-document manifest write.
+ *
+ * The pass-through in `mergeProbeManifestWrite` exists so the model can
+ * REPAIR a structurally broken manifest, and that intent is right — but a
+ * repair that does not itself parse is not a repair, it is corruption, and
+ * the writer must never persist a record no reader can read back. The two
+ * machine writers already hold that invariant; this closes the model-owned
+ * path to the same standard while leaving repair untouched, because only the
+ * INCOMING document is checked (existing-corrupt + incoming-valid still
+ * passes through verbatim).
+ *
+ * MEASURED 2026-08-21, batch 3 / web-progress: `edit_file` refuses manifest
+ * edits and tells the caller to "write_file the whole document after
+ * read_file", so the model hand-authored 10857 bytes carrying a RAW NEWLINE
+ * inside a string ("Bad control character in string literal at position
+ * 6408", charCode 10). The merge could not parse it, returned it verbatim,
+ * and byte-identical in/out put an unreadable manifest on disk. The
+ * supervisor's zero-token ground-truth probe then reported MALFORMED at that
+ * exact position, the L2 validator rejected the RESULT, and the run paid a
+ * full extra execute cycle to repair a file this tool had accepted. We
+ * refused the SURGICAL edit and accepted the risky WHOLESALE rewrite with no
+ * check, having just instructed it.
+ *
+ * Returns the coaching message, or null when the write may proceed.
+ */
+export function probeManifestWriteRefusal(incomingRaw: string): string | null {
+  try {
+    JSON.parse(incomingRaw);
+    return null;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return (
+      `write_file: refusing to write "${PROBE_MANIFEST_FILENAME}" because the document you supplied ` +
+      `is not valid JSON (${detail}). Nothing was written, so the manifest on disk is unchanged and ` +
+      `still readable. This is usually a RAW newline, tab or quote inside a string value — a smoke ` +
+      `source or a recorded stdout pasted in literally instead of escaped. Do not hand-author this ` +
+      `file: let record_probe, fetch_url record:true and validate_html write their own entries, and ` +
+      `if you must repair its structure, read_file it and write back a document you have kept valid.`
+    );
+  }
+}
+
+/**
  * Structural merge for a MODEL-authored whole-document manifest write
  * (write_file). Shell entries replace by `cmd`, web entries replace by
  * `file`+`smoke`, anything else appends unless it is an exact duplicate.

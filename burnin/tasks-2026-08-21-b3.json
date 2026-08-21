@@ -1,0 +1,34 @@
+{
+  "tasks": [
+    {
+      "id": "cli-csvhead",
+      "family": "cli",
+      "goal": "a Node CLI 'csvhead' that prints the header row plus the first N data rows of a CSV: reads a path as argv[2] and an optional row count as argv[3] (default 5), prints the selected rows verbatim to stdout, exits 1 with a clear stderr error when the file is missing, empty, or argv[3] is not a positive integer. Ship package.json, a fixtures/ dir with a sample CSV, and a README with a 'Verified invocations' section. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every invocation documented in the README exactly as written and confirm stdout/stderr/exit codes match what the README claims."
+    },
+    {
+      "id": "cli-stdin-wordfreq",
+      "family": "cli",
+      "goal": "a Node CLI 'wordfreq' that reads text from STDIN (not from a file argument) and prints the 5 most frequent words as 'word<TAB>count' lines sorted by descending count then alphabetically, printing nothing and exiting 0 on empty input, and exiting 1 with a clear stderr error when stdin is a TTY with no piped input. Ship package.json and a README with a 'Verified invocations' section showing piped invocations. As a FINAL SEPARATE PHASE, re-verify the finished deliverable: re-run every documented invocation exactly as written and confirm stdout/exit codes match what the README claims."
+    },
+    {
+      "id": "web-progress",
+      "family": "web",
+      "goal": "a single-file index.html progress-bar widget: a bar that ANIMATES to a target width using a CSS transition when 'Advance' is clicked (25% per click, capped at 100%), a percentage label that updates with it, a Reset button, and the bar turning green once it reaches 100%. No external assets. Serve it with a local static server and verify in a real browser that the page loads with zero console errors, that the bar and label actually reach each milestone, and that the completed state really applies its green styling."
+    },
+    {
+      "id": "web-countdown",
+      "family": "web",
+      "goal": "a single-file index.html countdown timer: a 30-second countdown displayed as MM:SS that ticks once per second while running, Start/Pause/Reset buttons, the display turning amber when 10 seconds or fewer remain, and the text 'Time up' shown at zero. No external assets. Serve it with a local static server and verify in a real browser that the page loads with zero console errors, that the displayed time actually advances while running, and that the amber state really applies below the threshold."
+    },
+    {
+      "id": "http-headers-sum",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP JSON service 'inspector': GET /headers returns 200 with the request's headers as a JSON object; POST /sum reads a JSON array of numbers as the body and returns 200 {\"sum\":<number>}, or 400 with a JSON error when the body is not a JSON array of numbers; any other path returns 404 with a JSON error. Start the server and verify EVERY endpoint including both error cases with real HTTP requests, reporting the observed status codes and bodies."
+    },
+    {
+      "id": "http-ratelimit",
+      "family": "http",
+      "goal": "a zero-dependency Node HTTP service 'gatekeeper' with GET /ping that returns 200 {\"ok\":true,\"seen\":<n>} where n counts how many times the caller has been seen, and returns 429 {\"error\":\"rate limited\"} on the 4th and every later request from the same caller within the process lifetime. GET /reset clears the counters and returns 204. Start the server and verify the FULL SEQUENCE with real HTTP requests in order — three accepted pings, a 429, a reset, then an accepted ping again — reporting the observed status codes and bodies for each step in order."
+    }
+  ]
+}

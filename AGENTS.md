@@ -364,6 +364,16 @@ Read this section before changing any LLM call site.
   owns entry identity per shape (shell by `cmd`, web by `file`+`smoke`, http =
   ordered append) and documents the three writers' corrupt-input policies side
   by side. Never re-implement a merge in a tool.
+- `write_file` REFUSES an unparseable `.atoma-probes.json`
+  (`probeManifestWriteRefusal`) before touching disk. The verbatim
+  pass-through exists so the model can REPAIR a broken manifest, and only the
+  INCOMING document is checked, so repair still works — but a repair that does
+  not itself parse is corruption, and no writer may leave a record no reader
+  can read back. Measured 2026-08-21: a hand-authored 10857-byte document with
+  a raw newline inside a string reached disk, the ground-truth probe reported
+  MALFORMED, the validator rejected, and the run paid an extra execute cycle
+  to repair our own write. `edit_file` refuses manifest edits and points at
+  this path, so the two halves must hold the same standard.
 
 ## Architecture invariants
 
@@ -684,6 +694,14 @@ Skills follow learn → match/inject → earn credit → compile → trusted dis
   in Chrome, 2026-08-21): assert the class/inline marker the source toggles,
   or make the smoke async and await past the declared duration — the tool
   awaits the returned promise.
+- That await is BOUNDED to one repaint or transition. It is not a way to wait
+  for real time: a smoke still running at `CDP_PROTOCOL_TIMEOUT_MS` is killed
+  and returns NOTHING, and `diagnoseSmokeEvaluationError` replaces Puppeteer's
+  `protocolTimeout` advice (addressed to the harness author, not the caller)
+  with the remedy the `holdMs` description already gives — drive
+  `window.__test.advance(ms)`. Measured 2026-08-21: teaching the await without
+  the bound made a countdown task await 33s and 35s inside two smokes, both
+  killed after burning ~45s each, and the run failed on its whole budget.
 
 ## MCP stdio server
 

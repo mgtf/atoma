@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -13,6 +13,7 @@ import {
   recordProbeTool,
   renderProbeCmd,
   splitCommandLine,
+  writeFileTool,
 } from '../src/tools/builtin.js';
 import {
   PROBE_MANIFEST_FILENAME,
@@ -421,6 +422,78 @@ describe('mergeProbeManifestWrite — cross-phase manifest preservation', () => 
     expect(validateProbeManifest(JSON.stringify(merged)).join('\n')).toMatch(
       /entry #1 is not an object/
     );
+  });
+});
+
+describe('write_file refuses an unparseable probe manifest — the production path', () => {
+  let root: string;
+  let sandbox: ToolSandbox;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'atoma-probe-refuse-'));
+    sandbox = new ToolSandbox(root);
+  });
+  afterEach(async () => {
+    await sandbox.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const manifestPath = (): string => join(root, PROBE_MANIFEST_FILENAME);
+
+  /**
+   * MEASURED 2026-08-21, batch 3 / web-progress. Three model-authored writes
+   * of the manifest, in order: 3019B valid (created), 3464B valid (merged to
+   * 6445B), then 10857B carrying a RAW NEWLINE inside a string. The merge
+   * could not parse the third, returned it verbatim by documented policy, and
+   * byte-identical in/out left an unreadable manifest on disk. The
+   * supervisor's zero-token ground-truth probe reported "MALFORMED … position
+   * 6408", the L2 validator rejected the RESULT, and the run paid a full extra
+   * execute cycle repairing a file write_file had accepted.
+   *
+   * Exercised through the TOOL, not the pure merge, because the tool is what
+   * wrote the file.
+   */
+  it('leaves the existing valid manifest untouched and explains why', async () => {
+    const tool = writeFileTool({ sandbox });
+    const good = JSON.stringify({ version: 1, entries: [{ cmd: 'node ok.js', exitCode: 0 }] });
+    await tool.execute({ path: PROBE_MANIFEST_FILENAME, content: good });
+
+    // A raw newline inside a string value — exactly the observed corruption.
+    const broken = '{"version":1,"entries":[{"probe":"web","file":"i.html","smoke":"a\nb"}]}';
+    await expect(
+      tool.execute({ path: PROBE_MANIFEST_FILENAME, content: broken })
+    ).rejects.toThrow(/not valid JSON/);
+
+    // The point of the fix: disk still holds the READABLE document.
+    const onDisk = readFileSync(manifestPath(), 'utf8');
+    expect(JSON.parse(onDisk).entries).toEqual([{ cmd: 'node ok.js', exitCode: 0 }]);
+    expect(validateProbeManifest(onDisk)).toEqual([]);
+  });
+
+  it('never creates the manifest from an unparseable first write', async () => {
+    const tool = writeFileTool({ sandbox });
+    await expect(
+      tool.execute({ path: PROBE_MANIFEST_FILENAME, content: '{"version":1,"entries":[' })
+    ).rejects.toThrow(/not valid JSON/);
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it('still lets a VALID document repair a manifest that is already broken', async () => {
+    // Repair is the reason the verbatim pass-through exists; only the INCOMING
+    // side is checked, so this must keep working.
+    writeFileSync(manifestPath(), '{"version":1,"entries":[', 'utf8');
+    const tool = writeFileTool({ sandbox });
+    const repaired = JSON.stringify({ version: 1, entries: [{ cmd: 'node fixed.js', exitCode: 0 }] });
+    await tool.execute({ path: PROBE_MANIFEST_FILENAME, content: repaired });
+    expect(JSON.parse(readFileSync(manifestPath(), 'utf8')).entries).toEqual([
+      { cmd: 'node fixed.js', exitCode: 0 },
+    ]);
+  });
+
+  it('does not police ordinary files', async () => {
+    const tool = writeFileTool({ sandbox });
+    await tool.execute({ path: 'notes.json', content: 'not json at all' });
+    expect(readFileSync(join(root, 'notes.json'), 'utf8')).toBe('not json at all');
   });
 });
 

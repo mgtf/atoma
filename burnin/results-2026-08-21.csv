@@ -11,3 +11,9 @@ timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet
 2026-08-21T10:22:15.707Z,web-stopwatch,web,delivered,0.398,404,11,1,0,10,0,0,0,0,0,0,0,2026-08-21T10-22-16-307-c1c52773.json,claude-cli,0,0,0
 2026-08-21T10:29:01.406Z,http-kv,http,delivered,0.2038,168,9,1,0,8,0,0,0,0,0,0,0,2026-08-21T10-29-02-053-110c820b.json,claude-cli,0,0,0
 2026-08-21T10:31:51.598Z,http-healthz,http,delivered,0.1423,111,9,1,0,8,0,0,0,0,0,0,0,2026-08-21T10-31-52-121-ba38f855.json,claude-cli,0,0,0
+2026-08-21T10:44:11.211Z,cli-csvhead,cli,delivered,0.3514,222,14,1,0,13,0,0,0,0,0,0,0,2026-08-21T10-44-11-718-6a94ca57.json,claude-cli,0,0,0
+2026-08-21T10:47:54.210Z,cli-stdin-wordfreq,cli,delivered,0.2868,206,14,1,0,13,0,0,0,0,0,0,0,2026-08-21T10-47-54-855-089b443a.json,claude-cli,0,0,0
+2026-08-21T10:51:21.043Z,web-progress,web,delivered,0.8356,662,31,1,3,27,0,0,1,0,0,0,0,2026-08-21T10-51-21-645-9401e44e.json,claude-cli,0,1,0
+2026-08-21T11:02:25.503Z,web-countdown,web,failed,0.8084,902,29,1,3,25,0,2,0,0,0,0,0,2026-08-21T11-02-26-148-48faa963.json,claude-cli,0,0,0
+2026-08-21T11:17:29.914Z,http-headers-sum,http,delivered,0.2217,158,10,1,0,9,0,0,0,0,0,0,0,2026-08-21T11-17-30-529-8974abdb.json,claude-cli,0,0,0
+2026-08-21T11:20:09.731Z,http-ratelimit,http,delivered,0.2379,143,10,1,0,9,0,0,0,0,0,0,0,2026-08-21T11-20-10-340-a0a9b46a.json,claude-cli,0,0,0

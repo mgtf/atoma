@@ -10,6 +10,7 @@ import {
   PROBE_MANIFEST_FILENAME,
   appendHttpProbe,
   mergeProbeManifestWrite,
+  probeManifestWriteRefusal,
   mergeShellProbe,
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
@@ -20,7 +21,7 @@ import {
 // src/contracts/probeManifest.ts, shared by write_file, record_probe and
 // fetch_url record:true. Re-exported so existing consumers/tests importing
 // them from this module keep working.
-export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe };
+export { appendHttpProbe, mergeProbeManifestWrite, mergeShellProbe, probeManifestWriteRefusal };
 import { elementForTool } from '../contracts/toolTaxonomy.js';
 import puppeteer, { type Browser } from 'puppeteer';
 
@@ -97,9 +98,17 @@ export function writeFileTool(opts: BuiltinToolOptions): BuiltinTool {
       const path = expectString(args, 'path');
       const content = expectString(args, 'content');
       const abs = opts.sandbox.resolve(path);
+      const isManifest = isProbeManifestPath(opts.sandbox, path);
+      if (isManifest) {
+        // Refuse BEFORE mkdir/write: an unparseable manifest must never reach
+        // disk, whether it would have been merged or created. See
+        // `probeManifestWriteRefusal` for the measurement.
+        const refusal = probeManifestWriteRefusal(content);
+        if (refusal) throw new Error(refusal);
+      }
       mkdirSync(dirname(abs), { recursive: true });
       const finalContent =
-        isProbeManifestPath(opts.sandbox, path) && existsSync(abs)
+        isManifest && existsSync(abs)
           ? mergeProbeManifestWrite(readFileSync(abs, 'utf8'), content)
           : content;
       writeFileSync(abs, finalContent, 'utf8');
@@ -1640,8 +1649,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             }
           } catch (err) {
             smokeOk = false;
-            smokeResult = { error: (err as Error).message };
-            errors.push(`smoke evaluation threw: ${(err as Error).message}`);
+            const raw = (err as Error).message;
+            const explained = diagnoseSmokeEvaluationError(raw) ?? raw;
+            smokeResult = { error: explained };
+            errors.push(`smoke evaluation threw: ${explained}`);
           }
           // Record outcome for the stuck-detector above.
           stuck.record(smoke, smokeOk, pageRevision);
@@ -1916,6 +1927,38 @@ export function interactionPhaseBudgetMs(): number {
  * into a prompt failure instead of a stall.
  */
 export const CDP_PROTOCOL_TIMEOUT_MS = 30_000;
+
+/**
+ * Translate a killed smoke evaluation into advice the CALLER can act on.
+ *
+ * Puppeteer reports "Runtime.evaluate timed out. Increase the
+ * 'protocolTimeout' setting in launch/connect calls…" — advice for whoever
+ * builds the harness, not for the model composing the smoke, which cannot
+ * change our launch options and will read it as "ask for more time".
+ * AGENTS states the pattern for `holdMs`: a clamp the model cannot see just
+ * turns a long dead end into a short mystery.
+ *
+ * MEASURED 2026-08-21, batch 3 / web-countdown: two smokes awaited 33s and
+ * 35s of REAL TIME to let a 30-second countdown tick down. Both were killed
+ * at the CDP timeout having burned ~45s of wall clock each and returned
+ * nothing, and the run failed on its 900s budget. The remedy is the one the
+ * `holdMs` description already gives — drive the app's own clock hook — so
+ * say that here, where the failure is actually observed.
+ *
+ * Returns the replacement message, or null to keep the original verbatim.
+ */
+export function diagnoseSmokeEvaluationError(message: string): string | null {
+  if (!/timed out/i.test(message)) return null;
+  if (!/protocolTimeout|Runtime\.evaluate/i.test(message)) return null;
+  return (
+    `your smoke was KILLED after ${Math.round(CDP_PROTOCOL_TIMEOUT_MS / 1000)}s and returned nothing. ` +
+    `The browser runs in REAL TIME and cannot fast-forward, so an await inside a smoke is for ONE ` +
+    `repaint or transition — hundreds of milliseconds — never for the wall-clock progress of a timer, ` +
+    `countdown or animation loop. Expose a clock hook from the app instead ` +
+    `(window.__test.advance(ms) that moves its internal time AND repaints), drive that from the smoke, ` +
+    `and assert the state it produces. Original error: ${message}`
+  );
+}
 
 /**
  * Is this failing request Chrome's OWN speculative favicon fetch?

@@ -5,9 +5,12 @@ import {
   SMOKE_DESIGN_GUIDANCE,
 } from '../src/atoms/prompts.js';
 import {
+  CDP_PROTOCOL_TIMEOUT_MS,
   detectSmokeStatementError,
   detectBrittleComputedStyleLiteral,
   detectResetErasedIntermediateEvidence,
+  diagnoseSmokeEvaluationError,
+  probeManifestWriteRefusal,
 } from '../src/tools/builtin.js';
 import { smokeOkIncludesStyling } from '../src/contracts/probeManifest.js';
 
@@ -95,6 +98,55 @@ describe('SMOKE_DESIGN_GUIDANCE ↔ validate_html pre-flight guards', () => {
     for (const line of SMOKE_CANONICAL_STATE_SHAPE.split('\n')) {
       expect(SMOKE_DESIGN_GUIDANCE).toContain(line);
     }
+  });
+
+  // BATCH 3 REGRESSION, self-inflicted: teaching the smoke to await made the
+  // model await REAL TIME for a 30-second countdown. Two smokes were killed at
+  // the CDP timeout having burned ~45s each, and the run failed on its budget.
+  // The await is legitimate; unbounded it is not.
+  it('bounds the await, and the guidance quotes the real CDP ceiling', () => {
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/THE settle\(\) AWAIT IS BOUNDED/);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/window\.__test\.advance\(ms\)/);
+    // The prose states the ceiling in seconds. `src/atoms/` must not import
+    // from `src/tools/`, so the two are pinned here instead of shared: if the
+    // constant moves, this fails rather than the guidance quietly lying.
+    const seconds = Math.round(CDP_PROTOCOL_TIMEOUT_MS / 1000);
+    expect(SMOKE_DESIGN_GUIDANCE).toContain(`still running after ${seconds}s is KILLED`);
+  });
+
+  it('replaces the leaked Puppeteer protocolTimeout advice with a diagnosis', () => {
+    const puppeteer =
+      "Runtime.evaluate timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.";
+    const out = diagnoseSmokeEvaluationError(puppeteer);
+    expect(out).not.toBeNull();
+    expect(out).toMatch(/KILLED after 30s/);
+    expect(out).toMatch(/window\.__test\.advance\(ms\)/);
+    // The original is kept: it is still the ground truth of what threw.
+    expect(out).toContain(puppeteer);
+  });
+
+  it('leaves an unrelated smoke error verbatim', () => {
+    expect(diagnoseSmokeEvaluationError("Unexpected token 'const'")).toBeNull();
+    expect(diagnoseSmokeEvaluationError('el is not defined')).toBeNull();
+    // "timed out" alone is not enough — it must be the CDP evaluate timeout.
+    expect(diagnoseSmokeEvaluationError('fetch timed out after 5s')).toBeNull();
+  });
+
+  // FIX-5: two VALID model documents merged fine; a third, INVALID one was
+  // passed through verbatim and landed unreadable on disk (raw newline inside
+  // a string, position 6408). The ground-truth probe then reported MALFORMED
+  // and the run paid an extra execute cycle to repair our own write.
+  it('refuses an unparseable probe manifest, and only the incoming side', () => {
+    const raw = '{"version":1,"entries":[{"probe":"web","file":"index.html","smoke":"a\nb"}]}';
+    const refusal = probeManifestWriteRefusal(raw);
+    expect(refusal).not.toBeNull();
+    expect(refusal).toMatch(/not valid JSON/);
+    expect(refusal).toMatch(/Nothing was written/);
+    // Repair is preserved: a VALID replacement is always allowed through, even
+    // when the manifest already on disk is the broken one.
+    expect(
+      probeManifestWriteRefusal('{"version":1,"entries":[]}')
+    ).toBeNull();
   });
 
   it('still refuses the shapes the guards refuse (guard sanity, not tautology)', () => {
