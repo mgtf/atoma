@@ -205,6 +205,11 @@ function checkVisualizerAuth(env: NodeJS.ProcessEnv): DoctorCheck {
 }
 
 function checkGitHubApp(env: NodeJS.ProcessEnv): DoctorCheck {
+  // EVERY App-specific key arms the probe — including KEY_ID (a rotation
+  // leftover) and API_URL (a GHES half-config), which used to report
+  // 'disabled' instead of the documented half-present hard failure. The
+  // oauth/legacy client keys stay out: GitHub LOGIN legitimately exists
+  // without the App.
   const appConfigPresent = [
     GITHUB_APP_ENV.appId,
     GITHUB_APP_ENV.appSlug,
@@ -212,6 +217,8 @@ function checkGitHubApp(env: NodeJS.ProcessEnv): DoctorCheck {
     GITHUB_APP_ENV.privateKeyPath,
     GITHUB_APP_ENV.webhookSecret,
     GITHUB_APP_ENV.tokenEncryptionKey,
+    GITHUB_APP_ENV.tokenEncryptionKeyId,
+    GITHUB_APP_ENV.apiUrl,
   ].some((name) => env[name] !== undefined);
   if (!appConfigPresent) {
     return {

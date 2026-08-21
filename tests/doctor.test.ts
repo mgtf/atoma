@@ -153,6 +153,22 @@ describe('atoma doctor', () => {
       remedy: expect.stringContaining('ATOMA_GITHUB_APP_ID'),
     });
     expect(half.ready).toBe(false);
+
+    // A rotation leftover (KEY_ID alone) or a GHES half-config (API_URL
+    // alone) is the same half-present hard failure — these two keys used to
+    // be missing from the presence probe and reported 'disabled'.
+    for (const leftover of [
+      { ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY_ID: 'k2' },
+      { ATOMA_GITHUB_API_URL: 'https://ghes.example/api/v3' },
+    ]) {
+      const stale = await diagnoseDoctor({
+        mode: { container: false, egress: false },
+        env: { ATOMA_LLM: 'anthropic', ANTHROPIC_API_KEY: 'configured', ...leftover },
+        dependencies: dependencies(),
+      });
+      expect(stale.checks.find((check) => check.id === 'github-app')?.status).toBe('fail');
+      expect(stale.ready).toBe(false);
+    }
   });
 
   it.each([
