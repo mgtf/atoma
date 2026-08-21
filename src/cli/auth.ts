@@ -14,7 +14,9 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { authPublicOrigin, VIZ_PUBLIC_ORIGIN_ENV } from '../auth/gate.js';
 import { AuthStore, ORG_ROLES, type OrgRole } from '../auth/store.js';
+import { eventLabel } from '../contracts/platformEvents.js';
 import { storeDbPath } from '../core/stores.js';
+import { PlatformEventLog } from '../platform/events.js';
 import { parseCliArgs } from './args.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
 
@@ -215,6 +217,19 @@ export function runAuthCli(
         ? store.grantPlatformAdmin(principalRef)
         : store.revokePlatformAdmin(principalRef);
       const verb = command === 'grant-admin' ? 'granted to' : 'revoked from';
+      // Journaled from a SEPARATE PROCESS: this writes the audit row into the
+      // same store, and notifies nobody — the in-process bus lives in the viz
+      // server. Operator power changing hands is exactly the kind of fact
+      // that must survive in the journal even when no server is running.
+      // A no-op (`already`) is not journaled: nothing changed.
+      if (!result.already) {
+        PlatformEventLog.open(dbPath).append({
+          kind: command === 'grant-admin' ? 'admin.granted' : 'admin.revoked',
+          actorType: 'cli',
+          summary: `Platform admin ${verb} ${eventLabel(result.displayName)}`,
+          detail: { principalId: result.principalId },
+        });
+      }
       if (result.already) {
         console.log(
           command === 'grant-admin'
@@ -254,6 +269,14 @@ export function runAuthCli(
       token,
       role,
       ttlMs: ttlHours * 60 * 60 * 1_000,
+    });
+    // The token stays out of the journal, exactly as on the HTTP path.
+    PlatformEventLog.open(dbPath).append({
+      kind: 'invitation.created',
+      actorType: 'cli',
+      orgId: invitation.orgId,
+      summary: `Invitation minted for "${eventLabel(invitation.orgName)}" at role ${role}`,
+      detail: { role, ttlHours, expiresAt: invitation.expiresAt },
     });
     console.log(
       `Invitation created for ${role} in ${safeTerminal(invitation.orgName)} (${invitation.orgId}); expires ${invitation.expiresAt}.`

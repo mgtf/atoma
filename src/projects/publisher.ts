@@ -7,6 +7,7 @@ import {
   readManifestArtifact,
 } from './artifacts.js';
 import type { Project, ProjectRun, Publication } from '../contracts/projects.js';
+import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
 
 /**
  * GITHUB PUBLISHER — turns a delivered run's artifact manifest into a GitHub
@@ -39,6 +40,13 @@ export interface GitHubPublisherDeps {
    * use the installation token instead.
    */
   readonly resolveUserAccessToken?: (principalId: string) => Promise<string>;
+  /**
+   * Optional audit sink. Its ABSENCE was the blind spot this closes: the
+   * publisher's throw is swallowed by the coordinator (whose catch only
+   * transitions runs still `running`), so before this hook a failed
+   * publication existed solely as a column on a row nobody watched.
+   */
+  readonly events?: PlatformEventSink;
 }
 
 function errorMessage(error: unknown): string {
@@ -131,12 +139,14 @@ export class GitHubPublisher {
   private readonly github: GitHubStore;
   private readonly store: ProjectStore;
   private readonly resolveUserAccessToken?: (principalId: string) => Promise<string>;
+  private readonly events: PlatformEventSink;
 
   constructor(deps: GitHubPublisherDeps) {
     this.client = deps.client;
     this.github = deps.github;
     this.store = deps.store;
     this.resolveUserAccessToken = deps.resolveUserAccessToken;
+    this.events = deps.events ?? (() => undefined);
   }
 
   /**
@@ -280,8 +290,37 @@ export class GitHubPublisher {
           commitSha: commit.commitSha,
         },
       });
+      this.events({
+        kind: 'publication.published',
+        actorType: 'principal',
+        actorId: run.requestedByPrincipalId,
+        orgId: project.orgId,
+        projectId: project.projectId,
+        runId: run.projectRunId,
+        summary: `Published to ${eventLabel(repository.fullName, 80)}`,
+        detail: {
+          repository: repository.fullName,
+          url: repository.url,
+          commitSha: commit.commitSha,
+          files: run.artifactManifest.files.length,
+        },
+      });
       return publishing;
     } catch (error) {
+      // Emitted BEFORE the state transition below, and outside its try: the
+      // transition can itself fail (that is why it has its own catch), and a
+      // publication failure nobody is told about is the exact defect this
+      // hook exists to remove.
+      this.events({
+        kind: 'publication.failed',
+        actorType: 'principal',
+        actorId: run.requestedByPrincipalId,
+        orgId: project.orgId,
+        projectId: project.projectId,
+        runId: run.projectRunId,
+        summary: `Publication failed: ${eventLabel(errorMessage(error), 120)}`,
+        detail: { project: project.slug },
+      });
       try {
         const current = this.store.getPublication(project.orgId, publication.publicationId);
         if (current && current.status === 'publishing') {

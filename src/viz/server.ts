@@ -69,6 +69,8 @@ import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService } from '../projects/service.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
+import { PlatformEventLog } from '../platform/events.js';
+import { eventLabel } from '../contracts/platformEvents.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -290,6 +292,24 @@ const AUTH_RUNTIME: VizAuthRuntime | null = (() => {
 
 const AUTH = AUTH_RUNTIME?.gate ?? null;
 
+/**
+ * PLATFORM EVENT LOG. Gated deployments only — every event it records is
+ * scoped to a principal, an organisation or the instance operator, and none
+ * of those exist on the ungated developer path. Declared before the sweep
+ * timer below, which is its retention driver.
+ */
+const EVENTS: PlatformEventLog | null = AUTH_RUNTIME
+  ? PlatformEventLog.open(DBS[0]!.path)
+  : null;
+
+/**
+ * Fail-open emit helper. `EVENTS` is null on the ungated path, and `append`
+ * itself never throws, so no call site needs a guard or a try/catch.
+ */
+const emit: (input: Parameters<PlatformEventLog['append']>[0]) => void = (input) => {
+  EVENTS?.append(input);
+};
+
 if (AUTH?.store) {
   const sweepTimer = setInterval(() => {
     try {
@@ -297,6 +317,9 @@ if (AUTH?.store) {
     } catch (error) {
       console.error('[viz auth] failed to sweep expired auth records', error);
     }
+    // Retention rides the same tick: one timer, two bounded tables. The log
+    // sweeps fail-open on its own, so it needs no try/catch here.
+    EVENTS?.sweep();
   }, 5 * 60 * 1000);
   sweepTimer.unref();
 }
@@ -385,6 +408,7 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
         client: githubClient,
         github: githubStore,
         store: projectStore,
+        events: emit,
         resolveUserAccessToken: githubProvider
           ? (principalId) =>
               resolveGitHubUserAccessToken({
@@ -401,11 +425,23 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     dbPath,
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
-    // Real notifications even when the browser is closed: the terminal-run
-    // hook pushes to the requesting principal's subscribed browsers.
-    ...(PUSH_RUNTIME
-      ? { onRunFinished: (event) => PUSH_RUNTIME.notifier.notifyRunFinished(event) }
-      : {}),
+    // Real notifications even when the browser is closed, plus the audit
+    // row. `run.cancelled` (requested, emitted by the service) and a
+    // `run.finished` carrying status `cancelled` are DIFFERENT facts at
+    // different times — the ask and the actual end — so both are journaled.
+    onRunFinished: (event) => {
+      emit({
+        kind: 'run.finished',
+        actorType: 'principal',
+        actorId: event.principalId,
+        orgId: event.orgId,
+        projectId: event.projectId,
+        runId: event.projectRunId,
+        summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
+        detail: { status: event.status },
+      });
+      return PUSH_RUNTIME?.notifier.notifyRunFinished(event);
+    },
   });
   // A previous process that died mid-run left rows only its in-memory
   // drivers could ever move. Recover them BEFORE any new run can start,
@@ -415,11 +451,18 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     process.stderr.write(
       `[atoma viz] recovered interrupted project state: ${recovered.runs} run(s) and ${recovered.publications} publication(s) marked failed\n`
     );
+    emit({
+      kind: 'server.recovered',
+      actorType: 'system',
+      summary: `Recovered ${recovered.runs} interrupted run(s) and ${recovered.publications} publication(s) after a restart`,
+      detail: { runs: recovered.runs, publications: recovered.publications },
+    });
   }
   const projects = new ProjectService({
     store: projectStore,
     coordinator,
     github: githubStore,
+    events: emit,
   });
   return { store: projectStore, projects, coordinator, githubStore, githubConfig, githubClient };
 })();
@@ -1153,6 +1196,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         req,
         store: PROJECTS_RUNTIME.githubStore,
         config: PROJECTS_RUNTIME.githubConfig,
+        events: emit,
       })
     );
     return;
@@ -1192,6 +1236,16 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       }
       const rate = acceptLoginAttempt(req, AUTH_RUNTIME.trustedProxies);
       if (!rate.accepted) {
+        // The refusal itself is the event. The client address is the limiter's
+        // bucket key and stays OUT of the journal: it is a network identifier
+        // for a request nobody has authenticated, and the audit surface is
+        // read by an operator, not by an abuse pipeline.
+        emit({
+          kind: 'auth.rate_limited',
+          actorType: 'system',
+          summary: `Login attempts rate-limited for provider ${provider.id}`,
+          detail: { provider: provider.id, retryAfterSeconds: rate.retryAfterSeconds },
+        });
         res.writeHead(429, {
           ...AUTH_SECURITY_HEADERS,
           'retry-after': String(rate.retryAfterSeconds),
@@ -1214,6 +1268,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         });
       } catch (error) {
         if (error instanceof TooManyPendingOauthStatesError) {
+          emit({
+            kind: 'auth.state_flood',
+            actorType: 'system',
+            summary: 'Pending OAuth transaction ceiling reached; login refused',
+            detail: { provider: provider.id },
+          });
           sendJson(res, 429, { error: 'too many pending login transactions' });
           return;
         }
@@ -1344,6 +1404,29 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         if (!outcome) {
           fail('invitationRequired');
           return;
+        }
+        // The two admission facts, journaled where the outcome is known and
+        // nowhere else. `createdOrganisation` and `joinedOrganisation` are
+        // exclusive by construction in `completeLogin`, so at most one of
+        // these fires per login.
+        if (outcome.createdOrganisation) {
+          emit({
+            kind: 'org.created',
+            actorType: 'principal',
+            actorId: outcome.viewer.principalId,
+            orgId: outcome.viewer.orgId,
+            summary: `New organisation "${eventLabel(outcome.viewer.orgName)}" founded by its first login`,
+            detail: { provider: provider.id, role: outcome.viewer.role },
+          });
+        } else if (outcome.joinedOrganisation) {
+          emit({
+            kind: 'org.member_joined',
+            actorType: 'principal',
+            actorId: outcome.viewer.principalId,
+            orgId: outcome.viewer.orgId,
+            summary: `${eventLabel(outcome.viewer.displayName)} joined "${eventLabel(outcome.viewer.orgName)}" by invitation`,
+            detail: { provider: provider.id, role: outcome.viewer.role },
+          });
         }
         if (
           provider.id === 'github' &&
@@ -1513,6 +1596,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           setupAction: url.searchParams.get('setup_action'),
           authorizePath: '/auth/github/authorize',
           homePath: '/',
+          events: emit,
         })
       );
       return;
@@ -1641,6 +1725,17 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             role: role as OrgRole,
             ttlMs: ttlHours * 60 * 60 * 1_000,
           });
+          // The TOKEN never enters the journal, not even hashed: an audit row
+          // must not be a bearer credential. Who minted it, for which org and
+          // at which role is the auditable part.
+          emit({
+            kind: 'invitation.created',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: invitation.orgId,
+            summary: `Invitation minted for "${eventLabel(invitation.orgName)}" at role ${role}`,
+            detail: { role, ttlHours, expiresAt: invitation.expiresAt },
+          });
           sendJson(res, 200, {
             token,
             url: AUTH_RUNTIME
@@ -1695,9 +1790,19 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       const input = body as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
       const endpoint = typeof input.endpoint === 'string' ? input.endpoint : '';
       if (pathname === '/api/push/unsubscribe') {
-        sendJson(res, 200, {
-          removed: PUSH_RUNTIME.store.deleteSubscription(viewer.principalId, endpoint),
-        });
+        const removed = PUSH_RUNTIME.store.deleteSubscription(viewer.principalId, endpoint);
+        // The endpoint is a per-browser bearer URL: journal THAT a device was
+        // detached, never which one.
+        if (removed) {
+          emit({
+            kind: 'push.unsubscribed',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary: 'Notification subscription removed for one browser',
+          });
+        }
+        sendJson(res, 200, { removed });
         return;
       }
       const p256dh = typeof input.keys?.p256dh === 'string' ? input.keys.p256dh : '';
@@ -1715,6 +1820,13 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         });
         return;
       }
+      emit({
+        kind: 'push.subscribed',
+        actorType: 'principal',
+        actorId: viewer.principalId,
+        orgId: viewer.orgId,
+        summary: 'Notification subscription added for one browser',
+      });
       sendJson(res, 200, { subscribed: true });
       return;
     }

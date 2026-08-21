@@ -1,4 +1,6 @@
 import type { IncomingMessage } from 'node:http';
+import type { PlatformEventSink } from '../contracts/platformEvents.js';
+import { eventLabel } from '../contracts/platformEvents.js';
 import type { ProviderConfig } from '../auth/providers.js';
 import {
   buildAuthorizeUrl,
@@ -79,6 +81,12 @@ export async function handleGitHubWebhook(input: {
   readonly req: IncomingMessage;
   readonly store: GitHubStore;
   readonly config: GitHubAppConfig;
+  /**
+   * Optional audit sink. Injected rather than imported so the github module
+   * keeps knowing nothing about the viz server, and so a caller without an
+   * event log (tests, the ungated path) behaves exactly as before.
+   */
+  readonly events?: PlatformEventSink;
 }): Promise<GitHubHttpResult> {
   try {
     const rawBody = await readBoundedBody(input.req, GITHUB_WEBHOOK_MAX_BODY_BYTES);
@@ -90,10 +98,20 @@ export async function handleGitHubWebhook(input: {
       signature: headerValue(input.req.headers['x-hub-signature-256']),
       deliveryId: headerValue(input.req.headers['x-github-delivery']),
       event: headerValue(input.req.headers['x-github-event']),
+      ...(input.events ? { events: input.events } : {}),
     });
     return { kind: 'json', status: 202, body: result };
   } catch (error) {
     if (error instanceof GitHubWebhookError) {
+      // An unauthenticated caller reached a control-plane endpoint and was
+      // refused. The refusal CODE is the auditable fact; the body is not
+      // journaled — it is attacker-controlled bytes of unbounded shape.
+      input.events?.({
+        kind: 'webhook.rejected',
+        actorType: 'webhook',
+        summary: `GitHub webhook refused: ${error.code}`,
+        detail: { code: error.code },
+      });
       return { kind: 'json', status: webhookStatus(error), body: { error: error.message } };
     }
     throw error;
@@ -140,6 +158,7 @@ export async function completeGitHubSetup(input: {
   readonly setupAction: string | null;
   readonly authorizePath: string;
   readonly homePath: string;
+  readonly events?: PlatformEventSink;
 }): Promise<GitHubHttpResult> {
   const forbidden = requireAdmin(input.viewer);
   if (forbidden) return forbidden;
@@ -166,6 +185,18 @@ export async function completeGitHubSetup(input: {
       repositorySelection: installation.repositorySelection,
       permissions: installation.permissions,
       connectedByPrincipalId: input.viewer.principalId,
+    });
+    input.events?.({
+      kind: 'github.installation_linked',
+      actorType: 'principal',
+      actorId: input.viewer.principalId,
+      orgId: input.viewer.orgId,
+      summary: `GitHub installation linked for ${eventLabel(installation.accountLogin)} (${installation.targetType})`,
+      detail: {
+        installationId: installation.installationId,
+        targetType: installation.targetType,
+        repositorySelection: installation.repositorySelection,
+      },
     });
     if (
       installation.targetType === 'User' &&

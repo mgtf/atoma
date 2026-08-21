@@ -8,6 +8,7 @@ import {
   type Project,
   type ProjectRun,
 } from '../contracts/projects.js';
+import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
 import { GitHubStore } from '../github/store.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
 import {
@@ -48,6 +49,12 @@ export interface ProjectServiceDeps {
   readonly store: import('./store.js').ProjectStore;
   readonly coordinator: ProjectRunCoordinator;
   readonly github: GitHubStore | null;
+  /**
+   * Optional audit sink, injected rather than imported: the project control
+   * plane must not learn about the viz server's event log to be testable.
+   * Absent means "no journal", never "broken".
+   */
+  readonly events?: PlatformEventSink;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -110,11 +117,14 @@ export class ProjectService {
   private readonly store: import('./store.js').ProjectStore;
   private readonly coordinator: ProjectRunCoordinator;
   private readonly github: GitHubStore | null;
+  private readonly events: PlatformEventSink;
 
   constructor(deps: ProjectServiceDeps) {
     this.store = deps.store;
     this.coordinator = deps.coordinator;
     this.github = deps.github;
+    // A no-op default keeps every emission site free of `?.` noise.
+    this.events = deps.events ?? (() => undefined);
   }
 
   /** GET /api/github/installations — org-scoped. */
@@ -176,6 +186,15 @@ export class ProjectService {
         principalId: viewer.principalId,
         project: input.data,
       });
+      this.events({
+        kind: 'project.created',
+        actorType: 'principal',
+        actorId: viewer.principalId,
+        orgId: viewer.orgId,
+        projectId: project.projectId,
+        summary: `Project "${eventLabel(project.name)}" created`,
+        detail: { slug: project.slug, family: project.family },
+      });
       return publicProject(project);
     } catch (error) {
       if (error instanceof Error && /UNIQUE constraint failed: projects\.org_id, projects\.slug/.test(error.message)) {
@@ -211,6 +230,17 @@ export class ProjectService {
         projectId,
         request: input.data,
       });
+      // The GOAL is model-facing prose of arbitrary length and content; only
+      // its bounded label reaches the journal, and never the whole prompt.
+      this.events({
+        kind: 'run.started',
+        actorType: 'principal',
+        actorId: viewer.principalId,
+        orgId: viewer.orgId,
+        projectId,
+        runId: run.projectRunId,
+        summary: `Run started: ${eventLabel(run.goal, 120)}`,
+      });
       const publication = this.store.getPublicationForRun(viewer.orgId, run.projectRunId);
       return publicRun(run, publication);
     } catch (error) {
@@ -238,6 +268,18 @@ export class ProjectService {
     }
     const cancelled = this.coordinator.cancel(viewer.orgId, projectRunId);
     if (!cancelled) throw new ProjectHttpError(404, 'project run not found');
+    // WHO asked is the point of this one: `coordinator.cancel` takes only an
+    // org and a run id, so the requesting principal is knowable here and
+    // nowhere downstream.
+    this.events({
+      kind: 'run.cancelled',
+      actorType: 'principal',
+      actorId: viewer.principalId,
+      orgId: viewer.orgId,
+      projectId,
+      runId: projectRunId,
+      summary: `Run cancellation requested: ${eventLabel(cancelled.goal, 120)}`,
+    });
     const publication = this.store.getPublicationForRun(viewer.orgId, cancelled.projectRunId);
     return publicRun(cancelled, publication);
   }

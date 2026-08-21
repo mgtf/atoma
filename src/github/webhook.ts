@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { TextDecoder } from 'node:util';
+import type { PlatformEventSink } from '../contracts/platformEvents.js';
 import { canonicalGitHubId } from './config.js';
 import {
   type GitHubInstallationStatus,
@@ -36,6 +37,11 @@ export interface ProcessGitHubWebhookInput {
   readonly deliveryId: string | undefined;
   readonly event: string | undefined;
   readonly receivedAt?: Date | number;
+  /**
+   * Optional audit sink, injected rather than imported so this module keeps
+   * knowing nothing about the viz server. Absent means "no journal".
+   */
+  readonly events?: PlatformEventSink;
 }
 
 export interface ProcessGitHubWebhookResult {
@@ -152,6 +158,21 @@ export function processGitHubWebhook(
     ...(mutation === undefined ? {} : { mutation }),
     ...(input.receivedAt === undefined ? {} : { receivedAt: input.receivedAt }),
   });
+  // Only a transition that actually MOVED stored state is worth an event: a
+  // duplicate delivery, a `touch`, and an unlinked installation all leave the
+  // organisation's publication pipeline exactly as it was. Emitted here
+  // rather than returned to the caller, so the HTTP body GitHub receives
+  // stays exactly what it has always been.
+  if (input.events && delivery.applied && mutation?.kind === 'transition') {
+    const installation = input.store.getInstallation(mutation.installationId);
+    input.events({
+      kind: 'github.installation_status',
+      actorType: 'webhook',
+      ...(installation?.orgId ? { orgId: installation.orgId } : {}),
+      summary: `GitHub installation ${mutation.installationId} is now ${mutation.status}`,
+      detail: { installationId: mutation.installationId, status: mutation.status },
+    });
+  }
   return Object.freeze({
     accepted: true,
     duplicate: delivery.duplicate,

@@ -151,6 +151,31 @@ export type PlatformEventActorType = z.infer<typeof platformEventActorTypeSchema
 export type PlatformEventInput = z.input<typeof platformEventInputSchema>;
 export type PlatformEvent = z.infer<typeof platformEventSchema>;
 
+export const EVENT_LABEL_MAX_CHARS = 48;
+
+/**
+ * Make an untrusted string safe to interpolate into a `summary`.
+ *
+ * LOAD-BEARING, not cosmetic. Display names, organisation names and error
+ * strings reach summaries from OAuth providers, GitHub and model-adjacent
+ * failures. An unbounded one blows the 200-char cap and a newline trips the
+ * control-character refusal — and because the log is FAIL-OPEN, either one
+ * would silently DROP the audit event rather than shorten it. Every call
+ * site that interpolates text it did not author goes through this.
+ */
+export function eventLabel(value: string, maxChars = EVENT_LABEL_MAX_CHARS): string {
+  const flattened = [...value.trim()]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f ? ' ' : character;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (flattened.length === 0) return '(unnamed)';
+  return flattened.length > maxChars ? `${flattened.slice(0, maxChars - 1)}…` : flattened;
+}
+
 /** One declarative table: kind → severity. Exhaustive by construction. */
 export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSeverity> = {
   'run.started': 'info',

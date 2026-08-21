@@ -149,6 +149,20 @@ export interface LoginOutcome {
   viewer: Viewer;
   /** True when this login created the principal (vs returning an existing one). */
   createdPrincipal: boolean;
+  /**
+   * True when this login FOUNDED an organisation — a first login carrying no
+   * invitation. The platform's growth signal, and the one thing a caller
+   * cannot infer from the viewer alone (an owner of a long-standing org and
+   * the founder of a brand-new one look identical there).
+   */
+  createdOrganisation: boolean;
+  /**
+   * True when this login INSERTED a membership into an organisation that
+   * already existed — i.e. an invitation admitted someone. Distinct from
+   * `createdOrganisation` (a founder joins nothing) and from merely
+   * consuming an invitation whose membership was already present.
+   */
+  joinedOrganisation: boolean;
 }
 
 export interface CompletedProviderIdentity {
@@ -541,6 +555,10 @@ export class AuthStore {
       if (principal) {
         let membership: MembershipRow | undefined;
         let org: OrganisationRow | undefined;
+        // Set only when a membership row is actually INSERTED below. An
+        // invitation re-used by someone who is already a member consumes the
+        // token without admitting anybody, and must not read as an admission.
+        let joinedOrganisation = false;
 
         if (invitation) {
           membership = this.db
@@ -566,6 +584,7 @@ export class AuthStore {
               role: invitation.role,
               created_at: now,
             };
+            joinedOrganisation = true;
           }
           org = {
             org_id: invitation.org_id,
@@ -625,6 +644,10 @@ export class AuthStore {
             platformAdmin: this.isPlatformAdmin(principal.principal_id),
           },
           createdPrincipal: false,
+          // A returning principal never founds an organisation: the personal
+          // org is created on the FIRST login only.
+          createdOrganisation: false,
+          joinedOrganisation,
         };
       }
 
@@ -680,6 +703,11 @@ export class AuthStore {
           platformAdmin: false,
         },
         createdPrincipal: true,
+        // The two are exclusive by construction: the organisation INSERT
+        // above runs exactly when there is no invitation, and an invitation
+        // is exactly what admits this principal into someone else's org.
+        createdOrganisation: !invitation,
+        joinedOrganisation: Boolean(invitation),
       };
     });
     return run.immediate();
