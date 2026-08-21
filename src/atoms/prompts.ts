@@ -27,6 +27,48 @@ import type { Plan } from '../core/types.js';
  *       random clicks that could not produce a mate.
  */
 /**
+ * The canonical state-driving smoke: drive the widget's own API, snapshot
+ * each milestone, return one aggregate verdict.
+ *
+ * ASYNC BY DEFAULT since 2026-08-21, and that is the whole point. A
+ * synchronous smoke holds the JS task, so NOTHING the page updates
+ * asynchronously can be observed by it: CSS transitions have not advanced,
+ * and `setInterval` / `requestAnimationFrame` repaints have not run. Two
+ * burn-in tasks lost real money to that in one day (see
+ * SMOKE_DESIGN_GUIDANCE for both measurements), each asserting a claim that
+ * could not become true inside one task. The `settle()` await is what makes
+ * the copied template correct instead of subtly unobservable.
+ *
+ * Exported and pinned by `tests/smoke-guidance.test.ts` against the real
+ * validate_html pre-flight guards, like SMOKE_ASYNC_TRANSITION_EXAMPLE.
+ */
+export const SMOKE_CANONICAL_STATE_SHAPE = [
+  `interactions: []`,
+  `smoke: (async () => {`,
+  `  const settle = () => new Promise((r) => setTimeout(r, 400));`,
+  `  const w = window.__testOrWidget;`,
+  `  w.reset(); await settle();`,
+  `  const initial = { value: w.value, className: exactElement.className,`,
+  `                    text: exactElement.textContent };`,
+  `  for (let i = 0; i < thresholdFromSource; i++) w.increment();`,
+  `  await settle();  // let the timer/rAF repaint AND any transition finish`,
+  `  const milestone = { value: w.value, className: exactElement.className,`,
+  `                      text: exactElement.textContent };`,
+  `  w.reset(); await settle();`,
+  `  const reset = { value: w.value, className: exactElement.className };`,
+  `  const checks = {`,
+  `    milestoneValueMatches: milestone.value === thresholdFromSource,`,
+  `    milestoneStyleMatches: milestone.className === classFromSource,`,
+  `    milestoneTextRepainted: milestone.text !== initial.text,`,
+  `    resetMatches: reset.value === initial.value &&`,
+  `                  reset.className === initial.className,`,
+  `  };`,
+  `  return { ok: Object.values(checks).every(Boolean), checks,`,
+  `           initial, milestone, reset };`,
+  `})()`,
+].join('\n');
+
+/**
  * The canonical async smoke for reading a TRANSITIONED computed value.
  *
  * Exported as a CONSTANT rather than left as prose inside the guidance
@@ -124,41 +166,36 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `include the actual class/style/color value and \`ok\` must compare the`,
   `milestone and reset styling — counters or status labels alone are insufficient.`,
   `Use this canonical shape instead of inventing a new sequence each time:`,
-  `  interactions: []`,
-  `  smoke: (() => {`,
-  `    const w = window.__testOrWidget;`,
-  `    w.reset();`,
-  `    const initial = { value: w.value, className: exactElement.className };`,
-  `    for (let i = 0; i < thresholdFromSource; i++) w.increment();`,
-  `    const milestone = { value: w.value, className: exactElement.className };`,
-  `    w.reset();`,
-  `    const reset = { value: w.value, className: exactElement.className };`,
-  `    const checks = {`,
-  `      milestoneValueMatches: milestone.value === thresholdFromSource,`,
-  `      milestoneStyleMatches: milestone.className === classFromSource,`,
-  `      resetMatches: reset.value === initial.value &&`,
-  `                    reset.className === initial.className,`,
-  `    };`,
-  `    return { ok: Object.values(checks).every(Boolean), checks,`,
-  `             initial, milestone, reset };`,
-  `  })()`,
+  ...SMOKE_CANONICAL_STATE_SHAPE.split('\n').map((line) => `  ${line}`),
   `Derive exactElement id, threshold, labels and class names by reading the`,
   `CURRENT source first. Never query an id or expect a label you did not read.`,
   ``,
-  `== TRANSITIONED PROPERTIES: A SYNCHRONOUS COMPUTED READ IS ALWAYS STALE ==`,
-  `Before asserting ANY colour, size or opacity, read the source for`,
-  `\`transition\`. If the property you are about to inspect is transitioned, a`,
-  `getComputedStyle() read taken right after the click or class toggle returns`,
-  `the value from BEFORE the animation: the class is already on the element and`,
-  `the computed value has not moved yet. VERIFIED in Chrome against`,
-  `\`#count{transition:all .3s ease}\` + \`#count.negative{color:red}\`:`,
-  `    synchronous read -> { cls:true, computed:"rgb(51, 51, 51)" }   STALE`,
-  `    after await 400ms -> { cls:true, computed:"rgb(255, 0, 0)" }   settled`,
-  `MEASURED 2026-08-21: a click-counter run spent 19 validate_html calls and`,
-  `$0.52 of execute tokens here. Five consecutive smokes asserted the computed`,
-  `colour, each received the stale value, and the model "repaired" its already`,
-  `correct CSS by adding \`!important\` — which does nothing to an animation.`,
-  `In order of preference:`,
+  `== A SYNCHRONOUS SMOKE SEES ONLY WHAT THE PAGE ALREADY COMMITTED ==`,
+  `THE LAW: your smoke holds the JS task while it runs. Anything the page`,
+  `updates ASYNCHRONOUSLY therefore cannot be observed by it — CSS transitions`,
+  `have not advanced, and \`setInterval\` / \`requestAnimationFrame\` repaints`,
+  `have not run. Internal state read from a hook advances (it is computed on`,
+  `demand); the DOM the user would see does not. Assert one against the other`,
+  `and you have written a claim that CANNOT become true, however many times`,
+  `you retry it.`,
+  `Both halves were measured on 2026-08-21, one day apart in the same batch:`,
+  `  CSS TRANSITION. \`#count{transition:all .3s ease}\` +`,
+  `  \`#count.negative{color:red}\`, VERIFIED in Chrome:`,
+  `      synchronous read -> { cls:true, computed:"rgb(51, 51, 51)" }   STALE`,
+  `      after await 400ms -> { cls:true, computed:"rgb(255, 0, 0)" }   settled`,
+  `  The click-counter run spent 19 validate_html calls and $0.52 of execute`,
+  `  tokens here: five consecutive smokes asserted the computed colour, each`,
+  `  received the stale value, and the model "repaired" its already correct CSS`,
+  `  by adding \`!important\` — which does nothing to an animation.`,
+  `  TIMER REPAINT. A stopwatch smoke returned`,
+  `      { elapsed: 988, running: true, display: "00:00.00",`,
+  `        innerHTML: "00:00.00", textContent: "00:00.00" }`,
+  `  — the clock advanced because getElapsedMs() reads Date.now(), while the`,
+  `  display stayed at zero because the setInterval tick that writes it never`,
+  `  got to run. That run cost 18 validate_html calls and 404s.`,
+  `So: if the claim involves a repaint, an animation or a timer, the smoke MUST`,
+  `await. The canonical shape above already does; keep its \`settle()\`.`,
+  `For a STYLING claim specifically, in order of preference:`,
   `  1. ASSERT THE MARKER THE SOURCE TOGGLES — \`classList.contains('negative')\``,
   `     or the inline \`el.style.color\` the script assigns. Deterministic, no`,
   `     timing, and it is what the pre-flight guard means by "the exact`,

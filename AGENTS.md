@@ -777,6 +777,28 @@ Read the archived sections before changing something that merely looks odd.
   contains a squatter. Reserving the pool against `branch` instead was tried
   and reverted: it closed one tier of three and renamed branches to orphan
   `-2` names whose unsuffixed twin could never be issued.
+- A SYNCHRONOUS smoke observes only what the page has already committed, so
+  the canonical state-driving shape (`SMOKE_CANONICAL_STATE_SHAPE`) is ASYNC
+  and keeps its `settle()` awaits. Measured 2026-08-21 twice in one batch: a
+  transitioned colour read back stale (`rgb(51, 51, 51)` with the class
+  already applied) and a stopwatch display stuck at `"00:00.00"` while
+  `elapsed` reached 988ms, because the `setInterval` tick could not run. Both
+  runs retried an assertion that could not become true.
+- Do NOT lower the `skills stats --sim` default to catch semantic twins.
+  Measured 2026-08-21 against three known pairs: they score 0.41, 0.39 and
+  0.26 while a build-vs-probe FALSE positive scores 0.31, so no threshold on
+  matching-surface overlap separates them and the 0.5 default surfaces none of
+  the three. The lexical metric cannot tell "build a Node http service" from
+  "probe a Node http service" — same vocabulary. Prevention belongs at learn
+  time, where the distiller judges each recipe's claim.
+- Do NOT batch the `validate_html` pre-flight refusals into one response.
+  Measured across both 2026-08-21 web runs: every refused payload violated
+  exactly ONE guard, so reporting all of them at once would have saved zero
+  round-trips. They arrive in sequence because the model fixes one rule and
+  then breaks a different one.
+- Moving smoke guidance closer to the call site is NOT the untried variable.
+  The erased-intermediate-state rule already sits in the `smoke` PARAMETER
+  description and the model still violated it six times across two batches.
 - The MCP lease `ALTER TABLE` loop is corruption repair, not version
   migration. The lock DB lives in `~/.atoma/` outside the product store, and
   the burn-in pgid guard already documents it as writable by the run itself;
