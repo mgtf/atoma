@@ -412,6 +412,12 @@ export async function startTask(
 
   const args = parseRunnerArgs(argv);
   const goal = args.goal ?? profile.defaultGoal;
+  // AMBIENT BY DESIGN, unlike the lifecycle toggles and tier pins: the
+  // project coordinator sets these on a per-run CHILD PROCESS env, so two
+  // runs can never share them in production. A library embedder calling
+  // startTask twice in ONE process with ATOMA_RUN_ID set would reuse the id
+  // and overwrite the first run's trace/manifest — spawn per run, or unset
+  // between calls (review 2026-08-20 §3.3).
   const requestedRunId = process.env['ATOMA_RUN_ID'];
   const artifactManifestPath = process.env[ARTIFACT_MANIFEST_PATH_ENV];
   if (requestedRunId !== undefined && !isTraceRunId(requestedRunId)) {
