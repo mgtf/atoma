@@ -140,7 +140,9 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
 - `npm run auth` is the compiled identity/invitation CLI
   (`node dist/cli/auth.js`); contributors use `npm run auth:dev` for source.
 - `release:check` is the release-readiness definition: full check, audit,
-  build, compiled MCP/viz smoke, and doctor help smoke.
+  build, compiled MCP/viz smokes, the compiled auth end-to-end smoke
+  (`auth-release-smoke.mjs`: founder login, CLI invite, member admission),
+  and the auth/doctor help smokes.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
   `npm run build:worker:dev`.
 - Release archives contain no stores, skills, traces, workspaces, or secrets.

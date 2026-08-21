@@ -319,13 +319,15 @@ npm run burnin                    # regenerate the economics table above
 
 ### Optional single-organisation login
 
-The visualizer remains open on loopback by default. Copy `.env.example` to
-`.env` and set `ATOMA_VIZ_AUTH=1`, an exact `ATOMA_VIZ_PUBLIC_ORIGIN`, and at
-least one provider's canonical `ATOMA_AUTH_<PROVIDER>_CLIENT_ID` (plus its
-client secret for GitHub and Google; an approved ChatGPT client may use PKCE
-without one). `npm run viz`, `npm run doctor:dev` and `npm run auth:dev` apply
-unset keys from that file; `npm run viz:serve` still reads only the process
-environment, matching production. For the Vite HMR path the origin is
+The visualizer remains open on loopback by default. The keys to set are
+`ATOMA_VIZ_AUTH=1`, an exact `ATOMA_VIZ_PUBLIC_ORIGIN`, and at least one
+provider's canonical `ATOMA_AUTH_<PROVIDER>_CLIENT_ID` (plus its client
+secret for GitHub and Google; an approved ChatGPT client may use PKCE
+without one) — `.env.example` documents them all. On a source checkout, copy
+it to `.env`: `npm run viz`, `npm run doctor:dev` and `npm run auth:dev`
+apply unset keys from that file. The compiled `npm run viz:serve` reads only
+the process environment (systemd, Docker, the platform), matching
+production — a `.env` file does nothing there. For the Vite HMR path the origin is
 `http://127.0.0.1:5173` (not the API port). Register `${origin}/auth/callback`
 at GitHub, Google or ChatGPT. ChatGPT login requires an approved client; login
 proves identity only and never grants model inference on the person's

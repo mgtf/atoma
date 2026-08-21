@@ -36,7 +36,7 @@ jobs:
           root="atoma-${GITHUB_REF_NAME}"
           mkdir -p "release/${root}"
           cp -R dist docker scripts docs "release/${root}/"
-          cp package.json package-lock.json README.md AGENTS.md CLAUDE.md CHANGELOG.md "release/${root}/"
+          cp package.json package-lock.json README.md AGENTS.md CLAUDE.md CHANGELOG.md .env.example "release/${root}/"
           tar -C release -czf "release/${root}.tar.gz" "${root}"
           (cd release && sha256sum "${root}.tar.gz" > "${root}.tar.gz.sha256")
 
