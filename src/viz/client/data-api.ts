@@ -62,8 +62,12 @@ export const api = {
       body
     ),
   pushConfig: () => fetchJson<{ enabled: boolean; publicKey?: string }>('/api/push/config'),
-  subscribePush: (body: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
-    mutateJson<{ subscribed: boolean }>('/api/push/subscribe', body),
+  subscribePush: (body: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    /** Captured now: a push is generated later with no request to read. */
+    locale: string;
+  }) => mutateJson<{ subscribed: boolean }>('/api/push/subscribe', body),
   unsubscribePush: (body: { endpoint: string }) =>
     mutateJson<{ removed: boolean }>('/api/push/unsubscribe', body),
   adminOrganisations: () => fetchJson<VizAdminOrganisation[]>('/api/admin/organisations'),

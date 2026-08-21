@@ -69,6 +69,8 @@ import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService } from '../projects/service.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
+import { NotificationRouter } from './push/router.js';
+import { asPushLocale } from './push/routes.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
 
@@ -351,6 +353,33 @@ const PUSH_RUNTIME: PushRuntime | null = (() => {
 })();
 
 /**
+ * THE ONE PATH FROM AN EVENT TO A DEVICE. Subscribing the router to the log
+ * means no emitter can notify anybody directly: journal the fact, and the
+ * routing table decides. The audience readers are the auth store's own
+ * queries, wrapped so the router cannot reach anything else.
+ */
+if (EVENTS && PUSH_RUNTIME && AUTH?.store) {
+  const authStore = AUTH.store;
+  const router = new NotificationRouter({
+    notifier: PUSH_RUNTIME.notifier,
+    directory: {
+      // The organisation is selected here rather than passed to the reader,
+      // so this wiring does not depend on that reader's parameter list.
+      ownersOf: (orgId) =>
+        (
+          authStore
+            .listOrganisationsWithMembers()
+            .find((organisation) => organisation.orgId === orgId)?.members ?? []
+        )
+          .filter((member) => member.role === 'org:owner')
+          .map((member) => member.principalId),
+      platformAdmins: () => authStore.listPlatformAdmins().map((admin) => admin.principalId),
+    },
+  });
+  EVENTS.subscribe((event) => router.handle(event));
+}
+
+/**
  * PROJECTS + GITHUB APP RUNTIME.
  *
  * The project control plane exists only when the auth gate is on: projects
@@ -438,9 +467,10 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
         projectId: event.projectId,
         runId: event.projectRunId,
         summary: `Run ${event.status}: ${eventLabel(event.goal, 120)}`,
-        detail: { status: event.status },
+        // `goal` and `status` are what the localised push copy renders from:
+        // `summary` is one English line and could never become French.
+        detail: { status: event.status, goal: eventLabel(event.goal, 120) },
       });
-      return PUSH_RUNTIME?.notifier.notifyRunFinished(event);
     },
   });
   // A previous process that died mid-run left rows only its in-memory
@@ -1416,7 +1446,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             actorId: outcome.viewer.principalId,
             orgId: outcome.viewer.orgId,
             summary: `New organisation "${eventLabel(outcome.viewer.orgName)}" founded by its first login`,
-            detail: { provider: provider.id, role: outcome.viewer.role },
+            detail: {
+              provider: provider.id,
+              role: outcome.viewer.role,
+              orgName: eventLabel(outcome.viewer.orgName),
+            },
           });
         } else if (outcome.joinedOrganisation) {
           emit({
@@ -1425,7 +1459,12 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             actorId: outcome.viewer.principalId,
             orgId: outcome.viewer.orgId,
             summary: `${eventLabel(outcome.viewer.displayName)} joined "${eventLabel(outcome.viewer.orgName)}" by invitation`,
-            detail: { provider: provider.id, role: outcome.viewer.role },
+            detail: {
+              provider: provider.id,
+              role: outcome.viewer.role,
+              member: eventLabel(outcome.viewer.displayName),
+              orgName: eventLabel(outcome.viewer.orgName),
+            },
           });
         }
         if (
@@ -1787,7 +1826,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         sendJson(res, 400, { error: 'request body is not valid JSON' });
         return;
       }
-      const input = body as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+      const input = body as {
+        endpoint?: unknown;
+        keys?: { p256dh?: unknown; auth?: unknown };
+        locale?: unknown;
+      };
       const endpoint = typeof input.endpoint === 'string' ? input.endpoint : '';
       if (pathname === '/api/push/unsubscribe') {
         const removed = PUSH_RUNTIME.store.deleteSubscription(viewer.principalId, endpoint);
@@ -1813,6 +1856,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           endpoint,
           p256dh,
           auth,
+          // The browser's language, captured now because a push is generated
+          // later with no request to read a header off. Anything unrecognised
+          // becomes `en` rather than a 400: a wrong language is a far smaller
+          // failure than a refused subscription.
+          locale: asPushLocale(typeof input.locale === 'string' ? input.locale : null),
         });
       } catch (error) {
         sendJson(res, 400, {

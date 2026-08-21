@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { openStoreHandle, storeDbPath } from '../../core/stores.js';
+import { asPushLocale, type PushLocale } from './routes.js';
 import { fromBase64Url, generateVapidKeys, type VapidKeys } from './webpush.js';
 
 /**
@@ -25,6 +26,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   principal_id TEXT NOT NULL,
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
+  -- The subscriber's language, captured at subscribe time. The server cannot
+  -- infer it later: a push is generated with no request to read a header off.
+  locale TEXT NOT NULL DEFAULT 'en',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -41,6 +45,17 @@ export interface PushSubscriptionRecord {
   readonly endpoint: string;
   readonly p256dh: string;
   readonly auth: string;
+  /** Defaults to `en` when the browser sends nothing recognisable. */
+  readonly locale?: string;
+}
+
+/** What the notifier reads back: locale resolved, never undefined. */
+export interface StoredPushSubscription {
+  readonly principalId: string;
+  readonly endpoint: string;
+  readonly p256dh: string;
+  readonly auth: string;
+  readonly locale: PushLocale;
 }
 
 interface SubscriptionRow {
@@ -48,6 +63,7 @@ interface SubscriptionRow {
   endpoint: string;
   p256dh: string;
   auth: string;
+  locale: string | null;
 }
 
 function validateSubscription(input: PushSubscriptionRecord): void {
@@ -79,7 +95,16 @@ export class PushStore {
   }
 
   static open(path?: string): PushStore {
-    return new PushStore(openStoreHandle(path ?? storeDbPath(), PUSH_TABLES_DDL));
+    const db = openStoreHandle(path ?? storeDbPath(), PUSH_TABLES_DDL);
+    // Additive column migration, the AuthStore pattern: `CREATE TABLE IF NOT
+    // EXISTS` will not add `locale` to a table an earlier build created.
+    const columns = db.prepare('PRAGMA table_info(push_subscriptions)').all() as Array<{
+      name: string;
+    }>;
+    if (!columns.some((column) => column.name === 'locale')) {
+      db.exec("ALTER TABLE push_subscriptions ADD COLUMN locale TEXT NOT NULL DEFAULT 'en'");
+    }
+    return new PushStore(db);
   }
 
   /**
@@ -112,15 +137,24 @@ export class PushStore {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        `INSERT INTO push_subscriptions (endpoint, principal_id, p256dh, auth, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO push_subscriptions (endpoint, principal_id, p256dh, auth, locale, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(endpoint) DO UPDATE SET
            principal_id = excluded.principal_id,
            p256dh = excluded.p256dh,
            auth = excluded.auth,
+           locale = excluded.locale,
            updated_at = excluded.updated_at`
       )
-      .run(input.endpoint, input.principalId, input.p256dh, input.auth, now, now);
+      .run(
+        input.endpoint,
+        input.principalId,
+        input.p256dh,
+        input.auth,
+        asPushLocale(input.locale),
+        now,
+        now
+      );
     this.db
       .prepare(
         `DELETE FROM push_subscriptions
@@ -147,10 +181,10 @@ export class PushStore {
     this.db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
   }
 
-  listForPrincipal(principalId: string): PushSubscriptionRecord[] {
+  listForPrincipal(principalId: string): StoredPushSubscription[] {
     const rows = this.db
       .prepare(
-        'SELECT principal_id, endpoint, p256dh, auth FROM push_subscriptions WHERE principal_id = ? ORDER BY updated_at DESC, endpoint DESC'
+        'SELECT principal_id, endpoint, p256dh, auth, locale FROM push_subscriptions WHERE principal_id = ? ORDER BY updated_at DESC, endpoint DESC'
       )
       .all(principalId) as SubscriptionRow[];
     return rows.map((row) => ({
@@ -158,6 +192,7 @@ export class PushStore {
       endpoint: row.endpoint,
       p256dh: row.p256dh,
       auth: row.auth,
+      locale: asPushLocale(row.locale),
     }));
   }
 }

@@ -227,7 +227,10 @@ export function runAuthCli(
           kind: command === 'grant-admin' ? 'admin.granted' : 'admin.revoked',
           actorType: 'cli',
           summary: `Platform admin ${verb} ${eventLabel(result.displayName)}`,
-          detail: { principalId: result.principalId },
+          detail: {
+            principalId: result.principalId,
+            displayName: eventLabel(result.displayName),
+          },
         });
       }
       if (result.already) {

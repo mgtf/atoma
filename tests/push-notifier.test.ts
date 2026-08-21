@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectRunFinishedEvent } from '../src/projects/coordinator.js';
 import { closeStoreHandles } from '../src/core/stores.js';
-import { PushNotifier, runFinishedNotification } from '../src/viz/push/notifier.js';
+import { PushNotifier } from '../src/viz/push/notifier.js';
+import type { PushLocale } from '../src/viz/push/routes.js';
 import { PushStore } from '../src/viz/push/store.js';
 import { toBase64Url } from '../src/viz/push/webpush.js';
 
@@ -56,35 +56,33 @@ function browser() {
   };
 }
 
-function event(overrides: Partial<ProjectRunFinishedEvent> = {}): ProjectRunFinishedEvent {
-  return {
-    orgId: 'org-1',
-    projectId: 'proj-1',
-    projectRunId: 'run-1',
-    principalId: 'alice',
-    goal: 'Build a clock in one index.html.',
-    status: 'delivered',
-    ...overrides,
-  };
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'atoma-push-notifier-'));
+  roots.push(root);
+  return PushStore.open(join(root, 'atoma.db'));
 }
 
-describe('runFinishedNotification', () => {
-  it('bounds the goal excerpt and names the outcome', () => {
-    const long = event({ goal: `${'x'.repeat(200)}   with   spaces`, status: 'failed' });
-    const notification = runFinishedNotification(long);
-    expect(notification.title).toBe('Atoma — run failed');
-    expect(notification.body.length).toBeLessThanOrEqual(140);
-    expect(notification.body.endsWith('…')).toBe(true);
-    expect(notification.tag).toBe('atoma-run-run-1');
-    expect(notification.url).toBe('/');
+function notifierFor(
+  store: PushStore,
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response>
+) {
+  return new PushNotifier({
+    store,
+    vapid: store.vapidKeys(),
+    subject: 'https://viz.example',
+    fetchImpl: fetchImpl as unknown as typeof fetch,
   });
-});
+}
 
-describe('PushNotifier', () => {
+/** Localised copy, the shape the router hands the notifier. */
+const render = (locale: PushLocale) =>
+  locale === 'fr'
+    ? { title: 'Atoma — run livré', body: 'Construire une horloge' }
+    : { title: 'Atoma — run delivered', body: 'Build a clock' };
+
+describe('PushNotifier.notifyPrincipals', () => {
   it('delivers a payload the subscribed browser can decrypt', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'atoma-push-notifier-'));
-    roots.push(root);
-    const store = PushStore.open(join(root, 'atoma.db'));
+    const store = fixture();
     const chrome = browser();
     store.saveSubscription({
       principalId: 'alice',
@@ -97,26 +95,78 @@ describe('PushNotifier', () => {
       bodies.push(Buffer.from(init!.body as Buffer));
       return new Response(null, { status: 201 });
     });
-    const notifier = new PushNotifier({
-      store,
-      vapid: store.vapidKeys(),
-      subject: 'https://viz.example',
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-    });
 
-    await notifier.notifyRunFinished(event());
+    await notifierFor(store, fetchImpl).notifyPrincipals(['alice'], render, {
+      tag: 'atoma-run.finished-7',
+    });
 
     expect(fetchImpl).toHaveBeenCalledOnce();
     const decrypted = JSON.parse(chrome.decrypt(bodies[0]!)) as Record<string, string>;
-    expect(decrypted['title']).toBe('Atoma — run delivered');
-    expect(decrypted['body']).toBe('Build a clock in one index.html.');
-    expect(decrypted['tag']).toBe('atoma-run-run-1');
+    expect(decrypted).toEqual({
+      title: 'Atoma — run delivered',
+      body: 'Build a clock',
+      tag: 'atoma-run.finished-7',
+      url: '/',
+    });
+  });
+
+  it('renders each device in the language it subscribed with', async () => {
+    const store = fixture();
+    const english = browser();
+    const french = browser();
+    store.saveSubscription({
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/alice-en',
+      p256dh: english.p256dh,
+      auth: english.auth,
+      locale: 'en',
+    });
+    store.saveSubscription({
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/alice-fr',
+      p256dh: french.p256dh,
+      auth: french.auth,
+      locale: 'fr',
+    });
+    const sent = new Map<string, Buffer>();
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      sent.set(url, Buffer.from(init!.body as Buffer));
+      return new Response(null, { status: 201 });
+    });
+
+    await notifierFor(store, fetchImpl).notifyPrincipals(['alice'], render, { tag: 'tag-1' });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const enPayload = JSON.parse(
+      english.decrypt(sent.get('https://push.example.net/send/alice-en')!)
+    ) as Record<string, string>;
+    const frPayload = JSON.parse(
+      french.decrypt(sent.get('https://push.example.net/send/alice-fr')!)
+    ) as Record<string, string>;
+    expect(enPayload['title']).toBe('Atoma — run delivered');
+    expect(frPayload['title']).toBe('Atoma — run livré');
+    expect(frPayload['body']).toBe('Construire une horloge');
+  });
+
+  it('collapses a principal named twice into one device notification', async () => {
+    const store = fixture();
+    const chrome = browser();
+    store.saveSubscription({
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/alice-1',
+      p256dh: chrome.p256dh,
+      auth: chrome.auth,
+    });
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 201 }));
+    // Alice is both the requester and an org owner: one buzz, not two.
+    await notifierFor(store, fetchImpl).notifyPrincipals(['alice', 'alice'], render, {
+      tag: 'tag-1',
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it('prunes gone endpoints and stays silent for unsubscribed principals', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'atoma-push-notifier-'));
-    roots.push(root);
-    const store = PushStore.open(join(root, 'atoma.db'));
+    const store = fixture();
     const chrome = browser();
     store.saveSubscription({
       principalId: 'alice',
@@ -125,24 +175,17 @@ describe('PushNotifier', () => {
       auth: chrome.auth,
     });
     const fetchImpl = vi.fn(async () => new Response(null, { status: 410 }));
-    const notifier = new PushNotifier({
-      store,
-      vapid: store.vapidKeys(),
-      subject: 'https://viz.example',
-      fetchImpl: fetchImpl,
-    });
+    const notifier = notifierFor(store, fetchImpl);
 
-    await notifier.notifyRunFinished(event());
+    await notifier.notifyPrincipals(['alice'], render, { tag: 'tag-1' });
     expect(store.listForPrincipal('alice')).toEqual([]);
 
-    await notifier.notifyRunFinished(event({ principalId: 'nobody' }));
+    await notifier.notifyPrincipals(['nobody'], render, { tag: 'tag-2' });
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  it('a throwing transport is contained, never rethrown into the run', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'atoma-push-notifier-'));
-    roots.push(root);
-    const store = PushStore.open(join(root, 'atoma.db'));
+  it('a throwing transport is contained, never rethrown into the caller', async () => {
+    const store = fixture();
     const chrome = browser();
     store.saveSubscription({
       principalId: 'alice',
@@ -150,15 +193,59 @@ describe('PushNotifier', () => {
       p256dh: chrome.p256dh,
       auth: chrome.auth,
     });
-    const notifier = new PushNotifier({
-      store,
-      vapid: store.vapidKeys(),
-      subject: 'https://viz.example',
-      fetchImpl: vi.fn(async () => {
-        throw new Error('socket reset');
-      }),
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const notifier = notifierFor(store, async () => {
+      throw new Error('socket reset');
     });
-    await expect(notifier.notifyRunFinished(event())).resolves.toBeUndefined();
+    await expect(
+      notifier.notifyPrincipals(['alice'], render, { tag: 'tag-1' })
+    ).resolves.toBeUndefined();
+    stderr.mockRestore();
+    // A transport error is not evidence the subscription is gone.
     expect(store.listForPrincipal('alice')).toHaveLength(1);
+  });
+
+  it('does no work at all when nobody is named', async () => {
+    const store = fixture();
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 201 }));
+    await notifierFor(store, fetchImpl).notifyPrincipals([], render, { tag: 'tag-1' });
+    await notifierFor(store, fetchImpl).notifyPrincipals([''], render, { tag: 'tag-1' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe('PushStore locale', () => {
+  it('defaults an absent or unknown locale to English', () => {
+    const store = fixture();
+    const chrome = browser();
+    store.saveSubscription({
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/a',
+      p256dh: chrome.p256dh,
+      auth: chrome.auth,
+    });
+    store.saveSubscription({
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/b',
+      p256dh: chrome.p256dh,
+      auth: chrome.auth,
+      locale: 'klingon',
+    });
+    expect(store.listForPrincipal('alice').map((row) => row.locale)).toEqual(['en', 'en']);
+  });
+
+  it('re-subscribing the same endpoint updates its language', () => {
+    const store = fixture();
+    const chrome = browser();
+    const subscription = {
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/a',
+      p256dh: chrome.p256dh,
+      auth: chrome.auth,
+    };
+    store.saveSubscription({ ...subscription, locale: 'en' });
+    store.saveSubscription({ ...subscription, locale: 'fr' });
+    expect(store.listForPrincipal('alice')).toHaveLength(1);
+    expect(store.listForPrincipal('alice')[0]?.locale).toBe('fr');
   });
 });

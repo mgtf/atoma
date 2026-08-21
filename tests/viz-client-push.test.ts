@@ -92,6 +92,17 @@ describe('enableWebPush', () => {
     return { subscription, unsubscribe };
   }
 
+  /**
+   * Typed so `save.mock.calls[0][0]` is the BODY rather than a zero-length
+   * tuple: an untyped `vi.fn(async () => …)` infers no parameters and makes
+   * every argument assertion silently unreachable.
+   */
+  const saveSpy = async (_body: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    locale: string;
+  }) => ({ subscribed: true });
+
   function fakeRegistration(existing: PushSubscriptionLike | null, minted?: PushSubscriptionLike) {
     const subscribe = vi.fn(async () => {
       if (!minted) throw new Error('unexpected subscribe');
@@ -106,13 +117,14 @@ describe('enableWebPush', () => {
   it('subscribes with the server key and saves the subscription', async () => {
     const { subscription } = fakeSubscription();
     const { registration, subscribe } = fakeRegistration(null, subscription);
-    const save = vi.fn(async () => ({ subscribed: true }));
+    const save = vi.fn(saveSpy);
     const keys = generateVapidKeys();
     const outcome = await enableWebPush({
       requestPermission: async () => 'granted',
       registration: async () => registration,
       fetchConfig: async () => ({ enabled: true, publicKey: keys.publicKey }),
       save,
+      locale: 'fr',
     });
     expect(outcome).toBe('enabled');
     expect(subscribe).toHaveBeenCalledWith({
@@ -120,6 +132,24 @@ describe('enableWebPush', () => {
       applicationServerKey: applicationServerKeyBytes(keys.publicKey),
     });
     expect(save).toHaveBeenCalledOnce();
+    // The language rides the subscription: the server has no later chance to
+    // learn it, because a push is generated from an event, not a request.
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ locale: 'fr' });
+  });
+
+  it('falls back to English when no browser locale can be read', async () => {
+    const { subscription } = fakeSubscription();
+    const { registration } = fakeRegistration(null, subscription);
+    const save = vi.fn(saveSpy);
+    // No `locale` dep and no DOM: `detectLocale` throws on `location`, and a
+    // language preference must never be why a subscription fails.
+    await enableWebPush({
+      requestPermission: async () => 'granted',
+      registration: async () => registration,
+      fetchConfig: async () => ({ enabled: true, publicKey: generateVapidKeys().publicKey }),
+      save,
+    });
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ locale: 'en' });
   });
 
   it('reuses an existing browser subscription instead of minting a second one', async () => {

@@ -59,6 +59,7 @@ export const platformEventKindSchema = z.enum([
   // --- Organisation lifecycle.
   'org.created',
   'org.member_joined',
+  'principal.renamed',
   'project.created',
   'github.installation_linked',
   'github.installation_status',
@@ -187,6 +188,10 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'publication.failed': 'error',
   'org.created': 'info',
   'org.member_joined': 'security',
+  // A display name is what every other member of the organisation sees in the
+  // directory and in these very summaries. Changing it is an
+  // identity-presentation change, not a cosmetic preference.
+  'principal.renamed': 'security',
   'project.created': 'info',
   'github.installation_linked': 'info',
   // Suspended or deleted installations break the publication pipeline.

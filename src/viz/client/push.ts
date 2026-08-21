@@ -1,4 +1,5 @@
 import { api } from './data-api.js';
+import { detectLocale } from './i18n.js';
 
 /**
  * WEB PUSH — CLIENT SIDE.
@@ -30,6 +31,20 @@ interface PushScope {
   readonly navigator?: { readonly serviceWorker?: unknown };
   readonly Notification?: { readonly permission?: string };
   readonly PushManager?: unknown;
+}
+
+/**
+ * The one locale definition, borrowed rather than duplicated — but guarded:
+ * `detectLocale` reads `location` and `localStorage`, which a non-browser
+ * context does not have, and a language preference must never be the reason
+ * a subscription fails.
+ */
+function browserLocale(): string {
+  try {
+    return detectLocale();
+  } catch {
+    return 'en';
+  }
 }
 
 export function pushSupported(scope: PushScope = globalThis): boolean {
@@ -106,7 +121,10 @@ export async function enableWebPush(
     readonly save?: (body: {
       endpoint: string;
       keys: { p256dh: string; auth: string };
+      locale: string;
     }) => Promise<unknown>;
+    /** The language this browser reads, sent once with the subscription. */
+    readonly locale?: string;
   } = {}
 ): Promise<EnablePushOutcome> {
   if (!deps.registration && !pushSupported()) return 'unsupported';
@@ -145,6 +163,9 @@ export async function enableWebPush(
       await save({
         endpoint: json.endpoint,
         keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+        // Sent at subscribe time because the server has no later chance to
+        // learn it: a push is generated from an event, not from a request.
+        locale: deps.locale ?? browserLocale(),
       });
     } catch (error) {
       // The server never learned this subscription: do not leave the browser
