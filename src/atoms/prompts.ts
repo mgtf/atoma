@@ -27,6 +27,39 @@ import type { Plan } from '../core/types.js';
  *       random clicks that could not produce a mate.
  */
 /**
+ * The "one smoke, all the claims" example.
+ *
+ * Its `ok` asserts the STYLING it returns, which is not decoration: when a
+ * smoke returns a class/style/colour value that the aggregate `ok` does not
+ * assert, `validate_html` forces ok=false with "class/style/color values were
+ * returned but the aggregate ok expression does not assert them"
+ * (builtin.ts), and `tests/contracts.test.ts` pins that shape as
+ * non-compliant. The previous version of this example returned
+ * `colour: getComputedStyle(...).color` beside an `ok` asserting only
+ * counters — the exact refused shape — so a model following the block's
+ * flagship template was rejected on a page that was correct. Measured
+ * 2026-08-21: that refusal fired in all four burn-in batches.
+ *
+ * Exported and pinned by `tests/smoke-guidance.test.ts` against the real
+ * pre-flight guards and against `smokeOkIncludesStyling`.
+ */
+export const SMOKE_MULTI_CLAIM_EXAMPLE = [
+  `(() => {`,
+  `  const bar = document.querySelector('#bar');`,
+  `  const checks = {`,
+  `    pctReached:  window.__test.percentage === 75,`,
+  `    cellCount:   document.querySelectorAll('.cell').length === 64,`,
+  `    firstCell:   !!document.getElementById('cell-0'),`,
+  `    barClassSet: bar.classList.contains('filled'),`,
+  `  };`,
+  `  return { ok: Object.values(checks).every(Boolean), checks,`,
+  `           pct: window.__test.percentage,`,
+  `           cells: document.querySelectorAll('.cell').length,`,
+  `           barClass: bar.className };`,
+  `})()`,
+].join('\n');
+
+/**
  * The canonical state-driving smoke: drive the widget's own API, snapshot
  * each milestone, return one aggregate verdict.
  *
@@ -34,7 +67,7 @@ import type { Plan } from '../core/types.js';
  * synchronous smoke holds the JS task, so NOTHING the page updates
  * asynchronously can be observed by it: CSS transitions have not advanced,
  * and `setInterval` / `requestAnimationFrame` repaints have not run. Two
- * burn-in tasks lost real money to that in one day (see
+ * burn-in tasks lost real money to that on 2026-08-21 (see
  * SMOKE_DESIGN_GUIDANCE for both measurements), each asserting a claim that
  * could not become true inside one task. The `settle()` await is what makes
  * the copied template correct instead of subtly unobservable.
@@ -105,16 +138,13 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `your interactions: SECONDS per call. So a smoke must not check ONE`,
   `thing. Return a structured OBJECT that answers EVERY question you`,
   `have about the page, in a single call, with an explicit aggregate \`ok\`:`,
-  `    (() => ({`,
-  `       ok:       window.__test.percentage === 75 &&`,
-  `                 document.querySelectorAll('.cell').length === 64,`,
-  `       cells:    document.querySelectorAll('.cell').length,`,
-  `       pct:      window.__test.percentage,`,
-  `       colour:   getComputedStyle(document.querySelector('#bar')).color,`,
-  `       firstCell: !!document.getElementById('cell-0'),`,
-  `    }))()`,
+  ...SMOKE_MULTI_CLAIM_EXAMPLE.split('\n').map((line) => `    ${line}`),
   `The whole object comes back in \`smokeResult\`, and explicit \`ok === true\``,
   `is authoritative. Fold EVERY required task claim into that expression.`,
+  `ANY class, style or colour value you RETURN must also be asserted by \`ok\`:`,
+  `returning one as a bare diagnostic forces ok=false with "class/style/color`,
+  `values were returned but the aggregate ok expression does not assert them",`,
+  `on a page that may be perfectly correct. Put it in \`checks\`, not beside it.`,
   `Raw state fields may legitimately be false (for example`,
   `initial.thresholdReached=false); they are diagnostics, not assertions.`,
   `Keep smokeResult replay-stable: never return raw timestamps, generated ids,`,
@@ -188,7 +218,7 @@ export const SMOKE_DESIGN_GUIDANCE = [
   `demand); the DOM the user would see does not. Assert one against the other`,
   `and you have written a claim that CANNOT become true, however many times`,
   `you retry it.`,
-  `Both halves were measured on 2026-08-21, one day apart in the same batch:`,
+  `Both halves were measured on 2026-08-21, in two different batches:`,
   `  CSS TRANSITION. \`#count{transition:all .3s ease}\` +`,
   `  \`#count.negative{color:red}\`, VERIFIED in Chrome:`,
   `      synchronous read -> { cls:true, computed:"rgb(51, 51, 51)" }   STALE`,

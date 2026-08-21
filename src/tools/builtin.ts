@@ -1643,9 +1643,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               );
             }
             if (!smokeOk) {
-              errors.push(
-                `smoke check failed: ${JSON.stringify(smokeResult).slice(0, 500)}`
-              );
+              errors.push(renderSmokeFailure(smokeResult));
             }
           } catch (err) {
             smokeOk = false;
@@ -1929,6 +1927,32 @@ export function interactionPhaseBudgetMs(): number {
 export const CDP_PROTOCOL_TIMEOUT_MS = 30_000;
 
 /**
+ * Render a FAILED smoke result as the error line the caller reads.
+ *
+ * Extracted because the expression it replaces was a live defect and an
+ * unreachable one: `JSON.stringify(undefined)` is the VALUE undefined, not a
+ * string, so `.slice(0, 500)` on it threw a TypeError INSIDE the evaluation
+ * `try` — and the `catch` then reported it as
+ * "smoke evaluation threw: Cannot read properties of undefined (reading
+ * 'slice')", the tool blaming the page for a bug in the tool while the real
+ * state — a smoke that ran fine and returned nothing — never reached the
+ * caller at all. A void call (`el.click()`, `window.__test.reset()`) or an
+ * async body with a forgotten `return` lands here. Found by adversarial review
+ * 2026-08-21 and reproduced end to end against real Chrome.
+ */
+export function renderSmokeFailure(smokeResult: unknown): string {
+  const rendered = JSON.stringify(smokeResult);
+  if (rendered === undefined) {
+    return (
+      `smoke returned NO VALUE (undefined). An expression that evaluates to undefined proves ` +
+      `nothing — a void call like el.click(), or an async body with a forgotten return. Return ` +
+      `{ ok: <aggregate>, ...details } so the verdict and its evidence both come back.`
+    );
+  }
+  return `smoke check failed: ${rendered.slice(0, 500)}`;
+}
+
+/**
  * Translate a killed smoke evaluation into advice the CALLER can act on.
  *
  * Puppeteer reports "Runtime.evaluate timed out. Increase the
@@ -2195,7 +2219,14 @@ export function detectSmokeStatementError(raw: string): string | null {
     }
   }
   if (
-    /^(?:\(\s*\(\s*\)\s*=>|\(\s*function\b)/.test(trimmed) &&
+    // `async` is part of the leader since 2026-08-21: SMOKE_DESIGN_GUIDANCE
+    // teaches `(async () => { … })()` as the canonical shape, so the missing
+    // trailing `()` — the likeliest copy error on a 20-line template — must be
+    // caught here too. Without it the call pays a full Puppeteer round-trip and
+    // the model is told only `smoke check failed: {}`, Puppeteer's
+    // serialisation of an un-invoked function: the least diagnostic message the
+    // tool can emit, and exactly what this guard exists to prevent.
+    /^(?:\(\s*(?:async\s+)?\(\s*\)\s*=>|\(\s*(?:async\s+)?function\b)/.test(trimmed) &&
     /\}\s*\)\s*$/.test(trimmed) &&
     !/\}\s*\)\s*\(\s*\)\s*$/.test(trimmed)
   ) {

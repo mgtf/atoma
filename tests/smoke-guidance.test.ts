@@ -3,6 +3,7 @@ import {
   SMOKE_ASYNC_TRANSITION_EXAMPLE,
   SMOKE_CANONICAL_STATE_SHAPE,
   SMOKE_DESIGN_GUIDANCE,
+  SMOKE_MULTI_CLAIM_EXAMPLE,
 } from '../src/atoms/prompts.js';
 import {
   CDP_PROTOCOL_TIMEOUT_MS,
@@ -11,6 +12,7 @@ import {
   detectResetErasedIntermediateEvidence,
   diagnoseSmokeEvaluationError,
   probeManifestWriteRefusal,
+  renderSmokeFailure,
 } from '../src/tools/builtin.js';
 import { smokeOkIncludesStyling } from '../src/contracts/probeManifest.js';
 
@@ -147,6 +149,69 @@ describe('SMOKE_DESIGN_GUIDANCE ↔ validate_html pre-flight guards', () => {
     expect(
       probeManifestWriteRefusal('{"version":1,"entries":[]}')
     ).toBeNull();
+  });
+
+  // ADVERSARIAL REVIEW 2026-08-21 (highest-severity finding): the block's
+  // FLAGSHIP example returned `colour: getComputedStyle(...).color` beside an
+  // `ok` asserting only counters — the exact shape validate_html forces to
+  // ok=false, and the exact shape tests/contracts.test.ts pins as
+  // non-compliant. The "ok does not assert styling" refusal fired in all four
+  // burn-in batches while the model was following our own template.
+  it('EVERY example in the block passes the guards it will be measured by', () => {
+    const examples = {
+      multiClaim: SMOKE_MULTI_CLAIM_EXAMPLE,
+      canonical: SMOKE_CANONICAL_STATE_SHAPE.replace(/^[\s\S]*?smoke: /, ''),
+      transition: SMOKE_ASYNC_TRANSITION_EXAMPLE,
+    };
+    for (const [name, smoke] of Object.entries(examples)) {
+      expect(detectSmokeStatementError(smoke), name).toBeNull();
+      expect(detectBrittleComputedStyleLiteral(smoke), name).toBeNull();
+      expect(detectResetErasedIntermediateEvidence([], smoke), name).toBeNull();
+      // Each returns styling, so each must ASSERT styling inside its ok.
+      expect(smokeOkIncludesStyling(smoke), name).toBe(true);
+    }
+  });
+
+  it('renders the multi-claim example verbatim and warns about bare styling', () => {
+    for (const line of SMOKE_MULTI_CLAIM_EXAMPLE.split('\n')) {
+      expect(SMOKE_DESIGN_GUIDANCE).toContain(line);
+    }
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(
+      /ANY class, style or colour value you RETURN must also be asserted/
+    );
+    // The refused shape must not survive anywhere in the block.
+    expect(SMOKE_DESIGN_GUIDANCE).not.toContain('colour:   getComputedStyle');
+  });
+
+  // ADVERSARIAL REVIEW 2026-08-21: promoting the async shape to canonical made
+  // the guard's leader regex load-bearing for a shape it did not recognise, so
+  // the likeliest copy error on a 20-line template stopped being caught.
+  it('catches the missing trailing () on an async IIFE, not just a sync one', () => {
+    expect(detectSmokeStatementError('(async () => { return 1 })')).toMatch(
+      /never invokes it/
+    );
+    expect(detectSmokeStatementError('(async function(){ return 1 })')).toMatch(
+      /never invokes it/
+    );
+    // Still correct on the shapes it always handled, and still silent on the
+    // properly-invoked async forms the guidance teaches.
+    expect(detectSmokeStatementError('(() => { return 1 })')).toMatch(/never invokes it/);
+    expect(detectSmokeStatementError('(async () => { return 1 })()')).toBeNull();
+  });
+
+  // ADVERSARIAL REVIEW 2026-08-21: JSON.stringify(undefined) is the VALUE
+  // undefined, so `.slice` threw a TypeError inside the evaluation try and the
+  // catch reported the tool's own bug as the page's fault.
+  it('reports a smoke that returned nothing, instead of throwing on it', () => {
+    expect(() => renderSmokeFailure(undefined)).not.toThrow();
+    expect(renderSmokeFailure(undefined)).toMatch(/returned NO VALUE \(undefined\)/);
+    expect(renderSmokeFailure(undefined)).toMatch(/forgotten return/);
+    // Ordinary failures are unchanged, including the 500-char cap.
+    expect(renderSmokeFailure({ ok: false, count: 3 })).toBe(
+      'smoke check failed: {"ok":false,"count":3}'
+    );
+    expect(renderSmokeFailure(false)).toBe('smoke check failed: false');
+    expect(renderSmokeFailure({ pad: 'x'.repeat(900) }).length).toBeLessThan(540);
   });
 
   it('still refuses the shapes the guards refuse (guard sanity, not tautology)', () => {
