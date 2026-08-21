@@ -171,6 +171,34 @@ later phase if ever); no per-principal notification preferences in the base
 (sensible defaults per kind, mute is phase 2); local operator runs (ungated
 CLI/MCP) stay out of scope.
 
+## Implementation status (2026-08-21)
+
+Landed and verified in isolation (typecheck plus the full suite against a
+worktree holding only these commits, so none of it depends on concurrent
+work in the same checkout):
+
+- **Phase 1 — foundation.** `src/contracts/platformEvents.ts`,
+  `src/platform/events.ts`, tests.
+- **Phase 2 — emissions.** Every site in the matrix above, including the
+  three that previously had no witness at all, plus the `LoginOutcome`
+  flags and `eventLabel`.
+- **Phase 3 — routing.** `PUSH_ROUTES`, `NotificationRouter`,
+  `notifyPrincipals`, per-subscription locale, `run.finished` re-plumbed
+  through the journal.
+- **Phase 4a — audit API.** `/api/admin/events` and `/api/admin/ledger`,
+  with a process-level test that reads back a row the operator CLI wrote
+  from a different process.
+- **Phase 5 — AGENTS.md contract.**
+
+Remaining:
+
+- **Phase 4b — the Admin "Journal" section in the GL client**
+  (`renderer/views/admin.ts` plus its query, types and en/fr strings). The
+  API it reads is live, so this is a display surface, not a capability.
+  Deliberately deferred rather than interleaved: it touches the exact GL
+  modules a concurrent session was rewriting for the account menu, and
+  edits to shared files were being lost to that race.
+
 ## Sequencing (one commit per phase)
 
 1. **Foundation**: contract + `PlatformEventLog` (append/list/sweep/cap) +
