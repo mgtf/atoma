@@ -915,7 +915,9 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           name: this.name,
           model: this.model,
           params: this.params,
-          effectiveSystemPrompt: () => this.effectiveSystemPrompt(),
+          // The atom's own builder, so skill-role events carry actor AND the
+          // citation of the injected context their folded prompt embeds.
+          toLlmRequest: (role, args) => this.toLlmRequest(role, args),
         },
         this.skillRegistry,
         (ns) => this.displayNameForNamespace(ns)

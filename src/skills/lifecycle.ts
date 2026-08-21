@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import type { GenerationParams, Result, RunContext, Task } from '../core/types.js';
+import type { GenerationParams, LlmCompletionRequest, Result, RunContext, Task } from '../core/types.js';
 import type { L1Atom } from '../atoms/L1Atom.js';
 import type { Skill } from './types.js';
 import {
@@ -62,7 +62,21 @@ export interface SkillLifecycleHost {
   readonly name: string;
   readonly model: string;
   readonly params: GenerationParams;
-  effectiveSystemPrompt(): string;
+  /**
+   * The host atom's request builder. Lifecycle calls MUST go through it, not
+   * hand-roll `systemPrompt: effectiveSystemPrompt()`: the builder stamps
+   * `actor` and CITES the injected context blocks, so skill-role events on
+   * the trace carry the same fold-plus-citation contract as every other
+   * call (`llmTrace.ts`: the fold of these blocks IS the system-prompt tail).
+   */
+  toLlmRequest(
+    role: 'skill',
+    args: {
+      userContent: string;
+      params?: GenerationParams;
+      signal?: AbortSignal;
+    }
+  ): LlmCompletionRequest;
 }
 
 /** Kebab-case id check (lowercase letters, digits, single dashes). */
@@ -471,18 +485,15 @@ export class SkillLifecycle {
       `share).`,
     ].join('\n');
 
-    const resp = await args.ctx.llm.complete({
-      model: this.host.model,
-      systemPrompt: this.host.effectiveSystemPrompt(),
+    const resp = await args.ctx.llm.complete(this.host.toLlmRequest('skill', {
       userContent,
-      role: 'skill',
       // 1600, not 800: the optional verification split can double the JSON,
       // and on 5-series models adaptive thinking shares this cap with the
       // response — a truncated draft is a silently lost learning event.
       params: { ...this.host.params, maxTokens: 1600, temperature: 0 },
       // Post-approval bookkeeping: own budget, never the run deadline.
       signal: postApprovalSignal(),
-    });
+    }));
     const drafts = parseSkillDrafts(resp.text);
     if (drafts.length === 0) {
       args.ctx.logger.debug(
@@ -616,15 +627,12 @@ export class SkillLifecycle {
       `recur — a recovery note for a one-off is catalog noise.`,
     ].join('\n');
 
-    const resp = await args.ctx.llm.complete({
-      model: this.host.model,
-      systemPrompt: this.host.effectiveSystemPrompt(),
+    const resp = await args.ctx.llm.complete(this.host.toLlmRequest('skill', {
       userContent,
-      role: 'skill',
       params: { ...this.host.params, maxTokens: 1200, temperature: 0 },
       // Post-approval bookkeeping: own budget, never the run deadline.
       signal: postApprovalSignal(),
-    });
+    }));
     const draft = parseEventSkillDraft(resp.text);
     if (!draft) {
       args.ctx.logger.debug(
@@ -734,14 +742,11 @@ export class SkillLifecycle {
       `unchanged.`,
     ].join('\n');
 
-    const resp = await args.ctx.llm.complete({
-      model: this.host.model,
-      systemPrompt: this.host.effectiveSystemPrompt(),
+    const resp = await args.ctx.llm.complete(this.host.toLlmRequest('skill', {
       userContent,
-      role: 'skill',
       params: { ...this.host.params, maxTokens: 1500, temperature: 0 },
       signal: args.ctx.signal,
-    });
+    }));
     const text = (resp.text ?? '').trim();
     if (!text) return null;
     return text;
@@ -995,11 +1000,8 @@ export class SkillLifecycle {
       resultSummary: args.result.summary,
     });
 
-    const resp = await args.ctx.llm.complete({
-      model: this.host.model,
-      systemPrompt: this.host.effectiveSystemPrompt(),
+    const resp = await args.ctx.llm.complete(this.host.toLlmRequest('skill', {
       userContent,
-      role: 'skill',
       // `effort: 'medium'` is load-bearing on the claude-cli transport,
       // where maxTokens is advisory-only: at the default 'high' a compile
       // ran ~7 minutes / ~20k thinking+output tokens through the subprocess
@@ -1016,7 +1018,7 @@ export class SkillLifecycle {
       },
       // Post-approval bookkeeping: own budget, never the run deadline.
       signal: postApprovalSignal(),
-    });
+    }));
     const raw = (resp.text ?? '').trim();
     if (!raw) return { promotable: false, reason: 'empty model response' };
     let parsed: unknown;

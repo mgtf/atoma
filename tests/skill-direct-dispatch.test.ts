@@ -109,7 +109,18 @@ describe('direct dispatch — attribution follows the EXECUTOR, not the namespac
     const skill = skills.loadFor(asStoredNamespace('Ammonia'))[0]!;
     const { executor } = makeExecutor({ exitCode: 0, stdout: `${ENVELOPE_LINE}\n`, stderr: '' });
     const lifecycle = new SkillLifecycle(
-      { name: 'Water', model: 'm', params: {}, effectiveSystemPrompt: () => 'sys' },
+      {
+        name: 'Water',
+        model: 'm',
+        params: {},
+        toLlmRequest: (role, args) => ({
+          ...args,
+          model: 'm',
+          systemPrompt: 'sys',
+          role,
+          actor: { name: 'Water', tier: 2 },
+        }),
+      },
       skills
     );
     const ctx = { ...makeCtx(), tools: executor };
