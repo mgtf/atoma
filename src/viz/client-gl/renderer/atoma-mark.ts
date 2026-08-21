@@ -601,6 +601,17 @@ export function attachAtomaMark(
   };
 
   const reducedMotion = prefersReducedMotion();
+  /**
+   * Reduced-motion capture damper. The two offscreen passes (interior
+   * backdrop, stage env) each render every ticker frame — on a frozen pose
+   * that is full GPU cost for a still image. Once every capture input has
+   * been stable for the two frames the ping-pong pair needs to fill, the
+   * passes are skipped until an input changes (pose pin, bead knob, pointer,
+   * screen size). Never engaged outside reduced motion: a turning crystal
+   * needs every frame.
+   */
+  let stillFrames = 0;
+  let lastCaptureKey = '';
   const paint = (elapsedMs: number) => {
     // Bob lives HERE, before the pointer sample, so a parked mouse still
     // sees the lamp XY drift as the gem floats. A second ticker after paint
@@ -702,12 +713,25 @@ export function attachAtomaMark(
     // circular sticker survived every pose of the turn film. The front mesh
     // already paints coverage 1 and draws that interior bent. Toggle around
     // the pass: Pixi skips a hidden container even when it is the render target.
-    if (backdropPass) {
+    const pointerActive = renderer ? readPointerLight().active : false;
+    const captureKey = [
+      beadVisible,
+      elapsedMs,
+      pointerActive,
+      renderer ? `${renderer.screen.width}x${renderer.screen.height}` : '',
+    ].join('|');
+    if (!reducedMotion || captureKey !== lastCaptureKey) {
+      stillFrames = 0;
+      lastCaptureKey = captureKey;
+    }
+    const skipCaptures = reducedMotion && !pointerActive && stillFrames >= 2;
+    if (!skipCaptures) stillFrames += 1;
+    if (backdropPass && !skipCaptures) {
       behind.visible = true;
       backdropPass(elapsedMs);
       behind.visible = false;
     }
-    if (envPass) envPass(elapsedMs);
+    if (envPass && !skipCaptures) envPass(elapsedMs);
   };
 
   // Always tick: reduced motion still has to honour a pinned pose and the
