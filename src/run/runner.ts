@@ -449,6 +449,12 @@ export async function startTask(
   }
   console.log(`run timeout: ${Math.round(timeoutMs / 1000)}s`);
   const signal = AbortSignal.timeout(timeoutMs);
+  // Stamped HERE, at the same instant as the abort clock. Computing it after
+  // setup (workspace archive, store open, container boot, resolveLatestOpus)
+  // overstated the deadline by the whole setup cost, and `capToolIterations`
+  // then under-capped by exactly the drift the 2026-08-16 fan-in incident was
+  // closing.
+  const deadlineAt = Date.now() + timeoutMs;
   // Every LLM call + supervise-loop hop hangs an `abort` listener on this
   // signal; on long runs Node trips its default 10-listener warning.
   setMaxListeners(0, signal);
@@ -661,7 +667,6 @@ export async function startTask(
     handle = (t, c) => l3.handle(t, c);
   }
 
-  const deadlineAt = Date.now() + timeoutMs;
   const ctx: RunContext = {
     logger: consoleLogger,
     signal,

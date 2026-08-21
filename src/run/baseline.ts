@@ -1,3 +1,4 @@
+import { capToolIterations } from '../core/limits.js';
 import { modelForTier } from '../core/models.js';
 import type { Result, RunContext, Task, Tool } from '../core/types.js';
 
@@ -130,7 +131,10 @@ export async function runFrontierBaseline(
     tools: [...tools],
     executor: ctx.tools,
     signal: ctx.signal,
-    maxToolIterations: BASELINE_MAX_TOOL_ITERATIONS,
+    // Same wall-clock cap as the atoma arm (benchmark discipline: both arms
+    // share budgets and watchdog) — an uncapped baseline could PLAN more
+    // iterations than the run can still pay near the deadline.
+    maxToolIterations: capToolIterations(BASELINE_MAX_TOOL_ITERATIONS, ctx.deadlineAt),
     params: { maxTokens: BASELINE_MAX_TOKENS },
     role: 'execute',
     actor: { name: BASELINE_ATOM_NAME, tier: 3 },
