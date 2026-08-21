@@ -7,7 +7,8 @@ import Database from 'better-sqlite3';
 import { SkillRegistry } from '../skills/registry.js';
 import { sortRunIndex, summarizeTraceFile } from './runIndex.js';
 import type { VizRunIndexEntry } from './trace.js';
-import { skillsDirPath, storeDbPath } from '../core/stores.js';
+import { openStoreHandle, skillsDirPath, storeDbPath } from '../core/stores.js';
+import { LEDGER_TABLE_DDL, readLedgerTail } from '../core/ledger.js';
 import { LAUNCHABLE_PROFILES } from '../run/profiles/index.js';
 import { assessShareability, type ShareAssessment } from '../skills/shareability.js';
 import { taxonomyForTier, type AgentRank } from '../core/taxonomy.js';
@@ -363,8 +364,8 @@ if (EVENTS && PUSH_RUNTIME && AUTH?.store) {
   const router = new NotificationRouter({
     notifier: PUSH_RUNTIME.notifier,
     directory: {
-      // The organisation is selected here rather than passed to the reader,
-      // so this wiring does not depend on that reader's parameter list.
+      // Selected here rather than through a filtering argument so this
+      // wiring does not depend on the reader's parameter list.
       ownersOf: (orgId) =>
         (
           authStore
@@ -1725,6 +1726,57 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       const authStore = AUTH.store!;
+      // THE AUDIT JOURNAL. Newest-first, cursor-paged on `seq` — the same
+      // reading direction as the runs timeline. `before` is exclusive so a
+      // page boundary can neither repeat nor skip a row, which ordering by
+      // `at` could not guarantee (one login burst shares a millisecond).
+      if (pathname === '/api/admin/events') {
+        if (!methodAllowed(req, res, 'GET')) return;
+        if (!EVENTS) {
+          sendJson(res, 200, { events: [], nextBefore: null });
+          return;
+        }
+        // `Number(null)` is 0, not NaN, so an ABSENT parameter must be tested
+        // for presence before it is converted — otherwise a plain
+        // `/api/admin/events` asks for a zero-length page (clamped to one
+        // row) and the journal looks almost empty.
+        const rawBefore = url.searchParams.get('before');
+        const rawLimit = url.searchParams.get('limit');
+        const before = rawBefore === null ? Number.NaN : Number(rawBefore);
+        const limit = rawLimit === null ? Number.NaN : Number(rawLimit);
+        sendJson(
+          res,
+          200,
+          // Out-of-range values CLAMP inside `list` rather than 400: an
+          // operator typing limit=5000 gets the maximum page, not an error.
+          EVENTS.list({
+            ...(Number.isFinite(before) && before > 0 ? { before } : {}),
+            ...(Number.isFinite(limit) ? { limit } : {}),
+            ...(url.searchParams.get('kind') ? { kind: url.searchParams.get('kind')! } : {}),
+            ...(url.searchParams.get('severity')
+              ? { severity: url.searchParams.get('severity')! }
+              : {}),
+            ...(url.searchParams.get('orgId') ? { orgId: url.searchParams.get('orgId')! } : {}),
+          })
+        );
+        return;
+      }
+      // The PRODUCT ledger's tail, as a SEPARATE read (decision 4). The two
+      // journals answer different questions — what happened on the platform
+      // versus what the catalogue learned — and are never joined or merged;
+      // `lifecycle_events` keeps its counter-checking semantics and its own
+      // `ledger check` consumer.
+      if (pathname === '/api/admin/ledger') {
+        if (!methodAllowed(req, res, 'GET')) return;
+        const requested = Number(url.searchParams.get('limit'));
+        const limit = Number.isFinite(requested) ? requested : 50;
+        // `readLedgerTail` is bounded, newest-first and fail-open: a store
+        // without the table reads empty rather than 500-ing the admin surface.
+        sendJson(res, 200, {
+          events: readLedgerTail(limit, openStoreHandle(DBS[0]!.path, LEDGER_TABLE_DDL)),
+        });
+        return;
+      }
       if (pathname === '/api/admin/organisations') {
         if (!methodAllowed(req, res, 'GET')) return;
         sendJson(res, 200, authStore.listOrganisationsWithMembers());

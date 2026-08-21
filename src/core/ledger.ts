@@ -208,6 +208,31 @@ export function readLedger(db?: LedgerDb): LedgerEvent[] {
   }
 }
 
+/**
+ * The NEWEST `limit` events, newest first, without materialising the table.
+ *
+ * `readLedger` deliberately returns everything in append order because
+ * `projectCounters` is a fold over the whole history and cannot be computed
+ * from a tail. A reader that only DISPLAYS recent activity — the CLI's
+ * `ledger tail`, the admin journal — must not pay for that: an instance with
+ * a long history would load every row on every poll.
+ */
+export function readLedgerTail(limit: number, db?: LedgerDb): LedgerEvent[] {
+  const bounded = Math.max(1, Math.min(1_000, Math.trunc(limit)));
+  try {
+    const target = db ?? handleFor(ledgerDbPath());
+    const rows = target
+      .prepare(
+        'SELECT at, kind, entity, detail FROM lifecycle_events ORDER BY seq DESC LIMIT ?'
+      )
+      .all(bounded) as EventRow[];
+    return rows.map(rowToEvent);
+  } catch (err) {
+    warnOnce(err);
+    return [];
+  }
+}
+
 /** How many events the store holds, without materialising them. */
 export function ledgerCount(db?: LedgerDb): number {
   try {

@@ -8,6 +8,7 @@ import {
   ledgerDbPath,
   projectCounters,
   readLedger,
+  readLedgerTail,
 } from '../src/core/ledger.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
@@ -35,6 +36,27 @@ describe('lifecycle ledger', () => {
     if (envBefore === undefined) delete process.env['ATOMA_LEDGER_DB'];
     else process.env['ATOMA_LEDGER_DB'] = envBefore;
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads a bounded newest-first tail without materialising the table', () => {
+    // The admin journal and `ledger tail` only DISPLAY recent activity; they
+    // must not pay for the full-history load `projectCounters` needs.
+    for (let index = 0; index < 12; index++) {
+      appendLedger({ kind: 'type-success', entity: `Atom${index}` });
+    }
+    expect(readLedgerTail(3).map((event) => event.entity)).toEqual([
+      'Atom11',
+      'Atom10',
+      'Atom9',
+    ]);
+    // Out-of-range limits clamp rather than throwing or reading everything.
+    expect(readLedgerTail(0)).toHaveLength(1);
+    expect(readLedgerTail(-5)).toHaveLength(1);
+    expect(readLedgerTail(50_000)).toHaveLength(12);
+    // Fail-open: a store with no ledger table reads empty, never throws.
+    closeLedgerHandles();
+    process.env['ATOMA_LEDGER_DB'] = join(dir, 'absent-dir', 'store.db');
+    expect(readLedgerTail(5)).toEqual([]);
   });
 
   it('append + read round-trips in append order', () => {

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AUTH_COPY } from '../src/auth/copy.js';
-import { AuthStore, type OrgRole } from '../src/auth/store.js';
+import { AuthStore, sha256Hex, type OrgRole } from '../src/auth/store.js';
 import { pkceChallenge } from '../src/auth/oidc.js';
 import { MAX_LOGOUT_SESSION_CANDIDATES } from '../src/auth/values.js';
 import { GITHUB_COPY } from '../src/github/http.js';
@@ -576,6 +576,112 @@ describe('viz auth gate (process level)', () => {
     ).toBe(0);
     expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(403);
     expect((await fetch(`${base}/api/admin/organisations`, { headers: cookie })).status).toBe(403);
+  });
+
+  it('serves the platform audit journal to the admin alone, newest first', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 303 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    // The login itself founds an organisation, which is the journal's first
+    // row — written by the SERVER process.
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+
+    // Before the grant the journal is operator-level state, like the registry.
+    for (const path of ['/api/admin/events', '/api/admin/ledger']) {
+      expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(403);
+    }
+
+    const { runAuthCli } = await import('../src/cli/auth.js');
+    expect(
+      runAuthCli(
+        ['node', 'auth', 'grant-admin', '--principal', 'fake@example.com', '--db', instance.dbPath],
+        {}
+      )
+    ).toBe(0);
+
+    interface JournalPage {
+      events: Array<{
+        seq: number;
+        kind: string;
+        severity: string;
+        actorType: string;
+        orgId: string | null;
+        summary: string;
+        detail?: Record<string, unknown>;
+      }>;
+      nextBefore: number | null;
+    }
+    const read = async (query = ''): Promise<JournalPage> => {
+      const response = await fetch(`${base}/api/admin/events${query}`, { headers: cookie });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      return (await response.json()) as JournalPage;
+    };
+
+    const page = await read();
+    const kinds = page.events.map((event) => event.kind);
+    // `org.created` came from the server; `admin.granted` came from a
+    // SEPARATE PROCESS writing the same table. Seeing both here is the proof
+    // that the CLI's audit rows are not lost to the server.
+    expect(kinds).toContain('org.created');
+    expect(kinds).toContain('admin.granted');
+    // Newest first: the CLI grant happened after the login.
+    expect(kinds.indexOf('admin.granted')).toBeLessThan(kinds.indexOf('org.created'));
+    expect(page.events.map((event) => event.seq)).toEqual(
+      [...page.events.map((event) => event.seq)].sort((a, b) => b - a)
+    );
+    const granted = page.events.find((event) => event.kind === 'admin.granted')!;
+    expect(granted).toMatchObject({ actorType: 'cli', severity: 'security' });
+
+    // Minting an invitation is journaled — but a bearer credential must never
+    // become an audit row, not even hashed.
+    const orgId = page.events.find((event) => event.kind === 'org.created')!.orgId!;
+    const minted = await fetch(`${base}/api/admin/invitations`, {
+      method: 'POST',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ orgId, role: 'org:member', ttlHours: 1 }),
+    });
+    expect(minted.status).toBe(200);
+    const { token } = (await minted.json()) as { token: string };
+    const afterMint = await read();
+    expect(afterMint.events[0]).toMatchObject({
+      kind: 'invitation.created',
+      actorType: 'principal',
+    });
+    expect(JSON.stringify(afterMint.events)).not.toContain(token);
+    expect(JSON.stringify(afterMint.events)).not.toContain(sha256Hex(token));
+
+    // Filters and the exclusive newest-first cursor.
+    expect((await read('?kind=org.created')).events.map((event) => event.kind)).toEqual([
+      'org.created',
+    ]);
+    expect(
+      (await read('?severity=security')).events.every((event) => event.severity === 'security')
+    ).toBe(true);
+    const firstPage = await read('?limit=1');
+    expect(firstPage.events).toHaveLength(1);
+    expect(firstPage.nextBefore).toBe(firstPage.events[0]!.seq);
+    const secondPage = await read(`?limit=1&before=${firstPage.nextBefore!}`);
+    expect(secondPage.events[0]!.seq).toBeLessThan(firstPage.events[0]!.seq);
+    // Out-of-range limits clamp instead of erroring.
+    expect((await read('?limit=99999')).events.length).toBeGreaterThan(0);
+    expect((await read('?limit=notanumber')).events.length).toBeGreaterThan(0);
+
+    // The product ledger is a SEPARATE read in the same tab, never a merge.
+    const ledger = await fetch(`${base}/api/admin/ledger?limit=5`, { headers: cookie });
+    expect(ledger.status).toBe(200);
+    const ledgerBody = (await ledger.json()) as { events: unknown[] };
+    expect(Array.isArray(ledgerBody.events)).toBe(true);
+    expect(ledgerBody).not.toHaveProperty('nextBefore');
   });
 
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {
