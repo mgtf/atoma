@@ -1160,7 +1160,9 @@ function drawEventDetail(
   }
   const raw =
     event.kind === 'llm'
-      ? event.response ?? event.error ?? ''
+      // `||`, not `??`: the recorder writes response: '' on errors, and an
+      // empty string must not mask the error text in the detail pane.
+      ? event.response || event.error || ''
       : event.error ?? event.reasoning ?? '';
   const structured =
     event.kind === 'llm'

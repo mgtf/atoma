@@ -220,7 +220,15 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
   let body = event.error ?? event.reasoning ?? '';
   if (event.kind === 'tool' && !event.error) {
     body = [toolArgSummary(event.args), resultFacts(event.result)].filter(Boolean).join(' · ');
-  } else if (event.kind === 'llm' && Array.isArray(event.context) && event.context.length > 0) {
+  } else if (
+    event.kind === 'llm' &&
+    // Same guard as the tool branch: an ERROR outranks the context labels —
+    // a skill-injected execute that timed out must show its error on the
+    // card, not "Skill · Coaching".
+    !event.error &&
+    Array.isArray(event.context) &&
+    event.context.length > 0
+  ) {
     body = event.context
       .map((block) => t(`detail.enum.contextSource.${block.source}`))
       .join(' · ');

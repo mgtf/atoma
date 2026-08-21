@@ -131,6 +131,21 @@ describe('gpuEventCardCopy for an LLM call', () => {
     expect(body).toBe('Skill · Coaching');
   });
 
+  it('lets an ERROR outrank the inject labels on the card body', () => {
+    // A skill-injected execute that timed out used to show "Skill · Coaching"
+    // instead of its error — the llm branch lacked the tool branch's guard.
+    const { body } = gpuEventCardCopy(
+      event({
+        error: 'aborted: deadline exceeded',
+        context: [
+          { id: 'c1', source: 'skill', chars: 20, preview: 'STEP 1', skillId: 'web-build' },
+        ],
+      }),
+      t
+    );
+    expect(body).toBe('aborted: deadline exceeded');
+  });
+
   it('renders a context inject as its own card', () => {
     const { title, body, footer } = gpuEventCardCopy(
       {
