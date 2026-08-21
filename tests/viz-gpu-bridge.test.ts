@@ -49,6 +49,7 @@ beforeEach(() => {
       projectName: '',
       projectPrompt: '',
       projectRepository: '',
+      displayName: '',
     },
     entered: true,
   });

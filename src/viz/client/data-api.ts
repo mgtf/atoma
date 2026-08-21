@@ -1,6 +1,8 @@
 import type {
   BurninRow,
   LaunchProfile,
+  VizAccountModels,
+  VizOrganisation,
   RegistrySummary,
   RegistryType,
   RunIndexEntry,
@@ -83,11 +85,26 @@ export const api = {
     ),
   createAdminInvitation: (body: { orgId: string; role: string; ttlHours?: number }) =>
     mutateJson<VizAdminInvitation>('/api/admin/invitations', body),
+  organisation: () => fetchJson<VizOrganisation>('/api/org'),
+  accountModels: () => fetchJson<VizAccountModels>('/api/account/models'),
+  // PUT/PATCH rather than POST: these replace one account-scoped resource.
+  saveAccountModels: (pins: VizAccountModels['pins']) =>
+    mutateJson<VizAccountModels>('/api/account/models', { pins }, 'PUT'),
+  renameAccount: (displayName: string) =>
+    mutateJson<{ displayName: string; displayNameSource: string }>(
+      '/api/account',
+      { displayName },
+      'PATCH'
+    ),
 };
 
-async function mutateJson<T>(path: string, body: unknown): Promise<T> {
+async function mutateJson<T>(
+  path: string,
+  body: unknown,
+  method: 'POST' | 'PUT' | 'PATCH' = 'POST'
+): Promise<T> {
   const response = await fetch(path, {
-    method: 'POST',
+    method,
     credentials: 'same-origin',
     headers: {
       accept: 'application/json',

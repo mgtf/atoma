@@ -11,6 +11,7 @@ import type {
   ProjectRun,
   Publication,
 } from '../contracts/projects.js';
+import { pinForTier, type TierModelPins } from '../contracts/tierModels.js';
 import { ARTIFACT_MANIFEST_PATH_ENV } from '../run/runner.js';
 import {
   acquireRunLease,
@@ -61,6 +62,13 @@ export interface ProjectCoordinatorOptions {
   readonly acquireLease?: RunLeaseAcquirer;
   readonly publisher?: ProjectRunPublisher;
   readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
+  /**
+   * The requesting principal's per-tier model pins, when the deployment has
+   * accounts (the viz gate supplies `authStore.modelPins`). Fail-open: a
+   * throwing resolver falls back to the operator's host pins, because a
+   * preference lookup must never be able to block a run.
+   */
+  readonly tierModelsFor?: (principalId: string) => TierModelPins;
   readonly cwd?: string;
   readonly timeoutMs?: number;
 }
@@ -113,6 +121,14 @@ export function projectRunEnvironment(input: {
   readonly skillsPath: string;
   readonly runId: string;
   readonly artifactManifestPath: string;
+  /**
+   * The requesting account's per-tier choices. A pin set here OVERRIDES the
+   * operator's host pin for that tier; a null tier inherits it. Values come
+   * from the closed list in `contracts/tierModels.ts`, so they cannot carry a
+   * provider selector — the `:` refusal below still guards both sources as a
+   * last line of defence rather than as the only one.
+   */
+  readonly tierModels?: TierModelPins;
 }): NodeJS.ProcessEnv {
   const selected = input.hostEnv['ATOMA_LLM']?.trim() || 'anthropic';
   if (selected !== 'anthropic') {
@@ -140,7 +156,8 @@ export function projectRunEnvironment(input: {
   if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
   for (const tier of [1, 2, 3] as const) {
     const key = `ATOMA_MODEL_L${tier}`;
-    const value = input.hostEnv[key]?.trim();
+    const accountPin = input.tierModels ? pinForTier(input.tierModels, tier) : null;
+    const value = (accountPin ?? input.hostEnv[key])?.trim();
     if (!value) continue;
     if (value.includes(':')) {
       throw new ProjectRunConfigurationError(
@@ -259,6 +276,7 @@ export class ProjectRunCoordinator {
   private readonly acquireLease: RunLeaseAcquirer;
   private readonly publisher?: ProjectRunPublisher;
   private readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
+  private readonly tierModelsFor?: (principalId: string) => TierModelPins;
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly active = new Map<string, ActiveRun>();
@@ -273,6 +291,7 @@ export class ProjectRunCoordinator {
     this.acquireLease = options.acquireLease ?? acquireRunLease;
     this.publisher = options.publisher;
     if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
+    if (options.tierModelsFor) this.tierModelsFor = options.tierModelsFor;
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = options.timeoutMs ?? 15 * 60 * 1_000;
   }
@@ -287,6 +306,23 @@ export class ProjectRunCoordinator {
       throw new Error('reconcileInterrupted is a boot-time operation; runs are active');
     }
     return this.store.reconcileInterrupted('interrupted by server restart');
+  }
+
+  /**
+   * The requesting account's tier pins, or none. Fail-open by design: a
+   * preferences lookup that throws leaves the operator's host pins in force
+   * instead of failing the run the viewer just asked for.
+   */
+  private resolveTierModels(principalId: string): TierModelPins | undefined {
+    if (!this.tierModelsFor) return undefined;
+    try {
+      return this.tierModelsFor(principalId);
+    } catch (error) {
+      process.stderr.write(
+        `[atoma projects] tier model preferences unavailable for ${principalId}: ${String(error)}\n`
+      );
+      return undefined;
+    }
   }
 
   async start(input: {
@@ -366,6 +402,7 @@ export class ProjectRunCoordinator {
         skillsPath: paths.skillsPath,
         runId: run.projectRunId,
         artifactManifestPath: paths.artifactManifestPath,
+        tierModels: this.resolveTierModels(input.principalId),
       });
       this.store.transitionProjectRun({
         orgId: input.orgId,

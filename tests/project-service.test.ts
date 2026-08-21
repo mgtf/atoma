@@ -55,6 +55,7 @@ function principal(label: string, role: Viewer['role']): Viewer {
     orgName: `${label} Org`,
     role,
     platformAdmin: false,
+    displayNameSource: 'provider',
   };
 }
 

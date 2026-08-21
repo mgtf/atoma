@@ -27,9 +27,17 @@ import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { drawProjects, PROJECTS_DOM_FORM_HEIGHT, PROJECTS_DOM_FORM_TOP, projectsGpuContentTop } from '../src/viz/client-gl/renderer/views/projects.js';
 import {
-  authAccountLayout,
-  drawAuthAccount,
-} from '../src/viz/client-gl/renderer/views/auth-account.js';
+  accountMenuLayout,
+  drawAccountMenu,
+} from '../src/viz/client-gl/renderer/views/account-menu.js';
+import {
+  drawSettings,
+  MEMBER_ROW_HEIGHT,
+  modelChipLabel,
+  organisationPanelLayout,
+  parseSettingsModelId,
+  settingsGpuContentTop,
+} from '../src/viz/client-gl/renderer/views/settings.js';
 import { attachAtomaMark, ATOMA_MARK_ENV_MIN_SCALE, ATOMA_MARK_HEADER_SCALE } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
@@ -41,7 +49,9 @@ import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
-import { visibleViews, type GpuUiState } from '../src/viz/client-gl/store.js';
+import { isRoutableView, visibleViews, type GpuUiState } from '../src/viz/client-gl/store.js';
+import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
+import { GPU_LAYOUT } from '../src/viz/client-gl/theme.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
 
 // ---------------------------------------------------------------------------
@@ -85,6 +95,18 @@ interface RecordingCtx extends RendererCtx {
   texts: RecordedText[];
   buttons: RecordedButton[];
   filterButtons: RecordedButton[];
+  /** Panel frames, with the layer each was drawn into. */
+  panels: { parent: Container; x: number; y: number; width: number; height: number }[];
+  /** Account orbs the view asked the renderer to retain, in draw order. */
+  retainedOrbs: {
+    slot: string;
+    x: number;
+    y: number;
+    size: number;
+    photoUrl: string | null;
+    seed: string;
+    interactive: boolean;
+  }[];
   statCards: { id: string; label: string; value: string }[];
   atomButtons: RecordedButton[];
   eventCards: RecordedEventCard[];
@@ -155,9 +177,16 @@ function createRecordingCtx(): RecordingCtx {
     eventCards: [],
     tickers: [],
     exitCalls: 0,
+    panels: [],
+    retainedOrbs: [],
     metrics: emptyRenderMetrics(),
     // Headless retention stub: no renderer, so no textures to retain — every
     // call attaches a fresh mark, which is what the layout assertions read.
+    // The orb is a Mesh with a shader and a decoded texture: recording the
+    // retain call is what a headless context can honestly observe.
+    retainAvatarOrb(slot, x, y, size, photoUrl, seed, interactive) {
+      ctx.retainedOrbs.push({ slot, x, y, size, photoUrl, seed, interactive });
+    },
     retainAtomaMark(x, y, visualScale, options) {
       attachAtomaMark(
         ctx.markRoot,
@@ -182,6 +211,7 @@ function createRecordingCtx(): RecordingCtx {
       return textStub(value, options);
     },
     panel(parent, x, y, width, height) {
+      ctx.panels.push({ parent, x, y, width, height });
       const graphics = new Graphics();
       graphics.rect(x, y, Math.max(0, width), Math.max(0, height));
       parent.addChild(graphics);
@@ -353,6 +383,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
       projectName: '',
       projectPrompt: '',
       projectRepository: '',
+      displayName: '',
     },
     focusedInput: null,
     runPickerScrollY: 0,
@@ -361,10 +392,12 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
-    refreshNonce: 0,
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0, settings: 0 },
     entered: true,
+    accountMenuOpen: false,
     enter: noop,
+    toggleAccountMenu: noop,
+    closeAccountMenu: noop,
     setView: noop,
     setLocale: noop,
     selectRun: noop,
@@ -385,7 +418,6 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     setBurninFilter: noop,
     setBurninPage: noop,
     setScrollY: noop,
-    refresh: noop,
     ...overrides,
   };
 }
@@ -410,11 +442,41 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     adminLedger: [],
     adminInvitation: null,
     adminError: null,
+    organisation: null,
+    accountModels: null,
+    accountError: null,
     login: null,
     loading: false,
-    fetching: false,
     error: null,
     ...overrides,
+  };
+}
+
+/**
+ * One authenticated-viewer fixture. The three account fields (`principalId`,
+ * `avatarUrl`, `displayNameSource`) are what the orb and the profile panel read,
+ * so they belong in the shared factory rather than in every call site.
+ */
+function makeAuth(
+  viewer: Partial<AuthUiSnapshot['viewer']> = {},
+  rest: Partial<Omit<AuthUiSnapshot, 'viewer'>> = {}
+): AuthUiSnapshot {
+  return {
+    viewer: {
+      displayName: 'Root',
+      role: 'org:owner',
+      activeOrganisation: { id: 'org-1', name: 'Org One', role: 'org:owner' },
+      organisations: [],
+      platformAdmin: false,
+      principalId: 'principal-1',
+      avatarUrl: null,
+      displayNameSource: 'provider',
+      ...viewer,
+    },
+    failure: false,
+    signingOut: false,
+    switchingOrganisationId: null,
+    ...rest,
   };
 }
 
@@ -729,21 +791,22 @@ describe('visibleViews', () => {
       visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })
     ).toEqual(['projects', 'runs', 'registry', 'skills', 'burnin', 'launch', 'admin']);
   });
+
+  it('routes Settings without giving it a tab', () => {
+    const auth = makeAuth();
+    // A tab-less view must still be routable, or the "unknown view" guard in
+    // GpuApp bounces it back to runs on the render right after it opened.
+    expect(visibleViews(auth)).not.toContain('settings');
+    expect(isRoutableView('settings', auth)).toBe(true);
+    // ...and only where an account exists at all.
+    expect(isRoutableView('settings', null)).toBe(false);
+    expect(isRoutableView('admin', auth)).toBe(false);
+    expect(isRoutableView('runs', null)).toBe(true);
+  });
 });
 
 describe('drawAdmin', () => {
-  const auth = {
-    viewer: {
-      displayName: 'Root',
-      role: 'org:owner',
-      activeOrganisation: { id: 'org-1', name: 'Org One', role: 'org:owner' },
-      organisations: [],
-      platformAdmin: true,
-    },
-    failure: false,
-    signingOut: false,
-    switchingOrganisationId: null,
-  };
+  const auth = makeAuth({ platformAdmin: true });
   const organisations = [
     {
       orgId: 'org-1',
@@ -920,18 +983,10 @@ describe('drawProjects', () => {
 
   it('keeps GPU empty-state copy below the DOM create form', () => {
     const ctx = createRecordingCtx();
-    const auth = {
-      viewer: {
-        displayName: 'Alice',
-        role: 'org:owner',
-        activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
-        organisations: [],
-          platformAdmin: false,
-      },
-      failure: false,
-      signingOut: false,
-      switchingOrganisationId: null,
-    };
+    const auth = makeAuth({
+      displayName: 'Alice',
+      activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
+    });
     drawProjects(ctx, makeSnapshot({ view: 'projects' }, { auth }), 1280, 720);
     const title = ctx.texts.find((text) => text.value === 'Projects');
     const empty = ctx.texts.find((text) => text.value.includes('connect a GitHub App'));
@@ -1025,66 +1080,286 @@ describe('drawProjects', () => {
   });
 });
 
-describe('GPU account control', () => {
-  it('projects the account and logout action into Pixi', () => {
+describe('GPU account menu', () => {
+  const auth = makeAuth({
+    displayName: 'Ada Lovelace',
+    activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+    organisations: [
+      { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+      { id: 'org-b', name: 'Difference Engines', role: 'org:member' },
+    ],
+  });
+
+  it('stays closed until the header orb asks for it', () => {
+    const closed = createRecordingCtx();
+    drawAccountMenu(closed, makeSnapshot({ accountMenuOpen: false }, { auth }), 1280, 720);
+    expect(closed.buttons).toHaveLength(0);
+
+    const noViewer = createRecordingCtx();
+    drawAccountMenu(noViewer, makeSnapshot({ accountMenuOpen: true }), 1280, 720);
+    expect(noViewer.buttons).toHaveLength(0);
+  });
+
+  it('carries identity, role, the other organisations, settings and sign out', () => {
     const ctx = createRecordingCtx();
     const activated: string[] = [];
-    const snapshot = makeSnapshot({}, {
-      auth: {
-        viewer: {
-          displayName: 'Ada Lovelace',
-          role: 'org:owner',
-          activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
-          organisations: [
-            { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
-            { id: 'org-b', name: 'Difference Engines', role: 'org:member' },
-          ],
-          platformAdmin: false,
-        },
-        failure: false,
-        signingOut: false,
-        switchingOrganisationId: null,
-      },
-    });
+    const snapshot = makeSnapshot({ accountMenuOpen: true }, { auth });
     snapshot.onActivate = (id) => activated.push(id);
 
-    drawAuthAccount(ctx, snapshot, 1280, 720);
+    drawAccountMenu(ctx, snapshot, 1280, 720);
 
-    expect(ctx.metrics.visibleLabels).toContain('Signed in as Ada Lovelace');
-    expect(ctx.metrics.visibleLabels).toContain('Organisation: Analytical Engines');
-    expect(ctx.buttons.find((button) => button.id === 'org.switch.org-b')).toBeTruthy();
-    const logout = ctx.buttons.find((button) => button.id === 'auth.signOut');
-    expect(logout?.label).toBe('Sign out');
-    logout?.onActivate?.(logout.id);
+    expect(ctx.metrics.visibleLabels).toContain('Ada Lovelace');
+    expect(ctx.metrics.visibleLabels).toContain('OWNER');
+    expect(ctx.metrics.visibleLabels).toContain('Analytical Engines');
+    const ids = ctx.buttons.map((button) => button.id);
+    // The ACTIVE organisation is not offered as a switch target.
+    expect(ids).toContain('org.switch.org-b');
+    expect(ids).not.toContain('org.switch.org-a');
+    expect(ids).toContain('account.settings');
+    expect(ids).toContain('auth.signOut');
+    const signOut = ctx.buttons.find((button) => button.id === 'auth.signOut');
+    signOut?.onActivate?.(signOut.id);
     expect(activated).toEqual(['auth.signOut']);
   });
 
-  it('stays absent without a viewer and keeps its failure panel on-screen', () => {
-    const hidden = createRecordingCtx();
-    drawAuthAccount(hidden, makeSnapshot(), 360, 240);
-    expect(hidden.buttons).toHaveLength(0);
+  it('marks the platform admin and keeps the failure line', () => {
+    const ctx = createRecordingCtx();
+    drawAccountMenu(
+      ctx,
+      makeSnapshot(
+        { accountMenuOpen: true },
+        { auth: makeAuth({ platformAdmin: true }, { failure: true }) }
+      ),
+      1280,
+      720
+    );
+    expect(ctx.metrics.visibleLabels).toContain('PLATFORM ADMIN');
+    expect(ctx.metrics.visibleLabels).toContain('Account action failed');
+  });
 
-    const failed = createRecordingCtx();
-    drawAuthAccount(failed, makeSnapshot({}, {
-      auth: {
-        viewer: {
-          displayName: 'Grace Hopper',
-          role: 'org:member',
-          activeOrganisation: null,
-          organisations: [],
-          platformAdmin: false,
-        },
-        failure: true,
-        signingOut: false,
-        switchingOrganisationId: null,
-      },
-    }), 360, 240);
-    expect(failed.metrics.visibleLabels).toContain('Account action failed');
-    const layout = authAccountLayout(360, 240, true);
+  it('stays inside a narrow viewport and hangs under the header', () => {
+    const layout = accountMenuLayout(360, makeAuth({}, { failure: true }));
     expect(layout.x).toBeGreaterThanOrEqual(0);
-    expect(layout.y).toBeGreaterThanOrEqual(0);
     expect(layout.x + layout.width).toBeLessThanOrEqual(360);
-    expect(layout.y + layout.height).toBeLessThanOrEqual(240);
+    expect(layout.y).toBeGreaterThanOrEqual(GPU_LAYOUT.headerHeight);
+    // Ordering is the contract: identity first, actions last.
+    expect(layout.items[0]?.kind).toBe('identity');
+    expect(layout.items.map((item) => item.kind)).toContain('failure');
+    const kinds = layout.items.map((item) => item.kind);
+    expect(kinds.indexOf('settings')).toBeLessThan(kinds.indexOf('signOut'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Settings view
+// ---------------------------------------------------------------------------
+
+describe('drawSettings', () => {
+  const auth = makeAuth({ displayName: 'Ada Lovelace', principalId: 'principal-9' });
+  const accountModels = {
+    pins: { l1: 'claude-haiku-4-5-20251001', l2: null, l3: null },
+    defaults: {
+      l1: 'claude-haiku-4-5-20251001',
+      l2: 'claude-sonnet-5',
+      l3: 'claude-opus-5',
+    },
+    choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+  };
+  const organisation = {
+    id: 'org-1',
+    name: 'Analytical Engines',
+    createdAt: '2026-08-01T10:00:00.000Z',
+    viewerRole: 'org:owner',
+    members: [
+      {
+        principalId: 'principal-9',
+        displayName: 'Ada Lovelace',
+        role: 'org:owner',
+        joinedAt: '2026-08-01T10:00:00.000Z',
+        platformAdmin: true,
+        avatarUrl: null,
+      },
+      {
+        principalId: 'principal-2',
+        displayName: 'Charles Babbage',
+        role: 'org:member',
+        joinedAt: '2026-08-03T10:00:00.000Z',
+        platformAdmin: false,
+        avatarUrl: null,
+      },
+    ],
+    projectCount: 3,
+    pendingInvitations: 1,
+  };
+
+  it('offers one cell per tier per choice, plus the operator default', () => {
+    const ctx = createRecordingCtx();
+    drawSettings(
+      ctx,
+      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
+      1280,
+      720
+    );
+    const ids = ctx.filterButtons.map((filter) => filter.id);
+    for (const tier of [1, 2, 3]) {
+      expect(ids).toContain(`settings.model.${tier}.default`);
+      expect(ids).toContain(`settings.model.${tier}.0`);
+      expect(ids).toContain(`settings.model.${tier}.1`);
+      expect(ids).toContain(`settings.model.${tier}.2`);
+    }
+    // The pinned cell is the active one, and the default is active where no
+    // pin exists — the two must never both read as selected on one tier.
+    const active = ctx.filterButtons.filter((filter) => filter.active).map((filter) => filter.id);
+    expect(active).toContain('settings.model.1.0');
+    expect(active).not.toContain('settings.model.1.default');
+    expect(active).toContain('settings.model.2.default');
+    expect(active).toContain('settings.model.3.default');
+  });
+
+  it('shows the organisation card with members, roles and the admin chip', () => {
+    const ctx = createRecordingCtx();
+    drawSettings(
+      ctx,
+      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
+      1280,
+      720
+    );
+    const labels = ctx.texts.map((text) => text.value);
+    expect(labels).toContain('Analytical Engines');
+    expect(labels).toContain('Ada Lovelace');
+    expect(labels).toContain('Charles Babbage');
+    expect(labels).toContain('PLATFORM ADMIN');
+    expect(labels).toContain('org-1');
+    expect(labels).toContain('3');
+    // Owner/admin only: the pending count is null for a plain member and the
+    // row then disappears entirely.
+    expect(labels.some((label) => label.includes('PENDING INVITATIONS'))).toBe(true);
+    expect(ctx.scrollMax.settings).toBeGreaterThanOrEqual(0);
+  });
+
+  it('hides the invitation count from a member and survives no org at all', () => {
+    const member = createRecordingCtx();
+    drawSettings(
+      member,
+      makeSnapshot(
+        { view: 'settings' },
+        {
+          auth,
+          accountModels,
+          organisation: { ...organisation, viewerRole: 'org:member', pendingInvitations: null },
+        }
+      ),
+      1280,
+      720
+    );
+    expect(
+      member.texts.some((text) => text.value.includes('PENDING INVITATIONS'))
+    ).toBe(false);
+
+    const bare = createRecordingCtx();
+    drawSettings(bare, makeSnapshot({ view: 'settings' }, { auth }), 1280, 720);
+    // No models and no organisation yet: the tier rows still render against the
+    // operator defaults rather than leaving an empty page.
+    expect(bare.filterButtons.length).toBeGreaterThan(0);
+  });
+
+  it('names the name source and retains one orb for the account', () => {
+    const imported = createRecordingCtx();
+    drawSettings(imported, makeSnapshot({ view: 'settings' }, { auth }), 1280, 720);
+    expect(
+      imported.texts.some((text) => text.value.includes('Imported from your provider'))
+    ).toBe(true);
+    expect(imported.retainedOrbs).toHaveLength(1);
+    expect(imported.retainedOrbs[0]?.seed).toBe('principal-9');
+    // Its OWN slot: the header claims 'header' in the same frame, and a shared
+    // slot had the two orbs destroying each other on every render.
+    expect(imported.retainedOrbs[0]?.slot).toBe('settings');
+
+    const owned = createRecordingCtx();
+    drawSettings(
+      owned,
+      makeSnapshot(
+        { view: 'settings' },
+        { auth: makeAuth({ displayNameSource: 'user' }) }
+      ),
+      1280,
+      720
+    );
+    expect(owned.texts.some((text) => text.value.includes('Chosen here'))).toBe(true);
+  });
+
+  it('sizes the organisation panel around the rows it must hold', () => {
+    // THE REGRESSION: an owner sees one extra fact (pending invitations), which
+    // pushed the fact block onto a third line and the member list past a
+    // hand-tuned panel height — the last row was clipped. Every offset now
+    // comes from this one function, so the frame cannot be shorter than its
+    // content.
+    const ownerFacts = 5;
+    const memberFacts = 4;
+    for (const facts of [memberFacts, ownerFacts]) {
+      for (const members of [1, 3, 9]) {
+        const layout = organisationPanelLayout(facts, members);
+        const lastRowBottom = layout.firstMemberY + members * MEMBER_ROW_HEIGHT;
+        expect(layout.height, `${facts} facts / ${members} members`)
+          .toBeGreaterThanOrEqual(lastRowBottom);
+        // The members header must clear the fact lines it sits under.
+        expect(layout.membersHeaderY).toBeGreaterThan(38 + layout.factLines * 26);
+        expect(layout.firstMemberY).toBeGreaterThan(layout.membersHeaderY);
+      }
+    }
+    // One extra fact costs exactly one line of height, not zero.
+    expect(organisationPanelLayout(ownerFacts, 1).height).toBeGreaterThan(
+      organisationPanelLayout(memberFacts, 1).height
+    );
+    expect(organisationPanelLayout(memberFacts, 2).height).toBe(
+      organisationPanelLayout(memberFacts, 1).height + MEMBER_ROW_HEIGHT
+    );
+  });
+
+  it('draws every panel frame behind its own content', () => {
+    // The frames layer is added to the scroll pane FIRST: both panels size
+    // themselves from content they can only measure after drawing it, so a
+    // frame appended afterwards would paint over the rows.
+    const ctx = createRecordingCtx();
+    drawSettings(
+      ctx,
+      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
+      1280,
+      720
+    );
+    expect(ctx.panels).toHaveLength(2);
+    const framesLayer = ctx.panels[0]?.parent;
+    expect(ctx.panels[1]?.parent).toBe(framesLayer);
+    // ...and the rows went somewhere else, which is what "behind" means here.
+    const memberLabel = ctx.texts.find((text) => text.value === 'Charles Babbage');
+    expect(memberLabel?.parent).not.toBe(framesLayer);
+    for (const panel of ctx.panels) {
+      expect(panel.height).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps the GPU content clear of the DOM name form', () => {
+    // The form is `position: fixed` DOM over the canvas; content that started
+    // above its bottom edge would render underneath it.
+    expect(settingsGpuContentTop()).toBeGreaterThan(146 + 96);
+  });
+
+  it('round-trips a model cell id and shortens model ids for the chips', () => {
+    expect(parseSettingsModelId('settings.model.2.1')).toEqual({
+      tier: 2,
+      model: 'claude-sonnet-5',
+    });
+    expect(parseSettingsModelId('settings.model.3.default')).toEqual({
+      tier: 3,
+      model: null,
+    });
+    expect(parseSettingsModelId('settings.model.4.0')).toBeNull();
+    expect(parseSettingsModelId('settings.model.1.9')).toBeNull();
+    expect(parseSettingsModelId('nav.settings')).toBeNull();
+    expect(modelChipLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5');
+    expect(modelChipLabel('claude-sonnet-5')).toBe('Sonnet 5');
+    expect(modelChipLabel('claude-opus-5')).toBe('Opus 5');
+    expect(modelChipLabel('some-future-model')).toBe('some-future-model');
   });
 });
 
@@ -1138,6 +1413,7 @@ describe('drawRegistry scrolling honesty', () => {
             burnin: 0,
             launch: 0,
             admin: 0,
+            settings: 0,
           },
         },
         data
@@ -1272,6 +1548,7 @@ describe('drawSkills scrolling honesty and search', () => {
             projectName: '',
             projectPrompt: '',
             projectRepository: '',
+            displayName: '',
           },
         },
         {
@@ -1327,7 +1604,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0, admin: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0, admin: 0, settings: 0 },
         },
         data
       ),
@@ -1378,7 +1655,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0, admin: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0, admin: 0, settings: 0 },
         },
         data
       ),
@@ -1940,6 +2217,7 @@ describe('drawRuns behavior', () => {
             burnin: 0,
             launch: 0,
             admin: 0,
+            settings: 0,
           },
         },
         { run: makeRun(events) }

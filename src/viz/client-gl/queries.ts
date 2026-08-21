@@ -1,14 +1,8 @@
-import {
-  useQueries,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef } from 'react';
 import { api } from '../client/data-api.js';
 import { isRunLive, mergeRunDelta } from '../client/run-utils.js';
 import type { SkillSummary, VizRun } from '../client/types.js';
-import { useGpuStore, type ViewName } from './store.js';
 
 export function useRunsIndex(active: boolean) {
   return useQuery({
@@ -205,43 +199,21 @@ export function useAdminLedger(active: boolean) {
   });
 }
 
-const VIEW_QUERY_ROOTS: Record<ViewName, readonly string[]> = {
-  projects: ['projects', 'project', 'github'],
-  runs: ['runs', 'run'],
-  registry: ['registries', 'registry'],
-  skills: ['skills', 'skill'],
-  burnin: ['burnin'],
-  launch: ['profiles'],
-  admin: ['admin'],
-};
-
-/**
- * The queries the ACTIVE view is built from — one definition, used both to
- * invalidate them on refresh and to know when they are in flight. Two copies
- * of this predicate would drift, and the refresh button's spinner would then
- * report on a different set of requests than the button actually triggers.
- */
-export function activeViewQueryFilter(view: ViewName) {
-  return {
-    predicate: (query: { queryKey: readonly unknown[] }) => {
-      const root = query.queryKey[1];
-      return query.queryKey[0] === 'viz' &&
-        typeof root === 'string' &&
-        VIEW_QUERY_ROOTS[view].includes(root);
-    },
-  };
+/** The viewer's own organisation. Gated deployments only — 404 otherwise. */
+export function useOrganisation(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'org'],
+    queryFn: api.organisation,
+    enabled: active,
+    staleTime: 15_000,
+  });
 }
 
-export function invalidateActiveView(queryClient: QueryClient, view: ViewName) {
-  return queryClient.invalidateQueries(activeViewQueryFilter(view));
-}
-
-export function useRefreshBridge() {
-  const queryClient = useQueryClient();
-  const refreshNonce = useGpuStore((state) => state.refreshNonce);
-  const view = useGpuStore((state) => state.view);
-  useEffect(() => {
-    if (refreshNonce === 0) return;
-    void invalidateActiveView(queryClient, view);
-  }, [queryClient, refreshNonce, view]);
+export function useAccountModels(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'account', 'models'],
+    queryFn: api.accountModels,
+    enabled: active,
+    staleTime: 30_000,
+  });
 }

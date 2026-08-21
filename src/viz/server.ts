@@ -16,10 +16,13 @@ import { elementForTool } from '../contracts/toolTaxonomy.js';
 import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js';
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
+import { fetchAvatarImage } from '../auth/avatar.js';
+import { operatorTierDefaults, TIER_MODEL_CHOICES } from '../contracts/tierModels.js';
 import {
   ORG_ROLES,
   sha256Hex,
   TooManyPendingOauthStatesError,
+  type AuthStore,
   type OrgRole,
   type Viewer,
 } from '../auth/store.js';
@@ -455,8 +458,15 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     dbPath,
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
-    // Real notifications even when the browser is closed, plus the audit
-    // row. `run.cancelled` (requested, emitted by the service) and a
+    // Accounts choose their own per-tier models in Settings; without a gate
+    // there are no accounts and the operator's host pins are the only pins.
+    ...(AUTH?.store
+      ? { tierModelsFor: (principalId: string) => AUTH.store!.modelPins(principalId) }
+      : {}),
+    // The terminal-run hook JOURNALS; the router turns that row into pushes.
+    // There is deliberately no direct notifier call here any more — one
+    // delivery path, and no way to notify without an audit trail.
+    // `run.cancelled` (requested, emitted by the service) and a
     // `run.finished` carrying status `cancelled` are DIFFERENT facts at
     // different times — the ask and the actual end — so both are journaled.
     onRunFinished: (event) => {
@@ -501,6 +511,19 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
 /** Set-Cookie that removes the oauth transaction cookie. */
 function clearCookie(name: string, secure: boolean, path = '/'): string {
   return serializeCookie(name, '', { secure, path, maxAgeSeconds: 0 });
+}
+
+/**
+ * The same-origin avatar URL for a principal, or null when there is none.
+ *
+ * `?v=` is the content hash, not a timestamp: an unchanged picture keeps the
+ * browser cache warm across logins, and a new one changes the URL so the
+ * five-minute cache above cannot serve a stale face.
+ */
+function avatarUrlFor(store: AuthStore, principalId: string): string | null {
+  const meta = store.avatarMeta(principalId);
+  if (!meta) return null;
+  return `/auth/avatar/${encodeURIComponent(principalId)}?v=${meta.etag.slice(0, 16)}`;
 }
 
 /**
@@ -1194,7 +1217,7 @@ function invitationTokenFrom(value: string | null): string | null {
 function methodAllowed(
   req: import('node:http').IncomingMessage,
   res: import('node:http').ServerResponse,
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT'
 ): boolean {
   if (req.method === method) return true;
   res.writeHead(405, { allow: method, 'content-length': '0', 'cache-control': 'no-store' });
@@ -1468,6 +1491,29 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             },
           });
         }
+        // Provider picture, downloaded ONCE per source URL and stored as
+        // bytes. Fail-open in every direction: a refused, oversized or
+        // non-image response leaves the account on its procedural orb and the
+        // login continues. Re-downloading only when the URL changed keeps
+        // every subsequent sign-in free of an outbound request.
+        if (identity.avatarUrl) {
+          try {
+            const existing = authStore.avatarMeta(outcome.viewer.principalId);
+            if (existing?.sourceUrl !== identity.avatarUrl) {
+              const image = await fetchAvatarImage(identity.avatarUrl);
+              if (image) {
+                authStore.saveAvatar({
+                  principalId: outcome.viewer.principalId,
+                  mime: image.mime,
+                  bytes: image.bytes,
+                  sourceUrl: identity.avatarUrl,
+                });
+              }
+            }
+          } catch (error) {
+            console.error('[viz auth] avatar import failed', error);
+          }
+        }
         if (
           provider.id === 'github' &&
           PROJECTS_RUNTIME?.githubConfig &&
@@ -1539,10 +1585,20 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       sendJson(res, 200, {
         enabled: true,
         authenticated: true,
+        // Already visible to this browser through the avatar URL and the org
+        // member list; the client needs it as the seed for the fallback orb so
+        // an account without a picture still gets colours of its own.
+        principalId: viewer.principalId,
         displayName: viewer.displayName,
+        // Whether the name still belongs to the provider. The account page
+        // labels an imported name; a user-owned one is never re-synchronised.
+        displayNameSource: viewer.displayNameSource,
         orgName: viewer.orgName,
         role: viewer.role,
         platformAdmin: viewer.platformAdmin,
+        // Same-origin URL, versioned by the content hash so a changed picture
+        // busts the browser cache and an unchanged one stays cached.
+        avatarUrl: avatarUrlFor(authStore, viewer.principalId),
         activeOrganisation: {
           id: viewer.orgId,
           name: viewer.orgName,
@@ -1689,6 +1745,49 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
+    // AVATAR BYTES — same-origin, so rendering the app shell never talks to a
+    // provider CDN and no viewer IP leaks to GitHub or Google on page load.
+    // Readable by a viewer who shares an organisation with the subject: the
+    // org card and the member list show faces. Anything else is a 404, not a
+    // 403 — an outsider learns nothing about which principals exist.
+    const avatarRoute = pathname.match(/^\/auth\/avatar\/([^/]+)$/);
+    if (avatarRoute) {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const viewer = AUTH.resolve(req);
+      if (!viewer) {
+        sendJson(res, 401, { error: 'authentication required' });
+        return;
+      }
+      const principalId = decodePathComponent(avatarRoute[1]!);
+      if (!principalId || !authStore.sharesOrganisation(viewer.principalId, principalId)) {
+        sendJson(res, 404, { error: 'not found' });
+        return;
+      }
+      const avatar = authStore.readAvatar(principalId);
+      if (!avatar) {
+        sendJson(res, 404, { error: 'not found' });
+        return;
+      }
+      const etag = `"${avatar.etag}"`;
+      if (req.headers['if-none-match'] === etag) {
+        res.writeHead(304, { etag, 'cache-control': 'private, max-age=300' });
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        // The stored mime came from sniffing the bytes, not from the
+        // provider's header; nosniff keeps the browser on that verdict.
+        'content-type': avatar.mime,
+        'content-length': avatar.bytes.byteLength,
+        'cache-control': 'private, max-age=300',
+        etag,
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'no-referrer',
+      });
+      res.end(avatar.bytes);
+      return;
+    }
+
     if (pathname.startsWith('/auth/')) {
       sendJson(res, 404, { error: 'not found' });
       return;
@@ -1716,6 +1815,109 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       pathname === '/api/burnin';
     if (operatorApi && !viewer.platformAdmin) {
       sendJson(res, 403, { error: 'platform admin required' });
+      return;
+    }
+
+    // ACCOUNT SELF-CARE — the viewer's own name and per-tier model pins.
+    // Self-scoped by construction: the principal id comes from the resolved
+    // session, never from the request, so there is no object to authorise.
+    if (pathname === '/api/account' || pathname === '/api/account/models') {
+      const authStore = AUTH.store!;
+      if (pathname === '/api/account/models' && req.method === 'GET') {
+        sendJson(res, 200, {
+          pins: authStore.modelPins(viewer.principalId),
+          // Labels for the "operator default" choice, resolved from the HOST
+          // environment rather than a second copy of the tier defaults.
+          defaults: operatorTierDefaults(process.env),
+          choices: TIER_MODEL_CHOICES,
+        });
+        return;
+      }
+      const method = pathname === '/api/account' ? 'PATCH' : 'PUT';
+      if (!methodAllowed(req, res, method)) return;
+      if (!sameOrigin(req, res)) return;
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+      } catch {
+        sendJson(res, 400, { error: 'request body is not valid JSON' });
+        return;
+      }
+      if (pathname === '/api/account') {
+        const input = body as { displayName?: unknown };
+        if (typeof input.displayName !== 'string') {
+          sendJson(res, 400, { error: 'displayName is required' });
+          return;
+        }
+        try {
+          const displayName = authStore.setDisplayName(viewer.principalId, input.displayName);
+          emit({
+            kind: 'principal.renamed',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary: `Account renamed to "${eventLabel(displayName)}"`,
+          });
+          sendJson(res, 200, { displayName, displayNameSource: 'user' });
+        } catch (error) {
+          sendJson(res, 400, {
+            error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          });
+        }
+        return;
+      }
+      try {
+        const pins = authStore.setModelPins(viewer.principalId, (body as { pins?: unknown }).pins);
+        sendJson(res, 200, {
+          pins,
+          defaults: operatorTierDefaults(process.env),
+          choices: TIER_MODEL_CHOICES,
+        });
+      } catch {
+        // The closed choice list is the contract; a rejected value is a
+        // client bug, and echoing zod's shape back adds nothing.
+        sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
+      }
+      return;
+    }
+
+    // THE VIEWER'S OWN ORGANISATION. Org-scoped, not operator-scoped: every
+    // member sees who else is in the organisation they belong to. Emails are
+    // deliberately absent — provider emails are display attributes and
+    // GitHub's is not even a verified-email assertion.
+    if (pathname === '/api/org') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      const authStore = AUTH.store!;
+      const organisation = authStore.getOrganisationWithMembers(viewer.orgId);
+      if (!organisation) {
+        sendJson(res, 404, { error: 'not found' });
+        return;
+      }
+      const canSeeInvitations = viewer.role === 'org:owner' || viewer.role === 'org:admin';
+      sendJson(res, 200, {
+        id: organisation.orgId,
+        name: organisation.name,
+        createdAt: organisation.createdAt,
+        viewerRole: viewer.role,
+        members: organisation.members.map((member) => ({
+          principalId: member.principalId,
+          displayName: member.displayName,
+          role: member.role,
+          joinedAt: member.joinedAt,
+          platformAdmin: member.platformAdmin,
+          avatarUrl: member.avatarEtag
+            ? `/auth/avatar/${encodeURIComponent(member.principalId)}?v=${member.avatarEtag.slice(0, 16)}`
+            : null,
+        })),
+        projectCount: PROJECTS_RUNTIME
+          ? PROJECTS_RUNTIME.store.listProjects(viewer.orgId).length
+          : 0,
+        // Only owners and admins can mint invitations, so only they are told
+        // how many are outstanding.
+        pendingInvitations: canSeeInvitations
+          ? authStore.countLiveInvitations(viewer.orgId)
+          : null,
+      });
       return;
     }
 

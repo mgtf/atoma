@@ -389,6 +389,7 @@ describe('provider userinfo', () => {
       displayName: 'Ada Lovelace',
       email: 'ada@example.test',
       emailVerified: true,
+      avatarUrl: null,
     });
     expect(seenInit?.redirect).toBe('error');
     expect(new Headers(seenInit?.headers).get('authorization')).toBe('Bearer bearer-token');
@@ -404,7 +405,58 @@ describe('provider userinfo', () => {
       displayName: 'octocat',
       email: 'octocat@example.test',
       emailVerified: false,
+      avatarUrl: null,
     });
+  });
+
+  it('captures the provider picture, and NEVER fails a login over a bad one', async () => {
+    const withGithubAvatar = (async () =>
+      jsonResponse({
+        id: 7,
+        login: 'octocat',
+        avatar_url: 'https://avatars.githubusercontent.com/u/7?v=4',
+      })) as typeof fetch;
+    await expect(
+      fetchProviderIdentity({ provider: github(), accessToken: 'token' }, withGithubAvatar)
+    ).resolves.toMatchObject({
+      avatarUrl: 'https://avatars.githubusercontent.com/u/7?v=4',
+    });
+
+    const withOidcPicture = (async () =>
+      jsonResponse({
+        sub: 'subject',
+        name: 'Ada',
+        picture: 'https://lh3.googleusercontent.com/a/portrait',
+      })) as typeof fetch;
+    await expect(
+      fetchProviderIdentity({ provider: chatgpt(), accessToken: 'token' }, withOidcPicture)
+    ).resolves.toMatchObject({
+      avatarUrl: 'https://lh3.googleusercontent.com/a/portrait',
+    });
+
+    // Every rejected shape yields null rather than throwing: a broken profile
+    // picture is not a reason to refuse an otherwise valid identity. The
+    // http/loopback/IP-literal cases are the SSRF guard, since the SERVER is
+    // what dereferences this URL.
+    for (const picture of [
+      42,
+      '',
+      '   ',
+      'not-a-url',
+      'http://avatars.example/a.png',
+      'https://localhost/a.png',
+      'https://127.0.0.1/a.png',
+      'https://169.254.169.254/latest/meta-data',
+      'https://[::1]/a.png',
+      'https://user:secret@avatars.example/a.png',
+      `https://avatars.example/${'x'.repeat(3_000)}.png`,
+    ]) {
+      const fakeFetch = (async () =>
+        jsonResponse({ sub: 'subject', name: 'Ada', picture })) as typeof fetch;
+      await expect(
+        fetchProviderIdentity({ provider: chatgpt(), accessToken: 'token' }, fakeFetch)
+      ).resolves.toMatchObject({ avatarUrl: null });
+    }
   });
 
   it('refuses missing or malformed stable identities, names, emails and verification flags', async () => {

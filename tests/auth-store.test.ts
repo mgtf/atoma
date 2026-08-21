@@ -752,3 +752,248 @@ describe('session cookies', () => {
     expect(cookie).not.toContain('Max-Age=0');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Account self-care: the display name, avatars and per-tier model pins.
+// ---------------------------------------------------------------------------
+
+describe('auth store — display name ownership', () => {
+  it('stops provider re-synchronisation once the viewer renames the account', () => {
+    const store = freshStore();
+    const login = identity('rename-me', { displayName: 'ada-l' });
+    const { viewer } = admit(store, login, 'org:owner');
+    expect(viewer.displayNameSource).toBe('provider');
+
+    // A provider that changes its own idea of the name still wins here.
+    const renamedUpstream = store.completeLogin(
+      identity('rename-me', { displayName: 'Ada L.' }),
+      null
+    );
+    expect(renamedUpstream?.viewer.displayName).toBe('Ada L.');
+
+    expect(store.setDisplayName(viewer.principalId, '  Ada Lovelace  ')).toBe('Ada Lovelace');
+
+    // THE REGRESSION: a re-login must not silently revert the chosen name.
+    const afterRelogin = store.completeLogin(
+      identity('rename-me', { displayName: 'ada-l' }),
+      null
+    );
+    expect(afterRelogin?.viewer.displayName).toBe('Ada Lovelace');
+    expect(afterRelogin?.viewer.displayNameSource).toBe('user');
+    // ...and the session-resolved viewer agrees with the login outcome.
+    const issued = issueSession(store, afterRelogin!.viewer, { secure: false });
+    expect(store.resolveSession(issued.token)).toMatchObject({
+      displayName: 'Ada Lovelace',
+      displayNameSource: 'user',
+    });
+  });
+
+  it('refuses an empty, oversized or control-laden name, and an unknown principal', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('bounds'), 'org:owner');
+    expect(() => store.setDisplayName(viewer.principalId, '   ')).toThrow(/1 to 120/);
+    expect(() => store.setDisplayName(viewer.principalId, 'x'.repeat(121))).toThrow(/1 to 120/);
+    expect(() => store.setDisplayName(viewer.principalId, 'Ada\u0007Lovelace')).toThrow(
+      /control characters/
+    );
+    expect(() => store.setDisplayName('not-a-principal', 'Ada')).toThrow(/unknown principal/);
+  });
+
+  it('adds display_name_source to a store that predates it', () => {
+    const store = freshStore('legacy-name.db');
+    const { viewer } = admit(store, identity('legacy'), 'org:owner');
+    const db = rawDb(store);
+    // Rebuild auth_principals without the column, as a pre-release store had it.
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE auth_principals_legacy (
+        principal_id TEXT PRIMARY KEY,
+        kind         TEXT NOT NULL CHECK (kind IN ('human','service','system')),
+        display_name TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
+      INSERT INTO auth_principals_legacy (principal_id, kind, display_name, created_at)
+      SELECT principal_id, kind, display_name, created_at FROM auth_principals;
+      DROP TABLE auth_principals;
+      ALTER TABLE auth_principals_legacy RENAME TO auth_principals;
+      PRAGMA foreign_keys = ON;
+    `);
+    expect(tableColumnNames(db, 'auth_principals')).not.toContain('display_name_source');
+
+    const reopened = new AuthStore(db);
+    expect(tableColumnNames(db, 'auth_principals')).toContain('display_name_source');
+    // Existing rows default to provider-owned, which is what they were.
+    expect(reopened.setDisplayName(viewer.principalId, 'Renamed')).toBe('Renamed');
+  });
+});
+
+describe('auth store — avatars', () => {
+  it('stores, replaces and reads back the bytes with a content etag', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('face'), 'org:owner');
+    expect(store.readAvatar(viewer.principalId)).toBeNull();
+    expect(store.avatarMeta(viewer.principalId)).toBeNull();
+
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const etag = store.saveAvatar({
+      principalId: viewer.principalId,
+      mime: 'image/png',
+      bytes: png,
+      sourceUrl: 'https://avatars.example/a.png',
+    });
+    expect(etag).toMatch(/^[0-9a-f]{64}$/);
+    expect(store.readAvatar(viewer.principalId)).toMatchObject({ mime: 'image/png', etag });
+    expect(store.readAvatar(viewer.principalId)?.bytes.equals(png)).toBe(true);
+    expect(store.avatarMeta(viewer.principalId)).toEqual({
+      etag,
+      sourceUrl: 'https://avatars.example/a.png',
+    });
+
+    // Same URL, different bytes: a new etag, so the client cache cannot serve
+    // the old face.
+    const next = store.saveAvatar({
+      principalId: viewer.principalId,
+      mime: 'image/jpeg',
+      bytes: Buffer.from([0xff, 0xd8, 0xff, 9]),
+      sourceUrl: 'https://avatars.example/a.png',
+    });
+    expect(next).not.toBe(etag);
+    expect(store.readAvatar(viewer.principalId)?.mime).toBe('image/jpeg');
+  });
+
+  it('refuses a mime the avatar pipeline never produces', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('svg'), 'org:owner');
+    expect(() =>
+      store.saveAvatar({
+        principalId: viewer.principalId,
+        // Cast past the compile-time union: the CHECK constraint is the
+        // runtime guard, and a foreign writer would arrive exactly like this.
+        mime: 'image/svg+xml' as 'image/png',
+        bytes: Buffer.from('<svg/>'),
+        sourceUrl: null,
+      })
+    ).toThrow();
+  });
+});
+
+describe('auth store — per-tier model pins', () => {
+  it('round-trips a partial pin set and defaults the rest', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('pins'), 'org:owner');
+    expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
+
+    const saved = store.setModelPins(viewer.principalId, {
+      l1: 'claude-haiku-4-5-20251001',
+      l2: 'claude-sonnet-5',
+      l3: null,
+    });
+    expect(saved).toEqual({
+      l1: 'claude-haiku-4-5-20251001',
+      l2: 'claude-sonnet-5',
+      l3: null,
+    });
+    expect(store.modelPins(viewer.principalId)).toEqual(saved);
+
+    // An upsert, not an insert: a second write replaces the row.
+    store.setModelPins(viewer.principalId, { l1: null, l2: null, l3: 'claude-opus-5' });
+    expect(store.modelPins(viewer.principalId)).toEqual({
+      l1: null,
+      l2: null,
+      l3: 'claude-opus-5',
+    });
+  });
+
+  it('refuses anything outside the closed choice list, including a selector', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('bad-pins'), 'org:owner');
+    for (const pins of [
+      { l1: 'gpt-5', l2: null, l3: null },
+      { l1: 'ollama:llama3', l2: null, l3: null },
+      { l1: '', l2: null, l3: null },
+      { l2: null, l3: null },
+    ]) {
+      expect(() => store.setModelPins(viewer.principalId, pins)).toThrow();
+    }
+    expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
+  });
+
+  it('degrades a retired model id to the operator default instead of throwing', () => {
+    const store = freshStore();
+    const { viewer } = admit(store, identity('retired'), 'org:owner');
+    store.setModelPins(viewer.principalId, { l1: 'claude-sonnet-5', l2: null, l3: null });
+    // A model that existed when the pin was written and no longer does.
+    rawDb(store)
+      .prepare('UPDATE auth_principal_model_pins SET model_l1 = ? WHERE principal_id = ?')
+      .run('claude-sonnet-4', viewer.principalId);
+    expect(store.modelPins(viewer.principalId)).toEqual({ l1: null, l2: null, l3: null });
+  });
+});
+
+describe('auth store — organisation directory', () => {
+  it('narrows the member projection to one organisation and carries the chips', () => {
+    const store = freshStore();
+    const owner = admit(store, identity('dir-owner', { displayName: 'Owner' }), 'org:owner');
+    const member = admit(store, identity('dir-member', { displayName: 'Member' }), 'org:member');
+    store.grantPlatformAdmin(owner.viewer.principalId);
+    store.saveAvatar({
+      principalId: member.viewer.principalId,
+      mime: 'image/png',
+      bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, 7]),
+      sourceUrl: null,
+    });
+
+    const one = store.getOrganisationWithMembers(owner.viewer.orgId);
+    // Order is `created_at, principal_id` — two admissions in the same
+    // millisecond tie on the timestamp and fall back to the surrogate id, so
+    // the row set is the contract here, not who lands first.
+    expect(one?.members.map((entry) => entry.displayName).sort()).toEqual([
+      'Member',
+      'Owner',
+    ]);
+    const ownerRow = one?.members.find((entry) => entry.displayName === 'Owner');
+    const memberRow = one?.members.find((entry) => entry.displayName === 'Member');
+    expect(ownerRow).toMatchObject({ role: 'org:owner', platformAdmin: true });
+    expect(memberRow).toMatchObject({ role: 'org:member', platformAdmin: false });
+    expect(memberRow?.avatarEtag).toMatch(/^[0-9a-f]{64}$/);
+    expect(ownerRow?.avatarEtag).toBeNull();
+    // Emails are display attributes, never directory data.
+    expect(JSON.stringify(one)).not.toContain('@');
+
+    expect(store.getOrganisationWithMembers('unknown-org')).toBeNull();
+    // The unfiltered admin inventory keeps the same projection.
+    expect(store.listOrganisationsWithMembers()).toHaveLength(1);
+  });
+
+  it('answers organisation sharing and counts only live invitations', () => {
+    const store = freshStore();
+    const owner = admit(store, identity('share-owner'), 'org:owner');
+    const member = admit(store, identity('share-member'), 'org:member');
+    expect(store.sharesOrganisation(owner.viewer.principalId, member.viewer.principalId)).toBe(true);
+    expect(store.sharesOrganisation(owner.viewer.principalId, owner.viewer.principalId)).toBe(true);
+    expect(store.sharesOrganisation(owner.viewer.principalId, 'stranger')).toBe(false);
+
+    // `admit` consumed one invitation for the member above; a consumed token is
+    // not pending.
+    expect(store.countLiveInvitations(owner.viewer.orgId)).toBe(0);
+    store.createInvitation({
+      orgId: owner.viewer.orgId,
+      token: 'live-invitation',
+      role: 'org:member',
+      ttlMs: 60_000,
+    });
+    // Backdated rather than given a 1ms TTL: a short TTL is a race with the
+    // clock, and this assertion must be about expiry, not about timing.
+    const expired = store.createInvitation({
+      orgId: owner.viewer.orgId,
+      token: 'expired-invitation',
+      role: 'org:member',
+      ttlMs: 60_000,
+    });
+    rawDb(store)
+      .prepare('UPDATE auth_invitations SET created_at = ?, expires_at = ? WHERE token_hash = ?')
+      .run('2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', expired.tokenHash);
+    expect(store.countLiveInvitations(owner.viewer.orgId)).toBe(1);
+    expect(store.countLiveInvitations('unknown-org')).toBe(0);
+  });
+});

@@ -578,6 +578,173 @@ describe('viz auth gate (process level)', () => {
     expect((await fetch(`${base}/api/admin/organisations`, { headers: cookie })).status).toBe(403);
   });
 
+
+  it('serves the account surfaces: name, avatar bytes, tier pins and the org card', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({ port: await freePort(), subject: 909 });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      [...instance.args, '--port', String(port)],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+
+    // ---- whoami carries what the account UI needs.
+    const whoami = await (await fetch(`${base}/auth/whoami`, { headers: cookie })).json() as {
+      principalId: string;
+      displayName: string;
+      displayNameSource: string;
+      avatarUrl: string | null;
+    };
+    expect(whoami.displayName).toBe('Fake User');
+    expect(whoami.displayNameSource).toBe('provider');
+    expect(whoami.principalId).toMatch(/^[0-9a-f-]{36}$/);
+    // The fake provider serves no picture, and a loopback one would be refused
+    // by the SSRF rule anyway — so there is nothing to serve yet.
+    expect(whoami.avatarUrl).toBeNull();
+    expect((await fetch(`${base}/auth/avatar/${whoami.principalId}`, { headers: cookie })).status)
+      .toBe(404);
+
+    // ---- rename: same-origin only, and it sticks in whoami.
+    const crossSiteRename = await fetch(`${base}/api/account`, {
+      method: 'PATCH',
+      headers: { ...cookie, 'content-type': 'application/json', origin: 'https://evil.example' },
+      body: JSON.stringify({ displayName: 'Attacker' }),
+    });
+    expect(crossSiteRename.status).toBe(403);
+    const badRename = await fetch(`${base}/api/account`, {
+      method: 'PATCH',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ displayName: '   ' }),
+    });
+    expect(badRename.status).toBe(400);
+    const renamed = await fetch(`${base}/api/account`, {
+      method: 'PATCH',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ displayName: 'Ada Lovelace' }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(await (await fetch(`${base}/auth/whoami`, { headers: cookie })).json())
+      .toMatchObject({ displayName: 'Ada Lovelace', displayNameSource: 'user' });
+    // GET is not a rename.
+    expect((await fetch(`${base}/api/account`, { headers: cookie })).status).toBe(405);
+
+    // ---- tier pins: the closed choice list, then the run environment.
+    const defaults = await (await fetch(`${base}/api/account/models`, { headers: cookie })).json() as {
+      pins: Record<string, string | null>;
+      defaults: Record<string, string>;
+      choices: string[];
+    };
+    expect(defaults.pins).toEqual({ l1: null, l2: null, l3: null });
+    expect(defaults.defaults['l3']).toContain('opus');
+    expect(defaults.choices.length).toBeGreaterThan(0);
+
+    const refusedPin = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ pins: { l1: 'ollama:llama3', l2: null, l3: null } }),
+    });
+    expect(refusedPin.status).toBe(400);
+    const savedPin = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ pins: { l1: defaults.choices[1], l2: null, l3: null } }),
+    });
+    expect(savedPin.status).toBe(200);
+    expect(await (await fetch(`${base}/api/account/models`, { headers: cookie })).json())
+      .toMatchObject({ pins: { l1: defaults.choices[1], l2: null, l3: null } });
+
+    // ---- the viewer's own organisation, with no email anywhere in it.
+    const org = await fetch(`${base}/api/org`, { headers: cookie });
+    expect(org.status).toBe(200);
+    const orgBody = await org.json() as {
+      id: string;
+      name: string;
+      viewerRole: string;
+      members: Array<{ principalId: string; displayName: string; role: string; avatarUrl: string | null }>;
+      projectCount: number;
+      pendingInvitations: number | null;
+    };
+    expect(orgBody.viewerRole).toBe('org:owner');
+    expect(orgBody.members).toHaveLength(1);
+    expect(orgBody.members[0]).toMatchObject({
+      principalId: whoami.principalId,
+      displayName: 'Ada Lovelace',
+      role: 'org:owner',
+      avatarUrl: null,
+    });
+    expect(orgBody.projectCount).toBe(0);
+    // Owner, so the count is a number rather than withheld.
+    expect(orgBody.pendingInvitations).toBe(0);
+    expect(JSON.stringify(orgBody)).not.toContain('fake@example.com');
+
+    // ---- avatar bytes: stored out of band (the login path cannot reach a
+    // loopback picture), then served same-origin with a validator.
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    const strangerDb = new Database(instance.dbPath);
+    let strangerId: string;
+    let etag: string;
+    try {
+      const store = new AuthStore(strangerDb);
+      etag = store.saveAvatar({
+        principalId: whoami.principalId,
+        mime: 'image/png',
+        bytes: png,
+        sourceUrl: 'https://avatars.example/a.png',
+      });
+      // A principal in ANOTHER organisation: their avatar must be invisible.
+      const stranger = store.completeLogin({
+        provider: 'github',
+        subject: 'stranger-org-owner',
+        displayName: 'Stranger',
+        email: 'stranger@example.com',
+        emailVerified: false,
+      }, null);
+      strangerId = stranger!.viewer.principalId;
+      store.saveAvatar({
+        principalId: strangerId,
+        mime: 'image/png',
+        bytes: png,
+        sourceUrl: null,
+      });
+    } finally {
+      strangerDb.close();
+    }
+
+    const versioned = await (await fetch(`${base}/auth/whoami`, { headers: cookie })).json() as {
+      avatarUrl: string;
+    };
+    expect(versioned.avatarUrl).toBe(
+      `/auth/avatar/${whoami.principalId}?v=${etag.slice(0, 16)}`
+    );
+    const served = await fetch(`${base}${versioned.avatarUrl}`, { headers: cookie });
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(served.headers.get('cache-control')).toBe('private, max-age=300');
+    expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+
+    const validator = served.headers.get('etag')!;
+    const revalidated = await fetch(`${base}${versioned.avatarUrl}`, {
+      headers: { ...cookie, 'if-none-match': validator },
+    });
+    expect(revalidated.status).toBe(304);
+
+    // Cross-organisation read: a 404, not a 403 — an outsider learns nothing
+    // about which principals exist.
+    expect((await fetch(`${base}/auth/avatar/${strangerId}`, { headers: cookie })).status).toBe(404);
+    // ...and no session at all reads nothing.
+    expect((await fetch(`${base}/auth/avatar/${whoami.principalId}`)).status).toBe(401);
+    // Account routes are self-scoped, never operator-scoped: no platform admin
+    // grant happened above, and every one of them answered.
+    expect((await fetch(`${base}/api/registries`, { headers: cookie })).status).toBe(403);
+  });
+
   it('serves the platform audit journal to the admin alone, newest first', async () => {
     const instance = tempInstance();
     const provider = await startFakeProvider({ port: await freePort(), subject: 303 });

@@ -1,4 +1,3 @@
-import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   gpuCardShaderMode,
@@ -14,7 +13,6 @@ import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
 // Decisions are catalog-backed (outcome.* keys); resolving through the real
 // EN catalog proves the copy path never falls back to hardcoded English.
 const t = (key: string): string => I18N_CATALOGS.en[key] ?? key;
-import { invalidateActiveView } from '../src/viz/client-gl/queries.js';
 import {
   nextRunFilters,
   useGpuStore,
@@ -31,7 +29,7 @@ beforeEach(() => {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0, settings: 0 },
     entered: false,
   });
 });
@@ -70,6 +68,28 @@ describe('full-GL Zustand scene state', () => {
     expect(useGpuStore.getState().branchHeadingExpanded).toBe(true);
   });
 
+  it('opens the account menu and closes it on navigation', () => {
+    const store = useGpuStore.getState();
+    expect(store.accountMenuOpen).toBe(false);
+    store.toggleAccountMenu();
+    expect(useGpuStore.getState().accountMenuOpen).toBe(true);
+    store.toggleAccountMenu();
+    expect(useGpuStore.getState().accountMenuOpen).toBe(false);
+
+    store.toggleAccountMenu();
+    // Navigating away must close it: the panel is anchored to the header orb
+    // and would otherwise outlive the screen it was opened from.
+    useGpuStore.getState().setView('settings');
+    expect(useGpuStore.getState()).toMatchObject({
+      view: 'settings',
+      accountMenuOpen: false,
+    });
+
+    store.toggleAccountMenu();
+    useGpuStore.getState().closeAccountMenu();
+    expect(useGpuStore.getState().accountMenuOpen).toBe(false);
+  });
+
   it('resets dependent UI state and clamps GPU scrolling', () => {
     const store = useGpuStore.getState();
     store.setBurninPage(4);
@@ -80,19 +100,6 @@ describe('full-GL Zustand scene state', () => {
       burninPage: 1,
       scrollY: { runs: 0 },
     });
-  });
-});
-
-describe('TanStack Query remains server-state authority', () => {
-  it('invalidates only the active view query roots', async () => {
-    const client = new QueryClient();
-    client.setQueryData(['viz', 'runs'], []);
-    client.setQueryData(['viz', 'run', 'r1'], { id: 'r1' });
-    client.setQueryData(['viz', 'burnin'], { rows: [] });
-    await invalidateActiveView(client, 'runs');
-    expect(client.getQueryState(['viz', 'runs'])?.isInvalidated).toBe(true);
-    expect(client.getQueryState(['viz', 'run', 'r1'])?.isInvalidated).toBe(true);
-    expect(client.getQueryState(['viz', 'burnin'])?.isInvalidated).toBe(false);
   });
 });
 

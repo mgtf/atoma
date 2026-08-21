@@ -1,7 +1,15 @@
 import { create } from 'zustand';
 import type { EventFilters } from '../client/run-utils.js';
 
-export type ViewName = 'projects' | 'runs' | 'registry' | 'skills' | 'burnin' | 'launch' | 'admin';
+export type ViewName =
+  | 'projects'
+  | 'runs'
+  | 'registry'
+  | 'skills'
+  | 'burnin'
+  | 'launch'
+  | 'admin'
+  | 'settings';
 
 /**
  * ONE definition of which nav tabs a viewer gets — the DOM tablist and the
@@ -22,6 +30,24 @@ export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null
   }
   return ['projects', 'runs', 'launch'];
 }
+
+/**
+ * Which views may be ACTIVE, which is not the same question as which get a nav
+ * tab. Settings is reached from the account menu and deliberately has no tab —
+ * without this distinction the "viewer landed on a view they cannot see" guard
+ * in GpuApp would bounce it back to runs on the very next render.
+ *
+ * Settings exists only where an account does: the ungated developer path has
+ * no principal to configure.
+ */
+export function isRoutableView(
+  view: ViewName,
+  auth: { viewer: { platformAdmin: boolean } } | null
+): boolean {
+  if (view === 'settings') return auth !== null;
+  return visibleViews(auth).includes(view);
+}
+
 export type InputKind =
   | 'run'
   | 'registry'
@@ -30,6 +56,7 @@ export type InputKind =
   | 'projectName'
   | 'projectPrompt'
   | 'projectRepository'
+  | 'displayName'
   | null;
 
 export function nextRunFilters(
@@ -65,13 +92,20 @@ export interface GpuUiState {
   burninPreset: string;
   burninPage: number;
   scrollY: Record<ViewName, number>;
-  refreshNonce: number;
   /**
    * Arrival gate. False until Continue (later: login). Not a nav view — the
    * chrome and data views stay behind it so SaaS auth can replace `enter()`.
    */
   entered: boolean;
+  /**
+   * The account menu behind the header orb. Not a view: it is an overlay drawn
+   * above every view, and it closes on navigation so it can never outlive the
+   * screen it was opened from.
+   */
+  accountMenuOpen: boolean;
   enter: () => void;
+  toggleAccountMenu: () => void;
+  closeAccountMenu: () => void;
   setView: (view: ViewName) => void;
   setLocale: (locale: 'en' | 'fr') => void;
   selectRun: (id: string | null) => void;
@@ -92,7 +126,6 @@ export interface GpuUiState {
   setBurninFilter: (kind: 'family' | 'outcome' | 'preset', value: string) => void;
   setBurninPage: (page: number) => void;
   setScrollY: (view: ViewName, value: number) => void;
-  refresh: () => void;
 }
 
 function initialLocale(): 'en' | 'fr' {
@@ -129,6 +162,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     projectName: '',
     projectPrompt: '',
     projectRepository: '',
+    displayName: '',
   },
   focusedInput: null,
   runPickerScrollY: 0,
@@ -137,11 +171,24 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninOutcome: 'all',
   burninPreset: 'all',
   burninPage: 1,
-  scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0 },
-  refreshNonce: 0,
+  scrollY: {
+    projects: 0,
+    runs: 0,
+    registry: 0,
+    skills: 0,
+    burnin: 0,
+    launch: 0,
+    admin: 0,
+    settings: 0,
+  },
   entered: false,
+  accountMenuOpen: false,
   enter: () => set({ entered: true }),
-  setView: (view) => set({ view, focusedInput: null }),
+  toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
+  closeAccountMenu: () => set({ accountMenuOpen: false }),
+  // Navigation closes the menu: an overlay anchored to the header must not
+  // survive the screen it was opened from.
+  setView: (view) => set({ view, focusedInput: null, accountMenuOpen: false }),
   setLocale: (locale) => {
     try {
       if (typeof localStorage !== 'undefined') {
@@ -219,5 +266,4 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
       if (state.scrollY[view] === next) return state;
       return { scrollY: { ...state.scrollY, [view]: next } };
     }),
-  refresh: () => set((state) => ({ refreshNonce: state.refreshNonce + 1 })),
 }));

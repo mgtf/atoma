@@ -762,6 +762,206 @@ try {
       );
     }
 
+
+    // THE ACCOUNT ORB AND ITS MENU, on a real device.
+    //
+    // The orb is a Mesh with its OWN program (AVATAR_ORB_WGSL / _GLSL). A
+    // shader that fails to compile is invisible to the mocked suite — no
+    // device, no compiler — and the ungated developer path never draws one,
+    // because the orb only exists where an account does. So this arm STANDS
+    // THE GATE UP IN THE BROWSER: whoami is answered as authenticated and the
+    // org-scoped reads are stubbed, which is the smallest fixture that gets
+    // the real renderer to compile and draw the program.
+    const accountPage = await browser.newPage();
+    let accountStats;
+    const accountDiagnostics = [];
+    try {
+      await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      accountPage.on('console', (message) => {
+        if (
+          (message.type() === 'error' || message.type() === 'warn') &&
+          !isEnvironmentNoise(message.text())
+        ) {
+          accountDiagnostics.push(`${message.type()}: ${message.text()}`);
+        }
+      });
+      accountPage.on('pageerror', (error) => {
+        accountDiagnostics.push(`pageerror: ${error.message}`);
+      });
+      await accountPage.setRequestInterception(true);
+      const principalId = '11111111-2222-3333-4444-555555555555';
+      const stubs = {
+        '/auth/whoami': {
+          enabled: true,
+          authenticated: true,
+          principalId,
+          displayName: 'Ada Lovelace',
+          displayNameSource: 'provider',
+          // No avatar: the procedural interior is the path every account has
+          // before its provider picture arrives, so it is the one to prove.
+          avatarUrl: null,
+          role: 'org:owner',
+          platformAdmin: false,
+          activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+          organisations: [
+            { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+            { id: 'org-b', name: 'Difference Engines', role: 'org:member' },
+          ],
+          providers: [{ id: 'github', label: 'GitHub' }],
+        },
+        '/api/org': {
+          id: 'org-a',
+          name: 'Analytical Engines',
+          createdAt: '2026-08-01T10:00:00.000Z',
+          viewerRole: 'org:owner',
+          members: [
+            {
+              principalId,
+              displayName: 'Ada Lovelace',
+              role: 'org:owner',
+              joinedAt: '2026-08-01T10:00:00.000Z',
+              platformAdmin: false,
+              avatarUrl: null,
+            },
+          ],
+          projectCount: 0,
+          pendingInvitations: 0,
+        },
+        '/api/account/models': {
+          pins: { l1: null, l2: null, l3: null },
+          defaults: {
+            l1: 'claude-haiku-4-5-20251001',
+            l2: 'claude-sonnet-5',
+            l3: 'claude-opus-5',
+          },
+          choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+        },
+        '/api/projects': [],
+        '/api/github/installations': [],
+      };
+      accountPage.on('request', (request) => {
+        const path = new URL(request.url()).pathname;
+        const stub = stubs[path];
+        if (stub !== undefined) {
+          void request.respond({
+            status: 200,
+            contentType: 'application/json',
+            headers: { 'cache-control': 'no-store' },
+            body: JSON.stringify(stub),
+          });
+          return;
+        }
+        void request.continue();
+      });
+
+      await accountPage.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, { waitUntil: 'load' });
+      await accountPage.waitForSelector('.gpu-ui-host[data-gpu-backend]', {
+        timeout: READY_TIMEOUT_MS,
+      });
+      const clickAccountTarget = async (id) => {
+        const spot = await accountPage.evaluate((targetId) => {
+          const handle = globalThis.__ATOMA_GPU__;
+          const row = handle?.hitTargets().find((entry) => entry.id === targetId);
+          if (!row) return null;
+          const canvas = document.querySelector('.gpu-ui-canvas');
+          const box = canvas.getBoundingClientRect();
+          return {
+            x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
+            y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
+          };
+        }, id);
+        if (!spot) throw new Error(`account scenario: hit target ${id} not found`);
+        await accountPage.mouse.click(spot.x, spot.y);
+      };
+      const targetIds = () =>
+        accountPage.evaluate(() =>
+          globalThis.__ATOMA_GPU__.hitTargets().map((entry) => entry.id)
+        );
+
+      // The welcome scene needs to be built before its control can be hit;
+      // the GL path through `welcome.continue` is already proven by the anchor
+      // arm above, so this one goes through the a11y bridge and spends its
+      // budget on the account surface instead.
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      await passArrivalGate(accountPage);
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const withOrb = await targetIds();
+
+      // Open the menu from the orb itself: hit-testable on the canvas, not
+      // only mirrored into the a11y bridge.
+      await clickAccountTarget('account.menu.toggle');
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      const opened = await targetIds();
+
+      // ...and through the menu into Settings, where the orb is drawn again at
+      // a different size — a second retain of the same program.
+      await clickAccountTarget('account.settings');
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const settings = await targetIds();
+      const countScene = () => accountPage.evaluate(() => {
+        let orbs = 0;
+        const walk = (node) => {
+          if (node.label === 'avatar-orb') orbs += 1;
+          for (const child of node.children ?? []) walk(child);
+        };
+        walk(globalThis.__ATOMA_GPU__.app.stage);
+        return { orbs, canvases: document.querySelectorAll('canvas').length };
+      });
+      const meshes = await countScene();
+
+      // THE TAB-CHANGE REPRO. A view change rebuilds the scene under the SAME
+      // header retain key, which is precisely the path a fresh-attach cannot
+      // cover: the first version of the orb was destroyed by the markRoot
+      // teardown and its key-matched resume() re-attached a dead mesh —
+      // invisible header avatar on every tab switch, while every arm that
+      // CHANGED the key (menu, Settings) still passed.
+      await clickAccountTarget('nav.runs');
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const afterTab = await targetIds();
+      const meshesAfterTab = await countScene();
+      accountStats = { withOrb, opened, settings, meshes, afterTab, meshesAfterTab };
+    } finally {
+      await accountPage.close();
+    }
+
+    const accountHas = (ids, id) => ids.includes(id);
+    if (
+      // ARMED: the gated header actually drew the orb.
+      !accountHas(accountStats.withOrb, 'account.menu.toggle') ||
+      // Closed, the menu contributes nothing.
+      accountHas(accountStats.withOrb, 'auth.signOut') ||
+      // Open, it carries its actions and the other organisation.
+      !accountHas(accountStats.opened, 'auth.signOut') ||
+      !accountHas(accountStats.opened, 'account.settings') ||
+      !accountHas(accountStats.opened, 'org.switch.org-b') ||
+      // Settings is reachable from the menu and offers a cell per tier.
+      !accountHas(accountStats.settings, 'settings.model.1.default') ||
+      !accountHas(accountStats.settings, 'settings.model.3.2') ||
+      // Settings draws TWO orbs — the header control and the profile — in
+      // their own slots. One meant the slots were evicting each other.
+      accountStats.meshes.orbs !== 2 ||
+      accountStats.meshes.canvases !== 1 ||
+      // After a tab change the header orb SURVIVES the same-key rebuild and
+      // the Settings one is swept: exactly one mesh, and the control with it.
+      !accountHas(accountStats.afterTab, 'account.menu.toggle') ||
+      accountStats.meshesAfterTab.orbs !== 1 ||
+      // A shader that failed to compile surfaces here and nowhere else.
+      accountDiagnostics.length > 0
+    ) {
+      throw new Error(`GPU account smoke failed: ${JSON.stringify({
+        withOrb: accountStats.withOrb.filter((id) => id.startsWith('account.')),
+        opened: accountStats.opened.filter((id) => id.startsWith('auth.') || id.startsWith('org.') || id.startsWith('account.')),
+        settings: accountStats.settings.filter((id) => id.startsWith('settings.')),
+        meshes: accountStats.meshes,
+        afterTab: accountStats.afterTab.filter((id) => id.startsWith('account.')),
+        meshesAfterTab: accountStats.meshesAfterTab,
+        accountDiagnostics,
+      })}`);
+    }
+    console.log(
+      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, header orb survived the tab change`
+    );
+
     // A LIVE run's polling must not rebuild the GPU scene when nothing
     // changed. The trace polls every 1s and the index every 2s; before the
     // reference-stability fixes (spinner flag in the snapshot, per-render

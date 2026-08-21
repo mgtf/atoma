@@ -12,6 +12,7 @@ import {
   redirectIfAuthenticationRequired,
   type AuthNavigator,
 } from '../client/auth-session.js';
+import { useGpuStore } from './store.js';
 
 export interface AuthViewer {
   displayName: string;
@@ -20,6 +21,15 @@ export interface AuthViewer {
   organisations: AuthOrganisation[];
   /** Instance-wide operator flag; the server is the authority, this only shapes the UI. */
   platformAdmin: boolean;
+  /**
+   * Stable account id. Only used as the seed for the procedural orb, so an
+   * account with no picture still gets colours of its own.
+   */
+  principalId: string;
+  /** Same-origin avatar URL (`/auth/avatar/...`), or null for the fallback orb. */
+  avatarUrl: string | null;
+  /** 'provider' while the name is still imported, 'user' once renamed here. */
+  displayNameSource: 'provider' | 'user';
 }
 
 export interface AuthOrganisation {
@@ -159,6 +169,12 @@ export function AuthControls({
             activeOrganisation,
             organisations,
             platformAdmin: body['platformAdmin'] === true,
+            principalId: typeof body['principalId'] === 'string' ? body['principalId'] : '',
+            // A compiled server older than the avatar change omits both; the
+            // orb falls back to its procedural interior and the profile panel
+            // treats the name as imported, which is what it was.
+            avatarUrl: typeof body['avatarUrl'] === 'string' ? body['avatarUrl'] : null,
+            displayNameSource: body['displayNameSource'] === 'user' ? 'user' : 'provider',
           });
         }
       })
@@ -234,12 +250,64 @@ export function AuthControls({
   return (
     <AuthContext.Provider value={controller}>
       {children}
-      {viewer && active ? (
-        <aside className="gpu-a11y-bridge" aria-label={t('auth.account')}>
-          <span title={viewer.role}>{t('auth.signedInAs', { name: viewer.displayName })}</span>
-          {viewer.activeOrganisation ? (
-            <span>{t('auth.organisation', { name: viewer.activeOrganisation.name })}</span>
-          ) : null}
+      {viewer && active ? <AccountBridge
+        viewer={viewer}
+        t={t}
+        failure={failure}
+        signingOut={signingOut}
+        switchingOrganisationId={switchingOrganisationId}
+        activate={activate}
+      /> : null}
+    </AuthContext.Provider>
+  );
+}
+
+/**
+ * The ACCESSIBLE TWIN of the GL account menu.
+ *
+ * The orb and its dropdown are Pixi objects: a keyboard or a screen reader
+ * cannot reach either. This is the same account surface as real DOM — the
+ * toggle, the identity, the role, the organisations, Settings and Sign out —
+ * and it is what the GPU smokes drive too. It reads the SAME store state as
+ * the GL menu, so the two cannot disagree about whether the menu is open.
+ */
+function AccountBridge({
+  viewer,
+  t,
+  failure,
+  signingOut,
+  switchingOrganisationId,
+  activate,
+}: {
+  viewer: AuthViewer;
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  failure: boolean;
+  signingOut: boolean;
+  switchingOrganisationId: string | null;
+  activate: (id: string) => void;
+}) {
+  const open = useGpuStore((state) => state.accountMenuOpen);
+  const toggleAccountMenu = useGpuStore((state) => state.toggleAccountMenu);
+  const setView = useGpuStore((state) => state.setView);
+  const roleKey = `auth.role.${viewer.role}`;
+  const role = t(roleKey);
+  return (
+    <aside className="gpu-a11y-bridge" aria-label={t('auth.account')}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={open ? t('auth.closeMenu') : t('auth.openMenu')}
+        onClick={() => toggleAccountMenu()}
+      >
+        {t('auth.signedInAs', { name: viewer.displayName })}
+      </button>
+      <span>{role === roleKey ? viewer.role : role}</span>
+      {viewer.platformAdmin ? <span>{t('auth.platformAdmin')}</span> : null}
+      {viewer.activeOrganisation ? (
+        <span>{t('auth.organisation', { name: viewer.activeOrganisation.name })}</span>
+      ) : null}
+      {open ? (
+        <>
           {viewer.organisations
             .filter((organisation) => organisation.id !== viewer.activeOrganisation?.id)
             .map((organisation) => (
@@ -252,6 +320,9 @@ export function AuthControls({
                 {t('auth.switchToOrganisation', { name: organisation.name })}
               </button>
             ))}
+          <button type="button" onClick={() => setView('settings')}>
+            {t('nav.settings')}
+          </button>
           <button
             type="button"
             disabled={signingOut}
@@ -259,9 +330,9 @@ export function AuthControls({
           >
             {t('auth.signOut')}
           </button>
-          {failure ? <span role="alert">{t('auth.actionFailed')}</span> : null}
-        </aside>
+        </>
       ) : null}
-    </AuthContext.Provider>
+      {failure ? <span role="alert">{t('auth.actionFailed')}</span> : null}
+    </aside>
   );
 }

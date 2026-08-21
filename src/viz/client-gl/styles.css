@@ -348,3 +348,55 @@ html.atoma-cursor-active * {
 @media (max-width: 1000px) {
   .gpu-run-input { display: none; }
 }
+
+/* Settings: the display-name field is real DOM for the same reason the project
+   form is — text entry, autofill and screen readers belong to the browser.
+   `top` must match SETTINGS_DOM_FORM_TOP in renderer/views/settings.ts. */
+.gpu-settings-form {
+  position: fixed;
+  z-index: 4;
+  top: 146px;
+  left: 20px;
+  width: min(560px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  box-sizing: border-box;
+  background: rgba(11, 17, 30, .96);
+  border: 1px solid rgba(38, 51, 74, .9);
+  border-radius: 8px;
+}
+
+.gpu-settings-form .gpu-dom-input {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 6px 11px;
+  box-sizing: border-box;
+}
+
+.gpu-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gpu-settings-actions button {
+  border: 1px solid rgba(110, 168, 255, .62);
+  border-radius: 7px;
+  background: rgba(11, 17, 30, .96);
+  color: #e6edf7;
+  padding: 6px 12px;
+  font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-settings-actions [role='alert'] {
+  color: #f87171;
+  font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+}

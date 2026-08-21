@@ -257,7 +257,41 @@ export interface VizAdminOrganisation {
   orgId: string;
   name: string;
   createdAt: string;
-  members: Array<{ principalId: string; displayName: string; role: string }>;
+  members: VizOrganisationMember[];
+}
+
+export interface VizOrganisationMember {
+  principalId: string;
+  displayName: string;
+  role: string;
+  joinedAt?: string;
+  platformAdmin?: boolean;
+  /** Same-origin avatar URL, versioned by content hash; null when there is none. */
+  avatarUrl?: string | null;
+}
+
+/**
+ * The VIEWER'S OWN organisation (`GET /api/org`) — org-scoped, unlike the
+ * admin inventory above. No emails by design: provider emails are display
+ * attributes and GitHub's is not a verified-email assertion.
+ */
+export interface VizOrganisation {
+  id: string;
+  name: string;
+  createdAt: string;
+  viewerRole: string;
+  members: VizOrganisationMember[];
+  projectCount: number;
+  /** Null unless the viewer is an owner or admin — only they can mint them. */
+  pendingInvitations: number | null;
+}
+
+/** Per-tier model pins plus the labels the account page needs to show. */
+export interface VizAccountModels {
+  pins: { l1: string | null; l2: string | null; l3: string | null };
+  /** What "operator default" resolves to today, per tier. */
+  defaults: { l1: string; l2: string; l3: string };
+  choices: string[];
 }
 
 /**

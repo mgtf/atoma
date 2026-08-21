@@ -15,6 +15,16 @@ import {
   redirectIfAuthenticationRequired,
 } from '../src/viz/client/auth-session.js';
 import { AuthControls, useAuthController } from '../src/viz/client-gl/AuthControls.js';
+import { useGpuStore } from '../src/viz/client-gl/store.js';
+
+/**
+ * The account bridge is a DISCLOSURE, mirroring the GL menu: the identity and
+ * the toggle are always present, the actions appear once the menu is open. Both
+ * surfaces read the same store flag, so they cannot disagree about that.
+ */
+async function openAccountMenu(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: 'Open the account menu' }));
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -36,6 +46,7 @@ function renderControls(fetchMock: ReturnType<typeof vi.fn>, navigate = vi.fn())
 
 afterEach(() => {
   cleanup();
+  useGpuStore.getState().closeAccountMenu();
   window.history.replaceState({}, '', '/');
   vi.restoreAllMocks();
 });
@@ -103,19 +114,88 @@ describe('GPU authentication controls', () => {
     }));
 
     renderControls(fetchMock);
+    const user = userEvent.setup();
 
-    const viewer = await screen.findByText('Signed in as Ada Lovelace');
-    expect(viewer).toHaveAttribute(
-      'title',
-      'org:owner'
-    );
-    expect(viewer.closest('aside')).toHaveClass('gpu-a11y-bridge');
-    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    const toggle = await screen.findByRole('button', { name: 'Open the account menu' });
+    expect(toggle).toHaveTextContent('Signed in as Ada Lovelace');
+    expect(toggle.closest('aside')).toHaveClass('gpu-a11y-bridge');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // The role is stated, not hidden in a tooltip.
+    expect(screen.getByText('Owner')).toBeInTheDocument();
     expect(screen.getByText('Organisation: Analytical Engines')).toBeInTheDocument();
+    // Actions live behind the disclosure, exactly like the GL menu.
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+    await openAccountMenu(user);
+    // Open, the toggle offers the way back out.
+    expect(screen.getByRole('button', { name: 'Close the account menu' }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/auth/whoami', {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { accept: 'application/json' },
+    });
+  });
+
+  it('reads the account fields, and degrades where an older server omits them', async () => {
+    const complete = vi.fn().mockResolvedValue(jsonResponse({
+      authenticated: true,
+      principalId: 'principal-7',
+      displayName: 'Ada Lovelace',
+      displayNameSource: 'user',
+      avatarUrl: '/auth/avatar/principal-7?v=abc123',
+      role: 'org:admin',
+      platformAdmin: true,
+      activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:admin' },
+      organisations: [],
+    }));
+    const seen: Array<{ principalId: string; avatarUrl: string | null; displayNameSource: string }> = [];
+    function Probe() {
+      const { snapshot } = useAuthController();
+      if (snapshot) seen.push({
+        principalId: snapshot.viewer.principalId,
+        avatarUrl: snapshot.viewer.avatarUrl,
+        displayNameSource: snapshot.viewer.displayNameSource,
+      });
+      return null;
+    }
+    render(
+      createElement(AuthControls, {
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        fetchImpl: complete as unknown as typeof fetch,
+        navigate: vi.fn(),
+      }, createElement(Probe))
+    );
+    await screen.findByText('Admin');
+    expect(screen.getByText('Platform admin')).toBeInTheDocument();
+    expect(seen.at(-1)).toEqual({
+      principalId: 'principal-7',
+      avatarUrl: '/auth/avatar/principal-7?v=abc123',
+      displayNameSource: 'user',
+    });
+
+    cleanup();
+    seen.length = 0;
+    // A compiled server predating the avatar change: no picture, and the name
+    // is treated as still provider-owned, which is what it was.
+    const older = vi.fn().mockResolvedValue(jsonResponse({
+      authenticated: true,
+      displayName: 'Grace Hopper',
+      role: 'org:member',
+    }));
+    render(
+      createElement(AuthControls, {
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        fetchImpl: older as unknown as typeof fetch,
+        navigate: vi.fn(),
+      }, createElement(Probe))
+    );
+    await screen.findByText('Member');
+    expect(seen.at(-1)).toEqual({
+      principalId: '',
+      avatarUrl: null,
+      displayNameSource: 'provider',
     });
   });
 
@@ -194,6 +274,7 @@ describe('GPU authentication controls', () => {
     const { navigate } = renderControls(fetchMock);
     const user = userEvent.setup();
 
+    await openAccountMenu(user);
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/auth/logout', {
@@ -215,6 +296,7 @@ describe('GPU authentication controls', () => {
     const { navigate } = renderControls(fetchMock);
     const user = userEvent.setup();
 
+    await openAccountMenu(user);
     await user.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Account action failed');
@@ -240,6 +322,7 @@ describe('GPU authentication controls', () => {
     const { navigate } = renderControls(fetchMock);
     const user = userEvent.setup();
 
+    await openAccountMenu(user);
     await user.click(await screen.findByRole('button', { name: 'Switch to Flight Research' }));
 
     expect(fetchMock).toHaveBeenNthCalledWith(

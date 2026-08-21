@@ -18,19 +18,19 @@ import { AuthControls, useAuthController } from './AuthControls.js';
 import { DomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
-import { useIsFetching, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
 import {
-  activeViewQueryFilter,
+  useAccountModels,
   useAdminEvents,
   useAdminLedger,
   useAdminOrganisations,
   useBurnin,
+  useOrganisation,
   useGithubInstallations,
   useProfiles,
   useProjectRuns,
   useProjects,
-  useRefreshBridge,
   useRegistries,
   useRegistry,
   useRunTrace,
@@ -39,7 +39,8 @@ import {
   useSkillLists,
   useSkillNamespaces,
 } from './queries.js';
-import { nextRunFilters, useGpuStore, visibleViews } from './store.js';
+import { isRoutableView, nextRunFilters, useGpuStore, visibleViews } from './store.js';
+import { parseSettingsModelId } from './renderer/views/settings.js';
 import type { VizAdminInvitation } from '../client/types.js';
 
 const RELEASE_VERSION = __ATOMA_RELEASE_VERSION__;
@@ -120,7 +121,6 @@ function GpuAppContent({
   const [projectError, setProjectError] = useState<string | null>(null);
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
-  useRefreshBridge();
 
   // Operator surfaces are admin-only behind the gate: the server 403s them
   // for ordinary members, and a 403'd query would poison the global data
@@ -217,6 +217,48 @@ function GpuAppContent({
     setPushPrompt('hidden');
   }, []);
 
+  // Settings is account-scoped: it exists exactly where a principal does.
+  const organisationQuery = useOrganisation(state.view === 'settings' && authed);
+  const accountModelsQuery = useAccountModels(state.view === 'settings' && authed);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const saveTierModel = useCallback(
+    async (tier: 1 | 2 | 3, model: string | null) => {
+      const current = accountModelsQuery.data?.pins ?? { l1: null, l2: null, l3: null };
+      setAccountError(null);
+      try {
+        const next = await api.saveAccountModels({ ...current, [`l${tier}`]: model });
+        // Seed the cache with the server's answer instead of refetching: it
+        // returns the stored pins, so a round trip would tell us nothing new.
+        queryClient.setQueryData(['viz', 'account', 'models'], next);
+      } catch (error) {
+        setAccountError(error instanceof Error ? error.message : t('settings.actionFailed'));
+      }
+    },
+    [accountModelsQuery.data, queryClient, t]
+  );
+  const renameAccount = useCallback(
+    async (displayName: string) => {
+      setAccountError(null);
+      try {
+        await api.renameAccount(displayName);
+        // whoami owns the display name and the source flag, and AuthControls
+        // reads it once per page load — a reload is the honest refresh here.
+        window.location.reload();
+      } catch (error) {
+        setAccountError(error instanceof Error ? error.message : t('settings.actionFailed'));
+      }
+    },
+    [t]
+  );
+
+  // Seed the rename field with the name it is about to replace, once: an empty
+  // box beside "Save" reads as "your name is blank".
+  useEffect(() => {
+    if (state.view !== 'settings' || !authSnapshot) return;
+    if (state.search.displayName.length > 0) return;
+    state.setSearch('displayName', authSnapshot.viewer.displayName);
+  }, [authSnapshot, state]);
+
   const adminOrganisationsQuery = useAdminOrganisations(
     state.view === 'admin' && isPlatformAdmin
   );
@@ -247,8 +289,10 @@ function GpuAppContent({
 
   // A viewer whose nav does not include the current view (role changed,
   // admin revoked, stale state) lands back on runs instead of a dead tab.
+  // ROUTABLE, not visible: Settings has no tab by design and would otherwise
+  // be bounced away on the render right after it opened.
   useEffect(() => {
-    if (!visibleViews(authSnapshot).includes(state.view)) state.setView('runs');
+    if (!isRoutableView(state.view, authSnapshot)) state.setView('runs');
   }, [authSnapshot, state]);
 
   // A very fast Continue click while whoami was still in flight could enter
@@ -381,6 +425,25 @@ function GpuAppContent({
 
   const activate = useCallback((id: string) => {
     const store = useGpuStore.getState();
+    // The menu's own open/closed state is UI, not identity, so it is handled
+    // here rather than delegated to the auth controller.
+    if (id === 'account.menu.toggle') {
+      store.toggleAccountMenu();
+      return;
+    }
+    if (id === 'account.menu.close') {
+      store.closeAccountMenu();
+      return;
+    }
+    if (id === 'account.settings') {
+      store.setView('settings');
+      return;
+    }
+    const modelChoice = parseSettingsModelId(id);
+    if (modelChoice) {
+      void saveTierModel(modelChoice.tier, modelChoice.model);
+      return;
+    }
     if (id.startsWith('auth.')) {
       activateAuth(id);
       return;
@@ -395,10 +458,6 @@ function GpuAppContent({
     }
     if (id === 'locale.toggle') {
       store.setLocale(store.locale === 'en' ? 'fr' : 'en');
-      return;
-    }
-    if (id === 'refresh') {
-      store.refresh();
       return;
     }
     if (id.startsWith('run.select.')) {
@@ -510,7 +569,15 @@ function GpuAppContent({
       return;
     }
     if (id === 'launch.copy') copyCommand();
-  }, [activateAuth, beginEnter, copyCommand, loginHref, mintInvitation, profilesQuery.data]);
+  }, [
+    activateAuth,
+    beginEnter,
+    copyCommand,
+    loginHref,
+    mintInvitation,
+    profilesQuery.data,
+    saveTierModel,
+  ]);
 
   const loading =
     (state.view === 'projects' && (projectsQuery.isLoading || githubInstallationsQuery.isLoading)) ||
@@ -519,31 +586,8 @@ function GpuAppContent({
     (state.view === 'skills' && namespacesQuery.isLoading) ||
     (state.view === 'burnin' && burninQuery.isLoading) ||
     (state.view === 'launch' && profilesQuery.isLoading) ||
-    (state.view === 'admin' && adminOrganisationsQuery.isLoading);
-  // Requests in flight for the ACTIVE view only — the same predicate the
-  // refresh button invalidates with, so the spinner reports on exactly the
-  // requests the button causes. Unlike `loading` this covers refetches of
-  // data already on screen, which is the entire point: on registry, skills,
-  // burn-in and launch nothing polls, so a refetch is invisible without it.
-  const inFlight = useIsFetching(activeViewQueryFilter(state.view)) > 0;
-  // ...but ONLY the button arms it. `fetching` sits in the snapshot the GPU
-  // scene is rebuilt from, and on a live run the background polls (trace
-  // every 1s, index every 2s) each flip an unfiltered in-flight count on and
-  // off — two full scene rebuilds per poll, ~2.5 per second, for a spinner
-  // nobody asked to spin. Measured as the source of the frame drops on live
-  // runs: 30 rebuilds in 12s of an otherwise idle view. Polls now leave the
-  // snapshot alone unless their DATA actually changed.
-  const [refreshing, setRefreshing] = useState(false);
-  useEffect(() => {
-    if (state.refreshNonce > 0) setRefreshing(true);
-  }, [state.refreshNonce]);
-  useEffect(() => {
-    // Disarm only once the button's requests have settled. This effect also
-    // runs while the arm above is still pending its re-render, in which case
-    // `refreshing` is still false and there is nothing to disarm.
-    if (refreshing && !inFlight) setRefreshing(false);
-  }, [refreshing, inFlight]);
-  const fetching = refreshing;
+    (state.view === 'admin' && adminOrganisationsQuery.isLoading) ||
+    (state.view === 'settings' && (organisationQuery.isLoading || accountModelsQuery.isLoading));
   const error = errorMessage([
     runsQuery.error,
     runQuery.error,
@@ -558,6 +602,8 @@ function GpuAppContent({
     githubInstallationsQuery.error,
     projectRunsQuery.error,
     adminOrganisationsQuery.error,
+    organisationQuery.error,
+    accountModelsQuery.error,
     adminEventsQuery.error,
     adminLedgerQuery.error,
   ]);
@@ -580,18 +626,22 @@ function GpuAppContent({
     adminLedger: adminLedgerQuery.data?.events ?? [],
     adminInvitation,
     adminError,
+    organisation: organisationQuery.data ?? null,
+    accountModels: accountModelsQuery.data ?? null,
+    accountError,
     login,
     loading,
-    fetching,
     error,
   }), [
+    accountError,
+    accountModelsQuery.data,
     adminError,
     adminInvitation,
     adminOrganisationsQuery.data,
     adminEventsQuery.data,
     adminLedgerQuery.data,
     authSnapshot,
-    fetching,
+    organisationQuery.data,
     login,
     burninQuery.data,
     error,
@@ -664,6 +714,8 @@ function GpuAppContent({
         pushPrompt={pushPrompt}
         onEnablePush={() => { void enablePush(); }}
         onDismissPush={dismissPush}
+        onRenameAccount={(displayName) => { void renameAccount(displayName); }}
+        accountError={accountError}
       />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />

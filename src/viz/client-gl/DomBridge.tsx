@@ -22,6 +22,8 @@ export function DomBridge({
   pushPrompt = 'hidden',
   onEnablePush,
   onDismissPush,
+  onRenameAccount,
+  accountError = null,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -44,6 +46,9 @@ export function DomBridge({
   pushPrompt?: 'hidden' | 'offer' | 'busy' | 'error';
   onEnablePush?: () => void;
   onDismissPush?: () => void;
+  /** Settings: the display name is a real input, so its submit lives here. */
+  onRenameAccount?: (displayName: string) => void;
+  accountError?: string | null;
 }) {
   const view = useGpuStore((state) => state.view);
   const entered = useGpuStore((state) => state.entered);
@@ -54,7 +59,6 @@ export function DomBridge({
   const search = useGpuStore((state) => state.search);
   const setView = useGpuStore((state) => state.setView);
   const enter = useGpuStore((state) => state.enter);
-  const refresh = useGpuStore((state) => state.refresh);
   const setLocale = useGpuStore((state) => state.setLocale);
   const setSearch = useGpuStore((state) => state.setSearch);
   const setFocusedInput = useGpuStore((state) => state.setFocusedInput);
@@ -115,7 +119,6 @@ export function DomBridge({
             </button>
           ))}
         </nav>
-        <button onClick={refresh}>{t('nav.refresh')}</button>
         <button onClick={() => setLocale(locale === 'en' ? 'fr' : 'en')}>
           {locale === 'en' ? 'Français' : 'English'}
         </button>
@@ -281,6 +284,33 @@ export function DomBridge({
               ? t('projects.actionsHint.ready', { name: selectedProjectName })
               : t('projects.actionsHint.new')}
           </p>
+        </form>
+      ) : null}
+      {view === 'settings' ? (
+        <form
+          className="gpu-settings-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const next = search.displayName.trim();
+            if (next) onRenameAccount?.(next);
+          }}
+        >
+          <input
+            className="gpu-dom-input gpu-settings-name"
+            aria-label={t('settings.displayName')}
+            value={search.displayName}
+            placeholder={t('settings.displayName')}
+            maxLength={120}
+            onFocus={() => setFocusedInput('displayName')}
+            onBlur={() => setFocusedInput(null)}
+            onChange={(event) => setSearch('displayName', event.target.value)}
+          />
+          <div className="gpu-settings-actions">
+            <button type="submit" disabled={search.displayName.trim().length === 0}>
+              {t('settings.save')}
+            </button>
+            {accountError ? <span role="alert">{accountError}</span> : null}
+          </div>
         </form>
       ) : null}
       {pushPrompt !== 'hidden' ? (

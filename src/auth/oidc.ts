@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { avatarUrlFromClaim } from './avatar.js';
 import type { ProviderConfig } from './providers.js';
 import {
   hasControlCharacters,
@@ -187,6 +188,13 @@ export interface ProviderIdentity {
   displayName: string;
   email: string | null;
   emailVerified: boolean;
+  /**
+   * Provider picture URL, or null. Deliberately the ONLY optional claim that
+   * cannot fail a login: `avatarUrlFromClaim` swallows a malformed value
+   * instead of throwing (see `avatar.ts`), because a broken profile picture is
+   * not a reason to refuse an otherwise valid identity.
+   */
+  avatarUrl: string | null;
 }
 
 /** Fetch and strictly normalize the stable identity from userinfo. */
@@ -287,6 +295,7 @@ function githubIdentity(raw: Record<string, unknown>): ProviderIdentity {
     email: optionalEmail(raw['email']),
     // GitHub's basic /user response is not a verified-email assertion.
     emailVerified: false,
+    avatarUrl: avatarUrlFromClaim(raw['avatar_url']),
   };
 }
 
@@ -304,6 +313,7 @@ function oidcIdentity(raw: Record<string, unknown>): ProviderIdentity {
     displayName,
     email,
     emailVerified: email !== null && verified === true,
+    avatarUrl: avatarUrlFromClaim(raw['picture']),
   };
 }
 

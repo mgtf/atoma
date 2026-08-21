@@ -1,7 +1,29 @@
 import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
+import {
+  EMPTY_TIER_MODEL_PINS,
+  TIER_MODEL_CHOICES,
+  tierModelPinsSchema,
+  type TierModelChoice,
+  type TierModelPins,
+} from '../contracts/tierModels.js';
 import { openStoreHandle, storeDbPath } from '../core/stores.js';
-import { isSessionToken, MAX_LOGOUT_SESSION_CANDIDATES } from './values.js';
+import type { AvatarMime } from './avatar.js';
+import {
+  hasControlCharacters,
+  isSessionToken,
+  MAX_LOGOUT_SESSION_CANDIDATES,
+} from './values.js';
+
+/** Display names are bounded like the provider claim they usually come from. */
+const MAX_DISPLAY_NAME_LENGTH = 120;
+
+/** A stored pin that is no longer an allowed choice degrades to the default. */
+function allowedChoice(value: string | null): TierModelChoice | null {
+  return TIER_MODEL_CHOICES.includes(value as TierModelChoice)
+    ? (value as TierModelChoice)
+    : null;
+}
 
 /**
  * AUTH IDENTITY SUBSTRATE — principals, linked provider identities, the
@@ -93,6 +115,21 @@ CREATE TABLE IF NOT EXISTS auth_platform_admins (
   granted_at   TEXT NOT NULL,
   granted_by   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS auth_avatars (
+  principal_id TEXT PRIMARY KEY REFERENCES auth_principals(principal_id),
+  mime         TEXT NOT NULL CHECK (mime IN ('image/png','image/jpeg','image/webp','image/gif')),
+  bytes        BLOB NOT NULL,
+  source_url   TEXT,
+  etag         TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_principal_model_pins (
+  principal_id TEXT PRIMARY KEY REFERENCES auth_principals(principal_id),
+  model_l1     TEXT,
+  model_l2     TEXT,
+  model_l3     TEXT,
+  updated_at   TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS auth_invitations_expires_idx ON auth_invitations(expires_at);
 CREATE INDEX IF NOT EXISTS auth_oauth_states_expires_idx ON auth_oauth_states(expires_at);
@@ -143,6 +180,12 @@ export interface Viewer {
    * must not mint platform power.
    */
   platformAdmin: boolean;
+  /**
+   * Whether `displayName` still comes from the provider or was chosen by the
+   * viewer. The account UI needs the difference: it labels an imported name
+   * as imported, and a user-owned name is never re-synchronised on login.
+   */
+  displayNameSource: DisplayNameSource;
 }
 
 export interface LoginOutcome {
@@ -178,7 +221,11 @@ interface PrincipalRow {
   kind: PrincipalKind;
   display_name: string;
   created_at: string;
+  /** 'provider' until the viewer renames the account, then 'user'. */
+  display_name_source: DisplayNameSource;
 }
+
+export type DisplayNameSource = 'provider' | 'user';
 
 interface SessionRow {
   token_hash: string;
@@ -213,6 +260,17 @@ export interface InvitationRecord {
   createdAt: string;
   expiresAt: string;
   consumedAt: string | null;
+}
+
+export interface OrganisationMember {
+  principalId: string;
+  displayName: string;
+  role: OrgRole;
+  joinedAt: string;
+  /** Instance-wide operator flag, shown as a chip beside the member. */
+  platformAdmin: boolean;
+  /** Content hash of the stored avatar, or null when there is none. */
+  avatarEtag: string | null;
 }
 
 export interface OrganisationMembership {
@@ -438,6 +496,21 @@ export class AuthStore {
     if (!oauthStateColumns.some((column) => column.name === 'invitation_hash')) {
       this.db.exec('ALTER TABLE auth_oauth_states ADD COLUMN invitation_hash TEXT');
     }
+
+    // Who OWNS the display name. Provider logins re-synchronise it on every
+    // login (see completeLogin); once a viewer renames the account the
+    // provider must stop overwriting that choice, or the rename silently
+    // reverts at the next sign-in. Additive column, same guarded shape as the
+    // invitation_hash repair above.
+    const principalColumns = this.db
+      .prepare('PRAGMA table_info(auth_principals)')
+      .all() as Array<{ name: string }>;
+    if (!principalColumns.some((column) => column.name === 'display_name_source')) {
+      this.db.exec(
+        `ALTER TABLE auth_principals
+           ADD COLUMN display_name_source TEXT NOT NULL DEFAULT 'provider'`
+      );
+    }
     migrateInvitationOrganisationScope(this.db);
     this.db.exec(AUTH_POST_MIGRATION_DDL);
   }
@@ -619,7 +692,15 @@ export class AuthStore {
         if (!membership) return null;
         if (!org) return null;
 
-        if (input.displayName.trim().length > 0 && input.displayName !== principal.display_name) {
+        // Provider re-synchronisation, GUARDED: a name the viewer chose in
+        // Settings outranks whatever the provider reports. Without this check
+        // the rename survives exactly until the next login and then vanishes,
+        // with nothing in the UI to explain it.
+        if (
+          principal.display_name_source !== 'user' &&
+          input.displayName.trim().length > 0 &&
+          input.displayName !== principal.display_name
+        ) {
           this.db
             .prepare('UPDATE auth_principals SET display_name = ? WHERE principal_id = ?')
             .run(input.displayName, principal.principal_id);
@@ -642,6 +723,7 @@ export class AuthStore {
             orgName: org.name,
             role: membership.role,
             platformAdmin: this.isPlatformAdmin(principal.principal_id),
+            displayNameSource: principal.display_name_source,
           },
           createdPrincipal: false,
           // A returning principal never founds an organisation: the personal
@@ -701,6 +783,7 @@ export class AuthStore {
           role,
           // A brand-new principal can never already hold the operator flag.
           platformAdmin: false,
+          displayNameSource: 'provider',
         },
         createdPrincipal: true,
         // The two are exclusive by construction: the organisation INSERT
@@ -852,6 +935,7 @@ export class AuthStore {
       orgName: org.name,
       role: membership.role,
       platformAdmin: this.isPlatformAdmin(principal.principal_id),
+      displayNameSource: principal.display_name_source,
     };
   }
 
@@ -1099,35 +1183,217 @@ export class AuthStore {
     }));
   }
 
-  /** Admin surface: every organisation with its members. Gate on `platformAdmin`. */
-  listOrganisationsWithMembers(): Array<{
+  /**
+   * Organisations with their members.
+   *
+   * With no argument this is the platform-admin inventory (gate on
+   * `platformAdmin`). With `orgId` it is the SAME projection narrowed to one
+   * organisation, which is what a member's own org card needs — one SQL shape
+   * for both readers rather than a near-duplicate query that can drift.
+   *
+   * Members carry the operator flag and whether they have an avatar; they do
+   * NOT carry emails. Provider emails are display attributes and GitHub's is
+   * not a verified-email assertion, so they are not org-directory data.
+   */
+  listOrganisationsWithMembers(orgId?: string): Array<{
     orgId: string;
     name: string;
     createdAt: string;
-    members: Array<{ principalId: string; displayName: string; role: OrgRole }>;
+    members: OrganisationMember[];
   }> {
     const members = this.db
       .prepare(
-        `SELECT m.org_id, m.principal_id, m.role, p.display_name
+        `SELECT m.org_id, m.principal_id, m.role, m.created_at, p.display_name,
+                a.etag AS avatar_etag,
+                CASE WHEN pa.principal_id IS NULL THEN 0 ELSE 1 END AS platform_admin
          FROM auth_memberships m
          JOIN auth_principals p ON p.principal_id = m.principal_id
+         LEFT JOIN auth_avatars a ON a.principal_id = m.principal_id
+         LEFT JOIN auth_platform_admins pa ON pa.principal_id = m.principal_id
+         WHERE (? IS NULL OR m.org_id = ?)
          ORDER BY m.org_id ASC, m.created_at ASC, m.principal_id ASC`
       )
-      .all() as Array<{ org_id: string; principal_id: string; role: OrgRole; display_name: string }>;
-    const byOrg = new Map<string, Array<{ principalId: string; displayName: string; role: OrgRole }>>();
+      .all(orgId ?? null, orgId ?? null) as Array<{
+        org_id: string;
+        principal_id: string;
+        role: OrgRole;
+        created_at: string;
+        display_name: string;
+        avatar_etag: string | null;
+        platform_admin: number;
+      }>;
+    const byOrg = new Map<string, OrganisationMember[]>();
     for (const member of members) {
       const list = byOrg.get(member.org_id) ?? [];
       list.push({
         principalId: member.principal_id,
         displayName: member.display_name,
         role: member.role,
+        joinedAt: member.created_at,
+        platformAdmin: member.platform_admin === 1,
+        avatarEtag: member.avatar_etag,
       });
       byOrg.set(member.org_id, list);
     }
-    return this.listOrganisations().map((organisation) => ({
-      ...organisation,
-      members: byOrg.get(organisation.orgId) ?? [],
-    }));
+    return this.listOrganisations()
+      .filter((organisation) => orgId === undefined || organisation.orgId === orgId)
+      .map((organisation) => ({
+        ...organisation,
+        members: byOrg.get(organisation.orgId) ?? [],
+      }));
+  }
+
+  /** One organisation with its members, or null when it does not exist. */
+  getOrganisationWithMembers(orgId: string): {
+    orgId: string;
+    name: string;
+    createdAt: string;
+    members: OrganisationMember[];
+  } | null {
+    return this.listOrganisationsWithMembers(orgId)[0] ?? null;
+  }
+
+  /** Live (unconsumed, unexpired) invitations an organisation still holds. */
+  countLiveInvitations(orgId: string): number {
+    const nowMs = Date.now();
+    const rows = this.db
+      .prepare(
+        `SELECT created_at, expires_at FROM auth_invitations
+         WHERE org_id = ? AND consumed_at IS NULL`
+      )
+      .all(orgId) as Array<{ created_at: string; expires_at: string }>;
+    return rows.filter((row) => liveWindow(row.created_at, row.expires_at, nowMs)).length;
+  }
+
+  /** True when both principals share at least one organisation. */
+  sharesOrganisation(principalId: string, otherPrincipalId: string): boolean {
+    if (principalId === otherPrincipalId) return true;
+    return Boolean(
+      this.db
+        .prepare(
+          `SELECT 1 FROM auth_memberships a
+           JOIN auth_memberships b ON b.org_id = a.org_id
+           WHERE a.principal_id = ? AND b.principal_id = ?
+           LIMIT 1`
+        )
+        .get(principalId, otherPrincipalId)
+    );
+  }
+
+  // -------------------------------------------------------- account self-care
+
+  /**
+   * Rename the account. Sets `display_name_source = 'user'`, which is what
+   * stops the next provider login from overwriting the choice (see the guard
+   * in `completeLogin`).
+   */
+  setDisplayName(principalId: string, name: string): string {
+    const normalized = name.trim();
+    if (normalized.length === 0 || normalized.length > MAX_DISPLAY_NAME_LENGTH) {
+      throw new Error('a display name must be 1 to 120 characters');
+    }
+    if (hasControlCharacters(normalized)) {
+      throw new Error('a display name must not contain control characters');
+    }
+    const changed = this.db
+      .prepare(
+        `UPDATE auth_principals
+         SET display_name = ?, display_name_source = 'user'
+         WHERE principal_id = ?`
+      )
+      .run(normalized, principalId);
+    if (changed.changes !== 1) throw new Error('unknown principal');
+    return normalized;
+  }
+
+  /**
+   * Store the downloaded provider picture. `sourceUrl` is remembered so a
+   * later login only re-downloads when the provider actually changed it, and
+   * `etag` (a content hash) drives both cache validation and the URL the
+   * client uses, so a new picture busts the browser cache.
+   */
+  saveAvatar(input: {
+    principalId: string;
+    mime: AvatarMime;
+    bytes: Buffer;
+    sourceUrl: string | null;
+  }): string {
+    const etag = createHash('sha256').update(input.bytes).digest('hex');
+    this.db
+      .prepare(
+        `INSERT INTO auth_avatars (principal_id, mime, bytes, source_url, etag, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(principal_id) DO UPDATE SET
+           mime = excluded.mime,
+           bytes = excluded.bytes,
+           source_url = excluded.source_url,
+           etag = excluded.etag,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        input.principalId,
+        input.mime,
+        input.bytes,
+        input.sourceUrl,
+        etag,
+        new Date().toISOString()
+      );
+    return etag;
+  }
+
+  readAvatar(principalId: string): { mime: AvatarMime; bytes: Buffer; etag: string } | null {
+    const row = this.db
+      .prepare('SELECT mime, bytes, etag FROM auth_avatars WHERE principal_id = ?')
+      .get(principalId) as { mime: AvatarMime; bytes: Buffer; etag: string } | undefined;
+    return row ? { mime: row.mime, bytes: row.bytes, etag: row.etag } : null;
+  }
+
+  /** Metadata only — no BLOB read. Used to decide whether to re-download. */
+  avatarMeta(principalId: string): { etag: string; sourceUrl: string | null } | null {
+    const row = this.db
+      .prepare('SELECT etag, source_url FROM auth_avatars WHERE principal_id = ?')
+      .get(principalId) as { etag: string; source_url: string | null } | undefined;
+    return row ? { etag: row.etag, sourceUrl: row.source_url } : null;
+  }
+
+  /**
+   * The viewer's per-tier model pins. A row whose stored value is no longer an
+   * allowed choice reads as `null` (operator default) rather than throwing: a
+   * retired model id must degrade to the default, never break the account
+   * page or a run launch.
+   */
+  modelPins(principalId: string): TierModelPins {
+    const row = this.db
+      .prepare(
+        'SELECT model_l1, model_l2, model_l3 FROM auth_principal_model_pins WHERE principal_id = ?'
+      )
+      .get(principalId) as
+      | { model_l1: string | null; model_l2: string | null; model_l3: string | null }
+      | undefined;
+    if (!row) return { ...EMPTY_TIER_MODEL_PINS };
+    const parsed = tierModelPinsSchema.safeParse({
+      l1: allowedChoice(row.model_l1),
+      l2: allowedChoice(row.model_l2),
+      l3: allowedChoice(row.model_l3),
+    });
+    return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
+  }
+
+  setModelPins(principalId: string, pins: unknown): TierModelPins {
+    const parsed = tierModelPinsSchema.parse(pins);
+    this.db
+      .prepare(
+        `INSERT INTO auth_principal_model_pins
+           (principal_id, model_l1, model_l2, model_l3, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(principal_id) DO UPDATE SET
+           model_l1 = excluded.model_l1,
+           model_l2 = excluded.model_l2,
+           model_l3 = excluded.model_l3,
+           updated_at = excluded.updated_at`
+      )
+      .run(principalId, parsed.l1, parsed.l2, parsed.l3, new Date().toISOString());
+    return parsed;
   }
 
   /** Every organisation a principal may activate, in deterministic order. */

@@ -134,6 +134,44 @@ describe('project run environment', () => {
       hostEnv: { ANTHROPIC_API_KEY: 'key', ANTHROPIC_AUTH_TOKEN: 'token' },
     })).toThrow(/exactly one/);
   });
+
+  it('lets an account pin override the operator per tier, and inherit where it does not', () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        ANTHROPIC_API_KEY: 'key',
+        ATOMA_MODEL_L1: 'claude-haiku-4-5-20251001',
+        ATOMA_MODEL_L2: 'claude-sonnet-5',
+      },
+    };
+    // No account pins: the operator's host pins stand, unchanged behaviour.
+    const operatorOnly = projectRunEnvironment(base);
+    expect(operatorOnly['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
+    expect(operatorOnly['ATOMA_MODEL_L2']).toBe('claude-sonnet-5');
+    expect(operatorOnly['ATOMA_MODEL_L3']).toBeUndefined();
+
+    const withPins = projectRunEnvironment({
+      ...base,
+      tierModels: { l1: 'claude-sonnet-5', l2: null, l3: 'claude-opus-5' },
+    });
+    // L1 overridden, L2 inherited from the host, L3 set where the host had none.
+    expect(withPins['ATOMA_MODEL_L1']).toBe('claude-sonnet-5');
+    expect(withPins['ATOMA_MODEL_L2']).toBe('claude-sonnet-5');
+    expect(withPins['ATOMA_MODEL_L3']).toBe('claude-opus-5');
+
+    // The cross-provider refusal still guards the account path, not only the
+    // host one — the closed choice list cannot produce this, and that is
+    // exactly why the check stays.
+    expect(() => projectRunEnvironment({
+      ...base,
+      tierModels: { l1: 'ollama:llama3' as 'claude-sonnet-5', l2: null, l3: null },
+    })).toThrow(/another provider/);
+  });
 });
 
 describe('ProjectRunCoordinator', () => {

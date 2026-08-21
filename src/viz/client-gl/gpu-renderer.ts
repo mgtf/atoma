@@ -18,9 +18,11 @@ import type {
   RunIndexEntry,
   SkillNamespace,
   SkillSummary,
+  VizAccountModels,
   VizAdminInvitation,
   VizAdminOrganisation,
   VizLedgerEvent,
+  VizOrganisation,
   VizPlatformEvent,
   VizGitHubInstallation,
   VizProject,
@@ -86,6 +88,12 @@ export interface GpuDataSnapshot {
   adminEvents: VizPlatformEvent[];
   /** The product ledger's tail — a separate journal in the same tab. */
   adminLedger: VizLedgerEvent[];
+  /** The viewer's own organisation — the Settings org card. */
+  organisation: VizOrganisation | null;
+  /** Per-tier model pins plus the operator defaults to label them against. */
+  accountModels: VizAccountModels | null;
+  /** Last failed account write, already bounded by the server. */
+  accountError: string | null;
   /**
    * Non-null when the gate is on and this browser holds no session: the
    * arrival gate offers these providers instead of Continue, and `notice`
@@ -93,12 +101,6 @@ export interface GpuDataSnapshot {
    */
   login: { providers: { id: string; label: string }[]; notice: string | null } | null;
   loading: boolean;
-  /**
-   * The active view has requests IN FLIGHT — including refetches of data
-   * already on screen, which `loading` (react-query's `isLoading`) never
-   * reports. This is what the refresh control spins on.
-   */
-  fetching: boolean;
   error: string | null;
 }
 
@@ -146,6 +148,9 @@ interface TextOptions {
 }
 
 const NAV_HOVER_GAP = 20;
+
+/** Diameter of the account orb in the header. */
+export const HEADER_ORB_SIZE = 34;
 
 // Decomposed modules (2026-08-15): pure layout, copy, shaders, motion and the
 // shared scroll pane live under ./renderer/. This file keeps the stateful
@@ -197,7 +202,9 @@ import { drawLaunch } from './renderer/views/launch.js';
 import { drawProjects } from './renderer/views/projects.js';
 import { drawAdmin } from './renderer/views/admin.js';
 import { drawWelcome } from './renderer/views/welcome.js';
-import { drawAuthAccount } from './renderer/views/auth-account.js';
+import { drawAccountMenu } from './renderer/views/account-menu.js';
+import { drawSettings } from './renderer/views/settings.js';
+import { attachAvatarOrb, type AvatarOrbHandle } from './renderer/avatar-orb.js';
 
 export class GpuRenderer {
   app = new Application();
@@ -219,6 +226,19 @@ export class GpuRenderer {
    * new one.
    */
   private atomaMark: { key: string; handle: AtomaMarkHandle } | null = null;
+  /**
+   * The account orbs, retained on the same terms as the crystal above: each
+   * mesh carries a shader, a geometry and a decoded avatar texture, none of
+   * which should be rebuilt sixty times a second because `renderScene` tears
+   * the scene down. TWO slots exist because two views draw one concurrently —
+   * the header's control and the Settings profile orb — and a single slot had
+   * them evicting each other every render. `avatarOrbsRetained` is per-frame
+   * accounting: a slot no draw call claimed this frame (signed out, left
+   * Settings) is destroyed by `sweepAvatarOrbs`, never left parked on the
+   * scene.
+   */
+  private readonly avatarOrbs = new Map<string, { key: string; handle: AvatarOrbHandle }>();
+  private avatarOrbsRetained = new Set<string>();
   private host: HTMLElement | null = null;
   private initialized = false;
   private snapshot: GpuRenderSnapshot | null = null;
@@ -773,10 +793,16 @@ export class GpuRenderer {
     // and geometries survive the rebuild; `retainAtomaMark` re-adds or
     // replaces it.
     const keepMark = new Set<Container>(this.atomaMark?.handle.retained ?? []);
+    // The account orbs step out with the crystal. Without this they were
+    // destroyed by every rebuild, and `retainAvatarOrb`'s key-match path then
+    // resumed a dead mesh into nothing — the header avatar vanished on the
+    // first same-key rebuild, i.e. on every tab change.
+    for (const orb of this.avatarOrbs.values()) keepMark.add(orb.handle.container);
     for (const child of this.markRoot.removeChildren()) {
       if (keepMark.has(child)) continue;
       child.destroy({ children: true });
     }
+    this.avatarOrbsRetained = new Set<string>();
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
     this.metrics.runCollapseOffset = 0;
@@ -822,6 +848,7 @@ export class GpuRenderer {
       this.previousFilterBounds = this.currentFilterBounds;
       this.roleRowTransition = null;
       this.previousEventIds = this.currentEventIds;
+      this.sweepAvatarOrbs();
       this.labels.endRender();
       this.anchorCastShadows();
       this.updateCastShadows();
@@ -865,10 +892,13 @@ export class GpuRenderer {
         case 'launch':
           drawLaunch(this, snapshot, width, height);
           break;
+        case 'settings':
+          drawSettings(this, snapshot, width, height);
+          break;
       }
     }
     this.drawOverlays(snapshot, width, height);
-    drawAuthAccount(this, snapshot, width, height);
+    drawAccountMenu(this, snapshot, width, height);
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
       this.activeViewTransition = {
@@ -882,6 +912,7 @@ export class GpuRenderer {
     this.previousFilterBounds = this.currentFilterBounds;
     if (snapshot.state.view !== 'runs') this.roleRowTransition = null;
     this.previousEventIds = this.currentEventIds;
+    this.sweepAvatarOrbs();
     // Labels this render did not draw go idle, and idle keys are released.
     // `countObjects` walks the live scene, and a retained label that was not
     // re-attached is not in it, so retention never inflates objectCount.
@@ -2882,6 +2913,80 @@ export class GpuRenderer {
     };
   }
 
+  /**
+   * Attach-or-reuse for one account orb SLOT ('header', 'settings'). Same
+   * contract as `retainAtomaMark`: when every parameter matches, the existing
+   * mesh is re-parented and its paint ticker re-registered; otherwise the old
+   * one releases its GPU resources first. A destroyed mesh under a matching
+   * key is a miss, not a resume — resuming it would attach nothing and the
+   * orb would silently vanish. The avatar TEXTURE is cached by URL inside the
+   * orb module, so even a rebuild does not re-download a picture.
+   */
+  retainAvatarOrb(
+    slot: string,
+    x: number,
+    y: number,
+    size: number,
+    photoUrl: string | null,
+    seed: string,
+    interactive: boolean
+  ) {
+    this.avatarOrbsRetained.add(slot);
+    const active = interactive && this.snapshot?.state.accountMenuOpen === true;
+    const key = [x, y, size, photoUrl ?? '', seed, active ? '1' : '0'].join('|');
+    const existing = this.avatarOrbs.get(slot);
+    if (existing?.key === key && !existing.handle.container.destroyed) {
+      existing.handle.resume(this.markRoot, (callback) => this.addTicker(callback));
+      return;
+    }
+    existing?.handle.destroy();
+    this.avatarOrbs.set(slot, {
+      key,
+      handle: attachAvatarOrb(this.markRoot, (callback) => this.addTicker(callback), {
+        x,
+        y,
+        size,
+        photoUrl,
+        seed,
+        active,
+        pointerAt: () => this.pointerScreenPosition(),
+      }),
+    });
+  }
+
+  /**
+   * Destroy every orb slot no draw call claimed this frame. Runs at the end
+   * of `renderScene` (both exits): the welcome gate, a sign-out and leaving
+   * Settings all stop claiming a slot, and the kept-out-of-teardown mesh must
+   * then be released rather than left parented to markRoot forever.
+   */
+  private sweepAvatarOrbs() {
+    for (const [slot, orb] of this.avatarOrbs) {
+      if (this.avatarOrbsRetained.has(slot)) continue;
+      orb.handle.destroy();
+      this.avatarOrbs.delete(slot);
+    }
+  }
+
+  /**
+   * The pointer in renderer screen pixels, or null when it is off-canvas. The
+   * conversion the wheel handlers do inline, in one place, because the orb's
+   * light parallax needs the same mapping without a Pixi event.
+   */
+  private pointerScreenPosition(): { x: number; y: number } | null {
+    const pointer = readPointerLight();
+    if (!pointer.active) return null;
+    const bounds = this.app.canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return null;
+    return pointerClientToRenderer(
+      pointer.clientX,
+      pointer.clientY,
+      bounds,
+      this.app.screen.width,
+      this.app.screen.height
+    );
+  }
+
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
     // Wash, not an opaque bar. A 0.94 panel hid the far field — and the
     // lantern the crystal throws onto it — behind the wordmark. Nav buttons
@@ -2928,13 +3033,17 @@ export class GpuRenderer {
       x += Math.max(66, label.length * 7 + 22) + NAV_HOVER_GAP;
     }
 
-    this.drawFpsReadout(width - 114, 26);
+    // The account orb owns the far right when there is an account; the rest of
+    // the header controls shift left by its width plus a gap.
+    const auth = snapshot.data.auth;
+    const accountReserve = auth ? HEADER_ORB_SIZE + 16 : 0;
+    this.drawFpsReadout(width - 64 - accountReserve, 26);
     this.button(
       this.root,
       'locale.toggle',
       'button',
       snapshot.state.locale === 'en' ? 'EN' : 'FR',
-      width - 104,
+      width - 54 - accountReserve,
       10,
       42,
       32,
@@ -2943,21 +3052,50 @@ export class GpuRenderer {
       GPU_COLORS.primary,
       true
     );
-    this.button(
-      this.root,
-      'refresh',
-      'button',
-      '↻',
-      width - 54,
-      10,
-      42,
-      32,
-      false,
-      snapshot.onActivate,
-      GPU_COLORS.primary,
-      true,
-      snapshot.data.fetching
-    );
+    if (auth) {
+      const orbX = width - HEADER_ORB_SIZE - 12;
+      const orbY = (GPU_LAYOUT.headerHeight - HEADER_ORB_SIZE) / 2;
+      this.retainAvatarOrb(
+        'header',
+        orbX,
+        orbY,
+        HEADER_ORB_SIZE,
+        auth.viewer.avatarUrl,
+        auth.viewer.principalId,
+        true
+      );
+      // The CONTROL is this rect, not the mesh. `markRoot` is
+      // `eventMode = 'none'` so the brand crystal cannot eat pointer events,
+      // and that verdict covers every child of the layer the orb is retained
+      // on — including the orb. So the interactive layer carries an invisible
+      // rect over it, rebuilt with the scene like every other control, and
+      // forwards hover into the retained mesh.
+      const orbHit = new Graphics();
+      orbHit.rect(0, 0, HEADER_ORB_SIZE, HEADER_ORB_SIZE);
+      // Not alpha 0: a fully transparent fill is still hit-tested by Pixi, but
+      // a visible-to-the-engine surface is what keeps that true if the
+      // rendering path ever culls empty geometry.
+      orbHit.fill({ color: 0xffffff, alpha: 0.001 });
+      orbHit.position.set(orbX, orbY);
+      orbHit.eventMode = 'static';
+      orbHit.cursor = 'pointer';
+      orbHit.hitArea = new Rectangle(0, 0, HEADER_ORB_SIZE, HEADER_ORB_SIZE);
+      orbHit.on('pointertap', () => snapshot.onActivate('account.menu.toggle'));
+      orbHit.on('pointerover', () => this.avatarOrbs.get('header')?.handle.setHover(true));
+      orbHit.on('pointerout', () => this.avatarOrbs.get('header')?.handle.setHover(false));
+      this.root.addChild(orbHit);
+      this.metrics.hitTargets.push({
+        id: 'account.menu.toggle',
+        role: 'button',
+        label: snapshot.t('auth.openMenu'),
+        x: orbX,
+        y: orbY,
+        width: HEADER_ORB_SIZE,
+        height: HEADER_ORB_SIZE,
+      });
+    }
+    // Signed out: the header claims no slot this frame and `sweepAvatarOrbs`
+    // releases the mesh at the end of the render.
   }
 
   /**
@@ -3150,6 +3288,7 @@ export type RendererCtx = Pick<
   | 'detailMask'
   | 'addTicker'
   | 'retainAtomaMark'
+  | 'retainAvatarOrb'
   | 'drawExitingFilterButtons'
   | 'animateEnteringFilterSpace'
   | 'metrics'

@@ -1323,3 +1323,274 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
     finalColor = vec4(lit * alpha, alpha) * vColor;
   }
 `;
+
+/**
+ * AVATAR ORB — the account's picture under a faceted glass sphere.
+ *
+ * One quad, one program, no render-to-texture pass: the "sphere" is entirely
+ * in the fragment shader. `aUv` spans -1..1 over the quad, so `length(uv)` is
+ * the disc coordinate and `z = sqrt(1 - r^2)` is the hemisphere the light and
+ * the refraction are computed against.
+ *
+ * The photo is sampled with a LENS PINCH rather than wrapped on a turning
+ * sphere. A face mapped onto a rotating sphere spends half of every revolution
+ * facing away, which is exactly wrong for an avatar; a glass ball sitting over
+ * a photo magnifies and bends it while the face stays put, and the turn reads
+ * in the moving facet highlights instead of in the subject.
+ *
+ * With no photo (`uHasPhoto = 0`) the interior is a two-colour gradient from
+ * the principal's hash, so an account without a provider picture gets the same
+ * material and the same motion rather than a grey placeholder.
+ */
+export const AVATAR_ORB_WGSL = /* wgsl */ `
+  struct GlobalUniforms {
+    uProjectionMatrix: mat3x3<f32>,
+    uWorldTransformMatrix: mat3x3<f32>,
+    uWorldColorAlpha: vec4<f32>,
+    uResolution: vec2<f32>,
+  }
+
+  struct LocalUniforms {
+    uTransformMatrix: mat3x3<f32>,
+    uColor: vec4<f32>,
+    uRound: f32,
+  }
+
+  struct OrbUniforms {
+    uAccentA: vec3<f32>,
+    uAccentB: vec3<f32>,
+    uAccentC: vec3<f32>,
+    uSeedA: vec3<f32>,
+    uSeedB: vec3<f32>,
+    uLight: vec2<f32>,
+    uSpin: f32,
+    uHover: f32,
+    uHasPhoto: f32,
+    uFacets: f32,
+    uRadiusPx: f32,
+  }
+
+  @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
+  @group(1) @binding(0) var<uniform> localUniforms: LocalUniforms;
+  @group(2) @binding(0) var<uniform> orbUniforms: OrbUniforms;
+  // Declared from the first draw even when there is no picture yet: a resource
+  // that appears later would change the bind-group layout mid-life, which
+  // WebGPU refuses. Texture.EMPTY keeps the layout fixed and the sample inert.
+  @group(2) @binding(1) var uPhoto: texture_2d<f32>;
+  @group(2) @binding(2) var uPhotoSampler: sampler;
+
+  struct VertexInput {
+    @location(0) aPosition: vec2<f32>,
+    @location(1) aUv: vec2<f32>,
+  }
+
+  struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) vUv: vec2<f32>,
+    @location(1) vColor: vec4<f32>,
+  }
+
+  @vertex
+  fn mainVertex(input: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    let matrix = globalUniforms.uProjectionMatrix *
+      globalUniforms.uWorldTransformMatrix *
+      localUniforms.uTransformMatrix;
+    let clip = matrix * vec3<f32>(input.aPosition, 1.0);
+    out.position = vec4<f32>(clip.xy, 0.0, 1.0);
+    out.vUv = input.aUv;
+    out.vColor = localUniforms.uColor * globalUniforms.uWorldColorAlpha;
+    return out;
+  }
+
+  @fragment
+  fn mainFragment(
+    @location(0) vUv: vec2<f32>,
+    @location(1) vColor: vec4<f32>,
+  ) -> @location(0) vec4<f32> {
+    let r = length(vUv);
+    // Edge coverage in UV units: one pixel and a half of the actual on-screen
+    // radius, so the silhouette stays smooth at every orb size.
+    let aa = 1.5 / max(orbUniforms.uRadiusPx, 1.0);
+    // NO EARLY RETURN outside the disc, deliberately: WGSL requires
+    // textureSample to be reached in UNIFORM control flow, and a discard-shaped
+    // branch on r (a per-pixel varying) makes it non-uniform — Dawn refuses to
+    // compile the module at all. Coverage is applied to alpha at the bottom
+    // instead, which costs one sample outside the circle and is why this
+    // shader is one flat pass with no branches.
+    let cover = 1.0 - smoothstep(1.0 - aa, 1.0, r);
+    let z = sqrt(max(1.0 - r * r, 0.0));
+    let normal = vec3<f32>(vUv, z);
+
+    // Facet wedges of the shell. The cell index turns with uSpin, so the
+    // facets sweep past the light while the subject stays centred.
+    let tau = 6.28318530718;
+    let wedge = tau / max(orbUniforms.uFacets, 3.0);
+    let angle = atan2(vUv.y, vUv.x) + orbUniforms.uSpin;
+    let cell = floor(angle / wedge);
+    let facetAngle = (cell + 0.5) * wedge;
+    let facetDir = vec3<f32>(cos(facetAngle), sin(facetAngle), 1.35);
+    let facetNormal = normalize(mix(normal, normalize(facetDir), 0.34));
+    // Per-facet brightness. A shell cut from glass never shows two neighbours
+    // at the same value; without this the wedges only differ by their light
+    // response and the orb reads as a flat pinwheel rather than as facets.
+    let facetJitter = fract(sin(cell * 12.9898) * 43758.5453) - 0.5;
+    // The seam crease is a feature OF THE SHELL, so it fades toward the
+    // centre. Constant along the radius it drew hard spokes to the middle.
+    let seam = abs(fract(angle / wedge) - 0.5) * 2.0;
+    let crease = smoothstep(0.80, 1.0, seam) *
+      smoothstep(0.40, 0.98, r) *
+      (0.07 + 0.20 * orbUniforms.uHover);
+
+    // Refraction: a lens pinch toward the centre, plus a slow parallax nudge
+    // so the interior breathes with the turn instead of sitting still.
+    let pinch = 0.20 + 0.06 * orbUniforms.uHover;
+    let drift = vec2<f32>(sin(orbUniforms.uSpin), cos(orbUniforms.uSpin * 0.8)) *
+      0.014 * (1.0 - z);
+    let lensUv = vUv * (1.0 - pinch * (1.0 - z)) + drift;
+    let photoUv = clamp(lensUv * 0.5 + 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
+    let sampled = textureSample(uPhoto, uPhotoSampler, photoUv).rgb;
+    let gradient = mix(
+      orbUniforms.uSeedA,
+      orbUniforms.uSeedB,
+      clamp(0.5 + 0.5 * (lensUv.y * 0.9 + lensUv.x * 0.4), 0.0, 1.0)
+    );
+    let interior = mix(gradient, sampled, orbUniforms.uHasPhoto);
+
+    // Key light, parallaxed by the pointer sample the renderer already keeps.
+    let lightDir = normalize(vec3<f32>(
+      orbUniforms.uLight.x * 0.8 - 0.30,
+      orbUniforms.uLight.y * 0.8 - 0.42,
+      0.86
+    ));
+    let view = vec3<f32>(0.0, 0.0, 1.0);
+    // Named halfVector, not half: WGSL reserves 'half'.
+    let halfVector = normalize(lightDir + view);
+    // Two lobes: a broad sheen that shapes the sphere and a tight glint that
+    // says GLASS. One exponent could not do both — 46 alone left the body
+    // unlit, and a low exponent alone washed the facets out.
+    let facing = max(dot(facetNormal, halfVector), 0.0);
+    let specular = pow(facing, 26.0) * (0.30 + 0.55 * orbUniforms.uHover) +
+      pow(facing, 90.0) * (0.55 + 0.95 * orbUniforms.uHover);
+    let diffuse = (0.52 + 0.48 * max(dot(facetNormal, lightDir), 0.0)) *
+      (1.0 + facetJitter * 0.16);
+    let fresnel = pow(1.0 - z, 4.0);
+
+    // Rim: teal at rest, ramping to amber on hover, with violet held on the
+    // grazing edge so the three brand faces are all present.
+    let rim = mix(
+      mix(orbUniforms.uAccentA, orbUniforms.uAccentB, orbUniforms.uHover),
+      orbUniforms.uAccentC,
+      smoothstep(0.62, 1.0, r) * 0.42
+    );
+    // Glass absorbs toward the silhouette: the far edge is thicker glass.
+    let body = interior * diffuse * (0.74 + 0.26 * z);
+    let lit = body +
+      rim * fresnel * (0.72 + 0.55 * orbUniforms.uHover) +
+      vec3<f32>(0.92, 0.96, 1.0) * specular +
+      rim * crease;
+    let alpha = cover;
+    return vec4<f32>(lit * alpha, alpha) * vColor;
+  }
+`;
+
+export const AVATAR_ORB_GLSL_VERTEX = /* glsl */ `#version 300 es
+  in vec2 aPosition;
+  in vec2 aUv;
+
+  uniform mat3 uProjectionMatrix;
+  uniform mat3 uWorldTransformMatrix;
+  uniform mat3 uTransformMatrix;
+  uniform vec4 uColor;
+  uniform vec4 uWorldColorAlpha;
+
+  out vec2 vUv;
+  out vec4 vColor;
+
+  void main() {
+    mat3 matrix = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
+    vec3 clip = matrix * vec3(aPosition, 1.0);
+    gl_Position = vec4(clip.xy, 0.0, 1.0);
+    vUv = aUv;
+    vColor = uColor * uWorldColorAlpha;
+  }
+`;
+
+export const AVATAR_ORB_GLSL = /* glsl */ `#version 300 es
+  precision highp float;
+
+  in vec2 vUv;
+  in vec4 vColor;
+
+  uniform vec3 uAccentA;
+  uniform vec3 uAccentB;
+  uniform vec3 uAccentC;
+  uniform vec3 uSeedA;
+  uniform vec3 uSeedB;
+  uniform vec2 uLight;
+  uniform float uSpin;
+  uniform float uHover;
+  uniform float uHasPhoto;
+  uniform float uFacets;
+  uniform float uRadiusPx;
+  uniform sampler2D uPhoto;
+
+  out vec4 finalColor;
+
+  void main() {
+    float r = length(vUv);
+    float aa = 1.5 / max(uRadiusPx, 1.0);
+    // Branchless for the same reason as the WGSL path; keep the two in step.
+    float cover = 1.0 - smoothstep(1.0 - aa, 1.0, r);
+    float z = sqrt(max(1.0 - r * r, 0.0));
+    vec3 normal = vec3(vUv, z);
+
+    float tau = 6.28318530718;
+    float wedge = tau / max(uFacets, 3.0);
+    float angle = atan(vUv.y, vUv.x) + uSpin;
+    float cell = floor(angle / wedge);
+    float facetAngle = (cell + 0.5) * wedge;
+    vec3 facetDir = vec3(cos(facetAngle), sin(facetAngle), 1.35);
+    vec3 facetNormal = normalize(mix(normal, normalize(facetDir), 0.34));
+    float facetJitter = fract(sin(cell * 12.9898) * 43758.5453) - 0.5;
+    float seam = abs(fract(angle / wedge) - 0.5) * 2.0;
+    float crease = smoothstep(0.80, 1.0, seam) *
+      smoothstep(0.40, 0.98, r) *
+      (0.07 + 0.20 * uHover);
+
+    float pinch = 0.20 + 0.06 * uHover;
+    vec2 drift = vec2(sin(uSpin), cos(uSpin * 0.8)) * 0.014 * (1.0 - z);
+    vec2 lensUv = vUv * (1.0 - pinch * (1.0 - z)) + drift;
+    vec2 photoUv = clamp(lensUv * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+    vec3 sampled = texture(uPhoto, photoUv).rgb;
+    vec3 gradient = mix(
+      uSeedA,
+      uSeedB,
+      clamp(0.5 + 0.5 * (lensUv.y * 0.9 + lensUv.x * 0.4), 0.0, 1.0)
+    );
+    vec3 interior = mix(gradient, sampled, uHasPhoto);
+
+    vec3 lightDir = normalize(vec3(uLight.x * 0.8 - 0.30, uLight.y * 0.8 - 0.42, 0.86));
+    vec3 view = vec3(0.0, 0.0, 1.0);
+    vec3 halfVector = normalize(lightDir + view);
+    float facing = max(dot(facetNormal, halfVector), 0.0);
+    float specular = pow(facing, 26.0) * (0.30 + 0.55 * uHover) +
+      pow(facing, 90.0) * (0.55 + 0.95 * uHover);
+    float diffuse = (0.52 + 0.48 * max(dot(facetNormal, lightDir), 0.0)) *
+      (1.0 + facetJitter * 0.16);
+    float fresnel = pow(1.0 - z, 4.0);
+
+    vec3 rim = mix(
+      mix(uAccentA, uAccentB, uHover),
+      uAccentC,
+      smoothstep(0.62, 1.0, r) * 0.42
+    );
+    vec3 body = interior * diffuse * (0.74 + 0.26 * z);
+    vec3 lit = body +
+      rim * fresnel * (0.72 + 0.55 * uHover) +
+      vec3(0.92, 0.96, 1.0) * specular +
+      rim * crease;
+    float alpha = cover;
+    finalColor = vec4(lit * alpha, alpha) * vColor;
+  }
+`;
