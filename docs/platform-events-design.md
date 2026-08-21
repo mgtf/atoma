@@ -1,8 +1,9 @@
 # Platform events and notification routing — design
 
-Status: **accepted 2026-08-21**, implementation in progress. Companion to the
-web-push base landed the same day (`src/viz/push/`, `onRunFinished` hook on
-`ProjectRunCoordinator`).
+Status: **implemented 2026-08-21**. Companion to the web-push base landed the
+same day (`src/viz/push/`, `onRunFinished` hook on `ProjectRunCoordinator`).
+The active rules extracted from this document live in AGENTS.md under
+"Contracts and storage"; this file is the reasoning behind them.
 
 The five questions that gated implementation were settled by the operator on
 2026-08-21; each decision is folded into the sections below and restated in
@@ -188,16 +189,14 @@ work in the same checkout):
 - **Phase 4a — audit API.** `/api/admin/events` and `/api/admin/ledger`,
   with a process-level test that reads back a row the operator CLI wrote
   from a different process.
+- **Phase 4b — the Admin Journal.** Two stacked sections in the Admin tab:
+  the platform journal (newest first, severity-coloured) and the catalogue
+  ledger's tail, as two separate reads sharing a tab. Authored in an
+  isolated worktree and merged back, because a concurrent session was
+  rewriting the same GL modules for the account menu.
 - **Phase 5 — AGENTS.md contract.**
 
-Remaining:
-
-- **Phase 4b — the Admin "Journal" section in the GL client**
-  (`renderer/views/admin.ts` plus its query, types and en/fr strings). The
-  API it reads is live, so this is a display surface, not a capability.
-  Deliberately deferred rather than interleaved: it touches the exact GL
-  modules a concurrent session was rewriting for the account menu, and
-  edits to shared files were being lost to that race.
+Nothing outstanding. The plan is fully implemented.
 
 ## Sequencing (one commit per phase)
 
