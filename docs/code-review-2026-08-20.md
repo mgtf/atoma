@@ -291,4 +291,35 @@ Contraste : `recordingLlm.ts` protège chaque enregistrement
 >   survivent), et le câblage `recordRootPlan` attrape et logge les échecs
 >   d'écriture — observer-only en pratique, pas seulement en commentaire.
 >
-> Les findings de la section 3 restent ouverts.
+> **2026-08-21** — section 3 traitée :
+>
+> - **3.1 fermé** — l'erreur d'un appel llm à contexte injecté prime sur les
+>   labels d'inject (carte + `||` au détail) ; garde build du chunk lazy dans
+>   `viz-build.mjs` (marqueur `mark-shell-front`) ; amortisseur de captures en
+>   reduced motion (passes backdrop/env sautées après deux frames stables,
+>   jamais hors reduced motion). `crystalClip` du film de capture : accepté
+>   (outillage, coïncide au viewport fixe de la capture).
+> - **3.2 fermé pour l'essentiel** — `completeLogin` jette au lieu de
+>   committer un login raté ; `cancelProjectRun` lié au projet du chemin
+>   REST ; purge des `github_webhook_deliveries` (fenêtre 30 j) ;
+>   `githubRepositoryIdSchema` nommé ; sonde doctor armée par KEY_ID/API_URL
+>   seuls. REPORTÉS (fichiers en vol dans le chantier web-push) : le jumeau
+>   serveur `appConfigPresent`, le plafond d'états OAuth par IP, le contrôle
+>   d'origine des GET `/auth/github/connect|authorize`. ASSUMÉS : jeton
+>   d'invitation en query string ; `AUTH.resolve` multiple par requête (nit).
+> - **3.3 fermé** — `deadlineAt` estampillé au même instant que
+>   `AbortSignal.timeout` ; les appels lifecycle passent par
+>   `host.toLlmRequest('skill', …)` (actor + citation du contexte, le
+>   hand-rolling est devenu intypable) ; bras baseline capé par
+>   `capToolIterations` ; `ATOMA_RUN_ID` documenté ambient-par-design.
+>   `normalizeDeclaredOutput` : pour mémoire, sans action (sandbox couvre).
+> - **3.4 fermé** — `.env.example` embarqué dans l'archive de release et le
+>   README dit que `viz:serve` ignore `.env` ; la définition de
+>   `release:check` dans AGENTS.md nomme les smokes auth.
+>
+> Par ailleurs le 1.2/1.3 ont eu une suite le 2026-08-21 : la porte
+> d'arrivée EST le login (shell GL servi aux visiteurs non authentifiés,
+> boutons providers sur le cristal, notices bornées `?authNotice=`), et le
+> smoke auth de release — qui n'avait jamais pu passer (invitation sur store
+> vide, sans `--org`) — conduit désormais le vrai flux fondateur → invitation
+> CLI → membre admis.
