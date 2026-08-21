@@ -242,6 +242,51 @@ html.atoma-cursor-active * {
   color: #8a96ae;
 }
 
+/* First-live-run notification offer. Real DOM because the permission request
+   needs a user gesture on an actual element, not a GL hit target. */
+.gpu-push-prompt {
+  position: fixed;
+  z-index: 6;
+  right: 20px;
+  bottom: 20px;
+  width: min(340px, calc(100vw - 40px));
+  padding: 12px 14px;
+  box-sizing: border-box;
+  background: rgba(11, 17, 30, .96);
+  border: 1px solid rgba(38, 51, 74, .9);
+  border-radius: 8px;
+  color: #e6edf7;
+  font: 12px/1.45 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-push-prompt p {
+  margin: 0 0 10px;
+}
+
+.gpu-push-prompt [role='alert'] {
+  display: block;
+  margin: 0 0 10px;
+  color: #f87171;
+}
+
+.gpu-push-prompt-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.gpu-push-prompt-actions button {
+  border: 1px solid rgba(110, 168, 255, .62);
+  border-radius: 7px;
+  background: rgba(11, 17, 30, .96);
+  color: #e6edf7;
+  padding: 6px 12px;
+  font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-push-prompt-actions button:disabled {
+  opacity: .6;
+}
+
 .gpu-copy-bridge,
 .gpu-a11y-bridge {
   position: fixed;

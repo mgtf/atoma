@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { translate } from '../client/i18n.js';
 import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
+import { isIndexEntryLive } from '../client/run-utils.js';
+import { dismissPushPrompt, enableWebPush, shouldOfferPushPrompt } from '../client/push.js';
 import {
   emptyRenderMetrics,
   type GpuRenderMetrics,
@@ -180,6 +182,38 @@ function GpuAppContent({
     () => (gateBlocked ? { providers: authProviders, notice: loginParams.notice } : null),
     [authProviders, gateBlocked, loginParams.notice]
   );
+
+  // THE PERMISSION ASK LIVES IN THE FIRST RUN, not at login: the moment a
+  // viewer's run is actually alive is when "hear about it even offline" has
+  // visible value. One-shot per browser — enabling, denying or dismissing
+  // all end the offer (`shouldOfferPushPrompt` re-checks permission and the
+  // stored dismissal every time).
+  const [pushPrompt, setPushPrompt] = useState<'hidden' | 'offer' | 'busy' | 'error'>('hidden');
+  const hasLiveRun = useMemo(() => {
+    const projectRunLive = Object.values(projectRuns).some((runs) =>
+      runs.some((run) => run.status === 'queued' || run.status === 'running')
+    );
+    return projectRunLive || (runsQuery.data ?? []).some((entry) => isIndexEntryLive(entry));
+  }, [projectRuns, runsQuery.data]);
+  useEffect(() => {
+    if (pushPrompt !== 'hidden') return;
+    if (shouldOfferPushPrompt({ authenticated: authed, hasLiveRun })) setPushPrompt('offer');
+  }, [authed, hasLiveRun, pushPrompt]);
+  const enablePush = useCallback(async () => {
+    setPushPrompt('busy');
+    const outcome = await enableWebPush();
+    if (outcome === 'error') {
+      setPushPrompt('error');
+      return;
+    }
+    // enabled, denied and unsupported all end the conversation for good.
+    dismissPushPrompt();
+    setPushPrompt('hidden');
+  }, []);
+  const dismissPush = useCallback(() => {
+    dismissPushPrompt();
+    setPushPrompt('hidden');
+  }, []);
 
   const adminOrganisationsQuery = useAdminOrganisations(
     state.view === 'admin' && isPlatformAdmin
@@ -614,6 +648,9 @@ function GpuAppContent({
         projectBusy={projectBusy}
         projectError={projectError}
         selectedProjectName={selectedProject?.name ?? null}
+        pushPrompt={pushPrompt}
+        onEnablePush={() => { void enablePush(); }}
+        onDismissPush={dismissPush}
       />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />

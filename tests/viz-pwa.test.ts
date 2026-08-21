@@ -91,6 +91,13 @@ describe('Atoma visualizer PWA assets', () => {
     expect(serviceWorker).toContain('atoma-viz-shell-v2');
   });
 
+  it('handles push notifications with untrusted-payload defaults', () => {
+    expect(serviceWorker).toContain("addEventListener('push'");
+    expect(serviceWorker).toContain("addEventListener('notificationclick'");
+    expect(serviceWorker).toContain('showNotification');
+    expect(serviceWorker).toContain("payload.url.startsWith('/')");
+  });
+
   it('shares one public directory and serves every required MIME type', () => {
     expect(vite).toContain("new URL('./src/viz/public'");
     expect(server).toContain("case '.webmanifest':");

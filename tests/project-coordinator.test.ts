@@ -208,6 +208,87 @@ describe('ProjectRunCoordinator', () => {
     expect(started.hostPaths.runsPath).toBe(driver.mock.calls[0]?.[0].env?.['ATOMA_RUNS_DIR']);
   });
 
+  it('emits one terminal onRunFinished event with the requesting principal', async () => {
+    const f = fixture();
+    const finished = vi.fn();
+    const driver = vi.fn(async (options: SpawnRunOptions) => {
+      const env = options.env ?? {};
+      const workspace = env['ATOMA_BUILD_WORKSPACE']!;
+      const runs = env['ATOMA_RUNS_DIR']!;
+      const runId = env['ATOMA_RUN_ID']!;
+      const declarations = env['ATOMA_ARTIFACT_MANIFEST_PATH']!;
+      mkdirSync(workspace, { recursive: true });
+      mkdirSync(runs, { recursive: true });
+      writeFileSync(join(workspace, 'index.html'), '<h1>Clock</h1>', 'utf8');
+      writeFileSync(declarations, JSON.stringify({
+        version: 1,
+        runId,
+        generatedAt: new Date().toISOString(),
+        outputs: ['index.html'],
+      }), 'utf8');
+      writeFileSync(join(runs, `${runId}.json`), JSON.stringify({
+        id: runId,
+        endedAt: new Date().toISOString(),
+        result: { summary: 'verified' },
+      }), 'utf8');
+      return formatRunStatsEpilogue(DELIVERED_STATS) + '\n✓ build finished\n';
+    });
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver,
+      acquireLease: async () => lease(),
+      onRunFinished: finished,
+    });
+
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-1', goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+    expect(finished).toHaveBeenCalledExactlyOnceWith({
+      orgId: f.viewer.orgId,
+      projectId: f.project.projectId,
+      projectRunId: started.projectRunId,
+      principalId: f.viewer.principalId,
+      goal: 'Build a clock in one index.html.',
+      status: 'delivered',
+    });
+  });
+
+  it('a failed run still emits onRunFinished and a throwing listener stays contained', async () => {
+    const f = fixture();
+    const finished = vi.fn(() => {
+      throw new Error('listener exploded');
+    });
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver: vi.fn(async () => {
+        throw new Error('driver died');
+      }),
+      acquireLease: async () => lease(),
+      onRunFinished: finished,
+    });
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-1', goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+    expect(f.store.getProjectRun(f.viewer.orgId, started.projectRunId)?.status).toBe('failed');
+    expect(finished).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ status: 'failed', projectRunId: started.projectRunId })
+    );
+  });
+
   it('seeds a later run from the last delivered workspace', async () => {
     const f = fixture();
     const driver = vi.fn(async (options: SpawnRunOptions) => {

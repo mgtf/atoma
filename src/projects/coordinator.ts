@@ -36,6 +36,21 @@ export interface ProjectRunPublisher {
 
 export type ProjectRunDriver = typeof spawnRun;
 
+/**
+ * Terminal outcome of one project run, emitted exactly once from `finish()`
+ * after the state transition is persisted. Consumers (the viz push notifier)
+ * are fail-open: a throwing listener is stderr, never a run failure.
+ */
+export interface ProjectRunFinishedEvent {
+  readonly orgId: string;
+  readonly projectId: string;
+  readonly projectRunId: string;
+  /** The principal who requested the run — the one to notify. */
+  readonly principalId: string;
+  readonly goal: string;
+  readonly status: 'delivered' | 'failed' | 'cancelled';
+}
+
 export interface ProjectCoordinatorOptions {
   readonly store: ProjectStore;
   readonly dbPath: string;
@@ -45,6 +60,7 @@ export interface ProjectCoordinatorOptions {
   readonly driver?: ProjectRunDriver;
   readonly acquireLease?: RunLeaseAcquirer;
   readonly publisher?: ProjectRunPublisher;
+  readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
   readonly cwd?: string;
   readonly timeoutMs?: number;
 }
@@ -242,6 +258,7 @@ export class ProjectRunCoordinator {
   private readonly driver: ProjectRunDriver;
   private readonly acquireLease: RunLeaseAcquirer;
   private readonly publisher?: ProjectRunPublisher;
+  private readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly active = new Map<string, ActiveRun>();
@@ -255,6 +272,7 @@ export class ProjectRunCoordinator {
     this.driver = options.driver ?? spawnRun;
     this.acquireLease = options.acquireLease ?? acquireRunLease;
     this.publisher = options.publisher;
+    if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = options.timeoutMs ?? 15 * 60 * 1_000;
   }
@@ -494,6 +512,42 @@ export class ProjectRunCoordinator {
         );
       }
     } finally {
+      // Terminal-outcome hook, AFTER the state transition above persisted and
+      // read back from the store so listeners see exactly what the run table
+      // says. Fire-and-forget: notification latency or failure must never
+      // delay the lease release below or fail the run.
+      try {
+        const settled = this.onRunFinished
+          ? this.store.getProjectRun(reservedRun.orgId, reservedRun.projectRunId)
+          : null;
+        if (
+          this.onRunFinished &&
+          settled &&
+          (settled.status === 'delivered' ||
+            settled.status === 'failed' ||
+            settled.status === 'cancelled')
+        ) {
+          const emit = this.onRunFinished;
+          void Promise.resolve(
+            emit({
+              orgId: settled.orgId,
+              projectId: settled.projectId,
+              projectRunId: settled.projectRunId,
+              principalId: settled.requestedByPrincipalId,
+              goal: settled.goal,
+              status: settled.status,
+            })
+          ).catch((error: unknown) => {
+            process.stderr.write(
+              `[atoma projects] run-finished listener failed for ${reservedRun.projectRunId}: ${String(error)}\n`
+            );
+          });
+        }
+      } catch (error) {
+        process.stderr.write(
+          `[atoma projects] run-finished listener failed for ${reservedRun.projectRunId}: ${String(error)}\n`
+        );
+      }
       try {
         lease.release();
       } catch (error) {

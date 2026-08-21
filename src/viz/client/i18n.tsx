@@ -534,6 +534,13 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'burnin.metric.compileErrors': 'Compiler transport errors or timeouts before a decision.',
     'burnin.metric.demotions': 'Script skills demoted back to LLM recipes after deterministic failures.',
     'burnin.metric.fallbacks': 'Deterministic dispatch contract failures that fell back to the validated LLM loop.',
+
+    'push.title': 'Run notifications',
+    'push.body':
+      'Your run is underway. Enable notifications to hear the moment it delivers — even with this tab closed.',
+    'push.enable': 'Enable notifications',
+    'push.later': 'Not now',
+    'push.error': 'Notifications could not be enabled.',
   },
   fr: {
     'lang.name': 'Français',
@@ -1066,6 +1073,13 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'burnin.metric.compileErrors': 'Erreurs ou timeouts du transport avant une décision du compilateur.',
     'burnin.metric.demotions': 'Scripts rétrogradés en recettes LLM après des échecs déterministes.',
     'burnin.metric.fallbacks': 'Échecs du contrat de dispatch déterministe ayant basculé vers la boucle LLM validée.',
+
+    'push.title': 'Notifications de run',
+    'push.body':
+      'Ton run est en cours. Active les notifications pour être prévenu dès la livraison — même onglet fermé.',
+    'push.enable': 'Activer les notifications',
+    'push.later': 'Pas maintenant',
+    'push.error': 'Impossible d’activer les notifications.',
   },
 };
 

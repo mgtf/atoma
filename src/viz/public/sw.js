@@ -101,6 +101,53 @@ globalThis.addEventListener('activate', (event) => {
   event.waitUntil(activateSecurityWorker());
 });
 
+globalThis.addEventListener('push', (event) => {
+  // Payloads come from the Atoma server but cross a third-party push service;
+  // treat every field as untrusted data with a safe default.
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+  const title =
+    typeof payload.title === 'string' && payload.title ? payload.title : 'Atoma';
+  const url =
+    typeof payload.url === 'string' && payload.url.startsWith('/') && !payload.url.startsWith('//')
+      ? payload.url
+      : '/';
+  event.waitUntil(
+    globalThis.registration.showNotification(title, {
+      body: typeof payload.body === 'string' ? payload.body : '',
+      tag: typeof payload.tag === 'string' && payload.tag ? payload.tag : 'atoma-run',
+      icon: '/icons/atoma-192.png',
+      badge: '/icons/atoma-192.png',
+      data: { url },
+    })
+  );
+});
+
+globalThis.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  const url = data && typeof data.url === 'string' ? data.url : '/';
+  event.waitUntil(
+    (async () => {
+      const windows = await globalThis.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+      for (const client of windows) {
+        if (typeof client.focus === 'function') {
+          await client.focus();
+          return;
+        }
+      }
+      await globalThis.clients.openWindow(url);
+    })()
+  );
+});
+
 globalThis.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;

@@ -19,6 +19,9 @@ interface WorkerHarness {
   };
   skipWaiting: ReturnType<typeof vi.fn>;
   claim: ReturnType<typeof vi.fn>;
+  showNotification: ReturnType<typeof vi.fn>;
+  matchAll: ReturnType<typeof vi.fn>;
+  openWindow: ReturnType<typeof vi.fn>;
 }
 
 function workerHarness(): WorkerHarness {
@@ -36,6 +39,9 @@ function workerHarness(): WorkerHarness {
   const fetchMock = vi.fn();
   const claim = vi.fn(async () => undefined);
   const skipWaiting = vi.fn(async () => undefined);
+  const showNotification = vi.fn(async () => undefined);
+  const matchAll = vi.fn(async () => []);
+  const openWindow = vi.fn(async () => null);
   const source = readFileSync('src/viz/public/sw.js', 'utf8');
   runInNewContext(source, {
     URL,
@@ -43,13 +49,24 @@ function workerHarness(): WorkerHarness {
     fetch: fetchMock,
     caches,
     location: { origin: 'https://viz.example' },
-    clients: { claim },
+    clients: { claim, matchAll, openWindow },
+    registration: { showNotification },
     skipWaiting,
     addEventListener(name: string, handler: ServiceWorkerHandler) {
       handlers.set(name, handler);
     },
   });
-  return { handlers, fetch: fetchMock, cache, caches, skipWaiting, claim };
+  return {
+    handlers,
+    fetch: fetchMock,
+    cache,
+    caches,
+    skipWaiting,
+    claim,
+    showNotification,
+    matchAll,
+    openWindow,
+  };
 }
 
 async function dispatchLifecycle(harness: WorkerHarness, name: 'install' | 'activate') {
@@ -209,5 +226,95 @@ describe('viz service worker cache boundary', () => {
 
     expect(await response).toBe(network);
     expect(harness.cache.match).not.toHaveBeenCalled();
+  });
+});
+
+async function dispatchPush(harness: WorkerHarness, data: unknown) {
+  let work: Promise<unknown> | undefined;
+  harness.handlers.get('push')?.({
+    data,
+    waitUntil(value: Promise<unknown>) {
+      work = value;
+    },
+  });
+  if (!work) throw new Error('service worker did not register push');
+  await work;
+}
+
+describe('viz service worker push notifications', () => {
+  let harness: WorkerHarness;
+
+  beforeEach(() => {
+    harness = workerHarness();
+  });
+
+  it('shows the server payload with the Atoma icon and a same-origin url', async () => {
+    await dispatchPush(harness, {
+      json: () => ({
+        title: 'Atoma — run delivered',
+        body: 'Build a clock.',
+        tag: 'atoma-run-run-1',
+        url: '/',
+      }),
+    });
+    expect(harness.showNotification).toHaveBeenCalledWith('Atoma — run delivered', {
+      body: 'Build a clock.',
+      tag: 'atoma-run-run-1',
+      icon: '/icons/atoma-192.png',
+      badge: '/icons/atoma-192.png',
+      data: { url: '/' },
+    });
+  });
+
+  it('treats the payload as untrusted: malformed data and foreign urls degrade safely', async () => {
+    await dispatchPush(harness, {
+      json: () => {
+        throw new Error('not json');
+      },
+    });
+    expect(harness.showNotification).toHaveBeenLastCalledWith(
+      'Atoma',
+      expect.objectContaining({ body: '', data: { url: '/' } })
+    );
+    await dispatchPush(harness, {
+      json: () => ({ title: 'x', url: 'https://evil.example/phish' }),
+    });
+    expect(harness.showNotification).toHaveBeenLastCalledWith(
+      'x',
+      expect.objectContaining({ data: { url: '/' } })
+    );
+    await dispatchPush(harness, {
+      json: () => ({ title: 'x', url: '//evil.example/phish' }),
+    });
+    expect(harness.showNotification).toHaveBeenLastCalledWith(
+      'x',
+      expect.objectContaining({ data: { url: '/' } })
+    );
+  });
+
+  it('click focuses an existing window before opening a new one', async () => {
+    const focus = vi.fn(async () => undefined);
+    harness.matchAll.mockResolvedValueOnce([{ focus }]);
+    let work: Promise<unknown> | undefined;
+    const close = vi.fn();
+    harness.handlers.get('notificationclick')?.({
+      notification: { close, data: { url: '/' } },
+      waitUntil(value: Promise<unknown>) {
+        work = value;
+      },
+    });
+    await work;
+    expect(close).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledOnce();
+    expect(harness.openWindow).not.toHaveBeenCalled();
+
+    harness.handlers.get('notificationclick')?.({
+      notification: { close: vi.fn(), data: { url: '/' } },
+      waitUntil(value: Promise<unknown>) {
+        work = value;
+      },
+    });
+    await work;
+    expect(harness.openWindow).toHaveBeenCalledWith('/');
   });
 });

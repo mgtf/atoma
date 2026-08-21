@@ -19,6 +19,9 @@ export function DomBridge({
   projectBusy = false,
   projectError = null,
   selectedProjectName = null,
+  pushPrompt = 'hidden',
+  onEnablePush,
+  onDismissPush,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -36,6 +39,11 @@ export function DomBridge({
   projectBusy?: boolean;
   projectError?: string | null;
   selectedProjectName?: string | null;
+  /** First-live-run notification offer; real DOM buttons because the browser
+   *  permission request needs a user gesture on an actual element. */
+  pushPrompt?: 'hidden' | 'offer' | 'busy' | 'error';
+  onEnablePush?: () => void;
+  onDismissPush?: () => void;
 }) {
   const view = useGpuStore((state) => state.view);
   const entered = useGpuStore((state) => state.entered);
@@ -274,6 +282,28 @@ export function DomBridge({
               : t('projects.actionsHint.new')}
           </p>
         </form>
+      ) : null}
+      {pushPrompt !== 'hidden' ? (
+        <div className="gpu-push-prompt" role="dialog" aria-label={t('push.title')}>
+          <p>{t('push.body')}</p>
+          {pushPrompt === 'error' ? <span role="alert">{t('push.error')}</span> : null}
+          <div className="gpu-push-prompt-actions">
+            <button
+              type="button"
+              disabled={pushPrompt === 'busy'}
+              onClick={() => onEnablePush?.()}
+            >
+              {t('push.enable')}
+            </button>
+            <button
+              type="button"
+              disabled={pushPrompt === 'busy'}
+              onClick={() => onDismissPush?.()}
+            >
+              {t('push.later')}
+            </button>
+          </div>
+        </div>
       ) : null}
     </>
   );

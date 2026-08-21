@@ -303,6 +303,21 @@ Read this section before changing any LLM call site.
   GitHub login: register setup at `/auth/github/setup` and webhooks at
   `/webhooks/github`. Repositories are created only after a delivered,
   validated artifact manifest, and a retry never creates a second repo.
+- Web push notifications exist only behind the viz auth gate. The VAPID
+  keypair is generated once and persisted in the product store
+  (`push_vapid_keys`); rotating it orphans every browser subscription.
+  `ATOMA_VIZ_VAPID_SUBJECT` optionally overrides the JWT subject (default:
+  the public origin). Subscriptions (`push_subscriptions`) are
+  principal-scoped self-service rows behind same-origin `/api/push/*`
+  POSTs; a 404/410 from the push service prunes the row.
+  `src/viz/push/webpush.ts` is the ONE RFC 8291/8292 implementation
+  (node:crypto only — no web-push dependency), pinned by the RFC 8291
+  Appendix A known-answer test. Pushes fire from
+  `ProjectRunCoordinator.finish` via the fail-open `onRunFinished` hook and
+  carry bounded English payloads (status title, goal excerpt, same-origin
+  path — never trace prose or secrets). The browser permission ask lives in
+  the FIRST LIVE RUN (`shouldOfferPushPrompt`), never in the login or
+  signup flow — login stays zero-friction; the run is where the value shows.
 - Probe manifests are structured records. Normalize paths before recognizing
   `.atoma-probes.json`; machine writers merge entries, and model hand-edits are
   refused.

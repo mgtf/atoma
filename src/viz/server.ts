@@ -67,6 +67,8 @@ import { ProjectStore } from '../projects/store.js';
 import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectHttpError, ProjectService } from '../projects/service.js';
+import { PushStore } from './push/store.js';
+import { PushNotifier } from './push/notifier.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -300,6 +302,32 @@ if (AUTH?.store) {
 }
 
 /**
+ * WEB PUSH RUNTIME. Exists only behind the auth gate: subscriptions are
+ * principal-scoped rows, meaningless without a viewer. The VAPID keypair is
+ * generated once and persisted in the product store (rotating it silently
+ * would orphan every browser subscription); `ATOMA_VIZ_VAPID_SUBJECT` may
+ * override the JWT subject, defaulting to the deployment's public origin.
+ */
+interface PushRuntime {
+  readonly store: PushStore;
+  readonly notifier: PushNotifier;
+  readonly publicKey: string;
+}
+
+const PUSH_RUNTIME: PushRuntime | null = (() => {
+  if (!AUTH_RUNTIME) return null;
+  const pushStore = PushStore.open(DBS[0]!.path);
+  const vapid = pushStore.vapidKeys();
+  const subject =
+    process.env['ATOMA_VIZ_VAPID_SUBJECT']?.trim() || AUTH_RUNTIME.publicOrigin.origin;
+  return {
+    store: pushStore,
+    notifier: new PushNotifier({ store: pushStore, vapid, subject }),
+    publicKey: vapid.publicKey,
+  };
+})();
+
+/**
  * PROJECTS + GITHUB APP RUNTIME.
  *
  * The project control plane exists only when the auth gate is on: projects
@@ -373,6 +401,11 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     dbPath,
     projectsRoot: PROJECTS_ROOT,
     ...(publisher ? { publisher } : {}),
+    // Real notifications even when the browser is closed: the terminal-run
+    // hook pushes to the requesting principal's subscribed browsers.
+    ...(PUSH_RUNTIME
+      ? { onRunFinished: (event) => PUSH_RUNTIME.notifier.notifyRunFinished(event) }
+      : {}),
   });
   // A previous process that died mid-run left rows only its in-memory
   // drivers could ever move. Recover them BEFORE any new run can start,
@@ -1626,6 +1659,63 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         return;
       }
       sendJson(res, 404, { error: 'not found' });
+      return;
+    }
+
+    // WEB PUSH — principal-scoped self-service. The permission ask lives in
+    // the client during the viewer's first live run (that is where the value
+    // shows), never in the login flow; these routes only store what the
+    // browser's PushManager minted. Same-origin POSTs, bounded bodies, and
+    // the store validates key material before persisting.
+    if (pathname === '/api/push/config') {
+      if (!methodAllowed(req, res, 'GET')) return;
+      sendJson(
+        res,
+        200,
+        PUSH_RUNTIME
+          ? { enabled: true, publicKey: PUSH_RUNTIME.publicKey }
+          : { enabled: false }
+      );
+      return;
+    }
+    if (pathname === '/api/push/subscribe' || pathname === '/api/push/unsubscribe') {
+      if (!methodAllowed(req, res, 'POST')) return;
+      if (!sameOrigin(req, res)) return;
+      if (!PUSH_RUNTIME) {
+        sendJson(res, 404, { error: 'push notifications are not enabled' });
+        return;
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBodyBounded(req, 8_192)).toString('utf8') || '{}');
+      } catch {
+        sendJson(res, 400, { error: 'request body is not valid JSON' });
+        return;
+      }
+      const input = body as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+      const endpoint = typeof input.endpoint === 'string' ? input.endpoint : '';
+      if (pathname === '/api/push/unsubscribe') {
+        sendJson(res, 200, {
+          removed: PUSH_RUNTIME.store.deleteSubscription(viewer.principalId, endpoint),
+        });
+        return;
+      }
+      const p256dh = typeof input.keys?.p256dh === 'string' ? input.keys.p256dh : '';
+      const auth = typeof input.keys?.auth === 'string' ? input.keys.auth : '';
+      try {
+        PUSH_RUNTIME.store.saveSubscription({
+          principalId: viewer.principalId,
+          endpoint,
+          p256dh,
+          auth,
+        });
+      } catch (error) {
+        sendJson(res, 400, {
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+        });
+        return;
+      }
+      sendJson(res, 200, { subscribed: true });
       return;
     }
   }
