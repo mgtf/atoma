@@ -21,6 +21,17 @@ export const GPU_COLORS = {
 
 export const GPU_LAYOUT = {
   headerHeight: 52,
+  /**
+   * The nav rail's width. Views draw in their own viewport space starting at
+   * 0; `render()` places that space at this offset. Hit targets project
+   * through their live parents in `recordHitTarget`; only plain bounds need
+   * an explicit translation.
+   */
+  sidebarWidth: 208,
+  /** Narrowest the rail may become before its labels stop being legible. */
+  sidebarMinWidth: 112,
+  /** Preserve this much view space by shrinking the rail on narrow windows. */
+  contentMinWidth: 320,
   gap: 10,
   radius: 8,
   leftMinWidth: 520,
@@ -28,3 +39,18 @@ export const GPU_LAYOUT = {
   pagePadding: 12,
   rowHeight: 46,
 } as const;
+
+/**
+ * The rail gives space back before a view is pushed off-screen. This exact
+ * clamp is mirrored by `--gpu-sidebar` for DOM overlays.
+ */
+export function sidebarWidthForViewport(viewportWidth: number): number {
+  return Math.max(
+    0,
+    Math.min(
+      viewportWidth,
+      GPU_LAYOUT.sidebarWidth,
+      Math.max(GPU_LAYOUT.sidebarMinWidth, viewportWidth - GPU_LAYOUT.contentMinWidth)
+    )
+  );
+}

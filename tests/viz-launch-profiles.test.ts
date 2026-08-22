@@ -162,7 +162,7 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/roleRowTransition/);
     expect(gpuRenderer).toMatch(/startedAt/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
-    expect(gpuRenderer).toMatch(/private navButton\(/);
+    expect(gpuRenderer).toMatch(/\n {2}navButton\(/);
     // The brand mark is one Pixi crystal (header + arrival gate); no R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
     expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(20, 12\)/);
@@ -189,7 +189,12 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);
     expect(gpuStyles).toMatch(/\.gpu-entry-veil/);
     expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
-    expect(gpuRenderer).toMatch(/let x = 160/);
+    // The nav is a LEFT RAIL (renderer/views/sidebar.ts), not a header tab
+    // strip. What the rail does is asserted behaviourally in viz-gpu-views;
+    // what only a grep can hold is that the renderer class no longer carries
+    // a second nav layout of its own beside the rail's.
+    expect(gpuRenderer).toMatch(/drawSidebar\(this, snapshot, height, contentLeft\)/);
+    expect(gpuRenderer).not.toMatch(/visibleViews\(/);
     // Atom buttons draw local geometry at local origin (no double offsets).
     expect(gpuRenderer).toMatch(/ellipse\(0, 0, 7, 4\)/);
     expect(gpuRenderer).toMatch(/const particleCenterX = 16/);
@@ -198,8 +203,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).not.toMatch(/ellipse\(10, height \/ 2, 7, 4\)/);
     // Hover-scale gaps are pinned so scaled chips never overlap neighbours.
     expect(rendererChipLayout).toMatch(/const CONTROL_HOVER_GAP = 14/);
-    expect(gpuRenderer).toMatch(/const NAV_HOVER_GAP = 20/);
-    expect(gpuRenderer).toMatch(/label\.length \* 7 \+ 22\) \+ NAV_HOVER_GAP/);
+    // The nav's own hover gap moved with it: the rail stacks vertically, so
+    // the guard is that consecutive rail rows still clear each other at hover
+    // scale, asserted on the real layout in viz-gpu-views rather than grepped.
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
     // Card shaders and the pointer light ship BOTH GLSL and WGSL variants so
     // the WebGL fallback renders what WebGPU renders.

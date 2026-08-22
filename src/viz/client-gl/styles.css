@@ -1,4 +1,8 @@
 :root {
+  /* Must match sidebarWidthForViewport(): the rail gives space back until its
+     112px legibility floor so view overlays never inherit a fictitious 320px
+     canvas beyond the right edge. The run input lives in the header band. */
+  --gpu-sidebar: min(100vw, clamp(112px, calc(100vw - 320px), 208px));
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #070b13;
@@ -112,6 +116,24 @@ html.atoma-cursor-active * {
   .atoma-pointer-cursor { display: none; }
 }
 
+/* THE frame skin. `panel()` in gpu-renderer.ts draws exactly this on the GPU
+   side — fill GPU_COLORS.panel at the near-depth alpha, a 1px GPU_COLORS.border
+   stroke, radius GPU_LAYOUT.radius, and an elevation-2 pair of cast shadows
+   under a thin top rim. A DOM overlay that sits inside a view's column uses
+   that same material instead of inventing a second skin: the create-project
+   form used to carry its own darker fill and read as a foreign card.
+   The GL shadows swing with the pointer light; CSS cannot, so these are its
+   resting values. */
+.gpu-panel-skin {
+  background: rgba(17, 24, 39, .94);
+  border: 1px solid rgba(38, 51, 74, .9);
+  border-radius: 8px;
+  box-shadow:
+    0 14px 30px rgba(1, 4, 10, .36),
+    0 6px 14px rgba(7, 16, 29, .4),
+    inset 0 1px 0 rgba(199, 226, 255, .18);
+}
+
 .gpu-dom-input {
   position: fixed;
   z-index: 4;
@@ -141,23 +163,34 @@ html.atoma-cursor-active * {
 }
 
 .gpu-view-search {
+  --gpu-left-pane: min(560px, calc((100vw - var(--gpu-sidebar)) * .45));
+  --gpu-search-width: min(280px, calc(var(--gpu-left-pane) - 32px));
   top: 106px;
-  left: 250px;
-  width: min(280px, 22vw);
+  left: calc(
+    var(--gpu-sidebar) + 10px + var(--gpu-left-pane) - 16px - var(--gpu-search-width)
+  );
+  width: var(--gpu-search-width);
   height: 32px;
   padding: 6px 11px;
 }
 
 /* `top` must match PROJECTS_DOM_FORM_TOP. Fields are a grid, not six
-   independent fixed boxes — those stacked GPU empty-copy under the inputs. */
+   independent fixed boxes — those stacked GPU empty-copy under the inputs.
+
+   The column is `projectsColumn()` from renderer/views/projects.ts, restated
+   in CSS: this form and the GL project list are two cards in ONE stack, and
+   they only read as one while they share both edges. */
 .gpu-project-form {
+  --gpu-content: calc(100vw - var(--gpu-sidebar));
+  --gpu-frame: min(980px, calc(var(--gpu-content) - 20px));
   position: fixed;
   z-index: 4;
-  top: 128px;
-  left: 20px;
-  width: min(720px, calc(100vw - 48px));
+  top: 108px;
+  left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
+  width: calc(var(--gpu-frame) - 32px);
+  height: 140px;
   display: grid;
-  grid-template-columns: minmax(140px, 1.2fr) minmax(140px, 1fr) minmax(160px, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
     "name repo install"
     "actions actions actions"
@@ -165,14 +198,15 @@ html.atoma-cursor-active * {
   gap: 8px;
   padding: 10px;
   box-sizing: border-box;
-  background: rgba(11, 17, 30, .96);
-  border: 1px solid rgba(38, 51, 74, .9);
-  border-radius: 8px;
 }
 
+/* Selecting a project SWAPS the form rather than extending it: creating a
+   project and starting a run on one are two jobs, and the fields of the job
+   you are not doing are noise. Deselecting (clicking the selected row again)
+   brings the create fields back. */
 .gpu-project-form--run {
+  height: 184px;
   grid-template-areas:
-    "name repo install"
     "prompt prompt prompt"
     "actions actions actions"
     "hint hint hint";
@@ -216,6 +250,8 @@ html.atoma-cursor-active * {
 
 .gpu-project-actions a,
 .gpu-project-actions button {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid rgba(110, 168, 255, .62);
   border-radius: 7px;
   background: rgba(11, 17, 30, .96);
@@ -223,6 +259,9 @@ html.atoma-cursor-active * {
   padding: 6px 12px;
   font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gpu-project-hint {
@@ -230,6 +269,36 @@ html.atoma-cursor-active * {
   margin: 0;
   font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
   color: #8a96ae;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* At this window width the renderer's content viewport is <480px (the full
+   rail is 208px). Stack browser-native fields and reserve the SAME measured
+   band in projectsGpuContentTop; wrapping actions/hints must never spill over
+   the GL list below. */
+@media (max-width: 687px) {
+  .gpu-project-form {
+    height: 272px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "repo"
+      "install"
+      "actions"
+      "hint";
+  }
+
+  .gpu-project-form--run {
+    height: 248px;
+    grid-template-areas:
+      "prompt"
+      "actions"
+      "hint";
+  }
 }
 
 /* First-live-run notification offer. Real DOM because the permission request
@@ -289,6 +358,50 @@ html.atoma-cursor-active * {
   border: 0;
 }
 
+/* The bridge is screen-reader-only at rest, but it contains real keyboard
+   navigation. As soon as one of those controls receives focus, reveal a
+   bounded command palette so a sighted keyboard user never tabs through an
+   invisible interface. */
+.gpu-a11y-bridge:focus-within {
+  z-index: 30;
+  top: 60px;
+  left: 12px;
+  width: min(360px, calc(100vw - 24px));
+  height: auto;
+  max-height: calc(100vh - 72px);
+  padding: 10px;
+  margin: 0;
+  overflow: auto;
+  clip: auto;
+  white-space: normal;
+  border: 1px solid rgba(110, 168, 255, .72);
+  border-radius: 8px;
+  background: rgba(11, 17, 30, .98);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, .5);
+}
+
+.gpu-a11y-bridge:focus-within nav,
+.gpu-a11y-bridge:focus-within section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block: 0 8px;
+}
+
+.gpu-a11y-bridge:focus-within button,
+.gpu-a11y-bridge:focus-within a {
+  border: 1px solid rgba(110, 168, 255, .62);
+  border-radius: 6px;
+  padding: 6px 9px;
+  background: #111827;
+  color: #e6edf7;
+}
+
+.gpu-a11y-bridge:focus-within :focus-visible {
+  outline: 2px solid #6ea8ff;
+  outline-offset: 2px;
+}
+
 .gpu-crash {
   position: fixed;
   inset: 0;
@@ -322,10 +435,6 @@ html.atoma-cursor-active * {
     left: 610px;
     width: min(420px, calc(100vw - 722px));
   }
-  .gpu-view-search {
-    left: 170px;
-    width: 230px;
-  }
 }
 
 @media (max-width: 1000px) {
@@ -336,20 +445,20 @@ html.atoma-cursor-active * {
    form is — text entry, autofill and screen readers belong to the browser.
    `top` must match SETTINGS_DOM_FORM_TOP in renderer/views/settings.ts. */
 .gpu-settings-form {
+  --gpu-content: calc(100vw - var(--gpu-sidebar));
+  --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
   position: fixed;
   z-index: 4;
-  top: 146px;
-  left: 20px;
-  width: min(560px, calc(100vw - 48px));
+  top: 176px;
+  left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
+  width: calc(var(--gpu-frame) - 32px);
+  height: 96px;
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 10px;
   box-sizing: border-box;
-  background: rgba(11, 17, 30, .96);
-  border: 1px solid rgba(38, 51, 74, .9);
-  border-radius: 8px;
 }
 
 .gpu-settings-form .gpu-dom-input {

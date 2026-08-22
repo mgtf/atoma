@@ -318,7 +318,7 @@ npm run skills -- list            # what it learned, and what it refused to comp
 npm run burnin                    # regenerate the economics table above
 ```
 
-### Optional single-organisation login
+### Optional organisation login
 
 The visualizer remains open on loopback by default. The keys to set are
 `ATOMA_VIZ_AUTH=1`, an exact `ATOMA_VIZ_PUBLIC_ORIGIN`, and at least one
@@ -365,13 +365,17 @@ operator `./runs` directory.
 `npm run doctor` validates the auth switch, canonical origin, provider
 registry and optional GitHub App snapshot without contacting GitHub.
 
-The default visualizer is a full-GPU React 19 client: PixiJS renders the 2D
-component system through WebGPU with a deterministic WebGL fallback, while
-React Three Fiber renders the tier topology behind it. Zustand owns scene/UI
-state and TanStack Query owns the read-only API state. Only text input,
-clipboard, IME and accessibility use a minimal DOM bridge. The previous
-MUI client remains available through `npm run viz:mui` but is frozen:
-it receives bugfixes, not features.
+The default visualizer is a full-GPU React 19 client: one PixiJS context
+renders the component system and ambient field through WebGPU with a
+deterministic WebGL fallback. A left rail opens on Projects, where an
+authenticated member creates a project and starts work; Runs replays that
+work live, and the in-product Docs view explains the system and its main
+operational surfaces. Zustand owns scene/UI state and TanStack Query owns API
+state. Pixi draws the scene; a small DOM bridge owns browser-native controls
+and accessibility, including inputs, selects, links, forms, login/navigation
+fallbacks and the push-permission dialog. The previous MUI client remains
+available through `npm run viz:mui` but is frozen: it receives bugfixes, not
+features.
 The compiled visualizer is installable as an **Atoma** PWA; its service worker
 will cache only cacheable application-shell and static responses. It always
 excludes live `/api/*`, authentication `/auth/*`, GitHub `/webhooks/*`, and
@@ -400,7 +404,9 @@ DB+skills backup before renaming identities.
 The full source checkout supports every operator, benchmark and development
 command. The compiled archive attached to each GitHub Release includes MCP,
 its build-run path, doctor, the identity/invitation CLI (`npm run auth`), and
-the read-only visualizer (`npm run viz:serve`);
+the compiled visualizer (`npm run viz:serve`), including authenticated
+organisation-scoped project creation and launch when the optional gate is
+configured;
 benchmark and registry/skill mutation-oriented operator CLIs remain source-only.
 See [`CHANGELOG.md`](CHANGELOG.md) and the
 [`v0.1.0 release soak`](docs/release-soak-v0.1.0.md), followed by the
@@ -429,12 +435,12 @@ the other eleven are read-only — the agent catalogue with its earned trust, th
 its lifecycle, the audit ledger's integrity projection, run traces, and the tool-friction report.
 The caller pays for one tool call and atoma does the tiering.
 
-**It speaks over standard input, and refusing a port is the security argument rather than a
-limitation.** A run reaches the shell and the network by design, so the party a launch endpoint
-would have to defend against is *the run itself* — which is why the web console describes task
-families but deliberately will not start one, and why the list of controls that would make an HTTP
-endpoint safe is written down instead of implemented. A server on stdio hands the run no socket, so
-the question does not arise.
+**Its general-purpose control plane speaks over standard input, and refusing a port is the security
+argument rather than a limitation.** A run reaches the shell and the network by design, so a public
+HTTP equivalent of `atoma_start` would have to defend against *the run itself*. The web console's
+project launcher is a separate, narrower product surface: it requires the optional authenticated
+gate, binds writes to the active organisation, checks same-origin mutations and records work under
+that project. The MCP launcher remains stdio-only, so it hands a run no control-plane socket.
 
 Two properties are declared to the host rather than left to be discovered: starting a run is
 **destructive** — it archives the shared workspace unless told otherwise, and it mutates the
@@ -450,13 +456,15 @@ process group is confirmed gone and the trace has closed.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
-integrity checking, a web console with optional invitation-only single-organisation login, and a
+integrity checking, a web console with optional invitation-only organisation login, and a
 measurement harness.
 
-What does not: tenant-isolated data or runs, organisation-scoped authorization, and a hosted
-service. The authentication gate protects one dedicated instance; it does not turn the shared
-store or run corpus into a multi-tenant system. This is a private repository, shared deliberately
-rather than published. The target multi-tenant design is written up in
+What does not: full tenant isolation or a hosted service. Authenticated projects, their run
+workspaces and trace reads are scoped to the viewer's active organisation; the platform admin can
+read across organisations. Registry, skill and trust state remain instance-global, however, so
+the authentication gate still does not turn one dedicated instance into a fully multi-tenant
+system. This is a private repository, shared deliberately rather than published. The target
+multi-tenant design is written up in
 [`docs/saas-architecture.md`](docs/saas-architecture.md) and explicitly marked as not built.
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**

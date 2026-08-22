@@ -15,6 +15,8 @@ import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
 const t = (key: string): string => I18N_CATALOGS.en[key] ?? key;
 import {
   nextRunFilters,
+  projectSelectionAfterActivate,
+  projectSelectionAfterProjects,
   useGpuStore,
 } from '../src/viz/client-gl/store.js';
 
@@ -100,6 +102,33 @@ describe('full-GL Zustand scene state', () => {
       burninPage: 1,
       scrollY: { runs: 0 },
     });
+  });
+
+  it('deselects the active project and selects a different one', () => {
+    expect(projectSelectionAfterActivate('project-a', 'project-a')).toBeNull();
+    expect(projectSelectionAfterActivate('project-a', 'project-b')).toBe('project-b');
+    expect(projectSelectionAfterActivate(null, 'project-a')).toBe('project-a');
+  });
+
+  it('resets project scroll whenever selection changes shape', () => {
+    useGpuStore.setState((state) => ({
+      selectedProjectId: 'project-a',
+      scrollY: { ...state.scrollY, projects: 380 },
+    }));
+    useGpuStore.getState().selectProject(null);
+    expect(useGpuStore.getState()).toMatchObject({
+      selectedProjectId: null,
+      scrollY: { projects: 0 },
+    });
+  });
+
+  it('repairs a missing project without auto-selecting the first project', () => {
+    expect(projectSelectionAfterProjects(null, ['project-a', 'project-b'])).toBeNull();
+    expect(projectSelectionAfterProjects('project-b', ['project-a', 'project-b']))
+      .toBe('project-b');
+    expect(projectSelectionAfterProjects('project-gone', ['project-a', 'project-b']))
+      .toBe('project-a');
+    expect(projectSelectionAfterProjects('project-a', [])).toBe('project-a');
   });
 });
 

@@ -4,6 +4,7 @@ import {
   dismissPushPrompt,
   enableWebPush,
   PUSH_DISMISSED_KEY,
+  pushPromptStorage,
   pushSupported,
   shouldOfferPushPrompt,
   type PushRegistrationLike,
@@ -39,9 +40,67 @@ describe('shouldOfferPushPrompt', () => {
     expect(shouldOfferPushPrompt(eligible)).toBe(true);
   });
 
-  it('never offers at login time or without a live run — the run is the moment', () => {
+  it('never offers members at login time or without a live run — the run is the moment', () => {
     expect(shouldOfferPushPrompt({ ...eligible, authenticated: false })).toBe(false);
     expect(shouldOfferPushPrompt({ ...eligible, hasLiveRun: false })).toBe(false);
+  });
+
+  it('offers a platform admin at login, run or no run — admins must end up subscribed', () => {
+    expect(
+      shouldOfferPushPrompt({ ...eligible, hasLiveRun: false, platformAdmin: true })
+    ).toBe(true);
+    // Authentication and the browser permission still gate everyone.
+    expect(
+      shouldOfferPushPrompt({
+        ...eligible,
+        hasLiveRun: false,
+        platformAdmin: true,
+        authenticated: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldOfferPushPrompt({
+        ...eligible,
+        hasLiveRun: false,
+        platformAdmin: true,
+        scope: { ...supportedScope, Notification: { permission: 'denied' } },
+      })
+    ).toBe(false);
+  });
+
+  it("an admin's dismissal lives in sessionStorage, so the next session asks again", () => {
+    const local = memoryStorage();
+    const session = memoryStorage();
+    vi.stubGlobal('localStorage', local);
+    vi.stubGlobal('sessionStorage', session);
+    try {
+      const memberStorage = pushPromptStorage(false);
+      const adminStorage = pushPromptStorage(true);
+      expect(memberStorage).toBe(local);
+      expect(adminStorage).toBe(session);
+
+      // A member's forever-dismissal never silences the admin login offer.
+      dismissPushPrompt(memberStorage);
+      expect(
+        shouldOfferPushPrompt({
+          ...eligible,
+          hasLiveRun: false,
+          platformAdmin: true,
+          storage: adminStorage,
+        })
+      ).toBe(true);
+      dismissPushPrompt(adminStorage);
+      expect(
+        shouldOfferPushPrompt({
+          ...eligible,
+          hasLiveRun: false,
+          platformAdmin: true,
+          storage: adminStorage,
+        })
+      ).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('respects an earlier decision: dismissal, denial or a granted permission', () => {

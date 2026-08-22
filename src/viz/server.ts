@@ -2050,11 +2050,11 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       return;
     }
 
-    // WEB PUSH — principal-scoped self-service. The permission ask lives in
-    // the client during the viewer's first live run (that is where the value
-    // shows), never in the login flow; these routes only store what the
-    // browser's PushManager minted. Same-origin POSTs, bounded bodies, and
-    // the store validates key material before persisting.
+    // WEB PUSH — principal-scoped self-service. Members are asked during their
+    // first live run (where the value shows); platform admins are asked at
+    // login because curated platform alerts do not depend on them launching a
+    // run. These routes only store what the browser's PushManager minted.
+    // Same-origin POSTs, bounded bodies, and validated key material.
     if (pathname === '/api/push/config') {
       if (!methodAllowed(req, res, 'GET')) return;
       sendJson(

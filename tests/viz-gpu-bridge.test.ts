@@ -6,7 +6,7 @@ import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n.js';
-import { DomBridge } from '../src/viz/client-gl/DomBridge.js';
+import { DomBridge, GpuDomBridge } from '../src/viz/client-gl/DomBridge.js';
 import type { VizGitHubInstallation } from '../src/viz/client/types.js';
 import {
   ENTRY_FADE_IN_MS,
@@ -38,9 +38,11 @@ beforeEach(() => {
     view: 'runs',
     locale: 'en',
     selectedRunId: 'run-1',
+    selectedProjectId: null,
     focusedInput: null,
     runPickerActiveIndex: 0,
     runPickerScrollY: 0,
+    accountMenuOpen: false,
     search: {
       run: '',
       registry: '',
@@ -69,6 +71,8 @@ function renderBridge(
   githubInstallations: VizGitHubInstallation[] = [],
   selectedProjectName: string | null = null
 ) {
+  const selectedProjectId = selectedProjectName ? 'project-selected' : null;
+  if (selectedProjectId) useGpuStore.setState({ selectedProjectId });
   render(
     createElement(DomBridge, {
       runs: runItems,
@@ -77,7 +81,9 @@ function renderBridge(
       onSelectRun,
       onEnter,
       githubInstallations,
-      selectedProjectName,
+      projects: selectedProjectName
+        ? [{ projectId: selectedProjectId!, name: selectedProjectName }]
+        : [],
     })
   );
   return { onSelectRun, onEnter };
@@ -109,7 +115,8 @@ describe('full-GL minimal DOM bridge', () => {
   it('replaces Continue with real provider anchors when the gate is a login', () => {
     useGpuStore.setState({ entered: false });
     render(
-      createElement(DomBridge, {
+      createElement(GpuDomBridge, {
+        authSnapshot: null,
         runs,
         releaseVersion: '9.8.7',
         t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
@@ -150,6 +157,7 @@ describe('full-GL minimal DOM bridge', () => {
     expect(useGpuStore.getState().view).toBe('projects');
     expect(screen.getByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Project name' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Project name' })).toHaveAttribute('maxlength', '120');
     expect(document.querySelector('.gpu-project-form')).toContainElement(
       screen.getByRole('textbox', { name: 'Project name' })
     );
@@ -178,13 +186,138 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.getByRole('combobox', { name: 'GitHub installation' })).toHaveTextContent('mgtf');
   });
 
-  it('offers Start run only after a project is selected', () => {
+  // The project form is one form with two shapes, not one form that grows.
+  // Creating a project and running on one are separate jobs: showing both sets
+  // of fields at once asked the viewer which of two acts they were performing.
+  it('offers the create fields while no project is selected', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), runs, undefined, [], null);
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Project name' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Repository name' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Run prompt' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Start run/ })).not.toBeInTheDocument();
+  });
+
+  it('swaps in the run form once a project is selected', () => {
     useGpuStore.setState({ view: 'projects', entered: true });
     renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
-    expect(screen.getByRole('button', { name: 'Create project' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start run on Weather Lab' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Run prompt' })).toBeInTheDocument();
     expect(screen.getByText(/This prompt is for the next run on Weather Lab/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create project' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Project name' })).not.toBeInTheDocument();
+  });
+
+  it('bounds a valid long project name inside the run controls', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    const name = 'A'.repeat(120);
+    renderBridge(vi.fn(), runs, undefined, [], name);
+    const start = screen.getByRole('button', { name: /Start run on/ });
+    expect(start).toHaveAttribute('title', name);
+    expect(start.textContent?.length).toBeLessThan(80);
+    expect(screen.getByText(/This prompt is for the next run/)).not.toHaveTextContent(name);
+  });
+
+  it('mirrors project selection for keyboard and assistive navigation', async () => {
+    useGpuStore.setState({ view: 'projects', entered: true, selectedProjectId: null });
+    const user = userEvent.setup();
+    render(
+      createElement(DomBridge, {
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+        projects: [
+          { projectId: 'project-weather', name: 'Weather Lab' },
+          { projectId: 'project-notes', name: 'Notes Lab' },
+        ],
+      })
+    );
+
+    const weather = screen.getByRole('button', { name: 'Weather Lab' });
+    expect(weather).toHaveAttribute('aria-pressed', 'false');
+    await user.click(weather);
+    expect(useGpuStore.getState().selectedProjectId).toBe('project-weather');
+    expect(screen.getByRole('textbox', { name: 'Run prompt' })).toBeInTheDocument();
+    expect(weather).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(weather);
+    expect(useGpuStore.getState().selectedProjectId).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Project name' })).toBeInTheDocument();
+  });
+
+  it('keeps the GitHub connect flow reachable in either shape', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
+    expect(screen.getByRole('link', { name: 'Connect GitHub' })).toBeInTheDocument();
+  });
+
+  it('removes DOM view overlays while the Pixi account menu is open', () => {
+    useGpuStore.setState({ view: 'projects', entered: true, accountMenuOpen: true });
+    renderBridge();
+    expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Project name' })).not.toBeInTheDocument();
+  });
+
+  it('removes every other view overlay while the Pixi account menu is open', () => {
+    const cases = [
+      ['runs', '.gpu-run-input'],
+      ['registry', '.gpu-view-search'],
+      ['skills', '.gpu-view-search'],
+      ['settings', '.gpu-settings-form'],
+    ] as const;
+    for (const [view, selector] of cases) {
+      cleanup();
+      useGpuStore.setState({ view, entered: true, accountMenuOpen: true });
+      renderBridge();
+      expect(document.querySelector(selector), view).not.toBeInTheDocument();
+    }
+  });
+
+  it('does not offer project mutations on the ungated developer surface', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    render(
+      createElement(GpuDomBridge, {
+        authSnapshot: null,
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+      })
+    );
+    expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Connect GitHub' })).not.toBeInTheDocument();
+  });
+
+  it('describes the curated admin alert stream without promising every run', () => {
+    render(
+      createElement(GpuDomBridge, {
+        authSnapshot: {
+          viewer: {
+            displayName: 'Operator',
+            role: 'org:owner',
+            activeOrganisation: null,
+            organisations: [],
+            platformAdmin: true,
+            principalId: 'principal-admin',
+            avatarUrl: null,
+            displayNameSource: 'provider',
+          },
+          failure: false,
+          signingOut: false,
+          switchingOrganisationId: null,
+        },
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+        pushPrompt: 'offer',
+      })
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Platform alerts' });
+    expect(dialog).toHaveTextContent('critical platform events');
+    expect(dialog).not.toHaveTextContent('runs and events across the instance');
   });
 
   it('uses a real text input for IME/search and a textarea for the run prompt', async () => {

@@ -1,7 +1,9 @@
+import { Container } from 'pixi.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
+import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
 
 /**
  * Admin plane: every organisation with its members, and one-use invitations
@@ -13,7 +15,8 @@ import { createScrollPane } from '../scroll-pane.js';
  * at mint time (see GpuApp); nothing here persists it.
  */
 
-const HEADER_Y = 78;
+/** Admin reads as a centred column, like Projects and Settings. */
+const ADMIN_COLUMN_MAX_WIDTH = 880;
 const LIST_TOP = 12;
 const ORG_HEADER_HEIGHT = 34;
 const MEMBER_ROW_HEIGHT = 20;
@@ -53,52 +56,48 @@ export function drawAdmin(
   const failure = snapshot.data.adminError ?? null;
   const scroll = snapshot.state.scrollY.admin;
 
-  ctx.text(ctx.root, snapshot.t('nav.admin'), 20, HEADER_Y, { size: 18, weight: '700' });
-  ctx.text(
-    ctx.root,
-    snapshot.t('admin.summary', { count: organisations.length }),
-    20 + 200,
-    HEADER_Y + 6,
-    { size: 11, color: GPU_COLORS.muted }
+  const frame = viewFrame(width, height, ADMIN_COLUMN_MAX_WIDTH);
+  drawViewFrame(
+    ctx,
+    frame,
+    snapshot.t('nav.admin'),
+    snapshot.t('admin.summary', { count: organisations.length })
   );
 
-  const contentTop = HEADER_Y + 34;
+  const contentTop = frame.contentTop;
   const pane = createScrollPane(ctx.root, {
-    x: 0,
+    x: frame.x,
     y: contentTop,
-    width,
-    height: Math.max(0, height - contentTop),
+    width: frame.width,
+    height: Math.max(0, frame.bottom - VIEW_FRAME_PAD - contentTop),
     scrollY: scroll,
     bottomPadding: 24,
   });
 
-  const panelWidth = Math.min(880, width - GPU_LAYOUT.gap * 2);
-  const x = (width - panelWidth) / 2;
+  const x = VIEW_FRAME_PAD;
+  const panelWidth = frame.innerWidth;
   const columnX = x + 18;
   const innerWidth = panelWidth - 36;
+  const compactColumns = innerWidth < 400;
 
   let cursor = LIST_TOP;
 
   if (invitation || failure) {
-    ctx.panel(
-      pane.content,
-      x,
-      cursor,
-      panelWidth,
-      INVITE_PANEL_HEIGHT,
-      GPU_COLORS.panel,
-      failure ? GPU_COLORS.error : GPU_COLORS.success,
-      GPU_LAYOUT.radius,
-      2
-    );
+    // Reserve the frame's layer first, then size it from the text that wraps
+    // inside it. A fixed 84px panel let long bearer URLs collide with the
+    // copied notice on narrow windows.
+    const frameLayer = new Container();
+    pane.content.addChild(frameLayer);
+    let invitationPanelHeight = INVITE_PANEL_HEIGHT;
     if (failure) {
-      ctx.text(pane.content, failure, columnX, cursor + 14, {
+      const error = ctx.text(pane.content, failure, columnX, cursor + 14, {
         size: 11,
         color: GPU_COLORS.error,
         width: innerWidth,
       });
+      invitationPanelHeight = Math.max(INVITE_PANEL_HEIGHT, 28 + error.height);
     } else if (invitation) {
-      ctx.text(
+      const ready = ctx.text(
         pane.content,
         snapshot.t('admin.invitationReady', {
           role: invitation.role,
@@ -109,22 +108,39 @@ export function drawAdmin(
         cursor + 12,
         { size: 11, color: GPU_COLORS.success, width: innerWidth }
       );
+      let invitationY = cursor + 12 + Math.max(14, ready.height) + 8;
       // The full URL, visible for manual transcription: GL text is not
       // selectable, which is exactly why the clipboard copy happened at mint
       // time — this line is the fallback, not the primary channel.
-      ctx.text(pane.content, invitation.url, columnX, cursor + 36, {
+      const url = ctx.text(pane.content, invitation.url, columnX, invitationY, {
         size: 9,
         color: GPU_COLORS.text,
         mono: true,
         width: innerWidth,
       });
-      ctx.text(pane.content, snapshot.t('admin.invitationCopied'), columnX, cursor + 58, {
+      invitationY += Math.max(12, url.height) + 8;
+      const copied = ctx.text(pane.content, snapshot.t('admin.invitationCopied'), columnX, invitationY, {
         size: 9,
         color: GPU_COLORS.muted,
         width: innerWidth,
       });
+      invitationPanelHeight = Math.max(
+        INVITE_PANEL_HEIGHT,
+        invitationY - cursor + Math.max(12, copied.height) + 12
+      );
     }
-    cursor += INVITE_PANEL_HEIGHT + ORG_GAP;
+    ctx.panel(
+      frameLayer,
+      x,
+      cursor,
+      panelWidth,
+      invitationPanelHeight,
+      GPU_COLORS.panel,
+      failure ? GPU_COLORS.error : GPU_COLORS.success,
+      GPU_LAYOUT.radius,
+      2
+    );
+    cursor += invitationPanelHeight + ORG_GAP;
   }
 
   if (organisations.length === 0) {
@@ -137,8 +153,10 @@ export function drawAdmin(
   }
 
   for (const organisation of organisations) {
+    const orgHeaderHeight = compactColumns ? 54 : ORG_HEADER_HEIGHT;
+    const inviteRowHeight = compactColumns ? 72 : INVITE_ROW_HEIGHT;
     const orgHeight =
-      ORG_HEADER_HEIGHT + organisation.members.length * MEMBER_ROW_HEIGHT + INVITE_ROW_HEIGHT + 12;
+      orgHeaderHeight + organisation.members.length * MEMBER_ROW_HEIGHT + inviteRowHeight + 12;
     ctx.panel(
       pane.content,
       x,
@@ -150,33 +168,47 @@ export function drawAdmin(
       GPU_LAYOUT.radius,
       2
     );
-    ctx.text(pane.content, truncate(organisation.name, 64), columnX, cursor + 10, {
-      size: 13,
-      weight: '600',
-      width: innerWidth - 220,
-    });
-    ctx.text(pane.content, organisation.orgId, columnX + innerWidth - 300, cursor + 13, {
-      size: 8,
-      color: GPU_COLORS.muted,
-      mono: true,
-      width: 300,
-    });
-    let memberY = cursor + ORG_HEADER_HEIGHT;
+    ctx.text(
+      pane.content,
+      truncate(organisation.name, compactColumns ? 18 : 64),
+      columnX,
+      cursor + 10,
+      {
+        size: 13,
+        weight: '600',
+        width: compactColumns ? innerWidth : innerWidth - 220,
+      }
+    );
+    ctx.text(
+      pane.content,
+      organisation.orgId,
+      compactColumns ? columnX : columnX + innerWidth - 300,
+      cursor + (compactColumns ? 32 : 13),
+      {
+        size: 8,
+        color: GPU_COLORS.muted,
+        mono: true,
+        width: compactColumns ? innerWidth : 300,
+      }
+    );
+    let memberY = cursor + orgHeaderHeight;
     for (const member of organisation.members) {
+      const roleWidth = Math.min(160, Math.max(60, innerWidth * 0.35));
       ctx.text(pane.content, truncate(member.displayName, 48), columnX + 12, memberY, {
         size: 10,
-        width: innerWidth - 220,
+        width: Math.max(20, innerWidth - roleWidth - 24),
       });
-      ctx.text(pane.content, member.role, columnX + innerWidth - 160, memberY, {
+      ctx.text(pane.content, member.role, columnX + innerWidth - roleWidth, memberY, {
         size: 9,
         color: GPU_COLORS.muted,
         mono: true,
-        width: 160,
+        width: roleWidth,
       });
       memberY += MEMBER_ROW_HEIGHT;
     }
     // Two invitations cover the model the operator described — owner and
     // user (org:member). Finer roles stay on the CLI.
+    const inviteWidth = compactColumns ? Math.max(0, innerWidth - 24) : 180;
     ctx.button(
       pane.content,
       `admin.invite.org:member.${organisation.orgId}`,
@@ -184,7 +216,7 @@ export function drawAdmin(
       snapshot.t('admin.inviteUser'),
       columnX + 12,
       memberY + 6,
-      180,
+      inviteWidth,
       26,
       false,
       snapshot.onActivate
@@ -194,9 +226,9 @@ export function drawAdmin(
       `admin.invite.org:owner.${organisation.orgId}`,
       'button',
       snapshot.t('admin.inviteOwner'),
-      columnX + 204,
-      memberY + 6,
-      180,
+      compactColumns ? columnX + 12 : columnX + 204,
+      memberY + (compactColumns ? 38 : 6),
+      inviteWidth,
       26,
       false,
       snapshot.onActivate
@@ -209,6 +241,9 @@ export function drawAdmin(
   // TOLERANTLY: an unknown kind or severity from a newer server shows its
   // raw label rather than hiding the rows around it.
   const events = snapshot.data.adminEvents ?? [];
+  const sectionHeadingHeight = compactColumns ? 48 : SECTION_HEADING_HEIGHT;
+  const journalRowHeight = compactColumns ? 58 : JOURNAL_ROW_HEIGHT;
+  const ledgerRowHeight = compactColumns ? 42 : LEDGER_ROW_HEIGHT;
   ctx.text(pane.content, snapshot.t('admin.journal'), columnX, cursor + 6, {
     size: 13,
     weight: '700',
@@ -216,11 +251,15 @@ export function drawAdmin(
   ctx.text(
     pane.content,
     snapshot.t('admin.journalSummary', { count: events.length }),
-    columnX + 220,
-    cursor + 8,
-    { size: 10, color: GPU_COLORS.muted, width: innerWidth - 240 }
+    compactColumns ? columnX : columnX + 220,
+    cursor + (compactColumns ? 25 : 8),
+    {
+      size: 10,
+      color: GPU_COLORS.muted,
+      width: compactColumns ? innerWidth : innerWidth - 240,
+    }
   );
-  cursor += SECTION_HEADING_HEIGHT;
+  cursor += sectionHeadingHeight;
 
   if (events.length === 0) {
     ctx.text(pane.content, snapshot.t('admin.journalEmpty'), columnX, cursor, {
@@ -230,7 +269,7 @@ export function drawAdmin(
     });
     cursor += 24;
   } else {
-    const journalHeight = events.length * JOURNAL_ROW_HEIGHT + 12;
+    const journalHeight = events.length * journalRowHeight + 12;
     ctx.panel(
       pane.content,
       x,
@@ -246,7 +285,7 @@ export function drawAdmin(
     for (const event of events) {
       // Cull by skipping the DRAW, never the cursor: a layout that stops
       // advancing would collapse everything below it.
-      if (pane.visible(rowY, rowY + JOURNAL_ROW_HEIGHT)) {
+      if (pane.visible(rowY, rowY + journalRowHeight)) {
         const color = SEVERITY_COLORS[event.severity] ?? GPU_COLORS.muted;
         ctx.text(pane.content, clockTime(event.at), columnX + 8, rowY, {
           size: 9,
@@ -258,21 +297,33 @@ export function drawAdmin(
           size: 10,
           color,
           mono: true,
-          width: 200,
+          width: compactColumns ? Math.max(0, innerWidth - 86) : 200,
         });
-        ctx.text(pane.content, truncate(event.summary, 96), columnX + 8, rowY + 15, {
+        ctx.text(
+          pane.content,
+          truncate(event.summary, 96),
+          columnX + 8,
+          rowY + (compactColumns ? 32 : 15),
+          {
           size: 10,
           color: GPU_COLORS.text,
-          width: innerWidth - 120,
-        });
-        ctx.text(pane.content, event.actorType, columnX + innerWidth - 84, rowY, {
+          width: compactColumns ? Math.max(0, innerWidth - 16) : innerWidth - 120,
+          }
+        );
+        ctx.text(
+          pane.content,
+          event.actorType,
+          compactColumns ? columnX + 8 : columnX + innerWidth - 84,
+          rowY + (compactColumns ? 17 : 0),
+          {
           size: 9,
           color: GPU_COLORS.muted,
           mono: true,
-          width: 84,
-        });
+          width: compactColumns ? Math.max(0, innerWidth - 16) : 84,
+          }
+        );
       }
-      rowY += JOURNAL_ROW_HEIGHT;
+      rowY += journalRowHeight;
     }
     cursor += journalHeight + ORG_GAP;
   }
@@ -287,13 +338,19 @@ export function drawAdmin(
       size: 13,
       weight: '700',
     });
-    ctx.text(pane.content, snapshot.t('admin.ledgerHint'), columnX + 220, cursor + 8, {
+    ctx.text(
+      pane.content,
+      snapshot.t('admin.ledgerHint'),
+      compactColumns ? columnX : columnX + 220,
+      cursor + (compactColumns ? 25 : 8),
+      {
       size: 10,
       color: GPU_COLORS.muted,
-      width: innerWidth - 240,
-    });
-    cursor += SECTION_HEADING_HEIGHT;
-    const ledgerHeight = ledger.length * LEDGER_ROW_HEIGHT + 12;
+      width: compactColumns ? innerWidth : innerWidth - 240,
+      }
+    );
+    cursor += sectionHeadingHeight;
+    const ledgerHeight = ledger.length * ledgerRowHeight + 12;
     ctx.panel(
       pane.content,
       x,
@@ -307,7 +364,7 @@ export function drawAdmin(
     );
     let ledgerY = cursor + 8;
     for (const entry of ledger) {
-      if (pane.visible(ledgerY, ledgerY + LEDGER_ROW_HEIGHT)) {
+      if (pane.visible(ledgerY, ledgerY + ledgerRowHeight)) {
         ctx.text(pane.content, clockTime(entry.at), columnX + 8, ledgerY, {
           size: 9,
           color: GPU_COLORS.muted,
@@ -318,15 +375,21 @@ export function drawAdmin(
           size: 9,
           color: GPU_COLORS.primary,
           mono: true,
-          width: 180,
+          width: compactColumns ? Math.max(0, innerWidth - 86) : 180,
         });
-        ctx.text(pane.content, truncate(entry.entity, 48), columnX + 268, ledgerY, {
+        ctx.text(
+          pane.content,
+          truncate(entry.entity, 48),
+          compactColumns ? columnX + 8 : columnX + 268,
+          ledgerY + (compactColumns ? 19 : 0),
+          {
           size: 9,
           color: GPU_COLORS.text,
-          width: innerWidth - 280,
-        });
+          width: compactColumns ? Math.max(0, innerWidth - 16) : innerWidth - 280,
+          }
+        );
       }
-      ledgerY += LEDGER_ROW_HEIGHT;
+      ledgerY += ledgerRowHeight;
     }
     cursor += ledgerHeight + ORG_GAP;
   }

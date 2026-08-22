@@ -13,7 +13,7 @@ export type ViewName =
 
 /**
  * ONE definition of which nav tabs a viewer gets — the DOM tablist and the
- * GL header both read it, or they drift.
+ * GL rail both read it, or they drift.
  *
  * - Gate off (`auth` null): the classic operator developer path — every
  *   instance surface, no admin plane (there are no organisations to manage).
@@ -68,7 +68,7 @@ export const DOC_THEMES: readonly { key: DocsThemeKey; ref: string }[] = [
  * Which views may be ACTIVE, which is not the same question as which get a nav
  * tab. Settings is reached from the account menu and deliberately has no tab —
  * without this distinction the "viewer landed on a view they cannot see" guard
- * in GpuApp would bounce it back to runs on the very next render.
+ * in GpuApp would bounce it back to Projects on the very next render.
  *
  * Settings exists only where an account does: the ungated developer path has
  * no principal to configure.
@@ -99,6 +99,27 @@ export function nextRunFilters(
   if (dimension === 'kind') return { ...current, kind: value, role: 'all' };
   if (dimension === 'role') return { ...current, kind: 'llm', role: value };
   return { ...current, branchId: value };
+}
+
+/** Re-clicking the active project is the route back to the create form. */
+export function projectSelectionAfterActivate(
+  currentProjectId: string | null,
+  activatedProjectId: string
+): string | null {
+  return currentProjectId === activatedProjectId ? null : activatedProjectId;
+}
+
+/**
+ * Repair a stale selection without turning the first project into an implicit
+ * selection. An empty list may be a loading transition, so it preserves the
+ * current id until a non-empty response can prove that the project is gone.
+ */
+export function projectSelectionAfterProjects(
+  currentProjectId: string | null,
+  projectIds: readonly string[]
+): string | null {
+  if (currentProjectId === null || projectIds.length === 0) return currentProjectId;
+  return projectIds.includes(currentProjectId) ? currentProjectId : projectIds[0]!;
 }
 
 export interface GpuUiState {
@@ -175,7 +196,10 @@ function initialLocale(): 'en' | 'fr' {
 }
 
 export const useGpuStore = create<GpuUiState>()((set) => ({
-  view: 'runs',
+  // The app opens on PROJECTS: it is the authenticated launch surface. Runs
+  // is where you go to watch what you started, a second step rather than the
+  // arrival. Ungated developer mode gets its no-project-routes empty state.
+  view: 'projects',
   locale: initialLocale(),
   selectedRunId: null,
   selectedEventId: null,
@@ -259,7 +283,13 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     set({ selectedRegistryId, selectedRegistryAtom: null }),
   selectRegistryAtom: (selectedRegistryAtom) => set({ selectedRegistryAtom }),
   selectSkill: (selectedSkill) => set({ selectedSkill }),
-  selectProject: (selectedProjectId) => set({ selectedProjectId }),
+  selectProject: (selectedProjectId) => set((state) => ({
+    selectedProjectId,
+    // A selected project can expand with guidance and run history. Changing
+    // mode while retaining that scroll can place the shorter create list
+    // entirely above its pane until another wheel event clamps it.
+    scrollY: { ...state.scrollY, projects: 0 },
+  })),
   selectGithubInstallation: (selectedGithubInstallationId) =>
     set({ selectedGithubInstallationId }),
   setRunFilters: (runFilters) =>

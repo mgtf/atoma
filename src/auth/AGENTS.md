@@ -14,8 +14,10 @@ Neighbours:
 
 ## Gate and identity
 
-- Visualizer authentication is an opt-in deployment gate, not multi-tenancy
-  of the run corpus. `ATOMA_VIZ_AUTH=1` requires the operator-owned
+- Visualizer authentication is an opt-in deployment gate, not full
+  multi-tenancy. Authenticated projects, their run workspaces and trace reads
+  are scoped to the active organisation, but registry, skill and trust state
+  remain instance-global. `ATOMA_VIZ_AUTH=1` requires the operator-owned
   `ATOMA_VIZ_PUBLIC_ORIGIN`, at least one complete provider configuration
   (GitHub/Google require client ID + secret; an approved ChatGPT client may
   use PKCE without a secret). The first login without an invitation creates

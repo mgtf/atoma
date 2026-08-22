@@ -177,7 +177,7 @@ graph TB
 | | Deliverable gate | On the unsupervised path, every file the task asked for must exist — and, when the subtask used a mutating verb, must not be byte-identical afterwards. Existence alone was inert on maintenance work, where every file is seeded |
 | **Observability** | Cost metering | One formula, used by both the run summary and the console, so they cannot disagree |
 | | Trace recorder | Full JSON per run: every call, tool invocation, registry change and skill decision |
-| | Web console | Read-only full-GPU React client: PixiJS replays runs live, inspects learned state, and charts burn-in economics |
+| | Web console | Full-GPU React client: authenticated members create projects and start runs; PixiJS replays them live, inspects learned state, and charts burn-in economics |
 | | Economics ledger | `burnin/results.csv`, one row per measured run |
 | | Friction report | Offline scan of stored traces for recurring tool failures — no model calls |
 
@@ -457,11 +457,12 @@ check that it is still working.
 
 Recorded so nobody has to discover it in a demo:
 
-- **No multi-tenancy.** The web console is open on loopback by default and now has an optional,
-  invitation-only login gate for one organisation per deployment. It records principals,
-  provider identities, memberships and roles, but runs, traces, stores and trust are still shared
-  across that instance rather than scoped by organisation. The target isolation model exists in
-  [`saas-architecture.md`](saas-architecture.md) and is explicitly marked as not built.
+- **No full multi-tenancy.** The web console is open on loopback by default and has an optional,
+  invitation-only login gate. A principal may join multiple organisations and choose an active
+  one; authenticated projects, their run workspaces and trace reads are scoped to that active
+  organisation, while a platform admin can read across organisations. Registry, skill and trust
+  state remain instance-global, so this is still one dedicated instance rather than the complete
+  tenant-isolation model in [`saas-architecture.md`](saas-architecture.md).
 - **No hosted service.** This is a private repository, not a published project.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
   the compiler correctly refuses to compile web-validation recipes. Every compiled script in the

@@ -4,6 +4,11 @@
 
 ### Added
 
+- The GPU visualizer now includes an in-product Docs surface, a grouped left
+  navigation rail, and account Settings reached only from the account menu.
+  Platform admins are offered the curated platform-alert subscription at
+  their first console entry after login; member notification prompts remain
+  tied to their first live run.
 - Platform admin: an instance-wide operator flag granted only through the
   CLI (`npm run auth -- grant-admin --principal <id-or-email>`), never from
   a login's email. Behind the gate, the instance-global registry, skill and
@@ -36,9 +41,18 @@
 - Gated `/api/runs` lists the viewer's organisation only. Each project run
   lives at `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (workspace,
   traces, log) and is not copied into the operator `./runs` directory.
+- The GPU shell now keeps every navigation destination, project control,
+  admin journal and Settings model choice inside narrow or short viewports.
+  Project selection is mirrored in the keyboard/screen-reader bridge, whose
+  controls reveal a visible focus palette instead of remaining clipped.
 
 ### Changed
 
+- The visualizer opens on Projects. Its create-project and start-run forms are
+  mutually exclusive, re-clicking the selected project returns to creation,
+  and single-column views share one framed layout across their GL and DOM
+  surfaces. Launch guidance now lives beside the project run prompt rather
+  than in a separate GPU tab.
 - `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout
   `.env` so a local GitHub-gated visualizer does not need a shell export.
   Compiled `viz:serve` still reads only the process environment.

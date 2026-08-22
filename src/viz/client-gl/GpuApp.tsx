@@ -8,14 +8,19 @@ import {
 import { translate } from '../client/i18n.js';
 import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
-import { dismissPushPrompt, enableWebPush, shouldOfferPushPrompt } from '../client/push.js';
+import {
+  dismissPushPrompt,
+  enableWebPush,
+  pushPromptStorage,
+  shouldOfferPushPrompt,
+} from '../client/push.js';
 import {
   emptyRenderMetrics,
   type GpuRenderMetrics,
 } from './renderer/metrics.js';
 import { AtomaCursor } from './AtomaCursor.js';
 import { AuthControls, useAuthController } from './AuthControls.js';
-import { DomBridge } from './DomBridge.js';
+import { GpuDomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
 import { useQueryClient } from '@tanstack/react-query';
@@ -42,6 +47,8 @@ import {
 import {
   isRoutableView,
   nextRunFilters,
+  projectSelectionAfterActivate,
+  projectSelectionAfterProjects,
   useGpuStore,
   visibleViews,
   type DocsThemeKey,
@@ -195,11 +202,15 @@ function GpuAppContent({
     [authProviders, gateBlocked, loginParams.notice]
   );
 
-  // THE PERMISSION ASK LIVES IN THE FIRST RUN, not at login: the moment a
-  // viewer's run is actually alive is when "hear about it even offline" has
-  // visible value. One-shot per browser — enabling, denying or dismissing
-  // all end the offer (`shouldOfferPushPrompt` re-checks permission and the
-  // stored dismissal every time).
+  // For MEMBERS the permission ask lives in the FIRST RUN, not at login: the
+  // moment a viewer's run is actually alive is when "hear about it even
+  // offline" has visible value, and it is one-shot per browser. PLATFORM
+  // ADMINS must end up subscribed — push routes target them for a curated set
+  // of instance-wide platform events with or without a run — so they are
+  // asked at login, and their "not now" only holds for the session
+  // (`pushPromptStorage` picks the store).
+  // Enabling or denying ends the offer for everyone: `shouldOfferPushPrompt`
+  // re-checks the browser permission and the stored dismissal every time.
   const [pushPrompt, setPushPrompt] = useState<'hidden' | 'offer' | 'busy' | 'error'>('hidden');
   const hasLiveRun = useMemo(() => {
     const projectRunLive = Object.values(projectRuns).some((runs) =>
@@ -209,8 +220,16 @@ function GpuAppContent({
   }, [projectRuns, runsQuery.data]);
   useEffect(() => {
     if (pushPrompt !== 'hidden') return;
-    if (shouldOfferPushPrompt({ authenticated: authed, hasLiveRun })) setPushPrompt('offer');
-  }, [authed, hasLiveRun, pushPrompt]);
+    if (
+      shouldOfferPushPrompt({
+        authenticated: authed,
+        hasLiveRun,
+        platformAdmin: isPlatformAdmin,
+      })
+    ) {
+      setPushPrompt('offer');
+    }
+  }, [authed, hasLiveRun, isPlatformAdmin, pushPrompt]);
   const enablePush = useCallback(async () => {
     setPushPrompt('busy');
     const outcome = await enableWebPush();
@@ -219,13 +238,13 @@ function GpuAppContent({
       return;
     }
     // enabled, denied and unsupported all end the conversation for good.
-    dismissPushPrompt();
+    dismissPushPrompt(pushPromptStorage(isPlatformAdmin));
     setPushPrompt('hidden');
-  }, []);
+  }, [isPlatformAdmin]);
   const dismissPush = useCallback(() => {
-    dismissPushPrompt();
+    dismissPushPrompt(pushPromptStorage(isPlatformAdmin));
     setPushPrompt('hidden');
-  }, []);
+  }, [isPlatformAdmin]);
 
   // Settings is account-scoped: it exists exactly where a principal does.
   const organisationQuery = useOrganisation(state.view === 'settings' && authed);
@@ -298,11 +317,11 @@ function GpuAppContent({
   }, [queryClient, t]);
 
   // A viewer whose nav does not include the current view (role changed,
-  // admin revoked, stale state) lands back on runs instead of a dead tab.
+  // admin revoked, stale state) lands back on projects instead of a dead tab.
   // ROUTABLE, not visible: Settings has no tab by design and would otherwise
   // be bounced away on the render right after it opened.
   useEffect(() => {
-    if (!isRoutableView(state.view, authSnapshot)) state.setView('runs');
+    if (!isRoutableView(state.view, authSnapshot)) state.setView('projects');
   }, [authSnapshot, state]);
 
   // A very fast Continue click while whoami was still in flight could enter
@@ -338,18 +357,20 @@ function GpuAppContent({
     }
   }, [namespaceNames, skillLists.byNamespace, state]);
 
+  // NO auto-select of the first project. The form the Projects view carries is
+  // the create form until a project is selected, so auto-selecting one made
+  // creating a project unreachable for anyone who already had one — and it
+  // would have re-selected on the render right after a deselect, so the toggle
+  // in `activate` could never land either. Only the REPAIR remains: a
+  // selection whose project is gone falls back to the first that exists.
   useEffect(() => {
     const projects = projectsQuery.data ?? [];
     if (state.view !== 'projects') return;
-    if (!state.selectedProjectId && projects[0]) state.selectProject(projects[0].projectId);
-    else if (
-      state.selectedProjectId &&
-      projects.length &&
-      !projects.some((project) => project.projectId === state.selectedProjectId) &&
-      projects[0]
-    ) {
-      state.selectProject(projects[0].projectId);
-    }
+    const nextSelection = projectSelectionAfterProjects(
+      state.selectedProjectId,
+      projects.map((project) => project.projectId)
+    );
+    if (nextSelection !== state.selectedProjectId) state.selectProject(nextSelection);
   }, [projectsQuery.data, state]);
 
   useEffect(() => {
@@ -502,7 +523,11 @@ function GpuAppContent({
       return;
     }
     if (id.startsWith('project.select.')) {
-      store.selectProject(id.slice('project.select.'.length));
+      // Toggle: re-clicking the selected project deselects it, which is how a
+      // viewer who already has projects gets the create form back. No extra
+      // control for it — the row is the control.
+      const projectId = id.slice('project.select.'.length);
+      store.selectProject(projectSelectionAfterActivate(store.selectedProjectId, projectId));
       return;
     }
     if (id.startsWith('project.run.')) {
@@ -691,7 +716,8 @@ function GpuAppContent({
         onActivate={activate}
         onMetrics={updateMetrics}
       />
-      <DomBridge
+      <GpuDomBridge
+        authSnapshot={authSnapshot}
         runs={runsQuery.data ?? []}
         releaseVersion={RELEASE_VERSION}
         views={visibleViews(authSnapshot)}
@@ -708,11 +734,11 @@ function GpuAppContent({
         onSelectRun={state.selectRun}
         onEnter={beginEnter}
         githubInstallations={githubInstallationsQuery.data ?? []}
+        projects={projectsQuery.data ?? []}
         onCreateProject={() => { void createProject(); }}
         onStartRun={() => { void startProjectRun(); }}
         projectBusy={projectBusy}
         projectError={projectError}
-        selectedProjectName={selectedProject?.name ?? null}
         pushPrompt={pushPrompt}
         onEnablePush={() => { void enablePush(); }}
         onDismissPush={dismissPush}

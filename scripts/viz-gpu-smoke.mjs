@@ -111,6 +111,24 @@ async function passArrivalGate(page) {
 }
 
 /**
+ * Open a view by its nav label, and let the 560ms view transition finish.
+ *
+ * The app now OPENS ON PROJECTS, so every arm that exercises the RUNS view —
+ * the tuning panel, the filter rows, the live trace poll — has to navigate
+ * there first. They used to simply arrive on it.
+ */
+async function openView(page, label) {
+  await page.evaluate((name) => {
+    const tab = [...document.querySelectorAll('[role="tab"]')].find(
+      (candidate) => candidate.textContent === name
+    );
+    if (!tab) throw new Error(`nav tab missing: ${name}`);
+    tab.click();
+  }, label);
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
+}
+
+/**
  * The custom cursor is ENVIRONMENT-GATED by design: `AtomaCursor` enables it
  * only while `(any-hover: hover) and (any-pointer: fine)` matches with motion
  * allowed and forced colours off. A headless runner with no pointing device to
@@ -318,6 +336,13 @@ try {
       throw new Error('arrival gate did not hold: nav tabs rendered before Continue');
     }
     await passArrivalGate(page);
+    const arrivalView = await page.evaluate(() =>
+      [...document.querySelectorAll('[role="tab"]')]
+        .find((tab) => tab.getAttribute('aria-selected') === 'true')?.textContent ?? null
+    );
+    if (arrivalView !== 'Projects') {
+      throw new Error(`GPU arrival view must be Projects, got ${String(arrivalView)}`);
+    }
     const rasteriser = await readRasteriser(page);
     const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     const cursorEnv = await readCursorEnvironment(page);
@@ -570,6 +595,8 @@ try {
       });
       await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await passArrivalGate(tunePage);
+      // The tuning panel belongs to the RUNS view.
+      await openView(tunePage, 'Runs');
       await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
 
       const target = await tunePage.evaluate(() => {
@@ -700,6 +727,8 @@ try {
       // the canvas, not only that the a11y bridge mirrors it.
       await clickTarget('welcome.continue');
       await anchorPage.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+      // The filter rows this arm animates are the RUNS view's.
+      await openView(anchorPage, 'Runs');
       // Settle AFTER the gate as well as before it: the 600ms above only buys a
       // built splash, and this arm has to catch ONE animation mid-flight — the
       // view's own entry transition running underneath would arm it on the
@@ -792,6 +821,7 @@ try {
       });
       await accountPage.setRequestInterception(true);
       const principalId = '11111111-2222-3333-4444-555555555555';
+      const projectId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb';
       const stubs = {
         '/auth/whoami': {
           enabled: true,
@@ -838,7 +868,42 @@ try {
           },
           choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
         },
-        '/api/projects': [],
+        '/api/projects': [
+          {
+            projectId,
+            name: 'Wide Glyph Project',
+            slug: 'm'.repeat(48),
+            status: 'active',
+            family: 'build',
+            repositoryTarget: {
+              installationId: '501',
+              owner: 'm'.repeat(48),
+              name: 'm'.repeat(48),
+              visibility: 'private',
+            },
+            repositoryStatus: 'ready',
+            repositoryFullName: `${'m'.repeat(48)}/${'m'.repeat(48)}`,
+            repositoryUrl: `https://github.com/${'m'.repeat(48)}/${'m'.repeat(48)}`,
+            repositoryError: null,
+            createdAt: '2026-08-20T00:00:00.000Z',
+            updatedAt: '2026-08-20T00:00:00.000Z',
+          },
+        ],
+        [`/api/projects/${projectId}/runs`]: [
+          {
+            projectRunId: 'cccccccc-1111-4222-8333-dddddddddddd',
+            projectId,
+            goal: 'Exercise the bounded project row copy.',
+            status: 'failed',
+            traceId: null,
+            costUsd: null,
+            durationS: 1,
+            error: 'W'.repeat(240),
+            createdAt: '2026-08-20T00:01:00.000Z',
+            endedAt: '2026-08-20T00:01:01.000Z',
+            publication: null,
+          },
+        ],
         '/api/github/installations': [],
       };
       accountPage.on('request', (request) => {
@@ -887,6 +952,36 @@ try {
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
       await passArrivalGate(accountPage);
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+
+      // Real Pixi metrics, at the width that exposed the regression: a
+      // character-count estimate is not enough for wide proportional glyphs.
+      // Project metadata and a long run error must be one line AND fit their
+      // declared column after Pixi has measured the actual font.
+      await accountPage.setViewport({ width: 528, height: 800, deviceScaleFactor: 2 });
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      await clickAccountTarget(`project.select.${projectId}`);
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      const boundedProjectCopy = await accountPage.evaluate(() => {
+        const rows = [];
+        const walk = (node) => {
+          if (typeof node.text === 'string' && /^(m{4}|W{4})/.test(node.text)) {
+            rows.push({
+              text: node.text,
+              width: node.width,
+              height: node.height,
+              scaleX: node.scale.x,
+              wordWrap: node.style.wordWrap,
+              wordWrapWidth: node.style.wordWrapWidth,
+              lineHeight: node.style.lineHeight,
+            });
+          }
+          for (const child of node.children ?? []) walk(child);
+        };
+        walk(globalThis.__ATOMA_GPU__.app.stage);
+        return rows;
+      });
+      await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
       const withOrb = await targetIds();
 
       // Open the menu from the orb itself: hit-testable on the canvas, not
@@ -921,13 +1016,32 @@ try {
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
       const afterTab = await targetIds();
       const meshesAfterTab = await countScene();
-      accountStats = { withOrb, opened, settings, meshes, afterTab, meshesAfterTab };
+      accountStats = {
+        boundedProjectCopy,
+        withOrb,
+        opened,
+        settings,
+        meshes,
+        afterTab,
+        meshesAfterTab,
+      };
     } finally {
       await accountPage.close();
     }
 
     const accountHas = (ids, id) => ids.includes(id);
     if (
+      // ARMED: both adversarial labels reached the real renderer, stayed one
+      // line, and fitted the measured Pixi width rather than a character-count
+      // approximation. At least one must have needed x fitting or this fixture
+      // no longer exercises the wide-glyph failure.
+      accountStats.boundedProjectCopy.length < 2 ||
+      accountStats.boundedProjectCopy.some((label) =>
+        label.wordWrap !== false ||
+        label.height > label.lineHeight + 1 ||
+        label.width > label.wordWrapWidth + 0.5
+      ) ||
+      !accountStats.boundedProjectCopy.some((label) => label.scaleX < 0.99) ||
       // ARMED: the gated header actually drew the orb.
       !accountHas(accountStats.withOrb, 'account.menu.toggle') ||
       // Closed, the menu contributes nothing.
@@ -951,6 +1065,7 @@ try {
       accountDiagnostics.length > 0
     ) {
       throw new Error(`GPU account smoke failed: ${JSON.stringify({
+        boundedProjectCopy: accountStats.boundedProjectCopy,
         withOrb: accountStats.withOrb.filter((id) => id.startsWith('account.')),
         opened: accountStats.opened.filter((id) => id.startsWith('auth.') || id.startsWith('org.') || id.startsWith('account.')),
         settings: accountStats.settings.filter((id) => id.startsWith('settings.')),
@@ -1029,6 +1144,8 @@ try {
       await livePage.goto(`http://127.0.0.1:${livePort}/`, { waitUntil: 'load' });
       await livePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await passArrivalGate(livePage);
+      // The trace poll under test only runs while the RUNS view is open.
+      await openView(livePage, 'Runs');
       await livePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 1500)));
 
       const readCount = () =>

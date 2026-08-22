@@ -93,6 +93,13 @@ const EVENT_DETAIL_CHARS = 160;
 const COLLAPSED_TITLE_CHARS = 110;
 
 /**
+ * `drawRuns` receives the viewport AFTER the rail. Subtract the full rail
+ * from the historical 1050px window threshold so adding the rail does not
+ * silently remove event/atom detail between 1050px and 1257px windows.
+ */
+export const RUNS_TWO_PANE_MIN_WIDTH = 1050 - GPU_LAYOUT.sidebarWidth;
+
+/**
  * Runs view: causal branch timeline on the left, summary + event/atom detail
  * on the right. Extracted from GpuRenderer; the timeline keeps its bespoke
  * viewport math (windowed rows over `scrollMax.runs`) and its own list mask —
@@ -110,7 +117,7 @@ export function drawRuns(
     return;
   }
   const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-  const twoPane = width >= 1050;
+  const twoPane = width >= RUNS_TWO_PANE_MIN_WIDTH;
   const rightWidth = twoPane ? Math.min(GPU_LAYOUT.rightWidth, width * 0.4) : 0;
   const leftWidth = width - rightWidth - GPU_LAYOUT.gap * (twoPane ? 3 : 2);
   const leftX = GPU_LAYOUT.gap;
@@ -491,7 +498,7 @@ export function drawRuns(
     block.on('pointertap', () => snapshot.onActivate('branch.heading.toggle'));
     block.position.set(blockX, controlsBottom);
     lowerControlsLayer.addChild(block);
-    ctx.metrics.hitTargets.push({
+    ctx.recordHitTarget(lowerControlsLayer, {
       id: 'branch.heading.toggle',
       role: 'button',
       label: snapshot.t(expanded ? 'timeline.collapse' : 'timeline.expand'),
@@ -1007,7 +1014,7 @@ function drawRunSummaryCard(
   block.on('pointertap', () => snapshot.onActivate('run.summary.toggle'));
   block.position.set(x + 10, y + 10);
   ctx.root.addChild(block);
-  ctx.metrics.hitTargets.push({
+  ctx.recordHitTarget(ctx.root, {
     id: 'run.summary.toggle',
     role: 'button',
     label: snapshot.t(expanded ? 'run.collapse' : 'run.expand'),
@@ -1327,4 +1334,3 @@ function drawStructuredDetailNodes(
   }
   return cursor;
 }
-

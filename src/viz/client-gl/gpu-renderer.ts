@@ -62,8 +62,8 @@ import {
   TUNING_ROW_HEIGHT,
 } from './renderer/tuning-layout.js';
 import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
-import { visibleViews, type GpuUiState, type ViewName } from './store.js';
-import { GPU_COLORS, GPU_LAYOUT } from './theme.js';
+import type { GpuUiState, ViewName } from './store.js';
+import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
 
@@ -107,6 +107,11 @@ export interface GpuDataSnapshot {
 export interface FilterVisualTarget extends GpuHitTarget {
   active: boolean;
   accent: number;
+  /** Screen-space geometry captured while the parent transform is live. */
+  rendererX: number;
+  rendererY: number;
+  rendererWidth: number;
+  rendererHeight: number;
 }
 
 type TuningKey = keyof VizTuning;
@@ -143,14 +148,16 @@ interface TextOptions {
   color?: number;
   weight?: '400' | '500' | '600' | '700';
   width?: number;
+  /** Keep bounded row copy on one line, fitting against real Pixi metrics. */
+  singleLine?: boolean;
   mono?: boolean;
   alpha?: number;
 }
 
-const NAV_HOVER_GAP = 20;
-
 /** Diameter of the account orb in the header. */
 export const HEADER_ORB_SIZE = 34;
+/** Centred scale used by a hovered left-rail item. */
+export const NAV_HOVER_SCALE = 1.045;
 
 // Decomposed modules (2026-08-15): pure layout, copy, shaders, motion and the
 // shared scroll pane live under ./renderer/. This file keeps the stateful
@@ -204,12 +211,30 @@ import { drawAdmin } from './renderer/views/admin.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
+import { drawSidebar } from './renderer/views/sidebar.js';
 import { attachAvatarOrb, type AvatarOrbHandle } from './renderer/avatar-orb.js';
 
 export class GpuRenderer {
   app = new Application();
   readonly ambientRoot = new Container();
-  readonly root = new Container();
+  /**
+   * The persistent scene root: filtered by the pointer light, cleared and
+   * rebuilt by every `render()`, and the thing added to the Pixi stage.
+   */
+  private readonly stage = new Container();
+  /**
+   * Where the CURRENT pass draws. Chrome (header, nav rail, overlays, account
+   * menu) draws into the stage; the view pass draws into a viewport layer that
+   * is ALREADY positioned beside the nav rail when the view starts drawing.
+   *
+   * Positioned first, not shifted afterwards, and that ordering is the whole
+   * point: controls resolve their own screen geometry with `parent.toGlobal()`
+   * — sometimes lazily, from a closure, on a later pointer event. Reparenting
+   * a finished view left those closures holding the old ancestor, and the
+   * tuning slider's drag mapped the pointer against a track 208px from where
+   * it was drawn. A layer that exists before the draw has no such window.
+   */
+  root: Container = this.stage;
   /**
    * Crystals live HERE, not under `root`. The pointer-light filter flattens
    * `root` and its interior wash is a disc on any filled mesh — including the
@@ -553,7 +578,7 @@ export class GpuRenderer {
       uRadiusScale: number;
       uHueShift: number;
     };
-    this.root.filters = [filter];
+    this.stage.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
     // AFTER the light: it damps `pointerLightStrength`, which the cast reads.
     this.app.ticker.add(this.updateCastShadows);
@@ -636,7 +661,7 @@ export class GpuRenderer {
     }
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
-    this.app.stage.addChild(this.ambientRoot, this.root, this.markRoot);
+    this.app.stage.addChild(this.ambientRoot, this.stage, this.markRoot);
     this.farField = createFarField();
     if (this.farField) {
       this.ambientRoot.addChild(this.farField.mesh);
@@ -721,8 +746,8 @@ export class GpuRenderer {
     this.app.ticker.remove(this.tickFarField);
     this.farField = null;
     this.castShadows = [];
-    this.root.filters = null;
-    this.root.filterArea = undefined;
+    this.stage.filters = null;
+    this.stage.filterArea = undefined;
     this.pointerLightFilter?.destroy();
     this.pointerLightFilter = null;
     this.pointerLightUniforms = null;
@@ -788,7 +813,8 @@ export class GpuRenderer {
       child.destroy({ children: true });
     }
     this.retainFarField();
-    for (const child of this.root.removeChildren()) child.destroy({ children: true });
+    this.root = this.stage;
+    for (const child of this.stage.removeChildren()) child.destroy({ children: true });
     // The crystal steps out like the far field: its render textures, shader
     // and geometries survive the rebuild; `retainAtomaMark` re-adds or
     // replaces it.
@@ -841,7 +867,7 @@ export class GpuRenderer {
     }
     const width = this.app.screen.width;
     const height = this.app.screen.height;
-    this.root.filterArea = new Rectangle(0, 0, width, height);
+    this.stage.filterArea = new Rectangle(0, 0, width, height);
     if (!snapshot.state.entered) {
       drawWelcome(this, snapshot, width, height);
       this.previousView = null;
@@ -854,49 +880,65 @@ export class GpuRenderer {
       this.updateCastShadows();
       this.metrics.objectCount =
         this.countObjects(this.ambientRoot) +
-        this.countObjects(this.root) +
+        this.countObjects(this.stage) +
         this.countObjects(this.markRoot);
       return;
     }
     this.drawAmbientGrid(this.ambientRoot, width, height);
     this.drawHeader(snapshot, width);
-
-    if (snapshot.data.loading) {
-      this.text(this.root, snapshot.t('common.loading'), 24, 84, { size: 16 });
-    } else if (snapshot.data.error) {
-      this.text(this.root, snapshot.data.error, 24, 84, {
-        size: 14,
-        color: GPU_COLORS.error,
-        width: width - 48,
-      });
-    } else {
-      switch (snapshot.state.view) {
-        case 'projects':
-          drawProjects(this, snapshot, width, height);
-          break;
-        case 'admin':
-          drawAdmin(this, snapshot, width, height);
-          break;
-        case 'runs':
-          drawRuns(this, snapshot, width, height);
-          break;
-        case 'registry':
-          drawRegistry(this, snapshot, width, height);
-          break;
-        case 'skills':
-          drawSkills(this, snapshot, width, height);
-          break;
-        case 'burnin':
-          drawBurnin(this, snapshot, width, height);
-          break;
-        case 'docs':
-          drawDocs(this, snapshot, width, height);
-          break;
-        case 'settings':
-          drawSettings(this, snapshot, width, height);
-          break;
+    // Views draw in their OWN viewport space, from x = 0, exactly as they did
+    // when they owned the full width. The rail narrows before it can shove the
+    // view beyond the window; CSS mirrors this exact clamp for DOM overlays.
+    const contentLeft = sidebarWidthForViewport(width);
+    const contentWidth = Math.max(0, width - contentLeft);
+    drawSidebar(this, snapshot, height, contentLeft);
+    const viewport = new Container();
+    viewport.x = contentLeft;
+    this.stage.addChild(viewport);
+    this.root = viewport;
+    try {
+      if (snapshot.data.loading) {
+        this.text(this.root, snapshot.t('common.loading'), 24, 84, { size: 16 });
+      } else if (snapshot.data.error) {
+        this.text(this.root, snapshot.data.error, 24, 84, {
+          size: 14,
+          color: GPU_COLORS.error,
+          width: contentWidth - 48,
+        });
+      } else {
+        switch (snapshot.state.view) {
+          case 'projects':
+            drawProjects(this, snapshot, contentWidth, height);
+            break;
+          case 'admin':
+            drawAdmin(this, snapshot, contentWidth, height);
+            break;
+          case 'runs':
+            drawRuns(this, snapshot, contentWidth, height);
+            break;
+          case 'registry':
+            drawRegistry(this, snapshot, contentWidth, height);
+            break;
+          case 'skills':
+            drawSkills(this, snapshot, contentWidth, height);
+            break;
+          case 'burnin':
+            drawBurnin(this, snapshot, contentWidth, height);
+            break;
+          case 'docs':
+            drawDocs(this, snapshot, contentWidth, height);
+            break;
+          case 'settings':
+            drawSettings(this, snapshot, contentWidth, height);
+            break;
+        }
       }
+    } finally {
+      // Chrome draws into the stage again — including on the throw path, or
+      // one failed view would leave every later overlay inside the viewport.
+      this.root = this.stage;
     }
+    this.translateViewBounds(contentLeft);
     this.drawOverlays(snapshot, width, height);
     drawAccountMenu(this, snapshot, width, height);
     this.drawRemovedFilterEffects();
@@ -922,8 +964,45 @@ export class GpuRenderer {
     this.updateCastShadows();
     this.metrics.objectCount =
       this.countObjects(this.ambientRoot) +
-      this.countObjects(this.root) +
+      this.countObjects(this.stage) +
       this.countObjects(this.markRoot);
+  }
+
+  /**
+   * Record one interactive target in renderer coordinates.
+   *
+   * Views draw through nested viewport, scroll-pane and animation containers.
+   * Raw widget coordinates therefore stop being screen coordinates as soon as
+   * any parent moves. Project through the LIVE Pixi ancestry at the call site;
+   * this is also why the viewport must exist before a view starts drawing.
+   */
+  recordHitTarget(parent: Container, target: GpuHitTarget): GpuHitTarget {
+    const start = parent.toGlobal({ x: target.x, y: target.y });
+    const end = parent.toGlobal({
+      x: target.x + target.width,
+      y: target.y + target.height,
+    });
+    const projected = {
+      ...target,
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    };
+    this.metrics.hitTargets.push(projected);
+    return projected;
+  }
+
+  /** Detail bounds are a plain Rectangle, so project the view's x offset once. */
+  private translateViewBounds(offsetX: number) {
+    if (this.detailBounds) {
+      this.detailBounds = new Rectangle(
+        this.detailBounds.x + offsetX,
+        this.detailBounds.y,
+        this.detailBounds.width,
+        this.detailBounds.height
+      );
+    }
   }
 
   private countObjects(container: Container): number {
@@ -1153,7 +1232,7 @@ export class GpuRenderer {
     // Registered like every other control, so the DOM a11y bridge and the
     // hit-target metrics can see it. A control invisible to both is invisible
     // to every observer this project has.
-    this.metrics.hitTargets.push({
+    this.recordHitTarget(parent, {
       id: `tuning:${key}`,
       role: 'slider',
       label: range.label,
@@ -1295,7 +1374,7 @@ export class GpuRenderer {
     liveHit.cursor = 'pointer';
     parent.addChild(liveHit);
 
-    this.metrics.hitTargets.push({
+    this.recordHitTarget(parent, {
       id: 'welcome.turn',
       role: 'slider',
       label,
@@ -1304,7 +1383,7 @@ export class GpuRenderer {
       width: trackWidth,
       height: rowHeight,
     });
-    this.metrics.hitTargets.push({
+    this.recordHitTarget(parent, {
       id: 'welcome.turnLive',
       role: 'button',
       label: liveLabel,
@@ -1407,7 +1486,7 @@ export class GpuRenderer {
     hit.eventMode = 'static';
     hit.cursor = 'pointer';
     parent.addChild(hit);
-    this.metrics.hitTargets.push({
+    this.recordHitTarget(parent, {
       id,
       role: 'checkbox',
       label,
@@ -1462,7 +1541,9 @@ export class GpuRenderer {
     const weight = options.weight ?? '400';
     const color = options.color ?? GPU_COLORS.text;
     const mono = options.mono ?? false;
-    const key = `${size}|${weight}|${color}|${mono ? 'm' : 's'}|${options.width ?? ''}`;
+    const key = `${size}|${weight}|${color}|${mono ? 'm' : 's'}|${options.width ?? ''}|${
+      options.singleLine ? '1' : 'w'
+    }`;
     let style = this.textStyles.get(key);
     if (!style) {
       style = new TextStyle({
@@ -1472,7 +1553,7 @@ export class GpuRenderer {
           : '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif',
         fontSize: size,
         fontWeight: weight,
-        wordWrap: options.width !== undefined,
+        wordWrap: options.width !== undefined && !options.singleLine,
         wordWrapWidth: options.width ?? 0,
         breakWords: true,
         lineHeight: size * 1.35,
@@ -1502,7 +1583,20 @@ export class GpuRenderer {
     // spinning refresh glyph). A pooled label handed to the next caller with
     // a stale anchor draws in the wrong place for no visible reason.
     label.anchor.set(0, 0);
+    label.scale.set(1);
     label.rotation = 0;
+    // Character-count truncation is only a copy bound; proportional glyphs
+    // can still be wider than its estimate (`mmmm` is the adversarial case).
+    // Measure the real Pixi label after rasterisation and fit only its x-axis,
+    // so a bounded row can neither wrap into the next line nor cross its
+    // allotted column. Resetting scale above is mandatory for pooled labels.
+    if (
+      options.singleLine &&
+      options.width !== undefined &&
+      label.width > Math.max(0, options.width)
+    ) {
+      label.scale.x = Math.max(0, options.width) / label.width;
+    }
     label.eventMode = 'none';
     parent.addChild(label);
     this.metrics.visibleLabels.push(value);
@@ -1748,7 +1842,7 @@ export class GpuRenderer {
       graphics.tint = 0xffffff;
     });
     parent.addChild(container);
-    this.metrics.hitTargets.push({ id, role, label, x, y, width, height });
+    this.recordHitTarget(parent, { id, role, label, x, y, width, height });
     return container;
   }
 
@@ -1769,7 +1863,7 @@ export class GpuRenderer {
     onActivate: (id: string) => void,
     accent: number = GPU_COLORS.primary
   ) {
-    const target: FilterVisualTarget = {
+    const localTarget = {
       id,
       role: 'button',
       label,
@@ -1780,11 +1874,17 @@ export class GpuRenderer {
       active,
       accent,
     };
+    const projected = this.recordHitTarget(parent, localTarget);
+    const target: FilterVisualTarget = {
+      ...localTarget,
+      rendererX: projected.x,
+      rendererY: projected.y,
+      rendererWidth: projected.width,
+      rendererHeight: projected.height,
+    };
     const wasVisible = this.previousFilterBounds.has(id);
     const appearanceDelay = this.currentFilterBounds.size * 14;
     this.currentFilterBounds.set(id, target);
-    this.metrics.hitTargets.push(target);
-
     const container = new Container();
     container.position.set(x, y);
     container.eventMode = 'static';
@@ -1937,7 +2037,8 @@ export class GpuRenderer {
     return container;
   }
 
-  private navButton(
+  /** Public because the nav rail (`renderer/views/sidebar.ts`) draws with it. */
+  navButton(
     parent: Container,
     id: string,
     label: string,
@@ -2015,7 +2116,7 @@ export class GpuRenderer {
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 280));
       const easedEntrance = 1 - (1 - entrance) ** 3;
-      const targetScale = pressed ? 0.95 : hovered ? 1.045 : 1;
+      const targetScale = pressed ? 0.95 : hovered ? NAV_HOVER_SCALE : 1;
       const scale = easedEntrance * targetScale;
       container.alpha = easedEntrance;
       container.scale.set(scale);
@@ -2068,7 +2169,7 @@ export class GpuRenderer {
     container.on('pointerupoutside', () => { pressed = false; });
     container.on('pointertap', () => onActivate(id));
     parent.addChild(container);
-    this.metrics.hitTargets.push({ id, role: 'tab', label, x, y, width, height });
+    this.recordHitTarget(parent, { id, role: 'tab', label, x, y, width, height });
     return container;
   }
 
@@ -2285,7 +2386,7 @@ export class GpuRenderer {
     container.on('pointerupoutside', () => { pressed = false; });
     container.on('pointertap', () => onActivate(id));
     parent.addChild(container);
-    this.metrics.hitTargets.push({ id, role: 'button', label, x, y, width, height });
+    this.recordHitTarget(parent, { id, role: 'button', label, x, y, width, height });
     return container;
   }
 
@@ -2482,7 +2583,7 @@ export class GpuRenderer {
     container.on('pointerupoutside', () => { pressed = false; });
     container.on('pointertap', () => onActivate(`event.${id}`));
     parent.addChild(container);
-    this.metrics.hitTargets.push({
+    this.recordHitTarget(parent, {
       id: `event.${id}`,
       role: 'button',
       label: '',
@@ -2730,8 +2831,12 @@ export class GpuRenderer {
         continue;
       }
       const particles = new Container();
-      const centerX = target.x + target.width / 2;
-      const centerY = target.y + target.height / 2;
+      // The effect is chrome-level and outlives the view pass, so it draws on
+      // `stage`. Filter layout itself stays view-local for collapse/enter
+      // animations; use the screen projection captured when the filter was
+      // drawn rather than replaying those local numbers in the wrong space.
+      const centerX = target.rendererX + target.rendererWidth / 2;
+      const centerY = target.rendererY + target.rendererHeight / 2;
       const sprites = Array.from({ length: 14 }, (_, index) => {
         const particle = new Graphics();
         const angle = index / 14 * Math.PI * 2;
@@ -2933,6 +3038,13 @@ export class GpuRenderer {
   ) {
     this.avatarOrbsRetained.add(slot);
     const active = interactive && this.snapshot?.state.accountMenuOpen === true;
+    // Orbs are retained on `markRoot`, which the content viewport does not
+    // cover, so a view's own coordinates have to be resolved to screen space
+    // HERE — and the retention key must be built from the resolved pair, or a
+    // view drawing at a stable local x would re-key on every layout change.
+    const origin = this.root.toGlobal({ x, y });
+    x = origin.x;
+    y = origin.y;
     const key = [x, y, size, photoUrl ?? '', seed, active ? '1' : '0'].join('|');
     const existing = this.avatarOrbs.get(slot);
     if (existing?.key === key && !existing.handle.container.destroyed) {
@@ -3012,26 +3124,10 @@ export class GpuRenderer {
       weight: '700',
     });
 
-    // ONE nav definition shared with the DOM tablist: which tabs exist is a
-    // function of the auth snapshot (operator dev path / gated member /
-    // platform admin), never a second hardcoded list.
-    const views: ViewName[] = visibleViews(snapshot.data.auth);
-    let x = 160;
-    for (const view of views) {
-      const label = snapshot.t(`nav.${view}`).toUpperCase();
-      this.navButton(
-        this.root,
-        `nav.${view}`,
-        label,
-        x,
-        10,
-        Math.max(66, label.length * 7 + 22),
-        32,
-        snapshot.state.view === view,
-        snapshot.onActivate
-      );
-      x += Math.max(66, label.length * 7 + 22) + NAV_HOVER_GAP;
-    }
+    // The nav is a LEFT RAIL, not a tab strip: `renderer/views/sidebar.ts`
+    // draws it from `render()`. `visibleViews` remains the one definition of
+    // which tabs exist — the rail reads it, the DOM tablist reads it, and the
+    // header now carries identity and locale only.
 
     // The account orb owns the far right when there is an account; the rest of
     // the header controls shift left by its width plus a gap.
@@ -3084,7 +3180,7 @@ export class GpuRenderer {
       orbHit.on('pointerover', () => this.avatarOrbs.get('header')?.handle.setHover(true));
       orbHit.on('pointerout', () => this.avatarOrbs.get('header')?.handle.setHover(false));
       this.root.addChild(orbHit);
-      this.metrics.hitTargets.push({
+      this.recordHitTarget(this.root, {
         id: 'account.menu.toggle',
         role: 'button',
         label: snapshot.t('auth.openMenu'),
@@ -3275,7 +3371,9 @@ export type RendererCtx = Pick<
   | 'markRoot'
   | 'text'
   | 'panel'
+  | 'recordHitTarget'
   | 'button'
+  | 'navButton'
   | 'filterButton'
   | 'statCard'
   | 'atomButton'

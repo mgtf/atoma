@@ -8,6 +8,7 @@ import { gpuFilterButtonWidth } from '../chip-layout.js';
 import { quantile, truncate } from '../copy.js';
 import { prefersReducedMotion } from '../motion.js';
 import { createScrollPane } from '../scroll-pane.js';
+import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
 
 /**
  * Burn-in view: filters, stat cards, cost scatter chart and the paginated
@@ -95,7 +96,7 @@ function drawBurninChart(
           : GPU_COLORS.error,
     }];
   });
-  ctx.metrics.hitTargets.push({
+  ctx.recordHitTarget(parent, {
     id: 'burnin.chart',
     role: 'figure',
     label: snapshot.t('burnin.chartLabel'),
@@ -105,7 +106,7 @@ function drawBurninChart(
     height,
   });
   for (const point of points) {
-    ctx.metrics.hitTargets.push({
+    ctx.recordHitTarget(parent, {
       id: `burnin.point.${point.row.taskId}`,
       role: 'graphics-symbol',
       label: point.row.taskId,
@@ -250,13 +251,22 @@ export function drawBurnin(
   height: number
 ): void {
   const payload = snapshot.data.burnin;
+  const frame = viewFrame(width, height);
+  drawViewFrame(ctx, frame, snapshot.t('nav.burnin'));
   if (!payload?.rows.length) {
-    ctx.text(ctx.root, snapshot.t('burnin.empty', { path: payload?.csvPath ?? '' }), 20, 78, {
+    ctx.text(ctx.root, snapshot.t('burnin.empty', { path: payload?.csvPath ?? '' }), frame.innerX, frame.contentTop, {
       size: 13,
+      width: frame.innerWidth,
     });
+    ctx.scrollMax.burnin = 0;
     return;
   }
-  const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
+  // Everything lays out INSIDE the column frame: `left` is where content
+  // starts and `inner` is how wide it may be, replacing the page-edge gap
+  // this view used to measure against.
+  const top = frame.contentTop;
+  const left = VIEW_FRAME_PAD;
+  const inner = frame.innerWidth;
   const scroll = snapshot.state.scrollY.burnin;
   // Everything except the pager scrolls inside ONE masked pane: table rows
   // used to slide unmasked under the viewport-anchored pager and over the
@@ -265,10 +275,10 @@ export function drawBurnin(
   // wheel offset, so short windows can still reach the chart and table
   // (scroll honesty — 2026-08-14 review).
   const pane = createScrollPane(ctx.root, {
-    x: 0,
+    x: frame.x,
     y: top,
-    width,
-    height: height - PAGER_RESERVE - top,
+    width: frame.width,
+    height: Math.max(0, frame.bottom - PAGER_RESERVE - top),
     scrollY: scroll,
     bottomPadding: 0,
   });
@@ -293,12 +303,12 @@ export function drawBurnin(
     return true;
   });
   const families = [...new Set(payload.rows.map((row) => row.family))].sort();
-  let x = GPU_LAYOUT.gap;
+  let x = left;
   let familyY = top;
   const addFamilyFilter = (id: string, label: string, active: boolean) => {
     const buttonWidth = gpuFilterButtonWidth(label);
-    if (x + buttonWidth > width - GPU_LAYOUT.gap && x > GPU_LAYOUT.gap) {
-      x = GPU_LAYOUT.gap;
+    if (x + buttonWidth > left + inner && x > left) {
+      x = left;
       familyY += 34;
     }
     ctx.filterButton(
@@ -318,12 +328,12 @@ export function drawBurnin(
   for (const family of families.slice(0, 7)) {
     addFamilyFilter(`burnin.family.${family}`, family, snapshot.state.burninFamily === family);
   }
-  let optionX = GPU_LAYOUT.gap;
+  let optionX = left;
   let optionY = familyY + 36;
   const addOptionFilter = (id: string, label: string, active: boolean) => {
     const buttonWidth = gpuFilterButtonWidth(label);
-    if (optionX + buttonWidth > width - GPU_LAYOUT.gap && optionX > GPU_LAYOUT.gap) {
-      optionX = GPU_LAYOUT.gap;
+    if (optionX + buttonWidth > left + inner && optionX > left) {
+      optionX = left;
       optionY += 32;
     }
     ctx.filterButton(
@@ -384,9 +394,9 @@ export function drawBurnin(
     GPU_COLORS.warning,
   ];
   const statsY = optionY + 38;
-  const statWidth = (width - GPU_LAYOUT.gap * 5) / 4;
+  const statWidth = (inner - GPU_LAYOUT.gap * 3) / 4;
   stats.forEach(([label, value], index) => {
-    const statX = GPU_LAYOUT.gap + index * (statWidth + GPU_LAYOUT.gap);
+    const statX = left + index * (statWidth + GPU_LAYOUT.gap);
     ctx.statCard(
       pane.content,
       `burnin.stat.${index}`,
@@ -405,9 +415,9 @@ export function drawBurnin(
     ctx,
     snapshot,
     pane.content,
-    GPU_LAYOUT.gap,
+    left,
     chartY - top,
-    width - GPU_LAYOUT.gap * 2,
+    inner,
     chartHeight,
     rows
   );
@@ -415,7 +425,7 @@ export function drawBurnin(
   const tableY = chartY + chartHeight + 10;
   const availableRows = Math.min(
     PAGE_SIZE,
-    Math.max(1, Math.floor((height - tableY - PAGER_RESERVE) / 25))
+    Math.max(1, Math.floor((frame.bottom - tableY - PAGER_RESERVE) / 25))
   );
   const pageCount = Math.max(1, Math.ceil(rows.length / availableRows));
   const page = Math.min(snapshot.state.burninPage, pageCount);
@@ -425,9 +435,9 @@ export function drawBurnin(
     if (index % 2 === 0) {
       ctx.panel(
         pane.content,
-        GPU_LAYOUT.gap,
+        left,
         rowY,
-        width - GPU_LAYOUT.gap * 2,
+        inner,
         24,
         0x0f1725,
         0x0f1725,
@@ -435,12 +445,12 @@ export function drawBurnin(
         0
       );
     }
-    ctx.text(pane.content, row.outcome === 'delivered' ? '✓' : '✗', 18, rowY + 4, {
+    ctx.text(pane.content, row.outcome === 'delivered' ? '✓' : '✗', left + 8, rowY + 4, {
       size: 11,
       color: row.outcome === 'delivered' ? GPU_COLORS.success : GPU_COLORS.error,
     });
-    ctx.text(pane.content, truncate(row.taskId, 60), 40, rowY + 4, { size: 10, width: width * 0.5 });
-    ctx.text(pane.content, `${fmtCost(row.costUsd)} · ${row.durationS ?? '?'}s`, width * 0.58, rowY + 4, {
+    ctx.text(pane.content, truncate(row.taskId, 60), left + 30, rowY + 4, { size: 10, width: inner * 0.5 });
+    ctx.text(pane.content, `${fmtCost(row.costUsd)} · ${row.durationS ?? '?'}s`, left + inner * 0.58, rowY + 4, {
       size: 10,
       color: GPU_COLORS.muted,
     });
@@ -451,12 +461,12 @@ export function drawBurnin(
       row.demotions ? `🛡${row.demotions}` : '',
       row.dispatchFallbacks ? `↩${row.dispatchFallbacks}` : '',
     ].filter(Boolean).join(' ');
-    ctx.text(pane.content, lifecycle, width * 0.79, rowY + 4, {
+    ctx.text(pane.content, lifecycle, left + inner * 0.79, rowY + 4, {
       size: 10,
       color: row.compileErrors ? GPU_COLORS.error : GPU_COLORS.muted,
     });
     if (row.trace) {
-      ctx.button(pane.content, `burnin.trace.${row.trace.replace(/\.json$/, '')}`, 'button', '', GPU_LAYOUT.gap, rowY, width - GPU_LAYOUT.gap * 2, 24, false, snapshot.onActivate).alpha = 0.001;
+      ctx.button(pane.content, `burnin.trace.${row.trace.replace(/\.json$/, '')}`, 'button', '', left, rowY, inner, 24, false, snapshot.onActivate).alpha = 0.001;
     }
   });
   // Scroll honesty (2026-08-14 review): the wheel handler fails closed to

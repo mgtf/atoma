@@ -4,13 +4,19 @@ import { detectLocale } from './i18n.js';
 /**
  * WEB PUSH — CLIENT SIDE.
  *
- * The permission ask deliberately lives in the FIRST LIVE RUN, not in the
- * login or signup flow: a visitor who just launched work is the one who
- * understands why being pinged at delivery is worth a permission. Login must
- * stay a zero-friction surface. `shouldOfferPushPrompt` encodes that gate;
- * `enableWebPush` performs the browser dance (permission → PushManager
- * subscription → server save) and cleans up after itself when the server
- * never learned the subscription.
+ * For MEMBERS the permission ask deliberately lives in the FIRST LIVE RUN,
+ * not in the login or signup flow: a visitor who just launched work is the
+ * one who understands why being pinged at delivery is worth a permission,
+ * and login must stay a zero-friction surface. PLATFORM ADMINS are the
+ * exception: the push routes target them for a curated set of instance-wide
+ * platform events whether or not they ever launch a run, so an admin with no
+ * subscription is an admin whose alerts silently go nowhere. Admins are
+ * therefore asked at login, and a "not now" is remembered per browser
+ * session rather than forever — the next login asks again, until the browser
+ * permission itself settles.
+ * `shouldOfferPushPrompt` encodes both gates; `enableWebPush` performs the
+ * browser dance (permission → PushManager subscription → server save) and
+ * cleans up after itself when the server never learned the subscription.
  *
  * Everything takes injectable dependencies so tests run in plain Node.
  */
@@ -19,9 +25,14 @@ export const PUSH_DISMISSED_KEY = 'atoma.viz.push.dismissed';
 
 type PromptStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
-function safeStorage(): PromptStorage | null {
+/**
+ * Where a dismissal is remembered decides when the question returns: members
+ * dismiss into localStorage (once, for good), platform admins into
+ * sessionStorage (this visit only — they must end up subscribed).
+ */
+export function pushPromptStorage(platformAdmin: boolean): PromptStorage | null {
   try {
-    return globalThis.localStorage ?? null;
+    return (platformAdmin ? globalThis.sessionStorage : globalThis.localStorage) ?? null;
   } catch {
     return null;
   }
@@ -54,22 +65,27 @@ export function pushSupported(scope: PushScope = globalThis): boolean {
 /**
  * Offer the prompt only when it can still mean something: a signed-in viewer,
  * a run currently alive, browser support, a permission still undecided, and
- * no earlier "not now". The service worker registers in production builds
+ * no earlier "not now". Platform admins skip the live-run gate — the offer is
+ * part of their login — and their dismissal is read from sessionStorage, so a
+ * fresh session asks again. The service worker registers in production builds
  * only, so a dev session never dangles an enable button that cannot finish.
  */
 export function shouldOfferPushPrompt(input: {
   readonly authenticated: boolean;
   readonly hasLiveRun: boolean;
+  readonly platformAdmin?: boolean;
   readonly scope?: PushScope;
   readonly storage?: PromptStorage | null;
   readonly prod?: boolean;
 }): boolean {
   const prod = input.prod ?? import.meta.env.PROD;
-  if (!prod || !input.authenticated || !input.hasLiveRun) return false;
+  const admin = input.platformAdmin === true;
+  if (!prod || !input.authenticated) return false;
+  if (!admin && !input.hasLiveRun) return false;
   const scope = input.scope ?? (globalThis);
   if (!pushSupported(scope)) return false;
   if (scope.Notification?.permission !== 'default') return false;
-  const storage = input.storage === undefined ? safeStorage() : input.storage;
+  const storage = input.storage === undefined ? pushPromptStorage(admin) : input.storage;
   try {
     if (storage?.getItem(PUSH_DISMISSED_KEY)) return false;
   } catch {
@@ -78,7 +94,7 @@ export function shouldOfferPushPrompt(input: {
   return true;
 }
 
-export function dismissPushPrompt(storage: PromptStorage | null = safeStorage()): void {
+export function dismissPushPrompt(storage: PromptStorage | null = pushPromptStorage(false)): void {
   try {
     storage?.setItem(PUSH_DISMISSED_KEY, new Date().toISOString());
   } catch {

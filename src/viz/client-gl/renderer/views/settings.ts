@@ -1,10 +1,11 @@
 import { Container } from 'pixi.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
-import { GPU_COLORS } from '../../theme.js';
+import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { TIER_MODEL_CHOICES } from '../../../../contracts/tierModels.js';
 import { attachAvatarChip } from '../avatar-orb.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
+import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from '../view-frame.js';
 
 /**
  * SETTINGS — the account's own page, reached from the header orb and
@@ -19,10 +20,14 @@ import { createScrollPane } from '../scroll-pane.js';
  * autofill and screen readers belong to the browser. Everything else is GL.
  */
 
-const HEADER_Y = 78;
-const LEFT = 20;
-/** Must match `.gpu-settings-form { top }` in styles.css. */
-export const SETTINGS_DOM_FORM_TOP = 146;
+/** Settings reads as a centred column, like Projects and Admin. */
+const SETTINGS_COLUMN_MAX_WIDTH = 720;
+/**
+ * Must match `.gpu-settings-form { top }` in styles.css: the account orb is
+ * the first thing inside the column frame, and the rename field sits under it.
+ */
+export const SETTINGS_DOM_FORM_TOP =
+  GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + VIEW_FRAME_CONTENT_TOP + 56 + 12;
 export const SETTINGS_DOM_FORM_HEIGHT = 96;
 const ORB_SIZE = 56;
 const TIER_ROW_HEIGHT = 42;
@@ -64,21 +69,29 @@ export interface OrganisationPanelLayout {
  */
 export function organisationPanelLayout(
   factCount: number,
-  memberCount: number
+  memberCount: number,
+  factColumns = 2,
+  memberRowHeight = MEMBER_ROW_HEIGHT
 ): OrganisationPanelLayout {
-  const factLines = Math.ceil(factCount / 2);
+  const factLines = Math.ceil(factCount / factColumns);
   const membersHeaderY = FACTS_TOP + factLines * FACT_LINE_HEIGHT + MEMBERS_HEADER_GAP;
   const firstMemberY = membersHeaderY + MEMBERS_LIST_GAP;
   return {
     factLines,
     membersHeaderY,
     firstMemberY,
-    height: firstMemberY + memberCount * MEMBER_ROW_HEIGHT + PANEL_BOTTOM_PAD,
+    height: firstMemberY + memberCount * memberRowHeight + PANEL_BOTTOM_PAD,
   };
 }
 
-/** Where the header orb sits, so the renderer can retain it at a stable key. */
-export const SETTINGS_ORB = { x: LEFT, y: 70, size: ORB_SIZE } as const;
+/**
+ * Where the account orb sits INSIDE the column frame — its x follows the
+ * frame, so only the vertical placement and the size are fixed here.
+ */
+export const SETTINGS_ORB = {
+  y: GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + VIEW_FRAME_CONTENT_TOP,
+  size: ORB_SIZE,
+} as const;
 
 /**
  * Display copy for a model id. The stored value stays the full id — this is
@@ -120,48 +133,47 @@ export function drawSettings(
   const models = snapshot.data.accountModels;
   const organisation = snapshot.data.organisation;
 
+  const frame = viewFrame(width, height, SETTINGS_COLUMN_MAX_WIDTH);
+  drawViewFrame(ctx, frame, snapshot.t('nav.settings'));
+
   if (auth) {
     // The same orb as the header, larger — its OWN slot, because the header
     // draws its orb in the same frame and one slot had them evicting each
     // other every render.
     ctx.retainAvatarOrb(
       'settings',
-      SETTINGS_ORB.x,
+      frame.innerX,
       SETTINGS_ORB.y,
       SETTINGS_ORB.size,
       auth.viewer.avatarUrl,
       auth.viewer.principalId,
       false
     );
-  }
-  ctx.text(ctx.root, snapshot.t('nav.settings'), LEFT + ORB_SIZE + 18, HEADER_Y, {
-    size: 18,
-    weight: '700',
-  });
-  if (auth) {
     ctx.text(
       ctx.root,
       auth.viewer.displayNameSource === 'user'
         ? snapshot.t('settings.displayNameOwn')
         : snapshot.t('settings.displayNameProvider'),
-      LEFT + ORB_SIZE + 18,
-      HEADER_Y + 24,
-      { size: 11, color: GPU_COLORS.muted, width: Math.max(120, width - LEFT - ORB_SIZE - 60) }
+      frame.innerX + ORB_SIZE + 18,
+      SETTINGS_ORB.y + 18,
+      { size: 11, color: GPU_COLORS.muted, width: Math.max(120, frame.innerWidth - ORB_SIZE - 30) }
     );
   }
 
   const contentTop = settingsGpuContentTop();
   const pane = createScrollPane(ctx.root, {
-    x: 0,
+    x: frame.x,
     y: contentTop,
-    width,
-    height: Math.max(0, height - contentTop),
+    width: frame.width,
+    height: Math.max(0, frame.bottom - VIEW_FRAME_PAD - contentTop),
     scrollY: snapshot.state.scrollY.settings,
     bottomPadding: 24,
   });
-  const panelWidth = Math.min(720, width - LEFT * 2);
+  const LEFT = VIEW_FRAME_PAD;
+  const panelWidth = frame.innerWidth;
   const innerX = LEFT + 18;
   const innerWidth = panelWidth - 36;
+  const compactColumns = innerWidth < 360;
   let cursor = 0;
 
   // Panel FRAMES go here, and this layer is added first so it paints behind
@@ -184,6 +196,7 @@ export function drawSettings(
   });
   const rowsTop = cursor + 34 + Math.max(20, hint.height) + 12;
   let rowY = rowsTop;
+  let lastChipBottom = rowsTop;
   for (const tier of [1, 2, 3] as const) {
     const pinned = models ? models.pins[`l${tier}`] : null;
     const fallbackModel = models?.defaults[`l${tier}`] ?? null;
@@ -191,11 +204,13 @@ export function drawSettings(
       size: 10,
       color: GPU_COLORS.tiers[tier],
       weight: '700',
-      width: 168,
+      width: compactColumns ? innerWidth : 168,
     });
-    const chipsX = innerX + 176;
-    const available = Math.max(120, innerWidth - 176);
-    const chipWidth = Math.min(112, (available - 18) / 4);
+    const chipsX = compactColumns ? innerX : innerX + 176;
+    const chipsY = compactColumns ? rowY + 20 : rowY;
+    const available = compactColumns ? innerWidth : Math.max(0, innerWidth - 176);
+    // 1.6 units for default + 3×0.78 choices + three 6px gaps.
+    const chipWidth = Math.max(0, Math.min(112, (available - 18) / 3.94));
     ctx.filterButton(
       pane.content,
       settingsModelId(tier, 'default'),
@@ -203,7 +218,7 @@ export function drawSettings(
         ? `${snapshot.t('settings.operatorDefault')} · ${modelChipLabel(fallbackModel)}`
         : snapshot.t('settings.operatorDefault'),
       chipsX,
-      rowY,
+      chipsY,
       chipWidth * 1.6,
       TIER_CHIP_HEIGHT,
       pinned === null,
@@ -216,7 +231,7 @@ export function drawSettings(
         settingsModelId(tier, index),
         modelChipLabel(choice),
         chipsX + chipWidth * 1.6 + 6 + index * (chipWidth * 0.78 + 6),
-        rowY,
+        chipsY,
         chipWidth * 0.78,
         TIER_CHIP_HEIGHT,
         pinned === choice,
@@ -224,10 +239,9 @@ export function drawSettings(
         GPU_COLORS.tiers[tier]
       );
     });
-    rowY += TIER_ROW_HEIGHT;
+    lastChipBottom = chipsY + TIER_CHIP_HEIGHT;
+    rowY += compactColumns ? 58 : TIER_ROW_HEIGHT;
   }
-  // `rowY` sits one full row past the last chip, which is TIER_CHIP_HEIGHT tall.
-  const lastChipBottom = rowY - TIER_ROW_HEIGHT + TIER_CHIP_HEIGHT;
   let modelsBottom = lastChipBottom + PANEL_BOTTOM_PAD;
   if (snapshot.data.accountError) {
     const failure = ctx.text(pane.content, snapshot.data.accountError, innerX, rowY, {
@@ -262,11 +276,19 @@ export function drawSettings(
         String(organisation.pendingInvitations),
       ]);
     }
-    const orgLayout = organisationPanelLayout(facts.length, organisation.members.length);
+    const factColumns = compactColumns ? 1 : 2;
+    const memberRowHeight = compactColumns ? 56 : MEMBER_ROW_HEIGHT;
+    const orgLayout = organisationPanelLayout(
+      facts.length,
+      organisation.members.length,
+      factColumns,
+      memberRowHeight
+    );
     facts.forEach(([label, value], index) => {
-      const column = index % 2;
-      const line = Math.floor(index / 2);
-      const factX = innerX + column * (innerWidth / 2);
+      const column = index % factColumns;
+      const line = Math.floor(index / factColumns);
+      const factWidth = innerWidth / factColumns;
+      const factX = innerX + column * factWidth;
       ctx.text(pane.content, label.toUpperCase(), factX, cursor + FACTS_TOP + line * FACT_LINE_HEIGHT, {
         size: 8,
         color: GPU_COLORS.muted,
@@ -276,7 +298,7 @@ export function drawSettings(
         size: 10,
         color: GPU_COLORS.text,
         mono: true,
-        width: innerWidth / 2 - 12,
+        width: Math.max(0, factWidth - 12),
       });
     });
 
@@ -288,7 +310,7 @@ export function drawSettings(
       { size: 10, weight: '700', color: GPU_COLORS.muted }
     );
     organisation.members.forEach((member, index) => {
-      const memberY = cursor + orgLayout.firstMemberY + index * MEMBER_ROW_HEIGHT;
+      const memberY = cursor + orgLayout.firstMemberY + index * memberRowHeight;
       attachAvatarChip(pane.content, {
         x: innerX,
         y: memberY,
@@ -299,29 +321,45 @@ export function drawSettings(
       // Three left-aligned columns rather than anchored right edges: `text()`
       // treats `width` as a wrap bound, so a zero-width right-aligned label
       // wraps to one character per line.
-      const roleColumn = innerX + innerWidth - MEMBER_ROLE_COLUMN;
-      const joinedColumn = innerX + innerWidth - MEMBER_JOINED_COLUMN;
+      const roleColumn = compactColumns
+        ? innerX + 32
+        : innerX + innerWidth - MEMBER_ROLE_COLUMN;
+      const joinedColumn = compactColumns
+        ? innerX + 32
+        : innerX + innerWidth - MEMBER_JOINED_COLUMN;
       ctx.text(
         pane.content,
         truncate(member.displayName, 34),
         innerX + 32,
         memberY + 2,
-        { size: 11, width: Math.max(60, joinedColumn - innerX - 44) }
+        {
+          size: 11,
+          width: compactColumns
+            ? Math.max(0, innerWidth - 32)
+            : Math.max(60, joinedColumn - innerX - 44),
+        }
       );
       if (member.joinedAt) {
         ctx.text(
           pane.content,
           snapshot.t('settings.joined', { date: member.joinedAt.slice(0, 10) }),
           joinedColumn,
-          memberY + 4,
-          { size: 9, color: GPU_COLORS.muted, mono: true, width: MEMBER_JOINED_COLUMN - MEMBER_ROLE_COLUMN - 12 }
+          memberY + (compactColumns ? 19 : 4),
+          {
+            size: 9,
+            color: GPU_COLORS.muted,
+            mono: true,
+            width: compactColumns
+              ? Math.max(0, innerWidth - 32)
+              : MEMBER_JOINED_COLUMN - MEMBER_ROLE_COLUMN - 12,
+          }
         );
       }
       const role = snapshot.t(`auth.role.${member.role}`);
-      ctx.text(pane.content, role.toUpperCase(), roleColumn, memberY + 3, {
+      ctx.text(pane.content, role.toUpperCase(), roleColumn, memberY + (compactColumns ? 33 : 3), {
         size: 9,
         weight: '700',
-        width: MEMBER_ROLE_COLUMN - 8,
+        width: compactColumns ? Math.max(0, innerWidth - 32) : MEMBER_ROLE_COLUMN - 8,
         color:
           member.role === 'org:owner' || member.role === 'org:admin'
             ? GPU_COLORS.tiers[2]
@@ -332,8 +370,13 @@ export function drawSettings(
           pane.content,
           snapshot.t('auth.platformAdmin').toUpperCase(),
           roleColumn,
-          memberY + 15,
-          { size: 8, weight: '700', width: MEMBER_ROLE_COLUMN - 8, color: GPU_COLORS.tiers[3] }
+          memberY + (compactColumns ? 45 : 15),
+          {
+            size: 8,
+            weight: '700',
+            width: compactColumns ? Math.max(0, innerWidth - 32) : MEMBER_ROLE_COLUMN - 8,
+            color: GPU_COLORS.tiers[3],
+          }
         );
       }
     });

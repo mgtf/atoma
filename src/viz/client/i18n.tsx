@@ -5,6 +5,11 @@ export type Locale = 'en' | 'fr';
 export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
   en: {
     'lang.name': 'English',
+    // Nav rail group headings. The rail is the GL client's nav; the frozen
+    // MUI fallback has a tab bar and never reads these.
+    'nav.group.workspace': 'Workspace',
+    'nav.group.operate': 'Operate',
+    'nav.group.admin': 'Admin',
     'nav.runs': 'Runs',
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
@@ -605,12 +610,18 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'push.title': 'Run notifications',
     'push.body':
       'Your run is underway. Enable notifications to hear the moment it delivers — even with this tab closed.',
+    'push.admin.title': 'Platform alerts',
+    'push.admin.body':
+      'Enable notifications for critical platform events such as new organisations, recoveries and security alerts — even with this tab closed.',
     'push.enable': 'Enable notifications',
     'push.later': 'Not now',
     'push.error': 'Notifications could not be enabled.',
   },
   fr: {
     'lang.name': 'Français',
+    'nav.group.workspace': 'Espace de travail',
+    'nav.group.operate': 'Exploitation',
+    'nav.group.admin': 'Admin',
     'nav.runs': 'Runs',
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
@@ -1212,6 +1223,9 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'push.title': 'Notifications de run',
     'push.body':
       'Ton run est en cours. Active les notifications pour être prévenu dès la livraison — même onglet fermé.',
+    'push.admin.title': 'Alertes plateforme',
+    'push.admin.body':
+      'Active les notifications pour les événements critiques de la plateforme, comme les nouvelles organisations, les reprises après incident et les alertes de sécurité — même onglet fermé.',
     'push.enable': 'Activer les notifications',
     'push.later': 'Pas maintenant',
     'push.error': 'Impossible d’activer les notifications.',

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Rectangle } from 'pixi.js';
 import type { Text, Ticker } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { I18N_CATALOGS, translate } from '../src/viz/client/i18n.js';
@@ -14,7 +14,11 @@ import type {
   VizProject,
   VizRun,
 } from '../src/viz/client/types.js';
-import { emptyRenderMetrics } from '../src/viz/client-gl/gpu-renderer.js';
+import {
+  GpuRenderer,
+  NAV_HOVER_SCALE,
+  emptyRenderMetrics,
+} from '../src/viz/client-gl/gpu-renderer.js';
 import type {
   GpuDataSnapshot,
   GpuRenderSnapshot,
@@ -25,7 +29,20 @@ import {
   setReducedMotionOverrideForTests,
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
-import { drawProjects, PROJECTS_DOM_FORM_HEIGHT, PROJECTS_DOM_FORM_TOP, projectsGpuContentTop } from '../src/viz/client-gl/renderer/views/projects.js';
+import {
+  drawProjects,
+  PROJECTS_COLUMN_INSET,
+  PROJECTS_COLUMN_MAX_WIDTH,
+  PROJECTS_DOM_FORM_HEIGHT,
+  PROJECTS_DOM_FORM_NARROW_HEIGHT,
+  PROJECTS_DOM_FORM_TOP,
+  PROJECTS_NARROW_CONTENT_WIDTH,
+  PROJECTS_ROW_PAD,
+  projectsColumn,
+  projectsGpuContentTop,
+} from '../src/viz/client-gl/renderer/views/projects.js';
+import { drawSidebar, sidebarLayout, SIDEBAR_GROUPS } from '../src/viz/client-gl/renderer/views/sidebar.js';
+import { viewFrame, VIEW_FRAME_PAD } from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -36,6 +53,8 @@ import {
   modelChipLabel,
   organisationPanelLayout,
   parseSettingsModelId,
+  SETTINGS_DOM_FORM_HEIGHT,
+  SETTINGS_DOM_FORM_TOP,
   settingsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/settings.js';
 import { attachAtomaMark, ATOMA_MARK_ENV_MIN_SCALE, ATOMA_MARK_HEADER_SCALE } from '../src/viz/client-gl/renderer/atoma-mark.js';
@@ -46,7 +65,10 @@ import {
 } from '../src/viz/client-gl/renderer/mark-clock.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
-import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
+import {
+  drawRuns,
+  RUNS_TWO_PANE_MIN_WIDTH,
+} from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
 import {
@@ -57,7 +79,7 @@ import {
 } from '../src/viz/client-gl/store.js';
 import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
-import { GPU_LAYOUT } from '../src/viz/client-gl/theme.js';
+import { GPU_LAYOUT, sidebarWidthForViewport } from '../src/viz/client-gl/theme.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
 
 // ---------------------------------------------------------------------------
@@ -72,9 +94,11 @@ interface RecordedText {
   x: number;
   y: number;
   options: unknown;
+  node: Text;
 }
 
 interface RecordedButton {
+  parent: Container;
   id: string;
   label: string;
   x: number;
@@ -212,9 +236,10 @@ function createRecordingCtx(): RecordingCtx {
     seenAnimatedControls: new Set<string>(),
     previousFilterBounds: new Map(),
     text(parent, value, x, y, options) {
-      ctx.texts.push({ parent, value, x, y, options });
+      const node = textStub(value, options);
+      ctx.texts.push({ parent, value, x, y, options, node });
       ctx.metrics.visibleLabels.push(value);
-      return textStub(value, options);
+      return node;
     },
     panel(parent, x, y, width, height) {
       ctx.panels.push({ parent, x, y, width, height });
@@ -223,9 +248,25 @@ function createRecordingCtx(): RecordingCtx {
       parent.addChild(graphics);
       return graphics;
     },
+    recordHitTarget(parent, target) {
+      const start = parent.toGlobal({ x: target.x, y: target.y });
+      const end = parent.toGlobal({
+        x: target.x + target.width,
+        y: target.y + target.height,
+      });
+      const projected = {
+        ...target,
+        x: Math.min(start.x, end.x),
+        y: Math.min(start.y, end.y),
+        width: Math.abs(end.x - start.x),
+        height: Math.abs(end.y - start.y),
+      };
+      ctx.metrics.hitTargets.push(projected);
+      return projected;
+    },
     tuningRow(parent, key, x, y, width) {
       ctx.tuningRows.push({ key, x, y, width });
-      ctx.metrics.hitTargets.push({
+      ctx.recordHitTarget(parent, {
         id: `tuning:${key}`,
         role: 'slider',
         label: key,
@@ -239,7 +280,7 @@ function createRecordingCtx(): RecordingCtx {
     turnSlider(parent, x, y, width, label, liveLabel) {
       ctx.text(parent, label, x, y);
       ctx.text(parent, liveLabel, x + width - 40, y);
-      ctx.metrics.hitTargets.push({
+      ctx.recordHitTarget(parent, {
         id: 'welcome.turn',
         role: 'slider',
         label,
@@ -248,7 +289,7 @@ function createRecordingCtx(): RecordingCtx {
         width,
         height: 28,
       });
-      ctx.metrics.hitTargets.push({
+      ctx.recordHitTarget(parent, {
         id: 'welcome.turnLive',
         role: 'button',
         label: liveLabel,
@@ -260,7 +301,7 @@ function createRecordingCtx(): RecordingCtx {
     },
     markBeadCheck(parent, id, x, y, width, label) {
       ctx.text(parent, label, x, y);
-      ctx.metrics.hitTargets.push({
+      ctx.recordHitTarget(parent, {
         id,
         role: 'checkbox',
         label,
@@ -289,15 +330,22 @@ function createRecordingCtx(): RecordingCtx {
       return mask;
     },
     button(parent, id, role, label, x, y, width, height, active, onActivate) {
-      ctx.buttons.push({ id, label, x, y, width, height, active, onActivate });
-      ctx.metrics.hitTargets.push({ id, role, label, x, y, width, height });
+      ctx.buttons.push({ parent, id, label, x, y, width, height, active, onActivate });
+      ctx.recordHitTarget(parent, { id, role, label, x, y, width, height });
+      const container = new Container();
+      parent.addChild(container);
+      return container;
+    },
+    navButton(parent, id, label, x, y, width, height, active, onActivate) {
+      ctx.buttons.push({ parent, id, label, x, y, width, height, active, onActivate });
+      ctx.recordHitTarget(parent, { id, role: 'tab', label, x, y, width, height });
       const container = new Container();
       parent.addChild(container);
       return container;
     },
     filterButton(parent, id, label, x, y, width, height, active) {
-      ctx.filterButtons.push({ id, label, x, y, width, height, active });
-      ctx.metrics.hitTargets.push({
+      ctx.filterButtons.push({ parent, id, label, x, y, width, height, active });
+      ctx.recordHitTarget(parent, {
         id,
         role: 'button',
         label,
@@ -317,8 +365,8 @@ function createRecordingCtx(): RecordingCtx {
       return container;
     },
     atomButton(parent, id, label, _tier, x, y, width, height, active) {
-      ctx.atomButtons.push({ id, label, x, y, width, height, active });
-      ctx.metrics.hitTargets.push({
+      ctx.atomButtons.push({ parent, id, label, x, y, width, height, active });
+      ctx.recordHitTarget(parent, {
         id,
         role: 'button',
         label,
@@ -334,7 +382,7 @@ function createRecordingCtx(): RecordingCtx {
     eventCard(parent, id, x, y, width, height, _accent, shaderMode, selected) {
       const content = new Container();
       ctx.eventCards.push({ id, x, y, width, height, shaderMode, selected, content });
-      ctx.metrics.hitTargets.push({
+      ctx.recordHitTarget(parent, {
         id,
         role: 'button',
         label: id,
@@ -819,6 +867,226 @@ describe('drawDocs', () => {
   });
 });
 
+describe('the nav rail', () => {
+  const viewer = {
+    displayName: 'A',
+    role: 'org:member',
+    activeOrganisation: null,
+    organisations: [],
+    platformAdmin: false,
+  };
+  const base = { failure: false, signingOut: false, switchingOrganisationId: null };
+
+  it('groups every view visibleViews can offer', () => {
+    // A view that reaches the nav without a group here would simply not be
+    // drawn — the rail would swallow a whole surface silently. Hold the two
+    // lists to each other instead of trusting a reader to notice.
+    const grouped = new Set(SIDEBAR_GROUPS.flatMap((group) => group.views));
+    const offered = new Set([
+      ...visibleViews(null),
+      ...visibleViews({ ...base, viewer }),
+      ...visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } }),
+    ]);
+    for (const view of offered) expect(grouped, `ungrouped view: ${view}`).toContain(view);
+    // And nothing is grouped that the nav never offers.
+    for (const view of grouped) expect(offered, `grouped but never shown: ${view}`).toContain(view);
+  });
+
+  it('drops an empty group whole rather than leaving a bare heading', () => {
+    // A gated member gets the workspace group only.
+    const rows = sidebarLayout(visibleViews({ ...base, viewer }));
+    const groups = rows.filter((row) => row.kind === 'group');
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ group: 'workspace' });
+    expect(rows.filter((row) => row.kind === 'item').map((row) => row.view)).toEqual([
+      'projects', 'runs', 'docs',
+    ]);
+  });
+
+  it('stacks rows in order, and clears its own hover scale', () => {
+    const rows = sidebarLayout(visibleViews(null));
+    for (let index = 1; index < rows.length; index++) {
+      const previous = rows[index - 1]!;
+      const row = rows[index]!;
+      expect(row.y).toBeGreaterThanOrEqual(previous.y + previous.height);
+      // navButton grows by its production hover scale, centred: half the overflow must
+      // still fit in the gap or a hovered row would climb over its neighbour.
+      if (previous.kind !== 'item' || row.kind !== 'item') continue;
+      const overflow = (previous.height * NAV_HOVER_SCALE - previous.height) / 2;
+      expect(row.y - (previous.y + previous.height)).toBeGreaterThan(overflow);
+    }
+  });
+
+  it('draws one nav button per view, marking the current one', () => {
+    const ctx = createRecordingCtx();
+    drawSidebar(ctx, makeSnapshot({ view: 'skills' }), 720);
+    const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
+    expect(nav.map((button) => button.id)).toEqual([
+      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+    ]);
+    expect(nav.filter((button) => button.active).map((button) => button.id)).toEqual([
+      'nav.skills',
+    ]);
+    // Every row sits inside the rail, and the headings are drawn as copy.
+    for (const button of nav) {
+      expect(button.x).toBeGreaterThanOrEqual(0);
+      expect(button.x + button.width).toBeLessThanOrEqual(GPU_LAYOUT.sidebarWidth);
+    }
+    expect(ctx.texts.map((text) => text.value)).toContain('WORKSPACE');
+    expect(ctx.texts.map((text) => text.value)).toContain('OPERATE');
+  });
+
+  it('has no Settings row: the account menu owns that entrance', () => {
+    const ctx = createRecordingCtx();
+    drawSidebar(ctx, makeSnapshot({ view: 'projects' }), 720);
+    expect(ctx.buttons.some((button) => button.id === 'nav.settings')).toBe(false);
+  });
+
+  it('keeps every admin destination inside a short landscape rail', () => {
+    const height = 300;
+    const views = visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } });
+    const rows = sidebarLayout(views, height);
+    expect(new Set(rows.filter((row) => row.kind === 'item').map((row) => row.view)))
+      .toEqual(new Set(views));
+    expect(Math.max(...rows.map((row) => row.y + row.height))).toBeLessThanOrEqual(height);
+  });
+
+  it('shrinks the rail before it can push the content floor off-screen', () => {
+    expect(sidebarWidthForViewport(1280)).toBe(GPU_LAYOUT.sidebarWidth);
+    expect(sidebarWidthForViewport(528)).toBe(GPU_LAYOUT.sidebarWidth);
+    expect(sidebarWidthForViewport(500)).toBe(180);
+    expect(sidebarWidthForViewport(432)).toBe(GPU_LAYOUT.sidebarMinWidth);
+    expect(sidebarWidthForViewport(320)).toBe(GPU_LAYOUT.sidebarMinWidth);
+  });
+
+  it('keeps the CSS content offset equal to the rail it must clear', () => {
+    // The DOM overlays that sit over a VIEW are positioned in the content
+    // viewport. Two numbers, one truth: drift here puts an input under the
+    // rail with nothing failing.
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    expect(css).toMatch(new RegExp(
+      `--gpu-sidebar:\\s*min\\(100vw, clamp\\(${GPU_LAYOUT.sidebarMinWidth}px,` +
+      `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
+    ));
+    for (const selector of ['gpu-project-form', 'gpu-view-search', 'gpu-settings-form']) {
+      expect(css).toMatch(
+        new RegExp(`\\.${selector}\\s*\\{[\\s\\S]*?var\\(--gpu-sidebar\\)`)
+      );
+    }
+  });
+
+  it('projects nested hit targets through the rail, pane and scroll transforms', () => {
+    const renderer = new GpuRenderer();
+    const stage = new Container();
+    const viewport = new Container();
+    const pane = new Container();
+    const content = new Container();
+    viewport.position.set(GPU_LAYOUT.sidebarWidth, 0);
+    pane.position.set(150, 108);
+    content.position.set(0, -40);
+    stage.addChild(viewport);
+    viewport.addChild(pane);
+    pane.addChild(content);
+
+    const local = {
+      id: 'nested.target',
+      role: 'button',
+      label: 'Nested target',
+      x: 16,
+      y: 12,
+      width: 90,
+      height: 28,
+    };
+    const expectedStart = content.toGlobal({ x: local.x, y: local.y });
+    const expectedEnd = content.toGlobal({
+      x: local.x + local.width,
+      y: local.y + local.height,
+    });
+
+    renderer.recordHitTarget(content, local);
+    expect(renderer.metrics.hitTargets).toEqual([{
+      ...local,
+      x: expectedStart.x,
+      y: expectedStart.y,
+      width: expectedEnd.x - expectedStart.x,
+      height: expectedEnd.y - expectedStart.y,
+    }]);
+  });
+
+  it('projects each non-container viewport escape exactly once', () => {
+    const renderer = new GpuRenderer();
+    // Headless test: retained paint tickers are irrelevant to coordinate
+    // ownership, and Application has no live ticker before init().
+    renderer.addTicker = () => {};
+    const internals = renderer as unknown as {
+      translateViewBounds(offsetX: number): void;
+      drawRemovedFilterEffects(): void;
+      avatarOrbs: Map<string, {
+        key: string;
+        handle: {
+          container: Container;
+          resume(parent: Container, addTicker: (callback: (ticker: Ticker) => void) => void): void;
+          setHover(on: boolean): void;
+          destroy(): void;
+        };
+      }>;
+    };
+
+    // Wheel routing reads a plain Rectangle, so it receives the rail once.
+    renderer.detailBounds = new Rectangle(40, 70, 300, 200);
+    internals.translateViewBounds(GPU_LAYOUT.sidebarWidth);
+    expect(renderer.detailBounds).toEqual(
+      new Rectangle(40 + GPU_LAYOUT.sidebarWidth, 70, 300, 200)
+    );
+
+    // Settings asks from view-local space, while the retained orb is attached
+    // to markRoot. The renderer resolves that point through the live viewport.
+    const viewport = new Container();
+    viewport.x = GPU_LAYOUT.sidebarWidth;
+    renderer.root = viewport;
+    const expectedOrbKey = [GPU_LAYOUT.sidebarWidth + 16, 104, 34, '', 'principal', '0'].join('|');
+    let orbResumed = false;
+    internals.avatarOrbs.set('settings', {
+      key: expectedOrbKey,
+      handle: {
+        container: new Container(),
+        resume: () => { orbResumed = true; },
+        setHover: () => {},
+        destroy: () => {},
+      },
+    });
+    renderer.retainAvatarOrb('settings', 16, 104, 34, null, 'principal', false);
+    const orb = internals.avatarOrbs.get('settings');
+    expect(orb?.key).toBe(expectedOrbKey);
+    expect(orbResumed).toBe(true);
+
+    // Exit particles outlive the view and draw on stage. They must use the
+    // captured renderer projection, never the stale local chip rectangle.
+    renderer.root = new Container();
+    renderer.previousFilterBounds.set('filter.gone', {
+      id: 'filter.gone',
+      role: 'button',
+      label: 'Gone',
+      x: 12,
+      y: 20,
+      width: 80,
+      height: 28,
+      active: false,
+      accent: 0x6ea8ff,
+      rendererX: 220,
+      rendererY: 90,
+      rendererWidth: 80,
+      rendererHeight: 28,
+    });
+    setReducedMotionOverrideForTests(false);
+    internals.drawRemovedFilterEffects();
+    const particles = renderer.root.children[0] as Container;
+    const firstParticle = particles.children[0]!;
+    expect(firstParticle.position.x).toBe(260);
+    expect(firstParticle.position.y).toBe(104);
+  });
+});
+
 describe('visibleViews', () => {
   it('is one nav definition: dev path, gated member, platform admin', () => {
     const viewer = {
@@ -848,7 +1116,7 @@ describe('visibleViews', () => {
   it('routes Settings without giving it a tab', () => {
     const auth = makeAuth();
     // A tab-less view must still be routable, or the "unknown view" guard in
-    // GpuApp bounces it back to runs on the render right after it opened.
+    // GpuApp bounces it back to Projects on the render right after it opened.
     expect(visibleViews(auth)).not.toContain('settings');
     expect(isRoutableView('settings', auth)).toBe(true);
     // ...and only where an account exists at all.
@@ -890,6 +1158,40 @@ describe('drawAdmin', () => {
     expect(buttonIds).toContain('admin.invite.org:member.org-2');
     expect(buttonIds).toContain('admin.invite.org:owner.org-2');
     expect(ctx.scrollMax.admin).not.toBeUndefined();
+    const organisationPanel = ctx.panels.find((panel) => panel.parent !== ctx.root);
+    expect(organisationPanel).toBeTruthy();
+    expect(
+      organisationPanel!.parent.toGlobal({
+        x: organisationPanel!.x,
+        y: organisationPanel!.y,
+      }).x
+    ).toBe(viewFrame(1280, 720, 880).innerX);
+  });
+
+  it('stacks invitation controls and identity copy inside a narrow admin frame', () => {
+    const width = 248;
+    const ctx = createRecordingCtx();
+    drawAdmin(
+      ctx,
+      makeSnapshot({ view: 'admin' }, { auth, adminOrganisations: [organisations[0]!] }),
+      width,
+      720
+    );
+    const frame = viewFrame(width, 720, 880);
+    const invites = ctx.buttons.filter((button) => button.id.startsWith('admin.invite.'));
+    expect(invites).toHaveLength(2);
+    for (const button of invites) {
+      const origin = button.parent.toGlobal({ x: button.x, y: button.y });
+      expect(origin.x).toBeGreaterThanOrEqual(frame.innerX);
+      expect(origin.x + button.width).toBeLessThanOrEqual(frame.innerX + frame.innerWidth);
+    }
+    expect(invites[1]!.y).toBeGreaterThan(invites[0]!.y + invites[0]!.height);
+    const orgId = ctx.texts.find((text) => text.value === 'org-1');
+    expect(orgId).toBeTruthy();
+    expect(orgId!.parent.toGlobal({ x: orgId!.x, y: orgId!.y }).x)
+      .toBeGreaterThanOrEqual(frame.innerX);
+    const firstMember = ctx.texts.find((text) => text.value === 'Root');
+    expect(firstMember!.y).toBeGreaterThan(orgId!.y + 10);
   });
 
   it('shows a minted invitation once, URL visible for manual transcription', () => {
@@ -913,6 +1215,37 @@ describe('drawAdmin', () => {
     );
     expect(ctx.texts.some((text) => text.value === invitation.url)).toBe(true);
     expect(ctx.texts.some((text) => text.value.includes('Org Two'))).toBe(true);
+  });
+
+  it('measures a wrapped bearer URL before sizing the narrow invitation panel', () => {
+    const ctx = createRecordingCtx();
+    const url = `https://viz.example/?invite=${'token'.repeat(60)}`;
+    drawAdmin(
+      ctx,
+      makeSnapshot(
+        { view: 'admin' },
+        {
+          auth,
+          adminOrganisations: [],
+          adminInvitation: {
+            token: 'tok',
+            url,
+            orgId: 'org-2',
+            orgName: 'Org Two',
+            role: 'org:member',
+            expiresAt: '2026-08-21T00:00:00.000Z',
+          },
+        }
+      ),
+      248,
+      720
+    );
+    const invitePanel = ctx.panels.find((panel) => panel.parent !== ctx.root)!;
+    expect(invitePanel.height).toBeGreaterThan(84);
+    const copied = ctx.texts.find((text) => text.value.includes('copied to your clipboard'))!;
+    const panelTop = invitePanel.parent.toGlobal({ x: 0, y: invitePanel.y }).y;
+    const copiedTop = copied.parent.toGlobal({ x: copied.x, y: copied.y }).y;
+    expect(copiedTop + copied.node.height).toBeLessThanOrEqual(panelTop + invitePanel.height);
   });
 
   it('renders the platform journal newest-first beside the catalogue ledger', () => {
@@ -1043,21 +1376,76 @@ describe('drawProjects', () => {
     drawProjects(ctx, makeSnapshot({ view: 'projects' }, { auth }), 1280, 720);
     const title = ctx.texts.find((text) => text.value === 'Projects');
     const empty = ctx.texts.find((text) => text.value.includes('connect a GitHub App'));
+    // The title sits inside the column frame; the form is the first content
+    // below it, and has to clear the title's line box.
     expect(title?.y).toBeLessThan(PROJECTS_DOM_FORM_TOP);
-    expect((title?.y ?? 0) + 40).toBeLessThanOrEqual(PROJECTS_DOM_FORM_TOP);
-    expect(empty?.y).toBe(projectsGpuContentTop());
-    expect(empty?.y).toBeGreaterThanOrEqual(PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_HEIGHT);
+    expect(PROJECTS_DOM_FORM_TOP - (title?.y ?? 0)).toBeGreaterThanOrEqual(24);
+    // No project is selected here, so the form is the CREATE form.
+    expect(empty?.y).toBe(projectsGpuContentTop('create'));
+    expect(empty?.y).toBeGreaterThanOrEqual(
+      PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_HEIGHT.create
+    );
     expect(readFileSync('src/viz/client-gl/styles.css', 'utf8')).toMatch(
       new RegExp(`\\.gpu-project-form\\s*\\{[\\s\\S]*?top:\\s*${PROJECTS_DOM_FORM_TOP}px`)
     );
   });
 
+  it('gives the DOM form and the GL project list ONE shared column', () => {
+    // Two cards, one stack. The GL panel centres itself in the content
+    // viewport while the form is `position: fixed`, so the form has to land on
+    // the same two edges by computation — it used to sit flush left at 20 and
+    // the pair stepped sideways from each other.
+    // `projectsColumn` reports the frame's INNER column — where the form and
+    // the list both draw, inside the frame's own padding.
+    const wide = viewFrame(1072, 800, PROJECTS_COLUMN_MAX_WIDTH);
+    expect(projectsColumn(1072)).toEqual({ x: wide.innerX, width: wide.innerWidth });
+    expect(wide.width).toBe(980);
+    // Narrow: the frame gives up width, never its gap.
+    const narrow = viewFrame(600, 800, PROJECTS_COLUMN_MAX_WIDTH);
+    expect(narrow.width).toBe(600 - PROJECTS_COLUMN_INSET);
+    expect(projectsColumn(600)).toEqual({ x: narrow.innerX, width: narrow.innerWidth });
+
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    const form = css.slice(
+      css.indexOf('.gpu-project-form {'),
+      css.indexOf('.gpu-project-form--run')
+    );
+    expect(form).toContain(
+      `min(${PROJECTS_COLUMN_MAX_WIDTH}px, calc(var(--gpu-content) - ${PROJECTS_COLUMN_INSET}px))`
+    );
+    expect(form).toContain(
+      `left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + ${VIEW_FRAME_PAD}px)`
+    );
+    expect(form).toContain(`width: calc(var(--gpu-frame) - ${VIEW_FRAME_PAD * 2}px)`);
+    expect(form).toContain(`top: ${PROJECTS_DOM_FORM_TOP}px`);
+    expect(form).toContain(`height: ${PROJECTS_DOM_FORM_HEIGHT.create}px`);
+    const runForm = css.slice(
+      css.indexOf('.gpu-project-form--run'),
+      css.indexOf('.gpu-project-form .gpu-dom-input')
+    );
+    expect(runForm).toContain(`height: ${PROJECTS_DOM_FORM_HEIGHT.run}px`);
+    expect(projectsGpuContentTop('create', PROJECTS_NARROW_CONTENT_WIDTH - 1)).toBe(
+      PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_NARROW_HEIGHT.create + 16
+    );
+    expect(projectsGpuContentTop('run', PROJECTS_NARROW_CONTENT_WIDTH - 1)).toBe(
+      PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_NARROW_HEIGHT.run + 16
+    );
+    const narrowWindowMax = PROJECTS_NARROW_CONTENT_WIDTH + GPU_LAYOUT.sidebarWidth - 1;
+    expect(css).toContain(`@media (max-width: ${narrowWindowMax}px)`);
+    expect(css).toContain(`height: ${PROJECTS_DOM_FORM_NARROW_HEIGHT.create}px`);
+    expect(css).toContain(`height: ${PROJECTS_DOM_FORM_NARROW_HEIGHT.run}px`);
+    const hint = css.slice(
+      css.indexOf('.gpu-project-hint {'),
+      css.indexOf('/* At this window width')
+    );
+    expect(hint).toContain('overflow-wrap: anywhere');
+    expect(hint).toContain('-webkit-line-clamp: 2');
+  });
+
   it('renders a project row and expands its runs when selected', () => {
     const ctx = createRecordingCtx();
     const projectId = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
-    drawProjects(
-      ctx,
-      makeSnapshot(
+    const snapshot = makeSnapshot(
         { view: 'projects', selectedProjectId: projectId },
         {
           projects: [
@@ -1116,10 +1504,8 @@ describe('drawProjects', () => {
             ],
           },
         }
-      ),
-      1280,
-      720
-    );
+      );
+    drawProjects(ctx, snapshot, 1280, 720);
     expect(ctx.metrics.visibleLabels).toContain('Projects');
     expect(ctx.metrics.visibleLabels.some((label) => label.includes('Weather Lab'))).toBe(true);
     expect(ctx.buttons.some((button) => button.id === `project.select.${projectId}` && button.label === 'Weather Lab')).toBe(true);
@@ -1128,8 +1514,90 @@ describe('drawProjects', () => {
       ctx.buttons.some((button) => button.id === 'project.run.bbbbbbbb-cccc-dddd-eeee-ffffffffffff')
     ).toBe(true);
     expect(ctx.texts.some((text) => String(text.value).includes('401 API key is invalid'))).toBe(true);
+    const boundedRowCopy = ctx.texts.filter((text) =>
+      text.value === 'repo ready' ||
+      String(text.value).startsWith('weather-lab ·') ||
+      String(text.value).startsWith('https://github.com/atoma-org/') ||
+      String(text.value).startsWith('delivered') ||
+      String(text.value).includes('401 API key is invalid')
+    );
+    expect(boundedRowCopy.length).toBeGreaterThanOrEqual(5);
+    for (const label of boundedRowCopy) {
+      expect(label.options).toMatchObject({ singleLine: true });
+    }
     expect(ctx.scrollMax.projects).toBeGreaterThanOrEqual(0);
     expect(ctx.scrollMax.projects).toBeLessThan(200);
+
+    // The project list lives in a centred scroll pane. Its draw coordinates
+    // are pane-local, so applying the real Pixi ancestry must land on the same
+    // left edge as the DOM form. Absolute coordinates here would add frame.x
+    // twice while every raw-number assertion still passed.
+    const listPanel = ctx.panels.find((panel) => panel.parent !== ctx.root);
+    expect(listPanel).toBeTruthy();
+    const listGlobal = listPanel!.parent.toGlobal({ x: listPanel!.x, y: listPanel!.y });
+    expect(listGlobal.x).toBe(projectsColumn(1280).x);
+    expect(listPanel!.parent.toGlobal({ x: 0, y: 0 }).y).toBe(
+      projectsGpuContentTop('run')
+    );
+
+    // The status column is ANCHORED to the card's inner right edge, not left
+    // aligned somewhere in the middle of the row. It used to be capped at
+    // `columnX + 560`, which on any panel past ~700px floated the verdict a
+    // few hundred pixels short of the border it belongs against.
+    const column = projectsColumn(1280);
+    // The status sits inside the panel border, while the label surface gives
+    // that right-hand column its own horizontal space.
+    const rowRight = column.x + column.width - 18;
+    const rightEdge = rowRight - PROJECTS_ROW_PAD;
+    const staleCap = column.x + 18 + 560;
+    const repositoryUrl = ctx.texts.find((text) =>
+      String(text.value).startsWith('https://github.com/atoma-org/')
+    );
+    expect(String(repositoryUrl?.value)).toMatch(/…$/);
+    for (const [description, label] of [
+      ['repo ready', ctx.texts.find((text) => text.value === 'repo ready')],
+      ['bounded repository URL', repositoryUrl],
+    ] as const) {
+      expect(label, `missing status label: ${description}`).toBeTruthy();
+      expect(label!.parent.toGlobal({ x: label!.x, y: label!.y }).x).toBe(rightEdge);
+      expect(label!.node.anchor.x).toBe(1);
+    }
+    const verdict = ctx.texts.find((text) => String(text.value).startsWith('delivered'));
+    expect(verdict!.parent.toGlobal({ x: verdict!.x, y: verdict!.y }).x).toBe(rightEdge);
+    expect(verdict!.node.anchor.x).toBe(1);
+    expect(rightEdge).toBeGreaterThan(staleCap);
+    const wideProjectButton = ctx.buttons.find(
+      (candidate) => candidate.id === `project.select.${projectId}`
+    )!;
+    const wideButtonOrigin = wideProjectButton.parent.toGlobal({
+      x: wideProjectButton.x,
+      y: wideProjectButton.y,
+    });
+    expect(wideButtonOrigin.x + wideProjectButton.width).toBeLessThan(rightEdge);
+
+    // The run goal gives way before the status column on a narrow pane; no
+    // forced minimum may push its button through the frame edge.
+    const narrowWidth = 248;
+    const narrow = createRecordingCtx();
+    drawProjects(narrow, snapshot, narrowWidth, 720);
+    const narrowFrame = viewFrame(narrowWidth, 720, PROJECTS_COLUMN_MAX_WIDTH);
+    const projectButton = narrow.buttons.find(
+      (candidate) => candidate.id === `project.select.${projectId}`
+    )!;
+    const narrowStatus = narrow.texts.find((text) => text.value === 'repo ready')!;
+    expect(narrowStatus.parent.toGlobal({ x: narrowStatus.x, y: narrowStatus.y }).y)
+      .toBeGreaterThan(
+        projectButton.parent.toGlobal({ x: projectButton.x, y: projectButton.y }).y +
+        projectButton.height
+      );
+    for (const button of narrow.buttons.filter((candidate) => candidate.id.startsWith('project.run.'))) {
+      const origin = button.parent.toGlobal({ x: button.x, y: button.y });
+      expect(button.width).toBeGreaterThanOrEqual(100);
+      expect(origin.x).toBeGreaterThanOrEqual(narrowFrame.innerX);
+      expect(origin.x + button.width).toBeLessThanOrEqual(
+        narrowFrame.innerX + narrowFrame.innerWidth
+      );
+    }
   });
 });
 
@@ -1269,6 +1737,25 @@ describe('drawSettings', () => {
     expect(active).toContain('settings.model.3.default');
   });
 
+  it('stacks tier labels and keeps every model choice inside a narrow frame', () => {
+    const width = 248;
+    const ctx = createRecordingCtx();
+    drawSettings(
+      ctx,
+      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
+      width,
+      720
+    );
+    const frame = viewFrame(width, 720, 720);
+    expect(ctx.filterButtons).toHaveLength(12);
+    for (const button of ctx.filterButtons) {
+      const origin = button.parent.toGlobal({ x: button.x, y: button.y });
+      expect(origin.x).toBeGreaterThanOrEqual(frame.innerX);
+      expect(origin.x + button.width).toBeLessThanOrEqual(frame.innerX + frame.innerWidth);
+    }
+    expect(ctx.scrollMax.settings).toBeGreaterThan(0);
+  });
+
   it('shows the organisation card with members, roles and the admin chip', () => {
     const ctx = createRecordingCtx();
     drawSettings(
@@ -1380,9 +1867,15 @@ describe('drawSettings', () => {
       1280,
       720
     );
-    expect(ctx.panels).toHaveLength(2);
-    const framesLayer = ctx.panels[0]?.parent;
-    expect(ctx.panels[1]?.parent).toBe(framesLayer);
+    // The view's own column frame is drawn straight into the root; the two
+    // panels under test are the ones inside the scrolled frames layer.
+    const inner = ctx.panels.filter((panel) => panel.parent !== ctx.root);
+    expect(inner).toHaveLength(2);
+    const framesLayer = inner[0]?.parent;
+    expect(inner[1]?.parent).toBe(framesLayer);
+    expect(
+      inner[0]!.parent.toGlobal({ x: inner[0]!.x, y: inner[0]!.y }).x
+    ).toBe(viewFrame(1280, 720, 720).innerX);
     // ...and the rows went somewhere else, which is what "behind" means here.
     const memberLabel = ctx.texts.find((text) => text.value === 'Charles Babbage');
     expect(memberLabel?.parent).not.toBe(framesLayer);
@@ -1394,7 +1887,13 @@ describe('drawSettings', () => {
   it('keeps the GPU content clear of the DOM name form', () => {
     // The form is `position: fixed` DOM over the canvas; content that started
     // above its bottom edge would render underneath it.
-    expect(settingsGpuContentTop()).toBeGreaterThan(146 + 96);
+    expect(settingsGpuContentTop()).toBeGreaterThan(
+      SETTINGS_DOM_FORM_TOP + SETTINGS_DOM_FORM_HEIGHT
+    );
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    const form = css.slice(css.indexOf('.gpu-settings-form {'));
+    expect(form).toContain(`top: ${SETTINGS_DOM_FORM_TOP}px`);
+    expect(form).toContain(`height: ${SETTINGS_DOM_FORM_HEIGHT}px`);
   });
 
   it('round-trips a model cell id and shortens model ids for the chips', () => {
@@ -1631,6 +2130,11 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
     const tall = createRecordingCtx();
     drawBurnin(tall, makeSnapshot({ view: 'burnin' }, data), WIDTH, 1400);
     expect(tall.scrollMax.burnin).toBe(0);
+    const firstFilter = tall.filterButtons[0];
+    expect(firstFilter).toBeTruthy();
+    expect(
+      firstFilter!.parent.toGlobal({ x: firstFilter!.x, y: firstFilter!.y }).x
+    ).toBe(viewFrame(WIDTH, 1400).innerX);
 
     // The table shrinks with the window (availableRows), so overflow starts
     // only once the fixed filter/stat/chart stack itself exceeds the height.
@@ -2110,7 +2614,11 @@ describe('the run prompt carries its own guidance', () => {
     // last. Without the layer the backdrop would paint over the paragraph.
     const ctx = drawGuidance(LAUNCH_PROFILE);
     const content = ctx.texts.find((text) => text.value === t('launch.help'))!.parent;
-    const detached = ctx.panels.filter((panel) => panel.parent !== content);
+    // The view's own column frame is a panel as well, so select by SHAPE:
+    // the backdrop is the one sitting in a reserved layer under the content.
+    const detached = ctx.panels.filter(
+      (panel) => panel.parent !== content && panel.parent.parent === content
+    );
     expect(detached).toHaveLength(1);
     const backdrop = detached[0]!;
     // The reserved layer is a child of the same content container, and it is
@@ -2146,6 +2654,27 @@ describe('drawRuns behavior', () => {
       },
     ];
   }
+
+  it('keeps the historical 1050px window threshold for the detail pane', () => {
+    const event = makeLlmEvent('selected', { role: 'execute' });
+    const visible = createRecordingCtx();
+    drawRuns(
+      visible,
+      makeSnapshot({ selectedEventId: event.id }, { run: makeRun([event]) }),
+      RUNS_TWO_PANE_MIN_WIDTH,
+      HEIGHT
+    );
+    expect(visible.detailBounds).not.toBeNull();
+
+    const narrow = createRecordingCtx();
+    drawRuns(
+      narrow,
+      makeSnapshot({ selectedEventId: event.id }, { run: makeRun([event]) }),
+      RUNS_TWO_PANE_MIN_WIDTH - 1,
+      HEIGHT
+    );
+    expect(narrow.detailBounds).toBeNull();
+  });
 
   it('labels the role filter chip from the i18n catalog', () => {
     const ctx = createRecordingCtx();
@@ -2412,6 +2941,10 @@ describe('drawRuns behavior', () => {
       height: 27,
       active: true,
       accent: 0,
+      rendererX: 20,
+      rendererY: 200,
+      rendererWidth: 90,
+      rendererHeight: 27,
     });
     drawRuns(
       ctx,

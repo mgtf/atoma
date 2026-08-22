@@ -71,6 +71,14 @@ Naming convention: `domain.action`. "Push" means a Web Push notification;
 action; `run.finished` keeps pushing to the requester only; the admin push
 list stays short and curated — everything else lives in the audit journal.
 
+**Permission timing**: members see the browser permission offer during their
+first live run, when delivery notifications have immediate value. Platform
+admins may never launch a run, so they see the offer after login for the
+curated platform-alert list above. A member's “not now” is browser-persistent;
+an admin's is session-scoped so a later session can ask again. Neither policy
+widens the routing matrix: in particular, admins do not receive every
+`run.finished` push.
+
 ## The events layer: yes, and separate from the ledger
 
 The existing ledger (`lifecycle_events`, `src/core/ledger.ts`) is a

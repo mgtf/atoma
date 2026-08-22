@@ -110,12 +110,75 @@ npm run viz:mark-turn:analyze
   outside the cache so live data, identity state and GitHub deliveries cannot
   be hidden by an offline shell.
 - Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
+- ONE frame style, and ONE definition for the SINGLE-COLUMN views:
+  `renderer/view-frame.ts`. Projects/Admin/Settings/Burn-in use its elevation-2
+  `panel()`, title and `VIEW_FRAME_CONTENT_TOP`; the established split views
+  (Registry/Skills/Docs/Runs) keep their own pane geometry. The app had grown
+  two single-column conventions, one framed and one with a title floating at
+  y = 78, so one product carried two ideas of what a surface is. A DOM overlay
+  that sits inside a column uses `.gpu-panel-skin`, the sole CSS restatement of
+  `panel()`'s fill, border, radius and elevation-2 resting shadows (the GL
+  shadows swing with the pointer light). Do not add a per-form skin beside it.
+- The app OPENS on Projects, the authenticated launch surface. Runs is where
+  you go to watch what you started, which is a second step, not an arrival. The
+  unroutable-view fallback lands on Projects too. On the ungated developer path
+  project routes do not exist, so Projects shows its explanatory empty state
+  and the DOM mutation form is absent.
+- The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.
+  `visibleViews` remains the ONE definition of which tabs a viewer gets; the
+  rail only groups them, and a test holds the group list to it so a new view
+  cannot reach the nav ungrouped and silently vanish. Settings has no rail row
+  on purpose — the account menu is its entrance, and a second one would put one
+  job in two places.
+- The renderer draws in two spaces. `stage` is the persistent scene root;
+  `root` is the container the CURRENT pass draws into. Chrome (header, rail,
+  overlays, account menu) draws into the stage, and each view draws into a
+  viewport layer offset by `sidebarWidthForViewport(width)`. That layer is
+  POSITIONED BEFORE the view draws, and the ordering is load-bearing: controls resolve
+  their own screen geometry with `parent.toGlobal()`, sometimes lazily from a
+  closure on a later pointer event. Reparenting a finished view left those
+  closures holding the old ancestor — the tuning slider's drag then mapped the
+  pointer against a track 208px from where it was drawn, and clamped to the
+  range's end on first press. So views keep drawing from x = 0 and nothing
+  shifts them afterwards. `recordHitTarget` projects every diagnostic/a11y hit
+  target through its live parent with `toGlobal()`, including pane centring and
+  scroll; raw x/y must never be pushed into `metrics.hitTargets`. Two other
+  values still escape Pixi's transform: `detailBounds` is translated once by
+  the view offset because the wheel router compares its plain Rectangle with a
+  page position; a retained avatar orb sits on `markRoot`, so
+  `retainAvatarOrb` resolves the caller's coordinates through `this.root` and
+  keys the retention on the resolved pair. Any DOM overlay that sits over a
+  VIEW is positioned from the `--gpu-sidebar` CSS variable, whose CSS clamp a
+  test holds equal to `sidebarWidthForViewport`: the rail shrinks from 208px
+  to a 112px legibility floor before stealing the view's 320px minimum. The
+  run search input is not one of them, it lives in the header
+  band. View DOM overlays are removed while the Pixi account menu is open so
+  their higher CSS layer cannot intercept its controls. Short viewports
+  compact the rail, then drop group headings before they drop a destination.
+  The accessibility bridge is visually clipped only at rest; `:focus-within`
+  reveals it as a bounded command palette so keyboard focus is never invisible.
+- The project form is ONE form with TWO shapes, never one that grows: the
+  create fields with no project selected, the run prompt with one. Selecting is
+  a TOGGLE — reactivating the selected GL row or its accessible DOM mirror
+  deselects it — and that is the route back to the create form, which is why
+  Projects must NOT auto-select the first project. Auto-selection made creating
+  a second project unreachable and would have re-selected on the render right
+  after every deselect. Only the repair remains: a selection whose project is
+  gone falls back to the first that exists. The GitHub connect link stays
+  outside the switch, so an organisation with no installation can always reach
+  it. The create/run form heights are explicit shared TS/CSS contracts in both
+  wide and stacked-narrow modes; GPU rows start below the matching height.
+  Compact GL project and run rows stack status metadata below their full-width
+  targets rather than allowing fixed status columns to cover the label.
+  Variable row copy is strictly single-line and fitted only after Pixi measures
+  the real glyphs; character-count truncation alone is not a geometry bound.
 - There is NO Launch tab in the GPU client. A tab that could only DESCRIBE how
   to phrase a goal, beside a Projects tab that actually starts runs, split one
   job over two places; the family guidance (`/api/profiles`, with a
-  `launch.help.<id>` catalog override per family) renders inside the project
-  run form, on the same condition as the prompt textarea it describes, and its
-  examples fill that prompt. `/api/profiles` stays a READER: it is ungated, so
+  `launch.help.<id>` catalog override per family) renders in the GL guidance
+  panel directly below the project run form, on the same condition as the
+  prompt textarea it describes, and its examples fill that prompt.
+  `/api/profiles` stays a READER: it is ungated, so
   it must never gain launch power — browser launches live on the authenticated
   project routes, where a session the run does not hold is the boundary. The
   shell path for an instance with no organisations is the `launch` docs theme.
@@ -153,9 +216,17 @@ npm run viz:mark-turn:analyze
   (node:crypto only — no web-push dependency), pinned by the RFC 8291
   Appendix A known-answer test. Payloads are bounded and secret-free
   (status title, bounded excerpt, same-origin path — never trace prose).
-  The browser permission ask lives in the FIRST LIVE RUN
-  (`shouldOfferPushPrompt`), never in the login or signup flow — login
-  stays zero-friction; the run is where the value shows. The subscriber's
+  The browser permission ask lives in the FIRST LIVE RUN for members
+  (`shouldOfferPushPrompt`), never in their login or signup flow — login
+  stays zero-friction; the run is where the value shows. PLATFORM ADMINS
+  are the one exception: push routes target them for a CURATED set of
+  instance-wide platform events (not every run) whether or not they ever
+  launch one, so an unsubscribed admin is an admin whose alerts go nowhere.
+  Admins are asked on their first console entry after login and their
+  "not now" is session-scoped
+  (`pushPromptStorage`: sessionStorage for admins, localStorage for members),
+  so each new session asks again until the browser permission itself settles.
+  The subscriber's
   language rides the subscription (`locale` column, captured at subscribe
   time) because a push is generated from an event with no request left to
   read a header off; rendering uses the server-side frozen `PUSH_COPY`

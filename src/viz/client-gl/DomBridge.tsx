@@ -1,6 +1,12 @@
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
-import type { RunIndexEntry, VizGitHubInstallation } from '../client/types.js';
-import { useGpuStore, type ViewName } from './store.js';
+import type { RunIndexEntry, VizGitHubInstallation, VizProject } from '../client/types.js';
+import type { ComponentProps } from 'react';
+import type { AuthUiSnapshot } from './AuthControls.js';
+import {
+  projectSelectionAfterActivate,
+  useGpuStore,
+  type ViewName,
+} from './store.js';
 
 const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
 
@@ -13,12 +19,14 @@ export function DomBridge({
   onSelectRun,
   onEnter,
   githubInstallations = [],
+  projects = [],
   onCreateProject,
   onStartRun,
   projectBusy = false,
   projectError = null,
-  selectedProjectName = null,
+  projectActionsEnabled = true,
   pushPrompt = 'hidden',
+  pushAdmin = false,
   onEnablePush,
   onDismissPush,
   onRenameAccount,
@@ -26,7 +34,7 @@ export function DomBridge({
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
-  /** Nav tabs for this viewer — computed once by `visibleViews`, shared with the GL header. */
+  /** Nav tabs for this viewer — computed once by `visibleViews`, shared with the GL rail. */
   views?: ViewName[];
   /** Non-null when the arrival gate is a login: real anchors, one per provider. */
   loginLinks?: { id: string; label: string; href: string }[] | null;
@@ -34,14 +42,20 @@ export function DomBridge({
   onSelectRun: (id: string) => void;
   onEnter?: () => void;
   githubInstallations?: VizGitHubInstallation[];
+  /** Minimal project index mirrored for keyboard and assistive navigation. */
+  projects?: readonly Pick<VizProject, 'projectId' | 'name'>[];
   onCreateProject?: () => void;
   onStartRun?: () => void;
   projectBusy?: boolean;
   projectError?: string | null;
-  selectedProjectName?: string | null;
-  /** First-live-run notification offer; real DOM buttons because the browser
-   *  permission request needs a user gesture on an actual element. */
+  /** Project mutations exist only behind the auth gate. */
+  projectActionsEnabled?: boolean;
+  /** Notification offer (first live run for members, login for platform
+   *  admins); real DOM buttons because the browser permission request needs a
+   *  user gesture on an actual element. */
   pushPrompt?: 'hidden' | 'offer' | 'busy' | 'error';
+  /** Admins see the standing-duty copy — no run may be underway after login. */
+  pushAdmin?: boolean;
   onEnablePush?: () => void;
   onDismissPush?: () => void;
   /** Settings: the display name is a real input, so its submit lives here. */
@@ -52,6 +66,8 @@ export function DomBridge({
   const entered = useGpuStore((state) => state.entered);
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
+  const selectedProjectId = useGpuStore((state) => state.selectedProjectId);
+  const accountMenuOpen = useGpuStore((state) => state.accountMenuOpen);
   const focusedInput = useGpuStore((state) => state.focusedInput);
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
@@ -64,14 +80,24 @@ export function DomBridge({
   const setRunPickerScrollY = useGpuStore((state) => state.setRunPickerScrollY);
   const selectedGithubInstallationId = useGpuStore((state) => state.selectedGithubInstallationId);
   const selectGithubInstallation = useGpuStore((state) => state.selectGithubInstallation);
+  const selectProject = useGpuStore((state) => state.selectProject);
   const activeGithubInstallations = githubInstallations.filter(
     (installation) => installation.status === 'active'
   );
   const selectedRun = runs.find((run) => run.id === selectedRunId);
+  const selectedProjectName =
+    projects.find((project) => project.projectId === selectedProjectId)?.name ?? null;
+  const selectedProjectLabel = selectedProjectName && selectedProjectName.length > 48
+    ? `${selectedProjectName.slice(0, 47)}…`
+    : selectedProjectName;
   const runValue = focusedInput === 'run' ? search.run : selectedRun?.label ?? '';
   const filteredRuns = runs.filter((run) =>
     matchesSearchQuery(runSearchText(run), search.run)
   );
+  // The account menu is Pixi chrome while text-entry controls are real DOM
+  // above the canvas. Remove view overlays while the menu is open, otherwise
+  // an input/form can intercept clicks on the menu that visibly sits over it.
+  const viewOverlaysVisible = !accountMenuOpen;
 
   if (!entered) {
     return (
@@ -124,9 +150,27 @@ export function DomBridge({
           {t(`nav.${view}`)}
           {selectedRun ? ` — ${selectedRun.label}` : ''}
         </div>
+        {projectActionsEnabled && view === 'projects' && projects.length > 0 ? (
+          <section aria-label={t('nav.projects')}>
+            {projects.map((project) => (
+              <button
+                key={project.projectId}
+                type="button"
+                aria-pressed={project.projectId === selectedProjectId}
+                onClick={() => {
+                  selectProject(
+                    projectSelectionAfterActivate(selectedProjectId, project.projectId)
+                  );
+                }}
+              >
+                {project.name}
+              </button>
+            ))}
+          </section>
+        ) : null}
       </div>
 
-      {view === 'runs' ? (
+      {viewOverlaysVisible && view === 'runs' ? (
         <input
           className="gpu-dom-input gpu-run-input"
           aria-label={t('runs.search', { count: runs.length })}
@@ -178,7 +222,7 @@ export function DomBridge({
           }}
         />
       ) : null}
-      {view === 'registry' ? (
+      {viewOverlaysVisible && view === 'registry' ? (
         <input
           className="gpu-dom-input gpu-view-search"
           aria-label={t('nav.filterAtoms')}
@@ -189,7 +233,7 @@ export function DomBridge({
           onChange={(event) => setSearch('registry', event.target.value)}
         />
       ) : null}
-      {view === 'skills' ? (
+      {viewOverlaysVisible && view === 'skills' ? (
         <input
           className="gpu-dom-input gpu-view-search"
           aria-label={t('nav.filterSkills')}
@@ -200,43 +244,16 @@ export function DomBridge({
           onChange={(event) => setSearch('skills', event.target.value)}
         />
       ) : null}
-      {view === 'projects' ? (
+      {viewOverlaysVisible && projectActionsEnabled && view === 'projects' ? (
         <form
-          className={`gpu-project-form${selectedProjectName ? ' gpu-project-form--run' : ''}`}
+          className={`gpu-panel-skin gpu-project-form${selectedProjectName ? ' gpu-project-form--run' : ''}`}
           onSubmit={(event) => event.preventDefault()}
         >
-          <input
-            className="gpu-dom-input gpu-project-name"
-            aria-label={t('projects.name')}
-            value={search.projectName}
-            placeholder={t('projects.name')}
-            onFocus={() => setFocusedInput('projectName')}
-            onBlur={() => setFocusedInput(null)}
-            onChange={(event) => setSearch('projectName', event.target.value)}
-          />
-          <input
-            className="gpu-dom-input gpu-project-repo"
-            aria-label={t('projects.repository')}
-            value={search.projectRepository}
-            placeholder={t('projects.repository')}
-            onFocus={() => setFocusedInput('projectRepository')}
-            onBlur={() => setFocusedInput(null)}
-            onChange={(event) => setSearch('projectRepository', event.target.value)}
-          />
-          <select
-            className="gpu-dom-input gpu-project-install"
-            aria-label={t('projects.installation')}
-            value={selectedGithubInstallationId ?? ''}
-            onChange={(event) => selectGithubInstallation(event.target.value || null)}
-          >
-            <option value="">{t('projects.installation')}</option>
-            {activeGithubInstallations.map((installation) => (
-              <option key={installation.installationId} value={installation.installationId}>
-                {installation.accountLogin} ({installation.targetType})
-              </option>
-            ))}
-          </select>
           {selectedProjectName ? (
+            // ONE job at a time. A selected project means the next act is a
+            // run on it, so the create fields step aside — they belong to a
+            // project that does not exist yet. Clicking the selected row
+            // again deselects and brings them back.
             <textarea
               className="gpu-dom-input gpu-project-prompt"
               aria-label={t('projects.prompt')}
@@ -246,31 +263,75 @@ export function DomBridge({
               onBlur={() => setFocusedInput(null)}
               onChange={(event) => setSearch('projectPrompt', event.target.value)}
             />
-          ) : null}
+          ) : (
+            <>
+              <input
+                className="gpu-dom-input gpu-project-name"
+                aria-label={t('projects.name')}
+                value={search.projectName}
+                placeholder={t('projects.name')}
+                maxLength={120}
+                onFocus={() => setFocusedInput('projectName')}
+                onBlur={() => setFocusedInput(null)}
+                onChange={(event) => setSearch('projectName', event.target.value)}
+              />
+              <input
+                className="gpu-dom-input gpu-project-repo"
+                aria-label={t('projects.repository')}
+                value={search.projectRepository}
+                placeholder={t('projects.repository')}
+                onFocus={() => setFocusedInput('projectRepository')}
+                onBlur={() => setFocusedInput(null)}
+                onChange={(event) => setSearch('projectRepository', event.target.value)}
+              />
+              <select
+                className="gpu-dom-input gpu-project-install"
+                aria-label={t('projects.installation')}
+                value={selectedGithubInstallationId ?? ''}
+                onChange={(event) => selectGithubInstallation(event.target.value || null)}
+              >
+                <option value="">{t('projects.installation')}</option>
+                {activeGithubInstallations.map((installation) => (
+                  <option key={installation.installationId} value={installation.installationId}>
+                    {installation.accountLogin} ({installation.targetType})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <div className="gpu-project-actions">
+            {/* Outside the mode switch on purpose: an organisation with no
+                installation must be able to reach the connect flow even while
+                a project from a revoked one is selected. */}
             {activeGithubInstallations.length === 0 ? (
               <a href="/auth/github/connect">{t('projects.connectGithub')}</a>
             ) : null}
-            <button type="button" disabled={projectBusy} onClick={() => onCreateProject?.()}>
-              {t('projects.create')}
-            </button>
-            {selectedProjectName ? (
-              <button type="button" disabled={projectBusy} onClick={() => onStartRun?.()}>
-                {t('projects.startRunOn', { name: selectedProjectName })}
+            {selectedProjectLabel ? (
+              <button
+                type="button"
+                disabled={projectBusy}
+                title={selectedProjectName ?? undefined}
+                onClick={() => onStartRun?.()}
+              >
+                {t('projects.startRunOn', { name: selectedProjectLabel })}
               </button>
-            ) : null}
+            ) : (
+              <button type="button" disabled={projectBusy} onClick={() => onCreateProject?.()}>
+                {t('projects.create')}
+              </button>
+            )}
             {projectError ? <span role="alert">{projectError}</span> : null}
           </div>
           <p className="gpu-project-hint">
-            {selectedProjectName
-              ? t('projects.actionsHint.ready', { name: selectedProjectName })
+            {selectedProjectLabel
+              ? t('projects.actionsHint.ready', { name: selectedProjectLabel })
               : t('projects.actionsHint.new')}
           </p>
         </form>
       ) : null}
-      {view === 'settings' ? (
+      {viewOverlaysVisible && view === 'settings' ? (
         <form
-          className="gpu-settings-form"
+          className="gpu-panel-skin gpu-settings-form"
           onSubmit={(event) => {
             event.preventDefault();
             const next = search.displayName.trim();
@@ -296,8 +357,12 @@ export function DomBridge({
         </form>
       ) : null}
       {pushPrompt !== 'hidden' ? (
-        <div className="gpu-push-prompt" role="dialog" aria-label={t('push.title')}>
-          <p>{t('push.body')}</p>
+        <div
+          className="gpu-push-prompt"
+          role="dialog"
+          aria-label={t(pushAdmin ? 'push.admin.title' : 'push.title')}
+        >
+          <p>{t(pushAdmin ? 'push.admin.body' : 'push.body')}</p>
           {pushPrompt === 'error' ? <span role="alert">{t('push.error')}</span> : null}
           <div className="gpu-push-prompt-actions">
             <button
@@ -318,5 +383,25 @@ export function DomBridge({
         </div>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The production bridge boundary. Keeping auth-derived flags here makes the
+ * wiring independently renderable: an ungated shell cannot accidentally
+ * regain project mutations, and admin alert copy follows the actual viewer.
+ */
+export function GpuDomBridge({
+  authSnapshot,
+  ...props
+}: Omit<ComponentProps<typeof DomBridge>, 'projectActionsEnabled' | 'pushAdmin'> & {
+  authSnapshot: AuthUiSnapshot | null;
+}) {
+  return (
+    <DomBridge
+      {...props}
+      projectActionsEnabled={authSnapshot !== null}
+      pushAdmin={authSnapshot?.viewer.platformAdmin === true}
+    />
   );
 }

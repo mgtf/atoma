@@ -5,6 +5,7 @@ import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
+import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from '../view-frame.js';
 
 /**
  * Projects view: the organisation's projects, their GitHub repository state
@@ -22,20 +23,55 @@ import { createScrollPane } from '../scroll-pane.js';
  */
 
 const ROW_HEIGHT = 54;
+const COMPACT_ROW_HEIGHT = 86;
+const COMPACT_PROJECT_PANEL_WIDTH = 400;
 const RUN_ROW_HEIGHT = 34;
 const RUN_ERROR_EXTRA = 14;
-const HEADER_Y = 78;
 const STATUS_COL = 108;
-/** Must match `.gpu-project-form { top }` in styles.css. */
-export const PROJECTS_DOM_FORM_TOP = 128;
-export const PROJECTS_DOM_FORM_HEIGHT = 212;
+/**
+ * The repository link under the status needs more room than the status word:
+ * at 108 it wrapped mid-URL. Reserved by the name/slug column on every row, so
+ * a row that has a link and one that does not keep the same left column.
+ */
+const REPO_URL_COL = 220;
+/** Breathing room between the status column and the row's right border. */
+export const PROJECTS_ROW_PAD = 14;
+/**
+ * Must match `.gpu-project-form { top }` in styles.css. The form is the first
+ * thing inside the column frame, so this is the frame's own content top.
+ */
+export const PROJECTS_DOM_FORM_TOP =
+  GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + VIEW_FRAME_CONTENT_TOP;
+/**
+ * The form has two shapes, so it has two heights. With no project selected it
+ * is the create fields; with one it is the run prompt. Measuring one height
+ * for both left a band of dead space under whichever form was shorter.
+ */
+export const PROJECTS_DOM_FORM_HEIGHT = { create: 140, run: 184 } as const;
+/** Below this content width the DOM form stacks fields instead of squeezing them. */
+export const PROJECTS_NARROW_CONTENT_WIDTH = 480;
+/** Must match the narrow media query in styles.css. */
+export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 272, run: 248 } as const;
 
-export function projectsGpuContentTop(): number {
-  return PROJECTS_DOM_FORM_TOP + PROJECTS_DOM_FORM_HEIGHT + 16;
+export type ProjectsFormMode = keyof typeof PROJECTS_DOM_FORM_HEIGHT;
+
+export function projectsGpuContentTop(
+  mode: ProjectsFormMode,
+  contentWidth = Number.POSITIVE_INFINITY
+): number {
+  const heights = contentWidth < PROJECTS_NARROW_CONTENT_WIDTH
+    ? PROJECTS_DOM_FORM_NARROW_HEIGHT
+    : PROJECTS_DOM_FORM_HEIGHT;
+  return PROJECTS_DOM_FORM_TOP + heights[mode] + 16;
 }
 
-function runRowHeight(run: VizProjectRun): number {
-  return run.error ? RUN_ROW_HEIGHT + RUN_ERROR_EXTRA : RUN_ROW_HEIGHT;
+function runRowHeight(run: VizProjectRun, compact = false): number {
+  if (!compact) return run.error ? RUN_ROW_HEIGHT + RUN_ERROR_EXTRA : RUN_ROW_HEIGHT;
+  const hasSecondLine = Boolean(
+    run.error ||
+    (run.publication?.status === 'published' && run.publication.commitSha)
+  );
+  return hasSecondLine ? 68 : 54;
 }
 
 const STATUS_COLORS: Record<string, number> = {
@@ -159,25 +195,43 @@ function drawPromptGuidance(
   return height + GUIDANCE_GAP;
 }
 
+/** Widest the Projects column ever gets, shared with `.gpu-project-form`. */
+export const PROJECTS_COLUMN_MAX_WIDTH = 980;
+/** Horizontal inset the column leaves inside the content viewport, in total. */
+export const PROJECTS_COLUMN_INSET = GPU_LAYOUT.gap * 2;
+
+/**
+ * ONE content column for this view. The DOM form and the GL panels below it
+ * are two cards in a single stack, and they only read as one while they agree
+ * on both edges — the form used to sit flush left at 20 while the list centred
+ * itself, so the two cards stepped sideways from each other. `.gpu-project-form`
+ * computes exactly this in CSS; a test holds the two constants together.
+ */
+export function projectsColumn(viewportWidth: number): { x: number; width: number } {
+  const frame = viewFrame(viewportWidth, 0, PROJECTS_COLUMN_MAX_WIDTH);
+  return { x: frame.innerX, width: frame.innerWidth };
+}
+
 export function projectLayout(
   viewportWidth: number,
   projectCount: number,
   selectedIndex: number,
   selectedRuns: readonly VizProjectRun[]
 ) {
-  const panelWidth = Math.min(980, viewportWidth - GPU_LAYOUT.gap * 2);
-  const x = (viewportWidth - panelWidth) / 2;
+  const { x, width: panelWidth } = projectsColumn(viewportWidth);
+  const compactRunRows = panelWidth < COMPACT_PROJECT_PANEL_WIDTH;
+
   const listTop = 12;
   let cursor = listTop;
   for (let index = 0; index < projectCount; index++) {
-    cursor += ROW_HEIGHT;
+    cursor += compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     if (index !== selectedIndex) continue;
     if (selectedRuns.length === 0) {
       cursor += 24;
       continue;
     }
     cursor += 26;
-    for (const run of selectedRuns) cursor += runRowHeight(run);
+    for (const run of selectedRuns) cursor += runRowHeight(run, compactRunRows);
   }
   const contentBottom = cursor + 16;
   return { x, panelWidth, listTop, contentBottom };
@@ -195,7 +249,6 @@ export function drawProjects(
   const runsByProject = snapshot.data.projectRuns ?? {};
   const scroll = snapshot.state.scrollY.projects;
 
-  ctx.text(ctx.root, snapshot.t('nav.projects'), 20, HEADER_Y, { size: 18, weight: '700' });
   const selectedProject = projects.find((p) => p.projectId === snapshot.state.selectedProjectId);
   const summary = selectedProject
     ? snapshot.t('projects.summarySelected', {
@@ -203,12 +256,10 @@ export function drawProjects(
         name: selectedProject.name,
       })
     : snapshot.t('projects.summary', { count: projects.length });
-  ctx.text(ctx.root, summary, 20 + 200, HEADER_Y + 6, {
-    size: 11,
-    color: GPU_COLORS.muted,
-  });
+  const frame = viewFrame(width, height, PROJECTS_COLUMN_MAX_WIDTH);
+  drawViewFrame(ctx, frame, snapshot.t('nav.projects'), summary);
 
-  const contentTop = projectsGpuContentTop();
+  const contentTop = projectsGpuContentTop(selectedProject ? 'run' : 'create', width);
   if (projects.length === 0) {
     // Ungated deployments have no organisations, so projects cannot exist and
     // their API routes are absent — say that, instead of coaching the viewer
@@ -218,20 +269,22 @@ export function drawProjects(
       : installations.length === 0
         ? snapshot.t('projects.emptyNoInstallation')
         : snapshot.t('projects.empty');
-    ctx.text(ctx.root, connectHint, 20, contentTop, {
+    ctx.text(ctx.root, connectHint, frame.innerX, contentTop, {
       size: 13,
       color: GPU_COLORS.muted,
-      width: width - 60,
+      width: frame.innerWidth,
     });
     ctx.scrollMax.projects = 0;
     return;
   }
 
+  // Clipped to the FRAME, not the viewport: rows that scrolled past the
+  // column's bottom edge would otherwise draw over the page beneath it.
   const pane = createScrollPane(ctx.root, {
-    x: 0,
+    x: frame.x,
     y: contentTop,
-    width,
-    height: Math.max(0, height - contentTop),
+    width: frame.width,
+    height: Math.max(0, frame.bottom - VIEW_FRAME_PAD - contentTop),
     scrollY: scroll,
     bottomPadding: 24,
   });
@@ -243,7 +296,11 @@ export function drawProjects(
     ? projects.findIndex((project) => project.projectId === selectedProject.projectId)
     : -1;
   const selectedRuns = selectedIndex >= 0 ? expandedRunList[selectedIndex] ?? [] : [];
-  const layout = projectLayout(width, projects.length, selectedIndex, selectedRuns);
+  const viewportLayout = projectLayout(width, projects.length, selectedIndex, selectedRuns);
+  // `projectLayout` stays viewport-absolute because the DOM form consumes its
+  // edges too. The scroll pane is positioned at `frame.x`, so drawing inside
+  // `pane.content` uses the same layout relative to that pane.
+  const layout = { ...viewportLayout, x: viewportLayout.x - frame.x };
 
   // The guidance describes the run PROMPT, and the DOM form only shows that
   // textarea once a project is selected — so it appears on exactly the same
@@ -279,15 +336,30 @@ export function drawProjects(
   const columnX = layout.x + 18;
   const innerWidth = layout.panelWidth - 36;
   const runColumnX = layout.x + 34;
-  const statusX = Math.min(
-    layout.x + layout.panelWidth - 18 - STATUS_COL,
-    columnX + 560
-  );
+  const repoUrlWidth = Math.min(REPO_URL_COL, Math.max(80, innerWidth * 0.45));
+  const compactRunRows = layout.panelWidth < COMPACT_PROJECT_PANEL_WIDTH;
+  // The status column hugs the card's INNER RIGHT EDGE and its labels are
+  // anchored to that edge. Capping it at `columnX + 560` left a wide gap
+  // between the verdict and the card border on any panel past ~700px, so the
+  // column a reader scans down floated in the middle of the row. `statusX` is
+  // still the column's LEFT edge — the copy beside it measures against that.
+  // Inset from the ROW's own right edge, not flush with it: the row button
+  // spans `innerWidth`, so a status anchored to the panel edge sat exactly on
+  // that button's border with nothing between text and stroke.
+  const statusRight = layout.x + layout.panelWidth - 18 - PROJECTS_ROW_PAD;
+  const statusX = statusRight - STATUS_COL;
   let cursor = listOffset + layout.listTop;
   projects.forEach((project, index) => {
     const y = cursor;
+    const projectRowHeight = compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     const selected = project.projectId === snapshot.state.selectedProjectId;
     const rowLabel = truncate(project.name, 64);
+    // Wide rows reserve the right-hand status column from the LABEL surface;
+    // the surrounding panel still carries the row. A full-width centred label
+    // crossed directly through the anchored status at intermediate widths.
+    const projectButtonWidth = compactRunRows
+      ? innerWidth
+      : Math.max(0, statusX - columnX - 12);
     ctx.button(
       pane.content,
       `project.select.${project.projectId}`,
@@ -295,35 +367,61 @@ export function drawProjects(
       rowLabel,
       columnX,
       y,
-      innerWidth,
-      ROW_HEIGHT - 8,
+      projectButtonWidth,
+      compactRunRows ? 30 : ROW_HEIGHT - 8,
       selected,
       snapshot.onActivate
     );
+    const metadataWidth = compactRunRows
+      ? Math.max(0, innerWidth - 24)
+      : Math.max(40, innerWidth - repoUrlWidth - 24);
+    const metadata = `${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
     ctx.text(
       pane.content,
-      `${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`,
+      truncate(metadata.replace(/\s+/g, ' '), Math.max(8, Math.floor(metadataWidth / 6))),
       columnX + 12,
-      y + 26,
-      { size: 9, color: GPU_COLORS.muted, width: innerWidth - STATUS_COL - 24 }
+      y + (compactRunRows ? 34 : 26),
+      {
+        size: 9,
+        color: GPU_COLORS.muted,
+        width: metadataWidth,
+        singleLine: true,
+      }
     );
-    ctx.text(
+    const repositoryStatus = ctx.text(
       pane.content,
       statusLabel(snapshot.t, project.repositoryStatus, 'projects.repoStatus'),
-      statusX,
-      y + 8,
-      { size: 10, color: statusColor(project.repositoryStatus), mono: true, width: STATUS_COL }
+      compactRunRows ? columnX + 12 : statusRight,
+      y + (compactRunRows ? 49 : 8),
+      {
+        size: 10,
+        color: statusColor(project.repositoryStatus),
+        mono: true,
+        width: compactRunRows ? Math.max(0, innerWidth - 24) : STATUS_COL,
+        singleLine: true,
+      }
     );
+    if (!compactRunRows) repositoryStatus.anchor.x = 1;
     if (project.repositoryFullName) {
-      ctx.text(
+      const repositoryWidth = compactRunRows
+        ? Math.max(0, innerWidth - 24)
+        : repoUrlWidth;
+      const repositoryText = project.repositoryUrl ?? project.repositoryFullName;
+      const repository = ctx.text(
         pane.content,
-        project.repositoryUrl ?? project.repositoryFullName,
-        statusX,
-        y + 24,
-        { size: 8, color: GPU_COLORS.muted, width: STATUS_COL }
+        truncate(repositoryText, Math.max(8, Math.floor(repositoryWidth / 6))),
+        compactRunRows ? columnX + 12 : statusRight,
+        y + (compactRunRows ? 64 : 24),
+        {
+          size: 8,
+          color: GPU_COLORS.muted,
+          width: repositoryWidth,
+          singleLine: true,
+        }
       );
+      if (!compactRunRows) repository.anchor.x = 1;
     }
-    cursor += ROW_HEIGHT;
+    cursor += projectRowHeight;
 
     const runs = expandedRunList[index] ?? [];
     if (selected && runs.length > 0) {
@@ -338,8 +436,10 @@ export function drawProjects(
       for (const run of runs) {
         const statusText = statusLabel(snapshot.t, run.status, 'projects.runStatus');
         const cost = run.costUsd === null ? '' : ` · ${fmtCost(run.costUsd)}`;
-        const rowHeight = runRowHeight(run);
-        const goalWidth = Math.max(160, statusX - runColumnX - 12);
+        const rowHeight = runRowHeight(run, compactRunRows);
+        const goalWidth = compactRunRows
+          ? Math.max(0, layout.panelWidth - 52)
+          : Math.max(0, statusX - runColumnX - 12);
         ctx.button(
           pane.content,
           `project.run.${run.traceId ?? run.projectRunId}`,
@@ -348,32 +448,50 @@ export function drawProjects(
           runColumnX,
           cursor,
           goalWidth,
-          rowHeight - 4,
+          compactRunRows ? 30 : rowHeight - 4,
           false,
           snapshot.onActivate
         );
-        ctx.text(
+        const status = ctx.text(
           pane.content,
-          `${statusText}${cost}`,
-          statusX,
-          cursor + 4,
-          { size: 10, color: statusColor(run.status), mono: true, width: STATUS_COL }
+          truncate(
+            `${statusText}${cost}`,
+            Math.max(8, Math.floor((compactRunRows ? goalWidth : STATUS_COL) / 7))
+          ),
+          compactRunRows ? runColumnX : statusRight,
+          cursor + (compactRunRows ? 34 : 4),
+          {
+            size: 10,
+            color: statusColor(run.status),
+            mono: true,
+            width: compactRunRows ? goalWidth : STATUS_COL,
+            singleLine: true,
+          }
         );
+        if (!compactRunRows) status.anchor.x = 1;
         if (run.publication && run.publication.status === 'published' && run.publication.commitSha) {
-          ctx.text(
+          const commit = ctx.text(
             pane.content,
             truncate(run.publication.commitSha, 12),
-            statusX,
-            cursor + 18,
-            { size: 9, color: GPU_COLORS.success, mono: true, width: STATUS_COL }
+            compactRunRows ? runColumnX : statusRight,
+            cursor + (compactRunRows ? 48 : 18),
+            {
+              size: 9,
+              color: GPU_COLORS.success,
+              mono: true,
+              width: compactRunRows ? goalWidth : STATUS_COL,
+              singleLine: true,
+            }
           );
+          if (!compactRunRows) commit.anchor.x = 1;
         } else if (run.error) {
+          const boundedError = run.error.replace(/\s+/g, ' ');
           ctx.text(
             pane.content,
-            truncate(run.error, 72),
+            truncate(boundedError, Math.max(8, Math.floor(goalWidth / 6))),
             runColumnX,
-            cursor + 22,
-            { size: 8, color: GPU_COLORS.error, width: goalWidth }
+            cursor + (compactRunRows ? 48 : 22),
+            { size: 8, color: GPU_COLORS.error, width: goalWidth, singleLine: true }
           );
         }
         cursor += rowHeight;
