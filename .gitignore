@@ -36,6 +36,10 @@ atoma-prefilter-cache.json
 benchmark/logs/
 benchmark/*.log
 benchmark/.scratch/
+# Supervisor runtime output (docs/supervisor-design.md P0): verdicts, the
+# mechanism backlog and security alerts are run-derived data, not source.
+# Anchored like /skills/ so src/… paths can never be matched by accident.
+/supervisor/
 # Brand-mark rotation captures (`npm run viz:mark-turn`). PNGs, not source.
 .atoma-mark-turn/
 # Pointer-catch lighting captures (`npm run viz:mark-turn -- --pointer`).
