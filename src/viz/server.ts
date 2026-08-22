@@ -463,6 +463,26 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     ...(AUTH?.store
       ? { tierModelsFor: (principalId: string) => AUTH.store!.modelPins(principalId) }
       : {}),
+    // The subscription-transport authority. Passed as the QUESTION, not the
+    // answer — the coordinator asks it — and absent without a gate, where
+    // there are no accounts to be admin of.
+    ...(AUTH?.store
+      ? { platformAdmins: (principalId: string) => AUTH.store!.isPlatformAdmin(principalId) }
+      : {}),
+    // A run billed to the host's own login session is journaled, never
+    // pushed. Same one-delivery-path rule as `onRunFinished`: no audit-free
+    // side channel.
+    onSubscriptionTransport: (use) => {
+      emit({
+        kind: 'run.host_subscription',
+        actorType: 'principal',
+        actorId: use.principalId,
+        orgId: use.orgId,
+        projectId: use.projectId,
+        runId: use.projectRunId,
+        summary: `Run billed to the host subscription (${use.transport}) by platform admin`,
+      });
+    },
     // The terminal-run hook JOURNALS; the router turns that row into pushes.
     // There is deliberately no direct notifier call here any more — one
     // delivery path, and no way to notify without an audit trail.

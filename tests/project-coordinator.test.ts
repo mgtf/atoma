@@ -10,6 +10,7 @@ import {
   ProjectRunConfigurationError,
   ProjectRunCoordinator,
   projectRunEnvironment,
+  type ProjectRunDriver,
   projectRunHostLayout,
   runnerFailureDetail,
 } from '../src/projects/coordinator.js';
@@ -134,6 +135,60 @@ describe('project run environment', () => {
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ANTHROPIC_AUTH_TOKEN: 'token' },
     })).toThrow(/exactly one/);
+  });
+
+  it('opens the subscription transport for a platform admin ONLY, and forwards no credential', () => {
+    // The door: a machine-bound transport spends the HOST login session and
+    // cannot honour a per-run credential, so it stays refused for a tenant
+    // and is allowed for the one identity whose subscription it actually is.
+    // The authority is the platform-admin flag because it is never derived
+    // from an OAuth claim — only the operator CLI can mint it.
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+    };
+    for (const spelling of ['claude-cli', 'claude', 'CLAUDE-CLI']) {
+      // Both spellings `resolveBaseProviderKind` accepts, or the door has a
+      // hole in it.
+      expect(() => projectRunEnvironment({ ...base, hostEnv: { ATOMA_LLM: spelling } })).toThrow(
+        /platform admin/
+      );
+      const env = projectRunEnvironment({
+        ...base,
+        hostEnv: { ATOMA_LLM: spelling, ANTHROPIC_API_KEY: 'stale-host-key' },
+        subscriptionTransport: { principalId: 'admin-1' },
+      });
+      // Canonical spelling regardless of the alias the host wrote.
+      expect(env['ATOMA_LLM']).toBe('claude-cli');
+      // No credential crosses: the transport cannot honour one, and a stale
+      // exported key would only confuse the provider's own precedence.
+      expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+      expect(env['ANTHROPIC_AUTH_TOKEN']).toBeUndefined();
+      // Isolation is NOT relaxed by the door.
+      expect(env['ATOMA_CONTAINER']).toBe('1');
+      expect(env['ATOMA_REQUIRE_ISOLATION']).toBe('1');
+    }
+    // A subscription run has no per-run credential by definition, so the
+    // exactly-one-credential rule must not fire on it.
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        hostEnv: { ATOMA_LLM: 'claude-cli' },
+        subscriptionTransport: { principalId: 'admin-1' },
+      })
+    ).not.toThrow();
+    // A grant does not turn every provider into a subscription transport.
+    expect(() =>
+      projectRunEnvironment({
+        ...base,
+        hostEnv: { ATOMA_LLM: 'ollama' },
+        subscriptionTransport: { principalId: 'admin-1' },
+      })
+    ).toThrow(/do not support/);
   });
 
   it('lets an account pin override the operator per tier, and inherit where it does not', () => {
@@ -504,5 +559,152 @@ describe('runnerFailureDetail', () => {
     expect(runnerFailureDetail('hello\n✖ 401 API key is invalid.\n', 'failed'))
       .toBe('401 API key is invalid.');
     expect(runnerFailureDetail('no bang', 'failed')).toBe('runner finished with outcome failed');
+  });
+});
+
+describe('the subscription-transport door, at the coordinator', () => {
+  /**
+   * The VERIFICATION lives here, not at the caller: `platformAdmins` is a
+   * question the coordinator asks, so no route and no CLI can hand in a
+   * pre-decided "yes". Every case below is about who is allowed to spend the
+   * host's login session.
+   */
+  function deliveringDriver(): ReturnType<typeof vi.fn> {
+    return vi.fn(async (_options: SpawnRunOptions): Promise<string> => {
+      return `${formatRunStatsEpilogue(DELIVERED_STATS)}\n✓ build finished\n`;
+    });
+  }
+
+  /** A host with NO credential: only the door can make this run startable. */
+  function subscriptionHost(): NodeJS.ProcessEnv {
+    return { PATH: process.env['PATH'], ATOMA_LLM: 'claude-cli' };
+  }
+
+  async function expectRefused(
+    f: ReturnType<typeof fixture>,
+    coordinator: ProjectRunCoordinator,
+    driver: ReturnType<typeof vi.fn>,
+    key: string,
+    matcher: RegExp | typeof ProjectRunConfigurationError
+  ): Promise<void> {
+    const promise = coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: key, goal: 'Build a clock.' },
+    });
+    await (matcher instanceof RegExp
+      ? expect(promise).rejects.toThrow(matcher)
+      : expect(promise).rejects.toThrow(matcher));
+    expect(driver).not.toHaveBeenCalled();
+  }
+
+  it('refuses when NO authority is wired (fail-closed, unlike tier pins)', async () => {
+    const f = fixture();
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: subscriptionHost(),
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+    });
+    await expectRefused(f, coordinator, driver, 'no-authority', ProjectRunConfigurationError);
+  });
+
+  it('refuses a requester who is not a platform admin', async () => {
+    const f = fixture();
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: subscriptionHost(),
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      platformAdmins: () => false,
+    });
+    await expectRefused(f, coordinator, driver, 'not-admin', /platform admin/);
+  });
+
+  it('refuses when the authority lookup THROWS', async () => {
+    // The opposite of `tierModelsFor`, deliberately: a preferences lookup
+    // that throws must not block a run, an authority lookup that throws must
+    // never be read as permission to spend.
+    const f = fixture();
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: subscriptionHost(),
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      platformAdmins: () => {
+        throw new Error('store unavailable');
+      },
+    });
+    await expectRefused(f, coordinator, driver, 'authority-down', ProjectRunConfigurationError);
+  });
+
+  it('lets a platform admin through, and announces the spend exactly once', async () => {
+    const f = fixture();
+    const seen: Array<{ principalId: string; transport: string }> = [];
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: subscriptionHost(),
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      platformAdmins: (principalId) => principalId === f.viewer.principalId,
+      onSubscriptionTransport: (info) =>
+        seen.push({ principalId: info.principalId, transport: info.transport }),
+    });
+    const run = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'admin-run', goal: 'Build a clock.' },
+    });
+    await coordinator.waitForIdle();
+    expect(driver).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([
+      { principalId: f.viewer.principalId, transport: 'claude-cli' },
+    ]);
+    // The env the driver received carries the transport and no credential.
+    const passed = driver.mock.calls[0]![0] as SpawnRunOptions;
+    expect(passed.env?.['ATOMA_LLM']).toBe('claude-cli');
+    expect(passed.env?.['ANTHROPIC_API_KEY']).toBeUndefined();
+    expect(run.projectRunId).toBeTruthy();
+  });
+
+  it('says nothing when the host is NOT on a subscription transport', async () => {
+    const f = fixture();
+    const seen: unknown[] = [];
+    const driver = deliveringDriver();
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      platformAdmins: () => true,
+      onSubscriptionTransport: (info) => seen.push(info),
+    });
+    await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'credentialled', goal: 'Build a clock.' },
+    });
+    await coordinator.waitForIdle();
+    // An admin on a credentialled transport is an ordinary run: the audit row
+    // means "billed to the host subscription", and this one was not.
+    expect(seen).toEqual([]);
   });
 });

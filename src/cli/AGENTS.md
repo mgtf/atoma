@@ -35,3 +35,18 @@ remote completion calls to doctor.
 - Act on friction signatures only when they recur across two consecutive batches
   and their root cause lives inside the sandbox. Host, repository, and harness
   defects require structural fixes rather than learned workarounds.
+## Organisation-scoped runs
+
+- `projects run --project <slug-or-id> --as <principal>` is the only
+  non-browser path into an organisation's run corpus. It exists because
+  `run:build` writes the operator `./runs` corpus, which the gated visualizer
+  never mixes with project traces, so a terminal-started run was invisible to
+  the account owning the instance.
+- Like `auth`, it is an OPERATOR tool reading the store on disk: possession of
+  the machine is the credential. The run is ATTRIBUTED to `--as`, and the
+  subscription-transport door still asks the coordinator's authority — the CLI
+  refuses early with the `grant-admin` hint rather than letting the
+  coordinator reject it later.
+- A project slug is unique per organisation, not per instance. An ambiguous
+  reference is refused, never guessed.
+

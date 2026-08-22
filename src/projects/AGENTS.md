@@ -20,3 +20,33 @@ Neighbours:
   `orgs/<orgId>/projects/<projectId>/runs/<runId>/` (override the host root
   with `ATOMA_PROJECTS_ROOT`, default `~/.atoma`). It does not mix the
   operator `./runs` corpus used by CLI, MCP and ungated viz.
+
+## The subscription-transport door
+
+- A project run normally requires `ATOMA_LLM=anthropic` plus exactly one
+  per-run credential. A machine-bound transport (`claude-cli`, and its bare
+  `claude` alias) binds to the HOST's own login session, so it spends that
+  subscription and cannot honour a supplied credential — for a tenant that
+  would be one account billing another.
+- The ONE exception is a requester holding the platform-admin flag, whose own
+  instance's subscription it is. The flag is the right authority because it is
+  never derived from an OAuth claim: only `auth grant-admin`, run by the
+  operator against the store on disk, can mint it.
+- `platformAdmins` is passed to the coordinator as a QUESTION, never as an
+  answer: the coordinator asks it, so no route and no CLI can hand in a
+  pre-decided yes. It is FAIL-CLOSED — absent resolver, `false`, or a throwing
+  resolver all mean refusal. This is deliberately the opposite of
+  `tierModelsFor`, which is fail-open: a preferences lookup must not block a
+  run, an authority lookup must never be read as permission to spend.
+- A run that goes through the door forwards NO credential (the transport
+  cannot use one, and a stale exported key only confuses provider
+  precedence), normalises `ATOMA_LLM` to `claude-cli`, and does not relax
+  isolation: `ATOMA_CONTAINER` and `ATOMA_REQUIRE_ISOLATION` stay on.
+- Every such run is journaled as `run.host_subscription` (severity
+  `security`, never pushed). The coordinator emits no audit row itself — it
+  calls `onSubscriptionTransport` and the caller journals, so there is one
+  delivery path, as with `onRunFinished`.
+- The door does NOT change what a project run disables
+  (`ATOMA_SKILL_LEARN=0`, `ATOMA_SKILL_PROMOTE=0`, `ATOMA_SKILL_DIRECT=0`,
+  `ATOMA_EVENT_SKILLS=0`, `ATOMA_PREFILTER_CACHE=0`). A measurement that
+  depends on skill learning cannot be run as a project run.

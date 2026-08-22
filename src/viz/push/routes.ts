@@ -85,6 +85,9 @@ const INSTALLATION_STATUS_WORDS: Record<PushLocale, Record<string, string>> = {
 export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   // --- Client-facing.
   'run.started': null,
+  // Journaled for audit, never pushed: on a single-operator instance every
+  // admin run would fire one.
+  'run.host_subscription': null,
   'run.finished': {
     audience: { requester: true },
     vars: (event, locale) => ({

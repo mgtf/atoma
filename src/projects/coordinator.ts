@@ -69,8 +69,37 @@ export interface ProjectCoordinatorOptions {
    * preference lookup must never be able to block a run.
    */
   readonly tierModelsFor?: (principalId: string) => TierModelPins;
+  /**
+   * Does this principal hold the instance-wide platform-admin flag? Supplied
+   * as a QUESTION, never as an answer: the coordinator asks it itself, so no
+   * caller can hand in a pre-decided "yes". Absent or throwing means NO —
+   * fail-closed, unlike `tierModelsFor`, because this one gates spending.
+   *
+   * It is the authority for the subscription-transport door
+   * (`projectRunEnvironment`). The platform-admin flag is the right authority
+   * because it is never derived from an OAuth claim: only the operator CLI,
+   * run against the store on disk, can mint it (`src/cli/auth.ts`).
+   */
+  readonly platformAdmins?: (principalId: string) => boolean;
+  /**
+   * Observer, fired when a run is allowed to spend the HOST's subscription
+   * instead of a per-run credential. The caller journals it; nothing here
+   * writes an audit row, so there is one delivery path as with
+   * `onRunFinished`.
+   */
+  readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
   readonly cwd?: string;
   readonly timeoutMs?: number;
+}
+
+/** One run allowed through the subscription-transport door. */
+export interface SubscriptionTransportUse {
+  readonly orgId: string;
+  readonly projectId: string;
+  readonly projectRunId: string;
+  readonly principalId: string;
+  /** The `ATOMA_LLM` value the host configured, e.g. `claude-cli`. */
+  readonly transport: string;
 }
 
 export class ProjectRunBusy extends Error {
@@ -113,6 +142,17 @@ const FORWARDED_HOST_ENV = [
   'NODE_EXTRA_CA_CERTS',
 ] as const;
 
+/**
+ * Transports that bind to a machine-local login session rather than to a
+ * credential the caller can supply. `claude` is the bare alias
+ * `resolveBaseProviderKind` accepts for `claude-cli`; both spellings must be
+ * recognised here or the door would have a hole in it.
+ */
+export function isSubscriptionTransport(value: string | undefined): boolean {
+  const kind = (value ?? '').trim().toLowerCase();
+  return kind === 'claude-cli' || kind === 'claude';
+}
+
 export function projectRunEnvironment(input: {
   readonly hostEnv: NodeJS.ProcessEnv;
   readonly dbPath: string;
@@ -129,16 +169,44 @@ export function projectRunEnvironment(input: {
    * last line of defence rather than as the only one.
    */
   readonly tierModels?: TierModelPins;
+  /**
+   * THE SUBSCRIPTION-TRANSPORT DOOR. Present only when the coordinator has
+   * verified that the REQUESTING principal holds the platform-admin flag.
+   *
+   * What it permits and what it costs, stated plainly because the whole point
+   * is that this is not silent: a machine-bound transport such as
+   * `claude-cli` binds to the host's own `claude /login` session, so the run
+   * spends THAT subscription and cannot honour a per-run credential. For a
+   * tenant that would be one account billing another, which is why the
+   * default is still refusal. For a platform admin on their own instance the
+   * host subscription IS their subscription, so the objection does not apply
+   * — and the platform-admin flag is the right authority precisely because it
+   * is never derived from an OAuth claim: only the operator CLI, run against
+   * the store on disk, can mint it.
+   */
+  readonly subscriptionTransport?: { readonly principalId: string };
 }): NodeJS.ProcessEnv {
   const selected = input.hostEnv['ATOMA_LLM']?.trim() || 'anthropic';
-  if (selected !== 'anthropic') {
+  const subscriptionRequested = isSubscriptionTransport(selected);
+  if (subscriptionRequested && !input.subscriptionTransport) {
     throw new ProjectRunConfigurationError(
-      'project runs currently require ATOMA_LLM=anthropic; subscription CLI transports cannot honour per-run credentials'
+      `project runs cannot use ATOMA_LLM=${selected}: a subscription CLI transport binds to this ` +
+        'machine\'s own login session, so the run would spend the HOST subscription and ignore ' +
+        'per-run credentials. Set ATOMA_LLM=anthropic with a per-run credential, or have a ' +
+        'platform admin request the run — that is the one identity allowed through this door.'
+    );
+  }
+  if (!subscriptionRequested && selected !== 'anthropic') {
+    throw new ProjectRunConfigurationError(
+      `project runs do not support ATOMA_LLM=${selected}; use anthropic with a per-run credential`
     );
   }
   const apiKey = input.hostEnv['ANTHROPIC_API_KEY']?.trim();
   const authToken = input.hostEnv['ANTHROPIC_AUTH_TOKEN']?.trim();
-  if (Boolean(apiKey) === Boolean(authToken)) {
+  // The credential rule applies to the credentialled transport only. A
+  // subscription run has no per-run credential BY DEFINITION, and demanding
+  // one here would refuse exactly the case the door just allowed.
+  if (!subscriptionRequested && Boolean(apiKey) === Boolean(authToken)) {
     throw new ProjectRunConfigurationError(
       'project runs require exactly one of ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN'
     );
@@ -149,11 +217,20 @@ export function projectRunEnvironment(input: {
     if (value !== undefined) environment[key] = value;
   }
   environment['NODE_ENV'] = 'production';
-  environment['ATOMA_LLM'] = 'anthropic';
-  if (apiKey) environment['ANTHROPIC_API_KEY'] = apiKey;
-  if (authToken) environment['ANTHROPIC_AUTH_TOKEN'] = authToken;
-  const baseUrl = input.hostEnv['ANTHROPIC_BASE_URL']?.trim();
-  if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
+  if (subscriptionRequested) {
+    // Canonical spelling, so a run's env says which transport it used even
+    // when the host wrote the bare `claude` alias.
+    environment['ATOMA_LLM'] = 'claude-cli';
+    // NO credential is forwarded. The transport cannot honour one, and a
+    // stale exported key reaching the subprocess would only confuse the
+    // provider's own precedence rules.
+  } else {
+    environment['ATOMA_LLM'] = 'anthropic';
+    if (apiKey) environment['ANTHROPIC_API_KEY'] = apiKey;
+    if (authToken) environment['ANTHROPIC_AUTH_TOKEN'] = authToken;
+    const baseUrl = input.hostEnv['ANTHROPIC_BASE_URL']?.trim();
+    if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
+  }
   for (const tier of [1, 2, 3] as const) {
     const key = `ATOMA_MODEL_L${tier}`;
     const accountPin = input.tierModels ? pinForTier(input.tierModels, tier) : null;
@@ -277,6 +354,8 @@ export class ProjectRunCoordinator {
   private readonly publisher?: ProjectRunPublisher;
   private readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
   private readonly tierModelsFor?: (principalId: string) => TierModelPins;
+  private readonly platformAdmins?: (principalId: string) => boolean;
+  private readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly active = new Map<string, ActiveRun>();
@@ -292,6 +371,10 @@ export class ProjectRunCoordinator {
     this.publisher = options.publisher;
     if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
     if (options.tierModelsFor) this.tierModelsFor = options.tierModelsFor;
+    if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
+    if (options.onSubscriptionTransport) {
+      this.onSubscriptionTransport = options.onSubscriptionTransport;
+    }
     this.cwd = options.cwd ?? repoRoot();
     this.timeoutMs = options.timeoutMs ?? 15 * 60 * 1_000;
   }
@@ -320,6 +403,28 @@ export class ProjectRunCoordinator {
     } catch (error) {
       process.stderr.write(
         `[atoma projects] tier model preferences unavailable for ${principalId}: ${String(error)}\n`
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * The subscription-transport grant for this requester, or none.
+   *
+   * FAIL-CLOSED, and deliberately the opposite of `resolveTierModels`: a
+   * preferences lookup that throws must not block a run, but an authority
+   * lookup that throws must never be read as permission to spend. No
+   * resolver wired (a deployment without accounts) is also NO — the
+   * ungated developer path uses the CLI runner directly and never comes
+   * through here.
+   */
+  private resolveSubscriptionGrant(principalId: string): { principalId: string } | undefined {
+    if (!this.platformAdmins) return undefined;
+    try {
+      return this.platformAdmins(principalId) ? { principalId } : undefined;
+    } catch (error) {
+      process.stderr.write(
+        `[atoma projects] platform-admin lookup failed for ${principalId}; refusing the subscription transport: ${String(error)}\n`
       );
       return undefined;
     }
@@ -392,6 +497,7 @@ export class ProjectRunCoordinator {
       skillsPath: layout.skillsPath,
       artifactManifestPath: layout.artifactManifestPath,
     };
+    const subscriptionGrant = this.resolveSubscriptionGrant(input.principalId);
     let environment: NodeJS.ProcessEnv;
     try {
       environment = projectRunEnvironment({
@@ -403,7 +509,17 @@ export class ProjectRunCoordinator {
         runId: run.projectRunId,
         artifactManifestPath: paths.artifactManifestPath,
         tierModels: this.resolveTierModels(input.principalId),
+        ...(subscriptionGrant ? { subscriptionTransport: subscriptionGrant } : {}),
       });
+      if (subscriptionGrant && isSubscriptionTransport(this.hostEnv['ATOMA_LLM'])) {
+        this.onSubscriptionTransport?.({
+          orgId: input.orgId,
+          projectId: input.projectId,
+          projectRunId: run.projectRunId,
+          principalId: input.principalId,
+          transport: (this.hostEnv['ATOMA_LLM'] ?? '').trim(),
+        });
+      }
       this.store.transitionProjectRun({
         orgId: input.orgId,
         projectRunId: run.projectRunId,

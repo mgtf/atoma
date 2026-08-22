@@ -64,6 +64,15 @@ export const platformEventKindSchema = z.enum([
   'github.installation_linked',
   'github.installation_status',
   // --- Platform and security.
+  /**
+   * A project run was allowed to spend the HOST's subscription instead of a
+   * per-run credential, because the requester holds the platform-admin flag.
+   * Journaled, never pushed: it is routine for a single-operator instance and
+   * noise as a notification, but it must be answerable after the fact —
+   * "which runs did this instance bill to its own login session, and who
+   * asked for them".
+   */
+  'run.host_subscription',
   'admin.granted',
   'admin.revoked',
   'invitation.created',
@@ -196,6 +205,7 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'github.installation_linked': 'info',
   // Suspended or deleted installations break the publication pipeline.
   'github.installation_status': 'warning',
+  'run.host_subscription': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',

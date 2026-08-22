@@ -116,6 +116,9 @@ npm run auth -- grant-admin --principal <id-or-email>
 npm run auth -- revoke-admin --principal <id-or-email>
 npm run auth:dev -- list
 npm run auth:dev -- invite --role org:owner --ttl-hours 24
+npm run projects -- list
+npm run projects -- run --project <slug> --as <id-or-email> "<goal>"
+npm run projects:dev -- list
 npm run run:build -- "<goal>"
 npm run run:build:dev -- "<goal>"
 npm run mcp

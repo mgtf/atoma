@@ -21,6 +21,8 @@
     "doctor:dev": "tsx src/cli/doctor.ts",
     "auth": "node dist/cli/auth.js",
     "auth:dev": "tsx src/cli/auth.ts",
+    "projects": "node dist/cli/projects.js",
+    "projects:dev": "tsx src/cli/projects.ts",
     "release:check": "npm run check && npm audit && npm run build && npm run viz:smoke && node scripts/release-smoke.mjs && node scripts/auth-release-smoke.mjs && npm run auth -- --help && npm run doctor -- --help",
     "release:container-smoke": "node scripts/release-container-smoke.mjs",
     "run:build": "node dist/cli/build-app.js",
