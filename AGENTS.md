@@ -323,6 +323,7 @@ The frozen record contains the full dated reasoning behind these rules:
 - [external code review](docs/code-review-2026-08-14.md)
 - [code review 2026-08-18](docs/code-review-2026-08-18.md)
 - [supervisor-held proof attestation (A1) design review 2026-08-22](docs/supervisor-attestation-a1-review-2026-08-22.md)
+- [offering a skill to the platform catalog, design review 2026-08-23](docs/platform-skill-offer-review-2026-08-23.md)
 - [release soak v0.1.0](docs/release-soak-v0.1.0.md)
 - [release acceptance v0.1.1](docs/release-acceptance-v0.1.1.md)
 - [release acceptance v0.1.3](docs/release-acceptance-v0.1.3.md)
