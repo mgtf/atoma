@@ -26,8 +26,15 @@ here is a pointer and a one-line status, never a restatement.
    `projectRunEnvironment`, while `ATOMA_SKILL_PROMOTE` and
    `ATOMA_SKILL_DIRECT` stay `0`. Rationale and the boundary it respects:
    [platform-skill-offer-review §8 step 1](platform-skill-offer-review-2026-08-23.md).
-   Needs none of the new machinery — it is a variable change with a written
-   rationale, and it is the whole product benefit minus the cross-tenant part.
+   Needs none of the new machinery, and it is the whole product benefit minus
+   the cross-tenant part. CORRECTION to how this entry first read: it is NOT
+   only a variable change. The coordinator also passes `--no-learn-skills
+   --no-promote-skills --no-direct-skills` as CLI flags, and
+   `src/skills/AGENTS.md` records `--no-promote-skills` as the final veto over
+   both env and seed — so the flags must move too, or the env change is inert.
+   A project run is also structurally in maintenance mode: it is `--seed`ed
+   from the previous delivered workspace, itself a promotion-enabling signal,
+   which is why that veto is there.
 2. **Behavioural attestation for `kind: script` candidates.**
    [§3.2 and §8 step 2](platform-skill-offer-review-2026-08-23.md). To be
    measured against §4.1(e)'s nine obfuscated payloads BEFORE it is wired to
@@ -46,6 +53,43 @@ here is a pointer and a one-line status, never a restatement.
 
 Item 1 is independent of 2-4. Items 2 and 3 are each their own review, and
 neither should be designed in the session that lands the one before it.
+
+## Asked for, and what the code says about it
+
+**Route `benchmark` and `burn-in` through admin (project) runs** — asked
+2026-08-23. Recorded rather than built, because the two harnesses answer
+differently and one answers no for a reason of MEASUREMENT, not configuration.
+
+The coordinator drives a project run with `--container --no-learn-skills
+--no-promote-skills --no-direct-skills` plus, when an earlier run delivered,
+`--seed <that run's workspace>`.
+
+- **`benchmark`: no.** Its own header fixes the invariant this would break —
+  *"Every run of either arm gets a freshly archived workspace, so no run
+  inherits its predecessor's deliverable; without that the second atoma run
+  would find the artefact already on disk and 'solve' the task for free,
+  which would be a measurement of the harness rather than the system."* A
+  project run inherits that workspace by design. Two further blocks: the
+  benchmark's central invariant is *"two arms, one code path"* (`--baseline`
+  swaps one line of `runTask`), so routing one arm through the product
+  launcher and not the other destroys the comparison, while routing both puts
+  an experimental flag inside the production launcher; and frozen skills
+  remove half of the amortisation mechanism the benchmark exists to measure.
+- **`burn-in`: yes, but only after step 1 above.** Its header states its
+  purpose — *"Each run also matures the skill/trust counters as a side effect
+  — the harness IS usage."* Under today's project-run settings it would
+  mature atom trust only, with skill counters pinned at zero: a cost-decay
+  curve with its engine disconnected. Once step 1 lands, the shape that fits
+  is **one project per burn-in task**, which makes the seeding coherent —
+  each task evolves in its own project — instead of mixing unrelated tasks
+  into one workspace.
+- **What the ask probably wants, at no cost to any invariant.** Both
+  harnesses are wanted VISIBLE, which is a reading problem, not a launching
+  one. The gated viz refuses the operator corpus by contract, but nothing
+  stops exposing that corpus TO A PLATFORM ADMIN in its own
+  clearly-labelled view — operator, not org. A bounded viz change, no runner
+  touched, no measurement invalidated. Proposed as the first thing to build
+  here.
 
 ## Waiting on the operator
 
