@@ -35,6 +35,20 @@ export const runStatsSchema = z.object({
   compileErrors: countSchema,
   demotions: countSchema,
   dispatchFallbacks: countSchema,
+  /**
+   * Phases whose plan DECLARED a proof obligation that no transport-observed
+   * attestation covered. The deliverable may still have been approved; what
+   * this counts is runs whose METHOD went unproven, and therefore earned no
+   * atom trust, no skill credit, no distillation and no promotion. Without a
+   * counter here a withheld run is indistinguishable from a quiet one in the
+   * measurement CSV — the same reason `credit-withheld` exists as a skill
+   * event rather than a counter that simply fails to move.
+   */
+  // Defaulted, unlike its neighbours: `parseRunStatsEpilogue` reads logs
+  // written by EARLIER builds, and a newly required counter would turn every
+  // archived epilogue into a parse failure — the exact class of breakage the
+  // 'cancelled' outcome note above records.
+  uncoveredObligations: countSchema.default(0),
 });
 
 export type RunStats = z.infer<typeof runStatsSchema>;
@@ -48,7 +62,8 @@ export type RunStatSignal =
   | 'refusal'
   | 'compile-error'
   | 'demotion'
-  | 'dispatch-fallback';
+  | 'dispatch-fallback'
+  | 'uncovered-obligation';
 
 export function formatRunStatsEpilogue(stats: RunStats): string {
   return RUN_STATS_PREFIX + JSON.stringify(runStatsSchema.parse(stats));

@@ -1,8 +1,14 @@
 # Supervisor-held proof attestation (A1) — design review, 2026-08-22
 
-Status: **design review, revision 2. One contract proposed, reviewed against
-the nine boundaries in the evidence inventory. No code accepted, no code
-written.**
+Status: **ACCEPTED and LANDED, 2026-08-22 (steps 1-5 of §9). The two armed
+controls of §7 have NOT been run: they need a live batch with the machine to
+itself, and until they do the contract is implemented but unmeasured.**
+
+Revision 3 records what landed against what was proposed. The contract's
+shape, its dispositions and its refusals are unchanged from revision 2; §9
+carries the as-built notes, including the one place the implementation is
+narrower than the review and the one place it turned out to need no work at
+all.
 
 Revision 2 corrects one factually wrong claim in revision 1 (§6 asserted that
 a withheld consequence has no visible surface; for skill credit one already
@@ -345,22 +351,42 @@ archived before the batch.
 - **A new SQLite store for attestations.** Rejected: `src/core/stores.ts` is
   the one product store, and nothing here needs cross-run persistence.
 
-## 9. If this is accepted, the first increment
+## 9. The first increment, as built
 
-One reviewed commit, in this order, or none:
+1. **The typed browser observation.** `src/contracts/attestation.ts` owns the
+   observation, the record and the obligation vocabulary.
+   `validate_html` now reports `requestedInteractions`,
+   `ignoredInteractions` and the served `document` digest beside
+   `interactionLog`. **Narrower than proposed in one place:** the review
+   assumed carrying it through the worker and container executors was "real
+   work". It was none — both forward the tool result as opaque JSON, so the
+   added fields already survived. A protocol round-trip test pins that, since
+   a future field-enumerating serialiser would drop them silently and the seam
+   would then report "no interaction executed" for every container run.
+2. **The seam.** `forkBranch` wraps `ctx.tools` per branch, mirroring how it
+   already wraps `ctx.llm`, and appends into one run-scoped log shared by
+   reference. `attestingExecutor` unwraps before wrapping, so a nested fork
+   cannot append one call under every ancestor branch. Tests fork, nest, and
+   run sibling lanes concurrently.
+3. **The `Witness` observer union.** `transport-observed` carries a reference
+   (attestation id, tool, one-line rendering); `recorded-probe` is unchanged
+   and honestly labelled. `record_probe` and `fetch_url` were NOT relabelled.
+4. **`dom-interaction` in the plan schema**, beside `outputs`, with the
+   unknown-value drop, inheritance from the parent task, and
+   `PROOF_OBLIGATION_GUIDANCE` in both planning prompts.
+5. **The withholding disposition.** An uncovered obligation disqualifies the
+   trust fast path, attaches the machine facts to the full verdict, and sets
+   `PositiveVerdict.proofUncovered`; `onApproved` then withholds the atom
+   trust success, the skill credit (reusing `credit-withheld`), distillation
+   and promotion, and records the new `uncoveredObligations` run stat. The
+   counter is DEFAULTED in the schema so archived epilogues still parse.
 
-1. the typed browser observation in `src/contracts`, carried faithfully
-   through the local, worker and container executors;
-2. the per-branch tools wrapper in `forkBranch` and the shared append-only
-   log, with fork-propagation tests that fork **and nest**;
-3. the `Witness` observer union, with the existing machine writers mapped and
-   nothing relabelled;
-4. `dom-interaction` declared in the plan schema beside `outputs`;
-5. the withholding disposition of §3.5, with `credit-withheld` reused for the
-   skill side and the new run-stat counter for the trust side;
-6. the two armed controls of §7, results recorded with their thresholds.
+**Not built, and required before this is believed:** step 6, the two armed
+controls of §7. Until they run, every claim above is a claim about code, not
+about behaviour.
 
-What must **not** be in it: supervisor-authored or replayed interactions, any
-change to the interaction filter, any change to the negative paths, any
-manifest-checker widening, a second obligation, and any obligation the plan
-did not declare.
+What is **not** in it, as promised: no supervisor-authored or replayed
+interactions, no change to the interaction filter, no change to the negative
+paths, no manifest-checker widening, no second obligation, and no obligation
+the plan did not declare. Withholding is honoured at L2 only; L3 credits its
+L2 as before.

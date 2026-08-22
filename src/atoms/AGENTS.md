@@ -124,6 +124,33 @@ load-bearing.
   verdict. Workspace reads are cached per validation cycle. A new incident adds
   a table row with a stated disposition, never a new inline `if`.
 
+## Declared proof obligations
+
+- An obligation is DECLARED by the plan (`subtaskSpecSchema.proofObligations`,
+  threaded onto `Task`), never sniffed from the description. A lexical detector
+  over phase prose is the vocabulary-frozen detector class the 2026-08-14
+  review measured; the planning prompt carries the rule instead
+  (`PROOF_OBLIGATION_GUIDANCE`). An unknown value is DROPPED, so the failure
+  direction is "no gate", never "wrong gate".
+- Obligations INHERIT: `effectiveObligations` unions the subtask's own with the
+  parent task's, so an obligation declared at L3 still reaches the L2 that
+  supervises the tool-bearing child.
+- `checkProofCoverage` is read-only and costs zero LLM calls. It never rejects.
+  An uncovered obligation (a) disqualifies the trust fast path, (b) attaches
+  the machine-observed facts to the full verdict, and (c) sets
+  `PositiveVerdict.proofUncovered`, which withholds atom trust, skill credit,
+  distillation and promotion in `onApproved`. Approval is a judgment about an
+  ARTIFACT; those consequences are claims about a METHOD.
+- The flag rides on the VERDICT, not on the supervisor instance: parallel lanes
+  share one L2, so per-instance state would race across concurrent subtasks.
+- Coverage is asymmetric on purpose. An observation with no document binding
+  still covers; one whose document digest MOVED does not. A digest over a
+  guessed file set produces false staleness, and a silently withheld credit is
+  the failure mode this contract exists to remove.
+- Withholding is honoured at L2, the tier that supervises tool-bearing
+  children. L3 credits its L2 as before; do not duplicate the gate there
+  without measuring what a second one changes.
+
 ## Model output parsing
 
 - All model-output JSON parsing lives in `src/atoms/json.ts`. Preserve raw text

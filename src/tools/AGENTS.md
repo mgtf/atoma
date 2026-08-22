@@ -93,6 +93,21 @@ Neighbours:
   to repair our own write. `edit_file` refuses manifest edits and points at
   this path, so the two halves must hold the same standard.
 
+## Browser observation
+
+- `validate_html` reports `requestedInteractions`, `ignoredInteractions` and
+  the served `document` digest alongside `interactionLog`. The counts are the
+  CALLER's fact and the log is the runtime's; a result that carries only one
+  side cannot distinguish an executed click from a discarded one.
+- `smokeDrivesOwnState()` still discards external interactions — the filter
+  preserves one coherent state-transition path and is deliberately unchanged.
+  What changed is that its effect is now reported as a number instead of only a
+  warning string, so a consumer can act on it.
+- The document digest is resolved BEFORE the page opens, from the URL against
+  the sandbox root (`start_static_server` serves the workspace root). Anything
+  unresolvable — an external URL, a Node server, a missing file — yields NO
+  document, which is a weaker observation and never a failure.
+
 ## Intentional choices and rejected shortcuts
 
 - A SYNCHRONOUS smoke observes only what the page has already committed, so

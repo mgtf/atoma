@@ -33,6 +33,7 @@ const stats = (over: Partial<RunStats> = {}): RunStats => ({
   compileErrors: 0,
   demotions: 0,
   dispatchFallbacks: 0,
+  uncoveredObligations: 0,
   ...over,
 });
 

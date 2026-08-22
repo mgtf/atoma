@@ -25,8 +25,36 @@ export interface RecordedProbe {
   note?: string;
 }
 
-/** A witness is evidence with a declared source. */
-export type Witness = { readonly source: 'recorded-probe' } & RecordedProbe;
+/**
+ * A TRANSPORT-OBSERVED witness: a reference to one attestation record, not a
+ * copy of it. The observation itself stays in the run-scoped attestation log
+ * (`src/core/attestation.ts`), which is what keeps it out of the aggregation
+ * losses — N>1 aggregation drops `toolCallResults` and flattens `evidence`,
+ * and a reference survives both.
+ *
+ * The variant exists so a witness declares WHO OBSERVED IT. Before it, one
+ * `source` covered a model-authored `output.probes` entry, and calling that
+ * "evidence" made a declaration and an observation indistinguishable.
+ */
+export interface TransportWitness {
+  readonly source: 'transport-observed';
+  /** Attestation id in the run-scoped log. */
+  readonly eventId: string;
+  readonly tool: string;
+  /** One-line rendering of what the transport saw. */
+  readonly observed: string;
+}
+
+/**
+ * A witness is evidence with a declared OBSERVER.
+ *   - `recorded-probe`     — the child's own `output.probes` entry. A
+ *                            declaration; honestly labelled, never promoted.
+ *   - `transport-observed` — seen by the runtime at the tool seam.
+ * Existing machine writers (`record_probe`, `fetch_url`) are NOT relabelled
+ * here: their manifest entries are a different trust boundary with their own
+ * readers, and one label spanning three ownerships would be false.
+ */
+export type Witness = ({ readonly source: 'recorded-probe' } & RecordedProbe) | TransportWitness;
 
 function pickString(o: Record<string, unknown>, keys: string[]): string | undefined {
   for (const k of keys) {
@@ -79,12 +107,29 @@ export function witnessesFromPayload(payload: unknown): Witness[] {
   return extractRecordedProbes(payload).map((p) => ({ source: 'recorded-probe' as const, ...p }));
 }
 
-/** Typed witnesses back to the normalised probe view consumed by validators. */
+/**
+ * Typed witnesses back to the normalised probe view consumed by validators.
+ * Transport-observed witnesses are deliberately NOT folded in here: they are
+ * references, they carry no `cmd`, and the recorded-probe rendering exists to
+ * cross-check a child's own claims against read-back files.
+ */
 export function recordedProbesFromWitnesses(
   witnesses: readonly Witness[] | undefined
 ): RecordedProbe[] {
   return (witnesses ?? [])
-    .filter((w) => w.source === 'recorded-probe')
+    .filter(
+      (w): w is { readonly source: 'recorded-probe' } & RecordedProbe =>
+        w.source === 'recorded-probe'
+    )
     .map(({ source: _source, ...probe }) => probe)
     .slice(0, 12);
+}
+
+/** The transport-observed subset, in append order. */
+export function transportWitnesses(
+  witnesses: readonly Witness[] | undefined
+): TransportWitness[] {
+  return (witnesses ?? []).filter(
+    (w): w is TransportWitness => w.source === 'transport-observed'
+  );
 }

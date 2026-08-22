@@ -68,6 +68,7 @@ describe('burnin parseRunLog', () => {
       compileErrors: 0,
       demotions: 0,
       dispatchFallbacks: 0,
+      uncoveredObligations: 0,
     });
     const runnerFinal = formatRunStatsEpilogue({
       outcome: 'delivered',
@@ -86,6 +87,7 @@ describe('burnin parseRunLog', () => {
       compileErrors: 7,
       demotions: 8,
       dispatchFallbacks: 9,
+      uncoveredObligations: 0,
     });
     const s = parseRunLog(
       [
@@ -113,6 +115,7 @@ describe('burnin parseRunLog', () => {
       compileErrors: 7,
       demotions: 8,
       dispatchFallbacks: 9,
+      uncoveredObligations: 0,
     });
   });
 

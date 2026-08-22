@@ -664,6 +664,15 @@ export async function llmVerdict(args: {
    */
   mechanicalFindingsBlock?: string;
   /**
+   * Rendered `== DECLARED PROOF OBLIGATIONS ==` block (proofCoverage.ts).
+   * Machine-observed at the tool transport, so it is stated to the validator
+   * as fact rather than as a claim to weigh — but it never asks for a
+   * rejection: an uncovered obligation withholds method-level credit, and
+   * the deliverable is still judged on its merits. Like the gate findings,
+   * supplying it does NOT suppress the ground-truth probe.
+   */
+  proofCoverageBlock?: string;
+  /**
    * The persistent skill that drove this run, when there is one. RESULT
    * verdicts render it as an "ACTIVE SKILL" block and ask the validator
    * for the `activeSkillFollowed` adherence signal (usage-conditioned
@@ -736,6 +745,7 @@ export async function llmVerdict(args: {
     `${args.subject}: ${JSON.stringify(args.payload)}`,
     groundTruthBlock,
     args.mechanicalFindingsBlock ?? '',
+    args.proofCoverageBlock ?? '',
     // Adherence is a RESULT-phase judgment: a plan merely STATES intent to
     // follow the recipe, only the executed work can demonstrate it. Plan
     // verdicts therefore never carry the block even when a skill is active.

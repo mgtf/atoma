@@ -36,6 +36,7 @@ const DELIVERED_STATS: RunStats = {
   compileErrors: 0,
   demotions: 0,
   dispatchFallbacks: 0,
+  uncoveredObligations: 0,
 };
 
 afterEach(() => {

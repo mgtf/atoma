@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { jsonrepair, JSONRepairError } from 'jsonrepair';
 import { ValidationError } from '../core/errors.js';
+import { isProofObligation } from '../contracts/attestation.js';
 
 /**
  * Strip stray `}` / `]` tokens that close the OUTER aggregate too early,
@@ -660,6 +661,20 @@ export const subtaskSpecSchema = z.object({
     .transform((v) => {
       const cleaned = (v ?? []).map((p) => p.trim()).filter((p) => p.length > 0);
       return cleaned.length > 0 ? cleaned : undefined;
+    }),
+  // Proof obligations (Task.proofObligations). Same null-tolerance pattern as
+  // `outputs`, and the vocabulary is CLOSED: an unrecognised member is
+  // DROPPED rather than rejected, so a planner inventing "clicks-work" costs
+  // nothing instead of crashing the whole plan parse. Dropping is safe
+  // because an absent obligation is exactly today's behaviour — the failure
+  // direction is "no gate", never "wrong gate".
+  proofObligations: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .transform((v) => {
+      const cleaned = (v ?? []).map((o) => o.trim()).filter(isProofObligation);
+      return cleaned.length > 0 ? [...new Set(cleaned)] : undefined;
     }),
 });
 

@@ -136,6 +136,7 @@ function machineRunStats(
     compileErrors: signals['compile-error'],
     demotions: signals.demotion,
     dispatchFallbacks: signals['dispatch-fallback'],
+    uncoveredObligations: signals['uncovered-obligation'],
   };
 }
 
@@ -570,6 +571,7 @@ export async function startTask(
     'compile-error': 0,
     demotion: 0,
     'dispatch-fallback': 0,
+    'uncovered-obligation': 0,
   };
   // ONE construction switch, shared with curriculum (review §3.9): the
   // hand-rolled ternary here and its drifted copy over there were the exact

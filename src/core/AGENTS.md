@@ -67,6 +67,22 @@ Neighbours:
 - The lifecycle ledger is attributable; registry events distinguish initiator
   from target. Cache hits have their own event kind.
 
+## Proof attestation
+
+- `forkBranch` wraps `ctx.tools` per branch (mirroring how it wraps `ctx.llm`)
+  and appends transport-observed observations to ONE run-scoped log shared by
+  reference across every fork. Branch identity comes from the wrapper the fork
+  created; never from an ambient "current actor", which races the moment two
+  lanes run at once.
+- `attestingExecutor` UNWRAPS before wrapping (`baseExecutorOf`). A nested fork
+  that stacked wrappers would append one call under every ancestor branch, and
+  coverage would then find an observation in a branch that never made it.
+- The attestation is a CORRECTNESS path and the trace is an OBSERVABILITY one,
+  on the same seam: a failed attestation degrades the observation to unattested
+  and says so, a failed recording is swallowed. Neither ever fails a tool call.
+- The log is memory only. It is not a store, and cross-run proof reuse is out
+  of scope by construction.
+
 ## Intentional choices and rejected shortcuts
 
 - `DEFAULT_LIMITS.maxExecIterations` and its comparison are pinned by tests;

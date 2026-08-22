@@ -13,7 +13,8 @@ import { modelForTier } from '../core/models.js';
 import { capToolIterations } from '../core/limits.js';
 import { parsePayloadTolerant, parseWith, planSchema } from './json.js';
 import type { Skill } from '../skills/types.js';
-import { witnessesFromPayload } from '../contracts/witness.js';
+import { witnessesFromPayload, type Witness } from '../contracts/witness.js';
+import { renderObservation } from '../contracts/attestation.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { namespaceOf, type SkillNamespace } from '../skills/namespace.js';
 
@@ -442,8 +443,21 @@ export class L1Atom extends Atom {
       ...(this.activeSkillIdField !== null ? { activeScriptSkillExecuted } : {}),
       // Typed witnesses, attached at production time: the child's recorded
       // probes become first-class evidence the upper tiers can weigh
-      // without re-parsing the payload.
-      evidence: witnessesFromPayload({ output }),
+      // without re-parsing the payload. Transport-observed witnesses ride
+      // alongside them as REFERENCES into the run-scoped attestation log —
+      // the observation itself never enters the Result, which is what keeps
+      // it out of the N>1 aggregation losses.
+      evidence: [
+        ...witnessesFromPayload({ output }),
+        ...(ctx.attestations?.forBranch(ctx.currentBranchId) ?? []).map(
+          (record): Witness => ({
+            source: 'transport-observed',
+            eventId: record.eventId,
+            tool: record.tool,
+            observed: renderObservation(record),
+          })
+        ),
+      ],
     };
   }
 }

@@ -39,6 +39,7 @@ const cancelledStats: RunStats = {
   compileErrors: 0,
   demotions: 0,
   dispatchFallbacks: 0,
+  uncoveredObligations: 0,
 };
 
 describe('cancelled runs keep their economics', () => {

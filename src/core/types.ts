@@ -1,3 +1,5 @@
+import type { AttestationLog, ProofObligation } from '../contracts/attestation.js';
+
 export type Tier = 1 | 2 | 3;
 
 export interface Task {
@@ -15,6 +17,18 @@ export interface Task {
    * run per unrecognised phrasing (2026-08-14 review §3.3).
    */
   readonly outputs?: readonly string[];
+  /**
+   * Proof obligations DECLARED by the plan that authored this subtask. An
+   * obligation no transport-observed attestation covers never rejects the
+   * deliverable: it forces validator review and withholds the METHOD-level
+   * consequences of approval (atom trust, skill credit, distillation,
+   * promotion). Absent means today's behaviour, unchanged.
+   *
+   * Declared, never sniffed. A mechanical detector over `description` — "the
+   * word click implies a DOM obligation" — is the vocabulary-frozen detector
+   * class the 2026-08-14 review measured as a primary source of drift.
+   */
+  readonly proofObligations?: readonly ProofObligation[];
 }
 
 export interface ToolCall {
@@ -64,6 +78,12 @@ export interface SubtaskSpec {
   readonly preferredChild?: string;
   /** See `Task.outputs` — threaded verbatim onto the child Task. */
   readonly outputs?: readonly string[];
+  /**
+   * See `Task.proofObligations` — threaded onto the child Task, UNIONED with
+   * the parent task's own, so an obligation declared one tier up still
+   * reaches the supervisor that watches the tool-bearing child.
+   */
+  readonly proofObligations?: readonly ProofObligation[];
 }
 
 /**
@@ -181,6 +201,20 @@ export type PositiveVerdict = {
    * to `approved`: adherence routes credit, it never gates approval.
    */
   activeSkillFollowed?: boolean;
+  /**
+   * Proof coverage, set by the supervisor — never by a model. `true` means
+   * the task declared a proof obligation that no transport-observed
+   * attestation covers. Like `activeSkillFollowed`, it is orthogonal to
+   * `approved`: approving a RESULT is a judgment about an ARTIFACT, while
+   * atom trust, skill credit, distillation and promotion are claims about a
+   * METHOD, and only the second needs machine-observed proof. So this
+   * withholds the method-level consequences and leaves the verdict alone.
+   *
+   * Carried ON THE VERDICT rather than on the atom instance because parallel
+   * lanes share one supervisor instance: per-instance state would race
+   * across concurrent subtasks.
+   */
+  proofUncovered?: boolean;
 };
 export type NegativeVerdict = {
   approved: false;
@@ -487,6 +521,18 @@ export interface RunContext {
   readonly limits: Limits;
   /** Optional: tool executor used by molecules when the LLM emits tool_use blocks. */
   readonly tools?: ToolExecutor;
+  /**
+   * Run-scoped, append-only log of TRANSPORT-OBSERVED tool observations
+   * (`src/core/attestation.ts`). Mutable and lazily initialised like the
+   * memos above, and shared BY REFERENCE across every fork: the coverage
+   * check reads a phase's branch, so a branch-scoped copy would silently
+   * narrow to "whatever this fork happened to see". `forkBranch` wraps
+   * `tools` per branch to write into it.
+   *
+   * Memory only. Nothing here outlives the run, which is why it is not a
+   * store and why cross-run proof reuse is out of scope.
+   */
+  attestations?: AttestationLog;
   /**
    * Product-run integrity gate: when true, a production L1 Result that carries
    * an observed-action list but no successful action is mechanically rejected

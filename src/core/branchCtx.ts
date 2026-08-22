@@ -6,6 +6,7 @@ import type {
   SkillEventInfo,
   TrustFastPathInfo,
 } from './types.js';
+import { attestingExecutor, createAttestationLog } from './attestation.js';
 
 /**
  * Derive a child RunContext that tags every observable event (LLM call,
@@ -71,6 +72,18 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
   >());
   const mechanicalPlanRejections = (ctx.mechanicalPlanRejections ??= new Set<string>());
   const mechanicalResultRejections = (ctx.mechanicalResultRejections ??= new Set<string>());
+  // Same reference rule, same reason: the attestation log is read by the
+  // supervisor at verdict time for a PHASE's branch, so a per-fork copy
+  // would answer "what this fork saw" instead of "what happened in that
+  // branch". Initialised on the PARENT so the root and every sibling share
+  // one log.
+  const attestations = (ctx.attestations ??= createAttestationLog());
+  // The per-branch writer. `attestingExecutor` unwraps any wrapper it is
+  // handed, so a nested fork re-wraps the BASE executor instead of stacking
+  // one append per ancestor branch.
+  const wrappedTools = attestingExecutor(ctx.tools, attestations, branchId, (message) =>
+    ctx.logger.warn(`[attestation] ${message}`)
+  );
 
   const out: RunContext = {
     logger: ctx.logger,
@@ -81,7 +94,8 @@ export function forkBranch(ctx: RunContext, branchId: string): RunContext {
     dispatchedScriptSignatures,
     mechanicalPlanRejections,
     mechanicalResultRejections,
-    ...(ctx.tools !== undefined ? { tools: ctx.tools } : {}),
+    ...(wrappedTools !== undefined ? { tools: wrappedTools } : {}),
+    attestations,
     // Field-enumeration hazard, measured: this rebuild once dropped
     // `requireObservedToolAction`, and because the flag is only SET on the
     // root ctx while L2.validateResult reads it through a double fork, the

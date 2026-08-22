@@ -125,6 +125,9 @@ export function parseRunLog(log: string): RunStats {
     compileErrors: (log.match(/skill compile errored:/g) ?? []).length,
     demotions: (log.match(/demoted to llm after/g) ?? []).length,
     dispatchFallbacks: (log.match(/falling back to the LLM loop/g) ?? []).length,
+    // Prose fallback, runner-owned marker only — same discipline as the
+    // escalation counter above.
+    uncoveredObligations: (log.match(/proof obligation is UNCOVERED/g) ?? []).length,
   };
 }
 

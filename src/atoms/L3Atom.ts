@@ -56,6 +56,7 @@ import {
   HTTP_PORTABLE_DOC_GUIDANCE,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
+  PROOF_OBLIGATION_GUIDANCE,
   preservePlanLiteralContracts,
 } from './prompts.js';
 import type { SkillRegistry } from '../skills/registry.js';
@@ -520,6 +521,8 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `failure inputs (a missing argument, a path that does not exist).`,
       ``,
       MUTATING_SUBTASK_FILE_GUIDANCE,
+      ``,
+      PROOF_OBLIGATION_GUIDANCE,
       ``,
       LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
       ``,

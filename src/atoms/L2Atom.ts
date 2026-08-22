@@ -30,6 +30,12 @@ import {
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { forkBranch } from '../core/branchCtx.js';
+import {
+  anyUncovered,
+  checkProofCoverage,
+  effectiveObligations,
+  renderProofCoverage,
+} from './proofCoverage.js';
 import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
@@ -74,6 +80,7 @@ import {
   HTTP_PORTABLE_DOC_GUIDANCE,
   LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
   MUTATING_SUBTASK_FILE_GUIDANCE,
+  PROOF_OBLIGATION_GUIDANCE,
   preservePlanLiteralContracts,
   SMOKE_DESIGN_GUIDANCE,
   stripLiteralContractBlock,
@@ -454,6 +461,8 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       ``,
       MUTATING_SUBTASK_FILE_GUIDANCE,
       ``,
+      PROOF_OBLIGATION_GUIDANCE,
+      ``,
       LITERAL_CONTRACT_PRESERVATION_GUIDANCE,
       ``,
       `== STRATEGY OPTIONS (picks the L1 baseline) ==`,
@@ -650,6 +659,13 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       // Structured output intent travels with the task: the skill dispatch
       // gates read it as authoritative instead of regex-recovering it.
       ...(subtask.outputs && subtask.outputs.length > 0 ? { outputs: subtask.outputs } : {}),
+      // Proof obligations travel the same way, and INHERIT: an obligation
+      // declared one tier up (an L3 phase whose whole point is DOM
+      // behaviour) must reach the supervisor that actually watches the
+      // tool-bearing child, or declaring it there would be silently inert.
+      ...(effectiveObligations(subtask, parentTask).length > 0
+        ? { proofObligations: effectiveObligations(subtask, parentTask) }
+        : {}),
     };
 
     // Skill prefilter (C2a). When a SkillRegistry is wired and the
@@ -1493,6 +1509,36 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
         return freshBranched;
       },
       onApproved: async (child, result, verdict) => {
+        // PROOF-GATED METHOD CREDIT. The deliverable was approved on its
+        // merits; what is withheld here is every claim about the METHOD that
+        // produced it — the child type's trust success, the skill's credit,
+        // distillation and the promotion check that credit arms. Measured
+        // reason: an approved run whose eight requested clicks were all
+        // filtered away distilled a recipe teaching the next run to drive
+        // state through `window.__*` hooks, and that recipe was then matched,
+        // injected and credited.
+        if (verdict?.approved === true && verdict.proofUncovered === true) {
+          ctx.recordRunStat?.('uncovered-obligation');
+          const withheldSkillId = child.activeSkillId();
+          const withheldNs = child.activeSkillOwner() ?? namespaceOf(child);
+          ctx.logger.warn(
+            `[${this.name}] ${child.name}: RESULT approved but a declared proof obligation is UNCOVERED — ` +
+              `atom trust success, skill credit, distillation and promotion are all WITHHELD`
+          );
+          if (withheldSkillId && this.skillRegistry) {
+            ctx.recordSkill?.({
+              op: 'credit-withheld',
+              l1Name: this.displayNameForNamespace(withheldNs),
+              l1AtomId: withheldNs,
+              skillId: withheldSkillId,
+              actorName: this.name,
+              actorTier: 2,
+              reasoning:
+                'success NOT credited — a declared proof obligation has no transport-observed attestation',
+            });
+          }
+          return;
+        }
         this.registry.recordSuccess(child.name, this.name);
         // Skill trust counter bump (C2a). When the supervise loop
         // approves a result and a skill drove the run, record a
@@ -1990,6 +2036,24 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
           .join(', ')}] — forcing a full verdict instead of the trust fast-path`
       );
     }
+    // DECLARED PROOF OBLIGATIONS. Read-only, zero LLM calls: the supervisor
+    // reads the attestation log for this phase's branch and answers one
+    // mechanical question per obligation the plan declared. Absent
+    // obligations mean an empty list and a completely unchanged path.
+    const coverage = await checkProofCoverage({
+      ctx,
+      obligations: task.proofObligations ?? [],
+    });
+    const proofUncovered = anyUncovered(coverage);
+    const coverageBlock = renderProofCoverage(coverage);
+    if (proofUncovered) {
+      ctx.logger.warn(
+        `[${this.name}] result from ${child.name}: ${coverage
+          .filter((c) => !c.covered)
+          .map((c) => c.reason)
+          .join(' ')} — forcing a full verdict and withholding method-level credit`
+      );
+    }
     const activeSkillId = child.activeSkillId();
     const activeSkill =
       activeSkillId && this.skillRegistry
@@ -2016,7 +2080,7 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
     // runs its own ground-truth probe internally, so the trusted branch's
     // probe would be a duplicate on that path.
     let trustedProbe: GroundTruthCheck | null = null;
-    if (type && shouldTrustType(type) && gateFindingsBlock === undefined) {
+    if (type && shouldTrustType(type) && gateFindingsBlock === undefined && !proofUncovered) {
       trustedProbe = await checkGroundTruth({
         ctx,
         subject: 'RESULT',
@@ -2061,14 +2125,22 @@ export class L2Atom extends Atom implements Supervisor<L1Atom>, Peerable<L2Atom>
       child,
       ...(trustedProbe ? { groundTruthBlock: trustedProbe.block } : {}),
       ...(gateFindingsBlock !== undefined ? { mechanicalFindingsBlock: gateFindingsBlock } : {}),
+      ...(coverageBlock ? { proofCoverageBlock: coverageBlock } : {}),
       ...(activeSkill ? { activeSkill: { id: activeSkill.id, body: activeSkill.body } } : {}),
       task,
       payload: { output: result.output, summary: result.summary },
       ...(result.evidence ? { evidence: result.evidence } : {}),
     });
-    return activeScriptSkillIgnored
+    const adherenceAdjusted = activeScriptSkillIgnored
       ? { ...verdict, activeSkillFollowed: false }
       : verdict;
+    // `proofUncovered` rides on the verdict, not on this instance: parallel
+    // lanes share one L2, so per-instance state would race across concurrent
+    // subtasks. Only a POSITIVE verdict carries it — a rejection already
+    // stops the method-level consequences.
+    return proofUncovered && adherenceAdjusted.approved
+      ? { ...adherenceAdjusted, proofUncovered: true }
+      : adherenceAdjusted;
   }
 }
 

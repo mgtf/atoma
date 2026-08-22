@@ -1,3 +1,4 @@
+import { recordedProbesFromWitnesses } from '../src/contracts/witness.js';
 import { describe, it, expect } from 'vitest';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -95,7 +96,11 @@ describe('L2.execute — fan-out over N orthogonal subtasks', () => {
       expect.objectContaining({ value: 'B' }),
       expect.objectContaining({ value: 'C' }),
     ]);
-    expect(result.evidence?.map((w) => w.cmd)).toEqual(['echo A', 'echo B', 'echo C']);
+    expect(recordedProbesFromWitnesses(result.evidence).map((w) => w.cmd)).toEqual([
+      'echo A',
+      'echo B',
+      'echo C',
+    ]);
     expect(result.summary).toMatch(/3 subtasks aggregated \(concat\)/);
     expect(result.producedBy).toEqual({
       tier: 2,

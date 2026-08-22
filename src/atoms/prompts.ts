@@ -317,6 +317,33 @@ export const MUTATING_SUBTASK_FILE_GUIDANCE = [
   `runtime treats a declared list as authoritative for its dispatch gates.`,
 ].join('\n');
 
+/**
+ * DECLARED PROOF OBLIGATIONS. Deliberately terse, and deliberately part of
+ * the planning prompt rather than a detector over the phase description: a
+ * mechanical "the word click implies a DOM obligation" rule is the
+ * vocabulary-frozen detector class the 2026-08-14 review measured as a
+ * primary source of drift. The vocabulary is closed with one member, so this
+ * costs a handful of output tokens on the phases that need it and nothing
+ * anywhere else.
+ */
+export const PROOF_OBLIGATION_GUIDANCE = [
+  `PROVING USER INPUT WORKS. When a phase's verification depends on REAL user`,
+  `input reaching the page — a button that must actually respond to a click,`,
+  `a field that must accept typing — declare it structurally on that subtask:`,
+  `"proofObligations": ["dom-interaction"]. It is the ONLY accepted value;`,
+  `omit the field everywhere else.`,
+  `What it changes: the supervisor checks that the browser tool actually`,
+  `EXECUTED an interaction, from the tool's own transport record. A smoke`,
+  `expression that drives the page through its own \`window.*\` hooks proves`,
+  `the internal path and NOT the input path, and the runtime discards every`,
+  `external interaction when the smoke drives its own state — so a phase that`,
+  `declares this obligation must reach the affordance through selector-based`,
+  `interactions, not through a test hook.`,
+  `Declaring it does not make the phase stricter to pass; leaving it out when`,
+  `the task names user input means the work is delivered with its method`,
+  `unproven, and nothing is learned from the run.`,
+].join('\n');
+
 /** Durable HTTP docs must not capture the one port assigned to this run. */
 export const HTTP_PORTABLE_DOC_GUIDANCE = [
   `HTTP DOCUMENTATION USES A PORT PLACEHOLDER. In README/docs and durable`,

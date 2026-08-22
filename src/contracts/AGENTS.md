@@ -33,3 +33,18 @@ Neighbours:
   (`REPORTED_WEB_PROBE_ALIASES`) are READER tolerance for recipes distilled
   before a rename; never teach one, and never widen the on-disk checker to
   accept one — a compiled script dispatches on that discriminator.
+
+## Proof attestation
+
+- `src/contracts/attestation.ts` owns the typed tool observation, the
+  attestation record, and the obligation vocabulary. An observation is only
+  ever OBSERVED: no model-authored payload may enter that module, and the only
+  writer is the runtime seam that saw the raw tool result.
+- `requestedInteractions` and `executedInteractions` are SEPARATE fields on
+  purpose. Reporting one side is what let `ok: true` with an empty interaction
+  log read as proof that clicking worked.
+- The obligation vocabulary is CLOSED and has one member. Adding a second is a
+  design review with its own evidence, not a schema edit.
+- `Witness` declares its OBSERVER. Never relabel a model-declared witness as
+  transport-observed, and never fold transport witnesses into the
+  recorded-probe rendering — they are references, and they carry no `cmd`.

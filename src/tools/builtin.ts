@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, lstatS
 import { basename, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer as createNetServer } from 'node:net';
+import { createHash } from 'node:crypto';
 import type { Tool, Logger } from '../core/types.js';
 import { sandboxChildEnv, type ToolSandbox } from './sandbox.js';
 import {
@@ -1232,6 +1233,44 @@ export function startNodeServerTool(opts: BuiltinToolOptions): BuiltinTool {
  * This is the fix-loop signal the L1 worker needs to know whether the app it
  * just built actually runs.
  */
+/**
+ * The workspace file a `start_static_server` URL actually serves, with its
+ * content digest AT OBSERVATION TIME. `start_static_server` serves the
+ * WORKSPACE ROOT, so the mapping is deterministic: pathname → sandbox file,
+ * with a directory request meaning `index.html`.
+ *
+ * WHY the tool resolves this and not the caller: the digest is what relates
+ * a browser observation to an artifact revision, and it has to be taken
+ * while the observation is being taken. Recomputed later at verdict time it
+ * would only ever prove the file's CURRENT state, which is the question, not
+ * the answer.
+ *
+ * Silent on anything it cannot resolve (external URL, a Node server, a path
+ * outside the sandbox, a missing file). An absent document means "no
+ * revision binding", which is a weaker observation — never a failure.
+ */
+function observedDocumentFor(
+  sandbox: ToolSandbox,
+  rawUrl: string
+): { path: string; sha256: string } | undefined {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') return undefined;
+    let pathname = decodeURIComponent(parsed.pathname);
+    if (pathname.endsWith('/')) pathname = `${pathname}index.html`;
+    const relPath = pathname.replace(/^[\\/]+/, '');
+    if (relPath.length === 0) return undefined;
+    const abs = sandbox.resolve(relPath);
+    if (!existsSync(abs) || !lstatSync(abs).isFile()) return undefined;
+    return {
+      path: relPath,
+      sha256: createHash('sha256').update(readFileSync(abs)).digest('hex'),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
   // One shared browser per sandbox so we don't pay the 500ms+ launch cost on
   // every validation iteration.
@@ -1363,6 +1402,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           : 500;
       const waitMs = Math.min(requestedWaitMs, MAX_WAIT_MS);
       let interactions = parseInteractions(args['interactions']);
+      // Captured BEFORE the smoke filter empties the list below: the count
+      // the caller asked for is a fact about the request, and it is not
+      // recoverable from `interactions` afterwards.
+      const requestedInteractions = interactions.length;
       const smoke =
         typeof args['smoke'] === 'string' && args['smoke'].trim().length > 0
           ? args['smoke']
@@ -1428,6 +1471,10 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
       const interactionLog: string[] = [];
+      // Resolved BEFORE the page opens, so the digest is the revision the
+      // browser is about to load rather than whatever the file becomes later
+      // in the phase.
+      const document = observedDocumentFor(opts.sandbox, url);
       if (ignoredInteractions > 0) {
         warnings.push(
           `${ignoredInteractions} external interaction(s) ignored because the smoke IIFE drives and snapshots its own state transitions`
@@ -1677,6 +1724,14 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           warnings,
           failedRequests: realFailedRequests,
           interactionLog,
+          // Attestation fields (additive). `requestedInteractions` is the
+          // caller's fact and `interactionLog` is the runtime's; reporting
+          // only one side loses exactly the distinction that let a run whose
+          // eight requested clicks were all filtered away read as proof of
+          // clicking. `document` binds the observation to a revision.
+          requestedInteractions,
+          ignoredInteractions,
+          ...(document ? { document } : {}),
           ...(smoke ? { smokeResult } : {}),
         };
       } catch (err) {
@@ -1696,6 +1751,9 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             (r) => !isSpeculativeFaviconRequest(r.url, url, false)
           ),
           interactionLog,
+          requestedInteractions,
+          ignoredInteractions,
+          ...(document ? { document } : {}),
         };
       } finally {
         await page.close().catch(() => undefined);

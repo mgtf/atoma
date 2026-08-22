@@ -517,11 +517,22 @@ function toAnthropicTools(
  * Mock client for tests. Responds from a queue of canned replies, or from a function
  * that inspects the request and produces a reply.
  */
+type MockTurn = (
+  req: LlmCompletionRequest
+) => LlmCompletionResponse | Promise<LlmCompletionResponse>;
+
 export class MockLlmClient implements LlmClient {
-  private queue: (LlmCompletionResponse | ((req: LlmCompletionRequest) => LlmCompletionResponse))[] = [];
+  private queue: (LlmCompletionResponse | MockTurn)[] = [];
   public readonly calls: LlmCompletionRequest[] = [];
 
-  enqueue(reply: LlmCompletionResponse | ((req: LlmCompletionRequest) => LlmCompletionResponse)): void {
+  /**
+   * A queued turn may be a plain response OR a function of the request. The
+   * function form may be ASYNC on purpose: the mock has no tool loop, so a
+   * turn that needs to act like one drives `req.executor` itself before
+   * returning its text. Without that, nothing in the test suite can exercise
+   * the tool transport a child was actually handed.
+   */
+  enqueue(reply: LlmCompletionResponse | MockTurn): void {
     this.queue.push(reply);
   }
 
@@ -539,7 +550,7 @@ export class MockLlmClient implements LlmClient {
     if (!next) {
       throw new Error(`MockLlmClient: no queued reply for request (model=${req.model})`);
     }
-    if (typeof next === 'function') return next(req);
+    if (typeof next === 'function') return await next(req);
     return next;
   }
 }
