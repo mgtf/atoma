@@ -42,6 +42,29 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Same convention as the repo's operator source launchers (src/cli/loadDotenv):
+// checkout .env FILLS UNSET KEYS ONLY — the shell environment always wins, so
+// an operator export overrides the file and a deployed service that injects
+// real env vars never reads it. This keeps the analyst token out of shell
+// history locally without inventing a second precedence rule.
+function fillEnvFromDotenv() {
+  let text;
+  try {
+    text = readFileSync(join(root, '.env'), 'utf8');
+  } catch {
+    return;
+  }
+  for (const line of text.split('\n')) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+    if (!match || line.trimStart().startsWith('#')) continue;
+    const [, key, rawValue] = match;
+    if (process.env[key] !== undefined) continue;
+    const value = /^(['"]).*\1$/.test(rawValue) ? rawValue.slice(1, -1) : rawValue;
+    process.env[key] = value;
+  }
+}
+fillEnvFromDotenv();
 const runsDir = join(root, 'runs');
 const indexPath = join(runsDir, 'index.json');
 const supervisorDir = join(root, 'supervisor');
