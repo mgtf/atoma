@@ -27,6 +27,11 @@ export default tseslint.config(
       // CLI (their own package.json, their own module system) and belong to no
       // tsconfig — linting them type-aware fails on "not found in any project".
       'benchmark/seeds/**',
+      // Agent working copies. `.claude/worktrees/<name>` is a SEPARATE git
+      // checkout of this repository, so `eslint .` walks a second full source
+      // tree that belongs to no tsconfig here: 860 type-aware errors from code
+      // that is not this working tree's. Not project source, never linted.
+      '.claude/worktrees/**',
     ],
   },
   js.configs.recommended,

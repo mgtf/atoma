@@ -7,6 +7,8 @@ import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
 import { L2Atom } from '../src/atoms/L2Atom.js';
 import { L1Atom } from '../src/atoms/L1Atom.js';
+import { L3Atom } from '../src/atoms/L3Atom.js';
+import { FALLBACK_OPUS } from '../src/core/models.js';
 import { SkillRegistry } from '../src/skills/registry.js';
 import { TRUST_THRESHOLD_SUCCESSES } from '../src/atoms/cost.js';
 import { forkBranch } from '../src/core/branchCtx.js';
@@ -639,5 +641,172 @@ describe('the observation survives the worker/container protocol', () => {
     expect(parsedFiltered!.ignoredInteractions).toBe(8);
     expect(parsedFiltered!.executedInteractions).toEqual([]);
     expect(parsedFiltered!.document).toEqual({ path: 'index.html', sha256: 'a'.repeat(64) });
+  });
+});
+
+describe('an obligation declared at L3 reaches the supervisor that watches the tools', () => {
+  /**
+   * MEASURED REGRESSION, first armed control 2026-08-22. The L3 planner
+   * declared `proofObligations: ["dom-interaction"]` on its phase and the
+   * gate stayed inert: `L3Atom.runSubtask` threaded `outputs` onto the child
+   * Task and dropped this field, so the L2 saw a task with no obligation and
+   * had nothing to union. Fourteen requested interactions were discarded,
+   * zero executed, the RESULT was approved, atom trust was credited, and a
+   * recipe teaching "a smoke script exercising each control" was distilled.
+   *
+   * 2419 unit tests were green at the time: every one of them declared the
+   * obligation at the tier that CONSUMES it. This test therefore crosses the
+   * L3 → L2 → L1 boundary the bug crossed, declares the obligation ONLY in
+   * the L3 plan, and asserts both ends — what the L2's verdict was shown, and
+   * what the run refused to credit.
+   */
+  const seed = {
+    description: 'seed',
+    systemPrompt: 'sys',
+    tools: [],
+    params: {},
+    createdBy: 'test',
+  };
+
+  /**
+   * Answers by ROLE and by ACTOR TIER, so the assertions depend on neither
+   * call ordering nor prompt prose. Only the TIER-3 plan declares the
+   * obligation; if the field failed to travel, the L2 would see none.
+   */
+  class RoleDrivenLlm {
+    readonly calls: Array<{ role?: string; tier?: number; userContent: string }> = [];
+    constructor(
+      private readonly l2Name: string,
+      private readonly l1Name: string
+    ) {}
+    async complete(req: {
+      role?: string;
+      actor?: { tier?: number };
+      userContent: string;
+      executor?: ToolExecutor;
+    }): Promise<{
+      text: string;
+      stopReason: string;
+      usage: { inputTokens: number; outputTokens: number };
+    }> {
+      this.calls.push({
+        role: req.role,
+        ...(req.actor?.tier !== undefined ? { tier: req.actor.tier } : {}),
+        userContent: req.userContent,
+      });
+      const reply = (value: unknown) => ({
+        text: JSON.stringify(value),
+        stopReason: 'end_turn',
+        usage: { inputTokens: 10, outputTokens: 10 },
+      });
+      const tier = req.actor?.tier;
+      switch (req.role) {
+        case 'prefilter':
+          return reply({
+            kind: 'reuse',
+            target: tier === 3 ? this.l2Name : this.l1Name,
+            confidence: 'high',
+            reasoning: 'fits',
+          });
+        case 'plan':
+          if (tier === 3) {
+            // L3's plan turn returns a PAIR: the routing strategy, then the
+            // plan (`parseTwoJson`).
+            return {
+              text: JSON.stringify([
+                { strategy: 'reuse', target: this.l2Name, reasoning: 'fits' },
+                {
+                  reasoning: 'one phase',
+                  subtasks: [
+                    {
+                      description: 'build and verify the counter widget',
+                      preferredChild: this.l2Name,
+                      outputs: ['index.html'],
+                      proofObligations: ['dom-interaction'],
+                    },
+                  ],
+                  aggregation: { mode: 'sequential' },
+                  expectedOutput: 'a working widget',
+                },
+              ]),
+              stopReason: 'end_turn',
+              usage: { inputTokens: 10, outputTokens: 10 },
+            };
+          }
+          if (tier === 2) {
+            // Deliberately silent about the obligation: the L2 plan must not
+            // be the thing that saves the gate.
+            return reply({
+              reasoning: 'delegate',
+              subtasks: [
+                {
+                  description: 'write index.html and verify it in the browser',
+                  preferredChild: this.l1Name,
+                  outputs: ['index.html'],
+                },
+              ],
+              aggregation: { mode: 'concat' },
+              expectedOutput: 'index.html verified',
+            });
+          }
+          return reply({ reasoning: 'r', proposedAction: 'write and verify', expectedOutput: 'e' });
+        case 'validate-plan':
+        case 'validate-result':
+          return reply({ approved: true, reasoning: 'ok' });
+        case 'execute': {
+          // The child drives the browser through the executor the runtime
+          // handed it — the attesting wrapper installed by forkBranch.
+          if (req.executor) {
+            await req.executor.execute('validate_html', {
+              url: 'http://localhost:5051/',
+              interactions: [{ type: 'click', selector: '#inc' }],
+              smoke: 'window.__counter.increment()',
+            });
+          }
+          return reply({
+            output: { url: 'http://localhost:5051/', files: ['index.html'] },
+            summary: 'widget built and validated',
+          });
+        }
+        default:
+          return reply({ approved: true, reasoning: 'ok' });
+      }
+    }
+  }
+
+  it('withholds credit on a phase whose obligation only the L3 plan declared', async () => {
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l3Type = reg.create(3, seed);
+    const l2Type = reg.create(2, seed);
+    const l1Type = reg.create(1, {
+      ...seed,
+      tools: [tool('write_file'), tool('validate_html')],
+    });
+    const stats: string[] = [];
+    const llm = new RoleDrivenLlm(l2Type.name, l1Type.name);
+    const ctx = {
+      ...makeCtx(),
+      llm: llm as unknown as RunContext['llm'],
+      tools: new StubExecutor(COUNTER_RESULT, { 'index.html': '<html></html>' }),
+      recordRunStat: (name: string) => stats.push(name),
+    };
+
+    const l3 = L3Atom.buildWithModel(l3Type, reg, FALLBACK_OPUS);
+    await l3.handle(
+      { description: 'build a counter whose buttons change the displayed count' },
+      ctx
+    );
+
+    // End 1: the L2's RESULT verdict was shown the machine-observed facts.
+    const shown = llm.calls
+      .filter((c) => c.role === 'validate-result' && c.tier === 2)
+      .map((c) => c.userContent)
+      .join('\n');
+    expect(shown).toMatch(/== DECLARED PROOF OBLIGATIONS/);
+    expect(shown).toMatch(/UNCOVERED — dom-interaction NOT covered/);
+
+    // End 2: the run refused to credit the method.
+    expect(reg.getByName(l1Type.name)!.successes).toBe(0);
+    expect(stats).toContain('uncovered-obligation');
   });
 });

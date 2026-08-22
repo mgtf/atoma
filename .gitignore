@@ -21,6 +21,9 @@ burnin/logs/
 # the remote was unbuildable and local git status showed clean.
 /skills/
 .claude/settings.local.json
+# Agent working copies: each is a separate git checkout of this repository, so
+# `git add -A` offers to embed it as a submodule. Scratch, never committed.
+.claude/worktrees/
 # Local Codex MCP registration contains an absolute checkout path and executes
 # a command when the client starts. Keep it per-operator, never project-wide.
 .codex/config.toml

@@ -37,6 +37,7 @@ import {
 } from './json.js';
 import { superviseLoop, type SupervisionHooks } from '../core/supervisor.js';
 import { forkBranch } from '../core/branchCtx.js';
+import { effectiveObligations } from './proofCoverage.js';
 import { randomUUID } from 'node:crypto';
 import { RegistryNotFoundError } from '../core/errors.js';
 import { mergeTools } from './toolMerge.js';
@@ -742,6 +743,19 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       // Structured output intent travels with the task: the skill dispatch
       // gates read it as authoritative instead of regex-recovering it.
       ...(subtask.outputs && subtask.outputs.length > 0 ? { outputs: subtask.outputs } : {}),
+      // Proof obligations must cross THIS boundary too. Measured on the first
+      // armed control (2026-08-22): the L3 planner declared
+      // `proofObligations: ["dom-interaction"]` on its phase, this line
+      // threaded only `outputs`, and the obligation died here — the L2 saw a
+      // task with none, `effectiveObligations` had nothing to union, and the
+      // gate was inert on exactly the run it exists for. 14 requested
+      // interactions were discarded, zero executed, the RESULT was approved,
+      // trust was credited and a recipe teaching "a smoke script exercising
+      // each control" was distilled. Every tier that builds a child Task
+      // forwards this field.
+      ...(effectiveObligations(subtask, parentTask).length > 0
+        ? { proofObligations: effectiveObligations(subtask, parentTask) }
+        : {}),
     };
     // Fork a branch-scoped ctx so the viz can render each L2 subtask
     // (and its downstream L1 tree) as its own lane.
