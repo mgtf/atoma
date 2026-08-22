@@ -110,7 +110,18 @@ npm run viz:mark-turn:analyze
   outside the cache so live data, identity state and GitHub deliveries cannot
   be hidden by an offline shell.
 - Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
-- The Launch tab describes families and intentionally does not start runs.
+- There is NO Launch tab in the GPU client. A tab that could only DESCRIBE how
+  to phrase a goal, beside a Projects tab that actually starts runs, split one
+  job over two places; the family guidance (`/api/profiles`, with a
+  `launch.help.<id>` catalog override per family) renders inside the project
+  run form, on the same condition as the prompt textarea it describes, and its
+  examples fill that prompt. `/api/profiles` stays a READER: it is ungated, so
+  it must never gain launch power — browser launches live on the authenticated
+  project routes, where a session the run does not hold is the boundary. The
+  shell path for an instance with no organisations is the `launch` docs theme.
+  The FROZEN MUI fallback keeps its own Launch tab: it has no Projects view to
+  fold the guidance into, and it is a fallback, not where product decisions get
+  expressed.
 
 ## Server and gated surfaces
 

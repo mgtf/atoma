@@ -1,5 +1,6 @@
+import { Container } from 'pixi.js';
 import { fmtCost } from '../../../client/run-utils.js';
-import type { VizProjectRun } from '../../../client/types.js';
+import type { LaunchProfile, VizProjectRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
@@ -13,6 +14,11 @@ import { createScrollPane } from '../scroll-pane.js';
  *
  * The create/connect form is a DOM overlay (`.gpu-project-form`). GPU copy
  * and the project list start below that band so labels never sit under inputs.
+ *
+ * It also carries the run prompt's GUIDANCE — how to phrase a goal for the
+ * family, and example goals that fill the prompt. That used to be a separate
+ * Launch tab which could only describe and never start, so one job lived in
+ * two places; the guidance now sits beside the input it describes.
  */
 
 const ROW_HEIGHT = 54;
@@ -58,6 +64,99 @@ function statusLabel(
   prefix: string
 ): string {
   return t(`${prefix}.${status}`);
+}
+
+const GUIDANCE_PAD = 18;
+const GUIDANCE_GAP = 16;
+const EXAMPLE_HEIGHT = 34;
+const EXAMPLE_GAP = 8;
+const EXAMPLE_COLUMNS = 2;
+
+/**
+ * A catalog key beats the profile's own English when the deployment has one:
+ * `t()` echoes an unknown key back, which is how a miss is detected — the
+ * same resolution the MUI fallback applies, so a new family stays describable
+ * without touching either client.
+ */
+function familyHelp(t: GpuRenderSnapshot['t'], profile: LaunchProfile): string {
+  const key = `launch.help.${profile.id}`;
+  const translated = t(key);
+  return translated === key ? profile.help : translated;
+}
+
+/**
+ * Draw the prompt guidance at the top of the scrolled content and return the
+ * height the project list must shift by. Measured, not estimated: the body is
+ * a wrapped paragraph, so every block below it is placed from its real
+ * bottom. The backdrop panel depends on the final cursor but must render
+ * behind the text, so a layer reserves its z-slot up front (same shape the
+ * former Launch view used).
+ */
+function drawPromptGuidance(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  parent: Container,
+  x: number,
+  panelWidth: number,
+  profile: LaunchProfile
+): number {
+  const panelLayer = new Container();
+  parent.addChild(panelLayer);
+  const innerX = x + GUIDANCE_PAD;
+  const innerWidth = panelWidth - GUIDANCE_PAD * 2;
+
+  ctx.text(parent, snapshot.t('launch.help'), innerX, GUIDANCE_PAD, {
+    size: 13,
+    weight: '700',
+    color: GPU_COLORS.primary,
+  });
+  const body = ctx.text(parent, familyHelp(snapshot.t, profile), innerX, GUIDANCE_PAD + 26, {
+    size: 11,
+    color: GPU_COLORS.muted,
+    width: innerWidth,
+  });
+
+  let cursor = GUIDANCE_PAD + 26 + body.height + 18;
+  if (profile.examples.length > 0) {
+    ctx.text(parent, snapshot.t('launch.examples'), innerX, cursor, {
+      size: 10,
+      weight: '600',
+    });
+    cursor += 22;
+    const exampleWidth = (innerWidth - EXAMPLE_GAP * (EXAMPLE_COLUMNS - 1)) / EXAMPLE_COLUMNS;
+    profile.examples.forEach((example, index) => {
+      const column = index % EXAMPLE_COLUMNS;
+      const row = Math.floor(index / EXAMPLE_COLUMNS);
+      ctx.button(
+        parent,
+        `projects.example.${index}`,
+        'button',
+        truncate(example, 54),
+        innerX + column * (exampleWidth + EXAMPLE_GAP),
+        cursor + row * (EXAMPLE_HEIGHT + EXAMPLE_GAP),
+        exampleWidth,
+        EXAMPLE_HEIGHT,
+        false,
+        snapshot.onActivate
+      );
+    });
+    const rows = Math.ceil(profile.examples.length / EXAMPLE_COLUMNS);
+    cursor += rows * (EXAMPLE_HEIGHT + EXAMPLE_GAP) - EXAMPLE_GAP;
+  }
+
+  const height = cursor + GUIDANCE_PAD;
+  ctx.panel(
+    panelLayer,
+    x,
+    0,
+    panelWidth,
+    height,
+    GPU_COLORS.panel,
+    GPU_COLORS.border,
+    GPU_LAYOUT.radius,
+    2
+  );
+  return height + GUIDANCE_GAP;
 }
 
 export function projectLayout(
@@ -146,12 +245,29 @@ export function drawProjects(
   const selectedRuns = selectedIndex >= 0 ? expandedRunList[selectedIndex] ?? [] : [];
   const layout = projectLayout(width, projects.length, selectedIndex, selectedRuns);
 
+  // The guidance describes the run PROMPT, and the DOM form only shows that
+  // textarea once a project is selected — so it appears on exactly the same
+  // condition, and never coaches a viewer who has nothing to run yet. The
+  // list below shifts by its MEASURED height; nothing here estimates it.
+  const guidanceProfile = snapshot.data.profiles[0];
+  const listOffset =
+    selectedProject && guidanceProfile
+      ? drawPromptGuidance(
+          ctx,
+          snapshot,
+          pane.content,
+          layout.x,
+          layout.panelWidth,
+          guidanceProfile
+        )
+      : 0;
+
   // Hug the list. Stretching to the remaining viewport left a hollow slab
   // under a handful of rows.
   ctx.panel(
     pane.content,
     layout.x,
-    0,
+    listOffset,
     layout.panelWidth,
     layout.contentBottom,
     GPU_COLORS.panel,
@@ -167,7 +283,7 @@ export function drawProjects(
     layout.x + layout.panelWidth - 18 - STATUS_COL,
     columnX + 560
   );
-  let cursor = layout.listTop;
+  let cursor = listOffset + layout.listTop;
   projects.forEach((project, index) => {
     const y = cursor;
     const selected = project.projectId === snapshot.state.selectedProjectId;
@@ -274,6 +390,6 @@ export function drawProjects(
     }
   });
 
-  pane.extend(layout.contentBottom);
+  pane.extend(listOffset + layout.contentBottom);
   ctx.scrollMax.projects = pane.finish();
 }

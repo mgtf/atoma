@@ -7,7 +7,7 @@ export type ViewName =
   | 'registry'
   | 'skills'
   | 'burnin'
-  | 'launch'
+  | 'docs'
   | 'admin'
   | 'settings';
 
@@ -22,14 +22,47 @@ export type ViewName =
  *   instance-global operator state; the server 403s them for non-admins, so
  *   offering the tabs would poison the global data error the way the
  *   ungated /api/projects 404 once did.
+ *
+ * There is no `launch` tab: a tab that could only DESCRIBE how to phrase a
+ * goal, beside a Projects tab that actually starts runs, split one job over
+ * two places. The family guidance now renders inside the project run form
+ * (`views/projects.ts`), and the shell path for an instance with no
+ * organisations is documented under the `launch` docs theme.
  */
 export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null): ViewName[] {
-  if (!auth) return ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
+  if (!auth) return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
   if (auth.viewer.platformAdmin) {
-    return ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch', 'admin'];
+    return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', 'admin'];
   }
-  return ['projects', 'runs', 'launch'];
+  return ['projects', 'runs', 'docs'];
 }
+
+/**
+ * Doc themes are pure prose about what a feature does, never a fetch of its
+ * data — so unlike `visibleViews`, every theme is offered to every viewer
+ * regardless of gating. `mcp` has no nav tab of its own; it documents the
+ * stdio control plane a host application connects with.
+ */
+export type DocsThemeKey =
+  | 'projects'
+  | 'runs'
+  | 'registry'
+  | 'skills'
+  | 'burnin'
+  | 'launch'
+  | 'admin'
+  | 'mcp';
+
+export const DOC_THEMES: readonly { key: DocsThemeKey; ref: string }[] = [
+  { key: 'projects', ref: 'src/projects/AGENTS.md' },
+  { key: 'runs', ref: 'src/run/AGENTS.md' },
+  { key: 'registry', ref: 'src/registry/AGENTS.md' },
+  { key: 'skills', ref: 'src/skills/AGENTS.md' },
+  { key: 'burnin', ref: 'src/cli/AGENTS.md' },
+  { key: 'launch', ref: 'src/run/AGENTS.md' },
+  { key: 'admin', ref: 'src/auth/AGENTS.md' },
+  { key: 'mcp', ref: 'src/mcp/AGENTS.md' },
+];
 
 /**
  * Which views may be ACTIVE, which is not the same question as which get a nav
@@ -52,7 +85,6 @@ export type InputKind =
   | 'run'
   | 'registry'
   | 'skills'
-  | 'launch'
   | 'projectName'
   | 'projectPrompt'
   | 'projectRepository'
@@ -91,6 +123,7 @@ export interface GpuUiState {
   burninOutcome: string;
   burninPreset: string;
   burninPage: number;
+  selectedDocsTheme: DocsThemeKey;
   scrollY: Record<ViewName, number>;
   /**
    * Arrival gate. False until Continue (later: login). Not a nav view — the
@@ -125,6 +158,7 @@ export interface GpuUiState {
   setRunPickerActiveIndex: (value: number) => void;
   setBurninFilter: (kind: 'family' | 'outcome' | 'preset', value: string) => void;
   setBurninPage: (page: number) => void;
+  selectDocsTheme: (theme: DocsThemeKey) => void;
   setScrollY: (view: ViewName, value: number) => void;
 }
 
@@ -158,7 +192,6 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     run: '',
     registry: '',
     skills: '',
-    launch: '',
     projectName: '',
     projectPrompt: '',
     projectRepository: '',
@@ -171,13 +204,14 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninOutcome: 'all',
   burninPreset: 'all',
   burninPage: 1,
+  selectedDocsTheme: 'runs',
   scrollY: {
     projects: 0,
     runs: 0,
     registry: 0,
     skills: 0,
     burnin: 0,
-    launch: 0,
+    docs: 0,
     admin: 0,
     settings: 0,
   },
@@ -260,6 +294,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
       burninPage: 1,
     } as Partial<GpuUiState>),
   setBurninPage: (burninPage) => set({ burninPage }),
+  selectDocsTheme: (selectedDocsTheme) => set({ selectedDocsTheme }),
   setScrollY: (view, value) =>
     set((state) => {
       const next = Math.max(0, value);

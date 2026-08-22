@@ -39,7 +39,13 @@ import {
   useSkillLists,
   useSkillNamespaces,
 } from './queries.js';
-import { isRoutableView, nextRunFilters, useGpuStore, visibleViews } from './store.js';
+import {
+  isRoutableView,
+  nextRunFilters,
+  useGpuStore,
+  visibleViews,
+  type DocsThemeKey,
+} from './store.js';
 import { parseSettingsModelId } from './renderer/views/settings.js';
 import type { VizAdminInvitation } from '../client/types.js';
 
@@ -157,7 +163,11 @@ function GpuAppContent({
   const skillSelection = state.view === 'skills' ? state.selectedSkill : runSkillSelection;
   const skillDetailQuery = useSkillDetail(skillSelection, Boolean(skillSelection) && operatorSurfaces);
   const burninQuery = useBurnin(state.view === 'burnin' && operatorSurfaces);
-  const profilesQuery = useProfiles(state.view === 'launch' && apiReady);
+  // The family guidance renders inside the project run form, so it is fetched
+  // with the Projects view. It is supplementary copy, never gating: it is
+  // deliberately absent from `loading` below, so a slow /api/profiles cannot
+  // hide the project list behind a spinner.
+  const profilesQuery = useProfiles(state.view === 'projects' && apiReady);
   // Project routes exist only behind the auth gate; an ungated server 404s
   // them. Left enabled, those 404s poisoned the GLOBAL `data.error` below and
   // the runs view then rendered an error banner instead of its list — the
@@ -351,14 +361,6 @@ function GpuAppContent({
     }
   }, [githubInstallationsQuery.data, state]);
 
-  const copyCommand = useCallback(() => {
-    const profile = profilesQuery.data?.profiles[0];
-    const goal = useGpuStore.getState().search.launch.trim();
-    if (!profile || !goal) return;
-    const command = `npm run ${profile.npmScript} -- "${goal.replace(/"/g, '\\"')}"`;
-    void navigator.clipboard.writeText(command);
-  }, [profilesQuery.data]);
-
   const createProject = useCallback(async (): Promise<void> => {
     if (projectBusy) return;
     const name = useGpuStore.getState().search.projectName.trim();
@@ -550,10 +552,14 @@ function GpuAppContent({
       store.setView('runs');
       return;
     }
-    if (id.startsWith('launch.example.')) {
-      const index = Number(id.slice('launch.example.'.length));
+    if (id.startsWith('docs.theme.')) {
+      store.selectDocsTheme(id.slice('docs.theme.'.length) as DocsThemeKey);
+      return;
+    }
+    if (id.startsWith('projects.example.')) {
+      const index = Number(id.slice('projects.example.'.length));
       const example = profilesQuery.data?.profiles[0]?.examples[index];
-      if (example) store.setSearch('launch', example);
+      if (example) store.setSearch('projectPrompt', example);
       return;
     }
     if (id.startsWith('login.provider.')) {
@@ -568,11 +574,9 @@ function GpuAppContent({
       if (role && orgId) void mintInvitation(orgId, role);
       return;
     }
-    if (id === 'launch.copy') copyCommand();
   }, [
     activateAuth,
     beginEnter,
-    copyCommand,
     loginHref,
     mintInvitation,
     profilesQuery.data,
@@ -585,7 +589,6 @@ function GpuAppContent({
     (state.view === 'registry' && (registriesQuery.isLoading || registryQuery.isLoading)) ||
     (state.view === 'skills' && namespacesQuery.isLoading) ||
     (state.view === 'burnin' && burninQuery.isLoading) ||
-    (state.view === 'launch' && profilesQuery.isLoading) ||
     (state.view === 'admin' && adminOrganisationsQuery.isLoading) ||
     (state.view === 'settings' && (organisationQuery.isLoading || accountModelsQuery.isLoading));
   const error = errorMessage([
@@ -703,7 +706,6 @@ function GpuAppContent({
         }
         t={t}
         onSelectRun={state.selectRun}
-        onCopy={copyCommand}
         onEnter={beginEnter}
         githubInstallations={githubInstallationsQuery.data ?? []}
         onCreateProject={() => { void createProject(); }}

@@ -2439,15 +2439,16 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
   }
 
   if (pathname === '/api/profiles') {
-    // READ-ONLY, and deliberately so: it returns compile-time constants and
-    // the command to copy, NOT a way to start anything. The server stays what
-    // it is — no writeFileSync, no child_process, SQLite readonly — so this
-    // adds zero attack surface. Launching from the browser is a separate,
-    // opt-in decision documented in AGENTS.md; the reason it is not here is
-    // that a run can call BACK into this server (`fetch_url` has no URL
-    // allowlist by design, and run_shell's is "STEERING, not a boundary"),
-    // so any secret served over HTTP would be readable by the very code it
-    // is meant to gate.
+    // READ-ONLY, and deliberately so: it returns compile-time constants — the
+    // family guidance the project run form renders and the shell command for a
+    // deployment with no organisations — NOT a way to start anything. This
+    // route is UNGATED, which is exactly why it stays a reader: a run can call
+    // BACK into this server (`fetch_url` has no URL allowlist by design, and
+    // run_shell's is "STEERING, not a boundary"), so an ungated launcher here
+    // would be reachable by the very code it would have to gate, and any
+    // secret served over HTTP would be readable by it too. Starting a run from
+    // the browser lives on the AUTHENTICATED project routes instead, where a
+    // session the run does not hold is the boundary.
     //
     // `defaults.dbPath` / `defaults.workspace` are NOT exposed: the run
     // resolves `process.env[...] ?? default` against ITS OWN environment, so

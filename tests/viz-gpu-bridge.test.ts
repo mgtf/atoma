@@ -45,7 +45,6 @@ beforeEach(() => {
       run: '',
       registry: '',
       skills: '',
-      launch: '',
       projectName: '',
       projectPrompt: '',
       projectRepository: '',
@@ -65,7 +64,6 @@ afterEach(() => {
 
 function renderBridge(
   onSelectRun = vi.fn(),
-  onCopy = vi.fn(),
   runItems = runs,
   onEnter?: () => void,
   githubInstallations: VizGitHubInstallation[] = [],
@@ -77,13 +75,12 @@ function renderBridge(
       releaseVersion: '9.8.7',
       t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
       onSelectRun,
-      onCopy,
       onEnter,
       githubInstallations,
       selectedProjectName,
     })
   );
-  return { onSelectRun, onCopy, onEnter };
+  return { onSelectRun, onEnter };
 }
 
 function EntryFadeProbe() {
@@ -117,7 +114,6 @@ describe('full-GL minimal DOM bridge', () => {
         releaseVersion: '9.8.7',
         t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
         onSelectRun: vi.fn(),
-        onCopy: vi.fn(),
         loginLinks: [
           { id: 'github', label: 'GitHub', href: '/auth/login?provider=github&invite=tok' },
         ],
@@ -134,7 +130,7 @@ describe('full-GL minimal DOM bridge', () => {
     useGpuStore.setState({ entered: false });
     const onEnter = vi.fn();
     const user = userEvent.setup();
-    renderBridge(vi.fn(), vi.fn(), runs, onEnter);
+    renderBridge(vi.fn(), runs, onEnter);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(onEnter).toHaveBeenCalledTimes(1);
     expect(useGpuStore.getState().entered).toBe(false);
@@ -146,6 +142,10 @@ describe('full-GL minimal DOM bridge', () => {
     renderBridge();
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(6);
+    // There is no Launch tab: starting a run belongs to Projects, and the
+    // guidance that used to justify a describe-only tab now renders inside
+    // the project run form.
+    expect(screen.queryByRole('tab', { name: 'Launch' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Projects' }));
     expect(useGpuStore.getState().view).toBe('projects');
     expect(screen.getByRole('tab', { name: 'Projects', selected: true })).toBeInTheDocument();
@@ -165,7 +165,7 @@ describe('full-GL minimal DOM bridge', () => {
 
   it('hides Connect GitHub once an App installation is active', () => {
     useGpuStore.setState({ view: 'projects', entered: true });
-    renderBridge(vi.fn(), vi.fn(), runs, undefined, [
+    renderBridge(vi.fn(), runs, undefined, [
       {
         installationId: '501',
         accountLogin: 'mgtf',
@@ -180,24 +180,27 @@ describe('full-GL minimal DOM bridge', () => {
 
   it('offers Start run only after a project is selected', () => {
     useGpuStore.setState({ view: 'projects', entered: true });
-    renderBridge(vi.fn(), vi.fn(), runs, undefined, [], 'Weather Lab');
+    renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
     expect(screen.getByRole('button', { name: 'Create project' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start run on Weather Lab' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Run prompt' })).toBeInTheDocument();
     expect(screen.getByText(/This prompt is for the next run on Weather Lab/)).toBeInTheDocument();
   });
 
-  it('uses a real text input for IME/search and a textarea for Launch', async () => {
+  it('uses a real text input for IME/search and a textarea for the run prompt', async () => {
     const user = userEvent.setup();
-    const { onSelectRun } = renderBridge();
+    const { onSelectRun } = renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
     const input = screen.getByRole('textbox', { name: /Search 1 runs/ });
     await user.click(input);
     await user.type(input, 'GPU');
     await user.keyboard('{Enter}');
     expect(onSelectRun).toHaveBeenCalledWith('run-1');
 
-    useGpuStore.getState().setView('launch');
-    expect(await screen.findByRole('textbox', { name: 'Goal' })).toBeInTheDocument();
+    // The multi-line goal input is the project's run prompt — the only place
+    // the browser starts a run from.
+    useGpuStore.getState().setView('projects');
+    const prompt = await screen.findByRole('textbox', { name: 'Run prompt' });
+    expect(prompt.tagName).toBe('TEXTAREA');
   });
 
   it('navigates the complete run list with arrows and Enter', async () => {
@@ -208,7 +211,7 @@ describe('full-GL minimal DOM bridge', () => {
       startedAt: '2026-08-13T10:00:00.000Z',
     }));
     const onSelectRun = vi.fn();
-    renderBridge(onSelectRun, vi.fn(), manyRuns);
+    renderBridge(onSelectRun, manyRuns);
     const input = screen.getByRole('textbox', { name: /Search 20 runs/ });
     await user.click(input);
     await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{Enter}');

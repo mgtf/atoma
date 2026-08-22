@@ -2,7 +2,7 @@ import { matchesSearchQuery, runSearchText } from '../client/search.js';
 import type { RunIndexEntry, VizGitHubInstallation } from '../client/types.js';
 import { useGpuStore, type ViewName } from './store.js';
 
-const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'launch'];
+const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
 
 export function DomBridge({
   runs,
@@ -11,7 +11,6 @@ export function DomBridge({
   loginLinks = null,
   t,
   onSelectRun,
-  onCopy,
   onEnter,
   githubInstallations = [],
   onCreateProject,
@@ -33,7 +32,6 @@ export function DomBridge({
   loginLinks?: { id: string; label: string; href: string }[] | null;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
-  onCopy: () => void;
   onEnter?: () => void;
   githubInstallations?: VizGitHubInstallation[];
   onCreateProject?: () => void;
@@ -201,22 +199,6 @@ export function DomBridge({
           onBlur={() => setFocusedInput(null)}
           onChange={(event) => setSearch('skills', event.target.value)}
         />
-      ) : null}
-      {view === 'launch' ? (
-        <>
-          <textarea
-            className="gpu-dom-input gpu-launch-input"
-            aria-label={t('launch.goal')}
-            value={search.launch}
-            placeholder={t('launch.goal.placeholder')}
-            onFocus={() => setFocusedInput('launch')}
-            onBlur={() => setFocusedInput(null)}
-            onChange={(event) => setSearch('launch', event.target.value)}
-          />
-          <button className="gpu-copy-bridge" onClick={onCopy}>
-            {t('launch.copy')}
-          </button>
-        </>
       ) : null}
       {view === 'projects' ? (
         <form

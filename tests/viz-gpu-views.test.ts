@@ -11,6 +11,7 @@ import type {
   RegistryType,
   SkillSummary,
   VizEvent,
+  VizProject,
   VizRun,
 } from '../src/viz/client/types.js';
 import { emptyRenderMetrics } from '../src/viz/client-gl/gpu-renderer.js';
@@ -24,7 +25,6 @@ import {
   setReducedMotionOverrideForTests,
 } from '../src/viz/client-gl/renderer/motion.js';
 import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
-import { drawLaunch } from '../src/viz/client-gl/renderer/views/launch.js';
 import { drawProjects, PROJECTS_DOM_FORM_HEIGHT, PROJECTS_DOM_FORM_TOP, projectsGpuContentTop } from '../src/viz/client-gl/renderer/views/projects.js';
 import {
   accountMenuLayout,
@@ -49,7 +49,13 @@ import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import { drawRuns } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
-import { isRoutableView, visibleViews, type GpuUiState } from '../src/viz/client-gl/store.js';
+import {
+  DOC_THEMES,
+  isRoutableView,
+  visibleViews,
+  type GpuUiState,
+} from '../src/viz/client-gl/store.js';
+import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import { GPU_LAYOUT } from '../src/viz/client-gl/theme.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
@@ -379,7 +385,6 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
       run: '',
       registry: '',
       skills: '',
-      launch: '',
       projectName: '',
       projectPrompt: '',
       projectRepository: '',
@@ -392,7 +397,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, launch: 0, admin: 0, settings: 0 },
+    selectedDocsTheme: 'runs',
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
     enter: noop,
@@ -417,6 +423,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     setRunPickerActiveIndex: noop,
     setBurninFilter: noop,
     setBurninPage: noop,
+    selectDocsTheme: noop,
     setScrollY: noop,
     ...overrides,
   };
@@ -770,6 +777,48 @@ describe('drawWelcome as the login gate', () => {
   });
 });
 
+describe('drawDocs', () => {
+  it('renders every theme as a selectable button, active theme first', () => {
+    const ctx = createRecordingCtx();
+    drawDocs(ctx, makeSnapshot({ view: 'docs' }), 1000, 700);
+    for (const theme of DOC_THEMES) {
+      const button = ctx.buttons.find((candidate) => candidate.id === `docs.theme.${theme.key}`);
+      expect(button).toBeDefined();
+      expect(button!.active).toBe(theme.key === 'runs');
+    }
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.runs.title'])).toBe(
+      true
+    );
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.runs.body'])).toBe(
+      true
+    );
+    expect(
+      ctx.texts.some((text) => text.value === `${I18N_CATALOGS.en['docs.refLabel']} src/run/AGENTS.md`)
+    ).toBe(true);
+  });
+
+  it('switches the right-hand content to whichever theme is selected', () => {
+    const ctx = createRecordingCtx();
+    drawDocs(ctx, makeSnapshot({ view: 'docs', selectedDocsTheme: 'mcp' }), 1000, 700);
+    const mcpButton = ctx.buttons.find((candidate) => candidate.id === 'docs.theme.mcp');
+    expect(mcpButton!.active).toBe(true);
+    const runsButton = ctx.buttons.find((candidate) => candidate.id === 'docs.theme.runs');
+    expect(runsButton!.active).toBe(false);
+    expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['docs.theme.mcp.title'])).toBe(
+      true
+    );
+    expect(
+      ctx.texts.some((text) => text.value === `${I18N_CATALOGS.en['docs.refLabel']} src/mcp/AGENTS.md`)
+    ).toBe(true);
+  });
+
+  it('reports a scroll max instead of leaving the pane unbounded', () => {
+    const ctx = createRecordingCtx();
+    drawDocs(ctx, makeSnapshot({ view: 'docs' }), 1000, 700);
+    expect(ctx.scrollMax.docs).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe('visibleViews', () => {
   it('is one nav definition: dev path, gated member, platform admin', () => {
     const viewer = {
@@ -782,14 +831,18 @@ describe('visibleViews', () => {
     const base = { failure: false, signingOut: false, switchingOrganisationId: null };
     // Gate off: classic operator surfaces, no admin plane.
     expect(visibleViews(null)).toEqual([
-      'projects', 'runs', 'registry', 'skills', 'burnin', 'launch',
+      'projects', 'runs', 'registry', 'skills', 'burnin', 'docs',
     ]);
+    // No `launch` tab anywhere: describing how to phrase a goal is not a view
+    // of its own, it is part of the form that starts the run.
+    expect(visibleViews(null)).not.toContain('launch');
     // Gated member: no instance-global operator surfaces — the server 403s
     // them, so the tabs must not exist to poison the global data error.
-    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'launch']);
+    // Docs stays: it is static prose, not a fetch of gated data.
+    expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'docs']);
     expect(
       visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })
-    ).toEqual(['projects', 'runs', 'registry', 'skills', 'burnin', 'launch', 'admin']);
+    ).toEqual(['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', 'admin']);
   });
 
   it('routes Settings without giving it a tab', () => {
@@ -1411,7 +1464,7 @@ describe('drawRegistry scrolling honesty', () => {
             registry: unscrolled.scrollMax.registry!,
             skills: 0,
             burnin: 0,
-            launch: 0,
+            docs: 0,
             admin: 0,
             settings: 0,
           },
@@ -1544,7 +1597,6 @@ describe('drawSkills scrolling honesty and search', () => {
             run: '',
             registry: '',
             skills: 'replay',
-            launch: '',
             projectName: '',
             projectPrompt: '',
             projectRepository: '',
@@ -1604,7 +1656,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, launch: 0, admin: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, docs: 0, admin: 0, settings: 0 },
         },
         data
       ),
@@ -1655,7 +1707,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, launch: 0, admin: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, docs: 0, admin: 0, settings: 0 },
         },
         data
       ),
@@ -1932,67 +1984,142 @@ describe('attachAtomaMark glass layering', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Launch view
+// The run prompt's guidance, inside Projects
+//
+// There is no Launch view any more: a tab that could only DESCRIBE how to
+// phrase a goal, beside a Projects tab that actually starts runs, split one
+// job over two places. These tests hold the guidance to the properties the
+// Launch view was measured against — measured (not estimated) layout, honest
+// scroll, a backdrop drawn into a reserved z-slot — now that it renders in
+// the form that owns the input.
 // ---------------------------------------------------------------------------
 
-describe('drawLaunch scrolling honesty', () => {
-  it('lets a short window reach examples and the command panel', () => {
-    const ctx = createRecordingCtx();
-    drawLaunch(
-      ctx,
-      makeSnapshot({ view: 'launch' }, { profiles: [LAUNCH_PROFILE] }),
-      1000,
-      420
-    );
-    expect(ctx.scrollMax.launch).toBeGreaterThan(0);
-    expect(ctx.buttons.some((button) => button.id === 'launch.example.7')).toBe(true);
-    expect(ctx.buttons.some((button) => button.id === 'launch.copy')).toBe(true);
+const GUIDANCE_PROJECT_ID = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
+
+function guidanceProject(): VizProject {
+  return {
+    projectId: GUIDANCE_PROJECT_ID,
+    name: 'Weather Lab',
+    slug: 'weather-lab',
+    status: 'active',
+    family: 'build',
+    repositoryTarget: {
+      installationId: '501',
+      owner: 'atoma-org',
+      name: 'weather-lab',
+      visibility: 'private',
+    },
+    repositoryStatus: 'ready',
+    repositoryFullName: 'atoma-org/weather-lab',
+    repositoryUrl: 'https://github.com/atoma-org/weather-lab',
+    repositoryError: null,
+    createdAt: '2026-08-20T00:00:00.000Z',
+    updatedAt: '2026-08-20T00:00:00.000Z',
+  };
+}
+
+function drawGuidance(
+  profile: LaunchProfile | null,
+  selected = true,
+  height = 720
+): ReturnType<typeof createRecordingCtx> {
+  const ctx = createRecordingCtx();
+  drawProjects(
+    ctx,
+    makeSnapshot(
+      { view: 'projects', selectedProjectId: selected ? GUIDANCE_PROJECT_ID : null },
+      { projects: [guidanceProject()], profiles: profile ? [profile] : [] }
+    ),
+    1000,
+    height
+  );
+  return ctx;
+}
+
+describe('the run prompt carries its own guidance', () => {
+  it('renders the family help and click-to-fill examples for the selected project', () => {
+    const ctx = drawGuidance(LAUNCH_PROFILE);
+    expect(ctx.texts.some((text) => text.value === t('launch.help'))).toBe(true);
+    expect(ctx.texts.some((text) => text.value === t('launch.examples'))).toBe(true);
+    // One button per example, and the ids the activation handler slices an
+    // index out of to fill the run prompt.
+    expect(ctx.buttons.some((button) => button.id === 'projects.example.0')).toBe(true);
+    expect(ctx.buttons.some((button) => button.id === 'projects.example.7')).toBe(true);
+    expect(ctx.buttons.some((button) => button.id === 'projects.example.8')).toBe(false);
+    // The project row still renders, below the guidance.
+    const row = ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!;
+    const firstExample = ctx.buttons.find((button) => button.id === 'projects.example.0')!;
+    expect(row.y).toBeGreaterThan(firstExample.y);
   });
 
-  it('does not invent scroll for a window that fits everything', () => {
-    const ctx = createRecordingCtx();
-    drawLaunch(
-      ctx,
-      makeSnapshot(
-        { view: 'launch' },
-        { profiles: [{ ...LAUNCH_PROFILE, examples: LAUNCH_PROFILE.examples.slice(0, 2) }] }
-      ),
-      1000,
-      900
-    );
-    expect(ctx.scrollMax.launch).toBe(0);
+  it('stays silent until a project is selected, and without a family', () => {
+    // The DOM form only shows the prompt textarea once a project is selected,
+    // so guidance for an input that does not exist yet would be noise.
+    const unselected = drawGuidance(LAUNCH_PROFILE, false);
+    expect(unselected.buttons.some((button) => button.id.startsWith('projects.example.'))).toBe(false);
+    expect(unselected.texts.some((text) => text.value === t('launch.help'))).toBe(false);
+    // /api/profiles is supplementary copy: an empty payload must not stop the
+    // project list from rendering.
+    const noProfile = drawGuidance(null);
+    expect(noProfile.buttons.some((button) => button.id.startsWith('projects.example.'))).toBe(false);
+    expect(
+      noProfile.buttons.some((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)
+    ).toBe(true);
   });
 
-  it('extends layout and scroll max by the measured wrapped help height', () => {
+  it('prefers a catalog override over the family English, per family id', () => {
+    // `launch.help.build` exists in the catalog, so a deployment's own wording
+    // wins; a family with no key falls back to what the profile carries.
+    const catalogued = drawGuidance({ ...LAUNCH_PROFILE, id: 'build' });
+    expect(catalogued.texts.some((text) => text.value === t('launch.help.build'))).toBe(true);
+    expect(catalogued.texts.some((text) => text.value === LAUNCH_PROFILE.help)).toBe(false);
+
+    const unknownFamily = drawGuidance({ ...LAUNCH_PROFILE, id: 'no-such-family' });
+    expect(unknownFamily.texts.some((text) => text.value === LAUNCH_PROFILE.help)).toBe(true);
+    // The key itself must never reach the screen.
+    expect(
+      unknownFamily.texts.some((text) => String(text.value).startsWith('launch.help.'))
+    ).toBe(false);
+  });
+
+  it('shifts the list and scroll max by the measured wrapped help height', () => {
     const HEIGHT = 420;
-    // Both paragraphs wrap far past the historical fixed slot, so every
-    // downstream block must shift by exactly the measured height difference.
     const mediumHelp = 'm'.repeat(800);
     const longHelp = 'l'.repeat(2400);
-    const draw = (help: string) => {
-      const ctx = createRecordingCtx();
-      drawLaunch(
-        ctx,
-        makeSnapshot({ view: 'launch' }, { profiles: [{ ...LAUNCH_PROFILE, help }] }),
-        1000,
-        HEIGHT
-      );
-      return ctx;
-    };
+    // An id with no catalog key, so the fixture's own paragraph is what wraps.
+    const draw = (help: string) =>
+      drawGuidance({ ...LAUNCH_PROFILE, id: 'no-such-family', help }, true, HEIGHT);
     const medium = draw(mediumHelp);
     const long = draw(longHelp);
     const heightDelta = textStub(longHelp).height - textStub(mediumHelp).height;
     expect(heightDelta).toBeGreaterThan(0);
-    expect(long.scrollMax.launch! - medium.scrollMax.launch!).toBe(heightDelta);
+    expect(long.scrollMax.projects! - medium.scrollMax.projects!).toBe(heightDelta);
+    const rowOf = (ctx: ReturnType<typeof createRecordingCtx>) =>
+      ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!.y;
+    expect(rowOf(long) - rowOf(medium)).toBe(heightDelta);
     // Examples start below the measured paragraph instead of overlapping it.
     const helpText = long.texts.find((text) => text.value === longHelp)!;
-    const firstExample = long.buttons.find((button) => button.id === 'launch.example.0')!;
+    const firstExample = long.buttons.find((button) => button.id === 'projects.example.0')!;
     expect(firstExample.y).toBeGreaterThanOrEqual(helpText.y + textStub(longHelp).height);
-    // The backdrop panel is drawn into the z-slot reserved before the text,
-    // sized by the same layout cursor (one pass, no analytic duplicate).
-    const backdrop = long.root.children[0] as Container;
-    expect(backdrop.children.length).toBe(1);
-    expect(backdrop.children[0]).toBeInstanceOf(Graphics);
+  });
+
+  it('draws its backdrop into the z-slot reserved before the text', () => {
+    // Same one-pass shape the Launch view used: the panel is sized by the
+    // FINAL layout cursor, so it cannot be drawn before the text it sits
+    // behind — a layer reserves the slot up front and the panel lands in it
+    // last. Without the layer the backdrop would paint over the paragraph.
+    const ctx = drawGuidance(LAUNCH_PROFILE);
+    const content = ctx.texts.find((text) => text.value === t('launch.help'))!.parent;
+    const detached = ctx.panels.filter((panel) => panel.parent !== content);
+    expect(detached).toHaveLength(1);
+    const backdrop = detached[0]!;
+    // The reserved layer is a child of the same content container, and it is
+    // its FIRST child — everything drawn afterwards sits on top of it.
+    expect(backdrop.parent.parent).toBe(content);
+    expect(content.children[0]).toBe(backdrop.parent);
+    // Sized by the measured cursor, spanning from the top of the content.
+    expect(backdrop.y).toBe(0);
+    expect(backdrop.height).toBeGreaterThan(0);
   });
 });
 
@@ -2215,7 +2342,7 @@ describe('drawRuns behavior', () => {
             registry: 0,
             skills: 0,
             burnin: 0,
-            launch: 0,
+            docs: 0,
             admin: 0,
             settings: 0,
           },

@@ -365,7 +365,10 @@ try {
     const scrollRebuildMax = softwareRastered
       ? SOFTWARE_SCROLL_REBUILD_P95_MAX
       : SCROLL_REBUILD_P95_MAX;
-    const views = ['Projects', 'Registry', 'Skills', 'Burn-in', 'Launch', 'Runs'];
+    // Six tabs, matching `visibleViews(null)` on the ungated developer path
+    // plus the return to Runs. There is no Launch tab: the family guidance
+    // lives inside the project run form.
+    const views = ['Projects', 'Registry', 'Skills', 'Burn-in', 'Docs', 'Runs'];
     for (const label of views) {
       await page.evaluate((name) => {
         const tabs = [...document.querySelectorAll('[role="tab"]')];
@@ -489,7 +492,6 @@ try {
       canvases: document.querySelectorAll('canvas').length,
       backend: document.querySelector('.gpu-ui-host')?.getAttribute('data-gpu-backend'),
       objects: Number(document.querySelector('.gpu-ui-host')?.getAttribute('data-gpu-objects')),
-      hasLaunchTextarea: !!document.querySelector('.gpu-launch-input'),
       cursorX: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-x'),
       cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
     }));

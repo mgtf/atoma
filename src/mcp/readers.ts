@@ -110,8 +110,8 @@ function familyMapFromCsv(csvPath: string): Map<string, string> {
 /**
  * The launchable task families and how to phrase a goal for each.
  *
- * This makes the MCP server the THIRD consumer of `TaskProfile` (runner → viz
- * Launch tab → here), which is the whole architectural argument for
+ * This makes the MCP server the THIRD consumer of `TaskProfile` (runner → the
+ * viz project run form → here), which is the whole architectural argument for
  * `TaskProfileGuidance` being required rather than optional. It also inherits
  * the ban that `tests/viz-launch-profiles.test.ts` already enforces over
  * `LAUNCHABLE_PROFILES`: the guidance must never teach a user to name a

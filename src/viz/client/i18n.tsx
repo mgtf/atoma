@@ -121,6 +121,33 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.emptyNoInstallation': 'No project yet — connect a GitHub App installation first.',
     'projects.gateOff':
       'Projects are organisation-scoped and need the login gate. Start the server with ATOMA_VIZ_AUTH=1 to use them.',
+    'nav.docs': 'Docs',
+    'docs.intro': 'What each part of the product does, and where its full contract lives in the repository.',
+    'docs.refLabel': 'Full contract:',
+    'docs.theme.projects.title': 'Projects',
+    'docs.theme.projects.body':
+      'An organisation-scoped workspace tied to a GitHub repository. Runs started against a project are kept together, and finished artifacts can be published back to that repository.',
+    'docs.theme.runs.title': 'Runs',
+    'docs.theme.runs.body':
+      'One goal driven through the plan → validate → execute → validate supervision loop. The timeline in this visualizer reads newest first, and a cancelled run is not the same thing as a failed one.',
+    'docs.theme.registry.title': 'Registry',
+    'docs.theme.registry.body':
+      'The one tier-keyed table of agent identity: every Molecule, Cell and Tissue that has run, its name, version history and the trust it has earned. Trust earned here is what lets repeat work skip to a cheaper path next time.',
+    'docs.theme.skills.title': 'Skills',
+    'docs.theme.skills.body':
+      "A persistent task recipe an agent earns credit for and compiles once trusted, kept under its owning agent's namespace. A skill review shown here is a mechanical pre-screen only — never a sharing approval.",
+    'docs.theme.burnin.title': 'Burn-in',
+    'docs.theme.burnin.body':
+      'A batch of real tasks run end to end to measure defects, cost and friction before a release. What is shown here is the last recorded batch, not a live guarantee about the next one.',
+    'docs.theme.launch.title': 'Launch',
+    'docs.theme.launch.body':
+      'The task families a run can take, and how to phrase a goal for each one. Inside an organisation a run is started from a project, and that guidance sits beside the run prompt itself. A local instance with no organisations has no projects: start a run from a shell with `npm run run:build -- "<goal>"`. The browser deliberately never launches a run outside a signed-in project.',
+    'docs.theme.admin.title': 'Admin',
+    'docs.theme.admin.body':
+      'Every organisation, its members and one-use invitations, plus the platform audit journal — the one source of what happened on this deployment. Restricted to the platform-admin flag; an invitation never grants operator-level access.',
+    'docs.theme.mcp.title': 'MCP',
+    'docs.theme.mcp.body':
+      'A stdio control plane exposing 13 atoma_* tools to host applications such as Claude Code or Claude Desktop. These are read APIs plus one destructive run-starter, not agent elements — only one run happens at a time, serialised by a shared lease.',
     'nav.admin': 'Admin',
     'admin.summary': '{{count}} organisation(s) on this instance',
     'admin.empty': 'No organisation yet. The first login creates one.',
@@ -701,6 +728,33 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.emptyNoInstallation': 'Aucun projet — connecte d’abord une installation GitHub App.',
     'projects.gateOff':
       'Les projets sont liés aux organisations et exigent la porte de connexion. Démarre le serveur avec ATOMA_VIZ_AUTH=1 pour les utiliser.',
+    'nav.docs': 'Docs',
+    'docs.intro': 'Ce que fait chaque partie du produit, et où trouver son contrat complet dans le dépôt.',
+    'docs.refLabel': 'Contrat complet :',
+    'docs.theme.projects.title': 'Projets',
+    'docs.theme.projects.body':
+      "Un espace de travail propre à une organisation, relié à un dépôt GitHub. Les runs lancés sur un projet sont regroupés ensemble, et les artefacts terminés peuvent être publiés vers ce dépôt.",
+    'docs.theme.runs.title': 'Runs',
+    'docs.theme.runs.body':
+      "Un objectif conduit à travers la boucle de supervision planifier → valider → exécuter → valider. La chronologie de ce visualiseur se lit du plus récent au plus ancien, et un run annulé n'est pas la même chose qu'un run en échec.",
+    'docs.theme.registry.title': 'Registre',
+    'docs.theme.registry.body':
+      "L'unique table d'identité des agents, indexée par palier : chaque Molécule, Cellule et Tissu déjà exécuté, son nom, son historique de versions et la confiance qu'il a gagnée. Cette confiance permet à un travail répété de basculer vers un chemin moins coûteux.",
+    'docs.theme.skills.title': 'Skills',
+    'docs.theme.skills.body':
+      "Une recette de tâche persistante qu'un agent gagne par le crédit puis compile une fois digne de confiance, rangée sous l'espace de noms de l'agent qui la possède. Une revue de skill affichée ici n'est qu'un pré-filtrage mécanique — jamais une approbation de partage.",
+    'docs.theme.burnin.title': 'Burn-in',
+    'docs.theme.burnin.body':
+      "Un lot de tâches réelles exécutées de bout en bout pour mesurer défauts, coût et friction avant une release. Ce qui est affiché ici est le dernier lot enregistré, pas une garantie en direct sur le prochain.",
+    'docs.theme.launch.title': 'Lancer',
+    'docs.theme.launch.body':
+      "Les familles de tâches qu'un run peut prendre, et comment formuler un objectif pour chacune. Dans une organisation, un run démarre depuis un projet, et cette aide accompagne directement le prompt du run. Une instance locale sans organisation n'a pas de projet : démarre un run depuis un shell avec `npm run run:build -- \"<objectif>\"`. Le navigateur ne lance volontairement jamais de run en dehors d'un projet identifié.",
+    'docs.theme.admin.title': 'Admin',
+    'docs.theme.admin.body':
+      "Chaque organisation, ses membres et ses invitations à usage unique, plus le journal d'audit de la plateforme — l'unique source de ce qui s'est passé sur ce déploiement. Réservé au drapeau platform-admin ; une invitation ne donne jamais un accès de niveau opérateur.",
+    'docs.theme.mcp.title': 'MCP',
+    'docs.theme.mcp.body':
+      "Un plan de contrôle stdio exposant 13 outils atoma_* aux applications hôtes comme Claude Code ou Claude Desktop. Ce sont des API de lecture plus un démarreur de run destructeur, pas des éléments d'agent — un seul run à la fois, sérialisé par un bail partagé.",
     'nav.admin': 'Admin',
     'admin.summary': '{{count}} organisation(s) sur cette instance',
     'admin.empty': 'Aucune organisation. La première connexion en crée une.',

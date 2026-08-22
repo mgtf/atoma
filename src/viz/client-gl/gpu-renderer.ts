@@ -198,7 +198,7 @@ import { drawRuns } from './renderer/views/runs.js';
 import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
-import { drawLaunch } from './renderer/views/launch.js';
+import { drawDocs } from './renderer/views/docs.js';
 import { drawProjects } from './renderer/views/projects.js';
 import { drawAdmin } from './renderer/views/admin.js';
 import { drawWelcome } from './renderer/views/welcome.js';
@@ -889,8 +889,8 @@ export class GpuRenderer {
         case 'burnin':
           drawBurnin(this, snapshot, width, height);
           break;
-        case 'launch':
-          drawLaunch(this, snapshot, width, height);
+        case 'docs':
+          drawDocs(this, snapshot, width, height);
           break;
         case 'settings':
           drawSettings(this, snapshot, width, height);

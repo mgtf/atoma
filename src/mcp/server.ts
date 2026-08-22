@@ -7,18 +7,22 @@
  * lifecycle, the ledger's integrity projection, run traces, the friction
  * report). The host pays one tool call; atoma does the tiering.
  *
- * WHY STDIO, AND WHY THAT IS THE WHOLE SAFETY ARGUMENT: AGENTS.md's viz
- * "Launch tab" entry records why there is no launch BUTTON in the visualiser —
- * every requirement it lists (a secret that never touches HTTP, a global Host
- * allowlist ahead of every branch, an exact-Origin check with the port, the
- * DNS-rebinding surface) exists because the viz listens on a PORT THE RUN
+ * WHY STDIO, AND WHY THAT IS THE WHOLE SAFETY ARGUMENT: the archived Launch-tab
+ * entry (engineering record 2026-08-14) lists what an UNGATED browser launcher
+ * would need — a secret that never touches HTTP, a global Host allowlist ahead
+ * of every branch, an exact-Origin check with the port, the DNS-rebinding
+ * surface — and every item exists because the viz listens on a PORT THE RUN
  * ITSELF CAN REACH: `fetch_url` has no URL allowlist by design, and
  * `run_shell`'s allowlist is documented as STEERING, not a boundary. So the
- * adversary is not a remote page, it is the run. A stdio server has no socket
- * the run was ever handed, which dissolves that entire threat model rather
- * than mitigating it. THE COROLLARY IS A RULE: do not add an HTTP transport,
- * a debug endpoint or a metrics port to this file. Any of them re-opens the
- * exact hole, and the reasoning above stops applying.
+ * adversary is not a remote page, it is the run. The visualiser does start runs
+ * today, but only inside an authenticated project (`/api/projects/*` behind the
+ * login gate, org-scoped, journaled): a run holds no session, so identity is
+ * what neutralises that reachability. A stdio server has no socket the run was
+ * ever handed, which dissolves the threat model rather than mitigating it —
+ * which is why the control plane has no identity layer to get wrong. THE
+ * COROLLARY IS A RULE: do not add an HTTP transport, a debug endpoint or a
+ * metrics port to this file. Any of them re-opens the exact hole, and the
+ * reasoning above stops applying.
  *
  * STDOUT IS THE PROTOCOL. The transport frames JSON-RPC on stdout and the
  * peer's reader THROWS on a non-JSON line — stricter than atoma's own
