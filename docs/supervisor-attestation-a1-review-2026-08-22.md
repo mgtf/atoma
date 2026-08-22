@@ -1,8 +1,12 @@
 # Supervisor-held proof attestation (A1) — design review, 2026-08-22
 
-Status: **ACCEPTED and LANDED, 2026-08-22 (steps 1-5 of §9). The two armed
-controls of §7 have NOT been run: they need a live batch with the machine to
-itself, and until they do the contract is implemented but unmeasured.**
+Status: **ACCEPTED, LANDED and MEASURED, 2026-08-22.** Steps 1-6 of §9 are
+done. The armed controls ran from a virgin store and are recorded in
+[`a1-armed-controls-2026-08-22.md`](incidents/a1-armed-controls-2026-08-22.md):
+the negative control found and fixed an implementation defect (`33ad67d`), then
+withheld as specified; the positive control kept its credit. No stop condition
+fired. One **design limit** the review did not anticipate was measured — see
+§6 — and is deliberately left unfixed under the cooling-off rule.
 
 Revision 3 records what landed against what was proposed. The contract's
 shape, its dispositions and its refusals are unchanged from revision 2; §9
@@ -287,12 +291,25 @@ it is what makes a withheld run distinguishable from a quiet one in the CSV.
 
 - **The obligation is only as good as the planner.** A planner that declares
   no obligation on a task whose whole point is DOM behaviour restores
-  today's silence, and the counter task's phase description *did* name
-  clicking. Declared obligations move the failure from a detector's
+  today's silence. Declared obligations move the failure from a detector's
   vocabulary to a planner's diligence. That is a better failure — visible in
   the plan, reviewable, and cheap to audit after the fact — but it is not a
-  proof, and no version of this contract makes it one. This is the one
-  attack revision 2 does not answer.
+  proof, and no version of this contract makes it one.
+  **Measured 2026-08-22: this attack did not materialise.** Both armed
+  controls saw the L3 planner declare `dom-interaction` on the verification
+  phase unprompted, once in words stricter than the prompt's ("selector-based
+  user interactions only (no internal test hooks)"). One observation is not a
+  rate; the attack stands as an attack, with weaker evidence than expected.
+- **A PHASED plan distils outside the gate.** MEASURED, and new — the review
+  did not consider it. When L3 splits build from verify, the obligation lives
+  on the verify phase and the recipe is distilled from the BUILD phase, which
+  carries none. Arm 1 withheld the credit of the recipe matched on phase 1
+  and still distilled two recipes on phase 0, both teaching the
+  `window.__test` hook. Subsequent credit is gated; the initial distillation
+  is not. This is the contract behaving exactly as §3.5 specifies on a phase
+  shape §3.5 never described. Left unfixed in the session that surfaced it,
+  per the cooling-off rule; candidate directions are listed in the controls
+  record, none accepted.
 - **Blast radius.** Tools, contracts, core context, atoms, skills and
   accounting all change together. The inventory said so; the review confirms
   it and has no smaller coherent version. A partial landing that ships the
