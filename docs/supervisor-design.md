@@ -166,6 +166,27 @@ each delivered run, it reaches the phase-redundancy finding; (4) zero
 delivered-run sampling, with failed runs staying on Sonnet 5. Costs are
 read from `_meta.modelsServed`, never from the requested id.
 
+**Result, measured 2026-08-22: 2/5 — Haiku is not viable, for any run
+class.** (1) FAIL: on the failed run it stopped at the surface (smoke-test
+design, classList vs computed style) and never reached the validator
+escalation that three Sonnet-generation analyses found; its one proposedFix
+also cited the WRONG intentional-choices file (`src/atoms/AGENTS.md` "does
+not record rejected shortcuts on smoke-test design" — the recorded rejection
+lives in `src/tools/AGENTS.md`), proving the citation field enforces
+presence, not diligence. (2) and (3) FAIL: both delivered runs came back
+`sound` with zero actionable findings — the phase redundancy that two
+Sonnet-generation models found independently (54% and 31% of run cost) is
+invisible to it; the http-healthz summary even celebrates port 53260, the
+redundant phase-2 server. (4) PASS: zero security false positives. (5) PASS
+on the letter (no grade inflation) while under-grading in substance:
+web-counter with ~54% avoidable spend deserved `wasteful`. Cost: $0.14–0.20
+per analysis (~4× cheaper than pinned Sonnet 5) — irrelevant, since it
+misses the systemic findings the analyst exists to produce. Decision:
+**both failed and delivered runs stay on pinned Sonnet 5; the economics are
+managed by the trigger (batch-end / sampling), not by the model.** The v1
+plumbing itself held: 3/3 schema-conformant, `modelsServed` recorded the
+real usage, grades split cleanly from findings.
+
 ## Stage 3 — the mender and green/blue (P2/P3)
 
 - On an approved `defect` verdict, the mender (Claude Code) works in an
@@ -318,9 +339,10 @@ conflated global verdict is the wrong shape.
 1. ~~**Analyst trigger granularity**~~ — SETTLED by the P0 measurement above:
    analysis costs 113% of the run it examines, so failed and cancelled runs
    are analysed always, delivered runs at batch end or by sampling. What
-   remains open is the sampling rate, and — now the leading question — whether
-   Haiku holds the signal quality, since a pinned Sonnet 5 analysis cost 446%
-   of the cheapest run it examined.
+   remains open is the sampling rate only: the Haiku question was measured on
+   2026-08-22 (see the A/B result above) and closed — Haiku misses the
+   systemic findings entirely, so every analysis stays on pinned Sonnet 5 and
+   the economics are managed by the trigger.
 2. **Mender initial autonomy** — proposal-only with operator approval
    (proposed default), or immediate auto-merge for trivial defect classes?
 3. **Green/blue scope** — compiled path only (proposed default: it is the
