@@ -224,9 +224,14 @@ npm run viz:mark-turn:analyze
   launch one, so an unsubscribed admin is an admin whose alerts go nowhere.
   Admins are asked on their first console entry after login and their
   "not now" is session-scoped
-  (`pushPromptStorage`: sessionStorage for admins, localStorage for members),
-  so each new session asks again until the browser permission itself settles.
-  The subscriber's
+  (`pushPromptStorage`: sessionStorage for admins, localStorage for members)
+  and cleared on logout (`clearSessionPushDismissal`), so each new login
+  asks again until the browser permission itself settles. A permission
+  already GRANTED shows no prompt by construction, so an admin in that
+  state is silently re-subscribed at login instead
+  (`shouldEnsureAdminSubscription`) — which also repairs a server row the
+  push service pruned. The prompt never fires in dev builds: the service
+  worker registers in production only. The subscriber's
   language rides the subscription (`locale` column, captured at subscribe
   time) because a push is generated from an event with no request left to
   read a header off; rendering uses the server-side frozen `PUSH_COPY`

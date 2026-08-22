@@ -1,23 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   applicationServerKeyBytes,
+  clearSessionPushDismissal,
   dismissPushPrompt,
   enableWebPush,
   PUSH_DISMISSED_KEY,
   pushPromptStorage,
   pushSupported,
+  shouldEnsureAdminSubscription,
   shouldOfferPushPrompt,
   type PushRegistrationLike,
   type PushSubscriptionLike,
 } from '../src/viz/client/push.js';
 import { generateVapidKeys, toBase64Url } from '../src/viz/push/webpush.js';
 
-function memoryStorage(): Pick<Storage, 'getItem' | 'setItem'> & { data: Map<string, string> } {
+function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & {
+  data: Map<string, string>;
+} {
   const data = new Map<string, string>();
   return {
     data,
     getItem: (key: string) => data.get(key) ?? null,
     setItem: (key: string, value: string) => void data.set(key, value),
+    removeItem: (key: string) => void data.delete(key),
   };
 }
 
@@ -98,9 +103,38 @@ describe('shouldOfferPushPrompt', () => {
           storage: adminStorage,
         })
       ).toBe(false);
+
+      // Logout ends the grace: the cleared store re-offers on the next login,
+      // even in the same tab (sessionStorage survives a same-tab re-login).
+      clearSessionPushDismissal();
+      expect(
+        shouldOfferPushPrompt({
+          ...eligible,
+          hasLiveRun: false,
+          platformAdmin: true,
+          storage: adminStorage,
+        })
+      ).toBe(true);
     } finally {
       vi.unstubAllGlobals();
     }
+    // No sessionStorage at all (plain Node) is a quiet no-op.
+    expect(() => clearSessionPushDismissal()).not.toThrow();
+  });
+
+  it('silently re-subscribes an admin whose permission is already granted', () => {
+    const granted = { ...supportedScope, Notification: { permission: 'granted' } };
+    const base = { authenticated: true, platformAdmin: true, scope: granted, prod: true };
+    expect(shouldEnsureAdminSubscription(base)).toBe(true);
+    // Only a signed-in admin, in prod, in a capable browser, with a granted
+    // permission — anything else is either the prompt's job or nobody's.
+    expect(shouldEnsureAdminSubscription({ ...base, platformAdmin: false })).toBe(false);
+    expect(shouldEnsureAdminSubscription({ ...base, authenticated: false })).toBe(false);
+    expect(shouldEnsureAdminSubscription({ ...base, prod: false })).toBe(false);
+    expect(shouldEnsureAdminSubscription({ ...base, scope: supportedScope })).toBe(false);
+    expect(
+      shouldEnsureAdminSubscription({ ...base, scope: { ...granted, PushManager: undefined } })
+    ).toBe(false);
   });
 
   it('respects an earlier decision: dismissal, denial or a granted permission', () => {

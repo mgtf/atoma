@@ -12,6 +12,7 @@ import {
   dismissPushPrompt,
   enableWebPush,
   pushPromptStorage,
+  shouldEnsureAdminSubscription,
   shouldOfferPushPrompt,
 } from '../client/push.js';
 import {
@@ -245,6 +246,20 @@ function GpuAppContent({
     dismissPushPrompt(pushPromptStorage(isPlatformAdmin));
     setPushPrompt('hidden');
   }, [isPlatformAdmin]);
+  // A permission already granted shows NO prompt (`permission !== 'default'`
+  // ends the offer), so an admin who said yes once is silently re-subscribed
+  // instead: enableWebPush reuses the browser subscription and re-saves it,
+  // repairing a pruned server row without any UI or gesture. Once per mount —
+  // the outcome cannot change within a page load.
+  const ensuredAdminPush = useRef(false);
+  useEffect(() => {
+    if (ensuredAdminPush.current) return;
+    if (!shouldEnsureAdminSubscription({ authenticated: authed, platformAdmin: isPlatformAdmin })) {
+      return;
+    }
+    ensuredAdminPush.current = true;
+    void enableWebPush();
+  }, [authed, isPlatformAdmin]);
 
   // Settings is account-scoped: it exists exactly where a principal does.
   const organisationQuery = useOrganisation(state.view === 'settings' && authed);

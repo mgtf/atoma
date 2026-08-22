@@ -12,6 +12,7 @@ import {
   redirectIfAuthenticationRequired,
   type AuthNavigator,
 } from '../client/auth-session.js';
+import { clearSessionPushDismissal } from '../client/push.js';
 import { useGpuStore } from './store.js';
 
 export interface AuthViewer {
@@ -221,6 +222,10 @@ export function AuthControls({
         headers: { accept: 'text/html' },
       });
       if (!response.ok) throw new Error('logout failed');
+      // An admin's "not now" is session-scoped, and signing out ends that
+      // grace: without this a same-tab re-login would inherit the dismissal
+      // and never re-offer notifications.
+      clearSessionPushDismissal();
       // Back to the arrival gate: signed out, it offers the providers again.
       navigate('/');
     } catch {

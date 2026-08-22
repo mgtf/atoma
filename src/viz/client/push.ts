@@ -102,6 +102,51 @@ export function dismissPushPrompt(storage: PromptStorage | null = pushPromptStor
   }
 }
 
+/**
+ * Logout ends the admin grace: sessionStorage survives a same-tab
+ * logout/login, so without this the "not now" from before signing out would
+ * silently swallow the next login's offer — "re-ask at login" means the
+ * LOGIN, not the browser tab.
+ */
+export function clearSessionPushDismissal(
+  storage: Pick<Storage, 'removeItem'> | null = sessionStorageOrNull()
+): void {
+  try {
+    storage?.removeItem(PUSH_DISMISSED_KEY);
+  } catch {
+    // Nothing stored means nothing to clear.
+  }
+}
+
+function sessionStorageOrNull(): Pick<Storage, 'removeItem'> | null {
+  try {
+    return globalThis.sessionStorage ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A permission already GRANTED needs no prompt and no gesture: an admin whose
+ * browser said yes once — perhaps as a member, before the flag, or whose
+ * server row was pruned by a 410 — is silently re-subscribed at login.
+ * Without this, "granted" is exactly the state the offer never fires in
+ * (`permission !== 'default'`), and the admin who already agreed would be the
+ * one admin who never hears anything.
+ */
+export function shouldEnsureAdminSubscription(input: {
+  readonly authenticated: boolean;
+  readonly platformAdmin: boolean;
+  readonly scope?: PushScope;
+  readonly prod?: boolean;
+}): boolean {
+  const prod = input.prod ?? import.meta.env.PROD;
+  if (!prod || !input.authenticated || !input.platformAdmin) return false;
+  const scope = input.scope ?? (globalThis);
+  if (!pushSupported(scope)) return false;
+  return scope.Notification?.permission === 'granted';
+}
+
 /** `applicationServerKey` wants raw bytes; the server speaks base64url. */
 export function applicationServerKeyBytes(publicKey: string): Uint8Array {
   const base64 = publicKey.replace(/-/g, '+').replace(/_/g, '/');
