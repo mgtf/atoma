@@ -1,5 +1,5 @@
 import type { Tier, Tool } from '../core/types.js';
-import { manifestWriterLines } from '../contracts/probeManifest.js';
+import { manifestWriterLines, WEB_PROBE_DISCRIMINANT } from '../contracts/probeManifest.js';
 import type { AtomRegistry, AtomType } from '../registry/atomRegistry.js';
 import { HTTP_PORTABLE_DOC_GUIDANCE } from './prompts.js';
 
@@ -542,7 +542,7 @@ export const CANONICAL_L1_SYSTEM_PROMPT_LINES: readonly string[] = [
   `rejected report; pasting the evidence will.`,
   `ALSO put a machine-readable record in "output":`,
   `  "output": { "url": "<bound url>", "files": ["index.html"],`,
-  `              "probes": [{"probe": "validate_html", "url": "<url>",`,
+  `              "probes": [{"probe": "${WEB_PROBE_DISCRIMINANT}", "url": "<url>",`,
   `                          "ok": true, "consoleErrors": 0,`,
   `                          "failedRequests": 0, "smoke": "<expr>",`,
   `                          "smokeResult": true}] }`,

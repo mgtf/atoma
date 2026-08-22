@@ -9,6 +9,10 @@ import {
   ensureCanonicalL1,
   ensureCanonicalL2,
 } from '../src/atoms/capability.js';
+import {
+  REPORTED_WEB_PROBE_ALIASES,
+  isReportedWebProbe,
+} from '../src/contracts/probeManifest.js';
 import { makeTools } from './helpers/factories.js';
 
 const WEB_TOOLS = makeTools([
@@ -52,6 +56,28 @@ describe('ensureCanonicalL1 / ensureCanonicalL2 — idempotent bootstrap', () =>
     expect(l1.systemPrompt).toMatch(/"probe": "web"/);
     expect(l1.systemPrompt).toMatch(/served\s+URL is EPHEMERAL/);
     expect(l1.systemPrompt).toMatch(/INTERACTIONS MUST BE SELECTOR-BASED/);
+  });
+
+  it('EVERY probe discriminant the web L1 prompt teaches is one the reader recognises', () => {
+    // The one-concept/two-definitions split measured on the cold
+    // `web-counter` run (2026-08-22): this prompt taught
+    // `"probe": "validate_html"` in the envelope while the manifest schema
+    // and the ground-truth detector both read `"web"`. The child obeyed the
+    // prompt, so the supervisor's web-manifest health check never activated
+    // and the RESULT was approved on the child's own narration. Assert the
+    // TAUGHT vocabulary against the READING vocabulary, not against a
+    // hard-coded literal — a future rename of either side fails here.
+    const reg = new AtomRegistry(openDb(':memory:'));
+    const l1 = ensureCanonicalL1(reg, WEB_TOOLS, SMOKE);
+    const taught = [...l1.systemPrompt.matchAll(/"probe":\s*"([^"]+)"/g)].map((m) => m[1]!);
+    expect(taught.length).toBeGreaterThan(1);
+    for (const value of taught) {
+      expect(isReportedWebProbe({ probe: value })).toBe(true);
+      // The aliases are READER tolerance for recipes distilled before the
+      // rename. The WRITER contract teaches exactly one word — teaching an
+      // alias is how the split happened in the first place.
+      expect(REPORTED_WEB_PROBE_ALIASES).not.toContain(value);
+    }
   });
 
   it('creates canonical L2 on first call with canonical description + bootstrap marker', () => {

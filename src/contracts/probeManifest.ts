@@ -87,6 +87,48 @@ export const httpEntrySchema = z
  * must be SELECTOR-based: pixel coordinates encode this run's viewport,
  * fonts and layout, and are rejected by the health check.
  */
+/**
+ * The BROWSER-PROBE discriminant, in the two places a browser observation is
+ * declared: the on-disk manifest entry (`webEntrySchema`) and the child's
+ * in-envelope `output.probes` record. ONE literal is taught — both the
+ * manifest writer block and the web canonical prompt's envelope example are
+ * generated from this constant, so the vocabulary cannot drift again.
+ *
+ * WHY the constant exists (measured, cold `web-counter` run 2026-08-22): the
+ * web canonical prompt taught `"probe": "validate_html"` in the envelope while
+ * the manifest schema and the ground-truth detector both read the literal
+ * `"web"`. The child followed the prompt, so the supervisor's web-manifest
+ * health check never activated even though a manifest was on disk, and the
+ * RESULT was approved on the child's own narration. See
+ * `docs/incidents/supervisor-attestation-evidence-2026-08-22.md`.
+ */
+export const WEB_PROBE_DISCRIMINANT = 'web' as const;
+
+/**
+ * Envelope-ONLY tolerance. `validate_html` is the tool-name spelling the web
+ * canonical prompt taught until 2026-08-22; archived skill recipes distilled
+ * in that window still carry it, and a child that matches such a recipe will
+ * keep emitting it. The READER therefore recognises it so the manifest check
+ * fires; the on-disk manifest checker below stays single-valued and still
+ * rejects it, because the manifest is a replay contract and its discriminator
+ * is what a compiled script dispatches on.
+ */
+export const REPORTED_WEB_PROBE_ALIASES: readonly string[] = ['validate_html'];
+
+/**
+ * Does this `output.probes` entry declare a browser observation? Recognition
+ * only — this says the child CLAIMS a browser probe, never that the runtime
+ * executed one.
+ */
+export function isReportedWebProbe(entry: unknown): boolean {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  const probe = (entry as Record<string, unknown>)['probe'];
+  return (
+    probe === WEB_PROBE_DISCRIMINANT ||
+    (typeof probe === 'string' && REPORTED_WEB_PROBE_ALIASES.includes(probe))
+  );
+}
+
 export const webInteractionSchema = z
   .object({
     type: z.string().min(1),
@@ -96,7 +138,7 @@ export const webInteractionSchema = z
 
 export const webEntrySchema = z
   .object({
-    probe: z.literal('web'),
+    probe: z.literal(WEB_PROBE_DISCRIMINANT),
     file: z.string().min(1),
     interactions: z.array(webInteractionSchema).optional(),
     smoke: z.string().min(1),
@@ -173,7 +215,7 @@ export const EXAMPLE_HTTP_ENTRY: HttpEntry = httpEntrySchema.parse({
 });
 
 export const EXAMPLE_WEB_ENTRY: WebEntry = webEntrySchema.parse({
-  probe: 'web',
+  probe: WEB_PROBE_DISCRIMINANT,
   file: 'index.html',
   interactions: [{ type: 'click', selector: '#start' }],
   smoke: 'window.__test.started === true',
@@ -257,7 +299,7 @@ export function validateProbeManifest(raw: string): string[] {
     if (
       Object.prototype.hasOwnProperty.call(en, 'probe') &&
       en['probe'] !== 'http' &&
-      en['probe'] !== 'web'
+      en['probe'] !== WEB_PROBE_DISCRIMINANT
     ) {
       problems.push(
         `entry #${i}: "probe" must be the literal "http" or "web", got ${JSON.stringify(en['probe'])} — scenario labels belong in the smoke/note, not in the discriminator`

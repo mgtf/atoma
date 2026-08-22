@@ -27,3 +27,9 @@ Neighbours:
   owns entry identity per shape (shell by `cmd`, web by `file`+`smoke`, http =
   ordered append) and documents the three writers' corrupt-input policies side
   by side. Never re-implement a merge in a tool.
+- The browser-probe discriminant has ONE taught literal
+  (`WEB_PROBE_DISCRIMINANT`), and both the manifest writer block and the web
+  canonical prompt's `output.probes` example are generated from it. Aliases
+  (`REPORTED_WEB_PROBE_ALIASES`) are READER tolerance for recipes distilled
+  before a rename; never teach one, and never widen the on-disk checker to
+  accept one — a compiled script dispatches on that discriminator.

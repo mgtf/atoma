@@ -528,6 +528,46 @@ describe('file read-back probe (#F9)', () => {
     expect(checked.block).toMatch(/expected.*JSON-encoded string/);
   });
 
+  it('activates the manifest check on the LEGACY envelope spelling too', async () => {
+    // Cold `web-counter` regression (2026-08-22): the web canonical prompt
+    // taught `"probe": "validate_html"` in `output.probes`, this detector
+    // read the literal `"web"`, and the health check therefore stayed
+    // silent on a manifest that was sitting on disk. The prompt now teaches
+    // one literal, but skills distilled in that window still carry the old
+    // spelling, so the READER must recognise it.
+    const exec = new FsExecutor(
+      {
+        '.atoma-probes.json': JSON.stringify({
+          version: 1,
+          entries: [
+            {
+              probe: 'web',
+              file: 'index.html',
+              smoke: '({ok:true})',
+              expected: { ok: true },
+            },
+          ],
+        }),
+      },
+      ['read_file', 'validate_html']
+    );
+    const checked = await checkGroundTruth({
+      ctx: ctxWith(exec),
+      subject: 'RESULT',
+      payload: {
+        output: {
+          url: 'http://localhost:1234/',
+          probes: [{ probe: 'validate_html', smoke: '({ok:true})' }],
+        },
+        summary: 'validated the page',
+      },
+      child: webChild(),
+    });
+    expect(exec.calls.some((c) => c.name === 'read_file')).toBe(true);
+    expect(checked.requiresReview).toBe(true);
+    expect(checked.block).toMatch(/expected.*JSON-encoded string/);
+  });
+
   it('does NOT fire for a child that cannot write files', async () => {
     const reasoner = new L1Atom({
       name: 'Glucose',

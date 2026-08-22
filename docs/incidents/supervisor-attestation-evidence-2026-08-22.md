@@ -110,8 +110,25 @@ There is also a measured discriminator split:
   288-330).
 
 The cold counter result followed the first convention, so the supervisor's
-web-manifest check did not activate even though a manifest existed. This is
-an observed one-concept/two-definitions boundary, not a proposed fix.
+web-manifest check did not activate even though a manifest existed. This was
+an observed one-concept/two-definitions boundary, recorded here without a fix.
+
+**Disposition, 2026-08-22 (after the cooling-off period).** Closed separately
+from A1, as a factual vocabulary defect rather than a new gate. The
+discriminant now has one taught literal owned by
+[`probeManifest.ts`](../../src/contracts/probeManifest.ts)
+(`WEB_PROBE_DISCRIMINANT`), the web canonical prompt's `output.probes`
+example is generated from that constant, and the ground-truth detector reads
+it through `isReportedWebProbe`, which also recognises the historical
+`validate_html` spelling that archived recipes still carry. The on-disk
+manifest checker stays single-valued, because a compiled script dispatches on
+that discriminator. Two regression tests pin the boundary: the taught
+vocabulary must be a subset of the read vocabulary and must never be an
+alias, and a legacy-spelling envelope must still activate the manifest check.
+Behavioural consequence, stated explicitly: a web RESULT that reports the old
+spelling now has its manifest health-checked, so a malformed manifest sets
+`manifestMalformed` and forces validator review where it was previously
+silent. Nothing else in the A1 inventory below is addressed.
 
 ## What the supervisor independently checks
 

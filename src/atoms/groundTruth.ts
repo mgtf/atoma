@@ -2,6 +2,7 @@ import type { RunContext } from '../core/types.js';
 import type { Atom } from '../core/atom.js';
 import {
   PROBE_MANIFEST_FILENAME,
+  isReportedWebProbe,
   validateProbeManifest,
 } from '../contracts/probeManifest.js';
 import {
@@ -294,11 +295,8 @@ export async function probeGroundTruthEx(args: {
     typeof output === 'object' &&
     !Array.isArray(output) &&
     Array.isArray((output as Record<string, unknown>)['probes']) &&
-    ((output as Record<string, unknown>)['probes'] as unknown[]).some(
-      (probe) =>
-        probe !== null &&
-        typeof probe === 'object' &&
-        (probe as Record<string, unknown>)['probe'] === 'web'
+    ((output as Record<string, unknown>)['probes'] as unknown[]).some((probe) =>
+      isReportedWebProbe(probe)
     );
   if (reportedWebProbes && tools.has('read_file')) {
     try {
