@@ -1,18 +1,24 @@
 # Supervisor-held proof attestation (A1) — design review, 2026-08-22
 
-Status: **design review. One contract proposed, reviewed against the nine
-boundaries in the evidence inventory. No code accepted, no code written.**
+Status: **design review, revision 2. One contract proposed, reviewed against
+the nine boundaries in the evidence inventory. No code accepted, no code
+written.**
+
+Revision 2 corrects one factually wrong claim in revision 1 (§6 asserted that
+a withheld consequence has no visible surface; for skill credit one already
+exists), resolves three of the four attacks revision 1 left standing, and
+adds the acceptance controls in §7. What did not change: the contract's
+shape, its dispositions, and the fact that nothing here is accepted.
 
 This review answers the reserved A1 direction recorded in
 [`docs/incidents/supervisor-attestation-evidence-2026-08-22.md`](incidents/supervisor-attestation-evidence-2026-08-22.md),
 after the cooling-off period the root [`AGENTS.md`](../AGENTS.md) requires.
-The inventory's nine facts are the acceptance criteria for anything proposed
-here; §5 works through them one at a time and states where the proposal
-fails.
+The inventory's nine facts are the acceptance criteria; §5 works through them
+one at a time and states where the proposal fails.
 
-The one defect the inventory listed that was *not* a design question — the
-web-probe discriminant taught in one vocabulary and read in another — was
-closed separately in `3ee624d` and is out of scope below.
+The one inventory item that was not a design question — the web-probe
+discriminant taught in one vocabulary and read in another — was closed
+separately in `3ee624d` and is out of scope below.
 
 ## 1. The proposal in one paragraph
 
@@ -21,8 +27,8 @@ Introduce **one** contract: a run-scoped, machine-written, append-only
 tool-executor seam (the only place that sees a raw tool result), addressed by
 branch and tool event, and read by the supervisor at verdict time. A witness
 gains an explicit **observer**: `transport-observed` (attestation-backed) or
-`model-declared` (today's `output.probes`). A plan subtask may declare
-**proof obligations** alongside its existing `outputs`. An obligation that no
+`model-declared` (today's `output.probes`). A plan subtask may declare a
+**proof obligation** alongside its existing `outputs`. An obligation that no
 transport-observed attestation covers does **not** reject the deliverable —
 it forces validator review and, decisively, **withholds the method-level
 consequences of approval**: atom trust success, skill credit, distillation
@@ -77,7 +83,8 @@ one schema, one home, per that subsystem's rule — carrying at minimum:
   interactions, as a first-class boolean rather than a warning string;
 - the smoke expression and its result;
 - console errors and failed requests;
-- a content digest of the artifact source the observation was taken against.
+- a content digest of the artifact source the observation was taken against
+  (scoped in §5.4).
 
 The filter itself is **not** changed. It exists to preserve one coherent
 state-transition path, and removing it is a tool behaviour change with its
@@ -106,9 +113,23 @@ Three consequences, each load-bearing:
   therefore **out of scope by construction**, which matches the inventory's
   note that run accounting has no proof-reuse signal.
 
-Attestation-write failures degrade the observation to unattested. They never
-fail the tool call: a disk or serialisation fault must not kill a run, and it
-must not silently look like proof either.
+**One seam, two consumers, two failure policies.** The wrapper feeds the
+attestation log (correctness: a write failure degrades the observation to
+unattested, and never fails the tool call — a disk fault must not kill a run,
+and must not silently look like proof either) and, separately, the viz trace
+(observability: fail-open, swallowed, unchanged). They cannot disagree about
+what happened, because they observe the same call at the same point; only
+what their own failure means differs.
+
+**Observability dividend, worth naming because it is free.** `VizToolEvent`
+is emitted only from the `onToolInvocation` observer on an LLM request
+([`recordingLlm.ts`](../src/viz/recordingLlm.ts)). Supervisor probes bypass
+it, so today **no supervisor action appears in the trace at all** — not the
+file read-back, not the manifest read, not the clean-load `validate_html`.
+Their only trace is the prose the supervisor pasted into its own prompt, and
+the GPU client does not render `userContent`. The same wrapper closes that
+blind spot as a side effect. This is a reason the seam is right, not a reason
+to promote the trace to a gate (§8).
 
 ### 3.3 Witnesses gain an observer
 
@@ -128,12 +149,12 @@ model after `validate_html` returns, maps to the second until its writer
 moves into the tool. Nothing is retro-labelled (inventory fact 9: one trust
 label over three different ownerships would be false).
 
-### 3.4 Proof obligations live in the plan, not in a detector
+### 3.4 One obligation, declared in the plan
 
 An obligation is declared by the planner in the subtask, beside the `outputs`
 field the planning prompts already demand on file-mutating subtasks. No new
 LLM call: the plan call is already paid for, and the plan schema is already
-the place where a phase states what it will produce.
+where a phase states what it will produce.
 
 This is deliberate, and it is the rule the cooling-off clause exists to
 enforce. A mechanical detector over the task description — "the word *click*
@@ -141,19 +162,26 @@ implies a DOM obligation" — is precisely the vocabulary-frozen detector the
 2026-08-14 review measured as a primary source of drift. Obligations are
 **declared**, not sniffed.
 
+The vocabulary is **closed, with exactly one member**:
+
+- `dom-interaction` — covered only by an attestation whose **executed**
+  interaction log is non-empty, on an artifact digest that still matches.
+
+Revision 1 offered this as a defensible first cut while calling general
+coverage the largest open question. Revision 2 makes it the definition. The
+reason is that no wider version survived review: coverage is a semantic match
+between a claim and an observation, and every generalisation of it is either
+brittle (a mechanical vocabulary) or another paid, spoofable model call. One
+member is mechanical, unambiguous, and refuses to generalise before it is
+measured. A second member is a new review with its own evidence.
+
 No obligation declared → today's behaviour, unchanged. That containment is
 what keeps the contract from freezing skill learning system-wide.
 
 ### 3.5 Coverage decides consequences, not approval
 
 At verdict time the supervisor holds, for the phase's branch, the set of
-attestations and the set of declared obligations. An obligation is **covered**
-when a transport-observed attestation in that branch satisfies it and its
-`artifactDigest` still matches the artifact on disk (inventory fact 4: a
-later `write_file` or `edit_file` makes an earlier observation stale, and
-today nothing relates the two).
-
-Dispositions, stated once:
+attestations and the declared obligation. Dispositions, stated once:
 
 | Coverage | Verdict | Trust success | Skill credit | Distillation / promotion |
 |---|---|---|---|---|
@@ -163,6 +191,18 @@ Dispositions, stated once:
 
 The verdict shape gains an optional list of attestation ids the approval
 rests on — absent for work with no obligations.
+
+**A withheld consequence must be visible, and mostly already is.** The skill
+side has its surface: `VizSkillEvent` carries the op `credit-withheld`,
+introduced for exactly this failure mode — its own comment says the only
+other trace is "a counter that did not move, which reads identically to
+*nothing happened*". A1's withholding reuses that op rather than inventing a
+second one. The **trust** side has no equivalent, so the contract adds one:
+a `RunStatSignal` member and its counter in
+[`runStats.ts`](../src/contracts/runStats.ts), beside `escalations`,
+`promotions` and `deterministicPhases`, counting uncovered obligations per
+run. That is also the accounting signal the inventory noted was missing, and
+it is what makes a withheld run distinguishable from a quiet one in the CSV.
 
 ## 4. What this contract deliberately does not do
 
@@ -174,7 +214,7 @@ rests on — absent for work with no obligations.
   is the obvious second increment, but it is a new supervisor execution path
   and belongs in its own review.
 - It does not promote the viz trace to a correctness boundary. The trace stays
-  fail-open observability.
+  fail-open observability (§3.2).
 - It does not widen the on-disk manifest checker, whose discriminator a
   compiled script dispatches on.
 - It does not touch the negative paths. Rejection, escalation and script
@@ -197,16 +237,20 @@ rests on — absent for work with no obligations.
    second closes the incident.
 3. **The strongest web observation is trace-owned and fail-open.** Passes:
    the executor wrapper, not the recorder, is the seam, and it catches the
-   supervisor's own probes. *Residual:* two observers of the same tool call
-   now exist (trace and attestation). They must not be allowed to disagree
-   silently; the review has no answer yet for what a divergence means.
+   supervisor's own probes. Revision 1 left "two observers could disagree
+   silently" open; §3.2 resolves it — one observation point, two consumers,
+   and only their failure policies differ.
 4. **No witness binds an observation to an artifact revision.** Addressed by
-   `artifactDigest` plus staleness. *Residual, and the weakest point in the
-   contract:* "the artifact the observation depended on" is decidable for a
-   single-file web build and ill-defined for a served tree with imports.
-   A digest over the wrong file set produces false staleness, which is a
-   silent withholding of skill credit — cheap to miss, since nothing fails
-   loudly. This needs a stated scope: single declared entry file first.
+   `artifactDigest` plus staleness, now with a **stated scope** rather than
+   an open question: the digest covers the **single declared artifact file**
+   the observation names — the same `file` the web manifest entry already
+   carries — and nothing else. Import trees, assets and generated bundles are
+   explicitly **not** covered, so a deliverable whose behaviour depends on a
+   sibling module can go stale without the digest noticing. That is a known
+   under-detection, chosen over the alternative: a digest over a guessed file
+   set produces **false** staleness, which withholds credit silently, and
+   silence is the failure mode this whole contract exists to remove. Widening
+   the scope requires the served file set to become a declared output first.
 5. **Evidence is neither phase-addressed nor claim-mapped.** Passes, and
    dodges a trap: because attestations live in the run-scoped log rather than
    in `Result`, N>1 aggregation dropping `toolCallResults` and flattening
@@ -215,13 +259,12 @@ rests on — absent for work with no obligations.
    Passes by refusing to reinterpret it (§4). The clean-load probe keeps its
    current meaning and its current cost.
 7. **Approval inherits trust, credit, learning, promotion.** This is the
-   contract's whole point, and its largest blast radius. `activeSkillFollowed:
-   undefined` deliberately keeps credit enabled today; obligation-scoped
-   withholding changes that default only where a plan declared an obligation.
-   *Residual:* the withheld-credit path must be **attributable and visible**,
-   or a skill that quietly stops earning credit is indistinguishable from one
-   nobody matched. Run accounting has no attestation or invalidation signal
-   today, so the contract is incomplete without one.
+   contract's whole point and its largest blast radius.
+   `activeSkillFollowed: undefined` deliberately keeps credit enabled today;
+   obligation-scoped withholding changes that default only where a plan
+   declared an obligation. Revision 1 called the visibility of a withheld
+   consequence unresolved; §3.5 resolves it — `credit-withheld` for the skill
+   side, a new run-stat counter for the trust side.
 8. **Run-scoped state must cross real fork construction.** The contract is
    built on the fork wrapper, so this is not an afterthought — but
    `forkBranch` carries a documented field-enumeration hazard: it once
@@ -234,39 +277,61 @@ rests on — absent for work with no obligations.
    rather than re-implemented. Manifest merge semantics stay in
    [`probeManifest.ts`](../src/contracts/probeManifest.ts).
 
-## 6. Attacks that survive
+## 6. What still stands after revision 2
 
 - **The obligation is only as good as the planner.** A planner that declares
   no obligation on a task whose whole point is DOM behaviour restores
   today's silence, and the counter task's phase description *did* name
   clicking. Declared obligations move the failure from a detector's
   vocabulary to a planner's diligence. That is a better failure — visible in
-  the plan, reviewable — but it is not a proof.
-- **Withheld credit is a silent outcome.** Every other mechanical
-  disposition in this codebase surfaces as validator-visible text. A
-  withheld consequence has no natural surface, and §5.7 has no design for
-  one yet.
-- **Coverage is a judgment wearing a mechanical costume.** "This attestation
-  satisfies that obligation" is a semantic match. Made mechanical it is
-  brittle; made model-authored it is another paid call and another thing to
-  spoof. The review does not resolve this, and it is the single largest open
-  question. A defensible first cut is a **closed obligation vocabulary** with
-  exactly one member — `dom-interaction`, covered only by a non-empty
-  executed interaction log on an unstale digest — which is mechanical,
-  unambiguous, and refuses to generalise until measured.
+  the plan, reviewable, and cheap to audit after the fact — but it is not a
+  proof, and no version of this contract makes it one. This is the one
+  attack revision 2 does not answer.
 - **Blast radius.** Tools, contracts, core context, atoms, skills and
   accounting all change together. The inventory said so; the review confirms
-  it and does not have a smaller coherent version. A partial landing that
-  ships the observation without the consequence preserves evidence and
-  changes no outcome; one that ships the consequence without fork coverage
-  repeats a measured inert-gate incident.
+  it and has no smaller coherent version. A partial landing that ships the
+  observation without the consequence preserves evidence and changes no
+  outcome; one that ships the consequence without fork coverage repeats a
+  measured inert-gate incident.
 
-## 7. Alternatives considered and rejected here
+## 7. Acceptance controls
+
+The contract is a behavioural claim, so it needs a pre-registered test, per
+the benchmark discipline in the root [`AGENTS.md`](../AGENTS.md): both arms
+on the same day and the same code path, thresholds recorded with the results.
+
+Two task shapes from the cold session are the controls, and they are already
+known to separate — that is the whole content of the evidence record. Their
+original traces were archived out of the tree with the store and skills, so
+these are **new armed runs**, not a replay:
+
+- **negative control (`web-counter` shape)** — a task whose verification
+  names real button clicks, on an artifact whose smoke drives its own state
+  through `window.__*` hooks. Pre-registered expectation: the deliverable is
+  still **approved** (it works), the `dom-interaction` obligation is
+  **uncovered**, no skill is distilled, no atom trust success is recorded,
+  and the run stats carry one uncovered obligation.
+- **positive control (`web-stopwatch` shape)** — same family, with Puppeteer
+  clicks that actually execute. Pre-registered expectation: approved,
+  covered, distillation and credit proceed exactly as today, and the run
+  stats carry zero uncovered obligations.
+
+A run that approves the negative control **and** distils a skill from it is
+the contract failing, not the model misbehaving. A positive control that
+stops earning credit is the false-staleness failure of §5.4 and is a stop
+condition for the increment.
+
+Both controls must run under the burn-in rules: the machine to itself, no
+fan-out competing for the same subscription quota, traces and starting store
+archived before the batch.
+
+## 8. Alternatives considered and rejected here
 
 - **Make the viz trace the correctness boundary.** Cheapest by far — the
   untruncated result already lands there. Rejected: recording failures are
   swallowed by design, and a fail-open observability path becoming a gate is
-  a silent-approval mechanism, not a proof one.
+  a silent-approval mechanism, not a proof one. §3.2 keeps the trace and the
+  attestation on one seam precisely so this stays unnecessary.
 - **Have the supervisor drive its own interactions.** Rejected in §4:
   supervisor-authored interactions are the measured false-rejection shortcut.
 - **Fail `validate_html` when the interaction filter strips a requested
@@ -275,10 +340,12 @@ rests on — absent for work with no obligations.
   drives its own state with no user-input claim at all.
 - **A mechanical claim detector over the task description.** Rejected in
   §3.4 — the vocabulary-frozen detector class, measured.
+- **A general obligation vocabulary.** Rejected in §3.4: nothing wider than
+  one member survived review. Deferred, not refused.
 - **A new SQLite store for attestations.** Rejected: `src/core/stores.ts` is
   the one product store, and nothing here needs cross-run persistence.
 
-## 8. If this is accepted, the first increment
+## 9. If this is accepted, the first increment
 
 One reviewed commit, in this order, or none:
 
@@ -288,11 +355,12 @@ One reviewed commit, in this order, or none:
    log, with fork-propagation tests that fork **and nest**;
 3. the `Witness` observer union, with the existing machine writers mapped and
    nothing relabelled;
-4. the single-member obligation vocabulary (`dom-interaction`) declared in
-   the plan schema beside `outputs`;
-5. the withholding disposition of §3.5, plus the accounting signal §5.7 says
-   it cannot ship without.
+4. `dom-interaction` declared in the plan schema beside `outputs`;
+5. the withholding disposition of §3.5, with `credit-withheld` reused for the
+   skill side and the new run-stat counter for the trust side;
+6. the two armed controls of §7, results recorded with their thresholds.
 
 What must **not** be in it: supervisor-authored or replayed interactions, any
 change to the interaction filter, any change to the negative paths, any
-manifest-checker widening, and any obligation the plan did not declare.
+manifest-checker widening, a second obligation, and any obligation the plan
+did not declare.
