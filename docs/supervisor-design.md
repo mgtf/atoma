@@ -201,11 +201,72 @@ inhibitor (`caffeinate`) because the machine sleeps on battery.
 - **P3** — green/blue slots, lease-gated switch, rollback, deploy journal.
 - **P4** — measured autonomy widening for the mender.
 
+## P0 results, measured 2026-08-22
+
+Seven analyses: the 2026-08-21 web-countdown failure, then a calibration
+sweep over the six delivered runs of that day's batch 6 (the default six
+tasks, third pass, 6/6 delivered). Every number below is reproducible from
+`supervisor/verdicts/`.
+
+**Cost — this is the finding that settles decision 1.** The six analyses cost
+$1.90 equivalent against $1.68 for the six runs they examined: **113% of the
+work's own cost**, at 4–7 turns and ~2 minutes each. Analysing every
+delivered run costs more than producing it. Per-run analysis is therefore
+indefensible as a default: analyse failed and cancelled runs always, and
+delivered runs at batch end or by sampling.
+
+**Signal quality — better than the raw split suggests.** Three verdicts came
+back `ok` and three `mechanism_candidate`, but the candidates are not
+independent noise: two are the SAME finding reached from two different runs,
+and a third run carries it as an observation. L3 chose a PHASED sequential
+decomposition whose second phase re-verified what the first had already
+proven — on `web-counter` phase 2 spent $0.180 of the run's $0.359 and 11
+`validate_html` iterations re-proving a delivered artefact; on `http-healthz`
+phase 2 re-booted the server on a new port and re-ran the same three probes,
+with the molecule's own plan text saying "the previousStepSummary shows
+pinger.js was already built and verified with all routes working. However, I
+need to follow the current task". That is a plan-shape question for
+[src/atoms](../src/atoms/AGENTS.md), it is not covered by any existing rule,
+and three dated instances is exactly what COOLING-OFF asks for before
+designing anything.
+
+**One real calibration defect.** The third candidate (`web-stopwatch`,
+async smokes not observing `setInterval` updates) re-proposes moving smoke
+guidance into the prompt — the exact shortcut
+[src/tools/AGENTS.md](../src/tools/AGENTS.md) records as already tried and
+rejected, with the measurement showing the rule was violated six times
+despite already sitting in the parameter description. The prompt asks the
+analyst to read the subsystem's intentional-choices section; asking is not
+enough. Fix for v1: make the check a required field — a proposed remedy must
+cite the subsystem file it checked, or it is not a proposal.
+
+**One false positive**, filed as an observation: `record_probe` writing
+`.atoma-probes.json` during a re-verification phase was read as a read-only
+violation, when writing the manifest from machine-observed results is what
+that element is for.
+
+**One catch worth the whole exercise**, in a run that PASSED: `http-kv`
+never probed the wrong-method case its own task contract required. A
+delivered verdict is a claim, and the analyst tested the claim.
+
+**Zero security alerts across seven runs**, and 7/7 verdicts conformed to the
+schema with no raw-output fallbacks.
+
+**A schema flaw the sweep exposed.** Two runs came back `ok` from the model
+while carrying a `mechanism_candidate` finding, and the harness's recompute
+promoted the global verdict. Both readings are right about different
+questions: the run went fine AND there is something systemic worth fixing.
+v1 must split them — `runAssessment` (how did this run go) separate from
+`findings` (what should change), with routing driven by findings only. The
+conflated global verdict is the wrong shape.
+
 ## Open decisions
 
-1. **Analyst trigger granularity** — per run, or per batch during burn-in?
-   Proposed default: per run outside burn-in, batch-end during (the quiet
-   period approximates this in P0).
+1. ~~**Analyst trigger granularity**~~ — SETTLED by the P0 measurement above:
+   analysis costs 113% of the run it examines, so failed and cancelled runs
+   are analysed always, delivered runs at batch end or by sampling. What
+   remains open is only the sampling rate, and whether a cheaper model holds
+   the signal quality.
 2. **Mender initial autonomy** — proposal-only with operator approval
    (proposed default), or immediate auto-merge for trivial defect classes?
 3. **Green/blue scope** — compiled path only (proposed default: it is the
