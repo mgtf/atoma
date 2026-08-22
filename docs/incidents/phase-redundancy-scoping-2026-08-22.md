@@ -356,3 +356,9 @@ record and measurements remain; no same-session heuristic, validator gate or
 proof exception was added. The next design round returns to the reserved A1
 supervisor-owned attestation direction after cooling-off, using this missing
 DOM-interaction evidence as a first-class adversarial case.
+
+The evidence-only packet for that later review is
+[`supervisor-attestation-evidence-2026-08-22.md`](supervisor-attestation-evidence-2026-08-22.md).
+It maps the current browser observation, witness, manifest, verdict, trust and
+skills boundaries without accepting or implementing an A1 mechanism during
+the incident session.
