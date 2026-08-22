@@ -37,10 +37,32 @@ Neighbours:
 
 ## The watch and the loop
 
-- Detection is `runs/index.json` plus `isIndexEntryLive`, the repo's ONE live
-  predicate. Not the MCP lease: a lease-only watch would miss the CLI runs
-  (burn-in, benchmark) that most need watching. The lease is read for context
-  only — which pid holds it.
+- Detection is TWO SOURCES behind one interface (`sources.ts`), because there
+  are two run corpora and they never mix. A watch on either alone is half
+  blind, and the half it misses is the product: `runs/index.json` holds the
+  operator runs, while every project run points `ATOMA_RUNS_DIR` at its own
+  directory precisely so its trace never joins the instance corpus.
+  - operator: `index.json` plus `isIndexEntryLive`, the repo's ONE live
+    predicate — an INFERENCE from event timestamps, because nothing records
+    the fact.
+  - project: `project_runs.status = 'running'`, a transactional fact, plus a
+    staleness bound (`ABANDONED_AFTER_MS` against the trace's mtime) for the
+    window in which a row outlives its process. The sentinel does NOT repair
+    such a row — `reconcileInterrupted` does that at the next boot, and an
+    observer that writes the control plane is no longer an observer.
+  Above the sources there is ONE tick, ONE rule table and ONE de-duplication
+  path. A source that throws is reported and the other keeps being read: a
+  locked tenant store is exactly when operator runs still need watching.
+- Not the MCP lease: a lease-only watch would miss the CLI runs (burn-in,
+  benchmark) that most need watching. The lease is read for context only —
+  which pid holds it.
+- A project finding carries `orgId`/`projectId` as ATTRIBUTION, not audience.
+  The push audience is unchanged and stays in `viz/push/routes.ts`: these
+  rules are not calibrated, and the first thing a customer learns from atoma
+  must not be an uncalibrated heuristic about their own run.
+- The tenant source is added only when the store ALREADY holds project tables
+  (`hasProjectTables`). `ProjectStore.open` applies its DDL, and a watcher
+  must not bring a tenant control plane into being by looking at it.
 - NEVER a parser on the runner's stdout. That stream is the burn-in harness's
   parsed API, and a second parser would couple the sentinel to a format it
   does not own.

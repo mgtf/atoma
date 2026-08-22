@@ -50,3 +50,17 @@ Neighbours:
   (`ATOMA_SKILL_LEARN=0`, `ATOMA_SKILL_PROMOTE=0`, `ATOMA_SKILL_DIRECT=0`,
   `ATOMA_EVENT_SKILLS=0`, `ATOMA_PREFILTER_CACHE=0`). A measurement that
   depends on skill learning cannot be run as a project run.
+
+## Readers outside this subsystem
+
+- `listLiveRunTraces()` is the ONE read that exposes which project runs are
+  executing, and it exists for the sentinel
+  ([src/sentinel](../sentinel/AGENTS.md)). It has to: each project run writes
+  into its own `runs/<runId>/traces` directory, so there is no shared index to
+  poll and `status = 'running'` is the only fact. Cross-org by construction,
+  like `listAllRunTraces`, because its caller is platform-wide.
+- Such a reader must not WRITE here. A `running` row that outlived its process
+  is repaired by `reconcileInterrupted` at the next boot, never by the
+  observer that noticed it. `hasProjectTables` exists so a reader can ask
+  whether this store has a control plane without `ProjectStore.open`'s DDL
+  creating one.

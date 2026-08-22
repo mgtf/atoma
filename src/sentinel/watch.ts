@@ -1,10 +1,16 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { VizEvent, VizRun, VizRunIndexEntry } from '../viz/trace.js';
-import { isIndexEntryLive } from '../viz/client/run-utils.js';
+import type { VizEvent, VizRun } from '../viz/trace.js';
 import { peekRunLease } from '../mcp/runLock.js';
 import { eventLabel, type PlatformEventInput } from '../contracts/platformEvents.js';
 import { runSentinelRules, type SentinelFinding, type SentinelKind } from './rules.js';
+import {
+  MAX_TRACE_BYTES,
+  operatorRunSource,
+  readBoundedJson,
+  type SentinelLiveRun,
+  type SentinelRunSource,
+  type SentinelSkip,
+} from './sources.js';
 
 /**
  * THE SENTINEL WATCH — one tick, and the loop around it.
@@ -15,12 +21,14 @@ import { runSentinelRules, type SentinelFinding, type SentinelKind } from './rul
  * costs zero tokens forever").
  *
  * WHAT IT READS, and what it deliberately does not:
- *   - `runs/index.json` plus each live run's trace file. The index is the
- *     detection surface because `isIndexEntryLive` is the repo's ONE live
- *     predicate and because every run writes a trace — a lease-only watch
- *     would miss the CLI runs (burn-in, benchmark) that most need watching.
+ *   - every live run its SOURCES report, and that run's trace file. There are
+ *     two corpora and a watch on either alone is half blind: `./runs` holds
+ *     the operator runs (CLI, burn-in, benchmark), while each project run
+ *     writes into its own directory. `sources.ts` owns that split; this file
+ *     owns what happens to a run once found.
  *   - the MCP run lease, for context only: which pid holds it, if any. The
- *     lease is not the detector.
+ *     lease is not the detector — a lease-only watch would miss the CLI runs
+ *     that most need watching.
  *   - NEVER the runner's stdout. That stream is the burn-in harness's parsed
  *     API and a second parser on it would couple the sentinel to a format it
  *     does not own.
@@ -30,9 +38,6 @@ import { runSentinelRules, type SentinelFinding, type SentinelKind } from './rul
  * repeats nothing and two watchers cannot double-report. Each finding's
  * `dedupeKey` is stored in `detail` for exactly this read-back.
  */
-
-/** A trace larger than this is not read: no watch is better than a stall. */
-export const MAX_TRACE_BYTES = 32 * 1024 * 1024;
 
 /** The kinds this watcher writes, and the only kinds it reads back. */
 const SENTINEL_KINDS: readonly SentinelKind[] = ['run.anomaly', 'security.flagged'];
@@ -46,6 +51,13 @@ export interface SentinelJournal {
 
 export interface SentinelWatchOptions {
   readonly journal: SentinelJournal;
+  /**
+   * Where live runs come from. Omitted, it is the operator corpus alone —
+   * which is what a bare `npm run sentinel` on a checkout with no tenants
+   * should watch, and nothing more.
+   */
+  readonly sources?: readonly SentinelRunSource[];
+  /** Operator corpus directory, used only to build the default source. */
   readonly runsDir?: string;
   readonly now?: () => number;
   /** USD alert threshold, or null to disable that rule. Not a budget. */
@@ -55,25 +67,15 @@ export interface SentinelWatchOptions {
 }
 
 export interface SentinelTickReport {
-  readonly liveRuns: string[];
+  readonly runs: SentinelLiveRun[];
   readonly emitted: SentinelFinding[];
-  /** Runs seen but skipped, with why — never silently ignored. */
-  readonly skipped: { runId: string; reason: string }[];
-}
-
-function readJsonFile<T>(path: string, maxBytes: number): T | null {
-  if (!existsSync(path)) return null;
-  if (statSync(path).size > maxBytes) return null;
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T;
-  } catch {
-    return null;
-  }
+  /** Candidates seen but skipped, with why — never silently ignored. */
+  readonly skipped: SentinelSkip[];
 }
 
 export class SentinelWatch {
   private readonly journal: SentinelJournal;
-  private readonly runsDir: string;
+  private readonly sources: readonly SentinelRunSource[];
   private readonly now: () => number;
   private readonly costAlertUsd: number | null;
   private readonly leasePath: string | undefined;
@@ -81,22 +83,15 @@ export class SentinelWatch {
 
   constructor(options: SentinelWatchOptions) {
     this.journal = options.journal;
-    this.runsDir = resolve(options.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs');
+    this.sources = options.sources ?? [
+      operatorRunSource({
+        runsDir: resolve(options.runsDir ?? process.env['ATOMA_RUNS_DIR'] ?? './runs'),
+      }),
+    ];
     this.now = options.now ?? (() => Date.now());
     this.costAlertUsd = options.costAlertUsd ?? null;
     if (options.leasePath !== undefined) this.leasePath = options.leasePath;
     this.logger = options.logger ?? (() => {});
-  }
-
-  /** Runs the index says are executing right now. */
-  private liveEntries(): VizRunIndexEntry[] {
-    const index = readJsonFile<VizRunIndexEntry[]>(
-      resolve(this.runsDir, 'index.json'),
-      MAX_TRACE_BYTES
-    );
-    if (!Array.isArray(index)) return [];
-    const now = this.now();
-    return index.filter((entry) => isIndexEntryLive(entry, now));
   }
 
   /** Keys already journaled for this run, so nothing is said twice. */
@@ -122,52 +117,84 @@ export class SentinelWatch {
   /** One pass. Pure with respect to everything except journal rows. */
   tick(): SentinelTickReport {
     const emitted: SentinelFinding[] = [];
-    const skipped: { runId: string; reason: string }[] = [];
-    const liveRuns: string[] = [];
+    const skipped: SentinelSkip[] = [];
+    const runs: SentinelLiveRun[] = [];
+    const now = this.now();
     const lease = this.leasePath ? peekRunLease(this.leasePath) : null;
 
-    for (const entry of this.liveEntries()) {
-      liveRuns.push(entry.id);
-      const tracePath = resolve(this.runsDir, `${entry.id}.json`);
-      const run = readJsonFile<VizRun>(tracePath, MAX_TRACE_BYTES);
-      if (!run) {
-        skipped.push({ runId: entry.id, reason: 'trace unreadable or over the size cap' });
+    for (const source of this.sources) {
+      let discovered;
+      try {
+        discovered = source.discover(now);
+      } catch (error) {
+        // One unreachable corpus must not blind the watch to the other. A
+        // tenant store that is locked, absent or mid-migration is exactly the
+        // moment operator runs still need watching.
+        skipped.push({ runId: null, reason: `${source.corpus} source failed: ${String(error)}` });
         continue;
       }
-      const events: VizEvent[] = run.events ?? [];
-      const already = this.emittedKeys(entry.id);
-      if (already.has('__journal-unavailable__')) {
-        skipped.push({ runId: entry.id, reason: 'journal unavailable for read-back' });
-        continue;
-      }
-      const findings = runSentinelRules(
-        { runId: entry.id, events, costAlertUsd: this.costAlertUsd },
-        (ruleId, error) => this.logger(`rule ${ruleId} threw: ${String(error)}`)
-      );
-      for (const finding of findings) {
-        if (already.has(finding.dedupeKey)) continue;
-        already.add(finding.dedupeKey);
-        this.journal.append({
-          kind: finding.kind,
-          // `system`: a resident process, not the operator CLI and not a
-          // signed-in principal. The row is attributable to the machine.
-          actorType: 'system',
-          actorId: null,
-          orgId: null,
-          projectId: null,
-          runId: entry.id,
-          summary: eventLabel(finding.summary, 200),
-          detail: {
-            ...finding.detail,
-            dedupeKey: finding.dedupeKey,
-            ...(lease ? { leaseOwnerPid: lease.ownerPid, leaseRunId: lease.runId } : {}),
-          },
-        });
-        emitted.push(finding);
-        this.logger(`${finding.kind} ${finding.ruleId} on ${entry.id}: ${finding.summary}`);
+      skipped.push(...discovered.skipped);
+      for (const candidate of discovered.runs) {
+        runs.push(candidate);
+        this.screen(candidate, lease, emitted, skipped);
       }
     }
-    return { liveRuns, emitted, skipped };
+    return { runs, emitted, skipped };
+  }
+
+  /** One live run: read, apply the table, journal what has not been said. */
+  private screen(
+    candidate: SentinelLiveRun,
+    lease: ReturnType<typeof peekRunLease>,
+    emitted: SentinelFinding[],
+    skipped: SentinelSkip[]
+  ): void {
+    const run = readBoundedJson<VizRun>(candidate.tracePath, MAX_TRACE_BYTES);
+    if (!run) {
+      skipped.push({ runId: candidate.runId, reason: 'trace unreadable or over the size cap' });
+      return;
+    }
+    const events: VizEvent[] = run.events ?? [];
+    const already = this.emittedKeys(candidate.runId);
+    if (already.has('__journal-unavailable__')) {
+      skipped.push({ runId: candidate.runId, reason: 'journal unavailable for read-back' });
+      return;
+    }
+    const findings = runSentinelRules(
+      { runId: candidate.runId, events, costAlertUsd: this.costAlertUsd },
+      (ruleId, error) => this.logger(`rule ${ruleId} threw: ${String(error)}`)
+    );
+    for (const finding of findings) {
+      if (already.has(finding.dedupeKey)) continue;
+      already.add(finding.dedupeKey);
+      this.journal.append({
+        kind: finding.kind,
+        // `system`: a resident process, not the operator CLI and not a
+        // signed-in principal. The row is attributable to the machine.
+        actorType: 'system',
+        actorId: null,
+        // ATTRIBUTION, not audience. A tenant run's finding names its org and
+        // project so an admin can filter and so a future org-scoped read has
+        // something to scope by. The push audience is unchanged and stays in
+        // `viz/push/routes.ts`: these rules are not calibrated yet, and the
+        // first thing a customer should learn from atoma is not an
+        // uncalibrated heuristic about their own run.
+        orgId: candidate.orgId,
+        projectId: candidate.projectId,
+        runId: candidate.runId,
+        summary: eventLabel(finding.summary, 200),
+        detail: {
+          ...finding.detail,
+          dedupeKey: finding.dedupeKey,
+          corpus: candidate.corpus,
+          ...(lease ? { leaseOwnerPid: lease.ownerPid, leaseRunId: lease.runId } : {}),
+        },
+      });
+      emitted.push(finding);
+      this.logger(
+        `${finding.kind} ${finding.ruleId} on ${candidate.corpus} run ${candidate.runId}: ${finding.summary}`
+      );
+    }
   }
 }
 

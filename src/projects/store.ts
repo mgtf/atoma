@@ -415,6 +415,33 @@ export interface ProjectStoreOptions {
   readonly closeOnClose?: boolean;
 }
 
+/**
+ * Does this store already hold the project control plane?
+ *
+ * For READERS that must not bring it into being. `ProjectStore.open` applies
+ * the DDL, which is right for the server that owns these tables and wrong for
+ * an observer: a watcher pointed at a store that has never had a tenant would
+ * otherwise CREATE the tenant tables as a side effect of looking. Read-only
+ * connection, closed immediately.
+ */
+export function hasProjectTables(dbPath: string): boolean {
+  let db: Database.Database;
+  try {
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  } catch {
+    return false;
+  }
+  try {
+    return (
+      db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_runs'")
+        .get() !== undefined
+    );
+  } finally {
+    db.close();
+  }
+}
+
 export class ProjectStore {
   private readonly db: Database.Database;
   private readonly closeOnClose: boolean;
@@ -561,6 +588,59 @@ export class ProjectStore {
       });
     }
     return out;
+  }
+
+  /**
+   * Runs the control plane says are executing RIGHT NOW, with the trace file
+   * to read and the scope a finding about them belongs to.
+   *
+   * `status = 'running'` is a TRANSACTIONAL fact, which is why a live watch
+   * over this corpus needs no heuristic — unlike the operator corpus, where
+   * `isIndexEntryLive` has to INFER liveness from event timestamps because
+   * nothing records it. Two caveats belong to the caller, not here: a run is
+   * `running` before its recorder has persisted anything, so `file` is null
+   * for the first seconds; and a row can outlive its process (SIGKILL between
+   * two transitions) until boot's `reconcileInterrupted` fails it.
+   *
+   * Cross-org by construction — the same scope `listAllRunTraces` already
+   * serves, and for the same reason: the caller is the platform-wide sentinel,
+   * reachable only by a platform admin.
+   */
+  listLiveRunTraces(): Array<{
+    projectRunId: string;
+    orgId: string;
+    projectId: string;
+    projectSlug: string;
+    file: string | null;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.project_run_id, r.trace_id, r.runs_path, r.org_id, r.project_id,
+                p.slug AS project_slug
+         FROM project_runs r
+         JOIN projects p ON p.project_id = r.project_id AND p.org_id = r.org_id
+         WHERE r.status = 'running'
+         ORDER BY r.started_at ASC, r.project_run_id ASC`
+      )
+      .all() as Array<{
+      project_run_id: string;
+      trace_id: string | null;
+      runs_path: string;
+      org_id: string;
+      project_id: string;
+      project_slug: string;
+    }>;
+    return rows.map((row) => ({
+      projectRunId: row.project_run_id,
+      orgId: row.org_id,
+      projectId: row.project_id,
+      projectSlug: row.project_slug,
+      file: resolveProjectRunTraceFile({
+        projectRunId: row.project_run_id,
+        runsPath: row.runs_path,
+        traceId: row.trace_id,
+      }),
+    }));
   }
 
   findAnyRunTraceFile(idInput: string): string | null {

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
 import type { ArtifactManifest } from '../src/contracts/projects.js';
 import type { RunStats } from '../src/contracts/runStats.js';
-import { ProjectStateConflict, ProjectStore } from '../src/projects/store.js';
+import { hasProjectTables, ProjectStateConflict, ProjectStore } from '../src/projects/store.js';
 
 let root: string;
 let db: Database.Database;
@@ -639,5 +639,91 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
     expect(store.findOrgRunTraceFile(bob.orgId, reserved.run.projectRunId)).toBeNull();
     expect(store.findOrgRunTraceFile(alice.orgId, missing.run.projectRunId)).toBeNull();
     expect(store.findOrgRunTraceFile(alice.orgId, '2026-08-19T23-00-36-516-7b12d830')).toBeNull();
+  });
+});
+
+/**
+ * WHAT A LIVE WATCH READS. The sentinel cannot infer a project run's liveness
+ * from `runs/index.json`: each project run writes into its own directory, so
+ * there is no shared index to poll. `status = 'running'` is the fact, and this
+ * is the only read that exposes it.
+ */
+describe('ProjectStore — the live-run reader the sentinel uses', () => {
+  it('lists only running runs, resolves the trace, and names the scope', () => {
+    const alice = actor('Alice');
+    const project = createProject(alice);
+    const paths = hostPaths('live-run');
+    mkdirSync(paths.runsPath, { recursive: true });
+
+    const queued = store.createProjectRun({
+      orgId: alice.orgId,
+      projectId: project.projectId,
+      principalId: alice.principalId,
+      request: runRequest('live-queued'),
+      hostPaths: hostPaths('queued-run'),
+    })!.run;
+    const run = store.createProjectRun({
+      orgId: alice.orgId,
+      projectId: project.projectId,
+      principalId: alice.principalId,
+      request: runRequest('live-running'),
+      hostPaths: paths,
+    })!.run;
+
+    // Queued is not live: nothing is executing yet.
+    expect(store.listLiveRunTraces()).toEqual([]);
+
+    store.transitionProjectRun({
+      orgId: alice.orgId,
+      projectRunId: run.projectRunId,
+      from: 'queued',
+      to: 'running',
+    });
+
+    // Running with no persisted trace: reported with a null file rather than
+    // dropped, because a caller must be able to tell "not yet" from "gone".
+    expect(store.listLiveRunTraces()).toEqual([
+      {
+        projectRunId: run.projectRunId,
+        orgId: alice.orgId,
+        projectId: project.projectId,
+        projectSlug: 'weather-lab',
+        file: null,
+      },
+    ]);
+
+    writeFileSync(join(paths.runsPath, `${run.projectRunId}.json`), '{}', 'utf8');
+    expect(store.listLiveRunTraces()[0]!.file).toBe(
+      join(paths.runsPath, `${run.projectRunId}.json`)
+    );
+
+    // And a finished run leaves the live list.
+    store.transitionProjectRun({
+      orgId: alice.orgId,
+      projectRunId: run.projectRunId,
+      from: 'running',
+      to: 'delivered',
+      traceId: run.projectRunId,
+      stats: deliveredStats,
+    });
+    expect(store.listLiveRunTraces()).toEqual([]);
+    expect(queued.status).toBe('queued');
+  });
+
+  it('answers whether a store holds the control plane without creating it', () => {
+    // A reader must not bring a tenant control plane into being by looking.
+    const emptyPath = join(root, 'fresh.db');
+    const fresh = new Database(emptyPath);
+    fresh.exec('CREATE TABLE unrelated (x INTEGER)');
+    fresh.close();
+
+    expect(hasProjectTables(emptyPath)).toBe(false);
+    expect(hasProjectTables(join(root, 'does-not-exist.db'))).toBe(false);
+
+    const opened = new Database(emptyPath);
+    opened.exec(AUTH_TABLES_DDL);
+    new ProjectStore(opened);
+    opened.close();
+    expect(hasProjectTables(emptyPath)).toBe(true);
   });
 });
