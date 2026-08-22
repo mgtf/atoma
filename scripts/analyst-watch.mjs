@@ -8,8 +8,9 @@
 //   node scripts/analyst-watch.mjs --run <id> [--force] analyse one run now
 //   node scripts/analyst-watch.mjs --dry-run ...        everything except the LLM call
 //
-// Options: --model <m> (default $ATOMA_ANALYST_MODEL or "sonnet"),
-// --quiet-ms (120000), --poll-ms (15000), --budget-usd (2), --timeout-ms (900000).
+// Options: --model <m> (default $ATOMA_ANALYST_MODEL or "claude-sonnet-5" —
+// pin an explicit id, an alias drifts under the measurement), --quiet-ms
+// (120000), --poll-ms (15000), --budget-usd (2), --timeout-ms (900000).
 //
 // The analyst never runs while a run is active: activity = a live entry in
 // runs/index.json (same 12-minute window as the viz) or a held MCP run lease.
@@ -357,6 +358,37 @@ function runClaude(prompt, options) {
   });
 }
 
+/** An explicit model id, as opposed to a moving alias like `sonnet`. */
+function looksPinned(model) {
+  return /^claude-/.test(model);
+}
+
+/**
+ * What the session actually consumed, per model, in the same shape the run
+ * traces already use for `totals.perModel`, so an analysis and the run it
+ * examined can be compared field by field.
+ *
+ * `claude -p` reports a `modelUsage` map, and it is never one model: the main
+ * loop's model plus whatever the harness ran auxiliary (Haiku classification
+ * work), all of it inside `total_cost_usd`. Recording the requested alias
+ * instead would name one model and price another — the exact lie `servedModel`
+ * exists to prevent in the product's own traces.
+ */
+function servedModels(wrapper) {
+  const usage = wrapper?.modelUsage;
+  if (!usage || typeof usage !== 'object') return null;
+  const entries = Object.entries(usage).map(([model, u]) => ({
+    model,
+    costUsd: typeof u?.costUSD === 'number' ? u.costUSD : null,
+    inputTokens: u?.inputTokens ?? 0,
+    outputTokens: u?.outputTokens ?? 0,
+    cacheReadInputTokens: u?.cacheReadInputTokens ?? 0,
+    cacheCreationInputTokens: u?.cacheCreationInputTokens ?? 0,
+  }));
+  entries.sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0));
+  return entries.length > 0 ? entries : null;
+}
+
 function parseLooseJson(text) {
   if (typeof text !== 'string') return null;
   const attempts = [text.trim()];
@@ -500,15 +532,28 @@ async function analyseRun(runId, options) {
   }
 
   const recomputed = recomputeGlobalVerdict(verdict.findings);
+  const served = servedModels(wrapper);
+  // A recorded baseline is only comparable to the next one if the model that
+  // produced it is named. An exact pin that does not appear in what was served
+  // means the request was reinterpreted, and the two measurements are not the
+  // same experiment.
+  if (looksPinned(options.model) && served && !served.some((m) => m.model === options.model)) {
+    warn(
+      `requested ${options.model} but served ${served.map((m) => m.model).join(' + ')} — ` +
+        `this verdict is not comparable to one recorded under the pin`
+    );
+  }
   const meta = {
     analysedAt: new Date().toISOString(),
     promptVersion: PROMPT_VERSION,
-    model: options.model,
+    modelRequested: options.model,
+    /** What the session ACTUALLY consumed, per model. Never the alias. */
+    modelsServed: served,
     analysisCostUsd: wrapper?.total_cost_usd ?? null,
     analysisDurationMs: wrapper?.duration_ms ?? Date.now() - startedAt,
     analysisTurns: wrapper?.num_turns ?? null,
     sessionId: wrapper?.session_id ?? null,
-    verdictAdjusted: recomputed !== verdict.verdict ? { model: verdict.verdict } : undefined,
+    verdictAdjusted: recomputed !== verdict.verdict ? { modelSaid: verdict.verdict } : undefined,
   };
   if (recomputed !== verdict.verdict) {
     warn(`model said ${verdict.verdict}, findings imply ${recomputed}; keeping recomputed`);
@@ -565,7 +610,11 @@ async function processQueue(queue, options) {
 
 function parseCliArgs(argv) {
   const options = {
-    model: process.env['ATOMA_ANALYST_MODEL'] ?? 'sonnet',
+    // PINNED, not an alias: `sonnet` resolved to claude-sonnet-4-6 on the
+    // machine that produced the first calibration, while the runs it judges
+    // are served by claude-opus-5 / claude-sonnet-5 / claude-haiku-4-5. An
+    // alias makes the recorded cost drift under the measurement.
+    model: process.env['ATOMA_ANALYST_MODEL'] ?? 'claude-sonnet-5',
     quietMs: 120_000,
     pollMs: 15_000,
     budgetUsd: 2,
@@ -600,6 +649,15 @@ function parseCliArgs(argv) {
 
 async function main() {
   const options = parseCliArgs(process.argv);
+  // Warn BEFORE spending: an alias is convenient for a one-off comparison and
+  // wrong for anything that gets recorded, because next month it resolves to a
+  // different model and the stored cost silently stops meaning what it said.
+  if (!looksPinned(options.model)) {
+    warn(
+      `"${options.model}" is an alias, not a pinned model id — its resolution can ` +
+        `change, so verdicts recorded under it are not comparable over time`
+    );
+  }
   mkdirSync(verdictsDir, { recursive: true });
   mkdirSync(workDir, { recursive: true });
 

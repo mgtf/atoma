@@ -210,10 +210,37 @@ tasks, third pass, 6/6 delivered). Every number below is reproducible from
 
 **Cost — this is the finding that settles decision 1.** The six analyses cost
 $1.90 equivalent against $1.68 for the six runs they examined: **113% of the
-work's own cost**, at 4–7 turns and ~2 minutes each. Analysing every
-delivered run costs more than producing it. Per-run analysis is therefore
-indefensible as a default: analyse failed and cancelled runs always, and
-delivered runs at batch end or by sampling.
+work's own cost**, at 4–7 turns and ~2 minutes each. Analysing every delivered
+run costs more than producing it, so per-run analysis is indefensible as a
+default: failed and cancelled runs always, delivered runs at batch end or by
+sampling.
+
+That 113% UNDERSTATES the intended configuration, and the correction matters
+more than the original number. Those six analyses ran under the `sonnet`
+alias, which resolved to `claude-sonnet-4-6` — while the runs being judged
+were served by `claude-opus-5`, `claude-sonnet-5` and `claude-haiku-4-5`. The
+analyst was reading Opus-5 work from a previous-generation model, nobody chose
+that, and the stored metadata recorded the alias rather than what was served,
+so the measurement did not show it. Re-running the CHEAPEST case
+(`http-healthz`, 58 events) under an explicit `claude-sonnet-5` pin cost
+**$0.7354 against a run that cost $0.1648 — 446%**, versus $0.2846 under the
+alias: 2.6× for the same analysis, faster (83s) and with more turns (7). One
+data point is not a new headline ratio, but the direction is not in doubt, and
+it promotes the cheaper-model question from a nice-to-have to the next
+measurement worth paying for.
+
+The fix is landed: the default is a pinned `claude-sonnet-5`, an alias warns
+BEFORE spending, `_meta.modelsServed` records the real per-model usage in the
+same shape as a run's `totals.perModel`, and a pin that does not appear in
+what was served warns that the verdict is not comparable. Recording the alias
+was the same lie `servedModel` exists to prevent in the product's own traces —
+naming one model while pricing another.
+
+**The convergent finding survived a model change.** The pinned re-run reached
+the phase-redundancy finding independently ("L3 phase split caused a full
+redundant rebuild+reboot+re-probe"), from a different model than the two runs
+that first produced it. Three instances across two model generations is
+stronger evidence than three instances from one.
 
 **Signal quality — better than the raw split suggests.** Three verdicts came
 back `ok` and three `mechanism_candidate`, but the candidates are not
@@ -265,8 +292,9 @@ conflated global verdict is the wrong shape.
 1. ~~**Analyst trigger granularity**~~ — SETTLED by the P0 measurement above:
    analysis costs 113% of the run it examines, so failed and cancelled runs
    are analysed always, delivered runs at batch end or by sampling. What
-   remains open is only the sampling rate, and whether a cheaper model holds
-   the signal quality.
+   remains open is the sampling rate, and — now the leading question — whether
+   Haiku holds the signal quality, since a pinned Sonnet 5 analysis cost 446%
+   of the cheapest run it examined.
 2. **Mender initial autonomy** — proposal-only with operator approval
    (proposed default), or immediate auto-merge for trivial defect classes?
 3. **Green/blue scope** — compiled path only (proposed default: it is the
