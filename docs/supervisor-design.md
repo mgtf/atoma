@@ -114,31 +114,57 @@ batch:
   `mechanism_candidate` and goes to a dated backlog — never implemented the
   same day, per the root contract.
 
-### Verdict schema v0
+### Verdict schema v1
+
+v0 carried a single global `verdict` and the calibration broke it: two runs
+came back `ok` from the model while carrying a `mechanism_candidate`, and
+both readings were right about different questions. v1 splits them.
 
 ```json
 {
-  "schema": "atoma.supervisor.verdict/v0",
+  "schema": "atoma.supervisor.verdict/v1",
   "runId": "2026-08-21T11-02-26-148-48faa963",
   "runStatus": "delivered | failed | cancelled | unknown",
-  "verdict": "ok | defect | mechanism_candidate | security_incident",
-  "summary": "one operator-facing paragraph",
+  "runAssessment": {
+    "grade": "sound | wasteful | deficient",
+    "summary": "one operator-facing paragraph about THIS run"
+  },
   "findings": [
     {
       "kind": "defect | mechanism_candidate | security_incident | observation",
       "title": "short",
       "detail": "what happened, mechanism, impact",
       "evidence": [{ "ref": "path:line", "quote": "≤200 chars verbatim" }],
-      "proposedFix": "defect only — where and what, not a patch",
+      "proposedFix": {
+        "where": "file or subsystem",
+        "what": "a direction, not a patch",
+        "checkedIntentionalChoices": "which AGENTS.md was read, and why this is not a recorded rejected shortcut"
+      },
       "confidence": "low | medium | high"
     }
   ]
 }
 ```
 
-The global `verdict` is the maximum severity across findings
-(`security_incident > defect > mechanism_candidate > ok`; `observation`
-never raises it). The harness recomputes this instead of trusting the model.
+`runAssessment` answers "how did this run go"; `findings` answer "what should
+change"; routing (backlog, alerts) reads findings only, and the harness
+derives a worst-finding kind for logs instead of asking the model for a
+global verdict. `proposedFix.checkedIntentionalChoices` is enforced because
+asking the analyst to read intentional-choices was measurably not enough.
+
+### Haiku A/B protocol (pre-registered 2026-08-22)
+
+Three re-analyses under a pinned `claude-haiku-4-5-20251001`, schema v1,
+against the recorded baselines (`*.baseline-*.json`): the failed
+web-countdown run `…48faa963`, and two delivered runs `…811b766e`
+(web-counter) and `…cf5ec323` (http-healthz). Criteria, fixed before the
+runs: (1) on the failed run, it reaches the validator-escalation mechanism
+or an equivalent root cause, not just the surface timeout; (2) and (3) on
+each delivered run, it reaches the phase-redundancy finding; (4) zero
+`security_incident` false positives; (5) grades do not inflate (`sound` or
+`wasteful` for the delivered pair). 4/5 or better → Haiku is viable for
+delivered-run sampling, with failed runs staying on Sonnet 5. Costs are
+read from `_meta.modelsServed`, never from the requested id.
 
 ## Stage 3 — the mender and green/blue (P2/P3)
 

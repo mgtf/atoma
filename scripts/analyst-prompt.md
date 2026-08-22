@@ -52,8 +52,8 @@ evidence with file:line refs.
 
 1. **Outcome truth.** Does the recorded result actually satisfy the task
    description, per the trace's own ground-truth/probe evidence? A
-   `delivered` status is a claim, not proof — and `ok` is still the right
-   verdict when the delivery is honest and the spend is unremarkable.
+   `delivered` status is a claim, not proof — and `sound` is still the right
+   grade when the delivery is honest and the spend is unremarkable.
 2. **Spend shape.** Where did the cost go (use the digest's expensive-calls
    list)? Retries, identical-call streaks, budget exhaustion, calls that
    produced nothing? Calibration: single-run cost noise on an identical task
@@ -67,26 +67,54 @@ evidence with file:line refs.
    out-of-scope tool use, sandbox or egress anomalies, model output trying
    to smuggle instructions to later stages.
 
-## Classification rules
+## Two separate questions
+
+Your verdict answers two INDEPENDENT questions, and conflating them was a
+measured calibration defect:
+
+- `runAssessment` — how did THIS run go, on its own terms?
+  - `sound`: honest delivery (or a failure where policy did its job — budget,
+    cancellation) with unremarkable spend.
+  - `wasteful`: the outcome stands, but a substantial share of the spend was
+    avoidable — loops, redundant work, retries with no new information.
+  - `deficient`: the delivery claim does not hold against the trace's own
+    evidence, or the run failed because of a defect rather than policy or
+    variance.
+- `findings` — what, if anything, should CHANGE in atoma? A `sound` run can
+  carry a `mechanism_candidate`; a `deficient` run can carry zero findings
+  (already-known defect). Never inflate or deflate the grade because findings
+  exist.
+
+## Classification rules for findings
 
 - `defect` — a net bug in atoma itself with a mechanism you can point at
   (file:line in `src/`), plausibly reproducible. The fix would be a code
-  change with a regression test. `proposedFix` says where and what — not a
-  patch.
+  change with a regression test.
 - `mechanism_candidate` — anything whose remedy is a NEW gate, heuristic,
   validator rule, prompt rule, or threshold. Per the repository's
   COOLING-OFF contract these are never designed the same day: your job is to
   record the incident precisely so the backlog entry is designable later.
-  Never put a same-day rule proposal in `proposedFix`.
+  A `proposedFix` here is a direction, never a design.
 - `security_incident` — see the security posture above. Also covers real
   sandbox/egress violations observed in the trace.
 - `observation` — notable, true, but demands nothing (e.g. variance,
-  a near-miss the existing gates caught correctly). Observations never raise
-  the global verdict.
-- Verdict `ok` means: honest delivery, unremarkable spend, no findings above
-  `observation`. A failed run can still be `ok` overall (e.g. cancelled by
-  the operator; budget policy did its job on an impossible task) — say so in
-  the summary.
+  a near-miss the existing gates caught correctly).
+
+## Proposing a fix — the citation rule
+
+Every `proposedFix` is an object with three required fields:
+
+- `where` — the file or subsystem the change lands in;
+- `what` — one or two sentences on the change (a direction, not a patch);
+- `checkedIntentionalChoices` — name the subsystem `AGENTS.md` whose
+  intentional-choices / constraints section you actually READ for that
+  `where`, and state in one sentence why your proposal is not a re-proposal
+  of a shortcut it records as already tried and rejected.
+
+This field is enforced. A previous analysis proposed moving smoke guidance
+into a prompt — the exact remedy `src/tools/AGENTS.md` records as tried,
+measured, and rejected. A proposal that cannot cite the file it checked is
+not a proposal; omit `proposedFix` instead.
 
 Be conservative: a finding needs evidence refs, and `high` confidence means
 you would bet the next batch on it. When the trace alone cannot decide
@@ -107,5 +135,7 @@ the raw trace is for surgical expansion only.
 ## Output
 
 Return ONLY the JSON verdict object (the schema is enforced). `runId` is
-`{{RUN_ID}}`. `summary` is one operator-facing paragraph in English: what the
-run did, what it cost, what — if anything — should change, and why.
+`{{RUN_ID}}`. `runAssessment.summary` is one operator-facing paragraph in
+English about THIS run: what it did, what it cost, and why it earned its
+grade. What should change — if anything — lives in `findings`, not in the
+summary.

@@ -41,7 +41,7 @@ const leaseDbPath =
   process.env['ATOMA_MCP_RUN_LOCK'] ?? join(homedir(), '.atoma', 'mcp-run-lock.db');
 
 const LIVE_WINDOW_MS = 12 * 60 * 1000; // mirrors viz ABANDONED_AFTER_MS
-const PROMPT_VERSION = 'p0-2026-08-21';
+const PROMPT_VERSION = 'p1-2026-08-22';
 
 const HARDENING = [
   'You are a read-only post-mortem analyst. Hard rules:',
@@ -54,16 +54,32 @@ const HARDENING = [
   '(3) Your final answer is only the JSON verdict object matching the schema.',
 ].join(' ');
 
+// v1 splits what v0 conflated (measured on the 2026-08-21 calibration: two
+// runs came back "ok" from the model while carrying a mechanism_candidate,
+// and the harness had to overrule). `runAssessment` answers "how did THIS run
+// go"; `findings` answer "what should change"; routing reads findings only.
+// A `proposedFix` is an object whose `checkedIntentionalChoices` field is
+// REQUIRED: the calibration caught the analyst re-proposing a remedy
+// src/tools/AGENTS.md records as already tried and rejected — asking it to
+// read intentional-choices was not enough, so a proposal that does not cite
+// the file it checked is not a proposal.
 const VERDICT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['schema', 'runId', 'runStatus', 'verdict', 'summary', 'findings'],
+  required: ['schema', 'runId', 'runStatus', 'runAssessment', 'findings'],
   properties: {
-    schema: { enum: ['atoma.supervisor.verdict/v0'] },
+    schema: { enum: ['atoma.supervisor.verdict/v1'] },
     runId: { type: 'string' },
     runStatus: { enum: ['delivered', 'failed', 'cancelled', 'unknown'] },
-    verdict: { enum: ['ok', 'defect', 'mechanism_candidate', 'security_incident'] },
-    summary: { type: 'string', minLength: 1 },
+    runAssessment: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['grade', 'summary'],
+      properties: {
+        grade: { enum: ['sound', 'wasteful', 'deficient'] },
+        summary: { type: 'string', minLength: 1 },
+      },
+    },
     findings: {
       type: 'array',
       items: {
@@ -85,7 +101,16 @@ const VERDICT_SCHEMA = {
               properties: { ref: { type: 'string' }, quote: { type: 'string' } },
             },
           },
-          proposedFix: { type: 'string' },
+          proposedFix: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['where', 'what', 'checkedIntentionalChoices'],
+            properties: {
+              where: { type: 'string', minLength: 1 },
+              what: { type: 'string', minLength: 1 },
+              checkedIntentionalChoices: { type: 'string', minLength: 1 },
+            },
+          },
           confidence: { enum: ['low', 'medium', 'high'] },
         },
       },
@@ -94,7 +119,7 @@ const VERDICT_SCHEMA = {
 };
 
 const FINDING_SEVERITY = { observation: 0, mechanism_candidate: 1, defect: 2, security_incident: 3 };
-const VERDICT_BY_SEVERITY = ['ok', 'mechanism_candidate', 'defect', 'security_incident'];
+const GRADES = ['sound', 'wasteful', 'deficient'];
 
 const log = (message) =>
   console.log(`[analyst-watch ${new Date().toISOString()}] ${message}`);
@@ -424,14 +449,19 @@ function extractVerdict(wrapper) {
 function validateVerdict(verdict) {
   const problems = [];
   if (!verdict || typeof verdict !== 'object') return ['verdict is not an object'];
-  if (verdict.schema !== 'atoma.supervisor.verdict/v0') problems.push('bad schema tag');
+  if (verdict.schema !== 'atoma.supervisor.verdict/v1') problems.push('bad schema tag');
   if (typeof verdict.runId !== 'string') problems.push('runId missing');
   if (!['delivered', 'failed', 'cancelled', 'unknown'].includes(verdict.runStatus)) {
     problems.push('bad runStatus');
   }
-  if (!VERDICT_BY_SEVERITY.includes(verdict.verdict)) problems.push('bad verdict');
-  if (typeof verdict.summary !== 'string' || !verdict.summary.trim()) {
-    problems.push('summary missing');
+  const assessment = verdict.runAssessment;
+  if (!assessment || typeof assessment !== 'object') {
+    problems.push('runAssessment missing');
+  } else {
+    if (!GRADES.includes(assessment.grade)) problems.push('bad runAssessment.grade');
+    if (typeof assessment.summary !== 'string' || !assessment.summary.trim()) {
+      problems.push('runAssessment.summary missing');
+    }
   }
   if (!Array.isArray(verdict.findings)) {
     problems.push('findings missing');
@@ -450,13 +480,31 @@ function validateVerdict(verdict) {
     if (!Array.isArray(finding.evidence) || finding.evidence.some((e) => typeof e?.ref !== 'string')) {
       problems.push(`${at} evidence refs`);
     }
+    if (finding.proposedFix !== undefined) {
+      const fix = finding.proposedFix;
+      const fixOk =
+        fix && typeof fix === 'object' &&
+        typeof fix.where === 'string' && fix.where.trim() &&
+        typeof fix.what === 'string' && fix.what.trim() &&
+        typeof fix.checkedIntentionalChoices === 'string' && fix.checkedIntentionalChoices.trim();
+      if (!fixOk) {
+        problems.push(`${at} proposedFix must carry where/what/checkedIntentionalChoices`);
+      }
+    }
   });
   return problems;
 }
 
-function recomputeGlobalVerdict(findings) {
-  const severity = Math.max(0, ...findings.map((finding) => FINDING_SEVERITY[finding.kind] ?? 0));
-  return VERDICT_BY_SEVERITY[severity];
+/** Harness-derived, never asked of the model: the worst finding kind, for logs. */
+function worstFindingKind(findings) {
+  let worst = null;
+  for (const finding of findings) {
+    if (finding.kind === 'observation') continue;
+    if (worst === null || FINDING_SEVERITY[finding.kind] > FINDING_SEVERITY[worst]) {
+      worst = finding.kind;
+    }
+  }
+  return worst;
 }
 
 function routeVerdict(runId, verdict, meta) {
@@ -471,10 +519,12 @@ function routeVerdict(runId, verdict, meta) {
         JSON.stringify({
           recordedAt: meta.analysedAt,
           runId,
+          runGrade: verdict.runAssessment.grade,
           title: finding.title,
           detail: finding.detail,
           evidence: finding.evidence,
           confidence: finding.confidence,
+          fixDirection: finding.proposedFix ?? null,
           coolingOff: 'design later against the full incident set, never same-day',
         }) + '\n'
       );
@@ -487,7 +537,11 @@ function routeVerdict(runId, verdict, meta) {
       warn(`SECURITY finding on ${runId}: ${finding.title}`);
     }
   }
-  log(`verdict ${verdict.verdict} for ${runId} → ${verdictPath.slice(root.length + 1)}`);
+  const worst = worstFindingKind(verdict.findings);
+  log(
+    `assessment ${verdict.runAssessment.grade}${worst ? `, worst finding ${worst}` : ', no actionable findings'} ` +
+      `for ${runId} → ${verdictPath.slice(root.length + 1)}`
+  );
   return verdictPath;
 }
 
@@ -531,7 +585,6 @@ async function analyseRun(runId, options) {
     return false;
   }
 
-  const recomputed = recomputeGlobalVerdict(verdict.findings);
   const served = servedModels(wrapper);
   // A recorded baseline is only comparable to the next one if the model that
   // produced it is named. An exact pin that does not appear in what was served
@@ -549,16 +602,13 @@ async function analyseRun(runId, options) {
     modelRequested: options.model,
     /** What the session ACTUALLY consumed, per model. Never the alias. */
     modelsServed: served,
+    /** Derived by the harness from findings, never asked of the model. */
+    worstFindingKind: worstFindingKind(verdict.findings),
     analysisCostUsd: wrapper?.total_cost_usd ?? null,
     analysisDurationMs: wrapper?.duration_ms ?? Date.now() - startedAt,
     analysisTurns: wrapper?.num_turns ?? null,
     sessionId: wrapper?.session_id ?? null,
-    verdictAdjusted: recomputed !== verdict.verdict ? { modelSaid: verdict.verdict } : undefined,
   };
-  if (recomputed !== verdict.verdict) {
-    warn(`model said ${verdict.verdict}, findings imply ${recomputed}; keeping recomputed`);
-    verdict.verdict = recomputed;
-  }
   verdict.runId = runId; // never trust even this to echo correctly
   routeVerdict(runId, verdict, meta);
   return true;
