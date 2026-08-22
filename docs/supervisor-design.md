@@ -166,6 +166,20 @@ each delivered run, it reaches the phase-redundancy finding; (4) zero
 delivered-run sampling, with failed runs staying on Sonnet 5. Costs are
 read from `_meta.modelsServed`, never from the requested id.
 
+**Operator decision, 2026-08-22 (supersedes the Sonnet-5 default below):**
+the analyst runs on **GLM-5.3** through the operator's own subscription. The
+provider is injected at platform launch through three scoped variables —
+`ATOMA_ANALYST_MODEL=glm-5.3`,
+`ATOMA_ANALYST_BASE_URL=<anthropic-compatible endpoint>` (Z.ai coding plan:
+`https://api.z.ai/api/anthropic`), `ATOMA_ANALYST_AUTH_TOKEN=<key>` —
+forwarded by the watcher to its child `claude` session only. The scoping is
+deliberate: raw `ANTHROPIC_*` exported at platform launch would reroute the
+runs' claude-cli transport too. A separate subscription also dissolves the
+quota-contention rationale for out-of-band sequencing (the machine-dedication
+rule during burn-in batches stands). GLM-5.3 must pass the same five
+pre-registered criteria below before the decision is confirmed by
+measurement; until its token is set, Sonnet 5 remains the fallback default.
+
 **Result, measured 2026-08-22: 2/5 — Haiku is not viable, for any run
 class.** (1) FAIL: on the failed run it stopped at the surface (smoke-test
 design, classList vs computed style) and never reached the validator

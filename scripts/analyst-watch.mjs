@@ -12,6 +12,17 @@
 // pin an explicit id, an alias drifts under the measurement), --quiet-ms
 // (120000), --poll-ms (15000), --budget-usd (2), --timeout-ms (900000).
 //
+// Provider override (set at platform launch, local shell or server unit):
+//   ATOMA_ANALYST_MODEL       model id the analyst runs on (e.g. glm-5.3)
+//   ATOMA_ANALYST_BASE_URL    Anthropic-compatible endpoint, forwarded to the
+//                             child claude session as ANTHROPIC_BASE_URL
+//   ATOMA_ANALYST_AUTH_TOKEN  forwarded as ANTHROPIC_AUTH_TOKEN (and the
+//                             ambient ANTHROPIC_API_KEY is dropped from the
+//                             child so a stale key cannot shadow it)
+// The ATOMA_ANALYST_* scoping is the point: exporting raw ANTHROPIC_* at
+// platform launch would reroute the RUNS' claude-cli transport too. These
+// variables move only the analyst.
+//
 // The analyst never runs while a run is active: activity = a live entry in
 // runs/index.json (same 12-minute window as the viz) or a held MCP run lease.
 // Outputs (git-ignored): supervisor/verdicts/<id>.json, supervisor/backlog.jsonl
@@ -39,6 +50,8 @@ const workDir = join(supervisorDir, 'work');
 const promptTemplatePath = join(root, 'scripts', 'analyst-prompt.md');
 const leaseDbPath =
   process.env['ATOMA_MCP_RUN_LOCK'] ?? join(homedir(), '.atoma', 'mcp-run-lock.db');
+const analystBaseUrl = process.env['ATOMA_ANALYST_BASE_URL'] ?? null;
+const analystAuthToken = process.env['ATOMA_ANALYST_AUTH_TOKEN'] ?? null;
 
 const LIVE_WINDOW_MS = 12 * 60 * 1000; // mirrors viz ABANDONED_AFTER_MS
 const PROMPT_VERSION = 'p1-2026-08-22';
@@ -350,6 +363,7 @@ function runClaude(prompt, options) {
   return new Promise((resolveCall, rejectCall) => {
     const child = spawn('claude', claudeArgs(prompt, options), {
       cwd: root,
+      env: analystChildEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -383,9 +397,31 @@ function runClaude(prompt, options) {
   });
 }
 
-/** An explicit model id, as opposed to a moving alias like `sonnet`. */
+/**
+ * An explicit model id, as opposed to a moving alias like `sonnet`. Non-Claude
+ * ids (glm-5.3, …) reached through ATOMA_ANALYST_BASE_URL are pins too — the
+ * alias set is the CLI's own resolution vocabulary, not a vendor test.
+ */
+const MODEL_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable', 'default']);
 function looksPinned(model) {
-  return /^claude-/.test(model);
+  return !MODEL_ALIASES.has(model);
+}
+
+/**
+ * The child claude session's environment. The override is scoped HERE, never
+ * exported globally: raw ANTHROPIC_* at platform launch would reroute the
+ * runs' claude-cli transport along with the analyst.
+ */
+function analystChildEnv() {
+  const env = { ...process.env };
+  if (analystBaseUrl) env['ANTHROPIC_BASE_URL'] = analystBaseUrl;
+  if (analystAuthToken) {
+    env['ANTHROPIC_AUTH_TOKEN'] = analystAuthToken;
+    // This machine exports a dead ANTHROPIC_API_KEY; left in the child env it
+    // can shadow the token at the gateway. Dropped from the child only.
+    delete env['ANTHROPIC_API_KEY'];
+  }
+  return env;
 }
 
 /**
@@ -568,6 +604,10 @@ async function analyseRun(runId, options) {
   if (options.dryRun) {
     log(`dry-run: digest at ${paths.digestPath.slice(root.length + 1)}`);
     log(`dry-run: would spawn claude ${claudeArgs('<prompt>', options).slice(0, -1).join(' ')}`);
+    log(
+      `dry-run: provider ${analystBaseUrl ?? 'default (subscription)'}` +
+        `${analystAuthToken ? ', auth token set' : analystBaseUrl ? ', NO AUTH TOKEN' : ''}`
+    );
     log(`dry-run: prompt is ${prompt.length} chars`);
     return true;
   }
@@ -600,6 +640,8 @@ async function analyseRun(runId, options) {
     analysedAt: new Date().toISOString(),
     promptVersion: PROMPT_VERSION,
     modelRequested: options.model,
+    /** Non-null when the analyst ran against an overridden endpoint. */
+    providerBaseUrl: analystBaseUrl,
     /** What the session ACTUALLY consumed, per model. Never the alias. */
     modelsServed: served,
     /** Derived by the harness from findings, never asked of the model. */
@@ -707,6 +749,12 @@ async function main() {
       `"${options.model}" is an alias, not a pinned model id — its resolution can ` +
         `change, so verdicts recorded under it are not comparable over time`
     );
+  }
+  if (analystBaseUrl) {
+    log(`analyst provider override: ${analystBaseUrl} (auth token ${analystAuthToken ? 'set' : 'MISSING'})`);
+    if (!analystAuthToken) {
+      warn('ATOMA_ANALYST_BASE_URL is set without ATOMA_ANALYST_AUTH_TOKEN — the endpoint will likely refuse');
+    }
   }
   mkdirSync(verdictsDir, { recursive: true });
   mkdirSync(workDir, { recursive: true });
