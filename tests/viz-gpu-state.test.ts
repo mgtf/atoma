@@ -13,6 +13,26 @@ import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
 // Decisions are catalog-backed (outcome.* keys); resolving through the real
 // EN catalog proves the copy path never falls back to hardcoded English.
 const t = (key: string): string => I18N_CATALOGS.en[key] ?? key;
+
+describe('catalog copy is drawable', () => {
+  it('carries no HTML tags: the GL client draws plain text', () => {
+    // The GL client is the product UI and `ctx.text()` rasterises whatever it
+    // is handed, so a tag meant for the frozen MUI fallback renders as
+    // literal `<code>` on screen — which is exactly how the burn-in empty
+    // state shipped. The MUI client strips tags defensively; the catalog is
+    // the place to not have them.
+    //
+    // Named tags only, deliberately: copy legitimately carries shell
+    // placeholders like `<goal>`, and a catch-all for anything in angle
+    // brackets would fail on those instead of on markup.
+    const markup = /<\/?(?:code|pre|kbd|b|i|em|strong|span|div|p|br|a|ul|ol|li)\b[^>]*>/i;
+    for (const [locale, catalog] of Object.entries(I18N_CATALOGS)) {
+      for (const [key, value] of Object.entries(catalog)) {
+        expect(value, `${locale}/${key} carries markup`).not.toMatch(markup);
+      }
+    }
+  });
+});
 import {
   nextRunFilters,
   projectSelectionAfterActivate,

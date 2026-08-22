@@ -259,7 +259,13 @@ export function drawProjects(
   const frame = viewFrame(width, height, PROJECTS_COLUMN_MAX_WIDTH);
   drawViewFrame(ctx, frame, snapshot.t('nav.projects'), summary);
 
-  const contentTop = projectsGpuContentTop(selectedProject ? 'run' : 'create', width);
+  // The DOM form is gated on a session (`projectActionsEnabled` in DomBridge),
+  // so an UNGATED instance renders none — and reserving the band it would have
+  // occupied left a ~260px hole between the title and the copy explaining why
+  // there is nothing here. Reserve the band only when the form is really there.
+  const contentTop = snapshot.data.auth === null
+    ? frame.contentTop
+    : projectsGpuContentTop(selectedProject ? 'run' : 'create', width);
   if (projects.length === 0) {
     // Ungated deployments have no organisations, so projects cannot exist and
     // their API routes are absent — say that, instead of coaching the viewer

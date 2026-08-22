@@ -1367,6 +1367,29 @@ describe('drawProjects', () => {
     expect(ctx.texts.some((text) => text.value.includes('connect a GitHub App'))).toBe(false);
   });
 
+  it('reserves the form band only when a form is actually rendered', () => {
+    // DomBridge gates the project form on a session, so an ungated instance
+    // renders none. Reserving its band anyway left a hole between the title
+    // and the copy explaining why there is nothing to show.
+    const ungated = createRecordingCtx();
+    drawProjects(ungated, makeSnapshot({ view: 'projects' }), 1280, 720);
+    const frame = viewFrame(1280, 720, PROJECTS_COLUMN_MAX_WIDTH);
+    const hint = ungated.texts.find((text) => text.value.includes('ATOMA_VIZ_AUTH=1'));
+    expect(hint?.y).toBe(frame.contentTop);
+
+    // Gated, the band is reserved: the DOM form occupies it.
+    const gated = createRecordingCtx();
+    drawProjects(
+      gated,
+      makeSnapshot({ view: 'projects' }, { auth: makeAuth({ displayName: 'Alice' }) }),
+      1280,
+      720
+    );
+    const gatedHint = gated.texts.find((text) => text.value.includes('connect a GitHub App'));
+    expect(gatedHint?.y).toBe(projectsGpuContentTop('create', 1280));
+    expect(gatedHint?.y).toBeGreaterThan(frame.contentTop);
+  });
+
   it('keeps GPU empty-state copy below the DOM create form', () => {
     const ctx = createRecordingCtx();
     const auth = makeAuth({
@@ -1448,6 +1471,12 @@ describe('drawProjects', () => {
     const snapshot = makeSnapshot(
         { view: 'projects', selectedProjectId: projectId },
         {
+          // Projects only exist behind the gate, and the run form only renders
+          // for a session — so this state carries one.
+          auth: makeAuth({
+            displayName: 'Alice',
+            activeOrganisation: { id: 'org-1', name: 'Org', role: 'org:owner' },
+          }),
           projects: [
             {
               projectId,
