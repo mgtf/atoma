@@ -35,6 +35,31 @@ Neighbours:
   [`src/contracts/platformEvents.ts`](../contracts/platformEvents.ts) and
   [`src/viz/push/routes.ts`](../viz/push/routes.ts).
 
+## The watch and the loop
+
+- Detection is `runs/index.json` plus `isIndexEntryLive`, the repo's ONE live
+  predicate. Not the MCP lease: a lease-only watch would miss the CLI runs
+  (burn-in, benchmark) that most need watching. The lease is read for context
+  only — which pid holds it.
+- NEVER a parser on the runner's stdout. That stream is the burn-in harness's
+  parsed API, and a second parser would couple the sentinel to a format it
+  does not own.
+- De-duplication reads the JOURNAL, not process memory: each finding's
+  `dedupeKey` is stored in `detail` and read back per run. A restarted watcher
+  repeats nothing, and two watchers cannot double-report. A journal read that
+  FAILS is treated as "already said" for that tick — a gap is better than a
+  flood.
+- Rows are attributed `system`: a resident process, not the operator CLI and
+  not a signed-in principal.
+- A run whose trace is unreadable or over `MAX_TRACE_BYTES` is REPORTED as
+  skipped, never silently dropped. A tick that throws is logged and the loop
+  continues: an observer that dies on one bad trace stops observing
+  everything behind it.
+- A tool failure lives in TWO places and the rules read both: `event.error`
+  is the transport's exception, `result.ok === false` is the element's own
+  verdict — and the second is where atoma's tools report almost everything.
+  Measured on the cold `web-counter` trace: 1 against 4.
+
 ## Untrusted content
 
 - Element RESULTS are where content the system did not author enters it, so

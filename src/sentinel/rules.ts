@@ -88,9 +88,30 @@ export function excerpt(value: string, max = 200): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+/**
+ * How this tool call FAILED, from either place a failure lives.
+ *
+ * Measured on the cold `web-counter` trace (2026-08-22): 23 tool events, ONE
+ * with `event.error` and FOUR with `result.ok === false` — three of them the
+ * same pre-flight smoke rejection. Reading only `event.error` is reading the
+ * transport's exceptions and missing the tool's own verdict, which is where
+ * atoma's elements report almost everything. The rule saw nothing on the run
+ * it existed for.
+ */
 function errorMessages(event: VizToolEvent): string | null {
   if (typeof event.error === 'string' && event.error.trim()) return event.error;
-  return null;
+  const result = event.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const row = result as Record<string, unknown>;
+  if (row['ok'] !== false) return null;
+  const errors = row['errors'];
+  if (Array.isArray(errors)) {
+    const first = errors.find((entry): entry is string => typeof entry === 'string');
+    if (first) return first;
+  }
+  // A tool that says `ok: false` and nothing else still failed, and a run
+  // repeating that is still a pattern worth a row.
+  return 'reported ok: false';
 }
 
 /** The first `max` characters of every string inside a tool result. */

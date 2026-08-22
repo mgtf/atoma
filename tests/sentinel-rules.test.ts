@@ -166,6 +166,39 @@ describe('recurring-tool-error', () => {
     );
     expect(runSentinelRules(env(events))).toEqual([]);
   });
+
+  it('reads a failure the TOOL reported, not only one the transport threw', () => {
+    // Measured on the cold web-counter trace: 23 tool events, one with
+    // `event.error` and four with `result.ok === false` — three of them the
+    // same pre-flight smoke rejection. A rule that reads only `event.error`
+    // saw nothing on the run it existed for.
+    const events = Array.from({ length: RECURRING_ERROR_THRESHOLD }, () =>
+      toolEvent({
+        name: 'validate_html',
+        result: { ok: false, errors: ['smoke rejected pre-flight: interactions repeat a control'] },
+      })
+    );
+    const findings = runSentinelRules(env(events));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.ruleId).toBe('recurring-tool-error');
+    expect(String(findings[0]!.detail['error'])).toMatch(/smoke rejected pre-flight/);
+  });
+
+  it('counts a bare ok:false as a failure too', () => {
+    const events = Array.from({ length: RECURRING_ERROR_THRESHOLD }, () =>
+      toolEvent({ name: 'run_shell', result: { ok: false } })
+    );
+    expect(runSentinelRules(env(events))).toHaveLength(1);
+  });
+
+  it('does not count a SUCCESSFUL result as a failure', () => {
+    const events = Array.from({ length: 5 }, () =>
+      toolEvent({ name: 'validate_html', result: { ok: true, errors: [] } })
+    );
+    expect(
+      runSentinelRules(env(events)).filter((f) => f.ruleId === 'recurring-tool-error')
+    ).toEqual([]);
+  });
 });
 
 describe('slow-tool-outlier', () => {

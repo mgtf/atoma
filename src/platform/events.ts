@@ -119,6 +119,13 @@ export interface PlatformEventQuery {
   readonly kind?: string | undefined;
   readonly severity?: string | undefined;
   readonly orgId?: string | undefined;
+  /**
+   * One run's rows. Added for the sentinel, which de-duplicates against the
+   * JOURNAL rather than against its own memory: the journal is the source of
+   * truth for "have I already said this", so a restarted watcher does not
+   * repeat a run's findings.
+   */
+  readonly runId?: string | undefined;
 }
 
 export interface PlatformEventPage {
@@ -301,6 +308,10 @@ export class PlatformEventLog {
     if (query.orgId) {
       clauses.push('org_id = ?');
       params.push(query.orgId);
+    }
+    if (query.runId) {
+      clauses.push('run_id = ?');
+      params.push(query.runId);
     }
     const where = clauses.length > 0 ? ` WHERE ${clauses.join(' AND ')}` : '';
     try {
