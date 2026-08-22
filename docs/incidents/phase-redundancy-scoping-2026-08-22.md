@@ -1,6 +1,6 @@
 # Phase redundancy — scoping record, 2026-08-22
 
-Status: **scoping complete, design pending operator approval**. This is the
+Status: **A3+ implemented and locally verified; cold live measurement pending**. This is the
 evidence corpus the fix must be designed against, per the COOLING-OFF
 contract: collected across the 2026-08-21 batch-6 runs and the failed
 web-countdown run, verified against the code on 2026-08-22 by a five-reader
@@ -35,7 +35,11 @@ the majority of spend on the smallest tasks.
 
 The finding was reached independently by two analyses of different runs,
 carried as an observation by a third, and reproduced across two analyst
-model generations (sonnet-4-6 alias and pinned sonnet-5) on the same run.
+model generations (sonnet-4-6 alias and pinned sonnet-5) on the same run. A
+later three-run GLM-5.3 calibration also recovered both the validator-evidence
+ratchet and the phase redundancy, with zero security false positives; its
+committed rows are in
+[`supervisor-glm-calibration-2026-08-22.csv`](supervisor-glm-calibration-2026-08-22.csv).
 
 ## Where the shape comes from (four distinct origins)
 
@@ -157,10 +161,131 @@ model generations (sonnet-4-6 alias and pinned sonnet-5) on the same run.
    a reset store (operator-approved), compare structural signals (LLM call
    count, phase counts) rather than cost (±30% single-run noise).
 
+## Design review — recommended Design A (A3+, prompt topology)
+
+Three alternatives were designed against the complete corpus before any
+production edit:
+
+- **A1, supervisor-owned proof handover:** tool-callback observations,
+  artifact hashes, conservative invalidation and mandatory full verdicts.
+- **A2, explicit phase contracts:** typed purpose/evidence requirements,
+  receipts, a non-blocking coached root replan and mechanical resolution of
+  already-satisfied phases outside L1.
+- **A3, producer-owned proof:** remove the planner pressure that creates the
+  redundant phase, so the phase that last mutates an artifact also performs
+  its matching probe once.
+
+A1 and A2 can be made sound only as a whole-system evidence protocol. The
+current `Witness` shape is shell-only, manifest entries are not by themselves
+proof of execution, HTTP state can be volatile, and a live PID/URL is not a
+behavioral witness. Building either variant now would add contracts across
+tools, manifests, dispatch, ground truth, verdicts, trust, skills and run
+stats. A2 would additionally let an LLM-authored plan describe a future
+bypass and would buy an extra Opus replan that can cost more than the small
+phase it is meant to remove. Both variants remain reserve designs, not the
+first intervention.
+
+The recommended first intervention is **A3+**: A3 with two corrections found
+by adversarial review. The same lifecycle rule must be stated at L2, otherwise
+L3 can emit one phase while L2 recreates `write` then `serve + validate`.
+Also, one artifact does not imply one phase when its required observations
+cross executable tool buckets; a combined UI/API may still need distinct
+browser and shell/HTTP phases.
+
+The exact planning contract is:
+
+1. Verification is a required outcome, not a default phase.
+2. The phase that creates or last mutates an artifact owns its matching
+   non-destructive `write → boot/serve → probe` lifecycle. When one executable
+   tool bucket can cover that cohesive lifecycle, a small single-artifact task
+   is one responsibility and `N=1` is valid.
+3. Do not append a read-only phase merely to reboot, re-serve or replay claims
+   the producing phase was already required to observe. This does not move
+   extra probes into the producer: it performs the required probe cluster once,
+   after its last mutation.
+4. Preserve a separate phase when the top-level task explicitly requires one,
+   when a different executable tool bucket or expertise is required, when a
+   later mutation makes earlier observation stale, when a genuinely new claim
+   remains, or when current volatile state must be observed later.
+5. A later phase verifies only its new or stale claims. No prior narrative,
+   child-declared witness or manifest entry becomes newly admissible proof.
+
+The implementation is deliberately limited to planning policy and its typed
+fallback:
+
+- replace all contradictory L3 pressures (`2-5` for every non-trivial task,
+  verification between phases, the monolithic-task penalty, separate browser
+  validation as the norm, and unconditional `N>=2` for builds) in
+  `src/atoms/L3Atom.ts`;
+- add the same cohesive-lifecycle rule to `src/atoms/L2Atom.ts`, whose existing
+  examples can otherwise reproduce the split one tier lower;
+- align only the topology preferences in `src/atoms/verdict.ts`: retain every
+  structural rejection, but stop preferring `N>=2` or `build → smoke`
+  sequential solely because the artifact is an app;
+- when an L3 response omits aggregation, use `concat` for the now-valid `N=1`
+  shape and retain the conservative `sequential` fallback for `N>1`;
+- record the invariant in `src/atoms/AGENTS.md` and add production-path tests.
+
+It does **not** edit the persisted Meristem seed, reset trust, change dispatch,
+accept carried proof, alter the probe manifest, add a heuristic detector, add
+a rejection gate or spend a coached-replan call. If this intervention is safe
+but ineffective on at least two of the four web/HTTP cases, revert it and
+return to A1's supervisor-owned attestation design in a later review; do not
+grow A3+ into a same-session heuristic.
+
+### Pre-construction adversarial dispositions
+
+- **Explicit fresh audit:** the exact `FINAL SEPARATE PHASE` clauses in both
+  CLI goals win, so their three-phase shapes remain.
+- **Cross-bucket proof:** a browser check plus a finite shell/HTTP harness
+  remains split even when both concern one file.
+- **Post-proof mutation:** the mutating later phase owns a new observation;
+  earlier closure is stale.
+- **Destructive error staging:** still forbidden. A3+ removes a duplicate
+  probe cluster; it does not relocate a destructive experiment into build.
+- **Proof hidden inside one phase:** live measurement counts tool events after
+  the last mutation, not just plan labels, so an in-phase replay still fails
+  the acceptance criteria.
+- **Proof transport temptation:** A3+ prevents the unnecessary boundary from
+  being created. It does not authorize a legitimate later phase to trust
+  `previousStepSummary` as ground truth.
+
+### Local tests completed before live measurement
+
+- Prompt-contract tests traverse the real `L3.plan` and `L2.plan` call paths,
+  assert the A3+ rule and each exception, align the shared verdict prompt, and
+  prove every superseded cardinality/final-phase pressure is absent.
+- A real `L3.handle` regression proves an omitted aggregation on a cohesive
+  `N=1` plan resolves to `concat`, avoiding a validator contradiction; the
+  existing `N>1` low-blast-radius fallback remains `sequential`.
+- Existing behavioral tests preserve explicit aggregation, collision coaching,
+  cross-bucket routing, literal contracts, ground truth, trust and skills.
+- `npm run check`, the targeted planner/root tests and `npm run build` pass.
+
+A mocked LLM that merely returned the desired six plans would be tautological,
+so exact phase counts, tool replay, final live URLs and proof relocation are
+reserved for the pre-registered live measurement below. Its expected L3 phase
+counts remain `3, 3, 1, 1, 1, 1`.
+
 ## Measurement plan
 
 Reset store/skills/runs (operator decision 2026-08-22), then re-run the six
 default tasks cold and compare against batch 1 of 2026-08-21 (also cold: 98
-LLM calls, $2.2552, phases per run as tabled above). Success: web/http runs
-lose the redundant phase or its cost collapses to reads; cli runs keep their
-seed-mandated phase; delivery stays 6/6; LLM call count drops.
+LLM calls, $2.2552, phases `3, 3, 2, 2, 2, 2`). The pre-registered acceptance
+criteria are: delivery remains 6/6; phases become `3, 3, 1, 1, 1, 1`; each
+web/HTTP run has exactly one server boot, complete required claims and a live
+URL in the final result; and total LLM calls are below 98.
+
+The structural check is **proof closure**: after the last mutation of the
+subject artifact, find the first successful set of required probes. No later
+branch may boot again or replay an equivalent successful probe cluster unless
+the task explicitly requires freshness, a different tool bucket is needed,
+the artifact was subsequently mutated, or the observed state is volatile.
+This keeps `http-kv`'s necessary stateful request sequence while detecting the
+same work merely moved inside the remaining phase. Report total cost, but do
+not gate on it because single-run variance is ±30%.
+
+Revert the one prompt/tests/docs commit immediately if delivery falls below
+6/6, a required claim or live URL is missing, either CLI audit disappears, a
+stale observation is accepted, or a cross-bucket check is collapsed. Archive
+the starting and ending store, skills and traces before any reset or restore.

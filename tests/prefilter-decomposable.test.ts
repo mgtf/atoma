@@ -160,9 +160,9 @@ describe('prefilter decomposable hint', () => {
     // even when the prefilter says "reuse + non-decomposable", L3 still
     // runs the Opus plan, with the target carried forward as a routing
     // hint. The framework's value at the top tier is decomposition
-    // reasoning — collapsing that to a 1-subtask routing decision wastes
-    // the tier and produced visibly broken Pong-type runs (one big L2
-    // delegation, no phase-by-phase smoke).
+    // reasoning — the full planner decides whether the task is one cohesive
+    // lifecycle or has genuine phase boundaries. A prefilter routing decision
+    // alone does not make that topology judgment.
     const reg = new AtomRegistry(openDb(':memory:'));
     const l3Type = reg.create(3, seed);
     reg.create(2, { ...seed, description: 'orchestrator' });

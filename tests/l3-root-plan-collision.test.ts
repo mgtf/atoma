@@ -214,6 +214,38 @@ describe('L3.handle — root plan has no parent validator', () => {
     producedBy: { tier: 3, name: 'Meristem', viaFallback: false },
   };
 
+  it('defaults an omitted N=1 aggregation to concat', async () => {
+    const { l3 } = seed();
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(
+      jsonText({ kind: 'reuse', target: 'Tracheid', confidence: 'high', reasoning: 't' })
+    );
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'r' },
+        {
+          reasoning: 'one cohesive lifecycle',
+          subtasks: [
+            {
+              description: 'write, serve, and probe index.html',
+              outputs: ['index.html'],
+            },
+          ],
+        }
+      )
+    );
+    let executed: Plan | undefined;
+    l3.execute = async (_task, plan) => {
+      executed = plan;
+      return dummy;
+    };
+
+    await l3.handle({ description: 'build one small web artefact' }, ctx);
+
+    expect(executed?.subtasks).toHaveLength(1);
+    expect(executed?.aggregation.mode).toBe('concat');
+  });
+
   it('honours explicit concat when outputs do not collide', async () => {
     const { l3 } = seed();
     const ctx = makeCtx();

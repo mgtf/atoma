@@ -5,6 +5,7 @@ import { L2Atom, taskRequiresRealBrowser } from '../src/atoms/L2Atom.js';
 import { L3Atom, routeCrossBucketVerification } from '../src/atoms/L3Atom.js';
 import { FALLBACK_OPUS } from '../src/core/models.js';
 import { preservePlanLiteralContracts } from '../src/atoms/prompts.js';
+import { VALIDATION_SYSTEM_PROMPT } from '../src/atoms/verdict.js';
 import { makeCtx, jsonText, jsonTextPair } from './helpers.js';
 import { makePlan } from './helpers/factories.js';
 
@@ -26,6 +27,37 @@ const seed = {
   params: {},
   createdBy: 'test',
 };
+
+/**
+ * A3+ is deliberately a planning-policy change, not a mechanical plan gate.
+ * Pin the concepts rather than one long paragraph so harmless wrapping edits
+ * stay possible while none of the independently load-bearing exceptions can
+ * disappear unnoticed.
+ */
+function expectCohesiveProofClosureGuidance(prompt: string): void {
+  expect(prompt).toMatch(
+    /verification\s+is\s+an?\s+(?:required\s+)?outcome,\s+not\s+a\s+default(?:\s+extra)?\s+(?:phase|responsibility)/i
+  );
+  expect(prompt).toMatch(/write\s*(?:→|->)\s*(?:boot\/serve|boot|serve)\s*(?:→|->)\s*probe/i);
+  expect(prompt).toMatch(/cohesive[\s\S]{0,320}(?:one|same)[\s\S]{0,60}(?:tool )?bucket/i);
+  expect(prompt).toMatch(/(?:N\s*=\s*1[\s\S]{0,100}valid|valid N\s*=\s*1)/i);
+  expect(prompt).toMatch(/explicit(?:ly)?[\s\S]{0,80}(?:separate[- ]phase|demands them)/i);
+  expect(prompt).toMatch(/cross(?:ing|es)?[\s\S]{0,40}(?:executable |L1 )?tool buckets?/i);
+  expect(prompt).toMatch(/later\s+(?:phase\s+)?mutation[\s\S]{0,50}invalidates prior proof/i);
+  expect(prompt).toMatch(/new[\s\S]{0,25}claim[\s\S]{0,30}fresh (?:proof|evidence)/i);
+  expect(prompt).toMatch(/different expertise/i);
+  expect(prompt).toMatch(/volatile[- ]state[\s\S]{0,100}(?:fresh|observ|distinct)/i);
+}
+
+function expectNoSupersededPhasePressure(prompt: string): void {
+  expect(prompt).not.toMatch(/For non-trivial tasks emit 2-5 subtasks/i);
+  expect(prompt).not.toMatch(/Use this whenever phases need to verify each other's work/i);
+  expect(prompt).not.toMatch(/One big monolithic subtask[\s\S]{0,160}phase-by-phase smoke validation/i);
+  expect(prompt).not.toMatch(/A separate final validation phase is the norm/i);
+  expect(prompt).not.toMatch(/For apps, libraries, builds, multi-step procedures: ALWAYS emit ≥2 subtasks/i);
+  expect(prompt).not.toMatch(/For app\/game\/library builds, prefer N>=2/i);
+  expect(prompt).not.toMatch(/build\s*→\s*extend\s*→\s*smoke/i);
+}
 
 describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
   it('the L3 Opus plan prompt carries the artefact-matched verification rule', async () => {
@@ -70,6 +102,8 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
     expect(planPrompt).toMatch(/FULL-STACK CROSS-BUCKET RULE/);
     expect(planPrompt).toMatch(/never rename, replace or summarise away/);
+    expectCohesiveProofClosureGuidance(planPrompt);
+    expectNoSupersededPhasePressure(planPrompt);
   });
 
   it('the L2 Sonnet plan prompt carries the same rule (short form)', async () => {
@@ -102,6 +136,60 @@ describe('plan prompts — VERIFICATION MATCHES THE ARTEFACT', () => {
     expect(planPrompt).toMatch(/HTTP DOCUMENTATION USES A PORT PLACEHOLDER/);
     expect(planPrompt).toMatch(/PRESERVE LITERAL CONTRACTS ACROSS DECOMPOSITION/);
     expect(planPrompt).toMatch(/REAL browser must route to an L1/);
+    expectCohesiveProofClosureGuidance(planPrompt);
+    expectNoSupersededPhasePressure(planPrompt);
+  });
+
+  it('keeps the A3+ topology contract aligned in the shared plan validator', () => {
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
+      /verification\s+is\s+an?\s+(?:required\s+)?outcome,\s+not\s+a\s+default(?:\s+extra)?\s+(?:phase|responsibility)/i
+    );
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/cohesive[\s\S]{0,400}N\s*=\s*1/i);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
+      /explicit(?:ly)?[\s\S]{0,40}separate[- ]phase/i
+    );
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
+      /later\s+mutation[\s\S]{0,120}(?:invalidates|fresh evidence|new claim)/i
+    );
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/new[\s\S]{0,25}claim/i);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(
+      /cross(?:ing|es)?[\s\S]{0,40}executable tool buckets/i
+    );
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/volatile state/i);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/different expertise/i);
+    // Structural failures remain failures: A3+ only changes topology preference.
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/NO\s+subtask depends on another's output/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/Artefact-collision rule/);
+    expect(VALIDATION_SYSTEM_PROMPT).toMatch(/sequential plan has only one subtask/);
+    expectNoSupersededPhasePressure(VALIDATION_SYSTEM_PROMPT);
+  });
+
+  it('shows the explicit FINAL SEPARATE audit beside the rule that preserves it', async () => {
+    const r = new AtomRegistry(openDb(':memory:'));
+    const l3Type = r.create(3, seed);
+    r.create(2, seed);
+    const l3 = L3Atom.buildWithModel(l3Type, r, FALLBACK_OPUS);
+    const ctx = makeCtx();
+    ctx.llm.enqueueText(jsonText({ kind: 'escalate', reasoning: 'no match' }));
+    ctx.llm.enqueueText(
+      jsonTextPair(
+        { strategy: 'reuse', target: 'Tracheid', reasoning: 'stub' },
+        {
+          reasoning: 'stub',
+          subtasks: [{ description: 'build', preferredChild: 'Tracheid' }],
+          aggregation: { mode: 'concat' },
+          expectedOutput: 'stub',
+        }
+      )
+    );
+    const audit =
+      'As a FINAL SEPARATE PHASE, re-verify every documented invocation exactly as written.';
+
+    await l3.plan({ description: `Build a tiny CLI. ${audit}` }, ctx);
+
+    const planPrompt = ctx.llm.calls[1]!.userContent;
+    expect(planPrompt).toContain(audit);
+    expect(planPrompt).toMatch(/explicit(?:ly)?[\s\S]{0,80}separate[- ]phase/i);
   });
 });
 

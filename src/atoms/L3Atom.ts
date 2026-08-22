@@ -386,8 +386,9 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `your plan high-level.`,
       ``,
       `== DECOMPOSITION DISCIPLINE — pick ONE shape ==`,
-      `For non-trivial tasks emit 2-5 subtasks. Pick the shape that matches`,
-      `the task's natural structure:`,
+      `Choose the number of subtasks from genuine responsibility and execution`,
+      `boundaries, never from task size alone. Pick the shape that matches the`,
+      `task's natural structure:`,
       ``,
       `  ORTHOGONAL (parallel) — subtasks are INDEPENDENT, no shared state.`,
       `    Each runs in its own workspace lane and produces a separate`,
@@ -404,11 +405,11 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `    Each step receives a "previousStepSummary" automatically in its`,
       `    inputs. Aggregation is "sequential" — the FINAL phase carries`,
       `    the deliverable. No extra LLM call for aggregation.`,
-      `    Examples: build apps and games (scaffold → wire input/logic →`,
-      `    smoke-test); refactors (rewrite module → migrate callers →`,
-      `    delete old module); pipelines (fetch data → transform → load).`,
-      `    Use this whenever phases need to verify each other's work or`,
-      `    when the artefact MUST go through review checkpoints.`,
+      `    Examples: refactors (rewrite module → migrate callers → delete old`,
+      `    module); pipelines (fetch data → transform → load); or a later phase`,
+      `    that intentionally mutates an artefact after an earlier observation.`,
+      `    Use this only for a real inter-phase dependency. Verification-specific`,
+      `    boundaries are defined below; never create a phase only to replay proof.`,
       ``,
       // ONE PHASE PER ORTHOGONAL GROUP, not one phase per artefact. A plan
       // carries a SINGLE aggregation mode, so "3 independent parts, then a
@@ -433,18 +434,20 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `  that genuinely share no file, and name every one of them in the phase`,
       `  description so the L2 can tell them apart.`,
       ``,
-      `When in doubt for an APP / GAME / FILE-BUILD task: prefer PHASED, with`,
-      `each orthogonal group kept inside ONE phase rather than spread across`,
-      `consecutive ones.`,
-      `One big monolithic subtask delegates real reasoning to the L2 prompt`,
-      `and skips the value of phase-by-phase smoke validation.`,
+      `VERIFICATION IS A REQUIRED OUTCOME, NOT A DEFAULT PHASE. A cohesive`,
+      `write → boot/serve → probe lifecycle with non-destructive probes is ONE`,
+      `responsibility and a valid N=1 plan when the same tool bucket can execute`,
+      `every required observation. This still delegates real leaf reasoning: the`,
+      `responsible L1 closes proof after its final mutation.`,
+      `File count alone never overrides a tool-bucket boundary. A single source`,
+      `file serving both a browser UI and an HTTP API still needs cross-bucket`,
+      `responsibilities when no one child can perform both required observations.`,
       ``,
       `== VERIFICATION MATCHES THE ARTEFACT ==`,
       `Every phase that verifies work MUST use the probe matching the`,
       `deliverable's NATURE — never default to the web pattern:`,
       `  - browser-rendered artefact (index.html page, canvas game, UI):`,
-      `    start_static_server + validate_html smoke. A separate final`,
-      `    validation phase is the norm here.`,
+      `    start_static_server + validate_html smoke after the final write.`,
       `  - HTTP server / API: start_node_server + fetch_url probes against`,
       `    the endpoints. No browser, no validate_html.`,
       HTTP_PORTABLE_DOC_GUIDANCE,
@@ -457,11 +460,14 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `something to serve and burn its tool budget on a browser loop that`,
       `proves nothing (observed: a Node CLI build given a "serve and`,
       `validate" phase 2 — 9 failed server boots and a parasitic`,
-      `index.html). For non-browser artefacts, verification usually`,
-      `belongs INSIDE the build phase itself (the builder runs the shell`,
-      `probe right after writing the files); add a separate verification`,
-      `phase only when it needs different expertise or tooling than the`,
-      `build.`,
+      `index.html). For every artefact kind, the responsible build phase`,
+      `normally closes its own evidence immediately after its final mutation.`,
+      `Add a separate verification phase only when the task explicitly requires`,
+      `a separate phase, observations cross executable tool buckets or require`,
+      `genuinely different expertise, a later mutation invalidates prior proof,`,
+      `a new claim needs fresh proof, or volatile state must be observed fresh`,
+      `at a distinct point. Never add one merely to repeat probes that the`,
+      `build phase already had to pass.`,
       `FULL-STACK CROSS-BUCKET RULE: a real-browser UI check and a finite`,
       `Node/API harness do NOT belong in one subtask. Emit two sequential`,
       `phases: browser/selector/window.__test verification to the web L2, then`,
@@ -527,9 +533,10 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
       `should handle it (required for N>1 plans). Multiple phases can target`,
       `the SAME L2 — that's the common case for PHASED builds.`,
       ``,
-      `Single-subtask plans are reserved for GENUINELY indivisible tasks`,
-      `(e.g. "look up the current time", "write a one-line config file"). For`,
-      `apps, libraries, builds, multi-step procedures: ALWAYS emit ≥2 subtasks.`,
+      `N=1 is valid under the cohesive-lifecycle rule above. Use N>1 only for`,
+      `genuine orthogonal work or one of the explicit phased boundaries above`,
+      `— never just because the task`,
+      `is an app, build, library or multi-step procedure.`,
       ``,
       `== AGGREGATION ==`,
       `Pick how the sub-results combine — must match decomposition shape:`,
@@ -614,22 +621,21 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
     const strategy = l3StrategySchema.parse(pair[0]);
     const plan = planSchema.parse(pair[1]);
     // TRUNCATION DEFAULT, L3 flavour. `planSchema` defaults a missing
-    // `aggregation` to `concat` — the right degradation at L2 (concat is a
-    // legitimate L2 mode; 19 observed) but the WRONG one here: at L3 every
-    // analysable archived plan emitted `sequential` (83/83), and `concat`
-    // routes the phases through `Promise.all` (`dispatch.ts`) over a SHARED
-    // workspace while dropping the `previousStepSummary` threading. The
-    // moment the field goes missing is a truncated response — precisely
-    // when we know least — so the fallback must be the low-blast-radius
-    // mode, not the high one. Read from the RAW pair, not the parsed plan:
-    // after `parse` an omitted field is indistinguishable from an explicit
-    // `"concat"`, which stays honoured.
+    // `aggregation` to `concat`, which is the only valid mode for the
+    // degenerate N=1 lifecycle now explicitly supported by the planner. For
+    // N>1, omission still degrades to sequential: before cohesive N=1 became
+    // a first-class shape, all 83 analysable archived L3 plans were phased,
+    // and accidental concat would run potentially coupled workspace writes
+    // through Promise.all without previousStepSummary. Read from the RAW pair:
+    // after parse, omission is indistinguishable from explicit `"concat"`.
     const rawPlan = pair[1];
     const aggregationWasOmitted =
       typeof rawPlan === 'object' &&
       rawPlan !== null &&
       (rawPlan as Record<string, unknown>)['aggregation'] === undefined;
-    if (aggregationWasOmitted) plan.aggregation = { mode: 'sequential' };
+    if (aggregationWasOmitted) {
+      plan.aggregation = { mode: plan.subtasks.length === 1 ? 'concat' : 'sequential' };
+    }
     const routed = preservePlanLiteralContracts(
       routeCrossBucketVerification(plan, this.registry),
       task.description
@@ -662,7 +668,7 @@ export class L3Atom extends Atom implements Supervisor<L2Atom> {
    *     `outputs` are threaded into the next step's inputs so the next
    *     L2 sees what the previous one accomplished and which paths it
    *     named. The workspace filesystem is shared (same sandbox), so
-   *     phases that mutate the same artefact (build → extend → smoke)
+   *     phases with a real mutation dependency (rewrite → migrate callers)
    *     get implicit state handover via disk; the threaded summary is
    *     the NARRATIVE state and `previousStepOutputs` is the structured
    *     path list.

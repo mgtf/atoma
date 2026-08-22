@@ -83,6 +83,14 @@ load-bearing.
   `inputs.previousStepOutputs`. Do not merge prior writes into the next
   phase's `outputs` — skill/promotion gates read the current phase only.
   Do not parallelize coupled filesystem work.
+- Verification is an outcome, not a default phase. The phase that last mutates
+  an artefact owns one matching, non-destructive proof closure; a cohesive
+  one-bucket lifecycle may therefore stay one responsibility at each planning
+  tier (`N=1`). Keep a separate phase only when the task explicitly requires it,
+  verification crosses a bucket or expertise boundary, a later mutation
+  invalidated the proof, a claim is new or stale, or volatile state requires a
+  fresh observation. Threaded narrative or manifest entries remain context;
+  they never become current proof.
 - A plan carries ONE aggregation mode, so fan-out + join has no direct spelling
   at a single tier: L3 emits ONE phase per orthogonal GROUP and the L2 that
   receives it fans the group out. One L3 phase per orthogonal artefact
