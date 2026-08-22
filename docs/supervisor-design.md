@@ -177,8 +177,26 @@ deliberate: raw `ANTHROPIC_*` exported at platform launch would reroute the
 runs' claude-cli transport too. A separate subscription also dissolves the
 quota-contention rationale for out-of-band sequencing (the machine-dedication
 rule during burn-in batches stands). GLM-5.3 must pass the same five
-pre-registered criteria below before the decision is confirmed by
-measurement; until its token is set, Sonnet 5 remains the fallback default.
+pre-registered criteria above before the decision is confirmed by
+measurement; when the override is absent, Sonnet 5 remains the fallback
+default.
+
+**Result, measured 2026-08-22: 5/5 — GLM-5.3 is confirmed as the analyst.**
+(1) PASS: on the failed web-countdown run it reconstructed the three RESULT
+validator rejections and their escalating evidence demands, rather than
+stopping at the surface timeout. (2) and (3) PASS: it independently measured
+the redundant later phase on web-counter (~54% of run spend) and http-healthz
+(~30%). (4) PASS: zero `security_incident` false positives. (5) PASS: the
+delivered pair were both graded `wasteful`; the failed run was `deficient`.
+All three verdicts conformed to schema v1, requested and served `glm-5.3`
+(plus the CLI's small auxiliary Haiku calls), and are archived as
+`*.baseline-glm-5-3.json` under the ignored supervisor evidence directory.
+The CLI-reported equivalent analysis cost was $0.6995 + $0.4122 + $0.3280 =
+$1.4396 over 52 turns and 797s, against $1.3322 for the three runs examined
+(108%). The separate subscription removes quota contention, not the economics:
+failed/cancelled runs remain automatic, while delivered runs remain batch-end
+or sampled. The exact committed measurement rows are
+[`incidents/supervisor-glm-calibration-2026-08-22.csv`](incidents/supervisor-glm-calibration-2026-08-22.csv).
 
 **Result, measured 2026-08-22: 2/5 — Haiku is not viable, for any run
 class.** (1) FAIL: on the failed run it stopped at the surface (smoke-test
@@ -195,9 +213,11 @@ redundant phase-2 server. (4) PASS: zero security false positives. (5) PASS
 on the letter (no grade inflation) while under-grading in substance:
 web-counter with ~54% avoidable spend deserved `wasteful`. Cost: $0.14–0.20
 per analysis (~4× cheaper than pinned Sonnet 5) — irrelevant, since it
-misses the systemic findings the analyst exists to produce. Decision:
-**both failed and delivered runs stay on pinned Sonnet 5; the economics are
-managed by the trigger (batch-end / sampling), not by the model.** The v1
+misses the systemic findings the analyst exists to produce. Decision at that
+measurement point: **both failed and delivered runs stayed on pinned Sonnet 5;
+the economics were managed by the trigger (batch-end / sampling), not by the
+model.** The later operator-owned GLM-5.3 measurement above supersedes that
+transport choice without changing the trigger. The v1
 plumbing itself held: 3/3 schema-conformant, `modelsServed` recorded the
 real usage, grades split cleanly from findings.
 
@@ -353,10 +373,10 @@ conflated global verdict is the wrong shape.
 1. ~~**Analyst trigger granularity**~~ — SETTLED by the P0 measurement above:
    analysis costs 113% of the run it examines, so failed and cancelled runs
    are analysed always, delivered runs at batch end or by sampling. What
-   remains open is the sampling rate only: the Haiku question was measured on
-   2026-08-22 (see the A/B result above) and closed — Haiku misses the
-   systemic findings entirely, so every analysis stays on pinned Sonnet 5 and
-   the economics are managed by the trigger.
+   remains open is the sampling rate only: Haiku misses the systemic findings,
+   while the operator-owned GLM-5.3 pin passed the same protocol 5/5. GLM-5.3
+   is the configured analyst; pinned Sonnet 5 is only the no-override fallback,
+   and the economics remain managed by the trigger.
 2. **Mender initial autonomy** — proposal-only with operator approval
    (proposed default), or immediate auto-merge for trivial defect classes?
 3. **Green/blue scope** — compiled path only (proposed default: it is the

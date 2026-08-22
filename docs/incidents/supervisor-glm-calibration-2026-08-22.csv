@@ -1,0 +1,4 @@
+run_id,run_status,run_cost_usd,grade,analysis_cost_usd,analysis_duration_ms,analysis_turns,requested_model,served_primary,served_auxiliary,security_incidents,criterion_evidence
+2026-08-21T11-02-26-148-48faa963,failed,0.8083801,deficient,0.6994684,410922,23,glm-5.3,glm-5.3,claude-haiku-4-5-20251001,0,validator-evidence-ratchet
+2026-08-21T13-04-47-254-811b766e,delivered,0.35901484999999994,wasteful,0.4121738,182828,14,glm-5.3,glm-5.3,claude-haiku-4-5-20251001,0,phase-redundancy-54pct
+2026-08-21T13-17-37-099-cf5ec323,delivered,0.1647659,wasteful,0.32799159999999994,203508,15,glm-5.3,glm-5.3,claude-haiku-4-5-20251001,0,phase-redundancy-30pct
