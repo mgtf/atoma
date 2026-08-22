@@ -88,6 +88,10 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   // Journaled for audit, never pushed: on a single-operator instance every
   // admin run would fire one.
   'run.host_subscription': null,
+  // Not pushed while the rule table is uncalibrated: an alert nobody trusts
+  // trains the operator to dismiss the channel. Revisit once the rules have
+  // run against real batches.
+  'run.anomaly': null,
   'run.finished': {
     audience: { requester: true },
     vars: (event, locale) => ({
@@ -172,6 +176,28 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
     },
   },
   // --- Platform and security.
+  /**
+   * PUSHED, unlike `run.anomaly`: an injection signature in an element result
+   * is rare, it is a security fact, and the operator wants it before the run
+   * that produced it has been forgotten. The payload NEVER reaches the
+   * notification — only the rule that matched and where. A push body carrying
+   * attacker-controlled text would make the notification itself the delivery
+   * channel.
+   */
+  'security.flagged': {
+    audience: { platformAdmins: true },
+    vars: (event) => ({ rule: text(event, 'ruleId', 'unknown'), tool: text(event, 'tool', '?') }),
+    copy: {
+      en: {
+        title: 'Atoma — security signature flagged',
+        body: '{{rule}} matched in a {{tool}} result; read the journal, not the payload',
+      },
+      fr: {
+        title: 'Atoma — signature de sécurité détectée',
+        body: '{{rule}} détectée dans un résultat {{tool}} ; lire le journal, pas la charge',
+      },
+    },
+  },
   'admin.granted': {
     audience: { platformAdmins: true },
     vars: (event) => ({ name: text(event, 'displayName') }),

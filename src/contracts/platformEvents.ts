@@ -63,6 +63,21 @@ export const platformEventKindSchema = z.enum([
   'project.created',
   'github.installation_linked',
   'github.installation_status',
+  /**
+   * The sentinel saw something wrong with a run IN FLIGHT: a cost threshold
+   * crossed, a stalled identical-call streak, a duration outlier, a recurring
+   * tool error. A flag, never a judgment — the standing rule is that a
+   * heuristic never decides alone, and the sentinel's only possible power is a
+   * journaled cancel, which is a separate decision from this row existing.
+   */
+  'run.anomaly',
+  /**
+   * The sentinel matched an injection signature in an ELEMENT RESULT — where
+   * untrusted content enters the system. The row carries a bounded excerpt so
+   * an operator can judge; the excerpt is data, never an instruction, and
+   * nothing downstream may act on it automatically.
+   */
+  'security.flagged',
   // --- Platform and security.
   /**
    * A project run was allowed to spend the HOST's subscription instead of a
@@ -205,6 +220,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'github.installation_linked': 'info',
   // Suspended or deleted installations break the publication pipeline.
   'github.installation_status': 'warning',
+  'run.anomaly': 'warning',
+  'security.flagged': 'security',
   'run.host_subscription': 'security',
   'admin.granted': 'security',
   'admin.revoked': 'security',

@@ -40,6 +40,7 @@ Use it when a rule's rationale matters, not as default session context.
 | `src/github/` | [src/github/AGENTS.md](src/github/AGENTS.md) | GitHub App install, webhooks, repository creation |
 | `src/platform/` | [src/platform/AGENTS.md](src/platform/AGENTS.md) | the control-plane audit journal and the one source of notifications |
 | `src/cli/` | [src/cli/AGENTS.md](src/cli/AGENTS.md) | operator commands, doctor, burn-in and friction reporting |
+| `src/sentinel/` | [src/sentinel/AGENTS.md](src/sentinel/AGENTS.md) | mechanical live watch over runs in flight: the rule table |
 
 Every subsystem file names its own neighbours, so one hop is usually enough.
 `npm run docs:check` enforces the shape: each subsystem `AGENTS.md` is listed
