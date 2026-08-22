@@ -1,7 +1,7 @@
 # Phase redundancy — scoping record, 2026-08-22
 
-Status: **A3+ implemented and locally verified; cold live measurement pending**. This is the
-evidence corpus the fix must be designed against, per the COOLING-OFF
+Status: **A3+ rolled back after its pre-registered cold live measurement**.
+This is the evidence corpus the fix was designed against, per the COOLING-OFF
 contract: collected across the 2026-08-21 batch-6 runs and the failed
 web-countdown run, verified against the code on 2026-08-22 by a five-reader
 sweep (verdicts, traces, planning code, skills, repo state). Analyst
@@ -210,8 +210,8 @@ The exact planning contract is:
 5. A later phase verifies only its new or stale claims. No prior narrative,
    child-declared witness or manifest entry becomes newly admissible proof.
 
-The implementation is deliberately limited to planning policy and its typed
-fallback:
+The measured implementation was deliberately limited to planning policy and
+its typed fallback:
 
 - replace all contradictory L3 pressures (`2-5` for every non-trivial task,
   verification between phases, the monolithic-task penalty, separate browser
@@ -250,7 +250,7 @@ grow A3+ into a same-session heuristic.
   being created. It does not authorize a legitimate later phase to trust
   `previousStepSummary` as ground truth.
 
-### Local tests completed before live measurement
+### Local tests completed before live measurement (subsequently reverted)
 
 - Prompt-contract tests traverse the real `L3.plan` and `L2.plan` call paths,
   assert the A3+ rule and each exception, align the shared verdict prompt, and
@@ -289,3 +289,70 @@ Revert the one prompt/tests/docs commit immediately if delivery falls below
 6/6, a required claim or live URL is missing, either CLI audit disappears, a
 stale observation is accepted, or a cross-bucket check is collapsed. Archive
 the starting and ending store, skills and traces before any reset or restore.
+
+## Cold live measurement and rollback
+
+The six-task batch ran on commit `af38ae6` with `ATOMA_LLM=claude-cli` and an
+isolated empty store, skills directory, runs directory and workspace. It did
+not replace the operator's normal state. The normal starting state was backed
+up at
+`/Users/mgtf/.atoma/backups/atoma-state-2026-08-22T13-22-41-263`; the complete
+ending cold state was backed up at
+`/Users/mgtf/.atoma/backups/atoma-state-2026-08-22T13-49-54-323`. Both archives
+were integrity-checked. The raw runner output is
+[`burnin/results-phase-redundancy-a3-2026-08-22.csv`](../../burnin/results-phase-redundancy-a3-2026-08-22.csv),
+and the trace audit is
+[`phase-redundancy-a3-measurement-2026-08-22.csv`](phase-redundancy-a3-measurement-2026-08-22.csv).
+
+An accidental `burnin --help` preflight invoked the first default task because
+that CLI has no help mode. It stopped at the first provider call with an HTTP
+401, made no successful LLM call and cost $0. Its CSV and log were moved under
+the incident's out-of-tree `preflight/` archive before the isolated state was
+created, so it is excluded from every number below.
+
+The structural results were:
+
+- delivery: 6/6, passing;
+- L3 phase vector: expected `3, 3, 1, 1, 1, 1`, observed
+  `3, 2, 1, 1, 1, 1`, failing the exact pre-registered target because
+  `cli-jsonpick` combined build and README work before its separate final
+  audit;
+- server topology: exactly one boot in each of the four web/HTTP runs,
+  passing;
+- final URLs: all four web/HTTP URLs were live when the L2 and L3 delivery
+  checks reloaded them, passing;
+- LLM calls: 70 versus the cold baseline's 98, a reduction of 28.6%, passing;
+- exact trace cost: $1.53165525 versus $2.2552, a reduction of 32.1%, reported
+  but not gated.
+
+Both explicit CLI audits survived. `cli-inicheck` used three phases and its
+final phase re-ran three documented invocations with the expected success,
+invalid-line and missing-file exits. `cli-jsonpick` used two phases and its
+final phase re-ran five documented invocations: two successes and the three
+required error cases. The latter is semantically sound but remains an honest
+miss against the exact three-phase target.
+
+The HTTP cases fully closed their required claims without a second boot,
+later mutation or equivalent replay. `http-kv` performed the complete
+stateful nine-request sequence through the deletion/error cases.
+`http-healthz` observed the success responses and the missing-`msg` 400. The
+stopwatch also closed: its first two browser smokes contained bad assertions,
+then the successful smoke drove Start and Lap through browser interactions;
+no artefact mutation or replay followed that closure.
+
+`web-counter` triggered the mandatory rollback. Its one successful worker
+smoke called `window.__counter` directly and proved increment, decrement,
+reset and negative-red logic. Source inspection showed that the buttons were
+wired to those functions, but the browser trace recorded no button
+interactions (`interactionLog=[]`). It therefore did **not** establish the
+user's required claim that "the buttons actually change the displayed count"
+in a real browser. Two later supervisor checks only reloaded the page and did
+not close the missing interaction evidence.
+
+This is a required-claim failure under the pre-registered rule, not a result
+to reinterpret after seeing it. The A3+ prompt, invariant and regression-test
+changes from `af38ae6` were therefore reverted immediately. The incident
+record and measurements remain; no same-session heuristic, validator gate or
+proof exception was added. The next design round returns to the reserved A1
+supervisor-owned attestation direction after cooling-off, using this missing
+DOM-interaction evidence as a first-class adversarial case.

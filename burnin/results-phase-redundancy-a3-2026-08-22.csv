@@ -1,0 +1,7 @@
+timestamp,task_id,family,outcome,cost_usd,duration_s,llm_calls,opus_calls,sonnet_calls,haiku_calls,deterministic_phases,escalations,learned_skills,promotions,refusals,demotions,dispatch_fallbacks,trace,provider,other_calls,learned_event_skills,compile_errors
+2026-08-22T13:26:38.465Z,cli-inicheck,cli,delivered,0.3717,297,23,1,1,21,0,0,2,0,0,0,0,2026-08-22T13-26-39-070-edd09d6a.json,claude-cli,0,0,0
+2026-08-22T13:31:35.659Z,cli-jsonpick,cli,delivered,0.3291,272,13,1,1,11,0,0,1,0,0,0,0,2026-08-22T13-31-36-188-6075de5f.json,claude-cli,0,0,0
+2026-08-22T13:36:08.413Z,web-counter,web,delivered,0.2183,128,9,1,1,7,0,0,1,0,0,0,0,2026-08-22T13-36-08-997-2dd12a14.json,claude-cli,0,0,0
+2026-08-22T13:38:18.310Z,web-stopwatch,web,delivered,0.1881,161,9,1,0,8,0,0,0,0,0,0,0,2026-08-22T13-38-18-931-7f73a79d.json,claude-cli,0,0,0
+2026-08-22T13:41:01.479Z,http-kv,http,delivered,0.2545,151,8,1,1,6,0,0,2,0,0,0,0,2026-08-22T13-41-02-127-11d4dbc8.json,claude-cli,0,0,0
+2026-08-22T13:43:34.392Z,http-healthz,http,delivered,0.17,98,8,1,0,7,0,0,0,0,0,0,0,2026-08-22T13-43-34-978-03b77c83.json,claude-cli,0,0,0
