@@ -182,7 +182,7 @@ html.atoma-cursor-active * {
    they only read as one while they share both edges. */
 .gpu-project-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
-  --gpu-frame: min(980px, calc(var(--gpu-content) - 20px));
+  --gpu-frame: calc(var(--gpu-content) - 20px);
   position: fixed;
   z-index: 4;
   top: 108px;

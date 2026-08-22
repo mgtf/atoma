@@ -15,8 +15,7 @@ import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
  * at mint time (see GpuApp); nothing here persists it.
  */
 
-/** Admin reads as a centred column, like Projects and Settings. */
-const ADMIN_COLUMN_MAX_WIDTH = 880;
+/** Admin reads as a full-bleed column, like Projects and Burn-in. */
 const LIST_TOP = 12;
 const ORG_HEADER_HEIGHT = 34;
 const MEMBER_ROW_HEIGHT = 20;
@@ -56,7 +55,7 @@ export function drawAdmin(
   const failure = snapshot.data.adminError ?? null;
   const scroll = snapshot.state.scrollY.admin;
 
-  const frame = viewFrame(width, height, ADMIN_COLUMN_MAX_WIDTH);
+  const frame = viewFrame(width, height);
   drawViewFrame(
     ctx,
     frame,

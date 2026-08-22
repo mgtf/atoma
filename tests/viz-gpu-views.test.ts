@@ -32,7 +32,6 @@ import { drawBurnin } from '../src/viz/client-gl/renderer/views/burnin.js';
 import {
   drawProjects,
   PROJECTS_COLUMN_INSET,
-  PROJECTS_COLUMN_MAX_WIDTH,
   PROJECTS_DOM_FORM_HEIGHT,
   PROJECTS_DOM_FORM_NARROW_HEIGHT,
   PROJECTS_DOM_FORM_TOP,
@@ -42,7 +41,7 @@ import {
   projectsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/projects.js';
 import { drawSidebar, sidebarLayout, SIDEBAR_GROUPS } from '../src/viz/client-gl/renderer/views/sidebar.js';
-import { viewFrame, VIEW_FRAME_PAD } from '../src/viz/client-gl/renderer/view-frame.js';
+import { viewFrame, VIEW_FRAME_PAD, VIEW_FRAME_TITLE_Y } from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -1165,7 +1164,7 @@ describe('drawAdmin', () => {
         x: organisationPanel!.x,
         y: organisationPanel!.y,
       }).x
-    ).toBe(viewFrame(1280, 720, 880).innerX);
+    ).toBe(viewFrame(1280, 720).innerX);
   });
 
   it('stacks invitation controls and identity copy inside a narrow admin frame', () => {
@@ -1177,7 +1176,7 @@ describe('drawAdmin', () => {
       width,
       720
     );
-    const frame = viewFrame(width, 720, 880);
+    const frame = viewFrame(width, 720);
     const invites = ctx.buttons.filter((button) => button.id.startsWith('admin.invite.'));
     expect(invites).toHaveLength(2);
     for (const button of invites) {
@@ -1373,7 +1372,7 @@ describe('drawProjects', () => {
     // and the copy explaining why there is nothing to show.
     const ungated = createRecordingCtx();
     drawProjects(ungated, makeSnapshot({ view: 'projects' }), 1280, 720);
-    const frame = viewFrame(1280, 720, PROJECTS_COLUMN_MAX_WIDTH);
+    const frame = viewFrame(1280, 720);
     const hint = ungated.texts.find((text) => text.value.includes('ATOMA_VIZ_AUTH=1'));
     expect(hint?.y).toBe(frame.contentTop);
 
@@ -1414,17 +1413,17 @@ describe('drawProjects', () => {
   });
 
   it('gives the DOM form and the GL project list ONE shared column', () => {
-    // Two cards, one stack. The GL panel centres itself in the content
-    // viewport while the form is `position: fixed`, so the form has to land on
-    // the same two edges by computation — it used to sit flush left at 20 and
-    // the pair stepped sideways from each other.
+    // Two cards, one stack. The column is FULL-BLEED like the other tabs: no
+    // width cap, so both edges come from the content viewport alone. The GL
+    // panel draws inside the frame while the form is `position: fixed`, so the
+    // form has to land on the same two edges by computation.
     // `projectsColumn` reports the frame's INNER column — where the form and
     // the list both draw, inside the frame's own padding.
-    const wide = viewFrame(1072, 800, PROJECTS_COLUMN_MAX_WIDTH);
+    const wide = viewFrame(1072, 800);
     expect(projectsColumn(1072)).toEqual({ x: wide.innerX, width: wide.innerWidth });
-    expect(wide.width).toBe(980);
+    expect(wide.width).toBe(1072 - PROJECTS_COLUMN_INSET);
     // Narrow: the frame gives up width, never its gap.
-    const narrow = viewFrame(600, 800, PROJECTS_COLUMN_MAX_WIDTH);
+    const narrow = viewFrame(600, 800);
     expect(narrow.width).toBe(600 - PROJECTS_COLUMN_INSET);
     expect(projectsColumn(600)).toEqual({ x: narrow.innerX, width: narrow.innerWidth });
 
@@ -1433,9 +1432,12 @@ describe('drawProjects', () => {
       css.indexOf('.gpu-project-form {'),
       css.indexOf('.gpu-project-form--run')
     );
+    // No cap: the frame is exactly the content viewport minus its inset, so
+    // the CSS restatement cannot reintroduce a second width by drift.
     expect(form).toContain(
-      `min(${PROJECTS_COLUMN_MAX_WIDTH}px, calc(var(--gpu-content) - ${PROJECTS_COLUMN_INSET}px))`
+      `--gpu-frame: calc(var(--gpu-content) - ${PROJECTS_COLUMN_INSET}px)`
     );
+    expect(form).not.toContain('min(');
     expect(form).toContain(
       `left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + ${VIEW_FRAME_PAD}px)`
     );
@@ -1609,7 +1611,7 @@ describe('drawProjects', () => {
     const narrowWidth = 248;
     const narrow = createRecordingCtx();
     drawProjects(narrow, snapshot, narrowWidth, 720);
-    const narrowFrame = viewFrame(narrowWidth, 720, PROJECTS_COLUMN_MAX_WIDTH);
+    const narrowFrame = viewFrame(narrowWidth, 720);
     const projectButton = narrow.buttons.find(
       (candidate) => candidate.id === `project.select.${projectId}`
     )!;
@@ -2703,6 +2705,42 @@ describe('drawRuns behavior', () => {
       HEIGHT
     );
     expect(narrow.detailBounds).toBeNull();
+  });
+
+  it('frames the empty state and centres its message', () => {
+    const ctx = createRecordingCtx();
+    drawRuns(ctx, makeSnapshot({}, { run: null }), WIDTH, HEIGHT);
+
+    // The frame: one panel spanning the view under the header, matching the
+    // shared view-frame geometry the populated single-pane layout uses.
+    const frame = viewFrame(WIDTH, HEIGHT);
+    const panel = ctx.panels.find(
+      (candidate) =>
+        candidate.width > 0 &&
+        Math.abs(candidate.x - frame.x) < 0.5 &&
+        Math.abs(candidate.y - frame.y) < 0.5 &&
+        Math.abs(candidate.width - frame.width) < 0.5 &&
+        Math.abs(candidate.height - frame.height) < 0.5
+    );
+    expect(panel).toBeDefined();
+
+    // The title inside the frame, from the catalog.
+    const title = ctx.texts.find(
+      (candidate) => candidate.value === t('nav.runs')
+    );
+    expect(title).toBeDefined();
+    expect(title!.y).toBeCloseTo(frame.y + VIEW_FRAME_TITLE_Y);
+
+    // The empty message centred in the frame.
+    const empty = ctx.texts.find((candidate) => candidate.value === t('runs.none'));
+    expect(empty).toBeDefined();
+    expect(empty!.x).toBeCloseTo(frame.x + frame.width / 2);
+    expect(empty!.y).toBeCloseTo(frame.y + frame.height / 2);
+    expect(empty!.node.anchor.x).toBeCloseTo(0.5);
+    expect(empty!.node.anchor.y).toBeCloseTo(0.5);
+
+    // Fail closed: nothing to scroll when no run is recorded.
+    expect(ctx.scrollMax.runs).toBe(0);
   });
 
   it('labels the role filter chip from the i18n catalog', () => {

@@ -41,7 +41,7 @@ import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
 export const ATOMA_MARK_LOCAL_CENTER = 14;
 
 /** Header size: a few pixels larger than the local box so the bar mark holds. */
-export const ATOMA_MARK_HEADER_SCALE = 1.488;
+export const ATOMA_MARK_HEADER_SCALE = 1.7;
 
 /**
  * Below this visual scale the gem is a header wordmark: too small to read a
@@ -442,9 +442,9 @@ export function attachAtomaMark(
    * drawn into a texture first, and the shell samples it three times per pixel.
    *
    * Sized from the mark's own box rather than the screen: the crystal occupies a
-   * fixed 28x28 local square, so a header mark at 1.488x needs a 42px texture
+   * fixed 28x28 local square, so a header mark at 1.7x needs a 48px texture
    * while the arrival gate needs a few hundred. Sizing to the viewport would
-   * spend megabytes to refract a 42px logo.
+   * spend megabytes to refract a 48px logo.
    *
    * Skipped entirely without a renderer. The mark must keep working in the
    * headless view tests and anywhere the caller has no renderer to lend, and

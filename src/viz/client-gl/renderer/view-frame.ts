@@ -44,9 +44,9 @@ export interface ViewFrame {
 /**
  * Geometry only, so a layout can be asserted without a GPU.
  *
- * `columnWidth` caps a view that reads better as a centred column (Projects,
- * Admin, Settings) than as a full-bleed one; omit it and the frame spans the
- * viewport inside the standard gap, which is what the list/detail views do.
+ * `columnWidth` caps a view that reads better as a centred column (Settings)
+ * than as a full-bleed one; omit it and the frame spans the viewport inside
+ * the standard gap, which is what the list/detail views do.
  */
 export function viewFrame(
   viewportWidth: number,

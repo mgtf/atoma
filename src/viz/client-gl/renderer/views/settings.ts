@@ -20,7 +20,7 @@ import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from
  * autofill and screen readers belong to the browser. Everything else is GL.
  */
 
-/** Settings reads as a centred column, like Projects and Admin. */
+/** Settings reads as a centred column; Projects and Admin went full-bleed. */
 const SETTINGS_COLUMN_MAX_WIDTH = 720;
 /**
  * Must match `.gpu-settings-form { top }` in styles.css: the account orb is

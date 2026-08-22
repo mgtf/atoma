@@ -51,6 +51,7 @@ import {
 import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette.js';
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
+import { drawViewFrame, viewFrame } from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
 import { drawTuningPanel, tuningPanelHeight } from './tuning-panel.js';
 import { gpuCardShaderMode } from '../shaders.js';
@@ -113,7 +114,22 @@ export function drawRuns(
 ): void {
   const run = snapshot.data.run;
   if (!run) {
-    ctx.text(ctx.root, snapshot.t('runs.none'), 18, 76, { size: 14 });
+    // The empty state is a framed column like every other tab, not a bare
+    // label over the page. `viewFrame` with no column cap IS the populated
+    // single-pane geometry, so the first recorded run does not move the frame.
+    const frame = viewFrame(width, height);
+    drawViewFrame(ctx, frame, snapshot.t('nav.runs'));
+    const empty = ctx.text(
+      ctx.root,
+      snapshot.t('runs.none'),
+      frame.x + frame.width / 2,
+      frame.y + frame.height / 2,
+      { size: 14, color: GPU_COLORS.muted }
+    );
+    // `text()` resets the pooled label's anchor before returning, so the
+    // centring is applied after the call — same contract as button labels.
+    empty.anchor.set(0.5, 0.5);
+    ctx.scrollMax.runs = 0;
     return;
   }
   const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;

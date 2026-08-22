@@ -195,20 +195,19 @@ function drawPromptGuidance(
   return height + GUIDANCE_GAP;
 }
 
-/** Widest the Projects column ever gets, shared with `.gpu-project-form`. */
-export const PROJECTS_COLUMN_MAX_WIDTH = 980;
 /** Horizontal inset the column leaves inside the content viewport, in total. */
 export const PROJECTS_COLUMN_INSET = GPU_LAYOUT.gap * 2;
 
 /**
- * ONE content column for this view. The DOM form and the GL panels below it
- * are two cards in a single stack, and they only read as one while they agree
- * on both edges — the form used to sit flush left at 20 while the list centred
- * itself, so the two cards stepped sideways from each other. `.gpu-project-form`
- * computes exactly this in CSS; a test holds the two constants together.
+ * ONE content column for this view, full-bleed like the other tabs. The DOM
+ * form and the GL panels below it are two cards in a single stack, and they
+ * only read as one while they agree on both edges — the form used to sit
+ * flush left at 20 while the list centred itself, so the two cards stepped
+ * sideways from each other. `.gpu-project-form` computes exactly this in
+ * CSS; a test holds the two constants together.
  */
 export function projectsColumn(viewportWidth: number): { x: number; width: number } {
-  const frame = viewFrame(viewportWidth, 0, PROJECTS_COLUMN_MAX_WIDTH);
+  const frame = viewFrame(viewportWidth, 0);
   return { x: frame.innerX, width: frame.innerWidth };
 }
 
@@ -256,7 +255,7 @@ export function drawProjects(
         name: selectedProject.name,
       })
     : snapshot.t('projects.summary', { count: projects.length });
-  const frame = viewFrame(width, height, PROJECTS_COLUMN_MAX_WIDTH);
+  const frame = viewFrame(width, height);
   drawViewFrame(ctx, frame, snapshot.t('nav.projects'), summary);
 
   // The DOM form is gated on a session (`projectActionsEnabled` in DomBridge),
