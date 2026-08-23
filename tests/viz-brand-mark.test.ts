@@ -34,6 +34,8 @@ import {
   markSpecularPower,
   markTurnDegreesFromElapsedMs,
   markTurnDegreesRounded,
+  markCausticFalloff,
+  projectMarkCaustic,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
 
@@ -700,6 +702,70 @@ describe('Atoma GPU brand mark', () => {
       );
       expect(Math.hypot(spill.x - 14, spill.y - 14)).toBeGreaterThan(faceR);
     }
+  });
+
+  it('casts the gem silhouette onto the field, deformed by the lamp position', () => {
+    const frame = buildAtomaMarkFrame(0);
+    // Lamp straight ahead: coupling on, cast exists, same corner count.
+    const centre = projectMarkCaustic(frame, 14, 14);
+    expect(centre).not.toBeNull();
+    expect(centre!.points.length).toBe(frame.silhouette.length);
+    expect(centre!.intensity).toBeGreaterThan(0.5);
+    // Far away, no coupling: no cast at all.
+    expect(projectMarkCaustic(frame, 80, 80)).toBeNull();
+
+    // A lamp off-centre pulls the cast OFF the gem's own footprint, to the
+    // side OPPOSITE the lamp — the same side a shadow falls on, which is
+    // where a converging lens puts the real image of an off-axis source.
+    const off = projectMarkCaustic(frame, 14 + 6, 14 - 4);
+    expect(off).not.toBeNull();
+    const centroid = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) => {
+      const sum = cast.points.reduce(
+        (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }),
+        { x: 0, y: 0 }
+      );
+      return { x: sum.x / cast.points.length, y: sum.y / cast.points.length };
+    };
+    const straight = centroid(centre!);
+    const shifted = centroid(off!);
+    // Screen-space y grows downward: a lamp up-right of centre lands the
+    // cast down-left of it.
+    expect(shifted.x).toBeLessThan(straight.x);
+    expect(shifted.y).toBeGreaterThan(straight.y);
+
+    // Convergence: the cast is SMALLER than the naive pinhole silhouette
+    // (weak positive lens), never larger.
+    const radius = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) =>
+      Math.max(...cast.points.map((p) => Math.hypot(p.x - 14, p.y - 14)));
+    const naive = frame.silhouette.reduce(
+      (max, p) => Math.max(max, Math.hypot(p.x - 14, p.y - 14)),
+      0
+    );
+    expect(radius(centre!)).toBeLessThan(naive * 1.15);
+    expect(radius(centre!)).toBeGreaterThan(0);
+  });
+
+  it('dims the cast by the distance it was thrown', () => {
+    // The lamp is a point source, so what reaches the wall obeys the inverse
+    // square of the distance it travelled. Sliding the pointer off the gem's
+    // centre lengthens that travel, which is why the diamond fades as it
+    // slides away instead of staying an equally bright patch.
+    expect(markCausticFalloff(0, 0)).toBeCloseTo(1);
+    const near = markCausticFalloff(0.5, 0);
+    const far = markCausticFalloff(1.5, 0);
+    expect(near).toBeLessThan(1);
+    expect(far).toBeLessThan(near);
+    expect(far).toBeGreaterThan(0);
+    // Radially symmetric: only how far, never which way.
+    expect(markCausticFalloff(0, 1.5)).toBeCloseTo(far);
+    expect(markCausticFalloff(-1.5, 0)).toBeCloseTo(far);
+
+    // And the published cast carries it: the same coupling thrown further is
+    // a dimmer cast, so a consumer never re-derives the falloff.
+    const frame = buildAtomaMarkFrame(0);
+    const straight = projectMarkCaustic(frame, 14, 14)!;
+    const sideways = projectMarkCaustic(frame, 14 + 9, 14)!;
+    expect(sideways.intensity).toBeLessThan(straight.intensity);
   });
 
   it('parks the pointer lamp in front of the gem, not on its surface', () => {

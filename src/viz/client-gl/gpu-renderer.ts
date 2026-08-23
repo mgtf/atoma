@@ -63,6 +63,7 @@ import {
   TUNING_ROW_HEIGHT,
 } from './renderer/tuning-layout.js';
 import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
+import { packMarkCaustic, readMarkFieldCaustic } from './mark-field-light.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
@@ -290,7 +291,16 @@ export class GpuRenderer {
     uStrength: number;
     uRadiusScale: number;
     uHueShift: number;
+    uCaustic0: Float32Array;
+    uCaustic1: Float32Array;
+    uCaustic2: Float32Array;
+    uCaustic3: Float32Array;
+    uCaustic4: Float32Array;
+    uCaustic5: Float32Array;
+    uCausticColor: Float32Array;
   } | null = null;
+  /** The cast's uniform slots, in declaration order. Built once. */
+  private pointerCausticSlots: Float32Array[] = [];
   private pointerLightStrength = 0;
   /** Light position in renderer pixels, published by `updatePointerLight`. */
   private lightRendererX = 0;
@@ -554,6 +564,27 @@ export class GpuRenderer {
     uniforms.uStrength = this.pointerLightStrength * tuning.lightIntensity;
     uniforms.uRadiusScale = tuning.lightHeight;
     uniforms.uHueShift = tuning.lightHue;
+    // The crystal's cast, on the UI this filter covers. Same packer the
+    // far-field mesh behind the UI uses, same renderer pixels, so one
+    // diamond crosses the backdrop and the buttons as a single shape.
+    const cast = packMarkCaustic(
+      readMarkFieldCaustic(),
+      bounds,
+      this.app.screen.width,
+      this.app.screen.height
+    );
+    for (let index = 0; index < this.pointerCausticSlots.length; index += 1) {
+      const slot = this.pointerCausticSlots[index]!;
+      const corner = cast?.corners[index];
+      // No cast parks the slots meaninglessly; the intensity below is the
+      // guard that actually turns the shape off.
+      slot[0] = corner?.x ?? -1e6;
+      slot[1] = corner?.y ?? -1e6;
+    }
+    uniforms.uCausticColor[0] = cast?.r ?? 0;
+    uniforms.uCausticColor[1] = cast?.g ?? 0;
+    uniforms.uCausticColor[2] = cast?.b ?? 0;
+    uniforms.uCausticColor[3] = cast?.intensity ?? 0;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
     // ticker. Recomputing it there would mean a SECOND
@@ -587,6 +618,16 @@ export class GpuRenderer {
           // exactly what it rendered before these existed.
           uRadiusScale: { value: 1, type: 'f32' },
           uHueShift: { value: 0, type: 'f32' },
+          // The crystal's cast. Declaration order is load-bearing: Pixi
+          // derives the UBO layout from it and the WGSL struct restates the
+          // same order by hand.
+          uCaustic0: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic1: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic2: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic3: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic4: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic5: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCausticColor: { value: new Float32Array(4), type: 'vec4<f32>' },
         },
       },
       padding: 0,
@@ -600,7 +641,22 @@ export class GpuRenderer {
       uStrength: number;
       uRadiusScale: number;
       uHueShift: number;
+      uCaustic0: Float32Array;
+      uCaustic1: Float32Array;
+      uCaustic2: Float32Array;
+      uCaustic3: Float32Array;
+      uCaustic4: Float32Array;
+      uCaustic5: Float32Array;
+      uCausticColor: Float32Array;
     };
+    this.pointerCausticSlots = [
+      this.pointerLightUniforms.uCaustic0,
+      this.pointerLightUniforms.uCaustic1,
+      this.pointerLightUniforms.uCaustic2,
+      this.pointerLightUniforms.uCaustic3,
+      this.pointerLightUniforms.uCaustic4,
+      this.pointerLightUniforms.uCaustic5,
+    ];
     this.stage.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
     // AFTER the light: it damps `pointerLightStrength`, which the cast reads.

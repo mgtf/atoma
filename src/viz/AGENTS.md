@@ -114,6 +114,11 @@ npm run viz:mark-turn:analyze
   Avoid double-offset hit targets.
 - The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic
   relighting, reduced-motion support, and no overlapping R3F logo.
+- The gem's CAST is ONE polygon on TWO surfaces — the far-field mesh behind the
+  UI and the pointer-light stage filter over it, so it crosses buttons and
+  frames instead of stopping at the backdrop. `projectMarkCaustic` alone derives
+  its throw falloff, `packMarkCaustic` alone writes its corners,
+  `renderer/caustic-shader.ts` alone tests containment, in GLSL kept ES 1.00-legal.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
 - PWA/service-worker registration is production-only. `/api/*`, `/auth/*`,

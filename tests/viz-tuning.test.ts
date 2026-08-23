@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import {
   TUNING_IDENTITY,
@@ -251,6 +252,54 @@ describe('both shader backends carry the tuning uniforms', () => {
     for (const source of [POINTER_LIGHT_GLSL, POINTER_LIGHT_WGSL]) {
       expect(source).toMatch(/halo \* \(0\.075 \+ edgeResponse \* \(0\.24 \+ facing \* 0\.36\)\)/);
     }
+  });
+
+  it('lands the crystal cast on the UI, gated by surface and strength', () => {
+    // The cast used to stop at the backdrop: the far-field mesh drew it and
+    // the UI in front of it was untouched, so the diamond vanished under
+    // every button it crossed. This filter covers the whole stage, so the
+    // same polygon reaches the surfaces themselves.
+    for (const source of [POINTER_LIGHT_GLSL, POINTER_LIGHT_WGSL]) {
+      expect(source).toContain('causticField');
+      expect(source).toContain('uCaustic0');
+      expect(source).toContain('uCaustic5');
+      expect(source).toContain('uCausticColor');
+      // Alpha-gated for the same reason the wash is: a transparent pixel has
+      // no surface to light. Strength-gated so it fades with the pointer.
+      expect(source).toMatch(/uStrength \* sampleColor\.a/);
+    }
+  });
+
+  it('declares the cast slots in the ONE order the WGSL struct restates', () => {
+    // Pixi derives the UBO layout from the declaration order in `resources`;
+    // the WGSL struct writes that order out by hand. A field inserted on one
+    // side only shifts every offset after it, silently.
+    const struct = POINTER_LIGHT_WGSL.split('struct PointerLightUniforms')[1]
+      ?.split('};')[0] ?? '';
+    const order = [...struct.matchAll(/(u[A-Za-z0-9]+):/g)].map((match) => match[1]);
+    expect(order).toEqual([
+      'uLightPx',
+      'uStrength',
+      'uRadiusScale',
+      'uHueShift',
+      'uCaustic0',
+      'uCaustic1',
+      'uCaustic2',
+      'uCaustic3',
+      'uCaustic4',
+      'uCaustic5',
+      'uCausticColor',
+    ]);
+    const renderer = readFileSync(
+      new URL('../src/viz/client-gl/gpu-renderer.ts', import.meta.url),
+      'utf8'
+    );
+    const resources =
+      renderer.split('pointerLight: {')[1]?.split('\n        },')[0] ?? '';
+    const declared = [...resources.matchAll(/^\s{10}(u[A-Za-z0-9]+):/gm)].map(
+      (match) => match[1]
+    );
+    expect(declared).toEqual(order);
   });
 });
 

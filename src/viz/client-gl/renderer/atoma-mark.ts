@@ -18,12 +18,14 @@ import {
   mergeFieldSpills,
   mixColor,
   pointerLampForLocal,
+  projectMarkCaustic,
   type AtomaMarkPoint,
   type AtomaMarkRearSpill,
 } from '../brand-mark.js';
 import {
   clearMarkFieldLight,
   markColorToRgb,
+  writeMarkFieldCaustic,
   writeMarkFieldLight,
 } from '../mark-field-light.js';
 import { readPointerLight } from '../pointer-light.js';
@@ -642,6 +644,8 @@ export function attachAtomaMark(
       uv: readonly [number, number];
       on: number;
     } = { uv: [0, 0], on: 0 };
+    /** The pointer's local position when it couples into the glass, else null. */
+    let coupledLocal: { x: number; y: number } | null = null;
     if (renderer) {
       const pointer = readPointerLight();
       if (pointer.active) {
@@ -654,6 +658,7 @@ export function attachAtomaMark(
         );
         pointerSpills = collectPointerFieldSpills(frame, local.x, local.y);
         lamp = pointerLampForLocal(local.x, local.y);
+        coupledLocal = local;
         const stagePos = markClientToStage(
           renderer,
           pointer.clientX,
@@ -688,6 +693,33 @@ export function attachAtomaMark(
         writeMarkFieldLight(
           fieldSpillsToSample(merged, container, scale, localRadius, renderer)
         );
+      }
+      // The CAST: the gem's silhouette projected onto the same wall, the
+      // shape a real glass would draw where the pools only glow. Published
+      // through the same sample channel, on the same coupling.
+      if (coupledLocal) {
+        const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
+        const rgb = cast ? markColorToRgb(cast.color) : null;
+        writeMarkFieldCaustic(
+          cast && rgb
+            ? {
+                points: cast.points.map((corner) => {
+                  const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+                    (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+                  const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+                    (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+                  const client = markStageToClient(renderer, stageX, stageY);
+                  return { x: client.clientX, y: client.clientY };
+                }),
+                intensity: cast.intensity,
+                r: rgb.r,
+                g: rgb.g,
+                b: rgb.b,
+              }
+            : null
+        );
+      } else {
+        writeMarkFieldCaustic(null);
       }
     }
     const { x: coreX, y: coreY } = frame.corePosition;

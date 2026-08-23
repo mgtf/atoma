@@ -2,7 +2,16 @@ import { Buffer, BufferUsage, Geometry, Mesh, Shader } from 'pixi.js';
 
 /** A mesh with our own geometry and program, not Pixi's textured default. */
 type FieldMesh = Mesh<Geometry, Shader>;
-import { readMarkFieldLight } from '../mark-field-light.js';
+import {
+  packMarkCaustic,
+  readMarkFieldCaustic,
+  readMarkFieldLight,
+} from '../mark-field-light.js';
+import {
+  CAUSTIC_CORNER_SLOTS,
+  CAUSTIC_FIELD_GLSL,
+  CAUSTIC_FIELD_WGSL,
+} from './caustic-shader.js';
 import {
   pointerClientToRenderer,
   readPointerLight,
@@ -54,6 +63,13 @@ export const FAR_FIELD_UNIFORMS = [
   { name: 'uMarkColor1', type: 'vec4<f32>' },
   { name: 'uMarkColor2', type: 'vec4<f32>' },
   { name: 'uMarkColor3', type: 'vec4<f32>' },
+  { name: 'uCaustic0', type: 'vec2<f32>' },
+  { name: 'uCaustic1', type: 'vec2<f32>' },
+  { name: 'uCaustic2', type: 'vec2<f32>' },
+  { name: 'uCaustic3', type: 'vec2<f32>' },
+  { name: 'uCaustic4', type: 'vec2<f32>' },
+  { name: 'uCaustic5', type: 'vec2<f32>' },
+  { name: 'uCausticColor', type: 'vec4<f32>' },
 ] as const;
 
 const uniformValues: Record<
@@ -72,6 +88,13 @@ const uniformValues: Record<
   uMarkColor1: () => new Float32Array(4),
   uMarkColor2: () => new Float32Array(4),
   uMarkColor3: () => new Float32Array(4),
+  uCaustic0: () => new Float32Array([-1e6, -1e6]),
+  uCaustic1: () => new Float32Array([-1e6, -1e6]),
+  uCaustic2: () => new Float32Array([-1e6, -1e6]),
+  uCaustic3: () => new Float32Array([-1e6, -1e6]),
+  uCaustic4: () => new Float32Array([-1e6, -1e6]),
+  uCaustic5: () => new Float32Array([-1e6, -1e6]),
+  uCausticColor: () => new Float32Array(4),
 };
 
 export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `#version 300 es
@@ -108,6 +131,13 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
   uniform vec4 uMarkColor1;
   uniform vec4 uMarkColor2;
   uniform vec4 uMarkColor3;
+  uniform vec2 uCaustic0;
+  uniform vec2 uCaustic1;
+  uniform vec2 uCaustic2;
+  uniform vec2 uCaustic3;
+  uniform vec2 uCaustic4;
+  uniform vec2 uCaustic5;
+  uniform vec4 uCausticColor;
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -143,6 +173,8 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
     float core = exp(-8.0 * dist * dist);
     return tint * mark.z * ${C.markGain} * (halo * 0.48 + core * 0.18);
   }
+
+${CAUSTIC_FIELD_GLSL}
 
   void main() {
     float aspect = uResolution.x / max(1.0, uResolution.y);
@@ -188,6 +220,16 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
     color += stainedField(vScreenUv, uResolution, uMark2, uMarkColor2.rgb);
     color += stainedField(vScreenUv, uResolution, uMark3, uMarkColor3.rgb);
 
+    // The gem's CAST: additive like the pools, so it reads as the shape the
+    // light is landing through, not a decal over the field. The polygon
+    // arrives in renderer pixels, so the fragment goes there too.
+    color += causticField(
+      vec2(vScreenUv.x, 1.0 - vScreenUv.y) * uResolution,
+      uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
+      uCausticColor.a,
+      uCausticColor.rgb
+    ) * ${C.markGain};
+
     float vignette = smoothstep(1.0, 0.12, length(p));
     finalColor = vec4(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
   }
@@ -220,6 +262,13 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     uMarkColor1: vec4<f32>,
     uMarkColor2: vec4<f32>,
     uMarkColor3: vec4<f32>,
+    uCaustic0: vec2<f32>,
+    uCaustic1: vec2<f32>,
+    uCaustic2: vec2<f32>,
+    uCaustic3: vec2<f32>,
+    uCaustic4: vec2<f32>,
+    uCaustic5: vec2<f32>,
+    uCausticColor: vec4<f32>,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -273,6 +322,8 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     let core = exp(-8.0 * dist * dist);
     return tint * mark.z * ${C.markGain} * (halo * 0.48 + core * 0.18);
   }
+
+${CAUSTIC_FIELD_WGSL}
 
   fn fwidth2(v: vec2<f32>) -> vec2<f32> {
     return abs(dpdx(v)) + abs(dpdy(v));
@@ -335,6 +386,21 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark1, farFieldUniforms.uMarkColor1.xyz);
     color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark2, farFieldUniforms.uMarkColor2.xyz);
     color += stainedField(input.vScreenUv, farFieldUniforms.uResolution, farFieldUniforms.uMark3, farFieldUniforms.uMarkColor3.xyz);
+
+    // The gem's CAST: additive like the pools, so it reads as the shape the
+    // light is landing through, not a decal over the field. The polygon
+    // arrives in renderer pixels, so the fragment goes there too.
+    color += causticField(
+      vec2<f32>(input.vScreenUv.x, 1.0 - input.vScreenUv.y) * farFieldUniforms.uResolution,
+      farFieldUniforms.uCaustic0,
+      farFieldUniforms.uCaustic1,
+      farFieldUniforms.uCaustic2,
+      farFieldUniforms.uCaustic3,
+      farFieldUniforms.uCaustic4,
+      farFieldUniforms.uCaustic5,
+      farFieldUniforms.uCausticColor.a,
+      farFieldUniforms.uCausticColor.rgb,
+    ) * ${C.markGain};
 
     let vignette = smoothstep(1.0, 0.12, length(p));
     return vec4<f32>(color * (0.62 + vignette * 0.38), ${C.fieldAlpha});
@@ -420,6 +486,13 @@ export function createFarField(): FarField | null {
     uMarkColor1: Float32Array;
     uMarkColor2: Float32Array;
     uMarkColor3: Float32Array;
+    uCaustic0: Float32Array;
+    uCaustic1: Float32Array;
+    uCaustic2: Float32Array;
+    uCaustic3: Float32Array;
+    uCaustic4: Float32Array;
+    uCaustic5: Float32Array;
+    uCausticColor: Float32Array;
   };
   const marks = [uniforms.uMark0, uniforms.uMark1, uniforms.uMark2, uniforms.uMark3];
   const colors = [
@@ -427,6 +500,14 @@ export function createFarField(): FarField | null {
     uniforms.uMarkColor1,
     uniforms.uMarkColor2,
     uniforms.uMarkColor3,
+  ];
+  const causticSlots = [
+    uniforms.uCaustic0,
+    uniforms.uCaustic1,
+    uniforms.uCaustic2,
+    uniforms.uCaustic3,
+    uniforms.uCaustic4,
+    uniforms.uCaustic5,
   ];
 
   let elapsed = 0;
@@ -466,6 +547,29 @@ export function createFarField(): FarField | null {
         color[0] = spill.r;
         color[1] = spill.g;
         color[2] = spill.b;
+      }
+      // The cast, through the ONE packer the pointer-light filter also uses,
+      // so the shape drawn on the backdrop is the shape drawn on the UI.
+      const cast = packMarkCaustic(readMarkFieldCaustic(), bounds, width, height);
+      if (cast) {
+        for (let index = 0; index < CAUSTIC_CORNER_SLOTS; index += 1) {
+          const slot = causticSlots[index]!;
+          const corner = cast.corners[index]!;
+          slot[0] = corner.x;
+          slot[1] = corner.y;
+        }
+        uniforms.uCausticColor[0] = cast.r;
+        uniforms.uCausticColor[1] = cast.g;
+        uniforms.uCausticColor[2] = cast.b;
+        uniforms.uCausticColor[3] = cast.intensity;
+      } else {
+        // Parked far offscreen AND at zero intensity: the shader's own guard
+        // is the one that matters, this only keeps the slots meaningless.
+        for (const slot of causticSlots) {
+          slot[0] = -1e6;
+          slot[1] = -1e6;
+        }
+        uniforms.uCausticColor[3] = 0;
       }
     },
   };

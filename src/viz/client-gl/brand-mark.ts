@@ -794,6 +794,58 @@ export function pointerLampForLocal(
   return { position, uv, on };
 }
 
+interface PointerEntryCoupling {
+  /** 0..1 how much of the lamp couples into the glass at all. */
+  gemEnter: number;
+  /** Colour of the front facet the light enters through. */
+  color: number;
+  /** Which front facet dominates under the cursor, for its material. */
+  octant: MarkOctant | null;
+}
+
+/**
+ * ONE definition of how the pointer lamp couples INTO the glass: distance
+ * falloff to the silhouette plus coverage of the front facet under the
+ * cursor. Both the rear POOLS and the CAUSTIC cast consume this — two
+ * entry models would drift, and the cast would stop matching the pools it
+ * sits inside.
+ */
+function pointerEntryCoupling(
+  frame: AtomaMarkFrame,
+  localX: number,
+  localY: number
+): PointerEntryCoupling {
+  const pointer: AtomaMarkPoint = { x: localX, y: localY };
+  const fromCenter = Math.hypot(localX - CENTER.x, localY - CENTER.y);
+  // Hull spans ~12.5 projected units from centre. A little extra so grazing
+  // the aura still couples into the glass instead of cutting off at the edge.
+  const gemReach = ATOMA_MARK_RADIUS * PROJECTION_SCALE * 1.35;
+  const t = fromCenter / gemReach;
+  const fromGem = t >= 1 ? 0 : Math.exp(-t * t * 2.2);
+
+  let entryCoverage = 0;
+  let entryColor = 0xdff1ff;
+  let entryOctant: MarkOctant | null = null;
+  for (const index of frame.frontOrder) {
+    const meshFacet = ATOMA_MARK_MESH.facets[index]!;
+    const corners = meshFacet.points.map((point) => frame.projected[point]!);
+    const a = corners[0];
+    const b = corners[1];
+    const c = corners[2];
+    if (!a || !b || !c) continue;
+    const coverage = triangleCoverage(pointer, a, b, c);
+    if (coverage <= entryCoverage) continue;
+    entryCoverage = coverage;
+    entryColor = markColorForOctant(meshFacet.octant);
+    entryOctant = meshFacet.octant;
+  }
+  return {
+    gemEnter: clamp(fromGem * 0.4 + entryCoverage * 0.85),
+    color: entryColor,
+    octant: entryOctant,
+  };
+}
+
 /**
  * Pointer lamp in FRONT of the gem, shining through onto the far field.
  * Local coordinates are the 28×28 box. Coverage of a front table is the
@@ -807,35 +859,20 @@ export function collectPointerFieldSpills(
   localY: number
 ): AtomaMarkRearSpill[] {
   if (!Number.isFinite(localX) || !Number.isFinite(localY)) return [];
-  const pointer: AtomaMarkPoint = { x: localX, y: localY };
-  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
-  const fromCenter = Math.hypot(localX - CENTER.x, localY - CENTER.y);
-  // Hull spans ~12.5 projected units from centre. A little extra so grazing
-  // the aura still couples into the glass instead of cutting off at the edge.
-  const gemReach = ATOMA_MARK_RADIUS * PROJECTION_SCALE * 1.35;
-  const t = fromCenter / gemReach;
-  const fromGem = t >= 1 ? 0 : Math.exp(-t * t * 2.2);
-
-  let entryCoverage = 0;
-  let entryColor = 0xdff1ff;
-  let entryStain = 0.7;
-  for (const index of frame.frontOrder) {
-    const meshFacet = ATOMA_MARK_MESH.facets[index]!;
-    const corners = meshFacet.points.map((point) => frame.projected[point]!);
-    const a = corners[0];
-    const b = corners[1];
-    const c = corners[2];
-    if (!a || !b || !c) continue;
-    const coverage = triangleCoverage(pointer, a, b, c);
-    if (coverage <= entryCoverage) continue;
-    entryCoverage = coverage;
-    entryColor = markColorForOctant(meshFacet.octant);
-    const material = markMaterialForOctant(meshFacet.octant);
-    entryStain = 0.42 + 0.58 * (material.transmit / maxTransmit);
-  }
-
-  const gemEnter = clamp(fromGem * 0.4 + entryCoverage * 0.85);
+  const { gemEnter, color: entryColor, octant: entryOctant } = pointerEntryCoupling(
+    frame,
+    localX,
+    localY
+  );
   if (gemEnter < 0.02) return [];
+  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
+  // The entry stain rides the same facet the coupling picked: its material
+  // sets how much light survives the first table. No dominant facet (grazing
+  // lamp, far side of the falloff) keeps the historical default.
+  const entryMaterial = entryOctant ? markMaterialForOctant(entryOctant) : null;
+  const entryStain = entryMaterial
+    ? 0.42 + 0.58 * (entryMaterial.transmit / maxTransmit)
+    : 0.7;
 
   const spills: AtomaMarkRearSpill[] = [];
   for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
@@ -882,6 +919,137 @@ export function mergeFieldSpills(
     }
   }
   return [...byFacet.values()];
+}
+
+/**
+ * How strongly the gem converges the light it passes: a thick-shell
+ * octahedron crossed near its centre behaves like a weak positive lens, so
+ * the cast shrinks below the silhouette — the flatter the angle of entry
+ * (lamp far to the side), the weaker the convergence.
+ */
+const CAUSTIC_CONVERGENCE = 0.82;
+
+/**
+ * Where the gem's refractive axis meets the far plane, in local box units.
+ * The lamp ray that passes through the gem's centre decides where the cast
+ * lands; every silhouette point is then placed relative to that anchor.
+ */
+const CAUSTIC_PLANE_Z = -2.4;
+
+/**
+ * How far along the lamp ray the wall sits, as a multiple of the lamp's own
+ * distance. Greater than 1: the ray is extrapolated BEYOND the gem, so the
+ * cast lands on the far side of the centre from the lamp, like any shadow.
+ * One definition — the projection and the falloff must agree on where the
+ * wall is or the diamond would dim for a throw it never made.
+ */
+const CAUSTIC_THROW_RATIO = (ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z) / ATOMA_MARK_LAMP_Z;
+
+/**
+ * The on-axis lamp-to-wall distance, in model units: the throw a cast has
+ * when the pointer sits dead centre on the gem. `markCausticFalloff`
+ * normalises against it, so the centred cast is unattenuated and every other
+ * position is dimmer than it.
+ */
+const CAUSTIC_REFERENCE_THROW = ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z;
+
+/**
+ * How the cast dims as it is thrown further. The lamp is a point source, so
+ * the light reaching the wall obeys the inverse square of the distance it
+ * travelled — and moving the pointer off the gem's centre both slides the
+ * cast sideways and lengthens that travel. This is the whole reason the
+ * diamond fades as it slides away instead of staying a constant patch.
+ *
+ * Model units, lamp position relative to the gem's centre.
+ */
+export function markCausticFalloff(lampX: number, lampY: number): number {
+  // Where the ray through the gem's centre lands, and how far it travelled.
+  const anchorX = lampX * (1 - CAUSTIC_THROW_RATIO);
+  const anchorY = lampY * (1 - CAUSTIC_THROW_RATIO);
+  const travel = Math.hypot(
+    anchorX - lampX,
+    anchorY - lampY,
+    CAUSTIC_REFERENCE_THROW
+  );
+  const ratio = CAUSTIC_REFERENCE_THROW / Math.max(travel, 1e-4);
+  return clamp(ratio * ratio);
+}
+
+export interface MarkCausticCast {
+  /** Projected silhouette polygon, convex, in the 28×28 local box. */
+  points: readonly AtomaMarkPoint[];
+  /**
+   * 0..1 brightness at the wall: how much of the lamp couples into the glass,
+   * dimmed by how far the cast was thrown.
+   */
+  intensity: number;
+  /** Colour stained by the entry facet, same palette as the pools. */
+  color: number;
+}
+
+/**
+ * The crystal's CAST on the far field: its silhouette projected from the
+ * pointer lamp onto the wall behind, drawn deformed — the caustic. Rays from
+ * a lamp in front cross the shell twice (front table, rear table); the
+ * converging glass lands each silhouette corner CLOSER to the refracted
+ * centre-ray than the naive pinhole would, and that pull grows with grazing
+ * entry, which is what makes the cast's shape follow the cursor instead of
+ * remaining a translated copy of the gem.
+ *
+ * Convex both before and after: the projection is affine per corner along
+ * its own lamp ray, and the silhouette is the convex hull of the outer
+ * poles, so the shader can test containment with cross products alone.
+ *
+ * The reported intensity is already dimmed by `markCausticFalloff`: a cast
+ * thrown further is a cast further from a point source. Consumers scale it,
+ * they never re-derive it.
+ */
+export function projectMarkCaustic(
+  frame: AtomaMarkFrame,
+  localX: number,
+  localY: number
+): MarkCausticCast | null {
+  if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
+  const coupling = pointerEntryCoupling(frame, localX, localY);
+  if (coupling.gemEnter < 0.02) return null;
+
+  // The lamp, in MODEL units, in front of the gem — the same placement
+  // `pointerLampForLocal` gives the shell shader.
+  const lampX = (localX - CENTER.x) / PROJECTION_SCALE;
+  const lampY = (CENTER.y - localY) / PROJECTION_SCALE;
+  const lampZ = ATOMA_MARK_LAMP_Z;
+
+  // Where the lamp's ray through the gem's centre crosses the wall: the
+  // refracted axis the cast hangs from.
+  const s = CAUSTIC_THROW_RATIO;
+  const axisX = lampX * (1 - s);
+  const axisY = lampY * (1 - s);
+
+  // Entry inclination: a lamp straight ahead enters flat-on (convergence at
+  // full strength); one far to the side grazes and the lens barely bends.
+  const slope = Math.hypot(lampX, lampY) / lampZ;
+  const convergence = CAUSTIC_CONVERGENCE / (1 + slope * slope * 0.6);
+
+  const corners: AtomaMarkPoint[] = [];
+  for (const point of frame.silhouette) {
+    // The silhouette corner back at the gem's centre depth (z=0): the 2D
+    // outline does not carry z, and the hull's extremes bound ±radius, so
+    // the centre plane is the shadow-outline approximation.
+    const modelX = (point.x - CENTER.x) / PROJECTION_SCALE;
+    const modelY = (CENTER.y - point.y) / PROJECTION_SCALE;
+    // Walk the ray lamp -> corner onto the wall behind.
+    let wallX = lampX + (modelX - lampX) * s;
+    let wallY = lampY + (modelY - lampY) * s;
+    // The converging glass pulls each corner toward the refracted axis.
+    wallX = axisX + (wallX - axisX) * convergence;
+    wallY = axisY + (wallY - axisY) * convergence;
+    corners.push(project([wallX, wallY, CAUSTIC_PLANE_Z]));
+  }
+  return {
+    points: corners,
+    intensity: coupling.gemEnter * markCausticFalloff(lampX, lampY),
+    color: coupling.color,
+  };
 }
 
 /**

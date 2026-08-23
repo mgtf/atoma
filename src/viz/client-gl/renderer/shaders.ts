@@ -3,6 +3,15 @@ import {
   POINTER_LIGHT_CORE_RADIUS_PX,
   POINTER_LIGHT_RADIUS_PX,
 } from '../pointer-light.js';
+import { CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL } from './caustic-shader.js';
+
+/**
+ * How much of the crystal's cast lands on the filled UI. Lower than the
+ * far-field's own gain: the backdrop is dark and takes the whole diamond,
+ * whereas a button is already lit by the pointer wash and only needs the
+ * shape to read THROUGH it.
+ */
+const CAUSTIC_SURFACE_GAIN = 0.7;
 
 /**
  * GPU shader sources and per-event shader-mode selection.
@@ -52,6 +61,13 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform float uStrength;
   uniform float uRadiusScale;
   uniform float uHueShift;
+  uniform vec2 uCaustic0;
+  uniform vec2 uCaustic1;
+  uniform vec2 uCaustic2;
+  uniform vec2 uCaustic3;
+  uniform vec2 uCaustic4;
+  uniform vec2 uCaustic5;
+  uniform vec4 uCausticColor;
 
   float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -68,7 +84,7 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
         axis * dot(axis, color) * (1.0 - cosA)
     );
   }
-
+${CAUSTIC_FIELD_GLSL}
   void main() {
     vec2 uv = vTextureCoord;
     vec4 sampleColor = texture(uTexture, uv);
@@ -101,6 +117,17 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
     // crystal must NOT live under this filter — it sits on markRoot.
     float illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
+    // The crystal's CAST, on the interface itself. The far field takes the
+    // same polygon behind the UI; here it lands on whatever is actually
+    // filled, so the diamond crosses buttons and frames instead of stopping
+    // at the backdrop. Modulated by alpha for the same reason the wash is:
+    // a transparent pixel has no surface to light.
+    sampleColor.rgb += causticField(
+      vScreenPx,
+      uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
+      uCausticColor.a,
+      uCausticColor.rgb
+    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
     finalColor = sampleColor;
   }
 `;
@@ -120,6 +147,13 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     uStrength: f32,
     uRadiusScale: f32,
     uHueShift: f32,
+    uCaustic0: vec2<f32>,
+    uCaustic1: vec2<f32>,
+    uCaustic2: vec2<f32>,
+    uCaustic3: vec2<f32>,
+    uCaustic4: vec2<f32>,
+    uCaustic5: vec2<f32>,
+    uCausticColor: vec4<f32>,
   };
 
   @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
@@ -165,7 +199,7 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
   fn luminance(color: vec3<f32>) -> f32 {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
   }
-
+${CAUSTIC_FIELD_WGSL}
   @fragment
   fn mainFragment(
     @location(0) uv: vec2<f32>,
@@ -194,6 +228,21 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     sampleColor.r += lightColor.r * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;
+    // The crystal's CAST, on the interface itself — twin of the GLSL above.
+    let castRgb = causticField(
+      screenPx,
+      pointerLight.uCaustic0,
+      pointerLight.uCaustic1,
+      pointerLight.uCaustic2,
+      pointerLight.uCaustic3,
+      pointerLight.uCaustic4,
+      pointerLight.uCaustic5,
+      pointerLight.uCausticColor.a,
+      pointerLight.uCausticColor.rgb,
+    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * pointerLight.uStrength * sampleColor.a;
+    sampleColor.r += castRgb.r;
+    sampleColor.g += castRgb.g;
+    sampleColor.b += castRgb.b;
     return sampleColor;
   }
 `;
