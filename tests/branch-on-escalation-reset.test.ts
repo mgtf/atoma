@@ -142,7 +142,14 @@ describe('createSubtaskL1 — fresh-L1 system prompt carries the same smoke guid
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/getter-only property/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/get name\(\).*this\.name =/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/statusText.*not writable state/s);
-    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/increments.*then resets.*reset state/s);
+    // Reworded 2026-08-23: the sequence rule now covers the shapes the
+    // DETECTOR covers (any repeated control plus reset/clear), because a
+    // double theme toggle matched the detector and not the old sentence —
+    // `a786358a` call #17 exactly. It also states the mutual exclusivity,
+    // which previously reached only the L2/L3 planning prompts and never the
+    // tier that writes the smoke.
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/increments, toggles.*or resets.*final state/s);
+    expect(SMOKE_DESIGN_GUIDANCE).toMatch(/MUTUALLY EXCLUSIVE/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/interactions: \[\]/);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/class\/style\/color.*labels alone are insufficient/s);
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/for \(let i = 0; i < thresholdFromSource/);

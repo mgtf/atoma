@@ -464,7 +464,7 @@ describe('renderSmokeFailure — the failing field is named, not left to be diag
     // The fields that held are NOT named: the list is the shortlist to look
     // at, and padding it with passing assertions is what made the pasted
     // object unreadable in the first place.
-    expect(rendered.split('FALSE field(s):')[1]).not.toContain('finalCountIsZero');
+    expect(rendered.split('. If one of those')[0]).not.toContain('finalCountIsZero');
   });
 
   it('names nested paths and never names `ok` itself', () => {

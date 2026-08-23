@@ -13,8 +13,10 @@ import {
   mergeProbeManifestWrite,
   probeManifestWriteRefusal,
   mergeShellProbe,
+  smokeOkClause,
   smokeOkIncludesStyling,
   smokeResultIncludesStyling,
+  stylingFieldPaths,
 } from '../contracts/probeManifest.js';
 
 // The manifest MERGE semantics (entry identity per shape + the three
@@ -1315,16 +1317,20 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
   return {
     declaration: {
       name: 'validate_html',
+      // THIS PAYS FOR the two parameter descriptions below. Both "OPTIONAL:
+      // pass X" sentences restated, less precisely, the description of the
+      // parameter they named, and one had gone wrong: "at absolute page
+      // coordinates" is the shape `manifestWriterLines('web')` calls MANDATORY
+      // to avoid ("NEVER pixel coordinates, even though validate_html accepts
+      // them"). The coordinate path stays documented on the x/y item
+      // properties, where it belongs. "and/or" replaces "interactions +
+      // smoke", which read as a requirement to send both — the exact
+      // combination the runtime voids.
       description: [
         'Load a URL in a real headless browser and verify the app actually works.',
         'Captures console.error, pageerror, and failed subresource loads.',
-        'OPTIONAL: pass `interactions` to simulate user input (clicks, right-clicks)',
-        'at absolute page coordinates — this is how you detect silent bugs like',
-        'elements that render but do not respond. OPTIONAL: pass `smoke`, a JS',
-        'snippet evaluated in the page context after interactions; it must return',
-        '{ ok: true } (or a truthy value) for the check to pass. For any',
-        'interactive app you MUST use interactions + smoke to prove functionality,',
-        'otherwise "no console errors" is meaningless.',
+        'For any interactive app you MUST prove functionality with `interactions`',
+        'and/or `smoke` — otherwise "no console errors" is meaningless.',
         'Returns { ok, errors, warnings, failedRequests, smokeResult?, interactionLog? }.',
       ].join(' '),
       inputSchema: {
@@ -1341,8 +1347,17 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           },
           interactions: {
             type: 'array',
+            // The `type` enum is declared eleven lines below in this same
+            // schema object and every member carries its own description, so
+            // restating it here was paid on every call for nothing. The
+            // ordering and the mutual exclusivity are what no caller could
+            // read off the schema — and mode E of `a786358a` (5 calls, the
+            // most expensive) was a caller who believed the smoke observed the
+            // page BETWEEN interactions. A verb list is deliberately absent:
+            // a partial enumeration of a seven-verb regex would reproduce the
+            // frozen-vocabulary defect exactly.
             description:
-              'Sequence of user interactions to simulate AFTER the page loads. Mouse events (click/rightclick), selector-based text entry (type), or keyboard events (keydown/keyup/keypress). Use type with selector+text for forms; keypress accepts one key name, not a whole string.',
+              'Sequence of user interactions replayed AFTER the page loads and COMPLETELY BEFORE `smoke`: the whole list runs first, then `smoke` is evaluated once, so a snapshot taken at the top of your smoke is a POST-interaction snapshot. Nothing observes the page between two interactions. Use type with selector+text for forms; keypress accepts one key name, not a whole string. MUTUALLY EXCLUSIVE with a self-driving smoke: if `smoke` itself calls a state-changing method on the page, EVERY interaction here is DISCARDED before the page opens and the smoke sees a page nobody touched. Pick one per call — replay input here and let `smoke` only READ state, or send `interactions: []` and drive every step inside the smoke.',
             items: {
               type: 'object',
               properties: {
@@ -1382,8 +1397,19 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           },
           smoke: {
             type: 'string',
+            // Three statements here contradicted the runtime and were paid for
+            // on every call. "every boolean field is an assertion that must be
+            // true" is FALSE — `isSmokeOk` reads `ok` alone, and its own
+            // comment records 22 false smoke failures caused by exactly the
+            // belief this sentence taught. The erased-state trigger was
+            // narrower than its detector, which fires on any repeated label
+            // plus reset/clear: a double theme toggle matches the detector and
+            // not the old sentence, which is call #17 of `a786358a` exactly.
+            // And `page.evaluate` awaits, so an async smoke has always worked
+            // and was documented nowhere, while two calls plus one FALSE PASS
+            // died on a 100-200ms settle inside a declared 300ms transition.
             description:
-              'JavaScript EXPRESSION evaluated in the page context after interactions (wrapped internally as `(() => { const __r = (YOUR_CODE); ... })()` — it CANNOT start with `const`, `let`, `return`, `function`, or contain top-level `;`-separated statements). Structured results MUST return { ok: true, ...details } and every boolean field is an assertion that must be true. Simple boolean form: `document.querySelectorAll(".revealed").length > 0`. For logic that needs locals, wrap in an IIFE. If interactions increment then reset, drive/snapshot the milestone INSIDE the IIFE before reset; the final DOM cannot prove an erased intermediate state.',
+              'JS EXPRESSION (wrap statements in an IIFE; a top-level `const`/`let`/`return` is refused pre-flight at no cost) evaluated in the page context AFTER interactions. It MAY be async — the tool awaits it, bounded to one repaint or transition. Structured results MUST return { ok: <aggregate>, ...details }: the explicit `ok` is the ONLY verdict, other fields are diagnostics that may legitimately be false. Any class/style/colour value you return must ALSO be asserted inside `ok`. Never compare a computed style to an `rgb(...)` literal: snapshot it, act, await the transition duration declared in your own CSS + 100ms, snapshot again, assert the two differ. If your interactions would repeat or undo a control before smoke runs (increment then reset, toggle then toggle back, clear), the final DOM cannot prove the erased intermediate state: send `interactions: []` and drive/snapshot every step inside the IIFE instead.',
           },
         },
         required: ['url'],
@@ -1426,6 +1452,18 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       // `smoke evaluation threw: Unexpected token 'const'`. Rejecting
       // here also teaches the model the right pattern via a clear error
       // instead of an opaque "unexpected token".
+      // Hoisted above the pre-flight, and it costs nothing: the digest and the
+      // requested/ignored split are facts about the REQUEST. A refusal that
+      // reports none of them is indistinguishable from a call that sent no
+      // interactions at all — which is exactly the confusion the attestation
+      // field pair exists to prevent. Resolved BEFORE the page opens either
+      // way, so the digest is the revision the browser is about to load rather
+      // than whatever the file becomes later in the phase.
+      const document = observedDocumentFor(opts.sandbox, url);
+      const discardWarning =
+        ignoredInteractions > 0
+          ? [DISCARDED_INTERACTIONS_WARNING(ignoredInteractions)]
+          : [];
       if (smoke !== undefined) {
         const refusals = preflightSmokeRefusals(smoke, interactions);
         if (refusals.length > 0) {
@@ -1434,9 +1472,12 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             ok: false,
             url,
             errors: refusals.map((r) => `smoke rejected pre-flight: ${r.message}`),
-            warnings: [],
+            warnings: discardWarning,
             failedRequests: [],
             interactionLog: [],
+            requestedInteractions,
+            ignoredInteractions,
+            ...(document ? { document } : {}),
             smokeResult: {
               error: refusals.map((r) => r.message).join(' ALSO: '),
               ...(hint !== undefined ? { hint } : {}),
@@ -1451,15 +1492,7 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       const warnings: string[] = [];
       const failedRequests: Array<{ url: string; reason: string }> = [];
       const interactionLog: string[] = [];
-      // Resolved BEFORE the page opens, so the digest is the revision the
-      // browser is about to load rather than whatever the file becomes later
-      // in the phase.
-      const document = observedDocumentFor(opts.sandbox, url);
-      if (ignoredInteractions > 0) {
-        warnings.push(
-          `${ignoredInteractions} external interaction(s) ignored because the smoke IIFE drives and snapshots its own state transitions`
-        );
-      }
+      warnings.push(...discardWarning);
 
       // Console errors are held STRUCTURED (text + source url) until the
       // end of the call: the favicon filter below decides on the source,
@@ -1659,18 +1692,27 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
               `(() => { try { const __r = (${smoke}); return __r; } catch (e) { return { ok: false, error: String(e) }; } })()`
             );
             smokeOk = isSmokeOk(smokeResult);
+            // The styling override is the ONE gate that turns a passing smoke
+            // into a failure, so its two error lines used to say "smoke check
+            // failed" and then paste an object whose first key is `ok: true`.
+            // Its own paste is labelled instead, and the false-field hunt is
+            // reserved for a result that actually returned a false verdict.
+            let stylingOverride = false;
             if (
               smokeOk &&
               smokeResultIncludesStyling(smokeResult) &&
               !smokeOkIncludesStyling(smoke)
             ) {
               smokeOk = false;
-              errors.push(
-                'smoke check failed: class/style/color values were returned but the aggregate ok expression does not assert them'
-              );
+              stylingOverride = true;
+              errors.push(renderStylingAggregateOverride(smoke, smokeResult));
             }
             if (!smokeOk) {
-              errors.push(renderSmokeFailure(smokeResult));
+              errors.push(
+                stylingOverride
+                  ? `smoke returned (ok:true, overridden above), TRUNCATED at 500 chars: ${JSON.stringify(smokeResult).slice(0, 500)}`
+                  : renderSmokeFailure(smokeResult)
+              );
             }
           } catch (err) {
             smokeOk = false;
@@ -1828,6 +1870,28 @@ export function preflightSmokeRefusals(
     ...(erased ? [{ message: erased }] : []),
   ];
 }
+
+/**
+ * The discard sentence, once, stating the CONSEQUENCE and not only the fact.
+ *
+ * MEASURED 2026-08-23 on `a786358a`: three calls (#18, #19, and #22 from the
+ * SUPERVISOR's own fallback execute) asserted `beforeResetElapsedGreaterThanZero`
+ * against a stopwatch that was never started, because the smoke drove its own
+ * state and every listed interaction had been discarded. The tool reported the
+ * discard — in `warnings`, as a fact with no consequence — and neither tier
+ * acted on it. Both recoveries deleted the assertion instead of reading the
+ * cause. Same warning, same non-fatal status: promoting it to an error when the
+ * smoke also failed would change a disposition and is recorded, not built.
+ */
+export const DISCARDED_INTERACTIONS_WARNING = (n: number): string =>
+  `${n} of your interaction(s) were DISCARDED and never ran, because the smoke ` +
+  `calls a state-changing method and so drives its own transitions. Everything ` +
+  `the smoke observed happened inside the smoke; nothing you listed in ` +
+  `\`interactions\` was clicked or typed, so any "before" snapshot in your smoke ` +
+  `is the page's INITIAL state, not the state those interactions would have ` +
+  `produced. Either send \`interactions: []\` and drive the whole sequence in the ` +
+  `smoke, or remove the state-changing calls from the smoke and let the ` +
+  `interactions run.`;
 
 export function detectResetErasedIntermediateEvidence(
   interactions: readonly ParsedInteraction[],
@@ -2011,6 +2075,45 @@ export const CDP_PROTOCOL_TIMEOUT_MS = 30_000;
  * async body with a forgotten `return` lands here. Found by adversarial review
  * 2026-08-21 and reproduced end to end against real Chrome.
  */
+/**
+ * The styling-aggregate override, verbatim, as one testable string.
+ *
+ * MEASURED 2026-08-23, project run `a786358a` call #2: the smoke's aggregate
+ * DID assert the colour change, and `smokeOkIncludesStyling` returned false
+ * only because the object was spelled `allChecks` rather than `checks`. A pure
+ * rename flips the predicate with zero change to what is asserted. The old
+ * message stated a finding the code never made ("does not assert them"), and
+ * the model responded rationally to it by strengthening the assertion it was
+ * already making — a change that cannot move a name-based detector — and never
+ * escaped the gate in 25 calls.
+ *
+ * This NAMES the predicate's real requirement, which is a requirement on HOW
+ * the aggregate is spelled. It does not widen it: widening
+ * `smokeOkIncludesStyling` changes a disposition and is recorded in
+ * `docs/decided-not-built-2026-08-23.md`, not built here.
+ */
+export function renderStylingAggregateOverride(
+  smoke: string,
+  smokeResult: unknown
+): string {
+  const clause = smokeOkClause(smoke);
+  const found = stylingFieldPaths(smokeResult).join(', ');
+  return (
+    'smoke overridden: your smoke returned ok:true and this tool set it to false. ' +
+    `Class/style/colour evidence came back at ${found}, and the aggregate this tool ` +
+    'could read does not assert any of it. What it read as your aggregate: ' +
+    (clause === ''
+      ? 'NOTHING — no `ok:` clause was found, which is what happens when the aggregate is assigned to a variable and returned by shorthand (`const ok = ...` then `return { ok, ... }`).'
+      : `\`${clause}\`.`) +
+    ' Two accepted spellings, and ONLY these two: put the styling comparison inside ' +
+    'the `ok:` clause itself, or name the aggregate object literally `checks` and ' +
+    'return `ok: Object.values(checks).every(Boolean)` with the styling comparison ' +
+    'among its fields. This is a check on HOW the aggregate is written, not a claim ' +
+    'that your comparison is wrong: renaming the object satisfies it without ' +
+    'changing what you assert.'
+  );
+}
+
 export function renderSmokeFailure(smokeResult: unknown): string {
   const rendered = JSON.stringify(smokeResult);
   if (rendered === undefined) {
@@ -2020,14 +2123,32 @@ export function renderSmokeFailure(smokeResult: unknown): string {
       `{ ok: <aggregate>, ...details } so the verdict and its evidence both come back.`
     );
   }
+  // A bare boolean or a primitive has no fields to name, and saying "no false
+  // boolean field is present" about the value `false` would be a worse message
+  // than the plain paste. Naming applies to structured results only.
+  if (smokeResult === null || typeof smokeResult !== 'object') {
+    return `smoke check failed: ${rendered.slice(0, 500)}`;
+  }
+  // The NAMES LEAD. Put them after the paste and the only new information in
+  // the message sits at the tail of its longest string — which is exactly
+  // where the tool-result truncation in src/tools/AGENTS.md cuts. Measured on
+  // `a786358a`: 7 of 14 failures were already cut mid-token (`"bgColor":"rgb(255`,
+  // `"la`) and the failing key was repeatedly past char 500, which is the
+  // entire reason naming was added.
   const named = falseBooleanFields(smokeResult);
+  const overflow =
+    named.length >= FALSE_FIELD_LIMIT ? ` (first ${FALSE_FIELD_LIMIT} shown)` : '';
   const naming =
     named.length > 0
-      ? ` FALSE field(s): ${named.join(', ')}. If one of those is an assertion, that is the ` +
-        `one that did not hold; if all of them are raw state, then \`ok\` is asserting ` +
-        `something the details do not carry.`
-      : '';
-  return `smoke check failed: ${rendered.slice(0, 500)}${naming}`;
+      ? `FALSE field(s): ${named.join(', ')}${overflow}. If one of those is an ` +
+        `assertion, that is the one that did not hold; if all of them are raw ` +
+        `state, then \`ok\` is asserting something the details do not carry. `
+      : 'No false boolean field is present, so `ok` was returned false by an ' +
+        'expression the details do not show. ';
+  return (
+    `smoke check failed: ${naming}Full result, TRUNCATED at 500 chars and ` +
+    `possibly cut mid-token: ${rendered.slice(0, 500)}`
+  );
 }
 
 /**
@@ -2046,10 +2167,13 @@ export function renderSmokeFailure(smokeResult: unknown): string {
  * Bounded in depth and count so a large state dump cannot turn one error
  * line into a page.
  */
+export const FALSE_FIELD_LIMIT = 12;
+export const FALSE_FIELD_DEPTH = 3;
+
 export function falseBooleanFields(
   value: unknown,
-  maxDepth = 3,
-  maxFields = 12
+  maxDepth = FALSE_FIELD_DEPTH,
+  maxFields = FALSE_FIELD_LIMIT
 ): string[] {
   const out: string[] = [];
   const walk = (node: unknown, path: string, depth: number): void => {

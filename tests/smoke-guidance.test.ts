@@ -207,11 +207,16 @@ describe('SMOKE_DESIGN_GUIDANCE ↔ validate_html pre-flight guards', () => {
     expect(renderSmokeFailure(undefined)).toMatch(/returned NO VALUE \(undefined\)/);
     expect(renderSmokeFailure(undefined)).toMatch(/forgotten return/);
     // Ordinary failures are unchanged, including the 500-char cap.
-    expect(renderSmokeFailure({ ok: false, count: 3 })).toBe(
-      'smoke check failed: {"ok":false,"count":3}'
-    );
+    // The paste is unchanged and still capped; what precedes it is the naming
+    // clause added 2026-08-23. A result with no false boolean says so rather
+    // than saying nothing.
+    const ordinary = renderSmokeFailure({ ok: false, count: 3 });
+    expect(ordinary).toMatch(/^smoke check failed: No false boolean field is present/);
+    expect(ordinary).toMatch(/\{"ok":false,"count":3\}$/);
     expect(renderSmokeFailure(false)).toBe('smoke check failed: false');
-    expect(renderSmokeFailure({ pad: 'x'.repeat(900) }).length).toBeLessThan(540);
+    // Still bounded: the 500-char paste plus a naming clause whose field list
+    // is itself capped at FALSE_FIELD_LIMIT names.
+    expect(renderSmokeFailure({ pad: 'x'.repeat(900) }).length).toBeLessThan(700);
   });
 
   it('still refuses the shapes the guards refuse (guard sanity, not tautology)', () => {

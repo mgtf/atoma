@@ -117,11 +117,24 @@ Neighbours:
   already applied) and a stopwatch display stuck at `"00:00.00"` while
   `elapsed` reached 988ms, because the `setInterval` tick could not run. Both
   runs retried an assertion that could not become true.
-- Do NOT batch the `validate_html` pre-flight refusals into one response.
-  Measured across both 2026-08-21 web runs: every refused payload violated
-  exactly ONE guard, so reporting all of them at once would have saved zero
-  round-trips. They arrive in sequence because the model fixes one rule and
-  then breaks a different one.
+- The `validate_html` pre-flight reports EVERY refusal that applies, via
+  `preflightSmokeRefusals`. This REVERSES the 2026-08-21 entry that forbade
+  batching, and the honest accounting is that the reversal is NOT justified by
+  measured savings: across both 2026-08-21 runs and project run `a786358a`
+  (2026-08-23), every refused payload still violated exactly ONE guard, so
+  batching has saved zero round-trips to date. It changes because three
+  sequential early returns made the ORDER of the guards part of the contract,
+  and one consequence of that order is a real hole: `interactions` is emptied
+  before `detectResetErasedIntermediateEvidence` is consulted, so a
+  self-driving smoke can never receive the erased-state refusal. Consulting
+  all three keeps the report order-independent. Closing the hole itself would
+  change a disposition and is NOT done here — see
+  [`docs/decided-not-built-2026-08-23.md`](../../docs/decided-not-built-2026-08-23.md).
+- A refused call is still ATTESTED. The pre-flight early return carries
+  `requestedInteractions`, `ignoredInteractions`, the document digest and the
+  discard warning, because a refusal reporting none of them is
+  indistinguishable from a call that sent no interactions at all — the exact
+  confusion that field pair exists to prevent.
 - Moving smoke guidance closer to the call site is NOT the untried variable.
   The erased-intermediate-state rule already sits in the `smoke` PARAMETER
   description and the model still violated it six times across two batches.

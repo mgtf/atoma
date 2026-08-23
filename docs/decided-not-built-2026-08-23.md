@@ -230,28 +230,75 @@ rule permits — no smoke is refused that was not refused before):
   path deliberately — prompt text is paid on every call, an error message only
   by the caller who already got it wrong.
 
-**NOT built, because each is a new mechanism and this is the session that
-surfaced the incident:**
+**NOT built.** A six-agent review of the trace (25 calls read one by one, every
+detector executed against the real payloads) produced the list below. Each
+entry changes a DISPOSITION — what a detector accepts — which the cooling-off
+rule forbids today. Two of them are landed drift, VERIFIED BY EXECUTION, not
+hypotheses:
 
-- **Interaction checkpoints.** Today the only way to prove an intermediate
-  state is to abandon `interactions` entirely and drive the app's own API —
-  which presumes the app exposes one. A `checkpoints` argument (snapshot an
-  expression after interaction *k*) would make the ordinary path provable.
-  This is the one candidate that is a real capability gap rather than a
-  teaching failure, and it is the one that needs a reviewed design: it adds a
-  second evaluation channel to a tool whose attestation fields currently
-  assume exactly one.
-- **A repeat-failure gate across a phase.** `makeSmokeStuckTracker` catches the
-  IDENTICAL smoke retried; it does not catch fourteen DIFFERENT smokes failing
-  the same way. Whatever would catch that is a new heuristic with a threshold,
-  and thresholds designed against one trace are how one concept acquires two
-  definitions.
-- **The vocabulary-frozen detector.** `smokeDrivesIntermediateState` keys on a
-  regex word list (`milestone|beforeReset|preReset|...`). A correct smoke that
-  names its snapshot something else is invisible to it and gets refused for a
-  problem it does not have. Widening the list reproduces the failure mode one
-  word further out; the fix is structural and is not a same-day edit. This is
-  the 2026-08-14 review's measured pattern, in our own code.
+1. **`smokeOkIncludesStyling`'s frozen literal.** It matches
+   `/Object\.values\(checks\)\.every\(Boolean\)/` — the identifier from the
+   canonical prompt shape. Call #2's smoke asserted the colour change inside
+   its aggregate and was overridden anyway, because the object was spelled
+   `allChecks`. A pure rename flips the predicate with zero change to what is
+   asserted. The model responded to the message by strengthening the assertion
+   it was already making — which cannot move a name-based detector — and never
+   escaped the gate in 25 calls. Today's commit makes the finding legible and
+   names the two accepted spellings; it does not widen the predicate. The sharp
+   objection to that is accepted: naming the accepted spellings invites the
+   cheapest compliance, a rename, which is the cargo-cult the frozen literal
+   already rewards.
+2. **`webStylingEvidenceMissing` (src/atoms/resultGates.ts) — THE STRUCTURAL
+   CAUSE OF THE WHOLE RUN, and nothing in today's commit touches it.** It
+   requires `/(?:milestone|afterIncrement|afterClick|streak.?3)/i` AND
+   `/(?:reset|final)/i`. Exactly 1 of 25 smokes satisfied it, by accident, on a
+   FAILING call, because it happened to contain a check named
+   `stopwatchStartedAfterClick`. A theme-toggle smoke naturally writes
+   `afterToggle`, `bgAfter`, `colorAfter` — none match. Call #1, the FIRST call
+   of the run, used the canonical idiom correctly with `ok:true` and 11/11
+   checks, and was rejected by it; three consecutive L2 verdicts then rejected
+   PASSING calls and coached the model toward more `getComputedStyle` reads,
+   into the transition race the tool's own guidance warns about. No amount of
+   legibility reaches an unsatisfiable gate.
+3. **Making the erased-state refusal reachable for a self-driving smoke.** It
+   is DOUBLY unreachable: `interactions` is emptied before the detector is
+   consulted, AND the detector has its own `smokeDrivesIntermediateState`
+   escape. Passing the pre-filter list would refuse payloads currently
+   accepted.
+4. **Promoting `ignoredInteractions > 0` to an error when the smoke also
+   failed.** Today it stays a warning that now states its consequence.
+5. **A detector for the interleaving misconception** (5 calls, the most
+   expensive mode: the caller believed the smoke observed the page BETWEEN
+   interactions) **or for a settle shorter than the source's own declared
+   transition duration** (2 calls plus one FALSE PASS at #16, which observed
+   transition progress and proved nothing — no gate in the product can catch
+   that).
+6. **Interaction checkpoints** (`{type:'snapshot', name, expr}` evaluated
+   in-page during the loop). The review argued for this and then withdrew it:
+   call #23 proves the existing surface could express the proof. It forces four
+   contract changes and it RETRACTS the mutual-exclusivity sentence three of
+   today's edits rest on. Before designing it, measure over archived web
+   traces: how many `validate_html` calls re-drive state solely to obtain a
+   before/after, split by whether the artefact exposed a hook. Below ~25% of
+   web smoke failures it is not worth the four contract changes.
+
+**Two closing observations that no edit addresses.** First, a hole survives
+today's commit: `bodyBg.includes('25') || bodyBg.includes('26')` still passes
+pre-flight, because `detectBrittleComputedStyleLiteral` only matches
+`=== 'rgb(`. That substring hack is strictly more brittle than what the guard
+refused, and it PASSED. Second, and larger: **every recovery in the trace is a
+DELETION, and the deleted thing is always the requirement under test.** Colour
+assertions deleted after the transition race; `getComputedStyle` deleted after
+the rgb refusal and replaced with the tautology
+`finalTheme === 'dark' || finalTheme === 'light'`; the theme claim deleted after
+the discard trap and restored as a substring hack. Nine of the eleven PASSES
+advanced the page by nothing. Nothing in this commit makes deletion more
+expensive than correctness, and a clearer message plausibly produces a
+better-targeted deletion rather than a better probe. The pre-registered check
+for the next web run is therefore NOT "did the messages improve" but the same
+ratio measured the same way: the contract-versus-artefact split of
+`validate_html` calls (22 versus 3 here), plus a zero-count assertion that no
+error string contains `smoke check failed` above an object whose `ok` is true.
 
 ## Waiting on the operator
 

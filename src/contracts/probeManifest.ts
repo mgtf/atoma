@@ -179,16 +179,36 @@ export function smokeOkIncludesStyling(smoke: string): boolean {
   );
 }
 
-export function smokeResultIncludesStyling(result: unknown): boolean {
-  if (result === null || typeof result !== 'object') return false;
-  const visit = (value: unknown): boolean => {
-    if (value === null || typeof value !== 'object') return false;
-    if (Array.isArray(value)) return value.some(visit);
-    return Object.entries(value as Record<string, unknown>).some(
-      ([key, child]) => WEB_STYLE_TERM_RE.test(key) || visit(child)
-    );
+/**
+ * Dotted paths of every field whose KEY carries class/style/colour evidence.
+ *
+ * `smokeResultIncludesStyling` is defined as `length > 0` of this walk, so the
+ * message that NAMES the evidence and the gate that REQUIRES it can never
+ * disagree. A second parallel walk would be one concept with two definitions,
+ * which is the drift the 2026-08-14 review measured.
+ */
+export function stylingFieldPaths(result: unknown, maxPaths = 8): string[] {
+  const out: string[] = [];
+  const visit = (value: unknown, path: string): void => {
+    if (out.length >= maxPaths) return;
+    if (value === null || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach((child, i) => visit(child, `${path}[${i}]`));
+      return;
+    }
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (out.length >= maxPaths) return;
+      const here = path ? `${path}.${key}` : key;
+      if (WEB_STYLE_TERM_RE.test(key)) out.push(here);
+      else visit(child, here);
+    }
   };
-  return visit(result);
+  visit(result, '');
+  return out;
+}
+
+export function smokeResultIncludesStyling(result: unknown): boolean {
+  return stylingFieldPaths(result, 1).length > 0;
 }
 
 /* ─────────────────── schema-validated examples ─────────────────── */
