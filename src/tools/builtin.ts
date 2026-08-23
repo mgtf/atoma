@@ -1339,7 +1339,13 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
           url: {
             type: 'string',
             description:
-              'Absolute URL returned by start_static_server (e.g. "http://localhost:8000/").',
+              // MEASURED 2026-08-23, project run `949ecd5d`: naming only the
+              // static server taught the front-end molecule to validate an
+              // API-backed page against python http.server — eight calls
+              // burned on /api/expenses 404s, then five more GUESSING common
+              // ports (3000, 8080, 5000...) for a server whose URL is only
+              // ever known from the starting tool's own result.
+              'Absolute URL returned by start_static_server or start_node_server (e.g. "http://localhost:8000/"). Never a guessed port: use the URL from the tool result that started the server.',
           },
           waitMs: {
             type: 'number',
@@ -1663,9 +1669,15 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
             // Let listeners run / raf fire.
             await new Promise((r) => setTimeout(r, 80));
           } catch (err) {
-            errors.push(
-              `interaction ${it.type} failed: ${(err as Error).message}`
-            );
+            const raw = (err as Error).message;
+            // Puppeteer's "Unknown key" names the convention without the
+            // remedy. MEASURED 2026-08-23, project run `949ecd5d`: three
+            // calls sent the chord "Control+A" and burned a full browser
+            // round-trip each on the same five-word mystery.
+            const remedy = /Unknown key/i.test(raw)
+              ? ' Keys are SINGLE names ("a", "Enter", "ArrowUp"); chords like "Control+A" are not supported — send keydown "Control", then the key, then keyup "Control", or drive the app API from `smoke` instead.'
+              : '';
+            errors.push(`interaction ${it.type} failed: ${raw}${remedy}`);
           }
         }
 

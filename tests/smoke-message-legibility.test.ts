@@ -233,3 +233,33 @@ describe('SMOKE_DESIGN_GUIDANCE reaches the tier that writes the smoke', () => {
     expect(SMOKE_DESIGN_GUIDANCE).toMatch(/interaction array must be empty/);
   });
 });
+
+describe('interaction errors carry the remedy — measured on run 949ecd5d', () => {
+  it('the url description names both server tools and forbids guessed ports', () => {
+    const props = (
+      validateHtmlTool({ sandbox: new ToolSandbox(tmpdir()) }).declaration.inputSchema as {
+        properties: Record<string, { description?: string }>;
+      }
+    ).properties;
+    expect(props['url']!.description).toMatch(/start_static_server or start_node_server/);
+    expect(props['url']!.description).toMatch(/Never a guessed port/);
+  });
+
+  it('an Unknown key failure explains chords, through the real handler', async () => {
+    const sandbox = workspace();
+    const { startStaticServerTool } = await import('../src/tools/builtin.js');
+    const served = (await startStaticServerTool({ sandbox }).execute({})) as {
+      ok: boolean;
+      url: string;
+    };
+    expect(served.ok).toBe(true);
+    const res = (await validateHtmlTool({ sandbox }).execute({
+      url: `${served.url}index.html`,
+      interactions: [{ type: 'keypress', key: 'Control+A' }],
+    })) as { ok: boolean; errors: string[] };
+    expect(res.ok).toBe(false);
+    const err = res.errors.find((e) => /Unknown key/i.test(e));
+    expect(err).toMatch(/chords like "Control\+A" are not supported/);
+    expect(err).toMatch(/keydown "Control"/);
+  }, 60_000);
+});
