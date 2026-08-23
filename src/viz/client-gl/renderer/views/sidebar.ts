@@ -1,7 +1,7 @@
 import { Graphics } from 'pixi.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
-import { visibleViews, type ViewName } from '../../store.js';
+import { ADMIN_VIEWS, visibleViews, type ViewName } from '../../store.js';
 
 /**
  * THE NAV RAIL — the tab strip that used to live in the header, stood on its
@@ -32,7 +32,7 @@ const ITEM_GAP = 6;
 export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
   { key: 'workspace', views: ['projects', 'runs', 'docs'] },
   { key: 'operate', views: ['registry', 'skills', 'burnin'] },
-  { key: 'admin', views: ['admin'] },
+  { key: 'admin', views: ADMIN_VIEWS },
 ];
 
 export type SidebarRow =

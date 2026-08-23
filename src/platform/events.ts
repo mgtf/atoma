@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ZodError } from 'zod';
 import {
+  isPlatformEventFamily,
   platformEventInputSchema,
   severityForKind,
   type PlatformEvent,
@@ -117,6 +118,14 @@ export interface PlatformEventQuery {
   readonly before?: number | undefined;
   readonly limit?: number | undefined;
   readonly kind?: string | undefined;
+  /**
+   * One FAMILY of kinds — the segment before the dot (`run`, `security`, …).
+   * The admin journal filters by family because 28 kinds is not a chip row,
+   * and the family list is derived from the kind vocabulary rather than
+   * written twice. Validated against that closed set by the caller; an
+   * unknown family is ignored, never interpolated.
+   */
+  readonly kindFamily?: string | undefined;
   readonly severity?: string | undefined;
   readonly orgId?: string | undefined;
   /**
@@ -300,6 +309,12 @@ export class PlatformEventLog {
     if (query.kind) {
       clauses.push('kind = ?');
       params.push(query.kind);
+    }
+    if (query.kindFamily && isPlatformEventFamily(query.kindFamily)) {
+      // Parameterised prefix match, and the family is checked against the
+      // closed vocabulary first: a filter must not become a pattern channel.
+      clauses.push('kind LIKE ?');
+      params.push(`${query.kindFamily}.%`);
     }
     if (query.severity) {
       clauses.push('severity = ?');

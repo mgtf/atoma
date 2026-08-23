@@ -6,13 +6,19 @@ import { createScrollPane } from '../scroll-pane.js';
 import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
 
 /**
- * Admin plane: every organisation with its members, and one-use invitations
- * minted per organisation. Platform admin only — the server 403s everyone
- * else, and `visibleViews` never offers the tab to anyone else either.
+ * ORGANISATIONS — every organisation with its members, and one-use invitations
+ * minted per organisation. Platform admin only: the server 403s everyone else,
+ * and `visibleViews` never offers the tab to anyone else either.
  *
  * A minted invitation is a bearer credential shown EXACTLY once: it is
  * rendered until the next mint or refresh and the clipboard receives the URL
  * at mint time (see GpuApp); nothing here persists it.
+ *
+ * This view held the platform journal and the catalogue ledger stacked under
+ * the organisation list, which read as one screen answering three questions
+ * and gave the journal no scroll position of its own — so it could never page
+ * past its first page. They are their own views now (`journal.ts`,
+ * `ledger.ts`, `sentinel.ts`), grouped under the same nav heading.
  */
 
 /** Admin reads as a full-bleed column, like Projects and Burn-in. */
@@ -22,27 +28,6 @@ const MEMBER_ROW_HEIGHT = 20;
 const INVITE_ROW_HEIGHT = 40;
 const ORG_GAP = 18;
 const INVITE_PANEL_HEIGHT = 84;
-const SECTION_HEADING_HEIGHT = 30;
-const JOURNAL_ROW_HEIGHT = 34;
-const LEDGER_ROW_HEIGHT = 18;
-
-/**
- * Severity → colour. Read through a lookup with a FALLBACK because the
- * server's vocabulary can be newer than this bundle: an unknown severity
- * renders in the muted colour rather than crashing the row.
- */
-const SEVERITY_COLORS: Record<string, number> = {
-  info: GPU_COLORS.muted,
-  warning: GPU_COLORS.warning,
-  error: GPU_COLORS.error,
-  security: GPU_COLORS.magenta,
-};
-
-/** `HH:MM:SS` from an ISO instant, or the raw value if it will not parse. */
-function clockTime(at: string): string {
-  const parsed = new Date(at);
-  return Number.isNaN(parsed.getTime()) ? truncate(at, 19) : parsed.toISOString().slice(11, 19);
-}
 
 export function drawAdmin(
   ctx: RendererCtx,
@@ -233,164 +218,6 @@ export function drawAdmin(
       snapshot.onActivate
     );
     cursor += orgHeight + ORG_GAP;
-  }
-
-  // ------------------------------------------------- the platform journal
-  // What happened on this deployment, newest first. Rows are rendered
-  // TOLERANTLY: an unknown kind or severity from a newer server shows its
-  // raw label rather than hiding the rows around it.
-  const events = snapshot.data.adminEvents ?? [];
-  const sectionHeadingHeight = compactColumns ? 48 : SECTION_HEADING_HEIGHT;
-  const journalRowHeight = compactColumns ? 58 : JOURNAL_ROW_HEIGHT;
-  const ledgerRowHeight = compactColumns ? 42 : LEDGER_ROW_HEIGHT;
-  ctx.text(pane.content, snapshot.t('admin.journal'), columnX, cursor + 6, {
-    size: 13,
-    weight: '700',
-  });
-  ctx.text(
-    pane.content,
-    snapshot.t('admin.journalSummary', { count: events.length }),
-    compactColumns ? columnX : columnX + 220,
-    cursor + (compactColumns ? 25 : 8),
-    {
-      size: 10,
-      color: GPU_COLORS.muted,
-      width: compactColumns ? innerWidth : innerWidth - 240,
-    }
-  );
-  cursor += sectionHeadingHeight;
-
-  if (events.length === 0) {
-    ctx.text(pane.content, snapshot.t('admin.journalEmpty'), columnX, cursor, {
-      size: 11,
-      color: GPU_COLORS.muted,
-      width: innerWidth,
-    });
-    cursor += 24;
-  } else {
-    const journalHeight = events.length * journalRowHeight + 12;
-    ctx.panel(
-      pane.content,
-      x,
-      cursor,
-      panelWidth,
-      journalHeight,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    let rowY = cursor + 8;
-    for (const event of events) {
-      // Cull by skipping the DRAW, never the cursor: a layout that stops
-      // advancing would collapse everything below it.
-      if (pane.visible(rowY, rowY + journalRowHeight)) {
-        const color = SEVERITY_COLORS[event.severity] ?? GPU_COLORS.muted;
-        ctx.text(pane.content, clockTime(event.at), columnX + 8, rowY, {
-          size: 9,
-          color: GPU_COLORS.muted,
-          mono: true,
-          width: 64,
-        });
-        ctx.text(pane.content, truncate(event.kind, 28), columnX + 78, rowY, {
-          size: 10,
-          color,
-          mono: true,
-          width: compactColumns ? Math.max(0, innerWidth - 86) : 200,
-        });
-        ctx.text(
-          pane.content,
-          truncate(event.summary, 96),
-          columnX + 8,
-          rowY + (compactColumns ? 32 : 15),
-          {
-          size: 10,
-          color: GPU_COLORS.text,
-          width: compactColumns ? Math.max(0, innerWidth - 16) : innerWidth - 120,
-          }
-        );
-        ctx.text(
-          pane.content,
-          event.actorType,
-          compactColumns ? columnX + 8 : columnX + innerWidth - 84,
-          rowY + (compactColumns ? 17 : 0),
-          {
-          size: 9,
-          color: GPU_COLORS.muted,
-          mono: true,
-          width: compactColumns ? Math.max(0, innerWidth - 16) : 84,
-          }
-        );
-      }
-      rowY += journalRowHeight;
-    }
-    cursor += journalHeight + ORG_GAP;
-  }
-
-  // ------------------------------------------- the product ledger's tail
-  // A SEPARATE journal in the same tab, deliberately not merged with the
-  // one above: this one records what the CATALOGUE learned (trust counters,
-  // promotions), and it keeps its own integrity checker.
-  const ledger = snapshot.data.adminLedger ?? [];
-  if (ledger.length > 0) {
-    ctx.text(pane.content, snapshot.t('admin.ledger'), columnX, cursor + 6, {
-      size: 13,
-      weight: '700',
-    });
-    ctx.text(
-      pane.content,
-      snapshot.t('admin.ledgerHint'),
-      compactColumns ? columnX : columnX + 220,
-      cursor + (compactColumns ? 25 : 8),
-      {
-      size: 10,
-      color: GPU_COLORS.muted,
-      width: compactColumns ? innerWidth : innerWidth - 240,
-      }
-    );
-    cursor += sectionHeadingHeight;
-    const ledgerHeight = ledger.length * ledgerRowHeight + 12;
-    ctx.panel(
-      pane.content,
-      x,
-      cursor,
-      panelWidth,
-      ledgerHeight,
-      GPU_COLORS.panel,
-      GPU_COLORS.border,
-      GPU_LAYOUT.radius,
-      2
-    );
-    let ledgerY = cursor + 8;
-    for (const entry of ledger) {
-      if (pane.visible(ledgerY, ledgerY + ledgerRowHeight)) {
-        ctx.text(pane.content, clockTime(entry.at), columnX + 8, ledgerY, {
-          size: 9,
-          color: GPU_COLORS.muted,
-          mono: true,
-          width: 64,
-        });
-        ctx.text(pane.content, truncate(entry.kind, 26), columnX + 78, ledgerY, {
-          size: 9,
-          color: GPU_COLORS.primary,
-          mono: true,
-          width: compactColumns ? Math.max(0, innerWidth - 86) : 180,
-        });
-        ctx.text(
-          pane.content,
-          truncate(entry.entity, 48),
-          compactColumns ? columnX + 8 : columnX + 268,
-          ledgerY + (compactColumns ? 19 : 0),
-          {
-          size: 9,
-          color: GPU_COLORS.text,
-          width: compactColumns ? Math.max(0, innerWidth - 16) : innerWidth - 280,
-          }
-        );
-      }
-      ledgerY += ledgerRowHeight;
-    }
-    cursor += ledgerHeight + ORG_GAP;
   }
 
   pane.extend(cursor + 8);

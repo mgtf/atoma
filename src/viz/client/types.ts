@@ -322,6 +322,27 @@ export interface VizPlatformEventPage {
   nextBefore: number | null;
 }
 
+/**
+ * WHAT THE SENTINEL SEES. The rule table, the runs it would screen right now
+ * across both corpora, the candidates it had to skip, and its own findings.
+ *
+ * Deliberately NOT a health check: nothing here says a sentinel process is
+ * running. The server cannot know that, and a green light it cannot justify
+ * is worse than none.
+ */
+export interface VizSentinelSnapshot {
+  rules: { id: string; kind: string }[];
+  live: {
+    runId: string;
+    corpus: 'operator' | 'project';
+    orgId: string | null;
+    projectId: string | null;
+    label: string | null;
+  }[];
+  skipped: { runId: string | null; reason: string }[];
+  findings: VizPlatformEvent[];
+}
+
 /** The product ledger's tail — a separate journal, never merged with the above. */
 export interface VizLedgerEvent {
   at: string;

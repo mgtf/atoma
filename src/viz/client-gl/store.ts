@@ -9,7 +9,21 @@ export type ViewName =
   | 'burnin'
   | 'docs'
   | 'admin'
+  | 'journal'
+  | 'ledger'
+  | 'sentinel'
   | 'settings';
+
+/**
+ * The admin plane, one view per JOB rather than one tab holding four.
+ *
+ * `admin` keeps its key (organisations and invitations) because it is the
+ * stored scroll key, the doc theme and the route every existing link uses;
+ * its LABEL is what changed. The journal, the catalogue ledger and the
+ * sentinel each answer a different question and each needs its own scroll
+ * position and its own filters — which one stacked view could not give them.
+ */
+export const ADMIN_VIEWS: readonly ViewName[] = ['admin', 'journal', 'ledger', 'sentinel'];
 
 /**
  * ONE definition of which nav tabs a viewer gets — the DOM tablist and the
@@ -32,7 +46,7 @@ export type ViewName =
 export function visibleViews(auth: { viewer: { platformAdmin: boolean } } | null): ViewName[] {
   if (!auth) return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
   if (auth.viewer.platformAdmin) {
-    return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', 'admin'];
+    return ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', ...ADMIN_VIEWS];
   }
   return ['projects', 'runs', 'docs'];
 }
@@ -144,6 +158,9 @@ export interface GpuUiState {
   burninOutcome: string;
   burninPreset: string;
   burninPage: number;
+  /** Journal filters. Server-side: filtering paged rows would thin the pages. */
+  journalSeverity: string;
+  journalFamily: string;
   selectedDocsTheme: DocsThemeKey;
   scrollY: Record<ViewName, number>;
   /**
@@ -179,6 +196,7 @@ export interface GpuUiState {
   setRunPickerActiveIndex: (value: number) => void;
   setBurninFilter: (kind: 'family' | 'outcome' | 'preset', value: string) => void;
   setBurninPage: (page: number) => void;
+  setJournalFilter: (kind: 'severity' | 'family', value: string) => void;
   selectDocsTheme: (theme: DocsThemeKey) => void;
   setScrollY: (view: ViewName, value: number) => void;
 }
@@ -228,6 +246,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   burninOutcome: 'all',
   burninPreset: 'all',
   burninPage: 1,
+  journalSeverity: 'all',
+  journalFamily: 'all',
   selectedDocsTheme: 'runs',
   scrollY: {
     projects: 0,
@@ -237,6 +257,9 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     burnin: 0,
     docs: 0,
     admin: 0,
+    journal: 0,
+    ledger: 0,
+    sentinel: 0,
     settings: 0,
   },
   entered: false,
@@ -324,6 +347,13 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
       burninPage: 1,
     } as Partial<GpuUiState>),
   setBurninPage: (burninPage) => set({ burninPage }),
+  // A changed filter is a different query, so the old scroll position points
+  // into rows that are no longer there: back to the top with it.
+  setJournalFilter: (kind, value) =>
+    set((state) => ({
+      ...(kind === 'severity' ? { journalSeverity: value } : { journalFamily: value }),
+      scrollY: { ...state.scrollY, journal: 0 },
+    })),
   selectDocsTheme: (selectedDocsTheme) => set({ selectedDocsTheme }),
   setScrollY: (view, value) =>
     set((state) => {

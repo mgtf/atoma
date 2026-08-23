@@ -341,3 +341,12 @@ export function runSentinelRules(
 export function sentinelRuleIds(): string[] {
   return RULES.map((rule) => rule.id);
 }
+
+/**
+ * The table as DATA, for a reader that wants to show what is being screened
+ * for. Ids and kinds only: a rule's prose belongs to the UI catalog, not
+ * beside its predicate, and its `check` is not something a reader may hold.
+ */
+export function sentinelRuleTable(): { id: string; kind: SentinelKind }[] {
+  return RULES.map((rule) => ({ id: rule.id, kind: rule.kind }));
+}

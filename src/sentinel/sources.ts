@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { VizRunIndexEntry } from '../viz/trace.js';
-import { ABANDONED_AFTER_MS, isIndexEntryLive } from '../viz/client/run-utils.js';
+import { ABANDONED_AFTER_MS, isIndexEntryLive } from '../viz/liveness.js';
 
 /**
  * WHO IS RUNNING RIGHT NOW — the sentinel's discovery sources, and the

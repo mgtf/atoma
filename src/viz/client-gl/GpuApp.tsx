@@ -28,8 +28,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
 import {
   useAccountModels,
-  useAdminEvents,
+  useAdminEventsPages,
   useAdminLedger,
+  useAdminSentinel,
   useAdminOrganisations,
   useBurnin,
   useOrganisation,
@@ -306,11 +307,26 @@ function GpuAppContent({
   const adminOrganisationsQuery = useAdminOrganisations(
     state.view === 'admin' && isPlatformAdmin
   );
-  // The journal and the ledger tail ride the same admin-only gate as the
-  // organisation list: the server 403s them for anyone else, and a poisoned
-  // query would take the whole view's error banner with it.
-  const adminEventsQuery = useAdminEvents(state.view === 'admin' && isPlatformAdmin);
-  const adminLedgerQuery = useAdminLedger(state.view === 'admin' && isPlatformAdmin);
+  // The journal, the ledger tail and the sentinel read ride the same
+  // admin-only gate as the organisation list: the server 403s them for anyone
+  // else, and a poisoned query would take the whole view's error banner with
+  // it. Each is enabled on ITS OWN view now — the three used to load together
+  // because they shared one tab, which meant opening Admin fetched three
+  // things to show one.
+  const adminEventsQuery = useAdminEventsPages(state.view === 'journal' && isPlatformAdmin, {
+    severity: state.journalSeverity,
+    family: state.journalFamily,
+  });
+  const adminLedgerQuery = useAdminLedger(state.view === 'ledger' && isPlatformAdmin);
+  const adminSentinelQuery = useAdminSentinel(state.view === 'sentinel' && isPlatformAdmin);
+  // ONE way to ask for the next page, so the wheel gesture and the button
+  // cannot diverge. React Query makes a second call while one is in flight a
+  // no-op, and `hasNextPage` false makes it a no-op too — which is what lets
+  // the wheel announce the bottom on every tick without consequence.
+  const loadOlderEvents = useCallback(() => {
+    if (!adminEventsQuery.hasNextPage || adminEventsQuery.isFetchingNextPage) return;
+    void adminEventsQuery.fetchNextPage();
+  }, [adminEventsQuery]);
   const [adminInvitation, setAdminInvitation] = useState<VizAdminInvitation | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
   const mintInvitation = useCallback(async (orgId: string, role: string) => {
@@ -606,6 +622,26 @@ function GpuAppContent({
       window.location.assign(loginHref(id.slice('login.provider.'.length)));
       return;
     }
+    if (id.startsWith('journal.severity.')) {
+      store.setJournalFilter('severity', id.slice('journal.severity.'.length));
+      return;
+    }
+    if (id.startsWith('journal.family.')) {
+      store.setJournalFilter('family', id.slice('journal.family.'.length));
+      return;
+    }
+    // The gesture and the button, one handler. `scroll.end.<view>` is the
+    // renderer saying a downward wheel had nowhere left to go.
+    if (id === 'journal.more' || id === 'scroll.end.journal') {
+      loadOlderEvents();
+      return;
+    }
+    if (id.startsWith('scroll.end.')) return;
+    if (id.startsWith('sentinel.run.')) {
+      store.selectRun(id.slice('sentinel.run.'.length));
+      store.setView('runs');
+      return;
+    }
     if (id.startsWith('admin.invite.')) {
       const rest = id.slice('admin.invite.'.length);
       const separator = rest.indexOf('.');
@@ -617,6 +653,7 @@ function GpuAppContent({
   }, [
     activateAuth,
     beginEnter,
+    loadOlderEvents,
     loginHref,
     mintInvitation,
     profilesQuery.data,
@@ -630,6 +667,12 @@ function GpuAppContent({
     (state.view === 'skills' && namespacesQuery.isLoading) ||
     (state.view === 'burnin' && burninQuery.isLoading) ||
     (state.view === 'admin' && adminOrganisationsQuery.isLoading) ||
+    // The FIRST page only. A later page loads under a foot-of-list notice
+    // inside the view; swapping the whole screen for "loading" while the
+    // viewer reads row 300 would throw their place away.
+    (state.view === 'journal' && adminEventsQuery.isLoading) ||
+    (state.view === 'ledger' && adminLedgerQuery.isLoading) ||
+    (state.view === 'sentinel' && adminSentinelQuery.isLoading) ||
     (state.view === 'settings' && (organisationQuery.isLoading || accountModelsQuery.isLoading));
   const error = errorMessage([
     runsQuery.error,
@@ -649,6 +692,7 @@ function GpuAppContent({
     accountModelsQuery.error,
     adminEventsQuery.error,
     adminLedgerQuery.error,
+    adminSentinelQuery.error,
   ]);
   const data = useMemo(() => ({
     auth: authSnapshot,
@@ -665,8 +709,11 @@ function GpuAppContent({
     projectRuns,
     githubInstallations: githubInstallationsQuery.data ?? [],
     adminOrganisations: adminOrganisationsQuery.data ?? [],
-    adminEvents: adminEventsQuery.data?.events ?? [],
+    adminEvents: adminEventsQuery.data?.pages.flatMap((page) => page.events) ?? [],
+    adminEventsHasMore: adminEventsQuery.hasNextPage === true,
+    adminEventsLoading: adminEventsQuery.isFetchingNextPage === true,
     adminLedger: adminLedgerQuery.data?.events ?? [],
+    adminSentinel: adminSentinelQuery.data ?? null,
     adminInvitation,
     adminError,
     organisation: organisationQuery.data ?? null,
@@ -682,7 +729,10 @@ function GpuAppContent({
     adminInvitation,
     adminOrganisationsQuery.data,
     adminEventsQuery.data,
+    adminEventsQuery.hasNextPage,
+    adminEventsQuery.isFetchingNextPage,
     adminLedgerQuery.data,
+    adminSentinelQuery.data,
     authSnapshot,
     organisationQuery.data,
     login,

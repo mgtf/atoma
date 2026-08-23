@@ -24,6 +24,7 @@ import type {
   VizLedgerEvent,
   VizOrganisation,
   VizPlatformEvent,
+  VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -84,10 +85,20 @@ export interface GpuDataSnapshot {
   adminOrganisations: VizAdminOrganisation[];
   adminInvitation: VizAdminInvitation | null;
   adminError: string | null;
-  /** The platform audit journal, newest first. */
+  /**
+   * The platform audit journal, newest first — every page loaded so far,
+   * flattened. The Journal view scrolls one continuous list, so the page
+   * boundaries are the fetch's business and not the view's.
+   */
   adminEvents: VizPlatformEvent[];
-  /** The product ledger's tail — a separate journal in the same tab. */
+  /** Whether the server said there is an older page after the ones loaded. */
+  adminEventsHasMore: boolean;
+  /** A page is in flight: the list foot says so instead of offering it again. */
+  adminEventsLoading: boolean;
+  /** The product ledger's tail — a SEPARATE journal, in its own view. */
   adminLedger: VizLedgerEvent[];
+  /** Rule table, live coverage and findings for the Sentinel view. */
+  adminSentinel: VizSentinelSnapshot | null;
   /** The viewer's own organisation — the Settings org card. */
   organisation: VizOrganisation | null;
   /** Per-tier model pins plus the operator defaults to label them against. */
@@ -208,6 +219,9 @@ import { drawBurnin } from './renderer/views/burnin.js';
 import { drawDocs } from './renderer/views/docs.js';
 import { drawProjects } from './renderer/views/projects.js';
 import { drawAdmin } from './renderer/views/admin.js';
+import { drawJournal } from './renderer/views/journal.js';
+import { drawLedger } from './renderer/views/ledger.js';
+import { drawSentinel } from './renderer/views/sentinel.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
@@ -423,6 +437,15 @@ export class GpuRenderer {
     const maximum = this.scrollMax[view] ?? 0;
     const next = Math.max(0, Math.min(maximum, current + event.deltaY));
     this.snapshot.onScroll(view, next - current);
+    // REACHED THE BOTTOM. The wheel handler is the only place that knows a
+    // view's scroll maximum, so it is the only place that can say a downward
+    // wheel had nowhere left to go — which is what "continuous scroll" needs
+    // in order to ask for the next page. Announced through the ordinary
+    // activation channel rather than a second callback; the handler makes it
+    // idempotent (a fetch already in flight, or no next page, is a no-op).
+    if (event.deltaY > 0 && maximum > 0 && next >= maximum) {
+      this.snapshot.onActivate(`scroll.end.${view}`);
+    }
   };
 
   /**
@@ -912,6 +935,15 @@ export class GpuRenderer {
             break;
           case 'admin':
             drawAdmin(this, snapshot, contentWidth, height);
+            break;
+          case 'journal':
+            drawJournal(this, snapshot, contentWidth, height);
+            break;
+          case 'ledger':
+            drawLedger(this, snapshot, contentWidth, height);
+            break;
+          case 'sentinel':
+            drawSentinel(this, snapshot, contentWidth, height);
             break;
           case 'runs':
             drawRuns(this, snapshot, contentWidth, height);

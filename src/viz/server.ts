@@ -77,6 +77,12 @@ import { NotificationRouter } from './push/router.js';
 import { asPushLocale } from './push/routes.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
+import { sentinelRuleTable } from '../sentinel/rules.js';
+import {
+  operatorRunSource,
+  projectRunSource,
+  type SentinelDiscovery,
+} from '../sentinel/sources.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -1979,8 +1985,64 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
               ? { severity: url.searchParams.get('severity')! }
               : {}),
             ...(url.searchParams.get('orgId') ? { orgId: url.searchParams.get('orgId')! } : {}),
+            // FAMILY, not kind: 28 kinds is not a filter row, and the family
+            // list is derived from the kind vocabulary rather than written a
+            // second time. An unknown family is dropped by `list`, which
+            // checks it against that closed set before it reaches SQL.
+            ...(url.searchParams.get('family')
+              ? { kindFamily: url.searchParams.get('family')! }
+              : {}),
           })
         );
+        return;
+      }
+      // WHAT THE SENTINEL SEES — the rule table, the runs it would screen
+      // right now, and its own findings. Read-only and quota-free, like the
+      // watch itself. This endpoint does NOT prove a sentinel process is
+      // running: nothing here is a heartbeat, and inventing one would be a
+      // claim the server cannot make. It answers "what is in flight, and
+      // what has been flagged".
+      if (pathname === '/api/admin/sentinel') {
+        if (!methodAllowed(req, res, 'GET')) return;
+        const discovery: SentinelDiscovery[] = [];
+        const now = Date.now();
+        for (const source of [
+          operatorRunSource({ runsDir: RUNS_DIR }),
+          ...(PROJECTS_RUNTIME
+            ? [projectRunSource({ reader: PROJECTS_RUNTIME.store })]
+            : []),
+        ]) {
+          try {
+            discovery.push(source.discover(now));
+          } catch {
+            // One unreadable corpus must not empty the whole screen.
+            discovery.push({ runs: [], skipped: [{ runId: null, reason: `${source.corpus} source unreadable` }] });
+          }
+        }
+        // Two kinds, two queries, merged newest-first: `list` filters one
+        // kind or one family, and these two share neither.
+        const findings = EVENTS
+          ? [
+              ...EVENTS.list({ kind: 'run.anomaly', limit: 40 }).events,
+              ...EVENTS.list({ kind: 'security.flagged', limit: 40 }).events,
+            ]
+              .sort((left, right) => right.seq - left.seq)
+              .slice(0, 60)
+          : [];
+        sendJson(res, 200, {
+          rules: sentinelRuleTable(),
+          live: discovery.flatMap((entry) =>
+            entry.runs.map((run) => ({
+              runId: run.runId,
+              corpus: run.corpus,
+              orgId: run.orgId,
+              projectId: run.projectId,
+              label: run.label,
+            }))
+          ),
+          skipped: discovery.flatMap((entry) => entry.skipped),
+          findings,
+        });
         return;
       }
       // The PRODUCT ledger's tail, as a SEPARATE read (decision 4). The two

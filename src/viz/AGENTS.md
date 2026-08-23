@@ -82,8 +82,17 @@ npm run viz:mark-turn:analyze
   `release:check`; it skips loudly rather than reporting "cannot observe" as
   "verified", and fails if its preconditions never arm. `?atomaDiag=1` exposes
   the read-only renderer handle those smokes need; it is inert otherwise.
-- `isRunLive` / `isIndexEntryLive` are the only live predicates. The abandoned
-  threshold exceeds plausible LLM/tool activity (currently 12 minutes).
+- `isRunLive` / `isIndexEntryLive` are the only live predicates, and they live
+  in `src/viz/liveness.ts`, OUTSIDE `client/`, because server-side readers ask
+  the same question (the sentinel's operator source). `client/run-utils.ts`
+  re-exports them, so there is one definition behind both import paths. The
+  abandoned threshold exceeds plausible LLM/tool activity (currently 12 min).
+- NOTHING outside `client/` and `client-gl/` may import `src/viz/client/*` at
+  runtime. `viz:build` EMPTIES `dist/viz/client/`, so the `.js` tsc emitted
+  there is gone by the end of `npm run build` and a compiled server importing
+  it dies with ERR_MODULE_NOT_FOUND — invisible to typecheck, lint and
+  `tests/`, all of which run from source. `tests/viz-client-bundle-boundary`
+  is the cheap guard; `viz:smoke` is the behavioural proof.
 - Runs rails remain aligned to viewport projection. Never apply scene parallax
   to causal timeline geometry.
 - `runStatus` is the ONE definition of what happened to a run, and every
@@ -124,6 +133,41 @@ npm run viz:mark-turn:analyze
   unroutable-view fallback lands on Projects too. On the ungated developer path
   project routes do not exist, so Projects shows its explanatory empty state
   and the DOM mutation form is absent.
+- The ADMIN PLANE is FOUR views, one per job — Organisations (`admin`), the
+  platform journal, the catalogue ledger, and the Sentinel — grouped under one
+  nav heading. It used to be one tab with the journal and the ledger stacked
+  under the organisation list: three questions on one screen, and the journal
+  had no scroll position of its own so it could never page past its first
+  page. `ADMIN_VIEWS` in `store.ts` is the one list, and the rail reads it.
+  Each view's query is enabled on ITS OWN view; opening one must not fetch the
+  other three.
+- The journal PAGES and FILTERS SERVER-SIDE. `nextBefore` is an exclusive
+  `seq` cursor, so a page boundary can neither repeat nor skip a row the way
+  an offset over a growing table would; filters ride the query key. Filtering
+  loaded pages client-side would THIN each page instead of finding more
+  matching rows — three security events shown where the journal holds three
+  hundred. Filters are two closed vocabularies: severity, and the kind's
+  FAMILY (`PLATFORM_EVENT_FAMILIES`, derived from the kind list rather than
+  written a second time). Live tailing polls only while ONE page is loaded:
+  React Query refetches every loaded page, so tailing a ten-page history would
+  re-fetch ten pages every ten seconds to learn about one row.
+  Reaching the bottom asks for the next page — the wheel handler is the only
+  place that knows a view's scroll maximum, so it announces `scroll.end.<view>`
+  through the ordinary activation channel, and the handler is idempotent. The
+  foot-of-list button is the same page by keyboard, not a fallback.
+- The SENTINEL view shows what is watched, what is looked for, and what was
+  flagged — and claims NOTHING else. There is no health indicator: the watch
+  is a separate process (`npm run sentinel`) that the server cannot see, and a
+  green light nothing backs is worse than none. There is no control either: a
+  finding is a flag, never a judgment, and whether the sentinel may cancel a
+  run is still an open decision, so no button here may. Its coverage list
+  spans BOTH run corpora — see [`src/sentinel`](../sentinel/AGENTS.md).
+- The agent detail pane names its sections. It showed the system prompt as one
+  unlabelled monospace block and nothing else, while the payload already
+  carried elements, parameters and provenance. The USER INSTRUCTION has a
+  heading and no body on purpose: it is composed per call from the task, the
+  plan and injected skills, so it belongs to a run — the heading points at an
+  LLM event in Runs rather than inventing a template nobody ever sent.
 - The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.
   `visibleViews` remains the ONE definition of which tabs a viewer gets; the
   rail only groups them, and a test holds the group list to it so a new view

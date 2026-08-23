@@ -1,4 +1,9 @@
-import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { useRef } from 'react';
 import { api } from '../client/data-api.js';
 import { isRunLive, mergeRunDelta } from '../client/run-utils.js';
@@ -175,17 +180,54 @@ export function useAdminOrganisations(active: boolean) {
 }
 
 /**
- * The audit journal. Polled on a 10s cadence rather than the 2s the runs
- * index uses: an audit trail is read, not watched, and every refetch here is
- * a full page of rows the operator did not ask to re-render.
+ * THE AUDIT JOURNAL, paged. One page per scroll to the bottom, newest first,
+ * with the server's `nextBefore` as the cursor — so a page boundary can
+ * neither repeat nor skip a row the way an offset over a growing table would.
+ *
+ * Filters live in the QUERY KEY, not in a client-side filter over loaded
+ * pages: filtering after paging would thin each page instead of finding more
+ * matching rows, and a viewer would see three matches where the journal holds
+ * three hundred.
+ *
+ * Polling stops once the viewer has paged. React Query refetches EVERY loaded
+ * page on an interval, so tailing a ten-page history would re-fetch ten pages
+ * every ten seconds to learn about one new row. Page one tails; deeper
+ * history is history.
  */
-export function useAdminEvents(active: boolean) {
-  return useQuery({
-    queryKey: ['viz', 'admin', 'events'],
-    queryFn: () => api.adminEvents(),
+export function useAdminEventsPages(
+  active: boolean,
+  filters: { severity: string; family: string }
+) {
+  return useInfiniteQuery({
+    queryKey: ['viz', 'admin', 'events', filters.severity, filters.family],
+    queryFn: ({ pageParam }) =>
+      api.adminEvents({
+        limit: 60,
+        before: pageParam,
+        severity: filters.severity,
+        family: filters.family,
+      }),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextBefore ?? undefined,
     enabled: active,
     staleTime: 10_000,
-    refetchInterval: active ? 10_000 : false,
+    refetchInterval: (query) =>
+      active && (query.state.data?.pages.length ?? 1) === 1 ? 10_000 : false,
+  });
+}
+
+/**
+ * The sentinel's own screen: rule table, live coverage, findings. Polled at
+ * the runs cadence rather than the journal's, because half of it IS live
+ * state — which runs are in flight right now.
+ */
+export function useAdminSentinel(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'admin', 'sentinel'],
+    queryFn: api.adminSentinel,
+    enabled: active,
+    staleTime: 2_000,
+    refetchInterval: active ? 5_000 : false,
   });
 }
 

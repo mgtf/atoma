@@ -99,6 +99,25 @@ export const platformEventKindSchema = z.enum([
   'push.unsubscribed',
 ]);
 
+export const PLATFORM_EVENT_KINDS = platformEventKindSchema.options;
+
+/**
+ * The kind vocabulary's own first segment, DERIVED rather than listed.
+ *
+ * A journal with 28 kinds cannot be filtered one chip per kind, and a
+ * hand-written family list would be a second vocabulary to keep in step —
+ * exactly the one-concept-two-definitions drift the 2026-08-14 review
+ * measured. Adding a kind adds its family for free; removing the last kind of
+ * a family removes it.
+ */
+export const PLATFORM_EVENT_FAMILIES: readonly string[] = [
+  ...new Set(PLATFORM_EVENT_KINDS.map((kind) => kind.split('.')[0]!)),
+].sort();
+
+export function isPlatformEventFamily(value: string): boolean {
+  return PLATFORM_EVENT_FAMILIES.includes(value);
+}
+
 export const platformEventSeveritySchema = z.enum(['info', 'warning', 'error', 'security']);
 
 /**

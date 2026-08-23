@@ -12,6 +12,7 @@ import type {
   VizAdminOrganisation,
   VizLedgerEvent,
   VizPlatformEventPage,
+  VizSentinelSnapshot,
   VizGitHubInstallation,
   VizProject,
   VizProjectRun,
@@ -75,8 +76,25 @@ export const api = {
   unsubscribePush: (body: { endpoint: string }) =>
     mutateJson<{ removed: boolean }>('/api/push/unsubscribe', body),
   adminOrganisations: () => fetchJson<VizAdminOrganisation[]>('/api/admin/organisations'),
-  adminEvents: (limit = 60) =>
-    fetchJson<VizPlatformEventPage>(`/api/admin/events?limit=${encodeURIComponent(limit)}`),
+  // The journal reads as PAGES, newest first: `before` is the exclusive `seq`
+  // cursor the previous page handed back, so a boundary can neither repeat
+  // nor skip a row. Filters are server-side for the same reason — filtering
+  // an already-paged list client-side would silently thin the pages.
+  adminEvents: (
+    query: {
+      limit?: number;
+      before?: number | null;
+      severity?: string;
+      family?: string;
+    } = {}
+  ) => {
+    const params = new URLSearchParams({ limit: String(query.limit ?? 60) });
+    if (query.before) params.set('before', String(query.before));
+    if (query.severity && query.severity !== 'all') params.set('severity', query.severity);
+    if (query.family && query.family !== 'all') params.set('family', query.family);
+    return fetchJson<VizPlatformEventPage>(`/api/admin/events?${params.toString()}`);
+  },
+  adminSentinel: () => fetchJson<VizSentinelSnapshot>('/api/admin/sentinel'),
   // A SEPARATE read of the product ledger, never a merge with the journal
   // above: the two answer different questions and only share a tab.
   adminLedger: (limit = 20) =>

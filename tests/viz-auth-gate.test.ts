@@ -763,7 +763,7 @@ describe('viz auth gate (process level)', () => {
     const cookie = { cookie: jar.header(base)! };
 
     // Before the grant the journal is operator-level state, like the registry.
-    for (const path of ['/api/admin/events', '/api/admin/ledger']) {
+    for (const path of ['/api/admin/events', '/api/admin/ledger', '/api/admin/sentinel']) {
       expect((await fetch(`${base}${path}`, { headers: cookie })).status).toBe(403);
     }
 
@@ -843,12 +843,54 @@ describe('viz auth gate (process level)', () => {
     expect((await read('?limit=99999')).events.length).toBeGreaterThan(0);
     expect((await read('?limit=notanumber')).events.length).toBeGreaterThan(0);
 
-    // The product ledger is a SEPARATE read in the same tab, never a merge.
+    // FAMILY, the filter the journal screen actually offers: 28 kinds is not a
+    // chip row. It is a prefix match over a CLOSED vocabulary, so an unknown
+    // family is ignored rather than reaching SQL as a pattern.
+    const byFamily = await read('?family=org');
+    expect(byFamily.events.length).toBeGreaterThan(0);
+    expect(byFamily.events.every((event) => event.kind.startsWith('org.'))).toBe(true);
+    expect(
+      (await read('?family=admin')).events.every((event) => event.kind.startsWith('admin.'))
+    ).toBe(true);
+    expect((await read("?family=%25")).events.length).toBeGreaterThan(0);
+    expect((await read('?family=nonsense')).events.length).toBeGreaterThan(0);
+
+    // The product ledger is a SEPARATE read from the journal, never a merge.
     const ledger = await fetch(`${base}/api/admin/ledger?limit=5`, { headers: cookie });
     expect(ledger.status).toBe(200);
     const ledgerBody = (await ledger.json()) as { events: unknown[] };
     expect(Array.isArray(ledgerBody.events)).toBe(true);
     expect(ledgerBody).not.toHaveProperty('nextBefore');
+
+    // THE SENTINEL READ. Rule table, runs in flight across both corpora, and
+    // findings — and NOTHING that claims the watch process is running, which
+    // this server cannot know.
+    const sentinel = await fetch(`${base}/api/admin/sentinel`, { headers: cookie });
+    expect(sentinel.status).toBe(200);
+    const sentinelBody = (await sentinel.json()) as {
+      rules: { id: string; kind: string }[];
+      live: { runId: string; corpus: string }[];
+      skipped: { runId: string | null; reason: string }[];
+      findings: { kind: string }[];
+    };
+    expect(sentinelBody.rules.length).toBeGreaterThan(0);
+    expect(sentinelBody.rules.map((rule) => rule.id)).toContain('injection-signature');
+    expect(
+      sentinelBody.rules.every(
+        (rule) => rule.kind === 'run.anomaly' || rule.kind === 'security.flagged'
+      )
+    ).toBe(true);
+    expect(Array.isArray(sentinelBody.live)).toBe(true);
+    expect(Array.isArray(sentinelBody.skipped)).toBe(true);
+    // Findings are journal rows of exactly the two sentinel kinds; this
+    // instance has none, and an empty list is the answer, not an error.
+    expect(
+      sentinelBody.findings.every(
+        (finding) => finding.kind === 'run.anomaly' || finding.kind === 'security.flagged'
+      )
+    ).toBe(true);
+    // A rule's `check` is not something a reader may hold.
+    expect(JSON.stringify(sentinelBody.rules)).not.toContain('check');
   });
 
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {

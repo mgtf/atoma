@@ -80,6 +80,10 @@ import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import { GPU_LAYOUT, sidebarWidthForViewport } from '../src/viz/client-gl/theme.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
+import { drawJournal, JOURNAL_SEVERITIES } from '../src/viz/client-gl/renderer/views/journal.js';
+import { drawLedger } from '../src/viz/client-gl/renderer/views/ledger.js';
+import { drawSentinel } from '../src/viz/client-gl/renderer/views/sentinel.js';
+import { PLATFORM_EVENT_FAMILIES } from '../src/contracts/platformEvents.js';
 
 // ---------------------------------------------------------------------------
 // Recording context: implements RendererCtx without a GPU. Pixi Container /
@@ -444,8 +448,10 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     burninOutcome: 'all',
     burninPreset: 'all',
     burninPage: 1,
+    journalSeverity: 'all',
+    journalFamily: 'all',
     selectedDocsTheme: 'runs',
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, settings: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
     enter: noop,
@@ -470,6 +476,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     setRunPickerActiveIndex: noop,
     setBurninFilter: noop,
     setBurninPage: noop,
+    setJournalFilter: noop,
     selectDocsTheme: noop,
     setScrollY: noop,
     ...overrides,
@@ -493,7 +500,10 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     githubInstallations: [],
     adminOrganisations: [],
     adminEvents: [],
+    adminEventsHasMore: false,
+    adminEventsLoading: false,
     adminLedger: [],
+    adminSentinel: null,
     adminInvitation: null,
     adminError: null,
     organisation: null,
@@ -1107,9 +1117,14 @@ describe('visibleViews', () => {
     // them, so the tabs must not exist to poison the global data error.
     // Docs stays: it is static prose, not a fetch of gated data.
     expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'docs']);
+    // The admin plane is FOUR destinations, one per job, not one tab holding
+    // organisations, the journal, the ledger and the sentinel at once.
     expect(
       visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })
-    ).toEqual(['projects', 'runs', 'registry', 'skills', 'burnin', 'docs', 'admin']);
+    ).toEqual([
+      'projects', 'runs', 'registry', 'skills', 'burnin', 'docs',
+      'admin', 'journal', 'ledger', 'sentinel',
+    ]);
   });
 
   it('routes Settings without giving it a tab', () => {
@@ -1246,44 +1261,52 @@ describe('drawAdmin', () => {
     const copiedTop = copied.parent.toGlobal({ x: copied.x, y: copied.y }).y;
     expect(copiedTop + copied.node.height).toBeLessThanOrEqual(panelTop + invitePanel.height);
   });
+});
 
-  it('renders the platform journal newest-first beside the catalogue ledger', () => {
+/**
+ * The admin plane is FOUR views, not one tab with four sections. What these
+ * hold: each screen answers its own question and owns its own scroll max; the
+ * journal pages and filters SERVER-SIDE; and the sentinel screen offers no
+ * control over a run, because a finding flags and never judges.
+ */
+function journalEvent(
+  seq: number,
+  overrides: Partial<import('../src/viz/client/types.js').VizPlatformEvent> = {}
+): import('../src/viz/client/types.js').VizPlatformEvent {
+  return {
+    seq,
+    at: '2026-08-21T10:30:00.000Z',
+    kind: 'publication.failed',
+    severity: 'error',
+    actorType: 'principal',
+    actorId: 'p-1',
+    orgId: 'org-1',
+    projectId: 'proj-1',
+    runId: 'run-1',
+    summary: 'Publication failed: repository unreachable',
+    ...overrides,
+  };
+}
+
+describe('drawJournal', () => {
+  const auth = makeAuth({ platformAdmin: true });
+
+  it('lists events newest-first with its own scroll max', () => {
     const ctx = createRecordingCtx();
-    drawAdmin(
+    drawJournal(
       ctx,
       makeSnapshot(
-        { view: 'admin' },
+        { view: 'journal' },
         {
           auth,
-          adminOrganisations: organisations,
           adminEvents: [
-            {
-              seq: 9,
-              at: '2026-08-21T10:30:00.000Z',
-              kind: 'publication.failed',
-              severity: 'error',
-              actorType: 'principal',
-              actorId: 'p-1',
-              orgId: 'org-1',
-              projectId: 'proj-1',
-              runId: 'run-1',
-              summary: 'Publication failed: repository unreachable',
-            },
-            {
-              seq: 8,
+            journalEvent(9),
+            journalEvent(8, {
               at: '2026-08-21T10:00:00.000Z',
               kind: 'org.created',
               severity: 'info',
-              actorType: 'principal',
-              actorId: 'p-3',
-              orgId: 'org-2',
-              projectId: null,
-              runId: null,
               summary: 'New organisation "Org Two" founded by its first login',
-            },
-          ],
-          adminLedger: [
-            { at: '2026-08-21T09:00:00.000Z', kind: 'promote', entity: 'Water/web-build-loop' },
+            }),
           ],
         }
       ),
@@ -1293,43 +1316,32 @@ describe('drawAdmin', () => {
     const values = ctx.texts.map((text) => text.value);
     expect(values).toContain('publication.failed');
     expect(values).toContain('org.created');
-    // Newest first: the later event is drawn above the earlier one.
     const failed = ctx.texts.find((text) => text.value === 'publication.failed')!;
     const created = ctx.texts.find((text) => text.value === 'org.created')!;
     expect(failed.y).toBeLessThan(created.y);
-    // Times render as a clock, not a raw ISO instant.
-    expect(values).toContain('10:30:00');
-    // The two journals are both present and separately headed.
-    expect(values.some((value) => value.includes('Platform journal'))).toBe(true);
-    expect(values.some((value) => value.includes('Catalogue ledger'))).toBe(true);
-    expect(values).toContain('Water/web-build-loop');
-    expect(ctx.scrollMax.admin).not.toBeUndefined();
+    // An absolute stamp: this list spans more than the last few minutes.
+    expect(values).toContain('2026-08-21 10:30:00');
+    expect(ctx.scrollMax.journal).not.toBeUndefined();
   });
 
   it('renders a kind and severity this bundle does not know, rather than hiding the row', () => {
     // The server's vocabulary can be newer than the client's. Blinding the
     // audit surface is a worse failure than an unfamiliar label.
     const ctx = createRecordingCtx();
-    drawAdmin(
+    drawJournal(
       ctx,
       makeSnapshot(
-        { view: 'admin' },
+        { view: 'journal' },
         {
           auth,
-          adminOrganisations: [],
           adminEvents: [
-            {
-              seq: 1,
+            journalEvent(1, {
               at: 'not-an-instant',
               kind: 'quota.exceeded',
               severity: 'critical',
               actorType: 'system',
-              actorId: null,
-              orgId: null,
-              projectId: null,
-              runId: null,
               summary: 'from a newer build',
-            },
+            }),
           ],
         }
       ),
@@ -1339,20 +1351,229 @@ describe('drawAdmin', () => {
     const values = ctx.texts.map((text) => text.value);
     expect(values).toContain('quota.exceeded');
     expect(values).toContain('from a newer build');
-    // An unparseable instant degrades to its raw text, never to "Invalid Date".
     expect(values.some((value) => value.includes('Invalid'))).toBe(false);
     expect(values).toContain('not-an-instant');
   });
 
-  it('says so when nothing has been recorded yet', () => {
+  it('offers every severity and every kind family as a filter chip', () => {
+    // Derived vocabularies, both of them: a chip list written by hand would be
+    // a second definition to keep in step with the contract.
     const ctx = createRecordingCtx();
-    drawAdmin(
+    drawJournal(
       ctx,
-      makeSnapshot({ view: 'admin' }, { auth, adminOrganisations: organisations }),
+      makeSnapshot({ view: 'journal', journalSeverity: 'security' }, { auth }),
       1280,
       720
     );
-    expect(ctx.texts.some((text) => text.value.includes('Nothing recorded yet'))).toBe(true);
+    const ids = ctx.filterButtons.map((button) => button.id);
+    for (const severity of JOURNAL_SEVERITIES) {
+      expect(ids).toContain(`journal.severity.${severity}`);
+    }
+    for (const family of PLATFORM_EVENT_FAMILIES) {
+      expect(ids).toContain(`journal.family.${family}`);
+    }
+    const active = ctx.filterButtons.filter((button) => button.active);
+    expect(active.map((button) => button.id)).toContain('journal.severity.security');
+  });
+
+  it('offers the next page only while the server says there is one', () => {
+    const withMore = createRecordingCtx();
+    drawJournal(
+      withMore,
+      makeSnapshot(
+        { view: 'journal' },
+        { auth, adminEvents: [journalEvent(1)], adminEventsHasMore: true }
+      ),
+      1280,
+      720
+    );
+    expect(withMore.buttons.map((button) => button.id)).toContain('journal.more');
+
+    const atEnd = createRecordingCtx();
+    drawJournal(
+      atEnd,
+      makeSnapshot(
+        { view: 'journal' },
+        { auth, adminEvents: [journalEvent(1)], adminEventsHasMore: false }
+      ),
+      1280,
+      720
+    );
+    expect(atEnd.buttons.map((button) => button.id)).not.toContain('journal.more');
+    expect(atEnd.texts.some((text) => text.value.includes('whole journal'))).toBe(true);
+
+    // A page in flight says so instead of offering the same page again.
+    const loading = createRecordingCtx();
+    drawJournal(
+      loading,
+      makeSnapshot(
+        { view: 'journal' },
+        {
+          auth,
+          adminEvents: [journalEvent(1)],
+          adminEventsHasMore: true,
+          adminEventsLoading: true,
+        }
+      ),
+      1280,
+      720
+    );
+    expect(loading.buttons.map((button) => button.id)).not.toContain('journal.more');
+  });
+
+  it('says a filter found nothing rather than "nothing recorded yet"', () => {
+    // Two different facts. An empty journal and an empty filter would read
+    // the same way, and one of them is a filter the viewer can undo.
+    const filtered = createRecordingCtx();
+    drawJournal(
+      filtered,
+      makeSnapshot({ view: 'journal', journalFamily: 'webhook' }, { auth }),
+      1280,
+      720
+    );
+    expect(filtered.texts.some((text) => text.value.includes('matches this filter'))).toBe(true);
+
+    const empty = createRecordingCtx();
+    drawJournal(empty, makeSnapshot({ view: 'journal' }, { auth }), 1280, 720);
+    expect(empty.texts.some((text) => text.value.includes('Nothing recorded yet'))).toBe(true);
+  });
+});
+
+describe('drawLedger', () => {
+  const auth = makeAuth({ platformAdmin: true });
+
+  it('is its own screen, and says what it is not', () => {
+    const ctx = createRecordingCtx();
+    drawLedger(
+      ctx,
+      makeSnapshot(
+        { view: 'ledger' },
+        {
+          auth,
+          adminLedger: [
+            { at: '2026-08-21T09:00:00.000Z', kind: 'promote', entity: 'Water/web-build-loop' },
+          ],
+        }
+      ),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    expect(values).toContain('Water/web-build-loop');
+    expect(values).toContain('promote');
+    expect(values.some((value) => value.includes('separate record'))).toBe(true);
+    expect(ctx.scrollMax.ledger).not.toBeUndefined();
+  });
+
+  it('says the catalogue has learned nothing yet', () => {
+    const ctx = createRecordingCtx();
+    drawLedger(ctx, makeSnapshot({ view: 'ledger' }, { auth }), 1280, 720);
+    expect(ctx.texts.some((text) => text.value.includes('learned nothing'))).toBe(true);
+  });
+});
+
+describe('drawSentinel', () => {
+  const auth = makeAuth({ platformAdmin: true });
+  const snapshotPayload = {
+    rules: [
+      { id: 'cost-alert', kind: 'run.anomaly' },
+      { id: 'injection-signature', kind: 'security.flagged' },
+    ],
+    live: [
+      {
+        runId: 'run-op-1',
+        corpus: 'operator' as const,
+        orgId: null,
+        projectId: null,
+        label: 'build-app: a stopwatch',
+      },
+      {
+        runId: 'run-proj-1',
+        corpus: 'project' as const,
+        orgId: 'org-1',
+        projectId: 'proj-1',
+        label: 'weather-lab',
+      },
+    ],
+    skipped: [{ runId: 'run-proj-2', reason: 'trace not persisted yet' }],
+    findings: [
+      journalEvent(12, {
+        kind: 'run.anomaly',
+        severity: 'warning',
+        actorType: 'system',
+        actorId: null,
+        runId: 'run-op-1',
+        summary: 'validate_html failed 3x with the same error',
+        detail: { ruleId: 'recurring-tool-error', corpus: 'operator', dedupeKey: 'x' },
+      }),
+    ],
+  };
+
+  it('shows both corpora in flight, the rule table, and the findings', () => {
+    const ctx = createRecordingCtx();
+    drawSentinel(
+      ctx,
+      makeSnapshot({ view: 'sentinel' }, { auth, adminSentinel: snapshotPayload }),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    // Both corpora: an operator run and a tenant run, on one screen.
+    expect(values).toContain('OPERATOR');
+    expect(values).toContain('PROJECT');
+    expect(values).toContain('run-op-1');
+    expect(values).toContain('run-proj-1');
+    // The rule table, with its prose from the catalog.
+    expect(values).toContain('cost-alert');
+    expect(values.some((value) => value.includes('not a budget'))).toBe(true);
+    // A finding, with the rule that produced it on its extra line.
+    expect(values.some((value) => value.includes('recurring-tool-error'))).toBe(true);
+    // A candidate seen and skipped is reported, never silently dropped.
+    expect(values.some((value) => value.includes('trace not persisted yet'))).toBe(true);
+    expect(ctx.scrollMax.sentinel).not.toBeUndefined();
+  });
+
+  it('claims no health, and offers no power over a run', () => {
+    // Two invariants in one screen. The watch is a separate process the server
+    // cannot see, so there is no green light; and the sentinel's only possible
+    // power is an unsettled design decision, so no control here may exercise
+    // it. Every button is a navigation to a run.
+    const ctx = createRecordingCtx();
+    drawSentinel(
+      ctx,
+      makeSnapshot({ view: 'sentinel' }, { auth, adminSentinel: snapshotPayload }),
+      1280,
+      720
+    );
+    expect(
+      ctx.texts.some((text) => text.value.includes('cannot tell you whether that process'))
+    ).toBe(true);
+    expect(ctx.texts.some((text) => text.value.includes('never a judgment'))).toBe(true);
+    for (const button of ctx.buttons) {
+      expect(button.id.startsWith('sentinel.run.')).toBe(true);
+    }
+  });
+
+  it('says nothing is in flight and nothing has been flagged, without an error', () => {
+    const ctx = createRecordingCtx();
+    drawSentinel(
+      ctx,
+      makeSnapshot(
+        { view: 'sentinel' },
+        { auth, adminSentinel: { rules: [], live: [], skipped: [], findings: [] } }
+      ),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    expect(values.some((value) => value.includes('No run in flight'))).toBe(true);
+    expect(values.some((value) => value.includes('No finding recorded'))).toBe(true);
+  });
+
+  it('survives a payload that never arrived', () => {
+    const ctx = createRecordingCtx();
+    drawSentinel(ctx, makeSnapshot({ view: 'sentinel' }, { auth }), 1280, 720);
+    expect(ctx.scrollMax.sentinel).not.toBeUndefined();
   });
 });
 
@@ -1996,6 +2217,9 @@ describe('drawRegistry scrolling honesty', () => {
             burnin: 0,
             docs: 0,
             admin: 0,
+            journal: 0,
+            ledger: 0,
+            sentinel: 0,
             settings: 0,
           },
         },
@@ -2016,11 +2240,15 @@ describe('drawRegistry scrolling honesty', () => {
     expect(containersWithMask(ctx.root).length).toBeGreaterThan(0);
   });
 
-  it('draws the shared scrollbar thumb only when the list overflows', () => {
+  it('draws the shared scrollbar thumb only when a pane overflows', () => {
     const overflowing = createRecordingCtx();
     drawRegistry(overflowing, makeSnapshot({ view: 'registry' }, data), WIDTH, HEIGHT);
-    // The list pane overflows (thumb); the default atom's short prompt does not.
-    expect(scrollbarThumbs(overflowing.root).length).toBe(1);
+    // BOTH panes overflow at this height: the tier list, and the detail pane —
+    // which carries elements, parameters, provenance and the system prompt,
+    // not the prompt alone.
+    expect(overflowing.scrollMax.registry).toBeGreaterThan(0);
+    expect(overflowing.detailScrollMax).toBeGreaterThan(0);
+    expect(scrollbarThumbs(overflowing.root).length).toBe(2);
 
     const fitting = createRecordingCtx();
     drawRegistry(
@@ -2037,6 +2265,31 @@ describe('drawRegistry scrolling honesty', () => {
     );
     expect(fitting.scrollMax.registry).toBe(0);
     expect(scrollbarThumbs(fitting.root).length).toBe(0);
+  });
+
+  it('names every section of the agent detail, not just its prompt', () => {
+    // The pane rendered the system prompt as one unlabelled monospace block
+    // and nothing else. Elements, parameters and provenance were payload the
+    // view already had and never showed.
+    const ctx = createRecordingCtx();
+    drawRegistry(
+      ctx,
+      makeSnapshot(
+        { view: 'registry', selectedRegistryAtom: 'Molecule0' },
+        { registries: [REGISTRY_SUMMARY], registry: { registry: REGISTRY_SUMMARY, types: types } }
+      ),
+      WIDTH,
+      900
+    );
+    const values = ctx.texts.map((text) => text.value);
+    for (const heading of ['ELEMENTS', 'PARAMETERS', 'PROVENANCE', 'SYSTEM PROMPT', 'USER INSTRUCTION']) {
+      expect(values, `missing ${heading}`).toContain(heading);
+    }
+    // The user instruction is NAMED and not shown: it is composed per call, so
+    // it belongs to a run. The heading points at the run instead of inventing
+    // a template nobody ever sent.
+    expect(values.some((value) => value.includes('Open an LLM event in Runs'))).toBe(true);
+    expect(values).toContain('You are a helper.');
   });
 
   it('scrolls a long system prompt inside the detail pane', () => {
@@ -2191,7 +2444,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, docs: 0, admin: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
         },
         data
       ),
@@ -2242,7 +2495,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, docs: 0, admin: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
         },
         data
       ),
@@ -2940,6 +3193,9 @@ describe('drawRuns behavior', () => {
             burnin: 0,
             docs: 0,
             admin: 0,
+            journal: 0,
+            ledger: 0,
+            sentinel: 0,
             settings: 0,
           },
         },

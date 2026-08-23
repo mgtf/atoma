@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  isPlatformEventFamily,
   PLATFORM_EVENT_DETAIL_MAX_CHARS,
+  PLATFORM_EVENT_FAMILIES,
   PLATFORM_EVENT_SEVERITY,
   PLATFORM_EVENT_SUMMARY_MAX_CHARS,
   platformEventInputSchema,
@@ -216,6 +218,39 @@ describe('PlatformEventLog paging', () => {
       'publication.failed',
     ]);
     expect(log.list({ orgId: 'org-missing' }).events).toEqual([]);
+  });
+
+  it('filters by kind FAMILY over a closed vocabulary, never as a pattern', () => {
+    // The journal screen filters by family because 28 kinds is not a chip row.
+    // The family list is DERIVED from the kind vocabulary, so a new kind joins
+    // its family for free and no hand-written second list can drift from it.
+    const log = openLog();
+    log.append(login());
+    log.append(login({ kind: 'admin.granted', actorType: 'cli', actorId: null, orgId: null }));
+    log.append(login({ kind: 'run.anomaly', actorType: 'system', actorId: null, orgId: null }));
+    log.append(login({ kind: 'run.finished', actorType: 'system', actorId: null, orgId: null }));
+
+    expect(log.list({ kindFamily: 'run' }).events.map((event) => event.kind)).toEqual([
+      'run.finished',
+      'run.anomaly',
+    ]);
+    expect(log.list({ kindFamily: 'admin' }).events.map((event) => event.kind)).toEqual([
+      'admin.granted',
+    ]);
+    // Every family the contract names is a family this query accepts.
+    for (const family of PLATFORM_EVENT_FAMILIES) {
+      expect(isPlatformEventFamily(family)).toBe(true);
+    }
+    // A family is checked against that set BEFORE it reaches SQL: a LIKE
+    // wildcard is not a family, so it filters nothing rather than matching
+    // everything under the guise of a filter.
+    expect(log.list({ kindFamily: '%' }).events).toHaveLength(4);
+    expect(log.list({ kindFamily: 'run.' }).events).toHaveLength(4);
+    expect(log.list({ kindFamily: 'nonsense' }).events).toHaveLength(4);
+    // And it composes with the other filters rather than replacing them.
+    expect(
+      log.list({ kindFamily: 'run', severity: 'info' }).events.map((event) => event.kind)
+    ).toEqual(['run.finished']);
   });
 
   it('clamps the page size instead of erroring', () => {

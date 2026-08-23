@@ -1,20 +1,18 @@
-import type { RegistryType, RunIndexEntry, VizEvent, VizRun } from './types.js';
+import type { RegistryType, VizEvent, VizRun } from './types.js';
 import { taxonomyForTier } from '../../core/taxonomy.js';
 
-export const ABANDONED_AFTER_MS = 12 * 60 * 1000;
-
-export function isAbandoned(run: VizRun, now = Date.now()): boolean {
-  if (run.endedAt) return false;
-  const latest = Math.max(
-    Date.parse(run.startedAt),
-    ...run.events.map((event) => event.ts || 0)
-  );
-  return now - latest > ABANDONED_AFTER_MS;
-}
-
-export function isRunLive(run: VizRun, now = Date.now()): boolean {
-  return !run.endedAt && !isAbandoned(run, now);
-}
+/**
+ * The live predicates are DEFINED in `../liveness.ts` and re-exported here:
+ * server-side readers need them too, and `client/` is emptied by the Vite
+ * build. One definition, both import paths.
+ */
+export {
+  ABANDONED_AFTER_MS,
+  isAbandoned,
+  isIndexEntryLive,
+  isRunLive,
+} from '../liveness.js';
+import { isAbandoned, isRunLive } from '../liveness.js';
 
 /**
  * LLM calls that have STARTED and not yet returned.
@@ -67,12 +65,6 @@ export function runStatus(run: VizRun, now = Date.now()): RunStatus {
   if (run.cancelled) return 'cancelled';
   if (!run.endedAt) return isAbandoned(run, now) ? 'abandoned' : 'live';
   return run.error ? 'failed' : 'delivered';
-}
-
-export function isIndexEntryLive(entry: RunIndexEntry, now = Date.now()): boolean {
-  if (entry.endedAt || !entry.inFlight) return false;
-  const latest = entry.lastEventAt ?? Date.parse(entry.startedAt);
-  return now - latest <= ABANDONED_AFTER_MS;
 }
 
 export function mergeRunDelta(current: VizRun, incoming: VizRun): VizRun {
