@@ -79,6 +79,7 @@ import {
 import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
 import { GPU_LAYOUT, sidebarWidthForViewport } from '../src/viz/client-gl/theme.js';
+import { buildAtomaMarkFrame } from '../src/viz/client-gl/brand-mark.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
 import { drawJournal, JOURNAL_SEVERITIES } from '../src/viz/client-gl/renderer/views/journal.js';
 import { drawLedger } from '../src/viz/client-gl/renderer/views/ledger.js';
@@ -2275,8 +2276,9 @@ describe('drawRegistry scrolling honesty', () => {
   it('reports the true content bottom for a pane the window cannot fit', () => {
     const ctx = createRecordingCtx();
     drawRegistry(ctx, makeSnapshot({ view: 'registry' }, data), WIDTH, HEIGHT);
-    // Pane math mirrors the view: header 52 + gap 10 = top 62, pane top 154.
-    const paneTop = 62 + 92;
+    // Pane math mirrors the view: the split views start below the header band
+    // plus the standard gap, so this reads the band rather than restating it.
+    const paneTop = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + 92;
     const paneHeight = HEIGHT - 10 - paneTop;
     const finalCursor = 28 + ATOM_COUNT * 37 + 8;
     expect(ctx.scrollMax.registry).toBe(Math.max(0, finalCursor + 12 - paneHeight));
@@ -2401,9 +2403,10 @@ describe('drawRegistry scrolling honesty', () => {
     const rightX = 10 + leftWidth + 10;
     expect(ctx.detailBounds).not.toBeNull();
     expect(ctx.detailBounds!.x).toBe(rightX);
-    expect(ctx.detailBounds!.y).toBe(62);
+    const paneTop = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
+    expect(ctx.detailBounds!.y).toBe(paneTop);
     expect(ctx.detailBounds!.width).toBe(WIDTH - rightX - 10);
-    expect(ctx.detailBounds!.height).toBe(HEIGHT - 62 - 10);
+    expect(ctx.detailBounds!.height).toBe(HEIGHT - paneTop - 10);
     // One atom fits the list, so the only thumb is the detail pane's.
     expect(scrollbarThumbs(ctx.root).length).toBe(1);
   });
@@ -2752,6 +2755,34 @@ describe('attachAtomaMark glass layering', () => {
     expect(glassGlow.mask).toBeTruthy();
     expect(glassGlow.children.map((child) => child.label))
       .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);
+  });
+
+  it('keeps the header crystal inside the bar and clear of the wordmark', () => {
+    // The mark is drawn at (20, 12) with its pivot at the local centre, so the
+    // gem's visual centre is pinned at (34, 26) whatever the scale — only its
+    // extent grows. Two neighbours bound that extent, and the box's nominal
+    // half-width (14) is NOT the bound: the projected hull reaches further at
+    // some turns than others, so the widest turn is what has to fit.
+    let halfWidth = 0;
+    let halfHeight = 0;
+    for (let step = 0; step < 360; step += 1) {
+      for (const point of buildAtomaMarkFrame(step * 40).silhouette) {
+        halfWidth = Math.max(halfWidth, Math.abs(point.x - 14));
+        halfHeight = Math.max(halfHeight, Math.abs(point.y - 14));
+      }
+    }
+    const centreX = GPU_LAYOUT.headerMarkX + 14;
+    const centreY = GPU_LAYOUT.headerHeight / 2;
+    // Inside the header bar, top and bottom, so it never crosses the border
+    // line the bar draws at its own height.
+    expect(centreY - halfHeight * ATOMA_MARK_HEADER_SCALE).toBeGreaterThan(0);
+    expect(centreY + halfHeight * ATOMA_MARK_HEADER_SCALE)
+      .toBeLessThan(GPU_LAYOUT.headerHeight);
+    // And clear of the wordmark by a real gap. This is the pairing that goes
+    // wrong quietly: scaling the mark up eats the space beside it, and nothing
+    // about the text's own position says it was ever meant to be adjacent.
+    const rightEdge = centreX + halfWidth * ATOMA_MARK_HEADER_SCALE;
+    expect(GPU_LAYOUT.headerWordmarkX - rightEdge).toBeGreaterThanOrEqual(8);
   });
 
   it('captures scene reflections only on the hero mark, never by redrawing in-app cards', () => {

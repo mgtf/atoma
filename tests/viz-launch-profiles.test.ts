@@ -165,7 +165,11 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/\n {2}navButton\(/);
     // The brand mark is one Pixi crystal (header + arrival gate); no R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
-    expect(gpuRenderer).toMatch(/this\.drawAtomaMark\(20, 12\)/);
+    // The lockup is placed from named layout, not from numbers that only
+    // happened to centre in the bar height of the day.
+    expect(gpuRenderer).toMatch(
+      /this\.drawAtomaMark\(\s*GPU_LAYOUT\.headerMarkX,\s*midY - ATOMA_MARK_LOCAL_CENTER\s*\)/
+    );
     expect(gpuRenderer).toMatch(/alpha: 0\.42/);
     expect(gpuRenderer).toMatch(/attachAtomaMark\(/);
     expect(gpuRenderer).toMatch(/drawWelcome\(/);

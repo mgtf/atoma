@@ -20,7 +20,23 @@ export const GPU_COLORS = {
 } as const;
 
 export const GPU_LAYOUT = {
-  headerHeight: 52,
+  /**
+   * The identity band. 54, not 52: the brand crystal is 48px tall at
+   * ATOMA_MARK_HEADER_SCALE and a 52px bar left it 2px of air top and bottom,
+   * which read as glued to the top of the screen. Everything the header draws
+   * is placed against headerHeight / 2, so this is the one number to move.
+   */
+  headerHeight: 54,
+  /** Left inset of the brand crystal's local box in the header band. */
+  headerMarkX: 20,
+  /**
+   * Where the wordmark starts. The crystal's hull reaches ~24.6px either side
+   * of its centre at ATOMA_MARK_HEADER_SCALE, so its right edge sits near
+   * x = 58.6 — this leaves it a real gap instead of the 3px the two used to
+   * share. A test holds that clearance, because the gap closes silently
+   * whenever the mark is scaled up and nothing moves the text.
+   */
+  headerWordmarkX: 70,
   /**
    * The nav rail's width. Views draw in their own viewport space starting at
    * 0; `render()` places that space at this offset. Hit targets project

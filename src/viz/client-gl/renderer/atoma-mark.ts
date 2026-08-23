@@ -42,8 +42,17 @@ import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
  */
 export const ATOMA_MARK_LOCAL_CENTER = 14;
 
-/** Header size: a few pixels larger than the local box so the bar mark holds. */
-export const ATOMA_MARK_HEADER_SCALE = 1.7;
+/**
+ * Header size. The hull spans 13.69 local units from the pivot at its widest
+ * turn (measured over a full rotation, not the 12.5 the box suggests), and the
+ * gem's visual centre is pinned at (34, 26) inside a 52px bar with the wordmark
+ * starting at x = 62. So this scale is bounded on two sides at once: 1.8 leaves
+ * ~2.0px above and below the bar and ~3.4px before the "A"; the hard ceiling is
+ * just under 1.9, where the gem reaches the header's own border line and the
+ * wordmark gap falls to 2px. Past that, the wordmark has to move with it — the
+ * bound is held by a test in tests/viz-gpu-views.test.ts, not by this comment.
+ */
+export const ATOMA_MARK_HEADER_SCALE = 1.8;
 
 /**
  * Below this visual scale the gem is a header wordmark: too small to read a
@@ -444,9 +453,9 @@ export function attachAtomaMark(
    * drawn into a texture first, and the shell samples it three times per pixel.
    *
    * Sized from the mark's own box rather than the screen: the crystal occupies a
-   * fixed 28x28 local square, so a header mark at 1.7x needs a 48px texture
+   * fixed 28x28 local square, so a header mark at 1.8x needs a 51px texture
    * while the arrival gate needs a few hundred. Sizing to the viewport would
-   * spend megabytes to refract a 48px logo.
+   * spend megabytes to refract a 51px logo.
    *
    * Skipped entirely without a renderer. The mark must keep working in the
    * headless view tests and anywhere the caller has no renderer to lend, and

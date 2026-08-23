@@ -30,7 +30,11 @@ import type {
   VizProjectRun,
   VizRun,
 } from '../client/types.js';
-import { attachAtomaMark, type AtomaMarkHandle } from './renderer/atoma-mark.js';
+import {
+  ATOMA_MARK_LOCAL_CENTER,
+  attachAtomaMark,
+  type AtomaMarkHandle,
+} from './renderer/atoma-mark.js';
 import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
 import {
   markElapsedMs,
@@ -3199,14 +3203,18 @@ export class GpuRenderer {
     bar.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.55 });
     bar.eventMode = 'none';
     this.root.addChild(bar);
-    this.drawAtomaMark(20, 12);
-    this.text(this.root, 'Atoma', 63, 17.5, {
+    // ONE vertical centre for everything in the band. These offsets used to be
+    // absolute numbers that happened to centre in a 52px bar, so changing the
+    // bar's height would have left its contents sitting high in it.
+    const midY = GPU_LAYOUT.headerHeight / 2;
+    this.drawAtomaMark(GPU_LAYOUT.headerMarkX, midY - ATOMA_MARK_LOCAL_CENTER);
+    this.text(this.root, 'Atoma', GPU_LAYOUT.headerWordmarkX + 1, midY - 8.5, {
       size: 16,
       color: 0x263f68,
       weight: '700',
       alpha: 0.72,
     });
-    this.text(this.root, 'Atoma', 62, 16, {
+    this.text(this.root, 'Atoma', GPU_LAYOUT.headerWordmarkX, midY - 10, {
       size: 16,
       color: GPU_COLORS.text,
       weight: '700',
@@ -3221,14 +3229,14 @@ export class GpuRenderer {
     // the header controls shift left by its width plus a gap.
     const auth = snapshot.data.auth;
     const accountReserve = auth ? HEADER_ORB_SIZE + 16 : 0;
-    this.drawFpsReadout(width - 64 - accountReserve, 26);
+    this.drawFpsReadout(width - 64 - accountReserve, midY);
     this.button(
       this.root,
       'locale.toggle',
       'button',
       snapshot.state.locale === 'en' ? 'EN' : 'FR',
       width - 54 - accountReserve,
-      10,
+      midY - 16,
       42,
       32,
       false,

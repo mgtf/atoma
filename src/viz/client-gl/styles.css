@@ -155,7 +155,7 @@ html.atoma-cursor-active * {
 }
 
 .gpu-run-input {
-  top: 10px;
+  top: 11px;
   left: max(610px, 48vw);
   width: min(420px, calc(100vw - max(610px, 48vw) - 120px));
   height: 32px;
@@ -165,7 +165,7 @@ html.atoma-cursor-active * {
 .gpu-view-search {
   --gpu-left-pane: min(560px, calc((100vw - var(--gpu-sidebar)) * .45));
   --gpu-search-width: min(280px, calc(var(--gpu-left-pane) - 32px));
-  top: 106px;
+  top: 108px;
   left: calc(
     var(--gpu-sidebar) + 10px + var(--gpu-left-pane) - 16px - var(--gpu-search-width)
   );
@@ -185,7 +185,7 @@ html.atoma-cursor-active * {
   --gpu-frame: calc(var(--gpu-content) - 20px);
   position: fixed;
   z-index: 4;
-  top: 108px;
+  top: 110px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
   height: 140px;
@@ -364,7 +364,7 @@ html.atoma-cursor-active * {
    invisible interface. */
 .gpu-a11y-bridge:focus-within {
   z-index: 30;
-  top: 60px;
+  top: 62px;
   left: 12px;
   width: min(360px, calc(100vw - 24px));
   height: auto;
@@ -449,7 +449,7 @@ html.atoma-cursor-active * {
   --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
   position: fixed;
   z-index: 4;
-  top: 176px;
+  top: 178px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
   height: 96px;
