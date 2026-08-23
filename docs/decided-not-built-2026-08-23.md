@@ -16,6 +16,7 @@ cannot see which of them were already reasoned through will re-design them.
 | platform-admin door for the subscription transport | [src/projects](../src/projects/AGENTS.md), `a6ff7e1` | done |
 | `npm run projects` (org-scoped runs from a terminal) | [src/cli](../src/cli/AGENTS.md), `a6ff7e1` | done |
 | depth-1 trace reader: a large trace stops erasing a delivery | [src/contracts](../src/contracts/AGENTS.md) | done; 11 new tests fail on the old reader |
+| incremental publication: every delivered run reaches the repository | [src/github](../src/github/AGENTS.md) | code done; 10 new tests fail on the old flow; NOT yet verified against real GitHub |
 
 ## Reasoned through, deliberately not built
 
@@ -455,6 +456,85 @@ And one finding from the same session that is a decision, not a defect:
   `949ecd5d`'s own post-mortem suggested, is therefore unreachable advice. The
   fix is small (an option, a flag, and `extraEnv` instead of `env`); the DEFAULT
   is the operator's call.
+
+## What incremental publication settled, and what it left (2026-08-23)
+
+Ten agents: three designs, six adversarial reviewers, one synthesis. What
+shipped is `publishManifestCommit` — the head read decides, `expectedHead`
+authorises, `base_tree` merges, `force: false` untouched. Two of the safety
+reviewer's three fatal findings against the first design were verified by hand
+before anything was written, and they changed the design:
+
+- **The empty-branch precondition was the only guard against writing into a
+  repository atoma never created.** `ensureRepository` ADOPTS a pre-existing
+  repository on a 422 name collision, checking only its visibility. Deleting
+  the precondition without replacing it would have let atoma commit into a
+  stranger's repository. `expectedHead` is the replacement, and it is now stated
+  rather than being a side effect.
+- **Two projects of one organisation can name the same repository.** The
+  projects DDL carries only `UNIQUE (project_id, org_id)` and
+  `UNIQUE (org_id, slug)` — nothing on the repository owner/name. The second
+  project now gets a permanent, honest divergence refusal instead of a silent
+  overwrite.
+
+Not built, deliberately:
+
+1. **MANIFEST-DECLARED DELETION.** A path published once cannot be removed by
+   publication, and a rename leaves the old path with stale content. Any signal
+   that expresses deletion — a completeness assertion, an explicit deletions
+   list — redefines what a declared output set MEANS, which is squarely inside
+   COOLING-OFF. The rejected design's `--allow-removals` flag is not the answer
+   either: it authorises an unbounded set.
+2. **A supported way to re-point or retire a project**, now with two symptoms:
+   a renamed default branch and a deleted branch both end at
+   `GitHubBranchGoneError` with no in-product repair.
+3. **The create-path partial seed still bricks a project.** The contents seed
+   lands a real commit before anything else, so a crash there leaves a branch
+   with one file of N and no published row; the next attempt sees
+   `expectedHead === null` against a populated branch and refuses, permanently.
+   This is exactly the old behaviour, not a regression, and the refusal now
+   names the head so an operator can recognise their own half-seeded publish.
+   Two candidate repairs: record the attempted commit sha, or adopt the tip by
+   observation.
+4. **`UNIQUE (org_id, repository_target_owner, repository_target_name)`** on the
+   projects table, per the finding above.
+5. **The 20 MiB publish bound versus the 50 MiB artifact limit.**
+   `MAX_GITHUB_PUBLISH_BYTES` is below `DEFAULT_ARTIFACT_LIMITS.maxTotalBytes`,
+   so a 21-50 MiB manifest is a permanent local refusal.
+6. **Blob diffing**, so unchanged paths are not re-uploaded on every attempt
+   including a no-op; and the orphan git objects a refused attempt leaves.
+7. **A no-op publication still pushes "Published to <repo>"** at the transport
+   level, because the push routes key on event kind alone. The event SUMMARY now
+   says "No change to publish", which is the honest half that was cheap.
+8. **A `publication.diverged` audience decision** for `baseSha` differing from
+   the previous publication's commit — the store-only, network-free record that
+   something outside atoma moved the branch. Nothing reads it yet.
+9. **The commit message body carrying the run goal.** Two reviewers
+   independently flagged what lands in a tenant's repository as its own
+   disposition. The message stays byte-identical.
+10. **The path-versus-directory collision under `base_tree`** (a manifest blob
+    at `docs` where the base tree holds `docs/`). GitHub's exact behaviour is
+    unmeasured; the guarantee is therefore stated narrowly — no path ABSENT
+    from the manifest is removed, except where the run itself changed the type
+    at that path.
+11. **`force: false` is a fast-forward test, not a compare-and-swap.** A human
+    who resets the branch to an ancestor inside the window gets rolled forward.
+    GitHub's ref API has no expected-old-sha, so there is no cheap close; the
+    next publication observes it through `baseSha`.
+12. **`POST /git/trees` against the 1 MiB response cap** as a merged tree grows.
+
+Two deviations from the synthesis, both mine and both stated:
+
+- **The stateless `mockClient` in `tests/project-publisher.test.ts` was NOT
+  deleted.** The synthesis wanted it gone and retyped so a stale commit
+  override became a type error. It survives, renamed, with a comment saying it
+  is a CALL-SHAPE stub on which no behavioural claim may rest — because the
+  tests that use it are about the repository lifecycle and the token split, not
+  about what reaches a branch. Every behavioural claim moved to
+  `tests/github-incremental-publish.test.ts` and to the two-run cases, which
+  drive the REAL client over a stateful fake GitHub.
+- **`projects show` does not exist**, so the staleness line went on
+  `projects list`.
 
 ## Waiting on the operator
 

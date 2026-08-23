@@ -324,6 +324,22 @@ async function main(): Promise<void> {
         process.stdout.write(
           `  ${project.slug.padEnd(28)} ${project.status.padEnd(10)} ${runs.length} run(s)  ${project.projectId}\n`
         );
+        // HOW FAR BEHIND THE REPOSITORY IS. `repository_status = 'ready'` means
+        // the repository EXISTS and never that it is current, so a project can
+        // sit green over a repository several delivered runs old. This is a
+        // COUNT over rows that already exist, not a stored pointer: a stored
+        // head would be a cache of state only GitHub owns.
+        const published = projects.lastPublishedCommitForProject(org.orgId, project.projectId);
+        const delivered = runs.filter((run) => run.status === 'delivered');
+        const behind = published
+          ? delivered.filter((run) => run.createdAt > published.runCreatedAt).length
+          : delivered.length;
+        if (behind > 0) {
+          process.stdout.write(
+            `  ${' '.repeat(28)} repository is ${behind} delivered run(s) behind` +
+              `${published ? ` (published ${published.commitSha.slice(0, 7)})` : ' (never published)'}\n`
+          );
+        }
       }
     }
     return;
@@ -560,6 +576,21 @@ async function main(): Promise<void> {
         process.stdout.write(`  ${safeTerminal(publication.repositoryUrl)}\n`);
       }
       if (publication.error) process.stdout.write(`  ${safeTerminal(publication.error)}\n`);
+      if (publication.commitSha) {
+        process.stdout.write(
+          `  commit ${publication.commitSha}` +
+            (publication.baseSha === null
+              ? ' (created the branch)\n'
+              : publication.baseSha === publication.commitSha
+                ? ' (already published — nothing to add)\n'
+                : ` on ${publication.baseSha.slice(0, 7)}\n`)
+        );
+      }
+      // A delivered run whose artifacts never reached GitHub is a FAILURE of
+      // this command's job, and `projects publish` already exits non-zero for
+      // exactly that. Only when a publisher is configured: without one, "not
+      // published" is a configuration statement, not a failure.
+      if (publisher && publication.status !== 'published') process.exitCode = 1;
       const project = projects.getProject(target.orgId, target.projectId);
       if (project) {
         process.stdout.write(

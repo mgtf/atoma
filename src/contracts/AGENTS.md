@@ -85,3 +85,14 @@ Neighbours:
   redefined there.
 - No refusal message carries a filesystem path. `project_runs.error` is served
   to tenants, and the row this reader replaced leaked an absolute host path.
+
+## Publication receipts
+
+- `baseSha` on a publication is OBSERVED, never a pointer anything decides
+  from — the same rule `attestation.ts` states for a tool observation. It
+  records the branch head found immediately before that publication; the
+  authority to publish onto an existing branch is read from GitHub at publish
+  time. A required KEY with a nullable VALUE on a `.strict()` object, so a
+  writer must state what it built on rather than omitting it.
+- `commitShaSchema` is the ONE definition of a 40-hex commit sha, imported by
+  both the receipt and the row. It was written twice.

@@ -396,6 +396,7 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
       url: 'https://github.com/atoma-test/weather-lab',
       defaultBranch: 'main',
       commitSha: 'c'.repeat(40),
+      baseSha: null,
     } as const;
     const published = store.transitionPublication({
       orgId: alice.orgId,
@@ -513,6 +514,7 @@ describe('ProjectStore — idempotency and CAS state machines', () => {
         url: 'https://github.com/atoma-test/weather-lab',
         defaultBranch: 'main',
         commitSha: 'c'.repeat(40),
+        baseSha: null,
       },
     });
 

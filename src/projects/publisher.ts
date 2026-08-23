@@ -10,23 +10,42 @@ import type { Project, ProjectRun, Publication } from '../contracts/projects.js'
 import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
 
 /**
- * GITHUB PUBLISHER — turns a delivered run's artifact manifest into a GitHub
- * repository with one initial commit.
+ * GITHUB PUBLISHER — turns EVERY delivered run's artifact manifest into a
+ * commit on the project's repository.
  *
  * Contract (see AGENTS.md):
  * - The repository is created only AFTER the run was delivered and validated;
  *   a failed run never leaves an empty repo behind.
  * - Creation is idempotent per project: a retry finds the existing repository
  *   and proceeds to publish; it never creates a second one.
- * - The initial publish is atomic in the "no half state" sense: the branch is
- *   created LAST, so a failure mid-way leaves an empty repo (no default
- *   branch) that the next attempt can repopulate via `getReference === null`.
+ * - PUBLICATION IS A SEQUENCE, one row per run. The first run creates the
+ *   branch; every later delivered run commits on top of what this project last
+ *   published, merging its manifest onto the parent's tree. `expectedHead` —
+ *   this project's own last published commit — is the authority for that, and
+ *   it is NOT `repository_status = 'ready'`, which says only that the
+ *   repository exists. Reading the second as the first is what made
+ *   publication single-shot.
+ * - Publishing a run OLDER than the one already published is refused, because
+ *   it would move the branch back to older artifacts. A later run's workspace
+ *   is seeded from the earlier one, so its artifacts already contain that work.
  * - The manifest is re-read byte-for-byte right before each blob upload;
  *   a file that changed after delivery is a refusal, never a silent revision.
  *
  * The publisher receives resolved tokens (installation token from the GitHub
  * App client); it never handles app credentials itself.
  */
+
+/**
+ * Refused because a NEWER run of this project is already published. Not a
+ * transport failure and not a divergence: a policy refusal, so the HTTP layer
+ * answers 409 rather than 502.
+ */
+export class PublicationSupersededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublicationSupersededError';
+  }
+}
 
 export const PUBLISHER_TOKEN_MARGIN_MS = 60_000;
 
@@ -301,14 +320,37 @@ export class GitHubPublisher {
         expectedHash: input.manifestHash,
       });
 
-      const commit = await this.client.publishInitialCommit({
+      // THE ORDER GATE. Every entry point (in-run publish, the HTTP retry, the
+      // `projects publish` CLI) accepts any delivered run whose publication is
+      // pending or failed, with no notion of sequence — so without this,
+      // publishing an older run would move the branch back to older artifacts.
+      // It is a refusal with no override flag: the newest delivered workspace
+      // is cumulative by seeding, so the published run's artifacts already
+      // contain the older run's work.
+      const branch = repository.defaultBranch || 'main';
+      const previous = this.store.lastPublishedCommitForProject(project.orgId, project.projectId);
+      if (
+        previous &&
+        previous.projectRunId !== run.projectRunId &&
+        (run.createdAt < previous.runCreatedAt ||
+          (run.createdAt === previous.runCreatedAt && run.projectRunId <= previous.projectRunId))
+      ) {
+        throw new PublicationSupersededError(
+          `run ${run.projectRunId.slice(0, 8)} was created before run ${previous.projectRunId.slice(0, 8)}, whose artifacts are already published as ${previous.commitSha.slice(0, 7)}: publishing it now would move ${repository.fullName}@${branch} back to older artifacts`
+        );
+      }
+
+      const commit = await this.client.publishManifestCommit({
         token: installationToken.token,
         repository: {
           owner: project.repositoryTarget.owner,
           name: project.repositoryTarget.name,
         },
-        branch: repository.defaultBranch || 'main',
+        branch,
+        // Byte-identical to what shipped: what lands in a tenant's repository
+        // as a commit message is its own decision, registered not built.
         message: `atoma: publish artifacts for run ${run.projectRunId}`,
+        expectedHead: previous?.commitSha ?? null,
         // The manifest's recorded mode travels all the way to the tree:
         // `readManifestArtifact` refuses a file whose on-disk mode diverged,
         // so dropping it here silently published executables as 100644.
@@ -333,6 +375,7 @@ export class GitHubPublisher {
           url: repository.url,
           defaultBranch: repository.defaultBranch,
           commitSha: commit.commitSha,
+          baseSha: commit.baseSha,
         },
       });
       this.events({
@@ -342,11 +385,16 @@ export class GitHubPublisher {
         orgId: project.orgId,
         projectId: project.projectId,
         runId: run.projectRunId,
-        summary: `Published to ${eventLabel(repository.fullName, 80)}`,
+        summary:
+          commit.publishKind === 'unchanged'
+            ? `No change to publish on ${eventLabel(repository.fullName, 80)}`
+            : `Published to ${eventLabel(repository.fullName, 80)}`,
         detail: {
           repository: repository.fullName,
           url: repository.url,
           commitSha: commit.commitSha,
+          baseSha: commit.baseSha,
+          publishKind: commit.publishKind,
           files: run.artifactManifest.files.length,
         },
       });

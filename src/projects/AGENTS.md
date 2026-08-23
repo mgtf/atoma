@@ -155,3 +155,35 @@ Neighbours:
   Recorded, not fixed: a `failed` row may not carry `delivered` stats, so the
   repair is a store-contract decision
   ([register](../../docs/decided-not-built-2026-08-23.md)).
+- PUBLICATION IS A SEQUENCE, one row per run, and every delivered run reaches
+  the repository. Exactly one commit used to be possible per project, because
+  `repository_status = 'ready'` is terminal and routed every later run into the
+  first publication's empty-branch refusal. `ready` means the repository EXISTS
+  and never that it is current; the authority to commit onto an existing branch
+  is `lastPublishedCommitForProject` — this project's own last published commit
+  — passed to the client as `expectedHead`
+  ([src/github](../github/AGENTS.md)).
+- `base_sha` on a publication row is an OBSERVATION, never a pointer anything
+  decides from: the head found immediately before that publication. NULL means
+  it created the branch, and `commit_sha = base_sha` means the attempt added no
+  commit because the branch already held the manifest. There is deliberately NO
+  last-published column on the projects row: "is the branch where we left it"
+  is answerable only by GitHub, and a stored head is a cache of state GitHub
+  owns — a stale one is how a wrong divergence verdict gets manufactured.
+- PUBLISHING A RUN OLDER THAN THE ONE ALREADY PUBLISHED IS REFUSED
+  (`PublicationSupersededError`, HTTP 409, not 502). Every entry point accepts
+  any delivered run whose publication is pending or failed, so without the gate
+  a retry of an older run would move the branch back to older artifacts. There
+  is no override flag: a later run's workspace is seeded from the earlier one,
+  so its artifacts already contain that work. The gate reads run creation
+  order, which can differ from delivery order — accepted, for the same reason.
+- STALENESS IS A QUERY, NOT A COLUMN. How far behind a repository is = delivered
+  runs of the project newer than the last published one, which `projects list`
+  prints. A project can sit at `ready` over a repository several runs old.
+- A publication failure NEVER changes a delivered run's status. The run was
+  delivered, the cost is real, `previousDeliveredWorkspace` seeds from
+  `delivered` rows, and a `failed` row may not carry `delivered` stats — marking
+  it failed would rebuild the measured cost erasure and silently stop seeding.
+  The operator surface is `publication.failed` plus the publication status
+  beside the run, and `projects run` now exits non-zero when a publisher is
+  configured and the publication did not reach `published`.

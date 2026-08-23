@@ -10,6 +10,7 @@ import {
 } from '../contracts/projects.js';
 import { eventLabel, type PlatformEventSink } from '../contracts/platformEvents.js';
 import { GitHubStore } from '../github/store.js';
+import { PublicationSupersededError } from './publisher.js';
 import { ProjectStateConflict, resolveProjectRunTraceFile } from './store.js';
 import {
   ProjectRunBusy,
@@ -299,6 +300,11 @@ export class ProjectService {
     } catch (error) {
       if (error instanceof ProjectHttpError) throw error;
       if (error instanceof ProjectStateConflict) throw new ProjectHttpError(409, error.message);
+      // A POLICY refusal, not a transport failure: this run is older than the
+      // one already published, and no retry converges.
+      if (error instanceof PublicationSupersededError) {
+        throw new ProjectHttpError(409, error.message);
+      }
       if (error instanceof ProjectRunConfigurationError) {
         throw new ProjectHttpError(503, error.message);
       }

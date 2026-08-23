@@ -233,8 +233,9 @@ describe('Git Data initial commit publication', () => {
       }
       throw new Error(`unexpected ${pathname}`);
     };
-    const result = await client(fakeFetch).publishInitialCommit({
+    const result = await client(fakeFetch).publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit from Atoma',
       files: [
@@ -244,7 +245,14 @@ describe('Git Data initial commit publication', () => {
         { path: 'README.md', content: '# Generated' },
       ],
     });
-    expect(result).toEqual({ branch: 'main', treeSha: SHA_C, commitSha: SHA_D, ref: 'refs/heads/main' });
+    expect(result).toEqual({
+      branch: 'main',
+      treeSha: SHA_C,
+      commitSha: SHA_D,
+      ref: 'refs/heads/main',
+      baseSha: null,
+      publishKind: 'created',
+    });
     // The seed is a REAL manifest file — the first in sorted order — never a
     // placeholder, so no commit exists that somebody has to explain later.
     const seedCall = calls.find((call) => new URL(call.url).pathname.includes('/contents/'))!;
@@ -294,8 +302,9 @@ describe('Git Data initial commit publication', () => {
       }
       throw new Error(`unexpected ${pathname}`);
     };
-    const result = await client(fakeFetch).publishInitialCommit({
+    const result = await client(fakeFetch).publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit from Atoma',
       files: [{ path: 'index.html', content: '<!doctype html>' }],
@@ -305,6 +314,8 @@ describe('Git Data initial commit publication', () => {
       treeSha: SHA_B,
       commitSha: SHA_A,
       ref: 'refs/heads/main',
+      baseSha: null,
+      publishKind: 'created',
     });
     expect(calls.map((call) => new URL(call.url).pathname.split('/').pop())).toEqual([
       'main',
@@ -318,8 +329,9 @@ describe('Git Data initial commit publication', () => {
       calls += 1;
       return Promise.resolve(json({ ref: 'refs/heads/main', object: { sha: SHA_A } }));
     };
-    await expect(client(fakeFetch).publishInitialCommit({
+    await expect(client(fakeFetch).publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit',
       files: [{ path: 'README.md', content: 'hello' }],
@@ -348,8 +360,9 @@ describe('Git Data initial commit publication', () => {
       }
       throw new Error(`unexpected ${path}`);
     };
-    await expect(client(fakeFetch).publishInitialCommit({
+    await expect(client(fakeFetch).publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit',
       files: [{ path: 'README.md', content: 'hello' }, { path: 'index.html', content: 'x' }],
@@ -365,14 +378,16 @@ describe('Git Data initial commit publication', () => {
       return Promise.resolve(new Response(null, { status: 404 }));
     };
     const github = client(fakeFetch);
-    await expect(github.publishInitialCommit({
+    await expect(github.publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit',
       files: [{ path: '.github/workflows/deploy.yml', content: 'unsafe' }],
     })).rejects.toThrow(/outside/);
-    await expect(github.publishInitialCommit({
+    await expect(github.publishManifestCommit({
       token: 'ghs_installation-token',
+      expectedHead: null,
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit',
       files: [

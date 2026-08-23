@@ -295,9 +295,27 @@ export const repositoryReceiptSchema = z
   })
   .strict();
 
+/** One definition of a git commit sha, written twice before this. */
+export const commitShaSchema = z.string().regex(/^[a-f0-9]{40}$/);
+
 export const publicationReceiptSchema = repositoryReceiptSchema
   .extend({
-    commitSha: z.string().regex(/^[a-f0-9]{40}$/),
+    commitSha: commitShaSchema,
+    /**
+     * The branch head OBSERVED immediately before this publication. Null means
+     * the branch did not exist and this publication created it;
+     * `commitSha === baseSha` means this ATTEMPT added no commit, because the
+     * branch already held every byte the manifest declares.
+     *
+     * An observation, never a pointer anything decides from — the same rule
+     * `src/contracts/attestation.ts` states for a tool observation. The
+     * authority to publish onto an existing branch is read from GitHub at
+     * publish time; this field only records what was found.
+     *
+     * A required KEY with a nullable VALUE on a `.strict()` object, so a writer
+     * must state what it built on rather than omitting it.
+     */
+    baseSha: commitShaSchema.nullable(),
   })
   .strict();
 
@@ -312,7 +330,8 @@ export const publicationSchema = z
     repositoryId: githubRepositoryIdSchema.nullable(),
     repositoryFullName: z.string().min(3).max(201).nullable(),
     repositoryUrl: httpsUrlSchema.nullable(),
-    commitSha: z.string().regex(/^[a-f0-9]{40}$/).nullable(),
+    commitSha: commitShaSchema.nullable(),
+    baseSha: commitShaSchema.nullable(),
     error: boundedErrorSchema,
     createdAt: instantSchema,
     updatedAt: instantSchema,

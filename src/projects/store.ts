@@ -119,6 +119,11 @@ CREATE TABLE IF NOT EXISTS project_publications (
   repository_full_name          TEXT,
   repository_url                TEXT,
   commit_sha                    TEXT,
+  -- The branch head OBSERVED before this publication. NOT in the CHECK below:
+  -- a first publication legitimately has no base, and SQLite cannot add a
+  -- CHECK by ALTER TABLE, so constraining it would leave fresh and migrated
+  -- stores with different constraints.
+  base_sha                      TEXT,
   error                         TEXT,
   created_at                    TEXT NOT NULL,
   updated_at                    TEXT NOT NULL,
@@ -259,6 +264,7 @@ interface PublicationRow {
   repository_full_name: string | null;
   repository_url: string | null;
   commit_sha: string | null;
+  base_sha: string | null;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -364,6 +370,10 @@ function publicationFromRow(row: PublicationRow): Publication {
     repositoryFullName: row.repository_full_name,
     repositoryUrl: row.repository_url,
     commitSha: row.commit_sha,
+    // `?? null` deliberately: a store opened with `initialize: false` ran no
+    // migration, so the column may be absent and better-sqlite3 yields
+    // undefined. Degrade to null instead of failing the parse on every row.
+    baseSha: row.base_sha ?? null,
     error: row.error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -451,7 +461,25 @@ export class ProjectStore {
     this.closeOnClose = options.closeOnClose ?? false;
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
-    if (options.initialize !== false) this.db.exec(PROJECT_TABLES_DDL);
+    if (options.initialize !== false) {
+      this.db.exec(PROJECT_TABLES_DDL);
+      // ADDITIVE MIGRATION. `CREATE TABLE IF NOT EXISTS` does nothing to a
+      // table that already exists, so a column added to the DDL above never
+      // reaches a store created before it. Same guarded shape the auth store
+      // uses. INSIDE this branch on purpose: `hasProjectTables` exists so a
+      // reader may open a store with no control plane, and PRAGMA/ALTER there
+      // would throw.
+      //
+      // No backfill and no guess: every publication that has ever succeeded in
+      // this product was a first publish, so NULL — "this publication created
+      // the branch" — is factually true for every pre-existing row.
+      const publicationColumns = (
+        this.db.prepare('PRAGMA table_info(project_publications)').all() as { name: string }[]
+      ).map((column) => column.name);
+      if (!publicationColumns.includes('base_sha')) {
+        this.db.exec('ALTER TABLE project_publications ADD COLUMN base_sha TEXT');
+      }
+    }
   }
 
   /** Open the explicitly selected primary product store. There is no default. */
@@ -1080,6 +1108,49 @@ export class ProjectStore {
     return row ? publicationFromRow(row) : null;
   }
 
+  /**
+   * What this PROJECT last published, and which run's artifacts those are.
+   *
+   * Publication is per-run and there is no per-project pointer — deliberately:
+   * "is the branch still where we left it" is answerable only by GitHub, and a
+   * stored head would be a cache of state GitHub owns, which is exactly how a
+   * wrong divergence verdict gets manufactured. This answers the two questions
+   * that ARE local: which commit is this project's own (the authority to
+   * publish onto an existing branch), and how far behind the repository is.
+   *
+   * Ordered by the RUN's creation, not by `published_at`, because publication
+   * order can differ from run order after a retry; ties break on the run id
+   * rather than the publication UUID, since a UUID tiebreak can select the
+   * older row and then report a head this project does not own.
+   */
+  lastPublishedCommitForProject(
+    orgIdInput: string,
+    projectIdInput: string
+  ): { publicationId: string; projectRunId: string; runCreatedAt: string; commitSha: string } | null {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectId = projectIdSchema.parse(projectIdInput);
+    const row = this.db
+      .prepare(
+        `SELECT pub.publication_id, pub.project_run_id, pub.commit_sha, r.created_at
+           FROM project_publications pub
+           JOIN project_runs r
+             ON r.project_run_id = pub.project_run_id AND r.org_id = pub.org_id
+          WHERE pub.org_id = ? AND r.project_id = ? AND pub.status = 'published'
+          ORDER BY r.created_at DESC, pub.project_run_id DESC
+          LIMIT 1`
+      )
+      .get(orgId, projectId) as
+      | { publication_id: string; project_run_id: string; commit_sha: string | null; created_at: string }
+      | undefined;
+    if (!row || !row.commit_sha) return null;
+    return {
+      publicationId: row.publication_id,
+      projectRunId: row.project_run_id,
+      runCreatedAt: row.created_at,
+      commitSha: row.commit_sha,
+    };
+  }
+
   transitionPublication(input: {
     readonly orgId: string;
     readonly publicationId: string;
@@ -1106,7 +1177,8 @@ export class ProjectStore {
         (current.repositoryId !== receipt.repositoryId ||
           current.repositoryFullName !== receipt.fullName ||
           current.repositoryUrl !== receipt.url ||
-          current.commitSha !== receipt.commitSha)
+          current.commitSha !== receipt.commitSha ||
+          current.baseSha !== receipt.baseSha)
       ) {
         throw new ProjectStateConflict('publication replay carries a different receipt');
       }
@@ -1126,7 +1198,7 @@ export class ProjectStore {
       .prepare(
         `UPDATE project_publications
          SET status = ?, repository_id = ?, repository_full_name = ?, repository_url = ?,
-             commit_sha = ?, error = ?, published_at = ?, updated_at = ?
+             commit_sha = ?, base_sha = ?, error = ?, published_at = ?, updated_at = ?
          WHERE publication_id = ? AND org_id = ? AND status = ?`
       )
       .run(
@@ -1135,6 +1207,7 @@ export class ProjectStore {
         receipt?.fullName ?? null,
         receipt?.url ?? null,
         receipt?.commitSha ?? null,
+        receipt?.baseSha ?? null,
         error,
         to === 'published' ? now : null,
         now,

@@ -11,8 +11,8 @@ export const GITHUB_API_VERSION = '2026-03-10';
 export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_GITHUB_RESPONSE_MAX_BYTES = 1024 * 1024;
 export const MAX_GITHUB_INSTALLATION_PAGES = 10;
-export const MAX_GITHUB_INITIAL_FILES = 1_000;
-export const MAX_GITHUB_INITIAL_BYTES = 20 * 1024 * 1024;
+export const MAX_GITHUB_PUBLISH_FILES = 1_000;
+export const MAX_GITHUB_PUBLISH_BYTES = 20 * 1024 * 1024;
 
 export const GITHUB_PUBLISH_PERMISSIONS = Object.freeze({
   administration: 'write',
@@ -67,26 +67,59 @@ export interface GitHubRepository {
   readonly htmlUrl: string;
 }
 
-export interface GitHubInitialFile {
+export interface GitHubPublishFile {
   readonly path: string;
   readonly content: string | Uint8Array;
   /** Git tree mode. Defaults to a regular file; '100755' publishes executable. */
   readonly mode?: '100644' | '100755';
 }
 
-export interface PublishGitHubInitialCommitInput {
+export interface PublishGitHubManifestInput {
   readonly token: string;
   readonly repository: { readonly owner: string; readonly name: string };
   readonly branch?: string;
   readonly message: string;
-  readonly files: readonly GitHubInitialFile[];
+  readonly files: readonly GitHubPublishFile[];
+  /**
+   * THE AUTHORITY TO WRITE ONTO A BRANCH THAT ALREADY HAS COMMITS: the commit
+   * this project itself last published, or null for a first publication.
+   *
+   * A required key with a nullable value, so a caller must state which it is
+   * rather than omitting it into the permissive case. It is NOT derived from
+   * `repository_status = 'ready'`: that says the repository EXISTS, and reading
+   * it as "the branch is ours" is the conflation that made publication
+   * single-shot. Passing null against a populated branch is a refusal, which is
+   * what keeps a repository adopted through a 422 name collision — or one a
+   * second project of the same organisation is publishing into — out of reach.
+   */
+  readonly expectedHead: string | null;
 }
 
-export interface GitHubInitialCommit {
+/** What a branch reference read found. 404 and 409 mean different things. */
+export type GitHubBranchHead =
+  | { readonly state: 'head'; readonly sha: string }
+  | { readonly state: 'missing' }
+  | { readonly state: 'empty' };
+
+export interface GitHubPublishedCommit {
   readonly branch: string;
   readonly treeSha: string;
   readonly commitSha: string;
   readonly ref: string;
+  /**
+   * The branch head OBSERVED immediately before this publication; null when the
+   * branch did not exist and this publication created it. An observation, never
+   * a pointer anything decides from.
+   */
+  readonly baseSha: string | null;
+  /**
+   * `unchanged` means the branch already held every byte the manifest declares,
+   * so no commit object was created and the reference was not moved.
+   *
+   * Named `publishKind` and not `outcome` because `src/projects/AGENTS.md`
+   * already owns a closed `outcome` vocabulary one join away.
+   */
+  readonly publishKind: 'created' | 'extended' | 'unchanged';
 }
 
 type GitHubApiErrorCode = 'http' | 'network' | 'timeout' | 'response_too_large' | 'invalid_response';
@@ -117,17 +150,121 @@ export class GitHubApiError extends Error {
   }
 }
 
+/**
+ * A FIRST publication found a branch that already has commits — so this
+ * product has no authority over that history and refuses to add to it.
+ *
+ * The sentence is a PREFIX and stays byte-identical, because it is quoted in
+ * `src/github/AGENTS.md` and it is the stored error on the live `a06b09ff`
+ * publication row. What follows it is the evidence an operator needs to tell
+ * the two reachable causes apart: a repository adopted through
+ * `ensureRepository`'s 422 name collision, and a second project of the same
+ * organisation publishing into one repository (nothing in the projects DDL
+ * forbids that).
+ */
 export class GitHubDivergenceError extends Error {
   readonly owner: string;
   readonly repository: string;
   readonly branch: string;
+  /** The head this product does not own, when it could be read. */
+  readonly observedHead: string | null;
 
-  constructor(owner: string, repository: string, branch: string) {
-    super('GitHub repository branch already exists; initial publish refused');
+  constructor(owner: string, repository: string, branch: string, observedHead: string | null = null) {
+    super(
+      'GitHub repository branch already exists; initial publish refused' +
+        (observedHead === null
+          ? ''
+          : ` (branch ${branch} is at ${observedHead.slice(0, 7)} and no publication of this project owns it)`)
+    );
     this.name = 'GitHubDivergenceError';
     this.owner = owner;
     this.repository = repository;
     this.branch = branch;
+    this.observedHead = observedHead;
+  }
+}
+
+/**
+ * This project HAS published to that branch, and the branch is no longer
+ * there. Refused rather than re-seeded: a second root history in a repository
+ * a tenant already cloned is worse than a stopped publication.
+ */
+export class GitHubBranchGoneError extends Error {
+  readonly owner: string;
+  readonly repository: string;
+  readonly branch: string;
+  readonly reason: 'missing' | 'empty';
+  readonly publishedSha: string;
+
+  constructor(input: {
+    readonly owner: string;
+    readonly repository: string;
+    readonly branch: string;
+    readonly reason: 'missing' | 'empty';
+    readonly publishedSha: string;
+  }) {
+    const slug = `${input.owner}/${input.repository}`;
+    super(
+      input.reason === 'missing'
+        ? `GitHub branch ${slug}@${input.branch} no longer exists although this project published ${input.publishedSha.slice(0, 7)} to it; publication refused rather than starting a second history`
+        : `GitHub repository ${slug} has no commits although this project published ${input.publishedSha.slice(0, 7)} to it; publication refused rather than starting a second history`
+    );
+    this.name = 'GitHubBranchGoneError';
+    this.owner = input.owner;
+    this.repository = input.repository;
+    this.branch = input.branch;
+    this.reason = input.reason;
+    this.publishedSha = input.publishedSha;
+  }
+}
+
+/**
+ * The fast-forward was declined. NO WORD IS SHARED with the divergence
+ * sentence above: reporting a protected branch as "somebody pushed" sends an
+ * operator hunting a push that never happened, and 422 is how GitHub answers
+ * both. One best-effort head re-read decides which it was.
+ *
+ * The identifying facts come FIRST because `publication.failed`'s push summary
+ * is truncated to 120 characters — the repository, branch and shas must survive
+ * that cut, and the reassurance is what may be lost.
+ */
+export class GitHubRefRefusedError extends Error {
+  readonly owner: string;
+  readonly repository: string;
+  readonly branch: string;
+  readonly reason: 'moved' | 'blocked' | 'unknown';
+  readonly expectedSha: string;
+  readonly observedSha: string | null;
+  readonly commitSha: string;
+
+  constructor(input: {
+    readonly owner: string;
+    readonly repository: string;
+    readonly branch: string;
+    readonly expectedSha: string;
+    readonly observedSha: string | null;
+    readonly commitSha: string;
+  }) {
+    const slug = `${input.owner}/${input.repository}@${input.branch}`;
+    const expected = input.expectedSha.slice(0, 7);
+    const built = input.commitSha.slice(0, 7);
+    const reason: 'moved' | 'blocked' | 'unknown' =
+      input.observedSha === null ? 'unknown' : input.observedSha === input.expectedSha ? 'blocked' : 'moved';
+    super(
+      reason === 'moved'
+        ? `GitHub branch ${slug} moved from ${expected} to ${input.observedSha!.slice(0, 7)} while this publication was being built; commit ${built} was created, the branch was NOT force-updated, and a retry builds on the new head`
+        : reason === 'blocked'
+          ? `GitHub declined to fast-forward ${slug}, which is still at ${expected}: a branch protection rule or ruleset forbids this update, so no retry converges until it changes`
+          : `GitHub declined to fast-forward ${slug} (HTTP 422) and its current head could not be read; commit ${built} was created and the branch was not force-updated`
+    );
+    this.name = 'GitHubRefRefusedError';
+    this.owner = input.owner;
+    this.repository = input.repository;
+    this.branch = input.branch;
+    this.reason = reason;
+    this.expectedSha = input.expectedSha;
+    this.observedSha = input.observedSha;
+    this.commitSha = input.commitSha;
   }
 }
 
@@ -624,21 +761,58 @@ export class GitHubAppClient {
     return parseRepository(result.json);
   }
 
-  async getReference(
+  /**
+   * Read a branch's head, DISCRIMINATING the two ways it can be absent.
+   *
+   * This used to collapse 404 and 409 into one `null`, one line from the
+   * decision that used it — and the two are not the same fact. 409 is
+   * `{"message":"Git Repository is empty."}`: the repository has no commits at
+   * all, which is the state the contents API exists to seed. 404 is a
+   * repository that HAS commits but not this branch, which for a project that
+   * already published means somebody deleted or renamed it. Publishing the
+   * same way in both cases is how a second root history gets started in a
+   * repository a tenant already cloned.
+   */
+  async readBranchHead(
     token: string,
     owner: string,
     repository: string,
     branch: string
-  ): Promise<string | null> {
+  ): Promise<GitHubBranchHead> {
     const safeOwner = ownerLogin(owner);
     const safeRepository = repositoryName(repository);
     const safeBranch = branchName(branch);
     const path = `/repos/${encodeSegment(safeOwner)}/${encodeSegment(safeRepository)}/git/ref/heads/${safeBranch.split('/').map(encodeSegment).join('/')}`;
     const result = await this.request({ token, path, accepted: [200, 404, 409] });
-    if (result.status === 404 || result.status === 409) return null;
+    if (result.status === 409) return { state: 'empty' };
+    if (result.status === 404) return { state: 'missing' };
     const object = asObject(result.json, 'GitHub reference response');
     const target = asObject(object['object'], 'GitHub reference target');
-    return sha(target['sha'], 'GitHub reference sha');
+    return { state: 'head', sha: sha(target['sha'], 'GitHub reference sha') };
+  }
+
+  /**
+   * One commit's tree. `readBranchHead` yields a COMMIT sha and `base_tree`
+   * needs a TREE sha, so an incremental publication cannot be composed without
+   * this read.
+   */
+  async getCommit(
+    token: string,
+    owner: string,
+    repository: string,
+    commitSha: string
+  ): Promise<{ treeSha: string; parents: readonly string[] }> {
+    const result = await this.request({
+      token,
+      path: this.gitPath(owner, repository, `commits/${sha(commitSha, 'GitHub commit sha')}`),
+    });
+    const object = asObject(result.json, 'GitHub commit response');
+    const tree = asObject(object['tree'], 'GitHub commit tree');
+    const parents = Array.isArray(object['parents']) ? object['parents'] : [];
+    return {
+      treeSha: sha(tree['sha'], 'GitHub tree sha'),
+      parents: parents.map((parent) => sha(asObject(parent, 'GitHub commit parent')['sha'], 'GitHub commit sha')),
+    };
   }
 
   async createBlob(input: {
@@ -650,8 +824,8 @@ export class GitHubAppClient {
     const bytes = typeof input.content === 'string'
       ? Buffer.from(input.content, 'utf8')
       : Buffer.from(input.content);
-    if (bytes.length > MAX_GITHUB_INITIAL_BYTES) {
-      throw new Error('GitHub blob exceeds the initial publish byte bound');
+    if (bytes.length > MAX_GITHUB_PUBLISH_BYTES) {
+      throw new Error('GitHub blob exceeds the publish byte bound');
     }
     const result = await this.request({
       method: 'POST',
@@ -674,8 +848,13 @@ export class GitHubAppClient {
       readonly sha: string;
       readonly mode?: '100644' | '100755';
     }[];
+    /**
+     * Merge onto this tree instead of replacing it. Present for an incremental
+     * publication, absent for a first one — where the manifest IS the tree.
+     */
+    readonly baseTreeSha?: string;
   }): Promise<string> {
-    if (input.entries.length < 1 || input.entries.length > MAX_GITHUB_INITIAL_FILES) {
+    if (input.entries.length < 1 || input.entries.length > MAX_GITHUB_PUBLISH_FILES) {
       throw new Error('GitHub tree has an invalid number of entries');
     }
     const seen = new Set<string>();
@@ -697,7 +876,12 @@ export class GitHubAppClient {
       method: 'POST',
       token: input.token,
       path: this.gitPath(input.owner, input.repository, 'trees'),
-      body: { tree },
+      body: {
+        tree,
+        ...(input.baseTreeSha === undefined
+          ? {}
+          : { base_tree: sha(input.baseTreeSha, 'GitHub tree sha') }),
+      },
     });
     return sha(asObject(result.json, 'GitHub tree response')['sha'], 'GitHub tree sha');
   }
@@ -773,8 +957,8 @@ export class GitHubAppClient {
       typeof input.content === 'string'
         ? Buffer.from(input.content, 'utf8')
         : Buffer.from(input.content);
-    if (bytes.length > MAX_GITHUB_INITIAL_BYTES) {
-      throw new Error('GitHub contents write exceeds the initial publish byte bound');
+    if (bytes.length > MAX_GITHUB_PUBLISH_BYTES) {
+      throw new Error('GitHub contents write exceeds the publish byte bound');
     }
     if (!input.message.trim() || input.message.length > 65_536 || input.message.includes('\u0000')) {
       throw new Error('GitHub commit message has an invalid value');
@@ -828,12 +1012,18 @@ export class GitHubAppClient {
     return ref;
   }
 
-  async publishInitialCommit(input: PublishGitHubInitialCommitInput): Promise<GitHubInitialCommit> {
+  /** Validation and canonical ordering, before any I/O. Shared by both paths. */
+  private normalizeManifestFiles(input: PublishGitHubManifestInput): {
+    owner: string;
+    repository: string;
+    branch: string;
+    files: Array<{ path: string; content: string | Uint8Array; mode?: '100644' | '100755'; bytes: number }>;
+  } {
     const owner = ownerLogin(input.repository.owner);
     const repository = repositoryName(input.repository.name);
     const branch = branchName(input.branch ?? 'main');
-    if (input.files.length < 1 || input.files.length > MAX_GITHUB_INITIAL_FILES) {
-      throw new Error('GitHub initial publish has an invalid number of files');
+    if (input.files.length < 1 || input.files.length > MAX_GITHUB_PUBLISH_FILES) {
+      throw new Error('GitHub publish has an invalid number of files');
     }
     const files = input.files.map((file) => ({
       path: filePath(file.path),
@@ -846,79 +1036,244 @@ export class GitHubAppClient {
     const seen = new Set<string>();
     let totalBytes = 0;
     for (const file of files) {
-      if (seen.has(file.path)) throw new Error('GitHub initial publish contains duplicate paths');
+      if (seen.has(file.path)) throw new Error('GitHub publish contains duplicate paths');
       seen.add(file.path);
       totalBytes += file.bytes;
-      if (totalBytes > MAX_GITHUB_INITIAL_BYTES) {
-        throw new Error('GitHub initial publish exceeds the byte bound');
+      if (totalBytes > MAX_GITHUB_PUBLISH_BYTES) {
+        throw new Error('GitHub publish exceeds the byte bound');
       }
     }
-    const existing = await this.getReference(input.token, owner, repository, branch);
-    if (existing !== null) throw new GitHubDivergenceError(owner, repository, branch);
+    return { owner, repository, branch, files };
+  }
 
-    // THE BRANCH IS SEEDED THROUGH THE CONTENTS API, always. A repository with
-    // no commits refuses `git/blobs` and `git/trees` alike (409, "Git
-    // Repository is empty"), so the first write cannot be a git-data write.
-    // The seed carries a real file from the manifest, never a placeholder:
-    // nobody should have to explain a junk commit later.
-    const seed = files[0]!;
-    const seeded = await this.putContentsFile({
-      token: input.token,
-      owner,
-      repository,
-      path: seed.path,
-      content: seed.content,
-      message: input.message,
-      branch,
-    });
-    // THE RACE THAT THE OLD FLOW CAUGHT WITH A 422. Creating the ref last made
-    // a concurrent branch creation an explicit refusal; seeding through the
-    // contents API cannot fail that way, because a write to a branch that now
-    // exists simply lands on it. The seed commit's parent count is the
-    // evidence, checked immediately: a root commit means the branch was ours
-    // to start, anything else means somebody created it inside the window.
-    // One file has been written by then, and saying so loudly is the honest
-    // outcome — the alternative is publishing the rest on top of content this
-    // product never saw.
-    if (seeded.parents > 0) throw new GitHubDivergenceError(owner, repository, branch);
-    const ref = `refs/heads/${branch}`;
-    if (files.length === 1) {
-      // One file, one commit — the ordinary case, and the tidiest result.
-      return Object.freeze({
-        branch,
-        treeSha: seeded.treeSha,
-        commitSha: seeded.commitSha,
-        ref,
-      });
-    }
-
-    // More than one file: the repository now HAS a commit, so the git data API
-    // works and the whole tree lands in a second commit on top of the seed.
-    // Two commits rather than one, and both of them ours.
+  /** One blob per manifest file, in canonical order, as tree entries. */
+  private async blobEntries(
+    token: string,
+    owner: string,
+    repository: string,
+    files: readonly { path: string; content: string | Uint8Array; mode?: '100644' | '100755' }[]
+  ): Promise<Array<{ path: string; sha: string; mode?: '100644' | '100755' }>> {
     const entries: Array<{ path: string; sha: string; mode?: '100644' | '100755' }> = [];
     for (const file of files) {
       entries.push({
         path: file.path,
         ...(file.mode !== undefined ? { mode: file.mode } : {}),
-        sha: await this.createBlob({
-          token: input.token,
-          owner,
-          repository,
-          content: file.content,
-        }),
+        sha: await this.createBlob({ token, owner, repository, content: file.content }),
       });
     }
-    const treeSha = await this.createTree({ token: input.token, owner, repository, entries });
+    return entries;
+  }
+
+  /**
+   * Move a branch, and say WHICH refusal it was when GitHub declines.
+   *
+   * `updateReference` sends `force: false`, so GitHub's own fast-forward check
+   * is the concurrency test — but it answers 422 both when somebody else moved
+   * the branch and when a protection rule forbids the update, and
+   * `GitHubApiError` carries no response body. So the branch is re-read once,
+   * best effort, and the head decides the sentence. Anything that is not 422 or
+   * 409 propagates untouched: a 403 from a ruleset must not be dressed up as
+   * divergence.
+   */
+  private async moveBranch(input: {
+    readonly token: string;
+    readonly owner: string;
+    readonly repository: string;
+    readonly branch: string;
+    readonly expectedSha: string;
+    readonly commitSha: string;
+  }): Promise<void> {
+    try {
+      await this.updateReference({
+        token: input.token,
+        owner: input.owner,
+        repository: input.repository,
+        branch: input.branch,
+        commitSha: input.commitSha,
+      });
+    } catch (error) {
+      if (!(error instanceof GitHubApiError) || (error.status !== 422 && error.status !== 409)) {
+        throw error;
+      }
+      const head = await this.readBranchHead(
+        input.token,
+        input.owner,
+        input.repository,
+        input.branch
+      ).catch(() => null);
+      throw new GitHubRefRefusedError({
+        owner: input.owner,
+        repository: input.repository,
+        branch: input.branch,
+        expectedSha: input.expectedSha,
+        observedSha: head !== null && head.state === 'head' ? head.sha : null,
+        commitSha: input.commitSha,
+      });
+    }
+  }
+
+  /**
+   * Publish one artifact manifest: create the branch, or commit ON TOP of what
+   * this project last published.
+   *
+   * THE DECISION IS TAKEN FROM GITHUB, not from the store. `expectedHead` is
+   * the authority (this project's own last published commit, or null), and the
+   * live head read is the fact. Reading `repository_status = 'ready'` as "the
+   * branch is ours" is what made publication single-shot.
+   *
+   * An incremental commit MERGES onto the parent's tree (`base_tree`), so a
+   * path the manifest does not name is never removed. That is deliberate and
+   * asymmetric: a manifest is `plan.subtasks.flatMap(s => s.outputs)`, a
+   * model's plan-time declaration of what THIS run would write, and the
+   * workspace is seeded from the previous delivered workspace — so absence
+   * from a manifest says nothing about a user's intent. Replacing the tree
+   * would let "run 2 only touched index.html" delete `app.js` from the branch
+   * tip while `app.js` still sits on disk in that very run, breaking the
+   * published site from a run that SUCCEEDED. The cost is that publication
+   * cannot delete; a human deletes in one click.
+   */
+  async publishManifestCommit(input: PublishGitHubManifestInput): Promise<GitHubPublishedCommit> {
+    const { owner, repository, branch, files } = this.normalizeManifestFiles(input);
+    const ref = `refs/heads/${branch}`;
+    const head = await this.readBranchHead(input.token, owner, repository, branch);
+
+    if (input.expectedHead === null) {
+      // A FIRST publication. A branch that already has commits is refused with
+      // zero writes: this product has no authority over that history.
+      if (head.state === 'head') {
+        throw new GitHubDivergenceError(owner, repository, branch, head.sha);
+      }
+      // THE BRANCH IS SEEDED THROUGH THE CONTENTS API, always. A repository
+      // with no commits refuses `git/blobs` and `git/trees` alike (409, "Git
+      // Repository is empty"), so the first write cannot be a git-data write.
+      // The seed carries a real file from the manifest, never a placeholder:
+      // nobody should have to explain a junk commit later.
+      const seed = files[0]!;
+      const seeded = await this.putContentsFile({
+        token: input.token,
+        owner,
+        repository,
+        path: seed.path,
+        content: seed.content,
+        message: input.message,
+        branch,
+      });
+      // THE RACE THAT THE OLD FLOW CAUGHT WITH A 422. A contents write to a
+      // branch created inside the window simply lands on it, so the seed
+      // commit's PARENT COUNT is the evidence: a root commit means the branch
+      // was ours to start, anything else means somebody created it inside the
+      // window. One file has been written by then, and saying so loudly beats
+      // publishing the rest on top of content this product never saw.
+      if (seeded.parents > 0) throw new GitHubDivergenceError(owner, repository, branch);
+      if (files.length === 1) {
+        return Object.freeze({
+          branch,
+          treeSha: seeded.treeSha,
+          commitSha: seeded.commitSha,
+          ref,
+          baseSha: null,
+          publishKind: 'created' as const,
+        });
+      }
+      // More than one file: the repository now HAS a commit, so the git data
+      // API works and the whole tree lands in a second commit on top of the
+      // seed. No `baseTreeSha` — on a first publication the manifest IS the
+      // tree. Two commits rather than one, and both of them ours.
+      const entries = await this.blobEntries(input.token, owner, repository, files);
+      const treeSha = await this.createTree({ token: input.token, owner, repository, entries });
+      const commitSha = await this.createCommit({
+        token: input.token,
+        owner,
+        repository,
+        message: input.message,
+        treeSha,
+        parents: [seeded.commitSha],
+      });
+      await this.moveBranch({
+        token: input.token,
+        owner,
+        repository,
+        branch,
+        expectedSha: seeded.commitSha,
+        commitSha,
+      });
+      return Object.freeze({
+        branch,
+        treeSha,
+        commitSha,
+        ref,
+        baseSha: null,
+        publishKind: 'created' as const,
+      });
+    }
+
+    // THIS PROJECT HAS PUBLISHED HERE BEFORE. A branch that is gone is refused
+    // rather than re-seeded: a second root history in a repository a tenant has
+    // already cloned is worse than a stopped publication.
+    if (head.state !== 'head') {
+      throw new GitHubBranchGoneError({
+        owner,
+        repository,
+        branch,
+        reason: head.state,
+        publishedSha: input.expectedHead,
+      });
+    }
+    // Deliberately NOT requiring `head.sha === input.expectedHead`. A branch
+    // that moved for a reason this product did not cause — a merged pull
+    // request, a typo fixed in the browser — must not brick the project, and a
+    // merge cannot delete what that change added. The observed head is
+    // returned as `baseSha`, which makes "somebody moved this branch" a
+    // store-only, network-free, timestamped fact afterwards.
+    const baseTreeSha = (await this.getCommit(input.token, owner, repository, head.sha)).treeSha;
+    const entries = await this.blobEntries(input.token, owner, repository, files);
+    const treeSha = await this.createTree({
+      token: input.token,
+      owner,
+      repository,
+      entries,
+      baseTreeSha,
+    });
+    // THE ORDER HERE IS LOAD-BEARING: the tree is built and compared BEFORE any
+    // commit object exists. Git trees are content-addressed, so an identical
+    // result sha means the branch tip already holds every byte this manifest
+    // declares — which is both the empty-diff case and the repair for a crash
+    // between the reference move and the store write. Merging a manifest onto
+    // its own result is idempotent; replacing would not be.
+    if (treeSha === baseTreeSha) {
+      return Object.freeze({
+        branch,
+        treeSha,
+        commitSha: head.sha,
+        ref,
+        baseSha: head.sha,
+        publishKind: 'unchanged' as const,
+      });
+    }
     const commitSha = await this.createCommit({
       token: input.token,
       owner,
       repository,
       message: input.message,
       treeSha,
-      parents: [seeded.commitSha],
+      parents: [head.sha],
     });
-    await this.updateReference({ token: input.token, owner, repository, branch, commitSha });
-    return Object.freeze({ branch, treeSha, commitSha, ref });
+    await this.moveBranch({
+      token: input.token,
+      owner,
+      repository,
+      branch,
+      expectedSha: head.sha,
+      commitSha,
+    });
+    return Object.freeze({
+      branch,
+      treeSha,
+      commitSha,
+      ref,
+      baseSha: head.sha,
+      publishKind: 'extended' as const,
+    });
   }
 
   private gitPath(owner: string, repository: string, object: string): string {
