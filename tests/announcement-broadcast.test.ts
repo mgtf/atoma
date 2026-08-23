@@ -187,6 +187,7 @@ describe('translation drafts, and their absence', () => {
     expect(result?.en.title.length).toBe(ANNOUNCEMENT_TITLE_MAX);
     expect(result?.en.body.length).toBe(ANNOUNCEMENT_BODY_MAX);
   });
+
 });
 
 describe('a malformed announcement is tolerated, never delivered blank', () => {
@@ -212,25 +213,78 @@ describe('a malformed announcement is tolerated, never delivered blank', () => {
 });
 
 /**
- * The composer is DOM over a GL view, so its height is a contract in TWO
- * files. The settings form already taught this lesson: a `position: fixed`
- * overlay whose reserved space the renderer does not know about lets content
- * scroll underneath it, which reads as a rendering fault rather than a layout
- * one.
+ * The composer is DOM over a GL view, so its box is a contract in TWO files.
+ * It no longer takes a slice at the foot of the organisation list — it IS the
+ * Announcements view, and fills that view's frame. The failure it still
+ * guards against is the same one: CSS and the renderer disagreeing about
+ * where a surface ends, with nothing failing to say so.
  */
-describe('the composer and the organisation list agree on the space', () => {
-  it('the list gives up exactly the height the stylesheet claims', async () => {
-    const { ADMIN_DOM_FORM_HEIGHT, ADMIN_DOM_FORM_BOTTOM, adminPaneHeight } = await import(
-      '../src/viz/client-gl/renderer/views/admin.js'
+describe('the composer fills the frame the renderer draws for it', () => {
+  it('its CSS box is the frame content box, taken from the frame itself', async () => {
+    const { viewFrame, VIEW_FRAME_PAD } = await import(
+      '../src/viz/client-gl/renderer/view-frame.js'
     );
+    const { announceFormBottom } = await import(
+      '../src/viz/client-gl/renderer/views/announce.js'
+    );
+    const viewportHeight = 900;
+    const frame = viewFrame(1280, viewportHeight);
     const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
     const form = css.slice(css.indexOf('.gpu-announce-form {'));
-    expect(form).toContain(`height: ${ADMIN_DOM_FORM_HEIGHT}px`);
-    expect(form).toContain(`bottom: ${ADMIN_DOM_FORM_BOTTOM}px`);
-    // The pane must end above the composer, and never take a negative height
-    // on a viewport too short to hold both.
-    const contentTop = 120;
-    expect(adminPaneHeight(900, contentTop)).toBeLessThan(900 - contentTop - ADMIN_DOM_FORM_HEIGHT);
-    expect(adminPaneHeight(200, contentTop)).toBe(0);
+    // Top: where the renderer's own title stops and content starts.
+    expect(form).toContain(`top: ${frame.contentTop}px`);
+    // Bottom: the frame's padding, measured up from the viewport's foot.
+    expect(form).toContain(`bottom: ${announceFormBottom(viewportHeight, frame.bottom)}px`);
+    expect(announceFormBottom(viewportHeight, frame.bottom)).toBe(
+      viewportHeight - frame.bottom + VIEW_FRAME_PAD
+    );
+    // No fixed height any more: a third language must grow the scroll inside
+    // the box, not push the send button out through the frame's foot.
+    expect(form.slice(0, form.indexOf('}'))).not.toContain('height:');
+    expect(form).toContain('overflow-y: auto');
+  });
+
+  it('gives the organisation list its full column back', async () => {
+    const admin = await import('../src/viz/client-gl/renderer/views/admin.js');
+    // The reserved slice is gone with the composer that needed it. These
+    // names existing again would mean two views claim the same space.
+    expect(Object.keys(admin)).toEqual(['drawAdmin']);
+  });
+});
+
+/**
+ * A destination nobody can reach is not a move, it is a deletion. The rail
+ * reads `ADMIN_VIEWS`, so the composer's new home has to be in that list and
+ * behind the same platform-admin flag as the four screens beside it.
+ */
+describe('announcements are a destination in the admin plane', () => {
+  it('is offered to a platform admin, and to nobody else', async () => {
+    const { ADMIN_VIEWS, visibleViews, isRoutableView } = await import(
+      '../src/viz/client-gl/store.js'
+    );
+    const viewer = {
+      displayName: 'A',
+      role: 'org:owner',
+      activeOrganisation: null,
+      organisations: [],
+      platformAdmin: false,
+    };
+    const base = { failure: false, signingOut: false, switchingOrganisationId: null };
+    expect(ADMIN_VIEWS).toContain('announce');
+    expect(visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })).toContain(
+      'announce'
+    );
+    expect(visibleViews({ ...base, viewer })).not.toContain('announce');
+    // The ungated developer path has no organisations to announce to.
+    expect(isRoutableView('announce', null)).toBe(false);
+    expect(isRoutableView('announce', { ...base, viewer })).toBe(false);
+  });
+
+  it('draws its own frame, and the DOM form follows the view', async () => {
+    const bridge = readFileSync('src/viz/client-gl/DomBridge.tsx', 'utf8');
+    // The overlay is pinned to ONE view: rendering it on `admin` too would put
+    // one job in two places, which is what this move undid.
+    expect(bridge).toContain("view === 'announce' && announcementsEnabled");
+    expect(bridge).not.toContain("view === 'admin' && announcementsEnabled");
   });
 });

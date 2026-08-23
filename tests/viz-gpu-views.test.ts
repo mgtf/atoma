@@ -460,7 +460,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     journalSeverity: 'all',
     journalFamily: 'all',
     selectedDocsTheme: 'runs',
-    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
+    scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
     enter: noop,
@@ -1127,13 +1127,15 @@ describe('visibleViews', () => {
     // them, so the tabs must not exist to poison the global data error.
     // Docs stays: it is static prose, not a fetch of gated data.
     expect(visibleViews({ ...base, viewer })).toEqual(['projects', 'runs', 'docs']);
-    // The admin plane is FOUR destinations, one per job, not one tab holding
-    // organisations, the journal, the ledger and the sentinel at once.
+    // The admin plane is FIVE destinations, one per job, not one tab holding
+    // organisations, the journal, the ledger and the sentinel at once — and
+    // the composer that used to ride at the foot of the organisation list is
+    // one of them, not a form bolted onto a screen about something else.
     expect(
       visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } })
     ).toEqual([
       'projects', 'runs', 'registry', 'skills', 'burnin', 'docs',
-      'admin', 'journal', 'ledger', 'sentinel',
+      'admin', 'journal', 'ledger', 'sentinel', 'announce',
     ]);
   });
 
@@ -2393,6 +2395,7 @@ describe('drawRegistry scrolling honesty', () => {
             journal: 0,
             ledger: 0,
             sentinel: 0,
+            announce: 0,
             settings: 0,
           },
         },
@@ -2618,7 +2621,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
         {
           view: 'burnin',
           burninPage: 2,
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 500, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
         },
         data
       ),
@@ -2669,7 +2672,7 @@ describe('drawBurnin scroll, pagination and lifecycle columns', () => {
       makeSnapshot(
         {
           view: 'burnin',
-          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, settings: 0 },
+          scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: SCROLL, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
         },
         data
       ),
@@ -3398,6 +3401,7 @@ describe('drawRuns behavior', () => {
             journal: 0,
             ledger: 0,
             sentinel: 0,
+            announce: 0,
             settings: 0,
           },
         },

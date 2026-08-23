@@ -388,7 +388,7 @@ export function DomBridge({
           </div>
         </form>
       ) : null}
-      {viewOverlaysVisible && view === 'admin' && announcementsEnabled ? (
+      {viewOverlaysVisible && view === 'announce' && announcementsEnabled ? (
         <AnnouncementForm t={t} locale={locale} />
       ) : null}
       {pushPrompt !== 'hidden' ? (

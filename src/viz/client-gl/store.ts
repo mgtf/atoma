@@ -16,6 +16,7 @@ export type ViewName =
   | 'journal'
   | 'ledger'
   | 'sentinel'
+  | 'announce'
   | 'settings';
 
 /**
@@ -26,8 +27,20 @@ export type ViewName =
  * its LABEL is what changed. The journal, the catalogue ledger and the
  * sentinel each answer a different question and each needs its own scroll
  * position and its own filters — which one stacked view could not give them.
+ *
+ * `announce` is the plane's only WRITE surface, and it is last for that
+ * reason: the other four report what happened, this one reaches every
+ * subscriber's pocket. It rode at the foot of the organisation list, which
+ * put a broadcast composer under a screen nobody opens to broadcast, and cost
+ * that list 260px of height on every visit.
  */
-export const ADMIN_VIEWS: readonly ViewName[] = ['admin', 'journal', 'ledger', 'sentinel'];
+export const ADMIN_VIEWS: readonly ViewName[] = [
+  'admin',
+  'journal',
+  'ledger',
+  'sentinel',
+  'announce',
+];
 
 /**
  * ONE definition of which nav tabs a viewer gets — the DOM tablist and the
@@ -272,6 +285,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     journal: 0,
     ledger: 0,
     sentinel: 0,
+    announce: 0,
     settings: 0,
   },
   entered: false,

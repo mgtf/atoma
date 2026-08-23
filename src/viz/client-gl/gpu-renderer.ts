@@ -228,6 +228,7 @@ import { drawAdmin } from './renderer/views/admin.js';
 import { drawJournal } from './renderer/views/journal.js';
 import { drawLedger } from './renderer/views/ledger.js';
 import { drawSentinel } from './renderer/views/sentinel.js';
+import { drawAnnounce } from './renderer/views/announce.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
@@ -1043,6 +1044,9 @@ export class GpuRenderer {
             break;
           case 'sentinel':
             drawSentinel(this, snapshot, contentWidth, height);
+            break;
+          case 'announce':
+            drawAnnounce(this, snapshot, contentWidth, height);
             break;
           case 'runs':
             drawRuns(this, snapshot, contentWidth, height);

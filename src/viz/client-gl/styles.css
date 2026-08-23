@@ -526,19 +526,20 @@ html.atoma-cursor-active * {
 }
 
 /* The announcement composer: real DOM for text entry, the language review and
-   the segment select. Pinned to the foot of the Admin view, whose scroll pane
-   gives up exactly this height (`ADMIN_DOM_FORM_HEIGHT` in
-   renderer/views/admin.ts) so organisation rows never slide behind it. The
-   review step grows with the number of languages, so the panel scrolls
-   INTERNALLY rather than pushing the list around. */
+   the segment select. It IS the Announcements view, so it fills that view's
+   frame rather than claiming a slice at the foot of another one. Top and
+   bottom are the frame's own content box (`view-frame.ts`); a test holds
+   all three numbers to their TS originals. `auto`, so a third language
+   scrolls inside the box instead of pushing the send button past the frame. */
 .gpu-announce-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
+  --gpu-frame: calc(var(--gpu-content) - 20px);
   position: fixed;
   z-index: 4;
-  bottom: 16px;
-  left: calc(var(--gpu-sidebar) + 32px);
-  width: calc(var(--gpu-content) - 64px);
-  height: 260px;
+  top: 110px;
+  bottom: 26px;
+  left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
+  width: calc(var(--gpu-frame) - 32px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;

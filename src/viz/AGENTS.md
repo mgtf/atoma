@@ -164,12 +164,19 @@ npm run viz:mark-turn:analyze
   unroutable-view fallback lands on Projects too. On the ungated developer path
   project routes do not exist, so Projects shows its explanatory empty state
   and the DOM mutation form is absent.
-- The ADMIN PLANE is FOUR views, one per job — Organisations (`admin`), the
-  platform journal, the catalogue ledger, and the Sentinel — under one nav
-  heading. It was one tab holding all four: three questions on one screen, and
-  one scroll position between them, so the journal could never page past its
-  first page. `ADMIN_VIEWS` in `store.ts` is the one list and the rail reads
-  it; each view's query is enabled on ITS OWN view.
+- The ADMIN PLANE is FIVE views, one per job — Organisations (`admin`), the
+  platform journal, the catalogue ledger, the Sentinel, and Announcements —
+  under one nav heading. It was one tab holding several: three questions on one
+  screen, and one scroll position between them, so the journal could never page
+  past its first page. `ADMIN_VIEWS` in `store.ts` is the one list and the rail
+  reads it; each view's query is enabled on ITS OWN view. Announcements is the
+  plane's only WRITE surface and is last for that reason. It draws a frame and
+  nothing else: the composer is DOM filling the frame's content box, so unlike
+  every other overlay here it has no GL content to reserve space against — the
+  height contract is inverted, and the test pins the CSS box to
+  `view-frame.ts`. It rode at the foot of the organisation list before, which
+  put a broadcast composer under a screen nobody opens to broadcast and cost
+  that list 260px on every visit.
 - The journal PAGES and FILTERS SERVER-SIDE. `nextBefore` is an exclusive
   `seq` cursor, so a page boundary can neither repeat nor skip a row; filters
   ride the query key, because filtering loaded pages client-side would THIN
@@ -357,4 +364,5 @@ npm run viz:mark-turn:analyze
   means everyone, and an EMPTY list can never mean that. `orgCount`, not
   the id list, rides the row: `detail` is capped and the journal is
   fail-open, so an oversized row would lose the audit trail AND the push.
-  The router refuses to deliver a push that renders no title.
+  The router refuses to deliver a push that renders no title. The composer
+  is its own admin view (above), not a form at the foot of another.
