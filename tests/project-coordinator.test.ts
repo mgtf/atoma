@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuthStore } from '../src/auth/store.js';
@@ -16,6 +25,7 @@ import {
 } from '../src/projects/coordinator.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { RunLockBusyError, type RunLease } from '../src/mcp/runLock.js';
+import { TraceRecorder } from '../src/viz/trace.js';
 
 type SpawnRunOptions = Parameters<typeof import('../src/cli/burnin.js').spawnRun>[0];
 
@@ -814,5 +824,313 @@ describe('the subscription-transport door, at the coordinator', () => {
     // An admin on a credentialled transport is an ordinary run: the audit row
     // means "billed to the host subscription", and this one was not.
     expect(seen).toEqual([]);
+  });
+});
+
+/**
+ * A LARGE TRACE IS EVIDENCE, NOT A REFUSAL.
+ *
+ * Project run `2857a579` delivered a dark-mode toggle, wrote a 781_071-byte
+ * trace, and was recorded `failed` with `control-plane JSON is not a bounded
+ * regular file` because the control plane read the whole document behind a
+ * 524_288-byte cap. Its archived epilogue was
+ * `{"outcome":"delivered","costUsd":0.8421,"llmCalls":20,…,"learnedSkills":1}`
+ * and its trace tail held a complete `result` with
+ * `producedBy: {tier: 3, name: "Meristem", viaFallback: false}` — it would have
+ * passed every SEMANTIC check. Only the size gate refused it.
+ *
+ * The erasure is not cosmetic: `previousDeliveredWorkspace` seeds the next run
+ * of a project only from a row whose status is `delivered`, so an erased
+ * delivery makes the following run seed from an OLDER workspace and silently
+ * skip the work.
+ *
+ * Every driver below writes its trace through the REAL `TraceRecorder`. The
+ * fixtures elsewhere in this file hand-write ~120-byte three-key traces, which
+ * is exactly how a cap on a document growing ~19KB per tool call shipped
+ * unnoticed.
+ */
+describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', () => {
+  /** ~19KB per tool event: the measured slope, reached the way a run reaches it. */
+  const EVENT_FILLER = 'x'.repeat(19_000);
+
+  function writeRealTrace(
+    runsDir: string,
+    traceRunId: string,
+    targetBytes: number,
+    finish: (recorder: TraceRecorder) => void
+  ): void {
+    mkdirSync(runsDir, { recursive: true });
+    const recorder = new TraceRecorder(runsDir);
+    recorder.beginRun({ description: 'Build a clock in one index.html.' }, 'clock', {
+      runId: traceRunId,
+    });
+    for (let i = 0; i < Math.ceil(targetBytes / 19_000) + 2; i++) {
+      recorder.record({
+        id: `e${i}`,
+        ts: Date.now(),
+        kind: 'tool',
+        llmEventId: 'l1',
+        name: 'write_file',
+        args: { path: `f${i}.js`, contents: EVENT_FILLER },
+        durationMs: 1,
+      });
+    }
+    finish(recorder);
+  }
+
+  const deliveredResult = {
+    summary: 'the toggle keeps the elapsed time and laps',
+    output: 'index.html, app.js',
+    producedBy: { tier: 3 as const, name: 'Meristem', viaFallback: false },
+  };
+
+  /**
+   * A driver that delivers for real: workspace file, declared manifest, and a
+   * trace of at least `targetBytes` written by the recorder.
+   */
+  function bigTraceDriver(options: {
+    targetBytes: number;
+    finish: (recorder: TraceRecorder) => void;
+    stats?: RunStats;
+    traceRunId?: (runId: string) => string;
+    afterTrace?: (runsDir: string, runId: string) => void;
+    skipTrace?: boolean;
+  }): ReturnType<typeof vi.fn> {
+    return vi.fn(async (spawn: SpawnRunOptions) => {
+      const env = spawn.env ?? {};
+      const workspace = env['ATOMA_BUILD_WORKSPACE']!;
+      const runs = env['ATOMA_RUNS_DIR']!;
+      const runId = env['ATOMA_RUN_ID']!;
+      const declarations = env['ATOMA_ARTIFACT_MANIFEST_PATH']!;
+      mkdirSync(workspace, { recursive: true });
+      mkdirSync(join(declarations, '..'), { recursive: true });
+      writeFileSync(join(workspace, 'index.html'), '<h1>Clock</h1>', 'utf8');
+      writeFileSync(
+        declarations,
+        JSON.stringify({
+          version: 1,
+          runId,
+          generatedAt: new Date().toISOString(),
+          outputs: ['index.html'],
+        }),
+        'utf8'
+      );
+      if (options.skipTrace !== true) {
+        writeRealTrace(
+          runs,
+          options.traceRunId ? options.traceRunId(runId) : runId,
+          options.targetBytes,
+          options.finish
+        );
+      } else {
+        mkdirSync(runs, { recursive: true });
+      }
+      options.afterTrace?.(runs, runId);
+      // The runner said DELIVERED in every case here. What differs is only
+      // what the trace says, which is precisely what `verifiedTrace` decides.
+      return `${formatRunStatsEpilogue(options.stats ?? DELIVERED_STATS)}\n✓ build finished\n`;
+    });
+  }
+
+  /** A publisher whose mock also satisfies `ProjectRunPublisher` structurally. */
+  function publisherSpy() {
+    return { publish: vi.fn(async (_input: unknown) => undefined) };
+  }
+
+  async function runOnce(
+    f: ReturnType<typeof fixture>,
+    driver: ReturnType<typeof vi.fn>,
+    key: string,
+    publisher?: ReturnType<typeof publisherSpy>
+  ) {
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      driver: driver as unknown as ProjectRunDriver,
+      acquireLease: async () => lease(),
+      ...(publisher ? { publisher } : {}),
+    });
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: key, goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+    const tracePath = join(
+      f.root,
+      'orgs',
+      f.viewer.orgId,
+      'projects',
+      f.project.projectId,
+      'runs',
+      started.projectRunId,
+      'traces',
+      `${started.projectRunId}.json`
+    );
+    return { started, row: f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!, tracePath };
+  }
+
+  it("delivers a run whose real trace passes the cap that erased 2857a579", async () => {
+    const f = fixture();
+    const publisher = publisherSpy();
+    const driver = bigTraceDriver({
+      targetBytes: 781_071,
+      finish: (r) => void r.endRun({ result: deliveredResult }),
+      stats: { ...DELIVERED_STATS, costUsd: 0.8421, llmCalls: 20, learnedSkills: 1 },
+    });
+    const { started, row, tracePath } = await runOnce(f, driver, 'run-big-1', publisher);
+
+    // FIRST: the trace really is over the old cap, so this case cannot pass
+    // vacuously if the writer ever stops producing a large document.
+    expect(statSync(tracePath).size).toBeGreaterThan(781_071);
+    expect(row.status).toBe('delivered');
+    expect(row.traceId).toBe(started.projectRunId);
+    expect(row.stats?.costUsd).toBe(0.8421);
+    expect(row.artifactManifest?.files.map((file) => file.path)).toEqual(['index.html']);
+    expect(publisher.publish).toHaveBeenCalledOnce();
+  });
+
+  it('delivers at 949ecd5d scale too, so the fix is not a raised constant', async () => {
+    const f = fixture();
+    const driver = bigTraceDriver({
+      targetBytes: 1_173_116,
+      finish: (r) => void r.endRun({ result: deliveredResult }),
+    });
+    const { row, tracePath } = await runOnce(f, driver, 'run-big-2');
+    expect(statSync(tracePath).size).toBeGreaterThan(1_173_116);
+    expect(row.status).toBe('delivered');
+  });
+
+  /**
+   * The semantic gate had NO test at all before this one — grep the suite for
+   * any of its three messages and you find nothing. Raising a constant would
+   * have left it that way.
+   */
+  const refusals: Array<[string, (r: TraceRecorder) => void, RegExp]> = [
+    // An errored or cancelled run usually has NO result, and the result check
+    // comes first — the same order the whole-document reader applied.
+    [
+      'an errored trace with no result',
+      (r) => void r.endRun({ error: '401 API key is invalid.' }),
+      /run trace has no completed result/,
+    ],
+    [
+      'a cancelled trace with no result',
+      (r) => void r.endRun({ cancelled: true }),
+      /run trace has no completed result/,
+    ],
+    // And these two reach the publishability branch, because a result IS there.
+    [
+      'a result carrying an error',
+      (r) => void r.endRun({ result: deliveredResult, error: '401 API key is invalid.' }),
+      /failed, cancelled or degraded traces are not publishable/,
+    ],
+    [
+      'a result cancelled mid-flight',
+      (r) => void r.endRun({ result: deliveredResult, cancelled: true }),
+      /failed, cancelled or degraded traces are not publishable/,
+    ],
+    [
+      'a degraded trace',
+      (r) =>
+        void r.endRun({
+          result: { ...deliveredResult, producedBy: { tier: 3, name: 'Meristem', viaFallback: true } },
+        }),
+      /failed, cancelled or degraded traces are not publishable/,
+    ],
+    [
+      'a trace that never completed',
+      (r) => r.flushPartial(),
+      /run trace has no completed result/,
+    ],
+  ];
+
+  for (const [name, finish, message] of refusals) {
+    it(`still refuses ${name} above the old cap`, async () => {
+      const f = fixture();
+      const publisher = publisherSpy();
+      const driver = bigTraceDriver({ targetBytes: 600_000, finish });
+      const key = `run-refuse-${name.replace(/[^A-Za-z0-9]+/g, '-')}`;
+      const { row, tracePath } = await runOnce(f, driver, key, publisher);
+      expect(statSync(tracePath).size).toBeGreaterThan(524_288);
+      expect(row.status).toBe('failed');
+      expect(row.error).toMatch(message);
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+  }
+
+  it('refuses a large trace whose id belongs to another run', async () => {
+    const f = fixture();
+    const driver = bigTraceDriver({
+      targetBytes: 600_000,
+      finish: (r) => void r.endRun({ result: deliveredResult }),
+      traceRunId: () => 'someone-elses-run',
+      // Put the foreign-id document at the path this run's trace must occupy.
+      afterTrace: (runsDir, runId) =>
+        renameSync(join(runsDir, 'someone-elses-run.json'), join(runsDir, `${runId}.json`)),
+    });
+    const { row, tracePath } = await runOnce(f, driver, 'run-foreign-id');
+    // The identity check now runs on a file the OLD reader refused for size
+    // before it ever compared an id.
+    expect(statSync(tracePath).size).toBeGreaterThan(524_288);
+    expect(row.status).toBe('failed');
+    expect(row.error).toMatch(/run trace id does not match the project run/);
+  });
+
+  it('refuses an absent trace by name, without leaking a host path', async () => {
+    const f = fixture();
+    const driver = bigTraceDriver({
+      targetBytes: 0,
+      finish: () => undefined,
+      skipTrace: true,
+    });
+    const { row } = await runOnce(f, driver, 'run-no-trace');
+    expect(row.status).toBe('failed');
+    expect(row.error).toBe('run trace was never written');
+    // `project_runs.error` is served to tenants. The row this fix replaces
+    // carried an absolute `/Users/…/.atoma/orgs/…` path into it.
+    expect(row.error).not.toContain(f.root);
+  });
+
+  it('refuses a symlink standing in for a trace, without leaking a host path', async () => {
+    const f = fixture();
+    const driver = bigTraceDriver({
+      targetBytes: 600_000,
+      finish: (r) => void r.endRun({ result: deliveredResult }),
+      traceRunId: () => 'real-target',
+      afterTrace: (runsDir, runId) =>
+        symlinkSync(join(runsDir, 'real-target.json'), join(runsDir, `${runId}.json`)),
+    });
+    const { row } = await runOnce(f, driver, 'run-symlinked-trace');
+    expect(row.status).toBe('failed');
+    expect(row.error).toBe('run trace is not a bounded regular file');
+    expect(row.error).not.toContain(f.root);
+  });
+
+  /**
+   * KNOWN GAP, pinned deliberately rather than hidden. When the runner reports
+   * `delivered` and the TRACE refuses, `finish()`'s failure path drops the
+   * stats — its condition is `stats.outcome !== 'delivered'`, keyed on the
+   * PARSED outcome rather than on the status actually written. So run
+   * `2857a579` is recorded `failed` with `stats_json = NULL` despite $0.8421
+   * spent and one skill learned. It is the same class of loss the ordinary
+   * failure path already fixed, reopened through a different door, and it is
+   * recorded in `docs/decided-not-built-2026-08-23.md` because the repair is a
+   * store-contract question (a `failed` row may not carry `outcome:
+   * 'delivered'` stats), not a one-line change.
+   */
+  it('does NOT yet record what a trace-refused delivery cost', async () => {
+    const f = fixture();
+    const driver = bigTraceDriver({
+      targetBytes: 600_000,
+      finish: (r) => void r.endRun({ cancelled: true }),
+      stats: { ...DELIVERED_STATS, costUsd: 0.8421, llmCalls: 20 },
+    });
+    const { row } = await runOnce(f, driver, 'run-cost-dropped');
+    expect(row.status).toBe('failed');
+    expect(row.stats).toBeNull();
   });
 });

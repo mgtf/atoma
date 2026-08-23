@@ -12,6 +12,13 @@ import type {
   Publication,
 } from '../contracts/projects.js';
 import { pinForTier, type TierModelPins } from '../contracts/tierModels.js';
+import { readTraceTopLevelFields } from '../contracts/traceFields.js';
+// TYPE-ONLY, and it must stay that way: `src/viz/server.ts` imports four
+// `src/projects` modules, so a value edge back into `src/viz` would close a
+// subsystem cycle and put the delivered/failed decision inside the
+// visualization subsystem. The import earns its place by pinning the member
+// names below against the shape the recorder actually writes.
+import type { VizRun } from '../viz/trace.js';
 import { ARTIFACT_MANIFEST_PATH_ENV } from '../run/runner.js';
 import {
   acquireRunLease,
@@ -304,6 +311,16 @@ function previousDeliveredWorkspace(
   return null;
 }
 
+/**
+ * ONE caller: `declared-artifacts.json`. That file is small by contract and its
+ * CONTENT is model-chosen, so a size bound plus a whole-document parse is the
+ * right shape for it.
+ *
+ * A run trace is the opposite on both axes — a control-plane-owned path whose
+ * SIZE is a function of how much work the run did — and bounding the two the
+ * same way is what recorded delivered run `2857a579` as failed. Traces go
+ * through `readTraceTopLevelFields`; see `src/contracts/traceFields.ts`.
+ */
 function boundedOwnJson(pathname: string): unknown {
   const stat = lstatSync(pathname);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_CONTROL_JSON_BYTES) {
@@ -312,17 +329,38 @@ function boundedOwnJson(pathname: string): unknown {
   return JSON.parse(readFileSync(pathname, 'utf8')) as unknown;
 }
 
+/**
+ * The members the delivery decision reads. `satisfies` pins them against the
+ * shape the recorder writes, so renaming a field in `VizRun` fails to compile
+ * here instead of silently reading `undefined` in production.
+ */
+const TRACE_VALUE_KEYS = ['id', 'endedAt', 'cancelled', 'degraded'] as const satisfies readonly (keyof VizRun)[];
+/**
+ * `result` and `error` are the two members a MODEL wrote. They are read as
+ * shapes — present, and an object — and never materialised, which is what
+ * makes the projection under 400 bytes on a trace of any size.
+ */
+const TRACE_SHAPE_KEYS = ['result', 'error'] as const satisfies readonly (keyof VizRun)[];
+
 function verifiedTrace(pathname: string, expectedRunId: string): void {
-  const raw = boundedOwnJson(pathname);
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('run trace is not an object');
+  const trace = readTraceTopLevelFields(pathname, {
+    values: TRACE_VALUE_KEYS,
+    shapes: TRACE_SHAPE_KEYS,
+  });
+  if (trace.values['id'] !== expectedRunId) {
+    throw new Error('run trace id does not match the project run');
   }
-  const trace = raw as Record<string, unknown>;
-  if (trace['id'] !== expectedRunId) throw new Error('run trace id does not match the project run');
-  if (typeof trace['endedAt'] !== 'string' || trace['result'] === null || typeof trace['result'] !== 'object') {
+  if (typeof trace.values['endedAt'] !== 'string' || trace.shapes['result'] !== 'object') {
     throw new Error('run trace has no completed result');
   }
-  if (trace['error'] || trace['cancelled'] === true || trace['degraded'] === true) {
+  // PRESENCE, not truthiness: `error: ''` now refuses where it used to pass.
+  // `endRun` assigns `error` only from a real message, so no writer produces
+  // the empty string, and the tightening only ever refuses.
+  if (
+    trace.shapes['error'] !== undefined ||
+    trace.values['cancelled'] === true ||
+    trace.values['degraded'] === true
+  ) {
     throw new Error('failed, cancelled or degraded traces are not publishable');
   }
 }

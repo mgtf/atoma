@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { MAX_TRACE_BYTES } from '../contracts/traceFields.js';
 import type { VizRunIndexEntry } from '../viz/trace.js';
 import { ABANDONED_AFTER_MS, isIndexEntryLive } from '../viz/liveness.js';
 
@@ -25,8 +26,17 @@ import { ABANDONED_AFTER_MS, isIndexEntryLive } from '../viz/liveness.js';
  * operator corpus does not have.
  */
 
-/** A trace larger than this is not read: no watch is better than a stall. */
-export const MAX_TRACE_BYTES = 32 * 1024 * 1024;
+/**
+ * ONE ceiling over trace files, THREE dispositions above it. The number lives
+ * in `src/contracts/traceFields.ts` and is re-exported here so this subsystem's
+ * callers keep naming it from their own neighbour.
+ *
+ * The sentinel's disposition is fail-SOFT: a trace larger than this is not
+ * read, because no watch is better than a stall. The coordinator's disposition
+ * over the same number is fail-HARD, because it is deciding whether work was
+ * delivered.
+ */
+export { MAX_TRACE_BYTES };
 
 /**
  * Bounded and TOTAL: absent, oversized, torn and vanished-mid-read all give

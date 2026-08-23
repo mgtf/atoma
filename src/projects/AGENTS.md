@@ -129,3 +129,29 @@ Neighbours:
   $1.10 over 41 calls, persisted as `stats_json = NULL`. `delivered` is the
   only outcome that cannot ride a failure; the store refuses the remaining
   contradictions itself.
+
+## Delivery, and the evidence it is decided from
+
+- DELIVERY IS DECIDED FROM SIX DEPTH-1 TRACE MEMBERS, never from the whole
+  document. `verifiedTrace` reads `id`, `endedAt`, `cancelled` and `degraded` as
+  values and `result`/`error` as shapes, through
+  [`readTraceTopLevelFields`](../contracts/AGENTS.md). Its three refusal
+  messages are unchanged; what changed is that a trace is no longer refused for
+  being large. Delivered run `2857a579` wrote 781_071 bytes, passed every
+  semantic check, and was recorded `failed` by a 524_288-byte cap — which also
+  made the NEXT run of that project seed from an older workspace, silently
+  skipping the work, because `previousDeliveredWorkspace` reads only rows whose
+  status is `delivered`.
+- `MAX_CONTROL_JSON_BYTES` now governs `declared-artifacts.json` ALONE, and the
+  difference between the two files is the whole point: a declared manifest is
+  small by contract and its CONTENT is model-chosen, so a size bound plus a
+  whole-document parse fits it; a trace is a control-plane-owned path whose
+  SIZE grows with the work. Bounding them the same way is what caused the
+  erasure. Do not reunify them.
+- A trace-refused delivery still records NO cost: `finish()` keys its stats
+  exclusion on the PARSED outcome (`stats.outcome !== 'delivered'`), so a run
+  the runner called delivered and the trace refused persists
+  `stats_json = NULL` — `2857a579` lost $0.8421 and one learned skill that way.
+  Recorded, not fixed: a `failed` row may not carry `delivered` stats, so the
+  repair is a store-contract decision
+  ([register](../../docs/decided-not-built-2026-08-23.md)).

@@ -261,6 +261,23 @@ npm run viz:mark-turn:analyze
   The FROZEN MUI fallback keeps its own Launch tab: it has no Projects view to
   fold the guidance into, and it is a fallback, not where product decisions get
   expressed.
+- `TraceRecorder.persist()` IS A WIRE CONTRACT for one reader outside this
+  subsystem. It must keep emitting ONE top-level JSON object whose members are
+  `VizRun`'s, because the projects control plane decides delivered-versus-failed
+  from six of them through
+  [`readTraceTopLevelFields`](../contracts/AGENTS.md) rather than by parsing the
+  document — a trace grows ~19KB per tool call and a 512KB whole-file cap
+  recorded a delivered run as failed. That reader depends on neither member
+  ORDER nor INDENTATION, which is deliberate: a throttled partial flush already
+  moves `totals` ahead of `endedAt`, so order was never stable. Changing the
+  document to a stream of records, or nesting the terminal members, is a change
+  to that contract.
+- TWO hand-rolled JSON scanners now exist and they own different jobs: this
+  subsystem's neighbour `src/atoms/json.ts` (`findBalancedEnd`,
+  `repairPrematureClose`) repairs a whole model-authored STRING already in
+  memory; `traceFields.ts` projects depth-1 members out of a FILE it must never
+  hold. Neither may drift into the other's job — the second exists precisely
+  because the first needs the whole document.
 
 ## Server and gated surfaces
 

@@ -15,6 +15,7 @@ cannot see which of them were already reasoned through will re-design them.
 | L3 → L2 obligation threading | `33ad67d` | done; found by the armed control, not by tests |
 | platform-admin door for the subscription transport | [src/projects](../src/projects/AGENTS.md), `a6ff7e1` | done |
 | `npm run projects` (org-scoped runs from a terminal) | [src/cli](../src/cli/AGENTS.md), `a6ff7e1` | done |
+| depth-1 trace reader: a large trace stops erasing a delivery | [src/contracts](../src/contracts/AGENTS.md) | done; 11 new tests fail on the old reader |
 
 ## Reasoned through, deliberately not built
 
@@ -347,6 +348,113 @@ checks, and the sequence narrowed (`labelAppearsInList, totalUpdated` →
 `totalUpdated` → `totalShows550`) across consecutive calls, which is the
 learning curve the naming was built to produce. And the failed row kept its
 cost (`stats_json` populated on `failed`), which run `a786358a` had lost.
+
+## What the trace-cap design panel settled, and the ten it recorded (2026-08-23)
+
+Fifteen agents: two grounding, four independent designs, eight adversarial
+reviewers (a security lens and a contract lens per design), one synthesis.
+What shipped is the depth-1 projecting reader
+([`src/contracts/traceFields.ts`](../src/contracts/traceFields.ts)). Three
+receipt-based designs were rejected, and the reason is item 1.
+
+1. **THE RECEIPT CHANNEL IS FORGEABLE FROM THE TENANT'S GOAL.** The most
+   valuable finding of the round, reproduced end-to-end by one reviewer against
+   the compiled parsers, and verified again by hand before this was written.
+   The chain: `projectGoalSchema` is `z.string().trim().min(1).max(4_000)` and
+   permits newlines (`src/contracts/projects.ts:58`); `buildTask` sets
+   `description: goal` verbatim and `runner.ts:720` prints it at second zero;
+   `builtin.ts` echoes the model's own argv; `containerExecutor.ts` forwards
+   worker stderr from a handler that outlives the terminal epilogue;
+   `spawnRun` merges stdout and stderr into one string; and
+   `parseRunStatsEpilogue` is a last-valid-wins LINE SCAN after `.trim()`, with
+   NO binding to a run id. On a normal run the runner's real epilogue wins by
+   position — but `burnin.ts`'s hard-reap path prints prose only, so a forged
+   line can be the ONLY receipt. What stands between that and a forged
+   `delivered` today is `verifiedTrace`, i.e. the trace itself; the three
+   rejected designs each deleted it. Two candidate closures, neither built: a
+   runner-written receipt FILE via a path env var (tmp+rename, read under the
+   surviving bound — the `ARTIFACT_MANIFEST_PATH_ENV` precedent), and/or a
+   coordinator-minted nonce echoed in the epilogue. Record alongside it that
+   `projectRunId`'s present unforgeability is an ACCIDENTAL secret nobody
+   designed, protected or tested, and it breaks the moment anyone forwards
+   `ATOMA_RUN_ID` into the container, mounts the run root, or runs project work
+   on the host backend.
+2. **"No `ATOMA_RUN_STATS` epilogue means not delivered."** `parseRunLog` falls
+   back to a prose vote on `/✓ build finished/` over a log that contains
+   model output. A real hole, a new mechanical gate, and not safe on its own
+   while item 1 stands. Decide it WITH item 1, not before.
+3. **`degraded` on `runStatsSchema` — decided against, not merely deferred.** It
+   would be a second carrier of one fact, defaulted fail-open across a
+   `dist/`-versus-source build boundary, whose only consumer is a decision the
+   trace already answers unforgeably.
+4. **Whether degraded work is deliverable, publishable and SEEDABLE.** Two of
+   the rejected designs would have made a fallback-produced workspace the seed
+   for run N+1 through `previousDeliveredWorkspace`. `src/viz/friction.ts`
+   already refuses to LEARN from such a run. This is a judgement about model
+   output — exactly what the cooling-off rule targets.
+5. **Post-delivery refusals as non-destructive, and where a withheld reason is
+   stored.** The store forbids `error` on a delivered row, `reservePublication`
+   requires a manifest hash, and the platform event vocabulary is a closed
+   enum — so "delivered but withheld" is a state the schema cannot currently
+   express. Three options to cost out: a nullable typed withholding field with
+   the CHECK relaxed; a manifest-hash-free publication row; a new closed event
+   kind with its severity mapping.
+6. **Incremental publication, and a per-project staleness surface.** Now
+   MEASURED, not theoretical: `project_publications` holds three rows —
+   `8597ec79` published to `mgtf/atoma-e2e-stopwatch-2`, and `a06b09ff` (the lap
+   button, trace 360_820 bytes, UNDER the old cap) refused with *"GitHub
+   repository branch already exists; initial publish refused"*. So the real
+   repository still shows a stopwatch with no laps. The trace-cap fix makes this
+   MORE FREQUENT, not newly possible, which is why holding the erasure fix
+   hostage to a GitHub-flow design was rejected. Includes: may
+   `repository_status = 'ready'` keep claiming currency while the repository is
+   N runs behind?
+7. **`MAX_CONTROL_JSON_BYTES` versus its own schema's bounds.**
+   `declaredArtifactManifestSchema` permits roughly 1.05 MB of schema-legal
+   declarations while 512 KB is enforced — the same defect class through a
+   different door, reachable with no large trace at all.
+8. **The cost drop on a trace-refused delivery.** `finish()` keys its stats
+   exclusion on the PARSED outcome, so a run the runner called delivered and the
+   trace refused persists `stats_json = NULL`; `2857a579` lost $0.8421 and one
+   learned skill. Pinned by a test that asserts the CURRENT behaviour on
+   purpose. The repair is a store-contract decision (a `failed` row may not
+   carry `delivered` stats), not a one-line change.
+9. **Refit the other two trace readers onto the projecting reader.**
+   `summarizeTraceFile` still whole-parses the same files with NO bound on the
+   gated `/api/runs` path, and the sentinel whole-parses up to 32 MiB per
+   synchronous tick in the same process. Deduplicate `TraceFileHeader` against
+   `VizRun` first — it is an existing "do not duplicate interfaces" violation
+   that a swap would make silently drift-prone. Until then the only accurate
+   claim is the narrow one: the COORDINATOR'S delivery decision materialises
+   under 400 bytes.
+10. **A writer-side cap on `result.summary` and `result.output`.** `output` is
+    typed `unknown` and passed through uncapped; 11 KB is the largest observed,
+    with nothing in code preventing more.
+
+Two honest limits of what shipped:
+
+- **The in-scan byte counter is not covered behaviourally.** Both stat checks
+  shadow it for a regular file, so triggering it needs a concurrent writer
+  appending between the stat and the read — a race the suite cannot make
+  deterministic. It is kept because a stat is stale the moment it returns and
+  the child owns that directory. Stated in the test file too.
+- **No real-child DELIVERED run is tested.** The FIFO case crosses a process
+  boundary and `runner-cancel-epilogue` crosses one for a cancelled run, but a
+  delivered real child needs a stubbed L3-L2-L1 chain the suite does not have.
+  The bug's boundary was reader-versus-file, so this is acceptable; closing it
+  means extending the ollama stub to complete a full protocol, which is worth
+  doing for other reasons.
+
+And one finding from the same session that is a decision, not a defect:
+
+- **A project run has no timeout lever.** `coordinator.ts` hard-codes
+  `15 * 60 * 1_000`, neither construction site passes `timeoutMs`,
+  `projects run` has no `--timeout`, and `spawnRun` writes
+  `ATOMA_BUILD_TIMEOUT_MS` AFTER spreading the caller's env — so an operator's
+  exported value is silently overwritten. "Raise the timeout", which run
+  `949ecd5d`'s own post-mortem suggested, is therefore unreachable advice. The
+  fix is small (an option, a flag, and `extraEnv` instead of `env`); the DEFAULT
+  is the operator's call.
 
 ## Waiting on the operator
 

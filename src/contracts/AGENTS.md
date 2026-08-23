@@ -48,3 +48,40 @@ Neighbours:
 - `Witness` declares its OBSERVER. Never relabel a model-declared witness as
   transport-observed, and never fold transport witnesses into the
   recorded-probe rendering — they are references, and they carry no `cmd`.
+
+## Reading a trace without holding it
+
+- `src/contracts/traceFields.ts` owns the ONE projecting reader over a run
+  trace: `readTraceTopLevelFields` enumerates the document's DEPTH-1 members in
+  bytes and returns only what its caller named — VALUES for members whose
+  content is needed, SHAPES for members whose presence and JSON type are. It
+  lives here, not in `src/viz`, because `src/viz/server.ts` imports four
+  `src/projects` modules and a value edge back would close a subsystem cycle;
+  it is allowed here for the same reason `runStats.ts` holds its own parser,
+  and because no model-authored payload ever enters it.
+- A trace's SIZE is a function of how much work the run did (~19KB per tool
+  call, measured). Never bound it with a constant: a 512KB cap recorded
+  delivered run `2857a579` as `failed`. Bound the PROJECTION instead — the
+  coordinator's spec captures under 400 bytes from a trace of any size.
+- `result` and `error` are the members a MODEL wrote, and they are read as
+  SHAPES ONLY. `result.output` is typed `unknown` and capped nowhere, so any
+  reader that captured it would rebuild the same erasure at a larger threshold.
+- The reader is order- and whitespace-agnostic, so archived traces stay
+  readable and no caller may depend on member order or indentation. It is
+  FAIL-CLOSED: a member is reported absent only after the scan reaches the
+  closing brace and then EOF, which is what rules out a head+tail byte window —
+  that window cannot tell "the member is not there" from "my window was too
+  small", and a missing `error` read as "no error" would publish a failed run.
+- Validation is DEPTH-1 ONLY. Inside a skipped container the scan tracks
+  strings and nesting but does not check bracket matching or primitive grammar,
+  so a document malformed only below depth 1 is accepted where `JSON.parse`
+  would refuse. Unreachable from `TraceRecorder`, which emits one
+  `JSON.stringify` per persist, and the projected members are still exact.
+- ONE ceiling (`MAX_TRACE_BYTES`, 32 MiB), THREE dispositions above it, stated
+  here once: the coordinator fails HARD, because it is deciding whether work
+  was delivered; the sentinel fails SOFT (`readBoundedJson` returns null — no
+  watch is better than a stall); `summarizeTraceFile` fails soft by skipping the
+  row. The ceiling is re-exported by `src/sentinel/sources.ts`; it is not
+  redefined there.
+- No refusal message carries a filesystem path. `project_runs.error` is served
+  to tenants, and the row this reader replaced leaked an absolute host path.
