@@ -420,14 +420,20 @@ receipt-based designs were rejected, and the reason is item 1.
    learned skill. Pinned by a test that asserts the CURRENT behaviour on
    purpose. The repair is a store-contract decision (a `failed` row may not
    carry `delivered` stats), not a one-line change.
-9. **Refit the other two trace readers onto the projecting reader.**
-   `summarizeTraceFile` still whole-parses the same files with NO bound on the
-   gated `/api/runs` path, and the sentinel whole-parses up to 32 MiB per
-   synchronous tick in the same process. Deduplicate `TraceFileHeader` against
-   `VizRun` first — it is an existing "do not duplicate interfaces" violation
-   that a swap would make silently drift-prone. Until then the only accurate
-   claim is the narrow one: the COORDINATOR'S delivery decision materialises
-   under 400 bytes.
+9. **PARTLY CLOSED, and the rest deliberately left.** `summarizeTraceFile` no
+   longer whole-parses with NO bound on the gated `/api/runs` path: it is now
+   held to the shared 32 MiB ceiling and fails SOFT, skipping the row, which is
+   this subsystem's disposition rather than the coordinator's. Its header key
+   names are pinned against `VizRun` with `satisfies`, which closes the "do not
+   duplicate interfaces" violation without claiming types a file may not hold.
+   NOT done: actually PROJECTING it. The row needs `totals.calls` and
+   `totals.costUsd`, which live BELOW depth 1, where the reader gives shapes
+   rather than nested values on purpose. Extending it to capture a bounded
+   container would work, and is not built in the session that shipped the
+   reader. The sentinel's `readBoundedJson` was already bounded; what remains
+   there is that it materialises up to the ceiling per synchronous tick. The
+   accurate claim stays narrow: the COORDINATOR'S delivery decision
+   materialises under 400 bytes.
 10. **A writer-side cap on `result.summary` and `result.output`.** `output` is
     typed `unknown` and passed through uncapped; 11 KB is the largest observed,
     with nothing in code preventing more.

@@ -1,23 +1,51 @@
-import { readFileSync } from 'node:fs';
-import type { VizRunIndexEntry } from './trace.js';
+import { lstatSync, readFileSync } from 'node:fs';
+import { MAX_TRACE_BYTES } from '../contracts/traceFields.js';
+import type { VizRun, VizRunIndexEntry } from './trace.js';
 
-interface TraceFileHeader {
-  id?: unknown;
-  label?: unknown;
-  startedAt?: unknown;
-  endedAt?: unknown;
-  durationMs?: unknown;
-  error?: unknown;
-  degraded?: unknown;
-  cancelled?: unknown;
-  totals?: { calls?: unknown; costUsd?: unknown };
-}
+/**
+ * The members this row is built from, PINNED AGAINST `VizRun` so renaming one
+ * there fails to compile here instead of silently reading `undefined`. The
+ * values stay `unknown` on purpose — this parses a file, and a file may hold
+ * anything — but the NAMES are not a second copy of the shape.
+ */
+export const TRACE_HEADER_KEYS = [
+  'id',
+  'label',
+  'startedAt',
+  'endedAt',
+  'durationMs',
+  'error',
+  'degraded',
+  'cancelled',
+  'totals',
+] as const satisfies readonly (keyof VizRun)[];
+
+type TraceFileHeader = {
+  readonly [K in (typeof TRACE_HEADER_KEYS)[number]]?: K extends 'totals'
+    ? { calls?: unknown; costUsd?: unknown }
+    : unknown;
+};
 
 /**
  * Lightweight Runs-tab row from a persisted trace JSON.
+ *
+ * BOUNDED, and fail-SOFT: a trace over the shared ceiling yields null and the
+ * row is skipped. It used to parse the whole document with no bound at all, on
+ * a GATED HTTP path — the same files the coordinator refused to read whole,
+ * measured at 1.48 MB and growing ~19KB per tool call. The ceiling is the one
+ * in `src/contracts/traceFields.ts`; the disposition over it is this
+ * subsystem's, and it differs from the coordinator's on purpose: a missing row
+ * in a list is not a wrong answer about whether work was delivered.
+ *
+ * This still materialises the document it accepts, because the row needs
+ * `totals.calls` and `totals.costUsd` — values BELOW depth 1, which the
+ * projecting reader deliberately does not give. Projecting them is registered,
+ * not built.
  */
 export function summarizeTraceFile(file: string): VizRunIndexEntry | null {
   try {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.size > MAX_TRACE_BYTES) return null;
     const run = JSON.parse(readFileSync(file, 'utf8')) as TraceFileHeader;
     if (typeof run.id !== 'string' || typeof run.label !== 'string' || typeof run.startedAt !== 'string') {
       return null;
