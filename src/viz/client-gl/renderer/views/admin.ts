@@ -28,6 +28,26 @@ const MEMBER_ROW_HEIGHT = 20;
 const INVITE_ROW_HEIGHT = 40;
 const ORG_GAP = 18;
 const INVITE_PANEL_HEIGHT = 84;
+/**
+ * The announcement composer is real DOM — text entry, a language review and
+ * a select belong to the browser — pinned to the FOOT of this view. The
+ * organisation list gives up that height instead of scrolling underneath
+ * it: a `position: fixed` overlay over a scroll pane would let rows slide
+ * behind the form and read as a rendering fault.
+ *
+ * Must match `.gpu-announce-form` in styles.css, both numbers.
+ */
+export const ADMIN_DOM_FORM_HEIGHT = 260;
+export const ADMIN_DOM_FORM_BOTTOM = VIEW_FRAME_PAD;
+const ADMIN_DOM_FORM_GAP = 12;
+
+/** The height the organisation list keeps once the composer has its share. */
+export function adminPaneHeight(frameBottom: number, contentTop: number): number {
+  return Math.max(
+    0,
+    frameBottom - VIEW_FRAME_PAD - ADMIN_DOM_FORM_HEIGHT - ADMIN_DOM_FORM_GAP - contentTop
+  );
+}
 
 export function drawAdmin(
   ctx: RendererCtx,
@@ -53,7 +73,7 @@ export function drawAdmin(
     x: frame.x,
     y: contentTop,
     width: frame.width,
-    height: Math.max(0, frame.bottom - VIEW_FRAME_PAD - contentTop),
+    height: adminPaneHeight(frame.bottom, contentTop),
     scrollY: scroll,
     bottomPadding: 24,
   });

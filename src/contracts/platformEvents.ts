@@ -97,6 +97,16 @@ export const platformEventKindSchema = z.enum([
   'server.recovered',
   'push.subscribed',
   'push.unsubscribed',
+  /**
+   * A platform admin broadcast an announcement to subscribers. The ONLY
+   * kind whose copy is written by a human at send time rather than frozen
+   * in `PUSH_ROUTES`, which is why the row carries the approved text for
+   * every locale AND the organisations the segment resolved to: a push
+   * that cannot be recalled must leave a record of what went out and to
+   * whom, readable without re-running the segment query against a store
+   * that has since moved on.
+   */
+  'platform.announcement',
 ]);
 
 export const PLATFORM_EVENT_KINDS = platformEventKindSchema.options;
@@ -250,6 +260,8 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'webhook.rejected': 'security',
   // A prior process died mid-run. Recovery worked; the crash still happened.
   'server.recovered': 'warning',
+  // Operator-initiated, attributable, and irreversible once sent.
+  'platform.announcement': 'security',
   'push.subscribed': 'info',
   'push.unsubscribed': 'info',
 };

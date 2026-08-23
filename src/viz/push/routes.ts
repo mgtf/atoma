@@ -54,6 +54,19 @@ export interface AudienceRule {
   readonly requester?: boolean;
   readonly orgOwners?: boolean;
   readonly platformAdmins?: boolean;
+  /**
+   * Every principal the instance knows. Only an operator announcement reaches
+   * this wide, and only because an operator typed it: no automatic event may
+   * ever resolve to everybody.
+   */
+  readonly everyone?: boolean;
+  /**
+   * Every member of the organisations the EVENT names in `detail.orgIds`.
+   * The segment that produced that list is resolved once, by the emitter,
+   * against the projects store — the router stays identity-only and never
+   * learns what a project is.
+   */
+  readonly orgMembers?: boolean;
 }
 
 export interface PushTemplate {
@@ -74,6 +87,26 @@ function text(event: PlatformEvent, key: string, fallback = ''): string {
   if (typeof value === 'string' && value.trim()) return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   return fallback;
+}
+
+/**
+ * Read one field of the announcement's approved text for this locale, falling
+ * back to the default language. The fallback is not decoration: a row written
+ * by a build that knew MORE languages than this one must still render, and
+ * the reader tolerating it is the same defensiveness the router applies to an
+ * unknown kind.
+ */
+function announcementText(event: PlatformEvent, locale: PushLocale, field: 'title' | 'body'): string {
+  const texts = event.detail?.['texts'];
+  if (typeof texts !== 'object' || texts === null) return '';
+  const record = texts as Record<string, unknown>;
+  for (const candidate of [locale, DEFAULT_LOCALE]) {
+    const entry = record[candidate];
+    if (typeof entry !== 'object' || entry === null) continue;
+    const value = (entry as Record<string, unknown>)[field];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
 }
 
 const RUN_STATUS_WORDS: Record<PushLocale, Record<string, string>> = {
@@ -252,6 +285,24 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
         title: 'Atoma — redémarrage après incident',
         body: '{{runs}} run(s) et {{publications}} publication(s) récupérés',
       },
+    },
+  },
+  /**
+   * THE ONE KIND WHOSE WORDS ARE NOT FROZEN HERE. The templates are pure
+   * placeholders because the copy is the operator's, approved in every
+   * language before the send. `requester` alongside `everyone`/`orgMembers`
+   * on purpose: an announcement its own sender cannot see is one nobody can
+   * verify went out.
+   */
+  'platform.announcement': {
+    audience: { requester: true, everyone: true, orgMembers: true },
+    vars: (event, locale) => ({
+      title: announcementText(event, locale, 'title'),
+      body: announcementText(event, locale, 'body'),
+    }),
+    copy: {
+      en: { title: '{{title}}', body: '{{body}}' },
+      fr: { title: '{{title}}', body: '{{body}}' },
     },
   },
   'push.subscribed': null,

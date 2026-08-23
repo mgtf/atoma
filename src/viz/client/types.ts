@@ -387,6 +387,13 @@ export interface VizLedgerEvent {
 }
 
 /** Admin plane: a freshly minted one-use invitation. Shown once, never stored. */
+/**
+ * An announcement's approved text, one entry per supported language. Keyed by
+ * a plain string rather than the Locale union so a client built against an
+ * older language list still renders a payload from a newer server.
+ */
+export type VizAnnouncementTexts = Record<string, { title: string; body: string }>;
+
 export interface VizAdminInvitation {
   token: string;
   url: string;

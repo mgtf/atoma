@@ -75,6 +75,19 @@ import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
 import { NotificationRouter } from './push/router.js';
 import { asPushLocale } from './push/routes.js';
+import { draftAnnouncementTranslations } from './push/translate.js';
+import { organisationsForSegment } from './push/segments.js';
+import {
+  announcementDetailFits,
+  announcementDraftSchema,
+  announcementRequestSchema,
+  type AnnouncementDetail,
+} from '../contracts/announcements.js';
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES } from '../contracts/locales.js';
+import { PLATFORM_EVENT_DETAIL_MAX_CHARS } from '../contracts/platformEvents.js';
+import { makeAnthropicClient } from '../run/auth.js';
+import { makeBaseClient, resolveBaseProviderKind } from '../run/providers.js';
+import type { LlmClient } from '../core/types.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
 import { sentinelRuleTable } from '../sentinel/rules.js';
@@ -407,6 +420,34 @@ const PUSH_RUNTIME: PushRuntime | null = (() => {
 })();
 
 /**
+ * THE VIZ SERVER'S ONLY LLM CLIENT, and it exists for exactly one thing:
+ * drafting announcement translations for an admin to review.
+ *
+ * Built on FIRST USE and never at boot. A control plane that constructed a
+ * provider at startup would demand a credential from every deployment that
+ * never sends an announcement, and would fail to start over a feature nobody
+ * asked for. `undefined` means "not tried yet", `null` means "tried, none
+ * available" — the distinction is what stops a missing provider from being
+ * re-resolved on every request.
+ */
+let announcementLlm: LlmClient | null | undefined;
+function announcementTranslator(): LlmClient | null {
+  if (announcementLlm !== undefined) return announcementLlm;
+  try {
+    const kind = resolveBaseProviderKind(process.env['ATOMA_LLM']);
+    announcementLlm = makeBaseClient(
+      kind,
+      kind === 'anthropic' ? { anthropic: makeAnthropicClient() } : {}
+    );
+  } catch {
+    // No provider configured here is a normal deployment, not a fault: the
+    // form falls back to the admin writing every language by hand.
+    announcementLlm = null;
+  }
+  return announcementLlm;
+}
+
+/**
  * THE ONE PATH FROM AN EVENT TO A DEVICE. Subscribing the router to the log
  * means no emitter can notify anybody directly: journal the fact, and the
  * routing table decides. The audience readers are the auth store's own
@@ -428,6 +469,17 @@ if (EVENTS && PUSH_RUNTIME && AUTH?.store) {
           .filter((member) => member.role === 'org:owner')
           .map((member) => member.principalId),
       platformAdmins: () => authStore.listPlatformAdmins().map((admin) => admin.principalId),
+      // Every principal, membership or not: an announcement addressed to the
+      // whole instance must not silently skip someone who has yet to join an
+      // organisation but has already subscribed a device.
+      allPrincipals: () => authStore.listPrincipals().map((principal) => principal.principalId),
+      membersOf: (orgIds) => {
+        const wanted = new Set(orgIds);
+        return authStore
+          .listOrganisationsWithMembers()
+          .filter((organisation) => wanted.has(organisation.orgId))
+          .flatMap((organisation) => organisation.members.map((member) => member.principalId));
+      },
     },
   });
   EVENTS.subscribe((event) => router.handle(event));
@@ -2246,6 +2298,95 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
           });
         }
+        return;
+      }
+      // OPERATOR ANNOUNCEMENTS — the one push a human writes, in two steps.
+      //
+      // The split is the safety property, not an interaction detail. `/draft`
+      // proposes translations and sends NOTHING; `/announce` delivers text the
+      // admin has read in every language. That is what keeps model prose out
+      // of the audit row and out of subscribers' pockets, on a message no one
+      // can recall.
+      if (pathname === '/api/admin/announce/draft') {
+        if (!methodAllowed(req, res, 'POST')) return;
+        if (!sameOrigin(req, res)) return;
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const draft = announcementDraftSchema.safeParse(body);
+        if (!draft.success) {
+          sendJson(res, 400, { error: draft.error.issues[0]?.message ?? 'invalid draft' });
+          return;
+        }
+        const translations = await draftAnnouncementTranslations(draft.data, {
+          llm: announcementTranslator(),
+        });
+        if (!translations) {
+          // 200, not an error: no provider is a normal state of this server,
+          // and the form's answer is "write the other languages yourself",
+          // not "something broke".
+          sendJson(res, 200, { translated: false, texts: null });
+          return;
+        }
+        sendJson(res, 200, { translated: true, texts: translations });
+        return;
+      }
+      if (pathname === '/api/admin/announce') {
+        if (!methodAllowed(req, res, 'POST')) return;
+        if (!sameOrigin(req, res)) return;
+        if (!PUSH_RUNTIME || !EVENTS) {
+          sendJson(res, 404, { error: 'push notifications are not enabled' });
+          return;
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 8_192)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        const parsed = announcementRequestSchema.safeParse(body);
+        if (!parsed.success) {
+          sendJson(res, 400, { error: parsed.error.issues[0]?.message ?? 'invalid announcement' });
+          return;
+        }
+        const { segment, texts } = parsed.data;
+        const orgIds = PROJECTS_RUNTIME
+          ? organisationsForSegment(segment, PROJECTS_RUNTIME.store.listAllProjects())
+          : organisationsForSegment(segment, []);
+        if (orgIds !== null && orgIds.length === 0) {
+          // Refused rather than sent: a segment matching nothing is far more
+          // likely a mistaken pick than an intent to notify no one.
+          sendJson(res, 409, { error: 'no organisation matches this segment' });
+          return;
+        }
+        const detail: AnnouncementDetail = {
+          segment,
+          ...(orgIds ? { orgIds } : {}),
+          orgCount: orgIds ? orgIds.length : null,
+          texts,
+        };
+        // BEFORE emitting, because the journal is fail-open: an oversized row
+        // would be dropped silently and the push would vanish with it, since
+        // the router only ever sees events that were journaled.
+        if (!announcementDetailFits(detail, PLATFORM_EVENT_DETAIL_MAX_CHARS)) {
+          sendJson(res, 400, {
+            error: `the announcement does not fit one audit row (${PLATFORM_EVENT_DETAIL_MAX_CHARS} characters across ${SUPPORTED_LOCALES.length} languages)`,
+          });
+          return;
+        }
+        emit({
+          kind: 'platform.announcement',
+          actorType: 'principal',
+          actorId: viewer.principalId,
+          summary: `Announcement to ${segment}: ${eventLabel(texts[DEFAULT_LOCALE].title)}`,
+          detail: { ...detail },
+        });
+        sendJson(res, 200, { segment, orgCount: detail.orgCount });
         return;
       }
       sendJson(res, 404, { error: 'not found' });

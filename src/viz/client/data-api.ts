@@ -9,6 +9,7 @@ import type {
   SkillNamespace,
   SkillSummary,
   VizAdminInvitation,
+  VizAnnouncementTexts,
   VizAdminOrganisation,
   VizLedgerEvent,
   VizPlatformEventPage,
@@ -103,6 +104,15 @@ export const api = {
     ),
   createAdminInvitation: (body: { orgId: string; role: string; ttlHours?: number }) =>
     mutateJson<VizAdminInvitation>('/api/admin/invitations', body),
+  // The two announcement steps, deliberately two calls: the draft sends
+  // nothing, and only text the admin has read reaches `announce`.
+  draftAnnouncement: (body: { source: string; title: string; body: string }) =>
+    mutateJson<{ translated: boolean; texts: VizAnnouncementTexts | null }>(
+      '/api/admin/announce/draft',
+      body
+    ),
+  sendAnnouncement: (body: { segment: string; texts: VizAnnouncementTexts }) =>
+    mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),
   accountModels: () => fetchJson<VizAccountModels>('/api/account/models'),
   // PUT/PATCH rather than POST: these replace one account-scoped resource.

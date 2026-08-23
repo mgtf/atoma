@@ -7,6 +7,7 @@ import {
   useGpuStore,
   type ViewName,
 } from './store.js';
+import { AnnouncementForm } from './AnnouncementForm.js';
 
 const DEFAULT_VIEWS: ViewName[] = ['projects', 'runs', 'registry', 'skills', 'burnin', 'docs'];
 
@@ -31,6 +32,7 @@ export function DomBridge({
   onDismissPush,
   onRenameAccount,
   accountError = null,
+  announcementsEnabled = false,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -61,6 +63,8 @@ export function DomBridge({
   /** Settings: the display name is a real input, so its submit lives here. */
   onRenameAccount?: (displayName: string) => void;
   accountError?: string | null;
+  /** Platform admins only: the broadcast composer lives on the admin view. */
+  announcementsEnabled?: boolean;
 }) {
   const view = useGpuStore((state) => state.view);
   const entered = useGpuStore((state) => state.entered);
@@ -384,6 +388,9 @@ export function DomBridge({
           </div>
         </form>
       ) : null}
+      {viewOverlaysVisible && view === 'admin' && announcementsEnabled ? (
+        <AnnouncementForm t={t} locale={locale} />
+      ) : null}
       {pushPrompt !== 'hidden' ? (
         <div
           className="gpu-push-prompt"
@@ -422,7 +429,10 @@ export function DomBridge({
 export function GpuDomBridge({
   authSnapshot,
   ...props
-}: Omit<ComponentProps<typeof DomBridge>, 'projectActionsEnabled' | 'pushAdmin'> & {
+}: Omit<
+  ComponentProps<typeof DomBridge>,
+  'projectActionsEnabled' | 'pushAdmin' | 'announcementsEnabled'
+> & {
   authSnapshot: AuthUiSnapshot | null;
 }) {
   return (
@@ -430,6 +440,11 @@ export function GpuDomBridge({
       {...props}
       projectActionsEnabled={authSnapshot !== null}
       pushAdmin={authSnapshot?.viewer.platformAdmin === true}
+      // Derived HERE with the other auth flags rather than passed in: the
+      // composer is operator power, and the server enforces the same
+      // answer — a client that forgot the flag must not be the reason a
+      // broadcast form appears for a member.
+      announcementsEnabled={authSnapshot?.viewer.platformAdmin === true}
     />
   );
 }

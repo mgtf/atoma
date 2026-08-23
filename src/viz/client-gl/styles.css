@@ -524,3 +524,86 @@ html.atoma-cursor-active * {
   color: #f87171;
   font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
 }
+
+/* The announcement composer: real DOM for text entry, the language review and
+   the segment select. Pinned to the foot of the Admin view, whose scroll pane
+   gives up exactly this height (`ADMIN_DOM_FORM_HEIGHT` in
+   renderer/views/admin.ts) so organisation rows never slide behind it. The
+   review step grows with the number of languages, so the panel scrolls
+   INTERNALLY rather than pushing the list around. */
+.gpu-announce-form {
+  --gpu-content: calc(100vw - var(--gpu-sidebar));
+  position: fixed;
+  z-index: 4;
+  bottom: 16px;
+  left: calc(var(--gpu-sidebar) + 32px);
+  width: calc(var(--gpu-content) - 64px);
+  height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.gpu-announce-form .gpu-dom-input {
+  position: relative;
+  top: auto;
+  left: auto;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 11px;
+  box-sizing: border-box;
+}
+
+.gpu-announce-form textarea.gpu-dom-input { height: 52px; resize: none; }
+
+.gpu-announce-hint,
+.gpu-announce-languages p {
+  margin: 0;
+  color: #9fb0c9;
+  font: 11px/1.4 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-announce-languages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid rgba(110, 168, 255, .24);
+  padding-top: 8px;
+}
+
+.gpu-announce-language {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gpu-announce-language > span,
+.gpu-announce-segment > span {
+  color: #e6edf7;
+  font: 11px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-announce-segment {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gpu-announce-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gpu-announce-actions button {
+  border: 1px solid rgba(110, 168, 255, .62);
+  border-radius: 7px;
+  background: rgba(11, 17, 30, .96);
+  color: #e6edf7;
+  padding: 6px 12px;
+  font: 12px/1.2 ui-sans-serif, system-ui, sans-serif;
+}

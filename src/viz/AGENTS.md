@@ -331,10 +331,30 @@ npm run viz:mark-turn:analyze
   already GRANTED shows no prompt by construction, so an admin in that
   state is silently re-subscribed at login instead
   (`shouldEnsureAdminSubscription`) — which also repairs a server row the
-  push service pruned. The prompt never fires in dev builds: the service
-  worker registers in production only. The subscriber's
+  push service pruned. The prompt follows the WORKER, not the build
+  (`serviceWorkerRegistrationAllowed`), so it is silent in a dev session
+  until that session opts the worker in. The subscriber's
   language rides the subscription (`locale` column, captured at subscribe
   time) because a push is generated from an event with no request left to
   read a header off; rendering uses the server-side frozen `PUSH_COPY`
   map in `src/viz/push/routes.ts`, never the client i18n catalog (a
   `.tsx` carrying a React provider must not reach the server).
+- OPERATOR ANNOUNCEMENTS (`platform.announcement`) are the ONE push whose
+  words a human writes, and the only route with an audience wider than an
+  organisation. Two steps, and the split is the safety property:
+  `/api/admin/announce/draft` proposes translations and sends NOTHING;
+  `/api/admin/announce` delivers only text the admin read in EVERY
+  supported language. That review is what keeps model prose out of the
+  audit row (`src/platform/AGENTS.md`) — a translation an operator
+  accepted is the operator's text — and out of a tray no one can undo.
+  `src/viz/push/translate.ts` is the server's ONLY LLM call site: tier 1,
+  built on first use so no deployment is asked for a credential it never
+  needs, and returning `null` (never a partial draft) whenever the
+  provider is absent or the reply unreadable — the form then asks the
+  admin to write the other languages. The segment (`src/viz/push/
+  segments.ts`) is resolved ONCE by the emitter against the projects
+  store and journaled, so the router stays identity-only; `orgIds` absent
+  means everyone, and an EMPTY list can never mean that. `orgCount`, not
+  the id list, rides the row: `detail` is capped and the journal is
+  fail-open, so an oversized row would lose the audit trail AND the push.
+  The router refuses to deliver a push that renders no title.

@@ -39,6 +39,10 @@ function event(overrides: Partial<PlatformEvent> = {}): PlatformEvent {
 const directory: AudienceDirectory = {
   ownersOf: (orgId) => (orgId === 'org-1' ? ['owner-a', 'owner-b'] : []),
   platformAdmins: () => ['admin-1'],
+  // Reached only by an announcement; every other kind must leave these
+  // untouched, which is itself worth being able to observe.
+  allPrincipals: () => ['owner-a', 'owner-b', 'admin-1', 'member-a'],
+  membersOf: (orgIds) => orgIds.flatMap((orgId) => (orgId === 'org-1' ? ['owner-a'] : [])),
 };
 
 function routerWith() {
@@ -105,6 +109,13 @@ describe('PUSH_ROUTES', () => {
               displayName: 'Ada',
               runs: 2,
               publications: 1,
+              // The one kind whose copy is not frozen: without its own
+              // text there is nothing for the template to fill, which is
+              // a malformed row rather than a missing template.
+              texts: {
+                en: { title: 'Maintenance', body: 'Tonight at 00:00.' },
+                fr: { title: 'Maintenance', body: 'Ce soir à 00h.' },
+              },
             },
           }),
           locale,
@@ -275,6 +286,8 @@ describe('NotificationRouter.handle', () => {
           throw new Error('store closed');
         },
         platformAdmins: () => [],
+        allPrincipals: () => [],
+        membersOf: () => [],
       },
     });
     await expect(
