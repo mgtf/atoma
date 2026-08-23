@@ -300,6 +300,54 @@ ratio measured the same way: the contract-versus-artefact split of
 `validate_html` calls (22 versus 3 here), plus a zero-count assertion that no
 error string contains `smoke check failed` above an object whose `ok` is true.
 
+## The envelope, measured one notch up (2026-08-23, expenses-node-api)
+
+One goal, deliberately one size above the stopwatch lineage: a Node HTTP
+server plus a JSON API plus a front-end, no external dependencies. Two runs,
+both failed, both worth more than a delivery.
+
+**Run `d771d166`** died at 6.5 min on `"preferredChild": null` in the L3's
+second-phase plan — fixed same day (`afa6d09`) by extending the schema's own
+documented null-tolerance pattern to the two fields it missed. Only
+multi-phase goals reach a second L3 plan, which is why three days of
+single-page runs never saw it.
+
+**Run `949ecd5d`** hit the real walls:
+
+- **The 900s budget, at 68 tool calls / 34 LLM calls / $0.96.** The
+  post-mortem's own advice is `ATOMA_BUILD_TIMEOUT_MS`; whether project runs
+  should carry a higher default than operator runs is a product choice, not a
+  session edit.
+- **The trace: 1.17 MB, ~17 KB per tool call.** Had the run delivered, the
+  512 KB control-plane cap (`MAX_CONTROL_JSON_BYTES`) would have refused it —
+  the same defect that erased run `2857a579`'s delivery. The cap binds at
+  roughly 30-60 tool calls, i.e. INSIDE the working range of any multi-file
+  goal. Fix direction still undecided (bound-per-field read vs. verification
+  as a publication precondition, not a delivery condition).
+- **The structural wall: a live process does not cross phases.** The back-end
+  molecule booted its server (`start_node_server :38197`), proved the API with
+  fetch_url probes, and its sandbox cleanup — mandatory, a contract — killed
+  the server with the phase. The front-end molecule then had no live API, was
+  not tooled with `start_node_server` or `fetch_url` at all (its declared
+  tools were the static six), and did the only things its toolset allowed:
+  static server → eight /api 404s, then five guessed ports. Thirteen of its
+  sixteen validate_html calls were structurally unable to succeed. Message
+  fixes landed (`fbe9306`); the real design question — how a phase whose
+  artefacts are coupled through a live process hands that process (or the
+  responsibility to restart it) to the next phase, and how the L2 tools the
+  receiving molecule — is an atoms/registry design, not a tools edit, and is
+  NOT designed here.
+- **Chords:** `Unknown key: "Control+A"` ×3 — remedy now on the error path
+  (`fbe9306`). Translating chords into modifier sequences would be a
+  capability change; recorded, not built.
+
+**What the same run proved in the right direction:** the false-field naming
+from `bc518ba` fired live — eight of nine smoke failures named their failing
+checks, and the sequence narrowed (`labelAppearsInList, totalUpdated` →
+`totalUpdated` → `totalShows550`) across consecutive calls, which is the
+learning curve the naming was built to produce. And the failed row kept its
+cost (`stats_json` populated on `failed`), which run `a786358a` had lost.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
