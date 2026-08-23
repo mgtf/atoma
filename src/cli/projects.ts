@@ -19,8 +19,14 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { AuthStore } from '../auth/store.js';
+import { snapshotProviderRegistry } from '../auth/providers.js';
 import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
+import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectStore } from '../projects/store.js';
+import { GitHubStore } from '../github/store.js';
+import { GitHubAppClient } from '../github/client.js';
+import { snapshotGitHubAppConfig } from '../github/config.js';
+import { resolveGitHubUserAccessToken } from '../github/tokens.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
 import { storeDbPath } from '../core/stores.js';
@@ -32,6 +38,7 @@ const USAGE = `atoma projects — organisation-scoped runs
 usage:
   npm run projects -- list [--db path]
   npm run projects -- run --project <slug-or-id> --as <principal-id-or-email> "<goal>" [--db path]
+  npm run projects -- publish --project <slug-or-id> --as <who> --run <run-id> [--db path]
 
 why not run:build:
   \`run:build\` writes the OPERATOR corpus (./runs). A project run is stored
@@ -47,10 +54,19 @@ subscription transport:
   grant-admin\` can mint, and every such run is journaled as
   \`run.host_subscription\`.
 
+publish:
+  A delivered run publishes automatically. \`publish\` re-drives one whose
+  publication never reached GitHub — an App configured after the fact, a
+  network failure, a name clash since cleared. The publication row is the
+  idempotency boundary: 'published' returns as-is, a concurrent 'publishing'
+  is left alone, and the manifest is revalidated byte-for-byte against the
+  workspace, so a workspace that changed since delivery is refused.
+
 flags:
   --db <path>                use this product store
-  --project <slug-or-id>     target project (required for run)
+  --project <slug-or-id>     target project (required for run and publish)
   --as <id-or-email>         principal the run is attributed to (required)
+  --run <run-id>             the delivered run to publish (publish only)
   --help                     show this help`;
 
 function safeTerminal(value: string): string {
@@ -108,7 +124,7 @@ async function main(): Promise<void> {
   applyCheckoutDotenvForSourceEntry();
   const args = parseCliArgs(process.argv, {
     booleanFlags: ['help'],
-    valueFlags: ['db', 'project', 'as'],
+    valueFlags: ['db', 'project', 'as', 'run'],
     undeclared: 'discard',
   });
   const command = args.command ?? 'help';
@@ -140,10 +156,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command !== 'run') fail(`unknown command "${safeTerminal(String(command))}"`);
+  if (command !== 'run' && command !== 'publish') {
+    fail(`unknown command "${safeTerminal(String(command))}"`);
+  }
 
   const goal = args.positional.join(' ').trim();
-  if (goal.length === 0) fail('a goal is required: npm run projects -- run --project <slug> --as <who> "<goal>"');
+  if (command === 'run' && goal.length === 0) {
+    fail('a goal is required: npm run projects -- run --project <slug> --as <who> "<goal>"');
+  }
+  const runRef = args.flags['run'];
+  if (command === 'publish' && (typeof runRef !== 'string' || runRef.length === 0)) {
+    fail('--run <run-id> is required: npm run projects -- publish --project <slug> --as <who> --run <id>');
+  }
   const asRef = args.flags['as'];
   if (typeof asRef !== 'string' || asRef.length === 0) fail('--as <principal-id-or-email> is required');
   const projectRef = args.flags['project'];
@@ -168,11 +192,90 @@ async function main(): Promise<void> {
   }
 
   const events = PlatformEventLog.open(dbPath);
+  // PUBLICATION, wired exactly as the viz server wires it — same publisher,
+  // same token resolution, same journal sink. Without it this command could
+  // start a run and deliver an artifact, and the artifact went nowhere: the
+  // repository stayed `pending` for ever and no journal row said why. A CLI
+  // that starts a project run must finish it the same way the browser does,
+  // or "started from a terminal" quietly means "half a product".
+  //
+  // Absent App configuration it stays undefined and the run still delivers —
+  // the same degradation the server accepts, and the same one `doctor`
+  // reports.
+  const githubStore = GitHubStore.open(dbPath);
+  const githubProvider = snapshotProviderRegistry(process.env).providers.find(
+    (provider) => provider.id === 'github'
+  );
+  // Same presence probe as the server, and the same fail-closed rule behind
+  // it: `snapshotGitHubAppConfig` THROWS on a half-configured App rather than
+  // degrading, so it is only called when at least one of its variables is set.
+  const appConfigPresent = [
+    'ATOMA_GITHUB_APP_ID',
+    'ATOMA_GITHUB_APP_SLUG',
+    'ATOMA_GITHUB_APP_PRIVATE_KEY',
+    'ATOMA_GITHUB_APP_PRIVATE_KEY_PATH',
+    'ATOMA_GITHUB_WEBHOOK_SECRET',
+    'ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY',
+  ].some((name) => process.env[name] !== undefined);
+  const appConfig = appConfigPresent
+    ? snapshotGitHubAppConfig(process.env, {
+        ...(githubProvider
+          ? {
+              oauth: {
+                clientId: githubProvider.clientId,
+                clientSecret: githubProvider.clientSecret ?? '',
+              },
+            }
+          : {}),
+      })
+    : null;
+  const publisher =
+    appConfig
+      ? new GitHubPublisher({
+          client: new GitHubAppClient({
+            appId: appConfig.appId,
+            appSlug: appConfig.appSlug,
+            privateKey: appConfig.privateKey,
+            apiBaseUrl: appConfig.apiBaseUrl,
+          }),
+          github: githubStore,
+          store: projects,
+          events: (input) => events.append(input),
+          ...(githubProvider
+            ? {
+                resolveUserAccessToken: (principalId: string) =>
+                  resolveGitHubUserAccessToken({
+                    github: githubStore,
+                    config: appConfig,
+                    provider: githubProvider,
+                    principalId,
+                  }),
+              }
+            : {}),
+        })
+      : undefined;
+
   const coordinator = new ProjectRunCoordinator({
     store: projects,
     dbPath,
+    ...(publisher ? { publisher } : {}),
     platformAdmins: (id) => auth.isPlatformAdmin(id),
     tierModelsFor: (id) => auth.modelPins(id),
+    // The run's own outcome, journaled from the process that drove it — the
+    // server's `onRunFinished` twin. A `run.finished` row is what makes the
+    // publication attempt (and its failure) answerable after the fact.
+    onRunFinished: (event) => {
+      events.append({
+        kind: 'run.finished',
+        actorType: 'cli',
+        actorId: null,
+        orgId: event.orgId,
+        projectId: event.projectId,
+        runId: event.projectRunId,
+        summary: `Run ${event.status} from the CLI`,
+        detail: { status: event.status, goal: eventLabel(goal, 120) },
+      });
+    },
     // Same audit rule as the HTTP path: a run billed to the host subscription
     // leaves a journal row. `cli` actor, because that is what asked.
     onSubscriptionTransport: (use) => {
@@ -192,8 +295,43 @@ async function main(): Promise<void> {
     `project ${target.slug} (${target.name})\n` +
       `as       ${safeTerminal(principal.displayName)}${admin ? ' [platform admin]' : ''}\n` +
       `store    ${dbPath}\n` +
-      `goal     ${safeTerminal(goal)}\n\n`
+      (command === 'publish'
+        ? `run      ${safeTerminal(String(runRef))}\n\n`
+        : `goal     ${safeTerminal(goal)}\n\n`)
   );
+
+  if (command === 'publish') {
+    // The missing caller. `retryPublication` shipped with a route, a role
+    // check and a test, and nothing in the product ever called it — so a
+    // delivered run whose artifact never reached GitHub had no way back.
+    if (!publisher) fail('this instance has no GitHub App configured, so nothing can be published');
+    let published;
+    try {
+      published = await coordinator.retryPublication(target.orgId, String(runRef));
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
+    }
+    if (!published) fail(`no run ${safeTerminal(String(runRef))} in this project's organisation`);
+    const publication = projects.getPublicationForRun(target.orgId, String(runRef));
+    process.stdout.write(`publication ${publication?.status ?? 'unknown'}\n`);
+    if (publication?.repositoryUrl) {
+      process.stdout.write(`  ${safeTerminal(publication.repositoryUrl)}\n`);
+    }
+    if (publication?.commitSha) process.stdout.write(`  commit ${publication.commitSha}\n`);
+    if (publication?.error) process.stdout.write(`  ${safeTerminal(publication.error)}\n`);
+    const project = projects.getProject(target.orgId, target.projectId);
+    if (project) {
+      process.stdout.write(
+        `  repository ${project.repositoryStatus} (${project.repositoryTarget.visibility})` +
+          `${project.repositoryFullName ? ` ${project.repositoryFullName}` : ''}\n`
+      );
+      if (project.repositoryError) {
+        process.stdout.write(`  ${safeTerminal(project.repositoryError)}\n`);
+      }
+    }
+    if (publication?.status !== 'published') process.exitCode = 1;
+    return;
+  }
 
   const run = await coordinator.start({
     orgId: target.orgId,
@@ -219,6 +357,34 @@ async function main(): Promise<void> {
   const status = finished?.status ?? 'unknown';
   process.stdout.write(`\nrun ${run.projectRunId} ${status}\n`);
   if (finished?.error) process.stdout.write(`  ${safeTerminal(finished.error)}\n`);
+  // THE OTHER HALF. A delivered run whose artifact never reached GitHub is
+  // exactly the outcome this command used to report as success, so the
+  // publication's own state is printed beside the run's.
+  if (status === 'delivered') {
+    const publication = projects.getPublicationForRun(target.orgId, run.projectRunId);
+    if (!publication) {
+      process.stdout.write(
+        publisher
+          ? '  no publication was recorded for this delivered run\n'
+          : '  not published: this instance has no GitHub App configured\n'
+      );
+    } else {
+      process.stdout.write(`  publication ${publication.status}\n`);
+      if (publication.repositoryUrl) {
+        process.stdout.write(`  ${safeTerminal(publication.repositoryUrl)}\n`);
+      }
+      if (publication.error) process.stdout.write(`  ${safeTerminal(publication.error)}\n`);
+      const project = projects.getProject(target.orgId, target.projectId);
+      if (project) {
+        process.stdout.write(
+          `  repository ${project.repositoryStatus} (${project.repositoryTarget.visibility})\n`
+        );
+        if (project.repositoryError) {
+          process.stdout.write(`  ${safeTerminal(project.repositoryError)}\n`);
+        }
+      }
+    }
+  }
   process.stdout.write('watch it in the visualizer: npm run viz:dev\n');
   if (status !== 'delivered') process.exitCode = 1;
 }

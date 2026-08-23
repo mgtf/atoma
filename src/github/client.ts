@@ -132,7 +132,7 @@ export class GitHubDivergenceError extends Error {
 }
 
 interface RequestInput {
-  readonly method?: 'GET' | 'POST';
+  readonly method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   readonly path: string;
   readonly token: string;
   readonly body?: unknown;
@@ -413,7 +413,10 @@ export class GitHubAppClient {
       throw new Error('GitHub API request path must be relative to the configured API');
     }
     const token = safeToken(input.token);
-    const accepted = input.accepted ?? (method === 'POST' ? [201] : [200]);
+    // PUT to the contents API answers 201 on create and 200 on update; PATCH
+    // answers 200. Defaults per method, so no call site restates them.
+    const accepted =
+      input.accepted ?? (method === 'POST' ? [201] : method === 'PUT' ? [200, 201] : [200]);
     const body = input.body === undefined ? undefined : JSON.stringify(input.body);
     if (body !== undefined && Buffer.byteLength(body, 'utf8') > 30 * 1024 * 1024) {
       throw new Error('GitHub API request body exceeds the configured publish bound');
@@ -705,6 +708,8 @@ export class GitHubAppClient {
     readonly repository: string;
     readonly message: string;
     readonly treeSha: string;
+    /** Empty for a root commit; one parent when building on a seeded branch. */
+    readonly parents?: readonly string[];
   }): Promise<string> {
     if (!input.message.trim() || input.message.length > 65_536 || input.message.includes('\u0000')) {
       throw new Error('GitHub commit message has an invalid value');
@@ -713,7 +718,11 @@ export class GitHubAppClient {
       method: 'POST',
       token: input.token,
       path: this.gitPath(input.owner, input.repository, 'commits'),
-      body: { message: input.message, tree: sha(input.treeSha, 'GitHub tree sha'), parents: [] },
+      body: {
+        message: input.message,
+        tree: sha(input.treeSha, 'GitHub tree sha'),
+        parents: (input.parents ?? []).map((parent) => sha(parent, 'GitHub commit sha')),
+      },
     });
     return sha(asObject(result.json, 'GitHub commit response')['sha'], 'GitHub commit sha');
   }
@@ -735,6 +744,87 @@ export class GitHubAppClient {
     const object = asObject(result.json, 'GitHub reference response');
     const ref = responseString(object['ref'], 'GitHub reference', 512);
     if (ref !== `refs/heads/${branch}`) throw new Error('GitHub created an unexpected reference');
+    return ref;
+  }
+
+  /**
+   * Write ONE file through the contents API, creating the branch if it does
+   * not exist.
+   *
+   * IT EXISTS BECAUSE THE GIT DATA API CANNOT START A REPOSITORY. Measured
+   * against real GitHub on 2026-08-23, in a repository created moments
+   * earlier: `POST /git/blobs` answers `409 {"message":"Git Repository is
+   * empty."}`, and so does `POST /git/trees` with inline content. Every path
+   * that begins with a blob or a tree is therefore unavailable for a first
+   * commit, and the contents API — which answered 201 on the same repository
+   * — is the only one that is. This was invisible to the suite because every
+   * publisher test mocks this client.
+   */
+  async putContentsFile(input: {
+    readonly token: string;
+    readonly owner: string;
+    readonly repository: string;
+    readonly path: string;
+    readonly content: string | Uint8Array;
+    readonly message: string;
+    readonly branch: string;
+  }): Promise<{ commitSha: string; treeSha: string; parents: number }> {
+    const bytes =
+      typeof input.content === 'string'
+        ? Buffer.from(input.content, 'utf8')
+        : Buffer.from(input.content);
+    if (bytes.length > MAX_GITHUB_INITIAL_BYTES) {
+      throw new Error('GitHub contents write exceeds the initial publish byte bound');
+    }
+    if (!input.message.trim() || input.message.length > 65_536 || input.message.includes('\u0000')) {
+      throw new Error('GitHub commit message has an invalid value');
+    }
+    const result = await this.request({
+      method: 'PUT',
+      token: input.token,
+      path: `/repos/${encodeSegment(ownerLogin(input.owner))}/${encodeSegment(
+        repositoryName(input.repository)
+      )}/contents/${filePath(input.path).split('/').map(encodeSegment).join('/')}`,
+      body: {
+        message: input.message,
+        content: bytes.toString('base64'),
+        branch: branchName(input.branch),
+      },
+    });
+    const commit = asObject(
+      asObject(result.json, 'GitHub contents response')['commit'],
+      'GitHub contents commit'
+    );
+    // Whether this commit STARTED the repository or landed on top of someone
+    // else's. The caller needs it: a contents write to an existing branch
+    // succeeds silently, so the parent count is the only evidence that the
+    // branch was empty when we looked.
+    const parents = Array.isArray(commit['parents']) ? commit['parents'].length : 0;
+    return {
+      commitSha: sha(commit['sha'], 'GitHub commit sha'),
+      treeSha: sha(asObject(commit['tree'], 'GitHub commit tree')['sha'], 'GitHub tree sha'),
+      parents,
+    };
+  }
+
+  /** Move a branch to a commit. Used only to complete a multi-file first push. */
+  async updateReference(input: {
+    readonly token: string;
+    readonly owner: string;
+    readonly repository: string;
+    readonly branch: string;
+    readonly commitSha: string;
+  }): Promise<string> {
+    const branch = branchName(input.branch);
+    const result = await this.request({
+      method: 'PATCH',
+      token: input.token,
+      path: this.gitPath(input.owner, input.repository, `refs/heads/${branch}`),
+      body: { sha: sha(input.commitSha, 'GitHub commit sha'), force: false },
+    });
+    const object = asObject(result.json, 'GitHub reference response');
+    const ref = responseString(object['ref'], 'GitHub reference', 512);
+    if (ref !== `refs/heads/${branch}`) throw new Error('GitHub moved an unexpected reference');
     return ref;
   }
 
@@ -766,6 +856,45 @@ export class GitHubAppClient {
     const existing = await this.getReference(input.token, owner, repository, branch);
     if (existing !== null) throw new GitHubDivergenceError(owner, repository, branch);
 
+    // THE BRANCH IS SEEDED THROUGH THE CONTENTS API, always. A repository with
+    // no commits refuses `git/blobs` and `git/trees` alike (409, "Git
+    // Repository is empty"), so the first write cannot be a git-data write.
+    // The seed carries a real file from the manifest, never a placeholder:
+    // nobody should have to explain a junk commit later.
+    const seed = files[0]!;
+    const seeded = await this.putContentsFile({
+      token: input.token,
+      owner,
+      repository,
+      path: seed.path,
+      content: seed.content,
+      message: input.message,
+      branch,
+    });
+    // THE RACE THAT THE OLD FLOW CAUGHT WITH A 422. Creating the ref last made
+    // a concurrent branch creation an explicit refusal; seeding through the
+    // contents API cannot fail that way, because a write to a branch that now
+    // exists simply lands on it. The seed commit's parent count is the
+    // evidence, checked immediately: a root commit means the branch was ours
+    // to start, anything else means somebody created it inside the window.
+    // One file has been written by then, and saying so loudly is the honest
+    // outcome — the alternative is publishing the rest on top of content this
+    // product never saw.
+    if (seeded.parents > 0) throw new GitHubDivergenceError(owner, repository, branch);
+    const ref = `refs/heads/${branch}`;
+    if (files.length === 1) {
+      // One file, one commit — the ordinary case, and the tidiest result.
+      return Object.freeze({
+        branch,
+        treeSha: seeded.treeSha,
+        commitSha: seeded.commitSha,
+        ref,
+      });
+    }
+
+    // More than one file: the repository now HAS a commit, so the git data API
+    // works and the whole tree lands in a second commit on top of the seed.
+    // Two commits rather than one, and both of them ours.
     const entries: Array<{ path: string; sha: string; mode?: '100644' | '100755' }> = [];
     for (const file of files) {
       entries.push({
@@ -786,22 +915,9 @@ export class GitHubAppClient {
       repository,
       message: input.message,
       treeSha,
+      parents: [seeded.commitSha],
     });
-    let ref: string;
-    try {
-      ref = await this.createReference({
-        token: input.token,
-        owner,
-        repository,
-        branch,
-        commitSha,
-      });
-    } catch (error) {
-      if (error instanceof GitHubApiError && error.status === 422) {
-        throw new GitHubDivergenceError(owner, repository, branch);
-      }
-      throw error;
-    }
+    await this.updateReference({ token: input.token, owner, repository, branch, commitSha });
     return Object.freeze({ branch, treeSha, commitSha, ref });
   }
 

@@ -49,6 +49,17 @@ remote completion calls to doctor.
   coordinator reject it later.
 - A project slug is unique per organisation, not per instance. An ambiguous
   reference is refused, never guessed.
+- It PUBLISHES too, wired exactly as the viz server wires it — same publisher,
+  same token resolution, same journal sink. Without that this command could
+  deliver an artifact that went nowhere: the repository stayed `pending` for
+  ever and no journal row said why. A CLI that starts a project run must
+  finish it the way the browser does, or "started from a terminal" quietly
+  means half a product. It prints the publication's own state beside the run's.
+- `publish --run <id>` re-drives a delivered run whose publication never
+  reached GitHub. `retryPublication` shipped with a route, a role check and a
+  test, and NOTHING called it; this is that caller. The publication row stays
+  the idempotency boundary, and the manifest is revalidated against the
+  workspace, so a workspace that changed since delivery is refused.
 
 ## Sentinel
 

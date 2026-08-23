@@ -220,8 +220,16 @@ describe('Git Data initial commit publication', () => {
       }
       if (pathname.endsWith('/git/trees')) return Promise.resolve(json({ sha: SHA_C }, 201));
       if (pathname.endsWith('/git/commits')) return Promise.resolve(json({ sha: SHA_D }, 201));
-      if (pathname.endsWith('/git/refs')) {
-        return Promise.resolve(json({ ref: 'refs/heads/main', object: { sha: SHA_D } }, 201));
+      // The SEED, through the contents API: the git data API refuses every
+      // write in a repository with no commits (measured: 409 "Git Repository
+      // is empty"), so the first file cannot be a blob.
+      if (pathname.includes('/contents/')) {
+        return Promise.resolve(
+          json({ commit: { sha: SHA_A, tree: { sha: SHA_B }, parents: [] } }, 201)
+        );
+      }
+      if (pathname.endsWith('/git/refs/heads/main')) {
+        return Promise.resolve(json({ ref: 'refs/heads/main', object: { sha: SHA_D } }, 200));
       }
       throw new Error(`unexpected ${pathname}`);
     };
@@ -237,6 +245,15 @@ describe('Git Data initial commit publication', () => {
       ],
     });
     expect(result).toEqual({ branch: 'main', treeSha: SHA_C, commitSha: SHA_D, ref: 'refs/heads/main' });
+    // The seed is a REAL manifest file — the first in sorted order — never a
+    // placeholder, so no commit exists that somebody has to explain later.
+    const seedCall = calls.find((call) => new URL(call.url).pathname.includes('/contents/'))!;
+    expect(new URL(seedCall.url).pathname).toContain('/contents/README.md');
+    expect(callBody(seedCall)).toEqual({
+      message: 'Initial commit from Atoma',
+      content: Buffer.from('# Generated', 'utf8').toString('base64'),
+      branch: 'main',
+    });
     const treeCall = calls.find((call) => new URL(call.url).pathname.endsWith('/git/trees'))!;
     expect(callBody(treeCall)).toEqual({
       tree: [
@@ -244,12 +261,55 @@ describe('Git Data initial commit publication', () => {
         { path: 'src/z.ts', mode: '100755', type: 'blob', sha: SHA_B },
       ],
     });
+    // The complete tree lands on TOP of the seed, so the branch ends at one
+    // commit holding every file — and the ref is MOVED, not created.
     const commitCall = calls.find((call) => new URL(call.url).pathname.endsWith('/git/commits'))!;
     expect(callBody(commitCall)).toEqual({
       message: 'Initial commit from Atoma',
       tree: SHA_C,
-      parents: [],
+      parents: [SHA_A],
     });
+    const refCall = calls.find((call) =>
+      new URL(call.url).pathname.endsWith('/git/refs/heads/main')
+    )!;
+    expect(refCall.init?.method).toBe('PATCH');
+    expect(callBody(refCall)).toEqual({ sha: SHA_D, force: false });
+  });
+
+  it('publishes a single-file manifest as one contents commit and no git-data write', async () => {
+    // The ordinary case, and the tidiest result: one file, one commit, and the
+    // git data API never touched.
+    const calls: FetchCall[] = [];
+    const fakeFetch: typeof fetch = (input, init) => {
+      const call = { url: requestUrl(input), init };
+      calls.push(call);
+      const { pathname } = new URL(call.url);
+      if (pathname.endsWith('/git/ref/heads/main')) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (pathname.includes('/contents/')) {
+        return Promise.resolve(
+          json({ commit: { sha: SHA_A, tree: { sha: SHA_B }, parents: [] } }, 201)
+        );
+      }
+      throw new Error(`unexpected ${pathname}`);
+    };
+    const result = await client(fakeFetch).publishInitialCommit({
+      token: 'ghs_installation-token',
+      repository: { owner: 'atoma-org', name: 'generated-app' },
+      message: 'Initial commit from Atoma',
+      files: [{ path: 'index.html', content: '<!doctype html>' }],
+    });
+    expect(result).toEqual({
+      branch: 'main',
+      treeSha: SHA_B,
+      commitSha: SHA_A,
+      ref: 'refs/heads/main',
+    });
+    expect(calls.map((call) => new URL(call.url).pathname.split('/').pop())).toEqual([
+      'main',
+      'index.html',
+    ]);
   });
 
   it('fails closed before writes when the target branch already exists', async () => {
@@ -267,22 +327,35 @@ describe('Git Data initial commit publication', () => {
     expect(calls).toBe(1);
   });
 
-  it('turns a concurrent ref creation race into explicit divergence', async () => {
+  it('turns a branch created inside the window into explicit divergence', async () => {
+    // The old flow caught this race with a 422 from creating the ref. Seeding
+    // through the contents API cannot fail that way — a write to a branch that
+    // now exists simply lands on it — so the seed commit's PARENT COUNT is the
+    // evidence. A parent means somebody created the branch after the
+    // pre-flight lookup, and the publication refuses rather than piling the
+    // rest of the manifest onto content this product never saw.
+    const calls: string[] = [];
     const fakeFetch: typeof fetch = (input) => {
       const path = new URL(requestUrl(input)).pathname;
-      if (path.endsWith('/git/ref/heads/main')) return Promise.resolve(new Response(null, { status: 404 }));
-      if (path.endsWith('/git/blobs')) return Promise.resolve(json({ sha: SHA_A }, 201));
-      if (path.endsWith('/git/trees')) return Promise.resolve(json({ sha: SHA_B }, 201));
-      if (path.endsWith('/git/commits')) return Promise.resolve(json({ sha: SHA_C }, 201));
-      if (path.endsWith('/git/refs')) return Promise.resolve(json({ message: 'Reference already exists' }, 422));
+      calls.push(path);
+      if (path.endsWith('/git/ref/heads/main')) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (path.includes('/contents/')) {
+        return Promise.resolve(
+          json({ commit: { sha: SHA_C, tree: { sha: SHA_B }, parents: [{ sha: SHA_A }] } }, 201)
+        );
+      }
       throw new Error(`unexpected ${path}`);
     };
     await expect(client(fakeFetch).publishInitialCommit({
       token: 'ghs_installation-token',
       repository: { owner: 'atoma-org', name: 'generated-app' },
       message: 'Initial commit',
-      files: [{ path: 'README.md', content: 'hello' }],
+      files: [{ path: 'README.md', content: 'hello' }, { path: 'index.html', content: 'x' }],
     })).rejects.toBeInstanceOf(GitHubDivergenceError);
+    // And it refused BEFORE writing anything else: no blob, no tree, no ref.
+    expect(calls.some((path) => path.includes('/git/blobs'))).toBe(false);
   });
 
   it('rejects workflow injection and duplicate artifact paths before network I/O', async () => {
