@@ -483,7 +483,7 @@ Recorded so nobody has to discover it in a demo:
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
 | What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
-| How does another agent drive atoma? | `npm run build`, then `claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"` — stdio only, 13 tools |
+| How does another agent drive atoma? | `npm run build`, then `claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"` — stdio only, 13 tools plus a goal-template prompt per task family |
 | Are the economics real? | regenerable with `npm run burnin`; the historical CSV was archived out of the repo at the 2026-08-18 from-scratch reset |
 | …under a control? | `benchmark/PROTOCOL.md` — every round registered before it ran — and `benchmark/ROUND8.md` |
 | Do the deliverables actually work? | `benchmark/results-round8-scores.json` is the committed historical 7-check output; `verify-maint.mjs` now has 10 checks, but the round workspaces needed to regenerate it are not committed. Rounds 4-7 have no committed scorer output |

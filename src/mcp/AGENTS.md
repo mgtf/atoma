@@ -1,7 +1,7 @@
 # MCP — AGENTS.md
 
-`src/mcp/` owns the stdio control plane: the 13-tool surface, the run lease,
-run serialisation and the bounded readers.
+`src/mcp/` owns the stdio control plane: the 13-tool surface, the prompt and
+completion surface, the run lease, run serialisation and the bounded readers.
 
 Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
 Everything below is stated once, here, and is not repeated at the root.
@@ -41,6 +41,21 @@ Neighbours:
   instead of amnesia.
 - The exported 13-tool surface is a compatibility contract. Add/remove tools only
   with protocol tests, docs, compiled smoke updates, and explicit rationale.
+- The PROMPT surface is separate from that contract and adds no tool: one goal
+  template per launchable family plus one prompt per reader group. Prompt text
+  QUOTES its source — `TaskProfileGuidance` for the guidance, the exported
+  caveat constants for the caveats — and never restates it, and the guidance
+  ban applies to it: a prompt must not teach a caller to name a builtin element
+  in a goal. The one exemption is a quoted caveat that names the tool whose
+  output it warns about.
+- Argument completions hang off PROMPTS because the protocol has `ref/prompt`
+  and `ref/resource` and no `ref/tool`. Every completable argument is REQUIRED:
+  the SDK enables the capability behind an optional but its completion handler
+  does not unwrap one, so an optional completable argument advertises
+  completion and returns nothing. Completion sources live in `readers.ts` under
+  the reader rules, and bound their own SCAN, not just the returned slice — a
+  filter applied after the cap answers "no such trace" for anything older than
+  the newest page.
 
 ## Intentional choices and rejected shortcuts
 

@@ -322,6 +322,14 @@ export function skillsStats(opts: { l1?: string; sim?: number } = {}): unknown {
  * forbids citing this as the gate. A clean verdict means a reviewer's time
  * will not be wasted — never "approved".
  */
+/**
+ * The sentence `atoma_skills_review` must never be read without. Exported so
+ * the prompt that drives that reader states it in the same words rather than
+ * growing a second, drifting paraphrase — one rule, one home.
+ */
+export const SKILL_REVIEW_CAVEAT =
+  'MECHANICAL PRE-SCREEN, NOT THE REVIEW GATE. A clean verdict means a human reviewer’s time will not be wasted; it never means the body is approved for sharing.';
+
 export function skillsReview(opts: { l1?: string } = {}): unknown {
   const dir = skillsDirPath();
   const reg = new SkillRegistry(dir);
@@ -364,8 +372,7 @@ export function skillsReview(opts: { l1?: string } = {}): unknown {
   }
   return {
     skillsDir: dir,
-    caveat:
-      'MECHANICAL PRE-SCREEN, NOT THE REVIEW GATE. A clean verdict means a human reviewer’s time will not be wasted; it never means the body is approved for sharing.',
+    caveat: SKILL_REVIEW_CAVEAT,
     toolScopeFindingsAvailable: existsSync(dbPath),
     tally,
     assessments,
@@ -607,4 +614,76 @@ export function friction(opts: { last?: number; tier?: 'hard' | 'soft' | 'all' }
     hard: want === 'soft' ? undefined : rows.filter((r) => r.severity === 'hard'),
     soft: want === 'hard' ? undefined : rows.filter((r) => r.severity === 'soft'),
   };
+}
+
+/* -------------------------------------------------------------- completions */
+
+/**
+ * The value sources behind the protocol's `completions` capability.
+ *
+ * WHY THEY LIVE HERE AND NOT IN `prompts.ts`: they are pure readers over the
+ * persisted state, which is this module's whole remit — same readonly handles,
+ * same "an absent store is an answer" rule, same bounding. `prompts.ts` owns
+ * the wording a host sees; it must not grow a second way of reading the store.
+ *
+ * BOUNDED TWICE. The SDK already slices a completion result at 100 values
+ * (`createCompletionResult`), but a source that materialises every row before
+ * that slice is not bounded, it is merely truncated at the edge — so each
+ * source caps its own read as well. A completion is typed into by a human,
+ * character by character: it must stay cheap at every keystroke.
+ */
+export const MAX_COMPLETION_VALUES = 100;
+
+/** Case-insensitive prefix filter, capped. Empty input offers the whole (capped) set. */
+function completionsFor(values: readonly string[], typed: string): string[] {
+  const prefix = typed.trim().toLowerCase();
+  const matched = prefix ? values.filter((v) => v.toLowerCase().startsWith(prefix)) : [...values];
+  return matched.slice(0, MAX_COMPLETION_VALUES);
+}
+
+/**
+ * How many newest traces a completion looks at BEFORE filtering.
+ *
+ * Filtering after the 100-value cap would be a bug, not a bound: trace names
+ * are timestamps, so a human types a date prefix, and a prefix that only ever
+ * saw the newest hundred files silently answers "no such trace" for last
+ * week. The scan is still bounded — a directory older than this window is not
+ * offered — and it costs no more than the cap did, because ordering by mtime
+ * already stats the whole directory.
+ */
+export const COMPLETION_TRACE_SCAN = 1000;
+
+/** Trace filenames for `atoma_run_trace.file`, newest first. */
+export function completeTraceFile(typed: string): string[] {
+  return completionsFor(newestTraceFiles(runsDirPath(), COMPLETION_TRACE_SCAN), typed);
+}
+
+/** Agent-type names for `atoma_registry_show.name`, across all three tiers. */
+export function completeAtomName(typed: string): string[] {
+  const dbPath = storeDbPath();
+  if (!existsSync(dbPath)) return [];
+  const db = readonlyDb(dbPath);
+  try {
+    const reg = new AtomRegistry(db);
+    const names = ([1, 2, 3] as const).flatMap((tier) => reg.listByTier(tier).map((a) => a.name));
+    return completionsFor(names, typed);
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Molecule names for the skill readers' `l1`.
+ *
+ * Only namespaces that actually hold skills are offered, and they are offered
+ * under the DISPLAY name for the same reason the payloads carry one: a
+ * namespace key is an atom id, and a bare UUID is not something a person can
+ * type back. A namespace whose atom is gone degrades to its raw key, which
+ * `resolveMoleculeRef` still accepts.
+ */
+export function completeMoleculeName(typed: string): string[] {
+  const reg = new SkillRegistry(skillsDirPath());
+  const labels = displayNamesByAtomId();
+  const names = reg.listNamespaces().map((ns) => labels.get(ns) ?? ns);
+  return completionsFor(names, typed);
 }

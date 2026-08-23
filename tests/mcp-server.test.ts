@@ -27,6 +27,8 @@ import {
 } from '../src/mcp/run.js';
 import type { RunLeaseAcquirer } from '../src/mcp/runLock.js';
 import { families, friction, registryList, runTrace, skillsList, TRACE_ERROR_CAVEAT } from '../src/mcp/readers.js';
+import { promptNames } from '../src/mcp/prompts.js';
+import { findLaunchable } from '../src/run/profiles/index.js';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { AtomRegistry } from '../src/registry/atomRegistry.js';
 import { openDb } from '../src/registry/db.js';
@@ -701,8 +703,12 @@ describe('MCP server over real stdio', () => {
       result?: {
         content?: { text: string }[];
         tools?: { name: string }[];
+        prompts?: { name: string; arguments?: { name: string; required?: boolean }[] }[];
+        messages?: { role: string; content: { type: string; text: string } }[];
+        completion?: { values: string[]; total?: number; hasMore?: boolean };
         isError?: boolean;
         serverInfo?: { name: string; version: string };
+        capabilities?: Record<string, unknown>;
       };
     }[] =>
       out
@@ -745,7 +751,27 @@ describe('MCP server over real stdio', () => {
         method: 'tools/call',
         params: { name: 'atoma_run_start', arguments: { goal: '--clean-workspace oops' } },
       });
-      for (let i = 0; i < 20 && !frames().some((f) => f.id === 4); i++) await wait(500);
+      // The PROMPT surface travels on the same connection: a goal template per
+      // family, prompts driving the readers, and `completion/complete` — which
+      // the protocol only accepts against a prompt or a resource ref, never a
+      // tool, which is why the completable arguments live here.
+      send({ jsonrpc: '2.0', id: 5, method: 'prompts/list' });
+      send({
+        jsonrpc: '2.0',
+        id: 6,
+        method: 'prompts/get',
+        params: { name: 'atoma_goal_build', arguments: { goal: 'a small static page' } },
+      });
+      send({
+        jsonrpc: '2.0',
+        id: 7,
+        method: 'completion/complete',
+        params: {
+          ref: { type: 'ref/prompt', name: 'atoma_goal_build' },
+          argument: { name: 'goal', value: '' },
+        },
+      });
+      for (let i = 0; i < 20 && !frames().some((f) => f.id === 7); i++) await wait(500);
 
       const lines = out.split('\n').filter((l) => l.trim());
       const nonJson = lines.filter((l) => {
@@ -777,6 +803,39 @@ describe('MCP server over real stdio', () => {
       const refused = frames().find((f) => f.id === 4);
       expect(refused?.result?.isError).toBe(true);
       expect(refused?.result?.content?.[0]?.text).toMatch(/must not start with "--"/);
+
+      // Prompts and completions are advertised, and the tool surface is
+      // untouched: this feature adds NO tool, so the 13-tool compatibility
+      // contract is not in play.
+      expect(initialized?.result?.capabilities).toHaveProperty('prompts');
+      expect(initialized?.result?.capabilities).toHaveProperty('completions');
+      expect(names).toHaveLength(13);
+
+      const prompts = frames().find((f) => f.id === 5)?.result?.prompts ?? [];
+      expect(prompts.map((p) => p.name)).toEqual(expect.arrayContaining(promptNames()));
+      /**
+       * Every completable argument must be REQUIRED. The SDK enables the
+       * capability when it finds a completable schema behind an optional, but
+       * its completion handler looks the argument up WITHOUT unwrapping the
+       * optional — so an optional completable argument advertises completion
+       * and then silently returns nothing.
+       */
+      for (const prompt of prompts) {
+        for (const arg of prompt.arguments ?? []) {
+          expect(arg.required, `${prompt.name}.${arg.name} is optional`).toBe(true);
+        }
+      }
+
+      const got = frames().find((f) => f.id === 6);
+      const promptText = got?.result?.messages?.[0]?.content?.text ?? '';
+      expect(promptText).toContain('a small static page');
+      expect(promptText).toContain('atoma_run_start');
+      expect(promptText).toMatch(/DESTRUCTIVE/);
+
+      const completed = frames().find((f) => f.id === 7)?.result?.completion;
+      expect(completed?.values).toEqual(
+        findLaunchable('build')?.profile.guidance.examples.slice(0, 100)
+      );
 
       // The banner proves the server announces itself where it is safe to.
       expect(err).toMatch(/\[atoma-mcp\] ready on stdio/);

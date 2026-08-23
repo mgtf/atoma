@@ -99,6 +99,40 @@ try {
     if (!names.includes(required)) throw new Error(`compiled MCP is missing ${required}`);
   }
 
+  // The PROMPT surface ships in the same build and is just as droppable: a
+  // packaged `dist/` missing `prompts.js` would still pass the tool count
+  // above. `completion/complete` is prompt-scoped by protocol — there is no
+  // tool ref — so proving one completion answers proves the whole capability.
+  send({ jsonrpc: '2.0', id: 3, method: 'prompts/list' });
+  const promptList = await waitForFrame(3);
+  const prompts = promptList.result?.prompts;
+  if (!Array.isArray(prompts) || prompts.length < 4) {
+    throw new Error(
+      `expected the compiled MCP prompt surface, got ${Array.isArray(prompts) ? prompts.length : 'none'}`
+    );
+  }
+  for (const required of ['atoma_goal_build', 'atoma_inspect_trace', 'atoma_inspect_agent']) {
+    if (!prompts.some((prompt) => prompt.name === required)) {
+      throw new Error(`compiled MCP is missing prompt ${required}`);
+    }
+  }
+  if (!initialized.result?.capabilities?.completions) {
+    throw new Error('compiled MCP does not advertise the completions capability');
+  }
+  send({
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'completion/complete',
+    params: {
+      ref: { type: 'ref/prompt', name: 'atoma_goal_build' },
+      argument: { name: 'goal', value: '' },
+    },
+  });
+  const completed = await waitForFrame(4);
+  if (!Array.isArray(completed.result?.completion?.values) || completed.result.completion.values.length === 0) {
+    throw new Error('compiled MCP returned no goal completions for the build family');
+  }
+
   // Re-parse every complete line after both responses: stdout purity is part
   // of the release contract, not just a unit-test property.
   frames();
@@ -187,7 +221,7 @@ try {
     if (viz.exitCode === null) viz.kill('SIGKILL');
   }
   process.stdout.write(
-    `release smoke ok: ${tools.length} MCP tools, JSON-only stdout, compiled viz UI/API\n`
+    `release smoke ok: ${tools.length} MCP tools, ${prompts.length} prompts with completions, JSON-only stdout, compiled viz UI/API\n`
   );
 } finally {
   if (child.exitCode === null) child.kill('SIGKILL');
