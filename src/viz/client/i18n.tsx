@@ -1,6 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { DEFAULT_LOCALE, isLocale, type Locale } from '../../contracts/locales.js';
 
-export type Locale = 'en' | 'fr';
+export type { Locale };
 
 export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
   en: {
@@ -1401,17 +1402,18 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
   },
 };
 
-const FALLBACK: Locale = 'en';
 const STORAGE_KEY = 'atoma.viz.lang';
 
 export function detectLocale(): Locale {
+  // `isLocale`, not `asLocale`: a miss here must fall through to the NEXT
+  // source, and a total read would stop at the query string every time.
   const query = new URLSearchParams(location.search).get('lang');
-  if (query === 'en' || query === 'fr') return query;
+  if (isLocale(query)) return query;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'fr') return saved;
+    if (isLocale(saved)) return saved;
   } catch { /* storage is optional */ }
-  return FALLBACK;
+  return DEFAULT_LOCALE;
 }
 
 function interpolationValue(value: unknown): string | undefined {
@@ -1424,7 +1426,7 @@ function interpolationValue(value: unknown): string | undefined {
 
 export function translate(locale: Locale, key: string, vars?: Record<string, unknown>): string {
   const singular = vars?.['count'] === 1 ? I18N_CATALOGS[locale][key + '.one'] : undefined;
-  const entry = singular ?? I18N_CATALOGS[locale][key] ?? I18N_CATALOGS[FALLBACK][key];
+  const entry = singular ?? I18N_CATALOGS[locale][key] ?? I18N_CATALOGS[DEFAULT_LOCALE][key];
   if (entry === undefined) return key;
   if (!vars) return entry;
   return entry.replace(/\{\{(\w+)\}\}/g, (match, name: string) => {

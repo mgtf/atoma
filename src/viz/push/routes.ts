@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, asLocale, type Locale }
+  from '../../contracts/locales.js';
 import type { PlatformEvent, PlatformEventKind } from '../../contracts/platformEvents.js';
 
 /**
@@ -27,13 +29,15 @@ import type { PlatformEvent, PlatformEventKind } from '../../contracts/platformE
  * `detail`.
  */
 
-export type PushLocale = 'en' | 'fr';
-export const PUSH_LOCALES: readonly PushLocale[] = ['en', 'fr'];
-export const DEFAULT_PUSH_LOCALE: PushLocale = 'en';
-
-export function asPushLocale(value: string | null | undefined): PushLocale {
-  return value === 'fr' ? 'fr' : DEFAULT_PUSH_LOCALE;
-}
+/**
+ * A push speaks the languages the PLATFORM speaks — there is no separate
+ * push vocabulary, and these aliases exist only so call sites here read as
+ * push code. `src/contracts/locales.ts` is the list.
+ */
+export type PushLocale = Locale;
+export const PUSH_LOCALES: readonly PushLocale[] = SUPPORTED_LOCALES;
+export const DEFAULT_PUSH_LOCALE: PushLocale = DEFAULT_LOCALE;
+export const asPushLocale = asLocale;
 
 /**
  * Recipients, resolved per event.
