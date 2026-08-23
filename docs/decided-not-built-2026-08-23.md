@@ -124,6 +124,32 @@ answered in it, each because answering it is its own change:
    meet. Recording coverage in the lease row would allow both; it also adds a
    second thing the lease has to be right about.
 
+## Left open by the repository-visibility commit (2026-08-23)
+
+The public/private choice landed ([src/projects](../src/projects/AGENTS.md)).
+Three adjacent gaps were verified during its review and deliberately not built,
+because each is its own change and none is on the path the choice opens:
+
+1. **The publication retry has no caller.** `POST
+   /api/projects/:id/runs/:runId/publish` → `ProjectService.retryPublication`
+   exists, works, is role-checked and same-origin guarded, and is pinned by
+   `tests/project-publisher.test.ts` — and nothing in the client, the CLI or
+   MCP ever calls it. A tenant whose publication failed has no button, while
+   the push notification tells them a retry is possible. Minimum viable: one
+   `retryPublication` in `data-api.ts` and one action on a run row whose
+   publication is `failed`; the 502 already carries a bounded reason.
+2. **A successful publication is the quietest event in the product.**
+   `publication.published` pushes to the requester only, while every FAILURE
+   reaches the org owners. On a User-target installation a member can therefore
+   publish under the organisation's installation with no owner ever told. One
+   line in `viz/push/routes.ts` (`orgOwners: true`) plus `visibility` in the
+   event detail would fix both halves — but who gets paged is a policy
+   decision, not a wiring one.
+3. **Nobody can review what a run will publish.** The manifest never crosses
+   the API in either direction, so a tenant cannot see the file set before or
+   after. That is the fact that decided the default; making it reviewable is a
+   product feature (an approval step before the first commit), not a default.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.

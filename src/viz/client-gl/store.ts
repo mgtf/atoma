@@ -1,4 +1,8 @@
 import { create } from 'zustand';
+import {
+  DEFAULT_REPOSITORY_VISIBILITY,
+  type RepositoryVisibility,
+} from '../../contracts/projects.js';
 import type { EventFilters } from '../client/run-utils.js';
 
 export type ViewName =
@@ -147,6 +151,12 @@ export interface GpuUiState {
   selectedSkill: { l1Name: string; id: string } | null;
   selectedProjectId: string | null;
   selectedGithubInstallationId: string | null;
+  /**
+   * The new project's repository visibility. A top-level field, like the
+   * installation it sits beside in the form: `search` is one key per focusable
+   * TEXT input, and a two-option select carries no focus state anyone reads.
+   */
+  projectVisibility: RepositoryVisibility;
   runFilters: EventFilters;
   branchHeadingExpanded: boolean;
   runSummaryExpanded: boolean;
@@ -187,6 +197,7 @@ export interface GpuUiState {
   selectSkill: (selection: { l1Name: string; id: string } | null) => void;
   selectProject: (id: string | null) => void;
   selectGithubInstallation: (id: string | null) => void;
+  setProjectVisibility: (visibility: RepositoryVisibility) => void;
   setRunFilters: (filters: EventFilters) => void;
   toggleBranchHeading: () => void;
   toggleRunSummary: () => void;
@@ -227,6 +238,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   selectedSkill: null,
   selectedProjectId: null,
   selectedGithubInstallationId: null,
+  projectVisibility: DEFAULT_REPOSITORY_VISIBILITY,
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
   branchHeadingExpanded: true,
   runSummaryExpanded: true,
@@ -315,6 +327,10 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   })),
   selectGithubInstallation: (selectedGithubInstallationId) =>
     set({ selectedGithubInstallationId }),
+  // Deliberately NOT persisted. A visibility carried over from the last
+  // project would be a decision made by a previous session about a repository
+  // that did not exist yet; every create starts from the stated default.
+  setProjectVisibility: (projectVisibility) => set({ projectVisibility }),
   setRunFilters: (runFilters) =>
     set((state) => ({
       runFilters,

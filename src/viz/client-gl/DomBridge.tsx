@@ -80,6 +80,8 @@ export function DomBridge({
   const setRunPickerScrollY = useGpuStore((state) => state.setRunPickerScrollY);
   const selectedGithubInstallationId = useGpuStore((state) => state.selectedGithubInstallationId);
   const selectGithubInstallation = useGpuStore((state) => state.selectGithubInstallation);
+  const projectVisibility = useGpuStore((state) => state.projectVisibility);
+  const setProjectVisibility = useGpuStore((state) => state.setProjectVisibility);
   const selectProject = useGpuStore((state) => state.selectProject);
   const activeGithubInstallations = githubInstallations.filter(
     (installation) => installation.status === 'active'
@@ -284,19 +286,41 @@ export function DomBridge({
                 onBlur={() => setFocusedInput(null)}
                 onChange={(event) => setSearch('projectRepository', event.target.value)}
               />
-              <select
-                className="gpu-dom-input gpu-project-install"
-                aria-label={t('projects.installation')}
-                value={selectedGithubInstallationId ?? ''}
-                onChange={(event) => selectGithubInstallation(event.target.value || null)}
-              >
-                <option value="">{t('projects.installation')}</option>
-                {activeGithubInstallations.map((installation) => (
-                  <option key={installation.installationId} value={installation.installationId}>
-                    {installation.accountLogin} ({installation.targetType})
-                  </option>
-                ))}
-              </select>
+              {/* WHERE the repository goes, and WHO can read it — one cell.
+                  The pair shares the grid area the installation select owned
+                  alone; a fourth column would have moved the form's height
+                  contract and three grid area lists for two words of text. */}
+              <div className="gpu-project-target">
+                <select
+                  className="gpu-dom-input gpu-project-install"
+                  aria-label={t('projects.installation')}
+                  value={selectedGithubInstallationId ?? ''}
+                  onChange={(event) => selectGithubInstallation(event.target.value || null)}
+                >
+                  <option value="">{t('projects.installation')}</option>
+                  {activeGithubInstallations.map((installation) => (
+                    <option key={installation.installationId} value={installation.installationId}>
+                      {installation.accountLogin} ({installation.targetType})
+                    </option>
+                  ))}
+                </select>
+                {/* Bare words in the options; the consequence and the finality
+                    are in the hint below, because a word in a dropdown is not
+                    a warning — and this choice cannot be taken back. */}
+                <select
+                  className="gpu-dom-input gpu-project-visibility"
+                  aria-label={t('projects.visibility')}
+                  value={projectVisibility}
+                  onChange={(event) =>
+                    setProjectVisibility(
+                      event.target.value === 'public' ? 'public' : 'private'
+                    )
+                  }
+                >
+                  <option value="private">{t('projects.visibility.private')}</option>
+                  <option value="public">{t('projects.visibility.public')}</option>
+                </select>
+              </div>
             </>
           )}
           <div className="gpu-project-actions">
@@ -325,7 +349,11 @@ export function DomBridge({
           <p className="gpu-project-hint">
             {selectedProjectLabel
               ? t('projects.actionsHint.ready', { name: selectedProjectLabel })
-              : t('projects.actionsHint.new')}
+              : `${t('projects.actionsHint.new')} ${t(
+                  projectVisibility === 'public'
+                    ? 'projects.visibility.publicHint'
+                    : 'projects.visibility.privateHint'
+                )}`}
           </p>
         </form>
       ) : null}

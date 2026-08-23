@@ -199,6 +199,42 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.queryByRole('button', { name: /Start run/ })).not.toBeInTheDocument();
   });
 
+  it('offers the audience beside the installation, and defaults to private', () => {
+    // WHERE the repository goes and WHO can read it are one decision, so they
+    // share one cell. Document order is tab order, and nothing but this holds
+    // it to the visual order the stacked layout reads.
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), runs, undefined, [], null);
+    const install = screen.getByRole('combobox', { name: 'GitHub installation' });
+    const visibility = screen.getByRole('combobox', { name: 'Repository visibility' });
+    expect(visibility).toHaveValue('private');
+    expect(
+      install.compareDocumentPosition(visibility) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // The consequence is prose beside the control, not a word in a dropdown:
+    // the choice cannot be taken back, and nothing in this product reviews what
+    // a run publishes.
+    expect(screen.getByText(/cannot be changed later/)).toBeInTheDocument();
+  });
+
+  it('warns about the audience when public is chosen, in the form itself', () => {
+    useGpuStore.setState({ view: 'projects', entered: true, projectVisibility: 'public' });
+    renderBridge(vi.fn(), runs, undefined, [], null);
+    expect(screen.getByRole('combobox', { name: 'Repository visibility' })).toHaveValue('public');
+    expect(screen.getByText(/PUBLIC and permanent/)).toBeInTheDocument();
+  });
+
+  it('drops the audience control with the rest of the create fields', () => {
+    useGpuStore.setState({ view: 'projects', entered: true });
+    renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
+    expect(
+      screen.queryByRole('combobox', { name: 'Repository visibility' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'GitHub installation' })
+    ).not.toBeInTheDocument();
+  });
+
   it('swaps in the run form once a project is selected', () => {
     useGpuStore.setState({ view: 'projects', entered: true });
     renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');

@@ -266,6 +266,15 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.promptRequired': 'A run prompt is required',
     'projects.repository': 'Repository name',
     'projects.installation': 'GitHub installation',
+    'projects.visibility': 'Repository visibility',
+    'projects.visibility.public': 'Public',
+    'projects.visibility.private': 'Private',
+    'projects.visibility.publicHint':
+      'PUBLIC and permanent: anyone will be able to read this repository and every file a run publishes into it, and the choice cannot be changed later.',
+    'projects.visibility.privateHint':
+      'Private: only you and this GitHub installation can read what runs publish. The choice cannot be changed later, and private repositories are free on every GitHub plan.',
+    'projects.visibilityBadge.public': 'public',
+    'projects.visibilityBadge.private': 'private',
     'projects.creating': 'Creating project…',
     'projects.starting': 'Starting run…',
     'projects.actionFailed': 'Project action failed',
@@ -941,6 +950,15 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'projects.promptRequired': 'Un prompt de run est requis',
     'projects.repository': 'Nom du dépôt',
     'projects.installation': 'Installation GitHub',
+    'projects.visibility': 'Visibilité du dépôt',
+    'projects.visibility.public': 'Public',
+    'projects.visibility.private': 'Privé',
+    'projects.visibility.publicHint':
+      'PUBLIC et définitif : n’importe qui pourra lire ce dépôt et chaque fichier qu’un run y publiera, et ce choix ne pourra plus être changé.',
+    'projects.visibility.privateHint':
+      'Privé : vous seul et cette installation GitHub pourrez lire ce que les runs publient. Ce choix ne pourra plus être changé, et les dépôts privés sont gratuits sur tous les plans GitHub.',
+    'projects.visibilityBadge.public': 'public',
+    'projects.visibilityBadge.private': 'privé',
     'projects.creating': 'Création du projet…',
     'projects.starting': 'Lancement du run…',
     'projects.actionFailed': 'Échec de l’action projet',

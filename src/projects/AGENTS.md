@@ -64,3 +64,38 @@ Neighbours:
   observer that noticed it. `hasProjectTables` exists so a reader can ask
   whether this store has a control plane without `ProjectStore.open`'s DDL
   creating one.
+
+## Repository visibility
+
+- It is chosen ONCE, at project creation, and it is IRREVERSIBLE: no update
+  schema, no `UPDATE projects` touching the column, no PATCH route, and the
+  HTTP transport has no PATCH method. Flipping it at GitHub instead breaks the
+  project permanently — `ensureRepository` refuses a repository whose
+  visibility disagrees with the row ("never a convergence") and
+  `REPOSITORY_TRANSITIONS.ready` is empty, so the row can never be reconciled.
+  The create form says so; anything that offers to change it later is lying.
+- `DEFAULT_REPOSITORY_VISIBILITY` in [src/contracts](../contracts/projects.ts)
+  is the ONE definition, read by the schema default and by the create form, and
+  it is `private`. The reasons are recorded beside it, including the one that
+  decides it: nothing in this pipeline reviews what gets published — the file
+  set is model-declared at plan time, the filter is filenames only, publication
+  is automatic on delivery, and the manifest never crosses the API — so a
+  public default hands an unreviewed set to the internet whenever nobody looks.
+- The repository is created at PUBLICATION, not at project creation, so a
+  project sits at `repository_status = 'pending'` until its first delivered
+  run. Everything about the target is therefore validated late: create-project
+  checks only that the installation row is active and belongs to the viewer's
+  organisation.
+- A failed repository creation is recorded ON THE PROJECT ROW (`failed` plus
+  `repository_error`), not only on the publication. It used to stay `creating`
+  with a NULL error, indistinguishable from a publish in flight sitting above a
+  green delivered run. `failed → creating` is allowed, so it stays retryable.
+- Every transition here is a compare-and-set, so the publisher reads the
+  repository status FRESH from the store rather than from the caller's
+  `Project` snapshot — a retry's snapshot is as old as the attempt that failed.
+- A `ready` repository is not re-derived: its receipt on the row IS its
+  identity. Calling GitHub again would fail the terminal `ready` CAS, which is
+  what made a retry-after-failed-commit impossible.
+- HTTP 422 from repository creation is NOT proof the name is taken — an
+  account can also refuse to create a repository of that visibility, and
+  `GitHubApiError` carries no body to tell them apart. Say what is known.

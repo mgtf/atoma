@@ -380,7 +380,15 @@ export function drawProjects(
     const metadataWidth = compactRunRows
       ? Math.max(0, innerWidth - 24)
       : Math.max(40, innerWidth - repoUrlWidth - 24);
-    const metadata = `${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
+    // VISIBILITY LEADS the metadata line. It cannot ride at the end: this line
+    // is truncated from the TAIL, so an appended badge is the first thing to
+    // disappear on a narrow panel — and it is the one word on the row that
+    // says who can read what these runs publish. Public is upshifted because a
+    // single text node carries a single colour, and this line's colour belongs
+    // to the slug, not to the audience.
+    const visibility = project.repositoryTarget.visibility;
+    const badge = snapshot.t(`projects.visibilityBadge.${visibility}`);
+    const metadata = `${visibility === 'public' ? badge.toUpperCase() : badge} · ${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
     ctx.text(
       pane.content,
       truncate(metadata.replace(/\s+/g, ' '), Math.max(8, Math.floor(metadataWidth / 6))),

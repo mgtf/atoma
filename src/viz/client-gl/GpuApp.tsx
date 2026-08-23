@@ -436,13 +436,18 @@ function GpuAppContent({
           installationId: installation.installationId,
           owner: installation.accountLogin,
           name: repository || slug,
-          visibility: 'private',
+          // The operator's choice, from the form's own select. The default it
+          // starts at lives in ONE place, `DEFAULT_REPOSITORY_VISIBILITY`.
+          visibility: useGpuStore.getState().projectVisibility,
         },
       });
       await queryClient.invalidateQueries({ queryKey: ['viz', 'projects'] });
       useGpuStore.getState().selectProject(created.projectId);
-    } catch {
-      setProjectError(t('projects.actionFailed'));
+    } catch (error) {
+      // The server's own message, like startProjectRun already does. A bare
+      // catch here discarded the one sentence that explains a refusal — and a
+      // visibility a GitHub organisation forbids is refused with a reason.
+      setProjectError(error instanceof Error ? error.message : t('projects.actionFailed'));
     } finally {
       setProjectBusy(false);
     }

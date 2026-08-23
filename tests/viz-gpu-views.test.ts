@@ -430,6 +430,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectedSkill: null,
     selectedProjectId: null,
     selectedGithubInstallationId: null,
+    projectVisibility: 'private',
     runFilters: { kind: 'all', role: 'all', branchId: 'all' },
     branchHeadingExpanded: true,
     runSummaryExpanded: true,
@@ -468,6 +469,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     selectSkill: noop,
     selectProject: noop,
     selectGithubInstallation: noop,
+    setProjectVisibility: noop,
     setRunFilters: noop,
     toggleBranchHeading: noop,
     toggleRunSummary: noop,
@@ -1778,6 +1780,68 @@ describe('drawProjects', () => {
     expect(hint).toContain('-webkit-line-clamp: 2');
   });
 
+  it('leads the row with the audience, because the line truncates from the tail', () => {
+    // The one word on a project row that says who can read what its runs
+    // publish. Appended it would be the first thing a narrow panel drops; and
+    // the choice is irreversible, so a reader must be able to see it was made.
+    const projectId = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
+    const project = {
+      projectId,
+      name: 'Weather Lab',
+      slug: 'weather-lab',
+      status: 'active' as const,
+      family: 'build',
+      repositoryTarget: {
+        installationId: '501',
+        owner: 'atoma-org',
+        name: 'weather-lab',
+        visibility: 'private' as const,
+      },
+      repositoryStatus: 'pending' as const,
+      repositoryFullName: null,
+      repositoryUrl: null,
+      repositoryError: null,
+      createdAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: '2026-08-20T00:00:00.000Z',
+    };
+
+    const privateCtx = createRecordingCtx();
+    drawProjects(
+      privateCtx,
+      makeSnapshot({ view: 'projects' }, { auth: makeAuth(), projects: [project] }),
+      1280,
+      720
+    );
+    expect(
+      privateCtx.texts.some((text) => String(text.value).startsWith('private · weather-lab'))
+    ).toBe(true);
+
+    // Public is upshifted: one text node carries one colour, and this line's
+    // colour belongs to the slug rather than to the audience.
+    const publicCtx = createRecordingCtx();
+    drawProjects(
+      publicCtx,
+      makeSnapshot(
+        { view: 'projects' },
+        {
+          auth: makeAuth(),
+          projects: [
+            { ...project, repositoryTarget: { ...project.repositoryTarget, visibility: 'public' } },
+          ],
+        }
+      ),
+      1280,
+      720
+    );
+    expect(
+      publicCtx.texts.some((text) => String(text.value).startsWith('PUBLIC · weather-lab'))
+    ).toBe(true);
+
+    // Visible BEFORE the repository exists, which is when it still matters:
+    // the repository is created at publication, not at project creation.
+    expect(publicCtx.texts.some((text) => String(text.value).includes('github.com'))).toBe(false);
+  });
+
   it('renders a project row and expands its runs when selected', () => {
     const ctx = createRecordingCtx();
     const projectId = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
@@ -1858,7 +1922,7 @@ describe('drawProjects', () => {
     expect(ctx.texts.some((text) => String(text.value).includes('401 API key is invalid'))).toBe(true);
     const boundedRowCopy = ctx.texts.filter((text) =>
       text.value === 'repo ready' ||
-      String(text.value).startsWith('weather-lab ·') ||
+      String(text.value).startsWith('private · weather-lab ·') ||
       String(text.value).startsWith('https://github.com/atoma-org/') ||
       String(text.value).startsWith('delivered') ||
       String(text.value).includes('401 API key is invalid')

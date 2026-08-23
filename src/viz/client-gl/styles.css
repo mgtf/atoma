@@ -189,6 +189,11 @@ html.atoma-cursor-active * {
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
   height: 140px;
+  /* The declared height is a contract with the GL list below it, so content
+     that outgrows it must scroll rather than spill: a longer locale, a raised
+     default font size, or a future field. `auto`, not `hidden` — hiding could
+     swallow the Create button. */
+  overflow-y: auto;
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
   grid-template-areas:
@@ -210,6 +215,27 @@ html.atoma-cursor-active * {
     "prompt prompt prompt"
     "actions actions actions"
     "hint hint hint";
+}
+
+/* THE TARGET PAIR shares the `install` cell rather than taking a fourth
+   column. Widening the grid would have touched four coupled numbers — the base
+   track list, three area lists, the narrow height, and its TS twin — and CSS
+   Grid makes area lists all-or-nothing across their rows, a cascade no test in
+   this repository can see (jsdom has no layout, and the GPU smoke never opens
+   this form). Nesting touches none of them: same cell, same heights, same
+   contract. */
+.gpu-project-target {
+  grid-area: install;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.gpu-project-target .gpu-dom-input {
+  /* Degrade to a floor rather than collapsing: this row already carries three
+     16px controls at the first wide pixel. */
+  flex: 1 1 0;
+  min-width: 5.5rem;
 }
 
 .gpu-project-form .gpu-dom-input {
@@ -290,6 +316,12 @@ html.atoma-cursor-active * {
       "install"
       "actions"
       "hint";
+  }
+
+  /* Stacked, the pair becomes two rows inside its own cell — which is why the
+     band height does not move and the zero-height-pane cliff stays put. */
+  .gpu-project-target {
+    flex-direction: column;
   }
 
   .gpu-project-form--run {

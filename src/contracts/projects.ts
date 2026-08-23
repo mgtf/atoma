@@ -67,12 +67,52 @@ export const githubRepositoryNameSchema = z
   });
 export const repositoryVisibilitySchema = z.enum(['private', 'public']);
 
+/**
+ * ONE definition of what a project gets when nobody chooses. Flipping this
+ * literal is the whole of that decision: the schema default and the create
+ * form both read it, so a form cannot ship one thing while an API caller gets
+ * another.
+ *
+ * IT IS `private`, AND THE OPERATOR ASKED FOR `public`. Recorded because
+ * overriding a stated preference needs its reasons in the open, not in a
+ * commit message nobody re-reads:
+ *
+ * 1. The reason given for `public` was that a private repository might need a
+ *    paid GitHub plan. That has not been true since 7 January 2019 for
+ *    personal accounts and 14 April 2020 for organisations — GitHub Free
+ *    includes unlimited private repositories with unlimited collaborators, and
+ *    a paid plan adds the feature SET on them (rulesets, required reviewers,
+ *    Pages, Actions minutes), never the right to create one. The premise for
+ *    the default was void, so the default was never really chosen.
+ * 2. NOBODY IN THIS SYSTEM HAS EVER LOOKED AT WHAT GETS PUBLISHED. The file
+ *    set is `plan.subtasks.flatMap(s => s.outputs)`, declared by a model at
+ *    plan time before the files exist; the filter is filenames only
+ *    (`secretLike`), not one byte of content; publication is automatic on
+ *    delivery with no opt-out; and the manifest never crosses the API, so a
+ *    tenant cannot review it before or after. A default is what happens when
+ *    nobody looks, and here "nobody looks" is the entire pipeline.
+ * 3. IT CANNOT BE TAKEN BACK. There is no update schema, no `UPDATE projects`
+ *    statement touching this column, no PATCH route, and the HTTP transport
+ *    has no PATCH method. Flipping it at GitHub instead permanently breaks the
+ *    project, because `ensureRepository` refuses a repository whose visibility
+ *    disagrees with the row ("never a convergence") and
+ *    `REPOSITORY_TRANSITIONS.ready` is empty, so the row can never be
+ *    reconciled.
+ *
+ * So the two errors are not symmetric. Defaulting to private and being wrong
+ * costs one edit to this line. Defaulting to public and being wrong published
+ * an unreviewed, model-chosen file set to the internet, permanently, for
+ * somebody who never touched the control.
+ */
+export const DEFAULT_REPOSITORY_VISIBILITY: z.infer<typeof repositoryVisibilitySchema> =
+  'private';
+
 export const repositoryTargetSchema = z
   .object({
     installationId: githubInstallationIdSchema,
     owner: githubOwnerSchema,
     name: githubRepositoryNameSchema,
-    visibility: repositoryVisibilitySchema.default('private'),
+    visibility: repositoryVisibilitySchema.default(DEFAULT_REPOSITORY_VISIBILITY),
   })
   .strict();
 
@@ -265,6 +305,7 @@ export type CreateProjectInput = z.input<typeof createProjectInputSchema>;
 export type Project = z.infer<typeof projectSchema>;
 export type ProjectStatus = z.infer<typeof projectStatusSchema>;
 export type RepositoryStatus = z.infer<typeof repositoryStatusSchema>;
+export type RepositoryVisibility = z.infer<typeof repositoryVisibilitySchema>;
 export type RepositoryTarget = z.infer<typeof repositoryTargetSchema>;
 export type RepositoryReceipt = z.infer<typeof repositoryReceiptSchema>;
 export type CreateProjectRunInput = z.input<typeof createProjectRunInputSchema>;

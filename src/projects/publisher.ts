@@ -109,8 +109,15 @@ async function ensureRepository(
         input.name
       );
       if (!existing) {
+        // 422 IS NOT ONLY "the name is taken". A GitHub organisation can
+        // forbid repository creation, or forbid one visibility — and
+        // `GitHubApiError` carries no response body, so the two are
+        // indistinguishable here. Saying "already exists" would tell an
+        // operator something affirmatively false about their own account, on
+        // the very path a public/private choice makes reachable. State what is
+        // known instead.
         throw new Error(
-          `repository ${input.owner}/${input.name} already exists but is not accessible to this installation`
+          `repository creation was refused (HTTP 422) and ${input.owner}/${input.name} is not visible to this installation: the name may be taken by a repository outside its scope, or this account may not allow creating a ${input.visibility} repository`
         );
       }
       // The idempotent path must not silently change the audience: publishing
@@ -207,47 +214,85 @@ export class GitHubPublisher {
           ? await this.userAccessToken(linked.connectedByPrincipalId)
           : installationToken.token;
 
-      // Repository lifecycle: pending → creating → ready (idempotent replay ok)
-      if (project.repositoryStatus === 'pending' || project.repositoryStatus === 'failed') {
-        const fromRepo = project.repositoryStatus === 'failed' ? 'failed' : 'pending';
-        this.store.transitionRepository({
-          orgId: project.orgId,
-          projectId: project.projectId,
-          from: fromRepo,
-          to: 'creating',
-        });
-      }
-      const repository = await ensureRepository(
-        this.client,
-        {
-          installationId: installation.installationId,
-          targetType: installation.targetType,
-          owner: project.repositoryTarget.owner,
-          name: project.repositoryTarget.name,
-          visibility: project.repositoryTarget.visibility,
-        },
-        {
-          createToken,
-          lookupToken: installation.targetType === 'User' ? createToken : installationToken.token,
+      // Repository lifecycle: pending → creating → ready (idempotent replay ok).
+      // The status is read FRESH from the store, not from the `project` the
+      // caller handed in: a retry's snapshot is as old as the attempt that
+      // failed, and every transition here is a compare-and-set. This was
+      // invisible while a failed repository row could not exist — the moment
+      // failures started being recorded, a retry compared 'pending' against a
+      // row that said 'failed' and refused itself.
+      const currentRepositoryStatus =
+        this.store.getProject(project.orgId, project.projectId)?.repositoryStatus ??
+        project.repositoryStatus;
+      let receipt: {
+        repositoryId: string;
+        fullName: string;
+        url: string;
+        defaultBranch: string;
+      } | null = null;
+      if (currentRepositoryStatus === 'ready') {
+        // ALREADY RESOLVED, and `ready` is terminal by design
+        // (`REPOSITORY_TRANSITIONS.ready = []`). Re-deriving the identity would
+        // call GitHub again and then fail its own compare-and-set, which is
+        // what broke a retry whose repository existed and whose COMMIT had
+        // failed. The row is the identity.
+        const stored = this.store.getProject(project.orgId, project.projectId);
+        // The store's CHECK constraint already ties `ready` to a complete
+        // receipt, so a missing field here is a corrupted row, not a state.
+        if (!stored?.repositoryId || !stored.repositoryFullName || !stored.repositoryUrl || !stored.defaultBranch) {
+          throw new Error(
+            `repository for project ${project.slug} is ready but carries no receipt to publish into`
+          );
         }
-      );
-      if (!repository.repositoryId) {
-        throw new Error(
-          `repository ${repository.fullName} already exists but its identity could not be resolved`
+        receipt = {
+          repositoryId: stored.repositoryId,
+          fullName: stored.repositoryFullName,
+          url: stored.repositoryUrl,
+          defaultBranch: stored.defaultBranch,
+        };
+      } else {
+        if (currentRepositoryStatus === 'pending' || currentRepositoryStatus === 'failed') {
+          this.store.transitionRepository({
+            orgId: project.orgId,
+            projectId: project.projectId,
+            from: currentRepositoryStatus,
+            to: 'creating',
+          });
+        }
+        const repository = await ensureRepository(
+          this.client,
+          {
+            installationId: installation.installationId,
+            targetType: installation.targetType,
+            owner: project.repositoryTarget.owner,
+            name: project.repositoryTarget.name,
+            visibility: project.repositoryTarget.visibility,
+          },
+          {
+            createToken,
+            lookupToken: installation.targetType === 'User' ? createToken : installationToken.token,
+          }
         );
-      }
-      this.store.transitionRepository({
-        orgId: project.orgId,
-        projectId: project.projectId,
-        from: 'creating',
-        to: 'ready',
-        receipt: {
+        if (!repository.repositoryId) {
+          throw new Error(
+            `repository ${repository.fullName} already exists but its identity could not be resolved`
+          );
+        }
+        receipt = {
           repositoryId: repository.repositoryId,
           fullName: repository.fullName,
           url: repository.url,
           defaultBranch: repository.defaultBranch,
-        },
-      });
+        };
+        this.store.transitionRepository({
+          orgId: project.orgId,
+          projectId: project.projectId,
+          from: 'creating',
+          to: 'ready',
+          receipt,
+        });
+      }
+      const repository = receipt;
 
       // Revalidate the manifest against disk immediately before upload.
       revalidateArtifactManifest({
@@ -335,6 +380,33 @@ export class GitHubPublisher {
       } catch (transitionError) {
         process.stderr.write(
           `[atoma publisher] failed to record publication failure for ${publication.publicationId}: ${String(transitionError)}\n`
+        );
+      }
+      // AND THE REPOSITORY ROW. Without this, a repository that could not be
+      // created stayed at `creating` with a NULL error — for ever, and
+      // indistinguishable from a publish still in flight, sitting above a
+      // green `delivered` run. `failed` was reachable only in tests.
+      // `ready` is terminal on purpose (`REPOSITORY_TRANSITIONS.ready = []`),
+      // so a failure after the repository exists is a publication failure and
+      // must not touch this row.
+      try {
+        const currentProject = this.store.getProject(project.orgId, project.projectId);
+        if (
+          currentProject &&
+          (currentProject.repositoryStatus === 'pending' ||
+            currentProject.repositoryStatus === 'creating')
+        ) {
+          this.store.transitionRepository({
+            orgId: project.orgId,
+            projectId: project.projectId,
+            from: currentProject.repositoryStatus,
+            to: 'failed',
+            error: errorMessage(error),
+          });
+        }
+      } catch (transitionError) {
+        process.stderr.write(
+          `[atoma publisher] failed to record repository failure for ${project.projectId}: ${String(transitionError)}\n`
         );
       }
       throw error;

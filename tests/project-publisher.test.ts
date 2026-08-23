@@ -284,6 +284,112 @@ describe('GitHubPublisher token split', () => {
     const publication = store.getPublicationForRun(owner.orgId, run.projectRunId)!;
     expect(publication.status).toBe('failed');
   });
+
+  it('records the repository failure on the project row, not only on the publication', async () => {
+    // The defect this pins: a repository that could not be created left the
+    // project at `creating` with a NULL error — for ever, and
+    // indistinguishable from a publish still in flight, sitting above a green
+    // `delivered` run. `failed` was reachable only from a test.
+    const owner = actor('Alice');
+    const { project, run, workspace, hash } = await deliveredRun(owner, 'User', 'alice');
+    const client = mockClient({
+      createUserRepository: vi.fn(async () => {
+        throw apiError(403, '/user/repos');
+      }),
+    });
+    const publisher = new GitHubPublisher({
+      client,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+
+    await expect(
+      publisher.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow();
+
+    const after = store.getProject(owner.orgId, project.projectId)!;
+    expect(after.repositoryStatus).toBe('failed');
+    expect(after.repositoryError).toBeTruthy();
+    // And it stays retryable: failed → creating is an allowed transition, so
+    // the next publish attempt can still converge.
+    expect(store.getPublicationForRun(owner.orgId, run.projectRunId)!.status).toBe('failed');
+  });
+
+  it('publishes into a ready repository without asking GitHub to create it again', async () => {
+    // The defect this pins: a first attempt that CREATED the repository and
+    // then failed its commit left the row at `ready`, which is terminal — so
+    // every retry called createUserRepository again and then failed its own
+    // compare-and-set. The retry could never succeed, and a tenant who had
+    // renamed the repository on GitHub got a second one.
+    const owner = actor('Alice');
+    const { project, run, workspace, hash } = await deliveredRun(owner, 'User', 'alice');
+    const failingCommit = mockClient({
+      publishInitialCommit: vi.fn(async () => {
+        throw apiError(500, '/repos/alice/weather-lab/git/commits');
+      }),
+    });
+    const first = new GitHubPublisher({
+      client: failingCommit,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    await expect(
+      first.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow();
+    // The repository exists, so its row is ready — and stays ready.
+    const afterFirst = store.getProject(owner.orgId, project.projectId)!;
+    expect(afterFirst.repositoryStatus).toBe('ready');
+    expect(failingCommit.createUserRepository).toHaveBeenCalledTimes(1);
+
+    const second = mockClient();
+    const retry = new GitHubPublisher({
+      client: second,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    const published = await retry.publish({
+      project,
+      run,
+      workspaceRoot: workspace,
+      manifestHash: hash,
+    });
+    expect(published?.status).toBe('published');
+    // Not once: the row already held the identity.
+    expect(second.createUserRepository).not.toHaveBeenCalled();
+    expect(second.publishInitialCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('says what is known when a 422 is not a name collision', async () => {
+    // 422 is both "the name is taken" and "this account refuses to create
+    // that repository", and GitHubApiError carries no body to tell them
+    // apart. Asserting the first would tell an operator something
+    // affirmatively false about their own account — on the very path a
+    // public/private choice opens.
+    const owner = actor('Alice');
+    const { project, run, workspace, hash } = await deliveredRun(owner, 'User', 'alice');
+    const client = mockClient({
+      createUserRepository: vi.fn(async () => {
+        throw apiError(422, '/user/repos');
+      }),
+      getRepository: vi.fn(async () => null),
+    });
+    const publisher = new GitHubPublisher({
+      client,
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+
+    await expect(
+      publisher.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow(/refused \(HTTP 422\)/);
+    await expect(
+      publisher.publish({ project, run, workspaceRoot: workspace, manifestHash: hash })
+    ).rejects.toThrow(/may not allow creating a private repository/);
+  });
 });
 
 describe('coordinator publication retry', () => {
