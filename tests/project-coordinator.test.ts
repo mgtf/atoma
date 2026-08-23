@@ -416,6 +416,41 @@ describe('ProjectRunCoordinator', () => {
     );
   });
 
+  it('records what a FAILED run cost, not only that it failed', async () => {
+    // The defect this pins: the outcome vocabulary is
+    // delivered | failed | error | cancelled, and the failure path enumerated
+    // two of the three non-delivered values — so `outcome: 'failed'`, the
+    // ordinary one, had its stats dropped. Measured on a real tenant run:
+    // $1.10 over 41 calls, persisted as stats_json = NULL. On a platform that
+    // bills, a failure with no cost on the row is not a rounding error.
+    const f = fixture();
+    const failedStats: RunStats = { ...DELIVERED_STATS, outcome: 'failed', costUsd: 1.1002, llmCalls: 41 };
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: { PATH: process.env['PATH'], ANTHROPIC_API_KEY: 'model-key' },
+      // A run that spends, reports its spend, and produces no artifact.
+      driver: vi.fn(async () => `${formatRunStatsEpilogue(failedStats)}\n✖ build failed\n`),
+      acquireLease: async () => lease(),
+    });
+    const started = await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-cost-1', goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+
+    const row = f.store.getProjectRun(f.viewer.orgId, started.projectRunId)!;
+    expect(row.status).toBe('failed');
+    expect(row.stats?.costUsd).toBe(1.1002);
+    expect(row.stats?.llmCalls).toBe(41);
+    expect(row.stats?.outcome).toBe('failed');
+    // And the failure still carries its reason.
+    expect(row.error).toBeTruthy();
+  });
+
   it('seeds a later run from the last delivered workspace', async () => {
     const f = fixture();
     const driver = vi.fn(async (options: SpawnRunOptions) => {

@@ -673,9 +673,16 @@ export class ProjectRunCoordinator {
             from: 'running',
             to: signal.aborted ? 'cancelled' : 'failed',
             ...(existsSync(tracePath) ? { traceId: reservedRun.projectRunId } : {}),
-            ...(stats && (stats.outcome === 'cancelled' || stats.outcome === 'error')
-              ? { stats }
-              : {}),
+            // WHAT THE FAILURE COST. The outcome vocabulary is
+            // delivered | failed | error | cancelled, and this condition
+            // enumerated two of the three non-delivered values — so the most
+            // ordinary failure, `outcome: 'failed'`, had its stats dropped and
+            // the row recorded no cost at all. Measured: a tenant run that
+            // burned $1.10 over 41 calls persisted `stats_json = NULL`, which
+            // on a platform that bills is not a rounding error. `delivered` is
+            // the only outcome that cannot ride a failure, and the store
+            // refuses the remaining contradictions itself.
+            ...(stats && stats.outcome !== 'delivered' ? { stats } : {}),
             ...(signal.aborted
               ? {}
               : {

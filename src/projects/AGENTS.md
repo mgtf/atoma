@@ -122,3 +122,10 @@ Neighbours:
   decisions would be readable to the next. Partitioning it is its own change.
 - A measurement that depends on PROMOTION or deterministic dispatch therefore
   still cannot be run as a project run. Learning, now, can.
+- A FAILED run records what it cost. The outcome vocabulary is
+  `delivered | failed | error | cancelled`, and the failure path used to
+  enumerate two of the three non-delivered values, so the ordinary
+  `outcome: 'failed'` had its stats dropped — measured on a real tenant run:
+  $1.10 over 41 calls, persisted as `stats_json = NULL`. `delivered` is the
+  only outcome that cannot ride a failure; the store refuses the remaining
+  contradictions itself.
