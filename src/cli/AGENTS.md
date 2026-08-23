@@ -67,6 +67,33 @@ remote completion calls to doctor.
   the idempotency boundary, and the manifest is revalidated against the
   workspace, so a workspace that changed since delivery is refused.
 
+## Reading a run's outcome from its log
+
+- `parseRunLog` prefers the runner's machine epilogue. Its PROSE fallback is
+  reached only when no epilogue exists — a hard reap, or a crash before
+  teardown — and it ranks three markers, which do NOT rank the way a flat list
+  would:
+  1. the RUNNER'S OWN verdict (`--- run failed ---`, `⏱ TIMEOUT after`) wins
+     over everything, because a run takes one path and a completion banner
+     beside a failure means one of them was not printed by the runner. The
+     reachable way that happens is a TENANT'S GOAL: it is echoed verbatim at
+     second zero and `projectGoalSchema` permits newlines. Reproduced
+     2026-08-23 — a goal carrying `✓ build finished` read `delivered` out of a
+     log whose own verdict was `✖ build failed`.
+  2. then `✓ build finished`.
+  3. then the HARNESS'S `--- hard timeout ---`, which must rank below the
+     banner: a delivered run keeps a server alive on purpose, so the harness
+     reaps it, and its marker would otherwise relabel a healthy run. The
+     marker's own text says the runner printed nothing, so a banner falsifies
+     its premise.
+- The runner's timeout is matched WITH its `⏱`, never by the bare `TIMEOUT
+  after` those two markers share. Conflating them breaks the reap race, and
+  there is a test for each direction.
+- This makes forging the banner USELESS, not impossible. Nothing in a text
+  stream can be unforgeable; the durable fix is a receipt the tenant cannot
+  write, which is registered in
+  [`docs/decided-not-built-2026-08-23.md`](../../docs/decided-not-built-2026-08-23.md).
+
 ## Sentinel
 
 - `npm run sentinel` is one of TWO hosts for the same watch: the gated viz

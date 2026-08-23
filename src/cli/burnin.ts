@@ -83,11 +83,38 @@ export function parseRunLog(log: string): RunStats {
   const machine = parseRunStatsEpilogue(log);
   if (machine) return machine;
 
-  const outcome: RunStats['outcome'] = /✓ build finished/.test(log)
-    ? 'delivered'
-    : /--- run failed ---|TIMEOUT after/.test(log)
-      ? 'failed'
-      : 'error';
+  // THREE MARKERS, AND THEY DO NOT RANK THE WAY A FLAT LIST WOULD.
+  //
+  // The RUNNER'S OWN verdict outranks the completion banner. A run takes one
+  // path, so both appearing means one of them was not printed by the runner —
+  // and the reachable way that happens is that a TENANT'S GOAL contains the
+  // string, because the goal is echoed verbatim at second zero (`runner.ts`,
+  // `task: ${task.description}`) and `projectGoalSchema` permits newlines.
+  // Reproduced 2026-08-23 against these parsers: a goal carrying
+  // `✓ build finished` read as `delivered` out of a log whose own verdict was
+  // `✖ build failed`. Refusing to grant delivery credit on ambiguity does not
+  // make the banner unforgeable — nothing in a text stream can be — it makes
+  // forging it useless.
+  //
+  // THE HARNESS'S REAP MARKER RANKS BELOW THE BANNER, and must: a delivered run
+  // keeps a server alive on purpose, so the harness terminates it, and the
+  // marker it appends would otherwise relabel a healthy run. Its own text says
+  // the runner "printed no completion or failure marker of its own" — so a
+  // banner falsifies its premise, and the banner wins.
+  //
+  // Which is why the runner's timeout is matched WITH its `⏱`, not by the bare
+  // `TIMEOUT after` these two share. Conflating them is what made the first
+  // version of this fix break the reap race.
+  const runnerFailed = /--- run failed ---|⏱ TIMEOUT after/.test(log);
+  const completed = /✓ build finished/.test(log);
+  const harnessReaped = /--- hard timeout ---/.test(log);
+  const outcome: RunStats['outcome'] = runnerFailed
+    ? 'failed'
+    : completed
+      ? 'delivered'
+      : harnessReaped
+        ? 'failed'
+        : 'error';
 
   let costUsd: number | null = null;
   let llmCalls: number | null = null;
