@@ -542,6 +542,65 @@ Two deviations from the synthesis, both mine and both stated:
 - **`projects show` does not exist**, so the staleness line went on
   `projects list`.
 
+## The chained two-run build, measured (2026-08-23, expenses-node-api)
+
+The thesis test: build the expense tracker as TWO runs of one project instead of
+one, each seeded from the last. Both delivered.
+
+| run | what | outcome | cost | llm | tools | trace | wall |
+|---|---|---|---|---|---|---|---|
+| `c1f30d1f` | API only, no front-end | delivered | $0.2968 | 10 | 21 | 274 KB | ~240s |
+| `ef70c2b8` | front-end, seeded | delivered | $1.69 | 26 | 122 | **1.19 MB** | **1294s** |
+
+**BOTH OF TODAY'S FIXES WERE INDIVIDUALLY NECESSARY FOR THE SECOND DELIVERY TO
+EXIST.** 1294s is past the old 900s budget, so the run would have been killed
+at roughly two thirds of the way; 1,190,050 bytes is 2.27x the old 512 KB
+control-plane cap, so had it survived the clock it would then have been recorded
+`failed` and erased. Neither fix was sufficient alone. The seed also worked: run
+2's workspace held `server.js` and `expenses.json` before it started, and the
+delivered manifest is `app.js`, `index.html`, `server.js`.
+
+**And the front-end was never validated in a browser against its own API.** All
+38 `validate_html` calls ran against a STATIC server, which structurally cannot
+serve `/api/expenses`, so every one of them carried an unavoidable
+`404 (File not found) [source: .../api/expenses]`. The run's last four browser
+probes — run by the L2 itself — are all `ok: false` for exactly that reason, and
+the final smoke checks only DOM presence (`hasExpenseList`, `hasTotal`,
+`hasForm`, …): the page's SHAPE, never its behaviour against the API. The run
+was still recorded `delivered`, `degraded: false`.
+
+The integration WAS proven, separately and at the HTTP level: a later molecule
+(`Methane/L1`) started the real server and fetched `/`, `/app.js` and
+`/api/expenses` three times, all ok. So the deliverable is plausible; what is
+missing is the one thing only a browser can show, which is that `app.js`
+actually renders the list and posts a new expense against the live API.
+
+**This CORRECTS the earlier diagnosis.** The 2026-08-23 envelope note said the
+wall was that a live process does not cross phases. True, but not the binding
+constraint here: the binding constraint is a TOOLSET PARTITION. `Ethanol`,
+`Methanol` and `Tracheid` held `start_static_server` + `validate_html`;
+`Methane` held `start_node_server` + `fetch_url`. No molecule in this run ever
+held both a real server and a browser at the same time — which is why 38 browser
+probes could only ever look at a page whose API was absent, and why the API's
+proof came from a tool that cannot see a rendered DOM.
+
+Not built, and deliberately not designed tonight (COOLING-OFF — these are
+judgements about model output and about planning):
+
+1. **Giving one molecule both a real server and a browser**, or teaching the
+   planner that a front-end phase validating against an API needs the
+   node-server tool. Precise evidence now exists; the fix is a
+   registry/planning design with its own review.
+2. **Whether a run whose final browser probes all failed may be `delivered`.**
+   Four consecutive `ok: false` results, each naming the same 404, did not stop
+   this run. Whether that should gate — and how, without making an unavoidable
+   static-server 404 fatal — is exactly the disposition the cooling-off rule
+   exists for.
+3. **Suppressing the unavoidable 404.** A static server serving a page whose
+   script calls an API will always produce it, and the noise cost is real: a
+   share of 26 LLM calls went into chasing a symptom that no edit to the page
+   could remove. Any suppression is a new detector, so it is recorded.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
