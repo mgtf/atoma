@@ -91,6 +91,39 @@ The coordinator drives a project run with `--container --no-learn-skills
   touched, no measurement invalidated. Proposed as the first thing to build
   here.
 
+## Left open by the watch-placement commit (2026-08-23)
+
+The mechanical watch now lives inside the gated viz server
+([src/viz](../src/viz/AGENTS.md), [src/sentinel](../src/sentinel/AGENTS.md)).
+Five questions were reasoned through during that review and deliberately not
+answered in it, each because answering it is its own change:
+
+1. **A uniqueness index on `platform_events` over (kind, run_id, dedupeKey).**
+   The lease makes the double-append unreachable through supported paths; the
+   constraint would make it unreachable at all, and would let `--once` run
+   beside a resident watch with no possible duplicate. It is not cheap:
+   `dedupeKey` lives inside the `detail` JSON, so it needs a generated column
+   or a new one — a migration on a live table.
+2. **Re-arming `security.flagged` for platform-admin push.** Disarmed on
+   purpose: the route had never fired, and `injection-signature` is a lexical
+   screen whose FALSE-POSITIVE rate nobody has measured (an element result is
+   also where the system's own output comes back — a molecule that writes an
+   install script and reads it back matches). It needs a noise floor from a
+   burn-in batch, then one line.
+3. **Deleting `viz:dev`.** It is byte-identical to `viz`, and its existence is
+   most of why a third launcher name looked attractive. Removing it moves two
+   pinned test strings and one line each in three docs — small, but naming
+   surgery, not a placement change.
+4. **What a release note says about a resident journal writer inside
+   `viz:serve`.** `release:check` exercises the sentinel not at all, and
+   `dist/cli/sentinel.js` appears in neither archive list in `README.md`. The
+   first honest CHANGELOG entry has to name which process now watches.
+5. **Whether two watchers over DISJOINT corpora should be allowed.** The lease
+   is per store, not per corpus, so a server watching projects and a CLI
+   watching an operator directory contend even though their dedupe keys never
+   meet. Recording coverage in the lease row would allow both; it also adds a
+   second thing the lease has to be right about.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
