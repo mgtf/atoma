@@ -248,4 +248,40 @@ describe('PushStore locale', () => {
     expect(store.listForPrincipal('alice')).toHaveLength(1);
     expect(store.listForPrincipal('alice')[0]?.locale).toBe('fr');
   });
+
+  /**
+   * The upsert has to SAY which half of itself ran. A platform admin's browser
+   * re-saves the same endpoint on every page load, and the route journals a
+   * `push.subscribed` audit row per save — measured on 2026-08-23 as eleven
+   * rows for one browser, burying the real ones. `changes` cannot answer it:
+   * `ON CONFLICT DO UPDATE` counts as a change too.
+   */
+  it('reports a new device once, and a returning one never again', () => {
+    const store = fixture();
+    const chrome = browser();
+    const subscription = {
+      principalId: 'alice',
+      endpoint: 'https://push.example.net/send/a',
+      p256dh: chrome.p256dh,
+      auth: chrome.auth,
+      locale: 'en' as PushLocale,
+    };
+    expect(store.saveSubscription(subscription)).toBe('created');
+    expect(store.saveSubscription(subscription)).toBe('refreshed');
+    // A changed language is still the same device, not a new one.
+    expect(store.saveSubscription({ ...subscription, locale: 'fr' })).toBe('refreshed');
+    // A second browser IS a new device, and must be reported as one.
+    const second = browser();
+    expect(
+      store.saveSubscription({
+        ...subscription,
+        endpoint: 'https://push.example.net/send/b',
+        p256dh: second.p256dh,
+        auth: second.auth,
+      })
+    ).toBe('created');
+    // And an endpoint that was pruned is new again when it comes back.
+    store.dropEndpoint('https://push.example.net/send/a');
+    expect(store.saveSubscription(subscription)).toBe('created');
+  });
 });

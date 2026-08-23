@@ -28,11 +28,19 @@ import type { LlmClient } from '../../core/types.js';
  *   passed through untouched. A translator that rewrote the input would be
  *   editing text a human already approved.
  *
- * Unavailability is a normal outcome, not an error to swallow: no provider, a
+ * Unavailability is a normal outcome, not an error to block on: no provider, a
  * refused credential, unparseable output — all resolve to `null`, and the
  * caller tells the admin to write the other languages by hand. A broadcast
- * must never be blocked by a translation service.
+ * must never be blocked by a translation service. It is not swallowed
+ * though: every `null` says WHY on stderr first. Five causes reaching the
+ * operator as one sentence left nothing anywhere to tell them apart.
  */
+
+/** One line per giving-up, so the cause is somewhere rather than nowhere. */
+function giveUp(reason: string): null {
+  process.stderr.write(`[atoma announce] no translation draft: ${reason}\n`);
+  return null;
+}
 
 export type AnnouncementTranslations = Record<Locale, AnnouncementText>;
 
@@ -96,7 +104,7 @@ export async function draftAnnouncementTranslations(
   const targets = SUPPORTED_LOCALES.filter((locale) => locale !== draft.source);
   // A single-language instance needs no provider at all.
   if (targets.length === 0) return { [draft.source]: source } as AnnouncementTranslations;
-  if (!options.llm) return null;
+  if (!options.llm) return giveUp('no provider is configured on this server');
 
   let reply: string;
   try {
@@ -111,22 +119,22 @@ export async function draftAnnouncementTranslations(
       params: { maxTokens: 600, temperature: 0 },
     });
     reply = response.text ?? '';
-  } catch {
-    return null;
+  } catch (error) {
+    return giveUp(error instanceof Error ? error.message : String(error));
   }
 
   const parsed = parseObject(reply);
-  if (!parsed) return null;
+  if (!parsed) return giveUp('the reply carried no JSON object');
 
   const translations: Partial<Record<Locale, AnnouncementText>> = { [draft.source]: source };
   for (const locale of targets) {
     const entry = parsed[locale];
-    if (typeof entry !== 'object' || entry === null) return null;
+    if (typeof entry !== 'object' || entry === null) return giveUp(`the reply has no "${locale}"`);
     const record = entry as Record<string, unknown>;
     const title = clamp(record['title'], ANNOUNCEMENT_TITLE_MAX);
     const body = clamp(record['body'], ANNOUNCEMENT_BODY_MAX);
     // An empty field is a failed translation, not a draft worth showing.
-    if (!title || !body) return null;
+    if (!title || !body) return giveUp(`the "${locale}" entry is missing a title or a body`);
     translations[locale] = { title, body };
   }
   return translations as AnnouncementTranslations;

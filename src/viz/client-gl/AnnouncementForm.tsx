@@ -39,7 +39,10 @@ export function AnnouncementForm({
   const [phase, setPhase] = useState<Phase>('compose');
   const [segment, setSegment] = useState<AnnouncementSegment>('all');
   const [texts, setTexts] = useState<VizAnnouncementTexts>({ [locale]: { ...EMPTY } });
-  const [untranslated, setUntranslated] = useState(false);
+  // `null` while a draft is expected; otherwise WHY there is none, because
+  // "no service is configured" and "the service refused" are two different
+  // things to do about it.
+  const [untranslated, setUntranslated] = useState<'unavailable' | 'failed' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<number | null>(null);
 
@@ -63,11 +66,13 @@ export function AnnouncementForm({
       const result = await api.draftAnnouncement({ source: locale, ...source });
       // An unavailable translator is not a failure: the admin fills the other
       // languages in the same fields, and the send is unchanged.
-      setUntranslated(!result.translated);
+      setUntranslated(result.translated ? null : (result.reason ?? 'failed'));
       if (result.texts) setTexts(result.texts);
       setPhase('review');
     } catch {
-      setUntranslated(true);
+      // The request itself never arrived, which is neither of the two answers
+      // the server gives — read it as the service being out of reach.
+      setUntranslated('failed');
       setPhase('review');
     }
   }
@@ -127,7 +132,7 @@ export function AnnouncementForm({
       />
       {phase !== 'compose' ? (
         <div className="gpu-announce-languages">
-          <p>{untranslated ? t('announce.untranslated') : t('announce.review')}</p>
+          <p>{untranslated ? t(`announce.${untranslated}`) : t('announce.review')}</p>
           {SUPPORTED_LOCALES.filter((entry) => entry !== locale).map((entry) => (
             <div key={entry} className="gpu-announce-language">
               <span>{LOCALE_NAMES[entry]}</span>

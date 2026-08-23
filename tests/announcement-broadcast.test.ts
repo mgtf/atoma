@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   ANNOUNCEMENT_BODY_MAX,
@@ -188,6 +188,48 @@ describe('translation drafts, and their absence', () => {
     expect(result?.en.body.length).toBe(ANNOUNCEMENT_BODY_MAX);
   });
 
+  /**
+   * `null` is a normal outcome, silence is not. Five causes — nothing
+   * configured, a refused credential, prose instead of JSON, a missing
+   * locale, an empty field — reached the operator as one sentence and left no
+   * trace anywhere else, which is how an unset `ATOMA_LLM` (it defaults to
+   * `anthropic`, which then demands a credential) read on screen as "this
+   * deployment has no translation service". Every give-up names itself.
+   */
+  it('never gives up silently: each cause writes its own reason', async () => {
+    const said: string[] = [];
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((chunk: string | Uint8Array) => {
+        said.push(String(chunk));
+        return true;
+      });
+    const replying = (text: string) => ({
+      complete: async () => ({
+        text,
+        stopReason: 'end_turn' as const,
+        usage: { inputTokens: 1, outputTokens: 1 },
+      }),
+    });
+    try {
+      await draftAnnouncementTranslations(draft, { llm: null });
+      await draftAnnouncementTranslations(draft, { llm: replying('sorry, I cannot') });
+      await draftAnnouncementTranslations(draft, { llm: replying('{"de": {}}') });
+      await draftAnnouncementTranslations(draft, {
+        llm: {
+          complete: () => Promise.reject(new Error('credentials refused')),
+        },
+      });
+    } finally {
+      stderr.mockRestore();
+    }
+    expect(said).toHaveLength(4);
+    expect(said[0]).toContain('no provider is configured');
+    expect(said[1]).toContain('no JSON object');
+    expect(said[2]).toContain('"en"');
+    expect(said[3]).toContain('credentials refused');
+    for (const line of said) expect(line).toContain('[atoma announce]');
+  });
 });
 
 describe('a malformed announcement is tolerated, never delivered blank', () => {

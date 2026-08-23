@@ -439,9 +439,16 @@ function announcementTranslator(): LlmClient | null {
       kind,
       kind === 'anthropic' ? { anthropic: makeAnthropicClient() } : {}
     );
-  } catch {
+  } catch (error) {
     // No provider configured here is a normal deployment, not a fault: the
-    // form falls back to the admin writing every language by hand.
+    // form falls back to the admin writing every language by hand. But the
+    // REASON is written down. Swallowing it made an unset `ATOMA_LLM` — which
+    // defaults to `anthropic` and then demands a credential — indistinguishable
+    // on screen from a deployment that deliberately has no provider, with
+    // nothing anywhere to tell the two apart (measured 2026-08-23).
+    process.stderr.write(
+      `[atoma viz] no announcement translator: ${error instanceof Error ? error.message : String(error)}\n`
+    );
     announcementLlm = null;
   }
   return announcementLlm;
@@ -2322,17 +2329,25 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           sendJson(res, 400, { error: draft.error.issues[0]?.message ?? 'invalid draft' });
           return;
         }
-        const translations = await draftAnnouncementTranslations(draft.data, {
-          llm: announcementTranslator(),
-        });
+        const llm = announcementTranslator();
+        const translations = await draftAnnouncementTranslations(draft.data, { llm });
         if (!translations) {
           // 200, not an error: no provider is a normal state of this server,
           // and the form's answer is "write the other languages yourself",
-          // not "something broke".
-          sendJson(res, 200, { translated: false, texts: null });
+          // not "something broke". But WHICH of the two is said out loud —
+          // "nothing is configured" and "the configured provider refused" ask
+          // the operator for different actions, and they reached the screen as
+          // one sentence until an unset ATOMA_LLM was mistaken for the first.
+          // The reason itself stays on stderr: a provider's error text is not
+          // for a broadcast form.
+          sendJson(res, 200, {
+            translated: false,
+            reason: llm ? 'failed' : 'unavailable',
+            texts: null,
+          });
           return;
         }
-        sendJson(res, 200, { translated: true, texts: translations });
+        sendJson(res, 200, { translated: true, reason: null, texts: translations });
         return;
       }
       if (pathname === '/api/admin/announce') {
@@ -2447,8 +2462,9 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       }
       const p256dh = typeof input.keys?.p256dh === 'string' ? input.keys.p256dh : '';
       const auth = typeof input.keys?.auth === 'string' ? input.keys.auth : '';
+      let saved: 'created' | 'refreshed';
       try {
-        PUSH_RUNTIME.store.saveSubscription({
+        saved = PUSH_RUNTIME.store.saveSubscription({
           principalId: viewer.principalId,
           endpoint,
           p256dh,
@@ -2465,13 +2481,20 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         });
         return;
       }
-      emit({
-        kind: 'push.subscribed',
-        actorType: 'principal',
-        actorId: viewer.principalId,
-        orgId: viewer.orgId,
-        summary: 'Notification subscription added for one browser',
-      });
+      // Only a NEW device is a fact worth an audit row. The same browser
+      // re-saving its endpoint is repair, not an event: an admin's page load
+      // does it unprompted, and journaling that buries the real rows under
+      // one line per reload. The unsubscribe branch above already reads this
+      // way — `if (removed)`.
+      if (saved === 'created') {
+        emit({
+          kind: 'push.subscribed',
+          actorType: 'principal',
+          actorId: viewer.principalId,
+          orgId: viewer.orgId,
+          summary: 'Notification subscription added for one browser',
+        });
+      }
       sendJson(res, 200, { subscribed: true });
       return;
     }

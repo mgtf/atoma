@@ -107,10 +107,12 @@ export const api = {
   // The two announcement steps, deliberately two calls: the draft sends
   // nothing, and only text the admin has read reaches `announce`.
   draftAnnouncement: (body: { source: string; title: string; body: string }) =>
-    mutateJson<{ translated: boolean; texts: VizAnnouncementTexts | null }>(
-      '/api/admin/announce/draft',
-      body
-    ),
+    mutateJson<{
+      translated: boolean;
+      /** Why there is no draft: nothing configured, or the provider refused. */
+      reason: 'unavailable' | 'failed' | null;
+      texts: VizAnnouncementTexts | null;
+    }>('/api/admin/announce/draft', body),
   sendAnnouncement: (body: { segment: string; texts: VizAnnouncementTexts }) =>
     mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),

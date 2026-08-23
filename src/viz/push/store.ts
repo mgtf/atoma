@@ -131,10 +131,25 @@ export class PushStore {
     return { publicKey: row.public_key, privateKey: row.private_key };
   }
 
-  /** Upsert by endpoint; ownership follows the latest authenticated saver. */
-  saveSubscription(input: PushSubscriptionRecord): void {
+  /**
+   * Upsert by endpoint; ownership follows the latest authenticated saver.
+   *
+   * Returns WHICH of the two happened, because the caller journals one and
+   * not the other. A platform admin's browser re-saves the same endpoint on
+   * every page load (`shouldEnsureAdminSubscription` repairs a pruned row
+   * without asking), so a caller that cannot tell "a device was attached"
+   * from "the same device said hello again" writes an audit row per reload —
+   * measured on 2026-08-23 as eleven `push.subscribed` rows for one browser.
+   * The upsert's own `changes` count cannot answer this: `DO UPDATE` reports
+   * a change too.
+   */
+  saveSubscription(input: PushSubscriptionRecord): 'created' | 'refreshed' {
     validateSubscription(input);
     const now = new Date().toISOString();
+    const existed =
+      this.db
+        .prepare('SELECT 1 FROM push_subscriptions WHERE endpoint = ?')
+        .get(input.endpoint) !== undefined;
     this.db
       .prepare(
         `INSERT INTO push_subscriptions (endpoint, principal_id, p256dh, auth, locale, created_at, updated_at)
@@ -166,6 +181,7 @@ export class PushStore {
          )`
       )
       .run(input.principalId, input.principalId, MAX_SUBSCRIPTIONS_PER_PRINCIPAL);
+    return existed ? 'refreshed' : 'created';
   }
 
   /** Self-service removal: a principal can only delete its own row. */
