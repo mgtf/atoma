@@ -964,7 +964,13 @@ try {
       const boundedProjectCopy = await accountPage.evaluate(() => {
         const rows = [];
         const walk = (node) => {
-          if (typeof node.text === 'string' && /^(m{4}|W{4})/.test(node.text)) {
+          // CONTAINS, not starts-with. The adversarial runs are what identify
+          // these labels, and the metadata line now leads with the
+          // repository's audience ("private · <slug> · <owner>/<name>"), which
+          // an anchored pattern stopped seeing — reporting one label where
+          // there are two, and failing on the count rather than on any real
+          // geometry.
+          if (typeof node.text === 'string' && /(m{4}|W{4})/.test(node.text)) {
             rows.push({
               text: node.text,
               width: node.width,
