@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BUILTIN_TOOL_VOCABULARY } from '../src/atoms/verdict.js';
 import { launchCommand } from '../src/viz/client/launch-utils.js';
-import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
+import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
 import { LAUNCHABLE_PROFILES, findLaunchable } from '../src/run/profiles/index.js';
 
 describe('launchable profiles are all describable', () => {

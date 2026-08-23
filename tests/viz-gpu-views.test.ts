@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Container, Graphics, Rectangle } from 'pixi.js';
 import type { Text, Ticker } from 'pixi.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { I18N_CATALOGS, translate } from '../src/viz/client/i18n.js';
+import { I18N_CATALOGS, translate } from '../src/viz/client/i18n-catalog.js';
 import type {
   BurninRow,
   LaunchProfile,

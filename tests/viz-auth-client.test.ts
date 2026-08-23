@@ -6,7 +6,7 @@ import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_COPY } from '../src/auth/copy.js';
-import { translate } from '../src/viz/client/i18n.js';
+import { translate } from '../src/viz/client/i18n-catalog.js';
 import {
   AUTH_LOGIN_PATH,
   authLoginPath,
@@ -14,7 +14,8 @@ import {
   providerLoginHref,
   redirectIfAuthenticationRequired,
 } from '../src/viz/client/auth-session.js';
-import { AuthControls, useAuthController } from '../src/viz/client-gl/AuthControls.js';
+import { AuthControls } from '../src/viz/client-gl/AuthControls.js';
+import { useAuthController } from '../src/viz/client-gl/auth-controller.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 
 /**

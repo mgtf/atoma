@@ -7,7 +7,7 @@ import {
   timestampMs,
   timestampTooltip,
 } from '../src/viz/client-gl/renderer/relative-time.js';
-import { translate } from '../src/viz/client/i18n.js';
+import { translate } from '../src/viz/client/i18n-catalog.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;

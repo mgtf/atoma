@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { translate } from '../src/viz/client/i18n.js';
+import { translate } from '../src/viz/client/i18n-catalog.js';
 import { DomBridge, GpuDomBridge } from '../src/viz/client-gl/DomBridge.js';
 import type { VizGitHubInstallation } from '../src/viz/client/types.js';
 import {

@@ -1,5 +1,5 @@
 import { api } from './data-api.js';
-import { detectLocale } from './i18n.js';
+import { detectLocale } from './i18n-catalog.js';
 import { serviceWorkerRegistrationAllowed } from './pwa.js';
 
 /**

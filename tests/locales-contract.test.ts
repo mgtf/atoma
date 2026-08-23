@@ -6,7 +6,7 @@ import {
   asLocale,
   isLocale,
 } from '../src/contracts/locales.js';
-import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
+import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
 import { PUSH_LOCALES, PUSH_ROUTES } from '../src/viz/push/routes.js';
 
 /**

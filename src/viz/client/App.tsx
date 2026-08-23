@@ -22,7 +22,8 @@ import {
 } from '@mui/material';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { SkillSelection } from './features/SkillsView.js';
-import { I18N_CATALOGS, useI18n } from './i18n.js';
+import { I18N_CATALOGS } from './i18n-catalog.js';
+import { useI18n } from './i18n.js';
 import { RunPicker, type RunPickerOption } from './run-picker.js';
 import { fmtCost, isIndexEntryLive } from './run-utils.js';
 import { runSearchText } from './search.js';

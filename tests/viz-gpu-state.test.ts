@@ -8,7 +8,7 @@ import {
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
 } from '../src/viz/client-gl/gpu-renderer.js';
-import { I18N_CATALOGS } from '../src/viz/client/i18n.js';
+import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
 
 // Decisions are catalog-backed (outcome.* keys); resolving through the real
 // EN catalog proves the copy path never falls back to hardcoded English.

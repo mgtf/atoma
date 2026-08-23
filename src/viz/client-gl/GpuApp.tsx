@@ -6,7 +6,7 @@ import {
   useState,
 } from 'react';
 import { projectSlugFromName } from '../../contracts/projects.js';
-import { translate } from '../client/i18n.js';
+import { translate } from '../client/i18n-catalog.js';
 import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
 import {
@@ -21,7 +21,8 @@ import {
   type GpuRenderMetrics,
 } from './renderer/metrics.js';
 import { AtomaCursor } from './AtomaCursor.js';
-import { AuthControls, useAuthController } from './AuthControls.js';
+import { AuthControls } from './AuthControls.js';
+import { useAuthController } from './auth-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { translate } from '../src/viz/client/i18n.js';
+import { translate } from '../src/viz/client/i18n-catalog.js';
 import {
   buildLlmEnvelopeDetail,
   buildSkillEventDetail,

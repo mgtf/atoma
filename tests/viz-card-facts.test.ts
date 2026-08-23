@@ -7,7 +7,7 @@ import {
   modelPairLabel,
   stopReasonLabel,
 } from '../src/viz/client-gl/renderer/copy.js';
-import { translate } from '../src/viz/client/i18n.js';
+import { translate } from '../src/viz/client/i18n-catalog.js';
 import type { VizEvent } from '../src/viz/client/types.js';
 
 const t = (key: string, vars?: Record<string, unknown>) => translate('en', key, vars);
