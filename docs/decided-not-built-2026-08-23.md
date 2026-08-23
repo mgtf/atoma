@@ -200,6 +200,59 @@ The second is probably right, and it needs `parents: [head]` plus a ref update
 the client already has (`updateReference`, added for the multi-file seed). None
 of it should be decided by whoever happens to be in the file.
 
+## What the fourth run's browser probes exposed (2026-08-23)
+
+Measured on project run `a786358a`: **25 `validate_html` calls, 14 failures**.
+Two were pre-flight refusals (a `getComputedStyle` compared to a literal
+`rgb()`, and interactions that repeated a control then reset before the smoke
+ran); twelve were smokes that ran and whose own assertions came back false —
+`themeToggledToDark: false`, `beforeResetElapsedGreaterThanZero: false`, all of
+them about an intermediate state the probe had already erased.
+
+**The contract already had the answer.** `smokeDrivesOwnState` empties the
+interaction list when the smoke drives the app itself, and the `smoke`
+description says it: *drive/snapshot the milestone INSIDE the IIFE before
+reset; the final DOM cannot prove an erased intermediate state.* So this was
+not a missing capability. It was fourteen round trips spent rediscovering a
+capability we own, one diagnostic at a time.
+
+**Landed** (legibility over evidence already in hand, which the cooling-off
+rule permits — no smoke is refused that was not refused before):
+
+- `preflightSmokeRefusals` consults all three detectors and returns every
+  refusal that applies. Two problems used to cost two refusals.
+- `renderSmokeFailure` NAMES the false boolean fields instead of pasting the
+  result object and leaving the caller to diagnose its own output — including
+  when the 500-char truncation would have cut the failing field off.
+- The erased-state refusal quotes one accepted smoke verbatim
+  (`SMOKE_SELF_DRIVEN_EXAMPLE`), and a test asserts the pre-flight accepts it:
+  advice we hand out must never be advice we refuse. It lives on the error
+  path deliberately — prompt text is paid on every call, an error message only
+  by the caller who already got it wrong.
+
+**NOT built, because each is a new mechanism and this is the session that
+surfaced the incident:**
+
+- **Interaction checkpoints.** Today the only way to prove an intermediate
+  state is to abandon `interactions` entirely and drive the app's own API —
+  which presumes the app exposes one. A `checkpoints` argument (snapshot an
+  expression after interaction *k*) would make the ordinary path provable.
+  This is the one candidate that is a real capability gap rather than a
+  teaching failure, and it is the one that needs a reviewed design: it adds a
+  second evaluation channel to a tool whose attestation fields currently
+  assume exactly one.
+- **A repeat-failure gate across a phase.** `makeSmokeStuckTracker` catches the
+  IDENTICAL smoke retried; it does not catch fourteen DIFFERENT smokes failing
+  the same way. Whatever would catch that is a new heuristic with a threshold,
+  and thresholds designed against one trace are how one concept acquires two
+  definitions.
+- **The vocabulary-frozen detector.** `smokeDrivesIntermediateState` keys on a
+  regex word list (`milestone|beforeReset|preReset|...`). A correct smoke that
+  names its snapshot something else is invisible to it and gets refused for a
+  problem it does not have. Widening the list reproduces the failure mode one
+  word further out; the fix is structural and is not a same-day edit. This is
+  the 2026-08-14 review's measured pattern, in our own code.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.

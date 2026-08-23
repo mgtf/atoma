@@ -1427,40 +1427,20 @@ export function validateHtmlTool(opts: BuiltinToolOptions): BuiltinTool {
       // here also teaches the model the right pattern via a clear error
       // instead of an opaque "unexpected token".
       if (smoke !== undefined) {
-        const syntax = detectSmokeStatementError(smoke);
-        if (syntax) {
+        const refusals = preflightSmokeRefusals(smoke, interactions);
+        if (refusals.length > 0) {
+          const hint = refusals.find((r) => r.hint !== undefined)?.hint;
           return {
             ok: false,
             url,
-            errors: [`smoke rejected pre-flight: ${syntax}`],
+            errors: refusals.map((r) => `smoke rejected pre-flight: ${r.message}`),
             warnings: [],
             failedRequests: [],
             interactionLog: [],
-            smokeResult: { error: syntax, hint: SMOKE_EXPR_HINT },
-          };
-        }
-        const brittleStyle = detectBrittleComputedStyleLiteral(smoke);
-        if (brittleStyle) {
-          return {
-            ok: false,
-            url,
-            errors: [`smoke rejected pre-flight: ${brittleStyle}`],
-            warnings: [],
-            failedRequests: [],
-            interactionLog: [],
-            smokeResult: { error: brittleStyle },
-          };
-        }
-        const erased = detectResetErasedIntermediateEvidence(interactions, smoke);
-        if (erased) {
-          return {
-            ok: false,
-            url,
-            errors: [`smoke rejected pre-flight: ${erased}`],
-            warnings: [],
-            failedRequests: [],
-            interactionLog: [],
-            smokeResult: { error: erased },
+            smokeResult: {
+              error: refusals.map((r) => r.message).join(' ALSO: '),
+              ...(hint !== undefined ? { hint } : {}),
+            },
           };
         }
       }
@@ -1817,6 +1797,38 @@ export function parseInteractions(raw: unknown): ParsedInteraction[] {
  * changes followed by reset erase the milestone unless the smoke itself
  * drives and snapshots it (or reads an explicit history exposed by the app).
  */
+export interface SmokeRefusal {
+  readonly message: string;
+  readonly hint?: string;
+}
+
+/**
+ * Consult EVERY pre-flight detector and return every refusal that applies.
+ *
+ * The detectors used to be consulted in sequence inside the handler, each
+ * returning on its first hit. A smoke that both compared `getComputedStyle`
+ * to an `rgb()` literal AND replayed interactions past a reset therefore
+ * cost two refusal round-trips to learn two things we already held on the
+ * first. MEASURED 2026-08-23, project run `a786358a`: 25 `validate_html`
+ * calls, 14 failures, one diagnostic learned per round trip.
+ *
+ * This is legibility over evidence already in hand, NOT a new gate: exactly
+ * the same smokes are refused as before, and the same messages are used.
+ */
+export function preflightSmokeRefusals(
+  smoke: string,
+  interactions: readonly ParsedInteraction[]
+): SmokeRefusal[] {
+  const syntax = detectSmokeStatementError(smoke);
+  const brittleStyle = detectBrittleComputedStyleLiteral(smoke);
+  const erased = detectResetErasedIntermediateEvidence(interactions, smoke);
+  return [
+    ...(syntax ? [{ message: syntax, hint: SMOKE_EXPR_HINT }] : []),
+    ...(brittleStyle ? [{ message: brittleStyle }] : []),
+    ...(erased ? [{ message: erased }] : []),
+  ];
+}
+
 export function detectResetErasedIntermediateEvidence(
   interactions: readonly ParsedInteraction[],
   smoke: string
@@ -1841,7 +1853,8 @@ export function detectResetErasedIntermediateEvidence(
   return (
     'interactions repeat a state-changing control and then reset BEFORE smoke runs, ' +
     'so the intermediate state has been erased. Drive the exposed API inside one smoke IIFE, ' +
-    'capture a milestone/beforeReset snapshot, reset, capture the final snapshot, and include both in ok.'
+    'capture a milestone/beforeReset snapshot, reset, capture the final snapshot, and include both in ok. ' +
+    `Accepted shape: ${SMOKE_SELF_DRIVEN_EXAMPLE}`
   );
 }
 
@@ -2007,7 +2020,57 @@ export function renderSmokeFailure(smokeResult: unknown): string {
       `{ ok: <aggregate>, ...details } so the verdict and its evidence both come back.`
     );
   }
-  return `smoke check failed: ${rendered.slice(0, 500)}`;
+  const named = falseBooleanFields(smokeResult);
+  const naming =
+    named.length > 0
+      ? ` FALSE field(s): ${named.join(', ')}. If one of those is an assertion, that is the ` +
+        `one that did not hold; if all of them are raw state, then \`ok\` is asserting ` +
+        `something the details do not carry.`
+      : '';
+  return `smoke check failed: ${rendered.slice(0, 500)}${naming}`;
+}
+
+/**
+ * Dotted paths of every `false` boolean in a structured smoke result, `ok`
+ * itself excluded.
+ *
+ * MEASURED 2026-08-23, project run `a786358a`: twelve smoke failures whose
+ * only report was the pasted result object, so the caller had to diagnose
+ * its own output to find which of a dozen fields came back false —
+ * `themeToggledToDark`, `beforeResetElapsedGreaterThanZero`. The names were
+ * in our hands and we were not saying them, and the 500-char truncation of
+ * the pasted object could cut off the very field that failed.
+ *
+ * It NAMES, it does not judge: `isSmokeOk` keeps an explicit `ok` as the
+ * only authority, because raw state legitimately contains false booleans.
+ * Bounded in depth and count so a large state dump cannot turn one error
+ * line into a page.
+ */
+export function falseBooleanFields(
+  value: unknown,
+  maxDepth = 3,
+  maxFields = 12
+): string[] {
+  const out: string[] = [];
+  const walk = (node: unknown, path: string, depth: number): void => {
+    if (out.length >= maxFields || depth > maxDepth) return;
+    if (node === null || typeof node !== 'object') return;
+    for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+      if (out.length >= maxFields) return;
+      const here = path ? `${path}.${key}` : key;
+      if (child === false) {
+        if (here !== 'ok') out.push(here);
+      } else if (child !== null && typeof child === 'object') {
+        walk(child, here, depth + 1);
+      }
+    }
+  };
+  walk(smokeResultRecord(value), '', 1);
+  return out;
+}
+
+function smokeResultRecord(value: unknown): unknown {
+  return Array.isArray(value) ? { ...value } : value;
 }
 
 /**
@@ -2210,6 +2273,21 @@ export function isSmokeOk(result: unknown): boolean {
  * same language. Kept at module level so the strings are identical to
  * the examples in `buildNarrowL1Prompt`.
  */
+/**
+ * ONE worked smoke that drives its own state, quoted verbatim by the
+ * erased-intermediate refusal.
+ *
+ * It lives here, on the ERROR path, and deliberately not in the `smoke`
+ * argument description: prompt text is paid on every call, an error message
+ * only by the caller who already got it wrong. The example is itself
+ * accepted by every pre-flight detector — `tests/smoke-preflight.test.ts`
+ * asserts that, so advice we hand out can never be advice we refuse.
+ */
+export const SMOKE_SELF_DRIVEN_EXAMPLE =
+  '(() => { const a = window.__app; a.increment(); a.increment(); ' +
+  'const beforeReset = a.count; a.reset(); return { ok: beforeReset === 2 ' +
+  '&& a.count === 0, beforeReset, final: a.count } })()';
+
 const SMOKE_EXPR_HINT =
   'The `smoke` arg must be a JS EXPRESSION, not a statement. It is ' +
   'wrapped as `(() => { const __r = (YOUR_CODE); ... })()`. A top-level ' +

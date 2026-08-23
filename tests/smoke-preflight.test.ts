@@ -3,7 +3,11 @@ import {
   detectSmokeStatementError,
   detectResetErasedIntermediateEvidence,
   detectBrittleComputedStyleLiteral,
+  falseBooleanFields,
   isSmokeOk,
+  preflightSmokeRefusals,
+  renderSmokeFailure,
+  SMOKE_SELF_DRIVEN_EXAMPLE,
   makeSmokeStuckTracker,
   parseInteractions,
   SMOKE_STUCK_WINDOW,
@@ -390,5 +394,100 @@ describe('makeSmokeStuckTracker — isOscillating (#2)', () => {
     t.record('other', true);
     t.record('other', true);
     expect(t.isOscillating(smoke)).toBe(false);
+  });
+});
+
+/**
+ * MEASURED 2026-08-23, project run `a786358a` (25 `validate_html` calls, 14
+ * failures): every refusal and every failed smoke taught the caller exactly
+ * one thing per Puppeteer round trip, while the rest of the diagnosis was
+ * already in our hands. These tests hold the two places that changed.
+ */
+describe('preflightSmokeRefusals — one round trip reports every applicable refusal', () => {
+  const erasingInteractions = parseInteractions([
+    { type: 'click', selector: '#add' },
+    { type: 'click', selector: '#add' },
+    { type: 'click', selector: '#add' },
+    { type: 'click', selector: '#reset' },
+  ]);
+
+  it('reports the brittle-colour refusal AND the erased-state refusal together', () => {
+    const smoke = `getComputedStyle(document.body).color === 'rgb(0, 0, 0)'`;
+    const refusals = preflightSmokeRefusals(smoke, erasingInteractions);
+    expect(refusals).toHaveLength(2);
+    expect(refusals[0]!.message).toMatch(/getComputedStyle/);
+    expect(refusals[1]!.message).toMatch(/intermediate state has been erased/);
+  });
+
+  it('carries the expression hint only for the syntax refusal', () => {
+    const [syntax] = preflightSmokeRefusals('const x = 1; x > 0', []);
+    expect(syntax!.hint).toMatch(/must be a JS EXPRESSION/);
+    const [style] = preflightSmokeRefusals(
+      `getComputedStyle(el).color === 'rgb(1, 2, 3)'`,
+      []
+    );
+    expect(style!.hint).toBeUndefined();
+  });
+
+  it('refuses nothing it did not refuse before', () => {
+    expect(preflightSmokeRefusals('document.querySelectorAll(".x").length > 0', [])).toEqual(
+      []
+    );
+    expect(preflightSmokeRefusals('(() => { const a = 1; return a > 0 })()', [])).toEqual([]);
+  });
+
+  it('accepts the very example the erased-state refusal hands out', () => {
+    const erased = detectResetErasedIntermediateEvidence(
+      erasingInteractions,
+      'document.querySelector("#count").textContent === "0"'
+    );
+    expect(erased).toContain(SMOKE_SELF_DRIVEN_EXAMPLE);
+    // Advice we hand out must never be advice we refuse — including when the
+    // caller keeps the interactions that triggered the refusal.
+    expect(preflightSmokeRefusals(SMOKE_SELF_DRIVEN_EXAMPLE, erasingInteractions)).toEqual([]);
+    expect(smokeDrivesOwnState(SMOKE_SELF_DRIVEN_EXAMPLE)).toBe(true);
+    expect(smokeDrivesIntermediateState(SMOKE_SELF_DRIVEN_EXAMPLE)).toBe(true);
+  });
+});
+
+describe('renderSmokeFailure — the failing field is named, not left to be diagnosed', () => {
+  it('names the false booleans observed in the measured run', () => {
+    const rendered = renderSmokeFailure({
+      ok: false,
+      themeToggledToDark: false,
+      beforeResetElapsedGreaterThanZero: false,
+      finalCountIsZero: true,
+    });
+    expect(rendered).toMatch(
+      /FALSE field\(s\): themeToggledToDark, beforeResetElapsedGreaterThanZero\./
+    );
+    // The fields that held are NOT named: the list is the shortlist to look
+    // at, and padding it with passing assertions is what made the pasted
+    // object unreadable in the first place.
+    expect(rendered.split('FALSE field(s):')[1]).not.toContain('finalCountIsZero');
+  });
+
+  it('names nested paths and never names `ok` itself', () => {
+    expect(falseBooleanFields({ ok: false, milestone: { classMatches: false } })).toEqual([
+      'milestone.classMatches',
+    ]);
+  });
+
+  it('is bounded in count and depth so one error stays one line', () => {
+    const wide: Record<string, boolean> = {};
+    for (let i = 0; i < 40; i++) wide[`f${i}`] = false;
+    expect(falseBooleanFields(wide).length).toBe(12);
+    expect(falseBooleanFields({ a: { b: { c: { d: false } } } })).toEqual([]);
+  });
+
+  it('says nothing extra when the result carries no false boolean', () => {
+    expect(renderSmokeFailure({ ok: false, count: 0 })).not.toMatch(/FALSE field/);
+    expect(renderSmokeFailure(false)).not.toMatch(/FALSE field/);
+  });
+
+  it('keeps naming the field when the pasted object is truncated away', () => {
+    const filler = 'x'.repeat(600);
+    const rendered = renderSmokeFailure({ ok: false, filler, lateAssertion: false });
+    expect(rendered).toContain('lateAssertion');
   });
 });

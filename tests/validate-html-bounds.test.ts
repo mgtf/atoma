@@ -205,3 +205,52 @@ describe('validate_html — the bounds, against a real browser', () => {
     expect(res.ok).toBe(false);
   }, 60_000);
 });
+
+/**
+ * The pre-flight refusals cross the PRODUCTION handler, not just the pure
+ * detectors: the handler is where they used to return one at a time.
+ *
+ * The URL here is deliberately unreachable — a refusal that still names both
+ * problems proves the tool answered without opening a page, which is the
+ * whole point of a pre-flight.
+ */
+describe('validate_html — every applicable pre-flight refusal, in one call', () => {
+  it('reports both refusals without opening a browser', async () => {
+    const sandbox = makeWorkspace({ 'index.html': '<!doctype html><h1>x</h1>' });
+    const started = Date.now();
+    const res = (await validateHtmlTool({ sandbox }).execute({
+      url: 'http://127.0.0.1:1/',
+      interactions: [
+        { type: 'click', selector: '#add' },
+        { type: 'click', selector: '#add' },
+        { type: 'click', selector: '#add' },
+        { type: 'click', selector: '#reset' },
+      ],
+      smoke: `getComputedStyle(document.body).color === 'rgb(0, 0, 0)'`,
+    })) as { ok: boolean; errors: string[]; smokeResult: { error: string; hint?: string } };
+    const elapsed = Date.now() - started;
+
+    expect(res.ok).toBe(false);
+    expect(res.errors).toHaveLength(2);
+    expect(res.errors.every((e) => e.startsWith('smoke rejected pre-flight: '))).toBe(true);
+    expect(res.errors[0]).toMatch(/getComputedStyle/);
+    expect(res.errors[1]).toMatch(/intermediate state has been erased/);
+    // Both reasons reach the smokeResult channel too, and the accepted shape
+    // is quoted so the next attempt does not have to be guessed.
+    expect(res.smokeResult.error).toContain(' ALSO: ');
+    expect(res.smokeResult.error).toContain('window.__app');
+    expect(res.smokeResult.hint).toBeUndefined();
+    expect(elapsed, `took ${elapsed}ms — a browser was opened`).toBeLessThan(2_000);
+  });
+
+  it('a syntax refusal still carries the expression hint', async () => {
+    const sandbox = makeWorkspace({ 'index.html': '<!doctype html><h1>x</h1>' });
+    const res = (await validateHtmlTool({ sandbox }).execute({
+      url: 'http://127.0.0.1:1/',
+      smoke: 'const x = document.title; x.length > 0',
+    })) as { errors: string[]; smokeResult: { hint?: string } };
+
+    expect(res.errors).toHaveLength(1);
+    expect(res.smokeResult.hint).toMatch(/must be a JS EXPRESSION/);
+  });
+});
