@@ -149,7 +149,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
       'The task families a run can take, and how to phrase a goal for each one. Inside an organisation a run is started from a project, and that guidance sits beside the run prompt itself. A local instance with no organisations has no projects: start a run from a shell with `npm run run:build -- "<goal>"`. The browser deliberately never launches a run outside a signed-in project.',
     'docs.theme.admin.title': 'Admin',
     'docs.theme.admin.body':
-      'Every organisation, its members and one-use invitations, plus the platform audit journal — the one source of what happened on this deployment. Restricted to the platform-admin flag; an invitation never grants operator-level access.',
+      'Four screens behind the platform-admin flag: organisations with their members and one-use invitations, the platform audit journal (the one source of what happened on this deployment), the catalogue ledger of what the agent catalogue learned, and the sentinel — the mechanical live watch over runs in flight. An invitation never grants operator-level access.',
     'docs.theme.mcp.title': 'MCP',
     'docs.theme.mcp.body':
       'A stdio control plane exposing 13 atoma_* tools to host applications such as Claude Code or Claude Desktop. These are read APIs plus one destructive run-starter, not agent elements — only one run happens at a time, serialised by a shared lease.',
@@ -807,7 +807,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
       "Les familles de tâches qu'un run peut prendre, et comment formuler un objectif pour chacune. Dans une organisation, un run démarre depuis un projet, et cette aide accompagne directement le prompt du run. Une instance locale sans organisation n'a pas de projet : démarre un run depuis un shell avec `npm run run:build -- \"<objectif>\"`. Le navigateur ne lance volontairement jamais de run en dehors d'un projet identifié.",
     'docs.theme.admin.title': 'Admin',
     'docs.theme.admin.body':
-      "Chaque organisation, ses membres et ses invitations à usage unique, plus le journal d'audit de la plateforme — l'unique source de ce qui s'est passé sur ce déploiement. Réservé au drapeau platform-admin ; une invitation ne donne jamais un accès de niveau opérateur.",
+      "Quatre écrans derrière le drapeau platform-admin : les organisations avec leurs membres et leurs invitations à usage unique, le journal d'audit de la plateforme (l'unique source de ce qui s'est passé sur ce déploiement), le registre du catalogue — ce que le catalogue d'agents a appris — et la sentinelle, la veille mécanique sur les runs en vol. Une invitation ne donne jamais un accès de niveau opérateur.",
     'docs.theme.mcp.title': 'MCP',
     'docs.theme.mcp.body':
       "Un plan de contrôle stdio exposant 13 outils atoma_* aux applications hôtes comme Claude Code ou Claude Desktop. Ce sont des API de lecture plus un démarreur de run destructeur, pas des éléments d'agent — un seul run à la fois, sérialisé par un bail partagé.",
