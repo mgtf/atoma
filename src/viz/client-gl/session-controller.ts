@@ -1,6 +1,10 @@
 // The auth context, its shapes, and the hook that reads it. Split out of
 // `AuthControls.tsx` so that file exports its component only: vite's Fast
 // Refresh gives up on a module mixing a component with a hook.
+//
+// NOT named `auth-controller.ts`: this directory is the dev server's root, so
+// the file's own URL would be `/auth-controller.ts`, and vite.config.ts
+// proxies every `/auth` path to the API port — the module would 404.
 import { createContext, useContext } from 'react';
 
 export interface AuthViewer {

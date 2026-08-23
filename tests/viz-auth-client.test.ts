@@ -15,7 +15,7 @@ import {
   redirectIfAuthenticationRequired,
 } from '../src/viz/client/auth-session.js';
 import { AuthControls } from '../src/viz/client-gl/AuthControls.js';
-import { useAuthController } from '../src/viz/client-gl/auth-controller.js';
+import { useAuthController } from '../src/viz/client-gl/session-controller.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 
 /**

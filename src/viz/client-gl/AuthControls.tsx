@@ -19,7 +19,7 @@ import {
   type AuthProviderOption,
   type AuthUiSnapshot,
   type AuthViewer,
-} from './auth-controller.js';
+} from './session-controller.js';
 import { useGpuStore } from './store.js';
 
 export type {

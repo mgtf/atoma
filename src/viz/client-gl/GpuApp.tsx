@@ -22,7 +22,7 @@ import {
 } from './renderer/metrics.js';
 import { AtomaCursor } from './AtomaCursor.js';
 import { AuthControls } from './AuthControls.js';
-import { useAuthController } from './auth-controller.js';
+import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
