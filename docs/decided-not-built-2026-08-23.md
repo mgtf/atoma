@@ -173,6 +173,33 @@ verified against a throwaway repository. Three things that run stopped at:
    failure reaches the org owners — see the visibility entry above. Unchanged,
    because who gets paged is a policy decision.
 
+## The one product gap the third run exposed (2026-08-23)
+
+**Only the FIRST delivered run of a project can publish.** Measured: run 2 of
+`stopwatch-e2e-two` was refused with `GitHub repository branch already exists;
+initial publish refused` — correctly, because `publishInitialCommit` is exactly
+that, an INITIAL commit, and its divergence guard cannot tell our own previous
+publication from somebody else's branch.
+
+The copy has been corrected so nothing lies (`projects.actionsHint.ready` used
+to promise that later runs add features, which they do — locally, unpublished).
+The feature itself is a fork worth stating before anyone builds it, because it
+decides what a project's repository IS:
+
+- **A snapshot per run.** Every publication force-moves the branch to the run's
+  manifest. Simple, and it throws away history nobody agreed to lose.
+- **A history.** Each publication commits on top of the current head, with the
+  head sha as an optimistic-concurrency check — the divergence guard becomes
+  "the branch moved under us" instead of "the branch exists". This is the
+  normal git shape and what a customer expects from "later runs".
+- **A branch or a pull request per run.** Nothing is ever overwritten and a
+  human merges. The most honest for unreviewed model output, and the most
+  machinery.
+
+The second is probably right, and it needs `parents: [head]` plus a ref update
+the client already has (`updateReference`, added for the multi-file seed). None
+of it should be decided by whoever happens to be in the file.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
