@@ -28,11 +28,22 @@ import { ABANDONED_AFTER_MS, isIndexEntryLive } from '../viz/liveness.js';
 /** A trace larger than this is not read: no watch is better than a stall. */
 export const MAX_TRACE_BYTES = 32 * 1024 * 1024;
 
-/** Bounded, total: absent, oversized and torn all read as null. */
+/**
+ * Bounded and TOTAL: absent, oversized, torn and vanished-mid-read all give
+ * null.
+ *
+ * The size check sits INSIDE the try, which is the whole point. `existsSync`
+ * then `statSync` is a race — a trace or index unlinked between the two throws
+ * ENOENT — and that throw used to escape into the caller. It cost the CLI one
+ * pass, which is why nobody noticed; in a server process an escaping throw
+ * from an interval callback is an uncaught exception with no backstop.
+ * `projectRunSource` below already guarded its own `statSync` for exactly this
+ * race, so the function was inconsistent with itself.
+ */
 export function readBoundedJson<T>(path: string, maxBytes = MAX_TRACE_BYTES): T | null {
-  if (!existsSync(path)) return null;
-  if (statSync(path).size > maxBytes) return null;
   try {
+    if (!existsSync(path)) return null;
+    if (statSync(path).size > maxBytes) return null;
     return JSON.parse(readFileSync(path, 'utf8')) as T;
   } catch {
     return null;

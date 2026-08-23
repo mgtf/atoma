@@ -11,6 +11,7 @@ import {
   type SentinelRunSource,
   type SentinelSkip,
 } from './sources.js';
+import type { SentinelWatchSource } from './lease.js';
 
 /**
  * THE SENTINEL WATCH — one tick, and the loop around it.
@@ -44,10 +45,26 @@ const SENTINEL_KINDS: readonly SentinelKind[] = ['run.anomaly', 'security.flagge
 
 export interface SentinelJournal {
   append(input: PlatformEventInput): unknown;
-  list(query: { kind?: string; runId?: string; limit?: number }): {
-    events: { detail?: Record<string, unknown> | undefined }[];
+  list(query: { kind?: string; runId?: string; limit?: number; before?: number }): {
+    events: { seq?: number; detail?: Record<string, unknown> | undefined }[];
+    /** Cursor for the next (older) page, or null at the end. */
+    nextBefore?: number | null;
   };
 }
+
+/**
+ * How many pages of read-back one run may cost per kind.
+ *
+ * The read-back USED to be one page of 200, which quietly turned the
+ * cross-tick guarantee into a cross-tick-under-200-findings guarantee: past
+ * that, the oldest keys fell off the page, the rules re-emitted them, and each
+ * tick added more rows for the next tick to miss. Paging fixes it; the cap
+ * bounds it. Hitting the cap is treated exactly like a journal that cannot be
+ * read — "everything already said" — because a run with 2000 findings needs an
+ * operator, not more rows.
+ */
+export const MAX_DEDUPE_PAGES = 10;
+const DEDUPE_PAGE_SIZE = 200;
 
 export interface SentinelWatchOptions {
   readonly journal: SentinelJournal;
@@ -63,6 +80,14 @@ export interface SentinelWatchOptions {
   /** USD alert threshold, or null to disable that rule. Not a budget. */
   readonly costAlertUsd?: number | null;
   readonly leasePath?: string;
+  /**
+   * Which host is watching. It rides every row as `detail.watch` so a finding
+   * can be traced to the process that wrote it — there are two hosts now, and
+   * `actorType` stays `system` for both because watcher identity is a sentinel
+   * fact, not an actor. Defaults to the CLI, the historical host; the viz
+   * server passes its own.
+   */
+  readonly source?: SentinelWatchSource;
   readonly logger?: (line: string) => void;
 }
 
@@ -79,6 +104,7 @@ export class SentinelWatch {
   private readonly now: () => number;
   private readonly costAlertUsd: number | null;
   private readonly leasePath: string | undefined;
+  private readonly source: SentinelWatchSource;
   private readonly logger: (line: string) => void;
 
   constructor(options: SentinelWatchOptions) {
@@ -91,6 +117,7 @@ export class SentinelWatch {
     this.now = options.now ?? (() => Date.now());
     this.costAlertUsd = options.costAlertUsd ?? null;
     if (options.leasePath !== undefined) this.leasePath = options.leasePath;
+    this.source = options.source ?? 'cli';
     this.logger = options.logger ?? (() => {});
   }
 
@@ -98,17 +125,32 @@ export class SentinelWatch {
   private emittedKeys(runId: string): Set<string> {
     const keys = new Set<string>();
     for (const kind of SENTINEL_KINDS) {
-      let page: ReturnType<SentinelJournal['list']>;
-      try {
-        page = this.journal.list({ kind, runId, limit: 200 });
-      } catch {
-        // A journal read that fails must not turn into a flood: treat it as
-        // "everything already said" for this tick and try again next time.
-        return new Set(['__journal-unavailable__']);
-      }
-      for (const event of page.events) {
-        const key = event.detail?.['dedupeKey'];
-        if (typeof key === 'string') keys.add(key);
+      let before: number | undefined;
+      for (let page = 0; page < MAX_DEDUPE_PAGES; page++) {
+        let read: ReturnType<SentinelJournal['list']>;
+        try {
+          read = this.journal.list({
+            kind,
+            runId,
+            limit: DEDUPE_PAGE_SIZE,
+            ...(before !== undefined ? { before } : {}),
+          });
+        } catch {
+          // A journal read that fails must not turn into a flood: treat it as
+          // "everything already said" for this tick and try again next time.
+          return new Set(['__journal-unavailable__']);
+        }
+        for (const event of read.events) {
+          const key = event.detail?.['dedupeKey'];
+          if (typeof key === 'string') keys.add(key);
+        }
+        const next = read.nextBefore;
+        if (typeof next !== 'number') break;
+        before = next;
+        // The cap is reached WITH a page still outstanding: the run has more
+        // history than this watch will read, so say nothing rather than
+        // re-say what is beyond the cap.
+        if (page === MAX_DEDUPE_PAGES - 1) return new Set(['__journal-unavailable__']);
       }
     }
     return keys;
@@ -120,7 +162,16 @@ export class SentinelWatch {
     const skipped: SentinelSkip[] = [];
     const runs: SentinelLiveRun[] = [];
     const now = this.now();
-    const lease = this.leasePath ? peekRunLease(this.leasePath) : null;
+    // Contained, like every other read in this pass: `peekRunLease` opens a
+    // SQLite file this module does not own, and it was the one call in `tick`
+    // that could throw past every guard. Context is worth having and never
+    // worth a failed pass.
+    let lease: ReturnType<typeof peekRunLease> = null;
+    try {
+      if (this.leasePath) lease = peekRunLease(this.leasePath);
+    } catch {
+      lease = null;
+    }
 
     for (const source of this.sources) {
       let discovered;
@@ -187,6 +238,11 @@ export class SentinelWatch {
           ...finding.detail,
           dedupeKey: finding.dedupeKey,
           corpus: candidate.corpus,
+          // WHICH HOST wrote this row. The pid and start time deliberately do
+          // NOT ride along: they are fresh in the health payload and in the
+          // watch lease, and a stale pid on an immutable row is a fact that
+          // rots.
+          watch: this.source,
           ...(lease ? { leaseOwnerPid: lease.ownerPid, leaseRunId: lease.runId } : {}),
         },
       });
@@ -199,6 +255,29 @@ export class SentinelWatch {
 }
 
 export const SENTINEL_DEFAULT_INTERVAL_MS = 20_000;
+
+/**
+ * THE ONLY WAY EITHER SHELL REACHES A TICK.
+ *
+ * Containment used to live inside `runSentinelLoop`, which was fine while the
+ * CLI was the only host: a throwing tick cost one pass. In a server process an
+ * exception escaping an interval callback is an UNCAUGHT exception — the viz
+ * server registers no `uncaughtException` handler, so the process exits, and
+ * `scripts/viz-dev.mjs` then takes Vite down with it. One bad `statSync` would
+ * end the operator's session. So containment is a function both shells call,
+ * not a property of one of them.
+ */
+export function safeTick(
+  watch: Pick<SentinelWatch, 'tick'>,
+  log: (line: string) => void
+): SentinelTickReport | null {
+  try {
+    return watch.tick();
+  } catch (error) {
+    log(`tick failed: ${String(error)}`);
+    return null;
+  }
+}
 
 /**
  * The resident loop. Ticks, sleeps, repeats until the signal aborts.
@@ -217,12 +296,8 @@ export async function runSentinelLoop(args: {
   const interval = args.intervalMs ?? SENTINEL_DEFAULT_INTERVAL_MS;
   const log = args.logger ?? (() => {});
   while (!args.signal.aborted) {
-    try {
-      const report = args.watch.tick();
-      args.onTick?.(report);
-    } catch (error) {
-      log(`tick failed: ${String(error)}`);
-    }
+    const report = safeTick(args.watch, log);
+    if (report) args.onTick?.(report);
     if (args.signal.aborted) break;
     await new Promise<void>((resolveSleep) => {
       const timer = setTimeout(resolveSleep, interval);

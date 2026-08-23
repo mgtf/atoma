@@ -113,7 +113,10 @@ CREATE TABLE IF NOT EXISTS platform_events (
   then fan-out to subscribers). The auth CLI, a separate process, **writes
   its row directly** into the same store (WAL): audited, but never pushed —
   only the viz server pushes.
-- **Retention**: swept in the server's existing 5-minute timer — cut by age
+- **Retention**: swept in the server's existing 5-minute timer, and (since
+  2026-08-23) on the sentinel CLI's own five-minute cadence, because that
+  watch journals on ungated checkouts where the server's timer does not
+  exist — cut by age
   (90 days, `ATOMA_EVENTS_RETENTION_DAYS`) **and** by row cap (50,000, the
   `NOT IN (SELECT … ORDER BY seq DESC LIMIT ?)` pattern already used by
   `prefilter_cache` and `push_subscriptions`). `npm run backup` already

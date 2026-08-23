@@ -239,6 +239,14 @@ function cleanChildEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
     'ATOMA_VIZ_TRUSTED_PROXIES',
     'ATOMA_VIZ_DEV_URL',
     'ATOMA_DB_PATH',
+    // The watch reads these, and a developer's real values must not reach a
+    // spawned harness: `ATOMA_RUNS_DIR` would point a resident journal writer
+    // at the operator's live corpus, and the sentinel switches would decide
+    // whether these children watch at all.
+    'ATOMA_RUNS_DIR',
+    'ATOMA_VIZ_SENTINEL',
+    'ATOMA_VIZ_SENTINEL_INTERVAL_MS',
+    'ATOMA_SENTINEL_COST_ALERT_USD',
     'GITHUB_CLIENT_ID',
     'GITHUB_CLIENT_SECRET',
     'GOOGLE_CLIENT_ID',
@@ -305,13 +313,14 @@ async function waitReady(running: RunningChild, url: string, timeoutMs = 10_000)
   throw new Error(`server not ready: ${url}\n${running.stderr.join('')}`);
 }
 
-function tempInstance(): { root: string; dbPath: string; args: string[] } {
+function tempInstance(): { root: string; dbPath: string; runsDir: string; args: string[] } {
   const root = mkdtempSync(join(tmpdir(), 'atoma-viz-auth-'));
   roots.push(root);
   const dbPath = join(root, 'atoma.db');
   return {
     root,
     dbPath,
+    runsDir: join(root, 'runs'),
     args: [
       '--host', '127.0.0.1',
       '--dir', join(root, 'runs'),
@@ -891,6 +900,98 @@ describe('viz auth gate (process level)', () => {
     ).toBe(true);
     // A rule's `check` is not something a reader may hold.
     expect(JSON.stringify(sentinelBody.rules)).not.toContain('check');
+  });
+
+  it('hosts the watch itself, armed by default, and says so honestly', async () => {
+    // THE PLACEMENT, at the boundary that matters: a real gated server process,
+    // not a unit. `npm run viz`, `viz:dev` and `viz:serve` are all this file,
+    // so arming it here is what arms all three.
+    const instance = tempInstance();
+    const provider = await startFakeProvider({
+      port: await freePort(),
+      subject: 9111,
+      displayName: 'Watcher',
+    });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      ['--host', '127.0.0.1', '--port', String(port), '--db', instance.dbPath, '--dir', instance.runsDir],
+      providerEnv(provider, base)
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+
+    // The banner is the honest substitute for a whole-stack command: one
+    // command, and it says what it started.
+    const banner = running.stdout.join('');
+    expect(banner).toMatch(/sentinel: watching every \d+s/);
+    expect(banner).toContain('caffeinate -i -m');
+
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+    const { runAuthCli } = await import('../src/cli/auth.js');
+    expect(
+      runAuthCli(
+        ['node', 'auth', 'grant-admin', '--principal', 'fake@example.com', '--db', instance.dbPath],
+        {}
+      )
+    ).toBe(0);
+
+    const response = await fetch(`${base}/api/admin/sentinel`, { headers: cookie });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      watch: {
+        armed: boolean;
+        reason: string;
+        source: string;
+        intervalMs: number;
+        incumbent: unknown;
+      };
+    };
+    expect(body.watch.armed).toBe(true);
+    expect(body.watch.reason).toBe('armed');
+    // A fact about THIS process — which is the only reason it may be reported.
+    expect(body.watch.source).toBe('viz-server');
+    expect(body.watch.intervalMs).toBeGreaterThan(0);
+    expect(body.watch.incumbent).toBeNull();
+
+    // And the watch is not why the server refuses to die. `waitForExit`
+    // escalates to SIGKILL after five seconds, so the signal it actually died
+    // from is the assertion: SIGTERM means the term worked, SIGKILL would mean
+    // something held the loop open.
+    running.process.kill('SIGTERM');
+    await waitForExit(running.process);
+    expect(running.process.signalCode).toBe('SIGTERM');
+  });
+
+  it('lets an operator switch the watch off without losing the visualizer', async () => {
+    const instance = tempInstance();
+    const provider = await startFakeProvider({
+      port: await freePort(),
+      subject: 9112,
+      displayName: 'No Watch',
+    });
+    const port = await freePort();
+    const base = `http://127.0.0.1:${port}`;
+    const running = startViz(
+      ['--host', '127.0.0.1', '--port', String(port), '--db', instance.dbPath, '--dir', instance.runsDir],
+      { ...providerEnv(provider, base), ATOMA_VIZ_SENTINEL: '0' }
+    );
+    await waitReady(running, `${base}/auth/whoami`);
+    expect(running.stdout.join('')).toContain('sentinel: off (disabled)');
+
+    const jar = new CookieJar();
+    expect((await fetchWithJar(jar, `${base}/auth/login?provider=github`)).status).toBe(200);
+    const cookie = { cookie: jar.header(base)! };
+    const { runAuthCli } = await import('../src/cli/auth.js');
+    runAuthCli(
+      ['node', 'auth', 'grant-admin', '--principal', 'fake@example.com', '--db', instance.dbPath],
+      {}
+    );
+    const body = (await (
+      await fetch(`${base}/api/admin/sentinel`, { headers: cookie })
+    ).json()) as { watch: { armed: boolean; reason: string } };
+    expect(body.watch).toMatchObject({ armed: false, reason: 'disabled' });
   });
 
   it('completes invited login, ignores hostile forwarded headers, and revokes on POST logout', async () => {

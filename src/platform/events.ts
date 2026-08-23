@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS platform_events (
 );
 CREATE INDEX IF NOT EXISTS idx_platform_events_org ON platform_events(org_id);
 CREATE INDEX IF NOT EXISTS idx_platform_events_kind ON platform_events(kind);
+-- The sentinel's de-duplication read: two queries per live run per tick,
+-- filtered by run and kind. Without this they were full scans of a table that
+-- grows to 50k rows, on a resident timer. Additive on open, not a migration.
+CREATE INDEX IF NOT EXISTS idx_platform_events_run ON platform_events(run_id, kind);
 `;
 
 /** Hard ceiling on rows kept, independent of age. */

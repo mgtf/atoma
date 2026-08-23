@@ -44,7 +44,14 @@ Neighbours:
   - Readers TOLERATE foreign rows: an unknown kind or a torn `detail`
     renders raw rather than blinding the page around it. Retention cuts by
     age (`ATOMA_EVENTS_RETENTION_DAYS`, 90d) AND by a 50k row cap, swept
-    from the viz server's existing 5-minute timer.
+    from the viz server's existing 5-minute timer — and by the sentinel CLI on
+    the same cadence, since that watch writes rows on ungated checkouts where
+    the server's timer does not exist. Any resident writer sweeps, or it is a
+    writer with no retention.
+  - `platform_events` carries no uniqueness over (kind, run_id, dedupeKey), so
+    de-duplication by read-back is a cross-tick guarantee only. Exclusivity
+    between watchers is a LEASE, not a constraint — see
+    [src/sentinel](../sentinel/AGENTS.md).
   - `/api/admin/events` and `/api/admin/ledger` are platform-admin only,
     beside the registry and skill surfaces. They are two SEPARATE reads:
     `lifecycle_events` keeps its counter-checking semantics and its own

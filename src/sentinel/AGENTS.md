@@ -1,9 +1,19 @@
 # Sentinel — AGENTS.md
 
 `src/sentinel/` owns the mechanical live watch over runs in flight: the
-declarative rule table, and (later) the resident process that polls and
-journals. Stage 1 of
+declarative rule table, the discovery sources, and the two shells that host a
+watch — `runSentinelLoop` for the CLI and `startResidentSentinel` for the viz
+server. Stage 1 of
 [`docs/supervisor-design.md`](../../docs/supervisor-design.md).
+
+TWO HOSTS, ONE WATCH PER STORE. The gated viz server arms the watch
+in-process, so `npm run viz` covers whoever is looking at the screen; the CLI
+covers what a server cannot — an ungated checkout, another machine, another
+store, a burn-in batch that must not also run a browser, `--once` in cron. A
+resident CLI TAKES the store's watch over from a viz server, because typing
+that command is the deliberate act and a forgotten browser tab must not refuse
+it; it yields to another live CLI, where the tie is ambiguous. The displaced
+server notices on its next ownership check and re-arms once the CLI stops.
 
 Read [`AGENTS.md`](../../AGENTS.md) first: it holds the cross-cutting rules.
 Everything below is stated once, here, and is not repeated at the root.
@@ -67,12 +77,40 @@ Neighbours:
   parsed API, and a second parser would couple the sentinel to a format it
   does not own.
 - De-duplication reads the JOURNAL, not process memory: each finding's
-  `dedupeKey` is stored in `detail` and read back per run. A restarted watcher
-  repeats nothing, and two watchers cannot double-report. A journal read that
-  FAILS is treated as "already said" for that tick — a gap is better than a
-  flood.
-- Rows are attributed `system`: a resident process, not the operator CLI and
-  not a signed-in principal.
+  `dedupeKey` is stored in `detail` and read back per run, PAGED to
+  `MAX_DEDUPE_PAGES`. A restarted watcher repeats nothing. A journal read that
+  FAILS — or a run with more findings than the cap will read — is treated as
+  "already said" for that tick: a gap is better than a flood.
+  CORRECTION, and it is load-bearing: this is a CROSS-TICK guarantee, not a
+  within-tick one. `emittedKeys` reads and `screen` writes as two statements
+  and `platform_events` has no uniqueness over (kind, run_id, dedupeKey), so
+  two watchers ticking in the same window each write the same finding once.
+  That is what `lease.ts` is for, and the earlier claim that "two watchers
+  cannot double-report" was simply wrong.
+- ONE APPENDING RESIDENT WATCH PER STORE, held as the `sentinel_watch`
+  singleton in the product store — keyed by the store, which is why it lives
+  in it, unlike `mcpRunLockPath()`. Reclaim is automatic when the owner is
+  gone, is a different process wearing its pid, or is silent past THREE OF ITS
+  OWN INTERVALS (floored at a minute): reading the owner's cadence rather than
+  the claimant's is what stops a `--interval 2000` CLI evicting a healthy
+  20-second server. `--once` takes no lease and still journals, because a
+  bounded pass that appends nothing would be a dry run wearing a safety
+  feature's name.
+- The lease is a PER-TICK fact, never a boot decision. A refused claim at boot
+  would leave a server blind until somebody restarted it, so every tick
+  asserts ownership first — and the heartbeat IS that assertion: zero rows
+  changed means the row is no longer ours and appending must stop.
+- CONTAINMENT IS `safeTick`, called by both shells. A throwing tick cost the
+  CLI one pass; in a server an exception escaping an interval callback is an
+  uncaught exception with no handler above it, so the process dies and
+  `viz-dev.mjs` takes Vite with it. The resident also stops calling itself a
+  watch after three consecutive failures, and its timer is `unref()`ed so a
+  watch can never be why a host refuses to exit.
+- Rows are attributed `system` — a resident process, not a signed-in
+  principal — for BOTH hosts, and `detail.watch` names which one wrote the
+  row. Watcher identity is a sentinel fact, not an actor; the pid and start
+  time stay out of the row, where they would rot, and live in the health
+  payload and the lease instead.
 - A run whose trace is unreadable or over `MAX_TRACE_BYTES` is REPORTED as
   skipped, never silently dropped. A tick that throws is logged and the loop
   continues: an observer that dies on one bad trace stops observing

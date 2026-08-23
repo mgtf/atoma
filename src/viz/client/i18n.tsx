@@ -182,8 +182,24 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'journal.scrollHint': 'Scrolling to the bottom loads the next page.',
     'sentinel.title': 'Sentinel',
     'sentinel.summary': '{{rules}} rules, {{live}} run(s) in flight',
-    'sentinel.processHint':
-      'The watch is a separate process: npm run sentinel. This screen reads the journal and the runs in flight, so it cannot tell you whether that process is running.',
+    'sentinel.watch': 'This server',
+    'sentinel.watch.scope':
+      'This server hosts the watch, so it reports its own timer — and only its own. A sentinel on another machine, or against another store, is invisible here.',
+    'sentinel.watch.armed': 'Watching, one pass every {{seconds}}s since {{since}}.',
+    'sentinel.watch.disabled': 'Not watching: ATOMA_VIZ_SENTINEL=0 on this server.',
+    'sentinel.watch.leaseHeld':
+      '{{source}} pid {{pid}} has held the watch on this store since {{since}} (last beat {{beat}}). One appending watch per store, so this server yielded.',
+    'sentinel.watch.leaseLost':
+      'This server lost the watch: something took this store over. It will take it back on its own once that watch stops.',
+    'sentinel.watch.failing':
+      'Stopped after {{count}} failed passes in a row. Last error: {{error}}',
+    'sentinel.watch.off': 'This server is not watching ({{reason}}).',
+    'sentinel.watch.passes':
+      '{{ticks}} pass(es) · last {{at}} in {{ms}}ms · {{runs}} run(s) screened, {{skipped}} skipped, {{emitted}} finding(s) written',
+    'sentinel.watch.never': 'No pass completed yet.',
+    'sentinel.watch.slow':
+      'That pass took {{ms}}ms, and it runs on the HTTP loop. A trace this large is worth looking at.',
+    'sentinel.watch.headless': 'A watch without a browser: npm run sentinel',
     'sentinel.coverage': 'In flight now',
     'sentinel.coverageEmpty': 'No run in flight. Nothing to watch this second.',
     'sentinel.corpus.operator': 'operator',
@@ -840,8 +856,24 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'journal.scrollHint': 'Arriver en bas charge la page suivante.',
     'sentinel.title': 'Sentinelle',
     'sentinel.summary': '{{rules}} règles, {{live}} run(s) en vol',
-    'sentinel.processHint':
-      'La veille est un processus distinct : npm run sentinel. Cet écran lit le journal et les runs en vol ; il ne peut donc pas dire si ce processus tourne.',
+    'sentinel.watch': 'Ce serveur',
+    'sentinel.watch.scope':
+      'Ce serveur héberge la veille : il rend compte de son propre minuteur, et de lui seul. Une sentinelle sur une autre machine, ou sur un autre store, est invisible ici.',
+    'sentinel.watch.armed': 'En veille, un passage toutes les {{seconds}}s depuis {{since}}.',
+    'sentinel.watch.disabled': 'Pas de veille : ATOMA_VIZ_SENTINEL=0 sur ce serveur.',
+    'sentinel.watch.leaseHeld':
+      '{{source}} pid {{pid}} tient la veille sur ce store depuis {{since}} (dernier battement {{beat}}). Une seule veille écrivante par store : ce serveur a cédé.',
+    'sentinel.watch.leaseLost':
+      'Ce serveur a perdu la veille : quelque chose a repris ce store. Il la reprendra de lui-même quand cette veille s’arrêtera.',
+    'sentinel.watch.failing':
+      'Arrêtée après {{count}} passages en échec d’affilée. Dernière erreur : {{error}}',
+    'sentinel.watch.off': 'Ce serveur ne veille pas ({{reason}}).',
+    'sentinel.watch.passes':
+      '{{ticks}} passage(s) · dernier {{at}} en {{ms}}ms · {{runs}} run(s) examinés, {{skipped}} écartés, {{emitted}} constat(s) écrits',
+    'sentinel.watch.never': 'Aucun passage terminé pour l’instant.',
+    'sentinel.watch.slow':
+      'Ce passage a pris {{ms}}ms, et il tourne sur la boucle HTTP. Une trace de cette taille mérite un œil.',
+    'sentinel.watch.headless': 'Une veille sans navigateur : npm run sentinel',
     'sentinel.coverage': 'En vol maintenant',
     'sentinel.coverageEmpty': 'Aucun run en vol. Rien à surveiller à cette seconde.',
     'sentinel.corpus.operator': 'opérateur',

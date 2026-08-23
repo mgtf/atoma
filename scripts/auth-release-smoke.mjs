@@ -196,6 +196,14 @@ function cleanEnv(overrides) {
     'ATOMA_VIZ_TRUSTED_PROXIES',
     'ATOMA_VIZ_DEV_URL',
     'ATOMA_DB_PATH',
+    // The compiled server hosts the mechanical watch. A developer's own
+    // ATOMA_RUNS_DIR would point a resident journal writer at their live
+    // corpus, and the sentinel switches would decide whether this smoke's
+    // children watch at all.
+    'ATOMA_RUNS_DIR',
+    'ATOMA_VIZ_SENTINEL',
+    'ATOMA_VIZ_SENTINEL_INTERVAL_MS',
+    'ATOMA_SENTINEL_COST_ALERT_USD',
     'GITHUB_CLIENT_ID',
     'GITHUB_CLIENT_SECRET',
     'GOOGLE_CLIENT_ID',

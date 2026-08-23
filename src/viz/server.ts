@@ -82,7 +82,23 @@ import {
   operatorRunSource,
   projectRunSource,
   type SentinelDiscovery,
+  type SentinelRunSource,
 } from '../sentinel/sources.js';
+import { SentinelWatch, SENTINEL_DEFAULT_INTERVAL_MS } from '../sentinel/watch.js';
+import {
+  sentinelCostAlertFromEnv,
+  sentinelIntervalFromEnv,
+  startResidentSentinel,
+  unarmedSentinelHealth,
+  vizSentinelEnabled,
+  type ResidentSentinel,
+  type SentinelHealth,
+} from '../sentinel/resident.js';
+import { peekSentinelWatch } from '../sentinel/lease.js';
+// The MCP run lease, read for CONTEXT only (which pid holds the run slot) and
+// never as a detector. `src/sentinel/watch.ts` already reaches for it, so this
+// adds a name, not a dependency.
+import { mcpRunLockPath } from '../mcp/runLock.js';
 
 /**
  * Tiny read-only HTTP server that exposes runs/*.json produced by
@@ -104,10 +120,24 @@ interface Cli {
   dbs: string[];
   /** Optional skills root dir (overrides ATOMA_SKILLS_DIR). */
   skillsDir?: string;
+  /** Refuse to host the mechanical watch, whatever the environment says. */
+  noSentinel: boolean;
+  sentinelIntervalMs?: number;
+  costAlertUsd?: number;
 }
 
 function parseArgs(argv: string[]): Cli {
-  const out: Cli = { dir: './runs', port: 4111, host: '127.0.0.1', dbs: [] };
+  const out: Cli = {
+    // `ATOMA_RUNS_DIR` is where the RUNNER writes, and `viz-dev.mjs` forwards
+    // no `--dir`, so a hardcoded './runs' meant an operator who moved their
+    // corpus had a permanently empty Runs tab and, now, a watch confidently
+    // screening a directory nothing writes to.
+    dir: process.env['ATOMA_RUNS_DIR'] ?? './runs',
+    port: 4111,
+    host: '127.0.0.1',
+    dbs: [],
+    noSentinel: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     const takeValue = (): string => {
@@ -130,7 +160,21 @@ function parseArgs(argv: string[]): Cli {
     } else if (flag === '--host') out.host = takeValue();
     else if (flag === '--db') out.dbs.push(takeValue());
     else if (flag === '--skills-dir') out.skillsDir = takeValue();
-    else throw new Error(`unknown viz argument: ${flag}`);
+    else if (flag === '--no-sentinel') out.noSentinel = true;
+    else if (flag === '--sentinel-interval') {
+      const raw = takeValue();
+      if (!/^\d+$/.test(raw) || Number(raw) < 1_000) {
+        throw new Error('--sentinel-interval must be at least 1000 (ms)');
+      }
+      out.sentinelIntervalMs = Number(raw);
+    } else if (flag === '--cost-alert') {
+      const raw = takeValue();
+      const value = Number(raw);
+      if (!Number.isFinite(value) || value <= 0) {
+        throw new Error('--cost-alert must be a positive number of USD');
+      }
+      out.costAlertUsd = value;
+    } else throw new Error(`unknown viz argument: ${flag}`);
   }
   return out;
 }
@@ -533,6 +577,72 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
   });
   return { store: projectStore, projects, coordinator, githubStore, githubConfig, githubClient };
 })();
+
+/**
+ * THE MECHANICAL WATCH, hosted here.
+ *
+ * `npm run viz`, `npm run viz:dev` and `npm run viz:serve` all start it,
+ * because they are all this file: the launcher supervises the source server and
+ * Vite, and the release entry IS this process. A watch spawned beside the
+ * launcher would have armed the development path and left the release contract
+ * with nothing.
+ *
+ * It exists exactly where the journal does — behind the gate — for a reason
+ * that is not merely mechanical: de-duplication is against the journal, and a
+ * watch with nowhere to write is theatre. The Sentinel screen is gated too, so
+ * an ungated instance would have had a watch nobody could read. The ungated
+ * path says so in the boot banner rather than arming silently, and
+ * `npm run sentinel` is its watch.
+ *
+ * ONE source builder, shared with `/api/admin/sentinel`: the screen must
+ * describe the corpora the watch actually covers, and two builders would drift
+ * the day one of them gains a corpus.
+ */
+function sentinelSources(): SentinelRunSource[] {
+  return [
+    operatorRunSource({ runsDir: RUNS_DIR }),
+    ...(PROJECTS_RUNTIME ? [projectRunSource({ reader: PROJECTS_RUNTIME.store })] : []),
+  ];
+}
+
+const SENTINEL_BOOTED_AT = new Date().toISOString();
+
+const SENTINEL: ResidentSentinel | null = (() => {
+  if (!EVENTS) return null;
+  if (cli.noSentinel) return null;
+  if (!vizSentinelEnabled()) return null;
+  return startResidentSentinel({
+    watch: new SentinelWatch({
+      journal: EVENTS,
+      sources: sentinelSources(),
+      costAlertUsd: cli.costAlertUsd ?? sentinelCostAlertFromEnv(),
+      leasePath: mcpRunLockPath(),
+      source: 'viz-server',
+      logger: (line) => console.error(`[sentinel] ${line}`),
+    }),
+    dbPath: DBS[0]!.path,
+    source: 'viz-server',
+    intervalMs:
+      cli.sentinelIntervalMs ?? sentinelIntervalFromEnv() ?? SENTINEL_DEFAULT_INTERVAL_MS,
+    label: `viz ${cli.host}:${cli.port}`,
+    logger: (line) => console.error(`[sentinel] ${line}`),
+  });
+})();
+
+/** What this process can honestly say about watching. Never an aggregate. */
+function sentinelHealth(): SentinelHealth {
+  if (SENTINEL) return SENTINEL.health();
+  const reason = !EVENTS ? 'ungated' : 'disabled';
+  // Even disarmed, the store can name the watch that IS holding it — a fact,
+  // read fresh, not a claim about the world.
+  return unarmedSentinelHealth(
+    reason,
+    'viz-server',
+    SENTINEL_BOOTED_AT,
+    EVENTS ? peekSentinelWatch(DBS[0]!.path) : null
+  );
+}
+
 
 /** Set-Cookie that removes the oauth transaction cookie. */
 function clearCookie(name: string, secure: boolean, path = '/'): string {
@@ -1996,12 +2106,21 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         );
         return;
       }
-      // WHAT THE SENTINEL SEES — the rule table, the runs it would screen
-      // right now, and its own findings. Read-only and quota-free, like the
-      // watch itself. This endpoint does NOT prove a sentinel process is
-      // running: nothing here is a heartbeat, and inventing one would be a
-      // claim the server cannot make. It answers "what is in flight, and
-      // what has been flagged".
+      // WHAT THE SENTINEL SEES — this server's own watch, the rule table, the
+      // runs it would screen right now, and the findings in the journal.
+      // Read-only and quota-free, like the watch itself.
+      //
+      // `watch` is a fact about THIS PROCESS, which is the only reason it may
+      // be reported at all: the server hosts the tick, so it knows its own
+      // timer. It is never an aggregate — a `npm run sentinel` on another
+      // machine, or against another store, is invisible here — and when this
+      // server is not watching, `incumbent` names the watch holding the store
+      // from the lease row, which is a read, not a claim.
+      //
+      // `live` and `skipped` are discovered FRESH on every request rather than
+      // replayed from the last tick: it is one file read plus one indexed
+      // query, and a screen that showed a 20-second-old list while calling it
+      // "in flight now" would need a disclaimer nobody would read.
       if (pathname === '/api/admin/sentinel') {
         if (!methodAllowed(req, res, 'GET')) return;
         const discovery: SentinelDiscovery[] = [];
@@ -2030,6 +2149,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
               .slice(0, 60)
           : [];
         sendJson(res, 200, {
+          watch: sentinelHealth(),
           rules: sentinelRuleTable(),
           live: discovery.flatMap((entry) =>
             entry.runs.map((run) => ({
@@ -2585,6 +2705,27 @@ server.listen(cli.port, cli.host, () => {
     if (!existsSync(RUNS_DIR)) {
       console.log(`(directory does not exist yet — it will be created when a run is recorded)`);
     }
+  }
+  // THE WATCH, in the banner beside auth and the registries — the honest
+  // substitute for a whole-stack command. `npm run viz` starts the API, the UI
+  // and this; there is nothing else to launch, so there is nothing to name.
+  const health = sentinelHealth();
+  if (health.armed) {
+    console.log(
+      `sentinel: watching every ${Math.round(health.intervalMs / 1000)}s ` +
+        `(${sentinelRuleTable().length} rules, zero tokens, flagging only)`
+    );
+    // The same obligation the CLI banner carries: a laptop that sleeps stops
+    // watching exactly while the run it was watching keeps spending.
+    console.log('  keep this machine awake alongside long runs: caffeinate -i -m');
+  } else if (health.reason === 'ungated') {
+    console.log('sentinel: off (no platform journal on this path — npm run sentinel writes its own)');
+  } else if (health.reason === 'lease-held' && health.incumbent) {
+    console.log(
+      `sentinel: off — ${health.incumbent.source} pid ${health.incumbent.ownerPid} holds the watch on this store`
+    );
+  } else {
+    console.log(`sentinel: off (${health.reason})`);
   }
   if (PROJECTS_RUNTIME?.githubConfig) {
     console.log(`github app: ${PROJECTS_RUNTIME.githubConfig.appSlug}`);

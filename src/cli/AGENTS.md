@@ -50,3 +50,21 @@ remote completion calls to doctor.
 - A project slug is unique per organisation, not per instance. An ambiguous
   reference is refused, never guessed.
 
+## Sentinel
+
+- `npm run sentinel` is one of TWO hosts for the same watch: the gated viz
+  server arms it in-process ([src/viz](../viz/AGENTS.md)), and this command
+  covers what a server cannot — an ungated checkout, another machine, another
+  store, a burn-in batch that owns the machine and must not also run a
+  browser, and `--once` in cron.
+- Resident, it TAKES the store's watch over from a viz server: typing the
+  command is the deliberate act and a browser tab left open must not refuse
+  it. It yields to another live sentinel and exits non-zero naming the
+  incumbent. `--once` takes no lease and still journals.
+- It carries the journal's RETENTION on its own tick, every five minutes. The
+  age cut and the row cap otherwise ride the viz server's sweep timer, which
+  exists only behind the gate — so an ungated watch was the one journal writer
+  in the repository with no retention at all.
+- `ATOMA_SENTINEL_COST_ALERT_USD` is the default for `--cost-alert`, read
+  through the one helper both hosts share. The flag wins, and a threshold is
+  recorded with any result it influenced.

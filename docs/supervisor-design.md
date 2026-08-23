@@ -35,7 +35,7 @@ One resident process cannot do all three jobs, because "watch live",
 
 | stage | what | runs | LLM | may write |
 |---|---|---|---|---|
-| 1. sentinel | mechanical live watch | always, beside viz/MCP | never | journal rows only (+ optional run cancel) |
+| 1. sentinel | mechanical live watch | always, INSIDE the gated viz server (or the CLI) | never | journal rows only (+ optional run cancel) |
 | 2. analyst | post-mortem judgment | after a run ends, never beside one | Claude Code headless, read-only | verdict files only |
 | 3. mender | fix + green/blue redeploy | on a `defect` verdict, gated | Claude Code in an isolated worktree | a branch, then a deploy slot |
 
@@ -61,8 +61,13 @@ and the wrong one here:
 
 ## Stage 1 — the sentinel (P1, in-product)
 
-A long-running `atoma sentinel` process beside `viz:serve` and the MCP
-server:
+LANDED 2026-08-23, with one correction to this design: the watch is not a
+process beside the server, it is a resident tick INSIDE it. `npm run viz`,
+`viz:dev` and `viz:serve` are all the same file, and `viz:serve` is one
+process, so a sibling would have armed the development launcher and left the
+release contract with nothing. `npm run sentinel` remains a first-class host
+for what a server cannot cover, and at most one appending watch holds a store
+(`src/sentinel/lease.ts`). What the stage does, unchanged:
 
 - **Reads**, read-only: the `platform_events` journal, the MCP run lease
   (`~/.atoma/mcp-run-lock.db`), and the active run's trace through the same
@@ -80,8 +85,13 @@ server:
   screen sits.
 - **Emits** journal rows under new closed-vocabulary kinds (`run.anomaly`,
   `security.flagged`) — severity and audience are forced at compile time by
-  the exhaustive maps — and rides the existing push routes. Like the
-  operator CLI, it writes its rows from its own process.
+  the exhaustive maps. It does NOT ride the push routes: both kinds are null
+  audiences. `run.anomaly` never had one, and `security.flagged` shipped with
+  a platform-admin audience that never fired once, because the journal
+  notifies only subscribers in its own process and the only watch was a
+  separate CLI. Hosting the watch in the server would have turned that route
+  on silently, so it was disarmed until the injection screen has a measured
+  noise floor. Re-arming is one line and one measurement.
 - **Single power**: `atoma_run_cancel` as an optional kill switch, journaled.
   Never a modification. Consistent with the standing rule that heuristics
   flag and never judge alone.

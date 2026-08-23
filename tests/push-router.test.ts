@@ -128,6 +128,15 @@ describe('PUSH_ROUTES', () => {
       'push.subscribed',
       'push.unsubscribed',
       'github.installation_linked',
+      // The two SENTINEL kinds. `run.anomaly` was never pushed: an alert
+      // nobody trusts trains the operator to dismiss the channel.
+      // `security.flagged` shipped with a platform-admin audience and never
+      // fired once — the journal notifies only its own process and the only
+      // watch was a separate CLI. Hosting the watch in the viz server would
+      // have turned it on silently, so it is null until the injection screen
+      // has a measured noise floor. See src/viz/push/routes.ts.
+      'run.anomaly',
+      'security.flagged',
     ] as const) {
       expect(PUSH_ROUTES[kind], kind).toBeNull();
     }

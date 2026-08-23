@@ -1474,7 +1474,26 @@ describe('drawLedger', () => {
 
 describe('drawSentinel', () => {
   const auth = makeAuth({ platformAdmin: true });
+  const armedWatch = {
+    armed: true,
+    reason: 'armed',
+    source: 'viz-server',
+    intervalMs: 20_000,
+    startedAt: '2026-08-23T08:00:00.000Z',
+    armedSince: '2026-08-23T08:00:00.000Z',
+    lastTickAt: '2026-08-23T08:00:20.000Z',
+    lastTickMs: 4,
+    ticks: 3,
+    runsScreenedLastTick: 2,
+    skippedLastTick: 1,
+    emittedSinceBoot: 1,
+    consecutiveFailures: 0,
+    lastError: null,
+    incumbent: null,
+  };
+
   const snapshotPayload = {
+    watch: armedWatch,
     rules: [
       { id: 'cost-alert', kind: 'run.anomaly' },
       { id: 'injection-signature', kind: 'security.flagged' },
@@ -1533,11 +1552,12 @@ describe('drawSentinel', () => {
     expect(ctx.scrollMax.sentinel).not.toBeUndefined();
   });
 
-  it('claims no health, and offers no power over a run', () => {
-    // Two invariants in one screen. The watch is a separate process the server
-    // cannot see, so there is no green light; and the sentinel's only possible
-    // power is an unsettled design decision, so no control here may exercise
-    // it. Every button is a navigation to a run.
+  it('claims only what this process can back, and offers no power over a run', () => {
+    // The server hosts the watch now, so it may report ITS OWN timer — which
+    // is exactly why the scope sentence is mandatory in every state: a watch on
+    // another machine or another store is still invisible here. And the
+    // sentinel's only possible power is an unsettled design decision, so no
+    // control may exercise it: every button is a navigation to a run.
     const ctx = createRecordingCtx();
     drawSentinel(
       ctx,
@@ -1545,13 +1565,79 @@ describe('drawSentinel', () => {
       1280,
       720
     );
-    expect(
-      ctx.texts.some((text) => text.value.includes('cannot tell you whether that process'))
-    ).toBe(true);
-    expect(ctx.texts.some((text) => text.value.includes('never a judgment'))).toBe(true);
+    const values = ctx.texts.map((text) => text.value);
+    expect(values.some((value) => value.includes('Watching, one pass every 20s'))).toBe(true);
+    expect(values.some((value) => value.includes('3 pass(es)'))).toBe(true);
+    // The scope, and no aggregate claim anywhere.
+    expect(values.some((value) => value.includes('and only its own'))).toBe(true);
+    expect(values.some((value) => value.includes('invisible here'))).toBe(true);
+    expect(values.some((value) => value.includes('never a judgment'))).toBe(true);
     for (const button of ctx.buttons) {
       expect(button.id.startsWith('sentinel.run.')).toBe(true);
     }
+  });
+
+  it('reports a yielded watch as a fact about the other one, not as a failure', () => {
+    // One appending watch per store. A server that yielded to an operator's
+    // `npm run sentinel` is not broken, and the screen must name the incumbent
+    // rather than render a red light — the reader concludes, the screen
+    // reports.
+    const ctx = createRecordingCtx();
+    drawSentinel(
+      ctx,
+      makeSnapshot(
+        { view: 'sentinel' },
+        {
+          auth,
+          adminSentinel: {
+            ...snapshotPayload,
+            watch: {
+              ...armedWatch,
+              armed: false,
+              reason: 'lease-held',
+              armedSince: null,
+              incumbent: {
+                source: 'cli',
+                ownerPid: 4242,
+                label: 'npm run sentinel',
+                intervalMs: 20_000,
+                startedAt: '2026-08-23T07:55:00.000Z',
+                heartbeatAt: '2026-08-23T08:00:10.000Z',
+              },
+            },
+          },
+        }
+      ),
+      1280,
+      720
+    );
+    const values = ctx.texts.map((text) => text.value);
+    expect(values.some((value) => value.includes('cli pid 4242'))).toBe(true);
+    expect(values.some((value) => value.includes('this server yielded'))).toBe(true);
+    // Still no aggregate, and still no control.
+    expect(values.some((value) => value.includes('invisible here'))).toBe(true);
+    for (const button of ctx.buttons) {
+      expect(button.id.startsWith('sentinel.run.')).toBe(true);
+    }
+  });
+
+  it('says a pass ran long, because that pass shares the HTTP loop', () => {
+    const ctx = createRecordingCtx();
+    drawSentinel(
+      ctx,
+      makeSnapshot(
+        { view: 'sentinel' },
+        {
+          auth,
+          adminSentinel: { ...snapshotPayload, watch: { ...armedWatch, lastTickMs: 900 } },
+        }
+      ),
+      1280,
+      720
+    );
+    expect(
+      ctx.texts.some((text) => text.value.includes('runs on the HTTP loop'))
+    ).toBe(true);
   });
 
   it('says nothing is in flight and nothing has been flagged, without an error', () => {
@@ -1560,7 +1646,10 @@ describe('drawSentinel', () => {
       ctx,
       makeSnapshot(
         { view: 'sentinel' },
-        { auth, adminSentinel: { rules: [], live: [], skipped: [], findings: [] } }
+        {
+          auth,
+          adminSentinel: { watch: armedWatch, rules: [], live: [], skipped: [], findings: [] },
+        }
       ),
       1280,
       720

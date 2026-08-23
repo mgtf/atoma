@@ -177,27 +177,29 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   },
   // --- Platform and security.
   /**
-   * PUSHED, unlike `run.anomaly`: an injection signature in an element result
-   * is rare, it is a security fact, and the operator wants it before the run
-   * that produced it has been forgotten. The payload NEVER reaches the
-   * notification — only the rule that matched and where. A push body carrying
-   * attacker-controlled text would make the notification itself the delivery
-   * channel.
+   * NOT PUSHED, and this line is a retraction.
+   *
+   * It shipped with `audience: { platformAdmins: true }` and an argument for
+   * it — an injection signature is rare, it is a security fact, and the
+   * operator wants it before the run that produced it is forgotten. The
+   * argument was fine and the route never fired once: `PlatformEventLog`
+   * notifies only subscribers in ITS OWN process, and the only watch was a
+   * separate CLI, so nothing was ever delivered.
+   *
+   * Hosting the watch inside this server would have turned that dead route on
+   * silently, as a side effect of "start the watch with the visualizer" — and
+   * the rule behind it is an uncalibrated lexical screen whose FALSE-POSITIVE
+   * rate nobody has measured. An element result is where the system's own
+   * output comes back too: a molecule that writes an install script and reads
+   * it back matches. Notifying an admin on that trains them to dismiss the
+   * channel, which is exactly why `run.anomaly` is null.
+   *
+   * So it lands null and stays null until a burn-in batch gives the rule a
+   * noise floor. The row is still journaled, the Sentinel screen still shows
+   * it, and re-arming is one line — with a measurement behind it. The copy
+   * that was drafted for it is in this file's history.
    */
-  'security.flagged': {
-    audience: { platformAdmins: true },
-    vars: (event) => ({ rule: text(event, 'ruleId', 'unknown'), tool: text(event, 'tool', '?') }),
-    copy: {
-      en: {
-        title: 'Atoma — security signature flagged',
-        body: '{{rule}} matched in a {{tool}} result; read the journal, not the payload',
-      },
-      fr: {
-        title: 'Atoma — signature de sécurité détectée',
-        body: '{{rule}} détectée dans un résultat {{tool}} ; lire le journal, pas la charge',
-      },
-    },
-  },
+  'security.flagged': null,
   'admin.granted': {
     audience: { platformAdmins: true },
     vars: (event) => ({ name: text(event, 'displayName') }),

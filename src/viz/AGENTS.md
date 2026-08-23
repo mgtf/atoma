@@ -17,7 +17,9 @@ Neighbours:
 ## Commands
 
 Visualizer. The GPU client is the product UI (`npm run viz`); MUI is the frozen
-fallback. `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
+fallback. Every launcher here also arms the mechanical watch in-process behind
+the gate (`--no-sentinel`, `--sentinel-interval`, `--cost-alert`, or
+`ATOMA_VIZ_SENTINEL=0` on the launcher path, which forwards no flags). `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
 film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
 `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
 so a local GitHub-gated visualizer does not need a shell export. Compiled
@@ -134,34 +136,43 @@ npm run viz:mark-turn:analyze
   project routes do not exist, so Projects shows its explanatory empty state
   and the DOM mutation form is absent.
 - The ADMIN PLANE is FOUR views, one per job — Organisations (`admin`), the
-  platform journal, the catalogue ledger, and the Sentinel — grouped under one
-  nav heading. It used to be one tab with the journal and the ledger stacked
-  under the organisation list: three questions on one screen, and the journal
-  had no scroll position of its own so it could never page past its first
-  page. `ADMIN_VIEWS` in `store.ts` is the one list, and the rail reads it.
-  Each view's query is enabled on ITS OWN view; opening one must not fetch the
-  other three.
+  platform journal, the catalogue ledger, and the Sentinel — under one nav
+  heading. It was one tab holding all four: three questions on one screen, and
+  one scroll position between them, so the journal could never page past its
+  first page. `ADMIN_VIEWS` in `store.ts` is the one list and the rail reads
+  it; each view's query is enabled on ITS OWN view.
 - The journal PAGES and FILTERS SERVER-SIDE. `nextBefore` is an exclusive
-  `seq` cursor, so a page boundary can neither repeat nor skip a row the way
-  an offset over a growing table would; filters ride the query key. Filtering
-  loaded pages client-side would THIN each page instead of finding more
-  matching rows — three security events shown where the journal holds three
-  hundred. Filters are two closed vocabularies: severity, and the kind's
-  FAMILY (`PLATFORM_EVENT_FAMILIES`, derived from the kind list rather than
-  written a second time). Live tailing polls only while ONE page is loaded:
-  React Query refetches every loaded page, so tailing a ten-page history would
-  re-fetch ten pages every ten seconds to learn about one row.
-  Reaching the bottom asks for the next page — the wheel handler is the only
-  place that knows a view's scroll maximum, so it announces `scroll.end.<view>`
-  through the ordinary activation channel, and the handler is idempotent. The
-  foot-of-list button is the same page by keyboard, not a fallback.
-- The SENTINEL view shows what is watched, what is looked for, and what was
-  flagged — and claims NOTHING else. There is no health indicator: the watch
-  is a separate process (`npm run sentinel`) that the server cannot see, and a
-  green light nothing backs is worse than none. There is no control either: a
-  finding is a flag, never a judgment, and whether the sentinel may cancel a
-  run is still an open decision, so no button here may. Its coverage list
-  spans BOTH run corpora — see [`src/sentinel`](../sentinel/AGENTS.md).
+  `seq` cursor, so a page boundary can neither repeat nor skip a row; filters
+  ride the query key, because filtering loaded pages client-side would THIN
+  each page instead of finding more matching rows. Filters are two closed
+  vocabularies: severity, and the kind's FAMILY
+  (`PLATFORM_EVENT_FAMILIES`, derived from the kind list, never written twice).
+  Live tailing polls only while ONE page is loaded — React Query refetches
+  every loaded page. Reaching the bottom asks for the next page: the wheel
+  handler is the only place that knows a view's scroll maximum, so it announces
+  `scroll.end.<view>` through the ordinary activation channel and the handler
+  is idempotent. The foot-of-list button is that page by keyboard.
+- THE SERVER HOSTS THE MECHANICAL WATCH in-process whenever the auth gate is
+  on: `npm run viz`, `viz:dev` and `viz:serve` are all this file, so one
+  placement arms the development launcher and the release contract alike — a
+  watch spawned beside `viz-dev.mjs` would have armed only the development
+  path. It exists where the journal does, because de-duplication is against
+  the journal and a watch with nowhere to write is theatre; the ungated path
+  says so in the boot banner, and `npm run sentinel` is its watch. That banner
+  line is also the answer to "one command for the whole stack": there is
+  nothing else to launch, so there is no `npm run atoma` — and the MCP server
+  could not join one anyway, spawned as it is by its client over stdio.
+  `sentinelSources()` is shared with `/api/admin/sentinel`, so the screen
+  describes the corpora the watch actually covers.
+- The SENTINEL view may report the watch's health, and ONLY ITS OWN. That
+  became sayable when the tick moved in-process; before, the honest answer was
+  silence. The scope is stated on screen in every state rather than implied, a
+  stale incumbent renders as an age and a timestamp instead of a red light, and
+  an aggregate ("nothing is watching") stays forbidden — a sentinel on another
+  machine or another store is invisible here. Still no control: a finding is a
+  flag, never a judgment, and whether the sentinel may cancel a run is an open
+  decision, so every button on that screen is a navigation. Coverage spans
+  BOTH run corpora — see [`src/sentinel`](../sentinel/AGENTS.md).
 - The agent detail pane names its sections. It showed the system prompt as one
   unlabelled monospace block and nothing else, while the payload already
   carried elements, parameters and provenance. The USER INSTRUCTION has a

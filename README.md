@@ -312,6 +312,7 @@ env -u OPENAI_API_KEY ZAI_API_KEY=... ATOMA_LLM=ollama \
   npm run run:build "…"                         # ChatGPT supervisors + Z.ai executor
 
 npm run viz                       # HMR UI :5173; API :4111 redirects its root there
+                                  # (gated: also hosts the sentinel watch in-process)
 npm run viz:mui                   # frozen DOM/MUI fallback (bugfixes only)
 npm run viz:serve                 # compiled visualizer after npm run build
 npm run skills -- list            # what it learned, and what it refused to compile

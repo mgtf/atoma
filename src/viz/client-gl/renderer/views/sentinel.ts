@@ -3,7 +3,7 @@ import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
 import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
-import { drawJournalRow, journalRowHeight, SEVERITY_COLORS } from './journal-row.js';
+import { clockDate, drawJournalRow, journalRowHeight, SEVERITY_COLORS } from './journal-row.js';
 
 /**
  * THE SENTINEL SCREEN — what is being watched, what is being looked for, and
@@ -14,15 +14,19 @@ import { drawJournalRow, journalRowHeight, SEVERITY_COLORS } from './journal-row
  * operator's `runs/` and every project run the control plane calls running),
  * which rules screen them, and what those rules have said.
  *
- * WHAT THIS SCREEN DELIBERATELY DOES NOT CLAIM. There is no green light. The
- * watch is a separate process (`npm run sentinel`) and the server has no way
- * to know whether it is running — a health indicator here would be a claim
- * nothing backs, which is worse than no indicator. The screen says what it
- * reads: runs in flight, and findings in the journal.
+ * WHAT IT MAY CLAIM, and why that changed. The screen used to say the watch
+ * was a separate process the server could not see, and refused any health
+ * indicator on that ground. The server hosts the tick now, so it can report
+ * ITS OWN timer — armed or not, since when, how long the last pass took — and
+ * the old refusal would have been a false modesty. The scope is stated on the
+ * screen rather than implied: this is one process's account of itself, never
+ * an aggregate, because a sentinel on another machine or another store is
+ * still invisible here. A stale heartbeat renders as an age and a timestamp,
+ * never as a red light: the reader concludes, the screen reports.
  *
- * And no control. A finding is a flag, never a judgment: whether the sentinel
- * may cancel a run at all is an open decision in the design document, so no
- * button here can.
+ * And no control, unchanged. A finding is a flag, never a judgment: whether
+ * the sentinel may cancel a run at all is an open decision in the design
+ * document, so no button here can.
  */
 
 const LIST_TOP = 8;
@@ -94,7 +98,64 @@ export function drawSentinel(
     cursor += Math.max(14, drawn.height) + 12;
   };
 
-  note(snapshot.t('sentinel.processHint'));
+  // ------------------------------------------------------- this server
+  const watch = payload?.watch ?? null;
+  heading(snapshot.t('sentinel.watch'));
+  if (!watch) {
+    note(snapshot.t('sentinel.watch.never'));
+  } else if (watch.armed) {
+    note(
+      snapshot.t('sentinel.watch.armed', {
+        seconds: Math.round(watch.intervalMs / 1000),
+        since: clockDate(watch.armedSince ?? watch.startedAt),
+      })
+    );
+  } else if (watch.reason === 'disabled') {
+    note(snapshot.t('sentinel.watch.disabled'));
+  } else if (watch.reason === 'lease-held' && watch.incumbent) {
+    note(
+      snapshot.t('sentinel.watch.leaseHeld', {
+        source: watch.incumbent.source,
+        pid: watch.incumbent.ownerPid,
+        since: clockDate(watch.incumbent.startedAt),
+        beat: clockDate(watch.incumbent.heartbeatAt),
+      })
+    );
+  } else if (watch.reason === 'lease-lost') {
+    note(snapshot.t('sentinel.watch.leaseLost'));
+  } else if (watch.reason === 'failing') {
+    note(
+      snapshot.t('sentinel.watch.failing', {
+        count: watch.consecutiveFailures,
+        error: truncate(watch.lastError ?? '', 120),
+      })
+    );
+  } else {
+    note(snapshot.t('sentinel.watch.off', { reason: watch.reason }));
+  }
+  if (watch) {
+    note(
+      watch.lastTickAt === null
+        ? snapshot.t('sentinel.watch.never')
+        : snapshot.t('sentinel.watch.passes', {
+            ticks: watch.ticks,
+            at: clockDate(watch.lastTickAt),
+            ms: watch.lastTickMs ?? 0,
+            runs: watch.runsScreenedLastTick,
+            skipped: watch.skippedLastTick,
+            emitted: watch.emittedSinceBoot,
+          })
+    );
+    // One pass that took a quarter of a second is worth an operator's
+    // attention: the tick is synchronous and shares the HTTP loop.
+    if ((watch.lastTickMs ?? 0) > 250) {
+      note(snapshot.t('sentinel.watch.slow', { ms: watch.lastTickMs ?? 0 }));
+    }
+  }
+  // The scope sentence is not optional and not conditional: every state of
+  // this panel is one process talking about itself.
+  note(snapshot.t('sentinel.watch.scope'));
+  note(snapshot.t('sentinel.watch.headless'));
 
   // ------------------------------------------------------------- coverage
   heading(snapshot.t('sentinel.coverage'));

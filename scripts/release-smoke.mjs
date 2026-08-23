@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,10 +111,21 @@ try {
   ]);
   if (exitCode !== 0) throw new Error(`compiled MCP exited ${exitCode}; stderr: ${stderr.slice(-500)}`);
   const port = await freePort();
-  const viz = spawn(process.execPath, [vizEntry, '--host', '127.0.0.1', '--port', String(port)], {
-    cwd: root,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  // EXPLICIT --dir and --db. The compiled server defaults `--dir` from
+  // ATOMA_RUNS_DIR and now hosts a resident watch, so an inherited variable
+  // would aim this smoke at whatever corpus the machine happens to have.
+  const vizRuns = join(root, 'smoke-runs');
+  const viz = spawn(
+    process.execPath,
+    [
+      vizEntry,
+      '--host', '127.0.0.1',
+      '--port', String(port),
+      '--dir', vizRuns,
+      '--db', join(root, 'smoke-store.db'),
+    ],
+    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] }
+  );
   let vizStderr = '';
   viz.stderr.on('data', (chunk) => {
     vizStderr += chunk.toString();

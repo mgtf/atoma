@@ -121,7 +121,12 @@ function openLockDb(path: string): Database.Database {
   return db;
 }
 
-function processExists(pid: number): boolean {
+/**
+ * Is this pid a live process? Exported because the sentinel's watch lease asks
+ * the same question of the same kind of row, and two definitions of "is the
+ * owner still there" is how one of them ends up trusting a recycled pid.
+ */
+export function processExists(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);

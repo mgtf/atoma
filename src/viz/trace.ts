@@ -681,7 +681,15 @@ export class TraceRecorder {
       entry.calls = this.run.totals.calls;
     }
     index.unshift(entry);
-    writeFileSync(indexFile, JSON.stringify(index, null, 2));
+    // Atomic, for the same reason the trace above it is: this file is read by
+    // the viz index, by `atoma runs`, and now by the sentinel's operator
+    // source every tick. A plain write leaves a TORN index visible for the
+    // duration of the write, and a reader that hits that window sees no live
+    // runs at all — a watch that observes nothing, quietly, on a file it was
+    // told to trust.
+    const indexTmp = indexFile + '.tmp';
+    writeFileSync(indexTmp, JSON.stringify(index, null, 2));
+    renameSync(indexTmp, indexFile);
   }
 }
 

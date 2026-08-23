@@ -323,14 +323,49 @@ export interface VizPlatformEventPage {
 }
 
 /**
- * WHAT THE SENTINEL SEES. The rule table, the runs it would screen right now
- * across both corpora, the candidates it had to skip, and its own findings.
+ * One watch's own account of itself. Facts about a TIMER IN A PROCESS — which
+ * is the only reason they may be reported: the viz server hosts the tick, so
+ * it knows its own. Never an aggregate over every watch that might exist.
+ */
+export interface VizSentinelWatchHealth {
+  armed: boolean;
+  /** `armed` | `disabled` | `lease-held` | `lease-lost` | `failing` | … */
+  reason: string;
+  source: string;
+  intervalMs: number;
+  startedAt: string;
+  armedSince: string | null;
+  lastTickAt: string | null;
+  lastTickMs: number | null;
+  ticks: number;
+  runsScreenedLastTick: number;
+  skippedLastTick: number;
+  emittedSinceBoot: number;
+  consecutiveFailures: number;
+  lastError: string | null;
+  /** The watch holding this store when this server is not it. */
+  incumbent: {
+    source: string;
+    ownerPid: number;
+    label: string | null;
+    intervalMs: number;
+    startedAt: string;
+    heartbeatAt: string;
+  } | null;
+}
+
+/**
+ * WHAT THE SENTINEL SEES. This server's own watch, the rule table, the runs it
+ * would screen right now across both corpora, the candidates it had to skip,
+ * and the findings in the journal.
  *
- * Deliberately NOT a health check: nothing here says a sentinel process is
- * running. The server cannot know that, and a green light it cannot justify
- * is worse than none.
+ * `watch` is scoped to THIS PROCESS and says so on screen. It became reportable
+ * when the server started hosting the tick; before that the honest answer was
+ * silence, because a watch in another process is not something a server can
+ * see — and that is still true of any watch but its own.
  */
 export interface VizSentinelSnapshot {
+  watch: VizSentinelWatchHealth | null;
   rules: { id: string; kind: string }[];
   live: {
     runId: string;
