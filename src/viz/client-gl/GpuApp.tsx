@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { projectSlugFromName } from '../../contracts/projects.js';
 import { translate } from '../client/i18n.js';
 import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
@@ -91,15 +92,6 @@ export function GpuApp() {
       <GpuAppContent t={t} />
     </AuthControls>
   );
-}
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63);
 }
 
 function GpuAppContent({
@@ -421,7 +413,7 @@ function GpuAppContent({
     const installation = githubInstallationsQuery.data?.find(
       (candidate) => candidate.installationId === installationId
     );
-    const slug = slugify(name);
+    const slug = projectSlugFromName(name);
     if (!name || !slug || !installation) {
       setProjectError(t('projects.actionFailed'));
       return;

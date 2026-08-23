@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  createProjectInputSchema,
+  DEFAULT_REPOSITORY_VISIBILITY,
+  projectSlugFromName,
+  projectSlugSchema,
+} from '../src/contracts/projects.js';
+import {
   DECORATED_CMD_RE,
   EXAMPLE_HTTP_ENTRY,
   EXAMPLE_SHELL_ENTRY,
@@ -389,5 +395,50 @@ describe('decorated cmds: `; echo EXIT=$?` corrupts the record — all three sid
     expect(DECORATED_CMD_RE.test('node x.js; echo done')).toBe(false);
     expect(DECORATED_CMD_RE.test('node build.js && node test.js')).toBe(false);
     expect(DECORATED_CMD_RE.test('node x.js')).toBe(false);
+  });
+});
+
+/**
+ * ONE rule for turning a project name into a slug. It had two copies — the GL
+ * create form and, with a different bound, the curriculum's task ids — and the
+ * CLI would have been a third. The schema that VALIDATES a slug and the
+ * function that DERIVES one are the same rule seen from either side, so they
+ * live together.
+ */
+describe('project slugs', () => {
+  it('derives a slug the schema accepts, and refuses what it cannot', () => {
+    expect(projectSlugFromName('Stopwatch E2E two')).toBe('stopwatch-e2e-two');
+    expect(projectSlugFromName('  Weather Lab!  ')).toBe('weather-lab');
+    expect(projectSlugFromName('Café — 2026 // v2')).toBe('caf-2026-v2');
+    for (const name of ['Stopwatch E2E two', 'Weather Lab!', 'a', 'Café 2026']) {
+      expect(projectSlugSchema.safeParse(projectSlugFromName(name)).success, name).toBe(true);
+    }
+    // A name of pure punctuation derives NOTHING, and the schema is what says
+    // so — the deriver does not invent a slug to be helpful.
+    expect(projectSlugFromName('!!! ???')).toBe('');
+    expect(projectSlugSchema.safeParse('').success).toBe(false);
+  });
+
+  it('never leaves a trailing separator, at any length', () => {
+    // The 63-character cut can land on a hyphen, and a trailing hyphen is
+    // exactly what the schema refuses — so the cut is trimmed after it, not
+    // before.
+    const name = `${'a'.repeat(62)} tail`;
+    const slug = projectSlugFromName(name);
+    expect(slug.endsWith('-')).toBe(false);
+    expect(slug.length).toBeLessThanOrEqual(63);
+    expect(projectSlugSchema.safeParse(slug).success).toBe(true);
+  });
+
+  it('defaults a repository to private, and the schema agrees', () => {
+    // The default lives in ONE place so the create form and an API caller
+    // cannot disagree about what happens when nobody chooses.
+    expect(DEFAULT_REPOSITORY_VISIBILITY).toBe('private');
+    const parsed = createProjectInputSchema.parse({
+      name: 'Weather Lab',
+      slug: 'weather-lab',
+      repositoryTarget: { installationId: '501', owner: 'atoma-org', name: 'weather-lab' },
+    });
+    expect(parsed.repositoryTarget.visibility).toBe(DEFAULT_REPOSITORY_VISIBILITY);
   });
 });

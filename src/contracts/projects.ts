@@ -35,6 +35,25 @@ export const projectSlugSchema = z
   .min(1)
   .max(63)
   .regex(/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/, 'expected a lowercase kebab-case slug');
+/**
+ * How a project NAME becomes a slug — one definition, beside the schema that
+ * says what a valid slug is, because the two are the same rule seen from
+ * either side. The GL create form and the CLI both call it; a third copy is
+ * how one of them starts truncating at a different length.
+ *
+ * It can return an empty string (a name of pure punctuation), which
+ * `projectSlugSchema` then refuses. That refusal is the caller's to report.
+ */
+export function projectSlugFromName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/g, '');
+}
+
 export const projectPromptSchema = z.string().trim().max(4_000);
 export const projectGoalSchema = z.string().trim().min(1).max(4_000);
 export const idempotencyKeySchema = z

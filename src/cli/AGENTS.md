@@ -55,6 +55,12 @@ remote completion calls to doctor.
   ever and no journal row said why. A CLI that starts a project run must
   finish it the way the browser does, or "started from a terminal" quietly
   means half a product. It prints the publication's own state beside the run's.
+- PUBLICATION NEEDS THE APP IN THE PROCESS ENVIRONMENT, so the compiled
+  `npm run projects` cannot publish on a checkout: only source launchers fill
+  unset keys from `.env`, by contract. A delivered run then reports
+  `not published` and names the way out (`projects:dev`, or export the App
+  variables). The run itself is unaffected — the transport is chosen by
+  `ATOMA_LLM`, which a caller passes explicitly.
 - `publish --run <id>` re-drives a delivered run whose publication never
   reached GitHub. `retryPublication` shipped with a route, a role check and a
   test, and NOTHING called it; this is that caller. The publication row stays

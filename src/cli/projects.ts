@@ -29,6 +29,11 @@ import { snapshotGitHubAppConfig } from '../github/config.js';
 import { resolveGitHubUserAccessToken } from '../github/tokens.js';
 import { PlatformEventLog } from '../platform/events.js';
 import { eventLabel } from '../contracts/platformEvents.js';
+import {
+  createProjectInputSchema,
+  DEFAULT_REPOSITORY_VISIBILITY,
+  projectSlugFromName,
+} from '../contracts/projects.js';
 import { storeDbPath } from '../core/stores.js';
 import { parseCliArgs } from './args.js';
 import { applyCheckoutDotenvForSourceEntry } from './loadDotenv.js';
@@ -37,6 +42,9 @@ const USAGE = `atoma projects — organisation-scoped runs
 
 usage:
   npm run projects -- list [--db path]
+  npm run projects -- create --as <who> --name "<name>" [--repo <repo-name>]
+                             [--visibility private|public] [--installation <id>]
+                             [--slug <slug>] [--family <family>] [--prompt "<text>"]
   npm run projects -- run --project <slug-or-id> --as <principal-id-or-email> "<goal>" [--db path]
   npm run projects -- publish --project <slug-or-id> --as <who> --run <run-id> [--db path]
 
@@ -54,6 +62,18 @@ subscription transport:
   grant-admin\` can mint, and every such run is journaled as
   \`run.host_subscription\`.
 
+create:
+  Enforces the same rules as the browser route: the repository target must be
+  an ACTIVE GitHub installation linked to the principal's organisation, the
+  payload goes through the one create schema, and a duplicate slug is refused
+  rather than suffixed. The repository itself is created at the first
+  PUBLICATION, not here, so a fresh project sits at repository status
+  \`pending\`.
+
+  --visibility is chosen ONCE and cannot be changed afterwards: nothing in this
+  product can move it, and changing it on GitHub breaks the project. It
+  defaults to private, because nothing here reviews what a run publishes.
+
 publish:
   A delivered run publishes automatically. \`publish\` re-drives one whose
   publication never reached GitHub — an App configured after the fact, a
@@ -64,6 +84,13 @@ publish:
 
 flags:
   --db <path>                use this product store
+  --name "<name>"            project name (create only)
+  --slug <slug>              slug, derived from the name when omitted
+  --repo <repo-name>         GitHub repository name, defaults to the slug
+  --installation <id>        GitHub installation; required only if several
+  --visibility <v>           private (default) or public — permanent
+  --family <family>          run family, default build
+  --prompt "<text>"          the project's initial prompt, optional
   --project <slug-or-id>     target project (required for run and publish)
   --as <id-or-email>         principal the run is attributed to (required)
   --run <run-id>             the delivered run to publish (publish only)
@@ -81,6 +108,140 @@ function safeTerminal(value: string): string {
 function fail(message: string): never {
   process.stderr.write(`atoma projects: ${message}\n`);
   process.exit(1);
+}
+
+/**
+ * Create a project from the terminal, under the SAME rules as the browser
+ * route (`ProjectService.createProject`): one create schema, an installation
+ * that must be active and belong to the principal's organisation, and a
+ * duplicate slug refused rather than suffixed.
+ *
+ * It exists because the CLI could list, run and publish — everything except
+ * the step that starts it all — so an operator with no browser could not use
+ * their own product end to end. The rules are restated here rather than
+ * shared, because the service's method takes an HTTP request and a session
+ * viewer; what IS shared is the schema and the store method that enforce them.
+ */
+function createProject(
+  auth: AuthStore,
+  projects: ProjectStore,
+  dbPath: string,
+  flags: Record<string, string | undefined>
+): void {
+  const asRef = flags['as'];
+  if (typeof asRef !== 'string' || asRef.length === 0) fail('--as <principal-id-or-email> is required');
+  const name = (flags['name'] ?? '').trim();
+  if (name.length === 0) fail('--name "<project name>" is required');
+
+  let principal: { principalId: string; displayName: string };
+  try {
+    principal = auth.resolvePrincipalRef(asRef);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+  const memberships = auth.listOrganisationsForPrincipal(principal.principalId);
+  if (memberships.length === 0) fail(`principal ${principal.principalId} belongs to no organisation`);
+  if (memberships.length > 1) {
+    fail(
+      `${safeTerminal(principal.displayName)} belongs to ${memberships.length} organisations; ` +
+        'this command creates in one, so it refuses to guess'
+    );
+  }
+  const orgId = memberships[0]!.orgId;
+
+  // The GitHub App is required, exactly as the route requires it: a project
+  // with no repository target is a project that can never publish.
+  const github = GitHubStore.open(dbPath);
+  const active = github.listInstallations(orgId).filter((row) => row.status === 'active');
+  const installationRef = flags['installation'];
+  const installation =
+    typeof installationRef === 'string' && installationRef.length > 0
+      ? active.find((row) => row.installationId === installationRef)
+      : active.length === 1
+        ? active[0]
+        : undefined;
+  if (!installation) {
+    if (active.length === 0) {
+      fail(`organisation ${orgId} has no active GitHub installation — connect one in the visualizer`);
+    }
+    fail(
+      `--installation <id> is required: ${active.length} active installations (` +
+        `${active.map((row) => `${row.installationId}=${row.accountLogin}`).join(', ')})`
+    );
+  }
+
+  const slug = (flags['slug'] ?? projectSlugFromName(name)).trim();
+  const repository = (flags['repo'] ?? slug).trim();
+  const rawVisibility = flags['visibility'];
+  if (rawVisibility !== undefined && rawVisibility !== 'private' && rawVisibility !== 'public') {
+    fail('--visibility must be private or public');
+  }
+  const visibility = rawVisibility ?? DEFAULT_REPOSITORY_VISIBILITY;
+
+  const parsed = createProjectInputSchema.safeParse({
+    name,
+    slug,
+    initialPrompt: flags['prompt'] ?? '',
+    ...(flags['family'] ? { family: flags['family'] } : {}),
+    repositoryTarget: {
+      installationId: installation.installationId,
+      owner: installation.accountLogin,
+      name: repository,
+      visibility,
+    },
+  });
+  if (!parsed.success) {
+    fail(
+      `invalid project: ${parsed.error.issues
+        .map((issue) => `${issue.path.join('.') || 'input'} ${issue.message}`)
+        .join('; ')}`
+    );
+  }
+
+  const events = PlatformEventLog.open(dbPath);
+  let project;
+  try {
+    project = projects.createProject({
+      orgId,
+      principalId: principal.principalId,
+      project: parsed.data,
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      /UNIQUE constraint failed: projects\.org_id, projects\.slug/.test(error.message)
+    ) {
+      fail(`a project with slug "${safeTerminal(slug)}" already exists in this organisation`);
+    }
+    throw error;
+  }
+  // Same row the route writes, `cli` actor — because that is what asked.
+  events.append({
+    kind: 'project.created',
+    actorType: 'cli',
+    actorId: null,
+    orgId,
+    projectId: project.projectId,
+    summary: `Project "${eventLabel(project.name)}" created from the CLI`,
+    detail: {
+      slug: project.slug,
+      family: project.family,
+      visibility: project.repositoryTarget.visibility,
+    },
+  });
+
+  process.stdout.write(
+    `created ${project.slug} (${project.projectId})\n` +
+      `  org          ${orgId}\n` +
+      `  as           ${safeTerminal(principal.displayName)}\n` +
+      `  repository   ${project.repositoryTarget.owner}/${project.repositoryTarget.name}` +
+      ` (${project.repositoryTarget.visibility}, permanent)\n` +
+      `  installation ${installation.installationId} ${installation.accountLogin}` +
+      ` (${installation.targetType})\n` +
+      `  status       repository ${project.repositoryStatus} — created at the first publication\n` +
+      `\nstart a run:\n` +
+      `  npm run projects -- run --project ${project.slug} --as ${safeTerminal(asRef)} "<goal>"\n`
+  );
 }
 
 /**
@@ -124,7 +285,19 @@ async function main(): Promise<void> {
   applyCheckoutDotenvForSourceEntry();
   const args = parseCliArgs(process.argv, {
     booleanFlags: ['help'],
-    valueFlags: ['db', 'project', 'as', 'run'],
+    valueFlags: [
+      'db',
+      'project',
+      'as',
+      'run',
+      'name',
+      'slug',
+      'repo',
+      'installation',
+      'visibility',
+      'family',
+      'prompt',
+    ],
     undeclared: 'discard',
   });
   const command = args.command ?? 'help';
@@ -153,6 +326,11 @@ async function main(): Promise<void> {
         );
       }
     }
+    return;
+  }
+
+  if (command === 'create') {
+    createProject(auth, projects, dbPath, args.flags);
     return;
   }
 
@@ -304,7 +482,13 @@ async function main(): Promise<void> {
     // The missing caller. `retryPublication` shipped with a route, a role
     // check and a test, and nothing in the product ever called it — so a
     // delivered run whose artifact never reached GitHub had no way back.
-    if (!publisher) fail('this instance has no GitHub App configured, so nothing can be published');
+    if (!publisher) {
+      fail(
+        'no GitHub App in this process environment, so nothing can be published — ' +
+          'the compiled CLI does not read checkout .env: use npm run projects:dev ' +
+          'or export ATOMA_GITHUB_APP_*'
+      );
+    }
     let published;
     try {
       published = await coordinator.retryPublication(target.orgId, String(runRef));
@@ -366,7 +550,9 @@ async function main(): Promise<void> {
       process.stdout.write(
         publisher
           ? '  no publication was recorded for this delivered run\n'
-          : '  not published: this instance has no GitHub App configured\n'
+          : '  not published: no GitHub App in this process environment.\n' +
+            '  The COMPILED cli does not read checkout .env by contract — run\n' +
+            '  npm run projects:dev, or export ATOMA_GITHUB_APP_*.\n'
       );
     } else {
       process.stdout.write(`  publication ${publication.status}\n`);
