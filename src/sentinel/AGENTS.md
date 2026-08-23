@@ -148,7 +148,11 @@ Neighbours:
   browser validation and a file read share no scale.
 - Adding a rule is adding a mechanism: it follows the COOLING-OFF contract —
   collect incidents, design once, land reviewed — never same-day reaction to
-  the run that surfaced it.
+  the run that surfaced it. The pile so far:
+  [the blind spot measured 2026-08-23](../../docs/incidents/sentinel-blind-spot-2026-08-23.md)
+  — every content rule keys on IDENTITY (same args, same error, same tool's
+  median), so a model that keeps VARYING a failing attempt is invisible: 25
+  validations, 14 failures, 3 escalations, $1.10, zero findings.
 - The sentinel's only possible power is a journaled `atoma_run_cancel`, and
   whether it has it at all is still an open decision in the design document.
   Until that is settled the table cannot express it, and no row here is
