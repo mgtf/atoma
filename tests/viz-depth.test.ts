@@ -53,7 +53,14 @@ describe('viz visual depth contract', () => {
 
   it('lights only the Pixi foreground while leaving the ambient field unfiltered', () => {
     const renderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
-    expect(renderer).toMatch(/stage\.addChild\(this\.ambientRoot, this\.stage, this\.markRoot\)/);
+    // Layer ORDER, bottom to top: the ambient field, the filtered UI stage,
+    // the crystal, and the hover bubble last so it draws over all of them.
+    expect(renderer).toMatch(
+      /stage\.addChild\(this\.ambientRoot, this\.stage, this\.markRoot, this\.tooltipRoot\)/
+    );
+    // The bubble is chrome, not lit surface: the pointer light must not smear
+    // the text a reader opened it to read.
+    expect(renderer).not.toMatch(/this\.tooltipRoot\.filters\s*=/);
     expect(renderer).toMatch(/drawAmbientGrid\(this\.ambientRoot/);
     expect(renderer).toMatch(/this\.stage\.filters = \[filter\]/);
     expect(renderer).not.toMatch(/this\.ambientRoot\.filters\s*=/);

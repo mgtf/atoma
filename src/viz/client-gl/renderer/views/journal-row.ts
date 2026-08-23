@@ -3,6 +3,7 @@ import type { VizPlatformEvent } from '../../../client/types.js';
 import type { RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS } from '../../theme.js';
 import { truncate } from '../copy.js';
+import { relativeTime, timestampTooltip } from '../relative-time.js';
 
 /**
  * ONE journal row, drawn in one place.
@@ -63,6 +64,12 @@ export function drawJournalRow(
     readonly y: number;
     readonly innerWidth: number;
     readonly compact: boolean;
+    /**
+     * Show HOW LONG AGO instead of a wall clock. Needs the reader's locale and
+     * translator: the phrase is translated, and the hover bubble carries the
+     * exact instant formatted in that locale.
+     */
+    readonly relative?: { readonly t: (key: string, vars?: Record<string, unknown>) => string; readonly locale: string };
     /** Absolute timestamps, for a list that is not "the last few minutes". */
     readonly withDate?: boolean;
     /** One extra muted line under the summary. Already bounded by the caller. */
@@ -71,14 +78,32 @@ export function drawJournalRow(
 ): void {
   const { x, y, innerWidth, compact } = options;
   const color = SEVERITY_COLORS[event.severity] ?? GPU_COLORS.muted;
-  const stamp = options.withDate ? clockDate(event.at) : clockTime(event.at);
-  const stampWidth = options.withDate ? 132 : 64;
+  const relative = options.relative;
+  // TOLERANT, like the kind and severity below: a stamp this bundle cannot
+  // parse shows its RAW value rather than an empty column, so bad data from a
+  // newer server is visible instead of silently blank.
+  const stamp = relative
+    ? relativeTime(event.at, relative.t, relative.locale) || truncate(event.at, 19)
+    : options.withDate
+      ? clockDate(event.at)
+      : clockTime(event.at);
+  const stampWidth = relative ? 118 : options.withDate ? 132 : 64;
   ctx.text(parent, stamp, x + 8, y, {
     size: 9,
     color: GPU_COLORS.muted,
-    mono: true,
+    mono: !relative,
     width: stampWidth,
+    singleLine: true,
   });
+  // The relative phrase is lossy BY DESIGN, so the exact instant has to stay
+  // reachable. It is on the stamp only: the row's other fields say what they
+  // mean already.
+  if (relative) {
+    const exact = timestampTooltip(event.at, relative.locale);
+    if (exact) {
+      ctx.tooltip(parent, { x: x + 8, y, width: stampWidth, height: 13, text: exact });
+    }
+  }
   ctx.text(parent, truncate(event.kind, 28), x + stampWidth + 14, y, {
     size: 10,
     color,

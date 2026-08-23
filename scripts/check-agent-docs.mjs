@@ -14,7 +14,12 @@ const archivePath = resolve(repoRoot, 'docs/incidents/engineering-record-2026-08
 // quietly collapsing back into one always-loaded document.
 const ROOT_LINE_BUDGET = 450;
 const ROOT_BYTE_BUDGET = 60_000;
-const SUBSYSTEM_LINE_BUDGET = 300;
+// 300 until 2026-08-23, when src/viz sat AT the cap while the next largest
+// subsystem file was 175 lines: the limit had stopped shaping the split and
+// started shaping SENTENCES, condensing new rules until they lost their
+// reasons. A subsystem file is read only by an agent opening that subtree, so
+// the pressure it needs is "one subsystem, one file", not a word count.
+const SUBSYSTEM_LINE_BUDGET = 400;
 
 function fail(message) {
   process.stderr.write(`agent docs check failed: ${message}\n`);

@@ -68,6 +68,7 @@ import {
 } from './renderer/tuning-layout.js';
 import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
 import { packMarkCaustic, readMarkFieldCaustic } from './mark-field-light.js';
+import { TooltipLayer } from './renderer/tooltip.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
@@ -344,6 +345,13 @@ export class GpuRenderer {
    * would otherwise leave a listener on the shared style holding it alive.
    * The style setter does unsubscribe, which is why this goes through it.
    */
+  /**
+   * The hover bubble. Its own sibling ABOVE the crystal, so no scene rebuild
+   * and no view's container transform can touch it, and it draws over
+   * everything including the account menu.
+   */
+  private tooltipLayer: TooltipLayer | null = null;
+  private readonly tooltipRoot = new Container();
   private readonly labels = new LabelCache<Text>({
     detach: (label) => label.removeFromParent(),
     release: (label) => {
@@ -510,6 +518,30 @@ export class GpuRenderer {
   private readonly tuningPointerUp = () => {
     this.tuningDrag = null;
     this.turnDrag = null;
+  };
+
+  /**
+   * Moves the hover bubble from the SAME mutable pointer sample the pointer
+   * light reads, once per frame. Regions were declared in renderer pixels by
+   * the last render, so the pointer is converted the same way.
+   */
+  private readonly updateTooltip = () => {
+    const tooltip = this.tooltipLayer;
+    if (!tooltip) return;
+    const pointer = readPointerLight();
+    const bounds = this.app.canvas.getBoundingClientRect();
+    const local = pointerClientToRenderer(
+      pointer.clientX,
+      pointer.clientY,
+      bounds,
+      this.app.screen.width,
+      this.app.screen.height
+    );
+    tooltip.update(
+      { x: local.x, y: local.y, active: pointer.active },
+      performance.now(),
+      { width: this.app.screen.width, height: this.app.screen.height }
+    );
   };
 
   private readonly updatePointerLight = (ticker: Ticker) => {
@@ -744,7 +776,10 @@ export class GpuRenderer {
     }
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
-    this.app.stage.addChild(this.ambientRoot, this.stage, this.markRoot);
+    this.tooltipRoot.eventMode = 'none';
+    this.app.stage.addChild(this.ambientRoot, this.stage, this.markRoot, this.tooltipRoot);
+    this.tooltipLayer = new TooltipLayer(this.tooltipRoot);
+    this.app.ticker.add(this.updateTooltip);
     this.farField = createFarField();
     if (this.farField) {
       this.ambientRoot.addChild(this.farField.mesh);
@@ -824,6 +859,9 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    this.app.ticker.remove(this.updateTooltip);
+    this.tooltipLayer?.destroy();
+    this.tooltipLayer = null;
     this.app.ticker.remove(this.updatePointerLight);
     this.app.ticker.remove(this.updateCastShadows);
     this.app.ticker.remove(this.tickFarField);
@@ -912,6 +950,7 @@ export class GpuRenderer {
       child.destroy({ children: true });
     }
     this.avatarOrbsRetained = new Set<string>();
+    this.tooltipLayer?.beginRender();
     this.metrics.visibleLabels = [];
     this.metrics.hitTargets = [];
     this.metrics.runCollapseOffset = 0;
@@ -1083,6 +1122,33 @@ export class GpuRenderer {
     };
     this.metrics.hitTargets.push(projected);
     return projected;
+  }
+
+  /**
+   * Declare a hoverable region that shows `text` in the shared bubble.
+   *
+   * Coordinates are LOCAL to `parent`, like `recordHitTarget`'s, and are
+   * projected here while the parent transform is still live — a view drawn
+   * into the offset content viewport must not have to know its own offset.
+   */
+  tooltip(
+    parent: Container,
+    region: { x: number; y: number; width: number; height: number; text: string }
+  ): void {
+    const layer = this.tooltipLayer;
+    if (!layer) return;
+    const start = parent.toGlobal({ x: region.x, y: region.y });
+    const end = parent.toGlobal({
+      x: region.x + region.width,
+      y: region.y + region.height,
+    });
+    layer.register({
+      x: Math.min(start.x, end.x),
+      y: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+      text: region.text,
+    });
   }
 
   /** Detail bounds are a plain Rectangle, so project the view's x offset once. */
@@ -3468,6 +3534,7 @@ export type RendererCtx = Pick<
   | 'text'
   | 'panel'
   | 'recordHitTarget'
+  | 'tooltip'
   | 'button'
   | 'navButton'
   | 'filterButton'

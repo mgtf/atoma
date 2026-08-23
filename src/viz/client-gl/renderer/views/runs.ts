@@ -1,10 +1,10 @@
 import { Container, Graphics, Rectangle } from 'pixi.js';
+import { relativeTime, timestampTooltip } from '../relative-time.js';
 import {
   buildAtomMap,
   coerceEventFilters,
   fmtCost,
   fmtMs,
-  fmtTime,
   inFlightLlmEvents,
   isRunLive,
   runElapsedMs,
@@ -159,17 +159,25 @@ export function drawRuns(
     weight: '700',
     width: leftWidth - 28,
   });
-  ctx.text(
-    ctx.root,
-    [heading.family, fmtTime(run.startedAt)].filter(Boolean).join('  ·  '),
-    leftX + 14,
-    top + 34,
-    {
-      size: 11,
-      color: GPU_COLORS.muted,
+  // WHEN this run happened, as an age. The exact instant is one hover away —
+  // `fmtTime` still formats it, in the reader's locale, inside the bubble.
+  const startedAge = relativeTime(run.startedAt, snapshot.t, snapshot.state.locale);
+  const subtitle = [heading.family, startedAge].filter(Boolean).join('  ·  ');
+  ctx.text(ctx.root, subtitle, leftX + 14, top + 34, {
+    size: 11,
+    color: GPU_COLORS.muted,
+    width: leftWidth - 28,
+  });
+  const startedExact = timestampTooltip(run.startedAt, snapshot.state.locale);
+  if (startedExact && startedAge) {
+    ctx.tooltip(ctx.root, {
+      x: leftX + 14,
+      y: top + 34,
       width: leftWidth - 28,
-    }
-  );
+      height: 15,
+      text: startedExact,
+    });
+  }
   // What happened to this run, always visible: the header used to flag only
   // LIVE, so a cancelled or failed run looked exactly like a delivered one
   // (2026-08-15 review of a real cancelled run).

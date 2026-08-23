@@ -5,6 +5,22 @@ export type Locale = 'en' | 'fr';
 export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
   en: {
     'lang.name': 'English',
+    // Relative timestamps. One vocabulary, rendered by
+    // client-gl/renderer/relative-time.ts, which owns the thresholds. `.one`
+    // fires the singular when count === 1, so 'time.daysAgo' never says
+    // "1 days". Past two weeks the client shows an exact date instead.
+    'time.secondsAgo': 'a few seconds ago',
+    'time.oneMinuteAgo': 'a minute ago',
+    'time.minutesAgo': 'a few minutes ago',
+    'time.oneHourAgo': 'an hour ago',
+    'time.hoursAgo': '{{count}} hours ago',
+    'time.hoursAgo.one': 'an hour ago',
+    'time.yesterday': 'yesterday',
+    'time.dayBeforeYesterday': 'the day before yesterday',
+    'time.daysAgo': '{{count}} days ago',
+    'time.daysAgo.one': 'yesterday',
+    'time.weeksAgo': '{{count}} weeks ago',
+    'time.weeksAgo.one': 'a week ago',
     // Nav rail group headings. The rail is the GL client's nav; the frozen
     // MUI fallback has a tab bar and never reads these.
     'nav.group.workspace': 'Workspace',
@@ -689,6 +705,18 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
   },
   fr: {
     'lang.name': 'Français',
+    'time.secondsAgo': 'il y a quelques secondes',
+    'time.oneMinuteAgo': 'il y a une minute',
+    'time.minutesAgo': 'il y a quelques minutes',
+    'time.oneHourAgo': 'il y a une heure',
+    'time.hoursAgo': 'il y a {{count}} heures',
+    'time.hoursAgo.one': 'il y a une heure',
+    'time.yesterday': 'hier',
+    'time.dayBeforeYesterday': 'avant-hier',
+    'time.daysAgo': 'il y a {{count}} jours',
+    'time.daysAgo.one': 'hier',
+    'time.weeksAgo': 'il y a {{count}} semaines',
+    'time.weeksAgo.one': 'il y a une semaine',
     'nav.group.workspace': 'Espace de travail',
     'nav.group.operate': 'Exploitation',
     'nav.group.admin': 'Admin',

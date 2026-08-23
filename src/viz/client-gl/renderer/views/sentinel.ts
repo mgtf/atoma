@@ -317,7 +317,7 @@ export function drawSentinel(
           y: rowY,
           innerWidth,
           compact,
-          withDate: true,
+          relative: { t: snapshot.t, locale: snapshot.state.locale },
           extra: [ruleId, corpus, finding.runId ?? ''].filter(Boolean).join(' · '),
         });
         if (finding.runId) {

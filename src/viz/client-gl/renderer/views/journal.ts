@@ -161,7 +161,7 @@ export function drawJournal(
           y: rowY,
           innerWidth,
           compact,
-          withDate: true,
+          relative: { t: snapshot.t, locale: snapshot.state.locale },
         });
       }
       rowY += rowHeight;

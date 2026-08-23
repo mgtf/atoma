@@ -129,6 +129,8 @@ interface RecordingCtx extends RendererCtx {
   texts: RecordedText[];
   buttons: RecordedButton[];
   filterButtons: RecordedButton[];
+  /** Hover bubbles the view declared, in renderer space. */
+  tooltips: { x: number; y: number; width: number; height: number; text: string }[];
   /** Panel frames, with the layer each was drawn into. */
   panels: { parent: Container; x: number; y: number; width: number; height: number }[];
   /** Account orbs the view asked the renderer to retain, in draw order. */
@@ -203,6 +205,7 @@ function createRecordingCtx(): RecordingCtx {
     root: new Container(),
     markRoot: new Container(),
     texts: [],
+    tooltips: [],
     buttons: [],
     filterButtons: [],
     tuningRows: [],
@@ -251,6 +254,10 @@ function createRecordingCtx(): RecordingCtx {
       graphics.rect(x, y, Math.max(0, width), Math.max(0, height));
       parent.addChild(graphics);
       return graphics;
+    },
+    tooltip(parent, region) {
+      const start = parent.toGlobal({ x: region.x, y: region.y });
+      ctx.tooltips.push({ ...region, x: start.x, y: start.y });
     },
     recordHitTarget(parent, target) {
       const start = parent.toGlobal({ x: target.x, y: target.y });
@@ -1322,8 +1329,19 @@ describe('drawJournal', () => {
     const failed = ctx.texts.find((text) => text.value === 'publication.failed')!;
     const created = ctx.texts.find((text) => text.value === 'org.created')!;
     expect(failed.y).toBeLessThan(created.y);
-    // An absolute stamp: this list spans more than the last few minutes.
-    expect(values).toContain('2026-08-21 10:30:00');
+    // The stamp is now an AGE, so the fixture's own timestamp decides which
+    // bucket it lands in. Both events above are stamped at a FIXED 2026-08
+    // date, which slides through every bucket as the calendar moves, so the
+    // assertion is only that the wall clock is gone and that the exact instant
+    // stayed reachable in a bubble — the buckets themselves are pinned against
+    // a frozen `now` in tests/viz-relative-time.test.ts.
+    expect(values).not.toContain('2026-08-21 10:30:00');
+    expect(ctx.tooltips.map((tip) => tip.text)).toContain(
+      new Date('2026-08-21T10:30:00.000Z').toLocaleString('en', {
+        dateStyle: 'full',
+        timeStyle: 'medium',
+      })
+    );
     expect(ctx.scrollMax.journal).not.toBeUndefined();
   });
 

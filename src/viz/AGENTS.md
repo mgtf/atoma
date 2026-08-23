@@ -64,6 +64,22 @@ npm run viz:mark-turn:analyze
   both backends.
 - Keep GPU animation state out of React/Zustand hot paths. Use mutable samples
   read once per frame; do not rebuild the scene for pointer motion.
+- The hover bubble is ONE bubble, on its own sibling layer above the crystal,
+  and it obeys the rule above: views declare RECTANGLES per render through
+  `ctx.tooltip` (local coordinates, projected while the parent transform is
+  live), and `renderer/tooltip.ts` moves the bubble from the same pointer
+  sample the pointer light reads. That layer is never filtered — the pointer
+  light must not smear text a reader opened the bubble to read — and never
+  hit-tested, so it cannot eat a click meant for the row under it. The canvas
+  is one DOM surface, so a Pixi label cannot carry a native `title=`; do not
+  add a DOM overlay for one instead.
+- Relative ages come from `renderer/relative-time.ts` alone: it owns the
+  buckets and the two-week horizon past which an exact date is shown. NOT
+  `Intl.RelativeTimeFormat`, which cannot say "hier" or "il y a quelques
+  minutes"; it still formats the exact instant. The phrase is lossy by design,
+  so every relative stamp keeps the exact instant reachable in a bubble, and a
+  stamp this bundle cannot parse shows its RAW value rather than an empty
+  column — the same tolerance journal rows apply to kind and severity.
 - A Pixi filter that OUTLIVES one `render()` must never sit `enabled = false`
   across a GC window without `buffer.autoGarbageCollect = false` on its uniform
   buffer. Pixi skips disabled filters, so the buffer stops being touched, ages

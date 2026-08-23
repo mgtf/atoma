@@ -3,7 +3,7 @@ import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
 import { drawViewFrame, viewFrame, VIEW_FRAME_PAD } from '../view-frame.js';
-import { clockDate } from './journal-row.js';
+import { relativeTime, timestampTooltip } from '../relative-time.js';
 
 /**
  * THE CATALOGUE LEDGER's tail — a SEPARATE record from the platform journal,
@@ -89,12 +89,24 @@ export function drawLedger(
   let rowY = cursor + 8;
   for (const entry of ledger) {
     if (pane.visible(rowY, rowY + rowHeight)) {
-      ctx.text(pane.content, clockDate(entry.at), columnX + 8, rowY, {
-        size: 9,
-        color: GPU_COLORS.muted,
-        mono: true,
-        width: 132,
-      });
+      ctx.text(
+        pane.content,
+        // Same tolerance as a journal row: an unparseable stamp shows raw.
+        relativeTime(entry.at, snapshot.t, snapshot.state.locale) || truncate(entry.at, 19),
+        columnX + 8,
+        rowY,
+        { size: 9, color: GPU_COLORS.muted, width: 132, singleLine: true }
+      );
+      const exactAt = timestampTooltip(entry.at, snapshot.state.locale);
+      if (exactAt) {
+        ctx.tooltip(pane.content, {
+          x: columnX + 8,
+          y: rowY,
+          width: 132,
+          height: 13,
+          text: exactAt,
+        });
+      }
       ctx.text(pane.content, truncate(entry.kind, 26), columnX + 146, rowY, {
         size: 9,
         color: GPU_COLORS.primary,
