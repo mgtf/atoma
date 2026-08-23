@@ -46,10 +46,8 @@ Neighbours:
   `security`, never pushed). The coordinator emits no audit row itself — it
   calls `onSubscriptionTransport` and the caller journals, so there is one
   delivery path, as with `onRunFinished`.
-- The door does NOT change what a project run disables
-  (`ATOMA_SKILL_LEARN=0`, `ATOMA_SKILL_PROMOTE=0`, `ATOMA_SKILL_DIRECT=0`,
-  `ATOMA_EVENT_SKILLS=0`, `ATOMA_PREFILTER_CACHE=0`). A measurement that
-  depends on skill learning cannot be run as a project run.
+- The door does NOT change the lifecycle settings a project run pins. Those
+  are stated once, under "What a tenant run may learn" below.
 
 ## Readers outside this subsystem
 
@@ -99,3 +97,28 @@ Neighbours:
 - HTTP 422 from repository creation is NOT proof the name is taken — an
   account can also refuse to create a repository of that visibility, and
   `GitHubApiError` carries no body to tell them apart. Say what is known.
+
+## What a tenant run may learn
+
+- SKILL LEARNING IS ON (`ATOMA_SKILL_LEARN=1`, `ATOMA_EVENT_SKILLS=1`). It is
+  the point of the platform: a tenant's runs get cheaper as their project
+  grows. It was off, and two delivered runs measured the cost of that —
+  $0.59 spent, `learnedSkills: 0`, nothing carried forward.
+- What makes it safe is PARTITIONING, not restraint: `ATOMA_SKILLS_DIR` points
+  at `<projectRoot>/skills`, so what a run learns belongs to that project
+  alone. Nothing reaches another project, let alone another organisation. The
+  cross-tenant question is a separate design with a human gate
+  ([offer review](../../docs/platform-skill-offer-review-2026-08-23.md)).
+- PROMOTION and DETERMINISTIC DISPATCH stay off, and explicitly: a project run
+  is `--seed`ed from the previous delivered workspace, and a seeded workspace
+  is the maintenance-mode signal that enables promotion BY DEFAULT. Silence
+  would therefore promote tenant scripts to trusted executables as a side
+  effect of seeding. `--no-promote-skills` and `--no-direct-skills` also
+  travel as FLAGS, because those are the final word over both the environment
+  and the seed ([src/skills](../skills/AGENTS.md)).
+- The PREFILTER CACHE stays off for a different reason, and the difference
+  matters: it is the one lifecycle store that is not partitioned per project.
+  It lives in the shared product store, so one tenant's cached planning
+  decisions would be readable to the next. Partitioning it is its own change.
+- A measurement that depends on PROMOTION or deterministic dispatch therefore
+  still cannot be run as a project run. Learning, now, can.

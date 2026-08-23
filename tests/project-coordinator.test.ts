@@ -116,6 +116,34 @@ describe('project run environment', () => {
     expect(env['ATOMA_AUTH_GITHUB_CLIENT_SECRET']).toBeUndefined();
   });
 
+  it('lets a tenant run LEARN, and keeps promotion, dispatch and the shared cache off', () => {
+    // The platform's own point: a project's runs get cheaper as it grows.
+    // Measured before this was on — two delivered runs, $0.59, learnedSkills 0.
+    const env = projectRunEnvironment({
+      hostEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'model-key' },
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/projects/p1/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+    });
+    expect(env['ATOMA_SKILL_LEARN']).toBe('1');
+    expect(env['ATOMA_EVENT_SKILLS']).toBe('1');
+    // What makes that safe: skills are partitioned per PROJECT, so nothing
+    // learned here can reach another project, let alone another organisation.
+    expect(env['ATOMA_SKILLS_DIR']).toBe('/control/projects/p1/skills');
+    // PROMOTION stays off explicitly, because a project run is seeded from the
+    // last delivered workspace and a seed enables promotion by default — so
+    // silence here would promote tenant scripts as a side effect of seeding.
+    expect(env['ATOMA_SKILL_PROMOTE']).toBe('0');
+    expect(env['ATOMA_SKILL_DIRECT']).toBe('0');
+    // And the prefilter cache stays off for a different reason: it is the one
+    // lifecycle store that is NOT per project — it lives in the shared product
+    // store.
+    expect(env['ATOMA_PREFILTER_CACHE']).toBe('0');
+  });
+
   it('refuses subscription transports, cross-provider pins and ambiguous credentials', () => {
     const base = {
       dbPath: '/control/atoma.db',
@@ -283,6 +311,11 @@ describe('ProjectRunCoordinator', () => {
     expect(finished.traceId).toBe(started.projectRunId);
     expect(finished.artifactManifest?.files.map((file) => file.path)).toEqual(['index.html']);
     expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--container');
+    // The two vetoes travel as FLAGS because they are the final word over both
+    // the environment and the seed; learning is not among them any more.
+    expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--no-promote-skills');
+    expect(driver.mock.calls[0]?.[0].extraArgs).toContain('--no-direct-skills');
+    expect(driver.mock.calls[0]?.[0].extraArgs).not.toContain('--no-learn-skills');
     expect(runLease.attachChild).toHaveBeenCalledWith(4242);
     expect(runLease.release).toHaveBeenCalledOnce();
     expect(publisher.publish).toHaveBeenCalledOnce();

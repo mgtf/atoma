@@ -254,10 +254,31 @@ export function projectRunEnvironment(input: {
     ATOMA_SKILLS_DIR: path.resolve(input.skillsPath),
     ATOMA_RUN_ID: input.runId,
     [ARTIFACT_MANIFEST_PATH_ENV]: path.resolve(input.artifactManifestPath),
-    ATOMA_SKILL_LEARN: '0',
+    // SKILL LEARNING IS ON, and it is the point of the platform: a tenant's
+    // runs should get cheaper as their project grows. It was off, and two
+    // delivered runs measured what that costs — $0.59 spent, `learnedSkills:
+    // 0`, nothing carried into the next run.
+    //
+    // What makes it safe here is `ATOMA_SKILLS_DIR` above: it points at
+    // `<projectRoot>/skills`, so what a run learns is partitioned PER PROJECT.
+    // Nothing crosses to another project, let alone another organisation, and
+    // the cross-tenant question stays where it belongs — a reviewed offer with
+    // a human gate (`docs/platform-skill-offer-review-2026-08-23.md`).
+    ATOMA_SKILL_LEARN: '1',
+    ATOMA_EVENT_SKILLS: '1',
+    // PROMOTION AND DETERMINISTIC DISPATCH STAY OFF. A project run is
+    // `--seed`ed from the previous delivered workspace, which is itself the
+    // maintenance-mode signal that enables promotion by default — so leaving
+    // these unset would promote tenant scripts to trusted executables as a
+    // side effect of the seeding. Promotion is what turns a learned recipe
+    // into something that RUNS without a model reading it, and that needs
+    // measurement this product has not done for tenant work.
     ATOMA_SKILL_PROMOTE: '0',
     ATOMA_SKILL_DIRECT: '0',
-    ATOMA_EVENT_SKILLS: '0',
+    // The prefilter cache stays off for a different reason: it is the one
+    // lifecycle store that is NOT partitioned per project — it lives in the
+    // shared product store, so one tenant's cached planning decisions would be
+    // readable to the next. Partitioning it is its own change.
     ATOMA_PREFILTER_CACHE: '0',
   });
   return environment;
@@ -559,7 +580,10 @@ export class ProjectRunCoordinator {
         cleanWorkspace: true,
         extraArgs: [
           '--container',
-          '--no-learn-skills',
+          // `--no-learn-skills` is gone; the two vetoes below remain, and they
+          // are the FINAL word over both the environment and the seed
+          // (`src/skills/AGENTS.md`). Without them a seeded workspace would
+          // re-enable promotion underneath the env above.
           '--no-promote-skills',
           '--no-direct-skills',
           ...(seedFrom ? ['--seed', seedFrom] : []),
