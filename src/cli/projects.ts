@@ -94,6 +94,7 @@ flags:
   --project <slug-or-id>     target project (required for run and publish)
   --as <id-or-email>         principal the run is attributed to (required)
   --run <run-id>             the delivered run to publish (publish only)
+  --timeout <seconds>        run budget, 60..7200, default 900 (run only)
   --help                     show this help`;
 
 function safeTerminal(value: string): string {
@@ -297,6 +298,7 @@ async function main(): Promise<void> {
       'visibility',
       'family',
       'prompt',
+      'timeout',
     ],
     undeclared: 'discard',
   });
@@ -449,9 +451,24 @@ async function main(): Promise<void> {
         })
       : undefined;
 
+  // THE OPERATOR'S BUDGET, said out loud. Seconds on the command line because
+  // that is how the runner prints it; milliseconds across the boundary because
+  // that is what every deadline downstream is in. An unparsable value is a
+  // refusal here rather than a silent 15 minutes.
+  const timeoutFlag = args.flags['timeout'];
+  let timeoutMs: number | undefined;
+  if (typeof timeoutFlag === 'string' && timeoutFlag.trim().length > 0) {
+    const seconds = Number(timeoutFlag.trim());
+    if (!Number.isSafeInteger(seconds) || seconds < 1) {
+      fail(`invalid --timeout "${timeoutFlag}" (expected whole seconds)`);
+    }
+    timeoutMs = seconds * 1_000;
+  }
+
   const coordinator = new ProjectRunCoordinator({
     store: projects,
     dbPath,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
     ...(publisher ? { publisher } : {}),
     platformAdmins: (id) => auth.isPlatformAdmin(id),
     tierModelsFor: (id) => auth.modelPins(id),

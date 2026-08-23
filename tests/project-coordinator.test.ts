@@ -15,12 +15,17 @@ import { AuthStore } from '../src/auth/store.js';
 import { formatRunStatsEpilogue, type RunStats } from '../src/contracts/runStats.js';
 import { closeStoreHandles } from '../src/core/stores.js';
 import {
+  DEFAULT_PROJECT_RUN_TIMEOUT_MS,
+  MAX_PROJECT_RUN_TIMEOUT_MS,
+  MIN_PROJECT_RUN_TIMEOUT_MS,
+  PROJECT_RUN_TIMEOUT_ENV,
   ProjectRunBusy,
   ProjectRunConfigurationError,
   ProjectRunCoordinator,
   projectRunEnvironment,
   type ProjectRunDriver,
   projectRunHostLayout,
+  projectRunTimeoutMs,
   runnerFailureDetail,
 } from '../src/projects/coordinator.js';
 import { ProjectStore } from '../src/projects/store.js';
@@ -1132,5 +1137,92 @@ describe('ProjectRunCoordinator — a large trace is evidence, not a refusal', (
     const { row } = await runOnce(f, driver, 'run-cost-dropped');
     expect(row.status).toBe('failed');
     expect(row.stats).toBeNull();
+  });
+});
+
+/**
+ * THE OPERATOR'S BUDGET WAS UNREACHABLE.
+ *
+ * `949ecd5d` died at 900s after 68 tool calls and $0.96, and its own post-mortem
+ * advised raising `ATOMA_BUILD_TIMEOUT_MS` — which cannot work: `spawnRun`
+ * writes that variable from the coordinator's own value AFTER spreading the
+ * caller's environment, so a host export is silently overwritten. The
+ * coordinator hard-coded 15 minutes, neither construction site passed
+ * `timeoutMs`, and `projects run` had no flag.
+ */
+describe('a project run has a budget an operator can set', () => {
+  it('defaults to 15 minutes, and reads the host environment', () => {
+    expect(projectRunTimeoutMs({})).toBe(DEFAULT_PROJECT_RUN_TIMEOUT_MS);
+    expect(projectRunTimeoutMs({})).toBe(900_000);
+    expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '2400000' })).toBe(2_400_000);
+    // An empty value is absence, not an error: `export VAR=` is how a shell
+    // unsets in practice.
+    expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '' })).toBe(900_000);
+  });
+
+  it('lets an explicit argument win over the environment', () => {
+    expect(projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: '2400000' }, 600_000)).toBe(600_000);
+  });
+
+  it('REFUSES a malformed or out-of-range budget instead of falling back', () => {
+    // A run that quietly gets 15 minutes when the operator asked for 40 is the
+    // defect this replaces, wearing a different hat.
+    for (const bad of ['forty minutes', '2400000.5', '-1', 'NaN']) {
+      expect(() => projectRunTimeoutMs({ [PROJECT_RUN_TIMEOUT_ENV]: bad })).toThrow(
+        ProjectRunConfigurationError
+      );
+    }
+    expect(() => projectRunTimeoutMs({}, 59_000)).toThrow(/outside/);
+    expect(() => projectRunTimeoutMs({}, 3 * 60 * 60 * 1_000)).toThrow(/outside/);
+    expect(projectRunTimeoutMs({}, MIN_PROJECT_RUN_TIMEOUT_MS)).toBe(60_000);
+    expect(projectRunTimeoutMs({}, MAX_PROJECT_RUN_TIMEOUT_MS)).toBe(7_200_000);
+  });
+
+  it('carries the resolved budget to the driver, and ATOMA_BUILD_TIMEOUT_MS stays inert', async () => {
+    const f = fixture();
+    const driver = vi.fn(
+      async (_spawn: SpawnRunOptions) =>
+        `${formatRunStatsEpilogue({ ...DELIVERED_STATS, outcome: 'failed' })}\n✖ build failed\n`
+    );
+    const coordinator = new ProjectRunCoordinator({
+      store: f.store,
+      dbPath: f.dbPath,
+      projectsRoot: f.root,
+      hostEnv: {
+        PATH: process.env['PATH'],
+        ANTHROPIC_API_KEY: 'model-key',
+        // The variable the post-mortem advised, exported on the host. It
+        // reaches the child only as whatever the coordinator decided, because
+        // `spawnRun` overwrites it — so it must NOT be what sets the budget.
+        ATOMA_BUILD_TIMEOUT_MS: '9999999',
+        [PROJECT_RUN_TIMEOUT_ENV]: '2400000',
+      },
+      driver,
+      acquireLease: async () => lease(),
+    });
+    await coordinator.start({
+      orgId: f.viewer.orgId,
+      principalId: f.viewer.principalId,
+      projectId: f.project.projectId,
+      request: { idempotencyKey: 'run-budget', goal: 'Build a clock in one index.html.' },
+    });
+    await coordinator.waitForIdle();
+    // The host's ATOMA_BUILD_TIMEOUT_MS did not win; the project budget did.
+    expect(driver.mock.calls[0]?.[0].timeoutMs).toBe(2_400_000);
+  });
+
+  it('refuses to start at all when the configured budget is nonsense', () => {
+    const f = fixture();
+    expect(
+      () =>
+        new ProjectRunCoordinator({
+          store: f.store,
+          dbPath: f.dbPath,
+          projectsRoot: f.root,
+          hostEnv: { PATH: process.env['PATH'], [PROJECT_RUN_TIMEOUT_ENV]: 'later' },
+          driver: vi.fn(async (_spawn: SpawnRunOptions) => ''),
+          acquireLease: async () => lease(),
+        })
+    ).toThrow(ProjectRunConfigurationError);
   });
 });

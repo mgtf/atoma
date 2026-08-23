@@ -187,3 +187,18 @@ Neighbours:
   The operator surface is `publication.failed` plus the publication status
   beside the run, and `projects run` now exits non-zero when a publisher is
   configured and the publication did not reach `published`.
+
+## The run budget
+
+- ONE place decides how long a project run may take: `projectRunTimeoutMs`,
+  which reads an explicit argument, then `ATOMA_PROJECT_TIMEOUT_MS`, then the
+  15-minute default, and REFUSES anything malformed or outside 60s..7200s
+  rather than falling back — a run that quietly gets 15 minutes when the
+  operator asked for 40 is the same defect wearing a different hat.
+- `ATOMA_BUILD_TIMEOUT_MS` is the CHILD's variable and is inert on the host:
+  `spawnRun` writes it from this value AFTER spreading the caller's
+  environment, so an exported one is overwritten. That is why "raise the
+  timeout", which run `949ecd5d`'s post-mortem advised after dying at 900s on
+  68 tool calls and $0.96, was unreachable advice until the lever existed.
+- The DEFAULT is unchanged at 15 minutes. What a tenant run may spend is a
+  product decision; only its reachability was a defect.

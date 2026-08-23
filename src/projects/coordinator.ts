@@ -396,6 +396,58 @@ export function runnerFailureDetail(log: string, outcome: string): string {
   return `runner finished with outcome ${outcome}`.slice(0, 2_000);
 }
 
+/**
+ * THE OPERATOR'S BUDGET FOR ONE PROJECT RUN, and the one place it is decided.
+ *
+ * It used to be unreachable. The coordinator hard-coded 15 minutes, neither
+ * construction site passed `timeoutMs`, `projects run` had no flag, and
+ * `spawnRun` writes `ATOMA_BUILD_TIMEOUT_MS` AFTER spreading the caller's env —
+ * so an operator's exported value was silently overwritten by the default. Run
+ * `949ecd5d` died at 900s after 68 tool calls and $0.96, and its own post-mortem
+ * advised raising a variable that could not be raised.
+ *
+ * The DEFAULT IS UNCHANGED at 15 minutes: what a tenant run may spend is a
+ * product decision, not a refactor. What changes is that it can be said.
+ *
+ * Bounded on both ends because the child derives two later deadlines from it:
+ * the runner's watchdog fires at budget + 60s and the harness hard-reaps at
+ * budget + 180s, so an absurd value moves those too.
+ */
+export const DEFAULT_PROJECT_RUN_TIMEOUT_MS = 15 * 60 * 1_000;
+export const MIN_PROJECT_RUN_TIMEOUT_MS = 60 * 1_000;
+export const MAX_PROJECT_RUN_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
+export const PROJECT_RUN_TIMEOUT_ENV = 'ATOMA_PROJECT_TIMEOUT_MS';
+
+/**
+ * Resolve the budget: an explicit argument wins over the host environment,
+ * which wins over the default. A malformed or out-of-range value is a REFUSAL,
+ * never a silent fallback — a run that quietly gets 15 minutes when the
+ * operator asked for 40 is the defect this replaces, wearing a different hat.
+ *
+ * Deliberately NOT named `ATOMA_BUILD_TIMEOUT_MS`: that variable belongs to the
+ * child, is written by `spawnRun` from this value, and two names for one number
+ * on either side of a process boundary is how the first version got confusing.
+ */
+export function projectRunTimeoutMs(
+  hostEnv: NodeJS.ProcessEnv = process.env,
+  explicitMs?: number
+): number {
+  const raw = explicitMs ?? hostEnv[PROJECT_RUN_TIMEOUT_ENV];
+  if (raw === undefined || raw === '') return DEFAULT_PROJECT_RUN_TIMEOUT_MS;
+  const parsed = typeof raw === 'number' ? raw : Number(raw.trim());
+  if (!Number.isSafeInteger(parsed)) {
+    throw new ProjectRunConfigurationError(
+      `invalid project run timeout "${String(raw)}" (expected an integer in milliseconds)`
+    );
+  }
+  if (parsed < MIN_PROJECT_RUN_TIMEOUT_MS || parsed > MAX_PROJECT_RUN_TIMEOUT_MS) {
+    throw new ProjectRunConfigurationError(
+      `project run timeout ${parsed}ms is outside ${MIN_PROJECT_RUN_TIMEOUT_MS}..${MAX_PROJECT_RUN_TIMEOUT_MS}ms`
+    );
+  }
+  return parsed;
+}
+
 /** Default host root: `~/.atoma/orgs/<orgId>/projects/<projectId>/runs/<runId>`. */
 export const DEFAULT_PROJECTS_ROOT = path.join(homedir(), '.atoma');
 
@@ -454,7 +506,7 @@ export class ProjectRunCoordinator {
       this.onSubscriptionTransport = options.onSubscriptionTransport;
     }
     this.cwd = options.cwd ?? repoRoot();
-    this.timeoutMs = options.timeoutMs ?? 15 * 60 * 1_000;
+    this.timeoutMs = projectRunTimeoutMs(this.hostEnv, options.timeoutMs);
   }
 
   /**
