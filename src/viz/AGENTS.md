@@ -137,7 +137,15 @@ npm run viz:mark-turn:analyze
   `renderer/caustic-shader.ts` alone tests containment, in GLSL kept ES 1.00-legal.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
-- PWA/service-worker registration is production-only. `/api/*`, `/auth/*`,
+- PWA/service-worker registration is production-default and dev-opt-in
+  (`ATOMA_VIZ_SW_DEV=1` → `__ATOMA_SW_DEV__`). `serviceWorkerRegistrationAllowed()`
+  in `client/pwa.ts` is the ONE answer, shared with the push prompt so an
+  enable button never appears without a worker to attach to. The off state
+  UNREGISTERS: the worker's scope is the ORIGIN, not the build, so a dev
+  registration outlives its dev server and would control whatever is served on
+  that port next — cleanup touches only a `/sw.js` registration and the
+  `atoma-viz-` cache namespace, never a neighbour's. `isDevModuleGraph` keeps
+  Vite's rewritten module URLs out of the shell cache. `/api/*`, `/auth/*`,
   `/webhooks/*`, and every response marked `Cache-Control: no-store` stay
   outside the cache so live data, identity state and GitHub deliveries cannot
   be hidden by an offline shell.

@@ -1,5 +1,6 @@
 import { api } from './data-api.js';
 import { detectLocale } from './i18n.js';
+import { serviceWorkerRegistrationAllowed } from './pwa.js';
 
 /**
  * WEB PUSH — CLIENT SIDE.
@@ -67,8 +68,10 @@ export function pushSupported(scope: PushScope = globalThis): boolean {
  * a run currently alive, browser support, a permission still undecided, and
  * no earlier "not now". Platform admins skip the live-run gate — the offer is
  * part of their login — and their dismissal is read from sessionStorage, so a
- * fresh session asks again. The service worker registers in production builds
- * only, so a dev session never dangles an enable button that cannot finish.
+ * fresh session asks again. The offer follows the SERVICE WORKER, not the
+ * build: `serviceWorkerRegistrationAllowed()` is the one answer both use, so a
+ * dev session never dangles an enable button that cannot finish — and a dev
+ * session that opted the worker IN gets a button that can.
  */
 export function shouldOfferPushPrompt(input: {
   readonly authenticated: boolean;
@@ -76,11 +79,11 @@ export function shouldOfferPushPrompt(input: {
   readonly platformAdmin?: boolean;
   readonly scope?: PushScope;
   readonly storage?: PromptStorage | null;
-  readonly prod?: boolean;
+  readonly serviceWorkerAvailable?: boolean;
 }): boolean {
-  const prod = input.prod ?? import.meta.env.PROD;
+  const available = input.serviceWorkerAvailable ?? serviceWorkerRegistrationAllowed();
   const admin = input.platformAdmin === true;
-  if (!prod || !input.authenticated) return false;
+  if (!available || !input.authenticated) return false;
   if (!admin && !input.hasLiveRun) return false;
   const scope = input.scope ?? (globalThis);
   if (!pushSupported(scope)) return false;
@@ -138,10 +141,10 @@ export function shouldEnsureAdminSubscription(input: {
   readonly authenticated: boolean;
   readonly platformAdmin: boolean;
   readonly scope?: PushScope;
-  readonly prod?: boolean;
+  readonly serviceWorkerAvailable?: boolean;
 }): boolean {
-  const prod = input.prod ?? import.meta.env.PROD;
-  if (!prod || !input.authenticated || !input.platformAdmin) return false;
+  const available = input.serviceWorkerAvailable ?? serviceWorkerRegistrationAllowed();
+  if (!available || !input.authenticated || !input.platformAdmin) return false;
   const scope = input.scope ?? (globalThis);
   if (!pushSupported(scope)) return false;
   return scope.Notification?.permission === 'granted';

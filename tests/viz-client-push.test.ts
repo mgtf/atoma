@@ -38,7 +38,7 @@ describe('shouldOfferPushPrompt', () => {
     hasLiveRun: true,
     scope: supportedScope,
     storage: memoryStorage(),
-    prod: true,
+    serviceWorkerAvailable: true,
   };
 
   it('offers exactly when a signed-in viewer has a live run in a capable browser', () => {
@@ -124,13 +124,19 @@ describe('shouldOfferPushPrompt', () => {
 
   it('silently re-subscribes an admin whose permission is already granted', () => {
     const granted = { ...supportedScope, Notification: { permission: 'granted' } };
-    const base = { authenticated: true, platformAdmin: true, scope: granted, prod: true };
+    const base = {
+      authenticated: true,
+      platformAdmin: true,
+      scope: granted,
+      serviceWorkerAvailable: true,
+    };
     expect(shouldEnsureAdminSubscription(base)).toBe(true);
-    // Only a signed-in admin, in prod, in a capable browser, with a granted
-    // permission — anything else is either the prompt's job or nobody's.
+    // Only a signed-in admin, with a service worker to hang the subscription
+    // on, in a capable browser, with a granted permission — anything else is
+    // either the prompt's job or nobody's.
     expect(shouldEnsureAdminSubscription({ ...base, platformAdmin: false })).toBe(false);
     expect(shouldEnsureAdminSubscription({ ...base, authenticated: false })).toBe(false);
-    expect(shouldEnsureAdminSubscription({ ...base, prod: false })).toBe(false);
+    expect(shouldEnsureAdminSubscription({ ...base, serviceWorkerAvailable: false })).toBe(false);
     expect(shouldEnsureAdminSubscription({ ...base, scope: supportedScope })).toBe(false);
     expect(
       shouldEnsureAdminSubscription({ ...base, scope: { ...granted, PushManager: undefined } })
@@ -152,8 +158,10 @@ describe('shouldOfferPushPrompt', () => {
     }
   });
 
-  it('stays silent in dev builds and unsupported browsers', () => {
-    expect(shouldOfferPushPrompt({ ...eligible, prod: false })).toBe(false);
+  it('stays silent without a service worker and in unsupported browsers', () => {
+    // No worker, no subscription to attach — the offer must not appear. This
+    // is the dev default, and it follows the worker rather than the build.
+    expect(shouldOfferPushPrompt({ ...eligible, serviceWorkerAvailable: false })).toBe(false);
     expect(
       shouldOfferPushPrompt({ ...eligible, scope: { ...supportedScope, PushManager: undefined } })
     ).toBe(false);

@@ -148,6 +148,24 @@ globalThis.addEventListener('notificationclick', (event) => {
   );
 });
 
+/**
+ * Vite's dev module graph, which only exists when the worker was opted into a
+ * dev session (`ATOMA_VIZ_SW_DEV=1`). These URLs are rewritten on every edit,
+ * so caching them would let an offline fallback serve a module from a previous
+ * edit — a stale-code bug that looks like anything but a cache. A production
+ * build emits none of these paths, so this costs prod nothing, and bypassing
+ * the worker only means an ordinary network fetch.
+ */
+function isDevModuleGraph(url) {
+  return (
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.searchParams.has('t') ||
+    url.searchParams.has('import')
+  );
+}
+
 globalThis.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -159,7 +177,8 @@ globalThis.addEventListener('fetch', (event) => {
     url.pathname === '/auth' ||
     url.pathname.startsWith('/auth/') ||
     url.pathname === '/webhooks' ||
-    url.pathname.startsWith('/webhooks/')
+    url.pathname.startsWith('/webhooks/') ||
+    isDevModuleGraph(url)
   ) {
     return;
   }
