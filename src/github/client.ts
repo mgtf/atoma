@@ -12,7 +12,30 @@ export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_GITHUB_RESPONSE_MAX_BYTES = 1024 * 1024;
 export const MAX_GITHUB_INSTALLATION_PAGES = 10;
 export const MAX_GITHUB_PUBLISH_FILES = 1_000;
-export const MAX_GITHUB_PUBLISH_BYTES = 20 * 1024 * 1024;
+/**
+ * Request-body ceiling for any single call. Named because the per-file publish
+ * bound below is DERIVED from it and the two must not drift apart.
+ */
+export const MAX_GITHUB_REQUEST_BODY_BYTES = 30 * 1024 * 1024;
+/**
+ * PER FILE, and not a policy choice: every file travels as its own request with
+ * a base64 body, and base64 inflates by 4/3. So 30 MiB of body allows 22.5 MiB
+ * of content; 20 MiB is that with margin for the surrounding JSON.
+ * `DEFAULT_ARTIFACT_LIMITS.maxFileBytes` is 10 MiB, so this never binds first —
+ * it is the wall behind the wall.
+ */
+export const MAX_GITHUB_PUBLISH_FILE_BYTES = 20 * 1024 * 1024;
+/**
+ * TOTAL across a manifest, and it exists only to stop an unbounded upload. It
+ * MATCHES `DEFAULT_ARTIFACT_LIMITS.maxTotalBytes`, deliberately: a manifest the
+ * artifact policy accepted at delivery must never be one publication can never
+ * carry. It was 20 MiB against that policy's 50 MiB, which made a 21-50 MiB
+ * deliverable land as `delivered` and then fail every publish attempt for ever,
+ * with a byte-bound message that read like a transient limit. Nothing derives
+ * this number from the request cap — files go one per request — so the only
+ * thing keeping the two honest is the test that asserts they agree.
+ */
+export const MAX_GITHUB_PUBLISH_TOTAL_BYTES = 50 * 1024 * 1024;
 
 export const GITHUB_PUBLISH_PERMISSIONS = Object.freeze({
   administration: 'write',
@@ -555,7 +578,7 @@ export class GitHubAppClient {
     const accepted =
       input.accepted ?? (method === 'POST' ? [201] : method === 'PUT' ? [200, 201] : [200]);
     const body = input.body === undefined ? undefined : JSON.stringify(input.body);
-    if (body !== undefined && Buffer.byteLength(body, 'utf8') > 30 * 1024 * 1024) {
+    if (body !== undefined && Buffer.byteLength(body, 'utf8') > MAX_GITHUB_REQUEST_BODY_BYTES) {
       throw new Error('GitHub API request body exceeds the configured publish bound');
     }
     const signal = AbortSignal.timeout(this.timeoutMs);
@@ -824,8 +847,8 @@ export class GitHubAppClient {
     const bytes = typeof input.content === 'string'
       ? Buffer.from(input.content, 'utf8')
       : Buffer.from(input.content);
-    if (bytes.length > MAX_GITHUB_PUBLISH_BYTES) {
-      throw new Error('GitHub blob exceeds the publish byte bound');
+    if (bytes.length > MAX_GITHUB_PUBLISH_FILE_BYTES) {
+      throw new Error('GitHub blob exceeds the per-file publish byte bound');
     }
     const result = await this.request({
       method: 'POST',
@@ -957,8 +980,8 @@ export class GitHubAppClient {
       typeof input.content === 'string'
         ? Buffer.from(input.content, 'utf8')
         : Buffer.from(input.content);
-    if (bytes.length > MAX_GITHUB_PUBLISH_BYTES) {
-      throw new Error('GitHub contents write exceeds the publish byte bound');
+    if (bytes.length > MAX_GITHUB_PUBLISH_FILE_BYTES) {
+      throw new Error('GitHub contents write exceeds the per-file publish byte bound');
     }
     if (!input.message.trim() || input.message.length > 65_536 || input.message.includes('\u0000')) {
       throw new Error('GitHub commit message has an invalid value');
@@ -1039,8 +1062,8 @@ export class GitHubAppClient {
       if (seen.has(file.path)) throw new Error('GitHub publish contains duplicate paths');
       seen.add(file.path);
       totalBytes += file.bytes;
-      if (totalBytes > MAX_GITHUB_PUBLISH_BYTES) {
-        throw new Error('GitHub publish exceeds the byte bound');
+      if (totalBytes > MAX_GITHUB_PUBLISH_TOTAL_BYTES) {
+        throw new Error('GitHub publish exceeds the total byte bound');
       }
     }
     return { owner, repository, branch, files };

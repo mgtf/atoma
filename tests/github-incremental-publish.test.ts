@@ -5,7 +5,12 @@ import {
   GitHubBranchGoneError,
   GitHubDivergenceError,
   GitHubRefRefusedError,
+  MAX_GITHUB_PUBLISH_FILE_BYTES,
+  MAX_GITHUB_PUBLISH_FILES,
+  MAX_GITHUB_PUBLISH_TOTAL_BYTES,
+  MAX_GITHUB_REQUEST_BODY_BYTES,
 } from '../src/github/client.js';
+import { DEFAULT_ARTIFACT_LIMITS } from '../src/projects/artifacts.js';
 import { FakeGitHub } from './github-api-fake.js';
 
 /**
@@ -385,5 +390,49 @@ describe('incremental publication refuses what it must not write', () => {
     ).rejects.toThrow(/PATCH \/repos\/alice\/clock\/git\/refs\/heads\/main returned HTTP 422/);
     expect(fake.refSha('alice', 'clock', 'main')).not.toBe(stale);
     expect(fake.forcedUpdates).toBe(0);
+  });
+});
+
+/**
+ * TWO CEILINGS THAT MUST AGREE, across a boundary neither module may import.
+ *
+ * `src/github` must not import `src/projects` and vice versa, so nothing in the
+ * type system can hold these together. This test is the only thing that does.
+ *
+ * The defect it closes: the publish TOTAL was 20 MiB while the artifact policy
+ * accepted 50 MiB, so a 21-50 MiB deliverable was recorded `delivered` and then
+ * failed every publish attempt for ever — with a byte-bound message that read
+ * like a transient limit.
+ */
+describe('the publish bounds and the artifact policy agree', () => {
+  it('never lets the artifact policy accept a manifest publication cannot carry', () => {
+    expect(MAX_GITHUB_PUBLISH_TOTAL_BYTES).toBeGreaterThanOrEqual(
+      DEFAULT_ARTIFACT_LIMITS.maxTotalBytes
+    );
+    expect(MAX_GITHUB_PUBLISH_FILE_BYTES).toBeGreaterThanOrEqual(
+      DEFAULT_ARTIFACT_LIMITS.maxFileBytes
+    );
+    expect(MAX_GITHUB_PUBLISH_FILES).toBeGreaterThanOrEqual(DEFAULT_ARTIFACT_LIMITS.maxFiles);
+  });
+
+  it('derives the per-file bound from the request body cap and base64 inflation', () => {
+    // Every file travels as its own base64 request body, which inflates by 4/3.
+    expect(Math.ceil((MAX_GITHUB_PUBLISH_FILE_BYTES * 4) / 3)).toBeLessThan(
+      MAX_GITHUB_REQUEST_BODY_BYTES
+    );
+  });
+
+  it('refuses a single file over the per-file bound before any request', async () => {
+    const fake = new FakeGitHub({ existing: ['alice/clock'] });
+    const client = clientFor(fake);
+    await expect(
+      client.createBlob({
+        token: TOKEN,
+        owner: 'alice',
+        repository: 'clock',
+        content: Buffer.alloc(MAX_GITHUB_PUBLISH_FILE_BYTES + 1),
+      })
+    ).rejects.toThrow(/per-file publish byte bound/);
+    expect(fake.calls).toEqual([]);
   });
 });

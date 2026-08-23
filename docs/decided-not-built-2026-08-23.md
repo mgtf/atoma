@@ -504,9 +504,17 @@ Not built, deliberately:
    observation.
 4. **`UNIQUE (org_id, repository_target_owner, repository_target_name)`** on the
    projects table, per the finding above.
-5. **The 20 MiB publish bound versus the 50 MiB artifact limit.**
-   `MAX_GITHUB_PUBLISH_BYTES` is below `DEFAULT_ARTIFACT_LIMITS.maxTotalBytes`,
-   so a 21-50 MiB manifest is a permanent local refusal.
+5. **CLOSED.** The publish bound was one number doing two unrelated jobs. It is
+   now two: `MAX_GITHUB_PUBLISH_FILE_BYTES` (20 MiB) is DERIVED — every file
+   travels as its own base64 request body and base64 inflates by 4/3, so the
+   30 MiB body cap allows 22.5 MiB of content — and
+   `MAX_GITHUB_PUBLISH_TOTAL_BYTES` now MATCHES
+   `DEFAULT_ARTIFACT_LIMITS.maxTotalBytes` at 50 MiB, so a manifest the artifact
+   policy accepted at delivery can no longer be one publication refuses for
+   ever. `src/github` may not import `src/projects`, so nothing in the type
+   system holds the two together: a test asserts all three ceilings dominate
+   their artifact-policy counterparts, and that the per-file bound survives
+   base64 inflation.
 6. **Blob diffing**, so unchanged paths are not re-uploaded on every attempt
    including a no-op; and the orphan git objects a refused attempt leaves.
 7. **A no-op publication still pushes "Published to <repo>"** at the transport
