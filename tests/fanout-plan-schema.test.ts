@@ -135,3 +135,50 @@ describe('parsePlanTolerant + fan-out', () => {
     expect(plan.subtasks.map((s) => s.description)).toEqual(['A', 'B']);
   });
 });
+
+/**
+ * MEASURED 2026-08-23, project run `d771d166` (expenses-node-api): the L3's
+ * second-phase plan said `"preferredChild": null` — the model's spelling of
+ * "omit", which the verdict guidance itself recommends when no catalog name
+ * fits — and the direct `planSchema.parse` at L3Atom killed the run: $0.51 and
+ * 22 tool calls of delivered server work discarded on a nullable-vs-optional
+ * mismatch. The null-tolerance pattern was already DOCUMENTED twice in the
+ * same schema object (`outputs`, `proofObligations`); these tests extend it to
+ * the two fields it missed. The fixture below is the run's own subtask,
+ * trimmed.
+ */
+describe('subtaskSpecSchema — null-tolerance on the fields the pattern missed', () => {
+  const runD771Subtask = {
+    description:
+      'Validate index.html and app.js against the running server; iterate until zero console.error.',
+    preferredChild: null,
+    outputs: ['index.html', 'app.js'],
+    proofObligations: ['dom-interaction'],
+  };
+
+  it('parses the exact shape that killed run d771d166, through the same entry point', () => {
+    const plan = planSchema.parse({
+      reasoning: 'phase 2',
+      subtasks: [runD771Subtask],
+      aggregation: { mode: 'concat' },
+    });
+    expect(plan.subtasks[0]!.preferredChild).toBeUndefined();
+  });
+
+  it('normalises null and blank to the documented meaning: omitted', () => {
+    expect(subtaskSpecSchema.parse({ description: 'x', preferredChild: null }).preferredChild)
+      .toBeUndefined();
+    expect(subtaskSpecSchema.parse({ description: 'x', preferredChild: '  ' }).preferredChild)
+      .toBeUndefined();
+    expect(subtaskSpecSchema.parse({ description: 'x', inputs: null }).inputs).toBeUndefined();
+  });
+
+  it('keeps a real routing hint byte-identical', () => {
+    expect(
+      subtaskSpecSchema.parse({ description: 'x', preferredChild: 'Chlorophyll' }).preferredChild
+    ).toBe('Chlorophyll');
+    expect(
+      subtaskSpecSchema.parse({ description: 'x', inputs: { port: 8000 } }).inputs
+    ).toEqual({ port: 8000 });
+  });
+});

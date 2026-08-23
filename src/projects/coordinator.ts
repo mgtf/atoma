@@ -329,12 +329,31 @@ function verifiedTrace(pathname: string, expectedRunId: string): void {
 
 /** First `✖ …` line from a failed runner log, else a bounded outcome label. */
 export function runnerFailureDetail(log: string, outcome: string): string {
-  for (const line of log.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('✖ ')) {
-      const detail = trimmed.slice(2).trim();
-      if (detail) return detail.slice(0, 2_000);
+  const lines = log.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trim();
+    if (!trimmed.startsWith('✖ ')) continue;
+    const detail = trimmed.slice(2).trim();
+    if (!detail) continue;
+    // A runner error is not always one line: a schema failure prints zod's
+    // pretty-printed issues array, whose FIRST line is `[`. MEASURED
+    // 2026-08-23, project run `d771d166`: the stored error column held the
+    // single character `[` while the field that failed and why sat on the
+    // eleven indented lines below it. Continuation lines are recognised by
+    // SHAPE — indented, or a bare closing bracket — so an unrelated flat log
+    // line that happens to follow a one-line error is never swallowed.
+    const parts = [detail];
+    let budget = 2_000 - detail.length;
+    for (let j = i + 1; j < lines.length && budget > 0; j++) {
+      const raw = lines[j]!;
+      const isContinuation =
+        /^\s+\S/.test(raw) || /^[\]}],?$/.test(raw.trim());
+      if (!isContinuation) break;
+      const piece = raw.trim();
+      parts.push(piece);
+      budget -= piece.length + 1;
     }
+    return parts.join(' ').slice(0, 2_000);
   }
   return `runner finished with outcome ${outcome}`.slice(0, 2_000);
 }

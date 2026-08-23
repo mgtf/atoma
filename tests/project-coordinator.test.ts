@@ -628,6 +628,46 @@ describe('runnerFailureDetail', () => {
       .toBe('401 API key is invalid.');
     expect(runnerFailureDetail('no bang', 'failed')).toBe('runner finished with outcome failed');
   });
+
+  /**
+   * MEASURED 2026-08-23, project run `d771d166`: the runner printed zod's
+   * pretty-printed issues array after the bang, so the stored error column
+   * held the single character `[` while the field that failed and why sat on
+   * the indented lines below. Continuation is recognised by SHAPE (indented,
+   * or a bare closing bracket), so a flat unrelated log line after a one-line
+   * error is never swallowed.
+   */
+  it('collects the indented continuation of a multi-line error — the d771d166 shape', () => {
+    const log = [
+      'planning phase 2',
+      '✖ [',
+      '  {',
+      '    "code": "invalid_type",',
+      '    "expected": "string",',
+      '    "received": "null",',
+      '    "path": [',
+      '      "subtasks",',
+      '      0,',
+      '      "preferredChild"',
+      '    ],',
+      '    "message": "Expected string, received null"',
+      '  }',
+      ']',
+      '',
+      '== post-mortem ==',
+    ].join('\n');
+    const detail = runnerFailureDetail(log, 'failed');
+    expect(detail).toContain('preferredChild');
+    expect(detail).toContain('Expected string, received null');
+    expect(detail).not.toContain('post-mortem');
+    expect(detail.length).toBeLessThanOrEqual(2_000);
+  });
+
+  it('does not swallow an unrelated flat line after a one-line error', () => {
+    expect(
+      runnerFailureDetail('✖ 401 API key is invalid.\nrun recorded in /tmp/x\n', 'failed')
+    ).toBe('401 API key is invalid.');
+  });
 });
 
 describe('the subscription-transport door, at the coordinator', () => {

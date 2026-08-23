@@ -647,8 +647,29 @@ export function parsePlanWithFallback(
  */
 export const subtaskSpecSchema = z.object({
   description: z.string(),
-  inputs: z.record(z.unknown()).optional(),
-  preferredChild: z.string().optional(),
+  // Null-tolerance, same pattern as `outputs`/`proofObligations` below —
+  // which DOCUMENTED the pattern while these two fields, in the same object,
+  // stayed plain `.optional()`. MEASURED 2026-08-23, project run `d771d166`:
+  // the L3's second-phase plan carried `"preferredChild": null` (the model's
+  // way of saying "omit", exactly as the verdict guidance told it to when no
+  // catalog name fits) and the direct `planSchema.parse` at L3Atom killed the
+  // whole run — $0.51 and 22 tool calls of delivered server work discarded on
+  // a nullable-vs-optional mismatch. Null and blank normalise to undefined,
+  // which is the documented meaning ("omit entirely"); the failure direction
+  // is "no routing hint", never "wrong routing".
+  inputs: z
+    .record(z.unknown())
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
+  preferredChild: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((v) => {
+      const trimmed = v?.trim();
+      return trimmed !== undefined && trimmed.length > 0 ? v! : undefined;
+    }),
   // Structured output intent (Task.outputs). Same null-tolerance pattern as
   // aggregation.instruction: models emit `"outputs": null` on read-only
   // subtasks, and a plain .optional() would crash the whole plan parse.
