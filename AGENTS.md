@@ -196,6 +196,30 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
   measured same-day gates as the main source of one-concept-two-definitions
   drift and vocabulary-frozen detectors.
 
+### Parallel agents on one machine
+
+Two agents may hold two `git worktree` checkouts and edit in parallel — that is
+what resolves the burn-in rule above, which forbids concurrent EDITS, not
+concurrent work. A worktree isolates the source and the repo-relative state for
+free: `./atoma.db`, `./skills/` and `./runs/` are cwd-relative and ignored, and
+`repoRoot()` derives from the module's own path, so an MCP server launched from
+a worktree serves that worktree's store. A fresh worktree therefore starts with
+NO store: the registry bootstraps and trust counters begin at zero.
+
+What a worktree does NOT isolate, and what each one must set:
+
+- The build workspace is a fixed HOME path (`~/.atoma/workspaces/build`) and is
+  ARCHIVED at the start of every run. Give each worktree its own
+  `ATOMA_BUILD_WORKSPACE`, or one agent's run replaces the other's workspace.
+- The viz ports are `strictPort`: set `ATOMA_VIZ_DEV_PORT` and
+  `ATOMA_VIZ_API_PORT` per worktree. The `atoma-worker:latest` tag is shared
+  too — do not rebuild it while another agent's container run is in flight.
+- The MCP run lease (`~/.atoma/mcp-run-lock.db`) is machine-global ON PURPOSE.
+  Never override `ATOMA_MCP_RUN_LOCK` to win concurrency: it is what keeps two
+  runs off one workspace and one provider quota.
+- Model quota is one account. Runs and their sub-agents draw on it together, so
+  parallel EDITING is safe and parallel RUNNING is not: one live run at a time.
+
 ## Cost discipline
 
 Read the subsystem file before changing any LLM call site. The cost rules are
