@@ -622,6 +622,70 @@ judgements about model output and about planning):
    share of 26 LLM calls went into chasing a symptom that no edit to the page
    could remove. Any suppression is a new detector, so it is recorded.
 
+## The forgeable receipt: reproduced, designed, and not built (2026-08-24)
+
+Eleven agents reviewed it. What SHIPPED is only the cheap half — the prose
+fallback now fails closed (`adae87e`). The durable fix is designed and its two
+load-bearing facts are MEASURED on this machine, and it is deliberately not
+built in the session that found the hole.
+
+**Reproduced first**, driving the real parsers with a goal that carries a forged
+line:
+
+    A: the runner also prints its honest epilogue  -> failed | cost 0.02   safe
+    B: HARD REAP, no honest epilogue               -> delivered | cost 0
+    C: no epilogue at all, prose vote only         -> delivered
+    D: the goal forges the PROSE MARKER            -> delivered
+
+Case D was not in the earlier record and is the simplest: one string, no JSON,
+and it beat the log's own `✖ build failed`. That is what `adae87e` closes. Cases
+B and C need the same precondition — no valid epilogue — and remain open.
+
+**TWO MEASURED FACTS, and neither is what a reasonable person would assume.**
+
+1. **The environment cannot hold a secret.** `ps eww -p <pid>` on a `node`
+   process of the same user PRINTS its environment, even when the child was
+   launched with `env -i`. So `run_shell` — `bash` is allowlisted — can read
+   anything passed to the runner in its environment, which kills every
+   nonce-in-the-environment design. Verify with a `node` target, NOT `/bin/sleep`:
+   platform binaries have restricted introspection and testing one nearly made
+   this session reject the finding as false.
+2. **stdin is the channel that survives; fd 3 is not.** Through the real `npm`
+   layer, a child writing to fd 3 gets **ENXIO** — npm forwards only 0, 1, 2 —
+   while a key written to stdin arrives intact, and a `run_shell`-shaped
+   grandchild inheriting stdin reads EMPTY, because the parent wrote once and
+   ended and the pipe is at EOF. Note `sh -c` alone DOES forward fd 3; the hop
+   that matters is npm's, so any test of this must go through it.
+
+**The design, ready to implement.** A new `src/contracts/runReceipt.ts`: the
+parent mints a 32-byte key and writes it to the child's stdin as one line; the
+environment carries only the receipt PATH, which is not a secret; the runner
+writes a receipt file (tmp+rename, mode 0600) whose body is the existing
+`runStatsSchema` plus an HMAC over `version | runId | emittedAt | the canonical
+epilogue`, so the on-disk receipt is useless to a reader and a future stats field
+enters the MAC automatically. `runStatsSchema` is imported, never extended. The
+reader is TOTAL and returns a discriminated union — `verified`, `absent`,
+`unreadable`, `forged` — where `forged` is a security event and not a data point.
+The receipt is written BEFORE the epilogue line, because the line is the losable
+channel: the watchdog's default is `process.exit(1)` on the next statement, and
+`writeFileSync`+`renameSync` complete across it. The decision function takes a
+facts object with NO `log` field, so it structurally cannot read prose.
+
+**Why it is not built tonight**, stated plainly: it changes the runner's four
+epilogue sites, `spawnRun`'s stdio, and what a burn-in and a benchmark row MEAN.
+The measurement harnesses' comparability is load-bearing here, and one of the
+review's two central claims was half-wrong when checked (fd 3 survives `sh -c`
+and dies at npm), which is the sort of detail that decides whether this works.
+Building it at the end of the session that found the hole is exactly what the
+cooling-off rule exists to prevent, even though a trust boundary is not a
+disposition about model output.
+
+**Still open, and now narrower.** With `adae87e` the prose vote can no longer be
+used to claim delivery. What remains is cases B and C: a hard-reaped or
+crashed-before-teardown run, where a forged `ATOMA_RUN_STATS` line from the goal
+is the only receipt. For project runs `verifiedTrace` refuses it — accidentally,
+not by design. For a burn-in or benchmark CSV nothing refuses it.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
