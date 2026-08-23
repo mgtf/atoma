@@ -150,6 +150,29 @@ because each is its own change and none is on the path the choice opens:
    after. That is the fact that decided the default; making it reviewable is a
    product feature (an approval step before the first commit), not a default.
 
+## Left open by the first real publication (2026-08-23)
+
+The first end-to-end project run delivered and could not publish: `POST
+/git/blobs` answers `409 "Git Repository is empty."` in a fresh repository, so
+the publisher's whole flow was unreachable against real GitHub while every
+test mocked the client. Fixed ([src/github](../src/github/AGENTS.md)) and
+verified against a throwaway repository. Three things that run stopped at:
+
+1. **The CLI cannot CREATE a project.** It can list, run and publish, so an
+   operator can drive everything except the one step that needs a repository
+   target and an installation choice — which is a product surface (name, slug,
+   repository name, visibility) and not obviously a terminal's business. Worth
+   deciding rather than drifting into.
+2. **A repository that exists out-of-band bricks its project.**
+   `REPOSITORY_TRANSITIONS.ready = []` is deliberate, and a `main` ref that
+   appeared by any means other than a publication makes every future publish a
+   divergence refusal with no way back. That is the correct refusal and the
+   wrong dead end; the missing piece is a supported way to point a project at a
+   different repository name, or to retire it.
+3. **`publication.published` still pushes to the requester alone** while every
+   failure reaches the org owners — see the visibility entry above. Unchanged,
+   because who gets paged is a policy decision.
+
 ## Waiting on the operator
 
 Not code — these cannot be done from an agent session.
