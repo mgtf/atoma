@@ -502,8 +502,21 @@ Not built, deliberately:
    names the head so an operator can recognise their own half-seeded publish.
    Two candidate repairs: record the attempted commit sha, or adopt the tip by
    observation.
-4. **`UNIQUE (org_id, repository_target_owner, repository_target_name)`** on the
-   projects table, per the finding above.
+4. **CLOSED.** `projects_org_repository_target_idx` is a unique INDEX, created
+   in the guarded migration rather than in the table DDL: SQLite cannot add a
+   UNIQUE by `ALTER TABLE`, and a rebuild would leave fresh and migrated stores
+   with different schemas. It is wrapped, because a store that already holds a
+   duplicate pair cannot create the index and failing to OPEN would be far worse
+   than failing to enforce — the operator is told loudly which pair to resolve,
+   and the duplicate is never touched. `createProject` also refuses early and by
+   name, slug first, because the slug is the project's own identity and a caller
+   who reused it wants to hear that. Both conflicts are now HTTP 409 from a
+   typed error, replacing a regex over one driver's prose that said "slug" for
+   every collision.
+
+   The reason this was worth closing now: since publication became incremental,
+   the second project only learned of the collision AFTER running and spending —
+   its first publish read a branch it does not own and was refused permanently.
 5. **CLOSED.** The publish bound was one number doing two unrelated jobs. It is
    now two: `MAX_GITHUB_PUBLISH_FILE_BYTES` (20 MiB) is DERIVED — every file
    travels as its own base64 request body and base64 inflates by 4/3, so the

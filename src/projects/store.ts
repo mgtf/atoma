@@ -479,6 +479,29 @@ export class ProjectStore {
       if (!publicationColumns.includes('base_sha')) {
         this.db.exec('ALTER TABLE project_publications ADD COLUMN base_sha TEXT');
       }
+      // ONE PROJECT PER REPOSITORY, per organisation. Nothing forbade two
+      // projects naming the same repository, and since publication became
+      // incremental the second one only finds out AFTER it has run and spent:
+      // its first publish reads a branch this project does not own and is
+      // refused, permanently. A unique INDEX rather than a table constraint
+      // because SQLite cannot add a CHECK or a UNIQUE by ALTER TABLE, and a
+      // rebuild would leave fresh and migrated stores with different schemas.
+      //
+      // Guarded: a store that already holds a duplicate pair cannot create it,
+      // and failing to OPEN would be far worse than failing to enforce. The
+      // operator is told, loudly, which pair to resolve.
+      try {
+        this.db.exec(
+          `CREATE UNIQUE INDEX IF NOT EXISTS projects_org_repository_target_idx
+             ON projects(org_id, repository_target_owner, repository_target_name)`
+        );
+      } catch (error) {
+        process.stderr.write(
+          `[atoma projects] cannot enforce one project per repository: ${String(error)}\n` +
+            '[atoma projects] two projects in one organisation name the same repository; ' +
+            'resolve the duplicate and reopen the store to enforce it\n'
+        );
+      }
     }
   }
 
@@ -498,6 +521,37 @@ export class ProjectStore {
     const principalId = principalIdSchema.parse(input.principalId);
     const projectId = projectIdSchema.parse(input.projectId ?? randomUUID());
     const project = createProjectInputSchema.parse(input.project);
+    // THE SLUG SPEAKS FIRST: it is the project's own identity, and a caller who
+    // reused it wants to hear that, not a fact about a repository. Explicit
+    // rather than caught from a UNIQUE violation's message, because parsing a
+    // driver's prose to learn which constraint fired is the brittleness this
+    // codebase keeps removing elsewhere.
+    const slugTaken = this.db
+      .prepare('SELECT project_id FROM projects WHERE org_id = ? AND slug = ? LIMIT 1')
+      .get(orgId, project.slug) as { project_id: string } | undefined;
+    if (slugTaken) {
+      throw new ProjectStateConflict(
+        `a project with the slug ${project.slug} already exists in this organisation`
+      );
+    }
+    // Then the repository. The unique index below is the guarantee, but a raw
+    // constraint violation says nothing an operator can act on, and the whole
+    // point is to move this refusal off the publish path — where it costs a
+    // run — and onto creation, where it costs a retyped flag.
+    const taken = this.db
+      .prepare(
+        `SELECT slug FROM projects
+          WHERE org_id = ? AND repository_target_owner = ? AND repository_target_name = ?
+          LIMIT 1`
+      )
+      .get(orgId, project.repositoryTarget.owner, project.repositoryTarget.name) as
+      | { slug: string }
+      | undefined;
+    if (taken) {
+      throw new ProjectStateConflict(
+        `project ${taken.slug} already publishes to ${project.repositoryTarget.owner}/${project.repositoryTarget.name}; one repository belongs to one project`
+      );
+    }
     const now = new Date().toISOString();
     this.db
       .prepare(

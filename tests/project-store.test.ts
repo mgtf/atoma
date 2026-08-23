@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AUTH_TABLES_DDL } from '../src/auth/store.js';
 import type { ArtifactManifest } from '../src/contracts/projects.js';
 import type { RunStats } from '../src/contracts/runStats.js';
@@ -727,5 +727,100 @@ describe('ProjectStore — the live-run reader the sentinel uses', () => {
     new ProjectStore(opened);
     opened.close();
     expect(hasProjectTables(emptyPath)).toBe(true);
+  });
+});
+
+/**
+ * ONE REPOSITORY, ONE PROJECT — per organisation.
+ *
+ * Nothing forbade two projects naming the same repository, and since
+ * publication became incremental the second one only finds out AFTER it has run
+ * and spent: its first publish reads a branch this project does not own and is
+ * refused, permanently, by `GitHubDivergenceError`. This moves the refusal onto
+ * creation, where it costs a retyped flag.
+ */
+describe('a repository belongs to one project', () => {
+  function projectTargeting(owner: Actor, slug: string, repository: string) {
+    return store.createProject({
+      orgId: owner.orgId,
+      principalId: owner.principalId,
+      project: {
+        name: slug,
+        slug,
+        repositoryTarget: {
+          installationId: '12345',
+          owner: 'atoma-test',
+          name: repository,
+          visibility: 'private',
+        },
+      },
+    });
+  }
+
+  it('refuses a second project naming the same repository, and says which holds it', () => {
+    const alice = actor('Alice');
+    projectTargeting(alice, 'first', 'shared-repo');
+    expect(() => projectTargeting(alice, 'second', 'shared-repo')).toThrow(ProjectStateConflict);
+    expect(() => projectTargeting(alice, 'third', 'shared-repo')).toThrow(
+      /project first already publishes to atoma-test\/shared-repo/
+    );
+  });
+
+  it('allows a different repository, and the same one in another organisation', () => {
+    const alice = actor('Alice');
+    const bob = actor('Bob');
+    projectTargeting(alice, 'one', 'repo-a');
+    expect(() => projectTargeting(alice, 'two', 'repo-b')).not.toThrow();
+    // The constraint is org-scoped: two organisations are two GitHub accounts'
+    // worth of namespace as far as this store is concerned.
+    expect(() => projectTargeting(bob, 'three', 'repo-a')).not.toThrow();
+  });
+
+  it('enforces it in the schema, not only in the check', () => {
+    const alice = actor('Alice');
+    projectTargeting(alice, 'only', 'guarded');
+    // Bypass createProject entirely: the unique index is the guarantee, the
+    // early check is only the good error message.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO projects (
+             project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+             status, github_installation_id, repository_target_owner, repository_target_name,
+             repository_visibility, repository_status, created_at, updated_at
+           ) VALUES (?, ?, ?, 'x', 'sneaky', '', 'build', 'active', '12345', 'atoma-test', 'guarded',
+                     'private', 'pending', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')`
+        )
+        .run(randomUUID(), alice.orgId, alice.principalId)
+    ).toThrow(/UNIQUE/i);
+  });
+
+  it('still OPENS a store that already holds a duplicate, loudly', () => {
+    const alice = actor('Alice');
+    projectTargeting(alice, 'legacy-one', 'was-shared');
+    // A store written before the index existed: drop it, insert the duplicate,
+    // then reopen. Failing to OPEN would be far worse than failing to enforce.
+    db.exec('DROP INDEX IF EXISTS projects_org_repository_target_idx');
+    db.prepare(
+      `INSERT INTO projects (
+         project_id, org_id, created_by_principal_id, name, slug, initial_prompt, family,
+         status, github_installation_id, repository_target_owner, repository_target_name,
+         repository_visibility, repository_status, created_at, updated_at
+       ) VALUES (?, ?, ?, 'x', 'legacy-two', '', 'build', 'active', '12345', 'atoma-test',
+                 'was-shared', 'private', 'pending', '2026-08-23T00:00:00.000Z',
+                 '2026-08-23T00:00:00.000Z')`
+    ).run(randomUUID(), alice.orgId, alice.principalId);
+    const warned = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      expect(() => new ProjectStore(db)).not.toThrow();
+      expect(warned.mock.calls.flat().join(' ')).toMatch(/cannot enforce one project per repository/);
+    } finally {
+      warned.mockRestore();
+    }
+    // And the duplicate is still there — this refuses to enforce, never to fix.
+    expect(store.listProjects(alice.orgId).map((p) => p.slug).sort()).toEqual([
+      'legacy-one',
+      'legacy-two',
+    ]);
   });
 });

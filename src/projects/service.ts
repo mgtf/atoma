@@ -198,8 +198,14 @@ export class ProjectService {
       });
       return publicProject(project);
     } catch (error) {
-      if (error instanceof Error && /UNIQUE constraint failed: projects\.org_id, projects\.slug/.test(error.message)) {
-        throw new ProjectHttpError(409, 'a project with this slug already exists in the organisation');
+      // The store says WHICH identity collided — a slug or a repository — and
+      // both are 409. This used to depend on matching a driver's own prose for
+      // one constraint, which said nothing about the other and would have gone
+      // on saying "slug" for a repository collision.
+      if (error instanceof ProjectStateConflict) throw new ProjectHttpError(409, error.message);
+      if (error instanceof Error && /UNIQUE constraint failed: projects\./.test(error.message)) {
+        // Backstop only: reachable if something bypasses the checks above.
+        throw new ProjectHttpError(409, 'a project identity in this organisation is already taken');
       }
       throw error;
     }
