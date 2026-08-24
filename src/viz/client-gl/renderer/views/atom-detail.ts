@@ -4,7 +4,6 @@ import { taxonomyForTier } from '../../../../core/taxonomy.js';
 import { elementForTool } from '../../../../contracts/toolTaxonomy.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS } from '../../theme.js';
-import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
 
 /**
@@ -12,7 +11,9 @@ import { createScrollPane } from '../scroll-pane.js';
  * the Runs view's atom selection. Name, rank and counters stay fixed; every
  * FACT about the type scrolls in a masked pane driven by the shared detail
  * wheel route, so its tail is reachable instead of silently overflowing the
- * panel (2026-08-14 review).
+ * panel (2026-08-14 review). The header also carries the catalogue ordinal;
+ * provenance names the latest change; and a bounded prompt preview says when
+ * it is incomplete instead of silently passing an excerpt off as the whole.
  *
  * IT SHOWS ITS SECTIONS UNDER HEADINGS. The pane used to render the system
  * prompt as one unlabelled monospace block and nothing else — no elements, no
@@ -25,11 +26,13 @@ import { createScrollPane } from '../scroll-pane.js';
  * task, the plan and whatever skills were injected, so it belongs to a run and
  * not to a type. Leaving the heading out would suggest the type has no such
  * face; inventing a template here would show a prompt nobody ever sent. It
- * says where the real one is: an LLM event in Runs.
+ * says where the real one is: an LLM event in Runs. It sits BEFORE the system
+ * prompt, whose long preview must never bury that distinction.
  */
 
 const HEADING_GAP = 8;
 const SECTION_GAP = 16;
+const PROMPT_PREVIEW_CHARS = 5_000;
 
 export function drawAtomDetail(
   ctx: RendererCtx,
@@ -44,7 +47,7 @@ export function drawAtomDetail(
   ctx.text(ctx.root, atom.name, x + 18, y + 16, { size: 16, weight: '700' });
   ctx.text(
     ctx.root,
-    `L${atom.tier} ${snapshot.t(`rank.${taxonomy.rank}`)} · v${atom.version} · ✓${atom.successes}/✗${atom.failures}`,
+    `L${atom.tier} ${snapshot.t(`rank.${taxonomy.rank}`)} · #${atom.ordinal} · v${atom.version} · ✓${atom.successes}/✗${atom.failures}`,
     x + 18,
     y + 43,
     { size: 10, color: GPU_COLORS.tiers[atom.tier as 1 | 2 | 3] }
@@ -96,7 +99,9 @@ export function drawAtomDetail(
       atom.tools
         .map((tool) => {
           const element = elementForTool(tool);
-          return element ? `${element.symbol} · ${tool}` : tool;
+          return element
+            ? `${element.symbol} · ${element.name} (#${element.number}) · ${tool}`
+            : tool;
         })
         .join('   '),
       { mono: true }
@@ -104,16 +109,54 @@ export function drawAtomDetail(
   }
 
   heading(snapshot.t('registry.detailParams'));
-  body(safeJson(atom.params), { mono: true });
+  if (isEmptyRecord(atom.params)) {
+    body(snapshot.t('registry.detailNoParams'), { muted: true });
+  } else {
+    body(safeJson(atom.params) ?? snapshot.t('registry.detailParamsUnreadable'), {
+      mono: true,
+    });
+  }
 
   heading(snapshot.t('registry.detailProvenance'));
-  body(`${atom.createdBy} · ${atom.createdAt}`, { mono: true, muted: true });
-
-  heading(snapshot.t('registry.detailPrompt'));
-  body(truncate(atom.systemPrompt, 5000), { mono: true });
+  // Registry API payloads carry history; compact run snapshots deliberately
+  // do not. Undefined therefore means "not present in this trace", not zero.
+  const history = atom.history;
+  const lastChange = history?.at(-1);
+  body(
+    [
+      snapshot.t('registry.detailCreated', { by: atom.createdBy, at: atom.createdAt }),
+      lastChange
+        ? snapshot.t('registry.detailLastChanged', {
+          by: lastChange.modifiedBy,
+          at: lastChange.modifiedAt,
+        })
+        : '',
+      lastChange?.reason
+        ? snapshot.t('registry.detailChangeReason', { reason: lastChange.reason })
+        : '',
+      history
+        ? snapshot.t('registry.detailArchivedVersions', { count: history.length })
+        : '',
+    ].filter(Boolean).join('\n'),
+    { mono: true, muted: true }
+  );
 
   heading(snapshot.t('registry.detailInstruction'));
   body(snapshot.t('registry.detailInstructionHint'), { muted: true });
+
+  heading(snapshot.t('registry.detailPrompt'));
+  if (atom.systemPrompt.length > PROMPT_PREVIEW_CHARS) {
+    body(snapshot.t('registry.detailPromptTruncated', {
+      shown: PROMPT_PREVIEW_CHARS,
+      total: atom.systemPrompt.length,
+    }), { muted: true });
+  }
+  body(
+    atom.systemPrompt.length > PROMPT_PREVIEW_CHARS
+      ? `${atom.systemPrompt.slice(0, PROMPT_PREVIEW_CHARS)}…`
+      : atom.systemPrompt,
+    { mono: true }
+  );
 
   pane.extend(cursor);
   ctx.detailScrollMax = pane.finish();
@@ -122,11 +165,16 @@ export function drawAtomDetail(
   ctx.detailBounds = new Rectangle(x, y, width, height);
 }
 
+function isEmptyRecord(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) &&
+    Object.keys(value).length === 0;
+}
+
 /** Parameters are stored JSON; an unserialisable value must not blank the pane. */
-function safeJson(value: unknown): string {
+function safeJson(value: unknown): string | null {
   try {
     return JSON.stringify(value, null, 2) ?? 'null';
   } catch {
-    return '(unserialisable)';
+    return null;
   }
 }

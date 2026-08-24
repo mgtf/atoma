@@ -10,6 +10,8 @@ import {
   isIndexEntryLive,
   isRunLive,
   mergeRunDelta,
+  projectRunTaxonomy,
+  projectRunUpdate,
   runElapsedMs,
   runHeading,
   tryParseJson,
@@ -139,6 +141,37 @@ describe('React viz delta and filters', () => {
     expect(mergeRunDelta(current, emptyDelta)).toBe(current);
   });
 
+  it('ignores projection-only rank metadata when comparing a raw empty delta', () => {
+    const storedType = {
+      tier: 1,
+      ordinal: 1,
+      name: 'Water',
+      description: 'builder',
+      systemPrompt: 'prompt',
+      tools: [],
+      params: {},
+      createdBy: 'seed',
+      createdAt: '2026-08-14T00:00:00.000Z',
+      version: 2,
+      successes: 0,
+      failures: 0,
+    };
+    const current = projectRunTaxonomy(run({
+      events: [{ id: 'e1', kind: 'llm', ts: 1 }],
+      initialTypes: [storedType],
+      totals: { calls: 1 },
+    }));
+    expect(current.initialTypes?.[0]?.rank).toBe('molecule');
+
+    const rawEmptyDelta = run({
+      eventsFrom: 1,
+      events: [],
+      initialTypes: [storedType],
+      totals: { calls: 1 },
+    });
+    expect(mergeRunDelta(current, rawEmptyDelta)).toBe(current);
+  });
+
   it('still merges an empty delta whose metadata moved', () => {
     // The run finishing produces exactly this shape: no new events, but
     // endedAt/error/totals changed. Identity here would freeze the verdict.
@@ -178,6 +211,47 @@ describe('React viz delta and filters', () => {
     // now has none, not that nothing happened.
     const resync = mergeRunDelta(current, run({ eventsFrom: 0, events: [] }));
     expect(resync.events).toEqual([]);
+  });
+
+  it('recovers legacy registry counter versions in chronological order', () => {
+    const v2 = {
+      tier: 1,
+      ordinal: 1,
+      name: 'Water',
+      description: 'builder',
+      systemPrompt: 'v2 prompt',
+      tools: [],
+      params: {},
+      createdBy: 'seed',
+      createdAt: '2026-08-14T00:00:00.000Z',
+      version: 2,
+      successes: 0,
+      failures: 0,
+    };
+    const v3 = { ...v2, systemPrompt: 'v3 prompt', version: 3 };
+    const legacy = run({
+      initialTypes: [v2],
+      events: [
+        { id: 'before', kind: 'registry', op: 'recordSuccess', name: 'Water', ts: 1 },
+        { id: 'patch', kind: 'registry', op: 'patch', name: 'Water', snapshot: v3, ts: 2 },
+        { id: 'after', kind: 'registry', op: 'recordSuccess', name: 'Water', ts: 3 },
+        { id: 'unknown', kind: 'registry', op: 'recordSuccess', name: 'Methane', ts: 4 },
+      ],
+    });
+    const projected = projectRunTaxonomy(legacy);
+    expect(projected.events.map((event) => event.version)).toEqual([2, 3, 3, undefined]);
+
+    // Live polling keeps the delta raw until it rejoins the complete run. If
+    // this counter were projected alone, initialTypes would mislabel it v2.
+    const current = projectRunTaxonomy(run({
+      initialTypes: [v2],
+      events: legacy.events.slice(0, 2),
+    }));
+    const merged = projectRunUpdate(current, run({
+      eventsFrom: 2,
+      events: [legacy.events[2]!],
+    }));
+    expect(merged.events[2]?.version).toBe(3);
   });
 
   it('treats llm-start as llm while preserving role and branch filters', () => {

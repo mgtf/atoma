@@ -63,10 +63,12 @@ describe('registry trace actor/child attribution', () => {
       )).toMatchObject({
         actor: { name: tissue.name, tier: 3 },
         child: { name: cell.name, tier: 2 },
+        version: 2,
       });
       expect(events.find((event) => event.op === 'recordFailure')).toMatchObject({
         actor: { name: tissue.name, tier: 3 },
         child: { name: branch.name, tier: 2 },
+        version: 1,
       });
       // A direct/operator bump has a known target but no invented initiator.
       const unattributed = events.find(
@@ -75,6 +77,7 @@ describe('registry trace actor/child attribution', () => {
       expect(unattributed?.actor).toBeUndefined();
       expect(unattributed).toMatchObject({
         child: { name: tissue.name, tier: 3 },
+        version: 1,
       });
     } finally {
       recorder.endRun({});

@@ -6,7 +6,7 @@ import {
 } from '@tanstack/react-query';
 import { useRef } from 'react';
 import { api } from '../client/data-api.js';
-import { isRunLive, mergeRunDelta } from '../client/run-utils.js';
+import { isRunLive, projectRunUpdate } from '../client/run-utils.js';
 import type { SkillSummary, VizRun } from '../client/types.js';
 
 export function useRunsIndex(active: boolean) {
@@ -28,9 +28,7 @@ export function useRunTrace(runId: string | null, active: boolean) {
       if (!runId) throw new Error('run id is required');
       const current = queryClient.getQueryData<VizRun>(['viz', 'run', runId]);
       const incoming = await api.run(runId, current?.events.length);
-      return current && incoming.eventsFrom !== undefined
-        ? mergeRunDelta(current, incoming)
-        : incoming;
+      return projectRunUpdate(current, incoming);
     },
     refetchInterval: (query) => {
       const run = query.state.data;

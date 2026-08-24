@@ -174,3 +174,30 @@ describe('gpuEventCardCopy for an LLM call', () => {
     expect(bare.footer).not.toContain('NaN');
   });
 });
+
+describe('gpuEventCardCopy for registry counters', () => {
+  it('shows the credited type version when the event carries it', () => {
+    const { footer } = gpuEventCardCopy({
+      id: 'registry-success',
+      ts: Date.parse('2026-08-16T10:00:00.000Z'),
+      kind: 'registry',
+      op: 'recordSuccess',
+      name: 'Water',
+      version: 2,
+    }, t);
+    expect(footer).toContain('v2');
+    expect(footer).not.toContain('v?');
+  });
+
+  it('omits a version that an irrecoverable legacy event never recorded', () => {
+    const { footer } = gpuEventCardCopy({
+      id: 'legacy-registry-success',
+      ts: Date.parse('2026-08-16T10:00:00.000Z'),
+      kind: 'registry',
+      op: 'recordSuccess',
+      name: 'Water',
+    }, t);
+    expect(footer).not.toContain('v?');
+    expect(footer).not.toMatch(/(^| · )v\d/);
+  });
+});

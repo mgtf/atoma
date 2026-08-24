@@ -19,7 +19,6 @@ import type {
   VizProjectRun,
   VizRun,
 } from './types.js';
-import { projectRunTaxonomy } from './run-utils.js';
 import { redirectIfAuthenticationRequired } from './auth-session.js';
 
 export async function fetchJson<T>(path: string): Promise<T> {
@@ -32,9 +31,9 @@ export async function fetchJson<T>(path: string): Promise<T> {
 export const api = {
   runs: () => fetchJson<RunIndexEntry[]>('/api/runs'),
   run: async (id: string, after?: number) =>
-    projectRunTaxonomy(await fetchJson<VizRun>(
+    fetchJson<VizRun>(
       `/api/runs/${encodeURIComponent(id)}${after === undefined ? '' : `?after=${after}`}`
-    )),
+    ),
   registries: () => fetchJson<RegistrySummary[]>('/api/registries'),
   registry: (id: string) =>
     fetchJson<{ registry: RegistrySummary; types: RegistryType[] }>(

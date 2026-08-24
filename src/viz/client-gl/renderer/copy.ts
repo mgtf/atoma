@@ -255,6 +255,10 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
       second: '2-digit',
     })
     : '';
+  const registryVersion = event.snapshot?.version ?? event.version;
+  const registryVersionLabel = typeof registryVersion === 'number' && Number.isFinite(registryVersion)
+    ? `v${registryVersion}`
+    : '';
   const footer =
     event.kind === 'llm'
       ? [
@@ -279,7 +283,7 @@ export function gpuEventCardCopy(event: VizEvent, t: GpuTranslate): GpuEventCard
                   time,
                 ].filter(Boolean).join(' · ')
             : event.kind === 'registry'
-              ? [`v${event.snapshot?.version ?? scalar(event.version, '?')}`, time].filter(Boolean).join(' · ')
+              ? [registryVersionLabel, time].filter(Boolean).join(' · ')
               : [event.model, time].filter(Boolean).join(' · ');
   return { title, meta, body, footer, decision: eventDecision(event, t) };
 }
@@ -306,4 +310,3 @@ export function nowDescription(t: GpuTranslate, event: VizEvent): string {
       return t('now.doing.unknown', vars);
   }
 }
-

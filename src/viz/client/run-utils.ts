@@ -82,29 +82,64 @@ export function mergeRunDelta(current: VizRun, incoming: VizRun): VizRun {
   ) {
     return current;
   }
-  return {
+  // Re-project the WHOLE merged run. A historical counter event in a live
+  // delta may omit its version while the snapshot that establishes it sits in
+  // an earlier page; projecting the delta alone cannot recover that context.
+  return projectRunTaxonomy({
     ...current,
     ...incoming,
     events:
       from === 0
         ? incoming.events
         : current.events.slice(0, from).concat(incoming.events),
-  };
+  });
+}
+
+/**
+ * ONE ingestion boundary for a full trace or a polled delta. The API reader
+ * intentionally returns raw trace JSON: projecting a delta before it rejoins
+ * the preceding events can assign a counter the initial version even though a
+ * patch sits in an earlier page. Merge first, then project the complete run.
+ */
+export function projectRunUpdate(
+  current: VizRun | null | undefined,
+  incoming: VizRun
+): VizRun {
+  return current && incoming.eventsFrom !== undefined
+    ? mergeRunDelta(current, incoming)
+    : projectRunTaxonomy(incoming);
 }
 
 /**
  * Field-by-field over the DELTA's own keys, so a field the server adds later
  * automatically participates instead of silently freezing on screen. JSON
- * compare per field: both sides came off the same serializer, so key order is
- * stable, and `totals`/`result` are nested. Events are excluded — the caller
- * already knows the delta carries none.
+ * compare per field: persisted keys came off the same serializer, so key order
+ * is stable, and `totals`/`result` are nested. Projection-only metadata is
+ * normalised below. Events are excluded — the caller already knows the delta
+ * carries none.
  */
 function sameRunMeta(current: VizRun, incoming: VizRun): boolean {
   for (const key of Object.keys(incoming) as (keyof VizRun)[]) {
     if (key === 'events' || key === 'eventsFrom') continue;
-    if (JSON.stringify(current[key]) !== JSON.stringify(incoming[key])) return false;
+    if (
+      JSON.stringify(comparableRunMeta(current, key)) !==
+      JSON.stringify(comparableRunMeta(incoming, key))
+    ) return false;
   }
   return true;
+}
+
+function comparableRunMeta(run: VizRun, key: keyof VizRun): unknown {
+  if (key !== 'initialTypes') return run[key];
+  // `rank` is typed-boundary metadata derived from the persisted numeric tier.
+  // CURRENT has already been projected while an API delta is deliberately raw,
+  // so comparing the two shapes byte-for-byte would turn every empty poll into
+  // a false change and rebuild the GPU scene once per second.
+  return run.initialTypes?.map((snapshot) => {
+    const storedShape = { ...snapshot };
+    delete storedShape.rank;
+    return storedShape;
+  });
 }
 
 export interface RunHeading {
@@ -241,21 +276,32 @@ function projectRegistryType(snapshot: RegistryType): RegistryType {
  */
 export function projectRunTaxonomy(run: VizRun): VizRun {
   const refs = new Map<string, { name?: string; tier?: number }>();
-  const remember = (snapshot: RegistryType): RegistryType => {
+  const versions = new Map<string, number>();
+  const rememberRef = (snapshot: RegistryType): RegistryType => {
     const projected = projectRegistryType(snapshot);
     refs.set(snapshot.name, { name: projected.name, tier: projected.tier });
     return projected;
   };
-  const projectedInitialTypes = run.initialTypes?.map(remember);
+  const projectedInitialTypes = run.initialTypes?.map((snapshot) => {
+    const projected = rememberRef(snapshot);
+    if (Number.isFinite(projected.version)) versions.set(projected.name, projected.version);
+    return projected;
+  });
+  // This pre-pass is ONLY for actor/child taxonomy. Version recovery below is
+  // chronological: seeding it from every future snapshot would label a
+  // success before a patch with the version created after that success.
   for (const event of run.events) {
-    if (event.kind === 'registry' && event.snapshot) remember(event.snapshot);
+    if (event.kind === 'registry' && event.snapshot) rememberRef(event.snapshot);
   }
 
   return {
     ...run,
     initialTypes: projectedInitialTypes,
     events: run.events.map((event) => {
-      const snapshot = event.snapshot ? remember(event.snapshot) : undefined;
+      const snapshot = event.snapshot ? rememberRef(event.snapshot) : undefined;
+      if (snapshot && Number.isFinite(snapshot.version)) {
+        versions.set(snapshot.name, snapshot.version);
+      }
       const recordedBy = typeof event['by'] === 'string' ? event['by'] : undefined;
       const registryActor =
         event.kind === 'registry' && recordedBy
@@ -269,14 +315,28 @@ export function projectRunTaxonomy(run: VizRun): VizRun {
           : undefined;
       const actor = event.actor ?? registryActor;
       const child = event.child ?? registryChild;
+      const targetName = event.kind === 'registry'
+        ? snapshot?.name ?? event.name
+        : undefined;
+      const recordedVersion = typeof event.version === 'number' && Number.isFinite(event.version)
+        ? event.version
+        : undefined;
+      const registryVersion = event.kind === 'registry'
+        ? recordedVersion ?? (targetName ? versions.get(targetName) : undefined)
+        : undefined;
+      if (targetName && registryVersion !== undefined) {
+        versions.set(targetName, registryVersion);
+      }
       const baseEvent: VizEvent = { ...event };
       delete baseEvent.actor;
       delete baseEvent.child;
+      delete baseEvent.version;
       return {
         ...baseEvent,
         ...(actor ? { actor } : {}),
         ...(child ? { child } : {}),
         ...(snapshot ? { snapshot } : {}),
+        ...(registryVersion !== undefined ? { version: registryVersion } : {}),
       };
     }),
   };

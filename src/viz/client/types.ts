@@ -46,6 +46,8 @@ export interface VizEvent {
   systemPrompt?: string;
   userContent?: string;
   op?: string;
+  /** Registry type version credited, blamed or produced by this event. */
+  version?: number;
   l1Name?: string;
   /** Stored skill-namespace key (atom id). Address `/api/skills` with this, not `l1Name`. */
   l1AtomId?: string;

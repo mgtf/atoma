@@ -123,6 +123,15 @@ npm run viz:mark-turn:analyze
 - `runStatus` is the ONE definition of what happened to a run, and every
   surface that labels one uses it. Cancellation is not failure: a cancelled
   run records an error message by design, so `cancelled` wins over `error`.
+- Registry counter events stamp the TARGET TYPE VERSION they credit or blame;
+  they do not copy a full prompt snapshot into every event. The typed run
+  projection recovers that version chronologically for older traces when it
+  can, and the card omits an unknowable version instead of printing `v?`.
+  `/api/runs` stays raw at the client reader: a delta rejoins the complete run
+  BEFORE projection, or an earlier patch is invisible and the initial version
+  can be stamped onto a later counter. Empty-delta identity comparisons ignore
+  projection-only fields such as the rank derived from a stored numeric tier;
+  otherwise every raw poll looks changed and rebuilds the GPU scene.
 - The runs timeline reads NEWEST FIRST and is framed by two bookend rows
   (run ended / run started) that carry the verdict. Bookends are view rows:
   the view publishes `rowOffset` on the timeline viewport and overlays add it,
@@ -234,10 +243,18 @@ npm run viz:mark-turn:analyze
   flag, never a judgment, and whether the sentinel may cancel a run is an open
   decision, so every button on that screen is a navigation. Coverage spans
   BOTH run corpora — see [`src/sentinel`](../sentinel/AGENTS.md).
+- The Registry's ordinary one-store source is INFORMATION, not a selector:
+  show its database basename and population, with the full path on hover.
+  Repeated `--db` inputs turn that same row into measured, wrapping choices;
+  no store may disappear behind a fixed slice.
 - The agent detail pane names its sections. It showed the system prompt as one
   unlabelled monospace block and nothing else, while the payload already
-  carried elements, parameters and provenance. The USER INSTRUCTION has a
-  heading and no body on purpose: it is composed per call from the task, the
+  carried elements, parameters and provenance. Its header keeps the catalogue
+  ordinal; elements retain both periodic metadata and their immutable call
+  names; empty parameters say there is no type-level override; provenance
+  names the latest archived change; and a bounded prompt preview says when it
+  is incomplete. The USER INSTRUCTION comes BEFORE that prompt and has a
+  heading but no body on purpose: it is composed per call from the task, the
   plan and injected skills, so it belongs to a run — the heading points at an
   LLM event in Runs rather than inventing a template nobody ever sent.
 - The nav is a LEFT RAIL (`renderer/views/sidebar.ts`), not a header tab strip.

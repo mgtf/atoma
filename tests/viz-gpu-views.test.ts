@@ -2763,11 +2763,30 @@ describe('drawRegistry scrolling honesty', () => {
     // and nothing else. Elements, parameters and provenance were payload the
     // view already had and never showed.
     const ctx = createRecordingCtx();
+    const detailTypes = [
+      makeRegistryType('Molecule0', {
+        ordinal: 7,
+        version: 2,
+        history: [{
+          version: 1,
+          systemPrompt: 'Old prompt.',
+          tools: ['read_file'],
+          params: {},
+          modifiedBy: 'curriculum',
+          modifiedAt: '2026-08-15T10:00:00.000Z',
+          reason: 'Tighten the evidence contract',
+        }],
+      }),
+      ...types.slice(1),
+    ];
     drawRegistry(
       ctx,
       makeSnapshot(
         { view: 'registry', selectedRegistryAtom: 'Molecule0' },
-        { registries: [REGISTRY_SUMMARY], registry: { registry: REGISTRY_SUMMARY, types: types } }
+        {
+          registries: [REGISTRY_SUMMARY],
+          registry: { registry: REGISTRY_SUMMARY, types: detailTypes },
+        }
       ),
       WIDTH,
       900
@@ -2777,16 +2796,54 @@ describe('drawRegistry scrolling honesty', () => {
       expect(values, `missing ${heading}`).toContain(heading);
     }
     // The user instruction is NAMED and not shown: it is composed per call, so
-    // it belongs to a run. The heading points at the run instead of inventing
-    // a template nobody ever sent.
+    // it belongs to a run. It must come before the potentially huge system
+    // prompt instead of being buried after an excerpt nobody can scroll past.
     expect(values.some((value) => value.includes('Open an LLM event in Runs'))).toBe(true);
+    expect(values.indexOf('USER INSTRUCTION')).toBeLessThan(values.indexOf('SYSTEM PROMPT'));
     expect(values).toContain('You are a helper.');
+    expect(values).toContain('L1 Molecule · #7 · v2 · ✓2/✗0');
+    expect(values).toContain('Li · Lithium (#3) · read_file');
+
+    // Empty type-level parameters say what their emptiness MEANS; a raw `{}`
+    // made an ordinary default look like missing or broken data.
+    expect(values).toContain(I18N_CATALOGS.en['registry.detailNoParams']);
+    expect(values).not.toContain('{}');
+
+    // Provenance carries the latest archived change, not creation alone.
+    expect(values).toContain([
+      'Created · seed · 2026-08-14T00:00:00.000Z',
+      'Last changed · curriculum · 2026-08-15T10:00:00.000Z',
+      'Reason · Tighten the evidence contract',
+      '1 archived version',
+    ].join('\n'));
+  });
+
+  it('keeps non-empty parameters as formatted JSON', () => {
+    const ctx = createRecordingCtx();
+    const configured = makeRegistryType('Configured', {
+      params: { maxTokens: 2048, temperature: 0.2 },
+    });
+    drawRegistry(
+      ctx,
+      makeSnapshot(
+        { view: 'registry', selectedRegistryAtom: configured.name },
+        {
+          registries: [REGISTRY_SUMMARY],
+          registry: { registry: REGISTRY_SUMMARY, types: [configured] },
+        }
+      ),
+      WIDTH,
+      900
+    );
+    expect(ctx.texts.map((text) => text.value)).toContain(
+      JSON.stringify(configured.params, null, 2)
+    );
   });
 
   it('scrolls a long system prompt inside the detail pane', () => {
     const ctx = createRecordingCtx();
     const longTypes = [
-      makeRegistryType('Verbose', { systemPrompt: 'x'.repeat(5000) }),
+      makeRegistryType('Verbose', { systemPrompt: 'x'.repeat(5001) }),
     ];
     drawRegistry(
       ctx,
@@ -2807,8 +2864,92 @@ describe('drawRegistry scrolling honesty', () => {
     expect(ctx.detailBounds!.y).toBe(paneTop);
     expect(ctx.detailBounds!.width).toBe(WIDTH - rightX - 10);
     expect(ctx.detailBounds!.height).toBe(HEIGHT - paneTop - 10);
+    expect(ctx.texts.map((text) => text.value)).toContain(
+      'Preview limited to 5000 of 5001 characters.'
+    );
     // One atom fits the list, so the only thumb is the detail pane's.
     expect(scrollbarThumbs(ctx.root).length).toBe(1);
+  });
+
+  it('shows the ordinary single store as named information, not an action', () => {
+    const ctx = createRecordingCtx();
+    drawRegistry(ctx, makeSnapshot({ view: 'registry' }, data), WIDTH, 900);
+    const values = ctx.texts.map((text) => text.value);
+    expect(values).toContain('REGISTRY STORE');
+    expect(values).toContain('store.db · 13 agents');
+    expect(ctx.buttons.some((button) => button.id.startsWith('registry.select.'))).toBe(false);
+    expect(ctx.tooltips.map((tip) => tip.text)).toContain('store.db');
+  });
+
+  it('wraps every store choice and measures the complete visible label', () => {
+    const registries = Array.from({ length: 5 }, (_, index): RegistrySummary => ({
+      id: `archive-${index}`,
+      label: `archive-${index}`,
+      path: `/stores/archive-${index}.db`,
+      exists: true,
+      counts: { 1: index + 1, 2: 0, 3: 0, total: index + 1 },
+    }));
+    const ctx = createRecordingCtx();
+    drawRegistry(
+      ctx,
+      makeSnapshot(
+        { view: 'registry', selectedRegistryId: registries[0]!.id },
+        { registries, registry: { registry: registries[0]!, types: [types[0]!] } }
+      ),
+      WIDTH,
+      900
+    );
+    const selectors = ctx.buttons.filter((button) => button.id.startsWith('registry.select.'));
+    expect(selectors).toHaveLength(registries.length);
+    expect(selectors.every((button) => !button.label.includes('…'))).toBe(true);
+    expect(selectors[0]!.label).toBe('archive-0.db · 1 agent');
+    expect(ctx.tooltips.map((tip) => tip.text)).toEqual(
+      expect.arrayContaining(registries.map((registry) => registry.path))
+    );
+  });
+
+  it('keeps an unbounded list of long store choices reachable in the shared pane', () => {
+    const registries = Array.from({ length: 20 }, (_, index): RegistrySummary => ({
+      id: `regional-archive-${index}`,
+      label: `regional-archive-${index}`,
+      path: `/stores/region-with-a-deliberately-long-name-${index}.db`,
+      exists: true,
+      counts: { 1: 1, 2: 0, 3: 0, total: 1 },
+    }));
+    const dataWithManyStores = {
+      registries,
+      registry: { registry: registries[0]!, types: [types[0]!] },
+    };
+    const lastSelector = `registry.select.${registries.at(-1)!.id}`;
+    const unscrolled = createRecordingCtx();
+    drawRegistry(
+      unscrolled,
+      makeSnapshot(
+        { view: 'registry', selectedRegistryId: registries[0]!.id },
+        dataWithManyStores
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(unscrolled.scrollMax.registry).toBeGreaterThan(0);
+    expect(unscrolled.buttons.some((button) => button.id === lastSelector)).toBe(false);
+
+    const scrolled = createRecordingCtx();
+    drawRegistry(
+      scrolled,
+      makeSnapshot(
+        {
+          view: 'registry',
+          selectedRegistryId: registries[0]!.id,
+          scrollY: { ...makeState().scrollY, registry: unscrolled.scrollMax.registry! },
+        },
+        dataWithManyStores
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    expect(scrolled.buttons.some((button) => button.id === lastSelector)).toBe(true);
+    expect(scrolled.buttons.some((button) => button.id === 'registry.atom.Molecule0')).toBe(true);
   });
 });
 

@@ -120,7 +120,9 @@ export class RecordingRegistry extends AtomRegistry {
       op: 'recordSuccess',
       name,
       ...(by ? { by, actor: this.ref(by) } : {}),
-      ...(target ? { tier: target.tier, child: this.childRef(target) } : {}),
+      ...(target
+        ? { tier: target.tier, child: this.childRef(target), version: target.version }
+        : {}),
     });
   }
 
@@ -134,7 +136,9 @@ export class RecordingRegistry extends AtomRegistry {
       op: 'recordFailure',
       name,
       ...(by ? { by, actor: this.ref(by) } : {}),
-      ...(target ? { tier: target.tier, child: this.childRef(target) } : {}),
+      ...(target
+        ? { tier: target.tier, child: this.childRef(target), version: target.version }
+        : {}),
     });
   }
 }

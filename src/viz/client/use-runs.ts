@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './data-api.js';
-import { isIndexEntryLive, isRunLive, mergeRunDelta } from './run-utils.js';
+import { isIndexEntryLive, isRunLive, projectRunUpdate } from './run-utils.js';
 import type { RunIndexEntry, VizRun } from './types.js';
 
 export function useRunsIndex(active: boolean) {
@@ -54,7 +54,7 @@ export function useRunTrace(runId: string | null, active: boolean) {
     setLoading(true);
     try {
       const next = await api.run(runId);
-      setRun(next);
+      setRun(projectRunUpdate(null, next));
       setError(null);
     } catch (cause) {
       setError(cause);
@@ -80,7 +80,7 @@ export function useRunTrace(runId: string | null, active: boolean) {
       }
       void api.run(runId, current.events.length)
         .then((delta) => {
-          setRun((value) => (value ? mergeRunDelta(value, delta) : delta));
+          setRun((value) => projectRunUpdate(value, delta));
           setError(null);
         })
         .catch(setError);
