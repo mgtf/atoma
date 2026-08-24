@@ -771,17 +771,29 @@ try {
     // The frame period comes from the main page's sampler: same browser, same
     // machine, same rasteriser, so it describes this page's cadence too.
     const restingObservable = frameStats.meanMs < RESTING_FRAME_CEILING_MS;
-    // AN ISOLATED CONTEXT, because this arm's whole point is clicking the GL
-    // arrival control — and `enter()` persists `atoma.viz.entered` per ORIGIN,
-    // so an earlier arm's Continue admits every later page in the default
-    // context and no arrival control is ever drawn there. Skipping the arm
-    // when the gate is absent would have silently deleted the coverage
-    // instead; its own storage partition keeps the gate real.
-    const anchorContext = await browser.createBrowserContext();
-    const anchorPage = await anchorContext.newPage();
+    const anchorPage = await browser.newPage();
     let anchorStats;
     try {
       await anchorPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
+      // This arm's whole point is CLICKING the GL arrival control, so it needs
+      // a gate to click — and `enter()` persists `atoma.viz.entered`, which is
+      // per ORIGIN and therefore shared with every page opened before it. An
+      // earlier arm's Continue would admit this one silently, leaving no
+      // control on the canvas and no coverage of the thing being proved.
+      //
+      // Clearing the flag BEFORE the app's scripts run is what a fresh visitor
+      // is; `evaluateOnNewDocument` runs on every navigation, ahead of the
+      // store's `initialEntered()` read. A separate browser context also gives
+      // a clean origin, but its page is never the front page, and headless
+      // Chrome does not deliver synthesized clicks into Pixi's hit-testing
+      // there — the gate rendered and then swallowed six clicks in a row.
+      await anchorPage.evaluateOnNewDocument(() => {
+        try {
+          localStorage.removeItem('atoma.viz.entered');
+        } catch {
+          // Storage is optional; the gate simply shows.
+        }
+      });
       await anchorPage.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, {
         waitUntil: 'load',
       });
@@ -821,15 +833,30 @@ try {
       // listening, and it is silently swallowed. The ASSERTION is unchanged —
       // the GL control must admit us — this only stops a lost first click from
       // being reported as "the gate never opened".
+      //
+      // A retry is attempted ONLY while the control is still on the canvas. A
+      // landed click removes it, and the runner draws one frame every ~2s, so
+      // a fixed short wait between attempts expired while entry was already in
+      // flight — the next `clickTarget` then threw "hit target not found" on
+      // the gate it had just successfully dismissed. Absence of the control is
+      // therefore progress, not an error: wait it out rather than re-click.
       const gateDeadline = Date.now() + READY_TIMEOUT_MS;
       for (;;) {
         if (await anchorPage.$('[role="tab"]')) break;
         if (Date.now() > gateDeadline) {
           throw new Error('anchor scenario: GL arrival control never admitted the visitor');
         }
-        await clickTarget('welcome.continue');
+        const stillOffered = await anchorPage.evaluate(
+          () =>
+            globalThis.__ATOMA_GPU__
+              ?.hitTargets()
+              .some((entry) => entry.id === 'welcome.continue') ?? false
+        );
+        if (stillOffered) await clickTarget('welcome.continue');
+        // Long enough for several frames on a ~2s/frame CPU rasteriser, so a
+        // click in flight is never mistaken for one that was swallowed.
         await anchorPage
-          .waitForSelector('[role="tab"]', { timeout: 2000 })
+          .waitForSelector('[role="tab"]', { timeout: 10_000 })
           .catch(() => {});
       }
       // The filter rows this arm animates are the RUNS view's.
@@ -873,8 +900,6 @@ try {
       anchorStats = { initial, hidden, midFlight, settled };
     } finally {
       await anchorPage.close();
-      // Closes the storage partition with it, so the gate stays real here.
-      await anchorContext.close();
     }
 
     if (
@@ -1107,42 +1132,50 @@ try {
       );
       const withOrb = await targetIds();
 
-      // Open the menu from the orb itself: hit-testable on the canvas, not
-      // only mirrored into the a11y bridge.
+      // Drive the GL controls — the orb, then the menu row — and OBSERVE the
+      // result rather than sleeping on it. The fixed 500ms/900ms waits this
+      // replaces were bets on a rasteriser's frame time, and losing one
+      // surfaced two clicks later as "account.settings not found".
       //
-      // OBSERVED AND RETRIED, not slept. The 500ms this replaces was a bet on
-      // a software rasteriser's frame time, and losing it surfaced two clicks
-      // later as "account.settings not found". A hit target is published by a
-      // RENDER, while the Pixi listener answering it attaches on the frame
-      // that draws the orb — right after a viewport change those can be far
+      // Each click is also retried, because a hit target is published by a
+      // RENDER while the Pixi listener answering it attaches on the frame that
+      // draws the control; right after a viewport change those can be far
       // enough apart that the first synthetic click hits a drawn-but-not-yet
-      // -listening orb and is swallowed. The assertion is unchanged: the GL
-      // orb must open the menu.
-      // The control is a TOGGLE, so each attempt waits long enough that a
-      // re-click can only follow a click that genuinely never landed — a
-      // re-click racing a slow render would close the menu it just opened.
-      let menuOpen = false;
-      for (let attempt = 0; attempt < 4 && !menuOpen; attempt += 1) {
-        await clickAccountTarget('account.menu.toggle');
-        const settleBy = Date.now() + 8000;
-        while (Date.now() < settleBy) {
-          if ((await targetIds()).includes('account.settings')) {
-            menuOpen = true;
-            break;
+      // -listening control and is swallowed. Every attempt waits many frames
+      // (the CI runner draws one roughly every 2s) so a click still in flight
+      // is never mistaken for one that was lost. The assertions are unchanged:
+      // the GL orb must open the menu, and the menu must reach Settings.
+      const clickUntil = async (clickId, expectId, describe) => {
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const ids = await targetIds();
+          if (ids.includes(expectId)) return;
+          // Re-click ONLY while the control is still offered. A landed click
+          // removes it (the menu toggles, Settings navigates), so its absence
+          // is progress to wait out — and re-clicking a toggle that already
+          // worked would undo it.
+          if (ids.includes(clickId)) await clickAccountTarget(clickId);
+          const settleBy = Date.now() + 20_000;
+          while (Date.now() < settleBy) {
+            if ((await targetIds()).includes(expectId)) return;
+            await accountPage.evaluate(
+              () => new Promise((resolve) => setTimeout(resolve, 250))
+            );
           }
-          await accountPage.evaluate(
-            () => new Promise((resolve) => setTimeout(resolve, 150))
-          );
         }
-      }
-      if (!menuOpen) throw new Error('account scenario: menu never opened from the orb');
+        throw new Error(describe);
+      };
+
+      await clickUntil(
+        'account.menu.toggle',
+        'account.settings',
+        'account scenario: menu never opened from the orb'
+      );
       const opened = await targetIds();
 
       // ...and through the menu into Settings, where the orb is drawn again at
       // a different size — a second retain of the same program.
-      await clickAccountTarget('account.settings');
-      await waitForHitTarget(
-        accountPage,
+      await clickUntil(
+        'account.settings',
         'settings.model.1.default',
         'account scenario: Settings never opened from the menu'
       );
