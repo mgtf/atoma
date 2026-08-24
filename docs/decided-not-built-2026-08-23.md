@@ -16,7 +16,7 @@ cannot see which of them were already reasoned through will re-design them.
 | platform-admin door for the subscription transport | [src/projects](../src/projects/AGENTS.md), `a6ff7e1` | done |
 | `npm run projects` (org-scoped runs from a terminal) | [src/cli](../src/cli/AGENTS.md), `a6ff7e1` | done |
 | depth-1 trace reader: a large trace stops erasing a delivery | [src/contracts](../src/contracts/AGENTS.md) | done; 11 new tests fail on the old reader |
-| incremental publication: every delivered run reaches the repository | [src/github](../src/github/AGENTS.md) | code done; 10 new tests fail on the old flow; NOT yet verified against real GitHub |
+| incremental publication: every delivered run reaches the repository | [src/github](../src/github/AGENTS.md) | done and VERIFIED against real GitHub — commit `c28afe4f`, `parents 1`, `baseSha f66b0fff` |
 
 ## Reasoned through, deliberately not built
 
@@ -685,6 +685,56 @@ used to claim delivery. What remains is cases B and C: a hard-reaped or
 crashed-before-teardown run, where a forged `ATOMA_RUN_STATS` line from the goal
 is the only receipt. For project runs `verifiedTrace` refuses it — accidentally,
 not by design. For a burn-in or benchmark CSV nothing refuses it.
+
+## Incremental publication, verified against real GitHub (2026-08-24)
+
+The commit shipped tested only against a stateful fake. This is the part no fake
+could establish, run against `mgtf/atoma-e2e-stopwatch-2` — and it also FIXED the
+live defect rather than merely demonstrating it.
+
+**Read first, zero writes.** The induction base held exactly: `readBranchHead`
+returned `{state:'head', sha:'f66b0fff…'}`, the recorded publication and nobody
+had moved the branch since; `getCommit` returned its tree and **0 parents**, a
+root commit, consistent with the one-file contents seed; the tree had **exactly
+one entry**, `index.html`, mode `100644`, 6 614 bytes, whose sha256 is
+byte-identical to what run `8597ec79` declared in its manifest.
+
+**Then the write.** Publishing `7baaa773` produced commit `c28afe4f`:
+`baseSha = f66b0fff` (the observed head), **`parents 1`** where the previous head
+had 0 — so the incremental path ran — and a tree of one entry at **11 981 bytes**
+holding both the lap button and dark mode. The repository now shows what the
+tenant watched being built, instead of the bare stopwatch it had shown since
+09:13. So `readBranchHead` → `getCommit` → `createBlob` → `createTree(base_tree)`
+→ `createCommit(parents:[head])` → `PATCH force:false` is verified end to end.
+
+**The order gate too.** Publishing `a06b09ff` afterwards is refused with its own
+sentence, exit 1, and the branch unmoved.
+
+**A CORRECTION TO THIS FILE, and a live example of item 3.** The register said
+`bbc7dd85` / `mgtf/atoma-first-e2e-test` was `ready` over an EMPTY repository
+whose only publication died at `POST /git/blobs` 409. It is not empty. Its `main`
+sits at `bbc125b5` with **1 parent and git's canonical empty tree**
+(`4b825dc642cb6eb9a060e54bf8d69288fbee4904`) — at least two commits and zero
+files at the tip. `createRepository` sends `auto_init: false`, so atoma never
+asked for that state. Whatever produced it, the consequence is exactly the brick
+recorded as item 3: that project has **zero** published publications, so
+`expectedHead` is NULL, so the next attempt reads a populated branch and is
+refused permanently by `GitHubDivergenceError`. Recorded, not repaired — the two
+candidate repairs are unchanged.
+
+**STILL UNVERIFIED, and it is the one assumption a read cannot reach:** whether a
+reference read on a genuinely EMPTY repository answers 409, which is what
+`state: 'empty'` is built on. Neither existing repository is empty and
+`mgtf/expenses-node-api` does not exist yet. Note the exposure is narrow: on a
+FIRST publication both 409 and 404 take the same seed path, because the branch is
+not a head either way. The discrimination only decides behaviour for a project
+that HAS published — 404 then means the branch was deleted, 409 that the
+repository was emptied — and that is the case a throwaway repository, or simply
+publishing the expenses project, would settle.
+
+Also unverified, as before: `PUT /contents/{path}` naming an absent branch of a
+NON-empty repository. `tests/github-api-fake.ts` answers 404 there and says in a
+comment that it is unmeasured.
 
 ## Waiting on the operator
 
