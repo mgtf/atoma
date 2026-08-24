@@ -8,7 +8,6 @@ import {
   isIdentityTuning,
   normalizeTuning,
   trackXFromTuningValue,
-  tuningPanelVisible,
   tuningValueFromTrack,
   type VizTuning,
 } from '../src/viz/client-gl/tuning.js';
@@ -204,25 +203,6 @@ describe('normalizeTuning', () => {
   it('returns the identity for nothing at all', () => {
     expect(normalizeTuning(null)).toEqual(TUNING_IDENTITY);
     expect(normalizeTuning(undefined)).toEqual(TUNING_IDENTITY);
-  });
-});
-
-describe('the panel is visible by default and dismissible by URL', () => {
-  it('shows with no query at all — it was asked for in the right column', () => {
-    expect(tuningPanelVisible('')).toBe(true);
-    expect(tuningPanelVisible('?lang=fr')).toBe(true);
-    expect(tuningPanelVisible('?atomaTune=1')).toBe(true);
-  });
-
-  it('hides only on an explicit off value', () => {
-    for (const value of ['0', 'off', 'false', 'no', 'OFF', ' 0 ']) {
-      expect(tuningPanelVisible(`?atomaTune=${value}`), value).toBe(false);
-    }
-  });
-
-  it('treats a bare or unrecognised value as ON rather than guessing', () => {
-    expect(tuningPanelVisible('?atomaTune')).toBe(true);
-    expect(tuningPanelVisible('?atomaTune=maybe')).toBe(true);
   });
 });
 

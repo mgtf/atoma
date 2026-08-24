@@ -296,7 +296,7 @@ export function DomBridge({
                   contract and three grid area lists for two words of text. */}
               <div className="gpu-project-target">
                 <select
-                  className="gpu-dom-input gpu-project-install"
+                  className="gpu-dom-input gpu-dom-select gpu-project-install"
                   aria-label={t('projects.installation')}
                   value={selectedGithubInstallationId ?? ''}
                   onChange={(event) => selectGithubInstallation(event.target.value || null)}
@@ -312,7 +312,7 @@ export function DomBridge({
                     are in the hint below, because a word in a dropdown is not
                     a warning — and this choice cannot be taken back. */}
                 <select
-                  className="gpu-dom-input gpu-project-visibility"
+                  className="gpu-dom-input gpu-dom-select gpu-project-visibility"
                   aria-label={t('projects.visibility')}
                   value={projectVisibility}
                   onChange={(event) =>

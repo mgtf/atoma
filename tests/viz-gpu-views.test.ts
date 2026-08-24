@@ -39,9 +39,11 @@ import {
   PROJECTS_NARROW_CONTENT_WIDTH,
   PROJECTS_ROW_PAD,
   projectsColumn,
+  projectsFormHeight,
   projectsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/projects.js';
 import { drawSidebar, sidebarLayout, SIDEBAR_GROUPS } from '../src/viz/client-gl/renderer/views/sidebar.js';
+import { clampSceneTuningPosition } from '../src/viz/client-gl/SceneTuningPanel.js';
 import { viewFrame, VIEW_FRAME_PAD, VIEW_FRAME_TITLE_Y } from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
@@ -64,7 +66,6 @@ import {
   setMarkBeadVisible,
 } from '../src/viz/client-gl/renderer/mark-clock.js';
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
-import { TUNING_KEYS } from '../src/viz/client-gl/tuning.js';
 import {
   drawRuns,
   RUNS_TWO_PANE_MIN_WIDTH,
@@ -72,6 +73,7 @@ import {
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
 import {
+  ADMIN_VIEWS,
   DOC_THEMES,
   isRoutableView,
   visibleViews,
@@ -150,26 +152,6 @@ interface RecordingCtx extends RendererCtx {
   tickers: ((ticker: Ticker) => void)[];
   exitCalls: number;
   tuningRows: { key: string; x: number; y: number; width: number }[];
-}
-
-/**
- * Draw with a chosen `location.search`. `tuningPanelVisible()` reads it the
- * same way `prefersReducedMotion()` reads a media query — a global the render
- * path is allowed, and one a test has to stand in for rather than route around.
- */
-function withTuningPanel(body: () => void, search = '?atomaTune=1') {
-  const original = Reflect.getOwnPropertyDescriptor(globalThis, 'location');
-  Object.defineProperty(globalThis, 'location', {
-    value: { search },
-    configurable: true,
-    writable: true,
-  });
-  try {
-    body();
-  } finally {
-    if (original) Object.defineProperty(globalThis, 'location', original);
-    else Reflect.deleteProperty(globalThis, 'location');
-  }
 }
 
 function textStub(value: string, options?: { size?: number }): Text {
@@ -509,9 +491,11 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
+    tuningPanelOpen: false,
     enter: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
+    toggleTuningPanel: noop,
     setView: noop,
     setLocale: noop,
     selectRun: noop,
@@ -1008,6 +992,17 @@ describe('the nav rail', () => {
     expect(ctx.buttons.some((button) => button.id === 'nav.settings')).toBe(false);
   });
 
+  it('puts the Scene Tuning toggle at the foot of ADMIN and reflects its state', () => {
+    const auth = makeAuth({ platformAdmin: true });
+    const ctx = createRecordingCtx();
+    drawSidebar(ctx, makeSnapshot({ tuningPanelOpen: true }, { auth }), 720);
+    const adminIds = ctx.buttons
+      .map((button) => button.id)
+      .filter((id) => id === 'tuning.toggle' || ADMIN_VIEWS.some((view) => id === `nav.${view}`));
+    expect(adminIds.at(-1)).toBe('tuning.toggle');
+    expect(ctx.buttons.find((button) => button.id === 'tuning.toggle')?.active).toBe(true);
+  });
+
   it('keeps every admin destination inside a short landscape rail', () => {
     const height = 300;
     const views = visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } });
@@ -1039,6 +1034,17 @@ describe('the nav rail', () => {
         new RegExp(`\\.${selector}\\s*\\{[\\s\\S]*?var\\(--gpu-sidebar\\)`)
       );
     }
+  });
+
+  it('layers Scene Tuning above DOM forms and gives every select one geometry', () => {
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    const projectForm = css.slice(css.indexOf('.gpu-project-form {'), css.indexOf('/* Selecting'));
+    const tuning = css.slice(css.indexOf('.gpu-scene-tuning {'), css.indexOf('.gpu-scene-tuning__header'));
+    expect(projectForm).toContain('z-index: 4');
+    expect(tuning).toContain('z-index: 8');
+    expect(css).toMatch(/\.gpu-dom-select\s*\{[\s\S]*?appearance:\s*none/);
+    expect(css).toContain('background-position: right 12px center');
+    expect(css).toMatch(/\.gpu-project-target \.gpu-dom-input\s*\{[\s\S]*?width:\s*0/);
   });
 
   it('projects nested hit targets through the rail, pane and scroll transforms', () => {
@@ -1847,6 +1853,30 @@ describe('drawProjects', () => {
     expect(hint).toContain('-webkit-line-clamp: 2');
   });
 
+  it('draws the form frame through the same GPU panel path as the project list', () => {
+    const ctx = createRecordingCtx();
+    const auth = makeAuth();
+    const viewportWidth = 1280;
+    const viewportHeight = 720;
+    drawProjects(ctx, makeSnapshot({ view: 'projects' }, { auth }), viewportWidth, viewportHeight);
+    const frame = viewFrame(viewportWidth, viewportHeight);
+    expect(ctx.panels).toContainEqual({
+      parent: ctx.root,
+      x: frame.innerX,
+      y: PROJECTS_DOM_FORM_TOP,
+      width: frame.innerWidth,
+      height: projectsFormHeight('create', viewportWidth),
+    });
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    const domSkin = css.slice(
+      css.indexOf('.gpu-project-form.gpu-panel-skin'),
+      css.indexOf('/* Selecting')
+    );
+    expect(domSkin).toContain('background: transparent');
+    expect(domSkin).toContain('border-color: transparent');
+    expect(domSkin).toContain('box-shadow: none');
+  });
+
   it('leads the row with the audience, because the line truncates from the tail', () => {
     // The one word on a project row that says who can read what its runs
     // publish. Appended it would be the first thing a narrow panel drops; and
@@ -1979,9 +2009,10 @@ describe('drawProjects', () => {
         }
       );
     drawProjects(ctx, snapshot, 1280, 720);
-    expect(ctx.metrics.visibleLabels).toContain('Projects');
-    expect(ctx.metrics.visibleLabels.some((label) => label.includes('Weather Lab'))).toBe(true);
-    expect(ctx.buttons.some((button) => button.id === `project.select.${projectId}` && button.label === 'Weather Lab')).toBe(true);
+    expect(ctx.metrics.visibleLabels).not.toContain('Projects');
+    expect(ctx.metrics.visibleLabels).toContain('Project : Weather Lab');
+    expect(ctx.metrics.visibleLabels.some((label) => label.includes('project(s)'))).toBe(false);
+    expect(ctx.buttons.some((button) => button.id === `project.select.${projectId}`)).toBe(false);
     expect(ctx.buttons.some((button) => button.id === 'project.run.trace-1')).toBe(true);
     expect(
       ctx.buttons.some((button) => button.id === 'project.run.bbbbbbbb-cccc-dddd-eeee-ffffffffffff')
@@ -2045,14 +2076,11 @@ describe('drawProjects', () => {
     expect(verdict!.parent.toGlobal({ x: verdict!.x, y: verdict!.y }).x).toBe(rightEdge);
     expect(verdict!.node.anchor.x).toBe(1);
     expect(rightEdge).toBeGreaterThan(staleCap);
-    const wideProjectButton = ctx.buttons.find(
-      (candidate) => candidate.id === `project.select.${projectId}`
+    const projectMetadata = ctx.texts.find((text) =>
+      String(text.value).startsWith('private · weather-lab ·')
     )!;
-    const wideButtonOrigin = wideProjectButton.parent.toGlobal({
-      x: wideProjectButton.x,
-      y: wideProjectButton.y,
-    });
-    expect(wideButtonOrigin.x + wideProjectButton.width).toBeLessThan(rightEdge);
+    const metadataWidth = (projectMetadata.options as { width?: number }).width!;
+    expect(projectMetadata.node.width).toBeLessThanOrEqual(metadataWidth);
 
     // The run goal gives way before the status column on a narrow pane; no
     // forced minimum may push its button through the frame edge.
@@ -2060,14 +2088,13 @@ describe('drawProjects', () => {
     const narrow = createRecordingCtx();
     drawProjects(narrow, snapshot, narrowWidth, 720);
     const narrowFrame = viewFrame(narrowWidth, 720);
-    const projectButton = narrow.buttons.find(
-      (candidate) => candidate.id === `project.select.${projectId}`
+    const narrowMetadata = narrow.texts.find((text) =>
+      String(text.value).startsWith('private')
     )!;
     const narrowStatus = narrow.texts.find((text) => text.value === 'repo ready')!;
     expect(narrowStatus.parent.toGlobal({ x: narrowStatus.x, y: narrowStatus.y }).y)
       .toBeGreaterThan(
-        projectButton.parent.toGlobal({ x: projectButton.x, y: projectButton.y }).y +
-        projectButton.height
+        narrowMetadata.parent.toGlobal({ x: narrowMetadata.x, y: narrowMetadata.y }).y
       );
     for (const button of narrow.buttons.filter((candidate) => candidate.id.startsWith('project.run.'))) {
       const origin = button.parent.toGlobal({ x: button.x, y: button.y });
@@ -2108,10 +2135,10 @@ describe('drawProjects', () => {
       `project.select.${GUIDANCE_PROJECT_ID}`,
       `project.select.${other.projectId}`,
     ]);
-    // Selected: its own card, alone. Re-activating the row deselects (see
-    // `projectSelectionAfterActivate`), which is how the full list comes back.
-    expect(draw(GUIDANCE_PROJECT_ID)).toEqual([`project.select.${GUIDANCE_PROJECT_ID}`]);
-    expect(draw(other.projectId)).toEqual([`project.select.${other.projectId}`]);
+    // Selected: its own detail card, alone, with no duplicate name button.
+    // Re-clicking Projects in the rail returns to the full list.
+    expect(draw(GUIDANCE_PROJECT_ID)).toEqual([]);
+    expect(draw(other.projectId)).toEqual([]);
   });
 
   // The status column was a FIXED 108px reservation, so a row surrendered the
@@ -3288,8 +3315,9 @@ describe('the run prompt carries its own guidance', () => {
     expect(ctx.buttons.some((button) => button.id === 'projects.example.0')).toBe(true);
     expect(ctx.buttons.some((button) => button.id === 'projects.example.7')).toBe(true);
     expect(ctx.buttons.some((button) => button.id === 'projects.example.8')).toBe(false);
-    // The project row still renders, below the guidance.
-    const row = ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!;
+    // The selected project's detail still renders below the guidance, without
+    // repeating its name as a button.
+    const row = ctx.texts.find((text) => String(text.value).startsWith('private ·'))!;
     const firstExample = ctx.buttons.find((button) => button.id === 'projects.example.0')!;
     expect(row.y).toBeGreaterThan(firstExample.y);
   });
@@ -3304,9 +3332,7 @@ describe('the run prompt carries its own guidance', () => {
     // project list from rendering.
     const noProfile = drawGuidance(null);
     expect(noProfile.buttons.some((button) => button.id.startsWith('projects.example.'))).toBe(false);
-    expect(
-      noProfile.buttons.some((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)
-    ).toBe(true);
+    expect(noProfile.texts.some((text) => String(text.value).startsWith('private ·'))).toBe(true);
   });
 
   it('prefers a catalog override over the family English, per family id', () => {
@@ -3337,7 +3363,7 @@ describe('the run prompt carries its own guidance', () => {
     expect(heightDelta).toBeGreaterThan(0);
     expect(long.scrollMax.projects! - medium.scrollMax.projects!).toBe(heightDelta);
     const rowOf = (ctx: ReturnType<typeof createRecordingCtx>) =>
-      ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!.y;
+      ctx.texts.find((text) => String(text.value).startsWith('private ·'))!.y;
     expect(rowOf(long) - rowOf(medium)).toBe(heightDelta);
     // Examples start below the measured paragraph instead of overlapping it.
     const helpText = long.texts.find((text) => text.value === longHelp)!;
@@ -3414,21 +3440,21 @@ describe('the run prompt carries its own guidance', () => {
     expect(bodyVisible(first)).toBe(true);
     expect(first.buttons.some((button) => button.id === 'projects.example.0')).toBe(true);
 
-    // Runs exist: the viewer has phrased a goal before, so the body folds away
-    // and only its clickable heading remains.
+    // Runs exist: the viewer has phrased a goal before, so the guidance leaves
+    // the screen whole — no collapsed heading lingering above the history.
     const later = drawWith([run]);
     expect(bodyVisible(later)).toBe(false);
     expect(later.buttons.some((button) => button.id === 'projects.example.0')).toBe(false);
-    expect(later.texts.some((text) => text.value === t('launch.help'))).toBe(true);
+    expect(later.texts.some((text) => text.value === t('launch.help'))).toBe(false);
 
     // Collapsing frees real vertical space for the list below it.
     const rowY = (ctx: ReturnType<typeof createRecordingCtx>) =>
-      ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!.y;
+      ctx.texts.find((text) => String(text.value).startsWith('private ·'))!.y;
     expect(rowY(later)).toBeLessThan(rowY(first));
 
-    // An EXPLICIT preference outranks the run-count default in both
-    // directions — the viewer's click is never overruled by their history.
-    expect(bodyVisible(drawWith([run], true))).toBe(true);
+    // A preference can collapse coaching for a new project, but history is an
+    // absolute eligibility rule: an old preference cannot resurrect it.
+    expect(bodyVisible(drawWith([run], true))).toBe(false);
     expect(bodyVisible(drawWith([], false))).toBe(false);
   });
 
@@ -3472,9 +3498,7 @@ describe('the run prompt carries its own guidance', () => {
       endedAt: '2026-08-20T00:02:00.000Z',
       publication: null,
     };
-    const [closed] = targets([run]);
-    expect(closed?.id).toBe('projects.guidance.toggle.closed');
-    expect(closed?.label).toBe(t('launch.help.expand'));
+    expect(targets([run])).toHaveLength(0);
   });
 });
 
@@ -3663,62 +3687,17 @@ describe('drawRuns behavior', () => {
     expect(detail!.value).toContain('⇢ haiku');
   });
 
-  it('draws the tuning panel by default — it is where it was asked for', () => {
+  it('does not reserve room for scene tuning inside the Runs detail column', () => {
     const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
     const ctx = createRecordingCtx();
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
-    expect(ctx.tuningRows.length).toBeGreaterThan(0);
-  });
-
-  it('drops it entirely on ?atomaTune=0, taking its hit targets with it', () => {
-    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
-    const ctx = createRecordingCtx();
-    withTuningPanel(() => {
-      drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
-    }, '?atomaTune=0');
     expect(ctx.tuningRows).toHaveLength(0);
-    // A hidden control that still answers the pointer is worse than no control.
-    expect(ctx.metrics.hitTargets.filter((t) => t.id.startsWith('tuning:'))).toHaveLength(0);
   });
 
-  it('draws one row per knob, and registers each as a hit target', () => {
-    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
-    const ctx = createRecordingCtx();
-    withTuningPanel(() => {
-      drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
-    });
-    expect(ctx.tuningRows.map((row) => row.key)).toEqual([...TUNING_KEYS]);
-    // Registered like every other control: a control no observer can see is a
-    // control no test and no a11y bridge can reach.
-    for (const key of TUNING_KEYS) {
-      expect(
-        ctx.metrics.hitTargets.some((target) => target.id === `tuning:${key}`),
-        key
-      ).toBe(true);
-    }
-    expect(ctx.metrics.hitTargets.some((target) => target.id === 'tuning:reset')).toBe(true);
-  });
-
-  it('reserves the panel its own space instead of drawing over the detail pane', () => {
-    // An event must be SELECTED for the detail pane to exist at all — with
-    // nothing selected both runs report a null bound and the comparison would
-    // pass while proving nothing.
-    const events: VizEvent[] = [makeLlmEvent('a', { role: 'plan' })];
-    const state = { selectedEventId: 'a' };
-    const plain = createRecordingCtx();
-    withTuningPanel(() => {
-      drawRuns(plain, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
-    }, '?atomaTune=0');
-    const tuned = createRecordingCtx();
-    withTuningPanel(() => {
-      drawRuns(tuned, makeSnapshot(state, { run: makeRun(events) }), WIDTH, HEIGHT);
-    });
-    expect(plain.detailBounds, 'the plain draw must have a detail pane').not.toBeNull();
-    const topRow = Math.min(...tuned.tuningRows.map((row) => row.y));
-    // Every row sits below the detail pane's new bottom, not on top of it.
-    expect(tuned.detailBounds?.height ?? HEIGHT)
-      .toBeLessThan(plain.detailBounds?.height ?? HEIGHT);
-    expect(topRow).toBeGreaterThan(0);
+  it('clamps a moved panel back inside a resized viewport', () => {
+    const panel = clampSceneTuningPosition({ x: 900, y: -40 }, 800, 500, 340, 214);
+    expect(panel).toEqual({ x: 448, y: 12 });
+    expect(panel.y + 214).toBeLessThanOrEqual(500 - 12);
   });
 
   it('windows the timeline, masks it, and reports the scroll bound', () => {

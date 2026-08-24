@@ -34,6 +34,9 @@ const PROJECT_BUTTON_HEIGHT = 34;
 /** Wide rows: where the metadata line starts, measured from the row's top. */
 const PROJECT_METADATA_Y = PROJECT_BUTTON_HEIGHT + 10;
 const COMPACT_ROW_HEIGHT = 86;
+/** A selected project owns the page title, so its detail row omits the name button. */
+const SELECTED_PROJECT_DETAIL_HEIGHT = 38;
+const SELECTED_PROJECT_COMPACT_DETAIL_HEIGHT = 54;
 const COMPACT_PROJECT_PANEL_WIDTH = 400;
 const RUN_ROW_HEIGHT = 46;
 /**
@@ -113,14 +116,21 @@ export const PROJECTS_DOM_FORM_NARROW_HEIGHT = { create: 272, run: 248 } as cons
 
 export type ProjectsFormMode = keyof typeof PROJECTS_DOM_FORM_HEIGHT;
 
-export function projectsGpuContentTop(
+export function projectsFormHeight(
   mode: ProjectsFormMode,
   contentWidth = Number.POSITIVE_INFINITY
 ): number {
   const heights = contentWidth < PROJECTS_NARROW_CONTENT_WIDTH
     ? PROJECTS_DOM_FORM_NARROW_HEIGHT
     : PROJECTS_DOM_FORM_HEIGHT;
-  return PROJECTS_DOM_FORM_TOP + heights[mode] + 16;
+  return heights[mode];
+}
+
+export function projectsGpuContentTop(
+  mode: ProjectsFormMode,
+  contentWidth = Number.POSITIVE_INFINITY
+): number {
+  return PROJECTS_DOM_FORM_TOP + projectsFormHeight(mode, contentWidth) + 16;
 }
 
 /**
@@ -209,11 +219,9 @@ const GUIDANCE_HEADER_HEIGHT = 18;
  * behind the text, so a layer reserves its z-slot up front (same shape the
  * former Launch view used).
  *
- * COLLAPSED BY DEFAULT (`projectGuidanceExpanded`, off): the body and examples
- * used to render unconditionally and push the project list — the thing a
- * viewer actually opened Projects to see — far down the page on every visit,
- * even for a viewer who already knows how to phrase a goal. The header row
- * stays, always clickable, so the guidance is one click away rather than gone.
+ * Eligibility belongs to the caller: this disclosure exists only for a
+ * selected project with no runs. Within that first-goal state it defaults
+ * open, and the viewer may collapse or reopen it without losing the examples.
  */
 function drawPromptGuidance(
   ctx: RendererCtx,
@@ -338,9 +346,9 @@ export function projectsColumn(viewportWidth: number): { x: number; width: numbe
  * A SELECTION IS A FILTER, not just a highlight: with one project selected the
  * list shows THAT project and nothing else, so the run form at the top of the
  * column sits directly against the card it acts on. Every other project is a
- * distraction from the run being launched, and re-activating the selected row
- * deselects it, which is how the full list comes back — so nothing is
- * unreachable, and there is no second control for it.
+ * distraction from the run being launched. Its name moves to the page title
+ * rather than repeating as an active row; re-clicking Projects in the rail
+ * returns to the full list and create form.
  *
  * ONE definition, consulted by both the measuring pass (`projectLayout`) and
  * the drawing pass. Two copies of this rule would desynchronise `scrollMax`
@@ -348,6 +356,13 @@ export function projectsColumn(viewportWidth: number): { x: number; width: numbe
  */
 function projectHidden(index: number, selectedIndex: number): boolean {
   return selectedIndex >= 0 && index !== selectedIndex;
+}
+
+function projectRowHeight(compact: boolean, selected: boolean): number {
+  if (selected) {
+    return compact ? SELECTED_PROJECT_COMPACT_DETAIL_HEIGHT : SELECTED_PROJECT_DETAIL_HEIGHT;
+  }
+  return compact ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
 }
 
 export function projectLayout(
@@ -363,7 +378,7 @@ export function projectLayout(
   let cursor = listTop;
   for (let index = 0; index < projectCount; index++) {
     if (projectHidden(index, selectedIndex)) continue;
-    cursor += compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
+    cursor += projectRowHeight(compactRunRows, index === selectedIndex);
     if (index !== selectedIndex) continue;
     if (selectedRuns.length === 0) {
       cursor += 24;
@@ -389,14 +404,38 @@ export function drawProjects(
   const scroll = snapshot.state.scrollY.projects;
 
   const selectedProject = projects.find((p) => p.projectId === snapshot.state.selectedProjectId);
-  const summary = selectedProject
-    ? snapshot.t('projects.summarySelected', {
-        count: projects.length,
-        name: selectedProject.name,
-      })
-    : snapshot.t('projects.summary', { count: projects.length });
   const frame = viewFrame(width, height);
-  drawViewFrame(ctx, frame, snapshot.t('nav.projects'), summary);
+  // Selection changes the SUBJECT of the screen. Once one project is open,
+  // its name is the title; the collection count and “viewing …” subtitle no
+  // longer describe the job in front of the viewer.
+  drawViewFrame(
+    ctx,
+    frame,
+    selectedProject
+      ? snapshot.t('projects.selectedTitle', { name: selectedProject.name })
+      : snapshot.t('nav.projects'),
+    selectedProject ? undefined : snapshot.t('projects.summary', { count: projects.length })
+  );
+
+  // The form's fields are DOM, but its CARD is the same GPU panel as the list
+  // below. A CSS imitation could share dimensions and still disagree on the
+  // pointer-driven shadow, which is exactly what made the two adjacent cards
+  // read at different depths. The DOM wrapper is transparent and supplies
+  // interaction only; this panel owns material, border, radius and elevation.
+  const formMode: ProjectsFormMode = selectedProject ? 'run' : 'create';
+  if (snapshot.data.auth !== null) {
+    ctx.panel(
+      ctx.root,
+      frame.innerX,
+      PROJECTS_DOM_FORM_TOP,
+      frame.innerWidth,
+      projectsFormHeight(formMode, width),
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
+  }
 
   // The DOM form is gated on a session (`projectActionsEnabled` in DomBridge),
   // so an UNGATED instance renders none — and reserving the band it would have
@@ -404,7 +443,7 @@ export function drawProjects(
   // there is nothing here. Reserve the band only when the form is really there.
   const contentTop = snapshot.data.auth === null
     ? frame.contentTop
-    : projectsGpuContentTop(selectedProject ? 'run' : 'create', width);
+    : projectsGpuContentTop(formMode, width);
   if (projects.length === 0) {
     // Ungated deployments have no organisations, so projects cannot exist and
     // their API routes are absent — say that, instead of coaching the viewer
@@ -447,16 +486,16 @@ export function drawProjects(
   // `pane.content` uses the same layout relative to that pane.
   const layout = { ...viewportLayout, x: viewportLayout.x - frame.x };
 
-  // The guidance describes the run PROMPT, and the DOM form only shows that
-  // textarea once a project is selected — so it appears on exactly the same
-  // condition, and never coaches a viewer who has nothing to run yet. It opens
+  // The guidance describes the run PROMPT, but only its FIRST use: it appears
+  // once a project is selected and only until that project has a run. It opens
   // for the FIRST goal on a project and steps aside afterwards
   // (`projectGuidanceOpen`), because a viewer with run history has phrased one
-  // before and this panel is tall enough to bury that history. The list below
-  // shifts by its MEASURED height; nothing here estimates it.
+  // before and this panel is tall enough to bury that history. It disappears
+  // WHOLE once any run exists — not merely collapsed to a lingering heading.
+  // The list below shifts by its MEASURED height; nothing here estimates it.
   const guidanceProfile = snapshot.data.profiles[0];
   const listOffset =
-    selectedProject && guidanceProfile
+    selectedProject && selectedRuns.length === 0 && guidanceProfile
       ? drawPromptGuidance(
           ctx,
           snapshot,
@@ -464,7 +503,7 @@ export function drawProjects(
           layout.x,
           layout.panelWidth,
           guidanceProfile,
-          projectGuidanceOpen(snapshot.state.projectGuidanceExpanded, selectedRuns.length)
+          projectGuidanceOpen(snapshot.state.projectGuidanceExpanded)
         )
       : 0;
 
@@ -517,7 +556,6 @@ export function drawProjects(
     // pass applied, so `scrollMax` describes what is really drawn.
     if (projectHidden(index, selectedIndex)) return;
     const y = cursor;
-    const projectRowHeight = compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     const selected = project.projectId === snapshot.state.selectedProjectId;
     // `button` fits this against its own width and the real glyphs; a
     // character bound on top would only cut a name that fitted.
@@ -528,18 +566,22 @@ export function drawProjects(
     const projectButtonWidth = compactRunRows
       ? innerWidth
       : Math.max(0, statusX - columnX - 12);
-    ctx.button(
-      pane.content,
-      `project.select.${project.projectId}`,
-      'button',
-      rowLabel,
-      columnX,
-      y,
-      projectButtonWidth,
-      compactRunRows ? 30 : PROJECT_BUTTON_HEIGHT,
-      selected,
-      snapshot.onActivate
-    );
+    // Once selected, the name owns the page title. Repeating it as a large
+    // active row immediately below the form produced two competing headings.
+    if (!selected) {
+      ctx.button(
+        pane.content,
+        `project.select.${project.projectId}`,
+        'button',
+        rowLabel,
+        columnX,
+        y,
+        projectButtonWidth,
+        compactRunRows ? 30 : PROJECT_BUTTON_HEIGHT,
+        false,
+        snapshot.onActivate
+      );
+    }
     const metadataWidth = compactRunRows
       ? Math.max(0, innerWidth - 24)
       : Math.max(40, innerWidth - repoUrlWidth - 24);
@@ -559,7 +601,7 @@ export function drawProjects(
       // then squeezed whatever survived rather than ending it cleanly.
       ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 10 }),
       columnX + 12,
-      y + (compactRunRows ? 34 : PROJECT_METADATA_Y),
+      y + (selected ? 0 : compactRunRows ? 34 : PROJECT_METADATA_Y),
       {
         size: 10,
         color: GPU_COLORS.muted,
@@ -571,7 +613,7 @@ export function drawProjects(
       pane.content,
       statusLabel(snapshot.t, project.repositoryStatus, 'projects.repoStatus'),
       compactRunRows ? columnX + 12 : statusRight,
-      y + (compactRunRows ? 49 : 10),
+      y + (selected ? (compactRunRows ? 18 : 0) : compactRunRows ? 49 : 10),
       {
         size: 10,
         color: statusColor(project.repositoryStatus),
@@ -590,7 +632,7 @@ export function drawProjects(
         pane.content,
         ctx.fitText(repositoryText, repositoryWidth, { size: 9 }),
         compactRunRows ? columnX + 12 : statusRight,
-        y + (compactRunRows ? 64 : PROJECT_METADATA_Y + 1),
+        y + (selected ? (compactRunRows ? 34 : 16) : compactRunRows ? 64 : PROJECT_METADATA_Y + 1),
         {
           size: 9,
           color: GPU_COLORS.muted,
@@ -600,7 +642,7 @@ export function drawProjects(
       );
       if (!compactRunRows) repository.anchor.x = 1;
     }
-    cursor += projectRowHeight;
+    cursor += projectRowHeight(compactRunRows, selected);
 
     const runs = expandedRunList[index] ?? [];
     if (selected && runs.length > 0) {

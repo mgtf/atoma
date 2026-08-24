@@ -13,6 +13,7 @@ npm run viz:shot                                    # anonymous visitor (login g
 npm run viz:shot -- --auth                          # logged-in member, Projects view
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
+npm run viz:shot -- --auth --tuning                  # open the floating Scene Tuning window
 npm run viz:shot -- --out /tmp/before.png           # explicit destination
 npm run viz:shot -- --url http://127.0.0.1:5173     # attach to a dev stack already running
 npm run viz:shot -- --debug                         # page console + failed requests on stderr

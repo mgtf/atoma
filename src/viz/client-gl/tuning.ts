@@ -139,27 +139,3 @@ export function normalizeTuning(value: Partial<VizTuning> | null | undefined): V
 export function isIdentityTuning(value: VizTuning): boolean {
   return TUNING_KEYS.every((key) => value[key] === TUNING_IDENTITY[key]);
 }
-
-/**
- * The panel is VISIBLE by default in the runs right column, which is where it
- * was asked for. `?atomaTune=0` (or `off`/`false`) hides it — for a clean
- * screenshot, or to see the scene without its own controls sitting in it.
- *
- * It was briefly the other way round, gated behind `?atomaTune=1` by analogy
- * with `?atomaDiag=1`. That analogy was wrong: the diag handle exists for
- * smokes and nothing in the product reads it, whereas this panel is a thing a
- * person opens the app to use. A control nobody can find is not a conservative
- * default, it is a missing feature.
- *
- * The scene reads the tuning values either way — they are simply the identity
- * when untouched — so the tuned path and the shipped path are one code path
- * that cannot rot behind a flag.
- */
-const HIDDEN = new Set(['0', 'off', 'false', 'no']);
-
-export function tuningPanelVisible(search?: string): boolean {
-  const query = search ?? (typeof location === 'undefined' ? '' : location.search);
-  const value = new URLSearchParams(query).get('atomaTune');
-  if (value === null) return true;
-  return !HIDDEN.has(value.trim().toLowerCase());
-}

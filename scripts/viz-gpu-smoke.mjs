@@ -637,15 +637,10 @@ try {
       `viz GPU scroll ok: ${scrollStats.renders} rebuilds (${scrollStats.missed} ticks missed), ${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/${scrollStats.maxMs.toFixed(2)}ms max against a ${scrollRebuildMax}ms ceiling, labels ${scrollStats.reused} reused vs ${scrollStats.created} built`
     );
 
-    // THE REGRESSION SCENARIO. A tuning drag must keep driving the value
-    // across a full scene rebuild. The slider this replaces held a Pixi
-    // Container in a module-level `activeSlider`, and `render()` destroys
-    // every child of `root` — so the first re-render during a drag destroyed
-    // the object the drag was holding. Reading `.position.x` off it threw
-    // (Pixi nulls `_position` on destroy), a try/catch then turned that throw
-    // into a silent stop, and the drag "stopped sliding while the mouse was
-    // still down". Only a real renderer with a real stage can prove the fix:
-    // the mocked suite has no hit-testing and no destroy cycle.
+    // THE REGRESSION SCENARIO. Scene Tuning is DOM chrome so it can sit above
+    // DOM project/settings forms; its sliders still write the mutable sample
+    // the Pixi ticker reads. A real browser proves both stacking/drag geometry
+    // and that slider motion changes the scene without rebuilding the canvas.
     const tunePage = await browser.newPage();
     const tuneDiagnostics = [];
     tunePage.on('console', (message) => {
@@ -665,32 +660,33 @@ try {
       });
       await tunePage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
       await passArrivalGate(tunePage);
-      // The tuning panel belongs to the RUNS view.
-      await openView(tunePage, 'Runs');
-      await waitForHitTarget(
-        tunePage,
-        'tuning:lightHue',
-        'tuning row never rendered; scenario cannot arm'
-      );
+      await tunePage.waitForSelector('.gpu-scene-tuning', { timeout: READY_TIMEOUT_MS });
 
-      const target = await tunePage.evaluate(() => {
-        const handle = globalThis.__ATOMA_GPU__;
-        if (!handle) return null;
-        const row = handle.hitTargets().find((entry) => entry.id === 'tuning:lightHue');
-        if (!row) return null;
-        const canvas = document.querySelector('.gpu-ui-canvas');
-        const box = canvas.getBoundingClientRect();
-        const toClient = (x, y) => ({
-          x: box.left + (x / handle.app.screen.width) * box.width,
-          y: box.top + (y / handle.app.screen.height) * box.height,
-        });
-        return {
-          left: toClient(row.x, row.y + row.height / 2),
-          right: toClient(row.x + row.width, row.y + row.height / 2),
-          value: handle.tuning().lightHue,
-        };
+      const panelBefore = await tunePage.$eval('.gpu-scene-tuning', (node) => {
+        const rect = node.getBoundingClientRect();
+        return { x: rect.x, y: rect.y };
       });
-      if (!target) throw new Error('tuning row never rendered; scenario cannot arm');
+      const moveHandle = await tunePage.$eval('.gpu-scene-tuning__header', (node) => {
+        const rect = node.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      });
+      await tunePage.mouse.move(moveHandle.x, moveHandle.y);
+      await tunePage.mouse.down();
+      await tunePage.mouse.move(moveHandle.x - 90, moveHandle.y + 45, { steps: 6 });
+      await tunePage.mouse.up();
+      const panelAfter = await tunePage.$eval('.gpu-scene-tuning', (node) => {
+        const rect = node.getBoundingClientRect();
+        return { x: rect.x, y: rect.y };
+      });
+      const panelDelta = {
+        x: panelAfter.x - panelBefore.x,
+        y: panelAfter.y - panelBefore.y,
+      };
+
+      const target = await tunePage.$eval('input[name="lightHue"]', (node) => {
+        const rect = node.getBoundingClientRect();
+        return { left: rect.left, right: rect.right, y: rect.y + rect.height / 2 };
+      });
 
       const readValue = () =>
         tunePage.evaluate(() => globalThis.__ATOMA_GPU__.tuning().lightHue);
@@ -698,44 +694,26 @@ try {
         tunePage.evaluate(() =>
           Number(document.querySelector('.gpu-ui-host').dataset.gpuRenderCount ?? 0));
 
-      // Press near the left end, then walk right in steps with the button held.
-      await tunePage.mouse.move(target.left.x + 6, target.left.y);
-      await tunePage.mouse.down();
-      const afterPress = await readValue();
-      const span = target.right.x - target.left.x;
-      await tunePage.mouse.move(target.left.x + span * 0.25, target.left.y, { steps: 6 });
-      const beforeRender = await readValue();
+      // DOM range input writes the mutable sample directly: the scene changes,
+      // but React never asks the GPU renderer to tear down and rebuild.
+      const beforeDrag = await readValue();
       const rendersBefore = await renderCount();
-
-      // Force the rebuild that used to kill the drag: a wheel over the event
-      // list goes through the store and re-renders the whole scene.
-      await tunePage.evaluate(() => {
-        const canvas = document.querySelector('.gpu-ui-canvas');
-        const box = canvas.getBoundingClientRect();
-        canvas.dispatchEvent(new WheelEvent('wheel', {
-          deltaY: 240,
-          clientX: box.left + box.width * 0.2,
-          clientY: box.top + box.height * 0.6,
-          bubbles: true,
-          cancelable: true,
-        }));
-      });
-      await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
-      const rendersAfter = await renderCount();
-
-      // ... and keep dragging, button still down.
-      await tunePage.mouse.move(target.left.x + span * 0.75, target.left.y, { steps: 8 });
-      const afterRender = await readValue();
+      await tunePage.mouse.move(target.left + 6, target.y);
+      await tunePage.mouse.down();
+      const span = target.right - target.left;
+      await tunePage.mouse.move(target.left + span * 0.75, target.y, { steps: 8 });
       await tunePage.mouse.up();
-      await tunePage.mouse.move(target.left.x + span * 0.1, target.left.y, { steps: 4 });
+      const afterDrag = await readValue();
+      const rendersAfter = await renderCount();
+      await tunePage.mouse.move(target.left + span * 0.1, target.y, { steps: 4 });
       const afterRelease = await readValue();
 
       tuneStats = {
-        afterPress,
-        beforeRender,
-        afterRender,
+        beforeDrag,
+        afterDrag,
         afterRelease,
-        rendersAcross: rendersAfter - rendersBefore,
+        panelDelta,
+        rendersDuringSlider: rendersAfter - rendersBefore,
         diagnostics: tuneDiagnostics,
       };
     } finally {
@@ -743,22 +721,17 @@ try {
     }
 
     if (
-      // ARMED: the drag actually moved the value before the rebuild, and a
-      // rebuild actually happened in between. Without both, "the value still
-      // changed" would be a scenario that never tested anything.
-      !(tuneStats.beforeRender > tuneStats.afterPress) ||
-      tuneStats.rendersAcross < 1 ||
-      // THE ASSERTION: the drag survived the rebuild.
-      !(tuneStats.afterRender > tuneStats.beforeRender) ||
-      // And it let go: a release must disarm, or the knob follows the mouse
-      // around the screen forever.
-      tuneStats.afterRelease !== tuneStats.afterRender ||
+      tuneStats.panelDelta.x > -70 ||
+      tuneStats.panelDelta.y < 30 ||
+      tuneStats.afterDrag === tuneStats.beforeDrag ||
+      tuneStats.rendersDuringSlider !== 0 ||
+      tuneStats.afterRelease !== tuneStats.afterDrag ||
       tuneStats.diagnostics.length > 0
     ) {
       throw new Error(`GPU tuning drag failed: ${JSON.stringify(tuneStats)}`);
     }
     console.log(
-      `viz GPU tuning ok: drag survived ${tuneStats.rendersAcross} scene rebuild(s) with the button down (${tuneStats.afterPress}° -> ${tuneStats.beforeRender}° -> ${tuneStats.afterRender}°), released clean`
+      `viz GPU tuning ok: DOM panel moved ${tuneStats.panelDelta.x.toFixed(0)}×${tuneStats.panelDelta.y.toFixed(0)}px above view overlays; slider changed ${tuneStats.beforeDrag}° -> ${tuneStats.afterDrag}° with 0 GPU rebuilds`
     );
 
     // Cast-shadow anchors must follow the role-row enter animation. The

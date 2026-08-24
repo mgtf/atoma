@@ -15,6 +15,8 @@ import {
   useEntryFade,
 } from '../src/viz/client-gl/entry-fade.js';
 import { GpuErrorBoundary } from '../src/viz/client-gl/GpuErrorBoundary.js';
+import { SceneTuningPanel } from '../src/viz/client-gl/SceneTuningPanel.js';
+import { readTuning, resetTuning } from '../src/viz/client-gl/tuning-live.js';
 import { setReducedMotionOverrideForTests } from '../src/viz/client-gl/renderer/motion.js';
 import {
   markBeadVisible,
@@ -43,6 +45,7 @@ beforeEach(() => {
     runPickerActiveIndex: 0,
     runPickerScrollY: 0,
     accountMenuOpen: false,
+    tuningPanelOpen: false,
     search: {
       run: '',
       registry: '',
@@ -62,6 +65,7 @@ afterEach(() => {
   pinMarkElapsedMs(null);
   setMarkBeadVisible(true);
   vi.useRealTimers();
+  resetTuning();
 });
 
 function renderBridge(
@@ -101,6 +105,17 @@ function EntryFadeProbe() {
 }
 
 describe('full-GL minimal DOM bridge', () => {
+  it('renders Scene Tuning above DOM forms and writes live slider values', () => {
+    useGpuStore.setState({ tuningPanelOpen: true });
+    render(createElement(SceneTuningPanel));
+    expect(screen.getByLabelText('Scene tuning')).toHaveClass('gpu-panel-skin');
+    expect(screen.getAllByRole('slider')).toHaveLength(6);
+    fireEvent.change(screen.getByRole('slider', { name: 'Light hue' }), {
+      target: { value: '45' },
+    });
+    expect(readTuning().lightHue).toBe(45);
+  });
+
   it('exposes Continue on the arrival gate and admits the chrome', async () => {
     useGpuStore.setState({ entered: false });
     const user = userEvent.setup();

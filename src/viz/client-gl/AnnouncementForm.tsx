@@ -157,7 +157,7 @@ export function AnnouncementForm({
       <label className="gpu-announce-segment">
         <span>{t('announce.segment')}</span>
         <select
-          className="gpu-dom-input"
+          className="gpu-dom-input gpu-dom-select"
           value={segment}
           onChange={(event) => setSegment(event.target.value as AnnouncementSegment)}
         >

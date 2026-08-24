@@ -26,6 +26,7 @@ import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
+import { SceneTuningPanel } from './SceneTuningPanel.js';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
 import {
@@ -505,7 +506,17 @@ function GpuAppContent({
       return;
     }
     if (id.startsWith('nav.')) {
-      store.setView(id.slice(4) as typeof store.view);
+      const nextView = id.slice(4) as typeof store.view;
+      // With the duplicate selected-project row removed, re-clicking Projects
+      // is the route back to the organisation list and creation form.
+      if (nextView === 'projects' && store.view === 'projects' && store.selectedProjectId) {
+        store.selectProject(null);
+      }
+      store.setView(nextView);
+      return;
+    }
+    if (id === 'tuning.toggle') {
+      store.toggleTuningPanel();
       return;
     }
     if (id === 'locale.toggle') {
@@ -815,6 +826,7 @@ function GpuAppContent({
         onRenameAccount={(displayName) => { void renameAccount(displayName); }}
         accountError={accountError}
       />
+      <SceneTuningPanel />
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />
     </main>

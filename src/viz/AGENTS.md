@@ -180,7 +180,10 @@ npm run viz:mark-turn:analyze
   y = 78, so one product carried two ideas of what a surface is. A DOM overlay
   that sits inside a column uses `.gpu-panel-skin`, the sole CSS restatement of
   `panel()`'s fill, border, radius and elevation-2 resting shadows (the GL
-  shadows swing with the pointer light). Do not add a per-form skin beside it.
+  shadows swing with the pointer light). The Projects form is the exception
+  that proves the boundary: its DOM wrapper is transparent and the view draws
+  its frame with the SAME `panel()` call as the project list below, so adjacent
+  cards cannot disagree as the pointer moves. Do not add a per-form skin.
 - The app OPENS on Projects, the authenticated launch surface. Runs is where
   you go to watch what you started, which is a second step, not an arrival. The
   unroutable-view fallback lands on Projects too. On the ungated developer path
@@ -270,14 +273,20 @@ npm run viz:mark-turn:analyze
   compact the rail, then drop group headings before they drop a destination.
   The accessibility bridge is visually clipped only at rest; `:focus-within`
   reveals it as a bounded command palette so keyboard focus is never invisible.
+- Scene Tuning is a floating DOM window, not Runs content or a second canvas.
+  Its toggle is the final control in the ADMIN rail, its pressed state is the
+  window's visibility, and its DOM layer sits above view forms. Title-bar
+  dragging clamps the complete window inside the viewport; slider values stay
+  in the mutable live sample so pointer motion never rebuilds the GPU scene.
 - The project form is ONE form with TWO shapes, never one that grows: the
-  create fields with no project selected, the run prompt with one. Selecting is
-  a TOGGLE — reactivating the selected GL row or its accessible DOM mirror
-  deselects it — and that is the route back to the create form, which is why
-  Projects must NOT auto-select the first project. Auto-selection made creating
-  a second project unreachable and would have re-selected on the render right
-  after every deselect. Only the repair remains: a selection whose project is
-  gone falls back to the first that exists. The GitHub connect link stays
+  create fields with no project selected, the run prompt with one. A selected
+  project's name owns the page title (`Project : <name>`) and is NOT repeated
+  as an active row in its detail card. Re-clicking Projects in the rail returns
+  to the full list and create form; the accessible DOM mirror also preserves
+  toggle semantics. Projects must NOT auto-select the first project: that made
+  creating a second one unreachable and re-selected immediately after every
+  deselect. Only the repair remains: a selection whose project is gone falls
+  back to the first that exists. The GitHub connect link stays
   outside the switch, so an organisation with no installation can always reach
   it. The create/run form heights are explicit shared TS/CSS contracts in both
   wide and stacked-narrow modes; GPU rows start below the matching height.
@@ -300,13 +309,13 @@ npm run viz:mark-turn:analyze
   to phrase a goal, beside a Projects tab that actually starts runs, split one
   job over two places; the family guidance (`/api/profiles`, with a
   `launch.help.<id>` catalog override per family) renders in the GL guidance
-  panel directly below the project run form, on the same condition as the
-  prompt textarea it describes, and its examples fill that prompt.
-  That panel is a DISCLOSURE whose default is the PROJECT's: tri-valued
-  `projectGuidanceExpanded`, `null` resolved by `projectGuidanceOpen` — open
-  with no runs yet, collapsed once they exist, since it otherwise buries the
-  history a viewer came to read. An explicit toggle outranks that, so its
-  activation id carries the DRAWN state (`…toggle.open|closed`).
+  panel directly below the project run form only for a selected project with
+  NO runs, and its examples fill that prompt. Once the first run exists the
+  WHOLE guidance panel disappears; no collapsed heading remains above history.
+  While eligible it is a DISCLOSURE: tri-valued `projectGuidanceExpanded`
+  defaults open through `projectGuidanceOpen`, and an explicit toggle may
+  collapse or reopen it, so its activation id carries the DRAWN state
+  (`…toggle.open|closed`).
   `/api/profiles` stays a READER: it is ungated, so
   it must never gain launch power — browser launches live on the authenticated
   project routes, where a session the run does not hold is the boundary. The

@@ -37,7 +37,8 @@ export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] 
 
 export type SidebarRow =
   | { readonly kind: 'group'; readonly group: string; readonly y: number; readonly height: number }
-  | { readonly kind: 'item'; readonly view: ViewName; readonly y: number; readonly height: number };
+  | { readonly kind: 'item'; readonly view: ViewName; readonly y: number; readonly height: number }
+  | { readonly kind: 'action'; readonly action: 'tuning'; readonly y: number; readonly height: number };
 
 interface SidebarMetrics {
   readonly top: number;
@@ -61,6 +62,12 @@ function groupedLayout(
     y += metrics.groupHeight;
     for (const view of members) {
       rows.push({ kind: 'item', view, y, height: metrics.itemHeight });
+      y += metrics.itemHeight + metrics.itemGap;
+    }
+    // Scene tuning is a utility, not a route. It lives at the foot of ADMIN
+    // and therefore appears only when that gated group itself is present.
+    if (group.key === 'admin') {
+      rows.push({ kind: 'action', action: 'tuning', y, height: metrics.itemHeight });
       y += metrics.itemHeight + metrics.itemGap;
     }
     y -= metrics.itemGap;
@@ -104,16 +111,23 @@ export function sidebarLayout(
   // If labels themselves would hide a destination, destinations win. Flatten
   // the known group order and distribute every hit target through the space
   // below the header; even a short landscape canvas keeps its last tab.
-  const members = SIDEBAR_GROUPS.flatMap((group) =>
-    group.views.filter((view) => views.includes(view))
-  );
+  const members: Array<
+    | { readonly kind: 'item'; readonly view: ViewName }
+    | { readonly kind: 'action'; readonly action: 'tuning' }
+  > = [];
+  for (const group of SIDEBAR_GROUPS) {
+    const groupViews = group.views.filter((view) => views.includes(view));
+    members.push(...groupViews.map((view) => ({ kind: 'item' as const, view })));
+    if (group.key === 'admin' && groupViews.length > 0) {
+      members.push({ kind: 'action', action: 'tuning' });
+    }
+  }
   const top = GPU_LAYOUT.headerHeight + 4;
   const gap = 2;
   const available = Math.max(0, viewportHeight - top - 4 - gap * Math.max(0, members.length - 1));
   const itemHeight = members.length > 0 ? Math.min(26, available / members.length) : 0;
-  return members.map((view, index) => ({
-    kind: 'item' as const,
-    view,
+  return members.map((member, index) => ({
+    ...member,
     y: top + index * (itemHeight + gap),
     height: itemHeight,
   }));
@@ -148,6 +162,20 @@ export function drawSidebar(
         SIDEBAR_PAD + 2,
         row.y,
         { size: 9, weight: '700', color: GPU_COLORS.muted }
+      );
+      continue;
+    }
+    if (row.kind === 'action') {
+      ctx.navButton(
+        ctx.root,
+        'tuning.toggle',
+        snapshot.t('nav.sceneTuning').toUpperCase(),
+        SIDEBAR_PAD,
+        row.y,
+        itemWidth,
+        row.height,
+        snapshot.state.tuningPanelOpen,
+        snapshot.onActivate
       );
       continue;
     }

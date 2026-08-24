@@ -23,6 +23,7 @@
  *                        them. Without it: the ungated developer rendering.
  *   --select-first       Click the first project row after arrival (the run
  *                        list + run form state).
+ *   --tuning             Open the floating Scene Tuning window.
  *   --out <path>         PNG destination. Default: screenshots/<view>-<mode>.png
  *   --url <base>         Attach to an already-running UI server instead of
  *                        spawning a dev stack. With no --url the script spawns
@@ -47,6 +48,7 @@ const has = (name) => process.argv.includes(name);
 
 const view = arg('--view', 'Projects');
 const authed = has('--auth');
+const tuning = has('--tuning');
 const selectFirst = has('--select-first');
 const width = Number(arg('--width', '1600'));
 const height = Number(arg('--height', '900'));
@@ -276,7 +278,7 @@ try {
         // Storage is optional; the gate simply shows.
       }
     });
-    await page.goto(`${stack.url}/?atomaDiag=1`, { waitUntil: 'load' });
+    await page.goto(`${stack.url}/?atomaDiag=1${tuning ? '&atomaTune=1' : ''}`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS })
       .catch(async (error) => {
         const body = await page

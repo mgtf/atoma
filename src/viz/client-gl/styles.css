@@ -129,8 +129,8 @@ html.atoma-cursor-active * {
   border: 1px solid rgba(38, 51, 74, .9);
   border-radius: 8px;
   box-shadow:
-    0 14px 30px rgba(1, 4, 10, .36),
-    0 6px 14px rgba(7, 16, 29, .4),
+    4px 6px 14px rgba(1, 4, 10, .36),
+    2px 3px 7px rgba(7, 16, 29, .4),
     inset 0 1px 0 rgba(199, 226, 255, .18);
 }
 
@@ -152,6 +152,19 @@ html.atoma-cursor-active * {
 .gpu-dom-input:focus {
   border-color: #6ea8ff;
   box-shadow: 0 0 0 2px rgba(110, 168, 255, .22);
+}
+
+/* ONE native-select geometry throughout the live GL client. `appearance`
+   removes browser-specific arrows so every select gets the same inset and the
+   chevron never touches the right border. */
+.gpu-dom-select {
+  appearance: none;
+  min-height: 32px;
+  padding: 5px 36px 5px 11px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%239fb0c9' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 10px 6px;
 }
 
 .gpu-run-input {
@@ -205,6 +218,15 @@ html.atoma-cursor-active * {
   box-sizing: border-box;
 }
 
+/* The form's real frame is drawn by Projects with the SAME `ctx.panel()` call
+   as the list below. This DOM node owns fields and layout only; leaving the
+   shared CSS skin visible here would double the border and cast two shadows. */
+.gpu-project-form.gpu-panel-skin {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 /* Selecting a project SWAPS the form rather than extending it: creating a
    project and starting a run on one are two jobs, and the fields of the job
    you are not doing are noise. Deselecting (clicking the selected row again)
@@ -235,7 +257,8 @@ html.atoma-cursor-active * {
   /* Degrade to a floor rather than collapsing: this row already carries three
      16px controls at the first wide pixel. */
   flex: 1 1 0;
-  min-width: 5.5rem;
+  width: 0;
+  min-width: 0;
 }
 
 .gpu-project-form .gpu-dom-input {
@@ -252,8 +275,8 @@ html.atoma-cursor-active * {
 .gpu-project-install {
   grid-area: install;
   height: 32px;
-  padding: 4px 8px;
 }
+.gpu-project-visibility { height: 32px; }
 .gpu-project-prompt {
   grid-area: prompt;
   height: 72px;
@@ -324,6 +347,8 @@ html.atoma-cursor-active * {
     flex-direction: column;
   }
 
+  .gpu-project-target .gpu-dom-select { width: 100%; }
+
   .gpu-project-form--run {
     height: 248px;
     grid-template-areas:
@@ -331,6 +356,76 @@ html.atoma-cursor-active * {
       "actions"
       "hint";
   }
+}
+
+/* Scene Tuning is DOM chrome because project and settings forms are DOM
+   overlays too: no display-list order inside the canvas can rise above a DOM
+   sibling. This layer is above view forms and notifications, below the cursor
+   and entry veil. It reuses `.gpu-panel-skin`, so its card material is the
+   same as every other DOM surface rather than a second approximation. */
+.gpu-scene-tuning {
+  position: fixed;
+  z-index: 8;
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px 12px;
+  color: #e6edf7;
+  user-select: none;
+}
+
+.gpu-scene-tuning__header {
+  min-height: 24px;
+  margin: -4px -4px 6px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: move;
+  touch-action: none;
+}
+
+.gpu-scene-tuning__header strong {
+  color: #6ea8ff;
+  font: 700 9px/1.2 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: .02em;
+}
+
+.gpu-scene-tuning__header button {
+  border: 1px solid rgba(110, 168, 255, .35);
+  border-radius: 7px;
+  background: rgba(11, 17, 30, .96);
+  color: #a9b5ca;
+  padding: 3px 10px;
+  font: 700 9px/1.2 ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.gpu-scene-tuning__rows {
+  display: grid;
+  gap: 6px;
+}
+
+.gpu-scene-tuning__row {
+  min-height: 22px;
+  display: grid;
+  grid-template-columns: 116px minmax(24px, 1fr) 54px;
+  align-items: center;
+  gap: 8px;
+  color: #a9b5ca;
+  font: 600 9px/1.2 ui-sans-serif, system-ui, sans-serif;
+}
+
+.gpu-scene-tuning__row input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: #6ea8ff;
+  cursor: ew-resize;
+}
+
+.gpu-scene-tuning__row output {
+  color: #e6edf7;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* First-live-run notification offer. Real DOM because the permission request

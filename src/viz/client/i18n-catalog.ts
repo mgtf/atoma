@@ -29,6 +29,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'nav.group.workspace': 'Workspace',
     'nav.group.operate': 'Operate',
     'nav.group.admin': 'Admin',
+    'nav.sceneTuning': 'Scene tuning',
     'nav.runs': 'Runs',
     'nav.registry': 'Registry',
     'nav.skills': 'Skills',
@@ -142,7 +143,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
 
     'nav.projects': 'Projects',
     'projects.summary': '{{count}} project(s) in this organisation',
-    'projects.summarySelected': '{{count}} project(s) · viewing {{name}}',
+    'projects.selectedTitle': 'Project : {{name}}',
     'projects.empty': 'No project yet. Create one to launch runs and publish artifacts.',
     'projects.emptyNoInstallation': 'No project yet — connect a GitHub App installation first.',
     'projects.gateOff':
@@ -748,6 +749,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'nav.group.workspace': 'Espace de travail',
     'nav.group.operate': 'Exploitation',
     'nav.group.admin': 'Admin',
+    'nav.sceneTuning': 'Réglage de scène',
     'nav.runs': 'Runs',
     'nav.registry': 'Registre',
     'nav.skills': 'Skills',
@@ -862,7 +864,7 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
 
     'nav.projects': 'Projets',
     'projects.summary': '{{count}} projet(s) dans cette organisation',
-    'projects.summarySelected': '{{count}} projet(s) · sélection : {{name}}',
+    'projects.selectedTitle': 'Projet : {{name}}',
     'projects.empty': 'Aucun projet. Crée-en un pour lancer des runs et publier des artefacts.',
     'projects.emptyNoInstallation': 'Aucun projet — connecte d’abord une installation GitHub App.',
     'projects.gateOff':

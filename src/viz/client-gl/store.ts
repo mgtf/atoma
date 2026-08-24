@@ -140,17 +140,9 @@ export function projectSelectionAfterActivate(
   return currentProjectId === activatedProjectId ? null : activatedProjectId;
 }
 
-/**
- * Is the prompt guidance open? An explicit toggle wins; absent one (`null`),
- * the project answers: coach the FIRST goal, then step aside. A viewer with
- * run history has phrased a goal before, and the panel is tall enough that
- * leaving it open buries that history under it on every visit.
- */
-export function projectGuidanceOpen(
-  preference: boolean | null,
-  runCount: number
-): boolean {
-  return preference ?? runCount === 0;
+/** Is the first-goal guidance open? With no preference, expose it by default. */
+export function projectGuidanceOpen(preference: boolean | null): boolean {
+  return preference ?? true;
 }
 
 /**
@@ -187,13 +179,9 @@ export interface GpuUiState {
   branchHeadingExpanded: boolean;
   runSummaryExpanded: boolean;
   /**
-   * The prompt guidance disclosure, and `null` is the POINT: it means the
-   * viewer has expressed no preference, so the view answers from the project
-   * itself — open on a project with no runs yet (the first goal is the one
-   * worth coaching), collapsed once runs exist (the viewer has done this
-   * before, and the panel otherwise pushes the run history off the screen on
-   * every visit). A toggle writes a real boolean and pins it for the session,
-   * so an explicit choice always outranks the default.
+   * The first-goal guidance disclosure. It is eligible only while the selected
+   * project has no runs; the view owns that absolute rule. Within that state,
+   * `null` defaults open and a toggle pins the viewer's choice for the session.
    */
   projectGuidanceExpanded: boolean | null;
   search: Record<Exclude<InputKind, null>, string>;
@@ -220,9 +208,12 @@ export interface GpuUiState {
    * screen it was opened from.
    */
   accountMenuOpen: boolean;
+  /** Floating scene controls, opened from the foot of the admin rail. */
+  tuningPanelOpen: boolean;
   enter: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
+  toggleTuningPanel: () => void;
   setView: (view: ViewName) => void;
   setLocale: (locale: 'en' | 'fr') => void;
   selectRun: (id: string | null) => void;
@@ -281,6 +272,13 @@ function initialEntered(): boolean {
   }
 }
 
+/** Explicit opt-in kept for diagnostics and the real-browser tuning smoke. */
+function initialTuningPanelOpen(): boolean {
+  if (typeof location === 'undefined') return false;
+  const value = new URLSearchParams(location.search).get('atomaTune');
+  return value === '1' || value?.trim().toLowerCase() === 'true';
+}
+
 export const useGpuStore = create<GpuUiState>()((set) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
   // is where you go to watch what you started, a second step rather than the
@@ -335,6 +333,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   },
   entered: initialEntered(),
   accountMenuOpen: false,
+  tuningPanelOpen: initialTuningPanelOpen(),
   enter: () => {
     try {
       if (typeof localStorage !== 'undefined') {
@@ -347,6 +346,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   },
   toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
+  toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),
   // Navigation closes the menu: an overlay anchored to the header must not
   // survive the screen it was opened from.
   setView: (view) => set({ view, focusedInput: null, accountMenuOpen: false }),
