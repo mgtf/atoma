@@ -39,6 +39,7 @@
     "viz:mui": "node --import tsx scripts/viz-dev.mjs --ui mui",
     "viz:build": "node scripts/viz-build.mjs gpu",
     "viz:build:mui": "node scripts/viz-build.mjs mui",
+    "viz:shot": "node scripts/viz-screenshot.mjs",
     "viz:smoke": "node scripts/viz-gpu-smoke.mjs",
     "viz:smoke:gc": "node scripts/viz-gpu-gc-smoke.mjs",
     "viz:mark-turn": "node scripts/viz-mark-turn.mjs",

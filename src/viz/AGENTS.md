@@ -25,11 +25,15 @@ film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
 so a local GitHub-gated visualizer does not need a shell export. Compiled
 `viz:serve` does not load `.env`: production injects the process environment.
 
+`viz:shot` captures a PNG of the rendered client (logged-in via stubs or
+anonymous) for visual review after UI edits — [docs/viz-screenshot.md](../../docs/viz-screenshot.md).
+
 ```bash
 npm run viz
 npm run viz:mui
 npm run viz:serve
 npm run viz:demo
+npm run viz:shot -- --auth --select-first
 npm run viz:smoke
 npm run viz:smoke:gc
 npm run viz:mark-turn

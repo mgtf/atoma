@@ -43,6 +43,8 @@ benchmark/.scratch/
 # mechanism backlog and security alerts are run-derived data, not source.
 # Anchored like /skills/ so src/… paths can never be matched by accident.
 /supervisor/
+# UI review captures (`npm run viz:shot`, docs/viz-screenshot.md). PNGs.
+/screenshots/
 # Brand-mark rotation captures (`npm run viz:mark-turn`). PNGs, not source.
 .atoma-mark-turn/
 # Pointer-catch lighting captures (`npm run viz:mark-turn -- --pointer`).

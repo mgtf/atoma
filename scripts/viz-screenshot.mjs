@@ -1,0 +1,369 @@
+/* global document */
+/**
+ * viz-screenshot — capture a PNG of the GPU client for visual review.
+ *
+ * Agent/developer tool, NOT a release gate: after editing the viz, run this to
+ * SEE the change instead of asserting around it. Documented in
+ * docs/viz-screenshot.md.
+ *
+ *   npm run viz:shot                                   # ungated Projects view
+ *   npm run viz:shot -- --auth --select-first          # logged-in, project open
+ *   npm run viz:shot -- --view Runs --out /tmp/runs.png
+ *   npm run viz:shot -- --url http://127.0.0.1:5173    # attach to a running dev stack
+ *
+ * Flags:
+ *   --view <Tab label>   Nav tab to open (Projects, Runs, Registry, Skills,
+ *                        Burn-in, Docs — a gated session also has the admin
+ *                        plane). Default: Projects, the arrival view.
+ *   --auth               Logged-in rendering WITHOUT a real OAuth session:
+ *                        /auth/whoami and the org-scoped reads are stubbed in
+ *                        the browser (same technique as viz-gpu-smoke's
+ *                        account arm), so the gate, the account orb and the
+ *                        project surfaces all render as a member would see
+ *                        them. Without it: the ungated developer rendering.
+ *   --select-first       Click the first project row after arrival (the run
+ *                        list + run form state).
+ *   --out <path>         PNG destination. Default: screenshots/<view>-<mode>.png
+ *   --url <base>         Attach to an already-running UI server instead of
+ *                        spawning a dev stack. With no --url the script spawns
+ *                        `scripts/viz-dev.mjs` on two free ports and tears it
+ *                        down afterwards (source path — no build needed).
+ *   --width/--height     Viewport (default 1600x900, deviceScaleFactor 2).
+ */
+import { spawn } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
+import { createServer } from 'node:net';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import puppeteer from 'puppeteer';
+
+const READY_TIMEOUT_MS = 60_000;
+
+function arg(name, fallback = null) {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : fallback;
+}
+const has = (name) => process.argv.includes(name);
+
+const view = arg('--view', 'Projects');
+const authed = has('--auth');
+const selectFirst = has('--select-first');
+const width = Number(arg('--width', '1600'));
+const height = Number(arg('--height', '900'));
+const outPath = resolve(
+  arg('--out', `screenshots/${view.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${authed ? 'gated' : 'ungated'}.png`)
+);
+
+/**
+ * Reserve N distinct ports by holding them all open at once. Two sequential
+ * `listen(0)` calls can hand back the SAME port (the first is freed before
+ * the second asks), and the two dev-stack children then race one bind.
+ */
+async function freePorts(count) {
+  const servers = await Promise.all(
+    Array.from({ length: count }, () =>
+      new Promise((resolvePort, reject) => {
+        const server = createServer();
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', () => resolvePort(server));
+      })
+    )
+  );
+  const ports = servers.map((server) => server.address().port);
+  await Promise.all(
+    servers.map(
+      (server) =>
+        new Promise((resolveClose, reject) =>
+          server.close((error) => (error ? reject(error) : resolveClose())))
+    )
+  );
+  return ports;
+}
+
+/** Same fixture shape as viz-gpu-smoke's account arm: the smallest stub set
+ * that makes the client render as an authenticated org member. */
+function gatedStubs() {
+  const principalId = '11111111-2222-3333-4444-555555555555';
+  const projectId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb';
+  const runs = [
+    ['delivered', 0.63, null, { status: 'published', commitSha: 'c28afe4f8e3d2b1a0c9e', repositoryUrl: 'https://github.com/example/stopwatch' }],
+    ['failed', null, 'control-plane JSON is not a bounded regular file: /tmp/example/trace.json', null],
+    ['failed', null, 'runner finished with outcome failed', null],
+    ['delivered', 0.38, null, null],
+    ['delivered', 0.25, null, { status: 'published', commitSha: 'f66b0fffceb1a2d3e4f5', repositoryUrl: 'https://github.com/example/stopwatch' }],
+  ].map(([status, costUsd, error, publication], index) => ({
+    projectRunId: `cccccccc-1111-4222-8333-dddddddddd${String(10 + index)}`,
+    projectId,
+    goal: [
+      'Add a dark mode toggle button to the stopwatch page that switches the colour scheme and keeps the current elapsed time and laps.',
+      'Add a dark mode toggle button to the stopwatch page that switches the colour scheme and keeps the current elapsed time and laps.',
+      'Add a dark mode toggle button to the stopwatch page that switches the colour scheme and keeps the current elapsed time and laps.',
+      'Add a lap button to the stopwatch: each press records the current elapsed time in a list below the controls, and reset clears the list.',
+      'Build a single-page stopwatch in index.html: start, stop and reset buttons, elapsed time shown as mm:ss.cc, no external dependencies.',
+    ][index],
+    status,
+    traceId: status === 'delivered' ? `trace-${index}` : null,
+    costUsd,
+    durationS: 60 + index,
+    error,
+    createdAt: `2026-08-20T00:0${index}:00.000Z`,
+    endedAt: `2026-08-20T00:0${index}:59.000Z`,
+    publication,
+  }));
+  return {
+    '/auth/whoami': {
+      enabled: true,
+      authenticated: true,
+      principalId,
+      displayName: 'Ada Lovelace',
+      displayNameSource: 'provider',
+      avatarUrl: null,
+      role: 'org:owner',
+      platformAdmin: false,
+      activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
+      organisations: [{ id: 'org-a', name: 'Analytical Engines', role: 'org:owner' }],
+      providers: [{ id: 'github', label: 'GitHub' }],
+    },
+    '/api/org': {
+      id: 'org-a',
+      name: 'Analytical Engines',
+      createdAt: '2026-08-01T10:00:00.000Z',
+      viewerRole: 'org:owner',
+      members: [{
+        principalId,
+        displayName: 'Ada Lovelace',
+        role: 'org:owner',
+        joinedAt: '2026-08-01T10:00:00.000Z',
+        platformAdmin: false,
+        avatarUrl: null,
+      }],
+      projectCount: 1,
+      pendingInvitations: 0,
+    },
+    '/api/account/models': {
+      pins: { l1: null, l2: null, l3: null },
+      defaults: {
+        l1: 'claude-haiku-4-5-20251001',
+        l2: 'claude-sonnet-5',
+        l3: 'claude-opus-5',
+      },
+      choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+    },
+    '/api/projects': [{
+      projectId,
+      name: 'Stopwatch E2E two',
+      slug: 'stopwatch-e2e-two',
+      status: 'active',
+      family: 'build',
+      repositoryTarget: {
+        installationId: '501',
+        owner: 'example',
+        name: 'atoma-e2e-stopwatch-2',
+        visibility: 'private',
+      },
+      repositoryStatus: 'ready',
+      repositoryFullName: 'example/atoma-e2e-stopwatch-2',
+      repositoryUrl: 'https://github.com/example/atoma-e2e-stopwatch-2',
+      repositoryError: null,
+      createdAt: '2026-08-20T00:00:00.000Z',
+      updatedAt: '2026-08-20T00:00:00.000Z',
+    }],
+    [`/api/projects/${projectId}/runs`]: runs,
+    '/api/github/installations': [],
+    // WITHOUT this stub the page reload-loops: the checkout `.env` usually arms
+    // the auth gate, the browser has no session cookie, and the client treats
+    // the resulting 401 on /api/profiles as an expired session.
+    '/api/profiles': [{
+      id: 'build',
+      label: 'Build',
+      help: 'Describe the artifact to build and its acceptance criteria in one or two sentences.',
+      examples: [
+        'Build a single-page stopwatch in index.html: start, stop and reset buttons, no external dependencies.',
+        'Add a lap button to the stopwatch: each press records the current elapsed time in a list below the controls.',
+      ],
+    }],
+  };
+}
+
+/** Spawn the source dev stack on free ports; resolve when the UI answers. */
+async function spawnDevStack() {
+  const [devPort, apiPort] = await freePorts(2);
+  const script = fileURLToPath(new URL('./viz-dev.mjs', import.meta.url));
+  const child = spawn(process.execPath, ['--import', 'tsx', script], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      ATOMA_VIZ_DEV_PORT: String(devPort),
+      ATOMA_VIZ_API_PORT: String(apiPort),
+      // The screenshot session must not arm a sentinel tick or push prompts.
+      ATOMA_VIZ_SENTINEL: '0',
+    },
+  });
+  // DRAIN both pipes: an unread pipe fills at ~64KB and then blocks the dev
+  // server's writes, which stalls Vite mid-serve with no error anywhere.
+  child.stdout.on('data', () => {});
+  child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+  const url = `http://127.0.0.1:${devPort}`;
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) break;
+    } catch {
+      // Vite is still starting.
+    }
+    if (Date.now() > deadline) {
+      child.kill('SIGTERM');
+      throw new Error('dev stack never answered on its UI port');
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 200));
+  }
+  return { url, stop: () => child.kill('SIGTERM') };
+}
+
+const attached = arg('--url');
+const stack = attached ? { url: attached, stop: () => {} } : await spawnDevStack();
+
+try {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--enable-unsafe-swiftshader'],
+  });
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: 2 });
+    page.on('pageerror', (error) => console.error(`pageerror: ${error.message}`));
+    if (has('--debug')) {
+      page.on('console', (message) => console.error(`[console:${message.type()}] ${message.text().slice(0, 200)}`));
+      page.on('requestfailed', (request) =>
+        console.error(`[requestfailed] ${request.url().slice(0, 140)} ${request.failure()?.errorText ?? ''}`));
+      page.on('response', (response) => {
+        if (response.status() >= 400) console.error(`[http ${response.status()}] ${response.url().slice(0, 140)}`);
+      });
+    }
+
+    if (authed) {
+      const stubs = gatedStubs();
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        // NEVER let this handler throw: with interception on, a request whose
+        // handler died is never continued and the page hangs on it forever.
+        try {
+          const path = new URL(request.url()).pathname;
+          const stub = stubs[path];
+          if (stub !== undefined) {
+            void request.respond({
+              status: 200,
+              contentType: 'application/json',
+              headers: { 'cache-control': 'no-store' },
+              body: JSON.stringify(stub),
+            });
+            return;
+          }
+        } catch {
+          // Fall through to continue().
+        }
+        void request.continue().catch(() => {});
+      });
+    }
+
+    // Fresh visitor: clear the persisted arrival flag so behaviour does not
+    // depend on what an earlier session on this origin did.
+    await page.evaluateOnNewDocument(() => {
+      try {
+        localStorage.removeItem('atoma.viz.entered');
+      } catch {
+        // Storage is optional; the gate simply shows.
+      }
+    });
+    await page.goto(`${stack.url}/?atomaDiag=1`, { waitUntil: 'load' });
+    await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS })
+      .catch(async (error) => {
+        const body = await page
+          .evaluate(() => document.body?.innerHTML.slice(0, 600) ?? '<no body>')
+          .catch(() => '<page unreachable>');
+        throw new Error(`${error.message}\npage body at timeout:\n${body}`);
+      });
+
+    // Pass the arrival gate through the a11y bridge, then wait for the nav.
+    await page.waitForFunction(
+      () =>
+        document.querySelector('.gpu-a11y-bridge [data-release-version]') !== null ||
+        document.querySelector('[role="tab"]') !== null,
+      { timeout: READY_TIMEOUT_MS }
+    );
+    const arrival = await page.evaluate(() => {
+      if (document.querySelector('[role="tab"]')) return 'entered';
+      const bridge = document
+        .querySelector('.gpu-a11y-bridge [data-release-version]')
+        ?.closest('.gpu-a11y-bridge');
+      const control = bridge?.querySelector('button');
+      if (!control) {
+        // Provider anchors instead of Continue: the instance is GATED and this
+        // session is anonymous. That page is itself a valid subject.
+        if (bridge?.querySelector('a')) return 'login';
+        throw new Error('arrival gate control missing');
+      }
+      control.click();
+      return 'continued';
+    });
+
+    if (arrival === 'login') {
+      // What a logged-out visitor sees. Nothing to navigate behind it; add
+      // --auth to stub a member session and reach the app.
+      await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
+      await mkdir(dirname(outPath), { recursive: true });
+      await page.screenshot({ path: outPath });
+      console.log(`viz screenshot: ${outPath} (login gate — anonymous visitor; use --auth to enter)`);
+      await browser.close();
+      stack.stop();
+      process.exit(0);
+    }
+    await page.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+
+    // Open the requested view and let the 560ms view transition finish.
+    await page.evaluate((name) => {
+      const tab = [...document.querySelectorAll('[role="tab"]')].find(
+        (candidate) => candidate.textContent === name
+      );
+      if (!tab) {
+        const names = [...document.querySelectorAll('[role="tab"]')]
+          .map((candidate) => candidate.textContent)
+          .join(', ');
+        throw new Error(`nav tab missing: ${name} (have: ${names})`);
+      }
+      tab.click();
+    }, view);
+    await page.waitForFunction(
+      (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
+      { timeout: READY_TIMEOUT_MS },
+      view
+    );
+    await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
+
+    if (selectFirst) {
+      const spot = await page.evaluate(() => {
+        const handle = globalThis.__ATOMA_GPU__;
+        const row = handle?.hitTargets().find((entry) => entry.id.startsWith('project.select.'));
+        if (!row) return null;
+        const canvas = document.querySelector('.gpu-ui-canvas');
+        const box = canvas.getBoundingClientRect();
+        return {
+          x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
+          y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
+        };
+      });
+      if (!spot) throw new Error('--select-first: no project row on screen');
+      await page.mouse.click(spot.x, spot.y);
+      await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
+    }
+
+    await mkdir(dirname(outPath), { recursive: true });
+    await page.screenshot({ path: outPath });
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}${selectFirst ? ', first project selected' : ''}, ${width}x${height})`);
+  } finally {
+    await browser.close();
+  }
+} finally {
+  stack.stop();
+}

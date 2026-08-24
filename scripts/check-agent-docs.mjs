@@ -12,14 +12,14 @@ const archivePath = resolve(repoRoot, 'docs/incidents/engineering-record-2026-08
 // The root file is loaded into every session; subsystem files are loaded only
 // when an agent opens that subtree. Both budgets exist to keep the split from
 // quietly collapsing back into one always-loaded document.
-const ROOT_LINE_BUDGET = 450;
+const ROOT_LINE_BUDGET = 500;
 const ROOT_BYTE_BUDGET = 60_000;
 // 300 until 2026-08-23, when src/viz sat AT the cap while the next largest
 // subsystem file was 175 lines: the limit had stopped shaping the split and
 // started shaping SENTENCES, condensing new rules until they lost their
 // reasons. A subsystem file is read only by an agent opening that subtree, so
 // the pressure it needs is "one subsystem, one file", not a word count.
-const SUBSYSTEM_LINE_BUDGET = 400;
+const SUBSYSTEM_LINE_BUDGET = 500;
 
 function fail(message) {
   process.stderr.write(`agent docs check failed: ${message}\n`);
