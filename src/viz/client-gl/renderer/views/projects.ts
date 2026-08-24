@@ -22,19 +22,31 @@ import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from
  * two places; the guidance now sits beside the input it describes.
  */
 
-const ROW_HEIGHT = 54;
+const ROW_HEIGHT = 72;
+/**
+ * Wide rows keep the name button a single-line control and stack the
+ * metadata BELOW it, like the run rows stack their second line. The metadata
+ * used to render INSIDE the 46px button frame, 11px under a vertically
+ * centred label — the two lines nearly touched, and the frame read as
+ * cramped at any width (2026-08-24 review of the live Projects screen).
+ */
+const PROJECT_BUTTON_HEIGHT = 34;
+/** Wide rows: where the metadata line starts, measured from the row's top. */
+const PROJECT_METADATA_Y = PROJECT_BUTTON_HEIGHT + 10;
 const COMPACT_ROW_HEIGHT = 86;
 const COMPACT_PROJECT_PANEL_WIDTH = 400;
-const RUN_ROW_HEIGHT = 34;
+const RUN_ROW_HEIGHT = 46;
 /**
  * Extra vertical room for a second line — commit hash or error — stacked
  * BELOW the run button in wide (non-compact) rows. The button itself keeps
- * `RUN_ROW_HEIGHT`'s single-line height; this is purely appended row height,
- * so the second line's own text never falls inside the button's label span.
+ * `RUN_BUTTON_HEIGHT`'s single-line height; this is purely appended row
+ * height, so the second line's text never falls inside the button's label.
  */
-const RUN_SECOND_LINE_EXTRA = 18;
+const RUN_SECOND_LINE_EXTRA = 20;
+/** Height of the run goal button itself; the row height above adds the air. */
+const RUN_BUTTON_HEIGHT = 32;
 /** Non-compact: where the second line starts, measured from the row's top. */
-const RUN_SECOND_LINE_Y = RUN_ROW_HEIGHT;
+const RUN_SECOND_LINE_Y = RUN_BUTTON_HEIGHT + 4;
 /**
  * The status column was a FIXED 108px reservation: every row surrendered the
  * same width whether the verdict read `delivered · $12.34` or just `queued`,
@@ -110,6 +122,12 @@ export function projectsGpuContentTop(
     : PROJECTS_DOM_FORM_HEIGHT;
   return PROJECTS_DOM_FORM_TOP + heights[mode] + 16;
 }
+
+/**
+ * Room the runs heading takes, shared by the measuring and drawing passes —
+ * two copies of this number would desynchronise `scrollMax` from the rows.
+ */
+const RUNS_HEADING_HEIGHT = 30;
 
 function runRowHeight(run: VizProjectRun, compact = false): number {
   const hasSecondLine = Boolean(
@@ -341,7 +359,7 @@ export function projectLayout(
   const { x, width: panelWidth } = projectsColumn(viewportWidth);
   const compactRunRows = panelWidth < COMPACT_PROJECT_PANEL_WIDTH;
 
-  const listTop = 12;
+  const listTop = 16;
   let cursor = listTop;
   for (let index = 0; index < projectCount; index++) {
     if (projectHidden(index, selectedIndex)) continue;
@@ -351,10 +369,10 @@ export function projectLayout(
       cursor += 24;
       continue;
     }
-    cursor += 26;
+    cursor += RUNS_HEADING_HEIGHT;
     for (const run of selectedRuns) cursor += runRowHeight(run, compactRunRows);
   }
-  const contentBottom = cursor + 16;
+  const contentBottom = cursor + 20;
   return { x, panelWidth, listTop, contentBottom };
 }
 
@@ -518,7 +536,7 @@ export function drawProjects(
       columnX,
       y,
       projectButtonWidth,
-      compactRunRows ? 30 : ROW_HEIGHT - 8,
+      compactRunRows ? 30 : PROJECT_BUTTON_HEIGHT,
       selected,
       snapshot.onActivate
     );
@@ -539,11 +557,11 @@ export function drawProjects(
       // Fitted against the real glyphs. `/6` was an average advance, so this
       // line ellipsised while the column still had room, and `singleLine`
       // then squeezed whatever survived rather than ending it cleanly.
-      ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 9 }),
+      ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 10 }),
       columnX + 12,
-      y + (compactRunRows ? 34 : 26),
+      y + (compactRunRows ? 34 : PROJECT_METADATA_Y),
       {
-        size: 9,
+        size: 10,
         color: GPU_COLORS.muted,
         width: metadataWidth,
         singleLine: true,
@@ -553,7 +571,7 @@ export function drawProjects(
       pane.content,
       statusLabel(snapshot.t, project.repositoryStatus, 'projects.repoStatus'),
       compactRunRows ? columnX + 12 : statusRight,
-      y + (compactRunRows ? 49 : 8),
+      y + (compactRunRows ? 49 : 10),
       {
         size: 10,
         color: statusColor(project.repositoryStatus),
@@ -570,11 +588,11 @@ export function drawProjects(
       const repositoryText = project.repositoryUrl ?? project.repositoryFullName;
       const repository = ctx.text(
         pane.content,
-        ctx.fitText(repositoryText, repositoryWidth, { size: 8 }),
+        ctx.fitText(repositoryText, repositoryWidth, { size: 9 }),
         compactRunRows ? columnX + 12 : statusRight,
-        y + (compactRunRows ? 64 : 24),
+        y + (compactRunRows ? 64 : PROJECT_METADATA_Y + 1),
         {
-          size: 8,
+          size: 9,
           color: GPU_COLORS.muted,
           width: repositoryWidth,
           singleLine: true,
@@ -593,7 +611,7 @@ export function drawProjects(
         cursor,
         { size: 10, color: GPU_COLORS.muted, weight: '600' }
       );
-      cursor += 26;
+      cursor += RUNS_HEADING_HEIGHT;
       for (const run of runs) {
         const statusText = statusLabel(snapshot.t, run.status, 'projects.runStatus');
         const cost = run.costUsd === null ? '' : ` · ${runCost(run.costUsd)}`;
@@ -616,7 +634,7 @@ export function drawProjects(
           // height a second line needs is appended AFTER the button, never
           // folded into it, or the button grows tall enough that its own
           // vertically-centred label lands under the second line's text.
-          30,
+          RUN_BUTTON_HEIGHT,
           false,
           snapshot.onActivate
         );
@@ -629,7 +647,7 @@ export function drawProjects(
           pane.content,
           `${statusText}${cost}`,
           compactRunRows ? runColumnX : statusRight,
-          cursor + (compactRunRows ? 34 : 4),
+          cursor + (compactRunRows ? 34 : 9),
           {
             size: 10,
             color: statusColor(run.status),
@@ -658,10 +676,10 @@ export function drawProjects(
           const boundedError = run.error.replace(/\s+/g, ' ');
           ctx.text(
             pane.content,
-            ctx.fitText(boundedError, goalWidth, { size: 8 }),
+            ctx.fitText(boundedError, goalWidth, { size: 9 }),
             runColumnX,
             cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
-            { size: 8, color: GPU_COLORS.error, width: goalWidth, singleLine: true }
+            { size: 9, color: GPU_COLORS.error, width: goalWidth, singleLine: true }
           );
         }
         cursor += rowHeight;
