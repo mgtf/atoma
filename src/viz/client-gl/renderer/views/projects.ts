@@ -1,7 +1,7 @@
-import { Container } from 'pixi.js';
-import { fmtCost } from '../../../client/run-utils.js';
+import { Container, Rectangle } from 'pixi.js';
 import type { LaunchProfile, VizProjectRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
+import { projectGuidanceOpen } from '../../store.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
 import { createScrollPane } from '../scroll-pane.js';
@@ -26,8 +26,54 @@ const ROW_HEIGHT = 54;
 const COMPACT_ROW_HEIGHT = 86;
 const COMPACT_PROJECT_PANEL_WIDTH = 400;
 const RUN_ROW_HEIGHT = 34;
-const RUN_ERROR_EXTRA = 14;
-const STATUS_COL = 108;
+/**
+ * Extra vertical room for a second line — commit hash or error — stacked
+ * BELOW the run button in wide (non-compact) rows. The button itself keeps
+ * `RUN_ROW_HEIGHT`'s single-line height; this is purely appended row height,
+ * so the second line's own text never falls inside the button's label span.
+ */
+const RUN_SECOND_LINE_EXTRA = 18;
+/** Non-compact: where the second line starts, measured from the row's top. */
+const RUN_SECOND_LINE_Y = RUN_ROW_HEIGHT;
+/**
+ * The status column was a FIXED 108px reservation: every row surrendered the
+ * same width whether the verdict read `delivered · $12.34` or just `queued`,
+ * so the label a reader came for — the project name, the run goal — was
+ * truncated to pay for space nothing drew in, AND `delivered · $1.02` still
+ * did not fit in it, losing its own cost to an ellipsis. Both halves of that
+ * are the same mistake: guessing a width instead of measuring one.
+ */
+/** Floor: below this the column is too narrow to read a verdict in. */
+const STATUS_COL_MIN = 44;
+/**
+ * Ceiling, as a SHARE of the card rather than a constant. A verdict is
+ * secondary to the goal beside it, so it may never take more than this of the
+ * row however long a locale makes it; on a wide card that is generous enough
+ * that nothing truncates, and on a narrow one the goal still wins.
+ */
+const STATUS_COL_MAX_SHARE = 0.3;
+/** Font size the status/verdict labels are drawn at, and measured at. */
+const STATUS_FONT_SIZE = 10;
+
+/**
+ * The status column, MEASURED against the real glyphs of the statuses on
+ * screen. Pixi is the only honest source here — a character count cannot tell
+ * `delivered · $12.34` from `queued` in pixels — and `CanvasTextMetrics`
+ * caches per font, so this costs a map lookup rather than a rasterisation.
+ */
+function statusColumnWidth(
+  ctx: RendererCtx,
+  labels: readonly string[],
+  panelWidth: number
+): number {
+  let widest = 0;
+  for (const label of labels) {
+    widest = Math.max(widest, ctx.measureText(label, { size: STATUS_FONT_SIZE, mono: true }));
+  }
+  // +2 so a sub-pixel measurement cannot clip the final glyph.
+  const ceiling = Math.max(STATUS_COL_MIN, panelWidth * STATUS_COL_MAX_SHARE);
+  return Math.min(ceiling, Math.max(STATUS_COL_MIN, Math.ceil(widest) + 2));
+}
 /**
  * The repository link under the status needs more room than the status word:
  * at 108 it wrapped mid-URL. Reserved by the name/slug column on every row, so
@@ -66,11 +112,11 @@ export function projectsGpuContentTop(
 }
 
 function runRowHeight(run: VizProjectRun, compact = false): number {
-  if (!compact) return run.error ? RUN_ROW_HEIGHT + RUN_ERROR_EXTRA : RUN_ROW_HEIGHT;
   const hasSecondLine = Boolean(
     run.error ||
     (run.publication?.status === 'published' && run.publication.commitSha)
   );
+  if (!compact) return hasSecondLine ? RUN_ROW_HEIGHT + RUN_SECOND_LINE_EXTRA : RUN_ROW_HEIGHT;
   return hasSecondLine ? 68 : 54;
 }
 
@@ -102,6 +148,20 @@ function statusLabel(
   return t(`${prefix}.${status}`);
 }
 
+/**
+ * A run's total cost, in MONEY — two decimals, and a leading `<` under a cent
+ * rather than a rounded `$0.00` that reads as free.
+ *
+ * NOT `fmtCost`, which is fixed at four decimals on purpose: it prices a
+ * SINGLE LLM call, where a tenth of a cent is the signal. A whole run's total
+ * is read as an amount spent, and `$1.0200` reads as a defect. The wide
+ * precision was invisible here only while the column truncated it away.
+ */
+function runCost(costUsd: number): string {
+  if (costUsd > 0 && costUsd < 0.01) return '<$0.01';
+  return `$${costUsd.toFixed(2)}`;
+}
+
 const GUIDANCE_PAD = 18;
 const GUIDANCE_GAP = 16;
 const EXAMPLE_HEIGHT = 34;
@@ -120,6 +180,9 @@ function familyHelp(t: GpuRenderSnapshot['t'], profile: LaunchProfile): string {
   return translated === key ? profile.help : translated;
 }
 
+/** Height of the always-visible header row a viewer clicks to expand/collapse. */
+const GUIDANCE_HEADER_HEIGHT = 18;
+
 /**
  * Draw the prompt guidance at the top of the scrolled content and return the
  * height the project list must shift by. Measured, not estimated: the body is
@@ -127,6 +190,12 @@ function familyHelp(t: GpuRenderSnapshot['t'], profile: LaunchProfile): string {
  * bottom. The backdrop panel depends on the final cursor but must render
  * behind the text, so a layer reserves its z-slot up front (same shape the
  * former Launch view used).
+ *
+ * COLLAPSED BY DEFAULT (`projectGuidanceExpanded`, off): the body and examples
+ * used to render unconditionally and push the project list — the thing a
+ * viewer actually opened Projects to see — far down the page on every visit,
+ * even for a viewer who already knows how to phrase a goal. The header row
+ * stays, always clickable, so the guidance is one click away rather than gone.
  */
 function drawPromptGuidance(
   ctx: RendererCtx,
@@ -134,7 +203,8 @@ function drawPromptGuidance(
   parent: Container,
   x: number,
   panelWidth: number,
-  profile: LaunchProfile
+  profile: LaunchProfile,
+  expanded: boolean
 ): number {
   const panelLayer = new Container();
   parent.addChild(panelLayer);
@@ -146,38 +216,49 @@ function drawPromptGuidance(
     weight: '700',
     color: GPU_COLORS.primary,
   });
-  const body = ctx.text(parent, familyHelp(snapshot.t, profile), innerX, GUIDANCE_PAD + 26, {
-    size: 11,
-    color: GPU_COLORS.muted,
-    width: innerWidth,
-  });
+  ctx.collapseCaret(
+    parent,
+    x + panelWidth - GUIDANCE_PAD,
+    GUIDANCE_PAD + 1,
+    expanded,
+    GPU_COLORS.primary
+  );
 
-  let cursor = GUIDANCE_PAD + 26 + body.height + 18;
-  if (profile.examples.length > 0) {
-    ctx.text(parent, snapshot.t('launch.examples'), innerX, cursor, {
-      size: 10,
-      weight: '600',
+  let cursor = GUIDANCE_PAD + GUIDANCE_HEADER_HEIGHT;
+  if (expanded) {
+    const body = ctx.text(parent, familyHelp(snapshot.t, profile), innerX, cursor + 8, {
+      size: 11,
+      color: GPU_COLORS.muted,
+      width: innerWidth,
     });
-    cursor += 22;
-    const exampleWidth = (innerWidth - EXAMPLE_GAP * (EXAMPLE_COLUMNS - 1)) / EXAMPLE_COLUMNS;
-    profile.examples.forEach((example, index) => {
-      const column = index % EXAMPLE_COLUMNS;
-      const row = Math.floor(index / EXAMPLE_COLUMNS);
-      ctx.button(
-        parent,
-        `projects.example.${index}`,
-        'button',
-        truncate(example, 54),
-        innerX + column * (exampleWidth + EXAMPLE_GAP),
-        cursor + row * (EXAMPLE_HEIGHT + EXAMPLE_GAP),
-        exampleWidth,
-        EXAMPLE_HEIGHT,
-        false,
-        snapshot.onActivate
-      );
-    });
-    const rows = Math.ceil(profile.examples.length / EXAMPLE_COLUMNS);
-    cursor += rows * (EXAMPLE_HEIGHT + EXAMPLE_GAP) - EXAMPLE_GAP;
+    cursor += 8 + body.height + 18;
+    if (profile.examples.length > 0) {
+      ctx.text(parent, snapshot.t('launch.examples'), innerX, cursor, {
+        size: 10,
+        weight: '600',
+      });
+      cursor += 22;
+      const exampleWidth = (innerWidth - EXAMPLE_GAP * (EXAMPLE_COLUMNS - 1)) / EXAMPLE_COLUMNS;
+      profile.examples.forEach((example, index) => {
+        const column = index % EXAMPLE_COLUMNS;
+        const row = Math.floor(index / EXAMPLE_COLUMNS);
+        ctx.button(
+          parent,
+          `projects.example.${index}`,
+          'button',
+          // `button` fits this to `exampleWidth` against the real glyphs.
+          example.replace(/\s+/g, ' '),
+          innerX + column * (exampleWidth + EXAMPLE_GAP),
+          cursor + row * (EXAMPLE_HEIGHT + EXAMPLE_GAP),
+          exampleWidth,
+          EXAMPLE_HEIGHT,
+          false,
+          snapshot.onActivate
+        );
+      });
+      const rows = Math.ceil(profile.examples.length / EXAMPLE_COLUMNS);
+      cursor += rows * (EXAMPLE_HEIGHT + EXAMPLE_GAP) - EXAMPLE_GAP;
+    }
   }
 
   const height = cursor + GUIDANCE_PAD;
@@ -192,6 +273,30 @@ function drawPromptGuidance(
     GPU_LAYOUT.radius,
     2
   );
+
+  // The whole header row toggles, not just the caret glyph: a wider target is
+  // easier to hit and matches the branch-heading disclosure pattern.
+  const headerHitHeight = GUIDANCE_PAD + GUIDANCE_HEADER_HEIGHT;
+  // The id states what is ON SCREEN: with no stored preference the open state
+  // came from the project's run count, so the handler cannot re-derive it.
+  const toggleId = `projects.guidance.toggle.${expanded ? 'open' : 'closed'}`;
+  const header = new Container();
+  header.eventMode = 'static';
+  header.cursor = 'pointer';
+  header.hitArea = new Rectangle(0, 0, panelWidth, headerHitHeight);
+  header.position.set(x, 0);
+  header.on('pointertap', () => snapshot.onActivate(toggleId));
+  parent.addChild(header);
+  ctx.recordHitTarget(parent, {
+    id: toggleId,
+    role: 'button',
+    label: snapshot.t(expanded ? 'launch.help.collapse' : 'launch.help.expand'),
+    x,
+    y: 0,
+    width: panelWidth,
+    height: headerHitHeight,
+  });
+
   return height + GUIDANCE_GAP;
 }
 
@@ -211,6 +316,22 @@ export function projectsColumn(viewportWidth: number): { x: number; width: numbe
   return { x: frame.innerX, width: frame.innerWidth };
 }
 
+/**
+ * A SELECTION IS A FILTER, not just a highlight: with one project selected the
+ * list shows THAT project and nothing else, so the run form at the top of the
+ * column sits directly against the card it acts on. Every other project is a
+ * distraction from the run being launched, and re-activating the selected row
+ * deselects it, which is how the full list comes back — so nothing is
+ * unreachable, and there is no second control for it.
+ *
+ * ONE definition, consulted by both the measuring pass (`projectLayout`) and
+ * the drawing pass. Two copies of this rule would desynchronise `scrollMax`
+ * from the content the moment one of them changed.
+ */
+function projectHidden(index: number, selectedIndex: number): boolean {
+  return selectedIndex >= 0 && index !== selectedIndex;
+}
+
 export function projectLayout(
   viewportWidth: number,
   projectCount: number,
@@ -223,6 +344,7 @@ export function projectLayout(
   const listTop = 12;
   let cursor = listTop;
   for (let index = 0; index < projectCount; index++) {
+    if (projectHidden(index, selectedIndex)) continue;
     cursor += compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     if (index !== selectedIndex) continue;
     if (selectedRuns.length === 0) {
@@ -309,8 +431,11 @@ export function drawProjects(
 
   // The guidance describes the run PROMPT, and the DOM form only shows that
   // textarea once a project is selected — so it appears on exactly the same
-  // condition, and never coaches a viewer who has nothing to run yet. The
-  // list below shifts by its MEASURED height; nothing here estimates it.
+  // condition, and never coaches a viewer who has nothing to run yet. It opens
+  // for the FIRST goal on a project and steps aside afterwards
+  // (`projectGuidanceOpen`), because a viewer with run history has phrased one
+  // before and this panel is tall enough to bury that history. The list below
+  // shifts by its MEASURED height; nothing here estimates it.
   const guidanceProfile = snapshot.data.profiles[0];
   const listOffset =
     selectedProject && guidanceProfile
@@ -320,7 +445,8 @@ export function drawProjects(
           pane.content,
           layout.x,
           layout.panelWidth,
-          guidanceProfile
+          guidanceProfile,
+          projectGuidanceOpen(snapshot.state.projectGuidanceExpanded, selectedRuns.length)
         )
       : 0;
 
@@ -352,13 +478,32 @@ export function drawProjects(
   // spans `innerWidth`, so a status anchored to the panel edge sat exactly on
   // that button's border with nothing between text and stroke.
   const statusRight = layout.x + layout.panelWidth - 18 - PROJECTS_ROW_PAD;
-  const statusX = statusRight - STATUS_COL;
+  // The column is only as wide as the verdicts it must hold. Gather the copy
+  // the VISIBLE rows will draw — a hidden project's longer status must not
+  // reserve width nothing renders — and measure that.
+  const statusCopy: string[] = [];
+  projects.forEach((project, index) => {
+    if (projectHidden(index, selectedIndex)) return;
+    statusCopy.push(statusLabel(snapshot.t, project.repositoryStatus, 'projects.repoStatus'));
+    if (index !== selectedIndex) return;
+    for (const run of expandedRunList[index] ?? []) {
+      const cost = run.costUsd === null ? '' : ` · ${runCost(run.costUsd)}`;
+      statusCopy.push(`${statusLabel(snapshot.t, run.status, 'projects.runStatus')}${cost}`);
+    }
+  });
+  const statusCol = statusColumnWidth(ctx, statusCopy, layout.panelWidth);
+  const statusX = statusRight - statusCol;
   let cursor = listOffset + layout.listTop;
   projects.forEach((project, index) => {
+    // A selection filters the list to its own card. Same rule the measuring
+    // pass applied, so `scrollMax` describes what is really drawn.
+    if (projectHidden(index, selectedIndex)) return;
     const y = cursor;
     const projectRowHeight = compactRunRows ? COMPACT_ROW_HEIGHT : ROW_HEIGHT;
     const selected = project.projectId === snapshot.state.selectedProjectId;
-    const rowLabel = truncate(project.name, 64);
+    // `button` fits this against its own width and the real glyphs; a
+    // character bound on top would only cut a name that fitted.
+    const rowLabel = project.name.replace(/\s+/g, ' ');
     // Wide rows reserve the right-hand status column from the LABEL surface;
     // the surrounding panel still carries the row. A full-width centred label
     // crossed directly through the anchored status at intermediate widths.
@@ -391,7 +536,10 @@ export function drawProjects(
     const metadata = `${visibility === 'public' ? badge.toUpperCase() : badge} · ${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
     ctx.text(
       pane.content,
-      truncate(metadata.replace(/\s+/g, ' '), Math.max(8, Math.floor(metadataWidth / 6))),
+      // Fitted against the real glyphs. `/6` was an average advance, so this
+      // line ellipsised while the column still had room, and `singleLine`
+      // then squeezed whatever survived rather than ending it cleanly.
+      ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 9 }),
       columnX + 12,
       y + (compactRunRows ? 34 : 26),
       {
@@ -410,7 +558,7 @@ export function drawProjects(
         size: 10,
         color: statusColor(project.repositoryStatus),
         mono: true,
-        width: compactRunRows ? Math.max(0, innerWidth - 24) : STATUS_COL,
+        width: compactRunRows ? Math.max(0, innerWidth - 24) : statusCol,
         singleLine: true,
       }
     );
@@ -422,7 +570,7 @@ export function drawProjects(
       const repositoryText = project.repositoryUrl ?? project.repositoryFullName;
       const repository = ctx.text(
         pane.content,
-        truncate(repositoryText, Math.max(8, Math.floor(repositoryWidth / 6))),
+        ctx.fitText(repositoryText, repositoryWidth, { size: 8 }),
         compactRunRows ? columnX + 12 : statusRight,
         y + (compactRunRows ? 64 : 24),
         {
@@ -448,7 +596,7 @@ export function drawProjects(
       cursor += 26;
       for (const run of runs) {
         const statusText = statusLabel(snapshot.t, run.status, 'projects.runStatus');
-        const cost = run.costUsd === null ? '' : ` · ${fmtCost(run.costUsd)}`;
+        const cost = run.costUsd === null ? '' : ` · ${runCost(run.costUsd)}`;
         const rowHeight = runRowHeight(run, compactRunRows);
         const goalWidth = compactRunRows
           ? Math.max(0, layout.panelWidth - 52)
@@ -457,27 +605,36 @@ export function drawProjects(
           pane.content,
           `project.run.${run.traceId ?? run.projectRunId}`,
           'button',
-          truncate(run.goal, 70),
+          // NO character-count bound here: `button` fits the label against the
+          // real glyphs and its own width. A 70-char pre-truncation on top of
+          // that only ever cut a goal the button had room for.
+          run.goal.replace(/\s+/g, ' '),
           runColumnX,
           cursor,
           goalWidth,
-          compactRunRows ? 30 : rowHeight - 4,
+          // A FIXED single-line height, independent of `rowHeight`: the extra
+          // height a second line needs is appended AFTER the button, never
+          // folded into it, or the button grows tall enough that its own
+          // vertically-centred label lands under the second line's text.
+          30,
           false,
           snapshot.onActivate
         );
+        // NO character-count pre-truncation: the column was MEASURED to hold
+        // exactly this copy, and a `/7` estimate on top of it was what cut
+        // `delivered · $1.02` down to `delivered · $1…` — dropping the cost,
+        // which is the half of the verdict a reader is scanning for.
+        // `singleLine` still fits it against the real glyphs as a backstop.
         const status = ctx.text(
           pane.content,
-          truncate(
-            `${statusText}${cost}`,
-            Math.max(8, Math.floor((compactRunRows ? goalWidth : STATUS_COL) / 7))
-          ),
+          `${statusText}${cost}`,
           compactRunRows ? runColumnX : statusRight,
           cursor + (compactRunRows ? 34 : 4),
           {
             size: 10,
             color: statusColor(run.status),
             mono: true,
-            width: compactRunRows ? goalWidth : STATUS_COL,
+            width: compactRunRows ? goalWidth : statusCol,
             singleLine: true,
           }
         );
@@ -487,12 +644,12 @@ export function drawProjects(
             pane.content,
             truncate(run.publication.commitSha, 12),
             compactRunRows ? runColumnX : statusRight,
-            cursor + (compactRunRows ? 48 : 18),
+            cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
             {
               size: 9,
               color: GPU_COLORS.success,
               mono: true,
-              width: compactRunRows ? goalWidth : STATUS_COL,
+              width: compactRunRows ? goalWidth : statusCol,
               singleLine: true,
             }
           );
@@ -501,9 +658,9 @@ export function drawProjects(
           const boundedError = run.error.replace(/\s+/g, ' ');
           ctx.text(
             pane.content,
-            truncate(boundedError, Math.max(8, Math.floor(goalWidth / 6))),
+            ctx.fitText(boundedError, goalWidth, { size: 8 }),
             runColumnX,
-            cursor + (compactRunRows ? 48 : 22),
+            cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
             { size: 8, color: GPU_COLORS.error, width: goalWidth, singleLine: true }
           );
         }

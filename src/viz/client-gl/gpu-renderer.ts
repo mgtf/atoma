@@ -1,5 +1,6 @@
 import {
   Application,
+  CanvasTextMetrics,
   Container,
   Filter,
   Graphics,
@@ -1725,6 +1726,54 @@ export class GpuRenderer {
     return { style, key };
   }
 
+  /**
+   * The rendered width of a string, WITHOUT drawing it — for a view that must
+   * size a column to the copy it is about to put in it. Measured through the
+   * same shared `TextStyle` the draw will use, so the number describes the
+   * real glyphs: a character count cannot, and every fixed column in this app
+   * that guessed instead either clipped its own text or stole width from the
+   * label beside it.
+   *
+   * `CanvasTextMetrics` is Pixi's own measurement path (it is what `Text` uses
+   * to lay itself out) and it caches per font, so this is a map lookup after
+   * the first call rather than a rasterisation.
+   */
+  measureText(value: string, options: TextOptions = {}): number {
+    const { style } = this.textStyle(options);
+    return CanvasTextMetrics.measureText(value, style).width;
+  }
+
+  /**
+   * The longest prefix of `value` that FITS `maxWidth`, ellipsised if it had
+   * to give anything up. Measured, then binary-searched — the alternative in
+   * this file was `Math.floor(width / 6.2)`, a fixed average advance that is
+   * wrong in both directions on a proportional face: it truncated `Build an
+   * expense tracker…` while the button still had room to spare, and let a run
+   * of wide glyphs overflow the same button.
+   *
+   * Returns '' rather than a bare ellipsis when not even one character fits,
+   * so a collapsed column draws nothing instead of a row of lone dots.
+   */
+  fitText(value: string, maxWidth: number, options: TextOptions = {}): string {
+    if (maxWidth <= 0) return '';
+    if (this.measureText(value, options) <= maxWidth) return value;
+    const ellipsis = '…';
+    if (this.measureText(ellipsis, options) > maxWidth) return '';
+    // Longest prefix whose text + ellipsis still fits. Monotonic in length, so
+    // a binary search is exact and costs ~log2(len) cached measurements.
+    let low = 0;
+    let high = value.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (this.measureText(`${value.slice(0, mid)}${ellipsis}`, options) <= maxWidth) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return low === 0 ? ellipsis : `${value.slice(0, low)}${ellipsis}`;
+  }
+
   text(parent: Container, value: string, x: number, y: number, options: TextOptions = {}) {
     const { style, key } = this.textStyle(options);
     // Retained across renders: a scroll tick rebuilds the scene, and
@@ -1964,16 +2013,22 @@ export class GpuRenderer {
     });
     graphics.stroke({ color: active ? accent : GPU_COLORS.border, width: active ? 1.5 : 1 });
     container.addChild(graphics);
+    // MEASURED against the real glyphs, not `width / 6.2`. That average advance
+    // clipped ordinary Latin copy well short of the button's edge — a run goal
+    // lost a third of its words to space the button was not using — while a
+    // string of wide glyphs still overflowed it. A left-aligned label starts at
+    // 10 and needs the same breathing room on the right.
+    const labelStyle = {
+      size: 11,
+      color: active ? GPU_COLORS.text : GPU_COLORS.muted,
+      weight: active ? '700' : '600',
+    } as const;
     const labelText = this.text(
       container,
-      truncate(label, Math.max(1, Math.floor((width - 16) / 6.2))),
+      this.fitText(label, Math.max(0, width - 20), labelStyle),
       centerLabel ? width / 2 : 10,
       Math.max(5, (height - 16) / 2),
-      {
-        size: 11,
-        color: active ? GPU_COLORS.text : GPU_COLORS.muted,
-        weight: active ? '700' : '600',
-      }
+      labelStyle
     );
     if (centerLabel) labelText.anchor.x = 0.5;
     labelText.eventMode = 'none';
@@ -3536,6 +3591,8 @@ export type RendererCtx = Pick<
   | 'root'
   | 'markRoot'
   | 'text'
+  | 'measureText'
+  | 'fitText'
   | 'panel'
   | 'recordHitTarget'
   | 'tooltip'

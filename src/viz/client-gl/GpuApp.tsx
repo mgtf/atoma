@@ -551,6 +551,13 @@ function GpuAppContent({
       store.toggleRunSummary();
       return;
     }
+    // The id carries what the viewer SAW, because with no stored preference
+    // the view resolved the open state from the selected project's run count
+    // and only it knows what it drew.
+    if (id.startsWith('projects.guidance.toggle.')) {
+      store.toggleProjectGuidance(id.endsWith('.open'));
+      return;
+    }
     if (id.startsWith('project.select.')) {
       // Toggle: re-clicking the selected project deselects it, which is how a
       // viewer who already has projects gets the create form back. No extra

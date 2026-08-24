@@ -141,6 +141,19 @@ export function projectSelectionAfterActivate(
 }
 
 /**
+ * Is the prompt guidance open? An explicit toggle wins; absent one (`null`),
+ * the project answers: coach the FIRST goal, then step aside. A viewer with
+ * run history has phrased a goal before, and the panel is tall enough that
+ * leaving it open buries that history under it on every visit.
+ */
+export function projectGuidanceOpen(
+  preference: boolean | null,
+  runCount: number
+): boolean {
+  return preference ?? runCount === 0;
+}
+
+/**
  * Repair a stale selection without turning the first project into an implicit
  * selection. An empty list may be a loading transition, so it preserves the
  * current id until a non-empty response can prove that the project is gone.
@@ -173,6 +186,16 @@ export interface GpuUiState {
   runFilters: EventFilters;
   branchHeadingExpanded: boolean;
   runSummaryExpanded: boolean;
+  /**
+   * The prompt guidance disclosure, and `null` is the POINT: it means the
+   * viewer has expressed no preference, so the view answers from the project
+   * itself — open on a project with no runs yet (the first goal is the one
+   * worth coaching), collapsed once runs exist (the viewer has done this
+   * before, and the panel otherwise pushes the run history off the screen on
+   * every visit). A toggle writes a real boolean and pins it for the session,
+   * so an explicit choice always outranks the default.
+   */
+  projectGuidanceExpanded: boolean | null;
   search: Record<Exclude<InputKind, null>, string>;
   focusedInput: InputKind;
   runPickerScrollY: number;
@@ -214,6 +237,14 @@ export interface GpuUiState {
   setRunFilters: (filters: EventFilters) => void;
   toggleBranchHeading: () => void;
   toggleRunSummary: () => void;
+  /**
+   * `currentlyOpen` is what the viewer SEES, which is not necessarily the
+   * stored preference: with no preference the view resolved it from the run
+   * count, and a toggle that flipped `null` would have to guess which way. The
+   * caller knows what it drew, so it says so, and the click always does the
+   * opposite of what is on screen.
+   */
+  toggleProjectGuidance: (currentlyOpen: boolean) => void;
   setSearch: (kind: Exclude<InputKind, null>, value: string) => void;
   setFocusedInput: (kind: InputKind) => void;
   setRunPickerScrollY: (value: number) => void;
@@ -237,6 +268,19 @@ function initialLocale(): 'en' | 'fr' {
   }
 }
 
+// A visitor who already hit Continue once should not see the arrival gate
+// again on the same browser. The gated login screen is unaffected: it
+// re-blocks itself the moment whoami resolves to unauthenticated (see the
+// gateBlocked effect in GpuApp.tsx), so this flag never bypasses a real login.
+function initialEntered(): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return localStorage.getItem('atoma.viz.entered') === '1';
+  } catch {
+    return false;
+  }
+}
+
 export const useGpuStore = create<GpuUiState>()((set) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
   // is where you go to watch what you started, a second step rather than the
@@ -255,6 +299,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   runFilters: { kind: 'all', role: 'all', branchId: 'all' },
   branchHeadingExpanded: true,
   runSummaryExpanded: true,
+  projectGuidanceExpanded: null,
   search: {
     run: '',
     registry: '',
@@ -288,9 +333,18 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     announce: 0,
     settings: 0,
   },
-  entered: false,
+  entered: initialEntered(),
   accountMenuOpen: false,
-  enter: () => set({ entered: true }),
+  enter: () => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('atoma.viz.entered', '1');
+      }
+    } catch {
+      // Local storage is optional.
+    }
+    set({ entered: true });
+  },
   toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
   // Navigation closes the menu: an overlay anchored to the header must not
@@ -360,6 +414,8 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     set((state) => ({ branchHeadingExpanded: !state.branchHeadingExpanded })),
   toggleRunSummary: () =>
     set((state) => ({ runSummaryExpanded: !state.runSummaryExpanded })),
+  toggleProjectGuidance: (currentlyOpen) =>
+    set({ projectGuidanceExpanded: !currentlyOpen }),
   setSearch: (kind, value) =>
     set((state) => ({ search: { ...state.search, [kind]: value } })),
   setFocusedInput: (focusedInput) => set({ focusedInput }),

@@ -82,13 +82,37 @@ const FRAME_SAMPLES = 120;
 const FRAME_SAMPLE_BUDGET_MS = 10_000;
 
 /**
- * The app opens on the ARRIVAL GATE: no header, no tabs, no data view until
- * Continue is pressed. Every arm below drives the real UI, so each one passes
- * the gate first, through the a11y bridge control — the same click a keyboard
- * user makes, and the only path that does not need the diagnostic handle.
+ * Reach the entered app, passing the ARRIVAL GATE when one is shown.
+ *
+ * The gate is NOT per-page: `enter()` persists `atoma.viz.entered` in
+ * localStorage, which is per ORIGIN, so it is shared by every page of this
+ * browser. The first arm that clicks Continue admits every LATER arm
+ * automatically, and those pages boot straight into the tablist with no gate
+ * and no version span to read. This helper therefore treats the gate as
+ * OPTIONAL and asserts on whichever state it actually finds — it used to wait
+ * on `.gpu-a11y-bridge button`, a selector that matches the entered app's
+ * tablist too, so an already-entered page slipped past the wait and then died
+ * on the gate-only span with a bare "failed to find element".
+ *
+ * The version assertion still runs on every page that DOES show a gate, which
+ * is the one that matters: the first arm of a fresh browser profile.
  */
 async function passArrivalGate(page) {
-  await page.waitForSelector('.gpu-a11y-bridge button', { timeout: READY_TIMEOUT_MS });
+  // Either the gate (its version span) or the entered app (its tablist).
+  await page.waitForFunction(
+    () =>
+      document.querySelector('.gpu-a11y-bridge [data-release-version]') !== null ||
+      document.querySelector('[role="tab"]') !== null,
+    { timeout: READY_TIMEOUT_MS }
+  );
+
+  const gate = await page.$('.gpu-a11y-bridge [data-release-version]');
+  if (!gate) {
+    // Already admitted by an earlier arm's persisted entry. Nothing to click.
+    await page.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+    return;
+  }
+
   const arrivalVersion = await page.$eval(
     '.gpu-a11y-bridge [data-release-version]',
     (element) => ({
@@ -103,9 +127,22 @@ async function passArrivalGate(page) {
   }
   await page.evaluate(() => {
     if (document.querySelector('[role="tab"]')) return;
-    const gate = document.querySelector('.gpu-a11y-bridge button');
-    if (!(gate instanceof HTMLButtonElement)) throw new Error('arrival gate control missing');
-    gate.click();
+    // Scoped to the GATE's own bridge: the entered app has buttons too, and a
+    // document-wide lookup would be a coin toss between the two branches.
+    const bridge = document
+      .querySelector('.gpu-a11y-bridge [data-release-version]')
+      ?.closest('.gpu-a11y-bridge');
+    const control = bridge?.querySelector('button');
+    if (!(control instanceof HTMLButtonElement)) {
+      // A GATED instance renders provider anchors instead of Continue, so this
+      // means the fixture failed to stub whoami, not that the app is broken.
+      throw new Error(
+        bridge?.querySelector('a')
+          ? 'arrival gate is a login: whoami is not stubbed as authenticated'
+          : 'arrival gate control missing'
+      );
+    }
+    control.click();
   });
   await page.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
 }
@@ -734,7 +771,14 @@ try {
     // The frame period comes from the main page's sampler: same browser, same
     // machine, same rasteriser, so it describes this page's cadence too.
     const restingObservable = frameStats.meanMs < RESTING_FRAME_CEILING_MS;
-    const anchorPage = await browser.newPage();
+    // AN ISOLATED CONTEXT, because this arm's whole point is clicking the GL
+    // arrival control — and `enter()` persists `atoma.viz.entered` per ORIGIN,
+    // so an earlier arm's Continue admits every later page in the default
+    // context and no arrival control is ever drawn there. Skipping the arm
+    // when the gate is absent would have silently deleted the coverage
+    // instead; its own storage partition keeps the gate real.
+    const anchorContext = await browser.createBrowserContext();
+    const anchorPage = await anchorContext.newPage();
     let anchorStats;
     try {
       await anchorPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
@@ -768,8 +812,26 @@ try {
       // This arm has the diagnostic handle, so it passes the gate through the
       // PIXI control itself: proof that the arrival button is hit-testable on
       // the canvas, not only that the a11y bridge mirrors it.
-      await clickTarget('welcome.continue');
-      await anchorPage.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
+      //
+      // RETRIED, because one click is not a guarantee here. The hit target is
+      // published by a render, but the Pixi listener that answers it is
+      // attached on the frame that draws the control; on a software rasteriser
+      // in a cold storage partition those can be far enough apart that the
+      // first synthetic click lands on a button which is drawn but not yet
+      // listening, and it is silently swallowed. The ASSERTION is unchanged —
+      // the GL control must admit us — this only stops a lost first click from
+      // being reported as "the gate never opened".
+      const gateDeadline = Date.now() + READY_TIMEOUT_MS;
+      for (;;) {
+        if (await anchorPage.$('[role="tab"]')) break;
+        if (Date.now() > gateDeadline) {
+          throw new Error('anchor scenario: GL arrival control never admitted the visitor');
+        }
+        await clickTarget('welcome.continue');
+        await anchorPage
+          .waitForSelector('[role="tab"]', { timeout: 2000 })
+          .catch(() => {});
+      }
       // The filter rows this arm animates are the RUNS view's.
       await openView(anchorPage, 'Runs');
       // Settle AFTER the gate as well as before it: the 600ms above only buys a
@@ -811,6 +873,8 @@ try {
       anchorStats = { initial, hidden, midFlight, settled };
     } finally {
       await anchorPage.close();
+      // Closes the storage partition with it, so the gate stays real here.
+      await anchorContext.close();
     }
 
     if (
@@ -1045,14 +1109,43 @@ try {
 
       // Open the menu from the orb itself: hit-testable on the canvas, not
       // only mirrored into the a11y bridge.
-      await clickAccountTarget('account.menu.toggle');
-      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      //
+      // OBSERVED AND RETRIED, not slept. The 500ms this replaces was a bet on
+      // a software rasteriser's frame time, and losing it surfaced two clicks
+      // later as "account.settings not found". A hit target is published by a
+      // RENDER, while the Pixi listener answering it attaches on the frame
+      // that draws the orb — right after a viewport change those can be far
+      // enough apart that the first synthetic click hits a drawn-but-not-yet
+      // -listening orb and is swallowed. The assertion is unchanged: the GL
+      // orb must open the menu.
+      // The control is a TOGGLE, so each attempt waits long enough that a
+      // re-click can only follow a click that genuinely never landed — a
+      // re-click racing a slow render would close the menu it just opened.
+      let menuOpen = false;
+      for (let attempt = 0; attempt < 4 && !menuOpen; attempt += 1) {
+        await clickAccountTarget('account.menu.toggle');
+        const settleBy = Date.now() + 8000;
+        while (Date.now() < settleBy) {
+          if ((await targetIds()).includes('account.settings')) {
+            menuOpen = true;
+            break;
+          }
+          await accountPage.evaluate(
+            () => new Promise((resolve) => setTimeout(resolve, 150))
+          );
+        }
+      }
+      if (!menuOpen) throw new Error('account scenario: menu never opened from the orb');
       const opened = await targetIds();
 
       // ...and through the menu into Settings, where the orb is drawn again at
       // a different size — a second retain of the same program.
       await clickAccountTarget('account.settings');
-      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      await waitForHitTarget(
+        accountPage,
+        'settings.model.1.default',
+        'account scenario: Settings never opened from the menu'
+      );
       const settings = await targetIds();
       const countScene = () => accountPage.evaluate(() => {
         let orbs = 0;
@@ -1092,15 +1185,23 @@ try {
     if (
       // ARMED: both adversarial labels reached the real renderer, stayed one
       // line, and fitted the measured Pixi width rather than a character-count
-      // approximation. At least one must have needed x fitting or this fixture
-      // no longer exercises the wide-glyph failure.
+      // approximation.
       accountStats.boundedProjectCopy.length < 2 ||
       accountStats.boundedProjectCopy.some((label) =>
         label.wordWrap !== false ||
         label.height > label.lineHeight + 1 ||
         label.width > label.wordWrapWidth + 0.5
       ) ||
-      !accountStats.boundedProjectCopy.some((label) => label.scaleX < 0.99) ||
+      // ARMED, on the OUTCOME rather than the mechanism: at least one label
+      // had to give something up, or these `mmmm`/`WWWW` fixtures stopped
+      // being adversarial and the wide-glyph failure is no longer exercised.
+      // It used to require `scaleX < 0.99`, i.e. that the x-squeeze backstop
+      // fired — but copy is now ellipsised to a MEASURED width before it is
+      // drawn, so a correctly bounded label reaches the stage at scale 1 and
+      // that clause failed on the fix rather than on any real overflow.
+      !accountStats.boundedProjectCopy.some(
+        (label) => label.scaleX < 0.99 || /…$/.test(label.text)
+      ) ||
       // ARMED: the gated header actually drew the orb.
       !accountHas(accountStats.withOrb, 'account.menu.toggle') ||
       // Closed, the menu contributes nothing.

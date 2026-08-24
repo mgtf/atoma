@@ -276,14 +276,30 @@ npm run viz:mark-turn:analyze
   wide and stacked-narrow modes; GPU rows start below the matching height.
   Compact GL project and run rows stack status metadata below their full-width
   targets rather than allowing fixed status columns to cover the label.
-  Variable row copy is strictly single-line and fitted only after Pixi measures
-  the real glyphs; character-count truncation alone is not a geometry bound.
+  A SELECTION IS A FILTER: one selected project draws THAT card alone, so the
+  run form sits against the card it acts on. `projectHidden` is the one rule,
+  read by BOTH the measuring and draw passes — two copies desynchronise
+  `scrollMax`. The form stays a DOM overlay ABOVE the canvas, never inside the
+  card, which no `fixed` element can do over a GL scroll pane.
+- WIDTHS ARE MEASURED, NEVER ESTIMATED, and row copy stays single-line: a
+  character count is not a geometry bound. `ctx.measureText`/`ctx.fitText` are
+  the one source and `button()` fits every label through them, so views pass
+  UNBOUNDED copy. A reserved column is measured from the copy the VISIBLE rows
+  carry, floored, and ceilinged as a SHARE of the card — never a constant,
+  which both steals width from its neighbour and under-serves itself. A run
+  TOTAL renders in whole cents, not `fmtCost`'s four decimals, which price ONE
+  LLM call. A row stacking a second line APPENDS it below a FIXED control.
 - There is NO Launch tab in the GPU client. A tab that could only DESCRIBE how
   to phrase a goal, beside a Projects tab that actually starts runs, split one
   job over two places; the family guidance (`/api/profiles`, with a
   `launch.help.<id>` catalog override per family) renders in the GL guidance
   panel directly below the project run form, on the same condition as the
   prompt textarea it describes, and its examples fill that prompt.
+  That panel is a DISCLOSURE whose default is the PROJECT's: tri-valued
+  `projectGuidanceExpanded`, `null` resolved by `projectGuidanceOpen` — open
+  with no runs yet, collapsed once they exist, since it otherwise buries the
+  history a viewer came to read. An explicit toggle outranks that, so its
+  activation id carries the DRAWN state (`…toggle.open|closed`).
   `/api/profiles` stays a READER: it is ungated, so
   it must never gain launch power — browser launches live on the authenticated
   project routes, where a session the run does not hold is the boundary. The

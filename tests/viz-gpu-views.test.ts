@@ -12,6 +12,7 @@ import type {
   SkillSummary,
   VizEvent,
   VizProject,
+  VizProjectRun,
   VizRun,
 } from '../src/viz/client/types.js';
 import {
@@ -196,6 +197,24 @@ function textStub(value: string, options?: { size?: number }): Text {
   } as unknown as Text;
 }
 
+/**
+ * The ellipsis fit `GpuRenderer.fitText` performs, over `textStub`'s advance
+ * model — so a recorded button label is the copy a viewer would actually read.
+ */
+function fitStub(value: string, maxWidth: number, options?: { size?: number }): string {
+  if (maxWidth <= 0) return '';
+  if (textStub(value, options).width <= maxWidth) return value;
+  if (textStub('…', options).width > maxWidth) return '';
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (textStub(`${value.slice(0, mid)}…`, options).width <= maxWidth) low = mid;
+    else high = mid - 1;
+  }
+  return low === 0 ? '…' : `${value.slice(0, low)}…`;
+}
+
 function createRecordingCtx(): RecordingCtx {
   const ctx: RecordingCtx = {
     // No renderer here, on purpose. The crystal's refraction pass needs one and
@@ -247,6 +266,15 @@ function createRecordingCtx(): RecordingCtx {
       ctx.texts.push({ parent, value, x, y, options, node });
       ctx.metrics.visibleLabels.push(value);
       return node;
+    },
+    // The SAME advance model `textStub` reports as a label's width, so a view
+    // that measures copy and then reads the drawn label back sees one
+    // consistent geometry. jsdom has no font metrics to offer either way.
+    measureText(value, options) {
+      return textStub(value, options).width;
+    },
+    fitText(value, maxWidth, options) {
+      return fitStub(value, maxWidth, options);
     },
     panel(parent, x, y, width, height) {
       ctx.panels.push({ parent, x, y, width, height });
@@ -341,7 +369,22 @@ function createRecordingCtx(): RecordingCtx {
       return mask;
     },
     button(parent, id, role, label, x, y, width, height, active, onActivate) {
-      ctx.buttons.push({ parent, id, label, x, y, width, height, active, onActivate });
+      // The real `button()` FITS its label to its own width against measured
+      // glyphs, so views hand it unbounded copy on purpose. Recording the raw
+      // string would let a row that visibly overflows pass a bounded-copy
+      // assertion. The hit target keeps the FULL label: that is the
+      // accessible name, and it is not what the button clips.
+      ctx.buttons.push({
+        parent,
+        id,
+        label: fitStub(label, Math.max(0, width - 20), { size: 11 }),
+        x,
+        y,
+        width,
+        height,
+        active,
+        onActivate,
+      });
       ctx.recordHitTarget(parent, { id, role, label, x, y, width, height });
       const container = new Container();
       parent.addChild(container);
@@ -441,6 +484,9 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     runFilters: { kind: 'all', role: 'all', branchId: 'all' },
     branchHeadingExpanded: true,
     runSummaryExpanded: true,
+    // `null` is the shipped default: no stored preference, so the view
+    // resolves the disclosure from the selected project's run count.
+    projectGuidanceExpanded: null,
     search: {
       run: '',
       registry: '',
@@ -480,6 +526,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     setRunFilters: noop,
     toggleBranchHeading: noop,
     toggleRunSummary: noop,
+    toggleProjectGuidance: noop,
     setSearch: noop,
     setFocusedInput: noop,
     setRunPickerScrollY: noop,
@@ -1979,7 +2026,13 @@ describe('drawProjects', () => {
     const repositoryUrl = ctx.texts.find((text) =>
       String(text.value).startsWith('https://github.com/atoma-org/')
     );
-    expect(String(repositoryUrl?.value)).toMatch(/…$/);
+    // BOUNDED BY WIDTH, which is the real requirement — not "ellipsised",
+    // which this used to assert. The `/6` average-advance estimate cut this
+    // URL while its column still had room; the measured fit renders it whole,
+    // and only ellipsises copy that genuinely does not fit.
+    const repoUrlColumn = (repositoryUrl!.options as { width?: number } | undefined)?.width;
+    expect(repoUrlColumn).toBeGreaterThan(0);
+    expect(repositoryUrl!.node.width).toBeLessThanOrEqual(repoUrlColumn!);
     for (const [description, label] of [
       ['repo ready', ctx.texts.find((text) => text.value === 'repo ready')],
       ['bounded repository URL', repositoryUrl],
@@ -2023,6 +2076,202 @@ describe('drawProjects', () => {
       expect(origin.x + button.width).toBeLessThanOrEqual(
         narrowFrame.innerX + narrowFrame.innerWidth
       );
+    }
+  });
+
+  // A SELECTION IS A FILTER. The run form at the top of the column acts on one
+  // project, and the other cards under it were competing for the same reading.
+  it('shows only the selected project, and every project with no selection', () => {
+    const other = {
+      ...guidanceProject(),
+      projectId: '7f0a1b2c-3d4e-4f50-8617-2839405162a7',
+      name: 'Other Lab',
+      slug: 'other-lab',
+    };
+    const draw = (selectedProjectId: string | null) => {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          { view: 'projects', selectedProjectId },
+          { projects: [guidanceProject(), other], profiles: [LAUNCH_PROFILE] }
+        ),
+        1000,
+        720
+      );
+      return ctx.buttons
+        .filter((button) => button.id.startsWith('project.select.'))
+        .map((button) => button.id);
+    };
+
+    expect(draw(null)).toEqual([
+      `project.select.${GUIDANCE_PROJECT_ID}`,
+      `project.select.${other.projectId}`,
+    ]);
+    // Selected: its own card, alone. Re-activating the row deselects (see
+    // `projectSelectionAfterActivate`), which is how the full list comes back.
+    expect(draw(GUIDANCE_PROJECT_ID)).toEqual([`project.select.${GUIDANCE_PROJECT_ID}`]);
+    expect(draw(other.projectId)).toEqual([`project.select.${other.projectId}`]);
+  });
+
+  // The status column was a FIXED 108px reservation, so a row surrendered the
+  // same width to `queued` as to `delivered · $12.34` and truncated the label a
+  // reader actually came for to pay for space nothing drew in.
+  it('sizes the status column to the widest status on screen, not a constant', () => {
+    const runWith = (
+      status: VizProjectRun['status'],
+      costUsd: number | null
+    ): VizProjectRun => ({
+      projectRunId: `aaaaaaaa-bbbb-cccc-dddd-${status.padEnd(12, '0').slice(0, 12)}`,
+      projectId: GUIDANCE_PROJECT_ID,
+      goal: 'Build a weather dashboard with a seven day forecast and alerts.',
+      status,
+      traceId: `trace-${status}`,
+      costUsd,
+      durationS: 12,
+      error: null,
+      createdAt: '2026-08-20T00:01:00.000Z',
+      endedAt: '2026-08-20T00:02:00.000Z',
+      publication: null,
+    });
+    const goalWidthFor = (runs: VizProjectRun[]) => {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          { view: 'projects', selectedProjectId: GUIDANCE_PROJECT_ID },
+          {
+            projects: [guidanceProject()],
+            profiles: [LAUNCH_PROFILE],
+            projectRuns: { [GUIDANCE_PROJECT_ID]: runs },
+          }
+        ),
+        1000,
+        720
+      );
+      return ctx.buttons.find((button) => button.id.startsWith('project.run.'))!.width;
+    };
+
+    // Short verdicts leave more room for the goal than long ones do.
+    const short = goalWidthFor([runWith('queued', null)]);
+    const long = goalWidthFor([runWith('delivered', 12.34)]);
+    expect(short).toBeGreaterThan(long);
+
+    // And the widest verdict present sets the column for EVERY row, so the
+    // goals stay in one straight left-aligned column rather than ragged.
+    const mixed = goalWidthFor([runWith('queued', null), runWith('delivered', 12.34)]);
+    expect(mixed).toBe(long);
+  });
+
+  // A run TOTAL is money. `fmtCost` is four decimals because it prices one LLM
+  // call; rendering `$1.0200` on a run row reads as a defect, and it was
+  // invisible only while the status column truncated the cost away entirely.
+  it('prices a run in whole cents, and never rounds a real cost to free', () => {
+    const verdictFor = (costUsd: number | null) => {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          { view: 'projects', selectedProjectId: GUIDANCE_PROJECT_ID },
+          {
+            projects: [guidanceProject()],
+            profiles: [LAUNCH_PROFILE],
+            projectRuns: {
+              [GUIDANCE_PROJECT_ID]: [
+                {
+                  projectRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+                  projectId: GUIDANCE_PROJECT_ID,
+                  goal: 'Build a weather dashboard.',
+                  status: 'delivered',
+                  traceId: 'trace-1',
+                  costUsd,
+                  durationS: 12,
+                  error: null,
+                  createdAt: '2026-08-20T00:01:00.000Z',
+                  endedAt: '2026-08-20T00:02:00.000Z',
+                  publication: null,
+                },
+              ],
+            },
+          }
+        ),
+        1000,
+        720
+      );
+      return String(
+        ctx.texts.find((text) => String(text.value).startsWith('delivered'))!.value
+      );
+    };
+
+    expect(verdictFor(1.02)).toBe('delivered · $1.02');
+    expect(verdictFor(12.3456)).toBe('delivered · $12.35');
+    // Sub-cent spend is not free, and must not print as `$0.00`.
+    expect(verdictFor(0.0004)).toBe('delivered · <$0.01');
+    expect(verdictFor(0)).toBe('delivered · $0.00');
+    // No cost recorded at all: the verdict stands alone.
+    expect(verdictFor(null)).toBe('delivered');
+  });
+
+  // Screen-2 defect: the run title's button height grew with the row whenever a
+  // second line existed, so its own vertically-centred label drifted down onto
+  // the commit hash / error text underneath.
+  it('keeps a run title clear of the second line stacked under it', () => {
+    const withSecondLine = (extra: Partial<VizProjectRun>): VizProjectRun => ({
+      projectRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      projectId: GUIDANCE_PROJECT_ID,
+      goal: 'Build an expense tracker: server.js with plain node:http.',
+      status: 'failed',
+      traceId: 'trace-1',
+      costUsd: 0.95,
+      durationS: 12,
+      error: null,
+      createdAt: '2026-08-20T00:01:00.000Z',
+      endedAt: '2026-08-20T00:02:00.000Z',
+      publication: null,
+      ...extra,
+    });
+    for (const [description, run] of [
+      ['an error line', withSecondLine({ error: 'runner finished with outcome failed' })],
+      [
+        'a commit receipt',
+        withSecondLine({
+          status: 'delivered',
+          publication: {
+            status: 'published',
+            commitSha: '0123456789abcdef',
+            repositoryUrl: 'https://github.com/atoma-org/weather-lab',
+          },
+        }),
+      ],
+    ] as const) {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          { view: 'projects', selectedProjectId: GUIDANCE_PROJECT_ID },
+          {
+            projects: [guidanceProject()],
+            profiles: [LAUNCH_PROFILE],
+            projectRuns: { [GUIDANCE_PROJECT_ID]: [run] },
+          }
+        ),
+        1000,
+        720
+      );
+      const title = ctx.buttons.find((button) => button.id.startsWith('project.run.'))!;
+      const titleTop = title.parent.toGlobal({ x: title.x, y: title.y }).y;
+      const secondLine = ctx.texts.find(
+        (text) =>
+          String(text.value).includes('runner finished') ||
+          String(text.value).startsWith('0123456789')
+      );
+      expect(secondLine, `missing second line: ${description}`).toBeTruthy();
+      const secondLineTop = secondLine!.parent.toGlobal({
+        x: secondLine!.x,
+        y: secondLine!.y,
+      }).y;
+      // Below the button's box, not merely below its top edge.
+      expect(secondLineTop).toBeGreaterThanOrEqual(titleTop + title.height);
     }
   });
 });
@@ -3117,6 +3366,115 @@ describe('the run prompt carries its own guidance', () => {
     // Sized by the measured cursor, spanning from the top of the content.
     expect(backdrop.y).toBe(0);
     expect(backdrop.height).toBeGreaterThan(0);
+  });
+
+  // The panel used to render its body unconditionally, which pushed the run
+  // history a viewer opened Projects to read off the bottom of the screen on
+  // every single visit.
+  it('coaches the first goal, then steps aside once the project has runs', () => {
+    const drawWith = (runs: VizProjectRun[], preference: boolean | null = null) => {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          {
+            view: 'projects',
+            selectedProjectId: GUIDANCE_PROJECT_ID,
+            projectGuidanceExpanded: preference,
+          },
+          {
+            projects: [guidanceProject()],
+            profiles: [{ ...LAUNCH_PROFILE, id: 'no-such-family' }],
+            projectRuns: { [GUIDANCE_PROJECT_ID]: runs },
+          }
+        ),
+        1000,
+        720
+      );
+      return ctx;
+    };
+    const bodyVisible = (ctx: ReturnType<typeof createRecordingCtx>) =>
+      ctx.texts.some((text) => text.value === LAUNCH_PROFILE.help);
+    const run: VizProjectRun = {
+      projectRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      projectId: GUIDANCE_PROJECT_ID,
+      goal: 'Build a weather dashboard.',
+      status: 'delivered',
+      traceId: 'trace-1',
+      costUsd: 0.12,
+      durationS: 12,
+      error: null,
+      createdAt: '2026-08-20T00:01:00.000Z',
+      endedAt: '2026-08-20T00:02:00.000Z',
+      publication: null,
+    };
+
+    // No runs yet: the first goal is the one worth coaching.
+    const first = drawWith([]);
+    expect(bodyVisible(first)).toBe(true);
+    expect(first.buttons.some((button) => button.id === 'projects.example.0')).toBe(true);
+
+    // Runs exist: the viewer has phrased a goal before, so the body folds away
+    // and only its clickable heading remains.
+    const later = drawWith([run]);
+    expect(bodyVisible(later)).toBe(false);
+    expect(later.buttons.some((button) => button.id === 'projects.example.0')).toBe(false);
+    expect(later.texts.some((text) => text.value === t('launch.help'))).toBe(true);
+
+    // Collapsing frees real vertical space for the list below it.
+    const rowY = (ctx: ReturnType<typeof createRecordingCtx>) =>
+      ctx.buttons.find((button) => button.id === `project.select.${GUIDANCE_PROJECT_ID}`)!.y;
+    expect(rowY(later)).toBeLessThan(rowY(first));
+
+    // An EXPLICIT preference outranks the run-count default in both
+    // directions — the viewer's click is never overruled by their history.
+    expect(bodyVisible(drawWith([run], true))).toBe(true);
+    expect(bodyVisible(drawWith([], false))).toBe(false);
+  });
+
+  // The header row is the control, and it must announce which way it goes.
+  it('toggles from the state it drew, so the click always reverses the screen', () => {
+    const targets = (runs: VizProjectRun[]) => {
+      const ctx = createRecordingCtx();
+      drawProjects(
+        ctx,
+        makeSnapshot(
+          { view: 'projects', selectedProjectId: GUIDANCE_PROJECT_ID },
+          {
+            projects: [guidanceProject()],
+            profiles: [LAUNCH_PROFILE],
+            projectRuns: { [GUIDANCE_PROJECT_ID]: runs },
+          }
+        ),
+        1000,
+        720
+      );
+      return ctx.metrics.hitTargets.filter((target) =>
+        target.id.startsWith('projects.guidance.toggle')
+      );
+    };
+
+    // Open (no runs): the id says `open`, so the handler stores `false`.
+    const [open] = targets([]);
+    expect(open?.id).toBe('projects.guidance.toggle.open');
+    expect(open?.label).toBe(t('launch.help.collapse'));
+
+    const run: VizProjectRun = {
+      projectRunId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      projectId: GUIDANCE_PROJECT_ID,
+      goal: 'Build a weather dashboard.',
+      status: 'delivered',
+      traceId: 'trace-1',
+      costUsd: 0.12,
+      durationS: 12,
+      error: null,
+      createdAt: '2026-08-20T00:01:00.000Z',
+      endedAt: '2026-08-20T00:02:00.000Z',
+      publication: null,
+    };
+    const [closed] = targets([run]);
+    expect(closed?.id).toBe('projects.guidance.toggle.closed');
+    expect(closed?.label).toBe(t('launch.help.expand'));
   });
 });
 
