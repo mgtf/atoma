@@ -393,6 +393,9 @@ npm run viz:mark-turn:analyze
   read a header off; rendering uses the server-side frozen `PUSH_COPY`
   map in `src/viz/push/routes.ts`, never the client i18n catalog (a
   `.tsx` carrying a React provider must not reach the server).
+  The worker logs whether `showNotification` was accepted or rejected with
+  the notification tag only, never the title or body: DevTools diagnostics
+  must be observable without copying operator or project text into a log.
 - OPERATOR ANNOUNCEMENTS (`platform.announcement`) are the ONE push whose
   words a human writes, and the only route with an audience wider than an
   organisation. Two steps, and the split is the safety property:

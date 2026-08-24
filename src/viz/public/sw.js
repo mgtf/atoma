@@ -117,14 +117,26 @@ globalThis.addEventListener('push', (event) => {
     typeof payload.url === 'string' && payload.url.startsWith('/') && !payload.url.startsWith('//')
       ? payload.url
       : '/';
+  const tag =
+    typeof payload.tag === 'string' && payload.tag ? payload.tag : 'atoma-run';
   event.waitUntil(
-    globalThis.registration.showNotification(title, {
-      body: typeof payload.body === 'string' ? payload.body : '',
-      tag: typeof payload.tag === 'string' && payload.tag ? payload.tag : 'atoma-run',
-      icon: '/icons/atoma-192.png',
-      badge: '/icons/atoma-192.png',
-      data: { url },
-    })
+    Promise.resolve()
+      .then(() =>
+        globalThis.registration.showNotification(title, {
+          body: typeof payload.body === 'string' ? payload.body : '',
+          tag,
+          icon: '/icons/atoma-192.png',
+          badge: '/icons/atoma-192.png',
+          data: { url },
+        })
+      )
+      .then(
+        () => console.info(`[atoma push] notification accepted (${tag})`),
+        (error) => {
+          console.error(`[atoma push] notification rejected (${tag})`, error);
+          throw error;
+        }
+      )
   );
 });
 

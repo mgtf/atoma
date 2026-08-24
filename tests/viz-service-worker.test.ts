@@ -20,6 +20,8 @@ interface WorkerHarness {
   skipWaiting: ReturnType<typeof vi.fn>;
   claim: ReturnType<typeof vi.fn>;
   showNotification: ReturnType<typeof vi.fn>;
+  consoleInfo: ReturnType<typeof vi.fn>;
+  consoleError: ReturnType<typeof vi.fn>;
   matchAll: ReturnType<typeof vi.fn>;
   openWindow: ReturnType<typeof vi.fn>;
 }
@@ -40,6 +42,8 @@ function workerHarness(): WorkerHarness {
   const claim = vi.fn(async () => undefined);
   const skipWaiting = vi.fn(async () => undefined);
   const showNotification = vi.fn(async () => undefined);
+  const consoleInfo = vi.fn();
+  const consoleError = vi.fn();
   const matchAll = vi.fn(async () => []);
   const openWindow = vi.fn(async () => null);
   const source = readFileSync('src/viz/public/sw.js', 'utf8');
@@ -51,6 +55,7 @@ function workerHarness(): WorkerHarness {
     location: { origin: 'https://viz.example' },
     clients: { claim, matchAll, openWindow },
     registration: { showNotification },
+    console: { info: consoleInfo, error: consoleError },
     skipWaiting,
     addEventListener(name: string, handler: ServiceWorkerHandler) {
       handlers.set(name, handler);
@@ -64,6 +69,8 @@ function workerHarness(): WorkerHarness {
     skipWaiting,
     claim,
     showNotification,
+    consoleInfo,
+    consoleError,
     matchAll,
     openWindow,
   };
@@ -265,6 +272,9 @@ describe('viz service worker push notifications', () => {
       badge: '/icons/atoma-192.png',
       data: { url: '/' },
     });
+    expect(harness.consoleInfo).toHaveBeenCalledWith(
+      '[atoma push] notification accepted (atoma-run-run-1)'
+    );
   });
 
   it('treats the payload as untrusted: malformed data and foreign urls degrade safely', async () => {
@@ -290,6 +300,24 @@ describe('viz service worker push notifications', () => {
     expect(harness.showNotification).toHaveBeenLastCalledWith(
       'x',
       expect.objectContaining({ data: { url: '/' } })
+    );
+  });
+
+  it('reports a rejected notification instead of failing silently', async () => {
+    const rejection = new TypeError('No notification permission has been granted');
+    harness.showNotification.mockRejectedValueOnce(rejection);
+
+    await expect(
+      dispatchPush(harness, {
+        json: () => {
+          throw new Error('not json');
+        },
+      })
+    ).rejects.toThrow('No notification permission has been granted');
+
+    expect(harness.consoleError).toHaveBeenCalledWith(
+      '[atoma push] notification rejected (atoma-run)',
+      rejection
     );
   });
 
