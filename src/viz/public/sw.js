@@ -1,8 +1,9 @@
-const CACHE_NAME = 'atoma-viz-shell-v2';
+const CACHE_NAME = 'atoma-viz-shell-v3';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
   '/favicon.svg',
+  '/favicon.ico',
   '/apple-touch-icon.png',
   '/icons/atoma-192.png',
   '/icons/atoma-512.png',

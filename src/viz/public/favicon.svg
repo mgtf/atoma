@@ -6,12 +6,14 @@
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <!-- one crystal, three ranks: molecule / cell / tissue meet at the atom -->
-  <g transform="translate(256 256)">
-    <path d="M-147.4 -85 0 -170 147.4 -85 0 0Z" fill="#f59e0b"/>
-    <path d="M147.4 -85 147.4 85 0 170 0 0Z" fill="#7c3aed"/>
-    <path d="M-147.4 -85 0 0 0 170 -147.4 85Z" fill="#0f766e"/>
-    <path d="M0 -170 147.4 -85 147.4 85 0 170 -147.4 85 -147.4 -85Z" fill="none" stroke="#e6edf7" stroke-width="16" stroke-linejoin="round"/>
-    <path d="M0 -64 72 0 0 64 -72 0Z" fill="#f8fbff" stroke="#22d3ee" stroke-width="14" stroke-linejoin="round"/>
+  <!-- one crystal, three ranks: molecule / cell / tissue meet at the atom.
+       The octahedron silhouette follows the GPU brand mark; the facets are
+       flat and strokeless so the mark still reads at 16 px, where the old
+       hairline outline collapsed into a grey blur. -->
+  <g>
+    <path d="M256 52 452 256 60 256Z" fill="#f59e0b"/>
+    <path d="M60 256 256 256 256 460Z" fill="#0f766e"/>
+    <path d="M452 256 256 460 256 256Z" fill="#7c3aed"/>
+    <path d="M256 200 316 256 256 312 196 256Z" fill="#f8fbff"/>
   </g>
 </svg>

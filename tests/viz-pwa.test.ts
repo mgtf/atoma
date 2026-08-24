@@ -78,6 +78,7 @@ describe('Atoma visualizer PWA assets', () => {
     for (const html of [gpuHtml, muiHtml]) {
       expect(html).toContain('<title>Atoma');
       expect(html).toContain('href="/favicon.svg"');
+      expect(html).toContain('href="/favicon.ico"');
       expect(html).toContain('href="/apple-touch-icon.png"');
       expect(html).toContain('href="/manifest.webmanifest"');
     }
@@ -94,7 +95,7 @@ describe('Atoma visualizer PWA assets', () => {
     expect(serviceWorker).toContain("cache-control");
     expect(serviceWorker).toContain("no-store");
     expect(serviceWorker).toContain('request.mode === \'navigate\'');
-    expect(serviceWorker).toContain('atoma-viz-shell-v2');
+    expect(serviceWorker).toContain('atoma-viz-shell-v3');
     // A dev-session worker must not cache Vite's rewritten module URLs.
     expect(serviceWorker).toContain('isDevModuleGraph');
     expect(serviceWorker).toContain("url.pathname.startsWith('/@')");
