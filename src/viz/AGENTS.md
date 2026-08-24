@@ -149,6 +149,21 @@ npm run viz:mark-turn:analyze
   `/webhooks/*`, and every response marked `Cache-Control: no-store` stay
   outside the cache so live data, identity state and GitHub deliveries cannot
   be hidden by an offline shell.
+- REJECTED, and why: `vite-plugin-pwa`'s `devOptions`. It serves a dev worker,
+  which is the easy half; it does not UNREGISTER one, and the docs are explicit
+  that in dev "the PWA will not be registered, only the service worker logic" —
+  so the origin-scope cleanup above stays our code either way. `generateSW`
+  cannot emit the `push`/`notificationclick` handlers this worker exists for,
+  so the route would be `injectManifest`: our `sw.js` stays the source, a
+  `workbox-precaching` import joins the SHIPPED bundle, and `viz:build` stops
+  being a `publicDir` copy the smoke asserts. Its two documented hazards —
+  workbox-window's one-minute update heuristic, and route interception bounded
+  by `navigateFallbackAllowlist` — are the class our own bypass list already
+  answers against the real server surface. WHAT WOULD REOPEN IT: precaching.
+  `SHELL_ASSETS` is seven hand-written entries, so hashed bundles are cached
+  only after a first successful fetch, never at install. If offline becomes a
+  product goal rather than a side effect of being a PWA, `injectManifest` is
+  the door, and it is one injection line in the file we already own.
 - Do not name a root client module `api.ts`; Vite's `/api` proxy can intercept it.
 - ONE frame style, and ONE definition for the SINGLE-COLUMN views:
   `renderer/view-frame.ts`. Projects/Admin/Settings/Burn-in use its elevation-2
