@@ -3,9 +3,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 /**
- * `npm run viz:smoke` is part of `release:check`, so CI runs it on a machine
- * with no GPU — and two of the smoke's own assumptions, not the renderer, are
- * what CI failed on for every push between 2026-08-13 and 2026-08-18:
+ * `npm run viz:smoke` left `release:check` on 2026-08-24 (see the root
+ * AGENTS.md), so CI no longer runs it — but these assertions are exactly why
+ * this file still earns its place: they are the hermetic half of that smoke,
+ * and they now guard a script whose own runs are manual.
+ *
+ * When CI did run it on a machine with no GPU, two of the smoke's own
+ * assumptions, not the renderer, are what failed every push between
+ * 2026-08-13 and 2026-08-18:
  *
  * 1. It navigated with `waitUntil: 'networkidle0'`. The client polls /api/runs
  *    for as long as it is open, and on a software rasteriser Blink never emits

@@ -17,10 +17,12 @@ import * as runUtils from '../src/viz/client/run-utils.js';
  * sentinel endpoint, `node dist/viz/server.js` died with ERR_MODULE_NOT_FOUND
  * and the GPU smoke could not even connect.
  *
- * The behavioural proof is `npm run viz:smoke` in `release:check`, which needs
- * a real Chrome and so cannot live here. This is the cheap guard that fails in
- * the same commit as the mistake: a source scan, which the repo permits for an
- * architectural boundary that source-running tests cannot otherwise observe.
+ * The behavioural proof is `npm run viz:smoke`, which needs a real Chrome and
+ * so cannot live here — and since 2026-08-24 it is no longer in
+ * `release:check` either, so this guard is now the ONLY automatic one. That
+ * raises its stakes rather than lowering them: a source scan, which the repo
+ * permits for an architectural boundary that source-running tests cannot
+ * otherwise observe, failing in the same commit as the mistake.
  */
 
 const CLIENT_PREFIX = join('src', 'viz', 'client') + '/';

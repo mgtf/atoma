@@ -19,8 +19,11 @@ Neighbours:
 Visualizer. The GPU client is the product UI (`npm run viz`); MUI is the frozen
 fallback. Every launcher here also arms the mechanical watch in-process behind
 the gate (`--no-sentinel`, `--sentinel-interval`, `--cost-alert`, or
-`ATOMA_VIZ_SENTINEL=0` on the launcher path, which forwards no flags). `viz:smoke` is in `release:check`. `viz:smoke:gc` and the mark-turn
-film are not: they need a real Chrome and, for GC, a real WebGPU adapter.
+`ATOMA_VIZ_SENTINEL=0` on the launcher path, which forwards no flags).
+NO browser check is in `release:check` any more — `viz:smoke`, `viz:smoke:gc`
+and the mark-turn film all need a real Chrome (and, for GC, a real WebGPU
+adapter), which CI does not have. Run `viz:smoke` on a real machine before
+shipping a viz change; the root file records why it left CI.
 `npm run viz`, `doctor:dev` and `auth:dev` fill unset keys from checkout `.env`
 so a local GitHub-gated visualizer does not need a shell export. Compiled
 `viz:serve` does not load `.env`: production injects the process environment.

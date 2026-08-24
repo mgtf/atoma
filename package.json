@@ -25,7 +25,7 @@
     "projects:dev": "tsx src/cli/projects.ts",
     "sentinel": "node dist/cli/sentinel.js",
     "sentinel:dev": "tsx src/cli/sentinel.ts",
-    "release:check": "npm run check && npm audit && npm run build && npm run viz:smoke && node scripts/release-smoke.mjs && node scripts/auth-release-smoke.mjs && npm run auth -- --help && npm run doctor -- --help",
+    "release:check": "npm run check && npm audit && npm run build && node scripts/release-smoke.mjs && node scripts/auth-release-smoke.mjs && npm run auth -- --help && npm run doctor -- --help",
     "release:container-smoke": "node scripts/release-container-smoke.mjs",
     "run:build": "node dist/cli/build-app.js",
     "run:build:dev": "tsx src/cli/build-app.ts",

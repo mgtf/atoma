@@ -162,9 +162,18 @@ npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROU
 - `npm run auth` is the compiled identity/invitation CLI
   (`node dist/cli/auth.js`); contributors use `npm run auth:dev` for source.
 - `release:check` is the release-readiness definition: full check, audit,
-  build, compiled MCP/viz smokes, the compiled auth end-to-end smoke
+  build, the compiled MCP smoke, the compiled auth end-to-end smoke
   (`auth-release-smoke.mjs`: founder login, CLI invite, member admission),
   and the auth/doctor help smokes.
+- The BROWSER smoke (`viz:smoke`) is NOT in it, since 2026-08-24. It is the one
+  check here that drives a real Chrome, and on CI's CPU rasteriser (2023–3433ms
+  per frame, against ~17ms on a developer machine) it both dominated the step
+  and failed on its own timing rather than on the change under test — three
+  distinct CI-only flakes in one day, plus a 25-minute wall it pushed an
+  icon-only commit through. It stays a supported command and remains the
+  behavioural proof of the client bundle boundary; run it on a real machine
+  before shipping a viz change. Re-arming it in CI needs the runner to render
+  faster, or the arms to stop measuring frame time — not a longer timeout.
 - `npm run build:worker` consumes an existing `dist/`; the source path is
   `npm run build:worker:dev`.
 - Release archives contain no stores, skills, traces, workspaces, or secrets.
