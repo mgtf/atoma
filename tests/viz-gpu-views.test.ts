@@ -16,6 +16,7 @@ import type {
   VizRun,
 } from '../src/viz/client/types.js';
 import {
+  BUTTON_LABEL_INSET,
   GpuRenderer,
   NAV_HOVER_SCALE,
   emptyRenderMetrics,
@@ -2299,7 +2300,45 @@ describe('drawProjects', () => {
       }).y;
       // Below the button's box, not merely below its top edge.
       expect(secondLineTop).toBeGreaterThanOrEqual(titleTop + title.height);
+
+      // ...and on the LABEL's vertical, not the button's border. The error
+      // used to start at the button's x while the goal it explains started
+      // `BUTTON_LABEL_INSET` further in, so it hung out to the left of the
+      // row. An ERROR line only: the commit receipt is right-anchored into
+      // the status column and has no label to line up with.
+      if (String(secondLine!.value).includes('runner finished')) {
+        const titleLeft = title.parent.toGlobal({ x: title.x, y: title.y }).x;
+        const secondLineLeft = secondLine!.parent.toGlobal({
+          x: secondLine!.x,
+          y: secondLine!.y,
+        }).x;
+        expect(secondLineLeft).toBe(titleLeft + BUTTON_LABEL_INSET);
+      }
     }
+  });
+
+  // The project's metadata is the same shape: a line under a button's label.
+  it('starts the project metadata on its name label, not the button border', () => {
+    const ctx = createRecordingCtx();
+    drawProjects(
+      ctx,
+      makeSnapshot(
+        { view: 'projects', selectedProjectId: null },
+        { projects: [guidanceProject()], profiles: [LAUNCH_PROFILE] }
+      ),
+      1000,
+      720
+    );
+    const nameButton = ctx.buttons.find((button) =>
+      button.id.startsWith('project.select.')
+    )!;
+    const metadata = ctx.texts.find((text) => String(text.value).startsWith('private ·'))!;
+    const buttonLeft = nameButton.parent.toGlobal({
+      x: nameButton.x,
+      y: nameButton.y,
+    }).x;
+    const metadataLeft = metadata.parent.toGlobal({ x: metadata.x, y: metadata.y }).x;
+    expect(metadataLeft).toBe(buttonLeft + BUTTON_LABEL_INSET);
   });
 });
 

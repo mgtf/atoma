@@ -181,6 +181,14 @@ export const NAV_HOVER_SCALE = 1.045;
 // shared scroll pane live under ./renderer/. This file keeps the stateful
 // renderer class. Re-exports preserve the public import surface.
 /**
+ * Left inset of a button's label inside its frame. EXPORTED because a view
+ * that stacks a line UNDER a button has to start it on the same vertical, and
+ * the two numbers were written independently: the run rows' second line sat at
+ * the button's border while the label above it sat 10px in, so an error read
+ * as hanging out of the row it belonged to.
+ */
+export const BUTTON_LABEL_INSET = 10;
+/**
  * A button label at rest. Buttons are now BUILT at `GPU_COLORS.text` and
  * tinted down to this, rather than built dim and re-coloured on hover: hover
  * used to assign `style.fill`, and that style is shared across every label
@@ -2026,7 +2034,7 @@ export class GpuRenderer {
     const labelText = this.text(
       container,
       this.fitText(label, Math.max(0, width - 20), labelStyle),
-      centerLabel ? width / 2 : 10,
+      centerLabel ? width / 2 : BUTTON_LABEL_INSET,
       Math.max(5, (height - 16) / 2),
       labelStyle
     );

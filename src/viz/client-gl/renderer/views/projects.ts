@@ -1,5 +1,6 @@
 import { Container, Rectangle } from 'pixi.js';
 import type { LaunchProfile, VizProjectRun } from '../../../client/types.js';
+import { BUTTON_LABEL_INSET } from '../../gpu-renderer.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { projectGuidanceOpen } from '../../store.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
@@ -600,7 +601,9 @@ export function drawProjects(
       // line ellipsised while the column still had room, and `singleLine`
       // then squeezed whatever survived rather than ending it cleanly.
       ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 10 }),
-      columnX + 12,
+      // The button's label vertical, like the run rows' second line: this
+      // describes the name above it, so it starts where that name starts.
+      columnX + BUTTON_LABEL_INSET,
       y + (selected ? 0 : compactRunRows ? 34 : PROJECT_METADATA_Y),
       {
         size: 10,
@@ -716,12 +719,21 @@ export function drawProjects(
           if (!compactRunRows) commit.anchor.x = 1;
         } else if (run.error) {
           const boundedError = run.error.replace(/\s+/g, ' ');
+          // Starts on the LABEL's vertical, not the button's border: this line
+          // belongs to the goal above it, and at `runColumnX` it hung 10px out
+          // to the left of the text it explains.
+          const errorX = runColumnX + BUTTON_LABEL_INSET;
           ctx.text(
             pane.content,
-            ctx.fitText(boundedError, goalWidth, { size: 9 }),
-            runColumnX,
+            ctx.fitText(boundedError, goalWidth - BUTTON_LABEL_INSET, { size: 9 }),
+            errorX,
             cursor + (compactRunRows ? 48 : RUN_SECOND_LINE_Y),
-            { size: 9, color: GPU_COLORS.error, width: goalWidth, singleLine: true }
+            {
+              size: 9,
+              color: GPU_COLORS.error,
+              width: goalWidth - BUTTON_LABEL_INSET,
+              singleLine: true,
+            }
           );
         }
         cursor += rowHeight;
