@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { GitHubApiError, type GitHubAppClient } from '../github/client.js';
 import { GitHubStore } from '../github/store.js';
+import { publicationCommitMessage } from './commitMessage.js';
 import { ProjectStateConflict, type ProjectStore } from './store.js';
 import {
   revalidateArtifactManifest,
@@ -347,9 +348,11 @@ export class GitHubPublisher {
           name: project.repositoryTarget.name,
         },
         branch,
-        // Byte-identical to what shipped: what lands in a tenant's repository
-        // as a commit message is its own decision, registered not built.
-        message: `atoma: publish artifacts for run ${run.projectRunId}`,
+        message: publicationCommitMessage({
+          project,
+          run,
+          manifest: run.artifactManifest,
+        }),
         expectedHead: previous?.commitSha ?? null,
         // The manifest's recorded mode travels all the way to the tree:
         // `readManifestArtifact` refuses a file whose on-disk mode diverged,

@@ -13,6 +13,7 @@ import {
 import { GitHubStore } from '../src/github/store.js';
 import { buildArtifactManifest } from '../src/projects/artifacts.js';
 import { ProjectRunCoordinator } from '../src/projects/coordinator.js';
+import { publicationCommitMessage } from '../src/projects/commitMessage.js';
 import { GitHubPublisher, PublicationSupersededError } from '../src/projects/publisher.js';
 import { ProjectStore } from '../src/projects/store.js';
 import { FakeGitHub } from './github-api-fake.js';
@@ -603,6 +604,40 @@ describe('two delivered runs of one project both reach the repository', () => {
     expect(files.get('run.sh')?.mode).toBe('100755');
     // And no repository was created twice.
     expect(fake.calls.filter((call) => call === 'POST /user/repos')).toHaveLength(1);
+  });
+
+  it('lands the rendered message on the real commit', async () => {
+    const owner = actor('Alice');
+    const first = await deliveredRun(owner, 'User', 'alice');
+    const fake = new FakeGitHub();
+    const publisher = new GitHubPublisher({
+      client: realClient(fake),
+      github,
+      store,
+      resolveUserAccessToken: async () => 'ghu_user-token',
+    });
+    await publisher.publish({
+      project: first.project,
+      run: first.run,
+      workspaceRoot: first.workspace,
+      manifestHash: first.hash,
+    });
+    // The publisher renders it, the REAL client sends it, and the commit
+    // carries it — the boundary a unit test of the renderer cannot reach.
+    const head = fake.historyOf('alice', 'weather-lab', 'main')[0]!;
+    expect(head.message).toBe(
+      publicationCommitMessage({
+        project: first.project,
+        run: first.run,
+        manifest: first.run.artifactManifest!,
+      })
+    );
+    // And it is not the UUID-only line it used to be.
+    expect(head.message).not.toMatch(/^atoma: publish artifacts for run/);
+    expect(head.message.split('\n')[0]).toBe('Build a weather dashboard.');
+    expect(head.message).toContain('Atoma-Run: ' + first.run.projectRunId);
+    expect(head.message).toContain('index.html');
+    expect(head.message).toContain('run.sh');
   });
 
   it('refuses to publish a run older than the one already published', async () => {

@@ -202,3 +202,28 @@ Neighbours:
   68 tool calls and $0.96, was unreachable advice until the lever existed.
 - The DEFAULT is unchanged at 15 minutes. What a tenant run may spend is a
   product decision; only its reachability was a defect.
+
+## What a published commit says
+
+- The commit message is a PRODUCT SURFACE: permanent, in the tenant's own
+  repository, and public if they chose a public one. It is rendered once, by
+  `publicationCommitMessage`, and its shape is a decision rather than a format.
+- SUBJECT: the goal through `eventLabel`, cut at a word boundary. BODY: the
+  provenance, the run's DECLARED output set, and the goal in full. TRAILERS:
+  `Atoma-Project` and `Atoma-Run`, so a machine can read them.
+- THE DECLARED SET IS THE REASON THE BODY EXISTS. Publication merges the
+  manifest onto the parent's tree, so the tree carries paths from earlier runs
+  and the diff shows only what changed — the run's declared outputs are NOT
+  recoverable from git. Nothing else in the message earns its place that way.
+- The goal is quoted INDENTED, and that is a guard, not a style. Git trailers
+  are unindented `Key: value` lines at the end, and a goal is up to 4 000
+  characters of tenant text that permits newlines — so a goal shaped like a
+  trailer would forge one. `git interpret-trailers --parse` is the authority
+  that it does not, and a test uses it.
+- OMITTED ON PURPOSE: the parent and created-versus-extended, because those are
+  first-class git fields and naming them in prose would both duplicate the
+  commit's own metadata and be decided BEFORE the head is read; cost and call
+  counts, because they come from the run log, a channel a tenant's goal can
+  write into ([src/cli](../cli/AGENTS.md)) — a git history must not carry a
+  number the tenant can influence, and the journal already has it; and the trace
+  id, which means nothing outside this instance.

@@ -536,9 +536,16 @@ Not built, deliberately:
 8. **A `publication.diverged` audience decision** for `baseSha` differing from
    the previous publication's commit — the store-only, network-free record that
    something outside atoma moved the branch. Nothing reads it yet.
-9. **The commit message body carrying the run goal.** Two reviewers
-   independently flagged what lands in a tenant's repository as its own
-   disposition. The message stays byte-identical.
+9. **CLOSED, as the operator's call.** Asked and answered 2026-08-24: subject
+   plus the goal IN FULL. The message now carries the goal as its subject (cut
+   at a word boundary), the provenance, the run's DECLARED output set, the whole
+   goal, and `Atoma-Project`/`Atoma-Run` trailers. The declared set is the reason
+   the body exists — merge semantics mean it is not recoverable from git. The
+   goal is quoted indented so it cannot forge a trailer, proven with
+   `git interpret-trailers --parse`. Cost and call counts stay out: they come
+   from the forgeable run log, and a git history must not carry a number the
+   tenant can influence. The trade-off accepted with the choice: a public
+   repository makes the goal public.
 10. **The path-versus-directory collision under `base_tree`** (a manifest blob
     at `docs` where the base tree holds `docs/`). GitHub's exact behaviour is
     unmeasured; the guarantee is therefore stated narrowly — no path ABSENT
