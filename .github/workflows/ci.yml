@@ -16,11 +16,19 @@ jobs:
   core:
     name: Hermetic checks (Docker integration skipped)
     runs-on: ubuntu-latest
-    # The GPU smoke runs on a CPU rasteriser here — measured 3433ms per frame on
-    # the runner against 16.7ms on a Metal-backed developer machine — so the
-    # browser arms alone take ~9 minutes of the step. 15 was not enough to reach
-    # the end of the check that has to pass.
-    timeout-minutes: 25
+    # The GPU smoke runs on a CPU rasteriser here — measured 2023ms, 3004ms and
+    # 3433ms per frame across runners, against 16.7ms on a Metal-backed
+    # developer machine — so the browser arms dominate this step and their cost
+    # swings by ~1.7x with nothing but which machine picked the job up.
+    #
+    # 25 was the fast end's number, not the slow end's: the last green run used
+    # 20m37s of it, and two consecutive pushes then died on the wall — one of
+    # them an ICON-ONLY commit that touched no test at all. A limit that fails
+    # on work it does not cover is measuring the runner, not the change. The
+    # smoke has no fat left to cut either: its fixed sleeps total ~10s, so the
+    # rest is frames, and a faster wall would only hide the slow runner's
+    # result rather than get one.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
