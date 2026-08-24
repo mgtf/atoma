@@ -116,6 +116,15 @@ async function passArrivalGate(page) {
  * The app now OPENS ON PROJECTS, so every arm that exercises the RUNS view —
  * the tuning panel, the filter rows, the live trace poll — has to navigate
  * there first. They used to simply arrive on it.
+ *
+ * The arrival is OBSERVED, not slept through. A fixed settle was sized against
+ * a machine that paints in milliseconds; on the CI runner a frame is ~3s, so
+ * 700ms after the click the view had not rendered once and the arms that read
+ * hit targets right after it reported the app's contents as missing (`tuning
+ * row never rendered`, on every run since 2026-08-23). The live region is the
+ * same signal the main arm already waits on for its six-view sweep, and it
+ * names the view the surface actually rendered. The settle after it is for the
+ * 560ms view transition, which the live region does not cover.
  */
 async function openView(page, label) {
   await page.evaluate((name) => {
@@ -125,7 +134,31 @@ async function openView(page, label) {
     if (!tab) throw new Error(`nav tab missing: ${name}`);
     tab.click();
   }, label);
+  await page.waitForFunction(
+    (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
+    { timeout: READY_TIMEOUT_MS },
+    label
+  );
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
+}
+
+/**
+ * Read one canvas hit target, waiting for it to exist. Same reason as
+ * `openView`: a target the renderer has not drawn yet is indistinguishable
+ * from one it will never draw, and only the clock tells them apart.
+ */
+async function waitForHitTarget(page, id, describe) {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    const found = await page.evaluate(
+      (targetId) =>
+        globalThis.__ATOMA_GPU__?.hitTargets().some((entry) => entry.id === targetId) ?? false,
+      id
+    );
+    if (found) return;
+    if (Date.now() > deadline) throw new Error(describe);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 250)));
+  }
 }
 
 /**
@@ -597,7 +630,11 @@ try {
       await passArrivalGate(tunePage);
       // The tuning panel belongs to the RUNS view.
       await openView(tunePage, 'Runs');
-      await tunePage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
+      await waitForHitTarget(
+        tunePage,
+        'tuning:lightHue',
+        'tuning row never rendered; scenario cannot arm'
+      );
 
       const target = await tunePage.evaluate(() => {
         const handle = globalThis.__ATOMA_GPU__;
@@ -705,7 +742,13 @@ try {
         waitUntil: 'load',
       });
       await anchorPage.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
-      await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 600)));
+      // The splash has to be BUILT before its control can be hit: same
+      // observed-not-slept rule as `openView`.
+      await waitForHitTarget(
+        anchorPage,
+        'welcome.continue',
+        'anchor scenario: arrival control never rendered'
+      );
 
       const clickTarget = async (id) => {
         const spot = await anchorPage.evaluate((targetId) => {
@@ -958,7 +1001,11 @@ try {
       // Project metadata and a long run error must be one line AND fit their
       // declared column after Pixi has measured the actual font.
       await accountPage.setViewport({ width: 528, height: 800, deviceScaleFactor: 2 });
-      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      await waitForHitTarget(
+        accountPage,
+        `project.select.${projectId}`,
+        `account scenario: project row ${projectId} never rendered`
+      );
       await clickAccountTarget(`project.select.${projectId}`);
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
       const boundedProjectCopy = await accountPage.evaluate(() => {
@@ -987,7 +1034,13 @@ try {
         return rows;
       });
       await accountPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
-      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+      // The orb only exists at this width, and the re-render that brings it
+      // back is one frame — which on a software rasteriser is seconds.
+      await waitForHitTarget(
+        accountPage,
+        'account.menu.toggle',
+        'account scenario: orb never returned at full width'
+      );
       const withOrb = await targetIds();
 
       // Open the menu from the orb itself: hit-testable on the canvas, not
