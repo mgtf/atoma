@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  gpuCardShaderMode,
   gpuEventCardCopy,
   gpuAtomButtonWidth,
   gpuFilterButtonWidth,
@@ -156,19 +155,6 @@ describe('full-GL Zustand scene state', () => {
 });
 
 describe('full-GL event cards preserve trace metadata', () => {
-  it('selects a distinct shader mode for every functional event family', () => {
-    const base = { id: 'e', ts: 1 };
-    const modes = [
-      gpuCardShaderMode({ ...base, kind: 'llm' }),
-      gpuCardShaderMode({ ...base, kind: 'tool' }),
-      gpuCardShaderMode({ ...base, kind: 'trust' }),
-      gpuCardShaderMode({ ...base, kind: 'skill' }),
-      gpuCardShaderMode({ ...base, kind: 'cache' }),
-      gpuCardShaderMode({ ...base, kind: 'registry' }),
-    ];
-    expect(new Set(modes).size).toBe(6);
-  });
-
   it('renders tool arguments, result facts, branch, duration and timestamp', () => {
     const copy = gpuEventCardCopy({
       id: 'tool-1',

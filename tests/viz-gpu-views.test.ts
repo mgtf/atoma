@@ -123,7 +123,6 @@ interface RecordedEventCard {
   y: number;
   width: number;
   height: number;
-  shaderMode: number;
   selected: boolean;
   /** The card's content container, so a test can group its labels. */
   content: Container;
@@ -416,9 +415,9 @@ function createRecordingCtx(): RecordingCtx {
       parent.addChild(container);
       return container;
     },
-    eventCard(parent, id, x, y, width, height, _accent, shaderMode, selected) {
+    eventCard(parent, id, x, y, width, height, _accent, selected) {
       const content = new Container();
-      ctx.eventCards.push({ id, x, y, width, height, shaderMode, selected, content });
+      ctx.eventCards.push({ id, x, y, width, height, selected, content });
       ctx.recordHitTarget(parent, {
         id,
         role: 'button',
@@ -3995,12 +3994,12 @@ describe('drawRuns behavior', () => {
     expect(ctx.metrics.hitTargets.some((target) => target.id === 'run.summary.toggle')).toBe(
       true
     );
-    // Event cards carry catalog-backed copy and per-family shader modes.
+    // Event cards carry catalog-backed copy. Their material is deliberately
+    // shared; action identity is expressed by the existing accent colour.
     const toolCard = ctx.eventCards.find((card) => card.id === 'e3');
     const llmCard = ctx.eventCards.find((card) => card.id === 'e1');
     expect(toolCard).toBeDefined();
     expect(llmCard).toBeDefined();
-    expect(toolCard!.shaderMode).not.toBe(llmCard!.shaderMode);
     expect(ctx.texts.some((text) => text.value.includes('read_file'))).toBe(true);
   });
 

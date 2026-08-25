@@ -1,5 +1,6 @@
 import {
   Application,
+  Assets,
   CanvasTextMetrics,
   Container,
   Filter,
@@ -8,6 +9,7 @@ import {
   RendererType,
   Text,
   TextStyle,
+  Texture,
   Ticker,
 } from 'pixi.js';
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
@@ -196,6 +198,16 @@ export const BUTTON_LABEL_INSET = 10;
  */
 const BUTTON_LABEL_IDLE = 0xa9b5ca;
 const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
+/** Cool ambient shadow shared by the timeline's filter controls. */
+const CONTROL_SHADOW_COLORS = {
+  core: 0x071326,
+  penumbra: 0x10233d,
+} as const;
+/** Slightly deeper than controls: event cards stand further off the pane. */
+const TIMELINE_SHADOW_COLORS = {
+  core: 0x071224,
+  penumbra: 0x0d1c32,
+} as const;
 
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
@@ -300,6 +312,8 @@ export class GpuRenderer {
   readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
   private readonly frameFilters = new Set<Filter>();
+  /** Shared CC0 bitmap material loaded once before any timeline card draws. */
+  private cardMaterial: { diffuse: Texture; normal: Texture } | null = null;
   private pointerLightFilter: Filter | null = null;
   private pointerLightUniforms: {
     uLightPx: Float32Array;
@@ -787,6 +801,13 @@ export class GpuRenderer {
     if (this.metrics.backend === 'webgpu') {
       this.app.renderer.gc.enabled = false;
     }
+    const [cardDiffuse, cardNormal] = await Promise.all([
+      Assets.load<Texture>('/textures/timeline-sand-diffuse.webp'),
+      Assets.load<Texture>('/textures/timeline-sand-normal.png'),
+    ]);
+    cardDiffuse.source.style.addressMode = 'repeat';
+    cardNormal.source.style.addressMode = 'repeat';
+    this.cardMaterial = { diffuse: cardDiffuse, normal: cardNormal };
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
     this.tooltipRoot.eventMode = 'none';
@@ -1302,7 +1323,16 @@ export class GpuRenderer {
     const container = new Container();
     container.position.set(block.x, block.y);
     container.eventMode = 'none';
-    this.addSurfaceShadow(container, block.width, block.height, 10, 0.56, 0.8, 'frame');
+    this.addSurfaceShadow(
+      container,
+      block.width,
+      block.height,
+      10,
+      0.46,
+      0.8,
+      'frame',
+      CONTROL_SHADOW_COLORS
+    );
     const graphics = new Graphics();
     graphics.roundRect(0, 0, block.width, block.height, 10);
     // OPAQUE, not a tint. A surface that stands off the page and casts a
@@ -1833,16 +1863,25 @@ export class GpuRenderer {
     alpha = 0.44,
     /** How far the surface stands off the page; scales offset AND reach. */
     depth = 1,
-    surface: CastShadowSurface = 'card'
+    surface: CastShadowSurface = 'card',
+    colors: { core: number; penumbra: number } = {
+      core: 0x01040a,
+      penumbra: 0x01040a,
+    }
   ) {
     const shadow = new Graphics();
     // Geometry at the local origin, offset by POSITION — the offset is what
     // the pointer light moves each frame, and baking it into the path would
     // mean re-tessellating every shadow on every pointer move. The penumbra
     // is stacked geometry for the same reason: still one object, one position.
-    for (const layer of softShadowLayers(width, height, radius, alpha, depth)) {
+    const layers = softShadowLayers(width, height, radius, alpha, depth);
+    for (const [index, layer] of layers.entries()) {
+      const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
       shadow.roundRect(layer.x, layer.y, layer.width, layer.height, layer.radius);
-      shadow.fill({ color: 0x01040a, alpha: layer.alpha });
+      shadow.fill({
+        color: mixColor(colors.penumbra, colors.core, towardCore),
+        alpha: layer.alpha,
+      });
     }
     shadow.eventMode = 'none';
     parent.addChild(shadow);
@@ -2119,7 +2158,16 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.42);
+    const dropShadow = this.addSurfaceShadow(
+      container,
+      width,
+      height,
+      8,
+      0.4,
+      1,
+      'button',
+      CONTROL_SHADOW_COLORS
+    );
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -2622,7 +2670,20 @@ export class GpuRenderer {
     return container;
   }
 
-  private createCardFilter(mode: number) {
+  private createCardFilter(materialKey: string) {
+    if (!this.cardMaterial) {
+      throw new Error('timeline card material was not loaded before rendering');
+    }
+    const diffuseSource = this.cardMaterial.diffuse.source;
+    const normalSource = this.cardMaterial.normal.source;
+    let materialHash = 2166136261;
+    for (let index = 0; index < materialKey.length; index += 1) {
+      materialHash = Math.imul(materialHash ^ materialKey.charCodeAt(index), 16777619);
+    }
+    const materialOffset = new Float32Array([
+      materialHash & 0xffff,
+      (materialHash >>> 16) & 0xffff,
+    ]);
     const filter = Filter.from({
       gl: {
         vertex: CARD_FILTER_GLSL_VERTEX,
@@ -2640,11 +2701,16 @@ export class GpuRenderer {
       },
       resources: {
         cardUniforms: {
-          uTime: { value: 0, type: 'f32' },
-          uMode: { value: mode, type: 'f32' },
+          uLightPx: { value: new Float32Array([0, 0]), type: 'vec2<f32>' },
+          uMaterialOffset: { value: materialOffset, type: 'vec2<f32>' },
+          uLightStrength: { value: 0, type: 'f32' },
           uHover: { value: 0, type: 'f32' },
           uSelected: { value: 0, type: 'f32' },
         },
+        uSandDiffuse: diffuseSource,
+        uSandDiffuseSampler: diffuseSource.style,
+        uSandNormal: normalSource,
+        uSandNormalSampler: normalSource.style,
       },
       padding: 12,
       resolution: 'inherit',
@@ -2654,8 +2720,9 @@ export class GpuRenderer {
     return {
       filter,
       uniforms: filter.resources['cardUniforms'].uniforms as {
-        uTime: number;
-        uMode: number;
+        uLightPx: Float32Array;
+        uMaterialOffset: Float32Array;
+        uLightStrength: number;
         uHover: number;
         uSelected: number;
       },
@@ -2670,7 +2737,6 @@ export class GpuRenderer {
     width: number,
     height: number,
     accent: number,
-    shaderMode: number,
     selected: boolean,
     onActivate: (id: string) => void,
     zDepth = 0
@@ -2684,77 +2750,124 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const cardShader = this.createCardFilter(shaderMode);
-    container.filters = [cardShader.filter];
+    const cardShader = this.createCardFilter(id);
+    const chamfer = Math.min(7, height * 0.16);
+    const extrusionX = 3.5 + zDepth * 3.5;
+    const extrusionY = 4 + zDepth * 3.5;
+    const facePoints = [
+      chamfer, 0,
+      width - chamfer, 0,
+      width, chamfer,
+      width, height - chamfer,
+      width - chamfer, height,
+      chamfer, height,
+      0, height - chamfer,
+      0, chamfer,
+    ];
 
-    const extrusion = new Graphics();
-    const extrusionX = 5 + zDepth * 7;
-    const extrusionY = 5 + zDepth * 5;
-    extrusion.roundRect(extrusionX, extrusionY, width, height, 8);
-    extrusion.fill({ color: 0x02050b, alpha: 0.44 + zDepth * 0.16 });
-    extrusion.stroke({
-      color: accent,
-      width: 1,
-      alpha: 0.14 + zDepth * 0.16,
-    });
-    container.addChild(extrusion);
-
-    const middleExtrusion = new Graphics();
-    middleExtrusion.roundRect(
-      extrusionX * 0.52,
-      extrusionY * 0.52,
+    // The card is a raised object above the timeline cartouche. This shadow is
+    // outside the material filter so the grain cannot turn it into another
+    // outline; the pointer light moves it across the cartouche like every
+    // other elevation-bearing surface.
+    const shadowHost = new Container();
+    shadowHost.position.set(x, y);
+    parent.addChild(shadowHost);
+    const castShadow = this.addSurfaceShadow(
+      shadowHost,
       width,
       height,
-      8
+      chamfer,
+      0.58,
+      // The solid extrusion already occupies 4–7px. The cast must spread
+      // beyond that wall or it is physically present but visually buried.
+      1.35 + zDepth * 0.85,
+      'card',
+      TIMELINE_SHADOW_COLORS
     );
-    middleExtrusion.fill({ color: 0x08111f, alpha: 0.4 + zDepth * 0.12 });
-    middleExtrusion.stroke({
-      color: accent,
-      width: 0.8,
-      alpha: 0.1 + zDepth * 0.13,
-    });
-    container.addChild(middleExtrusion);
+
+    const back = new Graphics();
+    back.poly(facePoints.map((value, index) => value + (index % 2 === 0 ? extrusionX : extrusionY)));
+    back.fill({ color: mixColor(0x091426, accent, 0.18), alpha: 0.98 });
+    container.addChild(back);
+
+    // Solid right and lower walls connect the rear slab to the face. Their
+    // unequal values provide depth without repeating neon contours.
+    const rightWall = new Graphics();
+    rightWall.poly([
+      width, chamfer,
+      width + extrusionX, chamfer + extrusionY,
+      width + extrusionX, height - chamfer + extrusionY,
+      width, height - chamfer,
+    ]);
+    rightWall.fill({ color: mixColor(0x071326, accent, 0.14), alpha: 0.98 });
+    container.addChild(rightWall);
+
+    const lowerWall = new Graphics();
+    lowerWall.poly([
+      chamfer, height,
+      width - chamfer, height,
+      width - chamfer + extrusionX, height + extrusionY,
+      chamfer + extrusionX, height + extrusionY,
+    ]);
+    lowerWall.fill({ color: mixColor(0x050f20, accent, 0.1), alpha: 0.98 });
+    container.addChild(lowerWall);
 
     const aura = new Graphics();
-    aura.roundRect(-3, -3, width + 6, height + 6, 10);
+    aura.poly([
+      chamfer, -3,
+      width - chamfer, -3,
+      width + 3, chamfer,
+      width + 3, height - chamfer,
+      width - chamfer, height + 3,
+      chamfer, height + 3,
+      -3, height - chamfer,
+      -3, chamfer,
+    ]);
     aura.stroke({ color: accent, width: 2.4, alpha: 0.72 });
     aura.alpha = selected ? 0.28 : 0;
     container.addChild(aura);
 
     const base = new Graphics();
-    base.roundRect(0, 0, width, height, 8);
+    base.poly(facePoints);
     base.fill({
-      color: selected ? 0x172a49 : 0x111a2b,
-      alpha: VIZ_VISUAL_DEPTH.near.cardAlpha,
+      color: mixColor(selected ? 0x172a49 : 0x111a2b, accent, selected ? 0.23 : 0.13),
+      alpha: Math.max(0.96, VIZ_VISUAL_DEPTH.near.cardAlpha),
     });
-    base.stroke({ color: selected ? GPU_COLORS.primary : accent, width: selected ? 1.7 : 1.05, alpha: 0.9 });
+    base.stroke({
+      color: selected ? GPU_COLORS.primary : accent,
+      width: selected ? 1.35 : 0.75,
+      alpha: selected ? 0.82 : 0.42,
+    });
+    base.filters = [cardShader.filter];
     container.addChild(base);
 
-    const depth = new Graphics();
-    depth.roundRect(4, 4, width - 8, height - 8, 6);
-    depth.stroke({ color: 0x9cb8e8, width: 0.65, alpha: selected ? 0.22 : 0.08 });
-    container.addChild(depth);
+    const topBevel = new Graphics();
+    topBevel.poly([
+      chamfer, 0,
+      width - chamfer, 0,
+      width - chamfer - 3, 2.5,
+      chamfer + 3, 2.5,
+    ]);
+    topBevel.fill({ color: mixColor(accent, 0xffffff, 0.48), alpha: selected ? 0.32 : 0.2 });
+    container.addChild(topBevel);
+
+    const lowerBevel = new Graphics();
+    lowerBevel.poly([
+      chamfer, height,
+      width - chamfer, height,
+      width - chamfer - 3, height - 2.5,
+      chamfer + 3, height - 2.5,
+    ]);
+    lowerBevel.fill({ color: 0x02050b, alpha: 0.42 });
+    container.addChild(lowerBevel);
 
     const rail = new Graphics();
     rail.roundRect(0, 7, 2.5, height - 14, 1.2).fill(accent);
     rail.alpha = 0.72;
     container.addChild(rail);
 
-    const scan = new Graphics();
-    scan.rect(5, 0, width - 10, 1.4).fill({ color: accent, alpha: 0.65 });
-    scan.alpha = selected ? 0.15 : 0.035;
-    container.addChild(scan);
-
     const content = new Container();
     container.addChild(content);
-
-    const sparks = Array.from({ length: 3 }, (_, index) => {
-      const spark = new Graphics();
-      spark.circle(0, 0, 1.25 - index * 0.15).fill(index === 1 ? 0xffffff : accent);
-      spark.alpha = selected ? 0.4 : 0;
-      container.addChild(spark);
-      return spark;
-    });
 
     let hovered = false;
     let pressed = false;
@@ -2775,33 +2888,22 @@ export class GpuRenderer {
         x + width * (1 - scale * depthScaleX) / 2,
         y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
       );
-      const pulse = 0.5 + Math.sin(elapsed / 190) * 0.5;
       const shaderLerp = prefersReducedMotion() ? 1 : Math.min(1, ticker.deltaMS * 0.014);
       shaderHover += ((hovered ? 1 : 0) - shaderHover) * shaderLerp;
       shaderSelected += ((selected ? 1 : 0) - shaderSelected) * shaderLerp;
-      cardShader.uniforms.uTime = elapsed / 1000;
+      cardShader.uniforms.uLightPx[0] = this.lightRendererX;
+      cardShader.uniforms.uLightPx[1] = this.lightRendererY;
+      cardShader.uniforms.uLightStrength = this.pointerLightStrength;
       cardShader.uniforms.uHover = shaderHover;
       cardShader.uniforms.uSelected = shaderSelected;
       aura.alpha = selected
-        ? 0.16 + pulse * 0.22
+        ? 0.3
         : hovered
-          ? 0.08 + pulse * 0.15
+          ? 0.16
           : 0;
       base.tint = pressed ? 0xb8d8ff : hovered ? 0xd8e9ff : 0xffffff;
-      depth.alpha = hovered || selected ? 1 : 0.65;
-      extrusion.alpha = hovered ? 0.82 : selected ? 0.75 : 0.58;
-      middleExtrusion.alpha = hovered ? 0.92 : selected ? 0.82 : 0.66;
-      rail.alpha = selected ? 0.72 + pulse * 0.25 : hovered ? 0.9 : 0.62;
-      scan.y = 5 + (Math.max(0, elapsed) * (hovered ? 0.075 : 0.025)) % Math.max(8, height - 10);
-      scan.alpha = selected ? 0.08 + pulse * 0.12 : hovered ? 0.09 : 0.025;
-      sparks.forEach((spark, index) => {
-        const phase = elapsed / 460 + index * 2.1;
-        spark.position.set(
-          8 + (Math.sin(phase) * 0.5 + 0.5) * (width - 16),
-          5 + (Math.cos(phase * 1.4) * 0.5 + 0.5) * (height - 10)
-        );
-        spark.alpha = selected ? 0.18 + pulse * 0.42 : hovered ? 0.12 + pulse * 0.28 : 0;
-      });
+      castShadow.alpha = easedEntrance * (hovered ? 0.96 : selected ? 0.92 : 0.86);
+      rail.alpha = selected ? 0.92 : hovered ? 0.84 : 0.68;
     };
     this.addTicker(animate);
 

@@ -1,4 +1,3 @@
-import type { VizEvent } from '../../client/types.js';
 import {
   POINTER_LIGHT_CORE_RADIUS_PX,
   POINTER_LIGHT_RADIUS_PX,
@@ -14,23 +13,15 @@ import { CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL } from './caustic-shader.js';
 const CAUSTIC_SURFACE_GAIN = 0.7;
 
 /**
- * GPU shader sources and per-event shader-mode selection.
+ * GPU shader sources. Timeline events deliberately share one sand-grain card
+ * material; their action accent remains geometry/copy colour, not a second
+ * family-specific texture vocabulary.
  *
  * Extracted from gpu-renderer.ts (2026-08-15 decomposition): the shaders are
  * pure source constants with both GLSL and WGSL variants — the two-backend
  * contract (WebGPU with WebGL fallback) means every visual effect ships both
  * or ships neither.
  */
-export function gpuCardShaderMode(event: VizEvent): number {
-  if (event.kind === 'llm') return 0;
-  if (event.kind === 'tool') return 1;
-  if (event.kind === 'trust') return 2;
-  if (event.kind === 'skill') return 3;
-  if (event.kind === 'cache') return 4;
-  if (event.kind === 'registry') return 5;
-  return 6;
-}
-
 export const POINTER_LIGHT_GLSL_VERTEX = /* glsl */ `
   in vec2 aPosition;
   out vec2 vTextureCoord;
@@ -258,6 +249,8 @@ ${CAUSTIC_FIELD_WGSL}
 export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
   in vec2 aPosition;
   out vec2 vTextureCoord;
+  out vec2 vSurfacePx;
+  out vec2 vScreenPx;
   uniform vec4 uInputSize;
   uniform vec4 uOutputFrame;
   uniform vec4 uOutputTexture;
@@ -270,81 +263,63 @@ export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
       uOutputTexture.z;
     gl_Position = vec4(position, 0.0, 1.0);
     vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
+    vSurfacePx = aPosition * uOutputFrame.zw;
+    vScreenPx = aPosition * uOutputFrame.zw + uOutputFrame.xy;
   }
 `;
 
 export const CARD_FILTER_GLSL = /* glsl */ `
   in vec2 vTextureCoord;
+  in vec2 vSurfacePx;
+  in vec2 vScreenPx;
   out vec4 finalColor;
   uniform sampler2D uTexture;
-  uniform float uTime;
-  uniform float uMode;
+  uniform sampler2D uSandDiffuse;
+  uniform sampler2D uSandNormal;
+  uniform vec2 uLightPx;
+  uniform vec2 uMaterialOffset;
+  uniform float uLightStrength;
   uniform float uHover;
   uniform float uSelected;
 
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-  }
-
   void main() {
-    vec2 uv = vTextureCoord;
-    vec4 sampleColor = texture(uTexture, uv);
-    float edge = 1.0 - smoothstep(0.0, 0.11, min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)));
-    float t = uTime;
-    float fx = 0.0;
-    vec3 tint = vec3(0.22, 0.55, 1.0);
-
-    if (uMode < 0.5) {
-      // LLM: travelling reasoning waves and token bands.
-      float wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
-      float band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
-      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
-      tint = vec3(0.28, 0.48, 1.0);
-    } else if (uMode < 1.5) {
-      // Tool: terminal grid, packet scan and deterministic digital noise.
-      vec2 gridUv = abs(fract(uv * vec2(36.0, 9.0)) - 0.5);
-      float grid = step(gridUv.x, 0.025) + step(gridUv.y, 0.035);
-      float packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
-      float noise = hash(floor(uv * 120.0) + floor(t * 8.0));
-      fx = grid * 0.07 + packet * 0.24 + (noise - 0.5) * 0.025;
-      tint = vec3(0.05, 0.82, 0.96);
-    } else if (uMode < 2.5) {
-      // Trust: shield-like radial pulse with a stable gold edge.
-      vec2 p = uv - 0.5;
-      float ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
-      float shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
-      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
-      tint = vec3(1.0, 0.68, 0.12);
-    } else if (uMode < 3.5) {
-      // Skill: magenta plasma, deliberately organic rather than gridded.
-      float plasma =
-        sin(uv.x * 18.0 + t * 1.9) +
-        sin(uv.y * 15.0 - t * 1.5) +
-        sin((uv.x + uv.y) * 13.0 + t);
-      fx = plasma * 0.035 + edge * 0.09;
-      tint = vec3(0.92, 0.22, 0.82);
-    } else if (uMode < 4.5) {
-      // Cache: crystalline diagonals and a fast replay glint.
-      float crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
-      float replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
-      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
-      tint = vec3(0.08, 0.9, 0.92);
-    } else if (uMode < 5.5) {
-      // Registry: violet circuit traces with stable node intersections.
-      vec2 circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - 0.5);
-      float traces = step(circuitUv.x, 0.028) * step(0.17, circuitUv.y);
-      float nodes = step(length(circuitUv), 0.075);
-      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
-      tint = vec3(0.62, 0.35, 1.0);
-    } else {
-      // Lifecycle/other: restrained state pulse.
-      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
-      tint = vec3(0.45, 0.62, 0.92);
-    }
-
-    float intensity = 0.46 + uHover * 0.72 + uSelected * 0.58;
-    sampleColor.rgb += tint * fx * intensity * sampleColor.a;
-    sampleColor.rgb += tint * edge * (uHover * 0.055 + uSelected * 0.065) * sampleColor.a;
+    vec4 sampleColor = texture(uTexture, vTextureCoord);
+    vec2 materialPoint = vSurfacePx + uMaterialOffset;
+    const float turnCos = 0.819648;
+    const float turnSin = 0.572867;
+    vec2 rotatedPoint = vec2(
+      turnCos * materialPoint.x - turnSin * materialPoint.y,
+      turnSin * materialPoint.x + turnCos * materialPoint.y
+    );
+    // Two incommensurate, rotated samples suppress the 96px columns the
+    // single tile exposed. The per-card phase prevents rows from aligning.
+    vec2 materialUvA = materialPoint / 173.0;
+    vec2 materialUvB = rotatedPoint / 113.0 + vec2(0.37, 0.71);
+    float grainA = texture(uSandDiffuse, materialUvA).r;
+    float grainB = texture(uSandDiffuse, materialUvB).r;
+    vec3 normalA = texture(uSandNormal, materialUvA).xyz * 2.0 - 1.0;
+    vec3 normalB = texture(uSandNormal, materialUvB).xyz * 2.0 - 1.0;
+    vec2 normalBScreen = vec2(
+      turnCos * normalB.x + turnSin * normalB.y,
+      -turnSin * normalB.x + turnCos * normalB.y
+    );
+    vec3 mapped = normalize(vec3(
+      normalA.xy * 0.68 + normalBScreen * 0.32,
+      max(0.24, normalA.z * 0.68 + normalB.z * 0.32)
+    ));
+    vec3 surfaceNormal = normalize(vec3(mapped.xy * 0.46, mapped.z));
+    vec3 ambientLight = normalize(vec3(-0.46, -0.72, 0.82));
+    vec3 pointerLight = normalize(vec3(uLightPx - vScreenPx, 105.0));
+    vec3 lightDirection = normalize(mix(
+      ambientLight,
+      pointerLight,
+      min(0.82, uLightStrength * 0.82)
+    ));
+    float bump = max(0.0, dot(surfaceNormal, lightDirection));
+    float bumpStrength = 0.095 + uHover * 0.045 + uSelected * 0.03;
+    float grain = (grainA - 0.5) * 0.68 + (grainB - 0.5) * 0.32;
+    float material = grain * 0.055 + (bump - 0.78) * bumpStrength;
+    sampleColor.rgb += vec3(material) * sampleColor.a;
     finalColor = sampleColor;
   }
 `;
@@ -360,8 +335,9 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
   };
 
   struct CardUniforms {
-    uTime: f32,
-    uMode: f32,
+    uLightPx: vec2<f32>,
+    uMaterialOffset: vec2<f32>,
+    uLightStrength: f32,
     uHover: f32,
     uSelected: f32,
   };
@@ -370,23 +346,17 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
   @group(0) @binding(1) var uTexture: texture_2d<f32>;
   @group(0) @binding(2) var uSampler: sampler;
   @group(1) @binding(0) var<uniform> cardUniforms: CardUniforms;
+  @group(1) @binding(1) var uSandDiffuse: texture_2d<f32>;
+  @group(1) @binding(2) var uSandDiffuseSampler: sampler;
+  @group(1) @binding(3) var uSandNormal: texture_2d<f32>;
+  @group(1) @binding(4) var uSandNormalSampler: sampler;
 
   struct VSOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
+    @location(1) surfacePx: vec2<f32>,
+    @location(2) screenPx: vec2<f32>,
   };
-
-  fn rotateHue(color: vec3<f32>, degrees: f32) -> vec3<f32> {
-    if (abs(degrees) < 0.001) { return color; }
-    let angle = radians(degrees);
-    let axis = vec3<f32>(0.57735027);
-    let cosA = cos(angle);
-    return max(
-      vec3<f32>(0.0),
-      color * cosA + cross(axis, color) * sin(angle) +
-        axis * dot(axis, color) * (1.0 - cosA)
-    );
-  }
 
   fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
     var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
@@ -401,70 +371,59 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
 
   @vertex
   fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
-    return VSOutput(filterVertexPosition(aPosition), filterTextureCoord(aPosition));
-  }
-
-  fn hash(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    return VSOutput(
+      filterVertexPosition(aPosition),
+      filterTextureCoord(aPosition),
+      aPosition * gfu.uOutputFrame.zw,
+      aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy
+    );
   }
 
   @fragment
-  fn mainFragment(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  fn mainFragment(
+    @location(0) uv: vec2<f32>,
+    @location(1) surfacePx: vec2<f32>,
+    @location(2) screenPx: vec2<f32>
+  ) -> @location(0) vec4<f32> {
     var sampleColor = textureSample(uTexture, uSampler, uv);
-    let edgeDistance = min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y));
-    let edge = 1.0 - smoothstep(0.0, 0.11, edgeDistance);
-    let t = cardUniforms.uTime;
-    var fx = 0.0;
-    var tint = vec3(0.22, 0.55, 1.0);
-
-    if (cardUniforms.uMode < 0.5) {
-      let wave = sin(uv.x * 28.0 - t * 2.4 + sin(uv.y * 10.0 + t));
-      let band = pow(max(0.0, sin((uv.x + uv.y * 0.35) * 42.0 - t * 3.2)), 16.0);
-      fx = 0.055 * wave + 0.22 * band + edge * 0.08;
-      tint = vec3(0.28, 0.48, 1.0);
-    } else if (cardUniforms.uMode < 1.5) {
-      let gridUv = abs(fract(uv * vec2(36.0, 9.0)) - vec2(0.5));
-      let grid = select(0.0, 1.0, gridUv.x <= 0.025) + select(0.0, 1.0, gridUv.y <= 0.035);
-      let packet = pow(max(0.0, sin(uv.x * 70.0 - t * 5.0)), 24.0);
-      let digitalNoise = hash(floor(uv * 120.0) + floor(vec2(t * 8.0)));
-      fx = grid * 0.07 + packet * 0.24 + (digitalNoise - 0.5) * 0.025;
-      tint = vec3(0.05, 0.82, 0.96);
-    } else if (cardUniforms.uMode < 2.5) {
-      let p = uv - vec2(0.5);
-      let ring = pow(max(0.0, sin(length(p) * 46.0 - t * 1.8)), 18.0);
-      let shield = 1.0 - smoothstep(0.08, 0.5, abs(abs(p.x) + p.y * 0.55 - 0.24));
-      fx = ring * 0.16 + shield * 0.08 + edge * 0.11;
-      tint = vec3(1.0, 0.68, 0.12);
-    } else if (cardUniforms.uMode < 3.5) {
-      let plasma =
-        sin(uv.x * 18.0 + t * 1.9) +
-        sin(uv.y * 15.0 - t * 1.5) +
-        sin((uv.x + uv.y) * 13.0 + t);
-      fx = plasma * 0.035 + edge * 0.09;
-      tint = vec3(0.92, 0.22, 0.82);
-    } else if (cardUniforms.uMode < 4.5) {
-      let crystal = pow(max(0.0, sin((uv.x - uv.y) * 58.0 + t * 2.8)), 22.0);
-      let replay = pow(max(0.0, sin(uv.x * 22.0 - t * 6.0)), 32.0);
-      fx = crystal * 0.12 + replay * 0.28 + edge * 0.07;
-      tint = vec3(0.08, 0.9, 0.92);
-    } else if (cardUniforms.uMode < 5.5) {
-      let circuitUv = abs(fract(uv * vec2(24.0, 8.0)) - vec2(0.5));
-      let traces = select(0.0, 1.0, circuitUv.x <= 0.028) * select(0.0, 1.0, circuitUv.y >= 0.17);
-      let nodes = select(0.0, 1.0, length(circuitUv) <= 0.075);
-      fx = traces * 0.11 + nodes * (0.16 + 0.08 * sin(t * 2.0)) + edge * 0.08;
-      tint = vec3(0.62, 0.35, 1.0);
-    } else {
-      fx = sin((uv.x + uv.y) * 24.0 - t * 1.4) * 0.035 + edge * 0.06;
-      tint = vec3(0.45, 0.62, 0.92);
-    }
-
-    let intensity = 0.46 + cardUniforms.uHover * 0.72 + cardUniforms.uSelected * 0.58;
-    sampleColor.r += tint.r * fx * intensity * sampleColor.a;
-    sampleColor.g += tint.g * fx * intensity * sampleColor.a;
-    sampleColor.b += tint.b * fx * intensity * sampleColor.a;
-    sampleColor.r += tint.r * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
-    sampleColor.g += tint.g * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
-    sampleColor.b += tint.b * edge * (cardUniforms.uHover * 0.055 + cardUniforms.uSelected * 0.065) * sampleColor.a;
+    let materialPoint = surfacePx + cardUniforms.uMaterialOffset;
+    let turnCos = 0.819648;
+    let turnSin = 0.572867;
+    let rotatedPoint = vec2(
+      turnCos * materialPoint.x - turnSin * materialPoint.y,
+      turnSin * materialPoint.x + turnCos * materialPoint.y
+    );
+    // Twin of the GLSL stochastic tiling above: unlike the old single sample,
+    // neither axis nor phase repeats coherently between neighbouring rows.
+    let materialUvA = materialPoint / 173.0;
+    let materialUvB = rotatedPoint / 113.0 + vec2(0.37, 0.71);
+    let grainA = textureSample(uSandDiffuse, uSandDiffuseSampler, materialUvA).r;
+    let grainB = textureSample(uSandDiffuse, uSandDiffuseSampler, materialUvB).r;
+    let normalA = textureSample(uSandNormal, uSandNormalSampler, materialUvA).xyz * 2.0 - vec3(1.0);
+    let normalB = textureSample(uSandNormal, uSandNormalSampler, materialUvB).xyz * 2.0 - vec3(1.0);
+    let normalBScreen = vec2(
+      turnCos * normalB.x + turnSin * normalB.y,
+      -turnSin * normalB.x + turnCos * normalB.y
+    );
+    let mapped = normalize(vec3(
+      normalA.xy * 0.68 + normalBScreen * 0.32,
+      max(0.24, normalA.z * 0.68 + normalB.z * 0.32)
+    ));
+    let surfaceNormal = normalize(vec3(mapped.xy * 0.46, mapped.z));
+    let ambientLight = normalize(vec3(-0.46, -0.72, 0.82));
+    let pointerLight = normalize(vec3(cardUniforms.uLightPx - screenPx, 105.0));
+    let lightDirection = normalize(mix(
+      ambientLight,
+      pointerLight,
+      min(0.82, cardUniforms.uLightStrength * 0.82)
+    ));
+    let bump = max(0.0, dot(surfaceNormal, lightDirection));
+    let bumpStrength = 0.095 + cardUniforms.uHover * 0.045 + cardUniforms.uSelected * 0.03;
+    let grain = (grainA - 0.5) * 0.68 + (grainB - 0.5) * 0.32;
+    let material = grain * 0.055 + (bump - 0.78) * bumpStrength;
+    sampleColor.r += material * sampleColor.a;
+    sampleColor.g += material * sampleColor.a;
+    sampleColor.b += material * sampleColor.a;
     return sampleColor;
   }
 `;

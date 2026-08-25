@@ -53,7 +53,6 @@ import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
 import { drawViewFrame, viewFrame } from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
-import { gpuCardShaderMode } from '../shaders.js';
 
 const RUN_STATUS_COLOR: Record<RunStatus, number> = {
   live: GPU_COLORS.success,
@@ -753,7 +752,6 @@ export function drawRuns(
       cardWidth,
       cardHeight,
       eventAccent(event),
-      gpuCardShaderMode(event),
       selected,
       snapshot.onActivate,
       zDepth
