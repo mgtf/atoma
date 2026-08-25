@@ -27,7 +27,9 @@ const SIDEBAR_TOP = GPU_LAYOUT.headerHeight + 18;
 const GROUP_HEIGHT = 20;
 const GROUP_GAP = 18;
 const ITEM_HEIGHT = 32;
-const ITEM_GAP = 6;
+const ITEM_GAP = 8;
+const GROUP_LABEL_SIZE = 9;
+const GROUP_RULE_GAP = 8;
 
 export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
   { key: 'workspace', views: ['projects', 'runs', 'docs'] },
@@ -156,13 +158,46 @@ export function drawSidebar(
   const itemWidth = Math.max(0, width - SIDEBAR_PAD * 2);
   for (const row of sidebarLayout(visibleViews(snapshot.data.auth), height)) {
     if (row.kind === 'group') {
-      ctx.text(
+      const label = snapshot.t(`nav.group.${row.group}`).toUpperCase();
+      const labelOptions = {
+        size: GROUP_LABEL_SIZE,
+        weight: '700' as const,
+        color: GPU_COLORS.muted,
+      };
+      const labelWidth = ctx.measureText(label, labelOptions);
+      const centreX = width / 2;
+      const ruleY = row.y + GROUP_LABEL_SIZE / 2 + 1;
+      const ruleLeft = SIDEBAR_PAD + 3;
+      const ruleRight = width - SIDEBAR_PAD - 3;
+      const labelLeft = centreX - labelWidth / 2 - GROUP_RULE_GAP;
+      const labelRight = centreX + labelWidth / 2 + GROUP_RULE_GAP;
+
+      // A restrained bevel gives the headings the requested "— TITLE —"
+      // silhouette without making punctuation part of the translated copy.
+      const rules = new Graphics();
+      rules
+        .moveTo(ruleLeft, ruleY + 1)
+        .lineTo(Math.max(ruleLeft, labelLeft), ruleY + 1)
+        .moveTo(Math.min(ruleRight, labelRight), ruleY + 1)
+        .lineTo(ruleRight, ruleY + 1)
+        .stroke({ color: 0x02050b, width: 1, alpha: 0.85 });
+      rules
+        .moveTo(ruleLeft, ruleY)
+        .lineTo(Math.max(ruleLeft, labelLeft), ruleY)
+        .moveTo(Math.min(ruleRight, labelRight), ruleY)
+        .lineTo(ruleRight, ruleY)
+        .stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.75 });
+      rules.eventMode = 'none';
+      ctx.root.addChild(rules);
+
+      const labelText = ctx.text(
         ctx.root,
-        snapshot.t(`nav.group.${row.group}`).toUpperCase(),
-        SIDEBAR_PAD + 2,
+        label,
+        centreX,
         row.y,
-        { size: 9, weight: '700', color: GPU_COLORS.muted }
+        labelOptions
       );
+      labelText.anchor.x = 0.5;
       continue;
     }
     if (row.kind === 'action') {

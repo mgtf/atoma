@@ -986,6 +986,15 @@ describe('the nav rail', () => {
     }
     expect(ctx.texts.map((text) => text.value)).toContain('WORKSPACE');
     expect(ctx.texts.map((text) => text.value)).toContain('OPERATE');
+    const headings = ctx.texts.filter((text) => ['WORKSPACE', 'OPERATE'].includes(text.value));
+    for (const heading of headings) {
+      expect(heading.x).toBe(GPU_LAYOUT.sidebarWidth / 2);
+      expect(heading.node.anchor.x).toBe(0.5);
+    }
+
+    const project = nav.find((button) => button.id === 'nav.projects')!;
+    const runs = nav.find((button) => button.id === 'nav.runs')!;
+    expect(runs.y - (project.y + project.height)).toBe(8);
   });
 
   it('has no Settings row: the account menu owns that entrance', () => {
