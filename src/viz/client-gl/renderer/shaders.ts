@@ -61,12 +61,12 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform float uStrength;
   uniform float uRadiusScale;
   uniform float uHueShift;
-  uniform vec2 uCaustic0;
-  uniform vec2 uCaustic1;
-  uniform vec2 uCaustic2;
-  uniform vec2 uCaustic3;
-  uniform vec2 uCaustic4;
-  uniform vec2 uCaustic5;
+  uniform vec4 uCaustic0;
+  uniform vec4 uCaustic1;
+  uniform vec4 uCaustic2;
+  uniform vec4 uCaustic3;
+  uniform vec4 uCaustic4;
+  uniform vec4 uCaustic5;
   uniform vec4 uCausticColor;
 
   float luminance(vec3 color) {
@@ -118,16 +118,19 @@ ${CAUSTIC_FIELD_GLSL}
     float illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
     // The crystal's CAST, on the interface itself. The far field takes the
-    // same polygon behind the UI; here it lands on whatever is actually
+    // same ray bundles behind the UI; here they land on whatever is actually
     // filled, so the diamond crosses buttons and frames instead of stopping
     // at the backdrop. Modulated by alpha for the same reason the wash is:
     // a transparent pixel has no surface to light.
-    sampleColor.rgb += causticField(
+    vec4 crystalCast = causticField(
       vScreenPx,
       uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
       uCausticColor.a,
       uCausticColor.rgb
-    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
+    );
+    float crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
+    sampleColor.rgb *= 1.0 - crystalCast.a * crystalCastGain;
+    sampleColor.rgb += crystalCast.rgb * crystalCastGain;
     finalColor = sampleColor;
   }
 `;
@@ -147,12 +150,12 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     uStrength: f32,
     uRadiusScale: f32,
     uHueShift: f32,
-    uCaustic0: vec2<f32>,
-    uCaustic1: vec2<f32>,
-    uCaustic2: vec2<f32>,
-    uCaustic3: vec2<f32>,
-    uCaustic4: vec2<f32>,
-    uCaustic5: vec2<f32>,
+    uCaustic0: vec4<f32>,
+    uCaustic1: vec4<f32>,
+    uCaustic2: vec4<f32>,
+    uCaustic3: vec4<f32>,
+    uCaustic4: vec4<f32>,
+    uCaustic5: vec4<f32>,
     uCausticColor: vec4<f32>,
   };
 
@@ -229,7 +232,7 @@ ${CAUSTIC_FIELD_WGSL}
     sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;
     // The crystal's CAST, on the interface itself — twin of the GLSL above.
-    let castRgb = causticField(
+    let crystalCast = causticField(
       screenPx,
       pointerLight.uCaustic0,
       pointerLight.uCaustic1,
@@ -239,10 +242,15 @@ ${CAUSTIC_FIELD_WGSL}
       pointerLight.uCaustic5,
       pointerLight.uCausticColor.a,
       pointerLight.uCausticColor.rgb,
-    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * pointerLight.uStrength * sampleColor.a;
-    sampleColor.r += castRgb.r;
-    sampleColor.g += castRgb.g;
-    sampleColor.b += castRgb.b;
+    );
+    let crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} *
+      pointerLight.uStrength * sampleColor.a;
+    sampleColor.r *= 1.0 - crystalCast.a * crystalCastGain;
+    sampleColor.g *= 1.0 - crystalCast.a * crystalCastGain;
+    sampleColor.b *= 1.0 - crystalCast.a * crystalCastGain;
+    sampleColor.r += crystalCast.r * crystalCastGain;
+    sampleColor.g += crystalCast.g * crystalCastGain;
+    sampleColor.b += crystalCast.b * crystalCastGain;
     return sampleColor;
   }
 `;
@@ -610,10 +618,9 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
   ) -> @location(0) vec4<f32> {
     let normal = normalize(vNormal);
     let outer = vSurface.y;
-    // The glass this face is cut from: obsidian, glass, crystal or diamond, one
-    // per rank wedge. See ATOMA_MARK_RANK_MATERIALS for what each field means.
-    // Derived on the CPU from the material's IOR and roughness; see
-    // ATOMA_MARK_RANK_MATERIALS. Nothing here is a free-floating look knob.
+    // Every face currently receives the diamond profile selected by
+    // markMaterialForOctant. The former per-rank selector stays commented beside
+    // that function for restoration. Nothing here is a free-floating look knob.
     let specularPower = vMaterial.x;
     let dispersion = vMaterial.y;
     let f0 = vMaterial.z;
@@ -746,10 +753,6 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let bounce = 1.0 - fresnel;
 
     // POINTER LAMP. A point light parked in FRONT of the gem, in model space.
-    // The catch must sit NEAR THE LAMP, not at the screen centre: convexity
-    // toward vScreen 0.5 parked a circular wash in the middle of the gem
-    // even when the mouse stood off to the left. A tight UV window keeps
-    // it local; the 3D term still travels and resizes as the solid turns.
     // Specular only — Lambert from this lamp buried the far facets.
     let toLamp = markUniforms.uLamp.xyz - vWorld;
     let lampDist = length(toLamp);
@@ -762,8 +765,32 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
       pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
     let lampFres = mix(0.38, 1.0, lampSpecF);
     let lampGate = smoothstep(0.0, 0.08, lampNdotL);
-    let lampDelta = vScreen - markUniforms.uLampUv;
-    let lampWindow = exp(-dot(lampDelta, lampDelta) * 280.0);
+    // FACE-PLANE FOOTPRINT. The old window measured an isotropic distance in
+    // screen UV, so it stayed circular however far the facet tilted. Cast the
+    // camera ray through the pointer onto this facet's plane, then measure the
+    // falloff in that plane. A face-on table remains round; an oblique table
+    // projects this plane-circle as an ellipse.
+    let pointerPlane = vec3<f32>(
+      (markUniforms.uLampUv.x - 0.5) * markUniforms.uLocalSize /
+        markUniforms.uProjectScale,
+      (0.5 - markUniforms.uLampUv.y) * markUniforms.uLocalSize /
+        markUniforms.uProjectScale,
+      0.0
+    );
+    let camera = vec3<f32>(0.0, 0.0, markUniforms.uCameraZ);
+    let pointerRay = normalize(pointerPlane - camera);
+    let planeOffset = dot(normal, vWorld);
+    let planeDenom = dot(normal, pointerRay);
+    let safePlaneDenom = select(
+      max(planeDenom, 0.04),
+      min(planeDenom, -0.04),
+      planeDenom < 0.0
+    );
+    let planeT = (planeOffset - dot(normal, camera)) / safePlaneDenom;
+    let planeHit = camera + pointerRay * planeT;
+    let lampPlaneDelta = (vWorld - planeHit) *
+      markUniforms.uProjectScale / markUniforms.uLocalSize;
+    let lampWindow = exp(-dot(lampPlaneDelta, lampPlaneDelta) * 280.0);
     let lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
     let lampNorm = (lampSoft + 2.0) / 22.0;
     let lampSpectral = vec3<f32>(
@@ -1171,7 +1198,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
   void main() {
     vec3 normal = normalize(vNormal);
     float outer = vSurface.y;
-    // Same four glasses as the WGSL path; keep the two in step.
+    // Same all-diamond material attributes as the WGSL path; keep both in step.
     float specularPower = vMaterial.x;
     float dispersion = vMaterial.y;
     float f0 = vMaterial.z;
@@ -1235,7 +1262,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
     float fresnel = f0 + (1.0 - f0) * pow(1.0 - nDotV, 5.0);
     float bounce = 1.0 - fresnel;
 
-    // Same pointer lamp as the WGSL path; keep the two in step.
+    // Same pointer lamp and face-plane footprint as the WGSL path.
     vec3 toLamp = uLamp.xyz - vWorld;
     float lampDist = length(toLamp);
     vec3 lampDir = toLamp / max(lampDist, 1e-4);
@@ -1247,8 +1274,22 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
       pow(1.0 - max(dot(viewDir, lampHalf), 0.0), 5.0);
     float lampFres = mix(0.38, 1.0, lampSpecF);
     float lampGate = smoothstep(0.0, 0.08, lampNdotL);
-    vec2 lampDelta = vScreen - uLampUv;
-    float lampWindow = exp(-dot(lampDelta, lampDelta) * 280.0);
+    vec3 pointerPlane = vec3(
+      (uLampUv.x - 0.5) * uLocalSize / uProjectScale,
+      (0.5 - uLampUv.y) * uLocalSize / uProjectScale,
+      0.0
+    );
+    vec3 camera = vec3(0.0, 0.0, uCameraZ);
+    vec3 pointerRay = normalize(pointerPlane - camera);
+    float planeOffset = dot(normal, vWorld);
+    float planeDenom = dot(normal, pointerRay);
+    float safePlaneDenom = abs(planeDenom) < 0.04
+      ? (planeDenom < 0.0 ? -0.04 : 0.04)
+      : planeDenom;
+    float planeT = (planeOffset - dot(normal, camera)) / safePlaneDenom;
+    vec3 planeHit = camera + pointerRay * planeT;
+    vec3 lampPlaneDelta = (vWorld - planeHit) * uProjectScale / uLocalSize;
+    float lampWindow = exp(-dot(lampPlaneDelta, lampPlaneDelta) * 280.0);
     float lampSoft = mix(14.0, 32.0, smoothstep(0.85, 2.7, lampDist));
     float lampNorm = (lampSoft + 2.0) / 22.0;
     vec3 lampSpectral = vec3(

@@ -134,9 +134,8 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uCoreIntensity', type: 'f32' },
   { name: 'uAmbient', type: 'f32' },
   { name: 'uPulse', type: 'f32' },
-  // The volume the four glasses are made OF: the wall's own depth, the shortest
-  // path any facet can present, and plain glass's opacity over that path — the
-  // reference every material is read against.
+  // The diamond volume: the wall's own depth, the shortest path any facet can
+  // present, and the scene-density reference used by the active material.
   { name: 'uWall', type: 'f32' },
   { name: 'uMinPath', type: 'f32' },
   { name: 'uOpacityRef', type: 'f32' },
@@ -159,8 +158,8 @@ export const MARK_SHELL_UNIFORMS = [
   // back facets sample the texture they are being drawn into.
   { name: 'uRefractOn', type: 'f32' },
   // Scene-wide scales for the two Schlick terms. The MATERIAL decides the
-  // ratios between the four glasses; these only set how loud that whole family
-  // is against the dark field, and neither may vary per material.
+  // active diamond response; these only set how loud that response is against
+  // the dark field, and neither may vary per facet.
   { name: 'uSpecular', type: 'f32' },
   { name: 'uRim', type: 'f32' },
   { name: 'uLocalSize', type: 'f32' },
@@ -169,8 +168,8 @@ export const MARK_SHELL_UNIFORMS = [
   // sphere of this size, so the ghost on a wall matches the real filament
   // instead of staying a point-light needle.
   { name: 'uCoreRadius', type: 'f32' },
-  // Local UV of the cursor in the 28×28 box: the catch follows this, not a
-  // Blinn lobe the octahedron almost never fires.
+  // Local UV of the cursor in the 28×28 box. The shader turns it into a camera
+  // ray and intersects that ray with each facet plane.
   { name: 'uLampUv', type: 'vec2<f32>' },
   // Scene reflection. 1 when a Pixi env capture is bound; 0 on the header
   // mark and during the interior backdrop pass (shared shader).
@@ -330,8 +329,8 @@ export function createMarkShell(): MarkShell | null {
   const normals = new Float32Array(VERTEX_COUNT * 3);
   const tints = new Float32Array(VERTEX_COUNT * 3);
   const surfaces = new Float32Array(VERTEX_COUNT * 2);
-  // The four glasses. Written ONCE: a rank's material is a property of the
-  // crystal, not of the frame, so these buffers are never touched again.
+  // Material coefficients. Written ONCE: every facet currently receives the
+  // active diamond profile, so these buffers are never touched again.
   const materials = new Float32Array(VERTEX_COUNT * 4);
   const finishes = new Float32Array(VERTEX_COUNT * 3);
   const bary = new Float32Array(VERTEX_COUNT * 3);

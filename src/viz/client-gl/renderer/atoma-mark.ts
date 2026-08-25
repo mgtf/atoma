@@ -83,6 +83,13 @@ const CORE_HOT_COLOR = 0xffffff;
  */
 const CORE_BODY_STEPS = 30;
 const CORE_BLOOM_STEPS = 80;
+/**
+ * Pixi tessellates `circle()` from the LOCAL radius. The bead is authored at
+ * less than one unit and later enlarged ~17× on the welcome gate, so the
+ * automatic low-detail circle exposes polygon corners there. An explicit
+ * 64-gon keeps the radial error below a tenth of a physical pixel at hero size.
+ */
+export const ATOMA_MARK_CORE_DISC_SEGMENTS = 64;
 const CORE_BLOOM_REACH = 2.6;
 const CORE_BLOOM_PEAK_ALPHA = 0.28;
 const CORE_FILAMENT_FRACTION = 0.5;
@@ -131,7 +138,9 @@ function paintFalloffDiscs(
     const delta = level - previous;
     previous = level;
     if (delta <= 0) continue;
-    target.circle(0, 0, outer).fill({ color, alpha: delta * peakAlpha });
+    target
+      .regularPoly(0, 0, outer, ATOMA_MARK_CORE_DISC_SEGMENTS)
+      .fill({ color, alpha: delta * peakAlpha });
   }
 }
 
@@ -178,7 +187,12 @@ function buildCore(): { core: Container; bloom: Graphics } {
   for (let step = 0; step < CORE_BODY_STEPS; step += 1) {
     const t = step / (CORE_BODY_STEPS - 1);
     body
-      .circle(0, 0, ATOMA_MARK_CORE_RADIUS * (1 - t * 0.55))
+      .regularPoly(
+        0,
+        0,
+        ATOMA_MARK_CORE_RADIUS * (1 - t * 0.55),
+        ATOMA_MARK_CORE_DISC_SEGMENTS
+      )
       .fill({
         color: mixColor(CORE_RIM_COLOR, CORE_HOT_COLOR, smoothstep(Math.min(1, t / 0.6))),
         alpha: smoothstep(t),
@@ -186,7 +200,12 @@ function buildCore(): { core: Container; bloom: Graphics } {
   }
   // The filament: a light has a point you cannot look at.
   body
-    .circle(0, 0, ATOMA_MARK_CORE_RADIUS * CORE_FILAMENT_FRACTION)
+    .regularPoly(
+      0,
+      0,
+      ATOMA_MARK_CORE_RADIUS * CORE_FILAMENT_FRACTION,
+      ATOMA_MARK_CORE_DISC_SEGMENTS
+    )
     .fill({ color: CORE_HOT_COLOR, alpha: 1 });
   core.addChild(bloom, body);
   return { core, bloom };

@@ -267,7 +267,7 @@ describe('mark shell shader contract', () => {
     }
   });
 
-  it('reflects the pointer lamp on the outer glass, never as a body fill', () => {
+  it('projects the pointer catch into each outer face plane', () => {
     // The 2D Pixi filter washes the UI; it is not a specular on the crystal.
     // A Lambert term from this lamp would lift the near table and bury the
     // far facets — the same fill that was tried and reverted for the window.
@@ -283,14 +283,16 @@ describe('mark shell shader contract', () => {
       expect(source).toMatch(/windowHighlight \+\s*\n\s*lampHighlight \+/);
       expect(source, 'the lamp must not add a Lambertian term')
         .not.toMatch(/0\.42 \* lampNdotL/);
-      expect(source, 'an anisotropic UV ellipse is still pinned as the whole catch')
-        .not.toContain('axisU');
       expect(source).not.toMatch(/lampR \* 22/);
       expect(source).toMatch(/mix\(14\.0,\s*32\.0/);
       expect(source).toContain('lampShade');
       expect(source).toContain('lampDir * 0.55');
       expect(source).toContain('lampWindow');
-      expect(source).toMatch(/dot\(lampDelta, lampDelta\) \* 280\.0/);
+      expect(source).toContain('pointerRay');
+      expect(source).toContain('planeHit');
+      expect(source).toMatch(/dot\(lampPlaneDelta, lampPlaneDelta\) \* 280\.0/);
+      expect(source, 'screen-space distance would keep the catch circular')
+        .not.toMatch(/dot\(lampDelta, lampDelta\)/);
       expect(source).toContain('lampPeak');
     }
   });

@@ -5,7 +5,10 @@ import {
   ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_FACET_DEPTH_SPAN,
+  ATOMA_MARK_ACTIVE_MATERIALS,
+  ATOMA_MARK_ACTIVE_MAX_TRANSMIT,
   ATOMA_MARK_CAMERA_Z,
+  ATOMA_MARK_DIAMOND_MATERIAL,
   ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
@@ -38,6 +41,10 @@ import {
   projectMarkCaustic,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
+import {
+  ATOMA_MARK_CORE_DISC_SEGMENTS,
+} from '../src/viz/client-gl/renderer/atoma-mark.js';
+import { welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
 
 interface Point {
   x: number;
@@ -238,9 +245,9 @@ describe('Atoma GPU brand mark', () => {
     ).toBeCloseTo(Math.PI / 2, 9);
   });
 
-  it('cuts each rank wedge from a different glass', () => {
-    // Four faces in the user's sense — a top triangle and its bottom twin —
-    // and four materials: obsidian, glass, crystal, diamond.
+  it('keeps the inactive four-material palette available for restoration', () => {
+    // The all-diamond presentation must not destroy the authored palette: a
+    // deliberate future restoration can reuse these measured coefficients.
     expect(Object.keys(ATOMA_MARK_RANK_MATERIALS).sort()).toEqual(
       ['cell', 'element', 'molecule', 'tissue']
     );
@@ -320,12 +327,10 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
-  it('makes each wedge a SOLID of its material, not a surfaced facet', () => {
-    // A face is a slab: what it does to light must depend on how far the ray
-    // travels through it. This pins the volume model the shell shader runs —
-    // Beer-Lambert over the path, normalised to plain glass at the thinnest
-    // presentation a facet can offer — so a wafer-thin wall or a per-material
-    // constant alpha cannot come back and flatten the four glasses into one.
+  it('keeps the inactive material presets volumetric, not surfaced', () => {
+    // The archived palette remains a set of slabs: Beer-Lambert over the path,
+    // calibrated against the established scene density. A future restoration
+    // can therefore reuse the profiles without reconstructing their volume.
     expect(ATOMA_MARK_MIN_PATH).toBeCloseTo(ATOMA_MARK_THICKNESS * Math.sqrt(3), 12);
     // Enough depth for absorption to separate the materials at all.
     expect(ATOMA_MARK_THICKNESS).toBeGreaterThanOrEqual(0.09);
@@ -389,10 +394,17 @@ describe('Atoma GPU brand mark', () => {
     expect(worst).toBeLessThan(0.02);
   });
 
-  it('gives a rank the same glass on both of its triangles', () => {
-    // Material follows the rank, so the top facet and the bottom facet of one
-    // wedge are the same glass while their colours differ. Colour is taxonomy;
-    // material is surface. Neither may start speaking for the other.
+  it('gives every crystal face the one active diamond material', () => {
+    // Material is uniformly diamond while rank colour remains taxonomy. The
+    // selector is shared by the GPU shell and CPU light spills, and the active
+    // map contains no archived glass that could leak into one path.
+    expect(Object.keys(ATOMA_MARK_ACTIVE_MATERIALS).sort()).toEqual(
+      ['cell', 'element', 'molecule', 'tissue']
+    );
+    expect(new Set(Object.values(ATOMA_MARK_ACTIVE_MATERIALS)))
+      .toEqual(new Set([ATOMA_MARK_DIAMOND_MATERIAL]));
+    expect(ATOMA_MARK_ACTIVE_MAX_TRANSMIT)
+      .toBe(ATOMA_MARK_DIAMOND_MATERIAL.transmit);
     const octants: MarkOctant[] = [
       [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
       [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
@@ -400,13 +412,14 @@ describe('Atoma GPU brand mark', () => {
     for (const octant of octants) {
       const twin: MarkOctant = [octant[0], octant[1] === 1 ? -1 : 1, octant[2]];
       expect(markMaterialForOctant(octant), octant.join(','))
-        .toBe(markMaterialForOctant(twin));
+        .toBe(ATOMA_MARK_DIAMOND_MATERIAL);
+      expect(markMaterialForOctant(twin), twin.join(','))
+        .toBe(ATOMA_MARK_DIAMOND_MATERIAL);
       expect(markColorForOctant(octant)).not.toBe(markColorForOctant(twin));
     }
-    // All four glasses actually reach the mesh.
-    expect(new Set(
-      ATOMA_MARK_MESH.facets.map((facet) => markMaterialForOctant(facet.octant).glass)
-    )).toHaveLength(4);
+    expect(new Set(ATOMA_MARK_MESH.facets.map(
+      (facet) => markMaterialForOctant(facet.octant).glass
+    ))).toEqual(new Set(['diamond']));
   });
 
   it('keeps the whole bead inside the outline it lights', () => {
@@ -466,6 +479,28 @@ describe('Atoma GPU brand mark', () => {
       ((x > xs[index - 1]! && x > xs[index + 1]!) ||
        (x < xs[index - 1]! && x < xs[index + 1]!)));
     expect(reversals.length).toBeGreaterThan(2);
+  });
+
+  it('keeps the enlarged welcome bead geometrically round', () => {
+    // Pixi chooses circle tessellation from the sub-unit LOCAL radius, before
+    // the welcome gate enlarges it. Pin the explicit polygon against the real
+    // largest hero scale at DPR 2: its midpoint must deviate by < 0.1px from a
+    // mathematical circle, so no polygon corner can read as a spike.
+    const hero = welcomeLayout(1920, 1080);
+    let largestScale = 0;
+    for (let elapsedMs = 0; elapsedMs <= ATOMA_MARK_TURN_MS; elapsedMs += 20) {
+      const frame = buildAtomaMarkFrame(elapsedMs);
+      largestScale = Math.max(
+        largestScale,
+        frame.scale * frame.coreScale * (1 + frame.pulse * 0.035)
+      );
+    }
+    const physicalRadius = ATOMA_MARK_CORE_RADIUS * hero.scale * 2 * largestScale;
+    const radialError = physicalRadius * (
+      1 - Math.cos(Math.PI / ATOMA_MARK_CORE_DISC_SEGMENTS)
+    );
+    expect(ATOMA_MARK_CORE_DISC_SEGMENTS).toBeGreaterThanOrEqual(64);
+    expect(radialError).toBeLessThan(0.1);
   });
 
   it('publishes the silhouette the renderer clips the light with', () => {
@@ -704,12 +739,12 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
-  it('casts the gem silhouette onto the field, deformed by the lamp position', () => {
+  it('casts four independently refracted facet bundles onto the field', () => {
     const frame = buildAtomaMarkFrame(0);
-    // Lamp straight ahead: coupling on, cast exists, same corner count.
+    // Lamp straight ahead: coupling on, four facets sampled by three rays each.
     const centre = projectMarkCaustic(frame, 14, 14);
     expect(centre).not.toBeNull();
-    expect(centre!.points.length).toBe(frame.silhouette.length);
+    expect(centre!.points).toHaveLength(12);
     expect(centre!.intensity).toBeGreaterThan(0.5);
     // Far away, no coupling: no cast at all.
     expect(projectMarkCaustic(frame, 80, 80)).toBeNull();
@@ -733,16 +768,31 @@ describe('Atoma GPU brand mark', () => {
     expect(shifted.x).toBeLessThan(straight.x);
     expect(shifted.y).toBeGreaterThan(straight.y);
 
-    // Convergence: the cast is SMALLER than the naive pinhole silhouette
-    // (weak positive lens), never larger.
-    const radius = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) =>
-      Math.max(...cast.points.map((p) => Math.hypot(p.x - 14, p.y - 14)));
-    const naive = frame.silhouette.reduce(
-      (max, p) => Math.max(max, Math.hypot(p.x - 14, p.y - 14)),
-      0
+    // The bundles stay independent; the shader receives separate footprints
+    // rather than four copies of one silhouette-derived triangle.
+    const triangleCentroid = (points: readonly Point[]) => ({
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    });
+    const bundleCentres = [0, 3, 6, 9].map((start) =>
+      triangleCentroid(centre!.points.slice(start, start + 3))
     );
-    expect(radius(centre!)).toBeLessThan(naive * 1.15);
-    expect(radius(centre!)).toBeGreaterThan(0);
+    expect(Math.max(...bundleCentres.slice(1).map((point) =>
+      Math.hypot(point.x - bundleCentres[0]!.x, point.y - bundleCentres[0]!.y)
+    ))).toBeGreaterThan(1);
+  });
+
+  it('keeps all four caustic bundles throughout a complete turn', () => {
+    // A grazing-angle cutoff used to drop the fourth visible facet in eight
+    // short windows per turn, clearing the cast for almost a second in total.
+    // Sample every tenth of a degree so those profile transitions stay covered.
+    const missing: number[] = [];
+    for (let tenthDegree = 0; tenthDegree < 3_600; tenthDegree += 1) {
+      const elapsedMs = ATOMA_MARK_TURN_MS * tenthDegree / 3_600;
+      const cast = projectMarkCaustic(buildAtomaMarkFrame(elapsedMs), 14, 14);
+      if (!cast || cast.points.length !== 12) missing.push(tenthDegree / 10);
+    }
+    expect(missing, 'degrees with an incomplete caustic').toEqual([]);
   });
 
   it('dims the cast by the distance it was thrown', () => {

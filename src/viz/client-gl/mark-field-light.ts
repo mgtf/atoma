@@ -17,23 +17,23 @@ import {
 export const MARK_FIELD_LIGHT_MAX = 4;
 
 /**
- * The mark's CAUSTIC: the gem's silhouette projected onto the wall behind,
- * deformed by the pointer lamp's position. One sample, written when the
- * pointer couples into the glass, read by every surface the cast lands on —
+ * The mark's CAUSTIC: four facet ray bundles projected onto the wall behind.
+ * One sample, written when the pointer couples into the glass, read by every
+ * surface the cast lands on —
  * the far-field aurora behind the UI and the pointer-light filter over it.
  *
  * Corners are VIEWPORT CSS PIXELS, the same space the pools are reported in,
  * so both readers convert them through the one mapping in `packMarkCaustic`.
  */
-export const MARK_CAUSTIC_MAX_POINTS = 6;
+export const MARK_CAUSTIC_MAX_POINTS = 12;
 
 export interface MarkFieldCaustic {
-  /** Convex polygon corners, viewport CSS pixels, in hull order. */
+  /** Four consecutive three-point ray bundles, in viewport CSS pixels. */
   points: readonly { x: number; y: number }[];
   /**
-   * 0..1 brightness at the wall: the entry coupling already dimmed by how far
-   * the cast was thrown. Readers scale it for their own surface; none of them
-   * re-derives it.
+   * 0..1 brightness at the wall: entry coupling after the crystal's physical
+   * falloff and extreme-lift exposure floor. Readers scale it for their own
+   * surface; none of them re-derives it.
    */
   intensity: number;
   r: number;
@@ -99,13 +99,11 @@ export function readMarkFieldLight(): readonly MarkFieldLightSpill[] {
 }
 
 /**
- * Publishes the cast. The polygon is clamped to MARK_CAUSTIC_MAX_POINTS
- * corners by taking the FIRST N of the convex outline (it is already in
- * hull order); fewer than three cannot be a shape and clear instead.
+ * Publishes the cast. A valid sample is exactly four triangular ray bundles.
  */
 export function writeMarkFieldCaustic(next: MarkFieldCaustic | null): void {
   const root = globalThis as FieldLightRoot;
-  if (!next || next.points.length < 3) {
+  if (!next || next.points.length < MARK_CAUSTIC_MAX_POINTS) {
     root.__ATOMA_MARK_CAUSTIC__ = null;
     return;
   }
@@ -124,9 +122,7 @@ export function readMarkFieldCaustic(): MarkFieldCaustic | null {
 
 export interface MarkCausticUniforms {
   /**
-   * Exactly MARK_CAUSTIC_MAX_POINTS corners in RENDERER pixels, wound
-   * POSITIVE, with unused slots repeating the last real corner so the
-   * closing edge stays real and every padding edge collapses to zero length.
+   * Exactly four triangles in RENDERER pixels, each wound POSITIVE.
    */
   corners: readonly { x: number; y: number }[];
   intensity: number;
@@ -138,7 +134,7 @@ export interface MarkCausticUniforms {
 /**
  * THE conversion from the published cast to shader uniforms. Both readers use
  * it: the far-field mesh behind the UI and the pointer-light filter over it
- * must resolve the same polygon in the same pixels, or the diamond drawn on
+ * must resolve the same ray bundles in the same pixels, or the diamond drawn on
  * the backdrop would not line up with the one drawn on the buttons.
  *
  * Winding is FORCED positive here rather than trusted from the hull order:
@@ -151,22 +147,19 @@ export function packMarkCaustic(
   rendererWidth: number,
   rendererHeight: number
 ): MarkCausticUniforms | null {
-  if (!cast || cast.points.length < 3) return null;
+  if (!cast || cast.points.length < MARK_CAUSTIC_MAX_POINTS) return null;
   const corners = cast.points
     .slice(0, MARK_CAUSTIC_MAX_POINTS)
     .map((point) =>
       pointerClientToRenderer(point.x, point.y, bounds, rendererWidth, rendererHeight)
     );
-  let area = 0;
-  for (let index = 0; index < corners.length; index += 1) {
-    const a = corners[index]!;
-    const b = corners[(index + 1) % corners.length]!;
-    area += a.x * b.y - b.x * a.y;
-  }
-  if (area < 0) corners.reverse();
-  const last = corners[corners.length - 1]!;
-  while (corners.length < MARK_CAUSTIC_MAX_POINTS) {
-    corners.push({ x: last.x, y: last.y });
+  for (const start of [0, 3, 6, 9]) {
+    const a = corners[start]!;
+    const b = corners[start + 1]!;
+    const c = corners[start + 2]!;
+    const area = a.x * b.y + b.x * c.y + c.x * a.y -
+      b.x * a.y - c.x * b.y - a.x * c.y;
+    if (area < 0) [corners[start + 1], corners[start + 2]] = [c, b];
   }
   return {
     corners,
