@@ -34,7 +34,9 @@ defaults to 1600×900 at deviceScaleFactor 2.
   `/api/account/models` and `/api/github/installations` are stubbed via
   Puppeteer request interception (the same technique as `viz-gpu-smoke`'s
   account arm). The fixture is one project with five runs covering delivered
-  (+ commit receipt), failed (+ error line) and cost display.
+  (+ commit receipt), failed (+ error line) and cost display. `/api/runs` and
+  its trace are stubbed too, so `--view Runs` renders a full run: summary card
+  with the metric tiles, branch filter chips, and a two-phase forked timeline.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
 

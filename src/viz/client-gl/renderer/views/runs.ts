@@ -27,12 +27,13 @@ import {
   skillEventTitle,
   type StructuredDetailNode,
 } from '../../../client/structured-detail.js';
-import type { RunStatus } from '../../../client/run-utils.js';
+import type { AtomView, RunStatus } from '../../../client/run-utils.js';
 import type { VizEvent, VizRun } from '../../../client/types.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import {
   FILTER_BLOCK_GAP,
+  FILTER_BUTTON_LABEL_SIZE_COMPACT,
   layoutAtomLaneBlocks,
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
@@ -195,83 +196,22 @@ export function drawRuns(
     weight: '700',
   });
 
-  // A tool-bearing L1 execute is one provider call that only reports its
-  // usage when it returns, so a live run's totals sit at zero for minutes
-  // while work streams past. The header says so: the duration ticks, and the
-  // call count carries the started-but-unfinished ones as `13 (+1)`.
   const inFlight = inFlightLlmEvents(run);
-  const statsY = top + 76;
-  const completedCalls = run.totals?.calls ?? 0;
-  const stats = [
-    [snapshot.t('summary.duration'), fmtMs(runElapsedMs(run))],
-    [
-      snapshot.t('summary.llmCalls'),
-      inFlight.length ? `${completedCalls} (+${inFlight.length})` : scalar(run.totals?.calls, '0'),
-    ],
-    [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
-    [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
-  ];
-  const statAccents = [
-    GPU_COLORS.cyan,
-    GPU_COLORS.tiers[3],
-    GPU_COLORS.primary,
-    GPU_COLORS.success,
-  ];
-  const statWidth = (leftWidth - 28 - GPU_LAYOUT.gap * 3) / 4;
-  stats.forEach(([label, value], index) => {
-    const x = leftX + 14 + index * (statWidth + GPU_LAYOUT.gap);
-    ctx.statCard(
-      ctx.root,
-      `runs.stat.${index}`,
-      label!,
-      value!,
-      x,
-      statsY,
-      statWidth,
-      55,
-      statAccents[index] ?? GPU_COLORS.primary
-    );
-  });
-
   const atoms = buildAtomMap(run);
-  const atomLayout = layoutAtomLaneBlocks({
-    originX: leftX + 14,
-    originY: statsY + 55 + FILTER_BLOCK_GAP,
-    maxWidth: leftWidth - 28,
-    lanes: ([3, 2, 1] as const).flatMap((tier) => {
-      const entries = [...atoms.values()].filter((value) => value.snapshot.tier === tier);
-      if (!entries.length) return [];
-      return [{
-        tier,
-        label: snapshot.t(`lanes.l${tier}`),
-        names: entries.map((entry) => entry.snapshot.name),
-      }];
-    }),
-  });
-  for (const lane of atomLayout.lanes) {
-    ctx.filterBlockFrame(ctx.root, lane);
-    ctx.text(ctx.root, lane.label, lane.labelX, lane.labelY, {
-      size: 10,
-      color: GPU_COLORS.tiers[lane.tier],
-      weight: '700',
-    });
-    for (const chip of lane.chips) {
-      ctx.atomButton(
-        ctx.root,
-        chip.id,
-        chip.label,
-        lane.tier,
-        chip.x,
-        chip.y,
-        chip.width,
-        chip.height,
-        snapshot.state.selectedAtomName === chip.label,
-        snapshot.onActivate
-      );
-    }
+  // The four run metrics and the atoms-used lanes live in the RUN summary
+  // card on the right pane; a single-pane viewport has no summary card, so
+  // both keep a row here instead.
+  let filterTop = top + 60;
+  if (!twoPane) {
+    filterTop +=
+      drawRunStatGrid(ctx, snapshot, run, ctx.root, 'runs.stat', leftX + 14, top + 60, leftWidth - 28) +
+      FILTER_BLOCK_GAP;
+    filterTop =
+      drawAtomLanes(ctx, snapshot, atoms, ctx.root, leftX + 14, filterTop, leftWidth - 28) +
+      FILTER_BLOCK_GAP;
   }
 
-  const filterY = atomLayout.bottom + FILTER_BLOCK_GAP;
+  const filterY = filterTop;
   const runFilters = coerceEventFilters(run.events, snapshot.state.runFilters);
   const kinds = visibleEventKindFilters(run.events);
   const rolesVisible =
@@ -419,7 +359,16 @@ export function drawRuns(
                 ? timelineBranchLabel(branch, snapshot.t).toUpperCase()
                 : `⑂ ${branchId.slice(0, 6)}`,
         };
-      })
+      }),
+      {
+        // Branch labels are the longest chip copy in the client; the compact
+        // face keeps a six-branch run's filter row from eating the timeline.
+        size: 'compact',
+        // Measured through the style the chips draw with — the bold (active)
+        // weight, so selecting a chip never outgrows its measured box.
+        measure: (label) =>
+          ctx.measureText(label, { size: FILTER_BUTTON_LABEL_SIZE_COMPACT, weight: '700' }),
+      }
     );
     ctx.filterBlockFrame(lowerControlsLayer, branchBlock);
     for (const chip of branchBlock.chips) {
@@ -432,7 +381,9 @@ export function drawRuns(
         chip.width,
         chip.height,
         runFilters.branchId === chip.id.slice('run.filter.branch.'.length),
-        snapshot.onActivate
+        snapshot.onActivate,
+        undefined,
+        FILTER_BUTTON_LABEL_SIZE_COMPACT
       );
     }
     controlsBottom = branchBlock.y + branchBlock.height + FILTER_BLOCK_GAP;
@@ -891,6 +842,7 @@ export function drawRuns(
       ctx,
       snapshot,
       run,
+      atoms,
       rightX,
       top,
       rightWidth
@@ -931,10 +883,112 @@ export function drawRuns(
   }
 }
 
+/** The atom lanes (L3/L2/L1 chips of atoms this run touched). Returns the
+ * lane block's bottom y, or `originY` unchanged when the run used none. */
+function drawAtomLanes(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  atoms: Map<string, AtomView>,
+  parent: Container,
+  originX: number,
+  originY: number,
+  maxWidth: number
+): number {
+  const atomLayout = layoutAtomLaneBlocks({
+    originX,
+    originY,
+    maxWidth,
+    lanes: ([3, 2, 1] as const).flatMap((tier) => {
+      const entries = [...atoms.values()].filter((value) => value.snapshot.tier === tier);
+      if (!entries.length) return [];
+      return [{
+        tier,
+        label: snapshot.t(`lanes.l${tier}`),
+        names: entries.map((entry) => entry.snapshot.name),
+      }];
+    }),
+  });
+  for (const lane of atomLayout.lanes) {
+    ctx.filterBlockFrame(parent, lane);
+    ctx.text(parent, lane.label, lane.labelX, lane.labelY, {
+      size: 10,
+      color: GPU_COLORS.tiers[lane.tier],
+      weight: '700',
+    });
+    for (const chip of lane.chips) {
+      ctx.atomButton(
+        parent,
+        chip.id,
+        chip.label,
+        lane.tier,
+        chip.x,
+        chip.y,
+        chip.width,
+        chip.height,
+        snapshot.state.selectedAtomName === chip.label,
+        snapshot.onActivate
+      );
+    }
+  }
+  return atomLayout.lanes.length ? atomLayout.bottom : originY;
+}
+
+const RUN_STAT_HEIGHT = 46;
+const RUN_STAT_GAP = 10;
+
+/**
+ * The four run metrics (duration, LLM calls, tokens, cost) as a two-column
+ * tile grid. A tool-bearing L1 execute is one provider call that only reports
+ * its usage when it returns, so a live run's totals sit at zero for minutes
+ * while work streams past — the duration ticks, and the call count carries
+ * the started-but-unfinished ones as `13 (+1)`. Returns the grid's height.
+ */
+function drawRunStatGrid(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  run: VizRun,
+  parent: Container,
+  idPrefix: string,
+  x: number,
+  y: number,
+  width: number
+): number {
+  const inFlight = inFlightLlmEvents(run);
+  const completedCalls = run.totals?.calls ?? 0;
+  const stats: [string, string][] = [
+    [snapshot.t('summary.duration'), fmtMs(runElapsedMs(run))],
+    [
+      snapshot.t('summary.llmCalls'),
+      inFlight.length ? `${completedCalls} (+${inFlight.length})` : scalar(run.totals?.calls, '0'),
+    ],
+    [snapshot.t('summary.tokens'), `${run.totals?.inputTokens ?? 0}/${run.totals?.outputTokens ?? 0}`],
+    [snapshot.t('summary.cost'), fmtCost(run.totals?.costUsd)],
+  ];
+  const accents = [GPU_COLORS.cyan, GPU_COLORS.tiers[3], GPU_COLORS.primary, GPU_COLORS.success];
+  const statWidth = (width - RUN_STAT_GAP) / 2;
+  stats.forEach(([label, value], index) => {
+    const column = index % 2;
+    const row = Math.floor(index / 2);
+    ctx.statCard(
+      parent,
+      `${idPrefix}.${index}`,
+      label,
+      value,
+      x + column * (statWidth + RUN_STAT_GAP),
+      y + row * (RUN_STAT_HEIGHT + RUN_STAT_GAP),
+      statWidth,
+      RUN_STAT_HEIGHT,
+      accents[index] ?? GPU_COLORS.primary
+    );
+  });
+  return RUN_STAT_HEIGHT * 2 + RUN_STAT_GAP;
+}
+
 function drawRunSummaryCard(
   ctx: RendererCtx,
   snapshot: GpuRenderSnapshot,
   run: VizRun,
+  atoms: Map<string, AtomView>,
   x: number,
   y: number,
   width: number
@@ -979,24 +1033,21 @@ function drawRunSummaryCard(
   // used to read identically for a delivered and a cancelled run.
   const summaryStatus = runStatus(run);
   const summaryStatusColor = RUN_STATUS_COLOR[summaryStatus];
-  const statusText = ctx.text(
+  ctx.text(
     block,
     snapshot.t(`runs.flag.${summaryStatus}`),
     padX,
     cursor,
     { size: 10, weight: '700', color: summaryStatusColor }
   );
-  cursor += 18;
+  cursor += 26;
+  // The four metrics are part of the verdict, not of the expansion: they stay
+  // on screen whether the card is collapsed or not, two columns so the card
+  // keeps its width for the goal.
+  cursor +=
+    drawRunStatGrid(ctx, snapshot, run, block, 'run.summary.stat', padX, cursor, innerWidth) +
+    FILTER_BLOCK_GAP;
   if (expanded) {
-    const facts = [
-      fmtMs(run.durationMs),
-      snapshot.t('runs.calls', { count: run.totals?.calls ?? 0 }),
-      fmtCost(run.totals?.costUsd),
-    ].filter(Boolean).join('  ·  ');
-    ctx.text(block, facts, padX + statusText.width + 12, cursor - 18, {
-      size: 10,
-      color: GPU_COLORS.muted,
-    });
     if (run.error) {
       const reason = ctx.text(block, run.error, padX, cursor, {
         size: 9,
@@ -1004,6 +1055,11 @@ function drawRunSummaryCard(
         width: innerWidth,
       });
       cursor += reason.height + 6;
+    }
+    // Atoms used ride below the metrics, expansion-only: this card's
+    // collapsed height is a verdict-plus-metrics glance, not a registry dump.
+    if (atoms.size) {
+      cursor = drawAtomLanes(ctx, snapshot, atoms, block, padX, cursor, innerWidth) + 8;
     }
   }
   cursor += 8;

@@ -3805,6 +3805,55 @@ describe('drawRuns behavior', () => {
     expect(laneLabels).not.toContain(t('lanes.l2'));
   });
 
+  it('shows atom lanes in the RUN summary card only while it is expanded', () => {
+    // The two-pane layout moved atom lanes off the left column into the RUN
+    // card, below the metrics — collapsing the card hides them like every
+    // other expansion-only fact (the goal, the failure reason).
+    const events: VizEvent[] = [
+      ...eventsWithRoles(),
+      {
+        id: 'r1',
+        ts: Date.parse('2026-08-14T10:02:00.000Z'),
+        kind: 'registry',
+        op: 'create',
+        snapshot: makeRegistryType('Ammonia', { tier: 1 }),
+      },
+    ];
+    const run = makeRun(events);
+
+    const expanded = createRecordingCtx();
+    drawRuns(expanded, makeSnapshot({ runSummaryExpanded: true }, { run }), WIDTH, HEIGHT);
+    expect(expanded.atomButtons.some((button) => button.label === 'Ammonia')).toBe(true);
+
+    const collapsed = createRecordingCtx();
+    drawRuns(collapsed, makeSnapshot({ runSummaryExpanded: false }, { run }), WIDTH, HEIGHT);
+    expect(collapsed.atomButtons.some((button) => button.label === 'Ammonia')).toBe(false);
+  });
+
+  it('keeps atom lanes in the single-pane left column regardless of expansion', () => {
+    // Below RUNS_TWO_PANE_MIN_WIDTH there is no RUN summary card to hide them
+    // in, so the left column keeps the row it always had.
+    const events: VizEvent[] = [
+      ...eventsWithRoles(),
+      {
+        id: 'r1',
+        ts: Date.parse('2026-08-14T10:02:00.000Z'),
+        kind: 'registry',
+        op: 'create',
+        snapshot: makeRegistryType('Ammonia', { tier: 1 }),
+      },
+    ];
+    const run = makeRun(events);
+    const ctx = createRecordingCtx();
+    drawRuns(
+      ctx,
+      makeSnapshot({ runSummaryExpanded: false }, { run }),
+      RUNS_TWO_PANE_MIN_WIDTH - 1,
+      HEIGHT
+    );
+    expect(ctx.atomButtons.some((button) => button.label === 'Ammonia')).toBe(true);
+  });
+
   it('never lets a long event title run into the actor column', () => {
     // `registry · recordSuccess` is ~24 characters of 11px bold, ~150px wide,
     // and the actor used to be pinned at a fixed x=118 — so the molecule name

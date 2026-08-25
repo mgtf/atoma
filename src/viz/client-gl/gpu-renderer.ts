@@ -621,11 +621,14 @@ export class GpuRenderer {
     );
     for (let index = 0; index < this.pointerCausticSlots.length; index += 1) {
       const slot = this.pointerCausticSlots[index]!;
-      const corner = cast?.corners[index];
+      const first = cast?.corners[index * 2];
+      const second = cast?.corners[index * 2 + 1];
       // No cast parks the slots meaninglessly; the intensity below is the
       // guard that actually turns the shape off.
-      slot[0] = corner?.x ?? -1e6;
-      slot[1] = corner?.y ?? -1e6;
+      slot[0] = first?.x ?? -1e6;
+      slot[1] = first?.y ?? -1e6;
+      slot[2] = second?.x ?? -1e6;
+      slot[3] = second?.y ?? -1e6;
     }
     uniforms.uCausticColor[0] = cast?.r ?? 0;
     uniforms.uCausticColor[1] = cast?.g ?? 0;
@@ -667,12 +670,12 @@ export class GpuRenderer {
           // The crystal's cast. Declaration order is load-bearing: Pixi
           // derives the UBO layout from it and the WGSL struct restates the
           // same order by hand.
-          uCaustic0: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic1: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic2: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic3: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic4: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic5: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic0: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic1: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic2: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic3: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic4: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic5: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
           uCausticColor: { value: new Float32Array(4), type: 'vec4<f32>' },
         },
       },
@@ -2086,7 +2089,8 @@ export class GpuRenderer {
     height: number,
     active: boolean,
     onActivate: (id: string) => void,
-    accent: number = GPU_COLORS.primary
+    accent: number = GPU_COLORS.primary,
+    labelSize: number = 11
   ) {
     const localTarget = {
       id,
@@ -2171,10 +2175,13 @@ export class GpuRenderer {
       return sparkle;
     });
 
-    const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
+    // The label box tracks the face: 11px renders ~16px tall, so centre on
+    // labelSize + 5 rather than a constant tied to the default face.
+    const labelBox = labelSize + 5;
+    const labelText = this.text(container, label, width / 2, Math.max(3, (height - labelBox) / 2), {
       // Built BRIGHT and tinted down, never re-coloured through the style —
       // the style is shared, so `style.fill = …` recolours every label using it.
-      size: 11,
+      size: labelSize,
       color: GPU_COLORS.text,
       weight: active ? '700' : '600',
     });

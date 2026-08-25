@@ -144,13 +144,15 @@ npm run viz:mark-turn:analyze
   events alone leaves child branches visually detached.
 - Pixi objects draw local geometry at local origin, then position the object.
   Avoid double-offset hit targets.
-- The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic
-  relighting, reduced-motion support, and no overlapping R3F logo.
-- The gem's CAST is ONE polygon on TWO surfaces — the far-field mesh behind the
-  UI and the pointer-light stage filter over it, so it crosses buttons and
-  frames instead of stopping at the backdrop. `projectMarkCaustic` alone derives
-  its throw falloff, `packMarkCaustic` alone writes its corners,
-  `renderer/caustic-shader.ts` alone tests containment, in GLSL kept ES 1.00-legal.
+- The brand mark is a single all-diamond Pixi crystal with an archived inactive
+  teal/amber/violet material palette, dynamic relighting, reduced-motion support,
+  and no overlapping R3F logo.
+- The gem's CAST is four three-ray facet bundles on TWO surfaces — the far-field
+  mesh behind the UI and the pointer-light stage filter over it, so it crosses
+  buttons and frames instead of stopping at the backdrop. `projectMarkCaustic`
+  alone traces and derives throw falloff, `packMarkCaustic` alone writes the
+  bundles, and `renderer/caustic-shader.ts` alone reconstructs their curved folds,
+  in GLSL kept ES 1.00-legal.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
 - PWA/service-worker registration is production-default and dev-opt-in
@@ -336,6 +338,12 @@ npm run viz:mark-turn:analyze
   which both steals width from its neighbour and under-serves itself. A run
   TOTAL renders in whole cents, not `fmtCost`'s four decimals, which price ONE
   LLM call. A row stacking a second line APPENDS it below a FIXED control.
+  `chip-layout.ts` is deliberately Pixi-free so recordings test geometry with
+  no renderer; it obeys this rule by INJECTION — a view passes `ctx.measureText`
+  through the layout's `measure` option (bound to the face the chips draw
+  with), and the per-character `gpuFilterButtonWidth*` estimates are the
+  renderer-less FALLBACK only. An estimate must over-shoot to never clip, so
+  it pads long labels unevenly; do not add a new chip surface on the fallback.
 - There is NO Launch tab in the GPU client. A tab that could only DESCRIBE how
   to phrase a goal, beside a Projects tab that actually starts runs, split one
   job over two places; the family guidance (`/api/profiles`, with a

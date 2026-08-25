@@ -4,6 +4,9 @@ import {
   gpuEventCardCopy,
   gpuAtomButtonWidth,
   gpuFilterButtonWidth,
+  gpuFilterButtonWidthCompact,
+  FILTER_BUTTON_HEIGHT,
+  FILTER_BUTTON_HEIGHT_COMPACT,
   layoutAtomLaneBlocks,
   layoutFilterChipBlock,
   layoutRunFilterBlocks,
@@ -275,14 +278,23 @@ describe('full-GL filter controls preserve semantic labels', () => {
   });
 
   it('frames a wrapping branch chip row as one block', () => {
-    const block = layoutFilterChipBlock(20, 80, 240, [
+    const chips = [
       { id: 'run.filter.branch.all', label: 'ALL BRANCHES' },
       { id: 'run.filter.branch.a', label: 'PARALLEL BRANCH 1 · CREATE' },
       { id: 'run.filter.branch.b', label: 'PARALLEL BRANCH 1 · VERIFY' },
-    ]);
+    ];
+    // Branch chips render compact — the production call in runs.ts.
+    const block = layoutFilterChipBlock(20, 80, 240, chips, { size: 'compact' });
     expect(block.chips.length).toBe(3);
     expect(block.chips[2]!.y).toBeGreaterThan(block.chips[0]!.y);
     expect(block.height).toBeGreaterThan(block.chips[0]!.height);
+    // The compact face is strictly smaller than the default one.
+    const defaultBlock = layoutFilterChipBlock(20, 80, 240, chips);
+    expect(block.chips[0]!.height).toBe(FILTER_BUTTON_HEIGHT_COMPACT);
+    expect(defaultBlock.chips[0]!.height).toBe(FILTER_BUTTON_HEIGHT);
+    for (const [index, chip] of block.chips.entries()) {
+      expect(chip.width).toBeLessThan(defaultBlock.chips[index]!.width);
+    }
   });
 
   it('stacks role filters when the pane cannot hold both frames', () => {
@@ -317,6 +329,35 @@ describe('full-GL filter controls preserve semantic labels', () => {
     ]) {
       const availableCharacters = Math.floor((gpuFilterButtonWidth(label) - 16) / 6.2);
       expect(availableCharacters, label).toBeGreaterThanOrEqual(label.length);
+    }
+  });
+
+  it('allocates enough compact width for every current branch label', () => {
+    // The fallback estimate, exercised when no renderer can measure: the 8px
+    // face averages ~4.6px per uppercase glyph (6.2 scaled by 8/11).
+    for (const label of ['ALL BRANCHES', 'PARALLEL BRANCH 1.1 · WRITE INDEX', '⑂ c545fb']) {
+      const availableCharacters = Math.floor((gpuFilterButtonWidthCompact(label) - 12) / 4.6);
+      expect(availableCharacters, label).toBeGreaterThanOrEqual(label.length);
+    }
+  });
+
+  it('sizes chips from an injected measurement, uniformly padded', () => {
+    // With a real measurer (ctx.measureText in production) every chip carries
+    // the same text padding regardless of label length — the estimate path
+    // cannot promise that, which is why runs.ts injects the measurement.
+    const measure = (label: string) => label.length * 5;
+    const block = layoutFilterChipBlock(
+      0,
+      0,
+      2000,
+      [
+        { id: 'a', label: 'ALL BRANCHES' },
+        { id: 'b', label: 'PARALLEL BRANCH 1.1 · WRITE INDEX.HTML AND APP.JS' },
+      ],
+      { size: 'compact', measure }
+    );
+    for (const chip of block.chips) {
+      expect(chip.width - measure(chip.label)).toBe(14);
     }
   });
 

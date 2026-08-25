@@ -7,18 +7,36 @@
  */
 const CONTROL_HOVER_GAP = 14;
 
+const FILTER_CHIP_MIN_WIDTH = 52;
+const FILTER_CHIP_TEXT_PAD = 24;
+const FILTER_CHIP_MIN_WIDTH_COMPACT = 36;
+const FILTER_CHIP_TEXT_PAD_COMPACT = 14;
+
 export function gpuFilterButtonWidth(label: string) {
+  // FALLBACK ESTIMATE for renderer-less layout (tests, recordings). A view
+  // with a renderer passes `measure` to layoutFilterChipBlock instead — an
+  // estimate must over-shoot to never clip, so it pads long labels unevenly.
   // Uppercase filter labels use the 11px semibold face, whose wide glyphs
   // average closer to 7px than the 6px estimate used for ordinary chips.
-  // Add enough horizontal padding that the generic button renderer never
-  // applies ellipsis to a semantic control.
-  return Math.max(52, Math.ceil(label.length * 7.2 + 24));
+  return Math.max(FILTER_CHIP_MIN_WIDTH, Math.ceil(label.length * 7.2 + FILTER_CHIP_TEXT_PAD));
+}
+
+export function gpuFilterButtonWidthCompact(label: string) {
+  // Same fallback role as gpuFilterButtonWidth, for the compact 8px face
+  // (~4.5px per uppercase glyph).
+  return Math.max(
+    FILTER_CHIP_MIN_WIDTH_COMPACT,
+    Math.ceil(label.length * 4.8 + FILTER_CHIP_TEXT_PAD_COMPACT)
+  );
 }
 
 
 export const FILTER_BLOCK_PAD = 8;
 export const FILTER_BLOCK_GAP = 12;
 export const FILTER_BUTTON_HEIGHT = 27;
+export const FILTER_BUTTON_HEIGHT_COMPACT = 21;
+export const FILTER_BUTTON_LABEL_SIZE = 11;
+export const FILTER_BUTTON_LABEL_SIZE_COMPACT = 8;
 export const ATOM_BUTTON_HEIGHT = 28;
 
 export function gpuLaneLabelWidth(label: string) {
@@ -52,10 +70,10 @@ function placeChipBlock(
   maxRow: number,
   widthOf: (label: string) => number,
   buttonH: number,
-  insetX = 0
+  insetX = 0,
+  gap: number = CONTROL_HOVER_GAP
 ): FilterBlockLayout {
   const pad = FILTER_BLOCK_PAD;
-  const gap = CONTROL_HOVER_GAP;
   let x = 0;
   let y = 0;
   let innerW = insetX;
@@ -85,19 +103,45 @@ function placeChipBlock(
   };
 }
 
+export interface FilterChipBlockOptions {
+  size?: 'default' | 'compact';
+  /**
+   * Rendered width of a label through the REAL text style — pass
+   * `ctx.measureText` bound to the face the chips draw with. The layout
+   * module stays Pixi-free (tests run without a renderer), so measurement is
+   * injected rather than imported; without it the per-character heuristic is
+   * the fallback, and its estimate must over-shoot to stay safe, which pads
+   * long labels unevenly.
+   */
+  measure?: (label: string) => number;
+}
+
 export function layoutFilterChipBlock(
   originX: number,
   originY: number,
   maxWidth: number,
-  chips: readonly FilterChipSpec[]
+  chips: readonly FilterChipSpec[],
+  options: FilterChipBlockOptions = {}
 ): FilterBlockLayout {
+  const compact = options.size === 'compact';
+  const buttonH = compact ? FILTER_BUTTON_HEIGHT_COMPACT : FILTER_BUTTON_HEIGHT;
+  const measure = options.measure;
+  const minWidth = compact ? FILTER_CHIP_MIN_WIDTH_COMPACT : FILTER_CHIP_MIN_WIDTH;
+  const textPad = compact ? FILTER_CHIP_TEXT_PAD_COMPACT : FILTER_CHIP_TEXT_PAD;
+  const widthOf = measure
+    ? (label: string) => Math.max(minWidth, Math.ceil(measure(label)) + textPad)
+    : compact
+      ? gpuFilterButtonWidthCompact
+      : gpuFilterButtonWidth;
   return placeChipBlock(
     chips,
     originX,
     originY,
-    Math.max(FILTER_BUTTON_HEIGHT, maxWidth - FILTER_BLOCK_PAD * 2),
-    gpuFilterButtonWidth,
-    FILTER_BUTTON_HEIGHT
+    Math.max(buttonH, maxWidth - FILTER_BLOCK_PAD * 2),
+    widthOf,
+    buttonH,
+    0,
+    compact ? 10 : undefined
   );
 }
 

@@ -171,6 +171,25 @@ function gatedStubs() {
       updatedAt: '2026-08-20T00:00:00.000Z',
     }],
     [`/api/projects/${projectId}/runs`]: runs,
+    // The Runs view auto-selects the newest index entry and loads its trace,
+    // so these two stubs make `--view Runs` render the full run surface:
+    // summary card, metric tiles, branch filter chips and the timeline.
+    '/api/runs': [
+      {
+        id: 'run-fixture',
+        label:
+          'server.js already exists and serves GET /api/expenses and POST /api/expenses — do not rewrite it. Add the frontend.',
+        startedAt: '2026-08-23T10:00:00.000Z',
+        endedAt: '2026-08-23T10:21:34.000Z',
+        durationMs: 1_293_740,
+        costUsd: 1.69,
+        calls: 26,
+        projectId,
+        projectName: 'Stopwatch E2E two',
+        projectSlug: 'stopwatch-e2e-two',
+      },
+    ],
+    '/api/runs/run-fixture': fixtureTrace(),
     '/api/github/installations': [],
     // WITHOUT this stub the page reload-loops: the checkout `.env` usually arms
     // the auth gate, the browser has no session cookie, and the client treats
@@ -184,6 +203,75 @@ function gatedStubs() {
         'Add a lap button to the stopwatch: each press records the current elapsed time in a list below the controls.',
       ],
     }],
+  };
+}
+
+/** One delivered two-phase run whose phases each fork a parallel branch —
+ * enough structure for the Runs view to draw the summary card, the four
+ * metric tiles, the branch filter chips and a forked timeline. */
+function fixtureTrace() {
+  const t0 = Date.parse('2026-08-23T10:00:00.000Z');
+  let seq = 0;
+  const at = (offsetS) => t0 + offsetS * 1000;
+  const ev = (offsetS, fields) => ({ id: `ev-${seq++}`, ts: at(offsetS), ...fields });
+  const events = [
+    ev(0, { kind: 'llm', role: 'plan', actor: { tier: 3, name: 'Meristem' }, durationMs: 9000 }),
+    ev(10, {
+      kind: 'branch', op: 'start', branchId: 'p1', index: 0, total: 2,
+      aggregationMode: 'sequential', actor: { tier: 3, name: 'Meristem' },
+      label: 'Write index.html and app.js: expense form, list and totals',
+    }),
+    ev(12, { kind: 'llm', role: 'plan', branchId: 'p1', actor: { tier: 2, name: 'Tracheid' }, durationMs: 8000 }),
+    ev(20, {
+      kind: 'branch', op: 'start', branchId: 'c1', parentBranchId: 'p1',
+      actor: { tier: 2, name: 'Tracheid' },
+      label: 'Write index.html and app.js against the running API',
+    }),
+    ev(25, {
+      kind: 'llm', role: 'execute', branchId: 'c1', actor: { tier: 1, name: 'Methane' },
+      model: 'claude-haiku-4-5-20251001', durationMs: 210_000, costUsd: 0.41,
+      usage: { input_tokens: 3200, output_tokens: 24_000 },
+    }),
+    ev(240, { kind: 'tool', name: 'write_file', branchId: 'c1', actor: { tier: 1, name: 'Methane' }, args: { path: 'index.html' } }),
+    ev(250, { kind: 'tool', name: 'write_file', branchId: 'c1', actor: { tier: 1, name: 'Methane' }, args: { path: 'app.js' } }),
+    ev(260, { kind: 'llm', role: 'validate-result', branchId: 'p1', actor: { tier: 2, name: 'Tracheid' }, durationMs: 12_000, costUsd: 0.08 }),
+    ev(300, { kind: 'branch', op: 'end', branchId: 'c1' }),
+    ev(300, { kind: 'branch', op: 'end', branchId: 'p1' }),
+    ev(300, {
+      kind: 'branch', op: 'start', branchId: 'p2', index: 1, total: 2,
+      aggregationMode: 'sequential', actor: { tier: 3, name: 'Meristem' },
+      label: 'Read the existing server.js and wire the frontend to its routes',
+    }),
+    ev(310, {
+      kind: 'branch', op: 'start', branchId: 'c2', parentBranchId: 'p2',
+      actor: { tier: 2, name: 'Sclereid' },
+      label: 'Read the existing server.js and adjust fetch paths',
+    }),
+    ev(315, { kind: 'tool', name: 'read_file', branchId: 'c2', actor: { tier: 1, name: 'Ethane' }, args: { path: 'server.js' } }),
+    ev(330, {
+      kind: 'llm', role: 'execute', branchId: 'c2', actor: { tier: 1, name: 'Ethane' },
+      model: 'claude-haiku-4-5-20251001', durationMs: 540_000, costUsd: 0.87,
+      usage: { input_tokens: 6200, output_tokens: 52_000 },
+    }),
+    ev(900, { kind: 'llm', role: 'validate-result', branchId: 'p2', actor: { tier: 2, name: 'Sclereid' }, durationMs: 14_000, costUsd: 0.11 }),
+    ev(1200, { kind: 'branch', op: 'end', branchId: 'c2' }),
+    ev(1200, { kind: 'branch', op: 'end', branchId: 'p2' }),
+    ev(1290, { kind: 'llm', role: 'aggregate', actor: { tier: 3, name: 'Meristem' }, durationMs: 4000, costUsd: 0.05 }),
+  ];
+  return {
+    id: 'run-fixture',
+    label:
+      'server.js already exists and serves GET /api/expenses and POST /api/expenses — do not rewrite it. Add the frontend. [build-app]',
+    task: {
+      description:
+        'server.js already exists and serves GET /api/expenses and POST /api/expenses — do not rewrite it. Add the frontend.',
+    },
+    startedAt: '2026-08-23T10:00:00.000Z',
+    endedAt: '2026-08-23T10:21:34.000Z',
+    durationMs: 1_293_740,
+    events,
+    result: { summary: 'Frontend delivered against the existing API.', producedBy: { tier: 3, name: 'Meristem' } },
+    totals: { calls: 26, inputTokens: 10_181, outputTokens: 80_380, costUsd: 1.69 },
   };
 }
 
