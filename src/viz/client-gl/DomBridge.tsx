@@ -87,6 +87,7 @@ export function DomBridge({
   const projectVisibility = useGpuStore((state) => state.projectVisibility);
   const setProjectVisibility = useGpuStore((state) => state.setProjectVisibility);
   const selectProject = useGpuStore((state) => state.selectProject);
+  const announcementResetSignal = useGpuStore((state) => state.announcementResetSignal);
   const activeGithubInstallations = githubInstallations.filter(
     (installation) => installation.status === 'active'
   );
@@ -389,7 +390,7 @@ export function DomBridge({
         </form>
       ) : null}
       {viewOverlaysVisible && view === 'announce' && announcementsEnabled ? (
-        <AnnouncementForm t={t} locale={locale} />
+        <AnnouncementForm t={t} locale={locale} resetSignal={announcementResetSignal} />
       ) : null}
       {pushPrompt !== 'hidden' ? (
         <div

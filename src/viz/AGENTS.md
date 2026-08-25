@@ -145,11 +145,31 @@ npm run viz:mark-turn:analyze
 - Pixi objects draw local geometry at local origin, then position the object.
   Avoid double-offset hit targets.
 - The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic
-  relighting, reduced-motion support, and no overlapping R3F logo.
-- The gem's CAST is ONE polygon on TWO surfaces — the far-field mesh behind the
-  UI and the pointer-light stage filter over it, so it crosses buttons and
-  frames instead of stopping at the backdrop. `projectMarkCaustic` alone derives
-  its throw falloff, `packMarkCaustic` alone writes its corners,
+  relighting, reduced-motion support, and no overlapping R3F logo. Every live
+  face uses `ATOMA_MARK_ACTIVE_MATERIALS` and is diamond; the former four-glass
+  palette is inactive reference data kept only for an explicit restoration.
+  Its core motion is deterministic inertial drift with a slight gravity bias:
+  `brand-mark.ts` reflects it on the octahedral cavity planes and publishes the
+  impact squash/stretch pose; the renderer only applies that pose.
+  The interior ping-pong backdrop is sized in physical renderer pixels. Diamond
+  dispersion is bounded in those same pixels: normalise bend by `uMaxBend`
+  before applying `uSplit`, or the arrival hero separates one bead into three.
+- The gem's CAST is FOUR facet ray bundles on TWO surfaces — the far-field mesh
+  behind the UI and the pointer-light stage filter over it, so it crosses
+  buttons and frames instead of stopping at the backdrop. `brand-mark.ts`
+  traces Snell entry/exit and total internal reflection through the thin shell;
+  the shared shader reconstructs each bundle as CURVED fold filaments —
+  quadratic arcs bowed toward the centroid with doubled cusps, over a faint
+  interior fill, brightness riding beam compression (inverse footprint area),
+  spatially culled per bundle (99 samples per facet, 396 in all) — as additive
+  refraction plus multiplicative translucent shadow. Sampling the bundle's
+  straight edges is banned too: it draws the transport triangle on the wall.
+  Never replace them with filled triangles or the gem's
+  projected silhouette: that is a stencil, not a diamond caustic.
+  `projectMarkCaustic` alone derives
+  its pixel-locked receiver throw, inverse-square falloff and shipped exposure
+  floor from Crystal lift;
+  `packMarkCaustic` alone writes its corners,
   `renderer/caustic-shader.ts` alone tests containment, in GLSL kept ES 1.00-legal.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
@@ -290,11 +310,28 @@ npm run viz:mark-turn:analyze
   compact the rail, then drop group headings before they drop a destination.
   The accessibility bridge is visually clipped only at rest; `:focus-within`
   reveals it as a bounded command palette so keyboard focus is never invisible.
+- A CANVAS CONTROL MUST BE REPRODUCED AND TESTED AS A CANVAS CONTROL. The DOM
+  tablist is an accessibility mirror: clicking its `role="tab"` button proves
+  neither Pixi's `pointertap` handler nor the active rail target that the user
+  actually clicked. When a state transition belongs to both surfaces, put its
+  signal in `store.ts` and let both surfaces consume that one state; do not
+  route it through one-off React state or a callback bridge in `GpuApp`, which
+  can pass a DOM test while the canvas path remains broken. A regression first
+  drives the complete precondition (for example compose → review → send →
+  receipt), then resolves the exact id from `__ATOMA_GPU__.hitTargets()` and
+  mouse-clicks its projected centre in `viz:smoke`; assert the resulting UI,
+  not merely that the activation callback fired. Finally verify from a fresh
+  page or full scene rebuild: Fast Refresh can leave an already-created Pixi
+  listener holding the pre-edit closure, so the current tab is not proof of
+  the newly loaded path.
 - Scene Tuning is a floating DOM window, not Runs content or a second canvas.
   Its toggle is the final control in the ADMIN rail, its pressed state is the
   window's visibility, and its DOM layer sits above view forms. Title-bar
   dragging clamps the complete window inside the viewport; slider values stay
   in the mutable live sample so pointer motion never rebuilds the GPU scene.
+  Crystal lift and Crystal size are read by the retained header mark's ticker
+  and never enter its retention key as live values; the arrival mark keeps its
+  authored depth and size.
 - The project form is ONE form with TWO shapes, never one that grows: the
   create fields with no project selected, the run prompt with one. A selected
   project's name owns the page title (`Project : <name>`) and is NOT repeated
@@ -421,6 +458,11 @@ npm run viz:mark-turn:analyze
   supported language. That review is what keeps model prose out of the
   audit row (`src/platform/AGENTS.md`) — a translation an operator
   accepted is the operator's text — and out of a tray no one can undo.
+  After delivery, re-activating the already-active Announcements destination
+  returns the composer to its empty initial state; the same gesture while a
+  draft is in progress preserves it. It follows the canvas-control method
+  above: the reset signal lives in the shared GPU store, and the real-GPU smoke
+  drives the active Pixi hit target after a complete stubbed send.
   `src/viz/push/translate.ts` is the server's ONLY LLM call site: tier 1,
   built on first use so no deployment is asked for a credential it never
   needs, and returning `null` (never a partial draft) whenever the

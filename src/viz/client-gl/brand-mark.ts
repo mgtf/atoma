@@ -47,11 +47,11 @@ export function markTurnDegreesRounded(elapsedMs: number): number {
 }
 
 /**
- * Bounce rate of the core bead, as three triangle-wave frequencies. Kept
- * deliberately incommensurate so the reflected path does not fall into a short
- * repeating orbit — a mark that visibly loops every few seconds reads as a
- * looping GIF rather than as something alive. The third axis is DEPTH: the bead
- * travels inside a volume, not across a picture of one.
+ * Angular rates of the core bead's inertial drift. They are deliberately
+ * incommensurate so the path does not fall into a short repeating orbit. Unlike
+ * the old triangle waves, these have continuous velocity between wall impacts.
+ * The third axis is DEPTH: the bead travels inside a volume, not across a
+ * picture of one.
  */
 export const ATOMA_MARK_CORE_SPEED_U = 0.85;
 export const ATOMA_MARK_CORE_SPEED_V = 0.6;
@@ -142,20 +142,19 @@ export function markColorForOctant(octant: MarkOctant): number {
 }
 
 /**
- * What KIND of glass a rank's face is made of.
+ * Optical material coefficients understood by the ONE shell shader.
  *
- * The four quadrant faces — each one a top triangle and its bottom twin, so a
- * rank owns a whole wedge of the crystal — are four different glasses, cut in
- * ascending order of refinement along the composition chain: raw volcanic glass
- * for the elements, drawn glass for the molecules, lead crystal for the cells,
- * brilliant-cut diamond for the tissues. The rank COLOUR is untouched by this;
- * taxonomy owns hue, material owns how the surface behaves in light, and mixing
- * the two would make a rank unreadable the moment its material changed.
+ * The live crystal is now diamond on every face. The former progression — raw
+ * volcanic glass for elements, drawn glass for molecules, lead crystal for
+ * cells and diamond for tissues — remains below as an INACTIVE authored
+ * palette so it can be restored deliberately without reconstructing its
+ * measurements. Rank COLOUR is independent: taxonomy owns hue, material owns
+ * how the surface behaves in light.
  *
- * Every field is a shading coefficient consumed by the shell shader, and all of
- * them are per-facet CONSTANTS: they are uploaded once with the geometry, never
- * per frame. What makes them visible is the bead — as the one light inside the
- * crystal travels, each wedge answers it differently.
+ * Every field is a shading coefficient consumed by the shell shader. Values are
+ * uploaded once per facet with the geometry, never per frame. Today every facet
+ * receives the same diamond object; keeping the per-facet lane is what makes
+ * restoring the inactive palette a data change instead of a shader rewrite.
  *
  * The table is now TWO physical quantities plus three behavioural ones. `ior`
  * and `roughness` are measurements; everything the surface does with light is
@@ -252,6 +251,10 @@ export function markSpecularPower(roughness: number): number {
   return Math.min(2 / alpha - 2, ATOMA_MARK_MAX_SPECULAR_POWER);
 }
 
+/**
+ * Inactive four-material palette retained for a possible future restoration.
+ * Renderers must consume `ATOMA_MARK_ACTIVE_MATERIALS`, never this archive.
+ */
 export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial> = {
   // Obsidian: natural volcanic glass. Its IOR is ordinary glass's — the two are
   // chemically close — so it is NOT the edges that tell it apart. It drinks
@@ -301,8 +304,30 @@ export const ATOMA_MARK_RANK_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial>
   },
 } as const;
 
+/**
+ * The only live material. All four entries deliberately share the same object,
+ * so shell faces and CPU light spills cannot drift into a partial restoration.
+ *
+ * To restore the archived progression later, replace this map with
+ * `ATOMA_MARK_RANK_MATERIALS`; no shader change is required because the single
+ * shader already consumes these coefficients generically.
+ */
+export const ATOMA_MARK_DIAMOND_MATERIAL = ATOMA_MARK_RANK_MATERIALS.tissue;
+export const ATOMA_MARK_ACTIVE_MATERIALS: Record<AtomaMarkRank, AtomaMarkMaterial> = {
+  element: ATOMA_MARK_DIAMOND_MATERIAL,
+  molecule: ATOMA_MARK_DIAMOND_MATERIAL,
+  cell: ATOMA_MARK_DIAMOND_MATERIAL,
+  tissue: ATOMA_MARK_DIAMOND_MATERIAL,
+} as const;
+
+/** Shared normalisation for every material-weighted light path. */
+export const ATOMA_MARK_ACTIVE_MAX_TRANSMIT = Math.max(
+  ...Object.values(ATOMA_MARK_ACTIVE_MATERIALS).map((material) => material.transmit)
+);
+
 export function markMaterialForOctant(octant: MarkOctant): AtomaMarkMaterial {
-  return ATOMA_MARK_RANK_MATERIALS[markRankForOctant(octant)];
+  const rank = markRankForOctant(octant);
+  return ATOMA_MARK_ACTIVE_MATERIALS[rank];
 }
 
 export interface AtomaMarkPoint {
@@ -359,16 +384,15 @@ export const ATOMA_MARK_CAMERA_Z = ATOMA_MARK_RADIUS * 2.5;
  * the offset between the two outlines reads as a wall rather than as an
  * antialiasing artefact once the mark is a splash-sized hero.
  *
- * It is also the DEPTH OF MATERIAL each wedge is made of: absorption is
+ * It is also the DEPTH OF DIAMOND each wedge is made of: absorption is
  * measured along the ray's path through this wall, so a wafer-thin shell would
- * make all four glasses look the same however different their coefficients are.
+ * make the volume disappear however accurate the active coefficients are.
  * The bead's travel room shrinks with every unit added here, which is the trade
  * this number settles — `ATOMA_MARK_CAVITY_INRADIUS` minus the bead's clearance
  * must stay comfortably positive.
  *
- * Halved from the 0.2 it was cut at. Thinner walls SATURATE less, so the four
- * glasses actually separate a little further apart rather than all reaching
- * near-solid: obsidian is the only one that ever fills up.
+ * Halved from the 0.2 it was cut at. This preserves room for the bead while the
+ * archived palette still retains the geometry it was authored against.
  */
 export const ATOMA_MARK_THICKNESS = 0.1;
 
@@ -391,14 +415,14 @@ export const ATOMA_MARK_MESH = createThickOctahedron(
 export const ATOMA_MARK_MIN_PATH = ATOMA_MARK_THICKNESS * Math.sqrt(3);
 
 /**
- * Beer-Lambert opacity of PLAIN GLASS over that shortest path. Opacity is
- * normalised by it, so glass at its thinnest presentation is exactly the mark's
- * baseline density and every other material and angle is read as more or less
- * solid than that one reference — rather than each material carrying a hand-set
- * alpha that has nothing to do with its depth.
+ * Scene-density calibration over the shortest path. The value 6 preserves the
+ * established transparency of the all-diamond cut; it is a display exposure,
+ * not a second live material. Absorption itself still comes exclusively from
+ * `ATOMA_MARK_ACTIVE_MATERIALS`.
  */
+const ATOMA_MARK_OPACITY_CALIBRATION = 6;
 export const ATOMA_MARK_OPACITY_REFERENCE =
-  1 - Math.exp(-ATOMA_MARK_RANK_MATERIALS.molecule.absorption * ATOMA_MARK_MIN_PATH);
+  1 - Math.exp(-ATOMA_MARK_OPACITY_CALIBRATION * ATOMA_MARK_MIN_PATH);
 
 /**
  * How near the camera a facet is: 0 at the far wall, 1 at the near one, from
@@ -537,6 +561,12 @@ export interface AtomaMarkFrame {
    * hull vertex at this Z. Not a second depth curve.
    */
   coreScale: number;
+  /** 0 away from a wall, 1 at the strongest current contact. */
+  coreImpact: number;
+  /** Scale along the projected wall normal, then along its tangent. */
+  coreDeformation: readonly [number, number];
+  /** Screen-space direction of the wall normal, in radians. */
+  coreDeformationAngle: number;
   /** Convex outline of the projected hull: the mask that keeps light inside. */
   silhouette: AtomaMarkPoint[];
   pulse: number;
@@ -550,11 +580,6 @@ function clamp(value: number, low = 0, high = 1) {
 
 function dot(a: MarkVec3, b: MarkVec3) {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-}
-
-function triangleWave(value: number) {
-  const phase = (value % 4 + 4) % 4;
-  return phase < 2 ? phase - 1 : 3 - phase;
 }
 
 function cross2d(origin: AtomaMarkPoint, a: AtomaMarkPoint, b: AtomaMarkPoint) {
@@ -639,36 +664,97 @@ function project(vertex: MarkVec3): AtomaMarkPoint {
   };
 }
 
+interface CoreMotion {
+  position: MarkVec3;
+  impact: number;
+  deformation: readonly [number, number];
+  deformationAngle: number;
+}
+
 /**
- * Three triangle waves produce a continuous reflected path through the CAVITY.
- * Two of them keep the screen-space wander the mark always had; the third moves
- * the bead toward and away from the camera. The walls that stop it are the eight
- * cavity planes, inset by the bead's own radius — so a bead at its limit is
- * touching a wall the viewer can see, and never floats past the outline.
+ * Smooth free flight, folded across the eight cavity planes when it reaches a
+ * wall. The small negative Y bias is the visual equivalent of gravity: arcs
+ * spend more of their life in the lower half instead of hovering around the
+ * exact centre. Folding rather than clamping preserves momentum and produces a
+ * true reflected direction instead of the old axis-by-axis direction changes.
  */
-function bouncingCore(seconds: number, rows: readonly [MarkVec3, MarkVec3, MarkVec3]): MarkVec3 {
-  const u = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_U + 1);
-  const v = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_V + 1);
-  const w = triangleWave(seconds * ATOMA_MARK_CORE_SPEED_W + 1);
-  const raw: MarkVec3 = [(u + v) / 2, (u - v) / 2, w * 0.85];
-  const distance = Math.hypot(...raw);
-  if (distance < 1e-6) return [0, 0, 0];
-
-  const direction: MarkVec3 = [raw[0] / distance, raw[1] / distance, raw[2] / distance];
-  const travelFraction = Math.max(Math.abs(u), Math.abs(v), Math.abs(w));
+function bouncingCore(
+  seconds: number,
+  rows: readonly [MarkVec3, MarkVec3, MarkVec3]
+): CoreMotion {
+  const freeView: MarkVec3 = [
+    0.42 * Math.sin(seconds * ATOMA_MARK_CORE_SPEED_U + 0.4) +
+      0.08 * Math.sin(seconds * 0.19 + 1.1),
+    0.36 * Math.sin(seconds * ATOMA_MARK_CORE_SPEED_V + 2.2) -
+      0.13 - 0.055 * Math.cos(seconds * 0.21),
+    0.40 * Math.sin(seconds * ATOMA_MARK_CORE_SPEED_W + 4.1) +
+      0.07 * Math.sin(seconds * 0.17 + 0.8),
+  ];
+  const freeVelocity: MarkVec3 = [
+    0.42 * ATOMA_MARK_CORE_SPEED_U * Math.cos(seconds * ATOMA_MARK_CORE_SPEED_U + 0.4) +
+      0.08 * 0.19 * Math.cos(seconds * 0.19 + 1.1),
+    0.36 * ATOMA_MARK_CORE_SPEED_V * Math.cos(seconds * ATOMA_MARK_CORE_SPEED_V + 2.2) +
+      0.055 * 0.21 * Math.sin(seconds * 0.21),
+    0.40 * ATOMA_MARK_CORE_SPEED_W * Math.cos(seconds * ATOMA_MARK_CORE_SPEED_W + 4.1) +
+      0.07 * 0.17 * Math.cos(seconds * 0.17 + 0.8),
+  ];
   const room = ATOMA_MARK_CAVITY_INRADIUS - CORE_MODEL_CLEARANCE;
-  if (!(room > 0)) return [0, 0, 0];
+  if (!(room > 0)) {
+    return {
+      position: [0, 0, 0],
+      impact: 0,
+      deformation: [1, 1],
+      deformationAngle: 0,
+    };
+  }
 
-  // The path is authored in VIEW space, so the bead keeps wandering across the
-  // picture the way it always did; the cavity it is clamped against turns with
-  // the crystal, so the direction goes back to MODEL space to be measured.
-  const model = applyTransposed(rows, direction);
-  // A regular octahedron is |x| + |y| + |z| <= inradius * sqrt(3), and inset by
-  // the bead's clearance it is the same shape — so the reach along a direction
-  // is one division instead of a loop over eight planes.
-  const l1 = Math.abs(model[0]) + Math.abs(model[1]) + Math.abs(model[2]);
-  const travel = room * Math.sqrt(3) / Math.max(1e-6, l1) * travelFraction;
-  return [direction[0] * travel, direction[1] * travel, direction[2] * travel];
+  const limit = room * Math.sqrt(3);
+  const freeModel = applyTransposed(rows, freeView);
+  const freeL1 = Math.abs(freeModel[0]) + Math.abs(freeModel[1]) + Math.abs(freeModel[2]);
+  // Fold the radial excursion at each octahedral plane. Keeping the direction
+  // continuous avoids a face-normal swap when a reflected path crosses an
+  // octant seam — the one-frame lateral snap a literal per-plane fold caused.
+  const phase = freeL1 % (limit * 2);
+  const foldedL1 = limit - Math.abs(limit - phase);
+  const radialScale = foldedL1 / Math.max(freeL1, 1e-9);
+  const model: MarkVec3 = [
+    freeModel[0] * radialScale,
+    freeModel[1] * radialScale,
+    freeModel[2] * radialScale,
+  ];
+
+  // Use the continuous collision direction for the visible squash. A literal
+  // face normal is discontinuous where two triangular walls meet and made the
+  // bead's ellipse rotate abruptly at that invisible mathematical seam.
+  const normalLength = Math.max(Math.hypot(...freeModel), 1e-9);
+  const normalModel: MarkVec3 = [
+    freeModel[0] / normalLength,
+    freeModel[1] / normalLength,
+    freeModel[2] / normalLength,
+  ];
+  const wallClearance = Math.max(0, (limit - foldedL1) / Math.sqrt(3));
+  const contactBand = 0.075;
+  const proximity = clamp(1 - wallClearance / contactBand);
+  const easedProximity = proximity * proximity * (3 - 2 * proximity);
+  const modelVelocity = applyTransposed(rows, freeVelocity);
+  const normalSpeed = Math.abs(dot(modelVelocity, normalModel));
+  // The same curve is used immediately before and after contact. Changing its
+  // gain at the reflection point would make the squash itself pop one frame.
+  const impact = easedProximity * clamp(normalSpeed / 0.24);
+  const normalView = apply(rows, normalModel);
+  const projectedNormalLength = Math.hypot(normalView[0], normalView[1]);
+  const deformationAngle = projectedNormalLength > 1e-5
+    ? Math.atan2(-normalView[1], normalView[0])
+    : 0;
+
+  return {
+    position: apply(rows, model),
+    impact,
+    // Compress into the wall and expand sideways. The modest area gain reads
+    // as a soft luminous body without turning it into a rubber balloon.
+    deformation: [1 - impact * 0.18, 1 + impact * 0.11],
+    deformationAngle,
+  };
 }
 
 function collectRearSpills(
@@ -676,9 +762,7 @@ function collectRearSpills(
   core3: MarkVec3,
   pulse: number
 ): AtomaMarkRearSpill[] {
-  // Diamond throws the most of the four; every other glass is read against it
-  // so the pools stay ordered the way the materials are.
-  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
+  const maxTransmit = ATOMA_MARK_ACTIVE_MAX_TRANSMIT;
   const spills: AtomaMarkRearSpill[] = [];
   for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
     const shaded = facets[index]!;
@@ -700,9 +784,8 @@ function collectRearSpills(
     // table is 1.
     const rear = clamp(-shaded.normal[2] * Math.sqrt(3));
     const material = markMaterialForOctant(meshFacet.octant);
-    // Colour is the stain. Absorption already made this glass darker in the
-    // shell; applying Beer-Lambert again here ate the obsidian pool to a
-    // smudge, so a lantern with four windows would only throw three.
+    // Colour is the taxonomy stain. Absorption already shaped the diamond in
+    // the shell, so the field path only normalises its transmission here.
     const stain = 0.42 + 0.58 * (material.transmit / maxTransmit);
     const intensity = clamp(
       incidence * rear * stain * (0.82 + 0.18 * pulse)
@@ -865,14 +948,14 @@ export function collectPointerFieldSpills(
     localY
   );
   if (gemEnter < 0.02) return [];
-  const maxTransmit = ATOMA_MARK_RANK_MATERIALS.tissue.transmit;
+  const maxTransmit = ATOMA_MARK_ACTIVE_MAX_TRANSMIT;
   // The entry stain rides the same facet the coupling picked: its material
   // sets how much light survives the first table. No dominant facet (grazing
-  // lamp, far side of the falloff) keeps the historical default.
+  // lamp, far side of the falloff) still uses the same active diamond response.
   const entryMaterial = entryOctant ? markMaterialForOctant(entryOctant) : null;
   const entryStain = entryMaterial
     ? 0.42 + 0.58 * (entryMaterial.transmit / maxTransmit)
-    : 0.7;
+    : 1;
 
   const spills: AtomaMarkRearSpill[] = [];
   for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
@@ -922,36 +1005,80 @@ export function mergeFieldSpills(
 }
 
 /**
- * How strongly the gem converges the light it passes: a thick-shell
- * octahedron crossed near its centre behaves like a weak positive lens, so
- * the cast shrinks below the silhouette — the flatter the angle of entry
- * (lamp far to the side), the weaker the convergence.
+ * Shipped distance between the header crystal and the pixel-locked UI
+ * receiver, as a multiple of the original wall distance. Three lets the soft
+ * rim reach the first navigation row while the body remains a compact cast.
+ * Scene Tuning imports this value so RESET and the closed panel reproduce the
+ * same geometry rather than maintaining a second default.
  */
-const CAUSTIC_CONVERGENCE = 0.82;
+export const ATOMA_MARK_CRYSTAL_LIFT = 3;
+/** Upper experimental receiver distance exposed by Scene Tuning. */
+export const ATOMA_MARK_CRYSTAL_LIFT_MAX = 20;
+/** Independent visual-size control; 1 keeps the perspective-derived size. */
+export const ATOMA_MARK_CRYSTAL_SIZE = 1;
+export const ATOMA_MARK_CRYSTAL_SIZE_MIN = 0.2;
+export const ATOMA_MARK_CRYSTAL_SIZE_MAX = 2.5;
+
+/** Original gem-to-wall distance, in model units. Lift 1 is the old geometry. */
+const CAUSTIC_BASE_PLANE_DISTANCE = 2.4;
 
 /**
- * Where the gem's refractive axis meets the far plane, in local box units.
- * The lamp ray that passes through the gem's centre decides where the cast
- * lands; every silhouette point is then placed relative to that anchor.
+ * The receiver is the interface itself, whose pixels do not shrink when its
+ * virtual depth changes. Keep its authored projection scale fixed while lift
+ * extends the lamp ray; using `project()` with an ever more negative Z made
+ * perspective contraction cancel the longer throw before it reached a button.
  */
-const CAUSTIC_PLANE_Z = -2.4;
+const CAUSTIC_RECEIVER_PERSPECTIVE = markPerspectiveAt(-CAUSTIC_BASE_PLANE_DISTANCE);
 
 /**
- * How far along the lamp ray the wall sits, as a multiple of the lamp's own
- * distance. Greater than 1: the ray is extrapolated BEYOND the gem, so the
- * cast lands on the far side of the centre from the lamp, like any shadow.
- * One definition — the projection and the falloff must agree on where the
- * wall is or the diamond would dim for a throw it never made.
+ * The on-axis lamp-to-wall distance at lift 1. It is the exposure reference:
+ * raising the crystal above the receiver makes the path longer and therefore
+ * dimmer by the same inverse-square law used for an off-axis pointer.
  */
-const CAUSTIC_THROW_RATIO = (ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z) / ATOMA_MARK_LAMP_Z;
+const CAUSTIC_REFERENCE_THROW = ATOMA_MARK_LAMP_Z + CAUSTIC_BASE_PLANE_DISTANCE;
+
+function finiteCrystalLift(crystalLift: number): number {
+  return Number.isFinite(crystalLift) && crystalLift > 0
+    ? crystalLift
+    : ATOMA_MARK_CRYSTAL_LIFT;
+}
 
 /**
- * The on-axis lamp-to-wall distance, in model units: the throw a cast has
- * when the pointer sits dead centre on the gem. `markCausticFalloff`
- * normalises against it, so the centred cast is unattenuated and every other
- * position is dimmer than it.
+ * Perspective cue for the object itself. The shipped lift remains restrained:
+ * 3× makes the crystal only 4% larger and keeps the wordmark intact. Beyond
+ * that point the experimental range accelerates, reaching a little over 2×
+ * apparent size at 20× so an extreme camera lift is actually inspectable.
  */
-const CAUSTIC_REFERENCE_THROW = ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z;
+export function markCrystalApparentScale(
+  crystalLift = ATOMA_MARK_CRYSTAL_LIFT
+): number {
+  const progress = Math.max(
+    0,
+    (finiteCrystalLift(crystalLift) - 1) / Math.max(ATOMA_MARK_CRYSTAL_LIFT - 1, 1e-4)
+  );
+  return 1 + Math.pow(progress, 1.5) * 0.04;
+}
+
+function finiteCrystalSize(crystalSize: number): number {
+  if (!Number.isFinite(crystalSize)) return ATOMA_MARK_CRYSTAL_SIZE;
+  return Math.min(
+    ATOMA_MARK_CRYSTAL_SIZE_MAX,
+    Math.max(ATOMA_MARK_CRYSTAL_SIZE_MIN, crystalSize)
+  );
+}
+
+/** Camera-derived growth and authored size stay independent, then meet here. */
+export function markCrystalDisplayScale(
+  crystalLift = ATOMA_MARK_CRYSTAL_LIFT,
+  crystalSize = ATOMA_MARK_CRYSTAL_SIZE
+): number {
+  return markCrystalApparentScale(crystalLift) * finiteCrystalSize(crystalSize);
+}
+
+function causticThrowRatio(crystalLift: number): number {
+  const planeDistance = CAUSTIC_BASE_PLANE_DISTANCE * finiteCrystalLift(crystalLift);
+  return (ATOMA_MARK_LAMP_Z + planeDistance) / ATOMA_MARK_LAMP_Z;
+}
 
 /**
  * How the cast dims as it is thrown further. The lamp is a point source, so
@@ -962,25 +1089,44 @@ const CAUSTIC_REFERENCE_THROW = ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z;
  *
  * Model units, lamp position relative to the gem's centre.
  */
-export function markCausticFalloff(lampX: number, lampY: number): number {
-  // Where the ray through the gem's centre lands, and how far it travelled.
-  const anchorX = lampX * (1 - CAUSTIC_THROW_RATIO);
-  const anchorY = lampY * (1 - CAUSTIC_THROW_RATIO);
-  const travel = Math.hypot(
-    anchorX - lampX,
-    anchorY - lampY,
-    CAUSTIC_REFERENCE_THROW
+export function markCausticFalloff(
+  lampX: number,
+  lampY: number,
+  crystalLift = ATOMA_MARK_CRYSTAL_LIFT
+): number {
+  // The ray from lamp -> gem centre is extrapolated by the SAME ratio the
+  // polygon uses. Its complete 3D length therefore scales by that ratio.
+  const travel = causticThrowRatio(crystalLift) * Math.hypot(
+    lampX,
+    lampY,
+    ATOMA_MARK_LAMP_Z
   );
   const ratio = CAUSTIC_REFERENCE_THROW / Math.max(travel, 1e-4);
   return clamp(ratio * ratio);
 }
 
+/**
+ * Art-directed exposure floor for extreme lifts. Inverse-square falloff still
+ * defines the physical cast, but beyond the shipped 3× distance its exposure
+ * is raised just enough to remain as legible as the 3× cast. Otherwise 20×
+ * carries only ~3.5% of that light and the much larger projection is nearly
+ * invisible on an opaque button. Lower lifts keep their naturally brighter
+ * result; `Light power` remains the user's final multiplier over both.
+ */
+export function markCausticExposureCompensation(
+  crystalLift = ATOMA_MARK_CRYSTAL_LIFT
+): number {
+  const shipped = markCausticFalloff(0, 0, ATOMA_MARK_CRYSTAL_LIFT);
+  const physical = markCausticFalloff(0, 0, crystalLift);
+  return Math.max(1, shipped / Math.max(physical, 1e-4));
+}
+
 export interface MarkCausticCast {
-  /** Projected silhouette polygon, convex, in the 28×28 local box. */
+  /** Four projected three-ray bundles, flattened as four consecutive triangles. */
   points: readonly AtomaMarkPoint[];
   /**
-   * 0..1 brightness at the wall: how much of the lamp couples into the glass,
-   * dimmed by how far the cast was thrown.
+   * 0..1 brightness at the wall: entry coupling after physical falloff and the
+   * shipped exposure floor used by extreme lifts.
    */
   intensity: number;
   /** Colour stained by the entry facet, same palette as the pools. */
@@ -988,26 +1134,23 @@ export interface MarkCausticCast {
 }
 
 /**
- * The crystal's CAST on the far field: its silhouette projected from the
- * pointer lamp onto the wall behind, drawn deformed — the caustic. Rays from
- * a lamp in front cross the shell twice (front table, rear table); the
- * converging glass lands each silhouette corner CLOSER to the refracted
- * centre-ray than the naive pinhole would, and that pull grows with grazing
- * entry, which is what makes the cast's shape follow the cursor instead of
- * remaining a translated copy of the gem.
+ * The crystal's CAST on the far field. This is intentionally NOT its projected
+ * silhouette: each camera-facing facet launches a three-ray bundle. Rays obey
+ * Snell at entry and exit, and total internal reflection is followed for up to
+ * four additional facet hits. The four strongest surviving bundles are sent to
+ * the shared field shader, where their overlap makes the caustic. That gives
+ * the receiver folds, gaps and concentrations that a diamond produces instead
+ * of a bright outline shaped like the object.
  *
- * Convex both before and after: the projection is affine per corner along
- * its own lamp ray, and the silhouette is the convex hull of the outer
- * poles, so the shader can test containment with cross products alone.
- *
- * The reported intensity is already dimmed by `markCausticFalloff`: a cast
- * thrown further is a cast further from a point source. Consumers scale it,
- * they never re-derive it.
+ * The reported intensity carries both `markCausticFalloff` and the shipped
+ * exposure floor for extreme lifts. Consumers apply the scene light power;
+ * they never re-derive either part of the crystal's transmission.
  */
 export function projectMarkCaustic(
   frame: AtomaMarkFrame,
   localX: number,
-  localY: number
+  localY: number,
+  crystalLift = ATOMA_MARK_CRYSTAL_LIFT
 ): MarkCausticCast | null {
   if (!Number.isFinite(localX) || !Number.isFinite(localY)) return null;
   const coupling = pointerEntryCoupling(frame, localX, localY);
@@ -1018,36 +1161,144 @@ export function projectMarkCaustic(
   const lampX = (localX - CENTER.x) / PROJECTION_SCALE;
   const lampY = (CENTER.y - localY) / PROJECTION_SCALE;
   const lampZ = ATOMA_MARK_LAMP_Z;
+  const lamp: MarkVec3 = [lampX, lampY, lampZ];
+  const receiverZ = -CAUSTIC_BASE_PLANE_DISTANCE * finiteCrystalLift(crystalLift);
+  const ior = ATOMA_MARK_DIAMOND_MATERIAL.ior;
+  // The mesh is a thin hollow shell, not a solid gemstone. Collapse its inner
+  // diamond→air and rear air→diamond pair into one effective exit ratio,
+  // weighted by shell thickness; using the solid's full 2.42 here traps almost
+  // every ray and models a different object.
+  const shellExitEta = 1 + (ior - 1) * ATOMA_MARK_THICKNESS / ATOMA_MARK_RADIUS;
 
-  // Where the lamp's ray through the gem's centre crosses the wall: the
-  // refracted axis the cast hangs from.
-  const s = CAUSTIC_THROW_RATIO;
-  const axisX = lampX * (1 - s);
-  const axisY = lampY * (1 - s);
+  const normalise = (value: MarkVec3): MarkVec3 => {
+    const length = Math.max(Math.hypot(...value), 1e-9);
+    return [value[0] / length, value[1] / length, value[2] / length];
+  };
+  const refract = (incident: MarkVec3, normal: MarkVec3, eta: number): MarkVec3 | null => {
+    const cosine = clamp(-dot(incident, normal), -1, 1);
+    const discriminant = 1 - eta * eta * (1 - cosine * cosine);
+    if (discriminant < 0) return null;
+    return normalise([
+      eta * incident[0] + (eta * cosine - Math.sqrt(discriminant)) * normal[0],
+      eta * incident[1] + (eta * cosine - Math.sqrt(discriminant)) * normal[1],
+      eta * incident[2] + (eta * cosine - Math.sqrt(discriminant)) * normal[2],
+    ]);
+  };
+  const trace = (sample: MarkVec3, entryFacet: number): AtomaMarkPoint | null => {
+    const entryNormal = frame.facets[entryFacet]!.normal;
+    const incident = normalise([
+      sample[0] - lamp[0], sample[1] - lamp[1], sample[2] - lamp[2],
+    ]);
+    let direction = refract(incident, entryNormal, 1 / ior);
+    if (!direction) return null;
+    let origin: MarkVec3 = [
+      sample[0] + direction[0] * 1e-4,
+      sample[1] + direction[1] * 1e-4,
+      sample[2] + direction[2] * 1e-4,
+    ];
 
-  // Entry inclination: a lamp straight ahead enters flat-on (convergence at
-  // full strength); one far to the side grazes and the lens barely bends.
-  const slope = Math.hypot(lampX, lampY) / lampZ;
-  const convergence = CAUSTIC_CONVERGENCE / (1 + slope * slope * 0.6);
+    for (let bounce = 0; bounce < 8; bounce += 1) {
+      let hitFacet = -1;
+      let hitDistance = Number.POSITIVE_INFINITY;
+      for (const [index, meshFacet] of ATOMA_MARK_MESH.facets.entries()) {
+        if (meshFacet.part !== 'outer') continue;
+        const facet = frame.facets[index]!;
+        const denominator = dot(facet.normal, direction);
+        if (denominator <= 1e-6) continue;
+        const plane = dot(facet.normal, facet.centroid);
+        const distance = (plane - dot(facet.normal, origin)) / denominator;
+        if (distance > 1e-5 && distance < hitDistance) {
+          hitDistance = distance;
+          hitFacet = index;
+        }
+      }
+      if (hitFacet < 0 || !Number.isFinite(hitDistance)) return null;
+      const hit: MarkVec3 = [
+        origin[0] + direction[0] * hitDistance,
+        origin[1] + direction[1] * hitDistance,
+        origin[2] + direction[2] * hitDistance,
+      ];
+      const outward = frame.facets[hitFacet]!.normal;
+      const exitDirection = refract(
+        direction,
+        [-outward[0], -outward[1], -outward[2]],
+        shellExitEta
+      );
+      if (exitDirection) {
+        if (exitDirection[2] >= -1e-5) return null;
+        const wallDistance = (receiverZ - hit[2]) / exitDirection[2];
+        if (!(wallDistance > 0) || !Number.isFinite(wallDistance)) return null;
+        const wallX = hit[0] + exitDirection[0] * wallDistance;
+        const wallY = hit[1] + exitDirection[1] * wallDistance;
+        return {
+          x: CENTER.x + wallX * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+          y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+        };
+      }
+      // Total internal reflection: remain inside and continue to the next face.
+      const reflectedDot = dot(direction, outward);
+      direction = normalise([
+        direction[0] - 2 * reflectedDot * outward[0],
+        direction[1] - 2 * reflectedDot * outward[1],
+        direction[2] - 2 * reflectedDot * outward[2],
+      ]);
+      origin = [
+        hit[0] + direction[0] * 1e-4,
+        hit[1] + direction[1] * 1e-4,
+        hit[2] + direction[2] * 1e-4,
+      ];
+    }
+    return null;
+  };
+  const leakedRay = (sample: MarkVec3, normal: MarkVec3): AtomaMarkPoint => {
+    // A polished diamond traps many exact geometric rays. A finite pointer
+    // source and the authored non-zero roughness still leak a cone around that
+    // ray; use its centroid when the ideal ray is totally trapped. The shift is
+    // derived from optical thickness and IOR, not from the silhouette.
+    const rayScale = (lampZ - receiverZ) / Math.max(lampZ - sample[2], 1e-4);
+    const prismShift = ATOMA_MARK_THICKNESS * (ior - 1) * rayScale;
+    const wallX = lampX + (sample[0] - lampX) * rayScale + normal[0] * prismShift;
+    const wallY = lampY + (sample[1] - lampY) * rayScale + normal[1] * prismShift;
+    return {
+      x: CENTER.x + wallX * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+      y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+    };
+  };
 
-  const corners: AtomaMarkPoint[] = [];
-  for (const point of frame.silhouette) {
-    // The silhouette corner back at the gem's centre depth (z=0): the 2D
-    // outline does not carry z, and the hull's extremes bound ±radius, so
-    // the centre plane is the shadow-outline approximation.
-    const modelX = (point.x - CENTER.x) / PROJECTION_SCALE;
-    const modelY = (CENTER.y - point.y) / PROJECTION_SCALE;
-    // Walk the ray lamp -> corner onto the wall behind.
-    let wallX = lampX + (modelX - lampX) * s;
-    let wallY = lampY + (modelY - lampY) * s;
-    // The converging glass pulls each corner toward the refracted axis.
-    wallX = axisX + (wallX - axisX) * convergence;
-    wallY = axisY + (wallY - axisY) * convergence;
-    corners.push(project([wallX, wallY, CAUSTIC_PLANE_Z]));
-  }
+  const bundles = ATOMA_MARK_MESH.facets.flatMap((meshFacet, facetIndex) => {
+    const facet = frame.facets[facetIndex]!;
+    if (meshFacet.part !== 'outer' || facet.normal[2] <= 0.02) return [];
+    const vertices = meshFacet.points.map((pointIndex) => frame.points[pointIndex]!);
+    const samples = vertices.map((vertex, vertexIndex): MarkVec3 => {
+      const otherA = vertices[(vertexIndex + 1) % 3]!;
+      const otherB = vertices[(vertexIndex + 2) % 3]!;
+      return [
+        vertex[0] * 0.72 + (otherA[0] + otherB[0]) * 0.14,
+        vertex[1] * 0.72 + (otherA[1] + otherB[1]) * 0.14,
+        vertex[2] * 0.72 + (otherA[2] + otherB[2]) * 0.14,
+      ];
+    });
+    const points = samples.map((sample) =>
+      trace(sample, facetIndex) ?? leakedRay(sample, facet.normal));
+    const entryRay = normalise([
+      facet.centroid[0] - lamp[0],
+      facet.centroid[1] - lamp[1],
+      facet.centroid[2] - lamp[2],
+    ]);
+    return [{
+      points,
+      score: clamp(-dot(entryRay, facet.normal)) * facet.normal[2],
+    }];
+  }).sort((left, right) => right.score - left.score).slice(0, 4);
+  if (bundles.length < 4) return null;
+  const corners = bundles.flatMap((bundle) => bundle.points);
   return {
     points: corners,
-    intensity: coupling.gemEnter * markCausticFalloff(lampX, lampY),
+    intensity: clamp(
+      coupling.gemEnter *
+      markCausticFalloff(lampX, lampY, crystalLift) *
+      markCausticExposureCompensation(crystalLift)
+    ),
     color: coupling.color,
   };
 }
@@ -1078,7 +1329,8 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     centroid: apply(rows, facet.centroid),
   }));
 
-  const core3 = bouncingCore(seconds, rows);
+  const coreMotion = bouncingCore(seconds, rows);
+  const core3 = coreMotion.position;
   const order = facets
     .map((_facet, index) => index)
     .sort((left, right) => facets[left]!.centroid[2] - facets[right]!.centroid[2]);
@@ -1125,6 +1377,9 @@ export function buildAtomaMarkFrame(elapsedMs: number): AtomaMarkFrame {
     corePosition: project(core3),
     coreDepth,
     coreScale: markPerspectiveAt(core3[2]),
+    coreImpact: coreMotion.impact,
+    coreDeformation: coreMotion.deformation,
+    coreDeformationAngle: coreMotion.deformationAngle,
     silhouette: convexHull(outerHull),
     pulse,
     scale: 1,

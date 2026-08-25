@@ -57,10 +57,27 @@ describe('core bead motion', () => {
     }
   });
 
-  it('moves further per second than the previous rate', () => {
-    // The ask was "faster"; this pins it against a silent revert to 0.52/0.37.
-    expect(ATOMA_MARK_CORE_SPEED_U).toBeGreaterThan(0.52);
-    expect(ATOMA_MARK_CORE_SPEED_V).toBeGreaterThan(0.37);
+  it('moves continuously and only deforms while contacting a wall', () => {
+    const frames = Array.from(
+      { length: 3_001 },
+      (_value, index) => buildAtomaMarkFrame(index * 10)
+    );
+    const steps = frames.slice(1).map((frame, index) => Math.hypot(
+      frame.core3[0] - frames[index]!.core3[0],
+      frame.core3[1] - frames[index]!.core3[1],
+      frame.core3[2] - frames[index]!.core3[2]
+    ));
+    const impactSteps = frames.slice(1).map((frame, index) =>
+      Math.abs(frame.coreImpact - frames[index]!.coreImpact));
+    expect(Math.max(...steps)).toBeLessThan(0.015);
+    expect(Math.max(...impactSteps)).toBeLessThan(0.08);
+    expect(frames.some((frame) => frame.coreImpact > 0.35)).toBe(true);
+    for (const frame of frames) {
+      expect(frame.coreImpact).toBeGreaterThanOrEqual(0);
+      expect(frame.coreImpact).toBeLessThanOrEqual(1);
+      expect(frame.coreDeformation[0]).toBeCloseTo(1 - frame.coreImpact * 0.18, 12);
+      expect(frame.coreDeformation[1]).toBeCloseTo(1 + frame.coreImpact * 0.11, 12);
+    }
   });
 
   it('keeps the bead inside the crystal at every sampled moment', () => {
@@ -73,5 +90,13 @@ describe('core bead motion', () => {
       const dy = frame.corePosition.y - 14;
       expect(Math.hypot(dx, dy), `at ${ms}ms`).toBeLessThan(8);
     }
+  });
+
+  it('lets gravity bias the long-term path toward the lower half', () => {
+    const meanViewY = Array.from(
+      { length: 6_001 },
+      (_value, index) => buildAtomaMarkFrame(index * 10).core3[1]
+    ).reduce((sum, y) => sum + y, 0) / 6_001;
+    expect(meanViewY).toBeLessThan(-0.03);
   });
 });

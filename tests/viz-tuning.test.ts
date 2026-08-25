@@ -22,6 +22,13 @@ import {
   POINTER_LIGHT_GLSL,
   POINTER_LIGHT_WGSL,
 } from '../src/viz/client-gl/renderer/shaders.js';
+import {
+  ATOMA_MARK_CRYSTAL_LIFT,
+  ATOMA_MARK_CRYSTAL_LIFT_MAX,
+  ATOMA_MARK_CRYSTAL_SIZE,
+  ATOMA_MARK_CRYSTAL_SIZE_MAX,
+  ATOMA_MARK_CRYSTAL_SIZE_MIN,
+} from '../src/viz/client-gl/brand-mark.js';
 
 describe('the tuning identity is the shipped look', () => {
   // This is the property the first version of this panel got wrong: it
@@ -32,6 +39,8 @@ describe('the tuning identity is the shipped look', () => {
     expect(TUNING_IDENTITY.buttonDepth).toBe(CAST_SHADOW_IDENTITY_DEPTH.button);
     expect(TUNING_IDENTITY.controlFrameDepth).toBe(CAST_SHADOW_IDENTITY_DEPTH.frame);
     expect(TUNING_IDENTITY.columnDepth).toBe(CAST_SHADOW_IDENTITY_DEPTH.column);
+    expect(TUNING_IDENTITY.crystalLift).toBe(ATOMA_MARK_CRYSTAL_LIFT);
+    expect(TUNING_IDENTITY.crystalSize).toBe(ATOMA_MARK_CRYSTAL_SIZE);
   });
 
   it('scales every surface class by exactly 1 at the identity', () => {
@@ -56,6 +65,13 @@ describe('the tuning identity is the shipped look', () => {
       expect(TUNING_IDENTITY[key], key).toBeGreaterThan(range.min);
       expect(TUNING_IDENTITY[key], key).toBeLessThan(range.max);
     }
+  });
+
+  it('leaves wide experimental headroom above the shipped crystal lift', () => {
+    expect(TUNING_RANGE.crystalLift.max).toBe(ATOMA_MARK_CRYSTAL_LIFT_MAX);
+    expect(TUNING_RANGE.crystalLift.step).toBeLessThanOrEqual(0.1);
+    expect(TUNING_RANGE.crystalSize.min).toBe(ATOMA_MARK_CRYSTAL_SIZE_MIN);
+    expect(TUNING_RANGE.crystalSize.max).toBe(ATOMA_MARK_CRYSTAL_SIZE_MAX);
   });
 
   it('recognises itself', () => {
@@ -126,6 +142,7 @@ describe('surfaceDepthScale lifts one stack without lifting the others', () => {
   it('leaves cards alone whatever the panel says', () => {
     const extreme: VizTuning = {
       lightHeight: 3, lightIntensity: 2, lightHue: 180,
+      crystalLift: 4, crystalSize: 2,
       buttonDepth: 4, controlFrameDepth: 4, columnDepth: 4,
     };
     expect(surfaceDepthScale('card', extreme)).toBe(1);
@@ -197,6 +214,7 @@ describe('normalizeTuning', () => {
     });
     expect(repaired.lightHue).toBe(TUNING_RANGE.lightHue.max);
     expect(repaired.buttonDepth).toBe(TUNING_IDENTITY.buttonDepth);
+    expect(repaired.crystalLift).toBe(TUNING_IDENTITY.crystalLift);
     expect(repaired.columnDepth).toBe(TUNING_IDENTITY.columnDepth);
   });
 

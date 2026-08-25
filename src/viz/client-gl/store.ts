@@ -210,6 +210,8 @@ export interface GpuUiState {
   accountMenuOpen: boolean;
   /** Floating scene controls, opened from the foot of the admin rail. */
   tuningPanelOpen: boolean;
+  /** Monotonic signal consumed by a sent announcement receipt only. */
+  announcementResetSignal: number;
   enter: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
@@ -334,6 +336,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   entered: initialEntered(),
   accountMenuOpen: false,
   tuningPanelOpen: initialTuningPanelOpen(),
+  announcementResetSignal: 0,
   enter: () => {
     try {
       if (typeof localStorage !== 'undefined') {
@@ -348,8 +351,19 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   closeAccountMenu: () => set({ accountMenuOpen: false }),
   toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),
   // Navigation closes the menu: an overlay anchored to the header must not
-  // survive the screen it was opened from.
-  setView: (view) => set({ view, focusedInput: null, accountMenuOpen: false }),
+  // survive the screen it was opened from. Re-activating Announcements also
+  // acknowledges its sent receipt; the form decides whether it is currently
+  // safe to consume that signal, so an in-progress draft remains untouched.
+  setView: (view) =>
+    set((state) => ({
+      view,
+      focusedInput: null,
+      accountMenuOpen: false,
+      announcementResetSignal:
+        state.view === 'announce' && view === 'announce'
+          ? state.announcementResetSignal + 1
+          : state.announcementResetSignal,
+    })),
   setLocale: (locale) => {
     try {
       if (typeof localStorage !== 'undefined') {

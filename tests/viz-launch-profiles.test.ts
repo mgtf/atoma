@@ -182,7 +182,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // Scaled FROM the frame, not pinned to a literal: the size is a design
     // value that moves, the "one crystal driven by buildAtomaMarkFrame" is the
     // contract this test exists to hold.
-    expect(atomaMarkDraw).toMatch(/crystal\.scale\.set\(frame\.scale \* /);
+    expect(atomaMarkDraw).toMatch(
+      /const scale = visualScale \* frame\.scale \* markCrystalDisplayScale\(/
+    );
+    expect(atomaMarkDraw).toMatch(/crystal\.scale\.set\(scale\)/);
     expect(atomaMarkDraw).toMatch(/buildAtomaMarkFrame\(/);
     expect(atomaMarkDraw).toMatch(/markElapsedMs\(/);
     expect(atomaMarkDraw).not.toMatch(/paint\(performance\.now\(\)\)/);

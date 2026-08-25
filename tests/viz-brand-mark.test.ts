@@ -2,10 +2,17 @@ import { describe, expect, it } from 'vitest';
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
+  ATOMA_MARK_CRYSTAL_LIFT,
+  ATOMA_MARK_CRYSTAL_LIFT_MAX,
+  ATOMA_MARK_CRYSTAL_SIZE_MAX,
+  ATOMA_MARK_CRYSTAL_SIZE_MIN,
   ATOMA_MARK_CAVITY_INRADIUS,
   ATOMA_MARK_CORE_RADIUS_PULSE,
   ATOMA_MARK_FACET_DEPTH_SPAN,
+  ATOMA_MARK_ACTIVE_MATERIALS,
+  ATOMA_MARK_ACTIVE_MAX_TRANSMIT,
   ATOMA_MARK_CAMERA_Z,
+  ATOMA_MARK_DIAMOND_MATERIAL,
   ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
@@ -35,9 +42,20 @@ import {
   markTurnDegreesFromElapsedMs,
   markTurnDegreesRounded,
   markCausticFalloff,
+  markCausticExposureCompensation,
+  markCrystalApparentScale,
+  markCrystalDisplayScale,
   projectMarkCaustic,
 } from '../src/viz/client-gl/brand-mark.js';
 import type { MarkOctant } from '../src/viz/client-gl/mark-geometry.js';
+import {
+  ATOMA_MARK_CORE_DISC_SEGMENTS,
+  ATOMA_MARK_HEADER_SCALE,
+} from '../src/viz/client-gl/renderer/atoma-mark.js';
+import { CAUSTIC_RIM_PX } from '../src/viz/client-gl/renderer/caustic-shader.js';
+import { sidebarLayout } from '../src/viz/client-gl/renderer/views/sidebar.js';
+import { welcomeLayout } from '../src/viz/client-gl/renderer/views/welcome.js';
+import { GPU_LAYOUT } from '../src/viz/client-gl/theme.js';
 
 interface Point {
   x: number;
@@ -238,9 +256,9 @@ describe('Atoma GPU brand mark', () => {
     ).toBeCloseTo(Math.PI / 2, 9);
   });
 
-  it('cuts each rank wedge from a different glass', () => {
-    // Four faces in the user's sense — a top triangle and its bottom twin —
-    // and four materials: obsidian, glass, crystal, diamond.
+  it('keeps the inactive four-material palette available for restoration', () => {
+    // The all-diamond presentation must not destroy the authored palette: a
+    // deliberate future restoration can reuse these measured coefficients.
     expect(Object.keys(ATOMA_MARK_RANK_MATERIALS).sort()).toEqual(
       ['cell', 'element', 'molecule', 'tissue']
     );
@@ -389,10 +407,17 @@ describe('Atoma GPU brand mark', () => {
     expect(worst).toBeLessThan(0.02);
   });
 
-  it('gives a rank the same glass on both of its triangles', () => {
-    // Material follows the rank, so the top facet and the bottom facet of one
-    // wedge are the same glass while their colours differ. Colour is taxonomy;
-    // material is surface. Neither may start speaking for the other.
+  it('gives every crystal face the one active diamond material', () => {
+    // Material is uniformly diamond while rank colour remains taxonomy. The
+    // selector is shared by the GPU shell and CPU light spills, and the active
+    // map contains no archived glass that could leak into one path.
+    expect(Object.keys(ATOMA_MARK_ACTIVE_MATERIALS).sort()).toEqual(
+      ['cell', 'element', 'molecule', 'tissue']
+    );
+    expect(new Set(Object.values(ATOMA_MARK_ACTIVE_MATERIALS)))
+      .toEqual(new Set([ATOMA_MARK_DIAMOND_MATERIAL]));
+    expect(ATOMA_MARK_ACTIVE_MAX_TRANSMIT)
+      .toBe(ATOMA_MARK_DIAMOND_MATERIAL.transmit);
     const octants: MarkOctant[] = [
       [1, 1, 1], [1, 1, -1], [1, -1, 1], [1, -1, -1],
       [-1, 1, 1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1],
@@ -400,13 +425,14 @@ describe('Atoma GPU brand mark', () => {
     for (const octant of octants) {
       const twin: MarkOctant = [octant[0], octant[1] === 1 ? -1 : 1, octant[2]];
       expect(markMaterialForOctant(octant), octant.join(','))
-        .toBe(markMaterialForOctant(twin));
+        .toBe(ATOMA_MARK_DIAMOND_MATERIAL);
+      expect(markMaterialForOctant(twin), twin.join(','))
+        .toBe(ATOMA_MARK_DIAMOND_MATERIAL);
       expect(markColorForOctant(octant)).not.toBe(markColorForOctant(twin));
     }
-    // All four glasses actually reach the mesh.
-    expect(new Set(
-      ATOMA_MARK_MESH.facets.map((facet) => markMaterialForOctant(facet.octant).glass)
-    )).toHaveLength(4);
+    expect(new Set(ATOMA_MARK_MESH.facets.map(
+      (facet) => markMaterialForOctant(facet.octant).glass
+    ))).toEqual(new Set(['diamond']));
   });
 
   it('keeps the whole bead inside the outline it lights', () => {
@@ -428,7 +454,8 @@ describe('Atoma GPU brand mark', () => {
     // a near bead is larger, and that larger disc still has to fit.
     for (const frame of frames) {
       const drawn =
-        ATOMA_MARK_CORE_RADIUS * frame.coreScale * (1 + frame.pulse * 0.035);
+        ATOMA_MARK_CORE_RADIUS * frame.coreScale * (1 + frame.pulse * 0.035) *
+        Math.max(...frame.coreDeformation);
       expect(distanceFromHull(frame.corePosition, frame.silhouette))
         .toBeGreaterThan(drawn);
     }
@@ -466,6 +493,28 @@ describe('Atoma GPU brand mark', () => {
       ((x > xs[index - 1]! && x > xs[index + 1]!) ||
        (x < xs[index - 1]! && x < xs[index + 1]!)));
     expect(reversals.length).toBeGreaterThan(2);
+  });
+
+  it('keeps the enlarged welcome bead geometrically round', () => {
+    // Pixi chooses circle tessellation from the sub-unit LOCAL radius, before
+    // the welcome gate enlarges it. Pin the explicit polygon against the real
+    // largest hero scale at DPR 2: its midpoint must deviate by < 0.1px from a
+    // mathematical circle, so no polygon corner can read as a spike.
+    const hero = welcomeLayout(1920, 1080);
+    let largestScale = 0;
+    for (let elapsedMs = 0; elapsedMs <= ATOMA_MARK_TURN_MS; elapsedMs += 20) {
+      const frame = buildAtomaMarkFrame(elapsedMs);
+      largestScale = Math.max(
+        largestScale,
+        frame.scale * frame.coreScale * (1 + frame.pulse * 0.035)
+      );
+    }
+    const physicalRadius = ATOMA_MARK_CORE_RADIUS * hero.scale * 2 * largestScale;
+    const radialError = physicalRadius * (
+      1 - Math.cos(Math.PI / ATOMA_MARK_CORE_DISC_SEGMENTS)
+    );
+    expect(ATOMA_MARK_CORE_DISC_SEGMENTS).toBeGreaterThanOrEqual(64);
+    expect(radialError).toBeLessThan(0.1);
   });
 
   it('publishes the silhouette the renderer clips the light with', () => {
@@ -704,20 +753,20 @@ describe('Atoma GPU brand mark', () => {
     }
   });
 
-  it('casts the gem silhouette onto the field, deformed by the lamp position', () => {
+  it('casts two independently refracted facet bundles onto the field', () => {
     const frame = buildAtomaMarkFrame(0);
-    // Lamp straight ahead: coupling on, cast exists, same corner count.
-    const centre = projectMarkCaustic(frame, 14, 14);
+    // Lamp straight ahead: coupling on, four three-ray bundles survive.
+    const centre = projectMarkCaustic(frame, 14, 14, 1);
     expect(centre).not.toBeNull();
-    expect(centre!.points.length).toBe(frame.silhouette.length);
+    expect(centre!.points.length).toBe(12);
     expect(centre!.intensity).toBeGreaterThan(0.5);
     // Far away, no coupling: no cast at all.
-    expect(projectMarkCaustic(frame, 80, 80)).toBeNull();
+    expect(projectMarkCaustic(frame, 80, 80, 1)).toBeNull();
 
     // A lamp off-centre pulls the cast OFF the gem's own footprint, to the
     // side OPPOSITE the lamp — the same side a shadow falls on, which is
     // where a converging lens puts the real image of an off-axis source.
-    const off = projectMarkCaustic(frame, 14 + 6, 14 - 4);
+    const off = projectMarkCaustic(frame, 14 + 6, 14 - 4, 1);
     expect(off).not.toBeNull();
     const centroid = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) => {
       const sum = cast.points.reduce(
@@ -733,16 +782,15 @@ describe('Atoma GPU brand mark', () => {
     expect(shifted.x).toBeLessThan(straight.x);
     expect(shifted.y).toBeGreaterThan(straight.y);
 
-    // Convergence: the cast is SMALLER than the naive pinhole silhouette
-    // (weak positive lens), never larger.
-    const radius = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) =>
-      Math.max(...cast.points.map((p) => Math.hypot(p.x - 14, p.y - 14)));
-    const naive = frame.silhouette.reduce(
-      (max, p) => Math.max(max, Math.hypot(p.x - 14, p.y - 14)),
-      0
-    );
-    expect(radius(centre!)).toBeLessThan(naive * 1.15);
-    expect(radius(centre!)).toBeGreaterThan(0);
+    const triangleCentroid = (points: readonly Point[]) => ({
+      x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+      y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+    });
+    const bundleCentres = [0, 3, 6, 9].map((start) =>
+      triangleCentroid(centre!.points.slice(start, start + 3)));
+    expect(Math.max(...bundleCentres.slice(1).map((point) =>
+      Math.hypot(point.x - bundleCentres[0]!.x, point.y - bundleCentres[0]!.y)
+    ))).toBeGreaterThan(1);
   });
 
   it('dims the cast by the distance it was thrown', () => {
@@ -750,22 +798,70 @@ describe('Atoma GPU brand mark', () => {
     // square of the distance it travelled. Sliding the pointer off the gem's
     // centre lengthens that travel, which is why the diamond fades as it
     // slides away instead of staying an equally bright patch.
-    expect(markCausticFalloff(0, 0)).toBeCloseTo(1);
-    const near = markCausticFalloff(0.5, 0);
-    const far = markCausticFalloff(1.5, 0);
+    expect(markCausticFalloff(0, 0, 1)).toBeCloseTo(1);
+    const near = markCausticFalloff(0.5, 0, 1);
+    const far = markCausticFalloff(1.5, 0, 1);
     expect(near).toBeLessThan(1);
     expect(far).toBeLessThan(near);
     expect(far).toBeGreaterThan(0);
     // Radially symmetric: only how far, never which way.
-    expect(markCausticFalloff(0, 1.5)).toBeCloseTo(far);
-    expect(markCausticFalloff(-1.5, 0)).toBeCloseTo(far);
+    expect(markCausticFalloff(0, 1.5, 1)).toBeCloseTo(far);
+    expect(markCausticFalloff(-1.5, 0, 1)).toBeCloseTo(far);
 
     // And the published cast carries it: the same coupling thrown further is
     // a dimmer cast, so a consumer never re-derives the falloff.
     const frame = buildAtomaMarkFrame(0);
-    const straight = projectMarkCaustic(frame, 14, 14)!;
-    const sideways = projectMarkCaustic(frame, 14 + 9, 14)!;
+    const straight = projectMarkCaustic(frame, 14, 14, 1)!;
+    const sideways = projectMarkCaustic(frame, 14 + 9, 14, 1)!;
     expect(sideways.intensity).toBeLessThan(straight.intensity);
+  });
+
+  it('lifts the compact crystal far enough for its cast rim to reach Projects', () => {
+    const frame = buildAtomaMarkFrame(0);
+    const lifts = [1, 2, ATOMA_MARK_CRYSTAL_LIFT];
+    const casts = lifts.map((lift) => projectMarkCaustic(frame, 20, 8, lift)!);
+    const maxY = casts.map((cast) => Math.max(...cast.points.map((point) => point.y)));
+
+    expect(maxY[1]).toBeGreaterThan(maxY[0]!);
+    expect(maxY[2]).toBeGreaterThan(maxY[1]!);
+    expect(casts[1]!.intensity).toBeLessThan(casts[0]!.intensity);
+    expect(casts[2]!.intensity).toBeLessThan(casts[1]!.intensity);
+    expect(projectMarkCaustic(frame, 20, 8)).toEqual(casts[2]);
+
+    const projectRow = sidebarLayout(['projects']).find(
+      (row) => row.kind === 'item' && row.view === 'projects'
+    );
+    expect(projectRow).toBeDefined();
+    const headerCentreY = GPU_LAYOUT.headerHeight / 2;
+    const castBottom = headerCentreY +
+      (maxY[2]! - 14) * ATOMA_MARK_HEADER_SCALE *
+      markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT);
+    expect(castBottom + CAUSTIC_RIM_PX, 'the refracted bundles reach the Projects surface')
+      .toBeGreaterThanOrEqual(projectRow!.y);
+    expect(ATOMA_MARK_HEADER_SCALE * markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT))
+      .toBeLessThan(1.9);
+    expect(markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT_MAX))
+      .toBeGreaterThan(markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT) * 2);
+
+    const fittedSize = markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT) /
+      markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT_MAX);
+    expect(fittedSize).toBeGreaterThan(ATOMA_MARK_CRYSTAL_SIZE_MIN);
+    expect(fittedSize).toBeLessThan(ATOMA_MARK_CRYSTAL_SIZE_MAX);
+    expect(markCrystalDisplayScale(ATOMA_MARK_CRYSTAL_LIFT_MAX, fittedSize))
+      .toBeCloseTo(markCrystalApparentScale(ATOMA_MARK_CRYSTAL_LIFT));
+  });
+
+  it('keeps an extreme-lift cast exposed strongly enough to light the UI', () => {
+    const frame = buildAtomaMarkFrame(0);
+    const shipped = projectMarkCaustic(frame, 20, 8, ATOMA_MARK_CRYSTAL_LIFT)!;
+    const extreme = projectMarkCaustic(frame, 20, 8, ATOMA_MARK_CRYSTAL_LIFT_MAX)!;
+
+    expect(markCausticExposureCompensation(ATOMA_MARK_CRYSTAL_LIFT)).toBe(1);
+    expect(markCausticExposureCompensation(ATOMA_MARK_CRYSTAL_LIFT_MAX))
+      .toBeGreaterThan(20);
+    expect(extreme.intensity).toBeCloseTo(shipped.intensity);
+    expect(Math.max(...extreme.points.map((point) => point.y)))
+      .toBeGreaterThan(Math.max(...shipped.points.map((point) => point.y)));
   });
 
   it('parks the pointer lamp in front of the gem, not on its surface', () => {

@@ -938,7 +938,7 @@ try {
           // before its provider picture arrives, so it is the one to prove.
           avatarUrl: null,
           role: 'org:owner',
-          platformAdmin: false,
+          platformAdmin: true,
           activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
           organisations: [
             { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
@@ -957,7 +957,7 @@ try {
               displayName: 'Ada Lovelace',
               role: 'org:owner',
               joinedAt: '2026-08-01T10:00:00.000Z',
-              platformAdmin: false,
+              platformAdmin: true,
               avatarUrl: null,
             },
           ],
@@ -1010,6 +1010,15 @@ try {
           },
         ],
         '/api/github/installations': [],
+        '/api/admin/announce/draft': {
+          translated: true,
+          reason: null,
+          texts: {
+            en: { title: 'Smoke announcement', body: 'Exercise the active rail reset.' },
+            fr: { title: 'Annonce smoke', body: 'Exercer le reset du rail actif.' },
+          },
+        },
+        '/api/admin/announce': { segment: 'all', orgCount: null },
       };
       accountPage.on('request', (request) => {
         const path = new URL(request.url()).pathname;
@@ -1174,6 +1183,54 @@ try {
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
       const afterTab = await targetIds();
       const meshesAfterTab = await countScene();
+
+      // THE ACTIVE ADMIN-NAV REPRO. After a send, Announcements is already the
+      // selected rail destination; clicking it again must reset the receipt to
+      // the empty composer. A DOM-tab test cannot prove the Pixi pointertap
+      // path the user actually clicks, so drive the real hit target here.
+      await clickAccountTarget('nav.announce');
+      await accountPage.waitForSelector('.gpu-announce-form input[aria-label="Title — English"]', {
+        timeout: READY_TIMEOUT_MS,
+      });
+      await accountPage.type(
+        '.gpu-announce-form input[aria-label="Title — English"]',
+        'Smoke announcement'
+      );
+      await accountPage.type(
+        '.gpu-announce-form textarea[aria-label="Message — English"]',
+        'Exercise the active rail reset.'
+      );
+      const clickAnnouncementButton = async (label) => {
+        const clicked = await accountPage.evaluate((wanted) => {
+          const button = [...document.querySelectorAll('.gpu-announce-form button')]
+            .find((candidate) => candidate.textContent?.trim() === wanted);
+          if (!(button instanceof HTMLButtonElement)) return false;
+          button.click();
+          return true;
+        }, label);
+        if (!clicked) throw new Error(`account scenario: announcement button ${label} missing`);
+      };
+      const waitForAnnouncementButton = (label) =>
+        accountPage.waitForFunction(
+          (wanted) => [...document.querySelectorAll('.gpu-announce-form button')]
+            .some((candidate) => candidate.textContent?.trim() === wanted),
+          { timeout: READY_TIMEOUT_MS },
+          label
+        );
+      await clickAnnouncementButton('Translate');
+      await waitForAnnouncementButton('Send');
+      await clickAnnouncementButton('Send');
+      await waitForAnnouncementButton('Confirm — this cannot be recalled');
+      await clickAnnouncementButton('Confirm — this cannot be recalled');
+      await accountPage.waitForSelector('.gpu-announce-form [role="status"]', {
+        timeout: READY_TIMEOUT_MS,
+      });
+      await clickAccountTarget('nav.announce');
+      await waitForAnnouncementButton('Translate');
+      const announcementReset = await accountPage.evaluate(() => ({
+        receipt: document.querySelector('.gpu-announce-form [role="status"]')?.textContent ?? null,
+        title: document.querySelector('.gpu-announce-form input')?.value ?? null,
+      }));
       accountStats = {
         boundedProjectCopy,
         withOrb,
@@ -1182,6 +1239,7 @@ try {
         meshes,
         afterTab,
         meshesAfterTab,
+        announcementReset,
       };
     } finally {
       await accountPage.close();
@@ -1227,6 +1285,10 @@ try {
       // the Settings one is swept: exactly one mesh, and the control with it.
       !accountHas(accountStats.afterTab, 'account.menu.toggle') ||
       accountStats.meshesAfterTab.orbs !== 1 ||
+      // The ACTIVE canvas destination itself returned the sent receipt to a
+      // fresh composer; neither stale success copy nor stale title survived.
+      accountStats.announcementReset.receipt !== null ||
+      accountStats.announcementReset.title !== '' ||
       // A shader that failed to compile surfaces here and nowhere else.
       accountDiagnostics.length > 0
     ) {
@@ -1238,11 +1300,12 @@ try {
         meshes: accountStats.meshes,
         afterTab: accountStats.afterTab.filter((id) => id.startsWith('account.')),
         meshesAfterTab: accountStats.meshesAfterTab,
+        announcementReset: accountStats.announcementReset,
         accountDiagnostics,
       })}`);
     }
     console.log(
-      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, header orb survived the tab change`
+      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, header orb survived the tab change, active Announcements reset its receipt`
     );
 
     // A LIVE run's polling must not rebuild the GPU scene when nothing

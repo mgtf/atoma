@@ -493,6 +493,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     entered: true,
     accountMenuOpen: false,
     tuningPanelOpen: false,
+    announcementResetSignal: 0,
     enter: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,

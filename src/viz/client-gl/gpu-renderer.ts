@@ -35,6 +35,7 @@ import {
   ATOMA_MARK_LOCAL_CENTER,
   attachAtomaMark,
   type AtomaMarkHandle,
+  type AtomaMarkOptions,
 } from './renderer/atoma-mark.js';
 import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
 import {
@@ -621,11 +622,14 @@ export class GpuRenderer {
     );
     for (let index = 0; index < this.pointerCausticSlots.length; index += 1) {
       const slot = this.pointerCausticSlots[index]!;
-      const corner = cast?.corners[index];
+      const first = cast?.corners[index * 2];
+      const second = cast?.corners[index * 2 + 1];
       // No cast parks the slots meaninglessly; the intensity below is the
       // guard that actually turns the shape off.
-      slot[0] = corner?.x ?? -1e6;
-      slot[1] = corner?.y ?? -1e6;
+      slot[0] = first?.x ?? -1e6;
+      slot[1] = first?.y ?? -1e6;
+      slot[2] = second?.x ?? -1e6;
+      slot[3] = second?.y ?? -1e6;
     }
     uniforms.uCausticColor[0] = cast?.r ?? 0;
     uniforms.uCausticColor[1] = cast?.g ?? 0;
@@ -667,12 +671,12 @@ export class GpuRenderer {
           // The crystal's cast. Declaration order is load-bearing: Pixi
           // derives the UBO layout from it and the WGSL struct restates the
           // same order by hand.
-          uCaustic0: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic1: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic2: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic3: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic4: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
-          uCaustic5: { value: new Float32Array([-1e6, -1e6]), type: 'vec2<f32>' },
+          uCaustic0: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic1: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic2: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic3: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic4: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
+          uCaustic5: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
           uCausticColor: { value: new Float32Array(4), type: 'vec4<f32>' },
         },
       },
@@ -3201,7 +3205,7 @@ export class GpuRenderer {
   }
 
   private drawAtomaMark(x: number, y: number) {
-    this.retainAtomaMark(x, y);
+    this.retainAtomaMark(x, y, undefined, { tunableCrystal: true });
   }
 
   /**
@@ -3214,7 +3218,7 @@ export class GpuRenderer {
     x: number,
     y: number,
     visualScale?: number,
-    options?: { bobPx?: number; bobPeriodMs?: number }
+    options?: AtomaMarkOptions
   ) {
     const key = [
       x,
@@ -3222,6 +3226,7 @@ export class GpuRenderer {
       visualScale ?? '',
       options?.bobPx ?? '',
       options?.bobPeriodMs ?? '',
+      options?.tunableCrystal ? 'crystal' : '',
       this.app.renderer.resolution,
     ].join('|');
     if (this.atomaMark?.key === key) {

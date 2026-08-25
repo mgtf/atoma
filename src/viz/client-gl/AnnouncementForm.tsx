@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   ANNOUNCEMENT_BODY_MAX,
@@ -31,9 +31,13 @@ const EMPTY = { title: '', body: '' };
 export function AnnouncementForm({
   t,
   locale,
+  resetSignal = 0,
 }: {
   t: (key: string, vars?: Record<string, unknown>) => string;
   locale: Locale;
+  /** A re-activation of the active Announcements destination. Only a sent
+   *  receipt consumes it; an in-progress message must never be erased. */
+  resetSignal?: number;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>('compose');
@@ -45,6 +49,19 @@ export function AnnouncementForm({
   const [untranslated, setUntranslated] = useState<'unavailable' | 'failed' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<number | null>(null);
+  const previousResetSignal = useRef(resetSignal);
+
+  useEffect(() => {
+    const changed = previousResetSignal.current !== resetSignal;
+    previousResetSignal.current = resetSignal;
+    if (!changed || phase !== 'sent') return;
+    setPhase('compose');
+    setSegment('all');
+    setTexts({ [locale]: { ...EMPTY } });
+    setUntranslated(null);
+    setError(null);
+    setSentTo(null);
+  }, [locale, phase, resetSignal]);
 
   const source = texts[locale] ?? EMPTY;
   const composed = source.title.trim().length > 0 && source.body.trim().length > 0;
