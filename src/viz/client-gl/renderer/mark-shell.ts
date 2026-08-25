@@ -134,8 +134,9 @@ export const MARK_SHELL_UNIFORMS = [
   { name: 'uCoreIntensity', type: 'f32' },
   { name: 'uAmbient', type: 'f32' },
   { name: 'uPulse', type: 'f32' },
-  // The volume the diamond is made OF: the wall's own depth, the shortest path
-  // any facet can present, and the scene-density calibration over that path.
+  // The volume the four glasses are made OF: the wall's own depth, the shortest
+  // path any facet can present, and plain glass's opacity over that path — the
+  // reference every material is read against.
   { name: 'uWall', type: 'f32' },
   { name: 'uMinPath', type: 'f32' },
   { name: 'uOpacityRef', type: 'f32' },
@@ -157,8 +158,9 @@ export const MARK_SHELL_UNIFORMS = [
   // `setRefracting`. Both shells share this shader, so without the switch the
   // back facets sample the texture they are being drawn into.
   { name: 'uRefractOn', type: 'f32' },
-  // Scene-wide scales for the two Schlick terms. The active diamond coefficients
-  // decide the physical response; these only set how loud it is in this studio.
+  // Scene-wide scales for the two Schlick terms. The MATERIAL decides the
+  // ratios between the four glasses; these only set how loud that whole family
+  // is against the dark field, and neither may vary per material.
   { name: 'uSpecular', type: 'f32' },
   { name: 'uRim', type: 'f32' },
   { name: 'uLocalSize', type: 'f32' },
@@ -195,13 +197,10 @@ export const MARK_SHELL_UNIFORMS = [
  * pixels; a 3px ceiling there is a rounding error and the interior does not
  * shear at all.
  */
-// A visible but still coherent diamond fringe. The previous 2.4/0.0045 values
-// were too restrained once the unit bug was fixed; these keep the hero below a
-// 9px physical half-spread instead of returning to the former ~100px split.
-const CHROMATIC_SPLIT_FLOOR_PX = 3;
+const CHROMATIC_SPLIT_FLOOR_PX = 2.4;
 const REFRACTION_BEND_FLOOR_PX = 5.5;
 const REFRACTION_MAX_BEND_FLOOR_PX = 3;
-const CHROMATIC_SPLIT_FRACTION = 0.009;
+const CHROMATIC_SPLIT_FRACTION = 0.0045;
 const REFRACTION_BEND_FRACTION = 0.038;
 const REFRACTION_MAX_BEND_FRACTION = 0.024;
 
@@ -217,24 +216,6 @@ export function refractionForBackdrop(widthPx: number): {
     bend: Math.max(REFRACTION_BEND_FLOOR_PX, width * REFRACTION_BEND_FRACTION),
     maxBend: Math.max(REFRACTION_MAX_BEND_FLOOR_PX, width * REFRACTION_MAX_BEND_FRACTION),
   };
-}
-
-/**
- * Chromatic half-spread after the refraction bend has been clamped, in backdrop
- * pixels. Bend and split are both distances, so bend must be normalised by its
- * ceiling before it scales split. Multiplying the two directly made a 9px
- * diamond fringe become a 100px RGB triple-image on the welcome hero.
- */
-export function chromaticSpreadPx(
-  bendPx: number,
-  maxBendPx: number,
-  splitPx: number,
-  dispersion: number
-): number {
-  const ceiling = Math.max(Math.abs(maxBendPx), 1e-4);
-  const bend = Math.min(Math.max(Math.abs(bendPx), 0), ceiling);
-  const materialDispersion = Math.min(Math.max(dispersion, 0), 1);
-  return bend / ceiling * Math.max(splitPx, 0) * materialDispersion;
 }
 
 /** Initial value per uniform, built fresh per shell so buffers are not shared. */
@@ -349,8 +330,8 @@ export function createMarkShell(): MarkShell | null {
   const normals = new Float32Array(VERTEX_COUNT * 3);
   const tints = new Float32Array(VERTEX_COUNT * 3);
   const surfaces = new Float32Array(VERTEX_COUNT * 2);
-  // One diamond response on every face. Written ONCE: material is a property
-  // of the crystal, not of the frame, so these buffers are never touched again.
+  // The four glasses. Written ONCE: a rank's material is a property of the
+  // crystal, not of the frame, so these buffers are never touched again.
   const materials = new Float32Array(VERTEX_COUNT * 4);
   const finishes = new Float32Array(VERTEX_COUNT * 3);
   const bary = new Float32Array(VERTEX_COUNT * 3);

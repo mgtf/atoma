@@ -1,13 +1,5 @@
-import {
-  ATOMA_MARK_CRYSTAL_LIFT,
-  ATOMA_MARK_CRYSTAL_LIFT_MAX,
-  ATOMA_MARK_CRYSTAL_SIZE,
-  ATOMA_MARK_CRYSTAL_SIZE_MAX,
-  ATOMA_MARK_CRYSTAL_SIZE_MIN,
-} from './brand-mark.js';
-
 /**
- * Live scene tuning: the eight knobs the tuning panel exposes, as PURE data.
+ * Live scene tuning: the six knobs the tuning panel exposes, as PURE data.
  *
  * Every value is a MULTIPLIER over what the scene already renders, and
  * `TUNING_IDENTITY` is the point where every multiplier is neutral. That is
@@ -37,10 +29,6 @@ export interface VizTuning {
   lightIntensity: number;
   /** Degrees of hue rotation applied to the light's colour. 0 keeps the blue. */
   lightHue: number;
-  /** Virtual distance between the header crystal and the pixel-locked UI plane. */
-  crystalLift: number;
-  /** Independent multiplier over the crystal's perspective-derived apparent size. */
-  crystalSize: number;
   /** How far a button stands off the frame that groups it. */
   buttonDepth: number;
   /** How far that group frame stands off the column behind it. */
@@ -59,8 +47,6 @@ export const TUNING_IDENTITY: VizTuning = {
   lightHeight: 1,
   lightIntensity: 1,
   lightHue: 0,
-  crystalLift: ATOMA_MARK_CRYSTAL_LIFT,
-  crystalSize: ATOMA_MARK_CRYSTAL_SIZE,
   buttonDepth: 1,
   controlFrameDepth: 0.8,
   columnDepth: 1,
@@ -85,20 +71,6 @@ export const TUNING_RANGE: Readonly<Record<keyof VizTuning, TuningRange>> = {
   lightHeight: { min: 0.3, max: 3, step: 0.05, label: 'Light height', unit: '×' },
   lightIntensity: { min: 0, max: 2.5, step: 0.05, label: 'Light power', unit: '×' },
   lightHue: { min: -180, max: 180, step: 1, label: 'Light hue', unit: '°' },
-  crystalLift: {
-    min: 0.5,
-    max: ATOMA_MARK_CRYSTAL_LIFT_MAX,
-    step: 0.1,
-    label: 'Crystal lift',
-    unit: '×',
-  },
-  crystalSize: {
-    min: ATOMA_MARK_CRYSTAL_SIZE_MIN,
-    max: ATOMA_MARK_CRYSTAL_SIZE_MAX,
-    step: 0.01,
-    label: 'Crystal size',
-    unit: '×',
-  },
   buttonDepth: { min: 0, max: 4, step: 0.05, label: 'Button lift', unit: '×' },
   controlFrameDepth: { min: 0, max: 4, step: 0.05, label: 'Group frame lift', unit: '×' },
   columnDepth: { min: 0, max: 4, step: 0.05, label: 'Column lift', unit: '×' },

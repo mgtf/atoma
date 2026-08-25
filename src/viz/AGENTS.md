@@ -145,31 +145,11 @@ npm run viz:mark-turn:analyze
 - Pixi objects draw local geometry at local origin, then position the object.
   Avoid double-offset hit targets.
 - The brand mark is a single Pixi crystal using teal/amber/violet faces, dynamic
-  relighting, reduced-motion support, and no overlapping R3F logo. Every live
-  face uses `ATOMA_MARK_ACTIVE_MATERIALS` and is diamond; the former four-glass
-  palette is inactive reference data kept only for an explicit restoration.
-  Its core motion is deterministic inertial drift with a slight gravity bias:
-  `brand-mark.ts` reflects it on the octahedral cavity planes and publishes the
-  impact squash/stretch pose; the renderer only applies that pose.
-  The interior ping-pong backdrop is sized in physical renderer pixels. Diamond
-  dispersion is bounded in those same pixels: normalise bend by `uMaxBend`
-  before applying `uSplit`, or the arrival hero separates one bead into three.
-- The gem's CAST is FOUR facet ray bundles on TWO surfaces — the far-field mesh
-  behind the UI and the pointer-light stage filter over it, so it crosses
-  buttons and frames instead of stopping at the backdrop. `brand-mark.ts`
-  traces Snell entry/exit and total internal reflection through the thin shell;
-  the shared shader reconstructs each bundle as CURVED fold filaments —
-  quadratic arcs bowed toward the centroid with doubled cusps, over a faint
-  interior fill, brightness riding beam compression (inverse footprint area),
-  spatially culled per bundle (99 samples per facet, 396 in all) — as additive
-  refraction plus multiplicative translucent shadow. Sampling the bundle's
-  straight edges is banned too: it draws the transport triangle on the wall.
-  Never replace them with filled triangles or the gem's
-  projected silhouette: that is a stencil, not a diamond caustic.
-  `projectMarkCaustic` alone derives
-  its pixel-locked receiver throw, inverse-square falloff and shipped exposure
-  floor from Crystal lift;
-  `packMarkCaustic` alone writes its corners,
+  relighting, reduced-motion support, and no overlapping R3F logo.
+- The gem's CAST is ONE polygon on TWO surfaces — the far-field mesh behind the
+  UI and the pointer-light stage filter over it, so it crosses buttons and
+  frames instead of stopping at the backdrop. `projectMarkCaustic` alone derives
+  its throw falloff, `packMarkCaustic` alone writes its corners,
   `renderer/caustic-shader.ts` alone tests containment, in GLSL kept ES 1.00-legal.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
@@ -329,9 +309,6 @@ npm run viz:mark-turn:analyze
   window's visibility, and its DOM layer sits above view forms. Title-bar
   dragging clamps the complete window inside the viewport; slider values stay
   in the mutable live sample so pointer motion never rebuilds the GPU scene.
-  Crystal lift and Crystal size are read by the retained header mark's ticker
-  and never enter its retention key as live values; the arrival mark keeps its
-  authored depth and size.
 - The project form is ONE form with TWO shapes, never one that grows: the
   create fields with no project selected, the run prompt with one. A selected
   project's name owns the page title (`Project : <name>`) and is NOT repeated

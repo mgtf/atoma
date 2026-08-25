@@ -109,19 +109,11 @@ describe('full-GL minimal DOM bridge', () => {
     useGpuStore.setState({ tuningPanelOpen: true });
     render(createElement(SceneTuningPanel));
     expect(screen.getByLabelText('Scene tuning')).toHaveClass('gpu-panel-skin');
-    expect(screen.getAllByRole('slider')).toHaveLength(8);
+    expect(screen.getAllByRole('slider')).toHaveLength(6);
     fireEvent.change(screen.getByRole('slider', { name: 'Light hue' }), {
       target: { value: '45' },
     });
     expect(readTuning().lightHue).toBe(45);
-    fireEvent.change(screen.getByRole('slider', { name: 'Crystal lift' }), {
-      target: { value: '3.5' },
-    });
-    expect(readTuning().crystalLift).toBe(3.5);
-    fireEvent.change(screen.getByRole('slider', { name: 'Crystal size' }), {
-      target: { value: '0.48' },
-    });
-    expect(readTuning().crystalSize).toBe(0.48);
   });
 
   it('exposes Continue on the arrival gate and admits the chrome', async () => {

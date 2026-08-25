@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  chromaticSpreadPx,
   MARK_SHELL_ATTRIBUTES,
   MARK_SHELL_UNIFORMS,
   refractionForBackdrop,
@@ -307,29 +306,6 @@ describe('mark shell shader contract', () => {
     expect(hero.maxBend).toBeGreaterThan(15);
     expect(hero.bend).toBeGreaterThan(header.bend);
     expect(hero.maxBend).toBeLessThan(hero.bend);
-  });
-
-  it('bounds diamond dispersion instead of multiplying two pixel distances', () => {
-    // The welcome hero has a ~978px physical backdrop at DPR 2. Bend and split
-    // are both authored in those pixels; multiplying them created up to a 100px
-    // half-spread and three separate RGB beads. At the bend ceiling, split is
-    // the ceiling — never another multiplier on top of it.
-    const hero = refractionForBackdrop(978);
-    expect(hero.split).toBeCloseTo(8.802);
-    expect(chromaticSpreadPx(0, hero.maxBend, hero.split, 1)).toBe(0);
-    expect(chromaticSpreadPx(hero.maxBend / 2, hero.maxBend, hero.split, 1))
-      .toBeCloseTo(hero.split / 2);
-    expect(chromaticSpreadPx(hero.maxBend, hero.maxBend, hero.split, 1))
-      .toBeCloseTo(hero.split);
-    expect(chromaticSpreadPx(hero.maxBend * 10, hero.maxBend, hero.split, 1))
-      .toBeCloseTo(hero.split);
-    expect(chromaticSpreadPx(hero.maxBend, hero.maxBend, hero.split, 0.34))
-      .toBeCloseTo(hero.split * 0.34);
-
-    expect(MARK_SHELL_WGSL).toMatch(
-      /uSplit\s*\/\s*\n\s*max\(markUniforms\.uMaxBend, 1e-4\)/
-    );
-    expect(MARK_SHELL_GLSL).toContain('uSplit / max(uMaxBend, 1e-4)');
   });
 
   it('keeps the body quieter than the highlights so facets are not painted flats', () => {

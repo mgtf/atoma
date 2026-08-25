@@ -61,12 +61,12 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform float uStrength;
   uniform float uRadiusScale;
   uniform float uHueShift;
-  uniform vec4 uCaustic0;
-  uniform vec4 uCaustic1;
-  uniform vec4 uCaustic2;
-  uniform vec4 uCaustic3;
-  uniform vec4 uCaustic4;
-  uniform vec4 uCaustic5;
+  uniform vec2 uCaustic0;
+  uniform vec2 uCaustic1;
+  uniform vec2 uCaustic2;
+  uniform vec2 uCaustic3;
+  uniform vec2 uCaustic4;
+  uniform vec2 uCaustic5;
   uniform vec4 uCausticColor;
 
   float luminance(vec3 color) {
@@ -118,19 +118,16 @@ ${CAUSTIC_FIELD_GLSL}
     float illumination = halo * (0.075 + edgeResponse * (0.24 + facing * 0.36));
     sampleColor.rgb += lightColor * illumination * uStrength * sampleColor.a;
     // The crystal's CAST, on the interface itself. The far field takes the
-    // same ray bundles behind the UI; here they land on whatever is actually
+    // same polygon behind the UI; here it lands on whatever is actually
     // filled, so the diamond crosses buttons and frames instead of stopping
     // at the backdrop. Modulated by alpha for the same reason the wash is:
     // a transparent pixel has no surface to light.
-    vec4 crystalCast = causticField(
+    sampleColor.rgb += causticField(
       vScreenPx,
       uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
       uCausticColor.a,
       uCausticColor.rgb
-    );
-    float crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
-    sampleColor.rgb *= 1.0 - crystalCast.a * crystalCastGain;
-    sampleColor.rgb += crystalCast.rgb * crystalCastGain;
+    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
     finalColor = sampleColor;
   }
 `;
@@ -150,12 +147,12 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     uStrength: f32,
     uRadiusScale: f32,
     uHueShift: f32,
-    uCaustic0: vec4<f32>,
-    uCaustic1: vec4<f32>,
-    uCaustic2: vec4<f32>,
-    uCaustic3: vec4<f32>,
-    uCaustic4: vec4<f32>,
-    uCaustic5: vec4<f32>,
+    uCaustic0: vec2<f32>,
+    uCaustic1: vec2<f32>,
+    uCaustic2: vec2<f32>,
+    uCaustic3: vec2<f32>,
+    uCaustic4: vec2<f32>,
+    uCaustic5: vec2<f32>,
     uCausticColor: vec4<f32>,
   };
 
@@ -232,7 +229,7 @@ ${CAUSTIC_FIELD_WGSL}
     sampleColor.g += lightColor.g * illumination * pointerLight.uStrength * sampleColor.a;
     sampleColor.b += lightColor.b * illumination * pointerLight.uStrength * sampleColor.a;
     // The crystal's CAST, on the interface itself — twin of the GLSL above.
-    let crystalCast = causticField(
+    let castRgb = causticField(
       screenPx,
       pointerLight.uCaustic0,
       pointerLight.uCaustic1,
@@ -242,15 +239,10 @@ ${CAUSTIC_FIELD_WGSL}
       pointerLight.uCaustic5,
       pointerLight.uCausticColor.a,
       pointerLight.uCausticColor.rgb,
-    );
-    let crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} *
-      pointerLight.uStrength * sampleColor.a;
-    sampleColor.r *= 1.0 - crystalCast.a * crystalCastGain;
-    sampleColor.g *= 1.0 - crystalCast.a * crystalCastGain;
-    sampleColor.b *= 1.0 - crystalCast.a * crystalCastGain;
-    sampleColor.r += crystalCast.r * crystalCastGain;
-    sampleColor.g += crystalCast.g * crystalCastGain;
-    sampleColor.b += crystalCast.b * crystalCastGain;
+    ) * ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * pointerLight.uStrength * sampleColor.a;
+    sampleColor.r += castRgb.r;
+    sampleColor.g += castRgb.g;
+    sampleColor.b += castRgb.b;
     return sampleColor;
   }
 `;
@@ -487,12 +479,6 @@ export const CARD_FILTER_WGSL = /* wgsl */ `
 // Two programs, one behaviour: WGSL for the WebGPU backend, GLSL ES 3 for the
 // WebGL fallback. Pixi binds `globalUniforms` and `localUniforms` itself; the
 // mark's own values live in `markUniforms`.
-//
-// There are NOT separate material shaders. Every live face currently receives
-// the diamond coefficients through the generic aMaterial/aFinish attributes.
-// Historical obsidian/glass/crystal rationale remains in this shader because
-// the inactive palette can be restored by data alone; none of it selects a
-// non-diamond material at runtime.
 // ---------------------------------------------------------------------------
 
 export const MARK_SHELL_WGSL = /* wgsl */ `
@@ -624,10 +610,10 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
   ) -> @location(0) vec4<f32> {
     let normal = normalize(vNormal);
     let outer = vSurface.y;
-    // Every live face is diamond. The same generic coefficient path is retained
-    // so the inactive historical palette can be restored without a new shader.
-    // IOR and roughness-derived values arrive from ATOMA_MARK_ACTIVE_MATERIALS;
-    // nothing here is a free-floating look knob.
+    // The glass this face is cut from: obsidian, glass, crystal or diamond, one
+    // per rank wedge. See ATOMA_MARK_RANK_MATERIALS for what each field means.
+    // Derived on the CPU from the material's IOR and roughness; see
+    // ATOMA_MARK_RANK_MATERIALS. Nothing here is a free-floating look knob.
     let specularPower = vMaterial.x;
     let dispersion = vMaterial.y;
     let f0 = vMaterial.z;
@@ -941,11 +927,8 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     );
     let offset = bend * markUniforms.uBackdropTexel;
     // The dispersive HALF-SPREAD around that common displacement: red bends
-    // least, blue most. uSplit and uMaxBend are BOTH pixel distances; normalise
-    // the live bend before applying split. Multiplying the two directly made
-    // the hero's intended ~9px fire explode into a ~100px RGB triple-image.
-    let spread = offset * dispersion * markUniforms.uSplit /
-      max(markUniforms.uMaxBend, 1e-4);
+    // least, blue most. Zero for obsidian, which refracts without splitting.
+    let spread = offset * dispersion * markUniforms.uSplit;
     let straight = textureSample(uBackdrop, uBackdropSampler, backdropUv + offset);
     let shiftR = textureSample(uBackdrop, uBackdropSampler,
       backdropUv + offset - spread).r;
@@ -1188,7 +1171,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
   void main() {
     vec3 normal = normalize(vNormal);
     float outer = vSurface.y;
-    // Same all-diamond active material as the WGSL path; keep the two in step.
+    // Same four glasses as the WGSL path; keep the two in step.
     float specularPower = vMaterial.x;
     float dispersion = vMaterial.y;
     float f0 = vMaterial.z;
@@ -1327,7 +1310,7 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
       ? rawBend * uMaxBend / max(bendLength, 1e-4)
       : rawBend;
     vec2 offset = bend * uBackdropTexel;
-    vec2 spread = offset * dispersion * uSplit / max(uMaxBend, 1e-4);
+    vec2 spread = offset * dispersion * uSplit;
     vec4 straight = texture(uBackdrop, vScreen + offset);
     float shiftR = texture(uBackdrop, vScreen + offset - spread).r;
     float shiftB = texture(uBackdrop, vScreen + offset + spread).b;

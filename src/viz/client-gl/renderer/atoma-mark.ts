@@ -9,8 +9,6 @@ import {
 import {
   ATOMA_MARK_CORE_LIGHT_RADIUS,
   ATOMA_MARK_CORE_RADIUS,
-  ATOMA_MARK_CRYSTAL_LIFT_MAX,
-  ATOMA_MARK_CRYSTAL_SIZE_MAX,
   ATOMA_MARK_LAMP_Z,
   ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_REAR_LIGHT_RADIUS,
@@ -19,7 +17,6 @@ import {
   coreLightFalloff,
   mergeFieldSpills,
   mixColor,
-  markCrystalDisplayScale,
   pointerLampForLocal,
   projectMarkCaustic,
   type AtomaMarkPoint,
@@ -32,7 +29,6 @@ import {
   writeMarkFieldLight,
 } from '../mark-field-light.js';
 import { readPointerLight } from '../pointer-light.js';
-import { readTuning } from '../tuning-live.js';
 import { markBeadVisible, markClockIsPinned, markElapsedMs } from './mark-clock.js';
 import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
@@ -49,11 +45,12 @@ export const ATOMA_MARK_LOCAL_CENTER = 14;
 /**
  * Header size. The hull spans 13.69 local units from the pivot at its widest
  * turn (measured over a full rotation, not the 12.5 the box suggests), and the
- * gem's visual centre is pinned at (34, 27) inside a 54px bar with the wordmark
- * starting at x = 70. At the shipped 3× lift it reaches only 1.872, still below
- * the tested 1.9 ceiling. Higher Scene Tuning values are deliberately allowed
- * to overflow and overlap the lockup as an experimental camera-distance probe;
- * they are not alternate production lockups.
+ * gem's visual centre is pinned at (34, 26) inside a 52px bar with the wordmark
+ * starting at x = 62. So this scale is bounded on two sides at once: 1.8 leaves
+ * ~2.0px above and below the bar and ~3.4px before the "A"; the hard ceiling is
+ * just under 1.9, where the gem reaches the header's own border line and the
+ * wordmark gap falls to 2px. Past that, the wordmark has to move with it — the
+ * bound is held by a test in tests/viz-gpu-views.test.ts, not by this comment.
  */
 export const ATOMA_MARK_HEADER_SCALE = 1.8;
 
@@ -86,13 +83,6 @@ const CORE_HOT_COLOR = 0xffffff;
  */
 const CORE_BODY_STEPS = 30;
 const CORE_BLOOM_STEPS = 80;
-/**
- * Pixi tessellates `circle()` from the LOCAL radius. The bead is authored at
- * less than one unit and later enlarged ~17× on the welcome gate, so the
- * automatic low-detail circle exposed polygon corners there. An explicit
- * 64-gon keeps the radial error below a tenth of a physical pixel at hero size.
- */
-export const ATOMA_MARK_CORE_DISC_SEGMENTS = 64;
 const CORE_BLOOM_REACH = 2.6;
 const CORE_BLOOM_PEAK_ALPHA = 0.28;
 const CORE_FILAMENT_FRACTION = 0.5;
@@ -141,9 +131,7 @@ function paintFalloffDiscs(
     const delta = level - previous;
     previous = level;
     if (delta <= 0) continue;
-    target
-      .regularPoly(0, 0, outer, ATOMA_MARK_CORE_DISC_SEGMENTS)
-      .fill({ color, alpha: delta * peakAlpha });
+    target.circle(0, 0, outer).fill({ color, alpha: delta * peakAlpha });
   }
 }
 
@@ -190,12 +178,7 @@ function buildCore(): { core: Container; bloom: Graphics } {
   for (let step = 0; step < CORE_BODY_STEPS; step += 1) {
     const t = step / (CORE_BODY_STEPS - 1);
     body
-      .regularPoly(
-        0,
-        0,
-        ATOMA_MARK_CORE_RADIUS * (1 - t * 0.55),
-        ATOMA_MARK_CORE_DISC_SEGMENTS
-      )
+      .circle(0, 0, ATOMA_MARK_CORE_RADIUS * (1 - t * 0.55))
       .fill({
         color: mixColor(CORE_RIM_COLOR, CORE_HOT_COLOR, smoothstep(Math.min(1, t / 0.6))),
         alpha: smoothstep(t),
@@ -203,12 +186,7 @@ function buildCore(): { core: Container; bloom: Graphics } {
   }
   // The filament: a light has a point you cannot look at.
   body
-    .regularPoly(
-      0,
-      0,
-      ATOMA_MARK_CORE_RADIUS * CORE_FILAMENT_FRACTION,
-      ATOMA_MARK_CORE_DISC_SEGMENTS
-    )
+    .circle(0, 0, ATOMA_MARK_CORE_RADIUS * CORE_FILAMENT_FRACTION)
     .fill({ color: CORE_HOT_COLOR, alpha: 1 });
   core.addChild(bloom, body);
   return { core, bloom };
@@ -382,13 +360,6 @@ export interface AtomaMarkHandle {
   destroy(): void;
 }
 
-export interface AtomaMarkOptions {
-  bobPx?: number;
-  bobPeriodMs?: number;
-  /** Read live depth + size for the compact header mark; the arrival mark stays authored. */
-  tunableCrystal?: boolean;
-}
-
 /**
  * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
  * wordmark and the arrival gate — never a second R3F logo.
@@ -409,7 +380,7 @@ export function attachAtomaMark(
   y: number,
   visualScale = ATOMA_MARK_HEADER_SCALE,
   renderer?: Renderer,
-  options?: AtomaMarkOptions
+  options?: { bobPx?: number; bobPeriodMs?: number }
 ): AtomaMarkHandle {
   /** Render textures alive right now; resize swaps entries, destroy drains it. */
   const ownedTextures = new Set<RenderTexture>();
@@ -494,17 +465,9 @@ export function attachAtomaMark(
   const backdropPass = ((): ((elapsedMs: number) => void) | null => {
     if (!renderer || !shell) return null;
     const resolution = renderer.resolution;
-    // The retained header texture is sized once, so reserve the largest live
-    // crystal controls up front. Otherwise 20× plus a large manual size would
-    // enlarge a ~51px refraction texture and make the test range look soft.
-    const textureVisualScale = visualScale * (
-      options?.tunableCrystal
-        ? markCrystalDisplayScale(ATOMA_MARK_CRYSTAL_LIFT_MAX, ATOMA_MARK_CRYSTAL_SIZE_MAX)
-        : 1
-    );
     const sizePx = Math.max(
       1,
-      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * textureVisualScale * resolution)
+      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * visualScale * resolution)
     );
     /**
      * TWO textures, alternating. WebGPU forbids a texture being bound for
@@ -673,15 +636,9 @@ export function attachAtomaMark(
       container.y = y;
     }
     const frame = buildAtomaMarkFrame(elapsedMs);
-    const tuning = options?.tunableCrystal ? readTuning() : null;
-    const crystalLift = tuning?.crystalLift ?? 1;
-    const crystalSize = tuning?.crystalSize ?? 1;
-    const scale = visualScale * frame.scale * markCrystalDisplayScale(
-      crystalLift,
-      crystalSize
-    );
-    crystal.scale.set(scale);
+    crystal.scale.set(frame.scale * visualScale);
     const beadVisible = markBeadVisible();
+    const scale = visualScale * frame.scale;
     let pointerSpills: AtomaMarkRearSpill[] = [];
     let lamp: {
       position: readonly [number, number, number];
@@ -746,15 +703,11 @@ export function attachAtomaMark(
           fieldSpillsToSample(merged, container, scale, localRadius, renderer)
         );
       }
-      // The CAST: four facet ray bundles traced through the shell onto the same
-      // wall. Published through the same sample channel, on the same coupling.
+      // The CAST: the gem's silhouette projected onto the same wall, the
+      // shape a real glass would draw where the pools only glow. Published
+      // through the same sample channel, on the same coupling.
       if (coupledLocal) {
-        const cast = projectMarkCaustic(
-          frame,
-          coupledLocal.x,
-          coupledLocal.y,
-          crystalLift
-        );
+        const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
         const rgb = cast ? markColorToRgb(cast.color) : null;
         writeMarkFieldCaustic(
           cast && rgb
@@ -782,12 +735,7 @@ export function attachAtomaMark(
     traceSilhouette(interiorMask, frame.silhouette);
     traceSilhouette(glassMask, frame.silhouette);
     core.position.set(coreX, coreY);
-    core.rotation = frame.coreDeformationAngle;
-    const pulsedCoreScale = frame.coreScale * (1 + frame.pulse * 0.035);
-    core.scale.set(
-      pulsedCoreScale * frame.coreDeformation[0],
-      pulsedCoreScale * frame.coreDeformation[1]
-    );
+    core.scale.set(frame.coreScale * (1 + frame.pulse * 0.035));
     core.visible = beadVisible;
     bloom.alpha = 0.76 + frame.pulse * 0.24;
     const forward = 0.55 + (frame.coreDepth + 1) * 0.225;
@@ -795,11 +743,7 @@ export function attachAtomaMark(
     transmittedPool.alpha = forward * (0.85 + frame.pulse * 0.15);
     transmittedPool.visible = beadVisible;
     transmittedCore.position.set(coreX, coreY);
-    transmittedCore.rotation = frame.coreDeformationAngle;
-    transmittedCore.scale.set(
-      frame.coreScale * frame.coreDeformation[0],
-      frame.coreScale * frame.coreDeformation[1]
-    );
+    transmittedCore.scale.set(frame.coreScale);
     transmittedCore.alpha = forward * (0.88 + frame.pulse * 0.12);
     transmittedCore.visible = beadVisible;
     // Last, so the texture holds THIS frame's interior: the front glass is
