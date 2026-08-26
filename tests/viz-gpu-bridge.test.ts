@@ -11,9 +11,9 @@ import type { VizGitHubInstallation } from '../src/viz/client/types.js';
 import {
   ENTRY_FADE_IN_MS,
   ENTRY_FADE_OUT_MS,
-  EntryVeilLayer,
   useEntryFade,
 } from '../src/viz/client-gl/entry-fade.js';
+import { EntryVeilLayer } from '../src/viz/client-gl/EntryVeilLayer.js';
 import { GpuErrorBoundary } from '../src/viz/client-gl/GpuErrorBoundary.js';
 import { SceneTuningPanel } from '../src/viz/client-gl/SceneTuningPanel.js';
 import { readTuning, resetTuning } from '../src/viz/client-gl/tuning-live.js';
