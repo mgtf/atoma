@@ -1,4 +1,9 @@
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
+import {
+  LOCALE_NAMES,
+  SUPPORTED_LOCALES,
+  type Locale,
+} from '../../contracts/locales.js';
 import type { RunIndexEntry, VizGitHubInstallation, VizProject } from '../client/types.js';
 import type { ComponentProps } from 'react';
 import type { AuthUiSnapshot } from './AuthControls.js';
@@ -73,6 +78,7 @@ export function DomBridge({
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
   const selectedProjectId = useGpuStore((state) => state.selectedProjectId);
   const accountMenuOpen = useGpuStore((state) => state.accountMenuOpen);
+  const localeMenuOpen = useGpuStore((state) => state.localeMenuOpen);
   const focusedInput = useGpuStore((state) => state.focusedInput);
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
@@ -106,7 +112,7 @@ export function DomBridge({
   // The account menu is Pixi chrome while text-entry controls are real DOM
   // above the canvas. Remove view overlays while the menu is open, otherwise
   // an input/form can intercept clicks on the menu that visibly sits over it.
-  const viewOverlaysVisible = !accountMenuOpen;
+  const viewOverlaysVisible = !accountMenuOpen && !localeMenuOpen;
 
   if (!entered) {
     return (
@@ -155,9 +161,18 @@ export function DomBridge({
             </button>
           ))}
         </nav>
-        <button onClick={() => setLocale(locale === 'en' ? 'fr' : 'en')}>
-          {t('lang.switch')}
-        </button>
+        <label>
+          {t('nav.language')}
+          <select
+            aria-label={t('nav.language')}
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as Locale)}
+          >
+            {SUPPORTED_LOCALES.map((code) => (
+              <option key={code} value={code}>{LOCALE_NAMES[code]}</option>
+            ))}
+          </select>
+        </label>
         <div data-viz-live aria-live="polite" aria-atomic="true">
           {t(`nav.${view}`)}
           {selectedRun ? ` — ${selectedRun.label}` : ''}

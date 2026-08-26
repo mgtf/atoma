@@ -389,6 +389,7 @@ import { drawSentinel } from './renderer/views/sentinel.js';
 import { drawAnnounce } from './renderer/views/announce.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
+import { drawLocaleMenu, type LocaleMenuAnchor } from './renderer/views/locale-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
 import {
   drawSidebar,
@@ -1623,6 +1624,16 @@ export class GpuRenderer {
       this.addTicker(animateUtilityDocks);
     }
     drawAccountMenu(this, snapshot, width, layoutHeight, focusRail?.profile ?? undefined);
+    const accountReserve = snapshot.data.auth ? HEADER_ORB_SIZE + 16 : 0;
+    const localeAnchor: LocaleMenuAnchor = snapshot.state.sceneCameraMode === 'focus' && focusRail
+      ? focusRail.locale
+      : {
+          x: width - 54 - accountReserve,
+          y: GPU_LAYOUT.headerHeight / 2 - 16,
+          width: 42,
+          height: 32,
+        };
+    drawLocaleMenu(this, snapshot, width, layoutHeight, localeAnchor);
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
       this.activeViewTransition = {
@@ -4264,14 +4275,14 @@ export class GpuRenderer {
     opacityTargets.push(this.drawFpsReadout(width - 64 - accountReserve, midY));
     const locale = this.button(
       this.root,
-      'locale.toggle',
+      'locale.menu.toggle',
       'button',
-      snapshot.state.locale === 'en' ? 'EN' : 'FR',
+      snapshot.state.locale.toUpperCase(),
       width - 54 - accountReserve,
       midY - 16,
       42,
       32,
-      false,
+      snapshot.state.localeMenuOpen,
       snapshot.onActivate,
       GPU_COLORS.primary,
       true
@@ -4377,14 +4388,14 @@ export class GpuRenderer {
     }
     const locale = this.button(
       this.root,
-      'locale.toggle',
+      'locale.menu.toggle',
       'button',
-      snapshot.state.locale === 'en' ? 'EN' : 'FR',
+      snapshot.state.locale.toUpperCase(),
       layout.locale.x,
       layout.locale.y,
       layout.locale.width,
       layout.locale.height,
-      false,
+      snapshot.state.localeMenuOpen,
       snapshot.onActivate,
       GPU_COLORS.primary,
       true

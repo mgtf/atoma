@@ -7,15 +7,18 @@ import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AnnouncementForm } from '../src/viz/client-gl/AnnouncementForm.js';
+import { SUPPORTED_LOCALES } from '../src/contracts/locales.js';
 import { DomBridge } from '../src/viz/client-gl/DomBridge.js';
 import { useGpuStore } from '../src/viz/client-gl/store.js';
 import { api } from '../src/viz/client/data-api.js';
 import { translate } from '../src/viz/client/i18n-catalog.js';
 
-const TEXTS = {
-  en: { title: 'Service update', body: 'Everything is ready.' },
-  fr: { title: 'Mise à jour du service', body: 'Tout est prêt.' },
-};
+const TEXTS = Object.fromEntries(SUPPORTED_LOCALES.map((locale) => [
+  locale,
+  locale === 'fr'
+    ? { title: 'Mise à jour du service', body: 'Tout est prêt.' }
+    : { title: 'Service update', body: 'Everything is ready.' },
+])) as Record<(typeof SUPPORTED_LOCALES)[number], { title: string; body: string }>;
 
 function form(client: QueryClient, resetSignal: number) {
   return createElement(

@@ -1,0 +1,19 @@
+# i18n: a staged en.json VALUE change (not an addition) blanks the matching
+# fr.json values so the next translate run redoes them. No-op otherwise.
+node scripts/i18n.mjs invalidate-staged || exit 1
+
+# Lint staged files only (added/copied/modified), so unstaged worktree changes
+# are never swept in. --fix then verify, and re-stage exactly what was already
+# staged to pick up fixes.
+FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|mjs|cjs|js)$' | grep -v '^dist/' | tr '\n' ' ')
+
+if [ -n "$FILES" ]; then
+  echo "Linting staged files…"
+  npx eslint $FILES --fix
+  RESULT=$?
+  if [ $RESULT -ne 0 ]; then
+    echo "✗ Linting failed. Fix the issues before committing."
+    exit 1
+  fi
+  git add $FILES
+fi

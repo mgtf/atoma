@@ -175,7 +175,8 @@ describe('PUSH_ROUTES', () => {
   it('maps an unknown locale to English', () => {
     expect(asPushLocale('fr')).toBe('fr');
     expect(asPushLocale('en')).toBe('en');
-    expect(asPushLocale('de')).toBe('en');
+    expect(asPushLocale('de')).toBe('de');
+    expect(asPushLocale('xx')).toBe('en');
     expect(asPushLocale(null)).toBe('en');
     expect(asPushLocale(undefined)).toBe('en');
   });

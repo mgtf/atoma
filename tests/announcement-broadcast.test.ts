@@ -16,10 +16,19 @@ import { PUSH_ROUTES, renderPush } from '../src/viz/push/routes.js';
 import { resolveAudience } from '../src/viz/push/router.js';
 import type { PlatformEvent } from '../src/contracts/platformEvents.js';
 
-const TEXTS = {
-  en: { title: 'Scheduled maintenance', body: 'Tonight at 00:00, about 30 minutes.' },
-  fr: { title: 'Maintenance prévue', body: 'Ce soir à 00h, environ 30 minutes.' },
-};
+const TEXTS = Object.fromEntries(SUPPORTED_LOCALES.map((locale) => [
+  locale,
+  locale === 'fr'
+    ? { title: 'Maintenance prévue', body: 'Ce soir à 00h, environ 30 minutes.' }
+    : { title: 'Scheduled maintenance', body: 'Tonight at 00:00, about 30 minutes.' },
+])) as AnnouncementDetail['texts'];
+
+const translatedDraft = (title = 'Scheduled maintenance', body = 'Tonight at 00:00.') =>
+  Object.fromEntries(
+    SUPPORTED_LOCALES
+      .filter((locale) => locale !== 'fr')
+      .map((locale) => [locale, { title, body }])
+  );
 
 function announcement(detail: Partial<AnnouncementDetail>): PlatformEvent {
   return {
@@ -153,7 +162,7 @@ describe('translation drafts, and their absence', () => {
   it('passes the operator language through untouched and fills the others', async () => {
     const llm = {
       complete: async () => ({
-        text: 'Here you go:\n{"en": {"title": "Scheduled maintenance", "body": "Tonight at 00:00."}}',
+        text: `Here you go:\n${JSON.stringify(translatedDraft())}`,
         stopReason: 'end_turn' as const,
         usage: { inputTokens: 1, outputTokens: 1 },
       }),
@@ -178,7 +187,7 @@ describe('translation drafts, and their absence', () => {
   it('clamps a draft that ignores the length it was given', async () => {
     const llm = {
       complete: async () => ({
-        text: JSON.stringify({ en: { title: 'T'.repeat(400), body: 'B'.repeat(900) } }),
+        text: JSON.stringify(translatedDraft('T'.repeat(400), 'B'.repeat(900))),
         stopReason: 'end_turn' as const,
         usage: { inputTokens: 1, outputTokens: 1 },
       }),

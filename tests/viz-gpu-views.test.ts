@@ -65,6 +65,11 @@ import {
   drawAccountMenu,
 } from '../src/viz/client-gl/renderer/views/account-menu.js';
 import {
+  drawLocaleMenu,
+  localeMenuLayout,
+} from '../src/viz/client-gl/renderer/views/locale-menu.js';
+import { LOCALE_NAMES, SUPPORTED_LOCALES } from '../src/contracts/locales.js';
+import {
   drawSettings,
   MEMBER_ROW_HEIGHT,
   modelChipLabel,
@@ -581,6 +586,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     scrollY: { projects: 0, runs: 0, registry: 0, skills: 0, burnin: 0, docs: 0, admin: 0, journal: 0, ledger: 0, sentinel: 0, announce: 0, settings: 0 },
     entered: true,
     accountMenuOpen: false,
+    localeMenuOpen: false,
     tuningPanelOpen: false,
     announcementResetSignal: 0,
     enter: noop,
@@ -588,6 +594,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     activateCrystal: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
+    toggleLocaleMenu: noop,
+    closeLocaleMenu: noop,
     toggleTuningPanel: noop,
     activateView: noop,
     setView: noop,
@@ -2760,6 +2768,42 @@ describe('GPU account menu', () => {
     expect(layout.x).toBeGreaterThan(profile.x + profile.width);
     expect(layout.y + layout.height).toBeLessThan(profile.y);
     expect(layout.x + layout.width).toBeLessThanOrEqual(1280);
+  });
+});
+
+describe('GPU locale menu', () => {
+  const headerAnchor = { x: 1200, y: 16, width: 42, height: 32 };
+  const railAnchor = { x: 20, y: 650, width: 42, height: 32 };
+
+  it('opens down from the header and up beside the focus rail', () => {
+    const header = localeMenuLayout(1280, 720, headerAnchor);
+    const rail = localeMenuLayout(1280, 720, railAnchor);
+    expect(header.y).toBeGreaterThan(headerAnchor.y);
+    expect(header.x + header.width).toBeLessThanOrEqual(1280);
+    expect(rail.y + rail.height).toBeLessThan(railAnchor.y);
+    expect(rail.x).toBeGreaterThan(railAnchor.x);
+  });
+
+  it('lists every endonym and marks the active locale', () => {
+    const closed = createRecordingCtx();
+    drawLocaleMenu(closed, makeSnapshot({ localeMenuOpen: false }), 1280, 720, headerAnchor);
+    expect(closed.buttons).toHaveLength(0);
+
+    const open = createRecordingCtx();
+    drawLocaleMenu(
+      open,
+      makeSnapshot({ locale: 'fr', localeMenuOpen: true }),
+      1280,
+      720,
+      headerAnchor
+    );
+    expect(open.buttons.map((button) => button.id)).toEqual(
+      SUPPORTED_LOCALES.map((locale) => `locale.select.${locale}`)
+    );
+    expect(open.buttons.map((button) => button.label)).toEqual(
+      SUPPORTED_LOCALES.map((locale) => LOCALE_NAMES[locale])
+    );
+    expect(open.buttons.find((button) => button.id === 'locale.select.fr')?.active).toBe(true);
   });
 });
 

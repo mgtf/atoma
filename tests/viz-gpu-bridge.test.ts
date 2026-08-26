@@ -6,6 +6,7 @@ import { userEvent } from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { translate } from '../src/viz/client/i18n-catalog.js';
+import { SUPPORTED_LOCALES } from '../src/contracts/locales.js';
 import { DomBridge, GpuDomBridge } from '../src/viz/client-gl/DomBridge.js';
 import type { VizGitHubInstallation } from '../src/viz/client/types.js';
 import {
@@ -46,6 +47,7 @@ beforeEach(() => {
     runPickerActiveIndex: 0,
     runPickerScrollY: 0,
     accountMenuOpen: false,
+    localeMenuOpen: false,
     tuningPanelOpen: false,
     search: {
       run: '',
@@ -320,6 +322,21 @@ describe('full-GL minimal DOM bridge', () => {
     renderBridge();
     expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Project name' })).not.toBeInTheDocument();
+  });
+
+  it('removes DOM view overlays while the Pixi locale menu is open', () => {
+    useGpuStore.setState({
+      view: 'projects',
+      entered: true,
+      accountMenuOpen: false,
+      localeMenuOpen: true,
+    });
+    renderBridge();
+    expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
+    const picker = screen.getByRole('combobox', { name: 'Language' });
+    expect(picker).toHaveValue('en');
+    expect(screen.getAllByRole('option').slice(0, SUPPORTED_LOCALES.length))
+      .toHaveLength(SUPPORTED_LOCALES.length);
   });
 
   it('removes every other view overlay while the Pixi account menu is open', () => {

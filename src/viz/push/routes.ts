@@ -1,5 +1,5 @@
 import { createInstance } from 'i18next';
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, asLocale, type Locale }
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, asLocale, twoFormPluralKey, type Locale }
   from '../../contracts/locales.js';
 import type { PlatformEvent, PlatformEventKind } from '../../contracts/platformEvents.js';
 
@@ -79,10 +79,16 @@ export interface PushRoute {
   readonly audience: AudienceRule;
   /** Values for the `{{placeholders}}` below, read out of `detail`. */
   readonly vars?: (event: PlatformEvent, locale: PushLocale) => Record<string, string>;
-  readonly copy: Record<PushLocale, PushTemplate>;
+  readonly copy: Readonly<Record<PushLocale, PushTemplate>>;
 }
 
-const PUSH_I18N_CATALOGS: Record<PushLocale, Record<string, string>> = {
+interface PushRouteSource extends Omit<PushRoute, 'copy'> {
+  /** English is required; a missing target deliberately falls back to it. */
+  readonly copy: Readonly<Partial<Record<PushLocale, PushTemplate>>> &
+    Readonly<Record<'en', PushTemplate>>;
+}
+
+const PUSH_I18N_CATALOGS: Partial<Record<PushLocale, Record<string, string>>> = {
   en: {
     'recovery.runs_one': '{{count}} run recovered',
     'recovery.runs_other': '{{count}} runs recovered',
@@ -125,7 +131,7 @@ function countFromDetail(event: PlatformEvent, key: string): number {
 }
 
 function pushCount(locale: PushLocale, key: string, count: number): string {
-  return pushI18n.t(key, { count, lng: locale });
+  return pushI18n.t(twoFormPluralKey(key, count), { count, lng: locale });
 }
 
 /** A `detail` string, defensively: foreign rows may omit or mistype it. */
@@ -156,17 +162,17 @@ function announcementText(event: PlatformEvent, locale: PushLocale, field: 'titl
   return '';
 }
 
-const RUN_STATUS_WORDS: Record<PushLocale, Record<string, string>> = {
+const RUN_STATUS_WORDS: Partial<Record<PushLocale, Record<string, string>>> = {
   en: { delivered: 'delivered', failed: 'failed', cancelled: 'cancelled' },
   fr: { delivered: 'livré', failed: 'échoué', cancelled: 'annulé' },
 };
 
-const INSTALLATION_STATUS_WORDS: Record<PushLocale, Record<string, string>> = {
+const INSTALLATION_STATUS_WORDS: Partial<Record<PushLocale, Record<string, string>>> = {
   en: { active: 'active', suspended: 'suspended', deleted: 'deleted' },
   fr: { active: 'active', suspended: 'suspendue', deleted: 'supprimée' },
 };
 
-export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
+const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   // --- Client-facing.
   'run.started': null,
   // Journaled for audit, never pushed: on a single-operator instance every
@@ -180,7 +186,9 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
     audience: { requester: true },
     vars: (event, locale) => ({
       status:
-        RUN_STATUS_WORDS[locale][text(event, 'status')] ?? text(event, 'status', 'finished'),
+        RUN_STATUS_WORDS[locale]?.[text(event, 'status')] ??
+        RUN_STATUS_WORDS.en![text(event, 'status')] ??
+        text(event, 'status', 'finished'),
       goal: text(event, 'goal'),
     }),
     copy: {
@@ -246,7 +254,9 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
     audience: { orgOwners: true },
     vars: (event, locale) => ({
       status:
-        INSTALLATION_STATUS_WORDS[locale][text(event, 'status')] ?? text(event, 'status'),
+        INSTALLATION_STATUS_WORDS[locale]?.[text(event, 'status')] ??
+        INSTALLATION_STATUS_WORDS.en![text(event, 'status')] ??
+        text(event, 'status'),
     }),
     copy: {
       en: {
@@ -360,6 +370,21 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   'push.unsubscribed': null,
 };
 
+/** Every consumer sees a total per-locale table; source omissions mean EN fallback. */
+export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = Object.fromEntries(
+  Object.entries(PUSH_ROUTE_SOURCES).map(([kind, route]) => [
+    kind,
+    route
+      ? {
+          ...route,
+          copy: Object.fromEntries(
+            SUPPORTED_LOCALES.map((locale) => [locale, route.copy[locale] ?? route.copy.en])
+          ),
+        }
+      : null,
+  ])
+) as Record<PlatformEventKind, PushRoute | null>;
+
 /** Render a frozen push template through the same i18next engine as count copy. */
 export function fillTemplate(
   template: string,
@@ -389,7 +414,7 @@ export function renderPush(
   route: PushRoute
 ): RenderedPush {
   const vars = route.vars ? route.vars(event, locale) : {};
-  const copy = route.copy[locale];
+  const copy = route.copy[locale] ?? route.copy.en;
   return {
     title: fillTemplate(copy.title, vars, locale).trim(),
     // An empty body is legitimate (a title-only notification); the browser

@@ -155,6 +155,23 @@ npm run benchmark -- --dry-run
 npm run benchmark -- --out benchmark/results-round<N>.csv --result benchmark/ROUND<N>.md
 ```
 
+Locales:
+
+```bash
+npm run i18n -- check               # all target catalogs + placeholder signatures
+npm run i18n -- fix-drift --apply   # blank target values that drifted from EN placeholders
+npm run i18n -- translate           # fill every blank target with gpt-5.6-sol (Codex locally; API in CI)
+npm run i18n -- sync                # same, but the caller translates (no API key)
+```
+
+The viz locale catalogs are JSON (`src/viz/client/locales/`); `en.json` is the
+source of truth and a blank or missing target value means "awaiting translation". A
+husky pre-commit hook (`.husky/pre-commit`) blanks FR values whose EN source
+changed and lints staged files; the CI `i18n` workflow translates the blanks
+on main and commits `[skip ci]`. Local translation reuses `codex login`
+(ChatGPT Plus/Pro); CI requires the separately billed `OPENAI_API_KEY`. The full contract is in
+[src/viz](src/viz/AGENTS.md).
+
 ### Release contract
 
 - Supported source verification is `npm ci` then `npm run release:check`.

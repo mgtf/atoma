@@ -14,7 +14,9 @@
  * catalog — the loops that fan out over languages read this list.
  */
 
-export const SUPPORTED_LOCALES = ['en', 'fr'] as const;
+export const SUPPORTED_LOCALES = [
+  'en', 'zh', 'hi', 'es', 'ar', 'fr', 'bn', 'pt', 'id', 'ur', 'ru', 'de', 'ja',
+] as const;
 
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
@@ -24,8 +26,36 @@ export const DEFAULT_LOCALE: Locale = 'en';
 /** Endonyms: a language picker names each language in that language. */
 export const LOCALE_NAMES: Record<Locale, string> = {
   en: 'English',
+  zh: '中文（普通话）',
+  hi: 'हिन्दी',
+  es: 'Español',
+  ar: 'العربية',
   fr: 'Français',
+  bn: 'বাংলা',
+  pt: 'Português',
+  id: 'Bahasa Indonesia',
+  ur: 'اردو',
+  ru: 'Русский',
+  de: 'Deutsch',
+  ja: '日本語',
 };
+
+/** The next picker entry, with ordering owned by the same canonical list. */
+export function nextLocale(locale: Locale): Locale {
+  const index = SUPPORTED_LOCALES.indexOf(locale);
+  return SUPPORTED_LOCALES[(index + 1) % SUPPORTED_LOCALES.length]!;
+}
+
+/** Browser writing direction for the two right-to-left interface languages. */
+export function localeDirection(locale: Locale): 'ltr' | 'rtl' {
+  return locale === 'ar' || locale === 'ur' ? 'rtl' : 'ltr';
+}
+
+/** The catalog contract has exactly two plural forms, independent of CLDR. */
+export function twoFormPluralKey(key: string, count: unknown): string {
+  if (typeof count !== 'number' || !Number.isFinite(count)) return key;
+  return `${key}_${count === 1 ? 'one' : 'other'}`;
+}
 
 /** A narrowing test, for callers that must try the NEXT source on a miss. */
 export function isLocale(value: unknown): value is Locale {

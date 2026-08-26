@@ -21,8 +21,8 @@ import {
   Typography,
 } from '@mui/material';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { LOCALE_NAMES, SUPPORTED_LOCALES } from '../../contracts/locales.js';
 import type { SkillSelection } from './features/SkillsView.js';
-import { I18N_CATALOGS } from './i18n-catalog.js';
 import { useI18n } from './i18n.js';
 import { RunPicker, type RunPickerOption } from './run-picker.js';
 import { fmtCost, isIndexEntryLive } from './run-utils.js';
@@ -161,8 +161,8 @@ export function App() {
                 aria-label={t('nav.language')}
                 sx={{ minWidth: 92 }}
               >
-                {(['en', 'fr'] as const).map((code) => (
-                  <MenuItem key={code} value={code}>{I18N_CATALOGS[code]['lang.name']}</MenuItem>
+                {SUPPORTED_LOCALES.map((code) => (
+                  <MenuItem key={code} value={code}>{LOCALE_NAMES[code]}</MenuItem>
                 ))}
               </Select>
             </FormControl>

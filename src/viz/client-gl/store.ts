@@ -3,6 +3,7 @@ import {
   DEFAULT_REPOSITORY_VISIBILITY,
   type RepositoryVisibility,
 } from '../../contracts/projects.js';
+import { isLocale, localeDirection, type Locale } from '../../contracts/locales.js';
 import type { EventFilters } from '../client/run-utils.js';
 import type { SceneCameraMode } from './scene-camera.js';
 
@@ -163,7 +164,7 @@ export interface GpuUiState {
   view: ViewName;
   /** Pulled-back whole scene, or the navigation focus on the content column. */
   sceneCameraMode: SceneCameraMode;
-  locale: 'en' | 'fr';
+  locale: Locale;
   selectedRunId: string | null;
   selectedEventId: string | null;
   selectedAtomName: string | null;
@@ -211,6 +212,8 @@ export interface GpuUiState {
    * screen it was opened from.
    */
   accountMenuOpen: boolean;
+  /** Endonym picker opened from the compact locale code control. */
+  localeMenuOpen: boolean;
   /** Floating scene controls, opened from the foot of the admin rail. */
   tuningPanelOpen: boolean;
   /** Monotonic signal consumed by a sent announcement receipt only. */
@@ -222,12 +225,14 @@ export interface GpuUiState {
   activateCrystal: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
+  toggleLocaleMenu: () => void;
+  closeLocaleMenu: () => void;
   toggleTuningPanel: () => void;
   /** User activation of a rail/tab destination; re-activation toggles framing. */
   activateView: (view: ViewName) => void;
   /** Programmatic/cross-view navigation always lands on focused content. */
   setView: (view: ViewName) => void;
-  setLocale: (locale: 'en' | 'fr') => void;
+  setLocale: (locale: Locale) => void;
   selectRun: (id: string | null) => void;
   selectEvent: (id: string | null) => void;
   selectAtom: (name: string | null) => void;
@@ -259,13 +264,14 @@ export interface GpuUiState {
   setScrollY: (view: ViewName, value: number) => void;
 }
 
-function initialLocale(): 'en' | 'fr' {
+function initialLocale(): Locale {
   if (typeof location === 'undefined') return 'en';
   const query = new URLSearchParams(location.search).get('lang');
-  if (query === 'fr') return 'fr';
+  if (isLocale(query)) return query;
   try {
     if (typeof localStorage === 'undefined') return 'en';
-    return localStorage.getItem('atoma.viz.lang') === 'fr' ? 'fr' : 'en';
+    const saved = localStorage.getItem('atoma.viz.lang');
+    return isLocale(saved) ? saved : 'en';
   } catch {
     return 'en';
   }
@@ -297,13 +303,19 @@ function viewChange(
   sceneCameraMode: SceneCameraMode
 ): Pick<
   GpuUiState,
-  'view' | 'sceneCameraMode' | 'focusedInput' | 'accountMenuOpen' | 'announcementResetSignal'
+  | 'view'
+  | 'sceneCameraMode'
+  | 'focusedInput'
+  | 'accountMenuOpen'
+  | 'localeMenuOpen'
+  | 'announcementResetSignal'
 > {
   return {
     view,
     sceneCameraMode,
     focusedInput: null,
     accountMenuOpen: false,
+    localeMenuOpen: false,
     announcementResetSignal:
       state.view === 'announce' && view === 'announce'
         ? state.announcementResetSignal + 1
@@ -366,6 +378,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   },
   entered: initialEntered(),
   accountMenuOpen: false,
+  localeMenuOpen: false,
   tuningPanelOpen: initialTuningPanelOpen(),
   announcementResetSignal: 0,
   enter: () => {
@@ -381,12 +394,20 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   // This is an explicit in-app route, not a first-visit reset. Keep the
   // persisted admission bit at `1`, so a later reload still opens the product
   // directly instead of trapping a returning viewer on Welcome again.
-  showWelcome: () => set({ entered: false, accountMenuOpen: false }),
+  showWelcome: () => set({ entered: false, accountMenuOpen: false, localeMenuOpen: false }),
   activateCrystal: () => set((state) => state.sceneCameraMode === 'focus'
     ? viewChange(state, state.view, 'overview')
-    : { entered: false, accountMenuOpen: false }),
-  toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
+    : { entered: false, accountMenuOpen: false, localeMenuOpen: false }),
+  toggleAccountMenu: () => set((state) => ({
+    accountMenuOpen: !state.accountMenuOpen,
+    localeMenuOpen: false,
+  })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
+  toggleLocaleMenu: () => set((state) => ({
+    localeMenuOpen: !state.localeMenuOpen,
+    accountMenuOpen: false,
+  })),
+  closeLocaleMenu: () => set({ localeMenuOpen: false }),
   toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),
   // Navigation closes the menu: an overlay anchored to the account control must not
   // survive the screen it was opened from. Re-activating Announcements also
@@ -419,8 +440,11 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     } catch {
       // Local storage is optional.
     }
-    if (typeof document !== 'undefined') document.documentElement.lang = locale;
-    set({ locale });
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = locale;
+      document.documentElement.dir = localeDirection(locale);
+    }
+    set({ locale, localeMenuOpen: false });
   },
   selectRun: (selectedRunId) =>
     set({

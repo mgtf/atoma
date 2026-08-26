@@ -1,0 +1,96 @@
+import { Graphics, Rectangle } from 'pixi.js';
+import { LOCALE_NAMES, SUPPORTED_LOCALES } from '../../../../contracts/locales.js';
+import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
+import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
+
+const EDGE = 12;
+const PANEL_WIDTH = 224;
+const PANEL_PAD = 8;
+const ROW_HEIGHT = 30;
+const ANCHOR_GAP = 6;
+
+export interface LocaleMenuAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface LocaleMenuLayout {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Anchor beside a rail control, opening away from the nearest viewport edge. */
+export function localeMenuLayout(
+  viewportWidth: number,
+  viewportHeight: number,
+  anchor: LocaleMenuAnchor
+): LocaleMenuLayout {
+  const width = Math.min(PANEL_WIDTH, Math.max(180, viewportWidth - EDGE * 2));
+  const height = SUPPORTED_LOCALES.length * ROW_HEIGHT + PANEL_PAD * 2;
+  const opensRight = anchor.x + anchor.width / 2 < viewportWidth / 2;
+  const preferredX = opensRight
+    ? anchor.x + anchor.width + ANCHOR_GAP
+    : anchor.x + anchor.width - width;
+  const opensDown = anchor.y + anchor.height + ANCHOR_GAP + height <= viewportHeight - EDGE;
+  const preferredY = opensDown
+    ? anchor.y + anchor.height + ANCHOR_GAP
+    : anchor.y - height - ANCHOR_GAP;
+  return {
+    x: Math.min(Math.max(EDGE, preferredX), Math.max(EDGE, viewportWidth - width - EDGE)),
+    y: Math.min(Math.max(EDGE, preferredY), Math.max(EDGE, viewportHeight - height - EDGE)),
+    width,
+    height,
+  };
+}
+
+export function drawLocaleMenu(
+  ctx: RendererCtx,
+  snapshot: GpuRenderSnapshot,
+  viewportWidth: number,
+  viewportHeight: number,
+  anchor: LocaleMenuAnchor
+): void {
+  if (!snapshot.state.localeMenuOpen) return;
+  const layout = localeMenuLayout(viewportWidth, viewportHeight, anchor);
+
+  const scrim = new Graphics();
+  scrim.rect(0, 0, viewportWidth, viewportHeight);
+  scrim.fill({ color: 0x050810, alpha: 0.2 });
+  scrim.eventMode = 'static';
+  scrim.cursor = 'default';
+  scrim.hitArea = new Rectangle(0, 0, viewportWidth, viewportHeight);
+  scrim.on('pointertap', () => snapshot.onActivate('locale.menu.close'));
+  ctx.root.addChild(scrim);
+
+  ctx.panel(
+    ctx.root,
+    layout.x,
+    layout.y,
+    layout.width,
+    layout.height,
+    0x0c1321,
+    GPU_COLORS.primary,
+    GPU_LAYOUT.radius,
+    2
+  );
+
+  for (const [index, locale] of SUPPORTED_LOCALES.entries()) {
+    ctx.button(
+      ctx.root,
+      `locale.select.${locale}`,
+      'menuitemradio',
+      LOCALE_NAMES[locale],
+      layout.x + PANEL_PAD,
+      layout.y + PANEL_PAD + index * ROW_HEIGHT,
+      layout.width - PANEL_PAD * 2,
+      ROW_HEIGHT - 2,
+      locale === snapshot.state.locale,
+      snapshot.onActivate,
+      GPU_COLORS.primary
+    );
+  }
+}

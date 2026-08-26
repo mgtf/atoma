@@ -6,6 +6,7 @@ import {
   useState,
 } from 'react';
 import { projectSlugFromName } from '../../contracts/projects.js';
+import { isLocale, localeDirection } from '../../contracts/locales.js';
 import { translate } from '../client/i18n-catalog.js';
 import { loginBounceParams, providerLoginHref } from '../client/auth-session.js';
 import { isIndexEntryLive } from '../client/run-utils.js';
@@ -89,6 +90,10 @@ function errorMessage(errors: unknown[], t: (key: string) => string) {
 export function GpuApp() {
   const locale = useGpuStore((snapshot) => snapshot.locale);
   const entered = useGpuStore((snapshot) => snapshot.entered);
+  useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = localeDirection(locale);
+  }, [locale]);
   const t = useCallback(
     (key: string, vars?: Record<string, unknown>) => translate(locale, key, vars),
     [locale]
@@ -532,8 +537,17 @@ function GpuAppContent({
       store.toggleTuningPanel();
       return;
     }
-    if (id === 'locale.toggle') {
-      store.setLocale(store.locale === 'en' ? 'fr' : 'en');
+    if (id === 'locale.menu.toggle') {
+      store.toggleLocaleMenu();
+      return;
+    }
+    if (id === 'locale.menu.close') {
+      store.closeLocaleMenu();
+      return;
+    }
+    if (id.startsWith('locale.select.')) {
+      const locale = id.slice('locale.select.'.length);
+      if (isLocale(locale)) store.setLocale(locale);
       return;
     }
     if (id.startsWith('run.select.')) {
