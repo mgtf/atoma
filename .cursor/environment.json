@@ -1,0 +1,15 @@
+{
+  "name": "atoma",
+  "install": "npm ci",
+  "terminals": [
+    {
+      "name": "viz",
+      "command": "npm run viz:dev",
+      "description": "Atoma visualizer: API on 127.0.0.1:4111, Vite GPU UI on 127.0.0.1:5173."
+    }
+  ],
+  "ports": [
+    { "name": "viz api", "port": 4111 },
+    { "name": "viz ui", "port": 5173 }
+  ]
+}
