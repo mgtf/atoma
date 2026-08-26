@@ -39,6 +39,8 @@ import {
   PROJECTS_DOM_FORM_TOP,
   PROJECTS_NARROW_CONTENT_WIDTH,
   PROJECTS_ROW_PAD,
+  REPOSITORY_ICON_GAP,
+  REPOSITORY_ICON_SIZE,
   projectsColumn,
   projectsFormHeight,
   projectsGpuContentTop,
@@ -117,6 +119,17 @@ interface RecordedButton {
   onActivate?: (id: string) => void;
 }
 
+interface RecordedLink {
+  parent: Container;
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  onActivate: (id: string) => void;
+}
+
 interface RecordedEventCard {
   id: string;
   x: number;
@@ -146,6 +159,9 @@ interface RecordingCtx extends RendererCtx {
     seed: string;
     interactive: boolean;
   }[];
+  repositoryIcons: { parent: Container; x: number; y: number; size: number }[];
+  privateRepositoryIcons: { parent: Container; x: number; y: number; size: number }[];
+  links: RecordedLink[];
   statCards: { id: string; label: string; value: string }[];
   atomButtons: RecordedButton[];
   eventCards: RecordedEventCard[];
@@ -217,6 +233,9 @@ function createRecordingCtx(): RecordingCtx {
     exitCalls: 0,
     panels: [],
     retainedOrbs: [],
+    repositoryIcons: [],
+    privateRepositoryIcons: [],
+    links: [],
     metrics: emptyRenderMetrics(),
     // Headless retention stub: no renderer, so no textures to retain — every
     // call attaches a fresh mark, which is what the layout assertions read.
@@ -248,6 +267,24 @@ function createRecordingCtx(): RecordingCtx {
       ctx.texts.push({ parent, value, x, y, options, node });
       ctx.metrics.visibleLabels.push(value);
       return node;
+    },
+    repositoryIcon(parent, x, y, size) {
+      ctx.repositoryIcons.push({ parent, x, y, size });
+      return null;
+    },
+    privateRepositoryIcon(parent, x, y, size) {
+      ctx.privateRepositoryIcons.push({ parent, x, y, size });
+      const container = new Container();
+      parent.addChild(container);
+      return container;
+    },
+    linkRegion(parent, id, label, x, y, width, height, onActivate) {
+      ctx.links.push({ parent, id, label, x, y, width, height, onActivate });
+      ctx.recordHitTarget(parent, { id, role: 'link', label, x, y, width, height });
+      const container = new Container();
+      container.position.set(x, y);
+      parent.addChild(container);
+      return container;
     },
     // The SAME advance model `textStub` reports as a label's width, so a view
     // that measures copy and then reads the drawn label back sees one
@@ -350,7 +387,23 @@ function createRecordingCtx(): RecordingCtx {
       ctx.root.addChild(mask);
       return mask;
     },
-    button(parent, id, role, label, x, y, width, height, active, onActivate) {
+    button(
+      parent,
+      id,
+      role,
+      label,
+      x,
+      y,
+      width,
+      height,
+      active,
+      onActivate,
+      _accent,
+      _centerLabel,
+      _spinning,
+      labelMaxWidth,
+      _labelY
+    ) {
       // The real `button()` FITS its label to its own width against measured
       // glyphs, so views hand it unbounded copy on purpose. Recording the raw
       // string would let a row that visibly overflows pass a bounded-copy
@@ -359,7 +412,11 @@ function createRecordingCtx(): RecordingCtx {
       ctx.buttons.push({
         parent,
         id,
-        label: fitStub(label, Math.max(0, width - 20), { size: 11 }),
+        label: fitStub(
+          label,
+          Math.max(0, Math.min(width - 20, labelMaxWidth ?? Number.POSITIVE_INFINITY)),
+          { size: 11 }
+        ),
         x,
         y,
         width,
@@ -1887,10 +1944,7 @@ describe('drawProjects', () => {
     expect(domSkin).toContain('box-shadow: none');
   });
 
-  it('leads the row with the audience, because the line truncates from the tail', () => {
-    // The one word on a project row that says who can read what its runs
-    // publish. Appended it would be the first thing a narrow panel drops; and
-    // the choice is irreversible, so a reader must be able to see it was made.
+  it('shows the private lock only for private repositories', () => {
     const projectId = '3c584a3c-933d-4488-ac44-4cdcc8e66f31';
     const project = {
       projectId,
@@ -1908,6 +1962,8 @@ describe('drawProjects', () => {
       repositoryFullName: null,
       repositoryUrl: null,
       repositoryError: null,
+      runCount: 3,
+      lastRunAt: '2026-08-26T12:00:00.000Z',
       createdAt: '2026-08-20T00:00:00.000Z',
       updatedAt: '2026-08-20T00:00:00.000Z',
     };
@@ -1919,12 +1975,14 @@ describe('drawProjects', () => {
       1280,
       720
     );
-    expect(
-      privateCtx.texts.some((text) => String(text.value).startsWith('private · weather-lab'))
-    ).toBe(true);
+    expect(privateCtx.texts.some((text) => text.value === 'repo pending')).toBe(true);
+    expect(privateCtx.texts.some((text) => text.value === '·')).toBe(true);
+    expect(privateCtx.texts.some((text) => text.value === 'atoma-org/weather-lab')).toBe(true);
+    expect(privateCtx.texts.some((text) => String(text.value).includes('Created'))).toBe(true);
+    expect(privateCtx.texts.some((text) => String(text.value).includes('3 runs'))).toBe(true);
+    expect(privateCtx.texts.some((text) => String(text.value).includes('last run'))).toBe(true);
+    expect(privateCtx.privateRepositoryIcons).toHaveLength(1);
 
-    // Public is upshifted: one text node carries one colour, and this line's
-    // colour belongs to the slug rather than to the audience.
     const publicCtx = createRecordingCtx();
     drawProjects(
       publicCtx,
@@ -1940,9 +1998,9 @@ describe('drawProjects', () => {
       1280,
       720
     );
-    expect(
-      publicCtx.texts.some((text) => String(text.value).startsWith('PUBLIC · weather-lab'))
-    ).toBe(true);
+    expect(publicCtx.texts.some((text) => text.value === 'repo pending')).toBe(true);
+    expect(publicCtx.texts.some((text) => text.value === 'atoma-org/weather-lab')).toBe(true);
+    expect(publicCtx.privateRepositoryIcons).toHaveLength(0);
 
     // Visible BEFORE the repository exists, which is when it still matters:
     // the repository is created at publication, not at project creation.
@@ -2018,6 +2076,8 @@ describe('drawProjects', () => {
           },
         }
       );
+    const activated: string[] = [];
+    snapshot.onActivate = (id) => activated.push(id);
     drawProjects(ctx, snapshot, 1280, 720);
     expect(ctx.metrics.visibleLabels).not.toContain('Projects');
     expect(ctx.metrics.visibleLabels).toContain('Project : Weather Lab');
@@ -2030,12 +2090,11 @@ describe('drawProjects', () => {
     expect(ctx.texts.some((text) => String(text.value).includes('401 API key is invalid'))).toBe(true);
     const boundedRowCopy = ctx.texts.filter((text) =>
       text.value === 'repo ready' ||
-      String(text.value).startsWith('private · weather-lab ·') ||
       String(text.value).startsWith('https://github.com/atoma-org/') ||
       String(text.value).startsWith('delivered') ||
       String(text.value).includes('401 API key is invalid')
     );
-    expect(boundedRowCopy.length).toBeGreaterThanOrEqual(5);
+    expect(boundedRowCopy.length).toBeGreaterThanOrEqual(4);
     for (const label of boundedRowCopy) {
       expect(label.options).toMatchObject({ singleLine: true });
     }
@@ -2054,10 +2113,9 @@ describe('drawProjects', () => {
       projectsGpuContentTop('run')
     );
 
-    // The status column is ANCHORED to the card's inner right edge, not left
-    // aligned somewhere in the middle of the row. It used to be capped at
-    // `columnX + 560`, which on any panel past ~700px floated the verdict a
-    // few hundred pixels short of the border it belongs against.
+    // Project metadata forms one sequence inside the framed row. In detail,
+    // the name is already the page title, so the sequence starts at the
+    // frame's left inset: lock, repository status, then destination.
     const column = projectsColumn(1280);
     // The status sits inside the panel border, while the label surface gives
     // that right-hand column its own horizontal space.
@@ -2067,30 +2125,49 @@ describe('drawProjects', () => {
     const repositoryUrl = ctx.texts.find((text) =>
       String(text.value).startsWith('https://github.com/atoma-org/')
     );
-    // BOUNDED BY WIDTH, which is the real requirement — not "ellipsised",
-    // which this used to assert. The `/6` average-advance estimate cut this
-    // URL while its column still had room; the measured fit renders it whole,
-    // and only ellipsises copy that genuinely does not fit.
+    expect(repositoryUrl!.value).toBe('https://github.com/atoma-org/weather-lab');
     const repoUrlColumn = (repositoryUrl!.options as { width?: number } | undefined)?.width;
     expect(repoUrlColumn).toBeGreaterThan(0);
-    expect(repositoryUrl!.node.width).toBeLessThanOrEqual(repoUrlColumn!);
-    for (const [description, label] of [
-      ['repo ready', ctx.texts.find((text) => text.value === 'repo ready')],
-      ['bounded repository URL', repositoryUrl],
-    ] as const) {
-      expect(label, `missing status label: ${description}`).toBeTruthy();
-      expect(label!.parent.toGlobal({ x: label!.x, y: label!.y }).x).toBe(rightEdge);
-      expect(label!.node.anchor.x).toBe(1);
-    }
+    expect(repositoryUrl!.node.width).toBeLessThanOrEqual(repoUrlColumn! + 0.001);
+    const repositoryLink = ctx.links.find((link) =>
+      link.id.startsWith('project.repository.')
+    )!;
+    const linkOrigin = repositoryLink.parent.toGlobal({
+      x: repositoryLink.x,
+      y: repositoryLink.y,
+    });
+    expect(repositoryLink).toMatchObject({
+      label: 'https://github.com/atoma-org/weather-lab',
+      height: REPOSITORY_ICON_SIZE,
+    });
+    repositoryLink.onActivate(repositoryLink.id);
+    expect(activated).toEqual([`project.repository.${projectId}`]);
+    const status = ctx.texts.find((text) => text.value === 'repo ready')!;
+    const separator = ctx.texts.find((text) => text.value === '·')!;
+    const lock = ctx.privateRepositoryIcons[0]!;
+    const lockOrigin = lock.parent.toGlobal({ x: lock.x, y: lock.y });
+    const statusOrigin = status.parent.toGlobal({ x: status.x, y: status.y });
+    const separatorOrigin = separator.parent.toGlobal({ x: separator.x, y: separator.y });
+    expect(lockOrigin.x).toBeGreaterThanOrEqual(column.x + 18);
+    expect(lockOrigin.x).toBeLessThan(statusOrigin.x);
+    expect(statusOrigin.x).toBeLessThan(separatorOrigin.x);
+    expect(separatorOrigin.x).toBeLessThan(linkOrigin.x);
+    expect(linkOrigin.x + repositoryLink.width).toBeLessThanOrEqual(rightEdge);
+    expect(status.node.anchor.x).toBe(0);
     const verdict = ctx.texts.find((text) => String(text.value).startsWith('delivered'));
     expect(verdict!.parent.toGlobal({ x: verdict!.x, y: verdict!.y }).x).toBe(rightEdge);
     expect(verdict!.node.anchor.x).toBe(1);
     expect(rightEdge).toBeGreaterThan(staleCap);
-    const projectMetadata = ctx.texts.find((text) =>
-      String(text.value).startsWith('private · weather-lab ·')
-    )!;
-    const metadataWidth = (projectMetadata.options as { width?: number }).width!;
-    expect(projectMetadata.node.width).toBeLessThanOrEqual(metadataWidth);
+    expect(ctx.texts.some((text) => text.value === 'atoma-org/weather-lab')).toBe(false);
+    expect(ctx.privateRepositoryIcons).toHaveLength(1);
+    expect(ctx.repositoryIcons).toHaveLength(1);
+    const repositoryIcon = ctx.repositoryIcons[0]!;
+    expect(repositoryIcon.x + repositoryIcon.size + REPOSITORY_ICON_GAP).toBe(
+      repositoryUrl!.x
+    );
+    expect(repositoryIcon.y + repositoryIcon.size / 2).toBe(
+      repositoryUrl!.y + 7
+    );
 
     // The run goal gives way before the status column on a narrow pane; no
     // forced minimum may push its button through the frame edge.
@@ -2098,13 +2175,14 @@ describe('drawProjects', () => {
     const narrow = createRecordingCtx();
     drawProjects(narrow, snapshot, narrowWidth, 720);
     const narrowFrame = viewFrame(narrowWidth, 720);
-    const narrowMetadata = narrow.texts.find((text) =>
-      String(text.value).startsWith('private')
-    )!;
+    const narrowMetadataIcon = narrow.repositoryIcons[0]!;
     const narrowStatus = narrow.texts.find((text) => text.value === 'repo ready')!;
     expect(narrowStatus.parent.toGlobal({ x: narrowStatus.x, y: narrowStatus.y }).y)
-      .toBeGreaterThan(
-        narrowMetadata.parent.toGlobal({ x: narrowMetadata.x, y: narrowMetadata.y }).y
+      .toBeLessThan(
+        narrowMetadataIcon.parent.toGlobal({
+          x: narrowMetadataIcon.x,
+          y: narrowMetadataIcon.y + narrowMetadataIcon.size / 2,
+        }).y
       );
     for (const button of narrow.buttons.filter((candidate) => candidate.id.startsWith('project.run.'))) {
       const origin = button.parent.toGlobal({ x: button.x, y: button.y });
@@ -2326,14 +2404,21 @@ describe('drawProjects', () => {
     }
   });
 
-  // The project's metadata is the same shape: a line under a button's label.
-  it('starts the project metadata on its name label, not the button border', () => {
+  it('does not show a GitHub mesh until the repository has a real URL', () => {
     const ctx = createRecordingCtx();
     drawProjects(
       ctx,
       makeSnapshot(
         { view: 'projects', selectedProjectId: null },
-        { projects: [guidanceProject()], profiles: [LAUNCH_PROFILE] }
+        {
+          projects: [{
+            ...guidanceProject(),
+            repositoryStatus: 'pending',
+            repositoryFullName: null,
+            repositoryUrl: null,
+          }],
+          profiles: [LAUNCH_PROFILE],
+        }
       ),
       1000,
       720
@@ -2341,13 +2426,49 @@ describe('drawProjects', () => {
     const nameButton = ctx.buttons.find((button) =>
       button.id.startsWith('project.select.')
     )!;
-    const metadata = ctx.texts.find((text) => String(text.value).startsWith('private ·'))!;
+    const path = ctx.texts.find((text) => text.value === 'atoma-org/weather-lab')!;
     const buttonLeft = nameButton.parent.toGlobal({
       x: nameButton.x,
       y: nameButton.y,
     }).x;
-    const metadataLeft = metadata.parent.toGlobal({ x: metadata.x, y: metadata.y }).x;
-    expect(metadataLeft).toBe(buttonLeft + BUTTON_LABEL_INSET);
+    const privateIcon = ctx.privateRepositoryIcons[0]!;
+    const privateIconLeft = privateIcon.parent.toGlobal({
+      x: privateIcon.x,
+      y: privateIcon.y,
+    }).x;
+    const buttonRight = buttonLeft + nameButton.width;
+    const pathLeft = path.parent.toGlobal({ x: path.x, y: path.y }).x;
+    expect(privateIconLeft).toBeGreaterThan(buttonLeft + BUTTON_LABEL_INSET);
+    expect(pathLeft + path.node.width).toBeLessThanOrEqual(buttonRight - PROJECTS_ROW_PAD);
+    expect(ctx.repositoryIcons).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
+  });
+
+  it('shows the target path in project detail until GitHub creates the repository', () => {
+    const pending = {
+      ...guidanceProject(),
+      repositoryStatus: 'pending' as const,
+      repositoryFullName: null,
+      repositoryUrl: null,
+    };
+    const ctx = createRecordingCtx();
+    drawProjects(
+      ctx,
+      makeSnapshot(
+        { view: 'projects', selectedProjectId: pending.projectId },
+        { projects: [pending], profiles: [LAUNCH_PROFILE] }
+      ),
+      1000,
+      720
+    );
+    expect(ctx.texts.some((text) =>
+      String(text.value).includes(
+        `${pending.repositoryTarget.owner}/${pending.repositoryTarget.name}`
+      )
+    )).toBe(true);
+    expect(ctx.repositoryIcons).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
+    expect(ctx.privateRepositoryIcons).toHaveLength(1);
   });
 });
 
@@ -3506,7 +3627,7 @@ describe('the run prompt carries its own guidance', () => {
     expect(ctx.buttons.some((button) => button.id === 'projects.example.8')).toBe(false);
     // The selected project's detail still renders below the guidance, without
     // repeating its name as a button.
-    const row = ctx.texts.find((text) => String(text.value).startsWith('private ·'))!;
+    const row = ctx.texts.find((text) => text.value === 'repo ready')!;
     const firstExample = ctx.buttons.find((button) => button.id === 'projects.example.0')!;
     expect(row.y).toBeGreaterThan(firstExample.y);
   });
@@ -3521,7 +3642,7 @@ describe('the run prompt carries its own guidance', () => {
     // project list from rendering.
     const noProfile = drawGuidance(null);
     expect(noProfile.buttons.some((button) => button.id.startsWith('projects.example.'))).toBe(false);
-    expect(noProfile.texts.some((text) => String(text.value).startsWith('private ·'))).toBe(true);
+    expect(noProfile.texts.some((text) => text.value === 'repo ready')).toBe(true);
   });
 
   it('prefers a catalog override over the family English, per family id', () => {
@@ -3552,7 +3673,7 @@ describe('the run prompt carries its own guidance', () => {
     expect(heightDelta).toBeGreaterThan(0);
     expect(long.scrollMax.projects! - medium.scrollMax.projects!).toBe(heightDelta);
     const rowOf = (ctx: ReturnType<typeof createRecordingCtx>) =>
-      ctx.texts.find((text) => String(text.value).startsWith('private ·'))!.y;
+      ctx.texts.find((text) => text.value === 'repo ready')!.y;
     expect(rowOf(long) - rowOf(medium)).toBe(heightDelta);
     // Examples start below the measured paragraph instead of overlapping it.
     const helpText = long.texts.find((text) => text.value === longHelp)!;
@@ -3638,7 +3759,7 @@ describe('the run prompt carries its own guidance', () => {
 
     // Collapsing frees real vertical space for the list below it.
     const rowY = (ctx: ReturnType<typeof createRecordingCtx>) =>
-      ctx.texts.find((text) => String(text.value).startsWith('private ·'))!.y;
+      ctx.texts.find((text) => text.value === 'repo ready')!.y;
     expect(rowY(later)).toBeLessThan(rowY(first));
 
     // A preference can collapse coaching for a new project, but history is an

@@ -97,7 +97,13 @@ function publicRun(run: ProjectRun, publication: import('../contracts/projects.j
   };
 }
 
-function publicProject(project: Project) {
+function publicProject(
+  project: Project,
+  runSummary: { runCount: number; lastRunAt: string | null } = {
+    runCount: 0,
+    lastRunAt: null,
+  }
+) {
   return {
     projectId: project.projectId,
     name: project.name,
@@ -109,6 +115,7 @@ function publicProject(project: Project) {
     repositoryFullName: project.repositoryFullName,
     repositoryUrl: project.repositoryUrl,
     repositoryError: project.repositoryError,
+    ...runSummary,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
   };
@@ -144,12 +151,20 @@ export class ProjectService {
   listProjects(viewer: Viewer): unknown {
     if (viewer.platformAdmin) {
       return this.store.listAllProjects().map((project) => ({
-        ...publicProject(project),
+        ...publicProject(
+          project,
+          this.store.projectRunSummary(project.orgId, project.projectId)
+        ),
         orgId: project.orgId,
         orgName: project.orgName,
       }));
     }
-    return this.store.listProjects(viewer.orgId).map(publicProject);
+    return this.store.listProjects(viewer.orgId).map((project) =>
+      publicProject(
+        project,
+        this.store.projectRunSummary(viewer.orgId, project.projectId)
+      )
+    );
   }
 
   /**

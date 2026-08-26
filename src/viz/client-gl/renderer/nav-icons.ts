@@ -65,6 +65,8 @@ export const NAV_FOLDER_PAPER_MATERIAL = {
 export const NAV_ICON_ASSET_PATHS = Object.values(MODEL_FILE).map(
   (file) => `src/viz/public/models/navigation/${file}.glb`
 );
+export const GITHUB_MESH_ASSET_PATH = 'src/viz/public/models/github/github.glb';
+const GITHUB_MESH_URL = '/models/github/github.glb';
 
 export interface NavIconLighting {
   /** Key-light direction in the icon's local 3D plane. */
@@ -82,6 +84,8 @@ export interface NavIconMesh {
 
 export interface NavIconMeshes {
   readonly icons: Readonly<Record<NavIconKind, NavIconMesh>>;
+  /** GitHub's repository mark, rendered by the same single Three.js context. */
+  readonly github: NavIconMesh;
   destroy(): void;
 }
 
@@ -151,7 +155,9 @@ export function navIconLighting(
   };
 }
 
-function polishMaterials(model: Group, three: ThreeModule, kind: NavIconKind): void {
+type MeshKind = NavIconKind | 'github';
+
+function polishMaterials(model: Group, three: ThreeModule, kind: MeshKind): void {
   model.traverse((child) => {
     if (!(child instanceof three.Mesh)) return;
     // The source meshes carry artist-authored normals for their rounded faces
@@ -161,6 +167,16 @@ function polishMaterials(model: Group, three: ThreeModule, kind: NavIconKind): v
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     for (const material of materials) {
       if (!(material instanceof three.MeshStandardMaterial)) continue;
+      if (kind === 'github') {
+        const isDarkMark = /github/i.test(material.name);
+        material.color.setHex(isDarkMark ? 0x111827 : 0xf3f4f6);
+        material.roughness = 0.28;
+        material.metalness = 0.12;
+        material.emissive.setHex(isDarkMark ? 0x020306 : 0x24262a);
+        material.emissiveIntensity = isDarkMark ? 0.08 : 0.18;
+        material.needsUpdate = true;
+        continue;
+      }
       const isFolderPaper =
         kind === 'projects' && /(?:clay\s*white|white|paper)/i.test(material.name);
       const palette = isFolderPaper ? NAV_FOLDER_PAPER_MATERIAL : NAV_ICON_MATERIAL;
@@ -230,7 +246,7 @@ function createMeshTexture(
   three: ThreeModule,
   renderer: WebGLRenderer,
   model: Group,
-  kind: NavIconKind
+  kind: MeshKind
 ): NavIconMesh {
   polishMaterials(model, three, kind);
   fitModel(model, three);
@@ -238,7 +254,9 @@ function createMeshTexture(
   const scene = new three.Scene();
   const pivot = new three.Group();
   const opticalSize = new three.Group();
-  const restPose = navIconRestPose(kind);
+  const restPose = kind === 'github'
+    ? { x: -0.12, y: -0.2, z: 0 }
+    : navIconRestPose(kind);
   pivot.rotation.set(restPose.x, restPose.y, restPose.z);
   opticalSize.add(model);
   pivot.add(opticalSize);
@@ -343,20 +361,43 @@ export async function loadNavIconMeshes(): Promise<NavIconMeshes> {
   renderer.toneMappingExposure = 1.18;
 
   const loader = new GLTFLoader();
-  const entries = await Promise.all(
-    Object.entries(MODEL_FILE).map(async ([kind, file]) => {
-      const gltf = await loader.loadAsync(`/models/navigation/${file}.glb`);
-      const mesh = createMeshTexture(three, renderer, gltf.scene, kind as NavIconKind);
-      return [kind, mesh] as const;
-    })
-  );
+  const [entries, githubGltf] = await Promise.all([
+    Promise.all(
+      Object.entries(MODEL_FILE).map(async ([kind, file]) => {
+        const gltf = await loader.loadAsync(`/models/navigation/${file}.glb`);
+        const mesh = createMeshTexture(three, renderer, gltf.scene, kind as NavIconKind);
+        return [kind, mesh] as const;
+      })
+    ),
+    loader.loadAsync(GITHUB_MESH_URL),
+  ]);
   const icons = Object.fromEntries(entries) as unknown as Readonly<
     Record<NavIconKind, NavIconMesh>
   >;
+  const github = createMeshTexture(three, renderer, githubGltf.scene, 'github');
   return {
     icons,
+    github,
     destroy: () => renderer.dispose(),
   };
+}
+
+/** Draw the GitHub mesh as a small repository-name prefix. */
+export function drawRepositoryIcon(
+  parent: Container,
+  meshes: NavIconMeshes,
+  x: number,
+  y: number,
+  size: number
+): Sprite {
+  const face = new Sprite(meshes.github.texture);
+  face.position.set(x, y);
+  face.width = size;
+  face.height = size;
+  face.label = 'repository-github-mesh';
+  face.eventMode = 'none';
+  parent.addChild(face);
+  return face;
 }
 
 export function drawNavIcon(

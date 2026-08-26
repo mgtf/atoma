@@ -231,6 +231,13 @@ describe('ProjectService — roles, IDOR and slug identity', () => {
     expect(listed[0]).not.toHaveProperty('hostPaths');
     expect(listed[0]?.['projectRunId']).toBe(reserved!.run.projectRunId);
     expect(listed[0]?.['traceId']).toBeNull();
+    expect(svc.listProjects(alice)).toEqual([
+      expect.objectContaining({
+        projectId: created.projectId,
+        runCount: 1,
+        lastRunAt: reserved!.run.createdAt,
+      }),
+    ]);
   });
 
   it('exposes the project-run id as traceId once the trace file exists', async () => {

@@ -895,6 +895,21 @@ export class ProjectStore {
     ).map(runFromRow);
   }
 
+  projectRunSummary(
+    orgIdInput: string,
+    projectIdInput: string
+  ): { runCount: number; lastRunAt: string | null } {
+    const orgId = organisationIdSchema.parse(orgIdInput);
+    const projectId = projectIdSchema.parse(projectIdInput);
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS run_count, MAX(created_at) AS last_run_at
+         FROM project_runs WHERE project_id = ? AND org_id = ?`
+      )
+      .get(projectId, orgId) as { run_count: number; last_run_at: string | null };
+    return { runCount: row.run_count, lastRunAt: row.last_run_at };
+  }
+
   /**
    * Trace files for one organisation. A run belongs to exactly one project;
    * `/api/runs` lists this set and never a shared instance directory.

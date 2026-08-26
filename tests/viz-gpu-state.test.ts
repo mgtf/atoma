@@ -14,6 +14,7 @@ import {
 import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
 import {
   advanceNavIconSpin,
+  GITHUB_MESH_ASSET_PATH,
   NAV_ICON_ASSET_PATHS,
   NAV_FOLDER_PAPER_MATERIAL,
   NAV_ICON_MATERIAL,
@@ -26,6 +27,31 @@ import {
   navIconRestPose,
   queueNavIconSpin,
 } from '../src/viz/client-gl/renderer/nav-icons.js';
+import {
+  githubRepositoryHref,
+  openGitHubRepository,
+} from '../src/viz/client-gl/repository-link.js';
+
+describe('GitHub repository links', () => {
+  it('opens only a concrete github.com repository in an isolated new tab', () => {
+    const calls: string[][] = [];
+    const openWindow = (...args: string[]) => {
+      calls.push(args);
+      return null;
+    };
+    expect(openGitHubRepository(
+      'https://github.com/atoma-org/weather-lab',
+      openWindow
+    )).toBe(true);
+    expect(calls).toEqual([[
+      'https://github.com/atoma-org/weather-lab',
+      '_blank',
+      'noopener,noreferrer',
+    ]]);
+    expect(githubRepositoryHref('https://example.com/atoma-org/weather-lab')).toBeNull();
+    expect(githubRepositoryHref('https://github.com/atoma-org')).toBeNull();
+  });
+});
 
 // Decisions are catalog-backed (outcome.* keys); resolving through the real
 // EN catalog proves the copy path never falls back to hardcoded English.
@@ -127,6 +153,16 @@ describe('navigation icon identity', () => {
       expect(glb.readUInt32LE(8), path).toBe(glb.byteLength);
     }
     expect(NAV_ICON_SOURCE_SIZE).toBeGreaterThan(NAV_ICON_RENDER_SIZE);
+  });
+
+  it('ships a valid GitHub GLB beside its required attribution', () => {
+    const glb = readFileSync(GITHUB_MESH_ASSET_PATH);
+    expect(glb.subarray(0, 4).toString('ascii')).toBe('glTF');
+    expect(glb.readUInt32LE(4)).toBe(2);
+    expect(glb.readUInt32LE(8)).toBe(glb.byteLength);
+    const license = readFileSync('src/viz/public/models/github/LICENSE.md', 'utf8');
+    expect(license).toContain('pengedarseni');
+    expect(license).toContain('Creative Commons Attribution 4.0');
   });
 });
 import {

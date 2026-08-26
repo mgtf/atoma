@@ -60,6 +60,7 @@ import {
 } from './store.js';
 import { parseSettingsModelId } from './renderer/views/settings.js';
 import type { VizAdminInvitation } from '../client/types.js';
+import { openGitHubRepository } from './repository-link.js';
 
 const RELEASE_VERSION = __ATOMA_RELEASE_VERSION__;
 
@@ -577,6 +578,12 @@ function GpuAppContent({
       store.selectProject(projectSelectionAfterActivate(store.selectedProjectId, projectId));
       return;
     }
+    if (id.startsWith('project.repository.')) {
+      const projectId = id.slice('project.repository.'.length);
+      const project = projectsQuery.data?.find((candidate) => candidate.projectId === projectId);
+      openGitHubRepository(project?.repositoryUrl);
+      return;
+    }
     if (id.startsWith('project.run.')) {
       store.selectRun(id.slice('project.run.'.length));
       store.setView('runs');
@@ -673,6 +680,7 @@ function GpuAppContent({
     loginHref,
     mintInvitation,
     profilesQuery.data,
+    projectsQuery.data,
     saveTierModel,
   ]);
 

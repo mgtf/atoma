@@ -67,6 +67,7 @@ import { LabelCache } from './renderer/label-cache.js';
 import {
   advanceNavIconSpin,
   drawNavIcon,
+  drawRepositoryIcon,
   loadNavIconMeshes,
   NAV_ICON_OUTSIDE_GAP,
   NAV_ICON_RENDER_SIZE,
@@ -1975,6 +1976,73 @@ export class GpuRenderer {
     return label;
   }
 
+  /** Prefix a repository name with the shared, rasterised GitHub GLB mesh. */
+  repositoryIcon(parent: Container, x: number, y: number, size: number) {
+    const meshes = this.navIconMeshes;
+    if (!meshes) return null;
+    this.addSilhouetteShadow(parent, meshes.github.shadowTexture, size, size, {
+      x,
+      y,
+      radius: Math.max(2, size * 0.22),
+      alpha: 0.3,
+      depth: 0.45,
+      surface: 'button',
+    });
+    return drawRepositoryIcon(parent, meshes, x, y, size);
+  }
+
+  /** Small neutral lock paired with a private repository visibility label. */
+  privateRepositoryIcon(parent: Container, x: number, y: number, size: number) {
+    const root = new Container();
+    root.position.set(x, y);
+    root.label = 'repository-private-lock';
+    root.eventMode = 'none';
+    const lock = new Graphics();
+    const stroke = Math.max(1.2, size * 0.12);
+    lock
+      .moveTo(size * 0.28, size * 0.48)
+      .lineTo(size * 0.28, size * 0.35)
+      .bezierCurveTo(
+        size * 0.28,
+        size * 0.08,
+        size * 0.72,
+        size * 0.08,
+        size * 0.72,
+        size * 0.35
+      )
+      .lineTo(size * 0.72, size * 0.48)
+      .stroke({ color: GPU_COLORS.muted, width: stroke, alpha: 0.8 });
+    lock
+      .roundRect(size * 0.16, size * 0.43, size * 0.68, size * 0.5, size * 0.1)
+      .fill({ color: GPU_COLORS.muted, alpha: 0.72 });
+    root.addChild(lock);
+    parent.addChild(root);
+    return root;
+  }
+
+  /** Transparent interactive region for inline links drawn by a view. */
+  linkRegion(
+    parent: Container,
+    id: string,
+    label: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    onActivate: (id: string) => void
+  ) {
+    const region = new Container();
+    region.position.set(x, y);
+    region.label = id;
+    region.eventMode = 'static';
+    region.cursor = 'pointer';
+    region.hitArea = new Rectangle(0, 0, width, height);
+    region.on('pointertap', () => onActivate(id));
+    parent.addChild(region);
+    this.recordHitTarget(parent, { id, role: 'link', label, x, y, width, height });
+    return region;
+  }
+
   private addSurfaceShadow(
     parent: Container,
     width: number,
@@ -2225,7 +2293,11 @@ export class GpuRenderer {
     accent: number = GPU_COLORS.primary,
     centerLabel = false,
     /** Spin the glyph: real feedback that a request is actually in flight. */
-    spinning = false
+    spinning = false,
+    /** Optional visual label column; the hit target keeps the full accessible label. */
+    labelMaxWidth?: number,
+    /** Optional top offset for compound buttons that draw secondary copy. */
+    labelY?: number
   ) {
     const container = new Container();
     container.position.set(x, y);
@@ -2254,9 +2326,13 @@ export class GpuRenderer {
     } as const;
     const labelText = this.text(
       container,
-      this.fitText(label, Math.max(0, width - 20), labelStyle),
+      this.fitText(
+        label,
+        Math.max(0, Math.min(width - 20, labelMaxWidth ?? Number.POSITIVE_INFINITY)),
+        labelStyle
+      ),
       centerLabel ? width / 2 : BUTTON_LABEL_INSET,
-      Math.max(5, (height - 16) / 2),
+      labelY ?? Math.max(5, (height - 16) / 2),
       labelStyle
     );
     if (centerLabel) labelText.anchor.x = 0.5;
@@ -3943,6 +4019,9 @@ export type RendererCtx = Pick<
   | 'root'
   | 'markRoot'
   | 'text'
+  | 'repositoryIcon'
+  | 'privateRepositoryIcon'
+  | 'linkRegion'
   | 'measureText'
   | 'fitText'
   | 'panel'

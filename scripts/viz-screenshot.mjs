@@ -167,6 +167,8 @@ function gatedStubs() {
       repositoryFullName: 'example/atoma-e2e-stopwatch-2',
       repositoryUrl: 'https://github.com/example/atoma-e2e-stopwatch-2',
       repositoryError: null,
+      runCount: 5,
+      lastRunAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       createdAt: '2026-08-20T00:00:00.000Z',
       updatedAt: '2026-08-20T00:00:00.000Z',
     }],

@@ -5,6 +5,7 @@ import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { projectGuidanceOpen } from '../../store.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
+import { relativeTime } from '../relative-time.js';
 import { createScrollPane } from '../scroll-pane.js';
 import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from '../view-frame.js';
 
@@ -23,7 +24,7 @@ import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP, VIEW_FRAME_PAD } from
  * two places; the guidance now sits beside the input it describes.
  */
 
-const ROW_HEIGHT = 72;
+const ROW_HEIGHT = 58;
 /**
  * Wide rows keep the name button a single-line control and stack the
  * metadata BELOW it, like the run rows stack their second line. The metadata
@@ -31,13 +32,11 @@ const ROW_HEIGHT = 72;
  * centred label — the two lines nearly touched, and the frame read as
  * cramped at any width (2026-08-24 review of the live Projects screen).
  */
-const PROJECT_BUTTON_HEIGHT = 34;
-/** Wide rows: where the metadata line starts, measured from the row's top. */
-const PROJECT_METADATA_Y = PROJECT_BUTTON_HEIGHT + 10;
-const COMPACT_ROW_HEIGHT = 86;
+const PROJECT_BUTTON_HEIGHT = 46;
+const COMPACT_ROW_HEIGHT = ROW_HEIGHT;
 /** A selected project owns the page title, so its detail row omits the name button. */
-const SELECTED_PROJECT_DETAIL_HEIGHT = 38;
-const SELECTED_PROJECT_COMPACT_DETAIL_HEIGHT = 54;
+const SELECTED_PROJECT_DETAIL_HEIGHT = ROW_HEIGHT;
+const SELECTED_PROJECT_COMPACT_DETAIL_HEIGHT = ROW_HEIGHT;
 const COMPACT_PROJECT_PANEL_WIDTH = 400;
 const RUN_ROW_HEIGHT = 46;
 /**
@@ -70,6 +69,28 @@ const STATUS_COL_MIN = 44;
 const STATUS_COL_MAX_SHARE = 0.3;
 /** Font size the status/verdict labels are drawn at, and measured at. */
 const STATUS_FONT_SIZE = 10;
+/** The linked mesh carries inset detail, so its full box must be visibly larger than the copy. */
+export const REPOSITORY_ICON_SIZE = 42;
+/** The mesh has transparent padding inside its box; overlap it to keep the visible mark near the URL. */
+export const REPOSITORY_ICON_GAP = -6;
+/** Pull the padded texture toward the separator without moving the link's logical start. */
+const REPOSITORY_ICON_OFFSET_X = -8;
+export const PRIVATE_REPOSITORY_ICON_SIZE = 13;
+export const PRIVATE_REPOSITORY_ICON_GAP = 6;
+const PROJECT_INFO_GAP = 10;
+const PROJECT_INFO_SEPARATOR = '·';
+const PROJECT_INFO_SEPARATOR_BEFORE_GAP = 6;
+/** Compensates for the repository mesh's transparent left inset. */
+const PROJECT_INFO_SEPARATOR_AFTER_GAP = 0;
+const PROJECT_INFO_TEXT_Y = 15;
+const PROJECT_NAME_Y = 7;
+const PROJECT_METADATA_Y = 28;
+
+function projectCreatedDate(createdAt: string, locale: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return date.toLocaleDateString(locale, { dateStyle: 'medium' });
+}
 
 /**
  * The status column, MEASURED against the real glyphs of the statuses on
@@ -95,7 +116,6 @@ function statusColumnWidth(
  * at 108 it wrapped mid-URL. Reserved by the name/slug column on every row, so
  * a row that has a link and one that does not keep the same left column.
  */
-const REPO_URL_COL = 220;
 /** Breathing room between the status column and the row's right border. */
 export const PROJECTS_ROW_PAD = 14;
 /**
@@ -525,7 +545,6 @@ export function drawProjects(
   const columnX = layout.x + 18;
   const innerWidth = layout.panelWidth - 36;
   const runColumnX = layout.x + 34;
-  const repoUrlWidth = Math.min(REPO_URL_COL, Math.max(80, innerWidth * 0.45));
   const compactRunRows = layout.panelWidth < COMPACT_PROJECT_PANEL_WIDTH;
   // The status column hugs the card's INNER RIGHT EDGE and its labels are
   // anchored to that edge. Capping it at `columnX + 560` left a wide gap
@@ -558,17 +577,63 @@ export function drawProjects(
     if (projectHidden(index, selectedIndex)) return;
     const y = cursor;
     const selected = project.projectId === snapshot.state.selectedProjectId;
-    // `button` fits this against its own width and the real glyphs; a
-    // character bound on top would only cut a name that fitted.
     const rowLabel = project.name.replace(/\s+/g, ' ');
-    // Wide rows reserve the right-hand status column from the LABEL surface;
-    // the surrounding panel still carries the row. A full-width centred label
-    // crossed directly through the anchored status at intermediate widths.
-    const projectButtonWidth = compactRunRows
-      ? innerWidth
-      : Math.max(0, statusX - columnX - 12);
-    // Once selected, the name owns the page title. Repeating it as a large
-    // active row immediately below the form produced two competing headings.
+    const repositoryStatusCopy = statusLabel(
+      snapshot.t,
+      project.repositoryStatus,
+      'projects.repoStatus'
+    );
+    const privateIconSpace = project.repositoryTarget.visibility === 'private'
+      ? PRIVATE_REPOSITORY_ICON_SIZE + PRIVATE_REPOSITORY_ICON_GAP
+      : 0;
+    const statusWidth = ctx.measureText(repositoryStatusCopy, {
+      size: STATUS_FONT_SIZE,
+      mono: true,
+    });
+    const separatorWidth = ctx.measureText(PROJECT_INFO_SEPARATOR, {
+      size: STATUS_FONT_SIZE,
+      mono: true,
+    });
+    const destinationPath =
+      `${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
+    const destinationText = project.repositoryUrl ?? destinationPath;
+    const destinationTextSize = project.repositoryUrl ? 9 : 10;
+    const destinationTextNaturalWidth = ctx.measureText(destinationText, {
+      size: destinationTextSize,
+    });
+    const destinationChromeWidth = project.repositoryUrl
+      ? REPOSITORY_ICON_OFFSET_X + REPOSITORY_ICON_SIZE + REPOSITORY_ICON_GAP
+      : 0;
+    const fixedInfoWidth =
+      privateIconSpace +
+      statusWidth +
+      PROJECT_INFO_SEPARATOR_BEFORE_GAP +
+      separatorWidth +
+      PROJECT_INFO_SEPARATOR_AFTER_GAP +
+      destinationChromeWidth;
+    // On a list row the project name keeps a useful left-hand column. In
+    // detail its name is already the page title, so the repository sequence
+    // may use the complete framed row.
+    const nameReserve = selected
+      ? 0
+      : Math.min(280, Math.max(140, innerWidth * 0.22));
+    const infoMaxWidth = Math.max(
+      0,
+      innerWidth - BUTTON_LABEL_INSET * 2 - nameReserve
+    );
+    const destinationTextWidth = Math.max(
+      0,
+      Math.min(destinationTextNaturalWidth, infoMaxWidth - fixedInfoWidth)
+    );
+    const infoWidth = fixedInfoWidth + destinationTextWidth;
+    const infoX = selected
+      ? columnX + BUTTON_LABEL_INSET
+      : columnX + innerWidth - PROJECTS_ROW_PAD - infoWidth;
+    const nameLabelWidth = Math.max(
+      0,
+      infoX - columnX - BUTTON_LABEL_INSET * 2 - PROJECT_INFO_GAP
+    );
+
     if (!selected) {
       ctx.button(
         pane.content,
@@ -577,73 +642,144 @@ export function drawProjects(
         rowLabel,
         columnX,
         y,
-        projectButtonWidth,
-        compactRunRows ? 30 : PROJECT_BUTTON_HEIGHT,
+        innerWidth,
+        PROJECT_BUTTON_HEIGHT,
         false,
-        snapshot.onActivate
+        snapshot.onActivate,
+        GPU_COLORS.primary,
+        false,
+        false,
+        nameLabelWidth,
+        PROJECT_NAME_Y
+      );
+      const runCount = project.runCount ?? runsByProject[project.projectId]?.length;
+      const lastRunAt = project.lastRunAt ?? runsByProject[project.projectId]?.[0]?.createdAt;
+      const lastRunAgo = lastRunAt
+        ? relativeTime(lastRunAt, snapshot.t, snapshot.state.locale)
+        : '';
+      const metadata = [
+        snapshot.t('projects.cardCreated', {
+          date: projectCreatedDate(project.createdAt, snapshot.state.locale),
+        }),
+        runCount === undefined
+          ? null
+          : lastRunAgo
+            ? snapshot.t('projects.cardRunsWithLast', {
+                count: runCount,
+                ago: lastRunAgo,
+              })
+            : snapshot.t('projects.cardRuns', { count: runCount }),
+      ].filter((value): value is string => value !== null).join(' · ');
+      ctx.text(
+        pane.content,
+        metadata,
+        columnX + BUTTON_LABEL_INSET,
+        y + PROJECT_METADATA_Y,
+        {
+          size: 9,
+          color: GPU_COLORS.muted,
+          width: nameLabelWidth,
+          singleLine: true,
+        }
+      );
+    } else {
+      ctx.panel(
+        pane.content,
+        columnX,
+        y,
+        innerWidth,
+        PROJECT_BUTTON_HEIGHT,
+        GPU_COLORS.panelRaised,
+        GPU_COLORS.border,
+        7,
+        1
       );
     }
-    const metadataWidth = compactRunRows
-      ? Math.max(0, innerWidth - 24)
-      : Math.max(40, innerWidth - repoUrlWidth - 24);
-    // VISIBILITY LEADS the metadata line. It cannot ride at the end: this line
-    // is truncated from the TAIL, so an appended badge is the first thing to
-    // disappear on a narrow panel — and it is the one word on the row that
-    // says who can read what these runs publish. Public is upshifted because a
-    // single text node carries a single colour, and this line's colour belongs
-    // to the slug, not to the audience.
-    const visibility = project.repositoryTarget.visibility;
-    const badge = snapshot.t(`projects.visibilityBadge.${visibility}`);
-    const metadata = `${visibility === 'public' ? badge.toUpperCase() : badge} · ${project.slug} · ${project.repositoryTarget.owner}/${project.repositoryTarget.name}`;
+    let infoCursor = infoX;
+    if (project.repositoryTarget.visibility === 'private') {
+      ctx.privateRepositoryIcon(
+        pane.content,
+        infoCursor,
+        y + 16,
+        PRIVATE_REPOSITORY_ICON_SIZE
+      );
+      infoCursor += privateIconSpace;
+    }
     ctx.text(
       pane.content,
-      // Fitted against the real glyphs. `/6` was an average advance, so this
-      // line ellipsised while the column still had room, and `singleLine`
-      // then squeezed whatever survived rather than ending it cleanly.
-      ctx.fitText(metadata.replace(/\s+/g, ' '), metadataWidth, { size: 10 }),
-      // The button's label vertical, like the run rows' second line: this
-      // describes the name above it, so it starts where that name starts.
-      columnX + BUTTON_LABEL_INSET,
-      y + (selected ? 0 : compactRunRows ? 34 : PROJECT_METADATA_Y),
-      {
-        size: 10,
-        color: GPU_COLORS.muted,
-        width: metadataWidth,
-        singleLine: true,
-      }
-    );
-    const repositoryStatus = ctx.text(
-      pane.content,
-      statusLabel(snapshot.t, project.repositoryStatus, 'projects.repoStatus'),
-      compactRunRows ? columnX + 12 : statusRight,
-      y + (selected ? (compactRunRows ? 18 : 0) : compactRunRows ? 49 : 10),
+      repositoryStatusCopy,
+      infoCursor,
+      y + PROJECT_INFO_TEXT_Y,
       {
         size: 10,
         color: statusColor(project.repositoryStatus),
         mono: true,
-        width: compactRunRows ? Math.max(0, innerWidth - 24) : statusCol,
+        width: statusWidth,
         singleLine: true,
       }
     );
-    if (!compactRunRows) repositoryStatus.anchor.x = 1;
-    if (project.repositoryFullName) {
-      const repositoryWidth = compactRunRows
-        ? Math.max(0, innerWidth - 24)
-        : repoUrlWidth;
-      const repositoryText = project.repositoryUrl ?? project.repositoryFullName;
-      const repository = ctx.text(
+    infoCursor += statusWidth + PROJECT_INFO_SEPARATOR_BEFORE_GAP;
+    ctx.text(
+      pane.content,
+      PROJECT_INFO_SEPARATOR,
+      infoCursor,
+      y + PROJECT_INFO_TEXT_Y,
+      {
+        size: STATUS_FONT_SIZE,
+        color: GPU_COLORS.muted,
+        mono: true,
+        width: separatorWidth,
+        singleLine: true,
+      }
+    );
+    infoCursor += separatorWidth + PROJECT_INFO_SEPARATOR_AFTER_GAP;
+    if (project.repositoryUrl) {
+      const repositoryGroupWidth =
+        REPOSITORY_ICON_OFFSET_X +
+        REPOSITORY_ICON_SIZE +
+        REPOSITORY_ICON_GAP +
+        destinationTextWidth;
+      const repositoryLink = ctx.linkRegion(
         pane.content,
-        ctx.fitText(repositoryText, repositoryWidth, { size: 9 }),
-        compactRunRows ? columnX + 12 : statusRight,
-        y + (selected ? (compactRunRows ? 34 : 16) : compactRunRows ? 64 : PROJECT_METADATA_Y + 1),
+        `project.repository.${project.projectId}`,
+        destinationText,
+        infoCursor,
+        y + 2,
+        repositoryGroupWidth,
+        REPOSITORY_ICON_SIZE,
+        snapshot.onActivate
+      );
+      ctx.repositoryIcon(
+        repositoryLink,
+        REPOSITORY_ICON_OFFSET_X,
+        0,
+        REPOSITORY_ICON_SIZE
+      );
+      ctx.text(
+        repositoryLink,
+        destinationText,
+        REPOSITORY_ICON_OFFSET_X + REPOSITORY_ICON_SIZE + REPOSITORY_ICON_GAP,
+        14,
         {
           size: 9,
-          color: GPU_COLORS.muted,
-          width: repositoryWidth,
+          color: GPU_COLORS.primary,
+          width: destinationTextWidth,
           singleLine: true,
         }
       );
-      if (!compactRunRows) repository.anchor.x = 1;
+    } else {
+      ctx.text(
+        pane.content,
+        destinationText,
+        infoCursor,
+        y + PROJECT_INFO_TEXT_Y,
+        {
+          size: 10,
+          color: GPU_COLORS.muted,
+          width: destinationTextWidth,
+          singleLine: true,
+        }
+      );
     }
     cursor += projectRowHeight(compactRunRows, selected);
 

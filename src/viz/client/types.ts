@@ -224,6 +224,8 @@ export interface VizProject {
   repositoryFullName: string | null;
   repositoryUrl: string | null;
   repositoryError: string | null;
+  runCount?: number;
+  lastRunAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

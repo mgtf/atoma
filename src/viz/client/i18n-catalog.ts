@@ -279,6 +279,11 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'login.notice.githubConnectExpired':
       'GitHub connect transaction expired or was replayed — start again.',
     'projects.runsHeading': 'Runs ({{count}})',
+    'projects.cardCreated': 'Created {{date}}',
+    'projects.cardRuns': '{{count}} runs',
+    'projects.cardRuns.one': '1 run',
+    'projects.cardRunsWithLast': '{{count}} runs, last run {{ago}}',
+    'projects.cardRunsWithLast.one': '1 run, last run {{ago}}',
     'projects.noRuns': 'No run yet for this project.',
     'projects.repoStatus.pending': 'repo pending',
     'projects.repoStatus.creating': 'repo creating',
@@ -1013,6 +1018,11 @@ export const I18N_CATALOGS: Record<Locale, Record<string, string>> = {
     'login.notice.githubConnectExpired':
       'La transaction de connexion GitHub a expiré ou a été rejouée — recommence.',
     'projects.runsHeading': 'Runs ({{count}})',
+    'projects.cardCreated': 'Créé le {{date}}',
+    'projects.cardRuns': '{{count}} runs',
+    'projects.cardRuns.one': '1 run',
+    'projects.cardRunsWithLast': '{{count}} runs, dernier run {{ago}}',
+    'projects.cardRunsWithLast.one': '1 run, dernier run {{ago}}',
     'projects.noRuns': 'Aucun run pour ce projet.',
     'projects.repoStatus.pending': 'dépôt en attente',
     'projects.repoStatus.creating': 'dépôt en création',
