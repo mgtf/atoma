@@ -108,9 +108,10 @@ describe('far-field shader contract', () => {
       expect(source).toContain('uCaustic0');
       expect(source).toContain('uCaustic5');
       expect(source).toContain('uCausticColor');
+      expect(source).toContain('uCausticDetail');
     }
     expect(FAR_FIELD_UNIFORMS.filter((entry) => entry.name.startsWith('uCaustic')))
-      .toHaveLength(14);
+      .toHaveLength(15);
   });
 
   it('takes the cast from the ONE shared source, on every surface', () => {
@@ -177,6 +178,9 @@ describe('far-field shader contract', () => {
       // branch. No radial heuristic may come back.
       expect(source).toContain('deltaPoint * band');
       expect(source).toContain('band < 0.004');
+      expect(source).toContain('detailWeight');
+      expect(source).toContain('detailRim');
+      expect(source).toContain('detailAmount > 0.004');
       expect(source).not.toContain('prism');
       expect(source).not.toContain('fringe');
       // Fold filaments stay far heavier than fill: the cusped envelope must

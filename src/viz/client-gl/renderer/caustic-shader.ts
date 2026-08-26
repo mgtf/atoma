@@ -30,9 +30,10 @@
  *   red, green and blue filaments are three reconstructions of three real
  *   Snell traces — the arc bows, the cusps and the spectral smear all move
  *   together because they are the same samples at three wavelengths, not one
- *   trace tinted by a heuristic. `band` is the Scene Tuning detail scalar:
- *   1 draws the traced band, 0 collapses the wavelengths onto the mean trace,
- *   and the collapse branch is uniform so it skips the two extra folds.
+ *   trace tinted by a heuristic. `band` is the independent Scene Tuning
+ *   dispersion scalar: 1 draws the traced band, 0 collapses the wavelengths
+ *   onto the mean trace, and the collapse branch is uniform so it skips the
+ *   two extra wavelength kernels.
  * - THE INTERPOLATION IS EXACT. Deltas are interpolated at the SAME
  *   barycentric weights as the green point; the traced hit position is affine
  *   in its corner set, so the interpolated wavelength position equals the
@@ -111,22 +112,31 @@ function arcPoint(i0: number, i1: number, i2: number, t: number, bow: number): B
   return [weight(0), weight(1), weight(2)];
 }
 
-const CAUSTIC_FOLD_SAMPLES: Bary[] = (() => {
+const CAUSTIC_PRIMARY_FOLD_SAMPLES: Bary[] = (() => {
   const samples: Bary[] = [];
   const arcs = [
-    [0, 1, 2],
-    [1, 2, 0],
-    [2, 0, 1],
+    [0, 1, 2, CAUSTIC_ARC_BOWS[0][1]],
+    [1, 2, 0, CAUSTIC_ARC_BOWS[1][0]],
+    [2, 0, 1, CAUSTIC_ARC_BOWS[2][0]],
   ] as const;
-  for (const [edge, [i0, i1, i2]] of arcs.entries()) {
-    for (const bow of CAUSTIC_ARC_BOWS[edge]!) {
-      for (let step = 0; step <= CAUSTIC_ARC_STEPS; step++) {
-        samples.push(arcPoint(i0, i1, i2, step / CAUSTIC_ARC_STEPS, bow));
-      }
+  for (const [i0, i1, i2, bow] of arcs) {
+    for (let step = 0; step <= CAUSTIC_ARC_STEPS; step++) {
+      samples.push(arcPoint(i0, i1, i2, step / CAUSTIC_ARC_STEPS, bow));
     }
   }
   return samples;
 })();
+
+/** The asymmetric inner fold controlled by the live detail scalar. */
+const CAUSTIC_DETAIL_FOLD_SAMPLES: Bary[] = Array.from(
+  { length: CAUSTIC_ARC_STEPS + 1 },
+  (_, step) => arcPoint(0, 1, 2, step / CAUSTIC_ARC_STEPS, CAUSTIC_ARC_BOWS[0][0])
+);
+
+const CAUSTIC_FOLD_SAMPLES = [
+  ...CAUSTIC_PRIMARY_FOLD_SAMPLES,
+  ...CAUSTIC_DETAIL_FOLD_SAMPLES,
+];
 
 const CAUSTIC_FILL_SAMPLES: Bary[] = (() => {
   const n = CAUSTIC_FILL_SUBDIVISION;
@@ -219,7 +229,7 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
 
   vec4 causticBundle(
     vec2 p, vec2 a, vec2 b, vec2 c, float intensity, vec3 tint,
-    vec2 da, vec2 db, vec2 dc, float band
+    vec2 da, vec2 db, vec2 dc, float band, float detail
   ) {
     if (intensity < 0.001) return vec4(0.0);
     vec2 centre = (a + b + c) / 3.0;
@@ -255,9 +265,21 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
       ${CAUSTIC_PRESS_REF.toFixed(1)} / (area + ${CAUSTIC_PRESS_SOFT.toFixed(1)}),
       ${CAUSTIC_PRESS_MIN.toFixed(2)}, ${CAUSTIC_PRESS_MAX.toFixed(2)}
     );
-    float fillRim = foldRim * ${CAUSTIC_FILL_RIM_RATIO.toFixed(2)};
-    vec3 spectral =
-      ${spectralKernelSum(CAUSTIC_FOLD_SAMPLES, 'foldRim', 'band', '      ')};
+    // Detail is independent from dispersion: it sharpens the three primary
+    // folds and fades in the asymmetric fourth fold. Identity 1 reproduces
+    // the shipped reconstruction exactly; 0 leaves a broad three-fold cast.
+    float detailAmount = clamp(detail, 0.0, 2.0);
+    float detailRim = foldRim / mix(0.75, 1.25, detailAmount * 0.5);
+    float detailWeight = min(detailAmount, 1.5);
+    float fillRim = detailRim * ${CAUSTIC_FILL_RIM_RATIO.toFixed(2)};
+    vec3 primaryFolds =
+      ${spectralKernelSum(CAUSTIC_PRIMARY_FOLD_SAMPLES, 'detailRim', 'band', '      ')};
+    vec3 detailFold = vec3(0.0);
+    if (detailAmount > 0.004) {
+      detailFold =
+        ${spectralKernelSum(CAUSTIC_DETAIL_FOLD_SAMPLES, 'detailRim', 'band', '        ')};
+    }
+    vec3 spectral = primaryFolds + detailFold * detailWeight;
     float fill =
       ${kernelSum('causticKernel', CAUSTIC_FILL_SAMPLES, 'fillRim', '', '      ')};
     vec3 light = clamp(
@@ -283,27 +305,28 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
     vec4 s0, vec4 s1, vec4 s2, vec4 s3, vec4 s4, vec4 s5,
     float intensity,
     vec3 tint,
-    float band
+    float band,
+    float detail
   ) {
     vec4 lobe0 = causticBundle(
       p, c0.xy, c0.zw, c1.xy, intensity,
       mix(tint, vec3(1.0, 0.48, 0.18), 0.18),
-      s0.xy, s0.zw, s1.xy, band
+      s0.xy, s0.zw, s1.xy, band, detail
     );
     vec4 lobe1 = causticBundle(
       p, c1.zw, c2.xy, c2.zw, intensity * 0.88,
       mix(tint, vec3(0.16, 0.68, 1.0), 0.20),
-      s1.zw, s2.xy, s2.zw, band
+      s1.zw, s2.xy, s2.zw, band, detail
     );
     vec4 lobe2 = causticBundle(
       p, c3.xy, c3.zw, c4.xy, intensity * 0.76,
       mix(tint, vec3(0.40, 1.0, 0.62), 0.14),
-      s3.xy, s3.zw, s4.xy, band
+      s3.xy, s3.zw, s4.xy, band, detail
     );
     vec4 lobe3 = causticBundle(
       p, c4.zw, c5.xy, c5.zw, intensity * 0.68,
       mix(tint, vec3(0.74, 0.42, 1.0), 0.16),
-      s4.zw, s5.xy, s5.zw, band
+      s4.zw, s5.xy, s5.zw, band, detail
     );
     float shadow = 1.0 -
       (1.0 - lobe0.a) * (1.0 - lobe1.a) *
@@ -335,7 +358,7 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
   fn causticBundle(
     p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, c: vec2<f32>,
     intensity: f32, tint: vec3<f32>,
-    da: vec2<f32>, db: vec2<f32>, dc: vec2<f32>, band: f32,
+    da: vec2<f32>, db: vec2<f32>, dc: vec2<f32>, band: f32, detail: f32,
   ) -> vec4<f32> {
     if (intensity < 0.001) {
       return vec4<f32>(0.0);
@@ -371,9 +394,19 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
       ${CAUSTIC_PRESS_REF.toFixed(1)} / (area + ${CAUSTIC_PRESS_SOFT.toFixed(1)}),
       ${CAUSTIC_PRESS_MIN.toFixed(2)}, ${CAUSTIC_PRESS_MAX.toFixed(2)},
     );
-    let fillRim = foldRim * ${CAUSTIC_FILL_RIM_RATIO.toFixed(2)};
-    let spectral =
-      ${spectralKernelSum(CAUSTIC_FOLD_SAMPLES, 'foldRim', 'band', '      ')};
+    // Twin of the GLSL detail control above.
+    let detailAmount = clamp(detail, 0.0, 2.0);
+    let detailRim = foldRim / mix(0.75, 1.25, detailAmount * 0.5);
+    let detailWeight = min(detailAmount, 1.5);
+    let fillRim = detailRim * ${CAUSTIC_FILL_RIM_RATIO.toFixed(2)};
+    let primaryFolds =
+      ${spectralKernelSum(CAUSTIC_PRIMARY_FOLD_SAMPLES, 'detailRim', 'band', '      ')};
+    var detailFold = vec3<f32>(0.0);
+    if (detailAmount > 0.004) {
+      detailFold =
+        ${spectralKernelSum(CAUSTIC_DETAIL_FOLD_SAMPLES, 'detailRim', 'band', '        ')};
+    }
+    let spectral = primaryFolds + detailFold * detailWeight;
     let fill =
       ${kernelSum('causticKernel', CAUSTIC_FILL_SAMPLES, 'fillRim', '', '      ')};
     let light = clamp(
@@ -399,27 +432,27 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
     c3: vec4<f32>, c4: vec4<f32>, c5: vec4<f32>,
     s0: vec4<f32>, s1: vec4<f32>, s2: vec4<f32>,
     s3: vec4<f32>, s4: vec4<f32>, s5: vec4<f32>,
-    intensity: f32, tint: vec3<f32>, band: f32,
+    intensity: f32, tint: vec3<f32>, band: f32, detail: f32,
   ) -> vec4<f32> {
     let lobe0 = causticBundle(
       p, c0.xy, c0.zw, c1.xy, intensity,
       mix(tint, vec3<f32>(1.0, 0.48, 0.18), vec3<f32>(0.18)),
-      s0.xy, s0.zw, s1.xy, band,
+      s0.xy, s0.zw, s1.xy, band, detail,
     );
     let lobe1 = causticBundle(
       p, c1.zw, c2.xy, c2.zw, intensity * 0.88,
       mix(tint, vec3<f32>(0.16, 0.68, 1.0), vec3<f32>(0.20)),
-      s1.zw, s2.xy, s2.zw, band,
+      s1.zw, s2.xy, s2.zw, band, detail,
     );
     let lobe2 = causticBundle(
       p, c3.xy, c3.zw, c4.xy, intensity * 0.76,
       mix(tint, vec3<f32>(0.40, 1.0, 0.62), vec3<f32>(0.14)),
-      s3.xy, s3.zw, s4.xy, band,
+      s3.xy, s3.zw, s4.xy, band, detail,
     );
     let lobe3 = causticBundle(
       p, c4.zw, c5.xy, c5.zw, intensity * 0.68,
       mix(tint, vec3<f32>(0.74, 0.42, 1.0), vec3<f32>(0.16)),
-      s4.zw, s5.xy, s5.zw, band,
+      s4.zw, s5.xy, s5.zw, band, detail,
     );
     let shadow = 1.0 -
       (1.0 - lobe0.a) * (1.0 - lobe1.a) *

@@ -375,6 +375,7 @@ export class GpuRenderer {
     uCausticSpec4: Float32Array;
     uCausticSpec5: Float32Array;
     uCausticBand: number;
+    uCausticDetail: number;
   } | null = null;
   /** The cast's uniform slots, in declaration order. Built once. */
   private pointerCausticSlots: Float32Array[] = [];
@@ -720,7 +721,8 @@ export class GpuRenderer {
         target[half * 2 + 1] = delta?.y ?? 0;
       }
     }
-    uniforms.uCausticBand = tuning.causticDetail;
+    uniforms.uCausticBand = tuning.causticDispersion;
+    uniforms.uCausticDetail = tuning.causticDetail;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
     // ticker. Recomputing it there would mean a SECOND
@@ -773,6 +775,7 @@ export class GpuRenderer {
           uCausticSpec4: { value: new Float32Array(4), type: 'vec4<f32>' },
           uCausticSpec5: { value: new Float32Array(4), type: 'vec4<f32>' },
           uCausticBand: { value: 1, type: 'f32' },
+          uCausticDetail: { value: 1, type: 'f32' },
         },
       },
       padding: 0,
@@ -800,6 +803,7 @@ export class GpuRenderer {
       uCausticSpec4: Float32Array;
       uCausticSpec5: Float32Array;
       uCausticBand: number;
+      uCausticDetail: number;
     };
     this.pointerCausticSlots = [
       this.pointerLightUniforms.uCaustic0,

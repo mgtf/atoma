@@ -163,8 +163,10 @@ npm run viz:mark-turn:analyze
   material dispersion band, diamond by default): the published corners are the
   mean trace and each carries its signed red−blue half-separation, so the
   fold reconstruction draws three real traces — the fringe is traced, never a
-  radial heuristic. The Scene Tuning `causticDetail` scalar opens or closes
-  that band around the traced measurement, as a live uniform.
+  radial heuristic. Scene Tuning keeps two live uniforms distinct:
+  `causticDetail` sharpens the three primary folds and fades the asymmetric
+  fourth fold, while `causticDispersion` opens or closes the traced wavelength
+  band around its measured positions.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
 - PWA/service-worker registration is production-default and dev-opt-in

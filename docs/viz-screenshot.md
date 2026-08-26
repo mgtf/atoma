@@ -40,6 +40,22 @@ defaults to 1600×900 at deviceScaleFactor 2.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
 
+## Caustic tuning
+
+The Scene Tuning window keeps the crystal's caustic structure separate from
+its colour dispersion:
+
+- **Caustic detail** controls filament sharpness and the asymmetric fourth
+  fold. At `0×` the broader three-fold reconstruction remains and the fourth
+  fold is skipped; `1×` is the shipped look; values above it tighten the
+  filaments and strengthen the additional fold.
+- **Caustic dispersion** controls only the distance between the traced red and
+  blue wavelengths. `0×` collapses both onto the mean trace, `1×` preserves
+  the measured diamond band, and `2×` doubles its visible separation.
+
+Both controls are live uniforms shared by the far-field and pointer-light
+surfaces. Moving either slider must not rebuild the Pixi scene.
+
 ## How it works, and its sharp edges
 
 - With no `--url` it spawns `scripts/viz-dev.mjs` (source path, no build) on

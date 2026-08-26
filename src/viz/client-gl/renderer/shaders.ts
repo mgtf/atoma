@@ -66,6 +66,7 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform vec4 uCausticSpec4;
   uniform vec4 uCausticSpec5;
   uniform float uCausticBand;
+  uniform float uCausticDetail;
 
   float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -127,7 +128,8 @@ ${CAUSTIC_FIELD_GLSL}
       uCausticSpec3, uCausticSpec4, uCausticSpec5,
       uCausticColor.a,
       uCausticColor.rgb,
-      uCausticBand
+      uCausticBand,
+      uCausticDetail
     );
     float crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
     sampleColor.rgb *= 1.0 - crystalCast.a * crystalCastGain;
@@ -165,6 +167,7 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     uCausticSpec4: vec4<f32>,
     uCausticSpec5: vec4<f32>,
     uCausticBand: f32,
+    uCausticDetail: f32,
   };
 
   @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
@@ -257,6 +260,7 @@ ${CAUSTIC_FIELD_WGSL}
       pointerLight.uCausticColor.a,
       pointerLight.uCausticColor.rgb,
       pointerLight.uCausticBand,
+      pointerLight.uCausticDetail,
     );
     let crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} *
       pointerLight.uStrength * sampleColor.a;

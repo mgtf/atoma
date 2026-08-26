@@ -75,7 +75,7 @@ export const FAR_FIELD_UNIFORMS = [
   // The spectral half-separation per corner, two corners per vec4: red draws
   // at corner + delta, blue at corner − delta. `uCausticBand` scales how far
   // apart the two wavelengths are drawn — 1 is the traced band, 0 collapses
-  // them onto the mean trace (the Scene Tuning detail slider).
+  // them onto the mean trace. Detail independently sharpens/fades folds.
   { name: 'uCausticSpec0', type: 'vec4<f32>' },
   { name: 'uCausticSpec1', type: 'vec4<f32>' },
   { name: 'uCausticSpec2', type: 'vec4<f32>' },
@@ -83,6 +83,7 @@ export const FAR_FIELD_UNIFORMS = [
   { name: 'uCausticSpec4', type: 'vec4<f32>' },
   { name: 'uCausticSpec5', type: 'vec4<f32>' },
   { name: 'uCausticBand', type: 'f32' },
+  { name: 'uCausticDetail', type: 'f32' },
 ] as const;
 
 const uniformValues: Record<
@@ -115,6 +116,7 @@ const uniformValues: Record<
   uCausticSpec4: () => new Float32Array(4),
   uCausticSpec5: () => new Float32Array(4),
   uCausticBand: () => 1,
+  uCausticDetail: () => 1,
 };
 
 export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `#version 300 es
@@ -165,6 +167,7 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
   uniform vec4 uCausticSpec4;
   uniform vec4 uCausticSpec5;
   uniform float uCausticBand;
+  uniform float uCausticDetail;
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -257,7 +260,8 @@ ${CAUSTIC_FIELD_GLSL}
       uCausticSpec3, uCausticSpec4, uCausticSpec5,
       uCausticColor.a,
       uCausticColor.rgb,
-      uCausticBand
+      uCausticBand,
+      uCausticDetail
     );
     color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
@@ -308,6 +312,7 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     uCausticSpec4: vec4<f32>,
     uCausticSpec5: vec4<f32>,
     uCausticBand: f32,
+    uCausticDetail: f32,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -446,6 +451,7 @@ ${CAUSTIC_FIELD_WGSL}
       farFieldUniforms.uCausticColor.a,
       farFieldUniforms.uCausticColor.rgb,
       farFieldUniforms.uCausticBand,
+      farFieldUniforms.uCausticDetail,
     );
     color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
@@ -548,6 +554,7 @@ export function createFarField(): FarField | null {
     uCausticSpec4: Float32Array;
     uCausticSpec5: Float32Array;
     uCausticBand: number;
+    uCausticDetail: number;
   };
   const marks = [uniforms.uMark0, uniforms.uMark1, uniforms.uMark2, uniforms.uMark3];
   const colors = [
@@ -648,7 +655,9 @@ export function createFarField(): FarField | null {
           target[half * 2 + 1] = delta?.y ?? 0;
         }
       }
-      uniforms.uCausticBand = readTuning().causticDetail;
+      const tuning = readTuning();
+      uniforms.uCausticBand = tuning.causticDispersion;
+      uniforms.uCausticDetail = tuning.causticDetail;
     },
   };
 }

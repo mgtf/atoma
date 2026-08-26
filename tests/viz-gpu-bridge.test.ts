@@ -109,9 +109,9 @@ describe('full-GL minimal DOM bridge', () => {
     useGpuStore.setState({ tuningPanelOpen: true });
     render(createElement(SceneTuningPanel));
     expect(screen.getByLabelText('Scene tuning')).toHaveClass('gpu-panel-skin');
-    // Seven knobs: six scene multipliers plus the caustic detail slider,
-    // which scales the traced spectral band live.
-    expect(screen.getAllByRole('slider')).toHaveLength(7);
+    // Eight knobs: six scene multipliers plus independent caustic structure
+    // and spectral-dispersion controls.
+    expect(screen.getAllByRole('slider')).toHaveLength(8);
     fireEvent.change(screen.getByRole('slider', { name: 'Light hue' }), {
       target: { value: '45' },
     });
@@ -120,6 +120,10 @@ describe('full-GL minimal DOM bridge', () => {
       target: { value: '0' },
     });
     expect(readTuning().causticDetail).toBe(0);
+    fireEvent.change(screen.getByRole('slider', { name: 'Caustic dispersion' }), {
+      target: { value: '2' },
+    });
+    expect(readTuning().causticDispersion).toBe(2);
   });
 
   it('exposes Continue on the arrival gate and admits the chrome', async () => {

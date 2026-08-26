@@ -35,14 +35,13 @@ export interface VizTuning {
   controlFrameDepth: number;
   /** How far the column stands off the page. */
   columnDepth: number;
-  /**
-   * How far apart the two traced wavelengths of the crystal's caustic are
-   * drawn. 1 is the band the CPU actually traced (real diamond fire); 0
-   * collapses red and blue onto the mean trace, which is the plain filament
-   * without its rainbow fringe. Scales the per-corner half-separations, so
-   * it is a live uniform write — no scene rebuild, no re-trace.
-   */
+  /** Sharpness and secondary-fold visibility of the crystal's caustic. */
   causticDetail: number;
+  /**
+   * How far apart the two traced wavelengths are drawn. 1 is the physical
+   * diamond band, 0 collapses red and blue onto the mean trace.
+   */
+  causticDispersion: number;
 }
 
 /**
@@ -58,9 +57,8 @@ export const TUNING_IDENTITY: VizTuning = {
   buttonDepth: 1,
   controlFrameDepth: 0.8,
   columnDepth: 1,
-  // The traced band itself: the caustic's fringe is measured diamond
-  // dispersion, and this knob opens or closes it around that measurement.
   causticDetail: 1,
+  causticDispersion: 1,
 };
 
 export interface TuningRange {
@@ -86,6 +84,7 @@ export const TUNING_RANGE: Readonly<Record<keyof VizTuning, TuningRange>> = {
   controlFrameDepth: { min: 0, max: 4, step: 0.05, label: 'Group frame lift', unit: '×' },
   columnDepth: { min: 0, max: 4, step: 0.05, label: 'Column lift', unit: '×' },
   causticDetail: { min: 0, max: 2, step: 0.05, label: 'Caustic detail', unit: '×' },
+  causticDispersion: { min: 0, max: 2, step: 0.05, label: 'Caustic dispersion', unit: '×' },
 };
 
 export const TUNING_KEYS = Object.keys(TUNING_RANGE) as ReadonlyArray<keyof VizTuning>;
