@@ -61,6 +61,19 @@ describe('the tuning identity is the shipped look', () => {
   it('recognises itself', () => {
     expect(isIdentityTuning({ ...TUNING_IDENTITY })).toBe(true);
     expect(isIdentityTuning({ ...TUNING_IDENTITY, lightHue: 40 })).toBe(false);
+    expect(isIdentityTuning({ ...TUNING_IDENTITY, causticDetail: 0 })).toBe(false);
+  });
+
+  it('keeps the caustic detail identity at the traced band', () => {
+    // 1 is not a taste: it is the band the CPU actually traced. The shader
+    // draws red and blue exactly at their hit points there, and the collapse
+    // branch (band < 0.004) must stay closed across the whole range above 0.
+    expect(TUNING_IDENTITY.causticDetail).toBe(1);
+    expect(TUNING_RANGE.causticDetail.min).toBeLessThan(1);
+    expect(TUNING_RANGE.causticDetail.max).toBeGreaterThan(1);
+    // Collapsing the band is a legal state (a non-dispersive cast), so the
+    // range must reach it without stepping over it.
+    expect(clampTuningValue('causticDetail', 0)).toBe(0);
   });
 });
 
@@ -127,6 +140,7 @@ describe('surfaceDepthScale lifts one stack without lifting the others', () => {
     const extreme: VizTuning = {
       lightHeight: 3, lightIntensity: 2, lightHue: 180,
       buttonDepth: 4, controlFrameDepth: 4, columnDepth: 4,
+      causticDetail: 2,
     };
     expect(surfaceDepthScale('card', extreme)).toBe(1);
   });
@@ -244,6 +258,11 @@ describe('both shader backends carry the tuning uniforms', () => {
       expect(source).toContain('uCaustic0');
       expect(source).toContain('uCaustic5');
       expect(source).toContain('uCausticColor');
+      // The traced band rides the same uniform block on both backends, so
+      // the detail slider moves both together or neither.
+      expect(source).toContain('uCausticSpec0');
+      expect(source).toContain('uCausticSpec5');
+      expect(source).toContain('uCausticBand');
       // Alpha-gated for the same reason the wash is: a transparent pixel has
       // no surface to light. Strength-gated so it fades with the pointer.
       expect(source).toMatch(/uStrength \* sampleColor\.a/);
@@ -269,6 +288,13 @@ describe('both shader backends carry the tuning uniforms', () => {
       'uCaustic4',
       'uCaustic5',
       'uCausticColor',
+      'uCausticSpec0',
+      'uCausticSpec1',
+      'uCausticSpec2',
+      'uCausticSpec3',
+      'uCausticSpec4',
+      'uCausticSpec5',
+      'uCausticBand',
     ]);
     const renderer = readFileSync(
       new URL('../src/viz/client-gl/gpu-renderer.ts', import.meta.url),

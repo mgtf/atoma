@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  SCENE_SHADOW_COLORS,
   softShadowLayers,
   softShadowPeakAlpha,
 } from '../src/viz/client-gl/renderer/soft-shadow.js';
 
 describe('soft shadow penumbra', () => {
+  it('owns the single cool palette used by the whole GPU scene', () => {
+    expect(SCENE_SHADOW_COLORS).toEqual({
+      core: 0x071224,
+      penumbra: 0x0d1c32,
+    });
+  });
+
   it('keeps the requested alpha as the stack peak, so it drops in for a flat fill', () => {
     // The whole point of solving for `per`: every call site kept the alpha it
     // already passed, and none of them had to be re-tuned when the flat fill

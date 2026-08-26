@@ -1,10 +1,14 @@
 import {
   Application,
   Assets,
+  BitmapFont,
+  BitmapText,
+  Cache,
   CanvasTextMetrics,
   Container,
   Filter,
   Graphics,
+  Matrix,
   Rectangle,
   RendererType,
   Text,
@@ -55,10 +59,18 @@ import {
   ambientShadowOffset,
   castShadowOffset,
 } from './renderer/cast-shadow.js';
-import { softShadowLayers } from './renderer/soft-shadow.js';
+import {
+  SCENE_SHADOW_COLORS,
+  softShadowLayers,
+} from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
 import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
-import { FPS_REFRESH_MS, formatFps, fpsColor } from './renderer/fps-readout.js';
+import {
+  createFpsSampleWindow,
+  formatFps,
+  fpsColor,
+  sampleFpsWindow,
+} from './renderer/fps-readout.js';
 import {
   emptyRenderMetrics,
   type GpuHitTarget,
@@ -198,16 +210,41 @@ export const BUTTON_LABEL_INSET = 10;
  */
 const BUTTON_LABEL_IDLE = 0xa9b5ca;
 const BUTTON_LABEL_IDLE_TINT = multiplyTint(GPU_COLORS.text, BUTTON_LABEL_IDLE);
-/** Cool ambient shadow shared by the timeline's filter controls. */
-const CONTROL_SHADOW_COLORS = {
-  core: 0x071326,
-  penumbra: 0x10233d,
-} as const;
-/** Slightly deeper than controls: event cards stand further off the pane. */
-const TIMELINE_SHADOW_COLORS = {
-  core: 0x071224,
-  penumbra: 0x0d1c32,
-} as const;
+const FPS_BITMAP_FONT_NAME = 'AtomaFps';
+const FPS_BITMAP_FONT_CACHE_KEY = `${FPS_BITMAP_FONT_NAME}-bitmap`;
+const FPS_BITMAP_STYLE = new TextStyle({
+  fontFamily: FPS_BITMAP_FONT_NAME,
+  fontSize: 10,
+  fontWeight: '600',
+  fill: GPU_COLORS.text,
+});
+
+function ensureFpsBitmapFont(resolution: number): void {
+  if (Cache.has(FPS_BITMAP_FONT_CACHE_KEY)) return;
+  BitmapFont.install({
+    name: FPS_BITMAP_FONT_NAME,
+    style: {
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontSize: 10,
+      fontWeight: '600',
+      fill: GPU_COLORS.text,
+    },
+    chars: '— 0123456789FPS',
+    resolution,
+    skipKerning: true,
+  });
+}
+
+interface SurfaceShadowOptions {
+  /** Surface origin inside its parent. Most widgets use a positioned container. */
+  x?: number;
+  y?: number;
+  radius?: number;
+  alpha?: number;
+  /** Physical elevation: controls vary this, never the shadow algorithm. */
+  depth?: number;
+  surface?: CastShadowSurface;
+}
 
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
@@ -222,9 +259,6 @@ export { TUNING_ROW_HEIGHT as TUNING_PANEL_ROW_HEIGHT } from './renderer/tuning-
 import { type FilterBlockLayout } from './renderer/chip-layout.js';
 import { truncate } from './renderer/copy.js';
 import {
-  CARD_FILTER_GLSL,
-  CARD_FILTER_GLSL_VERTEX,
-  CARD_FILTER_WGSL,
   POINTER_LIGHT_GLSL,
   POINTER_LIGHT_GLSL_VERTEX,
   POINTER_LIGHT_WGSL,
@@ -311,9 +345,14 @@ export class GpuRenderer {
   private snapshot: GpuRenderSnapshot | null = null;
   readonly scrollMax: Partial<Record<ViewName, number>> = {};
   private readonly tickerCallbacks = new Set<(ticker: Ticker) => void>();
-  private readonly frameFilters = new Set<Filter>();
+  /**
+   * Survives scene rebuilds so wheel-driven redraws cannot keep resetting the
+   * 250ms measurement window or flash the header back to its placeholder.
+   */
+  private readonly fpsSample = createFpsSampleWindow();
+  private lastFps = 0;
   /** Shared CC0 bitmap material loaded once before any timeline card draws. */
-  private cardMaterial: { diffuse: Texture; normal: Texture } | null = null;
+  private cardMaterial: Texture | null = null;
   private pointerLightFilter: Filter | null = null;
   private pointerLightUniforms: {
     uLightPx: Float32Array;
@@ -327,9 +366,18 @@ export class GpuRenderer {
     uCaustic4: Float32Array;
     uCaustic5: Float32Array;
     uCausticColor: Float32Array;
+    uCausticSpec0: Float32Array;
+    uCausticSpec1: Float32Array;
+    uCausticSpec2: Float32Array;
+    uCausticSpec3: Float32Array;
+    uCausticSpec4: Float32Array;
+    uCausticSpec5: Float32Array;
+    uCausticBand: number;
   } | null = null;
   /** The cast's uniform slots, in declaration order. Built once. */
   private pointerCausticSlots: Float32Array[] = [];
+  /** The cast's spectral slots, in the same order. Built once. */
+  private pointerCausticSpectralSlots: Float32Array[] = [];
   private pointerLightStrength = 0;
   /** Light position in renderer pixels, published by `updatePointerLight`. */
   private lightRendererX = 0;
@@ -648,6 +696,18 @@ export class GpuRenderer {
     uniforms.uCausticColor[1] = cast?.g ?? 0;
     uniforms.uCausticColor[2] = cast?.b ?? 0;
     uniforms.uCausticColor[3] = cast?.intensity ?? 0;
+    // The traced spectral band, packed two corners per vec4. No band
+    // published collapses every delta to zero, which draws both wavelengths
+    // on the mean trace — the correct degenerate for a non-dispersive glass.
+    for (let slot = 0; slot < this.pointerCausticSpectralSlots.length; slot += 1) {
+      const target = this.pointerCausticSpectralSlots[slot]!;
+      for (let half = 0; half < 2; half += 1) {
+        const delta = cast?.spectral?.[slot * 2 + half];
+        target[half * 2] = delta?.x ?? 0;
+        target[half * 2 + 1] = delta?.y ?? 0;
+      }
+    }
+    uniforms.uCausticBand = tuning.causticDetail;
     filter.enabled = true;
     // Published for the shadow cast, which runs right after on the same
     // ticker. Recomputing it there would mean a SECOND
@@ -691,6 +751,15 @@ export class GpuRenderer {
           uCaustic4: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
           uCaustic5: { value: new Float32Array(4).fill(-1e6), type: 'vec4<f32>' },
           uCausticColor: { value: new Float32Array(4), type: 'vec4<f32>' },
+          // Per-corner spectral half-separations, two corners per vec4, and
+          // the band scalar that scales them apart. Same order contract.
+          uCausticSpec0: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticSpec1: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticSpec2: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticSpec3: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticSpec4: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticSpec5: { value: new Float32Array(4), type: 'vec4<f32>' },
+          uCausticBand: { value: 1, type: 'f32' },
         },
       },
       padding: 0,
@@ -711,6 +780,13 @@ export class GpuRenderer {
       uCaustic4: Float32Array;
       uCaustic5: Float32Array;
       uCausticColor: Float32Array;
+      uCausticSpec0: Float32Array;
+      uCausticSpec1: Float32Array;
+      uCausticSpec2: Float32Array;
+      uCausticSpec3: Float32Array;
+      uCausticSpec4: Float32Array;
+      uCausticSpec5: Float32Array;
+      uCausticBand: number;
     };
     this.pointerCausticSlots = [
       this.pointerLightUniforms.uCaustic0,
@@ -719,6 +795,14 @@ export class GpuRenderer {
       this.pointerLightUniforms.uCaustic3,
       this.pointerLightUniforms.uCaustic4,
       this.pointerLightUniforms.uCaustic5,
+    ];
+    this.pointerCausticSpectralSlots = [
+      this.pointerLightUniforms.uCausticSpec0,
+      this.pointerLightUniforms.uCausticSpec1,
+      this.pointerLightUniforms.uCausticSpec2,
+      this.pointerLightUniforms.uCausticSpec3,
+      this.pointerLightUniforms.uCausticSpec4,
+      this.pointerLightUniforms.uCausticSpec5,
     ];
     this.stage.filters = [filter];
     this.app.ticker.add(this.updatePointerLight);
@@ -801,13 +885,14 @@ export class GpuRenderer {
     if (this.metrics.backend === 'webgpu') {
       this.app.renderer.gc.enabled = false;
     }
-    const [cardDiffuse, cardNormal] = await Promise.all([
-      Assets.load<Texture>('/textures/timeline-sand-diffuse.webp'),
-      Assets.load<Texture>('/textures/timeline-sand-normal.png'),
-    ]);
+    // The counter mutates glyph geometry only. Pre-install exactly the small
+    // alphabet it can display so the first rate change cannot grow an atlas in
+    // the middle of a frame.
+    ensureFpsBitmapFont(Math.min(devicePixelRatio || 1, 2));
+    const cardDiffuse = await Assets.load<Texture>('/textures/timeline-sand-diffuse.webp');
+    cardDiffuse.label = 'timeline-sand-diffuse';
     cardDiffuse.source.style.addressMode = 'repeat';
-    cardNormal.source.style.addressMode = 'repeat';
-    this.cardMaterial = { diffuse: cardDiffuse, normal: cardNormal };
+    this.cardMaterial = cardDiffuse;
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
     this.tooltipRoot.eventMode = 'none';
@@ -909,8 +994,6 @@ export class GpuRenderer {
     this.pointerLightStrength = 0;
     // A re-initialised renderer builds a NEW filter with a new buffer.
     this.pointerLightBufferPinned = false;
-    for (const filter of this.frameFilters) filter.destroy();
-    this.frameFilters.clear();
     // Detach-then-destroy, BEFORE the app tears the stage down: a retained
     // label still parented would otherwise be destroyed twice.
     this.atomaMark?.handle.destroy();
@@ -925,7 +1008,10 @@ export class GpuRenderer {
     this.tuningDrag = null;
     this.turnDrag = null;
     this.turnSliderBounds = null;
-    this.app.destroy(true, { children: true });
+    this.fpsSample.elapsedMs = 0;
+    this.fpsSample.frames = 0;
+    this.lastFps = 0;
+    this.app.destroy(true, { children: true, context: true });
     this.initialized = false;
     this.host = null;
   }
@@ -954,8 +1040,6 @@ export class GpuRenderer {
     this.snapshot = snapshot;
     for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
     this.tickerCallbacks.clear();
-    for (const filter of this.frameFilters) filter.destroy();
-    this.frameFilters.clear();
     // Retained labels step out of the scene BEFORE it is torn down, so the
     // recursive destroy below walks past them instead of through them.
     this.labels.beginRender();
@@ -965,11 +1049,17 @@ export class GpuRenderer {
     const keepFarField = this.farField?.mesh ?? null;
     for (const child of this.ambientRoot.removeChildren()) {
       if (child === keepFarField || child.label === FAR_FIELD_LABEL) continue;
-      child.destroy({ children: true });
+      child.destroy({ children: true, context: true });
     }
     this.retainFarField();
     this.root = this.stage;
-    for (const child of this.stage.removeChildren()) child.destroy({ children: true });
+    for (const child of this.stage.removeChildren()) {
+      // Pixi Graphics owns a GraphicsContext, but passing ANY options object
+      // stops Graphics.destroy() from releasing it unless context is explicit.
+      // Without this bit every wheel rebuild left hundreds of GPU contexts in
+      // GraphicsContextSystem._managedContexts while WebGPU GC was pinned off.
+      child.destroy({ children: true, context: true });
+    }
     // The crystal steps out like the far field: its render textures, shader
     // and geometries survive the rebuild; `retainAtomaMark` re-adds or
     // replaces it.
@@ -981,7 +1071,7 @@ export class GpuRenderer {
     for (const orb of this.avatarOrbs.values()) keepMark.add(orb.handle.container);
     for (const child of this.markRoot.removeChildren()) {
       if (keepMark.has(child)) continue;
-      child.destroy({ children: true });
+      child.destroy({ children: true, context: true });
     }
     this.avatarOrbsRetained = new Set<string>();
     this.tooltipLayer?.beginRender();
@@ -1235,41 +1325,14 @@ export class GpuRenderer {
     const safeWidth = Math.max(0, width);
     const safeHeight = Math.max(0, height);
     if (elevation > 0) {
-      // Both layers draw at the panel's own rect and are OFFSET BY POSITION,
-      // so the pointer light can swing them. The deep layer carries the larger
-      // depth, so the two separate as the light moves instead of travelling
-      // as one hard smear.
-      const deepShadow = new Graphics();
-      deepShadow.roundRect(x, y, safeWidth, safeHeight, radius);
-      deepShadow.fill({ color: 0x01040a, alpha: 0.2 + elevation * 0.08 });
-      deepShadow.eventMode = 'none';
-      parent.addChild(deepShadow);
-      this.registerCastShadow(
-        deepShadow,
-        parent,
+      this.addSurfaceShadow(parent, safeWidth, safeHeight, {
         x,
         y,
-        safeWidth,
-        safeHeight,
-        elevation / 2,
-        'column'
-      );
-
-      const nearShadow = new Graphics();
-      nearShadow.roundRect(x, y, safeWidth, safeHeight, radius);
-      nearShadow.fill({ color: 0x07101d, alpha: 0.3 + elevation * 0.05 });
-      nearShadow.eventMode = 'none';
-      this.registerCastShadow(
-        nearShadow,
-        parent,
-        x,
-        y,
-        safeWidth,
-        safeHeight,
-        elevation * 0.28,
-        'column'
-      );
-      parent.addChild(nearShadow);
+        radius,
+        alpha: 0.42 + elevation * 0.06,
+        depth: 0.55 + elevation * 0.35,
+        surface: 'column',
+      });
     }
 
     const graphics = new Graphics();
@@ -1323,16 +1386,12 @@ export class GpuRenderer {
     const container = new Container();
     container.position.set(block.x, block.y);
     container.eventMode = 'none';
-    this.addSurfaceShadow(
-      container,
-      block.width,
-      block.height,
-      10,
-      0.46,
-      0.8,
-      'frame',
-      CONTROL_SHADOW_COLORS
-    );
+    this.addSurfaceShadow(container, block.width, block.height, {
+      radius: 10,
+      alpha: 0.46,
+      depth: 0.8,
+      surface: 'frame',
+    });
     const graphics = new Graphics();
     graphics.roundRect(0, 0, block.width, block.height, 10);
     // OPAQUE, not a tint. A surface that stands off the page and casts a
@@ -1419,7 +1478,8 @@ export class GpuRenderer {
     });
     // A LIVE label, outside the retained pool on purpose: its text changes on
     // every drag step, and a pool keyed on `key\0value` would allocate a new
-    // entry per step. Same reason `drawFpsReadout` owns its own Text.
+    // entry per step. The FPS readout solves the same live-string problem with
+    // BitmapText because its glyph set is tiny and fixed.
     const readout = new Text({ text: '', style });
     readout.anchor.set(1, 0.5);
     readout.position.set(x + width, y + TUNING_ROW_HEIGHT / 2);
@@ -1859,33 +1919,36 @@ export class GpuRenderer {
     parent: Container,
     width: number,
     height: number,
-    radius = 8,
-    alpha = 0.44,
-    /** How far the surface stands off the page; scales offset AND reach. */
-    depth = 1,
-    surface: CastShadowSurface = 'card',
-    colors: { core: number; penumbra: number } = {
-      core: 0x01040a,
-      penumbra: 0x01040a,
-    }
+    options: SurfaceShadowOptions = {}
   ) {
+    const {
+      x = 0,
+      y = 0,
+      radius = 8,
+      alpha = 0.44,
+      depth = 1,
+      surface = 'card',
+    } = options;
     const shadow = new Graphics();
-    // Geometry at the local origin, offset by POSITION — the offset is what
-    // the pointer light moves each frame, and baking it into the path would
-    // mean re-tessellating every shadow on every pointer move. The penumbra
-    // is stacked geometry for the same reason: still one object, one position.
+    // Geometry stays fixed at the declared surface origin and the cast offset
+    // lives in POSITION — pointer motion therefore never re-tessellates it.
+    // The same penumbra stack serves panels, frames, buttons and timeline cards.
     const layers = softShadowLayers(width, height, radius, alpha, depth);
     for (const [index, layer] of layers.entries()) {
       const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
-      shadow.roundRect(layer.x, layer.y, layer.width, layer.height, layer.radius);
+      shadow.roundRect(x + layer.x, y + layer.y, layer.width, layer.height, layer.radius);
       shadow.fill({
-        color: mixColor(colors.penumbra, colors.core, towardCore),
+        color: mixColor(
+          SCENE_SHADOW_COLORS.penumbra,
+          SCENE_SHADOW_COLORS.core,
+          towardCore
+        ),
         alpha: layer.alpha,
       });
     }
     shadow.eventMode = 'none';
     parent.addChild(shadow);
-    this.registerCastShadow(shadow, parent, 0, 0, width, height, depth, surface);
+    this.registerCastShadow(shadow, parent, x, y, width, height, depth, surface);
     return shadow;
   }
 
@@ -1923,7 +1986,7 @@ export class GpuRenderer {
     const pad = CAST_SHADOW_REACH_PX * 3;
     const shadow = new Graphics();
     shadow.rect(-pad, -pad, width + pad * 2, height + pad * 2);
-    shadow.fill({ color: 0x01040a, alpha });
+    shadow.fill({ color: SCENE_SHADOW_COLORS.core, alpha });
     shadow.roundRect(0, 0, width, height, radius);
     shadow.cut();
     shadow.eventMode = 'none';
@@ -2054,7 +2117,11 @@ export class GpuRenderer {
   ) {
     const container = new Container();
     container.position.set(x, y);
-    this.addSurfaceShadow(container, width, height, 7, 0.4, 1, 'button');
+    this.addSurfaceShadow(container, width, height, {
+      radius: 7,
+      alpha: 0.4,
+      surface: 'button',
+    });
     const graphics = new Graphics();
     graphics.roundRect(0, 0, width, height, 7);
     graphics.fill({
@@ -2158,16 +2225,11 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const dropShadow = this.addSurfaceShadow(
-      container,
-      width,
-      height,
-      8,
-      0.4,
-      1,
-      'button',
-      CONTROL_SHADOW_COLORS
-    );
+    const dropShadow = this.addSurfaceShadow(container, width, height, {
+      radius: 8,
+      alpha: 0.4,
+      surface: 'button',
+    });
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -2336,7 +2398,10 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.48);
+    const dropShadow = this.addSurfaceShadow(container, width, height, {
+      radius: 8,
+      alpha: 0.48,
+    });
 
     const glow = new Graphics();
     glow.roundRect(-4, -3, width + 8, height + 6, 11);
@@ -2468,7 +2533,7 @@ export class GpuRenderer {
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
-    this.addSurfaceShadow(container, width, height, 8, 0.4);
+    this.addSurfaceShadow(container, width, height, { radius: 8, alpha: 0.4 });
 
     const glow = new Graphics();
     glow.roundRect(-2, -2, width + 4, height + 4, 10);
@@ -2560,7 +2625,10 @@ export class GpuRenderer {
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const dropShadow = this.addSurfaceShadow(container, width, height, 8, 0.42);
+    const dropShadow = this.addSurfaceShadow(container, width, height, {
+      radius: 8,
+      alpha: 0.42,
+    });
 
     const aura = new Graphics();
     aura.roundRect(-3, -3, width + 6, height + 6, 10);
@@ -2670,65 +2738,6 @@ export class GpuRenderer {
     return container;
   }
 
-  private createCardFilter(materialKey: string) {
-    if (!this.cardMaterial) {
-      throw new Error('timeline card material was not loaded before rendering');
-    }
-    const diffuseSource = this.cardMaterial.diffuse.source;
-    const normalSource = this.cardMaterial.normal.source;
-    let materialHash = 2166136261;
-    for (let index = 0; index < materialKey.length; index += 1) {
-      materialHash = Math.imul(materialHash ^ materialKey.charCodeAt(index), 16777619);
-    }
-    const materialOffset = new Float32Array([
-      materialHash & 0xffff,
-      (materialHash >>> 16) & 0xffff,
-    ]);
-    const filter = Filter.from({
-      gl: {
-        vertex: CARD_FILTER_GLSL_VERTEX,
-        fragment: CARD_FILTER_GLSL,
-      },
-      gpu: {
-        vertex: {
-          source: CARD_FILTER_WGSL,
-          entryPoint: 'mainVertex',
-        },
-        fragment: {
-          source: CARD_FILTER_WGSL,
-          entryPoint: 'mainFragment',
-        },
-      },
-      resources: {
-        cardUniforms: {
-          uLightPx: { value: new Float32Array([0, 0]), type: 'vec2<f32>' },
-          uMaterialOffset: { value: materialOffset, type: 'vec2<f32>' },
-          uLightStrength: { value: 0, type: 'f32' },
-          uHover: { value: 0, type: 'f32' },
-          uSelected: { value: 0, type: 'f32' },
-        },
-        uSandDiffuse: diffuseSource,
-        uSandDiffuseSampler: diffuseSource.style,
-        uSandNormal: normalSource,
-        uSandNormalSampler: normalSource.style,
-      },
-      padding: 12,
-      resolution: 'inherit',
-      antialias: 'inherit',
-    });
-    this.frameFilters.add(filter);
-    return {
-      filter,
-      uniforms: filter.resources['cardUniforms'].uniforms as {
-        uLightPx: Float32Array;
-        uMaterialOffset: Float32Array;
-        uLightStrength: number;
-        uHover: number;
-        uSelected: number;
-      },
-    };
-  }
-
   eventCard(
     parent: Container,
     id: string,
@@ -2745,12 +2754,12 @@ export class GpuRenderer {
     const entranceDelay = this.currentEventIds.size * 18;
     this.currentEventIds.add(id);
     const container = new Container();
+    container.label = `timeline-card:${id}`;
     container.position.set(x, y);
     container.skew.x = -zDepth * 0.007;
     container.eventMode = 'static';
     container.cursor = 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    const cardShader = this.createCardFilter(id);
     const chamfer = Math.min(7, height * 0.16);
     const extrusionX = 3.5 + zDepth * 3.5;
     const extrusionY = 4 + zDepth * 3.5;
@@ -2766,24 +2775,20 @@ export class GpuRenderer {
     ];
 
     // The card is a raised object above the timeline cartouche. This shadow is
-    // outside the material filter so the grain cannot turn it into another
-    // outline; the pointer light moves it across the cartouche like every
-    // other elevation-bearing surface.
+    // outside the grain face so its texture cannot turn the shadow into
+    // another outline; the pointer light moves it across the cartouche like
+    // every other elevation-bearing surface.
     const shadowHost = new Container();
     shadowHost.position.set(x, y);
     parent.addChild(shadowHost);
-    const castShadow = this.addSurfaceShadow(
-      shadowHost,
-      width,
-      height,
-      chamfer,
-      0.58,
+    const castShadow = this.addSurfaceShadow(shadowHost, width, height, {
+      radius: chamfer,
+      alpha: 0.58,
       // The solid extrusion already occupies 4–7px. The cast must spread
       // beyond that wall or it is physically present but visually buried.
-      1.35 + zDepth * 0.85,
-      'card',
-      TIMELINE_SHADOW_COLORS
-    );
+      depth: 1.35 + zDepth * 0.85,
+      surface: 'card',
+    });
 
     const back = new Graphics();
     back.poly(facePoints.map((value, index) => value + (index % 2 === 0 ? extrusionX : extrusionY)));
@@ -2828,6 +2833,7 @@ export class GpuRenderer {
     container.addChild(aura);
 
     const base = new Graphics();
+    base.label = `timeline-card-face:${id}`;
     base.poly(facePoints);
     base.fill({
       color: mixColor(selected ? 0x172a49 : 0x111a2b, accent, selected ? 0.23 : 0.13),
@@ -2838,8 +2844,32 @@ export class GpuRenderer {
       width: selected ? 1.35 : 0.75,
       alpha: selected ? 0.82 : 0.42,
     });
-    base.filters = [cardShader.filter];
     container.addChild(base);
+
+    const material = this.cardMaterial;
+    if (!material) {
+      throw new Error('timeline card material was not loaded before rendering');
+    }
+    let materialHash = 2166136261;
+    for (let index = 0; index < id.length; index += 1) {
+      materialHash = Math.imul(materialHash ^ id.charCodeAt(index), 16777619);
+    }
+    const materialMatrix = new Matrix()
+      .scale(173 / material.source.width, 173 / material.source.height)
+      .translate(materialHash & 0xff, (materialHash >>> 16) & 0xff);
+    const grain = new Graphics();
+    grain.label = `timeline-card-grain:${id}`;
+    grain.poly(facePoints);
+    grain.fill({
+      texture: material,
+      textureSpace: 'global',
+      matrix: materialMatrix,
+      color: 0xffffff,
+      alpha: 0.14,
+    });
+    grain.blendMode = 'multiply';
+    grain.eventMode = 'none';
+    container.addChild(grain);
 
     const topBevel = new Graphics();
     topBevel.poly([
@@ -2871,11 +2901,14 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
-    let shaderHover = 0;
-    let shaderSelected = selected ? 1 : 0;
+    let settled = false;
     let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -entranceDelay;
     container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
     const animate = (ticker: Ticker) => {
+      // Once its entrance/interaction has settled, an idle card is immutable.
+      // Keep the callback so pointerover can wake it, but do not dirty this
+      // container and every child transform 120 times a second.
+      if (settled && !hovered && !pressed) return;
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 300));
       const easedEntrance = 1 - (1 - entrance) ** 3;
@@ -2888,14 +2921,6 @@ export class GpuRenderer {
         x + width * (1 - scale * depthScaleX) / 2,
         y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
       );
-      const shaderLerp = prefersReducedMotion() ? 1 : Math.min(1, ticker.deltaMS * 0.014);
-      shaderHover += ((hovered ? 1 : 0) - shaderHover) * shaderLerp;
-      shaderSelected += ((selected ? 1 : 0) - shaderSelected) * shaderLerp;
-      cardShader.uniforms.uLightPx[0] = this.lightRendererX;
-      cardShader.uniforms.uLightPx[1] = this.lightRendererY;
-      cardShader.uniforms.uLightStrength = this.pointerLightStrength;
-      cardShader.uniforms.uHover = shaderHover;
-      cardShader.uniforms.uSelected = shaderSelected;
       aura.alpha = selected
         ? 0.3
         : hovered
@@ -2904,6 +2929,7 @@ export class GpuRenderer {
       base.tint = pressed ? 0xb8d8ff : hovered ? 0xd8e9ff : 0xffffff;
       castShadow.alpha = easedEntrance * (hovered ? 0.96 : selected ? 0.92 : 0.86);
       rail.alpha = selected ? 0.92 : hovered ? 0.84 : 0.68;
+      settled = entrance >= 1 && !hovered && !pressed;
     };
     this.addTicker(animate);
 
@@ -3082,7 +3108,7 @@ export class GpuRenderer {
           // handed back before the container is destroyed recursively.
           group.label.removeFromParent();
           group.container.removeFromParent();
-          group.container.destroy({ children: true });
+          group.container.destroy({ children: true, context: true });
         }
       }
       const collapseProgress = applyCollapse();
@@ -3199,7 +3225,7 @@ export class GpuRenderer {
           this.app.ticker.remove(dissolve);
           this.tickerCallbacks.delete(dissolve);
           particles.removeFromParent();
-          particles.destroy({ children: true });
+          particles.destroy({ children: true, context: true });
         }
       };
       this.addTicker(dissolve);
@@ -3293,7 +3319,7 @@ export class GpuRenderer {
         // transition completes its 560ms before the next one begins.)
         label.removeFromParent();
         layer.removeFromParent();
-        layer.destroy({ children: true });
+        layer.destroy({ children: true, context: true });
       }
     };
     this.addTicker(animate);
@@ -3535,33 +3561,35 @@ export class GpuRenderer {
   /**
    * Live frame rate, right-aligned just left of the locale toggle.
    *
-   * Deliberately NOT drawn through `text()`. That cache keys on the string
-   * itself, so a counter would mint a fresh pooled label for every value it
-   * ever displayed and never reuse one — the opposite of what the cache is
-   * for. This label is owned by the scene, destroyed with it, and mutated in
-   * place by a ticker at `FPS_REFRESH_MS`.
+   * Deliberately NOT drawn through `text()`. That cache keys on the string,
+   * while Canvas Text rasterises and uploads every new value. BitmapText owns
+   * a tiny pre-installed glyph atlas instead: a rate change only rebuilds its
+   * quads and cannot become an observer-induced dropped frame.
    *
-   * `ticker.FPS` is Pixi's own smoothed rate, so the number does not flicker
-   * between two values the way a per-frame `1000/deltaMS` does.
+   * Pixi's `ticker.FPS` is only `1000 / elapsedMS` for the last frame. The
+   * renderer-owned sample window averages every real interval over 250ms, so
+   * one missed 120Hz vsync reads as ~116 FPS rather than an alarming 60 FPS.
+   * It intentionally survives scene rebuilds caused by wheel input.
    */
   private drawFpsReadout(right: number, y: number) {
-    const { style } = this.textStyle({ size: 10, color: GPU_COLORS.text, mono: true, weight: '600' });
-    const readout = new Text({ text: formatFps(this.app.ticker.FPS), style });
+    const readout = new BitmapText({
+      text: formatFps(this.lastFps),
+      style: FPS_BITMAP_STYLE,
+    });
     readout.anchor.set(1, 0.5);
     readout.position.set(right, y);
     readout.eventMode = 'none';
-    readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(this.app.ticker.FPS));
+    readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(this.lastFps));
     readout.label = 'fps-readout';
     this.root.addChild(readout);
 
-    let sinceRefresh = 0;
     this.addTicker((ticker) => {
-      sinceRefresh += ticker.deltaMS;
-      if (sinceRefresh < FPS_REFRESH_MS || readout.destroyed) return;
-      sinceRefresh = 0;
-      const fps = this.app.ticker.FPS;
+      if (readout.destroyed) return;
+      const fps = sampleFpsWindow(this.fpsSample, ticker.elapsedMS);
+      if (fps === null) return;
+      this.lastFps = fps;
       const next = formatFps(fps);
-      // Assigning the same string still re-rasterises in Pixi; guard it.
+      // Even quad layout is needless when the rounded value did not move.
       if (next !== readout.text) readout.text = next;
       readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(fps));
     });

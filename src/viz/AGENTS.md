@@ -93,7 +93,12 @@ npm run viz:mark-turn:analyze
   out and is destroyed, while `BindGroupSystem._hash` keeps serving a cached
   bind group that points at it — every later `queue.submit` is then a
   validation error, permanently. Today only the pointer-light filter has that
-  lifetime; per-card filters are rebuilt each render and are safe.
+  lifetime.
+- Timeline cards use a repeated direct `Graphics` texture fill for their grain.
+  Never put a Pixi `Filter` on each card: every filtered object becomes its own
+  render-to-texture pass, so GPU cost scales with the visible event count and
+  the full RUNS timeline cannot sustain 120 Hz. Hover and selection belong in
+  batchable tint, border, aura, rail, and shadow properties instead.
 - Pixi 8.19.0 WebGPU GC also unloads in-use static uniform buffers (global
   uniforms, batcher UBOs) whose values have not changed, with the same
   destroyed-buffer submit (pixijs#12080). The engine fix (pixijs#12147) is
@@ -152,7 +157,12 @@ npm run viz:mark-turn:analyze
   buttons and frames instead of stopping at the backdrop. `projectMarkCaustic`
   alone traces and derives throw falloff, `packMarkCaustic` alone writes the
   bundles, and `renderer/caustic-shader.ts` alone reconstructs their curved folds,
-  in GLSL kept ES 1.00-legal.
+  in GLSL kept ES 1.00-legal. The bundles are traced at TWO wavelengths (the
+  material dispersion band, diamond by default): the published corners are the
+  mean trace and each carries its signed red−blue half-separation, so the
+  fold reconstruction draws three real traces — the fringe is traced, never a
+  radial heuristic. The Scene Tuning `causticDetail` scalar opens or closes
+  that band around the traced measurement, as a live uniform.
 - The UI is English and catalog-backed; add strings to i18n catalogs rather than
   hardcoding. Tests enforce representative parity, not every incidental string.
 - PWA/service-worker registration is production-default and dev-opt-in

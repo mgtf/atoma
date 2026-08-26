@@ -991,6 +991,15 @@ export interface MarkCausticCast {
   /** Four projected three-ray bundles, flattened as consecutive triangles. */
   points: readonly AtomaMarkPoint[];
   /**
+   * The signed spectral HALF-SEPARATION at each of the same twelve corners:
+   * (red hit − blue hit) / 2, in local box units. The green trace IS the mean
+   * of the two wavelengths, so red sits at corner + delta and blue at
+   * corner − delta — one delta carries both, and the consumer's `band` scalar
+   * decides how far apart to draw them. Null when the active material does
+   * not disperse (obsidian): there is one wavelength, not a zero-width band.
+   */
+  spectral: readonly AtomaMarkPoint[] | null;
+  /**
    * 0..1 brightness at the wall: how much of the lamp couples into the glass,
    * dimmed by how far the cast was thrown.
    */
@@ -1026,11 +1035,26 @@ export function projectMarkCaustic(
   const lampY = (CENTER.y - localY) / PROJECTION_SCALE;
   const lampZ = ATOMA_MARK_LAMP_Z;
   const lamp: MarkVec3 = [lampX, lampY, lampZ];
-  const ior = ATOMA_MARK_DIAMOND_MATERIAL.ior;
+  const material = ATOMA_MARK_DIAMOND_MATERIAL;
+  const ior = material.ior;
   // The mesh is a thin hollow shell, not a solid gemstone. Collapse its inner
   // diamond→air and rear air→diamond pair into one thickness-weighted exit
   // ratio; the solid's full 2.42 would trap almost every ray in another object.
-  const shellExitEta = 1 + (ior - 1) * ATOMA_MARK_THICKNESS / ATOMA_MARK_RADIUS;
+  const shellExitRatio = ATOMA_MARK_THICKNESS / ATOMA_MARK_RADIUS;
+
+  /**
+   * The two traced wavelengths, as indices of refraction. Real diamond spans
+   * n≈2.407 (red) to n≈2.451 (blue); the band is scaled by the material's
+   * `dispersion` so obsidian (0) traces one wavelength and diamond (1) traces
+   * the full band. One material field decides both the highlight split and
+   * this band — a second, disagreeing notion of "how dispersive" would put
+   * the caustic's fringe where the shell's fire is not.
+   */
+  const CAUSTIC_SPECTRAL_BAND = 0.044;
+  const band = CAUSTIC_SPECTRAL_BAND * material.dispersion;
+  const iorRed = ior - band / 2;
+  const iorBlue = ior + band / 2;
+  const tracesWavelengths = band > 1e-4;
 
   const normalise = (value: MarkVec3): MarkVec3 => {
     const length = Math.max(Math.hypot(...value), 1e-9);
@@ -1050,15 +1074,21 @@ export function projectMarkCaustic(
       eta * incident[2] + (eta * cosine - Math.sqrt(discriminant)) * normal[2],
     ]);
   };
-  const trace = (sample: MarkVec3, entryFacet: number): AtomaMarkPoint | null => {
+  const trace = (
+    sample: MarkVec3,
+    entryFacet: number,
+    wavelengthIor: number
+  ): AtomaMarkPoint | null => {
     const entryNormal = frame.facets[entryFacet]!.normal;
     const incident = normalise([
       sample[0] - lamp[0],
       sample[1] - lamp[1],
       sample[2] - lamp[2],
     ]);
-    let direction = refract(incident, entryNormal, 1 / ior);
+    let direction = refract(incident, entryNormal, 1 / wavelengthIor);
     if (!direction) return null;
+    // The thin shell's collapsed exit ratio, at THIS wavelength's index.
+    const exitEta = 1 + (wavelengthIor - 1) * shellExitRatio;
     let origin: MarkVec3 = [
       sample[0] + direction[0] * 1e-4,
       sample[1] + direction[1] * 1e-4,
@@ -1090,7 +1120,7 @@ export function projectMarkCaustic(
       const exitDirection = refract(
         direction,
         [-outward[0], -outward[1], -outward[2]],
-        shellExitEta
+        exitEta
       );
       if (exitDirection) {
         if (exitDirection[2] >= -1e-5) return null;
@@ -1118,12 +1148,16 @@ export function projectMarkCaustic(
     }
     return null;
   };
-  const leakedRay = (sample: MarkVec3, normal: MarkVec3): AtomaMarkPoint => {
+  const leakedRay = (
+    sample: MarkVec3,
+    normal: MarkVec3,
+    wavelengthIor: number
+  ): AtomaMarkPoint => {
     // Finite pointer size and authored roughness leak a cone around an ideal
     // trapped ray. Use that cone's centroid, derived from thickness and IOR.
     const rayScale = (lampZ - CAUSTIC_PLANE_Z) /
       Math.max(lampZ - sample[2], 1e-4);
-    const prismShift = ATOMA_MARK_THICKNESS * (ior - 1) * rayScale;
+    const prismShift = ATOMA_MARK_THICKNESS * (wavelengthIor - 1) * rayScale;
     const wallX = lampX + (sample[0] - lampX) * rayScale + normal[0] * prismShift;
     const wallY = lampY + (sample[1] - lampY) * rayScale + normal[1] * prismShift;
     return {
@@ -1131,6 +1165,15 @@ export function projectMarkCaustic(
       y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
     };
   };
+  /** Trace one sample at one wavelength, leaking where the trace fails. */
+  const land = (
+    sample: MarkVec3,
+    facetIndex: number,
+    normal: MarkVec3,
+    wavelengthIor: number
+  ): AtomaMarkPoint =>
+    trace(sample, facetIndex, wavelengthIor) ??
+    leakedRay(sample, normal, wavelengthIor);
 
   const bundles = ATOMA_MARK_MESH.facets.flatMap((meshFacet, facetIndex) => {
     const facet = frame.facets[facetIndex]!;
@@ -1149,9 +1192,20 @@ export function projectMarkCaustic(
         vertex[2] * 0.72 + (otherA[2] + otherB[2]) * 0.14,
       ];
     });
-    const points = samples.map((sample) =>
-      trace(sample, facetIndex) ?? leakedRay(sample, facet.normal)
-    );
+    const points = samples.map((sample) => {
+      // Green is the MEAN trace, by construction: the barycentric rebuild in
+      // the shader is linear, so (red+blue)/2 evaluated at any sample equals
+      // the mean trace evaluated there. Tracing it a third time would be a
+      // third ray for a value two already determine.
+      const red = land(sample, facetIndex, facet.normal, tracesWavelengths ? iorRed : ior);
+      const blue = land(sample, facetIndex, facet.normal, tracesWavelengths ? iorBlue : ior);
+      return {
+        corner: { x: (red.x + blue.x) / 2, y: (red.y + blue.y) / 2 },
+        delta: tracesWavelengths
+          ? { x: (red.x - blue.x) / 2, y: (red.y - blue.y) / 2 }
+          : null,
+      };
+    });
     const entryRay = normalise([
       facet.centroid[0] - lamp[0],
       facet.centroid[1] - lamp[1],
@@ -1163,9 +1217,22 @@ export function projectMarkCaustic(
     }];
   }).sort((left, right) => right.score - left.score).slice(0, 4);
   if (bundles.length < 4) return null;
-  const corners = bundles.flatMap((bundle) => bundle.points);
+  // Published green corners: the mean trace every consumer already draws.
+  const corners = bundles.flatMap((bundle) =>
+    bundle.points.map((point) => point.corner)
+  );
+  // Signed half-separation per corner, the same twelve again. Deltas ride the
+  // transport rather than absolute positions so the winding fix applies once,
+  // to green — and a degenerate band collapses to zero instead of to a second
+  // copy of the bundle.
+  const spectral = tracesWavelengths
+    ? bundles.flatMap((bundle) =>
+        bundle.points.flatMap((point) => (point.delta ? [point.delta] : []))
+      )
+    : null;
   return {
     points: corners,
+    spectral,
     intensity: coupling.gemEnter * markCausticFalloff(lampX, lampY),
     color: coupling.color,
   };

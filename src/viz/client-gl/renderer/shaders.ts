@@ -59,6 +59,13 @@ export const POINTER_LIGHT_GLSL = /* glsl */ `
   uniform vec4 uCaustic4;
   uniform vec4 uCaustic5;
   uniform vec4 uCausticColor;
+  uniform vec4 uCausticSpec0;
+  uniform vec4 uCausticSpec1;
+  uniform vec4 uCausticSpec2;
+  uniform vec4 uCausticSpec3;
+  uniform vec4 uCausticSpec4;
+  uniform vec4 uCausticSpec5;
+  uniform float uCausticBand;
 
   float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
@@ -116,8 +123,11 @@ ${CAUSTIC_FIELD_GLSL}
     vec4 crystalCast = causticField(
       vScreenPx,
       uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
+      uCausticSpec0, uCausticSpec1, uCausticSpec2,
+      uCausticSpec3, uCausticSpec4, uCausticSpec5,
       uCausticColor.a,
-      uCausticColor.rgb
+      uCausticColor.rgb,
+      uCausticBand
     );
     float crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} * uStrength * sampleColor.a;
     sampleColor.rgb *= 1.0 - crystalCast.a * crystalCastGain;
@@ -148,6 +158,13 @@ export const POINTER_LIGHT_WGSL = /* wgsl */ `
     uCaustic4: vec4<f32>,
     uCaustic5: vec4<f32>,
     uCausticColor: vec4<f32>,
+    uCausticSpec0: vec4<f32>,
+    uCausticSpec1: vec4<f32>,
+    uCausticSpec2: vec4<f32>,
+    uCausticSpec3: vec4<f32>,
+    uCausticSpec4: vec4<f32>,
+    uCausticSpec5: vec4<f32>,
+    uCausticBand: f32,
   };
 
   @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
@@ -231,8 +248,15 @@ ${CAUSTIC_FIELD_WGSL}
       pointerLight.uCaustic3,
       pointerLight.uCaustic4,
       pointerLight.uCaustic5,
+      pointerLight.uCausticSpec0,
+      pointerLight.uCausticSpec1,
+      pointerLight.uCausticSpec2,
+      pointerLight.uCausticSpec3,
+      pointerLight.uCausticSpec4,
+      pointerLight.uCausticSpec5,
       pointerLight.uCausticColor.a,
       pointerLight.uCausticColor.rgb,
+      pointerLight.uCausticBand,
     );
     let crystalCastGain = ${CAUSTIC_SURFACE_GAIN.toFixed(2)} *
       pointerLight.uStrength * sampleColor.a;
@@ -245,189 +269,6 @@ ${CAUSTIC_FIELD_WGSL}
     return sampleColor;
   }
 `;
-
-export const CARD_FILTER_GLSL_VERTEX = /* glsl */ `
-  in vec2 aPosition;
-  out vec2 vTextureCoord;
-  out vec2 vSurfacePx;
-  out vec2 vScreenPx;
-  uniform vec4 uInputSize;
-  uniform vec4 uOutputFrame;
-  uniform vec4 uOutputTexture;
-
-  void main() {
-    vec2 position = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-    position.x = position.x * (2.0 / uOutputTexture.x) - 1.0;
-    position.y =
-      position.y * (2.0 * uOutputTexture.z / uOutputTexture.y) -
-      uOutputTexture.z;
-    gl_Position = vec4(position, 0.0, 1.0);
-    vTextureCoord = aPosition * (uOutputFrame.zw * uInputSize.zw);
-    vSurfacePx = aPosition * uOutputFrame.zw;
-    vScreenPx = aPosition * uOutputFrame.zw + uOutputFrame.xy;
-  }
-`;
-
-export const CARD_FILTER_GLSL = /* glsl */ `
-  in vec2 vTextureCoord;
-  in vec2 vSurfacePx;
-  in vec2 vScreenPx;
-  out vec4 finalColor;
-  uniform sampler2D uTexture;
-  uniform sampler2D uSandDiffuse;
-  uniform sampler2D uSandNormal;
-  uniform vec2 uLightPx;
-  uniform vec2 uMaterialOffset;
-  uniform float uLightStrength;
-  uniform float uHover;
-  uniform float uSelected;
-
-  void main() {
-    vec4 sampleColor = texture(uTexture, vTextureCoord);
-    vec2 materialPoint = vSurfacePx + uMaterialOffset;
-    const float turnCos = 0.819648;
-    const float turnSin = 0.572867;
-    vec2 rotatedPoint = vec2(
-      turnCos * materialPoint.x - turnSin * materialPoint.y,
-      turnSin * materialPoint.x + turnCos * materialPoint.y
-    );
-    // Two incommensurate, rotated samples suppress the 96px columns the
-    // single tile exposed. The per-card phase prevents rows from aligning.
-    vec2 materialUvA = materialPoint / 173.0;
-    vec2 materialUvB = rotatedPoint / 113.0 + vec2(0.37, 0.71);
-    float grainA = texture(uSandDiffuse, materialUvA).r;
-    float grainB = texture(uSandDiffuse, materialUvB).r;
-    vec3 normalA = texture(uSandNormal, materialUvA).xyz * 2.0 - 1.0;
-    vec3 normalB = texture(uSandNormal, materialUvB).xyz * 2.0 - 1.0;
-    vec2 normalBScreen = vec2(
-      turnCos * normalB.x + turnSin * normalB.y,
-      -turnSin * normalB.x + turnCos * normalB.y
-    );
-    vec3 mapped = normalize(vec3(
-      normalA.xy * 0.68 + normalBScreen * 0.32,
-      max(0.24, normalA.z * 0.68 + normalB.z * 0.32)
-    ));
-    vec3 surfaceNormal = normalize(vec3(mapped.xy * 0.46, mapped.z));
-    vec3 ambientLight = normalize(vec3(-0.46, -0.72, 0.82));
-    vec3 pointerLight = normalize(vec3(uLightPx - vScreenPx, 105.0));
-    vec3 lightDirection = normalize(mix(
-      ambientLight,
-      pointerLight,
-      min(0.82, uLightStrength * 0.82)
-    ));
-    float bump = max(0.0, dot(surfaceNormal, lightDirection));
-    float bumpStrength = 0.095 + uHover * 0.045 + uSelected * 0.03;
-    float grain = (grainA - 0.5) * 0.68 + (grainB - 0.5) * 0.32;
-    float material = grain * 0.055 + (bump - 0.78) * bumpStrength;
-    sampleColor.rgb += vec3(material) * sampleColor.a;
-    finalColor = sampleColor;
-  }
-`;
-
-export const CARD_FILTER_WGSL = /* wgsl */ `
-  struct GlobalFilterUniforms {
-    uInputSize: vec4<f32>,
-    uInputPixel: vec4<f32>,
-    uInputClamp: vec4<f32>,
-    uOutputFrame: vec4<f32>,
-    uGlobalFrame: vec4<f32>,
-    uOutputTexture: vec4<f32>,
-  };
-
-  struct CardUniforms {
-    uLightPx: vec2<f32>,
-    uMaterialOffset: vec2<f32>,
-    uLightStrength: f32,
-    uHover: f32,
-    uSelected: f32,
-  };
-
-  @group(0) @binding(0) var<uniform> gfu: GlobalFilterUniforms;
-  @group(0) @binding(1) var uTexture: texture_2d<f32>;
-  @group(0) @binding(2) var uSampler: sampler;
-  @group(1) @binding(0) var<uniform> cardUniforms: CardUniforms;
-  @group(1) @binding(1) var uSandDiffuse: texture_2d<f32>;
-  @group(1) @binding(2) var uSandDiffuseSampler: sampler;
-  @group(1) @binding(3) var uSandNormal: texture_2d<f32>;
-  @group(1) @binding(4) var uSandNormalSampler: sampler;
-
-  struct VSOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-    @location(1) surfacePx: vec2<f32>,
-    @location(2) screenPx: vec2<f32>,
-  };
-
-  fn filterVertexPosition(aPosition: vec2<f32>) -> vec4<f32> {
-    var position = aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy;
-    position.x = position.x * (2.0 / gfu.uOutputTexture.x) - 1.0;
-    position.y = position.y * (2.0 * gfu.uOutputTexture.z / gfu.uOutputTexture.y) - gfu.uOutputTexture.z;
-    return vec4(position, 0.0, 1.0);
-  }
-
-  fn filterTextureCoord(aPosition: vec2<f32>) -> vec2<f32> {
-    return aPosition * (gfu.uOutputFrame.zw * gfu.uInputSize.zw);
-  }
-
-  @vertex
-  fn mainVertex(@location(0) aPosition: vec2<f32>) -> VSOutput {
-    return VSOutput(
-      filterVertexPosition(aPosition),
-      filterTextureCoord(aPosition),
-      aPosition * gfu.uOutputFrame.zw,
-      aPosition * gfu.uOutputFrame.zw + gfu.uOutputFrame.xy
-    );
-  }
-
-  @fragment
-  fn mainFragment(
-    @location(0) uv: vec2<f32>,
-    @location(1) surfacePx: vec2<f32>,
-    @location(2) screenPx: vec2<f32>
-  ) -> @location(0) vec4<f32> {
-    var sampleColor = textureSample(uTexture, uSampler, uv);
-    let materialPoint = surfacePx + cardUniforms.uMaterialOffset;
-    let turnCos = 0.819648;
-    let turnSin = 0.572867;
-    let rotatedPoint = vec2(
-      turnCos * materialPoint.x - turnSin * materialPoint.y,
-      turnSin * materialPoint.x + turnCos * materialPoint.y
-    );
-    // Twin of the GLSL stochastic tiling above: unlike the old single sample,
-    // neither axis nor phase repeats coherently between neighbouring rows.
-    let materialUvA = materialPoint / 173.0;
-    let materialUvB = rotatedPoint / 113.0 + vec2(0.37, 0.71);
-    let grainA = textureSample(uSandDiffuse, uSandDiffuseSampler, materialUvA).r;
-    let grainB = textureSample(uSandDiffuse, uSandDiffuseSampler, materialUvB).r;
-    let normalA = textureSample(uSandNormal, uSandNormalSampler, materialUvA).xyz * 2.0 - vec3(1.0);
-    let normalB = textureSample(uSandNormal, uSandNormalSampler, materialUvB).xyz * 2.0 - vec3(1.0);
-    let normalBScreen = vec2(
-      turnCos * normalB.x + turnSin * normalB.y,
-      -turnSin * normalB.x + turnCos * normalB.y
-    );
-    let mapped = normalize(vec3(
-      normalA.xy * 0.68 + normalBScreen * 0.32,
-      max(0.24, normalA.z * 0.68 + normalB.z * 0.32)
-    ));
-    let surfaceNormal = normalize(vec3(mapped.xy * 0.46, mapped.z));
-    let ambientLight = normalize(vec3(-0.46, -0.72, 0.82));
-    let pointerLight = normalize(vec3(cardUniforms.uLightPx - screenPx, 105.0));
-    let lightDirection = normalize(mix(
-      ambientLight,
-      pointerLight,
-      min(0.82, cardUniforms.uLightStrength * 0.82)
-    ));
-    let bump = max(0.0, dot(surfaceNormal, lightDirection));
-    let bumpStrength = 0.095 + cardUniforms.uHover * 0.045 + cardUniforms.uSelected * 0.03;
-    let grain = (grainA - 0.5) * 0.68 + (grainB - 0.5) * 0.32;
-    let material = grain * 0.055 + (bump - 0.78) * bumpStrength;
-    sampleColor.r += material * sampleColor.a;
-    sampleColor.g += material * sampleColor.a;
-    sampleColor.b += material * sampleColor.a;
-    return sampleColor;
-  }
-`;
-
 
 // ---------------------------------------------------------------------------
 // Brand mark shell
@@ -914,7 +755,14 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     let offset = bend * markUniforms.uBackdropTexel;
     // The dispersive HALF-SPREAD around that common displacement: red bends
     // least, blue most. Zero for obsidian, which refracts without splitting.
-    let spread = offset * dispersion * markUniforms.uSplit;
+    // uSplit is a PIXEL distance — the half-spread when the bend saturates at
+    // its ceiling — so it is scaled by the bend's own ratio to that ceiling.
+    // Multiplying the offset by the raw pixel count instead made the split a
+    // MULTIPLE of the whole displacement: ~75px per channel on the hero
+    // backdrop, which tore the filament into three separate discs and drew a
+    // ghost hull. The header only survived it because its ceiling is 3px.
+    let spread = offset * dispersion *
+      (markUniforms.uSplit / max(markUniforms.uMaxBend, 1e-3));
     let straight = textureSample(uBackdrop, uBackdropSampler, backdropUv + offset);
     let shiftR = textureSample(uBackdrop, uBackdropSampler,
       backdropUv + offset - spread).r;
@@ -1310,7 +1158,8 @@ export const MARK_SHELL_GLSL = /* glsl */ `#version 300 es
       ? rawBend * uMaxBend / max(bendLength, 1e-4)
       : rawBend;
     vec2 offset = bend * uBackdropTexel;
-    vec2 spread = offset * dispersion * uSplit;
+    // Same pixel-true half-spread as the WGSL path; keep the two in step.
+    vec2 spread = offset * dispersion * (uSplit / max(uMaxBend, 1e-3));
     vec4 straight = texture(uBackdrop, vScreen + offset);
     float shiftR = texture(uBackdrop, vScreen + offset - spread).r;
     float shiftB = texture(uBackdrop, vScreen + offset + spread).b;

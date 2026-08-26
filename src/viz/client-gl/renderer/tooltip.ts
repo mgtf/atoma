@@ -188,6 +188,6 @@ export class TooltipLayer {
   }
 
   destroy(): void {
-    this.bubble.destroy({ children: true });
+    this.bubble.destroy({ children: true, context: true });
   }
 }

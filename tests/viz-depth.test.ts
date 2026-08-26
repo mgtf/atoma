@@ -70,4 +70,16 @@ describe('viz visual depth contract', () => {
     expect(renderer).toMatch(/FAR_FIELD_LABEL/);
     expect(renderer).toMatch(/ticker\.add\(this\.tickFarField\)/);
   });
+
+  it('routes every raised surface through the shared cast-shadow painter', () => {
+    const renderer = readFileSync('src/viz/client-gl/gpu-renderer.ts', 'utf8');
+    const panel = renderer.slice(renderer.indexOf('  panel('), renderer.indexOf('  filterBlockFrame('));
+
+    // Panels used to build their own pair of flat dark rectangles while cards
+    // and controls used the soft penumbra. The only direct registrations left
+    // are the shared outward painter and its physically distinct inset variant.
+    expect(panel).toContain('this.addSurfaceShadow(');
+    expect(panel).not.toContain('registerCastShadow(');
+    expect(renderer.match(/this\.registerCastShadow\(/g)).toHaveLength(2);
+  });
 });

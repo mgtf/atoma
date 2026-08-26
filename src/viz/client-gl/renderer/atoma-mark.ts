@@ -728,6 +728,10 @@ export function attachAtomaMark(
       if (coupledLocal) {
         const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
         const rgb = cast ? markColorToRgb(cast.color) : null;
+        // Stage→client is affine and identical for every corner of one frame;
+        // each conversion overwrites the same value, so the delta rides the
+        // exact path its corner took without a second getBoundingClientRect.
+        let pixelScale = 1;
         writeMarkFieldCaustic(
           cast && rgb
             ? {
@@ -737,8 +741,18 @@ export function attachAtomaMark(
                   const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
                     (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
                   const client = markStageToClient(renderer, stageX, stageY);
+                  // Same affine both axes: the spectral delta rides the very
+                  // conversion the corner it belongs to just took, so the
+                  // fringe lands where its filament lands at every DPI.
+                  pixelScale = client.pixelScale;
                   return { x: client.clientX, y: client.clientY };
                 }),
+                spectral: cast.spectral && pixelScale > 0
+                  ? cast.spectral.map((delta) => ({
+                      x: delta.x * scale * pixelScale,
+                      y: delta.y * scale * pixelScale,
+                    }))
+                  : null,
                 intensity: cast.intensity,
                 r: rgb.r,
                 g: rgb.g,
@@ -824,7 +838,7 @@ export function attachAtomaMark(
       // Display subtree first (meshes detach from geometry/shader), then the
       // shell's GPU resources, then the textures the passes ping-pong.
       cursorEcho?.destroy();
-      container.destroy({ children: true });
+      container.destroy({ children: true, context: true });
       shell?.destroy();
       for (const texture of ownedTextures) texture.destroy(true);
       ownedTextures.clear();

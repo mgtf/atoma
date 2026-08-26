@@ -8,6 +8,7 @@ import {
 } from '../src/viz/client-gl/renderer/far-field.js';
 import {
   MARK_CAUSTIC_MAX_POINTS,
+  MARK_CAUSTIC_MAX_SPECTRAL,
   clearMarkFieldLight,
   packMarkCaustic,
   readMarkFieldCaustic,
@@ -108,7 +109,7 @@ describe('far-field shader contract', () => {
       expect(source).toContain('uCausticColor');
     }
     expect(FAR_FIELD_UNIFORMS.filter((entry) => entry.name.startsWith('uCaustic')))
-      .toHaveLength(7);
+      .toHaveLength(14);
   });
 
   it('takes the cast from the ONE shared source, on every surface', () => {
@@ -121,27 +122,58 @@ describe('far-field shader contract', () => {
     expect(POINTER_LIGHT_WGSL).toContain(CAUSTIC_FIELD_WGSL);
   });
 
+  it('maps the traced wavelengths to red, green and blue channels in order', () => {
+    // deltaPoint is the signed (red - blue) half-separation: the positive
+    // trace is red, the mean trace is green, and the negative trace is blue.
+    expect(CAUSTIC_FIELD_GLSL).toContain('return vec3(red, green, blue);');
+    expect(CAUSTIC_FIELD_WGSL).toContain('return vec3<f32>(red, green, blue);');
+  });
+
   it('reconstructs sampled caustics and carries translucent shadow on both backends', () => {
     for (const source of [CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL]) {
       expect(source).toContain('causticKernel');
+      expect(source).toContain('causticSpectralFold');
       expect(source).toContain('causticBundle');
       expect(source).toContain('centre');
       expect(source).toContain('shadow');
       expect(source).not.toContain('causticEdge');
+      // One plain kernel remains: the radial-offset fold pair is gone, its
+      // job taken by the two traced wavelengths it approximated.
+      expect(source).not.toContain('causticFold(');
       // Three curved fold arcs plus the interior fill, plus four broader
       // shadow samples per bundle; causticField invokes the bundle for all
-      // four traced facets.
+      // four traced facets. Every fold sample is the SPECTRAL triple — one
+      // traced position per wavelength — and the fill and shadow stay plain.
       const arcs = 3 * (CAUSTIC_ARC_STEPS + 1);
       const fillGrid = CAUSTIC_FILL_SUBDIVISION;
       const fill = ((fillGrid - 1) * (fillGrid - 2)) / 2;
       expect(CAUSTIC_SAMPLES_PER_BUNDLE).toBe(arcs + fill);
-      expect(source.split('causticKernel(p,').length - 1)
-        .toBe(CAUSTIC_SAMPLES_PER_BUNDLE + 4);
+      expect(source.split('causticSpectralFold(p,').length - 1).toBe(arcs);
+      // fill + 4 shadow kernels + 3 calls inside the spectral fold's own
+      // definition (green, red, blue) — one function, three wavelengths.
+      expect(source.split('causticKernel(p,').length - 1).toBe(fill + 4 + 3);
       expect(source.match(/causticBundle\(/g)).toHaveLength(5);
-      // The dense reconstruction never runs where the bundle cannot reach:
-      // every pixel outside the centroid's reach plus the widest kernel's
-      // support exits before the unrolled sums.
-      expect(source).toContain('cull * cull');
+      // The dense reconstruction never runs where any traced wavelength can
+      // contribute. Its ROI includes both spectral extremes and the ACTUAL
+      // bundle rim — never the global maximum that made a hero cast shade
+      // most of the viewport.
+      expect(source).toContain('spectralMin');
+      expect(source).toContain('spectralMax');
+      expect(source).toContain('cullPad');
+      expect(source).toContain('foldRim * 4.6');
+      expect(source).not.toContain('sqrt(reach)');
+      // Filament width rides the bundle's own footprint, clamped — one fixed
+      // pixel width is a blob on the header cast and a hairline on the hero's.
+      expect(source).toContain('foldRim');
+      expect(source).toMatch(/clamp\(\s*sqrt\(area\)/);
+      // THE FRINGE IS TRACED, NOT PAINTED: the two extra wavelengths are the
+      // SAME samples offset by each corner's signed half-separation, and the
+      // band scalar can collapse them onto the mean trace in a uniform
+      // branch. No radial heuristic may come back.
+      expect(source).toContain('deltaPoint * band');
+      expect(source).toContain('band < 0.004');
+      expect(source).not.toContain('prism');
+      expect(source).not.toContain('fringe');
       // Fold filaments stay far heavier than fill: the cusped envelope must
       // outshine the body, or the cast degrades into the filled shape this
       // file bans.
@@ -153,6 +185,8 @@ describe('far-field shader contract', () => {
       // A caustic is CURVED folds, never the bundle's own straight edges: a
       // straight-edge sampler puts pure two-corner mixes back on the wall,
       // where every fold point must blend all three corners.
+      expect(source).not.toMatch(/causticFold\(p, a \* [\d.]+ \+ b \* [\d.]+,/);
+      expect(source).not.toMatch(/causticFold\(p, b \* [\d.]+ \+ c \* [\d.]+,/);
       expect(source).not.toMatch(/causticKernel\(p, a \* [\d.]+ \+ b \* [\d.]+,/);
       expect(source).not.toMatch(/causticKernel\(p, b \* [\d.]+ \+ c \* [\d.]+,/);
     }
@@ -199,27 +233,58 @@ describe('far-field shader contract', () => {
       { x: 22, y: 22 },
       { x: 6, y: 22 },
     ];
-    writeMarkFieldCaustic({ points, intensity: 0.5, r: 0.2, g: 0.4, b: 0.8 });
+    writeMarkFieldCaustic({ points, spectral: null, intensity: 0.5, r: 0.2, g: 0.4, b: 0.8 });
     const cast = readMarkFieldCaustic();
     expect(cast).not.toBeNull();
     expect(cast!.points).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
     expect(cast!.points[0]).toEqual(points[0]);
     expect(cast!.intensity).toBeCloseTo(0.5);
+    expect(cast!.spectral).toBeNull();
+
+    // The spectral band rides the same twelve corners: a short one is
+    // dropped whole (never partially drawn), and a long one is clamped.
+    const halfBand = points.map((point) => ({ x: point.x * 0.1, y: point.y * 0.1 }));
+    writeMarkFieldCaustic({
+      points,
+      spectral: halfBand,
+      intensity: 0.5,
+      r: 0.2, g: 0.4, b: 0.8,
+    });
+    expect(readMarkFieldCaustic()!.spectral).toHaveLength(MARK_CAUSTIC_MAX_SPECTRAL);
+    writeMarkFieldCaustic({
+      points,
+      spectral: halfBand.slice(0, MARK_CAUSTIC_MAX_SPECTRAL - 1),
+      intensity: 0.5,
+      r: 0.2, g: 0.4, b: 0.8,
+    });
+    expect(readMarkFieldCaustic()!.spectral).toBeNull();
+    writeMarkFieldCaustic({
+      points,
+      spectral: [...halfBand, { x: 99, y: 99 }, { x: 99, y: 99 }],
+      intensity: 0.5,
+      r: 0.2, g: 0.4, b: 0.8,
+    });
+    expect(readMarkFieldCaustic()!.spectral).toHaveLength(MARK_CAUSTIC_MAX_SPECTRAL);
 
     // More corners than slots are clamped to the published maximum.
     const many = Array.from({ length: MARK_CAUSTIC_MAX_POINTS + 3 }, (_, i) => ({
       x: i,
       y: i,
     }));
-    writeMarkFieldCaustic({ points: many, intensity: 0.1, r: 0, g: 0, b: 0 });
+    writeMarkFieldCaustic({ points: many, spectral: null, intensity: 0.1, r: 0, g: 0, b: 0 });
     expect(readMarkFieldCaustic()!.points).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
 
     // An incomplete four-bundle field is cleared, never partially drawn.
-    writeMarkFieldCaustic({ points: many.slice(0, 11), intensity: 0.9, r: 1, g: 1, b: 1 });
+    writeMarkFieldCaustic({
+      points: many.slice(0, 11),
+      spectral: null,
+      intensity: 0.9,
+      r: 1, g: 1, b: 1,
+    });
     expect(readMarkFieldCaustic()).toBeNull();
 
     // The lantern clear sweeps the cast with it.
-    writeMarkFieldCaustic({ points, intensity: 0.5, r: 0, g: 0, b: 0 });
+    writeMarkFieldCaustic({ points, spectral: null, intensity: 0.5, r: 0, g: 0, b: 0 });
     clearMarkFieldLight();
     expect(readMarkFieldCaustic()).toBeNull();
   });
@@ -246,7 +311,7 @@ describe('far-field shader contract', () => {
       { x: 120, y: 60 },
     ];
     const packed = packMarkCaustic(
-      { points: clockwise, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      { points: clockwise, spectral: null, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
       bounds,
       800,
       400
@@ -266,6 +331,29 @@ describe('far-field shader contract', () => {
     }
     expect(packed.corners).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
     expect(packed.intensity).toBeCloseTo(0.4);
+
+    // The spectral band packs through the SAME affine scale factors, without
+    // the bounds' origin: a delta is a difference, so the translation cancels.
+    // Bounds are half the renderer size, so the scale is exactly 2× here.
+    const halfBand = clockwise.map((_point, index) => ({
+      x: index + 0.25,
+      y: -(index + 0.5),
+    }));
+    const spectralPacked = packMarkCaustic(
+      { points: clockwise, spectral: halfBand, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      bounds,
+      800,
+      400
+    )!;
+    expect(spectralPacked.spectral).toHaveLength(MARK_CAUSTIC_MAX_SPECTRAL);
+    // Bundles 0 and 2 need their final two corners swapped to make the
+    // winding positive. Their uniquely tagged deltas must make the same swap;
+    // otherwise red/blue reconstruct around a different green corner.
+    const windingOrder = [0, 2, 1, 3, 4, 5, 6, 8, 7, 9, 10, 11];
+    expect(spectralPacked.spectral).toEqual(windingOrder.map((index) => ({
+      x: (index + 0.25) * 2,
+      y: -(index + 0.5) * 2,
+    })));
 
     // Nothing published, nothing packed: the caller parks its own slots.
     expect(packMarkCaustic(null, bounds, 800, 400)).toBeNull();

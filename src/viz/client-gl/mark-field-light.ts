@@ -27,9 +27,21 @@ export const MARK_FIELD_LIGHT_MAX = 4;
  */
 export const MARK_CAUSTIC_MAX_POINTS = 12;
 
+/**
+ * Per-corner spectral HALF-SEPARATION, the same twelve corners again: red sits
+ * at corner + delta, blue at corner − delta, in the SAME viewport CSS pixels.
+ * At the mark's scale the pointer→renderer mapping is affine, so a delta maps
+ * exactly like the position it belongs to. Null when the active material does
+ * not disperse: the consumer's band gate stays closed rather than drawing a
+ * zero-width fringe it cannot see.
+ */
+export const MARK_CAUSTIC_MAX_SPECTRAL = 12;
+
 export interface MarkFieldCaustic {
   /** Four consecutive three-point ray bundles, in viewport CSS pixels. */
   points: readonly { x: number; y: number }[];
+  /** Per-corner signed half-separation, or null when the glass does not disperse. */
+  spectral: readonly { x: number; y: number }[] | null;
   /**
    * 0..1 brightness at the wall: entry coupling after the crystal's physical
    * falloff and extreme-lift exposure floor. Readers scale it for their own
@@ -109,6 +121,9 @@ export function writeMarkFieldCaustic(next: MarkFieldCaustic | null): void {
   }
   root.__ATOMA_MARK_CAUSTIC__ = {
     points: next.points.slice(0, MARK_CAUSTIC_MAX_POINTS),
+    spectral: next.spectral && next.spectral.length >= MARK_CAUSTIC_MAX_SPECTRAL
+      ? next.spectral.slice(0, MARK_CAUSTIC_MAX_SPECTRAL)
+      : null,
     intensity: next.intensity,
     r: next.r,
     g: next.g,
@@ -125,6 +140,12 @@ export interface MarkCausticUniforms {
    * Exactly four triangles in RENDERER pixels, each wound POSITIVE.
    */
   corners: readonly { x: number; y: number }[];
+  /**
+   * The SAME twelve corners as signed half-separations, in renderer pixels:
+   * red at corner + delta, blue at corner − delta. Null when no band was
+   * traced. Winding reorders each delta together with the corner it belongs to.
+   */
+  spectral: readonly { x: number; y: number }[] | null;
   intensity: number;
   r: number;
   g: number;
@@ -148,21 +169,39 @@ export function packMarkCaustic(
   rendererHeight: number
 ): MarkCausticUniforms | null {
   if (!cast || cast.points.length < MARK_CAUSTIC_MAX_POINTS) return null;
+  // The pointer→renderer mapping is affine, so a DELTA converts through the
+  // same two scale factors without the bounds' origin.
+  const scaleX = rendererWidth / Math.max(1, bounds.width);
+  const scaleY = rendererHeight / Math.max(1, bounds.height);
   const corners = cast.points
     .slice(0, MARK_CAUSTIC_MAX_POINTS)
     .map((point) =>
       pointerClientToRenderer(point.x, point.y, bounds, rendererWidth, rendererHeight)
     );
+  const spectral = cast.spectral && cast.spectral.length >= MARK_CAUSTIC_MAX_SPECTRAL
+    ? cast.spectral
+        .slice(0, MARK_CAUSTIC_MAX_SPECTRAL)
+        .map((delta) => ({ x: delta.x * scaleX, y: delta.y * scaleY }))
+    : null;
   for (const start of [0, 3, 6, 9]) {
     const a = corners[start]!;
     const b = corners[start + 1]!;
     const c = corners[start + 2]!;
     const area = a.x * b.y + b.x * c.y + c.x * a.y -
       b.x * a.y - c.x * b.y - a.x * c.y;
-    if (area < 0) [corners[start + 1], corners[start + 2]] = [c, b];
+    if (area < 0) {
+      [corners[start + 1], corners[start + 2]] = [c, b];
+      if (spectral) {
+        [spectral[start + 1], spectral[start + 2]] = [
+          spectral[start + 2]!,
+          spectral[start + 1]!,
+        ];
+      }
+    }
   }
   return {
     corners,
+    spectral,
     intensity: cast.intensity,
     r: cast.r,
     g: cast.g,

@@ -385,7 +385,7 @@ export function attachAvatarOrb(
     setHover,
     destroy() {
       if (mesh.destroyed) return;
-      mesh.destroy({ children: true });
+      mesh.destroy({ children: true, context: true });
       geometry.destroy(true);
       shader.destroy();
     },

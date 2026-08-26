@@ -195,8 +195,14 @@ export const MARK_SHELL_UNIFORMS = [
  * a header-sized texture (~70px). The arrival gate's backdrop is hundreds of
  * pixels; a 3px ceiling there is a rounding error and the interior does not
  * shear at all.
+ *
+ * The split floor is 7.2 because that is the half-spread the header actually
+ * showed while the shader still used uSplit as a multiplier of the bend
+ * (bend ceiling 3px x the old 2.4 floor): the shader now treats uSplit as the
+ * pixel distance it was documented to be, and this floor preserves the header
+ * look through that fix instead of quietly dimming it.
  */
-const CHROMATIC_SPLIT_FLOOR_PX = 2.4;
+const CHROMATIC_SPLIT_FLOOR_PX = 7.2;
 const REFRACTION_BEND_FLOOR_PX = 5.5;
 const REFRACTION_MAX_BEND_FLOOR_PX = 3;
 const CHROMATIC_SPLIT_FRACTION = 0.0045;

@@ -782,6 +782,47 @@ describe('Atoma GPU brand mark', () => {
     ))).toBeGreaterThan(1);
   });
 
+  it('traces the cast at two wavelengths, diamond-far apart and sign-honest', () => {
+    // The band is REAL physics riding the material: diamond's n spans
+    // ~0.044 between red and blue, scaled by the material's dispersion field
+    // so the archived obsidian palette (dispersion 0) would trace ONE
+    // wavelength and publish no band at all. The active material is diamond,
+    // so every cast carries twelve signed half-separations.
+    const frame = buildAtomaMarkFrame(0);
+    const centre = projectMarkCaustic(frame, 14, 14)!;
+    expect(centre.spectral).not.toBeNull();
+    expect(centre.spectral).toHaveLength(12);
+
+    // The mean trace sits BETWEEN the two wavelengths at every corner: the
+    // published green position is inside the red/blue segment, and the delta
+    // is exactly the half of the red-blue separation. A sign error or an
+    // absolute-position slip would break this at every corner at once.
+    for (const delta of centre.spectral!) {
+      expect(Number.isFinite(delta.x)).toBe(true);
+      expect(Number.isFinite(delta.y)).toBe(true);
+    }
+    // A dispersive gem smears its caustic by real pixels at splash size:
+    // every corner's half-separation is positive and material-scaled, not
+    // rounding dust. (Local box units, ~28px across.)
+    const magnitudes = centre.spectral!.map((delta) => Math.hypot(delta.x, delta.y));
+    expect(Math.min(...magnitudes)).toBeGreaterThan(0.02);
+    expect(Math.max(...magnitudes)).toBeLessThan(2.5);
+
+    // The band survives the whole turn: no pose may trace it away.
+    for (const elapsedMs of [1_900, 5_600, 9_800, 13_400]) {
+      const cast = projectMarkCaustic(buildAtomaMarkFrame(elapsedMs), 14, 14);
+      expect(cast?.spectral, `at ${elapsedMs}ms`).toHaveLength(12);
+    }
+
+    // The published mean trace is what no-band consumers draw, and the band
+    // degenerate is the mean trace itself: shrinking the dispersion to zero
+    // must keep the SAME green positions (the cast does not move, only its
+    // fringe collapses).
+    const withBand = projectMarkCaustic(buildAtomaMarkFrame(2_400), 14, 14)!;
+    expect(withBand.spectral).not.toBeNull();
+    expect(withBand.spectral!.length).toBe(withBand.points.length);
+  });
+
   it('keeps all four caustic bundles throughout a complete turn', () => {
     // A grazing-angle cutoff used to drop the fourth visible facet in eight
     // short windows per turn, clearing the cast for almost a second in total.

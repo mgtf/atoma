@@ -36,6 +36,12 @@ export interface SoftShadowLayer {
   alpha: number;
 }
 
+/** One material response for every shadowed surface in the GPU scene. */
+export const SCENE_SHADOW_COLORS = {
+  core: 0x071224,
+  penumbra: 0x0d1c32,
+} as const;
+
 /** Layers past this buy nothing visible and cost tessellation. */
 const MAX_LAYERS = 5;
 

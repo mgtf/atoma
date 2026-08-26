@@ -15,7 +15,8 @@
  *
  *   1. `beginRender()` BEFORE tearing the scene down. It detaches every
  *      retained label from its parent, so the caller's recursive
- *      `destroy({ children: true })` walks past them instead of through them.
+ *      `destroy({ children: true, context: true })` walks past them instead
+ *      of through them.
  *   2. `acquire(key, create)` while drawing. Same key twice in one render
  *      returns two distinct labels — a pool per key, indexed by use order,
  *      because the same string can legitimately appear twice on screen.
@@ -44,7 +45,8 @@ export interface LabelCacheHooks<T> {
    *
    * The cache lends labels out; it does not own what callers do with the
    * containers it lends them into. An animation that outlives its render and
-   * ends in `container.destroy({ children: true })` walks straight through a
+   * ends in `container.destroy({ children: true, context: true })` walks
+   * straight through a
    * retained label and destroys it, and the pool has no way to notice — the
    * next `acquire` hands back a corpse whose `position` is null, and the
    * renderer dies on `label.position.set(...)` several renders later, far from

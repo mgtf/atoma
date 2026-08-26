@@ -211,12 +211,16 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // the guard is that consecutive rail rows still clear each other at hover
     // scale, asserted on the real layout in viz-gpu-views rather than grepped.
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
-    // Card shaders and the pointer light ship BOTH GLSL and WGSL variants so
-    // the WebGL fallback renders what WebGPU renders.
-    expect(gpuRenderer).toMatch(/CARD_FILTER_GLSL|CARD_FILTER_WGSL/);
-    expect(rendererShaders).toMatch(/CARD_FILTER_GLSL/);
-    expect(rendererShaders).toMatch(/CARD_FILTER_WGSL/);
-    expect(gpuRenderer).toMatch(/padding: 12/);
+    // Timeline cards stay in Pixi's regular Graphics batch. A Filter here
+    // creates one render-to-texture pass per visible card and cannot sustain
+    // a 120 Hz RUNS timeline. The direct texture fill works on both backends.
+    expect(gpuRenderer).toMatch(/grain\.fill\(\{[\s\S]{0,120}texture: material/);
+    expect(gpuRenderer).toMatch(/textureSpace: 'global'/);
+    expect(gpuRenderer).toMatch(/matrix: materialMatrix/);
+    expect(gpuRenderer).toMatch(/alpha: 0\.14/);
+    expect(gpuRenderer).toMatch(/grain\.blendMode = 'multiply'/);
+    expect(gpuRenderer).not.toMatch(/createCardFilter|(?:base|grain|container)\.filters/);
+    expect(rendererShaders).not.toMatch(/CARD_FILTER/);
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(gpuRenderer).toMatch(/createFarField/);
     expect(gpuRenderer).toMatch(/tickFarField/);

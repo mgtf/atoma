@@ -1,4 +1,4 @@
-/* global document, HTMLButtonElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent */
+/* global document, HTMLButtonElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent, window */
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -65,6 +65,54 @@ async function readRasteriser(page) {
 const SOFTWARE_RASTERISERS = /swiftshader|llvmpipe|software|basic render/i;
 
 /**
+ * Browser-generated WebGPU validation errors do not travel through
+ * `page.on('console')`: Chrome writes them to DevTools and dispatches an
+ * `uncapturederror` event on the GPUDevice. Install the listener before any
+ * application module can request the device, or an invalid WGSL module can
+ * render nothing while this smoke reports a clean console and a WebGPU
+ * backend.
+ */
+async function captureWebGpuErrors(page) {
+  await page.evaluateOnNewDocument(() => {
+    const errors = [];
+    Object.defineProperty(window, '__ATOMA_WEBGPU_ERRORS__', {
+      value: errors,
+      configurable: false,
+      enumerable: false,
+      writable: false,
+    });
+    const gpu = navigator.gpu;
+    if (!gpu) return;
+    const requestAdapter = gpu.requestAdapter.bind(gpu);
+    gpu.requestAdapter = async (...args) => {
+      const adapter = await requestAdapter(...args);
+      if (!adapter) return adapter;
+      const requestDevice = adapter.requestDevice.bind(adapter);
+      adapter.requestDevice = async (...deviceArgs) => {
+        const device = await requestDevice(...deviceArgs);
+        device.addEventListener('uncapturederror', (event) => {
+          if (errors.length < 20) {
+            errors.push(event.error?.message ?? String(event.error));
+          }
+        });
+        return device;
+      };
+      return adapter;
+    };
+  });
+}
+
+async function newWebGpuPage(browser) {
+  const page = await browser.newPage();
+  await captureWebGpuErrors(page);
+  return page;
+}
+
+async function readWebGpuErrors(page) {
+  return await page.evaluate(() => window.__ATOMA_WEBGPU_ERRORS__ ?? []);
+}
+
+/**
  * Every wait in this file is sized for a runner that paints in SECONDS, because
  * CI does. Measured on the GitHub runner: 33s from `page.goto` to the app's
  * readiness attribute, against Puppeteer's 30s default for a selector — and one
@@ -80,6 +128,34 @@ const READY_TIMEOUT_MS = 60_000;
 const PROTOCOL_TIMEOUT_MS = 300_000;
 const FRAME_SAMPLES = 120;
 const FRAME_SAMPLE_BUDGET_MS = 10_000;
+const HARDWARE_FRAME_P95_MAX_MS = 35;
+
+async function sampleFrames(page) {
+  return await page.evaluate(
+    (target, budgetMs) => new Promise((resolve) => {
+      const samples = [];
+      let previous;
+      const started = performance.now();
+      const frame = (now) => {
+        if (previous !== undefined) samples.push(now - previous);
+        previous = now;
+        if (samples.length < target && performance.now() - started < budgetMs) {
+          requestAnimationFrame(frame);
+        } else {
+          const sorted = [...samples].sort((left, right) => left - right);
+          resolve({
+            samples: samples.length,
+            meanMs: samples.reduce((sum, value) => sum + value, 0) / Math.max(1, samples.length),
+            p95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
+          });
+        }
+      };
+      requestAnimationFrame(frame);
+    }),
+    FRAME_SAMPLES,
+    FRAME_SAMPLE_BUDGET_MS
+  );
+}
 
 /**
  * Reach the entered app, passing the ARRIVAL GATE when one is shown.
@@ -199,6 +275,83 @@ async function waitForHitTarget(page, id, describe) {
 }
 
 /**
+ * Read the real Pixi scene, not a source-code proxy. Every visible RUNS event
+ * must own one face and one directly batched grain layer, with no local filter
+ * that would split it into a render-to-texture pass.
+ */
+async function readTimelineCardMaterials(page) {
+  return await page.evaluate(() => {
+    const handle = globalThis.__ATOMA_GPU__;
+    if (!handle?.app?.stage || !handle.hitTargets) {
+      throw new Error('timeline card material diagnostics did not arm');
+    }
+    const eventIds = [...new Set(handle.hitTargets()
+      .map((entry) => entry.id)
+      .filter((id) => id.startsWith('event.'))
+      .map((id) => id.slice('event.'.length)))].sort();
+    const cardIds = [];
+    const faceIds = [];
+    const grainIds = [];
+    const filtered = [];
+    const grainBlendModes = [];
+    const grainMaterials = [];
+    const visit = (node) => {
+      const label = String(node.label ?? '');
+      if (label.startsWith('timeline-card:')) {
+        cardIds.push(label.slice('timeline-card:'.length));
+        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
+      }
+      if (label.startsWith('timeline-card-face:')) {
+        faceIds.push(label.slice('timeline-card-face:'.length));
+        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
+      }
+      if (label.startsWith('timeline-card-grain:')) {
+        const id = label.slice('timeline-card-grain:'.length);
+        grainIds.push(id);
+        grainBlendModes.push(String(node.blendMode));
+        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
+        const fill = node.context?.instructions?.find((instruction) =>
+          instruction.action === 'fill' && instruction.data?.style?.texture);
+        grainMaterials.push({
+          id,
+          texture: String(fill?.data?.style?.texture?.label ?? ''),
+          textureSpace: String(fill?.data?.style?.textureSpace ?? ''),
+          alpha: Number(fill?.data?.style?.alpha ?? 0),
+          hasMatrix: Boolean(fill?.data?.style?.matrix),
+        });
+      }
+      for (const child of node.children ?? []) visit(child);
+    };
+    visit(handle.app.stage);
+    return {
+      eventIds,
+      cardIds: cardIds.sort(),
+      faceIds: faceIds.sort(),
+      grainIds: grainIds.sort(),
+      filtered: filtered.sort(),
+      grainBlendModes: grainBlendModes.sort(),
+      grainMaterials: grainMaterials.sort((left, right) => left.id.localeCompare(right.id)),
+    };
+  });
+}
+
+function timelineCardsUseDirectMaterials(state) {
+  const eventKey = state.eventIds.join('\0');
+  return state.eventIds.length > 0 &&
+    state.cardIds.join('\0') === eventKey &&
+    state.faceIds.join('\0') === eventKey &&
+    state.grainIds.join('\0') === eventKey &&
+    state.filtered.length === 0 &&
+    state.grainBlendModes.every((mode) => mode === 'multiply') &&
+    state.grainMaterials.length === state.eventIds.length &&
+    state.grainMaterials.every((material) =>
+      material.texture === 'timeline-sand-diffuse' &&
+      material.textureSpace === 'global' &&
+      material.alpha === 0.14 &&
+      material.hasMatrix);
+}
+
+/**
  * The custom cursor is ENVIRONMENT-GATED by design: `AtomaCursor` enables it
  * only while `(any-hover: hover) and (any-pointer: fine)` matches with motion
  * allowed and forced colours off. A headless runner with no pointing device to
@@ -267,8 +420,9 @@ const SOFTWARE_SCROLL_REBUILD_P95_MAX = 40;
  * before reversing, and `views/runs.ts` sets
  * `scrollMax = rows * rowHeight + 38 - listHeight` with `rowHeight` 46 and the
  * list pane never taller than the 800px viewport — so the list needs ~62 rows
- * before the sixteenth tick still moves it. 80 keeps margin without inflating
- * the per-rebuild layout that the same arm is timing.
+ * before the sixteenth tick still moves it. The arm then reverses all sixteen
+ * ticks to compare resources at the exact same scroll offset. 80 keeps margin
+ * without inflating the per-rebuild layout that the same arm is timing.
  */
 const FIXTURE_EVENT_ROWS = 80;
 
@@ -371,7 +525,7 @@ try {
     protocolTimeout: PROTOCOL_TIMEOUT_MS,
   });
   try {
-    const page = await browser.newPage();
+    const page = await newWebGpuPage(browser);
     await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
     const diagnostics = [];
     page.on('console', (message) => {
@@ -383,6 +537,7 @@ try {
       }
     });
     page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+    page.on('error', (error) => diagnostics.push(`page-crash: ${error.message}`));
     page.on('requestfailed', (request) => {
       diagnostics.push(`requestfailed: ${request.url()} ${request.failure()?.errorText ?? ''}`);
     });
@@ -399,11 +554,42 @@ try {
     // in-flight requests sit at zero for ~2.8s at a stretch, yet networkidle0
     // does not resolve in 120 SECONDS. A bigger timeout cannot reach it, so
     // every arm here gates on `load` plus the app's own readiness attribute.
-    await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'load' });
+    await page.goto(`http://127.0.0.1:${port}/?atomaDiag=1`, { waitUntil: 'load' });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend]', { timeout: READY_TIMEOUT_MS });
+    const rasteriser = await readRasteriser(page);
+    const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     // The gate GATES: nothing navigable exists behind it until it is passed.
     if (await page.$('[role="tab"]')) {
       throw new Error('arrival gate did not hold: nav tabs rendered before Continue');
+    }
+    let welcomeCrystalFrameStats = null;
+    let welcomeRecoveryFrameStats = null;
+    if (softwareRastered) {
+      console.log(
+        `viz GPU welcome crystal performance NOT CHECKED: software rasteriser (${rasteriser})`
+      );
+    } else {
+      // THE CAUSTIC HOT PATH. The ordinary frame sample below runs only after
+      // Continue, where the hero crystal is gone. Drive its real centre and
+      // arm on the published production cast before measuring, or a missed
+      // pointer would flatter the shader through its intensity early-out.
+      await page.mouse.move(640, 400);
+      await page.waitForFunction(
+        () => (globalThis.__ATOMA_MARK_CAUSTIC__?.intensity ?? 0) > 0.001,
+        { polling: 'raf', timeout: READY_TIMEOUT_MS }
+      );
+      welcomeCrystalFrameStats = await sampleFrames(page);
+      await page.mouse.move(1200, 750);
+      await page.waitForFunction(
+        () => (globalThis.__ATOMA_MARK_CAUSTIC__?.intensity ?? 0) < 0.001,
+        { polling: 'raf', timeout: READY_TIMEOUT_MS }
+      );
+      welcomeRecoveryFrameStats = await sampleFrames(page);
+      console.log(
+        `viz GPU welcome crystal probe: ${welcomeCrystalFrameStats.meanMs.toFixed(2)}ms mean/` +
+          `${welcomeCrystalFrameStats.p95Ms.toFixed(2)}ms P95; recovered to ` +
+          `${welcomeRecoveryFrameStats.p95Ms.toFixed(2)}ms P95`
+      );
     }
     await passArrivalGate(page);
     const arrivalView = await page.evaluate(() =>
@@ -413,8 +599,6 @@ try {
     if (arrivalView !== 'Projects') {
       throw new Error(`GPU arrival view must be Projects, got ${String(arrivalView)}`);
     }
-    const rasteriser = await readRasteriser(page);
-    const softwareRastered = SOFTWARE_RASTERISERS.test(rasteriser);
     const cursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (cursorEnv.expected) {
@@ -428,34 +612,7 @@ try {
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 180));
-    const frameStats = await page.evaluate(
-      (target, budgetMs) => new Promise((resolve) => {
-        const samples = [];
-        let previous;
-        const started = performance.now();
-        const frame = (now) => {
-          if (previous !== undefined) samples.push(now - previous);
-          previous = now;
-          // Bounded by the clock as well as the count: 120 frames is ~2s of a
-          // real display and over three minutes of a software rasteriser, which
-          // is past the protocol timeout — and a truncated sample still carries
-          // the P95 the budget below reads, over however many frames arrived.
-          if (samples.length < target && performance.now() - started < budgetMs) {
-            requestAnimationFrame(frame);
-          } else {
-            const sorted = [...samples].sort((left, right) => left - right);
-            resolve({
-              samples: samples.length,
-              meanMs: samples.reduce((sum, value) => sum + value, 0) / Math.max(1, samples.length),
-              p95Ms: sorted[Math.floor(sorted.length * 0.95)] ?? 0,
-            });
-          }
-        };
-        requestAnimationFrame(frame);
-      }),
-      FRAME_SAMPLES,
-      FRAME_SAMPLE_BUDGET_MS
-    );
+    const frameStats = await sampleFrames(page);
 
     const scrollRebuildMax = softwareRastered
       ? SOFTWARE_SCROLL_REBUILD_P95_MAX
@@ -556,32 +713,63 @@ try {
       // re-renders synchronously instead of going through the store.
       const clientX = box.left + box.width * 0.2;
       const clientY = box.top + box.height * 0.6;
+      const managedResources = () => {
+        const renderer = window.__ATOMA_GPU__?.app?.renderer;
+        const graphics = renderer?.graphicsContext?._managedContexts?.items;
+        const buffers = renderer?.buffer?._managedBuffers?.items;
+        if (!graphics || !buffers) {
+          throw new Error('GPU managed-resource diagnostics did not arm');
+        }
+        const live = (items) => Object.values(items).filter(Boolean).length;
+        return {
+          graphicsContexts: live(graphics),
+          buffers: live(buffers),
+        };
+      };
+      const runCycle = async (onMiss) => {
+        for (let tick = 0; tick < 32; tick++) {
+          canvas.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: tick < 16 ? 140 : -140,
+            clientX,
+            clientY,
+            bubbles: true,
+            cancelable: true,
+          }));
+          if (!(await awaitRender())) onMiss();
+        }
+      };
+
+      // First cycle warms the bounded label cache and material batches across
+      // the complete viewport range. The second takes the exact same route and
+      // returns to scroll=0, so resource equality is a deterministic lifetime
+      // contract — no heap threshold and no timing heuristic. Before the fix,
+      // this leaked ~400 GraphicsContexts and ~100 buffers PER rebuild.
+      let warmupMissed = 0;
       let missed = 0;
-      await awaitRender();
+      await runCycle(() => { warmupMissed += 1; });
+      await frame();
+      const resourcesBefore = managedResources();
       samples.length = 0;
-      for (let tick = 0; tick < 24; tick++) {
-        canvas.dispatchEvent(new WheelEvent('wheel', {
-          deltaY: tick < 16 ? 140 : -140,
-          clientX,
-          clientY,
-          bubbles: true,
-          cancelable: true,
-        }));
-        if (!(await awaitRender())) missed++;
-      }
+      await runCycle(() => { missed += 1; });
+      await frame();
+      const resourcesAfter = managedResources();
       observer.disconnect();
       const durations = samples.map((sample) => sample.ms).sort((a, b) => a - b);
       const at = (quantile) => durations[Math.min(durations.length - 1, Math.floor(durations.length * quantile))] ?? 0;
       return {
         renders: samples.length,
+        warmupMissed,
         missed,
         p50Ms: at(0.5),
         p95Ms: at(0.95),
         maxMs: durations[durations.length - 1] ?? 0,
         created: samples.reduce((sum, sample) => sum + sample.created, 0),
         reused: samples.reduce((sum, sample) => sum + sample.reused, 0),
+        resourcesBefore,
+        resourcesAfter,
       };
     });
+    const cardMaterialStats = await readTimelineCardMaterials(page);
 
     const result = await page.evaluate(() => ({
       canvases: document.querySelectorAll('canvas').length,
@@ -589,6 +777,7 @@ try {
       objects: Number(document.querySelector('.gpu-ui-host')?.getAttribute('data-gpu-objects')),
       cursorX: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-x'),
       cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
+      webgpuErrors: window.__ATOMA_WEBGPU_ERRORS__ ?? [],
     }));
     if (
       result.canvases !== 1 ||
@@ -601,12 +790,30 @@ try {
       // build: 17.5ms P95 on this machine's Metal-backed WebGPU against 357ms
       // under `--use-angle=swiftshader`, which times the rasteriser and nothing
       // else. Skipped loudly below rather than silently relaxed.
-      (!softwareRastered && frameStats.p95Ms > 35) ||
+      (!softwareRastered && (
+        frameStats.samples < FRAME_SAMPLES ||
+        welcomeCrystalFrameStats.samples < FRAME_SAMPLES ||
+        welcomeRecoveryFrameStats.samples < FRAME_SAMPLES
+      )) ||
+      (!softwareRastered && frameStats.p95Ms > HARDWARE_FRAME_P95_MAX_MS) ||
+      (!softwareRastered &&
+        welcomeCrystalFrameStats.p95Ms > HARDWARE_FRAME_P95_MAX_MS) ||
       // The scroll scenario must ARM before its numbers mean anything: every
-      // tick has to have produced a rebuild, and there have to be rebuilds.
+      // tick in BOTH complete cycles has to have produced a rebuild, and there
+      // have to be rebuilds.
+      scrollStats.warmupMissed !== 0 ||
       scrollStats.missed !== 0 ||
-      scrollStats.renders < 20 ||
+      scrollStats.renders < 30 ||
       scrollStats.p95Ms > scrollRebuildMax ||
+      scrollStats.resourcesBefore.graphicsContexts <= 0 ||
+      scrollStats.resourcesBefore.buffers <= 0 ||
+      scrollStats.resourcesAfter.graphicsContexts !==
+        scrollStats.resourcesBefore.graphicsContexts ||
+      scrollStats.resourcesAfter.buffers !== scrollStats.resourcesBefore.buffers ||
+      // A filter on even one visible card reintroduces a separate offscreen
+      // pass per event and makes ALL slower than TRUST. Exact scene labels arm
+      // this on the cards that were actually drawn by the scroll scenario.
+      !timelineCardsUseDirectMaterials(cardMaterialStats) ||
       // The sharp one. Label retention is what keeps a rebuild off the canvas
       // text path; losing it drops this straight to zero, where the timing
       // budget above would still pass.
@@ -615,10 +822,20 @@ try {
       // nothing new in the console.
       navStats.views.join(',') !== 'Runs,Skills' ||
       navStats.newDiagnostics !== 0 ||
+      result.webgpuErrors.length > 0 ||
       diagnostics.length > 0
     ) {
       throw new Error(
-        `GPU smoke failed: ${JSON.stringify({ ...result, frameStats, scrollStats, navStats, diagnostics })}`
+        `GPU smoke failed: ${JSON.stringify({
+          ...result,
+          frameStats,
+          welcomeCrystalFrameStats,
+          welcomeRecoveryFrameStats,
+          scrollStats,
+          cardMaterialStats,
+          navStats,
+          diagnostics,
+        })}`
       );
     }
     console.log(
@@ -634,14 +851,21 @@ try {
       `viz GPU nav ok: 6 RUNS<->SKILLS round-trips past the 560ms view transition, views ${navStats.views.join('/')}, no render error`
     );
     console.log(
-      `viz GPU scroll ok: ${scrollStats.renders} rebuilds (${scrollStats.missed} ticks missed), ${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/${scrollStats.maxMs.toFixed(2)}ms max against a ${scrollRebuildMax}ms ceiling, labels ${scrollStats.reused} reused vs ${scrollStats.created} built`
+      `viz GPU scroll ok: ${scrollStats.renders} measured rebuilds after a full warm-up ` +
+        `(${scrollStats.warmupMissed + scrollStats.missed} ticks missed), ` +
+        `${scrollStats.p50Ms.toFixed(2)}ms P50/${scrollStats.p95Ms.toFixed(2)}ms P95/` +
+        `${scrollStats.maxMs.toFixed(2)}ms max against a ${scrollRebuildMax}ms ceiling, ` +
+        `labels ${scrollStats.reused} reused vs ${scrollStats.created} built, resources stable at ` +
+        `${scrollStats.resourcesAfter.graphicsContexts} graphics contexts/` +
+        `${scrollStats.resourcesAfter.buffers} buffers, ` +
+        `${cardMaterialStats.eventIds.length} cards directly textured`
     );
 
     // THE REGRESSION SCENARIO. Scene Tuning is DOM chrome so it can sit above
     // DOM project/settings forms; its sliders still write the mutable sample
     // the Pixi ticker reads. A real browser proves both stacking/drag geometry
     // and that slider motion changes the scene without rebuilding the canvas.
-    const tunePage = await browser.newPage();
+    const tunePage = await newWebGpuPage(browser);
     const tuneDiagnostics = [];
     tunePage.on('console', (message) => {
       if (
@@ -714,7 +938,10 @@ try {
         afterRelease,
         panelDelta,
         rendersDuringSlider: rendersAfter - rendersBefore,
-        diagnostics: tuneDiagnostics,
+        diagnostics: [
+          ...tuneDiagnostics,
+          ...(await readWebGpuErrors(tunePage)).map((error) => `webgpu: ${error}`),
+        ],
       };
     } finally {
       await tunePage.close();
@@ -744,7 +971,7 @@ try {
     // The frame period comes from the main page's sampler: same browser, same
     // machine, same rasteriser, so it describes this page's cadence too.
     const restingObservable = frameStats.meanMs < RESTING_FRAME_CEILING_MS;
-    const anchorPage = await browser.newPage();
+    const anchorPage = await newWebGpuPage(browser);
     let anchorStats;
     try {
       await anchorPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: 2 });
@@ -870,7 +1097,13 @@ try {
       await anchorPage.mouse.move(10, 780);
       await anchorPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
       const settled = await probe();
-      anchorStats = { initial, hidden, midFlight, settled };
+      anchorStats = {
+        initial,
+        hidden,
+        midFlight,
+        settled,
+        webgpuErrors: await readWebGpuErrors(anchorPage),
+      };
     } finally {
       await anchorPage.close();
     }
@@ -882,6 +1115,7 @@ try {
       anchorStats.hidden.roleRow ||
       !anchorStats.settled.roleRow ||
       anchorStats.midFlight === null ||
+      anchorStats.webgpuErrors.length > 0 ||
       // THE ASSERTION: anchors track the moving layer and its resting place.
       !(anchorStats.midFlight.drift < ANCHOR_DRIFT_MAX) ||
       (restingObservable && !(anchorStats.settled.drift < ANCHOR_DRIFT_MAX))
@@ -908,7 +1142,7 @@ try {
     // THE GATE UP IN THE BROWSER: whoami is answered as authenticated and the
     // org-scoped reads are stubbed, which is the smallest fixture that gets
     // the real renderer to compile and draw the program.
-    const accountPage = await browser.newPage();
+    const accountPage = await newWebGpuPage(browser);
     let accountStats;
     const accountDiagnostics = [];
     try {
@@ -1240,6 +1474,7 @@ try {
         afterTab,
         meshesAfterTab,
         announcementReset,
+        webgpuErrors: await readWebGpuErrors(accountPage),
       };
     } finally {
       await accountPage.close();
@@ -1289,7 +1524,8 @@ try {
       // fresh composer; neither stale success copy nor stale title survived.
       accountStats.announcementReset.receipt !== null ||
       accountStats.announcementReset.title !== '' ||
-      // A shader that failed to compile surfaces here and nowhere else.
+      // This page is the one that compiles the account orb's own shader.
+      accountStats.webgpuErrors.length > 0 ||
       accountDiagnostics.length > 0
     ) {
       throw new Error(`GPU account smoke failed: ${JSON.stringify({
@@ -1301,6 +1537,7 @@ try {
         afterTab: accountStats.afterTab.filter((id) => id.startsWith('account.')),
         meshesAfterTab: accountStats.meshesAfterTab,
         announcementReset: accountStats.announcementReset,
+        webgpuErrors: accountStats.webgpuErrors,
         accountDiagnostics,
       })}`);
     }
@@ -1319,7 +1556,7 @@ try {
     const livePort = await freePort();
     let liveServer = null;
     let liveStats;
-    const livePage = await browser.newPage();
+    const livePage = await newWebGpuPage(browser);
     try {
       const now = Date.now();
       const liveRun = {
@@ -1412,6 +1649,7 @@ try {
         idlePolls,
         idleRebuilds: idleEnd - idleStart,
         rebuildsAfterEvent: afterEvent - idleEnd,
+        webgpuErrors: await readWebGpuErrors(livePage),
       };
     } finally {
       await livePage.close();
@@ -1426,7 +1664,8 @@ try {
       // THE ASSERTION: empty polls leave the scene alone...
       liveStats.idleRebuilds !== 0 ||
       // ...and a real delta still reaches it.
-      liveStats.rebuildsAfterEvent < 1
+      liveStats.rebuildsAfterEvent < 1 ||
+      liveStats.webgpuErrors.length > 0
     ) {
       throw new Error(`GPU live-poll stability failed: ${JSON.stringify(liveStats)}`);
     }
@@ -1463,9 +1702,12 @@ try {
         diagnostics.push(`http ${response.status()}: ${response.url()}`);
       }
     });
-    await page.goto(`http://127.0.0.1:${port}/?renderer=webgl`, { waitUntil: 'load' });
+    await page.goto(`http://127.0.0.1:${port}/?renderer=webgl&atomaDiag=1`, {
+      waitUntil: 'load',
+    });
     await page.waitForSelector('.gpu-ui-host[data-gpu-backend="webgl"]', { timeout: READY_TIMEOUT_MS });
     await passArrivalGate(page);
+    await openView(page, 'Runs');
     const fallbackCursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (fallbackCursorEnv.expected) {
@@ -1479,16 +1721,23 @@ try {
       cursorX: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-x'),
       cursorY: document.querySelector('.atoma-pointer-cursor')?.getAttribute('data-y'),
     }));
+    const fallbackCardMaterialStats = await readTimelineCardMaterials(page);
     if (
       fallbackResult.canvases !== 1 ||
       (fallbackCursorEnv.expected && fallbackResult.cursorX !== '640') ||
       (fallbackCursorEnv.expected && fallbackResult.cursorY !== '400') ||
+      !timelineCardsUseDirectMaterials(fallbackCardMaterialStats) ||
       diagnostics.length > 0
     ) {
-      throw new Error(`GPU fallback diagnostics: ${JSON.stringify({ fallbackResult, diagnostics })}`);
+      throw new Error(`GPU fallback diagnostics: ${JSON.stringify({
+        fallbackResult,
+        fallbackCardMaterialStats,
+        diagnostics,
+      })}`);
     }
     console.log(
-      `viz GPU fallback ok: WebGL${fallbackCursorEnv.expected ? '' : ' (pointer cursor not checked)'}`
+      `viz GPU fallback ok: WebGL, ${fallbackCardMaterialStats.eventIds.length} cards directly ` +
+        `textured${fallbackCursorEnv.expected ? '' : ' (pointer cursor not checked)'}`
     );
   } finally {
     await fallbackBrowser.close();

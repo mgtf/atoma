@@ -11,6 +11,7 @@ import {
   CAUSTIC_CORNER_SLOTS,
   CAUSTIC_FIELD_GLSL,
   CAUSTIC_FIELD_WGSL,
+  CAUSTIC_SPECTRAL_SLOTS,
 } from './caustic-shader.js';
 import {
   pointerClientToRenderer,
@@ -19,6 +20,7 @@ import {
 } from '../pointer-light.js';
 import { effectiveFarAlpha, VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 import { prefersReducedMotion } from './motion.js';
+import { readTuning } from '../tuning-live.js';
 
 /** Survives `ambientRoot.removeChildren()` so the aurora is not rebuilt every scene. */
 export const FAR_FIELD_LABEL = 'far-field';
@@ -70,6 +72,17 @@ export const FAR_FIELD_UNIFORMS = [
   { name: 'uCaustic4', type: 'vec4<f32>' },
   { name: 'uCaustic5', type: 'vec4<f32>' },
   { name: 'uCausticColor', type: 'vec4<f32>' },
+  // The spectral half-separation per corner, two corners per vec4: red draws
+  // at corner + delta, blue at corner − delta. `uCausticBand` scales how far
+  // apart the two wavelengths are drawn — 1 is the traced band, 0 collapses
+  // them onto the mean trace (the Scene Tuning detail slider).
+  { name: 'uCausticSpec0', type: 'vec4<f32>' },
+  { name: 'uCausticSpec1', type: 'vec4<f32>' },
+  { name: 'uCausticSpec2', type: 'vec4<f32>' },
+  { name: 'uCausticSpec3', type: 'vec4<f32>' },
+  { name: 'uCausticSpec4', type: 'vec4<f32>' },
+  { name: 'uCausticSpec5', type: 'vec4<f32>' },
+  { name: 'uCausticBand', type: 'f32' },
 ] as const;
 
 const uniformValues: Record<
@@ -95,6 +108,13 @@ const uniformValues: Record<
   uCaustic4: () => new Float32Array([-1e6, -1e6, -1e6, -1e6]),
   uCaustic5: () => new Float32Array([-1e6, -1e6, -1e6, -1e6]),
   uCausticColor: () => new Float32Array(4),
+  uCausticSpec0: () => new Float32Array(4),
+  uCausticSpec1: () => new Float32Array(4),
+  uCausticSpec2: () => new Float32Array(4),
+  uCausticSpec3: () => new Float32Array(4),
+  uCausticSpec4: () => new Float32Array(4),
+  uCausticSpec5: () => new Float32Array(4),
+  uCausticBand: () => 1,
 };
 
 export const FAR_FIELD_GLSL_VERTEX = /* glsl */ `#version 300 es
@@ -138,6 +158,13 @@ export const FAR_FIELD_GLSL = /* glsl */ `#version 300 es
   uniform vec4 uCaustic4;
   uniform vec4 uCaustic5;
   uniform vec4 uCausticColor;
+  uniform vec4 uCausticSpec0;
+  uniform vec4 uCausticSpec1;
+  uniform vec4 uCausticSpec2;
+  uniform vec4 uCausticSpec3;
+  uniform vec4 uCausticSpec4;
+  uniform vec4 uCausticSpec5;
+  uniform float uCausticBand;
 
   float hash(vec2 p) {
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
@@ -226,8 +253,11 @@ ${CAUSTIC_FIELD_GLSL}
     vec4 crystalCast = causticField(
       vec2(vScreenUv.x, 1.0 - vScreenUv.y) * uResolution,
       uCaustic0, uCaustic1, uCaustic2, uCaustic3, uCaustic4, uCaustic5,
+      uCausticSpec0, uCausticSpec1, uCausticSpec2,
+      uCausticSpec3, uCausticSpec4, uCausticSpec5,
       uCausticColor.a,
-      uCausticColor.rgb
+      uCausticColor.rgb,
+      uCausticBand
     );
     color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
@@ -271,6 +301,13 @@ export const FAR_FIELD_WGSL = /* wgsl */ `
     uCaustic4: vec4<f32>,
     uCaustic5: vec4<f32>,
     uCausticColor: vec4<f32>,
+    uCausticSpec0: vec4<f32>,
+    uCausticSpec1: vec4<f32>,
+    uCausticSpec2: vec4<f32>,
+    uCausticSpec3: vec4<f32>,
+    uCausticSpec4: vec4<f32>,
+    uCausticSpec5: vec4<f32>,
+    uCausticBand: f32,
   }
 
   @group(0) @binding(0) var<uniform> globalUniforms: GlobalUniforms;
@@ -400,8 +437,15 @@ ${CAUSTIC_FIELD_WGSL}
       farFieldUniforms.uCaustic3,
       farFieldUniforms.uCaustic4,
       farFieldUniforms.uCaustic5,
+      farFieldUniforms.uCausticSpec0,
+      farFieldUniforms.uCausticSpec1,
+      farFieldUniforms.uCausticSpec2,
+      farFieldUniforms.uCausticSpec3,
+      farFieldUniforms.uCausticSpec4,
+      farFieldUniforms.uCausticSpec5,
       farFieldUniforms.uCausticColor.a,
       farFieldUniforms.uCausticColor.rgb,
+      farFieldUniforms.uCausticBand,
     );
     color *= 1.0 - crystalCast.a * ${C.markGain};
     color += crystalCast.rgb * ${C.markGain};
@@ -497,6 +541,13 @@ export function createFarField(): FarField | null {
     uCaustic4: Float32Array;
     uCaustic5: Float32Array;
     uCausticColor: Float32Array;
+    uCausticSpec0: Float32Array;
+    uCausticSpec1: Float32Array;
+    uCausticSpec2: Float32Array;
+    uCausticSpec3: Float32Array;
+    uCausticSpec4: Float32Array;
+    uCausticSpec5: Float32Array;
+    uCausticBand: number;
   };
   const marks = [uniforms.uMark0, uniforms.uMark1, uniforms.uMark2, uniforms.uMark3];
   const colors = [
@@ -512,6 +563,14 @@ export function createFarField(): FarField | null {
     uniforms.uCaustic3,
     uniforms.uCaustic4,
     uniforms.uCaustic5,
+  ];
+  const spectralSlots = [
+    uniforms.uCausticSpec0,
+    uniforms.uCausticSpec1,
+    uniforms.uCausticSpec2,
+    uniforms.uCausticSpec3,
+    uniforms.uCausticSpec4,
+    uniforms.uCausticSpec5,
   ];
 
   let elapsed = 0;
@@ -577,6 +636,19 @@ export function createFarField(): FarField | null {
         }
         uniforms.uCausticColor[3] = 0;
       }
+      // The traced spectral band: one signed half-separation per corner,
+      // packed two corners per vec4. No band published collapses the whole
+      // set to zero, which draws both wavelengths on the mean trace —
+      // exactly what a glass that does not disperse should do.
+      for (let slot = 0; slot < CAUSTIC_SPECTRAL_SLOTS; slot += 1) {
+        const target = spectralSlots[slot]!;
+        for (let half = 0; half < 2; half += 1) {
+          const delta = cast?.spectral?.[slot * 2 + half];
+          target[half * 2] = delta?.x ?? 0;
+          target[half * 2 + 1] = delta?.y ?? 0;
+        }
+      }
+      uniforms.uCausticBand = readTuning().causticDetail;
     },
   };
 }
