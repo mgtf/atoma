@@ -46,7 +46,7 @@ describe('relative time buckets', () => {
     expect(at(8 * DAY)).toBe('a week ago');
   });
 
-  it('never says "1 days" or "1 weeks": the singular catalog entry fires', () => {
+  it('never says "1 days" or "1 weeks": i18next selects the singular form', () => {
     // `count === 1` is exactly the case the buckets above route elsewhere, so
     // this pins the CATALOG rather than the routing — a future threshold move
     // must not be able to produce the plural form for one.

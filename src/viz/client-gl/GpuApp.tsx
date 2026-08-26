@@ -78,12 +78,12 @@ declare global {
   }
 }
 
-function errorMessage(errors: unknown[]) {
+function errorMessage(errors: unknown[], t: (key: string) => string) {
   const found = errors.find(Boolean);
   if (found instanceof Error) return found.message;
   if (typeof found === 'string') return found;
   if (typeof found === 'number' || typeof found === 'boolean') return String(found);
-  return found ? 'Unknown visualizer query error' : null;
+  return found ? t('app.queryError') : null;
 }
 
 export function GpuApp() {
@@ -729,7 +729,7 @@ function GpuAppContent({
     adminEventsQuery.error,
     adminLedgerQuery.error,
     adminSentinelQuery.error,
-  ]);
+  ], t);
   const data = useMemo(() => ({
     auth: authSnapshot,
     runs: runsQuery.data ?? [],

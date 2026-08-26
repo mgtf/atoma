@@ -65,8 +65,8 @@ export interface TuningRange {
   readonly min: number;
   readonly max: number;
   readonly step: number;
-  /** Shown on the panel row. English; the panel is a developer surface. */
-  readonly label: string;
+  /** Catalog key shown on the panel row and exposed to assistive technology. */
+  readonly labelKey: string;
   /** Rendered next to the value so a bare multiplier is not ambiguous. */
   readonly unit: '×' | '°';
 }
@@ -77,14 +77,14 @@ export interface TuningRange {
  * things bigger cannot tell you the shipped value was already too big.
  */
 export const TUNING_RANGE: Readonly<Record<keyof VizTuning, TuningRange>> = {
-  lightHeight: { min: 0.3, max: 3, step: 0.05, label: 'Light height', unit: '×' },
-  lightIntensity: { min: 0, max: 2.5, step: 0.05, label: 'Light power', unit: '×' },
-  lightHue: { min: -180, max: 180, step: 1, label: 'Light hue', unit: '°' },
-  buttonDepth: { min: 0, max: 4, step: 0.05, label: 'Button lift', unit: '×' },
-  controlFrameDepth: { min: 0, max: 4, step: 0.05, label: 'Group frame lift', unit: '×' },
-  columnDepth: { min: 0, max: 4, step: 0.05, label: 'Column lift', unit: '×' },
-  causticDetail: { min: 0, max: 2, step: 0.05, label: 'Caustic detail', unit: '×' },
-  causticDispersion: { min: 0, max: 2, step: 0.05, label: 'Caustic dispersion', unit: '×' },
+  lightHeight: { min: 0.3, max: 3, step: 0.05, labelKey: 'tuning.lightHeight', unit: '×' },
+  lightIntensity: { min: 0, max: 2.5, step: 0.05, labelKey: 'tuning.lightIntensity', unit: '×' },
+  lightHue: { min: -180, max: 180, step: 1, labelKey: 'tuning.lightHue', unit: '°' },
+  buttonDepth: { min: 0, max: 4, step: 0.05, labelKey: 'tuning.buttonDepth', unit: '×' },
+  controlFrameDepth: { min: 0, max: 4, step: 0.05, labelKey: 'tuning.controlFrameDepth', unit: '×' },
+  columnDepth: { min: 0, max: 4, step: 0.05, labelKey: 'tuning.columnDepth', unit: '×' },
+  causticDetail: { min: 0, max: 2, step: 0.05, labelKey: 'tuning.causticDetail', unit: '×' },
+  causticDispersion: { min: 0, max: 2, step: 0.05, labelKey: 'tuning.causticDispersion', unit: '×' },
 };
 
 export const TUNING_KEYS = Object.keys(TUNING_RANGE) as ReadonlyArray<keyof VizTuning>;

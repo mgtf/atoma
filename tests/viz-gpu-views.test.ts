@@ -1923,7 +1923,7 @@ describe('drawSentinel', () => {
     );
     const values = ctx.texts.map((text) => text.value);
     expect(values.some((value) => value.includes('Watching, one pass every 20s'))).toBe(true);
-    expect(values.some((value) => value.includes('3 pass(es)'))).toBe(true);
+    expect(values.some((value) => value.includes('3 passes'))).toBe(true);
     // The scope, and no aggregate claim anywhere.
     expect(values.some((value) => value.includes('and only its own'))).toBe(true);
     expect(values.some((value) => value.includes('invisible here'))).toBe(true);

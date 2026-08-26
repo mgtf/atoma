@@ -385,7 +385,7 @@ describe('full-GL minimal DOM bridge', () => {
   it('uses a real text input for IME/search and a textarea for the run prompt', async () => {
     const user = userEvent.setup();
     const { onSelectRun } = renderBridge(vi.fn(), runs, undefined, [], 'Weather Lab');
-    const input = screen.getByRole('textbox', { name: /Search 1 runs/ });
+    const input = screen.getByRole('textbox', { name: /Search 1 run/ });
     await user.click(input);
     await user.type(input, 'GPU');
     await user.keyboard('{Enter}');

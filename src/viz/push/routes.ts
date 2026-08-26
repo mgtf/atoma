@@ -1,3 +1,4 @@
+import { createInstance } from 'i18next';
 import { DEFAULT_LOCALE, SUPPORTED_LOCALES, asLocale, type Locale }
   from '../../contracts/locales.js';
 import type { PlatformEvent, PlatformEventKind } from '../../contracts/platformEvents.js';
@@ -79,6 +80,52 @@ export interface PushRoute {
   /** Values for the `{{placeholders}}` below, read out of `detail`. */
   readonly vars?: (event: PlatformEvent, locale: PushLocale) => Record<string, string>;
   readonly copy: Record<PushLocale, PushTemplate>;
+}
+
+const PUSH_I18N_CATALOGS: Record<PushLocale, Record<string, string>> = {
+  en: {
+    'recovery.runs_one': '{{count}} run recovered',
+    'recovery.runs_other': '{{count}} runs recovered',
+    'recovery.publications_one': '{{count}} publication recovered',
+    'recovery.publications_other': '{{count}} publications recovered',
+  },
+  fr: {
+    'recovery.runs_one': '{{count}} run récupéré',
+    'recovery.runs_other': '{{count}} runs récupérés',
+    'recovery.publications_one': '{{count}} publication récupérée',
+    'recovery.publications_other': '{{count}} publications récupérées',
+  },
+};
+
+const pushI18n = createInstance();
+void pushI18n.init({
+  fallbackLng: DEFAULT_PUSH_LOCALE,
+  initAsync: false,
+  interpolation: { escapeValue: false },
+  keySeparator: false,
+  nsSeparator: false,
+  resources: Object.fromEntries(
+    Object.entries(PUSH_I18N_CATALOGS).map(([locale, translation]) => [
+      locale,
+      { translation },
+    ])
+  ),
+  returnNull: false,
+  showSupportNotice: false,
+});
+
+function countFromDetail(event: PlatformEvent, key: string): number {
+  const value = event.detail?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+
+function pushCount(locale: PushLocale, key: string, count: number): string {
+  return pushI18n.t(key, { count, lng: locale });
 }
 
 /** A `detail` string, defensively: foreign rows may omit or mistype it. */
@@ -272,18 +319,22 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   'webhook.rejected': null,
   'server.recovered': {
     audience: { platformAdmins: true },
-    vars: (event) => ({
-      runs: text(event, 'runs', '0'),
-      publications: text(event, 'publications', '0'),
+    vars: (event, locale) => ({
+      runs: pushCount(locale, 'recovery.runs', countFromDetail(event, 'runs')),
+      publications: pushCount(
+        locale,
+        'recovery.publications',
+        countFromDetail(event, 'publications')
+      ),
     }),
     copy: {
       en: {
         title: 'Atoma — restarted after a crash',
-        body: 'Recovered {{runs}} run(s) and {{publications}} publication(s)',
+        body: '{{runs}}; {{publications}}',
       },
       fr: {
         title: 'Atoma — redémarrage après incident',
-        body: '{{runs}} run(s) et {{publications}} publication(s) récupérés',
+        body: '{{runs}} ; {{publications}}',
       },
     },
   },
@@ -309,9 +360,21 @@ export const PUSH_ROUTES: Record<PlatformEventKind, PushRoute | null> = {
   'push.unsubscribed': null,
 };
 
-/** `{{name}}` substitution, the same convention as the client i18n catalogs. */
-export function fillTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => vars[key] ?? '');
+/** Render a frozen push template through the same i18next engine as count copy. */
+export function fillTemplate(
+  template: string,
+  vars: Record<string, string>,
+  locale: PushLocale = DEFAULT_PUSH_LOCALE
+): string {
+  const completeVars = { ...vars };
+  for (const match of template.matchAll(/\{\{(\w+)\}\}/g)) {
+    completeVars[match[1]!] ??= '';
+  }
+  return pushI18n.t(template, {
+    ...completeVars,
+    defaultValue: template,
+    lng: locale,
+  });
 }
 
 export interface RenderedPush {
@@ -328,9 +391,9 @@ export function renderPush(
   const vars = route.vars ? route.vars(event, locale) : {};
   const copy = route.copy[locale];
   return {
-    title: fillTemplate(copy.title, vars).trim(),
+    title: fillTemplate(copy.title, vars, locale).trim(),
     // An empty body is legitimate (a title-only notification); the browser
     // renders the title alone rather than an empty line.
-    body: fillTemplate(copy.body, vars).trim(),
+    body: fillTemplate(copy.body, vars, locale).trim(),
   };
 }

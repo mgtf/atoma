@@ -138,12 +138,12 @@ export function DomBridge({
       <div
         className="gpu-a11y-bridge"
         role="application"
-        aria-label="Atoma GPU visualizer"
+        aria-label={t('app.accessibleName')}
       >
         <button onClick={activateCrystal}>
           {t(sceneCameraMode === 'focus' ? 'nav.crystalExpand' : 'nav.crystalWelcome')}
         </button>
-        <nav role="tablist" aria-label="Views">
+        <nav role="tablist" aria-label={t('nav.views')}>
           {views.map((name) => (
             <button
               key={name}
@@ -156,7 +156,7 @@ export function DomBridge({
           ))}
         </nav>
         <button onClick={() => setLocale(locale === 'en' ? 'fr' : 'en')}>
-          {locale === 'en' ? 'Français' : 'English'}
+          {t('lang.switch')}
         </button>
         <div data-viz-live aria-live="polite" aria-atomic="true">
           {t(`nav.${view}`)}

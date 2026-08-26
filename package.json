@@ -56,6 +56,7 @@
     "@anthropic-ai/sdk": "^0.115.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^11.3.0",
+    "i18next": "^25.10.10",
     "jsonrepair": "^3.14.0",
     "puppeteer": "^25.6.0",
     "three": "^0.185.1",

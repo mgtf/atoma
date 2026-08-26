@@ -49,7 +49,10 @@ const LaunchView = lazy(() =>
 
 export type ViewName = 'runs' | 'registry' | 'skills' | 'burnin' | 'launch';
 
-function pickerOption(run: RunIndexEntry, t: (key: string) => string): RunPickerOption {
+function pickerOption(
+  run: RunIndexEntry,
+  t: (key: string, vars?: Record<string, unknown>) => string
+): RunPickerOption {
   const title = run.label.replace(/^(?:build-app|baseline):\s*/i, '');
   const live = isIndexEntryLive(run);
   const state = run.cancelled
@@ -71,7 +74,7 @@ function pickerOption(run: RunIndexEntry, t: (key: string) => string): RunPicker
             ? t('runs.flag.fallback')
             : '';
   const meta =
-    `${run.startedAt.slice(0, 19).replace('T', ' ')} · ${run.calls ?? 0} calls · ${fmtCost(run.costUsd)}` +
+    `${run.startedAt.slice(0, 19).replace('T', ' ')} · ${t('runs.calls', { count: run.calls ?? 0 })} · ${fmtCost(run.costUsd)}` +
     (status ? ` · ${status}` : '');
   return {
     id: run.id,

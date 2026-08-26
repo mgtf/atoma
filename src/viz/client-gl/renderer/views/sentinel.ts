@@ -59,7 +59,10 @@ export function drawSentinel(
     ctx,
     frame,
     snapshot.t('sentinel.title'),
-    snapshot.t('sentinel.summary', { rules: rules.length, live: live.length })
+    [
+      snapshot.t('sentinel.rulesCount', { count: rules.length }),
+      snapshot.t('sentinel.liveRuns', { count: live.length }),
+    ].join(', ')
   );
 
   const contentTop = frame.contentTop;
@@ -106,7 +109,7 @@ export function drawSentinel(
   } else if (watch.armed) {
     note(
       snapshot.t('sentinel.watch.armed', {
-        seconds: Math.round(watch.intervalMs / 1000),
+        count: Math.round(watch.intervalMs / 1000),
         since: clockDate(watch.armedSince ?? watch.startedAt),
       })
     );
@@ -137,14 +140,18 @@ export function drawSentinel(
     note(
       watch.lastTickAt === null
         ? snapshot.t('sentinel.watch.never')
-        : snapshot.t('sentinel.watch.passes', {
-            ticks: watch.ticks,
+        : [
+          snapshot.t('sentinel.watch.passes', {
+            count: watch.ticks,
             at: clockDate(watch.lastTickAt),
             ms: watch.lastTickMs ?? 0,
-            runs: watch.runsScreenedLastTick,
-            skipped: watch.skippedLastTick,
-            emitted: watch.emittedSinceBoot,
-          })
+          }),
+          snapshot.t('sentinel.watch.screened', {
+            count: watch.runsScreenedLastTick,
+          }),
+          snapshot.t('sentinel.watch.skipped', { count: watch.skippedLastTick }),
+          snapshot.t('sentinel.watch.written', { count: watch.emittedSinceBoot }),
+        ].join(' · ')
     );
     // One pass that took a quarter of a second is worth an operator's
     // attention: the tick is synchronous and shares the HTTP loop.

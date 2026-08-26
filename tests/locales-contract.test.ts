@@ -6,7 +6,7 @@ import {
   asLocale,
   isLocale,
 } from '../src/contracts/locales.js';
-import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
+import { I18N_CATALOGS, translate } from '../src/viz/client/i18n-catalog.js';
 import { PUSH_LOCALES, PUSH_ROUTES } from '../src/viz/push/routes.js';
 
 /**
@@ -49,5 +49,28 @@ describe('the supported-locale list is the single source', () => {
     expect(isLocale('de')).toBe(false);
     expect(isLocale('en')).toBe(true);
     expect(SUPPORTED_LOCALES).toContain(DEFAULT_LOCALE);
+  });
+});
+
+describe('UI pluralisation', () => {
+  it('selects natural singular and plural forms in both interface languages', () => {
+    expect(translate('en', 'projects.summary', { count: 1 }))
+      .toBe('1 project in this organisation');
+    expect(translate('en', 'projects.summary', { count: 4 }))
+      .toBe('4 projects in this organisation');
+    expect(translate('fr', 'admin.journalSummary', { count: 1 }))
+      .toBe('1 événement chargé, du plus récent au plus ancien');
+    expect(translate('fr', 'admin.journalSummary', { count: 4 }))
+      .toBe('4 événements chargés, du plus récent au plus ancien');
+    expect(translate('en', 'summary.lifecycle.recovery', { count: 2 }))
+      .toBe('⟳ 2 mid-run recoveries');
+    expect(translate('fr', 'summary.guards.withheld', { count: 2 }))
+      .toBe('⊘ 2 crédits retenus');
+  });
+
+  it('contains no parenthetical pseudo-plurals', () => {
+    for (const catalog of Object.values(I18N_CATALOGS)) {
+      expect(Object.values(catalog).join('\n')).not.toMatch(/\((?:s|es|ies)\)/i);
+    }
   });
 });

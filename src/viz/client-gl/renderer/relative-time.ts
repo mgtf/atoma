@@ -33,7 +33,7 @@ export const RELATIVE_TIME_HORIZON_MS = 2 * WEEK;
 export interface RelativeTimeParts {
   /** The catalog key to translate. */
   readonly key: string;
-  /** Interpolation vars, `count` included so `.one` singulars can fire. */
+  /** Interpolation vars, `count` included so i18next can select a plural form. */
   readonly vars?: Record<string, number>;
   /** True once the age passed the horizon: `key` is unused, show the date. */
   readonly exact: boolean;

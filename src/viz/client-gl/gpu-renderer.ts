@@ -1901,13 +1901,14 @@ export class GpuRenderer {
     width: number
   ) {
     const range = TUNING_RANGE[key];
+    const label = this.snapshot?.t(range.labelKey) ?? range.labelKey;
     const trackLocalX = x + TUNING_LABEL_WIDTH;
     const trackWidth = Math.max(
       40,
       width - TUNING_LABEL_WIDTH - TUNING_READOUT_WIDTH - 16
     );
 
-    this.text(parent, range.label, x, y + 4, {
+    this.text(parent, label, x, y + 4, {
       size: 9,
       color: GPU_COLORS.muted,
       weight: '600',
@@ -1970,7 +1971,7 @@ export class GpuRenderer {
     this.recordHitTarget(parent, {
       id: `tuning:${key}`,
       role: 'slider',
-      label: range.label,
+      label,
       x: trackLocalX,
       y,
       width: trackWidth,

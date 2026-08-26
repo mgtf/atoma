@@ -154,8 +154,8 @@ export function drawAtomDetail(
   heading(snapshot.t('registry.detailPrompt'));
   if (atom.systemPrompt.length > PROMPT_PREVIEW_CHARS) {
     body(snapshot.t('registry.detailPromptTruncated', {
+      count: atom.systemPrompt.length,
       shown: PROMPT_PREVIEW_CHARS,
-      total: atom.systemPrompt.length,
     }), { muted: true });
   }
   body(

@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   SCENE_TUNING_WIDTH,
   SCENE_TUNING_WINDOW_MARGIN,
@@ -12,6 +18,7 @@ import {
 import { readTuning, resetTuning, setTuningValue } from './tuning-live.js';
 import { useGpuStore } from './store.js';
 import { sceneCameraViewport, unprojectScenePointInFrame } from './scene-camera.js';
+import { translate } from '../client/i18n-catalog.js';
 
 const DEFAULT_TOP = 64;
 
@@ -39,6 +46,11 @@ function formatValue(key: keyof VizTuning, value: number): string {
 }
 
 export function SceneTuningPanel() {
+  const locale = useGpuStore((state) => state.locale);
+  const t = useCallback(
+    (key: string) => translate(locale, key),
+    [locale]
+  );
   const open = useGpuStore((state) => state.tuningPanelOpen);
   const panelRef = useRef<HTMLElement>(null);
   const drag = useRef<{ offsetX: number; offsetY: number } | null>(null);
@@ -99,7 +111,7 @@ export function SceneTuningPanel() {
     <aside
       ref={panelRef}
       className="gpu-panel-skin gpu-scene-tuning"
-      aria-label="Scene tuning"
+      aria-label={t('tuning.title')}
       style={{ left: position.x, top: position.y }}
     >
       <header
@@ -109,7 +121,7 @@ export function SceneTuningPanel() {
         onPointerUp={stopMove}
         onPointerCancel={stopMove}
       >
-        <strong>SCENE TUNING</strong>
+        <strong>{t('tuning.title').toUpperCase()}</strong>
         <button
           type="button"
           onPointerDown={(event) => event.stopPropagation()}
@@ -118,7 +130,7 @@ export function SceneTuningPanel() {
             setValues({ ...TUNING_IDENTITY });
           }}
         >
-          RESET
+          {t('tuning.reset').toUpperCase()}
         </button>
       </header>
       <div className="gpu-scene-tuning__rows">
@@ -126,7 +138,7 @@ export function SceneTuningPanel() {
           const range = TUNING_RANGE[key];
           return (
             <div key={key} className="gpu-scene-tuning__row">
-              <label htmlFor={`scene-tuning-${key}`}>{range.label}</label>
+              <label htmlFor={`scene-tuning-${key}`}>{t(range.labelKey)}</label>
               <input
                 id={`scene-tuning-${key}`}
                 name={key}

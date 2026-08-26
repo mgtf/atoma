@@ -461,7 +461,7 @@ function NowBanner({ run, completed }: { run: VizRun; completed: Set<string> }) 
               <Typography variant="body2">{event.actor?.name ?? '?'} · {event.model ?? ''}</Typography>
               <Typography variant="caption" color="text.secondary">
                 {tools.length
-                  ? t(tools.length === 1 ? 'now.activity.one' : 'now.activity', {
+                  ? t('now.activity', {
                     count: tools.length,
                     tool: `${lastElement ? `${lastElement.symbol} · ` : ''}${last?.name ?? '?'} ${toolArgSummary(last?.args)}`,
                     ago: Math.max(0, Math.round((Date.now() - (last?.ts ?? Date.now())) / 1000)),

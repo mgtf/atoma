@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { detectLocale, translate } from '../client/i18n-catalog.js';
 
 export class GpuErrorBoundary extends Component<
   { children: ReactNode },
@@ -16,11 +17,14 @@ export class GpuErrorBoundary extends Component<
 
   override render() {
     if (!this.state.error) return this.props.children;
+    const locale = detectLocale();
     return (
       <main className="gpu-crash" role="alert">
-        <strong>GPU renderer stopped</strong>
+        <strong>{translate(locale, 'app.crash.title')}</strong>
         <pre>{this.state.error.message}</pre>
-        <button onClick={() => window.location.reload()}>Reload visualizer</button>
+        <button onClick={() => window.location.reload()}>
+          {translate(locale, 'app.crash.reload')}
+        </button>
       </main>
     );
   }

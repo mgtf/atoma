@@ -187,8 +187,8 @@ npm run viz:mark-turn:analyze
   `causticDetail` sharpens the three primary folds and fades the asymmetric
   fourth fold, while `causticDispersion` opens or closes the traced wavelength
   band around its measured positions.
-- The UI is English and catalog-backed; add strings to i18n catalogs rather than
-  hardcoding. Tests enforce representative parity, not every incidental string.
+- The UI is `i18next` catalog-backed, including accessibility, crash and developer copy. Use flat `<key>_one` / `<key>_other` entries and call `<key>` with numeric `count`; never select suffixes or write `run(s)` / `entry(ies)`. Split multiple counts into independently pluralised fragments.
+- Push keeps a separate server catalog (never import the React catalog) but uses the same rules. Add representative English/French singular/plural tests; tests enforce representative locale parity, not every incidental string.
 - PWA/service-worker registration is production-default and dev-opt-in
   (`ATOMA_VIZ_SW_DEV=1` → `__ATOMA_SW_DEV__`). `serviceWorkerRegistrationAllowed()`
   in `client/pwa.ts` is the ONE answer, shared with the push prompt so an

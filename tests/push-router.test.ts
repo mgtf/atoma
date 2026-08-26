@@ -160,6 +160,18 @@ describe('PUSH_ROUTES', () => {
     expect(fillTemplate('a {{missing}} b', {})).toBe('a  b');
   });
 
+  it('pluralises each recovery counter independently in the subscriber locale', () => {
+    const route = PUSH_ROUTES['server.recovered']!;
+    const recovered = event({
+      kind: 'server.recovered',
+      detail: { runs: 1, publications: 2 },
+    });
+    expect(renderPush(recovered, 'en', route).body)
+      .toBe('1 run recovered; 2 publications recovered');
+    expect(renderPush(recovered, 'fr', route).body)
+      .toBe('1 run récupéré ; 2 publications récupérées');
+  });
+
   it('maps an unknown locale to English', () => {
     expect(asPushLocale('fr')).toBe('fr');
     expect(asPushLocale('en')).toBe('en');
