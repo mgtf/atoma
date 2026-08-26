@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   gpuEventCardCopy,
@@ -11,6 +12,20 @@ import {
   layoutRunFilterBlocks,
 } from '../src/viz/client-gl/gpu-renderer.js';
 import { I18N_CATALOGS } from '../src/viz/client/i18n-catalog.js';
+import {
+  advanceNavIconSpin,
+  NAV_ICON_ASSET_PATHS,
+  NAV_FOLDER_PAPER_MATERIAL,
+  NAV_ICON_MATERIAL,
+  NAV_ICON_RENDER_SIZE,
+  NAV_ICON_SOURCE_SIZE,
+  NAV_ICON_SPIN_RADIANS_PER_MS,
+  navIconLighting,
+  navIconKind,
+  navIconOpticalScale,
+  navIconRestPose,
+  queueNavIconSpin,
+} from '../src/viz/client-gl/renderer/nav-icons.js';
 
 // Decisions are catalog-backed (outcome.* keys); resolving through the real
 // EN catalog proves the copy path never falls back to hardcoded English.
@@ -33,6 +48,85 @@ describe('catalog copy is drawable', () => {
         expect(value, `${locale}/${key} carries markup`).not.toMatch(markup);
       }
     }
+  });
+
+  it('brightens nearby icons without defining a second shadow model', () => {
+    const near = navIconLighting(30, 0, 1);
+    const far = navIconLighting(300, 0, 1);
+    expect(near.keyX).toBeLessThan(0);
+    expect(near.light).toBeGreaterThan(far.light);
+    expect(near).not.toHaveProperty('shadowX');
+    expect(near).not.toHaveProperty('shadowAlpha');
+  });
+
+  it('queues one slow turn per click and respects reduced motion', () => {
+    let spin = queueNavIconSpin({ rotation: 0, target: 0 }, false);
+    spin = advanceNavIconSpin(spin, 16, false);
+    expect(spin.rotation).toBeGreaterThan(0);
+    expect(spin.target).toBeCloseTo(Math.PI * 2);
+    expect((Math.PI * 2) / NAV_ICON_SPIN_RADIANS_PER_MS).toBeGreaterThan(3_500);
+
+    for (let frame = 0; frame < 260; frame += 1) {
+      spin = advanceNavIconSpin(spin, 16, false);
+    }
+    expect(spin.rotation % (Math.PI * 2)).toBeCloseTo(0);
+    expect(queueNavIconSpin(spin, true)).toEqual({ rotation: 0, target: 0 });
+  });
+
+  it('normalises optical weight and keeps one app-wide material palette', () => {
+    const dense = navIconOpticalScale(9_000, 100, 100);
+    const sparse = navIconOpticalScale(3_500, 90, 90);
+    expect(dense).toBeLessThan(0.75);
+    expect(sparse).toBeGreaterThan(1);
+    expect(NAV_ICON_MATERIAL).toEqual({
+      color: 0xd3a126,
+      roughness: 0.3,
+      metalness: 0.38,
+    });
+    expect(NAV_FOLDER_PAPER_MATERIAL).toEqual({
+      color: 0xdbe7f5,
+      roughness: 0.46,
+      metalness: 0.08,
+    });
+  });
+
+  it('presents the folder from the front while preserving depth during its click turn', () => {
+    const folder = navIconRestPose('projects');
+    const play = navIconRestPose('runs');
+    expect(Math.abs(folder.y)).toBeLessThan(Math.abs(play.y));
+    expect(Math.abs(folder.x)).toBeLessThan(Math.abs(play.x));
+    expect(folder.z).toBe(0);
+  });
+});
+
+describe('navigation icon identity', () => {
+  it('gives every rail destination and utility its own pictogram', () => {
+    const ids = [
+      'nav.projects',
+      'nav.runs',
+      'nav.docs',
+      'nav.registry',
+      'nav.skills',
+      'nav.burnin',
+      'nav.admin',
+      'nav.journal',
+      'nav.ledger',
+      'nav.sentinel',
+      'nav.announce',
+      'tuning.toggle',
+    ];
+    const kinds = ids.map(navIconKind);
+    expect(kinds.every(Boolean)).toBe(true);
+    expect(new Set(kinds).size).toBe(ids.length);
+    expect(NAV_ICON_RENDER_SIZE).toBe(34);
+    expect(NAV_ICON_ASSET_PATHS).toHaveLength(ids.length);
+    for (const path of NAV_ICON_ASSET_PATHS) {
+      const glb = readFileSync(path);
+      expect(glb.subarray(0, 4).toString('ascii'), path).toBe('glTF');
+      expect(glb.readUInt32LE(4), path).toBe(2);
+      expect(glb.readUInt32LE(8), path).toBe(glb.byteLength);
+    }
+    expect(NAV_ICON_SOURCE_SIZE).toBeGreaterThan(NAV_ICON_RENDER_SIZE);
   });
 });
 import {
@@ -233,6 +327,8 @@ describe('full-GL filter controls preserve semantic labels', () => {
     expect(layout.roles!.y).toBe(layout.kinds.y);
     expect(layout.roles!.x).toBeGreaterThan(layout.kinds.x + layout.kinds.width);
     expect(layout.bottom).toBe(layout.kinds.y + layout.kinds.height);
+    expect(layout.roles!.chips.every((chip) => chip.height === FILTER_BUTTON_HEIGHT_COMPACT))
+      .toBe(true);
   });
 
   it('puts atom lanes on one row when they fit and stacks them otherwise', () => {
@@ -318,10 +414,16 @@ describe('full-GL filter controls preserve semantic labels', () => {
     }
   });
 
-  it('allocates enough compact width for every current branch label', () => {
+  it('allocates enough compact width and side padding for role and branch labels', () => {
     // The fallback estimate, exercised when no renderer can measure: the 8px
     // face averages ~4.6px per uppercase glyph (6.2 scaled by 8/11).
-    for (const label of ['ALL BRANCHES', 'PARALLEL BRANCH 1.1 · WRITE INDEX', '⑂ c545fb']) {
+    for (const label of [
+      'ALL ROLES',
+      'VALIDATE-RESULT',
+      'ALL BRANCHES',
+      'PARALLEL BRANCH 1.1 · WRITE INDEX',
+      '⑂ c545fb',
+    ]) {
       const availableCharacters = Math.floor((gpuFilterButtonWidthCompact(label) - 12) / 4.6);
       expect(availableCharacters, label).toBeGreaterThanOrEqual(label.length);
     }
@@ -343,7 +445,7 @@ describe('full-GL filter controls preserve semantic labels', () => {
       { size: 'compact', measure }
     );
     for (const chip of block.chips) {
-      expect(chip.width - measure(chip.label)).toBe(14);
+      expect(chip.width - measure(chip.label)).toBe(22);
     }
   });
 

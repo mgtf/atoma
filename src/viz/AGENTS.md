@@ -101,6 +101,26 @@ npm run viz:mark-turn:analyze
   filter becomes its own render-to-texture pass and every custom mesh its own
   draw, so GPU cost diverges between ALL and TRUST. Hover/entry transforms and
   tint are interleaved attributes, flushed once before Pixi's render ticker.
+- Navigation icons are real CC0 GLB meshes rendered by ONE shared, transparent
+  Three.js renderer into twelve small dynamic Pixi textures. Three.js is an
+  asset renderer here, never a second page canvas or React scene: Pixi still
+  owns composition, hit testing and the shared cast-shadow painter. Render the
+  resting icons once, normalise optical size from their rendered alpha area,
+  use the one gold material across the set, and throttle pointer-light updates.
+  The folder alone keeps its pale document material and a near-front rest pose
+  so its pocket, rear tab and papers remain legible at rail size. Preserve the
+  artist-authored GLB normals: recomputing them smears bevel lighting across
+  flat faces. A mesh spins slowly only after click, with state retained across
+  the view rebuild that click causes. Do not create a WebGL renderer per icon
+  or restore the former pre-rendered PNG faces.
+- Navigation mesh shadows use the same Pixi cast-shadow painter as the rest of
+  the scene. Feed it a neutral white alpha mask derived from the live mesh
+  render; tinting the coloured face texture directly creates dark colour chips.
+- Human-readable product dates go through `client/date-format.ts`: use the
+  locale-aware absolute formatter for persisted timestamps and omit seconds by
+  default. Keep seconds only on operational surfaces where sub-minute ordering
+  matters. Relative timestamps may reuse that absolute formatter for their
+  expanded label instead of exposing ISO strings.
 - Pixi 8.19.0 WebGPU GC also unloads in-use static uniform buffers (global
   uniforms, batcher UBOs) whose values have not changed, with the same
   destroyed-buffer submit (pixijs#12080). The engine fix (pixijs#12147) is

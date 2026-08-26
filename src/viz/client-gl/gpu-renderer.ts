@@ -9,9 +9,11 @@ import {
   Graphics,
   Rectangle,
   RendererType,
+  Sprite,
   Text,
   TextStyle,
   Ticker,
+  type Texture,
   UPDATE_PRIORITY,
 } from 'pixi.js';
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
@@ -62,6 +64,18 @@ import {
   softShadowLayers,
 } from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
+import {
+  advanceNavIconSpin,
+  drawNavIcon,
+  loadNavIconMeshes,
+  NAV_ICON_OUTSIDE_GAP,
+  NAV_ICON_RENDER_SIZE,
+  navIconLighting,
+  navIconKind,
+  queueNavIconSpin,
+  type NavIconMeshes,
+  type NavIconSpinState,
+} from './renderer/nav-icons.js';
 import { NO_TINT, mixColor, multiplyTint, tintColor } from './renderer/label-tint.js';
 import {
   createFpsSampleWindow,
@@ -79,7 +93,12 @@ import {
   TUNING_READOUT_WIDTH,
   TUNING_ROW_HEIGHT,
 } from './renderer/tuning-layout.js';
-import { pointerClientToRenderer, readPointerLight, movePointerLight, hidePointerLight } from './pointer-light.js';
+import {
+  pointerClientToRenderer,
+  readPointerLight,
+  movePointerLight,
+  hidePointerLight,
+} from './pointer-light.js';
 import { packMarkCaustic, readMarkFieldCaustic } from './mark-field-light.js';
 import { TooltipLayer } from './renderer/tooltip.js';
 import type { GpuUiState, ViewName } from './store.js';
@@ -355,6 +374,10 @@ export class GpuRenderer {
   private lastFps = 0;
   /** One retained diffuse + normal mesh shared by every visible RUNS card. */
   private timelineCardMaterial: TimelineCardMaterial | null = null;
+  /** One coherent, preloaded GLB mesh set for the nav rail. */
+  private navIconMeshes: NavIconMeshes | null = null;
+  /** Click spins survive the scene rebuild caused by activating a nav tab. */
+  private readonly navIconSpins = new Map<string, NavIconSpinState>();
   private pointerLightFilter: Filter | null = null;
   private pointerLightUniforms: {
     uLightPx: Float32Array;
@@ -456,7 +479,7 @@ export class GpuRenderer {
   private turnSliderLastTapAt = 0;
 
   private castShadows: {
-    shadow: Graphics;
+    shadow: Graphics | Container;
     parent: Container;
     localX: number;
     localY: number;
@@ -906,7 +929,10 @@ export class GpuRenderer {
     // alphabet it can display so the first rate change cannot grow an atlas in
     // the middle of a frame.
     ensureFpsBitmapFont(Math.min(devicePixelRatio || 1, 2));
-    this.timelineCardMaterial = await loadTimelineCardMaterial();
+    [this.timelineCardMaterial, this.navIconMeshes] = await Promise.all([
+      loadTimelineCardMaterial(),
+      loadNavIconMeshes(),
+    ]);
     // Application rendering runs at LOW. Every event-card animation runs at
     // the default NORMAL priority, so LOW + 1 combines all changed faces into
     // exactly one buffer upload before the shared mesh is drawn.
@@ -1021,6 +1047,9 @@ export class GpuRenderer {
     // buffers and shared shader explicitly before the stage walks children.
     this.timelineCardMaterial?.destroy();
     this.timelineCardMaterial = null;
+    const navIconMeshes = this.navIconMeshes;
+    this.navIconMeshes = null;
+    this.navIconSpins.clear();
     // Detach-then-destroy, BEFORE the app tears the stage down: a retained
     // label still parented would otherwise be destroyed twice.
     this.atomaMark?.handle.destroy();
@@ -1039,6 +1068,7 @@ export class GpuRenderer {
     this.fpsSample.frames = 0;
     this.lastFps = 0;
     this.app.destroy(true, { children: true, context: true });
+    navIconMeshes?.destroy();
     this.initialized = false;
     this.host = null;
   }
@@ -1951,6 +1981,72 @@ export class GpuRenderer {
     height: number,
     options: SurfaceShadowOptions = {}
   ) {
+    const { x = 0, y = 0 } = options;
+    return this.addCastShadow(parent, width, height, options, (layers) => {
+      const shadow = new Graphics();
+      for (const [index, layer] of layers.entries()) {
+        const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
+        shadow.roundRect(x + layer.x, y + layer.y, layer.width, layer.height, layer.radius);
+        shadow.fill({
+          color: mixColor(
+            SCENE_SHADOW_COLORS.penumbra,
+            SCENE_SHADOW_COLORS.core,
+            towardCore
+          ),
+          alpha: layer.alpha,
+        });
+      }
+      return shadow;
+    });
+  }
+
+  /** The shared scene shadow material clipped to a texture's alpha silhouette. */
+  private addSilhouetteShadow(
+    parent: Container,
+    texture: Texture,
+    width: number,
+    height: number,
+    options: SurfaceShadowOptions = {}
+  ) {
+    const { x = 0, y = 0 } = options;
+    const silhouette = new Container();
+    silhouette.pivot.set(width / 2, height / 2);
+    silhouette.position.set(x + width / 2, y + height / 2);
+    const shadow = this.addCastShadow(parent, width, height, options, (layers) => {
+      const shadow = new Container();
+      for (const [index, layer] of layers.entries()) {
+        const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
+        const sprite = new Sprite(texture);
+        sprite.position.set(layer.x, layer.y);
+        sprite.width = layer.width;
+        sprite.height = layer.height;
+        sprite.tint = mixColor(
+          SCENE_SHADOW_COLORS.penumbra,
+          SCENE_SHADOW_COLORS.core,
+          towardCore
+        );
+        sprite.alpha = layer.alpha;
+        sprite.eventMode = 'none';
+        silhouette.addChild(sprite);
+      }
+      shadow.addChild(silhouette);
+      return shadow;
+    });
+    return { shadow, silhouette };
+  }
+
+  /**
+   * One painter owns every outward shadow: the same penumbra, palette, cast
+   * offset, light height and elevation. Callers provide only the geometry
+   * that receives that material (rounded rect or alpha silhouette).
+   */
+  private addCastShadow<T extends Graphics | Container>(
+    parent: Container,
+    width: number,
+    height: number,
+    options: SurfaceShadowOptions,
+    paint: (layers: ReturnType<typeof softShadowLayers>) => T
+  ): T {
     const {
       x = 0,
       y = 0,
@@ -1959,23 +2055,9 @@ export class GpuRenderer {
       depth = 1,
       surface = 'card',
     } = options;
-    const shadow = new Graphics();
     // Geometry stays fixed at the declared surface origin and the cast offset
     // lives in POSITION — pointer motion therefore never re-tessellates it.
-    // The same penumbra stack serves panels, frames, buttons and timeline cards.
-    const layers = softShadowLayers(width, height, radius, alpha, depth);
-    for (const [index, layer] of layers.entries()) {
-      const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
-      shadow.roundRect(x + layer.x, y + layer.y, layer.width, layer.height, layer.radius);
-      shadow.fill({
-        color: mixColor(
-          SCENE_SHADOW_COLORS.penumbra,
-          SCENE_SHADOW_COLORS.core,
-          towardCore
-        ),
-        alpha: layer.alpha,
-      });
-    }
+    const shadow = paint(softShadowLayers(width, height, radius, alpha, depth));
     shadow.eventMode = 'none';
     parent.addChild(shadow);
     this.registerCastShadow(shadow, parent, x, y, width, height, depth, surface);
@@ -2042,7 +2124,7 @@ export class GpuRenderer {
    * sit at its local origin so only `position` moves per frame.
    */
   private registerCastShadow(
-    shadow: Graphics,
+    shadow: Graphics | Container,
     parent: Container,
     localX: number,
     localY: number,
@@ -2427,7 +2509,8 @@ export class GpuRenderer {
     container.position.set(x, y);
     container.eventMode = 'static';
     container.cursor = 'pointer';
-    container.hitArea = new Rectangle(0, 0, width, height);
+    const iconGutter = NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
+    container.hitArea = new Rectangle(-iconGutter, 0, width + iconGutter, height);
     const dropShadow = this.addSurfaceShadow(container, width, height, {
       radius: 8,
       alpha: 0.48,
@@ -2464,13 +2547,51 @@ export class GpuRenderer {
     underline.alpha = active ? 0.9 : 0;
     container.addChild(underline);
 
-    const labelText = this.text(container, label, width / 2, Math.max(5, (height - 16) / 2), {
+    const labelStyle = {
       size: 11,
       // Built BRIGHT and tinted down — see the sibling button factory.
       color: GPU_COLORS.text,
       weight: active ? '700' : '600',
-    });
-    labelText.anchor.x = 0.5;
+    } as const;
+    const iconWidth = NAV_ICON_RENDER_SIZE;
+    const horizontalPad = 12;
+    const fittedLabel = this.fitText(
+      label,
+      Math.max(0, width - horizontalPad * 2),
+      labelStyle
+    );
+    const iconKind = navIconKind(id);
+    const iconMesh = iconKind && this.navIconMeshes
+      ? this.navIconMeshes.icons[iconKind]
+      : null;
+    const iconY = (height - iconWidth) / 2;
+    if (iconMesh) {
+      this.addSilhouetteShadow(container, iconMesh.shadowTexture, iconWidth, iconWidth, {
+        x: -iconGutter,
+        y: iconY,
+        radius: 8,
+        alpha: 0.48,
+        depth: 1,
+        surface: 'button',
+      });
+    }
+    const icon = this.navIconMeshes
+      ? drawNavIcon(
+          container,
+          id,
+          this.navIconMeshes,
+          -iconGutter,
+          iconY,
+          active
+        )
+      : null;
+    const labelText = this.text(
+      container,
+      fittedLabel,
+      horizontalPad,
+      Math.max(5, (height - 16) / 2),
+      labelStyle
+    );
 
     const sparks = Array.from({ length: 3 }, (_, index) => {
       const spark = new Graphics();
@@ -2482,6 +2603,7 @@ export class GpuRenderer {
 
     let hovered = false;
     let pressed = false;
+    let iconSpin = this.navIconSpins.get(id) ?? { rotation: 0, target: 0 };
     let insetDepth = active ? 1 : 0;
     let elapsed = firstAppearance ? -Math.max(0, x - 112) * 0.35 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
@@ -2526,6 +2648,27 @@ export class GpuRenderer {
         currentLabelTint = nextLabelTint;
         labelText.tint = nextLabelTint;
       }
+      if (icon) {
+        iconSpin = advanceNavIconSpin(
+          iconSpin,
+          ticker.deltaMS,
+          prefersReducedMotion()
+        );
+        this.navIconSpins.set(id, iconSpin);
+        const iconCenterX = x - iconGutter + iconWidth / 2;
+        const iconCenterY = y + height / 2;
+        const fromLightX = iconCenterX - this.lightRendererX;
+        const fromLightY = iconCenterY - this.lightRendererY;
+        const lightStrength = Math.max(0, this.pointerLightUniforms?.uStrength ?? 0);
+        const lighting = navIconLighting(fromLightX, fromLightY, lightStrength);
+        icon.mesh.render(
+          iconSpin.rotation % (Math.PI * 2),
+          lighting,
+          performance.now(),
+          iconSpin.rotation < iconSpin.target
+        );
+        icon.root.alpha = active || hovered || pressed ? 1 : 0.88;
+      }
       sparks.forEach((spark, index) => {
         const phase = elapsed / 350 + index * 2.1;
         spark.position.set(10 + (Math.sin(phase) * 0.5 + 0.5) * (width - 20), height - 3 - Math.abs(Math.cos(phase)) * 4);
@@ -2542,9 +2685,23 @@ export class GpuRenderer {
     container.on('pointerdown', () => { pressed = true; });
     container.on('pointerup', () => { pressed = false; });
     container.on('pointerupoutside', () => { pressed = false; });
-    container.on('pointertap', () => onActivate(id));
+    container.on('pointertap', () => {
+      if (icon) {
+        iconSpin = queueNavIconSpin(iconSpin, prefersReducedMotion());
+        this.navIconSpins.set(id, iconSpin);
+      }
+      onActivate(id);
+    });
     parent.addChild(container);
-    this.recordHitTarget(parent, { id, role: 'tab', label, x, y, width, height });
+    this.recordHitTarget(parent, {
+      id,
+      role: 'tab',
+      label,
+      x: x - iconGutter,
+      y,
+      width: width + iconGutter,
+      height,
+    });
     return container;
   }
 
@@ -3519,9 +3676,6 @@ export class GpuRenderer {
     const bar = new Graphics();
     bar.rect(0, 0, width, GPU_LAYOUT.headerHeight);
     bar.fill({ color: 0x0b111e, alpha: 0.42 });
-    bar.moveTo(0, GPU_LAYOUT.headerHeight);
-    bar.lineTo(width, GPU_LAYOUT.headerHeight);
-    bar.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.55 });
     bar.eventMode = 'none';
     this.root.addChild(bar);
     // ONE vertical centre for everything in the band. These offsets used to be

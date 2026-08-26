@@ -1,4 +1,5 @@
 import { Container } from 'pixi.js';
+import { formatDateTime } from '../../../client/date-format.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { TIER_MODEL_CHOICES } from '../../../../contracts/tierModels.js';
@@ -263,7 +264,10 @@ export function drawSettings(
     });
     const facts: Array<[string, string]> = [
       [snapshot.t('settings.orgId'), organisation.id],
-      [snapshot.t('settings.orgCreated'), organisation.createdAt.slice(0, 10)],
+      [
+        snapshot.t('settings.orgCreated'),
+        formatDateTime(organisation.createdAt, snapshot.state.locale),
+      ],
       [
         snapshot.t('settings.yourRole'),
         snapshot.t(`auth.role.${organisation.viewerRole}`),

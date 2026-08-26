@@ -1,4 +1,5 @@
 import { Container } from 'pixi.js';
+import { formatDateTime } from '../../../client/date-format.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { truncate } from '../copy.js';
@@ -88,7 +89,7 @@ export function drawAdmin(
         snapshot.t('admin.invitationReady', {
           role: invitation.role,
           name: invitation.orgName,
-          expires: invitation.expiresAt,
+          expires: formatDateTime(invitation.expiresAt, snapshot.state.locale),
         }),
         columnX,
         cursor + 12,

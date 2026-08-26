@@ -2,6 +2,7 @@ import { Graphics } from 'pixi.js';
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { ADMIN_VIEWS, visibleViews, type ViewName } from '../../store.js';
+import { NAV_ICON_OUTSIDE_GAP, NAV_ICON_RENDER_SIZE } from '../nav-icons.js';
 
 /**
  * THE NAV RAIL — the tab strip that used to live in the header, stood on its
@@ -27,7 +28,7 @@ const SIDEBAR_TOP = GPU_LAYOUT.headerHeight + 18;
 const GROUP_HEIGHT = 20;
 const GROUP_GAP = 18;
 const ITEM_HEIGHT = 32;
-const ITEM_GAP = 8;
+const ITEM_GAP = 12;
 const GROUP_LABEL_SIZE = 9;
 const GROUP_RULE_GAP = 8;
 
@@ -106,7 +107,7 @@ export function sidebarLayout(
     groupHeight: 14,
     groupGap: 6,
     itemHeight: 26,
-    itemGap: 2,
+    itemGap: 10,
   });
   if (rowsBottom(compact) <= viewportHeight - 4) return compact;
 
@@ -149,13 +150,11 @@ export function drawSidebar(
   const band = new Graphics();
   band.rect(0, top, width, Math.max(0, height - top));
   band.fill({ color: 0x0b111e, alpha: 0.42 });
-  band.moveTo(width, top);
-  band.lineTo(width, height);
-  band.stroke({ color: GPU_COLORS.border, width: 1, alpha: 0.55 });
   band.eventMode = 'none';
   ctx.root.addChild(band);
 
-  const itemWidth = Math.max(0, width - SIDEBAR_PAD * 2);
+  const buttonX = SIDEBAR_PAD + NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
+  const itemWidth = Math.max(0, width - buttonX - SIDEBAR_PAD);
   for (const row of sidebarLayout(visibleViews(snapshot.data.auth), height)) {
     if (row.kind === 'group') {
       const label = snapshot.t(`nav.group.${row.group}`).toUpperCase();
@@ -205,7 +204,7 @@ export function drawSidebar(
         ctx.root,
         'tuning.toggle',
         snapshot.t('nav.sceneTuning').toUpperCase(),
-        SIDEBAR_PAD,
+        buttonX,
         row.y,
         itemWidth,
         row.height,
@@ -218,7 +217,7 @@ export function drawSidebar(
       ctx.root,
       `nav.${row.view}`,
       snapshot.t(`nav.${row.view}`).toUpperCase(),
-      SIDEBAR_PAD,
+      buttonX,
       row.y,
       itemWidth,
       row.height,

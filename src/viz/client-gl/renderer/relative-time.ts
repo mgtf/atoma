@@ -1,3 +1,5 @@
+import { formatDateTime } from '../../client/date-format.js';
+
 /**
  * ONE relative-time vocabulary, for every timestamp the GPU client shows.
  *
@@ -78,10 +80,7 @@ function calendarDaysBetween(at: number, now: number): number {
 
 /** The exact instant, in the reader's locale. What the hover bubble shows. */
 export function absoluteTimestamp(at: number, locale: string): string {
-  return new Date(at).toLocaleString(locale, {
-    dateStyle: 'full',
-    timeStyle: 'medium',
-  });
+  return formatDateTime(at, locale, { seconds: true, dateStyle: 'full' });
 }
 
 /**

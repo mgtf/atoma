@@ -1,3 +1,5 @@
+import { formatDateTime } from './date-format.js';
+
 export type DetailTone = 'neutral' | 'success' | 'error' | 'warning' | 'info';
 export type DetailPresentation = 'text' | 'code' | 'badge';
 
@@ -43,6 +45,13 @@ const CODE_KEYS = new Set([
   'systemPrompt',
   'systemPromptAppend',
   'systemPromptReplace',
+]);
+
+const METADATA_TIMESTAMP_KEYS = new Set([
+  'createdAt',
+  'expiresAt',
+  'modifiedAt',
+  'updatedAt',
 ]);
 
 function translatedOrNull(t: Translator, key: string): string | null {
@@ -132,7 +141,8 @@ function booleanField(
 function scalarField(
   key: string,
   value: unknown,
-  t: Translator
+  t: Translator,
+  locale?: string
 ): StructuredDetailField {
   if (typeof value === 'boolean') {
     return { kind: 'field', key, ...booleanField(key, value, t) };
@@ -148,11 +158,14 @@ function scalarField(
     };
   }
   if (typeof value === 'string') {
+    const displayValue = locale && METADATA_TIMESTAMP_KEYS.has(key)
+      ? formatDateTime(value, locale)
+      : value;
     return {
       kind: 'field',
       key,
       label: structuredDetailLabel(key, t),
-      value: BADGE_KEYS.has(key) ? enumValue(key, value, t) : value,
+      value: BADGE_KEYS.has(key) ? enumValue(key, value, t) : displayValue,
       tone: 'neutral',
       presentation: BADGE_KEYS.has(key)
         ? 'badge'
@@ -335,7 +348,7 @@ export function parseMarkdownDetail(
 export function buildStructuredDetail(
   value: unknown,
   t: Translator,
-  options: { maxDepth?: number; maxNodes?: number; markdownPath?: string } = {}
+  options: { maxDepth?: number; maxNodes?: number; markdownPath?: string; locale?: string } = {}
 ): readonly StructuredDetailNode[] {
   const maxDepth = options.maxDepth ?? 8;
   const maxNodes = options.maxNodes ?? 240;
@@ -356,7 +369,8 @@ export function buildStructuredDetail(
       return scalarField(
         key,
         JSON.stringify(current)?.slice(0, 2000) ?? String(current),
-        t
+        t,
+        options.locale
       );
     }
     if (typeof current === 'string') {
@@ -396,7 +410,7 @@ export function buildStructuredDetail(
                       ),
                 }
               : {
-                  ...scalarField(itemKey, entry, t),
+                  ...scalarField(itemKey, entry, t, options.locale),
                   key: `${itemKey} ${index + 1}`,
                   label: `${structuredDetailLabel(itemKey, t)} ${index + 1}`,
                 };
@@ -419,7 +433,7 @@ export function buildStructuredDetail(
         ],
       };
     }
-    return scalarField(key, current, t);
+    return scalarField(key, current, t, options.locale);
   };
 
   if (Array.isArray(value)) {
@@ -501,7 +515,8 @@ export function buildSkillEventDetail(
     body?: string;
     shareability?: { verdict: string };
   } | null | undefined,
-  t: Translator
+  t: Translator,
+  locale?: string
 ): readonly StructuredDetailNode[] {
   const catalog = skill && skill.id === event.skillId ? skill : null;
   const payload: Record<string, unknown> = {
@@ -525,7 +540,8 @@ export function buildSkillEventDetail(
   };
   return buildStructuredDetail(
     Object.fromEntries(Object.entries(payload).filter(([, value]) => present(value))),
-    t
+    t,
+    { locale }
   );
 }
 

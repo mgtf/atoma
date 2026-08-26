@@ -10,7 +10,9 @@ const CONTROL_HOVER_GAP = 14;
 const FILTER_CHIP_MIN_WIDTH = 52;
 const FILTER_CHIP_TEXT_PAD = 24;
 const FILTER_CHIP_MIN_WIDTH_COMPACT = 36;
-const FILTER_CHIP_TEXT_PAD_COMPACT = 14;
+// Eleven pixels per side: the 8px compact face still needs enough air to stay
+// clear of the bevel and active-state rings drawn inside the chip boundary.
+const FILTER_CHIP_TEXT_PAD_COMPACT = 22;
 
 export function gpuFilterButtonWidth(label: string) {
   // FALLBACK ESTIMATE for renderer-less layout (tests, recordings). A view
@@ -172,20 +174,24 @@ export function layoutRunFilterBlocks(options: {
     options.originX,
     options.originY + kinds.height + FILTER_BLOCK_GAP,
     maxInner,
-    gpuFilterButtonWidth,
-    buttonH
+    gpuFilterButtonWidthCompact,
+    FILTER_BUTTON_HEIGHT_COMPACT,
+    0,
+    10
   );
   const inlineRoles = placeChipBlock(
     options.roles,
     options.originX + kinds.width + FILTER_BLOCK_GAP,
     options.originY,
     maxInner,
-    gpuFilterButtonWidth,
-    buttonH
+    gpuFilterButtonWidthCompact,
+    FILTER_BUTTON_HEIGHT_COMPACT,
+    0,
+    10
   );
   const singleRow =
     kinds.height === buttonH + pad * 2 &&
-    inlineRoles.height === buttonH + pad * 2 &&
+    inlineRoles.height === FILTER_BUTTON_HEIGHT_COMPACT + pad * 2 &&
     inlineRoles.x + inlineRoles.width <= options.originX + options.maxWidth;
   const roles = singleRow ? inlineRoles : stackedRoles;
   return { kinds, roles, bottom: Math.max(kinds.y + kinds.height, roles.y + roles.height) };
@@ -269,4 +275,3 @@ export function gpuAtomButtonWidth(label: string) {
   // 28px particle zone + 8px separation + 12px right padding.
   return Math.min(160, Math.max(80, Math.ceil(label.length * 6.4 + 48)));
 }
-

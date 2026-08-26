@@ -993,7 +993,7 @@ describe('the nav rail', () => {
 
     const project = nav.find((button) => button.id === 'nav.projects')!;
     const runs = nav.find((button) => button.id === 'nav.runs')!;
-    expect(runs.y - (project.y + project.height)).toBe(8);
+    expect(runs.y - (project.y + project.height)).toBe(12);
   });
 
   it('has no Settings row: the account menu owns that entrance', () => {
@@ -2820,8 +2820,8 @@ describe('drawRegistry scrolling honesty', () => {
 
     // Provenance carries the latest archived change, not creation alone.
     expect(values).toContain([
-      'Created · seed · 2026-08-14T00:00:00.000Z',
-      'Last changed · curriculum · 2026-08-15T10:00:00.000Z',
+      `Created · seed · ${new Date('2026-08-14T00:00:00.000Z').toLocaleString('en', { dateStyle: 'long', timeStyle: 'short' })}`,
+      `Last changed · curriculum · ${new Date('2026-08-15T10:00:00.000Z').toLocaleString('en', { dateStyle: 'long', timeStyle: 'short' })}`,
       'Reason · Tighten the evidence contract',
       '1 archived version',
     ].join('\n'));
@@ -3323,8 +3323,8 @@ describe('attachAtomaMark glass layering', () => {
     }
     const centreX = GPU_LAYOUT.headerMarkX + 14;
     const centreY = GPU_LAYOUT.headerHeight / 2;
-    // Inside the header bar, top and bottom, so it never crosses the border
-    // line the bar draws at its own height.
+    // Inside the header wash, top and bottom, so it never crosses into the
+    // view content now that the obsolete divider line is gone.
     expect(centreY - halfHeight * ATOMA_MARK_HEADER_SCALE).toBeGreaterThan(0);
     expect(centreY + halfHeight * ATOMA_MARK_HEADER_SCALE)
       .toBeLessThan(GPU_LAYOUT.headerHeight);
@@ -3918,7 +3918,7 @@ describe('drawRuns behavior', () => {
     drawRuns(ctx, makeSnapshot({}, { run: makeRun(events) }), WIDTH, HEIGHT);
 
     const detail = ctx.texts.find((text) =>
-      ctx.eventCards.some((card) => card.content === text.parent) && text.y === 28);
+      ctx.eventCards.some((card) => card.content === text.parent) && text.y === 25);
     expect(detail, 'the card must draw a detail line').toBeDefined();
     expect(detail!.value).toContain('cache 177k');
     expect(detail!.value).toContain('$');

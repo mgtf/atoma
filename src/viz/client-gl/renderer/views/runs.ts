@@ -271,7 +271,8 @@ export function drawRuns(
         runFilters.role === chip.id.slice('run.filter.role.'.length),
         snapshot.onActivate,
         // Role chips ride the same yellow→orange ramp their LLM cards do.
-        role === 'all' ? LLM_FAMILY_COLOR : llmRoleColor(role)
+        role === 'all' ? LLM_FAMILY_COLOR : llmRoleColor(role),
+        FILTER_BUTTON_LABEL_SIZE_COMPACT
       );
     }
   }
@@ -802,7 +803,7 @@ export function drawRuns(
     const detail = [truncate(copy.body, bodyBudget), copy.footer]
       .filter(Boolean)
       .join(' · ');
-    ctx.text(cardContent, detail, 11, 28, {
+    ctx.text(cardContent, detail, 11, 25, {
       size: 9,
       color: event.error ? GPU_COLORS.error : GPU_COLORS.muted,
       width: cardWidth - 22,
@@ -1111,7 +1112,7 @@ function drawEventDetail(
     });
     const skill =
       snapshot.data.skillDetail?.id === event.skillId ? snapshot.data.skillDetail : null;
-    const structured = buildSkillEventDetail(event, skill, snapshot.t);
+    const structured = buildSkillEventDetail(event, skill, snapshot.t, snapshot.state.locale);
     const detailTop = y + 36 + title.height + subtitle.height;
     const detailBottom = y + height - 62;
     const detailHeight = Math.max(40, detailBottom - detailTop);
@@ -1268,6 +1269,7 @@ function drawEventDetail(
         : []
       : buildStructuredDetail(structured, snapshot.t, {
           markdownPath: event.kind === 'tool' ? filePathFromArgs(event.args) : undefined,
+          locale: snapshot.state.locale,
         });
   const contentBottom =
     envelope.length === 0 && bodyNodes.length === 0

@@ -1,4 +1,5 @@
 import { Rectangle } from 'pixi.js';
+import { formatDateTime } from '../../../client/date-format.js';
 import type { RegistryType } from '../../../client/types.js';
 import { taxonomyForTier } from '../../../../core/taxonomy.js';
 import { elementForTool } from '../../../../contracts/toolTaxonomy.js';
@@ -53,8 +54,8 @@ export function drawAtomDetail(
     { size: 10, color: GPU_COLORS.tiers[atom.tier as 1 | 2 | 3] }
   );
   ctx.text(ctx.root, atom.description, x + 18, y + 67, {
-    size: 11,
-    color: GPU_COLORS.muted,
+    size: 12,
+    color: GPU_COLORS.text,
     width: width - 36,
   });
 
@@ -79,9 +80,12 @@ export function drawAtomDetail(
     cursor += 14 + HEADING_GAP;
   };
 
-  const body = (value: string, options: { mono?: boolean; muted?: boolean } = {}): void => {
+  const body = (
+    value: string,
+    options: { mono?: boolean; muted?: boolean; size?: number } = {}
+  ): void => {
     const drawn = ctx.text(pane.content, value, 18, cursor, {
-      size: 10,
+      size: options.size ?? 10,
       ...(options.mono ? { mono: true } : {}),
       ...(options.muted ? { color: GPU_COLORS.muted } : {}),
       width: innerWidth,
@@ -124,11 +128,14 @@ export function drawAtomDetail(
   const lastChange = history?.at(-1);
   body(
     [
-      snapshot.t('registry.detailCreated', { by: atom.createdBy, at: atom.createdAt }),
+      snapshot.t('registry.detailCreated', {
+        by: atom.createdBy,
+        at: formatDateTime(atom.createdAt, snapshot.state.locale),
+      }),
       lastChange
         ? snapshot.t('registry.detailLastChanged', {
           by: lastChange.modifiedBy,
-          at: lastChange.modifiedAt,
+          at: formatDateTime(lastChange.modifiedAt, snapshot.state.locale),
         })
         : '',
       lastChange?.reason
@@ -142,7 +149,7 @@ export function drawAtomDetail(
   );
 
   heading(snapshot.t('registry.detailInstruction'));
-  body(snapshot.t('registry.detailInstructionHint'), { muted: true });
+  body(snapshot.t('registry.detailInstructionHint'), { size: 11 });
 
   heading(snapshot.t('registry.detailPrompt'));
   if (atom.systemPrompt.length > PROMPT_PREVIEW_CHARS) {
@@ -155,7 +162,7 @@ export function drawAtomDetail(
     atom.systemPrompt.length > PROMPT_PREVIEW_CHARS
       ? `${atom.systemPrompt.slice(0, PROMPT_PREVIEW_CHARS)}…`
       : atom.systemPrompt,
-    { mono: true }
+    { mono: true, size: 11 }
   );
 
   pane.extend(cursor);

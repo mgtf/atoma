@@ -154,11 +154,18 @@ describe('structured detail presentation', () => {
       updatedAt: '2026-08-14T00:21:19.000Z',
       body: '1. Read the workspace\n2. Write the files',
       shareability: { verdict: 'review-required' },
-    }, en) as StructuredDetailField[];
+    }, en, 'en') as StructuredDetailField[];
     expect(withCatalog).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'Description', value: 'Author paired docs and a config file.' }),
       expect.objectContaining({ label: 'When to use', value: 'Task asks for README plus config.json' }),
       expect.objectContaining({ label: 'Successes', value: '3' }),
+      expect.objectContaining({
+        label: 'Updated at',
+        value: new Date('2026-08-14T00:21:19.000Z').toLocaleString('en', {
+          dateStyle: 'long',
+          timeStyle: 'short',
+        }),
+      }),
       expect.objectContaining({ label: 'Recipe', presentation: 'code' }),
       expect.objectContaining({
         label: 'Sharing review',

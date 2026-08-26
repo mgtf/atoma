@@ -81,5 +81,10 @@ describe('viz visual depth contract', () => {
     expect(panel).toContain('this.addSurfaceShadow(');
     expect(panel).not.toContain('registerCastShadow(');
     expect(renderer.match(/this\.registerCastShadow\(/g)).toHaveLength(2);
+    expect(renderer).toContain('this.addSilhouetteShadow(container, iconMesh.shadowTexture');
+    expect(renderer).toContain('return this.addCastShadow(parent, width, height, options');
+
+    const icons = readFileSync('src/viz/client-gl/renderer/nav-icons.ts', 'utf8');
+    expect(icons).not.toMatch(/shadowX|shadowY|shadowAlpha/);
   });
 });

@@ -43,6 +43,7 @@ describe('launchable profiles are all describable', () => {
 describe('viz full-GL build contract with MUI fallback', () => {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8')) as {
     scripts: Record<string, string>;
+    dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   };
   const server = readFileSync('src/viz/server.ts', 'utf8');
@@ -97,9 +98,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(pkg.devDependencies['pixi.js']).toBeTruthy();
     expect(pkg.devDependencies['zustand']).toBeTruthy();
     expect(pkg.devDependencies['@tanstack/react-query']).toBeTruthy();
-    expect(pkg.devDependencies['three']).toBeUndefined();
+    expect(pkg.dependencies['three']).toBeTruthy();
     expect(pkg.devDependencies['@react-three/fiber']).toBeUndefined();
-    expect(pkg.devDependencies['@types/three']).toBeUndefined();
+    expect(pkg.devDependencies['@types/three']).toBeTruthy();
     expect(pkg.devDependencies['@pixi/react']).toBeUndefined();
     expect(existsSync('src/viz/client-gl/ThreeBackdrop.tsx')).toBe(false);
     expect(existsSync('src/viz/client-gl/RunsTimelineRails.tsx')).toBe(false);
@@ -151,7 +152,9 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // The GPU runs view and the MUI RunsView share ONE heading/detail source.
     expect(rendererRuns).toMatch(/timelineBranchHeading\(/);
     expect(rendererRuns).toMatch(/filePathFromArgs/);
-    expect(rendererRuns).toMatch(/buildSkillEventDetail\(event, skill, snapshot\.t\)/);
+    expect(rendererRuns).toMatch(
+      /buildSkillEventDetail\(event, skill, snapshot\.t, snapshot\.state\.locale\)/
+    );
     expect(timelineLayout).toMatch(/export function timelineBranchHeading\(/);
     expect(readFileSync('src/viz/client/features/RunsView.tsx', 'utf8')).toMatch(
       /timelineBranchHeading\(/

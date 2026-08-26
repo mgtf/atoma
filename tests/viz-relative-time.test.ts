@@ -8,6 +8,7 @@ import {
   timestampTooltip,
 } from '../src/viz/client-gl/renderer/relative-time.js';
 import { translate } from '../src/viz/client/i18n-catalog.js';
+import { formatDateTime } from '../src/viz/client/date-format.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -110,5 +111,16 @@ describe('the hover bubble text', () => {
       expect(rendered).toMatch(/14[:h]35/);
       expect(rendered).toContain('07');
     }
+  });
+});
+
+describe('human-readable metadata timestamps', () => {
+  it('uses the reader locale without seconds and preserves invalid source values', () => {
+    const at = '2026-08-28T14:32:47.000Z';
+    const rendered = formatDateTime(at, 'fr-FR');
+    expect(rendered.toLowerCase()).toContain('août');
+    expect(rendered).toContain('2026');
+    expect(rendered).not.toContain('47');
+    expect(formatDateTime('not-an-instant', 'fr-FR')).toBe('not-an-instant');
   });
 });
