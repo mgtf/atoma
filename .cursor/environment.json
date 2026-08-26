@@ -1,6 +1,6 @@
 {
   "name": "atoma",
-  "install": "npm ci",
+  "install": "npm ci && npm run build",
   "terminals": [
     {
       "name": "viz",
