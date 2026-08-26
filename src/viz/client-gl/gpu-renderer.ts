@@ -1,6 +1,5 @@
 import {
   Application,
-  Assets,
   BitmapFont,
   BitmapText,
   Cache,
@@ -8,13 +7,12 @@ import {
   Container,
   Filter,
   Graphics,
-  Matrix,
   Rectangle,
   RendererType,
   Text,
   TextStyle,
-  Texture,
   Ticker,
+  UPDATE_PRIORITY,
 } from 'pixi.js';
 import { matchesSearchQuery, runSearchText } from '../client/search.js';
 import type {
@@ -64,7 +62,7 @@ import {
   softShadowLayers,
 } from './renderer/soft-shadow.js';
 import { LabelCache } from './renderer/label-cache.js';
-import { NO_TINT, mixColor, multiplyTint } from './renderer/label-tint.js';
+import { NO_TINT, mixColor, multiplyTint, tintColor } from './renderer/label-tint.js';
 import {
   createFpsSampleWindow,
   formatFps,
@@ -289,6 +287,10 @@ import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
 import { drawSidebar } from './renderer/views/sidebar.js';
 import { attachAvatarOrb, type AvatarOrbHandle } from './renderer/avatar-orb.js';
+import {
+  loadTimelineCardMaterial,
+  type TimelineCardMaterial,
+} from './renderer/timeline-card-material.js';
 
 export class GpuRenderer {
   app = new Application();
@@ -351,8 +353,8 @@ export class GpuRenderer {
    */
   private readonly fpsSample = createFpsSampleWindow();
   private lastFps = 0;
-  /** Shared CC0 bitmap material loaded once before any timeline card draws. */
-  private cardMaterial: Texture | null = null;
+  /** One retained diffuse + normal mesh shared by every visible RUNS card. */
+  private timelineCardMaterial: TimelineCardMaterial | null = null;
   private pointerLightFilter: Filter | null = null;
   private pointerLightUniforms: {
     uLightPx: Float32Array;
@@ -616,6 +618,11 @@ export class GpuRenderer {
     );
   };
 
+  /** Flushes all animated card faces once, immediately before Pixi renders. */
+  private readonly flushTimelineCardMaterial = () => {
+    this.timelineCardMaterial?.flush();
+  };
+
   private readonly updatePointerLight = (ticker: Ticker) => {
     const filter = this.pointerLightFilter;
     const uniforms = this.pointerLightUniforms;
@@ -654,6 +661,11 @@ export class GpuRenderer {
     if (!pointer.active && this.pointerLightStrength < 0.002) {
       this.pointerLightStrength = 0;
       uniforms.uStrength = 0;
+      this.timelineCardMaterial?.updateLight(
+        this.lightRendererX,
+        this.lightRendererY,
+        0
+      );
       filter.enabled = false;
       return;
     }
@@ -670,6 +682,7 @@ export class GpuRenderer {
     uniforms.uLightPx[0] = local.x;
     uniforms.uLightPx[1] = local.y;
     uniforms.uStrength = this.pointerLightStrength * tuning.lightIntensity;
+    this.timelineCardMaterial?.updateLight(local.x, local.y, uniforms.uStrength);
     uniforms.uRadiusScale = tuning.lightHeight;
     uniforms.uHueShift = tuning.lightHue;
     // The crystal's cast, on the UI this filter covers. Same packer the
@@ -889,10 +902,15 @@ export class GpuRenderer {
     // alphabet it can display so the first rate change cannot grow an atlas in
     // the middle of a frame.
     ensureFpsBitmapFont(Math.min(devicePixelRatio || 1, 2));
-    const cardDiffuse = await Assets.load<Texture>('/textures/timeline-sand-diffuse.webp');
-    cardDiffuse.label = 'timeline-sand-diffuse';
-    cardDiffuse.source.style.addressMode = 'repeat';
-    this.cardMaterial = cardDiffuse;
+    this.timelineCardMaterial = await loadTimelineCardMaterial();
+    // Application rendering runs at LOW. Every event-card animation runs at
+    // the default NORMAL priority, so LOW + 1 combines all changed faces into
+    // exactly one buffer upload before the shared mesh is drawn.
+    this.app.ticker.add(
+      this.flushTimelineCardMaterial,
+      undefined,
+      UPDATE_PRIORITY.LOW + 1
+    );
     this.ambientRoot.eventMode = 'none';
     this.markRoot.eventMode = 'none';
     this.tooltipRoot.eventMode = 'none';
@@ -978,6 +996,7 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    this.app.ticker.remove(this.flushTimelineCardMaterial);
     this.app.ticker.remove(this.updateTooltip);
     this.tooltipLayer?.destroy();
     this.tooltipLayer = null;
@@ -994,6 +1013,10 @@ export class GpuRenderer {
     this.pointerLightStrength = 0;
     // A re-initialised renderer builds a NEW filter with a new buffer.
     this.pointerLightBufferPinned = false;
+    // The mesh is retained across scene rebuilds, so release its geometry,
+    // buffers and shared shader explicitly before the stage walks children.
+    this.timelineCardMaterial?.destroy();
+    this.timelineCardMaterial = null;
     // Detach-then-destroy, BEFORE the app tears the stage down: a retained
     // label still parented would otherwise be destroyed twice.
     this.atomaMark?.handle.destroy();
@@ -1040,6 +1063,9 @@ export class GpuRenderer {
     this.snapshot = snapshot;
     for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
     this.tickerCallbacks.clear();
+    // Detach the retained material mesh before the recursive scene teardown.
+    // Its scene-owned underlay/overlay stack may then be destroyed normally.
+    this.timelineCardMaterial?.beginRender();
     // Retained labels step out of the scene BEFORE it is torn down, so the
     // recursive destroy below walks past them instead of through them.
     this.labels.beginRender();
@@ -2753,6 +2779,17 @@ export class GpuRenderer {
     const wasVisible = this.previousEventIds.has(id);
     const entranceDelay = this.currentEventIds.size * 18;
     this.currentEventIds.add(id);
+    const material = this.timelineCardMaterial;
+    if (!material) {
+      throw new Error('timeline card material was not loaded before rendering');
+    }
+    const layers = material.layersFor(parent);
+    const underlayContainer = new Container();
+    underlayContainer.label = `timeline-card-underlay:${id}`;
+    underlayContainer.position.set(x, y);
+    underlayContainer.skew.x = -zDepth * 0.007;
+    underlayContainer.eventMode = 'none';
+    layers.underlay.addChild(underlayContainer);
     const container = new Container();
     container.label = `timeline-card:${id}`;
     container.position.set(x, y);
@@ -2773,6 +2810,7 @@ export class GpuRenderer {
       0, height - chamfer,
       0, chamfer,
     ];
+    layers.overlay.addChild(container);
 
     // The card is a raised object above the timeline cartouche. This shadow is
     // outside the grain face so its texture cannot turn the shadow into
@@ -2780,7 +2818,7 @@ export class GpuRenderer {
     // every other elevation-bearing surface.
     const shadowHost = new Container();
     shadowHost.position.set(x, y);
-    parent.addChild(shadowHost);
+    layers.underlay.addChild(shadowHost);
     const castShadow = this.addSurfaceShadow(shadowHost, width, height, {
       radius: chamfer,
       alpha: 0.58,
@@ -2793,7 +2831,7 @@ export class GpuRenderer {
     const back = new Graphics();
     back.poly(facePoints.map((value, index) => value + (index % 2 === 0 ? extrusionX : extrusionY)));
     back.fill({ color: mixColor(0x091426, accent, 0.18), alpha: 0.98 });
-    container.addChild(back);
+    underlayContainer.addChild(back);
 
     // Solid right and lower walls connect the rear slab to the face. Their
     // unequal values provide depth without repeating neon contours.
@@ -2805,7 +2843,7 @@ export class GpuRenderer {
       width, height - chamfer,
     ]);
     rightWall.fill({ color: mixColor(0x071326, accent, 0.14), alpha: 0.98 });
-    container.addChild(rightWall);
+    underlayContainer.addChild(rightWall);
 
     const lowerWall = new Graphics();
     lowerWall.poly([
@@ -2815,7 +2853,7 @@ export class GpuRenderer {
       chamfer + extrusionX, height + extrusionY,
     ]);
     lowerWall.fill({ color: mixColor(0x050f20, accent, 0.1), alpha: 0.98 });
-    container.addChild(lowerWall);
+    underlayContainer.addChild(lowerWall);
 
     const aura = new Graphics();
     aura.poly([
@@ -2830,46 +2868,38 @@ export class GpuRenderer {
     ]);
     aura.stroke({ color: accent, width: 2.4, alpha: 0.72 });
     aura.alpha = selected ? 0.28 : 0;
-    container.addChild(aura);
+    underlayContainer.addChild(aura);
 
-    const base = new Graphics();
-    base.label = `timeline-card-face:${id}`;
-    base.poly(facePoints);
-    base.fill({
-      color: mixColor(selected ? 0x172a49 : 0x111a2b, accent, selected ? 0.23 : 0.13),
-      alpha: Math.max(0.96, VIZ_VISUAL_DEPTH.near.cardAlpha),
+    const faceColor = mixColor(
+      selected ? 0x172a49 : 0x111a2b,
+      accent,
+      selected ? 0.23 : 0.13
+    );
+    const faceAlpha = Math.max(0.96, VIZ_VISUAL_DEPTH.near.cardAlpha);
+    const initiallyVisible = wasVisible || prefersReducedMotion();
+    const materialFace = material.createFace({
+      id,
+      width,
+      height,
+      chamfer,
+      color: faceColor,
+      alpha: initiallyVisible ? faceAlpha : 0,
+      x,
+      y,
+      skewX: container.skew.x,
     });
-    base.stroke({
+
+    // Stroke stays regular Graphics so interaction colour and antialiasing
+    // remain cheap while the bitmap body is one shared direct mesh.
+    const border = new Graphics();
+    border.label = `timeline-card-face:${id}`;
+    border.poly(facePoints);
+    border.stroke({
       color: selected ? GPU_COLORS.primary : accent,
       width: selected ? 1.35 : 0.75,
       alpha: selected ? 0.82 : 0.42,
     });
-    container.addChild(base);
-
-    const material = this.cardMaterial;
-    if (!material) {
-      throw new Error('timeline card material was not loaded before rendering');
-    }
-    let materialHash = 2166136261;
-    for (let index = 0; index < id.length; index += 1) {
-      materialHash = Math.imul(materialHash ^ id.charCodeAt(index), 16777619);
-    }
-    const materialMatrix = new Matrix()
-      .scale(173 / material.source.width, 173 / material.source.height)
-      .translate(materialHash & 0xff, (materialHash >>> 16) & 0xff);
-    const grain = new Graphics();
-    grain.label = `timeline-card-grain:${id}`;
-    grain.poly(facePoints);
-    grain.fill({
-      texture: material,
-      textureSpace: 'global',
-      matrix: materialMatrix,
-      color: 0xffffff,
-      alpha: 0.14,
-    });
-    grain.blendMode = 'multiply';
-    grain.eventMode = 'none';
-    container.addChild(grain);
+    container.addChild(border);
 
     const topBevel = new Graphics();
     topBevel.poly([
@@ -2902,8 +2932,10 @@ export class GpuRenderer {
     let hovered = false;
     let pressed = false;
     let settled = false;
-    let elapsed = wasVisible || prefersReducedMotion() ? performance.now() : -entranceDelay;
-    container.alpha = wasVisible || prefersReducedMotion() ? 1 : 0;
+    let elapsed = initiallyVisible ? performance.now() : -entranceDelay;
+    container.alpha = initiallyVisible ? 1 : 0;
+    underlayContainer.alpha = container.alpha;
+    castShadow.alpha = initiallyVisible ? (selected ? 0.92 : 0.86) : 0;
     const animate = (ticker: Ticker) => {
       // Once its entrance/interaction has settled, an idle card is immutable.
       // Keep the callback so pointerover can wake it, but do not dirty this
@@ -2915,18 +2947,36 @@ export class GpuRenderer {
       const targetScale = pressed ? 0.992 : hovered ? 1.008 : 1;
       const scale = easedEntrance * targetScale;
       const depthScaleX = 1 - zDepth * 0.018;
+      const scaleX = scale * depthScaleX;
+      const positionX = x + width * (1 - scaleX) / 2;
+      const positionY =
+        y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0);
       container.alpha = easedEntrance;
-      container.scale.set(scale * depthScaleX, scale);
-      container.position.set(
-        x + width * (1 - scale * depthScaleX) / 2,
-        y + height * (1 - scale) / 2 + (pressed ? 1.4 : hovered ? -1.2 : 0)
-      );
+      underlayContainer.alpha = easedEntrance;
+      container.scale.set(scaleX, scale);
+      underlayContainer.scale.set(scaleX, scale);
+      container.position.set(positionX, positionY);
+      underlayContainer.position.set(positionX, positionY);
       aura.alpha = selected
         ? 0.3
         : hovered
           ? 0.16
           : 0;
-      base.tint = pressed ? 0xb8d8ff : hovered ? 0xd8e9ff : 0xffffff;
+      const interactionTint = pressed
+        ? 0xb8d8ff
+        : hovered
+          ? 0xd8e9ff
+          : 0xffffff;
+      border.tint = interactionTint;
+      materialFace.update(
+        positionX,
+        positionY,
+        scaleX,
+        scale,
+        container.skew.x,
+        tintColor(faceColor, interactionTint),
+        faceAlpha * easedEntrance
+      );
       castShadow.alpha = easedEntrance * (hovered ? 0.96 : selected ? 0.92 : 0.86);
       rail.alpha = selected ? 0.92 : hovered ? 0.84 : 0.68;
       settled = entrance >= 1 && !hovered && !pressed;
@@ -2942,7 +2992,6 @@ export class GpuRenderer {
     container.on('pointerup', () => { pressed = false; });
     container.on('pointerupoutside', () => { pressed = false; });
     container.on('pointertap', () => onActivate(`event.${id}`));
-    parent.addChild(container);
     this.recordHitTarget(parent, {
       id: `event.${id}`,
       role: 'button',

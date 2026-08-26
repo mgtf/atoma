@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { NO_TINT, multiplyTint } from '../src/viz/client-gl/renderer/label-tint.js';
+import {
+  NO_TINT,
+  multiplyTint,
+  tintColor,
+} from '../src/viz/client-gl/renderer/label-tint.js';
 import { GPU_COLORS } from '../src/viz/client-gl/theme.js';
 
 /** What the GPU does with a tint: multiply, per channel, in 0..1. */
@@ -52,5 +56,15 @@ describe('multiplyTint', () => {
         expect(tint).toBeLessThanOrEqual(0xffffff);
       }
     }
+  });
+});
+
+describe('tintColor', () => {
+  it('returns the source colour for Pixi no-tint white', () => {
+    expect(tintColor(0x172a49, NO_TINT)).toBe(0x172a49);
+  });
+
+  it('applies every packed channel as a multiplicative factor', () => {
+    expect(tintColor(0x804020, 0x80ff40)).toBe(0x404008);
   });
 });

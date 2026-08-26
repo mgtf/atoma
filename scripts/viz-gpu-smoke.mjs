@@ -276,8 +276,8 @@ async function waitForHitTarget(page, id, describe) {
 
 /**
  * Read the real Pixi scene, not a source-code proxy. Every visible RUNS event
- * must own one face and one directly batched grain layer, with no local filter
- * that would split it into a render-to-texture pass.
+ * must own one chrome face and appear in the ONE shared diffuse + normal mesh,
+ * with no local filter that would split it into a render-to-texture pass.
  */
 async function readTimelineCardMaterials(page) {
   return await page.evaluate(() => {
@@ -291,33 +291,69 @@ async function readTimelineCardMaterials(page) {
       .map((id) => id.slice('event.'.length)))].sort();
     const cardIds = [];
     const faceIds = [];
-    const grainIds = [];
+    const underlayIds = [];
+    const legacyGrainIds = [];
     const filtered = [];
-    const grainBlendModes = [];
-    const grainMaterials = [];
+    const batches = [];
     const visit = (node) => {
       const label = String(node.label ?? '');
+      if (label.startsWith('timeline-card') && (node.filters?.length ?? 0) > 0) {
+        filtered.push(label);
+      }
       if (label.startsWith('timeline-card:')) {
         cardIds.push(label.slice('timeline-card:'.length));
-        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
       }
       if (label.startsWith('timeline-card-face:')) {
         faceIds.push(label.slice('timeline-card-face:'.length));
-        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
+      }
+      if (label.startsWith('timeline-card-underlay:')) {
+        underlayIds.push(label.slice('timeline-card-underlay:'.length));
       }
       if (label.startsWith('timeline-card-grain:')) {
-        const id = label.slice('timeline-card-grain:'.length);
-        grainIds.push(id);
-        grainBlendModes.push(String(node.blendMode));
-        if ((node.filters?.length ?? 0) > 0) filtered.push(label);
-        const fill = node.context?.instructions?.find((instruction) =>
-          instruction.action === 'fill' && instruction.data?.style?.texture);
-        grainMaterials.push({
-          id,
-          texture: String(fill?.data?.style?.texture?.label ?? ''),
-          textureSpace: String(fill?.data?.style?.textureSpace ?? ''),
-          alpha: Number(fill?.data?.style?.alpha ?? 0),
-          hasMatrix: Boolean(fill?.data?.style?.matrix),
+        legacyGrainIds.push(label.slice('timeline-card-grain:'.length));
+      }
+      if (label === 'timeline-card-material-batch') {
+        const shader = node.shader;
+        const resources = shader?.resources ?? {};
+        const diffuse = resources.uSandDiffuse;
+        const normal = resources.uSandNormal;
+        const geometry = node.geometry;
+        const cardCount = Number(node.timelineCardCount ?? -1);
+        const colorAttribute = geometry?.attributes?.aBaseColor;
+        const colorData = colorAttribute?.buffer?.data;
+        const colorStride = Number(colorAttribute?.stride ?? 16) / 4;
+        const colorOffset = Number(colorAttribute?.offset ?? 0) / 4;
+        const baseColors = [];
+        for (let face = 0; face < cardCount; face += 1) {
+          const offset = face * 9 * colorStride + colorOffset;
+          baseColors.push([
+            Number(colorData?.[offset] ?? -1),
+            Number(colorData?.[offset + 1] ?? -1),
+            Number(colorData?.[offset + 2] ?? -1),
+          ]);
+        }
+        batches.push({
+          cardIds: [...(node.timelineCardIds ?? [])].sort(),
+          cardCount,
+          shaderUid: Number(shader?.uid ?? -1),
+          compatibleRenderers: Number(shader?.compatibleRenderers ?? -1),
+          diffuseLabel: String(diffuse?.label ?? ''),
+          normalLabel: String(normal?.label ?? ''),
+          diffuseUid: Number(diffuse?.uid ?? -1),
+          normalUid: Number(normal?.uid ?? -1),
+          diffuseAlive: diffuse?.destroyed === false,
+          normalAlive: normal?.destroyed === false,
+          diffuseWidth: Number(diffuse?.width ?? 0),
+          diffuseHeight: Number(diffuse?.height ?? 0),
+          normalWidth: Number(normal?.width ?? 0),
+          normalHeight: Number(normal?.height ?? 0),
+          diffuseRepeat: diffuse?.style?.addressMode === 'repeat',
+          normalRepeat: normal?.style?.addressMode === 'repeat',
+          diffuseSamplerBound: resources.uSandDiffuseSampler === diffuse?.style,
+          normalSamplerBound: resources.uSandNormalSampler === normal?.style,
+          geometrySize: Number(geometry?.getSize?.() ?? 0),
+          geometryAttributes: Object.keys(geometry?.attributes ?? {}).sort(),
+          baseColors,
         });
       }
       for (const child of node.children ?? []) visit(child);
@@ -327,28 +363,49 @@ async function readTimelineCardMaterials(page) {
       eventIds,
       cardIds: cardIds.sort(),
       faceIds: faceIds.sort(),
-      grainIds: grainIds.sort(),
+      underlayIds: underlayIds.sort(),
+      legacyGrainIds: legacyGrainIds.sort(),
       filtered: filtered.sort(),
-      grainBlendModes: grainBlendModes.sort(),
-      grainMaterials: grainMaterials.sort((left, right) => left.id.localeCompare(right.id)),
+      batches,
     };
   });
 }
 
-function timelineCardsUseDirectMaterials(state) {
+function timelineCardsUseSharedMaterial(state) {
   const eventKey = state.eventIds.join('\0');
+  const batch = state.batches[0];
   return state.eventIds.length > 0 &&
     state.cardIds.join('\0') === eventKey &&
     state.faceIds.join('\0') === eventKey &&
-    state.grainIds.join('\0') === eventKey &&
+    state.underlayIds.join('\0') === eventKey &&
+    state.legacyGrainIds.length === 0 &&
     state.filtered.length === 0 &&
-    state.grainBlendModes.every((mode) => mode === 'multiply') &&
-    state.grainMaterials.length === state.eventIds.length &&
-    state.grainMaterials.every((material) =>
-      material.texture === 'timeline-sand-diffuse' &&
-      material.textureSpace === 'global' &&
-      material.alpha === 0.14 &&
-      material.hasMatrix);
+    state.batches.length === 1 &&
+    batch.cardIds.join('\0') === eventKey &&
+    batch.cardCount === state.eventIds.length &&
+    batch.shaderUid > 0 &&
+    batch.compatibleRenderers === 3 &&
+    batch.diffuseLabel === 'timeline-sand-diffuse' &&
+    batch.normalLabel === 'timeline-sand-normal' &&
+    batch.diffuseUid > 0 &&
+    batch.normalUid > 0 &&
+    batch.diffuseUid !== batch.normalUid &&
+    batch.diffuseAlive &&
+    batch.normalAlive &&
+    batch.diffuseWidth > 1 &&
+    batch.diffuseHeight > 1 &&
+    batch.normalWidth > 1 &&
+    batch.normalHeight > 1 &&
+    batch.diffuseRepeat &&
+    batch.normalRepeat &&
+    batch.diffuseSamplerBound &&
+    batch.normalSamplerBound &&
+    batch.geometrySize >= state.eventIds.length * 9 &&
+    batch.geometryAttributes.join(',') === 'aBaseColor,aMaterialPx,aPosition' &&
+    batch.baseColors.length === state.eventIds.length &&
+    batch.baseColors.every((color) =>
+      color.every((channel) => channel >= 0 && channel < 0.55) &&
+      color.some((channel) => channel > 0));
 }
 
 /**
@@ -810,10 +867,10 @@ try {
       scrollStats.resourcesAfter.graphicsContexts !==
         scrollStats.resourcesBefore.graphicsContexts ||
       scrollStats.resourcesAfter.buffers !== scrollStats.resourcesBefore.buffers ||
-      // A filter on even one visible card reintroduces a separate offscreen
-      // pass per event and makes ALL slower than TRUST. Exact scene labels arm
-      // this on the cards that were actually drawn by the scroll scenario.
-      !timelineCardsUseDirectMaterials(cardMaterialStats) ||
+      // A filter or one material draw per visible card makes ALL slower than
+      // TRUST. Exact scene labels and public Shader/Geometry resources prove
+      // the scroll scenario used one direct diffuse + normal mesh instead.
+      !timelineCardsUseSharedMaterial(cardMaterialStats) ||
       // The sharp one. Label retention is what keeps a rebuild off the canvas
       // text path; losing it drops this straight to zero, where the timing
       // budget above would still pass.
@@ -858,7 +915,7 @@ try {
         `labels ${scrollStats.reused} reused vs ${scrollStats.created} built, resources stable at ` +
         `${scrollStats.resourcesAfter.graphicsContexts} graphics contexts/` +
         `${scrollStats.resourcesAfter.buffers} buffers, ` +
-        `${cardMaterialStats.eventIds.length} cards directly textured`
+        `${cardMaterialStats.eventIds.length} cards in one shared diffuse + normal mesh`
     );
 
     // THE REGRESSION SCENARIO. Scene Tuning is DOM chrome so it can sit above
@@ -1726,7 +1783,7 @@ try {
       fallbackResult.canvases !== 1 ||
       (fallbackCursorEnv.expected && fallbackResult.cursorX !== '640') ||
       (fallbackCursorEnv.expected && fallbackResult.cursorY !== '400') ||
-      !timelineCardsUseDirectMaterials(fallbackCardMaterialStats) ||
+      !timelineCardsUseSharedMaterial(fallbackCardMaterialStats) ||
       diagnostics.length > 0
     ) {
       throw new Error(`GPU fallback diagnostics: ${JSON.stringify({
@@ -1736,8 +1793,8 @@ try {
       })}`);
     }
     console.log(
-      `viz GPU fallback ok: WebGL, ${fallbackCardMaterialStats.eventIds.length} cards directly ` +
-        `textured${fallbackCursorEnv.expected ? '' : ' (pointer cursor not checked)'}`
+      `viz GPU fallback ok: WebGL, ${fallbackCardMaterialStats.eventIds.length} cards in one ` +
+        `shared diffuse + normal mesh${fallbackCursorEnv.expected ? '' : ' (pointer cursor not checked)'}`
     );
   } finally {
     await fallbackBrowser.close();

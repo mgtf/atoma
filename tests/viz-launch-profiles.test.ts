@@ -57,6 +57,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
   const welcomeView = readFileSync('src/viz/client-gl/renderer/views/welcome.ts', 'utf8');
   const rendererRuns = readFileSync('src/viz/client-gl/renderer/views/runs.ts', 'utf8');
   const rendererShaders = readFileSync('src/viz/client-gl/renderer/shaders.ts', 'utf8');
+  const timelineCardMaterial = readFileSync(
+    'src/viz/client-gl/renderer/timeline-card-material.ts',
+    'utf8'
+  );
   const rendererChipLayout = readFileSync('src/viz/client-gl/renderer/chip-layout.ts', 'utf8');
   const farField = readFileSync('src/viz/client-gl/renderer/far-field.ts', 'utf8');
   const gpuCursor = readFileSync('src/viz/client-gl/AtomaCursor.tsx', 'utf8');
@@ -211,15 +215,17 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // the guard is that consecutive rail rows still clear each other at hover
     // scale, asserted on the real layout in viz-gpu-views rather than grepped.
     expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
-    // Timeline cards stay in Pixi's regular Graphics batch. A Filter here
-    // creates one render-to-texture pass per visible card and cannot sustain
-    // a 120 Hz RUNS timeline. The direct texture fill works on both backends.
-    expect(gpuRenderer).toMatch(/grain\.fill\(\{[\s\S]{0,120}texture: material/);
-    expect(gpuRenderer).toMatch(/textureSpace: 'global'/);
-    expect(gpuRenderer).toMatch(/matrix: materialMatrix/);
-    expect(gpuRenderer).toMatch(/alpha: 0\.14/);
-    expect(gpuRenderer).toMatch(/grain\.blendMode = 'multiply'/);
+    // Timeline faces occupy ONE direct multi-texture mesh. A Filter or custom
+    // mesh per card would make cost scale with the ALL event count again.
+    expect(gpuRenderer).toMatch(/material\.layersFor\(parent\)/);
+    expect(gpuRenderer).toMatch(/material\.createFace\(\{/);
+    expect(gpuRenderer).toMatch(/flushTimelineCardMaterial/);
     expect(gpuRenderer).not.toMatch(/createCardFilter|(?:base|grain|container)\.filters/);
+    expect(timelineCardMaterial).toMatch(/TIMELINE_CARD_MATERIAL_LABEL = 'timeline-card-material-batch'/);
+    expect(timelineCardMaterial).toMatch(/this\.mesh = new Mesh/);
+    expect(timelineCardMaterial).toMatch(/uSandDiffuse: diffuse\.source/);
+    expect(timelineCardMaterial).toMatch(/uSandNormal: normal\.source/);
+    expect(timelineCardMaterial).not.toMatch(/\bFilter\b|timeline-card-grain/);
     expect(rendererShaders).not.toMatch(/CARD_FILTER/);
     expect(gpuRenderer).toMatch(/drawViewTransition/);
     expect(gpuRenderer).toMatch(/createFarField/);

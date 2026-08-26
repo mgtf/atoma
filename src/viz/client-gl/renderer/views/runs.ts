@@ -485,7 +485,7 @@ export function drawRuns(
   const listY = controlsBottom + 7;
   const listHeight = height - listY - GPU_LAYOUT.gap;
   const listMask = new Graphics();
-  // Card filters have 12px shader padding and hover-scale around center.
+  // Timeline chrome and its shared material face hover-scale around centre.
   // Keep vertical clipping strict (no overlap with filters) but use the full
   // pane width so right-side glow/scale is not guillotined.
   listMask.rect(leftX + 1, listY, leftWidth - 2, listHeight).fill(0xffffff);

@@ -94,11 +94,13 @@ npm run viz:mark-turn:analyze
   bind group that points at it — every later `queue.submit` is then a
   validation error, permanently. Today only the pointer-light filter has that
   lifetime.
-- Timeline cards use a repeated direct `Graphics` texture fill for their grain.
-  Never put a Pixi `Filter` on each card: every filtered object becomes its own
-  render-to-texture pass, so GPU cost scales with the visible event count and
-  the full RUNS timeline cannot sustain 120 Hz. Hover and selection belong in
-  batchable tint, border, aura, rail, and shadow properties instead.
+- Timeline card bodies use ONE direct shared `Mesh` for all visible faces. Its
+  shader samples the CC0 diffuse + normal bitmaps once each and derives the
+  specular term analytically; chrome remains ordinary Graphics in underlay and
+  overlay layers. Never put a Pixi `Filter` or custom mesh on each card: every
+  filter becomes its own render-to-texture pass and every custom mesh its own
+  draw, so GPU cost diverges between ALL and TRUST. Hover/entry transforms and
+  tint are interleaved attributes, flushed once before Pixi's render ticker.
 - Pixi 8.19.0 WebGPU GC also unloads in-use static uniform buffers (global
   uniforms, batcher UBOs) whose values have not changed, with the same
   destroyed-buffer submit (pixijs#12080). The engine fix (pixijs#12147) is

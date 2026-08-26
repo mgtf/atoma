@@ -48,6 +48,19 @@ export function multiplyTint(from: number, to: number): number {
   return (ratio(fr, tr) << 16) | (ratio(fg, tg) << 8) | ratio(fb, tb);
 }
 
+/** Apply a Pixi-style packed RGB tint and return the resulting packed RGB. */
+export function tintColor(color: number, tint: number): number {
+  const [red, green, blue] = split(color);
+  const [tintRed, tintGreen, tintBlue] = split(tint);
+  const multiply = (value: number, factor: number): number =>
+    channel(value * factor / 255);
+  return (
+    multiply(red, tintRed) << 16 |
+    multiply(green, tintGreen) << 8 |
+    multiply(blue, tintBlue)
+  );
+}
+
 /** No-op tint: what a pooled label must be reset to before reuse. */
 export const NO_TINT = 0xffffff;
 
