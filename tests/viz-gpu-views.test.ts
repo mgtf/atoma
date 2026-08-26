@@ -52,9 +52,14 @@ import {
   overviewRailChromeLayout,
   sidebarLayout,
   SIDEBAR_GROUPS,
+  utilityDockOpacity,
 } from '../src/viz/client-gl/renderer/views/sidebar.js';
 import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
-import { viewFrame, VIEW_FRAME_PAD } from '../src/viz/client-gl/renderer/view-frame.js';
+import {
+  viewFrame,
+  viewFrameGutterRects,
+  VIEW_FRAME_PAD,
+} from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -75,6 +80,7 @@ import {
   ATOMA_MARK_HEADER_SCALE,
   ATOMA_MARK_LOCAL_CENTER,
   ATOMA_MARK_OVERVIEW_RAIL_SCALE,
+  interpolateAtomaMarkPlacement,
 } from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
@@ -578,6 +584,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     tuningPanelOpen: false,
     announcementResetSignal: 0,
     enter: noop,
+    showWelcome: noop,
+    activateCrystal: noop,
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
     toggleTuningPanel: noop,
@@ -1056,6 +1064,7 @@ describe('the nav rail', () => {
   it('draws one nav button per view, marking the current one', () => {
     const ctx = createRecordingCtx();
     drawSidebar(ctx, makeSnapshot({ view: 'skills' }), 720);
+    expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(true);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
       'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
@@ -1089,6 +1098,7 @@ describe('the nav rail', () => {
       720,
       GPU_LAYOUT.sidebarWidth
     );
+    expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(false);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
     expect(nav.map((button) => button.id)).toEqual([
       'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
@@ -1128,8 +1138,8 @@ describe('the nav rail', () => {
     const first = rows[0]!;
     const last = rows.at(-1)!;
 
-    expect(layout.crystal).toEqual({ x: 164, y: 57, width: 44, height: 51 });
-    expect(layout.navigationTop).toBe(108);
+    expect(layout.crystal).toEqual({ x: 164, y: 65, width: 44, height: 51 });
+    expect(layout.navigationTop).toBe(116);
     expect(layout.crystal.y + layout.crystal.height).toBeLessThan(first.y);
     expect(last.y + last.height).toBeLessThan(layout.profile!.y);
     expect(layout.profile!.y + layout.profile!.height).toBeLessThan(layout.locale.y);
@@ -1149,6 +1159,17 @@ describe('the nav rail', () => {
     );
     expect(signedOut.profile).toBeNull();
     expect(signedOut.navigationBottom).toBeGreaterThan(layout.navigationBottom);
+  });
+
+  it('cross-fades utility docks without popping at either camera endpoint', () => {
+    expect(utilityDockOpacity('enter', 0)).toBe(0);
+    expect(utilityDockOpacity('leave', 0)).toBe(1);
+    expect(utilityDockOpacity('enter', 0.4)).toBeCloseTo(0.4);
+    expect(utilityDockOpacity('leave', 0.4)).toBeCloseTo(0.6);
+    expect(utilityDockOpacity('enter', 1)).toBe(1);
+    expect(utilityDockOpacity('leave', 1)).toBe(0);
+    expect(utilityDockOpacity('enter', -1)).toBe(0);
+    expect(utilityDockOpacity('leave', 2)).toBe(0);
   });
 
   it('has no Settings row: the account menu owns that entrance', () => {
@@ -1324,6 +1345,24 @@ describe('the nav rail', () => {
     internals.cameraFrameLayer = null;
     renderer.panel(cardRoot, 0, 0, 200, 80);
     expect(internals.castShadows).toHaveLength(1);
+  });
+
+  it('keeps the overview seam wash out of focused rounded corners', () => {
+    expect(viewFrameGutterRects(true, 1072, 720)).toEqual([]);
+    expect(viewFrameGutterRects(false, 1072, 720)).toEqual([
+      {
+        x: 0,
+        y: GPU_LAYOUT.headerHeight,
+        width: 1072,
+        height: GPU_LAYOUT.gap,
+      },
+      {
+        x: 0,
+        y: GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap,
+        width: GPU_LAYOUT.gap,
+        height: 720 - GPU_LAYOUT.headerHeight - GPU_LAYOUT.gap,
+      },
+    ]);
   });
 
   it('projects each non-container viewport escape exactly once', () => {
@@ -3554,6 +3593,25 @@ describe('drawWelcome gate', () => {
 // ---------------------------------------------------------------------------
 
 describe('attachAtomaMark glass layering', () => {
+  it('moves and scales one retained crystal through an interpolated placement', () => {
+    expect(interpolateAtomaMarkPlacement(
+      { x: 20, y: 30, visualScale: 3.2 },
+      { x: 80, y: 70, visualScale: 1.8 },
+      0.5
+    )).toEqual({ x: 50, y: 50, visualScale: 2.5 });
+
+    const parent = new Container();
+    const mark = attachAtomaMark(parent, () => {}, 20, 30, 3.2);
+    const crystal = mark.container.children[0] as Container;
+    const initialCrystalScale = crystal.scale.x;
+    mark.setPlacement(50, 50, 2.5);
+
+    expect(mark.container.position).toMatchObject({ x: 50, y: 50 });
+    expect(crystal.scale.x).toBeCloseTo(initialCrystalScale * 2.5 / 3.2, 8);
+    expect(parent.children).toContain(mark.container);
+    mark.destroy();
+  });
+
   it('paints the bead between the far walls and the near glass, clipped to the crystal', () => {
     // The defect this pins: with the bead painted LAST it sat on top of the
     // near faces at any size, and blown up to the arrival gate it read as a

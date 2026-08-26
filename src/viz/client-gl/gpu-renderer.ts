@@ -38,9 +38,13 @@ import type {
   VizRun,
 } from '../client/types.js';
 import {
+  ATOMA_MARK_ENV_MIN_SCALE,
+  ATOMA_MARK_HEADER_SCALE,
   ATOMA_MARK_LOCAL_CENTER,
   attachAtomaMark,
+  interpolateAtomaMarkPlacement,
   type AtomaMarkHandle,
+  type AtomaMarkPlacement,
 } from './renderer/atoma-mark.js';
 import { createFarField, FAR_FIELD_LABEL, type FarField } from './renderer/far-field.js';
 import {
@@ -102,6 +106,7 @@ import {
 } from './pointer-light.js';
 import { packMarkCaustic, readMarkFieldCaustic } from './mark-field-light.js';
 import { TooltipLayer } from './renderer/tooltip.js';
+import { viewFrameGutterRects } from './renderer/view-frame.js';
 import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
@@ -110,11 +115,14 @@ import {
   buildSceneCameraFrame,
   clientToRendererPoint,
   rendererToClientPoint,
+  sceneCameraEase,
   sceneCameraIsMoving,
   sceneCameraForMode,
+  sceneCameraTransitionDuration,
   sceneCameraViewport,
   subscribeSceneCameraFrames,
   visibleSceneLayoutHeight,
+  type SceneCameraMode,
   type SceneCameraViewport,
 } from './scene-camera.js';
 
@@ -387,7 +395,9 @@ import {
   FOCUS_RAIL_FPS_SCALE,
   focusRailChromeLayout,
   overviewRailChromeLayout,
+  utilityDockOpacity,
   type FocusRailChromeLayout,
+  type FocusRailRect,
   type OverviewRailChromeLayout,
 } from './renderer/views/sidebar.js';
 import { attachAvatarOrb, type AvatarOrbHandle } from './renderer/avatar-orb.js';
@@ -428,11 +438,29 @@ export class GpuRenderer {
    * The one crystal, RETAINED across scene rebuilds like the far field.
    * Attaching per render leaked its render textures, geometries and shader —
    * `Mesh.destroy()` only nulls those references, and WebGPU GC is pinned
-   * off. The key captures every attach parameter; a mismatch (view change,
-   * resize, resolution change) destroys the old mark properly and builds a
-   * new one.
+   * off. Navigation position and scale are mutable on that retained handle;
+   * the resource key changes only when shader/capture ownership really does
+   * (welcome mode, reflection class, resolution).
    */
-  private atomaMark: { key: string; handle: AtomaMarkHandle } | null = null;
+  private atomaMark: {
+    key: string;
+    resourceKey: string;
+    handle: AtomaMarkHandle;
+    placement: AtomaMarkPlacement;
+  } | null = null;
+  private atomaMarkMotion: {
+    from: AtomaMarkPlacement;
+    to: AtomaMarkPlacement;
+    startedAt: number;
+    duration: number;
+  } | null = null;
+  private previousSceneCameraMode: SceneCameraMode | null = null;
+  private utilityDockTransition: {
+    from: SceneCameraMode;
+    to: SceneCameraMode;
+    startedAt: number;
+    duration: number;
+  } | null = null;
   /**
    * The account orbs, retained on the same terms as the crystal above: each
    * mesh carries a shader, a geometry and a decoded avatar texture, none of
@@ -1215,6 +1243,9 @@ export class GpuRenderer {
     // label still parented would otherwise be destroyed twice.
     this.atomaMark?.handle.destroy();
     this.atomaMark = null;
+    this.atomaMarkMotion = null;
+    this.previousSceneCameraMode = null;
+    this.utilityDockTransition = null;
     this.labels.clear();
     this.textStyles.clear();
     this.app.canvas.removeEventListener('wheel', this.wheel);
@@ -1358,7 +1389,32 @@ export class GpuRenderer {
         this.countObjects(this.markRoot);
       return;
     }
-    const focused = snapshot.state.sceneCameraMode === 'focus';
+    const cameraMode = snapshot.state.sceneCameraMode;
+    const focused = cameraMode === 'focus';
+    const now = performance.now();
+    if (
+      this.previousSceneCameraMode !== null &&
+      this.previousSceneCameraMode !== cameraMode
+    ) {
+      this.utilityDockTransition = prefersReducedMotion()
+        ? null
+        : {
+            from: this.previousSceneCameraMode,
+            to: cameraMode,
+            startedAt: now,
+            duration: sceneCameraTransitionDuration(cameraMode),
+          };
+    }
+    this.previousSceneCameraMode = cameraMode;
+    let utilityTransition = this.utilityDockTransition;
+    const utilityProgress = () => utilityTransition
+      ? Math.max(0, Math.min(1, (performance.now() - utilityTransition.startedAt) /
+          Math.max(1, utilityTransition.duration)))
+      : 1;
+    if (utilityTransition && utilityProgress() >= 1) {
+      this.utilityDockTransition = null;
+      utilityTransition = null;
+    }
     this.drawAmbientGrid(
       this.ambientRoot,
       width,
@@ -1385,13 +1441,11 @@ export class GpuRenderer {
       : visibleLayoutHeight;
     // The compact rail is endpoint chrome: retain its established final
     // geometry during approach while the central column itself grows/shrinks.
-    const focusLayoutHeight = focused
-      ? visibleSceneLayoutHeight(buildSceneCameraFrame(
-          sceneCameraForMode('focus', width, height),
-          width,
-          height
-        ))
-      : layoutHeight;
+    const focusLayoutHeight = visibleSceneLayoutHeight(buildSceneCameraFrame(
+      sceneCameraForMode('focus', width, height),
+      width,
+      height
+    ));
     const focusRail = focused
       ? focusRailChromeLayout(contentLeft, focusLayoutHeight, snapshot.data.auth !== null)
       : null;
@@ -1404,8 +1458,11 @@ export class GpuRenderer {
       focusRail?.navigationBottom ?? layoutHeight,
       focusRail?.navigationTop ?? overviewRail?.navigationTop ?? GPU_LAYOUT.headerHeight
     );
-    if (focusRail) this.drawFocusRailChrome(snapshot, focusRail);
-    else if (overviewRail) this.drawOverviewRailChrome(overviewRail);
+    if (focusRail) {
+      this.drawFocusRailChrome(snapshot, focusRail);
+    } else if (overviewRail) {
+      this.drawOverviewRailChrome(snapshot, overviewRail);
+    }
     const viewportMaskHeight = Math.max(0, layoutHeight - GPU_LAYOUT.gap + 1);
     const viewportMask = new Graphics();
     viewportMask.rect(0, 0, contentWidth, viewportMaskHeight).fill(0xffffff);
@@ -1428,28 +1485,19 @@ export class GpuRenderer {
     // the frame's rounded corner, where it reads as a second frame underneath
     // the real one. Continue the shared chrome wash only through that gutter;
     // the retained frame still owns the actual surface, border and radius.
-    const frameTop = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-    const gutterSourceTop = focused
-      ? GPU_LAYOUT.focusTopInset
-      : GPU_LAYOUT.headerHeight;
-    const gutter = new Graphics();
-    gutter.label = 'camera-view-gutter';
-    gutter
-      .rect(
-        0,
-        gutterSourceTop,
-        contentWidth,
-        Math.max(0, frameTop - gutterSourceTop)
-      )
-      .rect(
-        0,
-        frameTop,
-        GPU_LAYOUT.gap,
-        Math.max(0, layoutHeight - frameTop)
-      )
-      .fill({ color: 0x0b111e, alpha: 0.42 });
-    gutter.eventMode = 'none';
-    viewport.addChild(gutter);
+    // Focus has no horizontal header seam, so the geometry helper returns no
+    // wash there and the ambient field stays clean around the rounded corner.
+    const gutterRects = viewFrameGutterRects(focused, contentWidth, layoutHeight);
+    if (gutterRects.length > 0) {
+      const gutter = new Graphics();
+      gutter.label = 'camera-view-gutter';
+      for (const rect of gutterRects) {
+        gutter.rect(rect.x, rect.y, rect.width, rect.height);
+      }
+      gutter.fill({ color: 0x0b111e, alpha: 0.42 });
+      gutter.eventMode = 'none';
+      viewport.addChild(gutter);
+    }
     this.root = viewport;
     this.activeViewLayoutHeight = layoutHeight;
     try {
@@ -1509,6 +1557,71 @@ export class GpuRenderer {
     }
     this.translateViewBounds(contentLeft);
     this.drawOverlays(snapshot, width, layoutHeight);
+    const enteringFocus = utilityTransition?.from === 'overview' &&
+      utilityTransition.to === 'focus';
+    const leavingFocus = utilityTransition?.from === 'focus' &&
+      utilityTransition.to === 'overview';
+    const easedUtilityProgress = utilityTransition
+      ? sceneCameraEase(utilityProgress())
+      : 1;
+    const opacitySetters: {
+      set: (opacity: number) => void;
+      direction: 'enter' | 'leave';
+    }[] = [];
+    // Keep BOTH copies alive during camera travel. Otherwise the utility dock
+    // teleports between the overview header and the foot of the focused rail,
+    // which is especially abrupt for the retained 3D profile orb.
+    if (!focused || enteringFocus) {
+      opacitySetters.push({
+        set: this.drawHeaderUtilityDock(
+          snapshot,
+          width,
+          enteringFocus ? utilityDockOpacity('leave', easedUtilityProgress) : leavingFocus
+            ? utilityDockOpacity('enter', easedUtilityProgress)
+            : 1,
+          utilityTransition === null
+        ),
+        direction: enteringFocus ? 'leave' : 'enter',
+      });
+    }
+    if (focused || leavingFocus) {
+      const dockLayout = focusRail ?? focusRailChromeLayout(
+        contentLeft,
+        focusLayoutHeight,
+        snapshot.data.auth !== null
+      );
+      opacitySetters.push({
+        set: this.drawFocusRailDock(
+          snapshot,
+          dockLayout,
+          enteringFocus ? utilityDockOpacity('enter', easedUtilityProgress) : leavingFocus
+            ? utilityDockOpacity('leave', easedUtilityProgress)
+            : 1,
+          utilityTransition === null
+        ),
+        direction: leavingFocus ? 'leave' : 'enter',
+      });
+    }
+    if (utilityTransition && opacitySetters.length > 0) {
+      const transition = utilityTransition;
+      let completed = false;
+      const animateUtilityDocks = () => {
+        if (this.utilityDockTransition !== transition) return;
+        const progress = utilityProgress();
+        const eased = sceneCameraEase(progress);
+        for (const entry of opacitySetters) {
+          entry.set(utilityDockOpacity(entry.direction, eased));
+        }
+        if (completed || progress < 1) return;
+        completed = true;
+        this.utilityDockTransition = null;
+        requestAnimationFrame(() => {
+          if (this.snapshot === snapshot) this.render(snapshot);
+        });
+      };
+      animateUtilityDocks();
+      this.addTicker(animateUtilityDocks);
+    }
     drawAccountMenu(this, snapshot, width, layoutHeight, focusRail?.profile ?? undefined);
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
@@ -3928,10 +4041,10 @@ export class GpuRenderer {
   }
 
   /**
-   * Attach-or-reuse for the crystal. When every attach parameter matches the
-   * retained mark, the existing subtree is re-parented and its paint ticker
-   * re-registered (renderScene cleared all tickers); otherwise the old mark
-   * releases its GPU resources and a fresh one is built.
+   * Attach-or-reuse for the crystal. Navigation placements share one retained
+   * subtree and travel with the scene camera; resource-shape changes (the
+   * large bobbing welcome mark, reflection mode, renderer resolution) still
+   * release the old GPU resources and build the required shape once.
    */
   retainAtomaMark(
     x: number,
@@ -3939,30 +4052,102 @@ export class GpuRenderer {
     visualScale?: number,
     options?: { bobPx?: number; bobPeriodMs?: number }
   ) {
-    const key = [
+    const resolvedScale = visualScale ?? ATOMA_MARK_HEADER_SCALE;
+    const placement: AtomaMarkPlacement = {
       x,
       y,
-      visualScale ?? '',
+      visualScale: resolvedScale,
+    };
+    const resourceKey = [
       options?.bobPx ?? '',
       options?.bobPeriodMs ?? '',
+      resolvedScale >= ATOMA_MARK_ENV_MIN_SCALE ? 'environment' : 'chrome',
       this.app.renderer.resolution,
     ].join('|');
-    if (this.atomaMark?.key === key) {
-      this.atomaMark.handle.resume(this.markRoot, (callback) => this.addTicker(callback));
+    const key = [
+      resourceKey,
+      placement.x,
+      placement.y,
+      placement.visualScale,
+    ].join('|');
+    const current = this.atomaMark;
+    const now = performance.now();
+    const sampleMotion = (motion: NonNullable<typeof this.atomaMarkMotion>) => {
+      const progress = Math.max(0, Math.min(1, (performance.now() - motion.startedAt) /
+        Math.max(1, motion.duration)));
+      return {
+        progress,
+        placement: interpolateAtomaMarkPlacement(
+          motion.from,
+          motion.to,
+          sceneCameraEase(progress)
+        ),
+      };
+    };
+
+    if (
+      current &&
+      current.resourceKey === resourceKey &&
+      options?.bobPx === undefined
+    ) {
+      if (current.key !== key) {
+        const from = this.atomaMarkMotion
+          ? sampleMotion(this.atomaMarkMotion).placement
+          : current.placement;
+        current.key = key;
+        current.placement = from;
+        this.atomaMarkMotion = prefersReducedMotion()
+          ? null
+          : {
+              from,
+              to: placement,
+              startedAt: now,
+              duration: sceneCameraTransitionDuration(
+                this.snapshot?.state.sceneCameraMode ?? 'overview'
+              ),
+            };
+      }
+      current.handle.resume(this.markRoot, (callback) => this.addTicker(callback));
+      const motion = this.atomaMarkMotion;
+      if (!motion) {
+        current.placement = placement;
+        current.handle.setPlacement(
+          placement.x,
+          placement.y,
+          placement.visualScale
+        );
+        return;
+      }
+      const animatePlacement = () => {
+        if (this.atomaMark !== current || this.atomaMarkMotion !== motion) return;
+        const sample = sampleMotion(motion);
+        current.placement = sample.placement;
+        current.handle.setPlacement(
+          sample.placement.x,
+          sample.placement.y,
+          sample.placement.visualScale
+        );
+        if (sample.progress >= 1) this.atomaMarkMotion = null;
+      };
+      animatePlacement();
+      this.addTicker(animatePlacement);
       return;
     }
-    this.atomaMark?.handle.destroy();
+    current?.handle.destroy();
+    this.atomaMarkMotion = null;
     this.atomaMark = {
       key,
+      resourceKey,
       handle: attachAtomaMark(
         this.markRoot,
         (callback) => this.addTicker(callback),
         x,
         y,
-        visualScale,
+        resolvedScale,
         this.app.renderer,
         options
       ),
+      placement,
     };
   }
 
@@ -4000,17 +4185,18 @@ export class GpuRenderer {
       return;
     }
     existing?.handle.destroy();
+    const handle = attachAvatarOrb(this.markRoot, (callback) => this.addTicker(callback), {
+      x,
+      y,
+      size,
+      photoUrl,
+      seed,
+      active,
+      pointerAt: () => this.pointerScreenPosition(),
+    });
     this.avatarOrbs.set(slot, {
       key,
-      handle: attachAvatarOrb(this.markRoot, (callback) => this.addTicker(callback), {
-        x,
-        y,
-        size,
-        photoUrl,
-        seed,
-        active,
-        pointerAt: () => this.pointerScreenPosition(),
-      }),
+      handle,
     });
   }
 
@@ -4053,6 +4239,15 @@ export class GpuRenderer {
     bar.fill({ color: 0x0b111e, alpha: 0.42 });
     bar.eventMode = 'none';
     this.root.addChild(bar);
+  }
+
+  /** Global utilities occupy the overview header and cross-fade into focus. */
+  private drawHeaderUtilityDock(
+    snapshot: GpuRenderSnapshot,
+    width: number,
+    opacity = 1,
+    interactive = true
+  ): (opacity: number) => void {
     // ONE vertical centre for every utility in the band.
     const midY = GPU_LAYOUT.headerHeight / 2;
 
@@ -4064,8 +4259,9 @@ export class GpuRenderer {
     // the header controls shift left by its width plus a gap.
     const auth = snapshot.data.auth;
     const accountReserve = auth ? HEADER_ORB_SIZE + 16 : 0;
-    this.drawFpsReadout(width - 64 - accountReserve, midY);
-    this.button(
+    const opacityTargets: { alpha: number }[] = [];
+    opacityTargets.push(this.drawFpsReadout(width - 64 - accountReserve, midY));
+    const locale = this.button(
       this.root,
       'locale.toggle',
       'button',
@@ -4079,22 +4275,41 @@ export class GpuRenderer {
       GPU_COLORS.primary,
       true
     );
+    locale.eventMode = interactive ? 'static' : 'none';
+    opacityTargets.push(locale);
     if (auth) {
       const orbX = width - HEADER_ORB_SIZE - 12;
       const orbY = (GPU_LAYOUT.headerHeight - HEADER_ORB_SIZE) / 2;
-      this.drawAccountControl(snapshot, orbX, orbY, HEADER_ORB_SIZE);
+      opacityTargets.push(...this.drawAccountControl(
+        snapshot,
+        orbX,
+        orbY,
+        HEADER_ORB_SIZE,
+        'overview-header',
+        interactive
+      ));
     }
     // Signed out: no account slot is claimed this frame and
     // `sweepAvatarOrbs` releases the mesh at the end of the render.
+    const setOpacity = (next: number) => {
+      const resolved = Math.max(0, Math.min(1, next));
+      for (const target of opacityTargets) target.alpha = resolved;
+    };
+    setOpacity(opacity);
+    return setOpacity;
   }
 
   /** Overview identity spans the rail and leaves the utility band uncluttered. */
-  private drawOverviewRailChrome(layout: OverviewRailChromeLayout) {
+  private drawOverviewRailChrome(
+    snapshot: GpuRenderSnapshot,
+    layout: OverviewRailChromeLayout
+  ) {
     this.drawAtomaMark(
       layout.crystal.x + layout.crystal.width / 2 - ATOMA_MARK_LOCAL_CENTER,
       layout.crystal.y + layout.crystal.height / 2 - ATOMA_MARK_LOCAL_CENTER,
       layout.crystalScale
     );
+    this.drawAtomaMarkControl(snapshot, layout.crystal, layout.crystalScale);
   }
 
   /** Focus chrome lives entirely inside the compact rail, never in a bar. */
@@ -4107,15 +4322,59 @@ export class GpuRenderer {
       layout.crystal.x + (layout.crystal.width - markSize) / 2,
       layout.crystal.y + (layout.crystal.height - markSize) / 2
     );
+    this.drawAtomaMarkControl(snapshot, layout.crystal, ATOMA_MARK_HEADER_SCALE);
+  }
+
+  /** The retained GPU mark cannot own events, so mirror its visual footprint. */
+  private drawAtomaMarkControl(
+    snapshot: GpuRenderSnapshot,
+    slot: FocusRailRect,
+    visualScale: number
+  ) {
+    const size = ATOMA_MARK_LOCAL_CENTER * 2 * visualScale;
+    const x = slot.x + (slot.width - size) / 2;
+    const y = slot.y + (slot.height - size) / 2;
+    const control = new Graphics();
+    control.rect(0, 0, size, size);
+    control.fill({ color: 0xffffff, alpha: 0.001 });
+    control.position.set(x, y);
+    control.eventMode = 'static';
+    control.cursor = 'pointer';
+    control.hitArea = new Rectangle(0, 0, size, size);
+    control.on('pointertap', () => snapshot.onActivate('brand.crystal'));
+    this.root.addChild(control);
+    this.recordHitTarget(this.root, {
+      id: 'brand.crystal',
+      role: 'button',
+      label: snapshot.t(snapshot.state.sceneCameraMode === 'focus'
+        ? 'nav.crystalExpand'
+        : 'nav.crystalWelcome'),
+      x,
+      y,
+      width: size,
+      height: size,
+    });
+  }
+
+  /** FPS, locale and profile share one opacity curve at the foot of focus. */
+  private drawFocusRailDock(
+    snapshot: GpuRenderSnapshot,
+    layout: FocusRailChromeLayout,
+    opacity = 1,
+    interactive = true
+  ): (opacity: number) => void {
+    const opacityTargets: { alpha: number }[] = [];
     if (layout.profile) {
-      this.drawAccountControl(
+      opacityTargets.push(...this.drawAccountControl(
         snapshot,
         layout.profile.x,
         layout.profile.y,
-        layout.profile.width
-      );
+        layout.profile.width,
+        'focus-rail',
+        interactive
+      ));
     }
-    this.button(
+    const locale = this.button(
       this.root,
       'locale.toggle',
       'button',
@@ -4129,11 +4388,19 @@ export class GpuRenderer {
       GPU_COLORS.primary,
       true
     );
-    this.drawFpsReadout(
+    locale.eventMode = interactive ? 'static' : 'none';
+    opacityTargets.push(locale);
+    opacityTargets.push(this.drawFpsReadout(
       layout.fps.x + layout.fps.width - 5,
       layout.fps.y + layout.fps.height / 2,
       FOCUS_RAIL_FPS_SCALE
-    );
+    ));
+    const setOpacity = (next: number) => {
+      const resolved = Math.max(0, Math.min(1, next));
+      for (const target of opacityTargets) target.alpha = resolved;
+    };
+    setOpacity(opacity);
+    return setOpacity;
   }
 
   /** One retained profile orb, with its real interactive control above it. */
@@ -4141,41 +4408,48 @@ export class GpuRenderer {
     snapshot: GpuRenderSnapshot,
     x: number,
     y: number,
-    size: number
-  ) {
+    size: number,
+    slot = 'overview-header',
+    interactive = true
+  ): { alpha: number }[] {
     const auth = snapshot.data.auth;
-    if (!auth) return;
+    if (!auth) return [];
     this.retainAvatarOrb(
-      'header',
+      slot,
       x,
       y,
       size,
       auth.viewer.avatarUrl,
       auth.viewer.principalId,
-      true
+      interactive
     );
+    const orb = this.avatarOrbs.get(slot)?.handle;
+    if (!orb) return [];
     // `markRoot` is non-interactive so the retained mesh cannot own events.
     // This nearly transparent stage control forwards activation and hover.
     const orbHit = new Graphics();
     orbHit.rect(0, 0, size, size);
     orbHit.fill({ color: 0xffffff, alpha: 0.001 });
     orbHit.position.set(x, y);
-    orbHit.eventMode = 'static';
-    orbHit.cursor = 'pointer';
+    orbHit.eventMode = interactive ? 'static' : 'none';
+    orbHit.cursor = interactive ? 'pointer' : 'default';
     orbHit.hitArea = new Rectangle(0, 0, size, size);
     orbHit.on('pointertap', () => snapshot.onActivate('account.menu.toggle'));
-    orbHit.on('pointerover', () => this.avatarOrbs.get('header')?.handle.setHover(true));
-    orbHit.on('pointerout', () => this.avatarOrbs.get('header')?.handle.setHover(false));
+    orbHit.on('pointerover', () => this.avatarOrbs.get(slot)?.handle.setHover(true));
+    orbHit.on('pointerout', () => this.avatarOrbs.get(slot)?.handle.setHover(false));
     this.root.addChild(orbHit);
-    this.recordHitTarget(this.root, {
-      id: 'account.menu.toggle',
-      role: 'button',
-      label: snapshot.t('auth.openMenu'),
-      x,
-      y,
-      width: size,
-      height: size,
-    });
+    if (interactive) {
+      this.recordHitTarget(this.root, {
+        id: 'account.menu.toggle',
+        role: 'button',
+        label: snapshot.t('auth.openMenu'),
+        x,
+        y,
+        width: size,
+        height: size,
+      });
+    }
+    return [orb.container, orbHit];
   }
 
   /**
@@ -4192,7 +4466,7 @@ export class GpuRenderer {
    * one missed 120Hz vsync reads as ~116 FPS rather than an alarming 60 FPS.
    * It intentionally survives scene rebuilds caused by wheel input.
    */
-  private drawFpsReadout(right: number, y: number, visualScale = 1) {
+  private drawFpsReadout(right: number, y: number, visualScale = 1): BitmapText {
     const readout = new BitmapText({
       text: formatFps(this.lastFps),
       style: FPS_BITMAP_STYLE,
@@ -4215,6 +4489,7 @@ export class GpuRenderer {
       if (next !== readout.text) readout.text = next;
       readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(fps));
     });
+    return readout;
   }
 
   private drawOverlays(snapshot: GpuRenderSnapshot, width: number, height: number) {

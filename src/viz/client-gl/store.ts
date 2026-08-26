@@ -216,6 +216,10 @@ export interface GpuUiState {
   /** Monotonic signal consumed by a sent announcement receipt only. */
   announcementResetSignal: number;
   enter: () => void;
+  /** Reopen the arrival scene without forgetting that Continue was completed. */
+  showWelcome: () => void;
+  /** Crystal route: focused content restores overview; overview opens Welcome. */
+  activateCrystal: () => void;
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
   toggleTuningPanel: () => void;
@@ -374,6 +378,13 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
     }
     set({ entered: true });
   },
+  // This is an explicit in-app route, not a first-visit reset. Keep the
+  // persisted admission bit at `1`, so a later reload still opens the product
+  // directly instead of trapping a returning viewer on Welcome again.
+  showWelcome: () => set({ entered: false, accountMenuOpen: false }),
+  activateCrystal: () => set((state) => state.sceneCameraMode === 'focus'
+    ? viewChange(state, state.view, 'overview')
+    : { entered: false, accountMenuOpen: false }),
   toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
   toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),

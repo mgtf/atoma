@@ -43,6 +43,8 @@ const FOCUS_RAIL_FPS_HEIGHT = 8;
 const FOCUS_RAIL_LOCALE_HEIGHT = 26;
 const FOCUS_RAIL_PROFILE_SIZE = 30;
 const FOCUS_RAIL_CRYSTAL_HEIGHT = 51;
+/** A little breathing room above the compact crystal after camera arrival. */
+const FOCUS_RAIL_CRYSTAL_TOP = GPU_LAYOUT.focusTopInset + 11;
 const OVERVIEW_RAIL_CRYSTAL_TOP = 4;
 const OVERVIEW_RAIL_CRYSTAL_SIDE_PAD = 8;
 export const FOCUS_RAIL_FPS_SCALE = 0.68;
@@ -70,6 +72,15 @@ export interface OverviewRailChromeLayout {
   readonly crystalScale: number;
   /** Source-space bottom of chrome reserved above the first navigation row. */
   readonly navigationTop: number;
+}
+
+/** Shared cross-fade curve for utilities moving between the two rail modes. */
+export function utilityDockOpacity(
+  direction: 'enter' | 'leave',
+  progress: number
+): number {
+  const bounded = Math.max(0, Math.min(1, progress));
+  return direction === 'enter' ? bounded : 1 - bounded;
 }
 
 /**
@@ -136,14 +147,14 @@ export function focusRailChromeLayout(
   return {
     crystal: {
       x: buttonX,
-      y: GPU_LAYOUT.focusTopInset + 3,
+      y: FOCUS_RAIL_CRYSTAL_TOP,
       width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
       height: FOCUS_RAIL_CRYSTAL_HEIGHT,
     },
     profile,
     locale,
     fps,
-    navigationTop: GPU_LAYOUT.focusTopInset + 3 + FOCUS_RAIL_CRYSTAL_HEIGHT,
+    navigationTop: FOCUS_RAIL_CRYSTAL_TOP + FOCUS_RAIL_CRYSTAL_HEIGHT,
     navigationBottom: Math.max(0, dockTop - FOCUS_RAIL_DOCK_GAP),
   };
 }
@@ -253,7 +264,7 @@ export function sidebarLayout(
   }));
 }
 
-/** Draw the rail: one wash band, then a heading and a nav button per row. */
+/** Draw the rail: an overview wash, then a heading and a nav button per row. */
 export function drawSidebar(
   ctx: RendererCtx,
   snapshot: GpuRenderSnapshot,
@@ -263,16 +274,25 @@ export function drawSidebar(
   navigationTop: number = GPU_LAYOUT.headerHeight
 ): void {
   const iconOnly = snapshot.state.sceneCameraMode === 'focus';
-  const top = iconOnly ? 0 : GPU_LAYOUT.headerHeight;
 
   // Wash, not an opaque slab — the same 0.42 the header bar uses, so the far
-  // field still reads behind both pieces of chrome.
-  const band = new Graphics();
-  band.label = 'sidebar-band';
-  band.rect(0, top, width, Math.max(0, height - top));
-  band.fill({ color: 0x0b111e, alpha: 0.42 });
-  band.eventMode = 'none';
-  ctx.root.addChild(band);
+  // field still reads behind both pieces of overview chrome. Focus has no
+  // header and its compact controls already own individual surfaces; keeping
+  // this full-height slab there leaves a rectangular veil under the crystal
+  // and across the gap before the rounded content frame.
+  if (!iconOnly) {
+    const band = new Graphics();
+    band.label = 'sidebar-band';
+    band.rect(
+      0,
+      GPU_LAYOUT.headerHeight,
+      width,
+      Math.max(0, height - GPU_LAYOUT.headerHeight)
+    );
+    band.fill({ color: 0x0b111e, alpha: 0.42 });
+    band.eventMode = 'none';
+    ctx.root.addChild(band);
+  }
 
   const buttonX = iconOnly
     ? Math.max(0, width - FOCUS_SIDEBAR_BUTTON_WIDTH)

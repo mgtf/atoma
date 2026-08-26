@@ -60,6 +60,26 @@ export const ATOMA_MARK_OVERVIEW_RAIL_SCALE = 3.2;
  */
 export const ATOMA_MARK_ENV_MIN_SCALE = 4;
 
+export interface AtomaMarkPlacement {
+  readonly x: number;
+  readonly y: number;
+  readonly visualScale: number;
+}
+
+/** Pure placement interpolation; the camera supplies its own eased progress. */
+export function interpolateAtomaMarkPlacement(
+  from: AtomaMarkPlacement,
+  to: AtomaMarkPlacement,
+  progress: number
+): AtomaMarkPlacement {
+  const t = Math.max(0, Math.min(1, progress));
+  return {
+    x: from.x + (to.x - from.x) * t,
+    y: from.y + (to.y - from.y) * t,
+    visualScale: from.visualScale + (to.visualScale - from.visualScale) * t,
+  };
+}
+
 /** Longest side of the env capture. Screen-space reflection, not a cubemap. */
 const MARK_ENV_MAX_PX = 512;
 
@@ -398,6 +418,8 @@ export interface AtomaMarkHandle {
    * inside `container`). A retaining teardown must skip these.
    */
   retained: readonly Container[];
+  /** Moves and resizes the retained crystal without rebuilding its GPU resources. */
+  setPlacement(x: number, y: number, visualScale: number): void;
   /** Re-adds the retained objects and re-registers the paint ticker after a scene rebuild. */
   resume(parent: Container, addTicker: (callback: (ticker: Ticker) => void) => void): void;
   /** Releases render textures, shader, geometries and the display subtree. Idempotent. */
@@ -422,16 +444,20 @@ export function attachAtomaMark(
   addTicker: (callback: (ticker: Ticker) => void) => void,
   x: number,
   y: number,
-  visualScale = ATOMA_MARK_HEADER_SCALE,
+  initialVisualScale = ATOMA_MARK_HEADER_SCALE,
   renderer?: Renderer,
   options?: { bobPx?: number; bobPeriodMs?: number }
 ): AtomaMarkHandle {
+  let markX = x;
+  let markY = y;
+  let visualScale = initialVisualScale;
+  let frameScale = 1;
   /** Render textures alive right now; resize swaps entries, destroy drains it. */
   const ownedTextures = new Set<RenderTexture>();
   let cursorEcho: Graphics | null = null;
   const container = new Container();
   container.label = 'atoma-mark';
-  container.position.set(x, y);
+  container.position.set(markX, markY);
   container.eventMode = 'none';
   const crystal = new Container();
   crystal.position.set(ATOMA_MARK_LOCAL_CENTER, ATOMA_MARK_LOCAL_CENTER);
@@ -510,9 +536,16 @@ export function attachAtomaMark(
   const backdropPass = ((): ((elapsedMs: number) => void) | null => {
     if (!renderer || !shell) return null;
     const resolution = renderer.resolution;
+    // Navigation animates between 1.8x and 3.2x. Allocate its two ping-pong
+    // textures once at the larger endpoint: swapping a texture that is still
+    // bound by WebGPU invalidates the bind group, and per-frame resize would
+    // churn two GPU textures for every scale sample anyway.
+    const backdropVisualScale = initialVisualScale < ATOMA_MARK_ENV_MIN_SCALE
+      ? Math.max(initialVisualScale, ATOMA_MARK_OVERVIEW_RAIL_SCALE)
+      : initialVisualScale;
     const sizePx = Math.max(
       1,
-      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * visualScale * resolution)
+      Math.ceil(ATOMA_MARK_LOCAL_CENTER * 2 * backdropVisualScale * resolution)
     );
     /**
      * TWO textures, alternating. WebGPU forbids a texture being bound for
@@ -530,8 +563,7 @@ export function attachAtomaMark(
       RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
       RenderTexture.create({ width: sizePx, height: sizePx, resolution: 1 }),
     ];
-    ownedTextures.add(textures[0]!);
-    ownedTextures.add(textures[1]!);
+    for (const texture of textures) ownedTextures.add(texture);
     let writeIndex = 0;
     shell.setBackdrop(textures[1]!, sizePx, sizePx);
     /**
@@ -544,13 +576,14 @@ export function attachAtomaMark(
      * is what a feedback loop looks like, not what a strong effect looks like.
      * The subtree that must be in there is exactly the one the glass is in front
      * of: the far facets and the bead.
-     */
-    const scale = ATOMA_MARK_LOCAL_SIZE > 0 ? sizePx / ATOMA_MARK_LOCAL_SIZE : 1;
+    */
     return () => {
       // Rendered in ISOLATION, so the transform maps the 28x28 local box onto
       // the texture rather than onto wherever the mark sits on screen.
       behind.position.set(0, 0);
-      behind.scale.set(scale);
+      behind.scale.set(ATOMA_MARK_LOCAL_SIZE > 0
+        ? sizePx / ATOMA_MARK_LOCAL_SIZE
+        : 1);
       const target = textures[writeIndex]!;
       // Refraction OFF for the pass: the back facets share the front's shader.
       shell.setRefracting(false);
@@ -675,12 +708,14 @@ export function attachAtomaMark(
     // in UV because the lamp never learned the gem had moved.
     const bobPx = options?.bobPx ?? 0;
     const bobPeriodMs = options?.bobPeriodMs ?? 1800;
+    container.x = markX;
     if (bobPx !== 0 && !markClockIsPinned() && !reducedMotion) {
-      container.y = y + Math.sin(markElapsedMs() / bobPeriodMs) * bobPx;
+      container.y = markY + Math.sin(markElapsedMs() / bobPeriodMs) * bobPx;
     } else {
-      container.y = y;
+      container.y = markY;
     }
     const frame = buildAtomaMarkFrame(elapsedMs);
+    frameScale = frame.scale;
     crystal.scale.set(frame.scale * visualScale);
     const beadVisible = markBeadVisible();
     const scale = visualScale * frame.scale;
@@ -820,6 +855,9 @@ export function attachAtomaMark(
     const captureKey = [
       beadVisible,
       elapsedMs,
+      markX,
+      markY,
+      visualScale,
       pointerActive,
       renderer ? `${renderer.screen.width}x${renderer.screen.height}` : '',
     ].join('|');
@@ -856,6 +894,14 @@ export function attachAtomaMark(
   return {
     container,
     retained,
+    setPlacement(nextX, nextY, nextVisualScale) {
+      if (destroyed) return;
+      markX = nextX;
+      markY = nextY;
+      visualScale = nextVisualScale;
+      container.position.set(markX, markY);
+      crystal.scale.set(frameScale * visualScale);
+    },
     resume(nextParent, nextAddTicker) {
       if (destroyed) return;
       for (const child of retained) nextParent.addChild(child);

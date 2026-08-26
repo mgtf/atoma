@@ -67,6 +67,7 @@ export function DomBridge({
   announcementsEnabled?: boolean;
 }) {
   const view = useGpuStore((state) => state.view);
+  const sceneCameraMode = useGpuStore((state) => state.sceneCameraMode);
   const entered = useGpuStore((state) => state.entered);
   const locale = useGpuStore((state) => state.locale);
   const selectedRunId = useGpuStore((state) => state.selectedRunId);
@@ -76,6 +77,7 @@ export function DomBridge({
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
   const activateView = useGpuStore((state) => state.activateView);
+  const activateCrystal = useGpuStore((state) => state.activateCrystal);
   const enter = useGpuStore((state) => state.enter);
   const setLocale = useGpuStore((state) => state.setLocale);
   const setSearch = useGpuStore((state) => state.setSearch);
@@ -138,6 +140,9 @@ export function DomBridge({
         role="application"
         aria-label="Atoma GPU visualizer"
       >
+        <button onClick={activateCrystal}>
+          {t(sceneCameraMode === 'focus' ? 'nav.crystalExpand' : 'nav.crystalWelcome')}
+        </button>
         <nav role="tablist" aria-label="Views">
           {views.map((name) => (
             <button

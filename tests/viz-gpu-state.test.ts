@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   gpuEventCardCopy,
   gpuAtomButtonWidth,
@@ -210,6 +210,39 @@ describe('full-GL Zustand scene state', () => {
     expect(useGpuStore.getState().entered).toBe(false);
     useGpuStore.getState().enter();
     expect(useGpuStore.getState().entered).toBe(true);
+  });
+
+  it('can explicitly reopen Welcome without forgetting the completed admission', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    try {
+      useGpuStore.getState().enter();
+      expect(values.get('atoma.viz.entered')).toBe('1');
+      useGpuStore.getState().activateCrystal();
+      expect(useGpuStore.getState().entered).toBe(false);
+      expect(values.get('atoma.viz.entered')).toBe('1');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('uses the focused crystal as the route back to overview', () => {
+    useGpuStore.setState({
+      view: 'skills',
+      sceneCameraMode: 'focus',
+      entered: true,
+      accountMenuOpen: true,
+    });
+    useGpuStore.getState().activateCrystal();
+    expect(useGpuStore.getState()).toMatchObject({
+      view: 'skills',
+      sceneCameraMode: 'overview',
+      entered: true,
+      accountMenuOpen: false,
+    });
   });
 
   it('keeps event and atom selections mutually exclusive', () => {

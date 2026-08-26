@@ -514,6 +514,10 @@ function GpuAppContent({
       beginEnter();
       return;
     }
+    if (id === 'brand.crystal') {
+      store.activateCrystal();
+      return;
+    }
     if (id.startsWith('nav.')) {
       const nextView = id.slice(4) as typeof store.view;
       // With the duplicate selected-project row removed, re-clicking Projects

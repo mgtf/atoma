@@ -41,6 +41,43 @@ export interface ViewFrame {
   readonly bottom: number;
 }
 
+export interface ViewFrameGutterRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Chrome wash behind the overview frame's header/rail seam.
+ *
+ * Focus crops the horizontal header out of the composition, so it has no seam
+ * to bridge. Keeping this L-shaped wash there leaves its translucent vertical
+ * leg visible through the frame's rounded top-left corner.
+ */
+export function viewFrameGutterRects(
+  focused: boolean,
+  contentWidth: number,
+  layoutHeight: number
+): ViewFrameGutterRect[] {
+  if (focused) return [];
+  const frameTop = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
+  return [
+    {
+      x: 0,
+      y: GPU_LAYOUT.headerHeight,
+      width: contentWidth,
+      height: GPU_LAYOUT.gap,
+    },
+    {
+      x: 0,
+      y: frameTop,
+      width: GPU_LAYOUT.gap,
+      height: Math.max(0, layoutHeight - frameTop),
+    },
+  ];
+}
+
 /**
  * Geometry only, so a layout can be asserted without a GPU.
  *
