@@ -20,6 +20,7 @@ import {
   CAUSTIC_FIELD_WGSL,
   CAUSTIC_FILL_SUBDIVISION,
   CAUSTIC_FILL_WEIGHT,
+  CAUSTIC_FOLD_ARCS,
   CAUSTIC_SAMPLES_PER_BUNDLE,
 } from '../src/viz/client-gl/renderer/caustic-shader.js';
 import {
@@ -140,13 +141,17 @@ describe('far-field shader contract', () => {
       // One plain kernel remains: the radial-offset fold pair is gone, its
       // job taken by the two traced wavelengths it approximated.
       expect(source).not.toContain('causticFold(');
-      // Three curved fold arcs plus the interior fill, plus four broader
+      // Four curved fold arcs plus the interior fill, plus four broader
       // shadow samples per bundle; causticField invokes the bundle for all
       // four traced facets. Every fold sample is the SPECTRAL triple — one
       // traced position per wavelength — and the fill and shadow stay plain.
-      const arcs = 3 * (CAUSTIC_ARC_STEPS + 1);
+      const arcs = CAUSTIC_FOLD_ARCS * (CAUSTIC_ARC_STEPS + 1);
       const fillGrid = CAUSTIC_FILL_SUBDIVISION;
       const fill = ((fillGrid - 1) * (fillGrid - 2)) / 2;
+      expect(CAUSTIC_FOLD_ARCS).toBe(4);
+      // The extra asymmetric fold adds detail without the 2× hot-path cost of
+      // mirroring a second fold across all three edges.
+      expect(arcs).toBe(84);
       expect(CAUSTIC_SAMPLES_PER_BUNDLE).toBe(arcs + fill);
       expect(source.split('causticSpectralFold(p,').length - 1).toBe(arcs);
       // fill + 4 shadow kernels + 3 calls inside the spectral fold's own

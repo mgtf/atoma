@@ -12,11 +12,10 @@
  * never the bundle's own geometry: sampling the triangle's straight edges
  * draws the triangle on the wall, which is a projection of the transport, not
  * a caustic. Each fold is a quadratic arc from vertex to vertex, bowed toward
- * the bundle's centroid — and each of the three arcs bows by a DIFFERENT
- * amount, so the envelope is a lopsided cusped figure instead of a rounded
- * triangle a viewer reads as a drawn ring. The vertices are sampled by two
- * arcs each, which doubles them into bright cusps for free, and a faint
- * wide-kernel interior fill carries the body glow.
+ * the bundle's centroid. One edge carries a second, unequally bowed fold, so
+ * one traced facet produces a nested, lopsided cusp instead of the single
+ * rounded triangle a viewer reads as a drawn ring. A faint wide-kernel
+ * interior fill carries the body glow.
  *
  * Four properties make it read as light rather than as a shape:
  *
@@ -49,7 +48,7 @@
  */
 
 /** Fold filament radius bounds, renderer pixels: sqrt(area) scaled, clamped. */
-export const CAUSTIC_FOLD_RIM_MIN_PX = 8;
+export const CAUSTIC_FOLD_RIM_MIN_PX = 9;
 export const CAUSTIC_FOLD_RIM_MAX_PX = 24;
 /** Filament radius as a fraction of the bundle footprint's linear size. */
 const CAUSTIC_FOLD_RIM_FRACTION = 0.085;
@@ -58,19 +57,24 @@ const CAUSTIC_FILL_RIM_RATIO = 1.7;
 /** Shadow kernels: the broad dark contact patch beneath the cast. */
 const CAUSTIC_SHADOW_RIM_RATIO = 4.6;
 const CAUSTIC_SHADOW_INNER_RIM_RATIO = 3.9;
-/** Steps per fold arc: each arc contributes this many segments (+1 points). */
-export const CAUSTIC_ARC_STEPS = 25;
+/** Number of curved folds reconstructed across one triangular ray bundle. */
+export const CAUSTIC_FOLD_ARCS = 4;
+/** Steps per fold arc: four folds stay near the former three-fold GPU budget. */
+export const CAUSTIC_ARC_STEPS = 20;
 /** Edge subdivision whose INTERIOR points seed the fill glow. */
 export const CAUSTIC_FILL_SUBDIVISION = 8;
 /** Interior fill weight: well under the folds, or the cast reads as a filled shape. */
 export const CAUSTIC_FILL_WEIGHT = 0.15;
 /**
- * How far each fold arc bows from its straight edge toward the centroid.
- * DELIBERATELY unequal: three equal bows close into a symmetric ring, and a
- * ring reads as a drawn figure. Unequal bows fold the envelope the way the
- * unequal facet path lengths actually would.
+ * How far the folds crossing each edge bow toward the centroid. The first
+ * edge carries a second fold; keeping that detail asymmetric avoids both a
+ * drawn concentric ring and the shader cost of doubling every edge.
  */
-const CAUSTIC_ARC_BOWS = [0.3, 0.5, 0.68] as const;
+const CAUSTIC_ARC_BOWS = [
+  [0.22, 0.48],
+  [0.58],
+  [0.72],
+] as const;
 const CAUSTIC_SUM_GAIN = 0.3;
 const CAUSTIC_LIGHT_GAIN = 0.52;
 const CAUSTIC_SHADOW_GAIN = 0.12;
@@ -114,10 +118,11 @@ const CAUSTIC_FOLD_SAMPLES: Bary[] = (() => {
     [1, 2, 0],
     [2, 0, 1],
   ] as const;
-  for (const [arc, [i0, i1, i2]] of arcs.entries()) {
-    const bow = CAUSTIC_ARC_BOWS[arc]!;
-    for (let step = 0; step <= CAUSTIC_ARC_STEPS; step++) {
-      samples.push(arcPoint(i0, i1, i2, step / CAUSTIC_ARC_STEPS, bow));
+  for (const [edge, [i0, i1, i2]] of arcs.entries()) {
+    for (const bow of CAUSTIC_ARC_BOWS[edge]!) {
+      for (let step = 0; step <= CAUSTIC_ARC_STEPS; step++) {
+        samples.push(arcPoint(i0, i1, i2, step / CAUSTIC_ARC_STEPS, bow));
+      }
     }
   }
   return samples;
