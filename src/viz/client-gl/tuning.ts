@@ -89,6 +89,36 @@ export const TUNING_RANGE: Readonly<Record<keyof VizTuning, TuningRange>> = {
 
 export const TUNING_KEYS = Object.keys(TUNING_RANGE) as ReadonlyArray<keyof VizTuning>;
 
+export const SCENE_TUNING_WIDTH = 340;
+export const SCENE_TUNING_WINDOW_MARGIN = 12;
+
+export interface SceneTuningPosition {
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Keep the floating DOM panel reachable after dragging or a viewport resize. */
+export function clampSceneTuningPosition(
+  position: SceneTuningPosition,
+  viewportWidth: number,
+  viewportHeight: number,
+  panelWidth: number,
+  panelHeight: number
+): SceneTuningPosition {
+  const maxX = Math.max(
+    SCENE_TUNING_WINDOW_MARGIN,
+    viewportWidth - panelWidth - SCENE_TUNING_WINDOW_MARGIN
+  );
+  const maxY = Math.max(
+    SCENE_TUNING_WINDOW_MARGIN,
+    viewportHeight - panelHeight - SCENE_TUNING_WINDOW_MARGIN
+  );
+  return {
+    x: Math.min(maxX, Math.max(SCENE_TUNING_WINDOW_MARGIN, position.x)),
+    y: Math.min(maxY, Math.max(SCENE_TUNING_WINDOW_MARGIN, position.y)),
+  };
+}
+
 /** Snap to the range's step and clamp, so a value is always one a row can draw. */
 export function clampTuningValue(key: keyof VizTuning, value: number): number {
   const range = TUNING_RANGE[key];

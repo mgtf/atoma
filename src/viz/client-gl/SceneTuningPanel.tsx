@@ -1,36 +1,28 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { TUNING_IDENTITY, TUNING_KEYS, TUNING_RANGE, type VizTuning } from './tuning.js';
+import {
+  SCENE_TUNING_WIDTH,
+  SCENE_TUNING_WINDOW_MARGIN,
+  TUNING_IDENTITY,
+  TUNING_KEYS,
+  TUNING_RANGE,
+  clampSceneTuningPosition,
+  type SceneTuningPosition,
+  type VizTuning,
+} from './tuning.js';
 import { readTuning, resetTuning, setTuningValue } from './tuning-live.js';
 import { useGpuStore } from './store.js';
 
-export const SCENE_TUNING_WIDTH = 340;
-const WINDOW_MARGIN = 12;
 const DEFAULT_TOP = 64;
 
-export interface SceneTuningPosition {
-  readonly x: number;
-  readonly y: number;
-}
-
-export function clampSceneTuningPosition(
-  position: SceneTuningPosition,
-  viewportWidth: number,
-  viewportHeight: number,
-  panelWidth: number,
-  panelHeight: number
-): SceneTuningPosition {
-  const maxX = Math.max(WINDOW_MARGIN, viewportWidth - panelWidth - WINDOW_MARGIN);
-  const maxY = Math.max(WINDOW_MARGIN, viewportHeight - panelHeight - WINDOW_MARGIN);
-  return {
-    x: Math.min(maxX, Math.max(WINDOW_MARGIN, position.x)),
-    y: Math.min(maxY, Math.max(WINDOW_MARGIN, position.y)),
-  };
-}
-
 function initialPosition(): SceneTuningPosition {
-  if (typeof window === 'undefined') return { x: WINDOW_MARGIN, y: DEFAULT_TOP };
+  if (typeof window === 'undefined') {
+    return { x: SCENE_TUNING_WINDOW_MARGIN, y: DEFAULT_TOP };
+  }
   return {
-    x: Math.max(WINDOW_MARGIN, window.innerWidth - SCENE_TUNING_WIDTH - WINDOW_MARGIN),
+    x: Math.max(
+      SCENE_TUNING_WINDOW_MARGIN,
+      window.innerWidth - SCENE_TUNING_WIDTH - SCENE_TUNING_WINDOW_MARGIN
+    ),
     y: DEFAULT_TOP,
   };
 }

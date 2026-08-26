@@ -44,7 +44,7 @@ import {
   projectsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/projects.js';
 import { drawSidebar, sidebarLayout, SIDEBAR_GROUPS } from '../src/viz/client-gl/renderer/views/sidebar.js';
-import { clampSceneTuningPosition } from '../src/viz/client-gl/SceneTuningPanel.js';
+import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
 import { viewFrame, VIEW_FRAME_PAD, VIEW_FRAME_TITLE_Y } from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
