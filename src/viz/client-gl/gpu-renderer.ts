@@ -106,6 +106,17 @@ import type { GpuUiState, ViewName } from './store.js';
 import { GPU_COLORS, GPU_LAYOUT, sidebarWidthForViewport } from './theme.js';
 import { VIZ_VISUAL_DEPTH } from './visual-depth.js';
 import type { AuthUiSnapshot } from './AuthControls.js';
+import {
+  buildSceneCameraFrame,
+  clientToRendererPoint,
+  rendererToClientPoint,
+  sceneCameraIsMoving,
+  sceneCameraForMode,
+  sceneCameraViewport,
+  subscribeSceneCameraFrames,
+  visibleSceneLayoutHeight,
+  type SceneCameraViewport,
+} from './scene-camera.js';
 
 export interface GpuDataSnapshot {
   auth: AuthUiSnapshot | null;
@@ -204,7 +215,7 @@ interface TextOptions {
   alpha?: number;
 }
 
-/** Diameter of the account orb in the header. */
+/** Diameter of the account orb in the overview header. */
 export const HEADER_ORB_SIZE = 34;
 /** Centred scale used by a hovered left-rail item. */
 export const NAV_HOVER_SCALE = 1.045;
@@ -264,6 +275,72 @@ interface SurfaceShadowOptions {
   surface?: CastShadowSurface;
 }
 
+interface CastShadowEntry {
+  shadow: Graphics | Container;
+  parent: Container;
+  localX: number;
+  localY: number;
+  width: number;
+  height: number;
+  depth: number;
+  surface: CastShadowSurface;
+  left: number;
+  top: number;
+}
+
+interface CameraFramePanel {
+  readonly surface: Graphics;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly fill: number;
+  readonly fillAlpha: number;
+  readonly border: number;
+  readonly radius: number;
+  currentHeight: number;
+}
+
+function paintPanelSurface(
+  graphics: Graphics,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  fill: number,
+  fillAlpha: number,
+  border: number,
+  radius: number
+): void {
+  graphics.roundRect(x, y, width, height, radius);
+  graphics.fill({ color: fill, alpha: fillAlpha });
+  if (border !== fill) graphics.stroke({ color: border, width: 1, alpha: 0.9 });
+}
+
+function paintPanelShadow(
+  graphics: Graphics,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+  alpha: number,
+  depth: number
+): void {
+  const layers = softShadowLayers(width, height, radius, alpha, depth);
+  for (const [index, layer] of layers.entries()) {
+    const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
+    graphics.roundRect(x + layer.x, y + layer.y, layer.width, layer.height, layer.radius);
+    graphics.fill({
+      color: mixColor(
+        SCENE_SHADOW_COLORS.penumbra,
+        SCENE_SHADOW_COLORS.core,
+        towardCore
+      ),
+      alpha: layer.alpha,
+    });
+  }
+}
+
 export * from './renderer/chip-layout.js';
 export * from './renderer/shaders.js';
 export { gpuEventCardCopy, type GpuEventCardCopy, type GpuTranslate } from './renderer/copy.js';
@@ -291,7 +368,7 @@ import {
 } from './tuning.js';
 import { prefersReducedMotion } from './renderer/motion.js';
 import { drawScrollbarThumb } from './renderer/scroll-pane.js';
-import { drawRuns } from './renderer/views/runs.js';
+import { drawRuns, runsPaneLayout, runsPickerControlLayout } from './renderer/views/runs.js';
 import { drawRegistry } from './renderer/views/registry.js';
 import { drawSkills } from './renderer/views/skills.js';
 import { drawBurnin } from './renderer/views/burnin.js';
@@ -305,7 +382,14 @@ import { drawAnnounce } from './renderer/views/announce.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawSettings } from './renderer/views/settings.js';
-import { drawSidebar } from './renderer/views/sidebar.js';
+import {
+  drawSidebar,
+  FOCUS_RAIL_FPS_SCALE,
+  focusRailChromeLayout,
+  overviewRailChromeLayout,
+  type FocusRailChromeLayout,
+  type OverviewRailChromeLayout,
+} from './renderer/views/sidebar.js';
 import { attachAvatarOrb, type AvatarOrbHandle } from './renderer/avatar-orb.js';
 import {
   loadTimelineCardMaterial,
@@ -354,8 +438,8 @@ export class GpuRenderer {
    * mesh carries a shader, a geometry and a decoded avatar texture, none of
    * which should be rebuilt sixty times a second because `renderScene` tears
    * the scene down. TWO slots exist because two views draw one concurrently —
-   * the header's control and the Settings profile orb — and a single slot had
-   * them evicting each other every render. `avatarOrbsRetained` is per-frame
+   * the global account control and the Settings profile orb — and a single
+   * slot had them evicting each other every render. `avatarOrbsRetained` is per-frame
    * accounting: a slot no draw call claimed this frame (signed out, left
    * Settings) is destroyed by `sweepAvatarOrbs`, never left parked on the
    * scene.
@@ -479,31 +563,63 @@ export class GpuRenderer {
   private turnSliderBounds: Rectangle | null = null;
   private turnSliderLastTapAt = 0;
 
-  private castShadows: {
-    shadow: Graphics | Container;
-    parent: Container;
-    localX: number;
-    localY: number;
-    width: number;
-    height: number;
-    depth: number;
-    surface: CastShadowSurface;
-    left: number;
-    top: number;
-  }[] = [];
+  private castShadows: CastShadowEntry[] = [];
+  /**
+   * Outer view panels are authored once at the largest transition height.
+   * Camera frames then resize only these retained Graphics and their mask;
+   * the full view is rebuilt once at settle to commit scroll geometry.
+   */
+  private cameraFramePanels: CameraFramePanel[] = [];
+  private cameraFrameLayer: Container | null = null;
+  private cameraViewportMask: Graphics | null = null;
+  private cameraViewportMaskHeight = 0;
+  private activeViewLayoutHeight: number | null = null;
+  private cameraFrameUnsubscribe: (() => void) | null = null;
   metrics: GpuRenderMetrics = emptyRenderMetrics();
+
+  /** Client coordinates on the projected image -> the original Pixi plane. */
+  private clientToRendererPosition(clientX: number, clientY: number): { x: number; y: number } {
+    const viewport = sceneCameraViewport(this.app.canvas);
+    if (viewport) {
+      return clientToRendererPoint(
+        { x: clientX, y: clientY },
+        this.app.screen.width,
+        this.app.screen.height,
+        viewport
+      );
+    }
+    return pointerClientToRenderer(
+      clientX,
+      clientY,
+      this.app.canvas.getBoundingClientRect(),
+      this.app.screen.width,
+      this.app.screen.height
+    );
+  }
+
+  /** Pixi renderer coordinates -> client coordinates on the projected image. */
+  private rendererToClientPosition(rendererX: number, rendererY: number): { x: number; y: number } {
+    const viewport = sceneCameraViewport(this.app.canvas);
+    if (viewport) {
+      return rendererToClientPoint(
+        { x: rendererX, y: rendererY },
+        this.app.screen.width,
+        this.app.screen.height,
+        viewport
+      );
+    }
+    const bounds = this.app.canvas.getBoundingClientRect();
+    return {
+      x: bounds.left + rendererX * bounds.width / Math.max(1, this.app.screen.width),
+      y: bounds.top + rendererY * bounds.height / Math.max(1, this.app.screen.height),
+    };
+  }
+
   private readonly wheel = (event: WheelEvent) => {
     if (!this.snapshot) return;
     event.preventDefault();
     if (!this.snapshot.state.entered && this.turnSliderBounds) {
-      const bounds = this.app.canvas.getBoundingClientRect();
-      const local = pointerClientToRenderer(
-        event.clientX,
-        event.clientY,
-        bounds,
-        this.app.screen.width,
-        this.app.screen.height
-      );
+      const local = this.clientToRendererPosition(event.clientX, event.clientY);
       if (this.turnSliderBounds.contains(local.x, local.y)) {
         const step = event.shiftKey ? 10 : 1;
         const delta = event.deltaY > 0 ? step : event.deltaY < 0 ? -step : 0;
@@ -517,11 +633,10 @@ export class GpuRenderer {
       this.snapshot.state.focusedInput === 'run' &&
       this.runPickerBounds
     ) {
-      const bounds = this.app.canvas.getBoundingClientRect();
-      const localX =
-        (event.clientX - bounds.left) * this.app.screen.width / Math.max(1, bounds.width);
-      const localY =
-        (event.clientY - bounds.top) * this.app.screen.height / Math.max(1, bounds.height);
+      const { x: localX, y: localY } = this.clientToRendererPosition(
+        event.clientX,
+        event.clientY
+      );
       if (this.runPickerBounds.contains(localX, localY)) {
         const current = this.snapshot.state.runPickerScrollY;
         const next = Math.max(
@@ -533,11 +648,10 @@ export class GpuRenderer {
       }
     }
     if (this.detailBounds) {
-      const bounds = this.app.canvas.getBoundingClientRect();
-      const localX =
-        (event.clientX - bounds.left) * this.app.screen.width / Math.max(1, bounds.width);
-      const localY =
-        (event.clientY - bounds.top) * this.app.screen.height / Math.max(1, bounds.height);
+      const { x: localX, y: localY } = this.clientToRendererPosition(
+        event.clientX,
+        event.clientY
+      );
       if (this.detailBounds.contains(localX, localY)) {
         const next = Math.max(
           0,
@@ -590,14 +704,7 @@ export class GpuRenderer {
       this.turnDrag = null;
       return;
     }
-    const bounds = this.app.canvas.getBoundingClientRect();
-    const local = pointerClientToRenderer(
-      event.clientX,
-      event.clientY,
-      bounds,
-      this.app.screen.width,
-      this.app.screen.height
-    );
+    const local = this.clientToRendererPosition(event.clientX, event.clientY);
     // Both coordinates in RENDERER space. The bug this replaces compared a
     // window clientX against a Pixi local position.x, which agreed only by
     // accident on an unscaled canvas sitting at the window origin.
@@ -628,16 +735,9 @@ export class GpuRenderer {
     const tooltip = this.tooltipLayer;
     if (!tooltip) return;
     const pointer = readPointerLight();
-    const bounds = this.app.canvas.getBoundingClientRect();
-    const local = pointerClientToRenderer(
-      pointer.clientX,
-      pointer.clientY,
-      bounds,
-      this.app.screen.width,
-      this.app.screen.height
-    );
+    const local = this.clientToRendererPosition(pointer.clientX, pointer.clientY);
     tooltip.update(
-      { x: local.x, y: local.y, active: pointer.active },
+      { x: local.x, y: local.y, active: pointer.trackingActive },
       performance.now(),
       { width: this.app.screen.width, height: this.app.screen.height }
     );
@@ -695,14 +795,7 @@ export class GpuRenderer {
       return;
     }
 
-    const bounds = this.app.canvas.getBoundingClientRect();
-    const local = pointerClientToRenderer(
-      pointer.clientX,
-      pointer.clientY,
-      bounds,
-      this.app.screen.width,
-      this.app.screen.height
-    );
+    const local = this.clientToRendererPosition(pointer.clientX, pointer.clientY);
     const tuning = readTuning();
     uniforms.uLightPx[0] = local.x;
     uniforms.uLightPx[1] = local.y;
@@ -715,9 +808,10 @@ export class GpuRenderer {
     // diamond crosses the backdrop and the buttons as a single shape.
     const cast = packMarkCaustic(
       readMarkFieldCaustic(),
-      bounds,
+      this.app.canvas.getBoundingClientRect(),
       this.app.screen.width,
-      this.app.screen.height
+      this.app.screen.height,
+      (x, y) => this.clientToRendererPosition(x, y)
     );
     for (let index = 0; index < this.pointerCausticSlots.length; index += 1) {
       const slot = this.pointerCausticSlots[index]!;
@@ -876,8 +970,47 @@ export class GpuRenderer {
       ticker.deltaMS / 1000,
       this.app.screen.width,
       this.app.screen.height,
-      canvas.getBoundingClientRect()
+      canvas.getBoundingClientRect(),
+      (x, y) => this.clientToRendererPosition(x, y)
     );
+  };
+
+  /**
+   * Keep the visible column foot on the exact camera ray without rebuilding
+   * the Pixi scene. A transition owns at most a few outer panels, so this is
+   * bounded geometry work while labels, hit areas, tickers and card buffers
+   * remain untouched.
+   */
+  private readonly updateCameraFrameGeometry = (frame: SceneCameraViewport) => {
+    const rendererHeight = this.app.screen.height;
+    const visibleHeight = visibleSceneLayoutHeight(frame) *
+      rendererHeight / Math.max(1, frame.height);
+    const frameBottom = Math.max(0, visibleHeight - GPU_LAYOUT.gap);
+    const mask = this.cameraViewportMask;
+    if (mask && !mask.destroyed && this.cameraViewportMaskHeight > 0) {
+      // One extra pixel keeps the frame's centred 1px stroke whole. The
+      // frame itself lives on the unmasked backing layer, while this stops a
+      // timeline card or scrollbar from leaking into the bottom gutter.
+      mask.scale.y = (frameBottom + 1) / this.cameraViewportMaskHeight;
+    }
+    for (const panel of this.cameraFramePanels) {
+      if (panel.surface.destroyed) continue;
+      const nextHeight = Math.max(0, frameBottom - panel.y);
+      if (Math.abs(nextHeight - panel.currentHeight) < 0.01) continue;
+      panel.currentHeight = nextHeight;
+      panel.surface.clear();
+      paintPanelSurface(
+        panel.surface,
+        panel.x,
+        panel.y,
+        panel.width,
+        nextHeight,
+        panel.fill,
+        panel.fillAlpha,
+        panel.border,
+        panel.radius
+      );
+    }
   };
 
   async init(host: HTMLElement) {
@@ -926,6 +1059,15 @@ export class GpuRenderer {
     if (this.metrics.backend === 'webgpu') {
       this.app.renderer.gc.enabled = false;
     }
+    // Pixi's stock mapper treats the transformed canvas' axis-aligned
+    // bounding box as if it were still a rectangle. A perspective plane is a
+    // quadrilateral, so that approximation visibly misses controls. Feed the
+    // event boundary the camera-ray/plane intersection instead.
+    this.app.renderer.events.mapPositionToPoint = (point, clientX, clientY) => {
+      const mapped = this.clientToRendererPosition(clientX, clientY);
+      point.x = mapped.x;
+      point.y = mapped.y;
+    };
     // The counter mutates glyph geometry only. Pre-install exactly the small
     // alphabet it can display so the first rate change cannot grow an atlas in
     // the middle of a frame.
@@ -957,6 +1099,10 @@ export class GpuRenderer {
     this.app.canvas.className = 'gpu-ui-canvas';
     this.app.canvas.setAttribute('aria-hidden', 'true');
     host.appendChild(this.app.canvas);
+    this.cameraFrameUnsubscribe = subscribeSceneCameraFrames(
+      this.app.canvas,
+      this.updateCameraFrameGeometry
+    );
     this.app.canvas.addEventListener('wheel', this.wheel, { passive: false });
     // On window, not the canvas: a drag that wanders off the canvas must keep
     // tracking, and its release must disarm wherever it happens. Tuning and
@@ -997,6 +1143,13 @@ export class GpuRenderer {
         // to hit-test against — so the smoke needs both to prove a drag
         // survived the render that used to destroy it.
         hitTargets: () => this.metrics.hitTargets,
+        projectRendererPoint: (x: number, y: number) =>
+          this.rendererToClientPosition(x, y),
+        tooltip: () => this.tooltipLayer?.diagnostics() ?? {
+          visible: false,
+          text: null,
+          regionCount: 0,
+        },
         tuning: () => ({ ...readTuning() }),
         // How displaced the animated filter layer currently is. The anchor
         // smoke reads it to prove its scenario ARMED: a zero drift only means
@@ -1027,6 +1180,13 @@ export class GpuRenderer {
 
   destroy() {
     if (!this.initialized) return;
+    this.cameraFrameUnsubscribe?.();
+    this.cameraFrameUnsubscribe = null;
+    this.cameraFramePanels = [];
+    this.cameraFrameLayer = null;
+    this.cameraViewportMask = null;
+    this.cameraViewportMaskHeight = 0;
+    this.activeViewLayoutHeight = null;
     this.app.ticker.remove(this.flushTimelineCardMaterial);
     this.app.ticker.remove(this.updateTooltip);
     this.tooltipLayer?.destroy();
@@ -1096,6 +1256,13 @@ export class GpuRenderer {
 
   private renderScene(snapshot: GpuRenderSnapshot) {
     this.snapshot = snapshot;
+    // Drop camera handles BEFORE their scene-owned Graphics are destroyed.
+    // A camera rAF can publish again only after this synchronous pass returns.
+    this.cameraFramePanels = [];
+    this.cameraFrameLayer = null;
+    this.cameraViewportMask = null;
+    this.cameraViewportMaskHeight = 0;
+    this.activeViewLayoutHeight = null;
     for (const callback of this.tickerCallbacks) this.app.ticker.remove(callback);
     this.tickerCallbacks.clear();
     // Detach the retained material mesh before the recursive scene teardown.
@@ -1191,18 +1358,100 @@ export class GpuRenderer {
         this.countObjects(this.markRoot);
       return;
     }
-    this.drawAmbientGrid(this.ambientRoot, width, height);
+    const focused = snapshot.state.sceneCameraMode === 'focus';
+    this.drawAmbientGrid(
+      this.ambientRoot,
+      width,
+      height,
+      focused ? 0 : GPU_LAYOUT.headerHeight
+    );
     this.drawHeader(snapshot, width);
     // Views draw in their OWN viewport space, from x = 0, exactly as they did
     // when they owned the full width. The rail narrows before it can shove the
     // view beyond the window; CSS mirrors this exact clamp for DOM overlays.
     const contentLeft = sidebarWidthForViewport(width);
     const contentWidth = Math.max(0, width - contentLeft);
-    drawSidebar(this, snapshot, height, contentLeft);
+    // During camera travel the view is authored once at its largest height.
+    // `updateCameraFrameGeometry` then follows the exact published camera ray
+    // by resizing only the outer panels and viewport mask. The complete scene
+    // therefore remains available behind the mask for DEZOOM, while the one
+    // settle rebuild commits scroll masks and bottom-anchored controls.
+    const cameraFrame = sceneCameraViewport(this.app.canvas);
+    const visibleLayoutHeight = cameraFrame
+      ? visibleSceneLayoutHeight(cameraFrame) * height / Math.max(1, cameraFrame.height)
+      : height;
+    const layoutHeight = sceneCameraIsMoving(this.app.canvas)
+      ? height
+      : visibleLayoutHeight;
+    // The compact rail is endpoint chrome: retain its established final
+    // geometry during approach while the central column itself grows/shrinks.
+    const focusLayoutHeight = focused
+      ? visibleSceneLayoutHeight(buildSceneCameraFrame(
+          sceneCameraForMode('focus', width, height),
+          width,
+          height
+        ))
+      : layoutHeight;
+    const focusRail = focused
+      ? focusRailChromeLayout(contentLeft, focusLayoutHeight, snapshot.data.auth !== null)
+      : null;
+    const overviewRail = focused ? null : overviewRailChromeLayout(contentLeft);
+    drawSidebar(
+      this,
+      snapshot,
+      height,
+      contentLeft,
+      focusRail?.navigationBottom ?? layoutHeight,
+      focusRail?.navigationTop ?? overviewRail?.navigationTop ?? GPU_LAYOUT.headerHeight
+    );
+    if (focusRail) this.drawFocusRailChrome(snapshot, focusRail);
+    else if (overviewRail) this.drawOverviewRailChrome(overviewRail);
+    const viewportMaskHeight = Math.max(0, layoutHeight - GPU_LAYOUT.gap + 1);
+    const viewportMask = new Graphics();
+    viewportMask.rect(0, 0, contentWidth, viewportMaskHeight).fill(0xffffff);
+    viewportMask.position.x = contentLeft;
+    viewportMask.eventMode = 'none';
+    viewportMask.label = 'camera-view-mask';
+    this.cameraViewportMask = viewportMask;
+    this.cameraViewportMaskHeight = viewportMaskHeight;
+    const frameLayer = new Container();
+    frameLayer.x = contentLeft;
+    frameLayer.eventMode = 'none';
+    frameLayer.label = 'camera-view-frames';
+    this.cameraFrameLayer = frameLayer;
     const viewport = new Container();
     viewport.x = contentLeft;
-    this.stage.addChild(viewport);
+    viewport.mask = viewportMask;
+    this.stage.addChild(frameLayer, viewport, viewportMask);
+    // The view frame begins one standard gap inside this viewport. Leaving
+    // that gutter on the ambient field exposes the header/rail seam around
+    // the frame's rounded corner, where it reads as a second frame underneath
+    // the real one. Continue the shared chrome wash only through that gutter;
+    // the retained frame still owns the actual surface, border and radius.
+    const frameTop = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
+    const gutterSourceTop = focused
+      ? GPU_LAYOUT.focusTopInset
+      : GPU_LAYOUT.headerHeight;
+    const gutter = new Graphics();
+    gutter.label = 'camera-view-gutter';
+    gutter
+      .rect(
+        0,
+        gutterSourceTop,
+        contentWidth,
+        Math.max(0, frameTop - gutterSourceTop)
+      )
+      .rect(
+        0,
+        frameTop,
+        GPU_LAYOUT.gap,
+        Math.max(0, layoutHeight - frameTop)
+      )
+      .fill({ color: 0x0b111e, alpha: 0.42 });
+    gutter.eventMode = 'none';
+    viewport.addChild(gutter);
     this.root = viewport;
+    this.activeViewLayoutHeight = layoutHeight;
     try {
       if (snapshot.data.loading) {
         this.text(this.root, snapshot.t('common.loading'), 24, 84, { size: 16 });
@@ -1215,51 +1464,52 @@ export class GpuRenderer {
       } else {
         switch (snapshot.state.view) {
           case 'projects':
-            drawProjects(this, snapshot, contentWidth, height);
+            drawProjects(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'admin':
-            drawAdmin(this, snapshot, contentWidth, height);
+            drawAdmin(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'journal':
-            drawJournal(this, snapshot, contentWidth, height);
+            drawJournal(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'ledger':
-            drawLedger(this, snapshot, contentWidth, height);
+            drawLedger(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'sentinel':
-            drawSentinel(this, snapshot, contentWidth, height);
+            drawSentinel(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'announce':
-            drawAnnounce(this, snapshot, contentWidth, height);
+            drawAnnounce(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'runs':
-            drawRuns(this, snapshot, contentWidth, height);
+            drawRuns(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'registry':
-            drawRegistry(this, snapshot, contentWidth, height);
+            drawRegistry(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'skills':
-            drawSkills(this, snapshot, contentWidth, height);
+            drawSkills(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'burnin':
-            drawBurnin(this, snapshot, contentWidth, height);
+            drawBurnin(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'docs':
-            drawDocs(this, snapshot, contentWidth, height);
+            drawDocs(this, snapshot, contentWidth, layoutHeight);
             break;
           case 'settings':
-            drawSettings(this, snapshot, contentWidth, height);
+            drawSettings(this, snapshot, contentWidth, layoutHeight);
             break;
         }
       }
     } finally {
       // Chrome draws into the stage again — including on the throw path, or
       // one failed view would leave every later overlay inside the viewport.
+      this.activeViewLayoutHeight = null;
       this.root = this.stage;
     }
     this.translateViewBounds(contentLeft);
-    this.drawOverlays(snapshot, width, height);
-    drawAccountMenu(this, snapshot, width, height);
+    this.drawOverlays(snapshot, width, layoutHeight);
+    drawAccountMenu(this, snapshot, width, layoutHeight, focusRail?.profile ?? undefined);
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
       this.activeViewTransition = {
@@ -1269,7 +1519,7 @@ export class GpuRenderer {
       };
     }
     this.previousView = snapshot.state.view;
-    this.drawViewTransition(width, height);
+    this.drawViewTransition(width, layoutHeight);
     this.previousFilterBounds = this.currentFilterBounds;
     if (snapshot.state.view !== 'runs') this.roleRowTransition = null;
     this.previousEventIds = this.currentEventIds;
@@ -1278,6 +1528,7 @@ export class GpuRenderer {
     // `countObjects` walks the live scene, and a retained label that was not
     // re-attached is not in it, so retention never inflates objectCount.
     this.labels.endRender();
+    if (cameraFrame) this.updateCameraFrameGeometry(cameraFrame);
     // Anchors resolve only now: the containers are attached and positioned.
     this.anchorCastShadows();
     this.updateCastShadows();
@@ -1359,13 +1610,18 @@ export class GpuRenderer {
     return count;
   }
 
-  private drawAmbientGrid(parent: Container, width: number, height: number) {
+  private drawAmbientGrid(
+    parent: Container,
+    width: number,
+    height: number,
+    top: number
+  ) {
     const graphics = new Graphics();
     graphics.alpha = 0.12;
     for (let x = 0; x < width; x += 40) {
-      graphics.moveTo(x, GPU_LAYOUT.headerHeight).lineTo(x, height);
+      graphics.moveTo(x, top).lineTo(x, height);
     }
-    for (let y = GPU_LAYOUT.headerHeight; y < height; y += 40) {
+    for (let y = top; y < height; y += 40) {
       graphics.moveTo(0, y).lineTo(width, y);
     }
     graphics.stroke({ color: 0x26334a, width: 1, alpha: 0.18 });
@@ -1385,31 +1641,65 @@ export class GpuRenderer {
   ) {
     const safeWidth = Math.max(0, width);
     const safeHeight = Math.max(0, height);
-    if (elevation > 0) {
+    const viewLayoutHeight = this.activeViewLayoutHeight;
+    const frameLayer = this.cameraFrameLayer;
+    const isCameraFramePanel =
+      elevation === 2 &&
+      viewLayoutHeight !== null &&
+      parent === this.root &&
+      frameLayer !== null &&
+      Math.abs(y + safeHeight - (viewLayoutHeight - GPU_LAYOUT.gap)) < 0.01;
+    const shadowAlpha = 0.42 + elevation * 0.06;
+    const shadowDepth = 0.55 + elevation * 0.35;
+    // A full-panel cast shadow reads as a second rounded frame once the outer
+    // surface is retained outside the camera mask. Keep depth on cards and
+    // controls, but let the column's own border/rim define its silhouette.
+    if (elevation > 0 && !isCameraFramePanel) {
       this.addSurfaceShadow(parent, safeWidth, safeHeight, {
         x,
         y,
         radius,
-        alpha: 0.42 + elevation * 0.06,
-        depth: 0.55 + elevation * 0.35,
+        alpha: shadowAlpha,
+        depth: shadowDepth,
         surface: 'column',
       });
     }
 
     const graphics = new Graphics();
-    graphics.roundRect(x, y, safeWidth, safeHeight, radius);
-    graphics.fill({
-      color: fill,
-      alpha: elevation === 0
-        ? 0.84
-        : VIZ_VISUAL_DEPTH.near.panelAlpha - (2 - elevation) * 0.04,
-    });
-    if (border !== fill) graphics.stroke({ color: border, width: 1, alpha: 0.9 });
+    const fillAlpha = elevation === 0
+      ? 0.84
+      : VIZ_VISUAL_DEPTH.near.panelAlpha - (2 - elevation) * 0.04;
+    paintPanelSurface(
+      graphics,
+      x,
+      y,
+      safeWidth,
+      safeHeight,
+      fill,
+      fillAlpha,
+      border,
+      radius
+    );
     graphics.eventMode = 'none';
     parent.addChild(graphics);
 
+    if (isCameraFramePanel) {
+      this.cameraFramePanels.push({
+        surface: graphics,
+        x,
+        y,
+        width: safeWidth,
+        fill,
+        fillAlpha,
+        border,
+        radius,
+        currentHeight: safeHeight,
+      });
+    }
+
+    let rim: Graphics | null = null;
     if (elevation > 0 && safeWidth > 8) {
-      const rim = new Graphics();
+      rim = new Graphics();
       rim
         .moveTo(x + Math.max(3, radius), y + 0.7)
         .lineTo(x + safeWidth - Math.max(3, radius), y + 0.7)
@@ -1420,6 +1710,13 @@ export class GpuRenderer {
         });
       rim.eventMode = 'none';
       parent.addChild(rim);
+    }
+    if (isCameraFramePanel && frameLayer) {
+      // The content mask must stop cards at the moving frame bottom without
+      // clipping the frame's own border. Both layers share the same view-local
+      // coordinate system, so reparenting changes no geometry.
+      frameLayer.addChild(graphics);
+      if (rim) frameLayer.addChild(rim);
     }
     return graphics;
   }
@@ -2050,20 +2347,18 @@ export class GpuRenderer {
     options: SurfaceShadowOptions = {}
   ) {
     const { x = 0, y = 0 } = options;
-    return this.addCastShadow(parent, width, height, options, (layers) => {
+    return this.addCastShadow(parent, width, height, options, () => {
       const shadow = new Graphics();
-      for (const [index, layer] of layers.entries()) {
-        const towardCore = layers.length > 1 ? index / (layers.length - 1) : 1;
-        shadow.roundRect(x + layer.x, y + layer.y, layer.width, layer.height, layer.radius);
-        shadow.fill({
-          color: mixColor(
-            SCENE_SHADOW_COLORS.penumbra,
-            SCENE_SHADOW_COLORS.core,
-            towardCore
-          ),
-          alpha: layer.alpha,
-        });
-      }
+      paintPanelShadow(
+        shadow,
+        x,
+        y,
+        width,
+        height,
+        options.radius ?? 8,
+        options.alpha ?? 0.44,
+        options.depth ?? 1
+      );
       return shadow;
     });
   }
@@ -2577,15 +2872,17 @@ export class GpuRenderer {
     width: number,
     height: number,
     active: boolean,
-    onActivate: (id: string) => void
+    onActivate: (id: string) => void,
+    options: { readonly iconOnly?: boolean; readonly tooltip?: string } = {}
   ) {
+    const iconOnly = options.iconOnly === true;
     const firstAppearance = !prefersReducedMotion() && !this.seenAnimatedControls.has(id);
     this.seenAnimatedControls.add(id);
     const container = new Container();
     container.position.set(x, y);
     container.eventMode = 'static';
     container.cursor = 'pointer';
-    const iconGutter = NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
+    const iconGutter = iconOnly ? 0 : NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
     container.hitArea = new Rectangle(-iconGutter, 0, width + iconGutter, height);
     const dropShadow = this.addSurfaceShadow(container, width, height, {
       radius: 8,
@@ -2616,20 +2913,15 @@ export class GpuRenderer {
     scanline.alpha = active ? 0.12 : 0.025;
     container.addChild(scanline);
 
-    const underline = new Graphics();
-    underline.roundRect(0, 0, Math.max(12, width - 18), 2.2, 1.1);
-    underline.fill(GPU_COLORS.primary);
-    underline.position.set(9, height - 4);
-    underline.alpha = active ? 0.9 : 0;
-    container.addChild(underline);
-
     const labelStyle = {
       size: 11,
       // Built BRIGHT and tinted down — see the sibling button factory.
       color: GPU_COLORS.text,
       weight: active ? '700' : '600',
     } as const;
-    const iconWidth = NAV_ICON_RENDER_SIZE;
+    const iconWidth = iconOnly
+      ? Math.min(NAV_ICON_RENDER_SIZE, Math.max(12, height))
+      : NAV_ICON_RENDER_SIZE;
     const horizontalPad = 12;
     const fittedLabel = this.fitText(
       label,
@@ -2640,10 +2932,11 @@ export class GpuRenderer {
     const iconMesh = iconKind && this.navIconMeshes
       ? this.navIconMeshes.icons[iconKind]
       : null;
+    const iconX = iconOnly ? (width - iconWidth) / 2 : -iconGutter;
     const iconY = (height - iconWidth) / 2;
     if (iconMesh) {
       this.addSilhouetteShadow(container, iconMesh.shadowTexture, iconWidth, iconWidth, {
-        x: -iconGutter,
+        x: iconX,
         y: iconY,
         radius: 8,
         alpha: 0.48,
@@ -2656,18 +2949,21 @@ export class GpuRenderer {
           container,
           id,
           this.navIconMeshes,
-          -iconGutter,
+          iconX,
           iconY,
-          active
+          active,
+          iconWidth
         )
       : null;
-    const labelText = this.text(
-      container,
-      fittedLabel,
-      horizontalPad,
-      Math.max(5, (height - 16) / 2),
-      labelStyle
-    );
+    const labelText = iconOnly
+      ? null
+      : this.text(
+          container,
+          fittedLabel,
+          horizontalPad,
+          Math.max(5, (height - 16) / 2),
+          labelStyle
+        );
 
     const sparks = Array.from({ length: 3 }, (_, index) => {
       const spark = new Graphics();
@@ -2684,7 +2980,7 @@ export class GpuRenderer {
     let elapsed = firstAppearance ? -Math.max(0, x - 112) * 0.35 : performance.now();
     container.alpha = firstAppearance ? 0 : 1;
     let currentLabelTint = active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
-    labelText.tint = currentLabelTint;
+    if (labelText) labelText.tint = currentLabelTint;
     const animate = (ticker: Ticker) => {
       if (!prefersReducedMotion()) elapsed += ticker.deltaMS;
       const entrance = Math.max(0, Math.min(1, elapsed / 280));
@@ -2705,10 +3001,6 @@ export class GpuRenderer {
           : 0;
       scanline.x = 4 + (Math.max(0, elapsed) * (hovered ? 0.16 : 0.05)) % Math.max(8, width - 10);
       scanline.alpha = active ? 0.11 + pulse * 0.08 : hovered ? 0.09 : 0.02;
-      // The selected tab's rail is a stable positional anchor. Surrounding
-      // glow/sparks can move, but the bar itself must not breathe or drift.
-      underline.alpha = active ? 0.95 : hovered ? 0.42 : 0;
-      underline.scale.x = active ? 1 : hovered ? 0.65 + pulse * 0.15 : 0.2;
       base.tint = pressed ? 0xafd1ff : hovered ? 0xd7e8ff : 0xffffff;
       // A pressed or selected surface is RECESSED: its drop shadow gives way
       // to the one it casts into itself. The inner shadow stays registered
@@ -2720,7 +3012,7 @@ export class GpuRenderer {
       insetShadow.visible = insetDepth > 0.02;
       dropShadow.alpha = 1 - insetDepth;
       const nextLabelTint = pressed || hovered || active ? NO_TINT : BUTTON_LABEL_IDLE_TINT;
-      if (nextLabelTint !== currentLabelTint) {
+      if (labelText && nextLabelTint !== currentLabelTint) {
         currentLabelTint = nextLabelTint;
         labelText.tint = nextLabelTint;
       }
@@ -2731,7 +3023,7 @@ export class GpuRenderer {
           prefersReducedMotion()
         );
         this.navIconSpins.set(id, iconSpin);
-        const iconCenterX = x - iconGutter + iconWidth / 2;
+        const iconCenterX = x + iconX + iconWidth / 2;
         const iconCenterY = y + height / 2;
         const fromLightX = iconCenterX - this.lightRendererX;
         const fromLightY = iconCenterY - this.lightRendererY;
@@ -2769,7 +3061,7 @@ export class GpuRenderer {
       onActivate(id);
     });
     parent.addChild(container);
-    this.recordHitTarget(parent, {
+    const hitTarget = {
       id,
       role: 'tab',
       label,
@@ -2777,7 +3069,17 @@ export class GpuRenderer {
       y,
       width: width + iconGutter,
       height,
-    });
+    } as const;
+    this.recordHitTarget(parent, hitTarget);
+    if (options.tooltip) {
+      this.tooltip(parent, {
+        x: hitTarget.x,
+        y: hitTarget.y,
+        width: hitTarget.width,
+        height: hitTarget.height,
+        text: options.tooltip,
+      });
+    }
     return container;
   }
 
@@ -3621,8 +3923,8 @@ export class GpuRenderer {
     return this.app.renderer;
   }
 
-  private drawAtomaMark(x: number, y: number) {
-    this.retainAtomaMark(x, y);
+  private drawAtomaMark(x: number, y: number, visualScale?: number) {
+    this.retainAtomaMark(x, y, visualScale);
   }
 
   /**
@@ -3734,47 +4036,29 @@ export class GpuRenderer {
   private pointerScreenPosition(): { x: number; y: number } | null {
     const pointer = readPointerLight();
     if (!pointer.active) return null;
-    const bounds = this.app.canvas.getBoundingClientRect();
-    if (bounds.width <= 0 || bounds.height <= 0) return null;
-    return pointerClientToRenderer(
-      pointer.clientX,
-      pointer.clientY,
-      bounds,
-      this.app.screen.width,
-      this.app.screen.height
-    );
+    if (this.app.screen.width <= 0 || this.app.screen.height <= 0) return null;
+    return this.clientToRendererPosition(pointer.clientX, pointer.clientY);
   }
 
   private drawHeader(snapshot: GpuRenderSnapshot, width: number) {
-    // Wash, not an opaque bar. A 0.94 panel hid the far field — and the
-    // lantern the crystal throws onto it — behind the wordmark. Nav buttons
-    // keep their own surfaces; the gem sits on the wall that faces the camera.
+    // Focus owns one self-contained vertical rail. Leaving even a transparent
+    // header control here would preserve the old horizontal composition and
+    // compete with the dock below, so the complete overview header steps out.
+    if (snapshot.state.sceneCameraMode === 'focus') return;
+    // Wash, not an opaque bar. Identity now belongs to the full-width brand
+    // slot in the rail; this shorter band carries only global utilities.
     const bar = new Graphics();
+    bar.label = 'header-band';
     bar.rect(0, 0, width, GPU_LAYOUT.headerHeight);
     bar.fill({ color: 0x0b111e, alpha: 0.42 });
     bar.eventMode = 'none';
     this.root.addChild(bar);
-    // ONE vertical centre for everything in the band. These offsets used to be
-    // absolute numbers that happened to centre in a 52px bar, so changing the
-    // bar's height would have left its contents sitting high in it.
+    // ONE vertical centre for every utility in the band.
     const midY = GPU_LAYOUT.headerHeight / 2;
-    this.drawAtomaMark(GPU_LAYOUT.headerMarkX, midY - ATOMA_MARK_LOCAL_CENTER);
-    this.text(this.root, 'Atoma', GPU_LAYOUT.headerWordmarkX + 1, midY - 8.5, {
-      size: 16,
-      color: 0x263f68,
-      weight: '700',
-      alpha: 0.72,
-    });
-    this.text(this.root, 'Atoma', GPU_LAYOUT.headerWordmarkX, midY - 10, {
-      size: 16,
-      color: GPU_COLORS.text,
-      weight: '700',
-    });
 
     // The nav is a LEFT RAIL, not a tab strip: `renderer/views/sidebar.ts`
     // draws it from `render()`. `visibleViews` remains the one definition of
-    // which tabs exist — the rail reads it, the DOM tablist reads it, and the
-    // header now carries identity and locale only.
+    // which tabs exist — the rail reads it and the DOM tablist mirrors it.
 
     // The account orb owns the far right when there is an account; the rest of
     // the header controls shift left by its width plus a gap.
@@ -3798,51 +4082,105 @@ export class GpuRenderer {
     if (auth) {
       const orbX = width - HEADER_ORB_SIZE - 12;
       const orbY = (GPU_LAYOUT.headerHeight - HEADER_ORB_SIZE) / 2;
-      this.retainAvatarOrb(
-        'header',
-        orbX,
-        orbY,
-        HEADER_ORB_SIZE,
-        auth.viewer.avatarUrl,
-        auth.viewer.principalId,
-        true
-      );
-      // The CONTROL is this rect, not the mesh. `markRoot` is
-      // `eventMode = 'none'` so the brand crystal cannot eat pointer events,
-      // and that verdict covers every child of the layer the orb is retained
-      // on — including the orb. So the interactive layer carries an invisible
-      // rect over it, rebuilt with the scene like every other control, and
-      // forwards hover into the retained mesh.
-      const orbHit = new Graphics();
-      orbHit.rect(0, 0, HEADER_ORB_SIZE, HEADER_ORB_SIZE);
-      // Not alpha 0: a fully transparent fill is still hit-tested by Pixi, but
-      // a visible-to-the-engine surface is what keeps that true if the
-      // rendering path ever culls empty geometry.
-      orbHit.fill({ color: 0xffffff, alpha: 0.001 });
-      orbHit.position.set(orbX, orbY);
-      orbHit.eventMode = 'static';
-      orbHit.cursor = 'pointer';
-      orbHit.hitArea = new Rectangle(0, 0, HEADER_ORB_SIZE, HEADER_ORB_SIZE);
-      orbHit.on('pointertap', () => snapshot.onActivate('account.menu.toggle'));
-      orbHit.on('pointerover', () => this.avatarOrbs.get('header')?.handle.setHover(true));
-      orbHit.on('pointerout', () => this.avatarOrbs.get('header')?.handle.setHover(false));
-      this.root.addChild(orbHit);
-      this.recordHitTarget(this.root, {
-        id: 'account.menu.toggle',
-        role: 'button',
-        label: snapshot.t('auth.openMenu'),
-        x: orbX,
-        y: orbY,
-        width: HEADER_ORB_SIZE,
-        height: HEADER_ORB_SIZE,
-      });
+      this.drawAccountControl(snapshot, orbX, orbY, HEADER_ORB_SIZE);
     }
-    // Signed out: the header claims no slot this frame and `sweepAvatarOrbs`
-    // releases the mesh at the end of the render.
+    // Signed out: no account slot is claimed this frame and
+    // `sweepAvatarOrbs` releases the mesh at the end of the render.
+  }
+
+  /** Overview identity spans the rail and leaves the utility band uncluttered. */
+  private drawOverviewRailChrome(layout: OverviewRailChromeLayout) {
+    this.drawAtomaMark(
+      layout.crystal.x + layout.crystal.width / 2 - ATOMA_MARK_LOCAL_CENTER,
+      layout.crystal.y + layout.crystal.height / 2 - ATOMA_MARK_LOCAL_CENTER,
+      layout.crystalScale
+    );
+  }
+
+  /** Focus chrome lives entirely inside the compact rail, never in a bar. */
+  private drawFocusRailChrome(
+    snapshot: GpuRenderSnapshot,
+    layout: FocusRailChromeLayout
+  ) {
+    const markSize = ATOMA_MARK_LOCAL_CENTER * 2;
+    this.drawAtomaMark(
+      layout.crystal.x + (layout.crystal.width - markSize) / 2,
+      layout.crystal.y + (layout.crystal.height - markSize) / 2
+    );
+    if (layout.profile) {
+      this.drawAccountControl(
+        snapshot,
+        layout.profile.x,
+        layout.profile.y,
+        layout.profile.width
+      );
+    }
+    this.button(
+      this.root,
+      'locale.toggle',
+      'button',
+      snapshot.state.locale === 'en' ? 'EN' : 'FR',
+      layout.locale.x,
+      layout.locale.y,
+      layout.locale.width,
+      layout.locale.height,
+      false,
+      snapshot.onActivate,
+      GPU_COLORS.primary,
+      true
+    );
+    this.drawFpsReadout(
+      layout.fps.x + layout.fps.width - 5,
+      layout.fps.y + layout.fps.height / 2,
+      FOCUS_RAIL_FPS_SCALE
+    );
+  }
+
+  /** One retained profile orb, with its real interactive control above it. */
+  private drawAccountControl(
+    snapshot: GpuRenderSnapshot,
+    x: number,
+    y: number,
+    size: number
+  ) {
+    const auth = snapshot.data.auth;
+    if (!auth) return;
+    this.retainAvatarOrb(
+      'header',
+      x,
+      y,
+      size,
+      auth.viewer.avatarUrl,
+      auth.viewer.principalId,
+      true
+    );
+    // `markRoot` is non-interactive so the retained mesh cannot own events.
+    // This nearly transparent stage control forwards activation and hover.
+    const orbHit = new Graphics();
+    orbHit.rect(0, 0, size, size);
+    orbHit.fill({ color: 0xffffff, alpha: 0.001 });
+    orbHit.position.set(x, y);
+    orbHit.eventMode = 'static';
+    orbHit.cursor = 'pointer';
+    orbHit.hitArea = new Rectangle(0, 0, size, size);
+    orbHit.on('pointertap', () => snapshot.onActivate('account.menu.toggle'));
+    orbHit.on('pointerover', () => this.avatarOrbs.get('header')?.handle.setHover(true));
+    orbHit.on('pointerout', () => this.avatarOrbs.get('header')?.handle.setHover(false));
+    this.root.addChild(orbHit);
+    this.recordHitTarget(this.root, {
+      id: 'account.menu.toggle',
+      role: 'button',
+      label: snapshot.t('auth.openMenu'),
+      x,
+      y,
+      width: size,
+      height: size,
+    });
   }
 
   /**
-   * Live frame rate, right-aligned just left of the locale toggle.
+   * Live frame rate: full-size in the overview header, miniature at the foot
+   * of the focused rail.
    *
    * Deliberately NOT drawn through `text()`. That cache keys on the string,
    * while Canvas Text rasterises and uploads every new value. BitmapText owns
@@ -3854,13 +4192,14 @@ export class GpuRenderer {
    * one missed 120Hz vsync reads as ~116 FPS rather than an alarming 60 FPS.
    * It intentionally survives scene rebuilds caused by wheel input.
    */
-  private drawFpsReadout(right: number, y: number) {
+  private drawFpsReadout(right: number, y: number, visualScale = 1) {
     const readout = new BitmapText({
       text: formatFps(this.lastFps),
       style: FPS_BITMAP_STYLE,
     });
     readout.anchor.set(1, 0.5);
     readout.position.set(right, y);
+    readout.scale.set(visualScale);
     readout.eventMode = 'none';
     readout.tint = multiplyTint(GPU_COLORS.text, fpsColor(this.lastFps));
     readout.label = 'fps-readout';
@@ -3880,9 +4219,13 @@ export class GpuRenderer {
 
   private drawOverlays(snapshot: GpuRenderSnapshot, width: number, height: number) {
     if (snapshot.state.view !== 'runs' || snapshot.state.focusedInput !== 'run') return;
-    const x = Math.max(480, width * 0.42);
-    const popupWidth = Math.max(260, width - x - 120);
-    const popupY = GPU_LAYOUT.headerHeight - 2;
+    const contentLeft = sidebarWidthForViewport(width);
+    const contentWidth = Math.max(0, width - contentLeft);
+    const picker = runsPickerControlLayout(contentWidth);
+    const pane = runsPaneLayout(contentWidth);
+    const x = contentLeft + picker.x;
+    const popupWidth = Math.max(0, pane.leftWidth - 28);
+    const popupY = picker.y + picker.height + 4;
     const rowHeight = 43;
     const headerHeight = 30;
     const query = snapshot.state.search.run;

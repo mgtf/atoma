@@ -175,6 +175,7 @@ import {
 beforeEach(() => {
   useGpuStore.setState({
     view: 'runs',
+    sceneCameraMode: 'overview',
     selectedRunId: null,
     selectedEventId: null,
     selectedAtomName: null,
@@ -189,6 +190,22 @@ beforeEach(() => {
 });
 
 describe('full-GL Zustand scene state', () => {
+  it('starts wide, focuses a destination and lets its active menu restore overview', () => {
+    expect(useGpuStore.getState().sceneCameraMode).toBe('overview');
+    useGpuStore.getState().activateView('skills');
+    expect(useGpuStore.getState()).toMatchObject({
+      view: 'skills',
+      sceneCameraMode: 'focus',
+    });
+    useGpuStore.getState().activateView('skills');
+    expect(useGpuStore.getState().sceneCameraMode).toBe('overview');
+    useGpuStore.getState().setView('skills');
+    useGpuStore.getState().setView('skills');
+    expect(useGpuStore.getState().sceneCameraMode).toBe('focus');
+    useGpuStore.getState().activateView('runs');
+    expect(useGpuStore.getState().sceneCameraMode).toBe('focus');
+  });
+
   it('starts behind the arrival gate and enter() admits the chrome', () => {
     expect(useGpuStore.getState().entered).toBe(false);
     useGpuStore.getState().enter();

@@ -3,6 +3,10 @@ import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import { ADMIN_VIEWS, visibleViews, type ViewName } from '../../store.js';
 import { NAV_ICON_OUTSIDE_GAP, NAV_ICON_RENDER_SIZE } from '../nav-icons.js';
+import {
+  ATOMA_MARK_LOCAL_CENTER,
+  ATOMA_MARK_OVERVIEW_RAIL_SCALE,
+} from '../atoma-mark.js';
 
 /**
  * THE NAV RAIL — the tab strip that used to live in the header, stood on its
@@ -24,13 +28,125 @@ import { NAV_ICON_OUTSIDE_GAP, NAV_ICON_RENDER_SIZE } from '../nav-icons.js';
  */
 
 const SIDEBAR_PAD = 12;
-const SIDEBAR_TOP = GPU_LAYOUT.headerHeight + 18;
 const GROUP_HEIGHT = 20;
 const GROUP_GAP = 18;
 const ITEM_HEIGHT = 32;
 const ITEM_GAP = 12;
 const GROUP_LABEL_SIZE = 9;
 const GROUP_RULE_GAP = 8;
+/** The compact rail gives each destination one centred icon tile. */
+export const FOCUS_SIDEBAR_BUTTON_WIDTH = GPU_LAYOUT.sidebarFocusButtonWidth;
+const FOCUS_RAIL_BOTTOM_PAD = 6;
+const FOCUS_RAIL_DOCK_GAP = 6;
+const FOCUS_RAIL_FPS_GAP = 4;
+const FOCUS_RAIL_FPS_HEIGHT = 8;
+const FOCUS_RAIL_LOCALE_HEIGHT = 26;
+const FOCUS_RAIL_PROFILE_SIZE = 30;
+const FOCUS_RAIL_CRYSTAL_HEIGHT = 51;
+const OVERVIEW_RAIL_CRYSTAL_TOP = 4;
+const OVERVIEW_RAIL_CRYSTAL_SIDE_PAD = 8;
+export const FOCUS_RAIL_FPS_SCALE = 0.68;
+
+export interface FocusRailRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface FocusRailChromeLayout {
+  readonly crystal: FocusRailRect;
+  readonly profile: FocusRailRect | null;
+  readonly locale: FocusRailRect;
+  readonly fps: FocusRailRect;
+  /** Source-space bottom of chrome reserved above the first navigation row. */
+  readonly navigationTop: number;
+  /** Last source-space y the navigation rows may occupy. */
+  readonly navigationBottom: number;
+}
+
+export interface OverviewRailChromeLayout {
+  readonly crystal: FocusRailRect;
+  readonly crystalScale: number;
+  /** Source-space bottom of chrome reserved above the first navigation row. */
+  readonly navigationTop: number;
+}
+
+/**
+ * The overview brand owns the complete rail width, with no adjacent wordmark.
+ * Its scale shrinks only for pathological viewports narrower than the normal
+ * 112px rail floor and always remains below the hero reflection threshold.
+ */
+export function overviewRailChromeLayout(
+  sidebarWidth: number
+): OverviewRailChromeLayout {
+  const markSize = ATOMA_MARK_LOCAL_CENTER * 2;
+  const availableWidth = Math.max(0, sidebarWidth - OVERVIEW_RAIL_CRYSTAL_SIDE_PAD * 2);
+  const crystalScale = Math.min(
+    ATOMA_MARK_OVERVIEW_RAIL_SCALE,
+    availableWidth / markSize
+  );
+  const crystalHeight = markSize * crystalScale;
+  const crystal: FocusRailRect = {
+    x: 0,
+    y: OVERVIEW_RAIL_CRYSTAL_TOP,
+    width: Math.max(0, sidebarWidth),
+    height: crystalHeight,
+  };
+  return {
+    crystal,
+    crystalScale,
+    navigationTop: crystal.y + crystal.height,
+  };
+}
+
+/**
+ * Source-space chrome for the projected focus rail. `visibleBottom` is the
+ * viewport foot inverse-projected onto the scene plane; anchoring here keeps
+ * the dock on screen after perspective rather than below the camera crop.
+ */
+export function focusRailChromeLayout(
+  sidebarWidth: number,
+  visibleBottom: number,
+  authenticated: boolean
+): FocusRailChromeLayout {
+  const buttonX = Math.max(0, sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH);
+  const bottom = Math.max(0, visibleBottom) - FOCUS_RAIL_BOTTOM_PAD;
+  const fps: FocusRailRect = {
+    x: buttonX,
+    y: bottom - FOCUS_RAIL_FPS_HEIGHT,
+    width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
+    height: FOCUS_RAIL_FPS_HEIGHT,
+  };
+  const locale: FocusRailRect = {
+    x: buttonX,
+    y: fps.y - FOCUS_RAIL_FPS_GAP - FOCUS_RAIL_LOCALE_HEIGHT,
+    width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
+    height: FOCUS_RAIL_LOCALE_HEIGHT,
+  };
+  const profile = authenticated
+    ? {
+        x: buttonX + (FOCUS_SIDEBAR_BUTTON_WIDTH - FOCUS_RAIL_PROFILE_SIZE) / 2,
+        y: locale.y - FOCUS_RAIL_DOCK_GAP - FOCUS_RAIL_PROFILE_SIZE,
+        width: FOCUS_RAIL_PROFILE_SIZE,
+        height: FOCUS_RAIL_PROFILE_SIZE,
+      }
+    : null;
+  const dockTop = profile?.y ?? locale.y;
+  return {
+    crystal: {
+      x: buttonX,
+      y: GPU_LAYOUT.focusTopInset + 3,
+      width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
+      height: FOCUS_RAIL_CRYSTAL_HEIGHT,
+    },
+    profile,
+    locale,
+    fps,
+    navigationTop: GPU_LAYOUT.focusTopInset + 3 + FOCUS_RAIL_CRYSTAL_HEIGHT,
+    navigationBottom: Math.max(0, dockTop - FOCUS_RAIL_DOCK_GAP),
+  };
+}
 
 export const SIDEBAR_GROUPS: readonly { key: string; views: readonly ViewName[] }[] = [
   { key: 'workspace', views: ['projects', 'runs', 'docs'] },
@@ -90,10 +206,11 @@ function rowsBottom(rows: readonly SidebarRow[]): number {
  */
 export function sidebarLayout(
   views: readonly ViewName[],
-  viewportHeight = Number.POSITIVE_INFINITY
+  viewportHeight = Number.POSITIVE_INFINITY,
+  navigationTop: number = GPU_LAYOUT.headerHeight
 ): readonly SidebarRow[] {
   const normal = groupedLayout(views, {
-    top: SIDEBAR_TOP,
+    top: navigationTop + 18,
     groupHeight: GROUP_HEIGHT,
     groupGap: GROUP_GAP,
     itemHeight: ITEM_HEIGHT,
@@ -103,7 +220,7 @@ export function sidebarLayout(
 
   // Landscape windows first tighten whitespace while keeping group labels.
   const compact = groupedLayout(views, {
-    top: GPU_LAYOUT.headerHeight + 8,
+    top: navigationTop + 8,
     groupHeight: 14,
     groupGap: 6,
     itemHeight: 26,
@@ -125,7 +242,7 @@ export function sidebarLayout(
       members.push({ kind: 'action', action: 'tuning' });
     }
   }
-  const top = GPU_LAYOUT.headerHeight + 4;
+  const top = navigationTop + 4;
   const gap = 2;
   const available = Math.max(0, viewportHeight - top - 4 - gap * Math.max(0, members.length - 1));
   const itemHeight = members.length > 0 ? Math.min(26, available / members.length) : 0;
@@ -141,22 +258,37 @@ export function drawSidebar(
   ctx: RendererCtx,
   snapshot: GpuRenderSnapshot,
   height: number,
-  width: number = GPU_LAYOUT.sidebarWidth
+  width: number = GPU_LAYOUT.sidebarWidth,
+  layoutHeight: number = height,
+  navigationTop: number = GPU_LAYOUT.headerHeight
 ): void {
-  const top = GPU_LAYOUT.headerHeight;
+  const iconOnly = snapshot.state.sceneCameraMode === 'focus';
+  const top = iconOnly ? 0 : GPU_LAYOUT.headerHeight;
 
   // Wash, not an opaque slab — the same 0.42 the header bar uses, so the far
   // field still reads behind both pieces of chrome.
   const band = new Graphics();
+  band.label = 'sidebar-band';
   band.rect(0, top, width, Math.max(0, height - top));
   band.fill({ color: 0x0b111e, alpha: 0.42 });
   band.eventMode = 'none';
   ctx.root.addChild(band);
 
-  const buttonX = SIDEBAR_PAD + NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
-  const itemWidth = Math.max(0, width - buttonX - SIDEBAR_PAD);
-  for (const row of sidebarLayout(visibleViews(snapshot.data.auth), height)) {
+  const buttonX = iconOnly
+    ? Math.max(0, width - FOCUS_SIDEBAR_BUTTON_WIDTH)
+    : SIDEBAR_PAD + NAV_ICON_RENDER_SIZE + NAV_ICON_OUTSIDE_GAP;
+  const itemWidth = iconOnly
+    ? Math.min(width, FOCUS_SIDEBAR_BUTTON_WIDTH)
+    : Math.max(0, width - buttonX - SIDEBAR_PAD);
+  for (const row of sidebarLayout(
+    visibleViews(snapshot.data.auth),
+    layoutHeight,
+    navigationTop
+  )) {
     if (row.kind === 'group') {
+      // Focus leaves only the icon buttons. Keeping the rows themselves
+      // preserves each group's rhythm without repeating its heading.
+      if (iconOnly) continue;
       const label = snapshot.t(`nav.group.${row.group}`).toUpperCase();
       const labelOptions = {
         size: GROUP_LABEL_SIZE,
@@ -200,29 +332,33 @@ export function drawSidebar(
       continue;
     }
     if (row.kind === 'action') {
+      const label = snapshot.t('nav.sceneTuning');
       ctx.navButton(
         ctx.root,
         'tuning.toggle',
-        snapshot.t('nav.sceneTuning').toUpperCase(),
+        label.toUpperCase(),
         buttonX,
         row.y,
         itemWidth,
         row.height,
         snapshot.state.tuningPanelOpen,
-        snapshot.onActivate
+        snapshot.onActivate,
+        iconOnly ? { iconOnly: true, tooltip: label } : undefined
       );
       continue;
     }
+    const label = snapshot.t(`nav.${row.view}`);
     ctx.navButton(
       ctx.root,
       `nav.${row.view}`,
-      snapshot.t(`nav.${row.view}`).toUpperCase(),
+      label.toUpperCase(),
       buttonX,
       row.y,
       itemWidth,
       row.height,
       snapshot.state.view === row.view,
-      snapshot.onActivate
+      snapshot.onActivate,
+      iconOnly ? { iconOnly: true, tooltip: label } : undefined
     );
   }
 }

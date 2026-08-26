@@ -12,12 +12,15 @@ export function GpuSurface({
   t,
   onActivate,
   onMetrics,
+  cameraRevision = 0,
 }: {
   data: GpuDataSnapshot;
   releaseVersion: string;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onActivate: (id: string) => void;
   onMetrics: (metrics: GpuRenderMetrics) => void;
+  /** Rebuild once after the imperative camera reaches a settled pose. */
+  cameraRevision?: number;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<GpuRenderer | null>(null);
@@ -89,7 +92,7 @@ export function GpuSurface({
       host.current.dataset['gpuRenderCount'] = String(renderCount.current);
     }
     onMetrics(metrics);
-  }, [data, onActivate, onMetrics, ready, releaseVersion, resizeVersion, state, t]);
+  }, [cameraRevision, data, onActivate, onMetrics, ready, releaseVersion, resizeVersion, state, t]);
 
   return <div ref={host} className="gpu-ui-host" />;
 }

@@ -467,7 +467,8 @@ export interface FarField {
     deltaSeconds: number,
     screenW: number,
     screenH: number,
-    bounds: PointerLightBounds
+    bounds: PointerLightBounds,
+    mapClientToRenderer?: (x: number, y: number) => { x: number; y: number }
   ): void;
 }
 
@@ -476,9 +477,11 @@ function fieldUv(
   clientY: number,
   bounds: PointerLightBounds,
   screenW: number,
-  screenH: number
+  screenH: number,
+  mapClientToRenderer: (x: number, y: number) => { x: number; y: number } =
+    (x, y) => pointerClientToRenderer(x, y, bounds, screenW, screenH)
 ) {
-  const local = pointerClientToRenderer(clientX, clientY, bounds, screenW, screenH);
+  const local = mapClientToRenderer(clientX, clientY);
   return {
     x: local.x / Math.max(1, screenW),
     y: 1 - local.y / Math.max(1, screenH),
@@ -584,7 +587,7 @@ export function createFarField(): FarField | null {
 
   return {
     mesh,
-    tick(deltaSeconds, screenW, screenH, bounds) {
+    tick(deltaSeconds, screenW, screenH, bounds, mapClientToRenderer) {
       const width = Math.max(1, screenW);
       const height = Math.max(1, screenH);
       mesh.scale.set(width, height);
@@ -594,7 +597,14 @@ export function createFarField(): FarField | null {
       if (!prefersReducedMotion()) elapsed += dt;
       uniforms.uTime = elapsed;
       const pointer = readPointerLight();
-      const pointerUv = fieldUv(pointer.clientX, pointer.clientY, bounds, width, height);
+      const pointerUv = fieldUv(
+        pointer.clientX,
+        pointer.clientY,
+        bounds,
+        width,
+        height,
+        mapClientToRenderer
+      );
       uniforms.uPointerUv[0] = pointerUv.x;
       uniforms.uPointerUv[1] = pointerUv.y;
       const target = pointer.active ? 1 : 0;
@@ -609,7 +619,14 @@ export function createFarField(): FarField | null {
           mark[2] = 0;
           continue;
         }
-        const uv = fieldUv(spill.clientX, spill.clientY, bounds, width, height);
+        const uv = fieldUv(
+          spill.clientX,
+          spill.clientY,
+          bounds,
+          width,
+          height,
+          mapClientToRenderer
+        );
         mark[0] = uv.x;
         mark[1] = uv.y;
         mark[2] = spill.intensity;
@@ -620,7 +637,13 @@ export function createFarField(): FarField | null {
       }
       // The cast, through the ONE packer the pointer-light filter also uses,
       // so the shape drawn on the backdrop is the shape drawn on the UI.
-      const cast = packMarkCaustic(readMarkFieldCaustic(), bounds, width, height);
+      const cast = packMarkCaustic(
+        readMarkFieldCaustic(),
+        bounds,
+        width,
+        height,
+        mapClientToRenderer
+      );
       if (cast) {
         for (let index = 0; index < CAUSTIC_CORNER_SLOTS; index += 1) {
           const slot = causticSlots[index]!;

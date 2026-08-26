@@ -45,9 +45,16 @@ import {
   projectsFormHeight,
   projectsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/projects.js';
-import { drawSidebar, sidebarLayout, SIDEBAR_GROUPS } from '../src/viz/client-gl/renderer/views/sidebar.js';
+import {
+  drawSidebar,
+  FOCUS_SIDEBAR_BUTTON_WIDTH,
+  focusRailChromeLayout,
+  overviewRailChromeLayout,
+  sidebarLayout,
+  SIDEBAR_GROUPS,
+} from '../src/viz/client-gl/renderer/views/sidebar.js';
 import { clampSceneTuningPosition } from '../src/viz/client-gl/tuning.js';
-import { viewFrame, VIEW_FRAME_PAD, VIEW_FRAME_TITLE_Y } from '../src/viz/client-gl/renderer/view-frame.js';
+import { viewFrame, VIEW_FRAME_PAD } from '../src/viz/client-gl/renderer/view-frame.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -62,7 +69,13 @@ import {
   SETTINGS_DOM_FORM_TOP,
   settingsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/settings.js';
-import { attachAtomaMark, ATOMA_MARK_ENV_MIN_SCALE, ATOMA_MARK_HEADER_SCALE } from '../src/viz/client-gl/renderer/atoma-mark.js';
+import {
+  attachAtomaMark,
+  ATOMA_MARK_ENV_MIN_SCALE,
+  ATOMA_MARK_HEADER_SCALE,
+  ATOMA_MARK_LOCAL_CENTER,
+  ATOMA_MARK_OVERVIEW_RAIL_SCALE,
+} from '../src/viz/client-gl/renderer/atoma-mark.js';
 import { drawWelcome, welcomeLayout, WELCOME_SHOW_INSPECT } from '../src/viz/client-gl/renderer/views/welcome.js';
 import {
   pinMarkElapsedMs,
@@ -71,7 +84,13 @@ import {
 import { drawRegistry } from '../src/viz/client-gl/renderer/views/registry.js';
 import {
   drawRuns,
+  RUN_PICKER_CONTROL_HEIGHT,
+  RUN_PICKER_CONTROL_TOP,
+  RUN_PICKER_HORIZONTAL_INSET,
+  RUN_PICKER_STATUS_RESERVE,
   RUNS_TWO_PANE_MIN_WIDTH,
+  runsPaneLayout,
+  runsPickerControlLayout,
 } from '../src/viz/client-gl/renderer/views/runs.js';
 import { drawSkills } from '../src/viz/client-gl/renderer/views/skills.js';
 import { timelineConnectorGeometry } from '../src/viz/client-gl/renderer/timeline-rails.js';
@@ -84,7 +103,11 @@ import {
 } from '../src/viz/client-gl/store.js';
 import { drawDocs } from '../src/viz/client-gl/renderer/views/docs.js';
 import type { AuthUiSnapshot } from '../src/viz/client-gl/AuthControls.js';
-import { GPU_LAYOUT, sidebarWidthForViewport } from '../src/viz/client-gl/theme.js';
+import {
+  GPU_COLORS,
+  GPU_LAYOUT,
+  sidebarWidthForViewport,
+} from '../src/viz/client-gl/theme.js';
 import { buildAtomaMarkFrame } from '../src/viz/client-gl/brand-mark.js';
 import { drawAdmin } from '../src/viz/client-gl/renderer/views/admin.js';
 import { drawJournal, JOURNAL_SEVERITIES } from '../src/viz/client-gl/renderer/views/journal.js';
@@ -429,9 +452,12 @@ function createRecordingCtx(): RecordingCtx {
       parent.addChild(container);
       return container;
     },
-    navButton(parent, id, label, x, y, width, height, active, onActivate) {
+    navButton(parent, id, label, x, y, width, height, active, onActivate, options) {
       ctx.buttons.push({ parent, id, label, x, y, width, height, active, onActivate });
       ctx.recordHitTarget(parent, { id, role: 'tab', label, x, y, width, height });
+      if (options?.tooltip) {
+        ctx.tooltip(parent, { x, y, width, height, text: options.tooltip });
+      }
       const container = new Container();
       parent.addChild(container);
       return container;
@@ -510,6 +536,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
   const noop = () => {};
   return {
     view: 'runs',
+    sceneCameraMode: 'overview',
     locale: 'en',
     selectedRunId: null,
     selectedEventId: null,
@@ -554,6 +581,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     toggleAccountMenu: noop,
     closeAccountMenu: noop,
     toggleTuningPanel: noop,
+    activateView: noop,
     setView: noop,
     setLocale: noop,
     selectRun: noop,
@@ -1053,6 +1081,76 @@ describe('the nav rail', () => {
     expect(runs.y - (project.y + project.height)).toBe(12);
   });
 
+  it('collapses focus to icon tiles with one translated tooltip per destination', () => {
+    const ctx = createRecordingCtx();
+    drawSidebar(
+      ctx,
+      makeSnapshot({ view: 'skills', sceneCameraMode: 'focus' }),
+      720,
+      GPU_LAYOUT.sidebarWidth
+    );
+    const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
+    expect(nav.map((button) => button.id)).toEqual([
+      'nav.projects', 'nav.runs', 'nav.docs', 'nav.registry', 'nav.skills', 'nav.burnin',
+    ]);
+    expect(ctx.texts.some((text) => ['WORKSPACE', 'OPERATE'].includes(text.value))).toBe(false);
+    expect(ctx.tooltips.map((tooltip) => tooltip.text)).toEqual([
+      'Projects', 'Runs', 'Docs', 'Registry', 'Skills', 'Burn-in',
+    ]);
+    for (const button of nav) {
+      expect(button.x).toBe(GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH);
+      expect(button.width).toBe(FOCUS_SIDEBAR_BUTTON_WIDTH);
+      expect(button.x + button.width).toBeLessThanOrEqual(GPU_LAYOUT.sidebarWidth);
+      const tooltip = ctx.tooltips.find((candidate) => candidate.y === button.y);
+      expect(tooltip).toMatchObject({
+        x: button.x,
+        y: button.y,
+        width: button.width,
+        height: button.height,
+      });
+    }
+  });
+
+  it('reserves a top crystal and a profile-language-FPS dock in focus', () => {
+    const views = visibleViews({ ...base, viewer: { ...viewer, platformAdmin: true } });
+    const visibleBottom = 640;
+    const layout = focusRailChromeLayout(
+      GPU_LAYOUT.sidebarWidth,
+      visibleBottom,
+      true
+    );
+    const rows = sidebarLayout(
+      views,
+      layout.navigationBottom,
+      layout.navigationTop
+    )
+      .filter((row) => row.kind !== 'group');
+    const first = rows[0]!;
+    const last = rows.at(-1)!;
+
+    expect(layout.crystal).toEqual({ x: 164, y: 57, width: 44, height: 51 });
+    expect(layout.navigationTop).toBe(108);
+    expect(layout.crystal.y + layout.crystal.height).toBeLessThan(first.y);
+    expect(last.y + last.height).toBeLessThan(layout.profile!.y);
+    expect(layout.profile!.y + layout.profile!.height).toBeLessThan(layout.locale.y);
+    expect(layout.locale.y + layout.locale.height).toBeLessThan(layout.fps.y);
+    expect(layout.fps.y + layout.fps.height).toBeLessThanOrEqual(visibleBottom);
+    for (const rect of [layout.crystal, layout.profile!, layout.locale, layout.fps]) {
+      expect(rect.x).toBeGreaterThanOrEqual(
+        GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH
+      );
+      expect(rect.x + rect.width).toBeLessThanOrEqual(GPU_LAYOUT.sidebarWidth);
+    }
+
+    const signedOut = focusRailChromeLayout(
+      GPU_LAYOUT.sidebarWidth,
+      visibleBottom,
+      false
+    );
+    expect(signedOut.profile).toBeNull();
+    expect(signedOut.navigationBottom).toBeGreaterThan(layout.navigationBottom);
+  });
+
   it('has no Settings row: the account menu owns that entrance', () => {
     const ctx = createRecordingCtx();
     drawSidebar(ctx, makeSnapshot({ view: 'projects' }), 720);
@@ -1068,6 +1166,21 @@ describe('the nav rail', () => {
       .filter((id) => id === 'tuning.toggle' || ADMIN_VIEWS.some((view) => id === `nav.${view}`));
     expect(adminIds.at(-1)).toBe('tuning.toggle');
     expect(ctx.buttons.find((button) => button.id === 'tuning.toggle')?.active).toBe(true);
+
+    const focused = createRecordingCtx();
+    drawSidebar(
+      focused,
+      makeSnapshot({ tuningPanelOpen: true, sceneCameraMode: 'focus' }, { auth }),
+      720,
+      GPU_LAYOUT.sidebarWidth
+    );
+    const tuning = focused.buttons.find((button) => button.id === 'tuning.toggle');
+    expect(tuning).toMatchObject({
+      x: GPU_LAYOUT.sidebarWidth - FOCUS_SIDEBAR_BUTTON_WIDTH,
+      width: FOCUS_SIDEBAR_BUTTON_WIDTH,
+      active: true,
+    });
+    expect(focused.tooltips.at(-1)?.text).toBe(I18N_CATALOGS.en['nav.sceneTuning']);
   });
 
   it('keeps every admin destination inside a short landscape rail', () => {
@@ -1096,11 +1209,30 @@ describe('the nav rail', () => {
       `--gpu-sidebar:\\s*min\\(100vw, clamp\\(${GPU_LAYOUT.sidebarMinWidth}px,` +
       `[\\s\\S]*?100vw - ${GPU_LAYOUT.contentMinWidth}px[\\s\\S]*?${GPU_LAYOUT.sidebarWidth}px`
     ));
-    for (const selector of ['gpu-project-form', 'gpu-view-search', 'gpu-settings-form']) {
+    for (const selector of [
+      'gpu-run-input', 'gpu-project-form', 'gpu-view-search', 'gpu-settings-form',
+      'gpu-announce-form',
+    ]) {
       expect(css).toMatch(
         new RegExp(`\\.${selector}\\s*\\{[\\s\\S]*?var\\(--gpu-sidebar\\)`)
       );
     }
+  });
+
+  it('keeps DOM overlays aligned with their GPU surfaces', () => {
+    const css = readFileSync('src/viz/client-gl/styles.css', 'utf8');
+    for (const [selector, top] of [
+      ['gpu-run-input', RUN_PICKER_CONTROL_TOP],
+      ['gpu-view-search', 102],
+      ['gpu-project-form', 104],
+      ['gpu-settings-form', 172],
+      ['gpu-announce-form', 104],
+    ] as const) {
+      expect(css).toMatch(
+        new RegExp(`\\.${selector}\\s*\\{[\\s\\S]*?top:\\s*${top}px`)
+      );
+    }
+    expect(css).toMatch(/\.gpu-a11y-bridge:focus-within\s*\{[\s\S]*?top:\s*56px/);
   });
 
   it('layers Scene Tuning above DOM forms and gives every select one geometry', () => {
@@ -1150,6 +1282,48 @@ describe('the nav rail', () => {
       width: expectedEnd.x - expectedStart.x,
       height: expectedEnd.y - expectedStart.y,
     }]);
+  });
+
+  it('keeps retained outer frames free of a second cast silhouette', () => {
+    const renderer = new GpuRenderer();
+    const root = new Container();
+    const frameLayer = new Container();
+    renderer.root = root;
+    const internals = renderer as unknown as {
+      activeViewLayoutHeight: number | null;
+      cameraFrameLayer: Container | null;
+      cameraFramePanels: Array<{ surface: Graphics }>;
+      castShadows: unknown[];
+    };
+    internals.activeViewLayoutHeight = 720;
+    internals.cameraFrameLayer = frameLayer;
+
+    const surface = renderer.panel(
+      root,
+      10,
+      58,
+      1000,
+      652,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
+    expect(surface.parent).toBe(frameLayer);
+    expect(internals.cameraFramePanels).toEqual([
+      expect.objectContaining({ surface }),
+    ]);
+    expect(internals.castShadows).toHaveLength(0);
+    expect(frameLayer.children[0]).toBe(surface);
+
+    // Smaller raised surfaces still use the shared depth system; only the
+    // giant retained column loses the outline that looked like another frame.
+    const cardRoot = new Container();
+    renderer.root = cardRoot;
+    internals.activeViewLayoutHeight = null;
+    internals.cameraFrameLayer = null;
+    renderer.panel(cardRoot, 0, 0, 200, 80);
+    expect(internals.castShadows).toHaveLength(1);
   });
 
   it('projects each non-container viewport escape exactly once', () => {
@@ -2482,7 +2656,7 @@ describe('GPU account menu', () => {
     ],
   });
 
-  it('stays closed until the header orb asks for it', () => {
+  it('stays closed until the profile orb asks for it', () => {
     const closed = createRecordingCtx();
     drawAccountMenu(closed, makeSnapshot({ accountMenuOpen: false }, { auth }), 1280, 720);
     expect(closed.buttons).toHaveLength(0);
@@ -2539,6 +2713,14 @@ describe('GPU account menu', () => {
     expect(layout.items.map((item) => item.kind)).toContain('failure');
     const kinds = layout.items.map((item) => item.kind);
     expect(kinds.indexOf('settings')).toBeLessThan(kinds.indexOf('signOut'));
+  });
+
+  it('opens beside and above the profile control in the focus rail', () => {
+    const profile = { x: 174, y: 620, width: 30, height: 30 };
+    const layout = accountMenuLayout(1280, auth, profile);
+    expect(layout.x).toBeGreaterThan(profile.x + profile.width);
+    expect(layout.y + layout.height).toBeLessThan(profile.y);
+    expect(layout.x + layout.width).toBeLessThanOrEqual(1280);
   });
 });
 
@@ -3428,32 +3610,32 @@ describe('attachAtomaMark glass layering', () => {
       .toEqual(['mark-transmitted-light', 'mark-transmitted-core']);
   });
 
-  it('keeps the header crystal inside the bar and clear of the wordmark', () => {
-    // The mark is drawn at (20, 12) with its pivot at the local centre, so the
-    // gem's visual centre is pinned at (34, 26) whatever the scale — only its
-    // extent grows. Two neighbours bound that extent, and the box's nominal
-    // half-width (14) is NOT the bound: the projected hull reaches further at
-    // some turns than others, so the widest turn is what has to fit.
+  it('centres one enlarged crystal across the overview rail above navigation', () => {
+    // The nominal 28px box is NOT the visible bound: the projected hull reaches
+    // further at some turns, so measure a full turn before asserting clearance.
     let halfWidth = 0;
     let halfHeight = 0;
     for (let step = 0; step < 360; step += 1) {
       for (const point of buildAtomaMarkFrame(step * 40).silhouette) {
-        halfWidth = Math.max(halfWidth, Math.abs(point.x - 14));
-        halfHeight = Math.max(halfHeight, Math.abs(point.y - 14));
+        halfWidth = Math.max(halfWidth, Math.abs(point.x - ATOMA_MARK_LOCAL_CENTER));
+        halfHeight = Math.max(halfHeight, Math.abs(point.y - ATOMA_MARK_LOCAL_CENTER));
       }
     }
-    const centreX = GPU_LAYOUT.headerMarkX + 14;
-    const centreY = GPU_LAYOUT.headerHeight / 2;
-    // Inside the header wash, top and bottom, so it never crosses into the
-    // view content now that the obsolete divider line is gone.
-    expect(centreY - halfHeight * ATOMA_MARK_HEADER_SCALE).toBeGreaterThan(0);
-    expect(centreY + halfHeight * ATOMA_MARK_HEADER_SCALE)
-      .toBeLessThan(GPU_LAYOUT.headerHeight);
-    // And clear of the wordmark by a real gap. This is the pairing that goes
-    // wrong quietly: scaling the mark up eats the space beside it, and nothing
-    // about the text's own position says it was ever meant to be adjacent.
-    const rightEdge = centreX + halfWidth * ATOMA_MARK_HEADER_SCALE;
-    expect(GPU_LAYOUT.headerWordmarkX - rightEdge).toBeGreaterThanOrEqual(8);
+    expect(GPU_LAYOUT.headerHeight).toBe(48);
+    expect(ATOMA_MARK_OVERVIEW_RAIL_SCALE).toBeGreaterThan(ATOMA_MARK_HEADER_SCALE);
+    expect(ATOMA_MARK_OVERVIEW_RAIL_SCALE).toBeLessThan(ATOMA_MARK_ENV_MIN_SCALE);
+
+    for (const width of [GPU_LAYOUT.sidebarMinWidth, 180, GPU_LAYOUT.sidebarWidth]) {
+      const layout = overviewRailChromeLayout(width);
+      const centreX = layout.crystal.x + layout.crystal.width / 2;
+      const centreY = layout.crystal.y + layout.crystal.height / 2;
+      expect(centreX).toBe(width / 2);
+      expect(centreX - halfWidth * layout.crystalScale).toBeGreaterThanOrEqual(8);
+      expect(centreX + halfWidth * layout.crystalScale).toBeLessThanOrEqual(width - 8);
+      expect(centreY - halfHeight * layout.crystalScale).toBeGreaterThanOrEqual(0);
+      const rows = sidebarLayout(visibleViews(null), Number.POSITIVE_INFINITY, layout.navigationTop);
+      expect(layout.crystal.y + layout.crystal.height + 8).toBeLessThanOrEqual(rows[0]!.y);
+    }
   });
 
   it('captures scene reflections only on the hero mark, never by redrawing in-app cards', () => {
@@ -3836,6 +4018,24 @@ describe('drawRuns behavior', () => {
     ];
   }
 
+  it('places the run selector inside the primary Runs panel in both layouts', () => {
+    for (const width of [RUNS_TWO_PANE_MIN_WIDTH - 1, WIDTH]) {
+      const pane = runsPaneLayout(width);
+      const picker = runsPickerControlLayout(width);
+      expect(picker).toEqual({
+        x: pane.leftX + RUN_PICKER_HORIZONTAL_INSET,
+        y: pane.top + 8,
+        width:
+          pane.leftWidth - RUN_PICKER_HORIZONTAL_INSET * 2 - RUN_PICKER_STATUS_RESERVE,
+        height: RUN_PICKER_CONTROL_HEIGHT,
+      });
+      expect(picker.x).toBeGreaterThan(pane.leftX);
+      expect(picker.x + picker.width).toBeLessThan(pane.leftX + pane.leftWidth);
+      expect(picker.y).toBeGreaterThan(pane.top);
+      expect(picker.y + picker.height).toBeLessThan(pane.top + 48);
+    }
+  });
+
   it('keeps the historical 1050px window threshold for the detail pane', () => {
     const event = makeLlmEvent('selected', { role: 'execute' });
     const visible = createRecordingCtx();
@@ -3873,13 +4073,6 @@ describe('drawRuns behavior', () => {
         Math.abs(candidate.height - frame.height) < 0.5
     );
     expect(panel).toBeDefined();
-
-    // The title inside the frame, from the catalog.
-    const title = ctx.texts.find(
-      (candidate) => candidate.value === t('nav.runs')
-    );
-    expect(title).toBeDefined();
-    expect(title!.y).toBeCloseTo(frame.y + VIEW_FRAME_TITLE_Y);
 
     // The empty message centred in the frame.
     const empty = ctx.texts.find((candidate) => candidate.value === t('runs.none'));

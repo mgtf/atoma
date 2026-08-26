@@ -77,7 +77,7 @@ export function drawViewFrame(
   title: string,
   subtitle?: string
 ): void {
-  ctx.panel(
+  const surface = ctx.panel(
     ctx.root,
     frame.x,
     frame.y,
@@ -88,6 +88,7 @@ export function drawViewFrame(
     GPU_LAYOUT.radius,
     2
   );
+  surface.label = 'view-frame-primary';
   ctx.text(ctx.root, title, frame.innerX, frame.y + VIEW_FRAME_TITLE_Y, {
     size: VIEW_FRAME_TITLE_SIZE,
     weight: '700',

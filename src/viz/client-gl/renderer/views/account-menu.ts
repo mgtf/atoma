@@ -4,11 +4,11 @@ import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
 import type { AuthUiSnapshot } from '../../AuthControls.js';
 
 /**
- * THE ACCOUNT MENU — what used to be a panel pinned to the bottom-right
- * corner, now anchored under the header orb where an account menu belongs.
+ * THE ACCOUNT MENU — anchored under the overview account orb, or immediately
+ * above the profile control when focus moves that control into the rail.
  *
  * Drawn from `drawOverlays`, on the same layer as the run picker, so it sits
- * above every view. It opens on the orb and closes on navigation (see
+ * above every view. It opens on the profile orb and closes on navigation (see
  * `setView` in store.ts) or on a click anywhere else — the scrim below is a
  * real hit target because the Pixi stage has no background handler of its own.
  */
@@ -50,6 +50,13 @@ export interface AccountMenuLayout {
   readonly items: readonly AccountMenuItem[];
 }
 
+export interface AccountMenuAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
  * Pure layout, so the row set can be asserted without a GPU. Ordering is the
  * contract: who you are, where you are, where else you could be, then the two
@@ -57,7 +64,8 @@ export interface AccountMenuLayout {
  */
 export function accountMenuLayout(
   viewportWidth: number,
-  auth: AuthUiSnapshot
+  auth: AuthUiSnapshot,
+  anchor?: AccountMenuAnchor
 ): AccountMenuLayout {
   const width = Math.min(PANEL_WIDTH, Math.max(200, viewportWidth - EDGE * 2));
   const items: AccountMenuItem[] = [];
@@ -83,11 +91,19 @@ export function accountMenuLayout(
   push({ kind: 'signOut', id: 'auth.signOut', height: ACTION_HEIGHT });
   if (auth.failure) push({ kind: 'failure', height: FAILURE_HEIGHT });
 
+  const height = cursor + 10;
   return {
-    x: Math.max(EDGE, viewportWidth - width - EDGE),
-    y: GPU_LAYOUT.headerHeight + 6,
+    x: anchor
+      ? Math.min(
+          Math.max(EDGE, anchor.x + anchor.width + 8),
+          Math.max(EDGE, viewportWidth - width - EDGE)
+        )
+      : Math.max(EDGE, viewportWidth - width - EDGE),
+    y: anchor
+      ? Math.max(EDGE, anchor.y - height - 6)
+      : GPU_LAYOUT.headerHeight + 6,
     width,
-    height: cursor + 10,
+    height,
     items,
   };
 }
@@ -104,11 +120,12 @@ export function drawAccountMenu(
   ctx: RendererCtx,
   snapshot: GpuRenderSnapshot,
   viewportWidth: number,
-  viewportHeight: number
+  viewportHeight: number,
+  anchor?: AccountMenuAnchor
 ): void {
   const auth = snapshot.data.auth;
   if (!auth || !snapshot.state.accountMenuOpen) return;
-  const layout = accountMenuLayout(viewportWidth, auth);
+  const layout = accountMenuLayout(viewportWidth, auth, anchor);
 
   // Click-away. Pixi has no stage-level pointer handler, so the only way to
   // close on an outside click is a real object under the panel. It also reads

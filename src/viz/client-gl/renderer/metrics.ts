@@ -1,4 +1,8 @@
-/** One interactive target projected from the Pixi scene into DOM/a11y space. */
+/**
+ * One interactive target in the final Pixi renderer plane. A diagnostic that
+ * drives the projected canvas must pass its centre through
+ * `__ATOMA_GPU__.projectRendererPoint`; these are not raw client pixels.
+ */
 export interface GpuHitTarget {
   id: string;
   role: string;

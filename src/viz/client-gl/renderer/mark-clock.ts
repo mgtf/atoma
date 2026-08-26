@@ -8,7 +8,7 @@
  * glass without the blob sitting on it — shader lighting of the facets is
  * unchanged; only the CPU-drawn sphere (and its refraction copy) hide.
  *
- * Continue unpins and restores the bead so the header mark is not left in
+ * Continue unpins and restores the bead so the navigation mark is not left in
  * a diagnostic state after enter. `?atomaDiag=1` exposes the same setters
  * on `__ATOMA_GPU__` for capture scripts.
  */

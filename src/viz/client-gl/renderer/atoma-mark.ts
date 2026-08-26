@@ -34,6 +34,11 @@ import { createMarkShell } from './mark-shell.js';
 import { prefersReducedMotion } from './motion.js';
 import { VIZ_VISUAL_DEPTH } from '../visual-depth.js';
 import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
+import {
+  clientToRendererPoint,
+  rendererToClientPoint,
+  sceneCameraViewport,
+} from '../scene-camera.js';
 
 /**
  * Local crystal origin. The mark is authored in a 28×28 box with its pivot
@@ -42,20 +47,14 @@ import { ATOMA_CURSOR_HOTSPOT, atomaCursorPoints } from '../pointer-cursor.js';
  */
 export const ATOMA_MARK_LOCAL_CENTER = 14;
 
-/**
- * Header size. The hull spans 13.69 local units from the pivot at its widest
- * turn (measured over a full rotation, not the 12.5 the box suggests), and the
- * gem's visual centre is pinned at (34, 26) inside a 52px bar with the wordmark
- * starting at x = 62. So this scale is bounded on two sides at once: 1.8 leaves
- * ~2.0px above and below the bar and ~3.4px before the "A"; the hard ceiling is
- * just under 1.9, where the gem reaches the header's own border line and the
- * wordmark gap falls to 2px. Past that, the wordmark has to move with it — the
- * bound is held by a test in tests/viz-gpu-views.test.ts, not by this comment.
- */
+/** Compact scale used by the focused icon rail. */
 export const ATOMA_MARK_HEADER_SCALE = 1.8;
 
+/** Prominent overview-rail scale; still below the hero reflection threshold. */
+export const ATOMA_MARK_OVERVIEW_RAIL_SCALE = 3.2;
+
 /**
- * Below this visual scale the gem is a header wordmark: too small to read a
+ * Below this visual scale the gem is navigation chrome: too small to read a
  * reflected card, and recapturing the whole Pixi stage would redraw every
  * filtered card. The arrival gate is >= 6.
  */
@@ -257,6 +256,23 @@ function markStageToClient(
     screen.width > 0 &&
     screen.height > 0
   ) {
+    const viewport = sceneCameraViewport(canvas);
+    if (viewport) {
+      const client = rendererToClientPoint(
+        { x: stageX, y: stageY },
+        screen.width,
+        screen.height,
+        viewport
+      );
+      return {
+        clientX: client.x,
+        clientY: client.y,
+        // Radius and spectral widths return to renderer space before they are
+        // drawn, so this is the layout-to-renderer scale, not the camera's
+        // position-dependent magnification.
+        pixelScale: viewport.width / screen.width,
+      };
+    }
     const bounds = canvas.getBoundingClientRect();
     return {
       clientX: bounds.left + stageX * bounds.width / screen.width,
@@ -280,6 +296,15 @@ function markClientToStage(
     screen.width > 0 &&
     screen.height > 0
   ) {
+    const viewport = sceneCameraViewport(canvas);
+    if (viewport) {
+      return clientToRendererPoint(
+        { x: clientX, y: clientY },
+        screen.width,
+        screen.height,
+        viewport
+      );
+    }
     const bounds = canvas.getBoundingClientRect();
     if (bounds.width > 0 && bounds.height > 0) {
       return {
@@ -380,8 +405,8 @@ export interface AtomaMarkHandle {
 }
 
 /**
- * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the header
- * wordmark and the arrival gate — never a second R3F logo.
+ * One Pixi crystal, driven by `buildAtomaMarkFrame`. Shared by the navigation
+ * rail and the arrival gate — never a second R3F logo.
  *
  * The shell is a MESH: a thick-shell regular octahedron shaded by its own
  * WGSL/GLSL program, split into the far cavity, the bead, the near cavity
@@ -405,6 +430,7 @@ export function attachAtomaMark(
   const ownedTextures = new Set<RenderTexture>();
   let cursorEcho: Graphics | null = null;
   const container = new Container();
+  container.label = 'atoma-mark';
   container.position.set(x, y);
   container.eventMode = 'none';
   const crystal = new Container();
@@ -472,7 +498,7 @@ export function attachAtomaMark(
    * drawn into a texture first, and the shell samples it three times per pixel.
    *
    * Sized from the mark's own box rather than the screen: the crystal occupies a
-   * fixed 28x28 local square, so a header mark at 1.8x needs a 51px texture
+   * fixed 28x28 local square, so compact chrome at 1.8x needs a 51px texture
    * while the arrival gate needs a few hundred. Sizing to the viewport would
    * spend megabytes to refract a 51px logo.
    *
@@ -542,7 +568,7 @@ export function attachAtomaMark(
   /**
    * Screen-space env of the Pixi scene, WITHOUT the gem. The aurora field
    * sits on ambientRoot so this capture includes it. Cards on in-app views
-   * are skipped with the header mark (see ATOMA_MARK_ENV_MIN_SCALE).
+   * are skipped with navigation chrome (see ATOMA_MARK_ENV_MIN_SCALE).
    *
    * The HTML cursor is a DOM overlay, so it is not in the stage. A Pixi
    * echo of the same silhouette is shown only for this pass — otherwise the
@@ -728,38 +754,41 @@ export function attachAtomaMark(
       if (coupledLocal) {
         const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
         const rgb = cast ? markColorToRgb(cast.color) : null;
-        // Stage→client is affine and identical for every corner of one frame;
-        // each conversion overwrites the same value, so the delta rides the
-        // exact path its corner took without a second getBoundingClientRect.
-        let pixelScale = 1;
-        writeMarkFieldCaustic(
-          cast && rgb
-            ? {
-                points: cast.points.map((corner) => {
-                  const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
-                    (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
-                  const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
-                    (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
-                  const client = markStageToClient(renderer, stageX, stageY);
-                  // Same affine both axes: the spectral delta rides the very
-                  // conversion the corner it belongs to just took, so the
-                  // fringe lands where its filament lands at every DPI.
-                  pixelScale = client.pixelScale;
-                  return { x: client.clientX, y: client.clientY };
-                }),
-                spectral: cast.spectral && pixelScale > 0
-                  ? cast.spectral.map((delta) => ({
-                      x: delta.x * scale * pixelScale,
-                      y: delta.y * scale * pixelScale,
-                    }))
-                  : null,
-                intensity: cast.intensity,
-                r: rgb.r,
-                g: rgb.g,
-                b: rgb.b,
-              }
-            : null
-        );
+        if (!cast || !rgb) {
+          writeMarkFieldCaustic(null);
+        } else {
+          const points: { x: number; y: number }[] = [];
+          const spectral: { x: number; y: number }[] | null = cast.spectral ? [] : null;
+          for (let index = 0; index < cast.points.length; index += 1) {
+            const corner = cast.points[index]!;
+            const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+              (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+            const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+              (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+            const client = markStageToClient(renderer, stageX, stageY);
+            points.push({ x: client.clientX, y: client.clientY });
+            const delta = cast.spectral?.[index];
+            if (spectral && delta) {
+              const endpoint = markStageToClient(
+                renderer,
+                stageX + delta.x * scale,
+                stageY + delta.y * scale
+              );
+              spectral.push({
+                x: endpoint.clientX - client.clientX,
+                y: endpoint.clientY - client.clientY,
+              });
+            }
+          }
+          writeMarkFieldCaustic({
+            points,
+            spectral,
+            intensity: cast.intensity,
+            r: rgb.r,
+            g: rgb.g,
+            b: rgb.b,
+          });
+        }
       } else {
         writeMarkFieldCaustic(null);
       }

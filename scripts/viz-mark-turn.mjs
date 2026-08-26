@@ -282,7 +282,10 @@ export async function captureMarkTurn(options = {}) {
       await page.evaluate(async (coords) => {
         const handle = window.__ATOMA_GPU__;
         if (!coords) handle.hidePointerLight();
-        else handle.movePointerLight(coords.x, coords.y);
+        else {
+          const client = handle.projectRendererPoint(coords.x, coords.y);
+          handle.movePointerLight(client.x, client.y);
+        }
         const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
         await frame();
         await frame();
@@ -296,10 +299,10 @@ export async function captureMarkTurn(options = {}) {
     await settle(0);
 
     const pointer = options.pointer ?? parsePointer(process.argv.slice(2));
-    const host = await page.$eval('.gpu-ui-host', (el) => {
-      const box = el.getBoundingClientRect();
-      return { left: box.left, top: box.top, width: box.width, height: box.height };
-    });
+    const host = await page.evaluate(() => ({
+      width: window.__ATOMA_GPU__.app.screen.width,
+      height: window.__ATOMA_GPU__.app.screen.height,
+    }));
 
     let shots;
     if (pointer) {
@@ -314,9 +317,7 @@ export async function captureMarkTurn(options = {}) {
           elapsedMs,
           file: `pointer-${shot.name}.png`,
           degree: degree ?? 0,
-          pointer: client
-            ? { x: host.left + client.x, y: host.top + client.y }
-            : null,
+          pointer: client,
         };
       });
     } else {

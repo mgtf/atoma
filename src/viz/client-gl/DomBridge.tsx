@@ -75,7 +75,7 @@ export function DomBridge({
   const focusedInput = useGpuStore((state) => state.focusedInput);
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
-  const setView = useGpuStore((state) => state.setView);
+  const activateView = useGpuStore((state) => state.activateView);
   const enter = useGpuStore((state) => state.enter);
   const setLocale = useGpuStore((state) => state.setLocale);
   const setSearch = useGpuStore((state) => state.setSearch);
@@ -144,7 +144,7 @@ export function DomBridge({
               key={name}
               role="tab"
               aria-selected={view === name}
-              onClick={() => setView(name)}
+              onClick={() => activateView(name)}
             >
               {t(`nav.${name}`)}
             </button>

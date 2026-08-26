@@ -38,6 +38,7 @@ const runs = [
 beforeEach(() => {
   useGpuStore.setState({
     view: 'runs',
+    sceneCameraMode: 'overview',
     locale: 'en',
     selectedRunId: 'run-1',
     selectedProjectId: null,

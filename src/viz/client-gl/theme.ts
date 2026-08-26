@@ -21,22 +21,16 @@ export const GPU_COLORS = {
 
 export const GPU_LAYOUT = {
   /**
-   * The identity band. 54, not 52: the brand crystal is 48px tall at
-   * ATOMA_MARK_HEADER_SCALE and a 52px bar left it 2px of air top and bottom,
-   * which read as glued to the top of the screen. Everything the header draws
-   * is placed against headerHeight / 2, so this is the one number to move.
+   * The overview utility band. A 34px account orb keeps 7px of air above and
+   * below; the brand now owns a larger, independent slot in the left rail.
    */
-  headerHeight: 54,
-  /** Left inset of the brand crystal's local box in the header band. */
-  headerMarkX: 20,
+  headerHeight: 48,
   /**
-   * Where the wordmark starts. The crystal's hull reaches ~24.6px either side
-   * of its centre at ATOMA_MARK_HEADER_SCALE, so its right edge sits near
-   * x = 58.6 — this leaves it a real gap instead of the 3px the two used to
-   * share. A test holds that clearance, because the gap closes silently
-   * whenever the mark is scaled up and nothing moves the text.
+   * Focus has no horizontal header, but its camera crop and compact rail were
+   * composed against the former 54px top inset. Keep that endpoint stable
+   * while the overview header becomes shorter.
    */
-  headerWordmarkX: 70,
+  focusTopInset: 54,
   /**
    * The nav rail's width. Views draw in their own viewport space starting at
    * 0; `render()` places that space at this offset. Hit targets project
@@ -44,6 +38,8 @@ export const GPU_LAYOUT = {
    * an explicit translation.
    */
   sidebarWidth: 208,
+  /** Destination surface kept at the trailing edge of the focused crop. */
+  sidebarFocusButtonWidth: 44,
   /** Narrowest the rail may become before its labels stop being legible. */
   sidebarMinWidth: 112,
   /** Preserve this much view space by shrinking the rail on narrow windows. */
@@ -60,7 +56,9 @@ export const GPU_LAYOUT = {
  * The rail gives space back before a view is pushed off-screen. This exact
  * clamp is mirrored by `--gpu-sidebar` for DOM overlays.
  */
-export function sidebarWidthForViewport(viewportWidth: number): number {
+export function sidebarWidthForViewport(
+  viewportWidth: number
+): number {
   return Math.max(
     0,
     Math.min(

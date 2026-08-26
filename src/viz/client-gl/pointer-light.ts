@@ -16,6 +16,8 @@ export const POINTER_LIGHT_CORE_RADIUS_PX = 34;
 export interface PointerLightSnapshot {
   readonly clientX: number;
   readonly clientY: number;
+  /** Pointer presence is input; `active` below is only the decorative light. */
+  readonly trackingActive: boolean;
   readonly active: boolean;
   readonly revision: number;
 }
@@ -30,6 +32,7 @@ export interface PointerLightBounds {
 const pointerLight = {
   clientX: 0,
   clientY: 0,
+  trackingActive: false,
   active: false,
   revision: 0,
 };
@@ -41,13 +44,28 @@ export function readPointerLight(): PointerLightSnapshot {
 export function movePointerLight(clientX: number, clientY: number) {
   pointerLight.clientX = clientX;
   pointerLight.clientY = clientY;
+  pointerLight.trackingActive = true;
   pointerLight.active = true;
+  pointerLight.revision += 1;
+}
+
+/** Track hover input even when reduced motion or forced colours disable light. */
+export function trackPointer(clientX: number, clientY: number) {
+  pointerLight.clientX = clientX;
+  pointerLight.clientY = clientY;
+  pointerLight.trackingActive = true;
   pointerLight.revision += 1;
 }
 
 export function hidePointerLight() {
   if (!pointerLight.active) return;
   pointerLight.active = false;
+  pointerLight.revision += 1;
+}
+
+export function hideTrackedPointer() {
+  if (!pointerLight.trackingActive) return;
+  pointerLight.trackingActive = false;
   pointerLight.revision += 1;
 }
 

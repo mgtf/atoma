@@ -1,4 +1,4 @@
-/* global document */
+/* global document, HTMLButtonElement */
 /**
  * viz-screenshot — capture a PNG of the GPU client for visual review.
  *
@@ -23,8 +23,12 @@
  *                        them. Without it: the ungated developer rendering.
  *   --select-first       Click the first project row after arrival (the run
  *                        list + run form state).
+ *   --camera <mode>      Camera pose after navigation: focus (default) or
+ *                        overview. Overview re-activates the selected menu,
+ *                        exercising the real return transition.
  *   --tuning             Open the floating Scene Tuning window.
- *   --out <path>         PNG destination. Default: screenshots/<view>-<mode>.png
+ *   --out <path>         PNG destination. Default:
+ *                        screenshots/<view>-<auth-mode>-<camera>.png
  *   --url <base>         Attach to an already-running UI server instead of
  *                        spawning a dev stack. With no --url the script spawns
  *                        `scripts/viz-dev.mjs` on two free ports and tears it
@@ -50,10 +54,14 @@ const view = arg('--view', 'Projects');
 const authed = has('--auth');
 const tuning = has('--tuning');
 const selectFirst = has('--select-first');
+const cameraMode = arg('--camera', 'focus');
+if (cameraMode !== 'overview' && cameraMode !== 'focus') {
+  throw new Error(`--camera must be overview or focus, got ${cameraMode}`);
+}
 const width = Number(arg('--width', '1600'));
 const height = Number(arg('--height', '900'));
 const outPath = resolve(
-  arg('--out', `screenshots/${view.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${authed ? 'gated' : 'ungated'}.png`)
+  arg('--out', `screenshots/${view.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${authed ? 'gated' : 'ungated'}-${cameraMode}.png`)
 );
 
 /**
@@ -431,19 +439,41 @@ try {
       { timeout: READY_TIMEOUT_MS },
       view
     );
-    await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
+    await page.waitForFunction(
+      () => document.querySelector('.gpu-scene-camera')?.getAttribute('data-scene-camera-motion') === 'settled',
+      { timeout: READY_TIMEOUT_MS }
+    );
+
+    if (cameraMode === 'overview') {
+      // A second activation of the CURRENT destination is the camera return;
+      // use the same menu contract as the product instead of mutating state.
+      await page.evaluate((name) => {
+        const tab = [...document.querySelectorAll('[role="tab"]')].find(
+          (candidate) => candidate.textContent === name
+        );
+        if (!(tab instanceof HTMLButtonElement)) throw new Error(`nav tab missing: ${name}`);
+        tab.click();
+      }, view);
+      await page.waitForFunction(
+        () => {
+          const plane = document.querySelector('.gpu-scene-camera');
+          return plane?.getAttribute('data-scene-camera-mode') === 'overview' &&
+            plane.getAttribute('data-scene-camera-motion') === 'settled';
+        },
+        { timeout: READY_TIMEOUT_MS }
+      );
+    }
+    await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 700)));
 
     if (selectFirst) {
       const spot = await page.evaluate(() => {
         const handle = globalThis.__ATOMA_GPU__;
         const row = handle?.hitTargets().find((entry) => entry.id.startsWith('project.select.'));
-        if (!row) return null;
-        const canvas = document.querySelector('.gpu-ui-canvas');
-        const box = canvas.getBoundingClientRect();
-        return {
-          x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
-          y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
-        };
+        if (!row || !handle.projectRendererPoint) return null;
+        return handle.projectRendererPoint(
+          row.x + row.width / 2,
+          row.y + row.height / 2
+        );
       });
       if (!spot) throw new Error('--select-first: no project row on screen');
       await page.mouse.click(spot.x, spot.y);
@@ -452,7 +482,7 @@ try {
 
     await mkdir(dirname(outPath), { recursive: true });
     await page.screenshot({ path: outPath });
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}${selectFirst ? ', first project selected' : ''}, ${width}x${height})`);
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}, ${width}x${height})`);
   } finally {
     await browser.close();
   }

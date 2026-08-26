@@ -12,6 +12,7 @@ import {
 import { atomaCursorPoints } from '../src/viz/client-gl/pointer-cursor.js';
 import {
   hidePointerLight,
+  hideTrackedPointer,
   POINTER_LIGHT_RADIUS_PX,
   pointerClientToRenderer,
   pointerClientToUv,
@@ -96,6 +97,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   hidePointerLight();
+  hideTrackedPointer();
   document.documentElement.classList.remove('atoma-cursor-active');
   vi.unstubAllGlobals();
 });
@@ -174,6 +176,14 @@ describe('Atoma 3D cursor', () => {
     expect(cursor).toHaveAttribute('data-visible', 'false');
     expect(readPointerLight().active).toBe(false);
     expect(document.documentElement).not.toHaveClass('atoma-cursor-active');
+
+    pointerMove(72, 56, 'mouse');
+    expect(readPointerLight()).toMatchObject({
+      clientX: 72,
+      clientY: 56,
+      trackingActive: true,
+      active: false,
+    });
   });
 
   it('parses the shared silhouette into the Pixi echo polygon', () => {

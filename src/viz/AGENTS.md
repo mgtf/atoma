@@ -299,7 +299,7 @@ npm run viz:mark-turn:analyze
   cannot reach the nav ungrouped and silently vanish. Settings has no rail row
   on purpose — the account menu is its entrance, and a second one would put one
   job in two places.
-- The renderer draws in two spaces. `stage` is the persistent scene root;
+- The renderer draws in two PIXI spaces. `stage` is the persistent scene root;
   `root` is the container the CURRENT pass draws into. Chrome (header, rail,
   overlays, account menu) draws into the stage, and each view draws into a
   viewport layer offset by `sidebarWidthForViewport(width)`. That layer is
@@ -309,17 +309,20 @@ npm run viz:mark-turn:analyze
   closures holding the old ancestor — the tuning slider's drag then mapped the
   pointer against a track 208px from where it was drawn, and clamped to the
   range's end on first press. So views keep drawing from x = 0 and nothing
-  shifts them afterwards. `recordHitTarget` projects every diagnostic/a11y hit
-  target through its live parent with `toGlobal()`, including pane centring and
-  scroll; raw x/y must never be pushed into `metrics.hitTargets`. Two other
-  values still escape Pixi's transform: `detailBounds` is translated once by
+  shifts them afterwards. The complete Pixi + visual DOM plane passes through ONE pinhole camera (`client-gl/scene-camera.ts`): overview is exact identity;
+  nav focuses content with the compact icon rail, and re-activation restores overview. `SceneCameraPlane`
+  rAF-interpolates ONE shared frame — NEVER a CSS transition — so CSS and inverse homography stay atomic. Pixi events, wheel routing, lights
+  and diagnostics use that frame, not the transformed canvas' axis-aligned bounds. While it travels, author the view ONCE at maximum height and resize retained outer panels + mask from that frame; NEVER call `GpuRenderer.render()` per camera rAF — the one settle rebuild commits scroll layout at the already-matching height.
+  `recordHitTarget` projects a target through its live parent with `toGlobal()` but
+  leaves it in the final PIXI renderer plane; a real click additionally uses
+  `projectRendererPoint`. Raw x/y must never enter `metrics.hitTargets`. `detailBounds` is translated once by
   the view offset because the wheel router compares its plain Rectangle with a
-  page position; a retained avatar orb sits on `markRoot`, so
+  camera-unprojected renderer position; a retained avatar orb sits on `markRoot`, so
   `retainAvatarOrb` resolves the caller's coordinates through `this.root` and
   keys the retention on the resolved pair. Any DOM overlay that sits over a
   VIEW is positioned from the `--gpu-sidebar` CSS variable, whose CSS clamp a
-  test holds equal to `sidebarWidthForViewport`: the rail shrinks from 208px
-  to a 112px legibility floor before stealing the view's 320px minimum. The
+  test holds equal to `sidebarWidthForViewport`: overview shrinks 208px to a
+  112px floor; focus preserves that source layout while the camera crops its trailing icon tile. The
   run search input is not one of them, it lives in the header
   band. View DOM overlays are removed while the Pixi account menu is open so
   their higher CSS layer cannot intercept its controls. Short viewports

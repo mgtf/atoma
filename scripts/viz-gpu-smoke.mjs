@@ -1,4 +1,4 @@
-/* global document, HTMLButtonElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent, window */
+/* global document, DOMMatrixReadOnly, DOMPoint, getComputedStyle, HTMLButtonElement, HTMLElement, matchMedia, requestAnimationFrame, MutationObserver, WheelEvent, window */
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -245,14 +245,192 @@ async function openView(page, label) {
       (candidate) => candidate.textContent === name
     );
     if (!tab) throw new Error(`nav tab missing: ${name}`);
-    tab.click();
+    // This helper opens a destination; re-activating an already-selected row
+    // is a different product action now — it toggles the camera overview.
+    if (tab.getAttribute('aria-selected') !== 'true') tab.click();
   }, label);
   await page.waitForFunction(
     (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
     { timeout: READY_TIMEOUT_MS },
     label
   );
+  await page.waitForFunction(
+    () => document.querySelector('.gpu-scene-camera')?.getAttribute('data-scene-camera-motion') === 'settled',
+    { timeout: READY_TIMEOUT_MS }
+  );
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 700)));
+}
+
+async function waitForSceneCamera(page, mode) {
+  await page.waitForFunction(
+    (expected) => {
+      const plane = document.querySelector('.gpu-scene-camera');
+      return plane?.getAttribute('data-scene-camera-mode') === expected &&
+        plane.getAttribute('data-scene-camera-motion') === 'settled';
+    },
+    { timeout: READY_TIMEOUT_MS },
+    mode
+  );
+}
+
+/** Compare the rAF-published projection with the matrix actually painted. */
+async function sampleMovingCameraAlignment(page) {
+  return await page.evaluate(async () => {
+    const plane = document.querySelector('.gpu-scene-camera');
+    const handle = globalThis.__ATOMA_GPU__;
+    const target = handle?.hitTargets().find((entry) => entry.id === 'nav.runs');
+    if (!(plane instanceof HTMLElement) || !handle?.projectRendererPoint || !target) {
+      throw new Error('camera alignment diagnostics did not arm');
+    }
+    const rendererWidth = handle.app.screen.width;
+    const rendererHeight = handle.app.screen.height;
+    const rendererPoint = {
+      x: target.x + target.width / 2,
+      y: target.y + target.height / 2,
+    };
+    for (let frame = 0; frame < 90; frame += 1) {
+      const progress = Number(plane.dataset.sceneCameraProgress ?? '1');
+      if (plane.dataset.sceneCameraMotion === 'moving' && progress > 0 && progress < 1) {
+        const projected = handle.projectRendererPoint(rendererPoint.x, rendererPoint.y);
+        const matrix = new DOMMatrixReadOnly(getComputedStyle(plane).transform);
+        const painted = matrix.transformPoint(new DOMPoint(
+          rendererPoint.x * plane.clientWidth / rendererWidth,
+          rendererPoint.y * plane.clientHeight / rendererHeight
+        ));
+        const paintedX = painted.x / painted.w;
+        const paintedY = painted.y / painted.w;
+        return {
+          sampled: true,
+          progress,
+          error: Math.hypot(projected.x - paintedX, projected.y - paintedY),
+        };
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    // A software rasteriser can spend longer than the full travelling shot on
+    // one frame. Endpoint clicks below still prove both published poses; unit
+    // tests cover every mathematical intermediate on such a runner.
+    return { sampled: false, progress: 1, error: 0 };
+  });
+}
+
+/**
+ * Arm BEFORE a camera click and observe the retained Pixi frame against the
+ * exact inverse of every painted CSS pose. This includes the stable samples
+ * on either side, so a jump at motion start or settle cannot hide between two
+ * `moving` samples.
+ */
+function beginMovingViewFrameRecorder(page) {
+  const recording = page.evaluate(async () => {
+    const plane = document.querySelector('.gpu-scene-camera');
+    const handle = globalThis.__ATOMA_GPU__;
+    if (!(plane instanceof HTMLElement) || !handle?.projectRendererPoint) {
+      throw new Error('camera frame diagnostics did not arm');
+    }
+    const host = document.querySelector('.gpu-ui-host');
+    const rendererHeight = handle.app.screen.height;
+    const samples = [];
+    let minimum = Number.POSITIVE_INFINITY;
+    let maximum = Number.NEGATIVE_INFINITY;
+    const startRenderCount = Number(host?.getAttribute('data-gpu-render-count') ?? '0');
+    const read = () => {
+      let primary = null;
+      const walk = (node) => {
+        if (node.label === 'view-frame-primary') primary = node;
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(handle.app.stage);
+      if (!primary) throw new Error('primary view frame missing during camera travel');
+      const bounds = primary.getBounds();
+      const sourceBottom = (bounds.y + bounds.height) *
+        plane.clientHeight / Math.max(1, rendererHeight);
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(plane).transform);
+      const inverse = matrix.inverse();
+      const foot = (x) => {
+        const point = inverse.transformPoint(new DOMPoint(x, window.innerHeight));
+        return point.y / point.w;
+      };
+      const visibleFoot = Math.min(foot(0), foot(window.innerWidth));
+      const bottom = handle.projectRendererPoint(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height
+      ).y;
+      minimum = Math.min(minimum, bottom);
+      maximum = Math.max(maximum, bottom);
+      samples.push({
+        motion: plane.dataset.sceneCameraMotion ?? null,
+        progress: Number(plane.dataset.sceneCameraProgress ?? '1'),
+        sourceBottom,
+        visibleFoot,
+        bottom,
+        at: performance.now(),
+      });
+    };
+    read();
+    globalThis.__ATOMA_CAMERA_FRAME_RECORDER_ARMED__ = true;
+    let moving = false;
+    for (let frame = 0; frame < 180; frame += 1) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      read();
+      if (plane.dataset.sceneCameraMotion === 'moving') moving = true;
+      if (moving && plane.dataset.sceneCameraMotion === 'settled') {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        read();
+        break;
+      }
+    }
+    delete globalThis.__ATOMA_CAMERA_FRAME_RECORDER_ARMED__;
+    const inset = samples[0].visibleFoot - samples[0].sourceBottom;
+    const errors = samples.map((sample) =>
+      Math.abs(sample.sourceBottom - (sample.visibleFoot - inset))
+    );
+    const endRenderCount = Number(host?.getAttribute('data-gpu-render-count') ?? '0');
+    return {
+      samples,
+      movingSamples: samples.filter((sample) => sample.motion === 'moving').length,
+      minimum,
+      maximum,
+      maxTrackingError: Math.max(...errors),
+      renderDelta: endRenderCount - startRenderCount,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  const armed = page.waitForFunction(
+    () => globalThis.__ATOMA_CAMERA_FRAME_RECORDER_ARMED__ === true,
+    { timeout: READY_TIMEOUT_MS }
+  );
+  return { armed, recording };
+}
+
+function assertMovingViewFrame(stats, direction, softwareRastered) {
+  if (stats.movingSamples === 0 && softwareRastered) return;
+  if (stats.movingSamples < 2) {
+    throw new Error(`camera frame travel did not arm: ${JSON.stringify(stats)}`);
+  }
+  const tolerance = 0.75;
+  for (let index = 1; index < stats.samples.length; index += 1) {
+    const previous = stats.samples[index - 1].sourceBottom;
+    const current = stats.samples[index].sourceBottom;
+    if (
+      (direction === 'zoom' && current > previous + tolerance) ||
+      (direction === 'dezoom' && current < previous - tolerance)
+    ) {
+      throw new Error(
+        `camera frame height reversed during ${direction}: ${JSON.stringify(stats)}`
+      );
+    }
+  }
+  if (
+    stats.maxTrackingError > 1 ||
+    stats.minimum < stats.viewportHeight - 16 ||
+    stats.maximum > stats.viewportHeight - 0.5 ||
+    stats.renderDelta < 1 ||
+    stats.renderDelta > 2
+  ) {
+    throw new Error(
+      `camera frame did not resize continuously during ${direction}: ${JSON.stringify(stats)}`
+    );
+  }
 }
 
 /**
@@ -656,6 +834,345 @@ try {
     if (arrivalView !== 'Projects') {
       throw new Error(`GPU arrival view must be Projects, got ${String(arrivalView)}`);
     }
+    await page.waitForFunction(
+      () => !document.querySelector('.gpu-entry-veil')?.hasAttribute('data-phase'),
+      { timeout: READY_TIMEOUT_MS }
+    );
+    const arrivalCamera = await page.evaluate(() => {
+      const plane = document.querySelector('.gpu-scene-camera');
+      const matrix = plane instanceof HTMLElement
+        ? new DOMMatrixReadOnly(getComputedStyle(plane).transform)
+        : null;
+      const identity = matrix
+        ? [
+            matrix.m11 - 1, matrix.m12, matrix.m13, matrix.m14,
+            matrix.m21, matrix.m22 - 1, matrix.m23, matrix.m24,
+            matrix.m31, matrix.m32, matrix.m33 - 1, matrix.m34,
+            matrix.m41, matrix.m42, matrix.m43, matrix.m44 - 1,
+          ]
+        : [Number.POSITIVE_INFINITY];
+      let headerBands = 0;
+      const walk = (node) => {
+        if (node.label === 'header-band') headerBands += 1;
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(globalThis.__ATOMA_GPU__.app.stage);
+      return {
+        mode: plane?.getAttribute('data-scene-camera-mode') ?? null,
+        motion: plane?.getAttribute('data-scene-camera-motion') ?? null,
+        transform: plane instanceof HTMLElement ? plane.style.transform : '',
+        identityError: Math.max(...identity.map((value) => Math.abs(value))),
+        headerBands,
+      };
+    });
+    if (arrivalCamera.mode !== 'overview' || arrivalCamera.motion !== 'settled') {
+      throw new Error(`arrival camera must frame the whole scene: ${JSON.stringify(arrivalCamera)}`);
+    }
+    if (arrivalCamera.identityError > 1e-9) {
+      throw new Error(
+        `arrival camera must not deform the authored scene: ${JSON.stringify(arrivalCamera)}`
+      );
+    }
+    if (arrivalCamera.headerBands !== 1) {
+      throw new Error(`overview header band missing: ${JSON.stringify(arrivalCamera)}`);
+    }
+
+    // Camera navigation through the REAL Pixi rail. First activation advances
+    // from the establishing overview to the content column; re-activation of
+    // that same destination returns. Both clicks are projected through the
+    // live pose, so this also proves endpoint inverse hit-testing.
+    await waitForHitTarget(page, 'nav.projects', 'Projects camera target never rendered');
+    const projectNavPoint = async () => await page.evaluate(() => {
+      const handle = globalThis.__ATOMA_GPU__;
+      const target = handle?.hitTargets().find((entry) => entry.id === 'nav.projects');
+      if (!target || !handle.projectRendererPoint) return null;
+      const point = handle.projectRendererPoint(
+        target.x + target.width / 2,
+        target.y + target.height / 2
+      );
+      return point.x >= 1 && point.x <= window.innerWidth - 1 &&
+        point.y >= 1 && point.y <= window.innerHeight - 1
+        ? point
+        : null;
+    });
+    const overviewNavPoint = await projectNavPoint();
+    if (!overviewNavPoint) throw new Error('overview camera could not project Projects menu');
+    const focusFrameRecorder = beginMovingViewFrameRecorder(page);
+    await focusFrameRecorder.armed;
+    await page.mouse.click(overviewNavPoint.x, overviewNavPoint.y);
+    const movingCamera = await sampleMovingCameraAlignment(page);
+    const focusFrameTravel = await focusFrameRecorder.recording;
+    assertMovingViewFrame(focusFrameTravel, 'zoom', softwareRastered);
+    await waitForSceneCamera(page, 'focus');
+    const focusCamera = await page.evaluate(() => {
+      const plane = document.querySelector('.gpu-scene-camera');
+      if (!(plane instanceof HTMLElement)) return null;
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(plane).transform);
+      const sourceTop = Number(plane.dataset.sceneCameraSourceTop ?? '0');
+      const project = (x, y) => {
+        const point = matrix.transformPoint(new DOMPoint(x, y));
+        return { x: point.x / point.w, y: point.y / point.w };
+      };
+      return {
+        transform: plane.style.transform,
+        sourceTop,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        topLeft: project(0, sourceTop),
+        topMiddle: project(plane.clientWidth / 2, sourceTop),
+        topRight: project(plane.clientWidth, sourceTop),
+        middleRight: project(plane.clientWidth, plane.clientHeight / 2),
+        bottomRight: project(plane.clientWidth, plane.clientHeight),
+      };
+    });
+    if (!focusCamera || focusCamera.transform === arrivalCamera.transform) {
+      throw new Error('camera focus did not change the scene projection');
+    }
+    const topEdgeError = Math.max(
+      Math.abs(focusCamera.topLeft.y),
+      Math.abs(focusCamera.topMiddle.y),
+      Math.abs(focusCamera.topRight.y)
+    );
+    const rightCornerError = Math.abs(
+      focusCamera.viewport.width - focusCamera.topRight.x
+    );
+    if (
+      topEdgeError > 0.75 ||
+      rightCornerError > 0.75 ||
+      focusCamera.middleRight.x < focusCamera.viewport.width - 0.75 ||
+      focusCamera.bottomRight.x < focusCamera.viewport.width - 0.75
+    ) {
+      throw new Error(
+        `focused camera exposed the page background: ${JSON.stringify(focusCamera)}`
+      );
+    }
+    if (movingCamera.sampled && movingCamera.error > 0.75) {
+      throw new Error(
+        `camera projection drifted ${movingCamera.error.toFixed(3)}px at ` +
+        `${(movingCamera.progress * 100).toFixed(1)}% travel`
+      );
+    }
+    await page.waitForFunction(
+      () => {
+        const targets = globalThis.__ATOMA_GPU__?.hitTargets()
+          .filter((entry) => entry.id.startsWith('nav.')) ?? [];
+        return targets.length > 0 && targets.every((entry) => entry.width <= 44.01);
+      },
+      { timeout: READY_TIMEOUT_MS }
+    );
+    const compactRail = await page.evaluate(() => {
+      const handle = globalThis.__ATOMA_GPU__;
+      const targets = handle.hitTargets().filter((entry) => entry.id.startsWith('nav.'));
+      return targets.map((entry) => {
+        const centre = handle.projectRendererPoint(
+          entry.x + entry.width / 2,
+          entry.y + entry.height / 2
+        );
+        return {
+          id: entry.id,
+          width: entry.width,
+          centre,
+          visible: centre.x >= 1 && centre.x <= window.innerWidth - 1 &&
+            centre.y >= 1 && centre.y <= window.innerHeight - 1,
+        };
+      });
+    });
+    const hiddenCompactTarget = compactRail.find(({ visible }) => !visible);
+    if (hiddenCompactTarget) {
+      throw new Error(`focused icon rail left a destination off-screen: ${JSON.stringify(hiddenCompactTarget)}`);
+    }
+    const focusRailChrome = await page.evaluate(() => {
+      const handle = globalThis.__ATOMA_GPU__;
+      const targets = handle.hitTargets();
+      const nav = targets.filter((entry) => entry.id.startsWith('nav.'));
+      const control = (id) => {
+        const entry = targets.find((candidate) => candidate.id === id);
+        if (!entry) return null;
+        const centre = handle.projectRendererPoint(
+          entry.x + entry.width / 2,
+          entry.y + entry.height / 2
+        );
+        return {
+          id,
+          source: entry,
+          centre,
+          visible: centre.x >= 0 && centre.x <= window.innerWidth &&
+            centre.y >= 0 && centre.y <= window.innerHeight,
+        };
+      };
+      let headerBands = 0;
+      let mark = null;
+      let fps = null;
+      const walk = (node) => {
+        if (node.label === 'header-band') headerBands += 1;
+        if (node.label === 'atoma-mark') {
+          const origin = node.getGlobalPosition();
+          mark = handle.projectRendererPoint(origin.x + 14, origin.y + 14);
+        }
+        if (node.label === 'fps-readout') {
+          const bounds = node.getBounds();
+          const topLeft = handle.projectRendererPoint(bounds.x, bounds.y);
+          const bottomRight = handle.projectRendererPoint(
+            bounds.x + bounds.width,
+            bounds.y + bounds.height
+          );
+          fps = {
+            centre: {
+              x: (topLeft.x + bottomRight.x) / 2,
+              y: (topLeft.y + bottomRight.y) / 2,
+            },
+            height: Math.abs(bottomRight.y - topLeft.y),
+          };
+        }
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(handle.app.stage);
+      const firstNav = nav.length > 0
+        ? handle.projectRendererPoint(
+            nav[0].x + nav[0].width / 2,
+            nav[0].y + nav[0].height / 2
+          )
+        : null;
+      const lastNavEntry = nav.at(-1);
+      const lastNav = lastNavEntry
+        ? handle.projectRendererPoint(
+            lastNavEntry.x + lastNavEntry.width / 2,
+            lastNavEntry.y + lastNavEntry.height / 2
+          )
+        : null;
+      return {
+        viewportHeight: window.innerHeight,
+        headerBands,
+        mark,
+        fps,
+        firstNav,
+        lastNav,
+        profile: control('account.menu.toggle'),
+        locale: control('locale.toggle'),
+      };
+    });
+    if (
+      focusRailChrome.headerBands !== 0 ||
+      !focusRailChrome.mark ||
+      !focusRailChrome.fps ||
+      !focusRailChrome.firstNav ||
+      !focusRailChrome.lastNav ||
+      !focusRailChrome.locale?.visible ||
+      focusRailChrome.mark.y >= focusRailChrome.firstNav.y ||
+      focusRailChrome.locale.centre.y <= focusRailChrome.lastNav.y ||
+      focusRailChrome.fps.centre.y <= focusRailChrome.locale.centre.y ||
+      focusRailChrome.fps.centre.y > focusRailChrome.viewportHeight ||
+      focusRailChrome.fps.height > 12 ||
+      (focusRailChrome.profile !== null && !focusRailChrome.profile.visible)
+    ) {
+      throw new Error(`focused rail chrome is misplaced: ${JSON.stringify(focusRailChrome)}`);
+    }
+    const focusDomEdges = await page.evaluate(() => {
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const bounds = (element) => {
+        const rect = element.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      };
+      const bridge = document.querySelector('.gpu-a11y-bridge');
+      const firstBridgeButton = bridge?.querySelector('button');
+      if (!(bridge instanceof HTMLElement) || !(firstBridgeButton instanceof HTMLElement)) {
+        return { viewport, palette: null, push: null, announce: null };
+      }
+      firstBridgeButton.focus();
+      const palette = bounds(bridge);
+      firstBridgeButton.blur();
+
+      const plane = document.querySelector('.gpu-scene-camera');
+      if (!(plane instanceof HTMLElement)) {
+        return { viewport, palette, push: null, announce: null };
+      }
+      const probe = (className, text) => {
+        const element = document.createElement('div');
+        element.className = className;
+        element.textContent = text;
+        plane.append(element);
+        const rect = bounds(element);
+        element.remove();
+        return rect;
+      };
+      return {
+        viewport,
+        palette,
+        push: probe('gpu-push-prompt', 'Notification permission probe'),
+        announce: probe('gpu-panel-skin gpu-announce-form', 'Announcement composer probe'),
+      };
+    });
+    const outsideViewport = (rect) => !rect ||
+      rect.left < -0.75 || rect.top < -0.75 ||
+      rect.right > focusDomEdges.viewport.width + 0.75 ||
+      rect.bottom > focusDomEdges.viewport.height + 0.75;
+    if (
+      outsideViewport(focusDomEdges.palette) ||
+      outsideViewport(focusDomEdges.push) ||
+      outsideViewport(focusDomEdges.announce)
+    ) {
+      throw new Error(
+        `focused DOM overlay escaped the camera viewport: ${JSON.stringify(focusDomEdges)}`
+      );
+    }
+    const focusNavPoint = await projectNavPoint();
+    if (!focusNavPoint) throw new Error('focus camera could not project Projects menu');
+    await page.mouse.move(focusNavPoint.x, focusNavPoint.y);
+    await page.waitForFunction(
+      () => {
+        const tooltip = globalThis.__ATOMA_GPU__?.tooltip?.();
+        return tooltip?.visible === true && tooltip.text === 'Projects';
+      },
+      { timeout: READY_TIMEOUT_MS }
+    );
+    const focusClickSurface = await page.evaluate(({ x, y }) => {
+      const element = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        tag: element?.tagName ?? null,
+        className: element instanceof HTMLElement ? element.className : null,
+      };
+    }, focusNavPoint);
+    const returnFrameRecorder = beginMovingViewFrameRecorder(page);
+    await returnFrameRecorder.armed;
+    await page.mouse.click(focusNavPoint.x, focusNavPoint.y);
+    const returnFrameTravel = await returnFrameRecorder.recording;
+    assertMovingViewFrame(returnFrameTravel, 'dezoom', softwareRastered);
+    const focusClickMode = await page.evaluate(() =>
+      document.querySelector('.gpu-scene-camera')?.getAttribute('data-scene-camera-mode'));
+    if (focusClickMode !== 'overview') {
+      throw new Error(`focus camera return click missed: ${JSON.stringify(focusClickSurface)}`);
+    }
+    await waitForSceneCamera(page, 'overview');
+    const returnedCamera = await page.evaluate(() => {
+      const plane = document.querySelector('.gpu-scene-camera');
+      return {
+        transform: plane instanceof HTMLElement ? plane.style.transform : '',
+        tooltip: globalThis.__ATOMA_GPU__?.tooltip?.() ?? null,
+      };
+    });
+    if (returnedCamera.transform !== arrivalCamera.transform || returnedCamera.tooltip?.visible) {
+      throw new Error(`camera did not restore the neutral overview cleanly: ${JSON.stringify(returnedCamera)}`);
+    }
+    console.log(
+      `viz GPU camera probe: overview -> focus -> overview through Pixi; ` +
+      (movingCamera.sampled
+        ? `${movingCamera.error.toFixed(3)}px projection error at ${(movingCamera.progress * 100).toFixed(1)}%`
+        : 'mid-travel sample skipped by slow frame') +
+      (returnFrameTravel.movingSamples > 0
+        ? `; frame tracked within ${Math.max(
+            focusFrameTravel.maxTrackingError,
+            returnFrameTravel.maxTrackingError
+          ).toFixed(3)}px across ${focusFrameTravel.movingSamples + returnFrameTravel.movingSamples} travel samples`
+        : '; frame travel sample skipped by slow frame')
+    );
     const cursorEnv = await readCursorEnvironment(page);
     await page.mouse.move(640, 400);
     if (cursorEnv.expected) {
@@ -689,6 +1206,70 @@ try {
         (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
         { timeout: READY_TIMEOUT_MS },
         label
+      );
+    }
+    await waitForSceneCamera(page, 'focus');
+
+    // The camera crops the source plane to remove the old header. The view
+    // must reflow to the inverse-projected viewport foot too: retaining raw
+    // canvas height leaves the lower frame border below the screen, exactly
+    // the defect a still screenshot exposed. Runs labels both real panels so
+    // this probe observes rendered production geometry, not camera math alone.
+    const focusedViewFrames = await page.evaluate(() => {
+      const handle = globalThis.__ATOMA_GPU__;
+      const frames = [];
+      let frameLayer = null;
+      let gutter = null;
+      const walk = (node) => {
+        if (node.label === 'camera-view-frames') frameLayer = node;
+        if (node.label === 'camera-view-gutter') gutter = node;
+        if (node.label === 'view-frame-primary' || node.label === 'view-frame-secondary') {
+          const bounds = node.getBounds();
+          const bottom = handle.projectRendererPoint(
+            bounds.x + bounds.width / 2,
+            bounds.y + bounds.height
+          );
+          frames.push({
+            label: node.label,
+            parentLabel: node.parent?.label ?? null,
+            bottom,
+            sourceBounds: bounds,
+          });
+        }
+        for (const child of node.children ?? []) walk(child);
+      };
+      walk(handle.app.stage);
+      const frameLayerChildren = frameLayer?.children ?? [];
+      return {
+        viewportHeight: window.innerHeight,
+        frames,
+        frameLayerShadows: frameLayerChildren.filter(
+          (node) => node.label === 'cast-shadow'
+        ).length,
+        frameLayerFilledGraphics: frameLayerChildren.filter(
+          (node) => node.context?.instructions?.some(
+            (instruction) => instruction.action === 'fill'
+          )
+        ).length,
+        gutterIsViewportFirstChild:
+          gutter !== null && gutter.parent?.children?.[0] === gutter,
+      };
+    });
+    if (
+      focusedViewFrames.frames.length !== 2 ||
+      focusedViewFrames.frameLayerShadows !== 0 ||
+      focusedViewFrames.frameLayerFilledGraphics !== focusedViewFrames.frames.length ||
+      !focusedViewFrames.gutterIsViewportFirstChild ||
+      focusedViewFrames.frames.some(({ parentLabel }) =>
+        parentLabel !== 'camera-view-frames'
+      ) ||
+      focusedViewFrames.frames.some(({ bottom }) =>
+        bottom.y > focusedViewFrames.viewportHeight - 0.5 ||
+        bottom.y < focusedViewFrames.viewportHeight - 32
+      )
+    ) {
+      throw new Error(
+        `focused view frame composite is invalid: ${JSON.stringify(focusedViewFrames)}`
       );
     }
 
@@ -733,7 +1314,10 @@ try {
       const host = document.querySelector('.gpu-ui-host');
       const canvas = host?.querySelector('canvas');
       if (!host || !canvas) throw new Error('no gpu host or UI canvas to scroll');
-      const box = canvas.getBoundingClientRect();
+      const handle = globalThis.__ATOMA_GPU__;
+      if (!handle?.projectRendererPoint) {
+        throw new Error('scene camera projection diagnostics did not arm');
+      }
       const samples = [];
       const observer = new MutationObserver(() => {
         samples.push({
@@ -768,8 +1352,12 @@ try {
       };
       // Left third: the event list, clear of the detail pane, whose wheel path
       // re-renders synchronously instead of going through the store.
-      const clientX = box.left + box.width * 0.2;
-      const clientY = box.top + box.height * 0.6;
+      const wheelPoint = handle.projectRendererPoint(
+        handle.app.screen.width * 0.2,
+        handle.app.screen.height * 0.6
+      );
+      const clientX = wheelPoint.x;
+      const clientY = wheelPoint.y;
       const managedResources = () => {
         const renderer = window.__ATOMA_GPU__?.app?.renderer;
         const graphics = renderer?.graphicsContext?._managedContexts?.items;
@@ -1067,13 +1655,11 @@ try {
         const spot = await anchorPage.evaluate((targetId) => {
           const handle = globalThis.__ATOMA_GPU__;
           const row = handle?.hitTargets().find((entry) => entry.id === targetId);
-          if (!row) return null;
-          const canvas = document.querySelector('.gpu-ui-canvas');
-          const box = canvas.getBoundingClientRect();
-          return {
-            x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
-            y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
-          };
+          if (!row || !handle.projectRendererPoint) return null;
+          return handle.projectRendererPoint(
+            row.x + row.width / 2,
+            row.y + row.height / 2
+          );
         }, id);
         if (!spot) throw new Error(`anchor scenario: hit target ${id} not found`);
         await anchorPage.mouse.click(spot.x, spot.y);
@@ -1334,16 +1920,30 @@ try {
         const spot = await accountPage.evaluate((targetId) => {
           const handle = globalThis.__ATOMA_GPU__;
           const row = handle?.hitTargets().find((entry) => entry.id === targetId);
-          if (!row) return null;
-          const canvas = document.querySelector('.gpu-ui-canvas');
-          const box = canvas.getBoundingClientRect();
-          return {
-            x: box.left + ((row.x + row.width / 2) / handle.app.screen.width) * box.width,
-            y: box.top + ((row.y + row.height / 2) / handle.app.screen.height) * box.height,
-          };
+          if (!row || !handle.projectRendererPoint) return null;
+          for (const fraction of [0.5, 0.7, 0.85, 0.95]) {
+            const projected = handle.projectRendererPoint(
+              row.x + row.width * fraction,
+              row.y + row.height / 2
+            );
+            if (
+              projected.x < 1 || projected.x > window.innerWidth - 1 ||
+              projected.y < 1 || projected.y > window.innerHeight - 1
+            ) continue;
+            const top = document.elementFromPoint(projected.x, projected.y);
+            if (!top) continue;
+            return {
+              ...projected,
+              target: row,
+              screen: { width: handle.app.screen.width, height: handle.app.screen.height },
+              dom: { tag: top.tagName, className: String(top.className ?? '') },
+            };
+          }
+          return null;
         }, id);
         if (!spot) throw new Error(`account scenario: hit target ${id} not found`);
         await accountPage.mouse.click(spot.x, spot.y);
+        return spot;
       };
       const targetIds = () =>
         accountPage.evaluate(() =>
@@ -1363,13 +1963,29 @@ try {
       // Project metadata and a long run error must be one line AND fit their
       // declared column after Pixi has measured the actual font.
       await accountPage.setViewport({ width: 528, height: 800, deviceScaleFactor: 2 });
+      await accountPage.waitForFunction(
+        (targetId) => {
+          const handle = globalThis.__ATOMA_GPU__;
+          const row = handle?.hitTargets().find((entry) => entry.id === targetId);
+          return Math.abs((handle?.app.screen.width ?? 0) - window.innerWidth) < 1 &&
+            row !== undefined && row.x + row.width <= handle.app.screen.width;
+        },
+        { timeout: READY_TIMEOUT_MS },
+        `project.select.${projectId}`
+      );
       await waitForHitTarget(
         accountPage,
         `project.select.${projectId}`,
         `account scenario: project row ${projectId} never rendered`
       );
+      const accountUrlBeforeProjectClick = accountPage.url();
       await clickAccountTarget(`project.select.${projectId}`);
-      await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      if (accountPage.url() !== accountUrlBeforeProjectClick) {
+        throw new Error(
+          `account scenario: project-row click navigated ${accountUrlBeforeProjectClick} -> ${accountPage.url()}`
+        );
+      }
       const boundedProjectCopy = await accountPage.evaluate(() => {
         const rows = [];
         const walk = (node) => {
@@ -1419,6 +2035,7 @@ try {
       // is never mistaken for one that was lost. The assertions are unchanged:
       // the GL orb must open the menu, and the menu must reach Settings.
       const clickUntil = async (clickId, expectId, describe) => {
+        const attempts = [];
         for (let attempt = 0; attempt < 3; attempt += 1) {
           const ids = await targetIds();
           if (ids.includes(expectId)) return;
@@ -1426,7 +2043,7 @@ try {
           // removes it (the menu toggles, Settings navigates), so its absence
           // is progress to wait out — and re-clicking a toggle that already
           // worked would undo it.
-          if (ids.includes(clickId)) await clickAccountTarget(clickId);
+          if (ids.includes(clickId)) attempts.push(await clickAccountTarget(clickId));
           const settleBy = Date.now() + 20_000;
           while (Date.now() < settleBy) {
             if ((await targetIds()).includes(expectId)) return;
@@ -1435,7 +2052,7 @@ try {
             );
           }
         }
-        throw new Error(describe);
+        throw new Error(`${describe}: ${JSON.stringify(attempts)}`);
       };
 
       await clickUntil(
@@ -1465,10 +2082,10 @@ try {
       const meshes = await countScene();
 
       // THE TAB-CHANGE REPRO. A view change rebuilds the scene under the SAME
-      // header retain key, which is precisely the path a fresh-attach cannot
+      // account-control retain key, which is precisely the path a fresh-attach cannot
       // cover: the first version of the orb was destroyed by the markRoot
       // teardown and its key-matched resume() re-attached a dead mesh —
-      // invisible header avatar on every tab switch, while every arm that
+      // invisible account avatar on every tab switch, while every arm that
       // CHANGED the key (menu, Settings) still passed.
       await clickAccountTarget('nav.runs');
       await accountPage.evaluate(() => new Promise((resolve) => setTimeout(resolve, 900)));
@@ -1558,7 +2175,7 @@ try {
       !accountStats.boundedProjectCopy.some(
         (label) => label.scaleX < 0.99 || /…$/.test(label.text)
       ) ||
-      // ARMED: the gated header actually drew the orb.
+      // ARMED: the gated chrome actually drew the account orb.
       !accountHas(accountStats.withOrb, 'account.menu.toggle') ||
       // Closed, the menu contributes nothing.
       accountHas(accountStats.withOrb, 'auth.signOut') ||
@@ -1569,11 +2186,11 @@ try {
       // Settings is reachable from the menu and offers a cell per tier.
       !accountHas(accountStats.settings, 'settings.model.1.default') ||
       !accountHas(accountStats.settings, 'settings.model.3.2') ||
-      // Settings draws TWO orbs — the header control and the profile — in
+      // Settings draws TWO orbs — the global account control and profile — in
       // their own slots. One meant the slots were evicting each other.
       accountStats.meshes.orbs !== 2 ||
       accountStats.meshes.canvases !== 1 ||
-      // After a tab change the header orb SURVIVES the same-key rebuild and
+      // After a tab change the account orb SURVIVES the same-key rebuild and
       // the Settings one is swept: exactly one mesh, and the control with it.
       !accountHas(accountStats.afterTab, 'account.menu.toggle') ||
       accountStats.meshesAfterTab.orbs !== 1 ||
@@ -1599,7 +2216,7 @@ try {
       })}`);
     }
     console.log(
-      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, header orb survived the tab change, active Announcements reset its receipt`
+      `viz GPU account ok: menu opened with ${accountStats.opened.filter((id) => id.startsWith('org.switch.')).length} org switch, settings reached with 2 orbs, account orb survived the tab change, active Announcements reset its receipt`
     );
 
     // A LIVE run's polling must not rebuild the GPU scene when nothing

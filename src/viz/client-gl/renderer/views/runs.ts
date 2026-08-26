@@ -51,7 +51,7 @@ import {
 import { LLM_FAMILY_COLOR, eventKindColor, llmRoleColor } from '../event-palette.js';
 import { drawScrollbarThumb } from '../scroll-pane.js';
 import { timelineConnectorGeometry } from '../timeline-rails.js';
-import { drawViewFrame, viewFrame } from '../view-frame.js';
+import { viewFrame } from '../view-frame.js';
 import { drawAtomDetail } from './atom-detail.js';
 
 const RUN_STATUS_COLOR: Record<RunStatus, number> = {
@@ -97,6 +97,57 @@ const COLLAPSED_TITLE_CHARS = 110;
  * silently remove event/atom detail between 1050px and 1257px windows.
  */
 export const RUNS_TWO_PANE_MIN_WIDTH = 1050 - GPU_LAYOUT.sidebarWidth;
+/** Native run selector geometry inside the primary Runs panel. */
+export const RUN_PICKER_CONTROL_TOP =
+  GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + 8;
+export const RUN_PICKER_CONTROL_HEIGHT = 32;
+export const RUN_PICKER_HORIZONTAL_INSET = 14;
+/** Space kept for the status chip at the right of the selector. */
+export const RUN_PICKER_STATUS_RESERVE = 128;
+
+export interface RunsPaneLayout {
+  readonly top: number;
+  readonly twoPane: boolean;
+  readonly rightWidth: number;
+  readonly leftWidth: number;
+  readonly leftX: number;
+  readonly rightX: number;
+}
+
+/** One geometry shared by the Runs view, its DOM selector and its popup. */
+export function runsPaneLayout(width: number): RunsPaneLayout {
+  const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
+  const twoPane = width >= RUNS_TWO_PANE_MIN_WIDTH;
+  const rightWidth = twoPane ? Math.min(GPU_LAYOUT.rightWidth, width * 0.4) : 0;
+  const leftWidth = width - rightWidth - GPU_LAYOUT.gap * (twoPane ? 3 : 2);
+  const leftX = GPU_LAYOUT.gap;
+  return {
+    top,
+    twoPane,
+    rightWidth,
+    leftWidth,
+    leftX,
+    rightX: leftX + leftWidth + GPU_LAYOUT.gap,
+  };
+}
+
+export function runsPickerControlLayout(width: number): {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+} {
+  const pane = runsPaneLayout(width);
+  return {
+    x: pane.leftX + RUN_PICKER_HORIZONTAL_INSET,
+    y: RUN_PICKER_CONTROL_TOP,
+    width: Math.max(
+      0,
+      pane.leftWidth - RUN_PICKER_HORIZONTAL_INSET * 2 - RUN_PICKER_STATUS_RESERVE
+    ),
+    height: RUN_PICKER_CONTROL_HEIGHT,
+  };
+}
 
 /**
  * Runs view: causal branch timeline on the left, summary + event/atom detail
@@ -116,7 +167,18 @@ export function drawRuns(
     // label over the page. `viewFrame` with no column cap IS the populated
     // single-pane geometry, so the first recorded run does not move the frame.
     const frame = viewFrame(width, height);
-    drawViewFrame(ctx, frame, snapshot.t('nav.runs'));
+    const surface = ctx.panel(
+      ctx.root,
+      frame.x,
+      frame.y,
+      frame.width,
+      frame.height,
+      GPU_COLORS.panel,
+      GPU_COLORS.border,
+      GPU_LAYOUT.radius,
+      2
+    );
+    surface.label = 'view-frame-primary';
     const empty = ctx.text(
       ctx.root,
       snapshot.t('runs.none'),
@@ -130,14 +192,9 @@ export function drawRuns(
     ctx.scrollMax.runs = 0;
     return;
   }
-  const top = GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap;
-  const twoPane = width >= RUNS_TWO_PANE_MIN_WIDTH;
-  const rightWidth = twoPane ? Math.min(GPU_LAYOUT.rightWidth, width * 0.4) : 0;
-  const leftWidth = width - rightWidth - GPU_LAYOUT.gap * (twoPane ? 3 : 2);
-  const leftX = GPU_LAYOUT.gap;
-  const rightX = leftX + leftWidth + GPU_LAYOUT.gap;
+  const { top, twoPane, rightWidth, leftWidth, leftX, rightX } = runsPaneLayout(width);
 
-  ctx.panel(
+  const primaryFrame = ctx.panel(
     ctx.root,
     leftX,
     top,
@@ -148,20 +205,16 @@ export function drawRuns(
     GPU_LAYOUT.radius,
     2
   );
-  // The goal names the run, once. The line under it used to repeat that same
-  // sentence verbatim — `label` is only ever a cut copy of the goal plus the
-  // family — so it now carries what the title cannot: who ran it, and when.
+  primaryFrame.label = 'view-frame-primary';
   const heading = runHeading(run);
-  ctx.text(ctx.root, truncate(heading.title, 95), leftX + 14, top + 12, {
-    size: 14,
-    weight: '700',
-    width: leftWidth - 28,
-  });
+  // The native selector now owns the title row inside this panel. Drawing the
+  // same run title under it would duplicate the selected value; the subtitle
+  // carries what that title cannot: who ran it, and when.
   // WHEN this run happened, as an age. The exact instant is one hover away —
   // `fmtTime` still formats it, in the reader's locale, inside the bubble.
   const startedAge = relativeTime(run.startedAt, snapshot.t, snapshot.state.locale);
   const subtitle = [heading.family, startedAge].filter(Boolean).join('  ·  ');
-  ctx.text(ctx.root, subtitle, leftX + 14, top + 34, {
+  ctx.text(ctx.root, subtitle, leftX + 14, top + 46, {
     size: 11,
     color: GPU_COLORS.muted,
     width: leftWidth - 28,
@@ -170,7 +223,7 @@ export function drawRuns(
   if (startedExact && startedAge) {
     ctx.tooltip(ctx.root, {
       x: leftX + 14,
-      y: top + 34,
+      y: top + 46,
       width: leftWidth - 28,
       height: 15,
       text: startedExact,
@@ -200,7 +253,7 @@ export function drawRuns(
   // The four run metrics and the atoms-used lanes live in the RUN summary
   // card on the right pane; a single-pane viewport has no summary card, so
   // both keep a row here instead.
-  let filterTop = top + 60;
+  let filterTop = top + 72;
   if (!twoPane) {
     filterTop +=
       drawRunStatGrid(ctx, snapshot, run, ctx.root, 'runs.stat', leftX + 14, top + 60, leftWidth - 28) +
@@ -826,7 +879,7 @@ export function drawRuns(
   });
 
   if (twoPane) {
-    ctx.panel(
+    const secondaryFrame = ctx.panel(
       ctx.root,
       rightX,
       top,
@@ -837,6 +890,7 @@ export function drawRuns(
       GPU_LAYOUT.radius,
       2
     );
+    secondaryFrame.label = 'view-frame-secondary';
     const summaryHeight = drawRunSummaryCard(
       ctx,
       snapshot,

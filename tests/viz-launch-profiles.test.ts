@@ -170,13 +170,20 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuRenderer).toMatch(/startedAt/);
     expect(gpuRenderer).toMatch(/app\.ticker\.add/);
     expect(gpuRenderer).toMatch(/\n {2}navButton\(/);
-    // The brand mark is one Pixi crystal (header + arrival gate); no R3F logo.
+    // The brand mark is one Pixi crystal (rail + arrival gate); no R3F logo.
     expect(gpuRenderer).toMatch(/private drawAtomaMark\(/);
-    // The lockup is placed from named layout, not from numbers that only
-    // happened to centre in the bar height of the day.
+    // Overview centres an enlarged mark across the rail with no adjacent
+    // wordmark; focus moves the same retained crystal into its compact slot.
     expect(gpuRenderer).toMatch(
-      /this\.drawAtomaMark\(\s*GPU_LAYOUT\.headerMarkX,\s*midY - ATOMA_MARK_LOCAL_CENTER\s*\)/
+      /sceneCameraMode === 'focus'\) return;/
     );
+    expect(gpuRenderer).toMatch(
+      /private drawOverviewRailChrome\([\s\S]*?layout\.crystal\.width \/ 2 - ATOMA_MARK_LOCAL_CENTER[\s\S]*?layout\.crystalScale/
+    );
+    expect(gpuRenderer).toMatch(
+      /private drawFocusRailChrome\([\s\S]*?this\.drawAtomaMark\(/
+    );
+    expect(gpuRenderer).toMatch(/bar\.label = 'header-band'/);
     expect(gpuRenderer).toMatch(/alpha: 0\.42/);
     expect(gpuRenderer).toMatch(/attachAtomaMark\(/);
     expect(gpuRenderer).toMatch(/drawWelcome\(/);
@@ -199,12 +206,34 @@ describe('viz full-GL build contract with MUI fallback', () => {
     expect(gpuApp).toMatch(/beginEnter/);
     expect(gpuStyles).not.toMatch(/\.gpu-brand-mark/);
     expect(gpuStyles).toMatch(/\.gpu-entry-veil/);
-    expect(gpuRenderer).toMatch(/this\.text\(this\.root, 'Atoma'/);
+    expect(gpuRenderer).not.toMatch(/this\.text\(this\.root, 'Atoma'/);
     // The nav is a LEFT RAIL (renderer/views/sidebar.ts), not a header tab
     // strip. What the rail does is asserted behaviourally in viz-gpu-views;
     // what only a grep can hold is that the renderer class no longer carries
     // a second nav layout of its own beside the rail's.
-    expect(gpuRenderer).toMatch(/drawSidebar\(this, snapshot, height, contentLeft\)/);
+    expect(gpuRenderer).toMatch(
+      /drawSidebar\(\s*this,\s*snapshot,\s*height,\s*contentLeft,\s*focusRail\?\.navigationBottom \?\? layoutHeight,\s*focusRail\?\.navigationTop \?\? overviewRail\?\.navigationTop \?\? GPU_LAYOUT\.headerHeight\s*\);/
+    );
+    // Every published camera frame resizes retained outer panels + the view
+    // mask imperatively. The view is authored once at full height while the
+    // camera travels, then the existing settle render commits scroll geometry.
+    expect(gpuRenderer).toMatch(/subscribeSceneCameraFrames\([\s\S]*?this\.updateCameraFrameGeometry/);
+    expect(gpuRenderer).toMatch(/const visibleLayoutHeight = cameraFrame[\s\S]*?visibleSceneLayoutHeight/);
+    expect(gpuRenderer).toMatch(
+      /const layoutHeight = sceneCameraIsMoving\(this\.app\.canvas\)\s*\? height\s*:\s*visibleLayoutHeight/
+    );
+    expect(gpuRenderer).toMatch(/panel\.surface\.clear\(\)[\s\S]*?paintPanelSurface/);
+    expect(gpuRenderer).not.toMatch(
+      /updateCameraFrameGeometry[\s\S]{0,1200}this\.render\(/
+    );
+    for (const view of [
+      'Projects', 'Admin', 'Journal', 'Ledger', 'Sentinel', 'Announce',
+      'Runs', 'Registry', 'Skills', 'Burnin', 'Docs', 'Settings',
+    ]) {
+      expect(gpuRenderer).toMatch(
+        new RegExp(`draw${view}\\(this, snapshot, contentWidth, layoutHeight\\)`)
+      );
+    }
     expect(gpuRenderer).not.toMatch(/visibleViews\(/);
     // Atom buttons draw local geometry at local origin (no double offsets).
     expect(gpuRenderer).toMatch(/ellipse\(0, 0, 7, 4\)/);
@@ -217,7 +246,10 @@ describe('viz full-GL build contract with MUI fallback', () => {
     // The nav's own hover gap moved with it: the rail stacks vertically, so
     // the guard is that consecutive rail rows still clear each other at hover
     // scale, asserted on the real layout in viz-gpu-views rather than grepped.
-    expect(gpuRenderer).toMatch(/underline\.scale\.x = active \? 1/);
+    // Selection and rollover keep their surface treatment without adding a
+    // blue underline beneath the label (or beneath compact icon-only tiles).
+    expect(gpuRenderer).not.toMatch(/const underline = new Graphics\(\)/);
+    expect(gpuRenderer).not.toMatch(/underline\.(?:alpha|scale\.x)/);
     // Timeline faces occupy ONE direct multi-texture mesh. A Filter or custom
     // mesh per card would make cost scale with the ALL event count again.
     expect(gpuRenderer).toMatch(/material\.layersFor\(parent\)/);

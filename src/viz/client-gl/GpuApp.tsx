@@ -26,6 +26,7 @@ import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
 import { EntryVeilLayer, useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
+import { SceneCameraPlane } from './SceneCameraPlane.js';
 import { SceneTuningPanel } from './SceneTuningPanel.js';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../client/data-api.js';
@@ -68,6 +69,7 @@ declare global {
   interface Window {
     __ATOMA_VIZ_TEST__?: {
       view: string;
+      cameraMode: string;
       renderer: GpuRenderMetrics;
       selectedRunId: string | null;
       dispatch: (id: string) => void;
@@ -129,6 +131,11 @@ function GpuAppContent({
   );
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [cameraRevision, setCameraRevision] = useState(0);
+  const cameraSettled = useCallback(
+    () => setCameraRevision((revision) => revision + 1),
+    []
+  );
   const metrics = useRef<GpuRenderMetrics>(emptyRenderMetrics());
   const { phase: entryPhase, begin: beginEnter } = useEntryFade();
 
@@ -513,7 +520,7 @@ function GpuAppContent({
       if (nextView === 'projects' && store.view === 'projects' && store.selectedProjectId) {
         store.selectProject(null);
       }
-      store.setView(nextView);
+      store.activateView(nextView);
       return;
     }
     if (id === 'tuning.toggle') {
@@ -787,6 +794,7 @@ function GpuAppContent({
     if (!import.meta.env.DEV) return;
     window.__ATOMA_VIZ_TEST__ = {
       view: state.view,
+      cameraMode: state.sceneCameraMode,
       renderer: metrics.current,
       selectedRunId: state.selectedRunId,
       dispatch: activate,
@@ -794,47 +802,50 @@ function GpuAppContent({
     return () => {
       delete window.__ATOMA_VIZ_TEST__;
     };
-  }, [activate, state.selectedRunId, state.view]);
+  }, [activate, state.sceneCameraMode, state.selectedRunId, state.view]);
 
   return (
     <main className="gpu-app">
-      <GpuSurface
-        data={data}
-        releaseVersion={RELEASE_VERSION}
-        t={t}
-        onActivate={activate}
-        onMetrics={updateMetrics}
-      />
-      <GpuDomBridge
-        authSnapshot={authSnapshot}
-        runs={runsQuery.data ?? []}
-        releaseVersion={RELEASE_VERSION}
-        views={visibleViews(authSnapshot)}
-        loginLinks={
-          login
-            ? login.providers.map((provider) => ({
-                id: provider.id,
-                label: provider.label,
-                href: loginHref(provider.id),
-              }))
-            : null
-        }
-        t={t}
-        onSelectRun={state.selectRun}
-        onEnter={beginEnter}
-        githubInstallations={githubInstallationsQuery.data ?? []}
-        projects={projectsQuery.data ?? []}
-        onCreateProject={() => { void createProject(); }}
-        onStartRun={() => { void startProjectRun(); }}
-        projectBusy={projectBusy}
-        projectError={projectError}
-        pushPrompt={pushPrompt}
-        onEnablePush={() => { void enablePush(); }}
-        onDismissPush={dismissPush}
-        onRenameAccount={(displayName) => { void renameAccount(displayName); }}
-        accountError={accountError}
-      />
-      <SceneTuningPanel />
+      <SceneCameraPlane mode={state.sceneCameraMode} onSettled={cameraSettled}>
+        <GpuSurface
+          data={data}
+          releaseVersion={RELEASE_VERSION}
+          t={t}
+          onActivate={activate}
+          onMetrics={updateMetrics}
+          cameraRevision={cameraRevision}
+        />
+        <GpuDomBridge
+          authSnapshot={authSnapshot}
+          runs={runsQuery.data ?? []}
+          releaseVersion={RELEASE_VERSION}
+          views={visibleViews(authSnapshot)}
+          loginLinks={
+            login
+              ? login.providers.map((provider) => ({
+                  id: provider.id,
+                  label: provider.label,
+                  href: loginHref(provider.id),
+                }))
+              : null
+          }
+          t={t}
+          onSelectRun={state.selectRun}
+          onEnter={beginEnter}
+          githubInstallations={githubInstallationsQuery.data ?? []}
+          projects={projectsQuery.data ?? []}
+          onCreateProject={() => { void createProject(); }}
+          onStartRun={() => { void startProjectRun(); }}
+          projectBusy={projectBusy}
+          projectError={projectError}
+          pushPrompt={pushPrompt}
+          onEnablePush={() => { void enablePush(); }}
+          onDismissPush={dismissPush}
+          onRenameAccount={(displayName) => { void renameAccount(displayName); }}
+          accountError={accountError}
+        />
+        <SceneTuningPanel />
+      </SceneCameraPlane>
       <AtomaCursor />
       <EntryVeilLayer phase={entryPhase} />
     </main>

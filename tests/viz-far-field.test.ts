@@ -364,6 +364,27 @@ describe('far-field shader contract', () => {
       y: -(index + 0.5) * 2,
     })));
 
+    // A camera is not affine: each spectral endpoint must travel through the
+    // mapping beside its own corner before the renderer-space delta is taken.
+    const projective = (x: number, y: number) => {
+      const divisor = 1 + y / 1_000;
+      return { x: x / divisor, y: y / divisor };
+    };
+    const projectedBand = packMarkCaustic(
+      { points: clockwise, spectral: halfBand, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      bounds,
+      800,
+      400,
+      projective
+    )!;
+    expect(projectedBand.spectral).toEqual(windingOrder.map((index) => {
+      const point = clockwise[index]!;
+      const delta = halfBand[index]!;
+      const corner = projective(point.x, point.y);
+      const endpoint = projective(point.x + delta.x, point.y + delta.y);
+      return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
+    }));
+
     // Nothing published, nothing packed: the caller parks its own slots.
     expect(packMarkCaustic(null, bounds, 800, 400)).toBeNull();
   });

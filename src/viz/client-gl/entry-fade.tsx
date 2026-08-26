@@ -18,7 +18,7 @@ export function useEntryFade() {
 
   const begin = useCallback(() => {
     // Welcome inspect knobs must not follow the user into the product: the
-    // header mark would otherwise stay frozen or beadless after Continue.
+    // navigation mark would otherwise stay frozen or beadless after Continue.
     pinMarkElapsedMs(null);
     setMarkBeadVisible(true);
     if (useGpuStore.getState().entered) return;

@@ -55,6 +55,12 @@ export interface TooltipRegion {
  */
 export type TooltipMeasure = (text: string) => { width: number; height: number };
 
+export interface TooltipDiagnostics {
+  readonly visible: boolean;
+  readonly text: string | null;
+  readonly regionCount: number;
+}
+
 export class TooltipLayer {
   private readonly bubble = new Container();
   private readonly background = new Graphics();
@@ -185,6 +191,15 @@ export class TooltipLayer {
 
   private hide(): void {
     this.bubble.visible = false;
+  }
+
+  /** Read-only capture surface, exposed only through the opt-in viz diagnostic. */
+  diagnostics(): TooltipDiagnostics {
+    return {
+      visible: this.bubble.visible,
+      text: this.bubble.visible ? this.shownText : null,
+      regionCount: this.regions.length,
+    };
   }
 
   destroy(): void {

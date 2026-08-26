@@ -13,6 +13,8 @@ npm run viz:shot                                    # anonymous visitor (login g
 npm run viz:shot -- --auth                          # logged-in member, Projects view
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
+npm run viz:shot -- --auth --camera overview        # neutral, undeformed whole-scene pose
+npm run viz:shot -- --auth --camera focus           # content-column pose (default)
 npm run viz:shot -- --auth --tuning                  # open the floating Scene Tuning window
 npm run viz:shot -- --out /tmp/before.png           # explicit destination
 npm run viz:shot -- --url http://127.0.0.1:5173     # attach to a dev stack already running
@@ -20,7 +22,7 @@ npm run viz:shot -- --debug                         # page console + failed requ
 npm run viz:shot -- --width 528 --height 800        # narrow/compact layouts
 ```
 
-PNGs default to `screenshots/<view>-<mode>.png` (git-ignored). Viewport
+PNGs default to `screenshots/<view>-<auth-mode>-<camera>.png` (git-ignored). Viewport
 defaults to 1600×900 at deviceScaleFactor 2.
 
 ## What each mode renders
@@ -39,6 +41,10 @@ defaults to 1600×900 at deviceScaleFactor 2.
   with the metric tiles, branch filter chips, and a two-phase forked timeline.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
+- **`--camera overview|focus`** — captures either endpoint of the global scene
+  camera. Overview re-activates the selected menu after navigation, exercising
+  the same return transition as the product and restoring the exact undeformed
+  scene; focus is the compact icon rail + content-column pose and is the default.
 
 ## Caustic tuning
 

@@ -11,6 +11,7 @@ import {
 } from './tuning.js';
 import { readTuning, resetTuning, setTuningValue } from './tuning-live.js';
 import { useGpuStore } from './store.js';
+import { sceneCameraViewport, unprojectScenePointInFrame } from './scene-camera.js';
 
 const DEFAULT_TOP = 64;
 
@@ -45,14 +46,20 @@ export function SceneTuningPanel() {
   const [values, setValues] = useState(tuningSnapshot);
 
   const clamp = (next: SceneTuningPosition): SceneTuningPosition => {
-    const rect = panelRef.current?.getBoundingClientRect();
+    const panel = panelRef.current;
     return clampSceneTuningPosition(
       next,
       window.innerWidth,
       window.innerHeight,
-      rect?.width ?? SCENE_TUNING_WIDTH,
-      rect?.height ?? 0
+      panel?.offsetWidth ?? SCENE_TUNING_WIDTH,
+      panel?.offsetHeight ?? 0
     );
+  };
+
+  const pointerOnScene = (event: ReactPointerEvent<HTMLElement>) => {
+    const viewport = sceneCameraViewport(panelRef.current);
+    if (!viewport) return { x: event.clientX, y: event.clientY };
+    return unprojectScenePointInFrame({ x: event.clientX, y: event.clientY }, viewport);
   };
 
   useEffect(() => {
@@ -66,17 +73,18 @@ export function SceneTuningPanel() {
   if (!open) return null;
 
   const startMove = (event: ReactPointerEvent<HTMLElement>) => {
-    const rect = panelRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    drag.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    if (!panelRef.current) return;
+    const pointer = pointerOnScene(event);
+    drag.current = { offsetX: pointer.x - position.x, offsetY: pointer.y - position.y };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     if (!drag.current) return;
+    const pointer = pointerOnScene(event);
     setPosition(clamp({
-      x: event.clientX - drag.current.offsetX,
-      y: event.clientY - drag.current.offsetY,
+      x: pointer.x - drag.current.offsetX,
+      y: pointer.y - drag.current.offsetY,
     }));
   };
 

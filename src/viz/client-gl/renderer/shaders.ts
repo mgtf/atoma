@@ -728,7 +728,7 @@ export const MARK_SHELL_WGSL = /* wgsl */ `
     // tables as windows and only the grazing rim as a mirror. The sample is
     // the Pixi stage without the gem. Gated on uRefractOn so the interior
     // backdrop pass cannot write the env into itself, and on uEnvOn so the
-    // header mark (too small to read a card, too expensive to recapture one)
+    // navigation mark (too small to read a card, too expensive to recapture one)
     // stays inert.
     let envUv = vClipUv + vec2<f32>(bounceDir.x, -bounceDir.y) *
       markUniforms.uEnvJump;

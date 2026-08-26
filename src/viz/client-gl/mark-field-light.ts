@@ -30,10 +30,10 @@ export const MARK_CAUSTIC_MAX_POINTS = 12;
 /**
  * Per-corner spectral HALF-SEPARATION, the same twelve corners again: red sits
  * at corner + delta, blue at corner − delta, in the SAME viewport CSS pixels.
- * At the mark's scale the pointer→renderer mapping is affine, so a delta maps
- * exactly like the position it belongs to. Null when the active material does
- * not disperse: the consumer's band gate stays closed rather than drawing a
- * zero-width fringe it cannot see.
+ * The camera mapping is projective, so `packMarkCaustic` maps the corner and
+ * its endpoint before subtracting them; it never applies one global scale to
+ * every delta. Null when the active material does not disperse: the consumer's
+ * band gate stays closed rather than drawing a zero-width fringe it cannot see.
  */
 export const MARK_CAUSTIC_MAX_SPECTRAL = 12;
 
@@ -166,22 +166,23 @@ export function packMarkCaustic(
   cast: MarkFieldCaustic | null,
   bounds: PointerLightBounds,
   rendererWidth: number,
-  rendererHeight: number
+  rendererHeight: number,
+  mapClientToRenderer: (x: number, y: number) => { x: number; y: number } =
+    (x, y) => pointerClientToRenderer(x, y, bounds, rendererWidth, rendererHeight)
 ): MarkCausticUniforms | null {
   if (!cast || cast.points.length < MARK_CAUSTIC_MAX_POINTS) return null;
-  // The pointer→renderer mapping is affine, so a DELTA converts through the
-  // same two scale factors without the bounds' origin.
-  const scaleX = rendererWidth / Math.max(1, bounds.width);
-  const scaleY = rendererHeight / Math.max(1, bounds.height);
   const corners = cast.points
     .slice(0, MARK_CAUSTIC_MAX_POINTS)
-    .map((point) =>
-      pointerClientToRenderer(point.x, point.y, bounds, rendererWidth, rendererHeight)
-    );
+    .map((point) => mapClientToRenderer(point.x, point.y));
   const spectral = cast.spectral && cast.spectral.length >= MARK_CAUSTIC_MAX_SPECTRAL
     ? cast.spectral
         .slice(0, MARK_CAUSTIC_MAX_SPECTRAL)
-        .map((delta) => ({ x: delta.x * scaleX, y: delta.y * scaleY }))
+        .map((delta, index) => {
+          const point = cast.points[index]!;
+          const corner = corners[index]!;
+          const endpoint = mapClientToRenderer(point.x + delta.x, point.y + delta.y);
+          return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
+        })
     : null;
   for (const start of [0, 3, 6, 9]) {
     const a = corners[start]!;

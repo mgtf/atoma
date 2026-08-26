@@ -43,6 +43,11 @@ describe('the shared hover bubble', () => {
     expect(bubble().visible).toBe(false);
     hover(layer, 120, 105, 1000 + AFTER_DELAY);
     expect(bubble().visible).toBe(true);
+    expect(layer.diagnostics()).toEqual({
+      visible: true,
+      text: '23 August 2026',
+      regionCount: 1,
+    });
   });
 
   it('restarts the delay only when the TEXT changes, not on every move', () => {

@@ -406,7 +406,8 @@ export function drawNavIcon(
   meshes: NavIconMeshes,
   x: number,
   y: number,
-  active: boolean
+  active: boolean,
+  size = NAV_ICON_RENDER_SIZE
 ): NavIconHandle | null {
   const kind = navIconKind(id);
   if (!kind) return null;
@@ -417,8 +418,8 @@ export function drawNavIcon(
   root.eventMode = 'none';
 
   const face = new Sprite(mesh.texture);
-  face.width = NAV_ICON_RENDER_SIZE;
-  face.height = NAV_ICON_RENDER_SIZE;
+  face.width = size;
+  face.height = size;
   face.eventMode = 'none';
   root.addChild(face);
 

@@ -4,6 +4,7 @@ import {
   type RepositoryVisibility,
 } from '../../contracts/projects.js';
 import type { EventFilters } from '../client/run-utils.js';
+import type { SceneCameraMode } from './scene-camera.js';
 
 export type ViewName =
   | 'projects'
@@ -160,6 +161,8 @@ export function projectSelectionAfterProjects(
 
 export interface GpuUiState {
   view: ViewName;
+  /** Pulled-back whole scene, or the navigation focus on the content column. */
+  sceneCameraMode: SceneCameraMode;
   locale: 'en' | 'fr';
   selectedRunId: string | null;
   selectedEventId: string | null;
@@ -216,6 +219,9 @@ export interface GpuUiState {
   toggleAccountMenu: () => void;
   closeAccountMenu: () => void;
   toggleTuningPanel: () => void;
+  /** User activation of a rail/tab destination; re-activation toggles framing. */
+  activateView: (view: ViewName) => void;
+  /** Programmatic/cross-view navigation always lands on focused content. */
   setView: (view: ViewName) => void;
   setLocale: (locale: 'en' | 'fr') => void;
   selectRun: (id: string | null) => void;
@@ -281,11 +287,32 @@ function initialTuningPanelOpen(): boolean {
   return value === '1' || value?.trim().toLowerCase() === 'true';
 }
 
+function viewChange(
+  state: GpuUiState,
+  view: ViewName,
+  sceneCameraMode: SceneCameraMode
+): Pick<
+  GpuUiState,
+  'view' | 'sceneCameraMode' | 'focusedInput' | 'accountMenuOpen' | 'announcementResetSignal'
+> {
+  return {
+    view,
+    sceneCameraMode,
+    focusedInput: null,
+    accountMenuOpen: false,
+    announcementResetSignal:
+      state.view === 'announce' && view === 'announce'
+        ? state.announcementResetSignal + 1
+        : state.announcementResetSignal,
+  };
+}
+
 export const useGpuStore = create<GpuUiState>()((set) => ({
   // The app opens on PROJECTS: it is the authenticated launch surface. Runs
   // is where you go to watch what you started, a second step rather than the
   // arrival. Ungated developer mode gets its no-project-routes empty state.
   view: 'projects',
+  sceneCameraMode: 'overview',
   locale: initialLocale(),
   selectedRunId: null,
   selectedEventId: null,
@@ -350,20 +377,29 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   toggleAccountMenu: () => set((state) => ({ accountMenuOpen: !state.accountMenuOpen })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
   toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),
-  // Navigation closes the menu: an overlay anchored to the header must not
+  // Navigation closes the menu: an overlay anchored to the account control must not
   // survive the screen it was opened from. Re-activating Announcements also
   // acknowledges its sent receipt; the form decides whether it is currently
   // safe to consume that signal, so an in-progress draft remains untouched.
-  setView: (view) =>
-    set((state) => ({
+  activateView: (view) =>
+    set((state) => viewChange(
+      state,
       view,
-      focusedInput: null,
-      accountMenuOpen: false,
-      announcementResetSignal:
-        state.view === 'announce' && view === 'announce'
-          ? state.announcementResetSignal + 1
-          : state.announcementResetSignal,
-    })),
+      // Arrival is the establishing overview. Any destination advances the
+      // camera to its content column; re-activating that same destination is
+      // the reversible route back to the whole-scene composition.
+      state.view === view && state.sceneCameraMode === 'focus'
+        ? 'overview'
+        : 'focus'
+    )),
+  setView: (view) =>
+    set((state) => viewChange(
+      state,
+      view,
+      // Cross-links and account routes are navigation, not menu toggles.
+      // Even an idempotent route setter keeps its destination in focus.
+      'focus'
+    )),
   setLocale: (locale) => {
     try {
       if (typeof localStorage !== 'undefined') {

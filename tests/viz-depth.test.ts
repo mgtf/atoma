@@ -61,7 +61,7 @@ describe('viz visual depth contract', () => {
     // The bubble is chrome, not lit surface: the pointer light must not smear
     // the text a reader opened it to read.
     expect(renderer).not.toMatch(/this\.tooltipRoot\.filters\s*=/);
-    expect(renderer).toMatch(/drawAmbientGrid\(this\.ambientRoot/);
+    expect(renderer).toMatch(/drawAmbientGrid\(\s*this\.ambientRoot/);
     expect(renderer).toMatch(/this\.stage\.filters = \[filter\]/);
     expect(renderer).not.toMatch(/this\.ambientRoot\.filters\s*=/);
     expect(renderer).not.toMatch(/this\.markRoot\.filters\s*=/);

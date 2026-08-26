@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
-import { hidePointerLight, movePointerLight } from './pointer-light.js';
+import {
+  hidePointerLight,
+  hideTrackedPointer,
+  movePointerLight,
+  trackPointer,
+} from './pointer-light.js';
 import {
   ATOMA_CURSOR_HOTSPOT,
   ATOMA_CURSOR_PATH,
@@ -47,6 +52,7 @@ export function AtomaCursor() {
       element.dataset['visible'] = 'false';
       document.documentElement.classList.remove(ROOT_CURSOR_CLASS);
       hidePointerLight();
+      hideTrackedPointer();
     };
     const paint = () => {
       frame = 0;
@@ -62,13 +68,17 @@ export function AtomaCursor() {
       document.documentElement.classList.add(ROOT_CURSOR_CLASS);
     };
     const onPointerMove = (event: PointerEvent) => {
-      if (!enabled || event.pointerType === 'touch') {
-        if (event.pointerType === 'touch') hide();
+      if (event.pointerType === 'touch') {
+        hide();
         return;
       }
       latestX = event.clientX;
       latestY = event.clientY;
-      movePointerLight(latestX, latestY);
+      // Tooltips remain real input in reduced-motion, forced-colour and native
+      // cursor modes; only the decorative cursor/light are conditional.
+      if (enabled) movePointerLight(latestX, latestY);
+      else trackPointer(latestX, latestY);
+      if (!enabled) return;
       if (!frame) frame = requestAnimationFrame(paint);
     };
     const onPointerOut = (event: PointerEvent) => {
@@ -98,6 +108,7 @@ export function AtomaCursor() {
     return () => {
       cancelFrame();
       hidePointerLight();
+      hideTrackedPointer();
       document.documentElement.classList.remove(ROOT_CURSOR_CLASS);
       for (const query of mediaQueries) query.removeEventListener('change', applyMediaState);
       window.removeEventListener('pointermove', onPointerMove);

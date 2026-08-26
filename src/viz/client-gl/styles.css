@@ -1,7 +1,7 @@
 :root {
   /* Must match sidebarWidthForViewport(): the rail gives space back until its
      112px legibility floor so view overlays never inherit a fictitious 320px
-     canvas beyond the right edge. The run input lives in the header band. */
+     canvas beyond the right edge. */
   --gpu-sidebar: min(100vw, clamp(112px, calc(100vw - 320px), 208px));
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -15,9 +15,19 @@ body { background: #070b13; }
 button, input, textarea, select { font: inherit; }
 
 .gpu-app,
+.gpu-scene-camera,
 .gpu-ui-host {
   position: fixed;
   inset: 0;
+}
+
+.gpu-scene-camera {
+  /* scene-camera.ts bakes target, optical anchor and perspective into one
+     matrix3d, all in viewport coordinates from this origin. */
+  transform-origin: 0 0;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  will-change: transform;
 }
 
 .gpu-ui-host { z-index: 1; }
@@ -117,11 +127,13 @@ html.atoma-cursor-active * {
 }
 
 /* THE frame skin. `panel()` in gpu-renderer.ts draws exactly this on the GPU
-   side — fill GPU_COLORS.panel at the near-depth alpha, a 1px GPU_COLORS.border
-   stroke, radius GPU_LAYOUT.radius, and an elevation-2 pair of cast shadows
-   under a thin top rim. A DOM overlay that sits inside a view's column uses
-   that same material instead of inventing a second skin: the create-project
-   form used to carry its own darker fill and read as a foreign card.
+   side — fill GPU_COLORS.panel at the near-depth alpha, a 1px GPU_COLORS.border,
+   radius GPU_LAYOUT.radius, and a thin top rim. Raised inner panels also cast
+   shadows; retained outer camera frames deliberately do not, because their
+   unmasked full-height shadow reads as a second frame. A DOM overlay that sits
+   inside a view's column uses that same material instead of inventing a second
+   skin: the create-project form used to carry its own darker fill and read as
+   a foreign card.
    The GL shadows swing with the pointer light; CSS cannot, so these are its
    resting values. */
 .gpu-panel-skin {
@@ -168,9 +180,13 @@ html.atoma-cursor-active * {
 }
 
 .gpu-run-input {
-  top: 11px;
-  left: max(610px, 48vw);
-  width: min(420px, calc(100vw - max(610px, 48vw) - 120px));
+  --gpu-content: calc(100vw - var(--gpu-sidebar));
+  --gpu-runs-right: min(500px, calc(var(--gpu-content) * .4));
+  --gpu-runs-left: calc(var(--gpu-content) - var(--gpu-runs-right) - 30px);
+  top: 66px;
+  left: calc(var(--gpu-sidebar) + 24px);
+  width: calc(var(--gpu-runs-left) - 156px);
+  min-width: 0;
   height: 32px;
   padding: 6px 12px;
 }
@@ -178,7 +194,7 @@ html.atoma-cursor-active * {
 .gpu-view-search {
   --gpu-left-pane: min(560px, calc((100vw - var(--gpu-sidebar)) * .45));
   --gpu-search-width: min(280px, calc(var(--gpu-left-pane) - 32px));
-  top: 108px;
+  top: 102px;
   left: calc(
     var(--gpu-sidebar) + 10px + var(--gpu-left-pane) - 16px - var(--gpu-search-width)
   );
@@ -198,7 +214,7 @@ html.atoma-cursor-active * {
   --gpu-frame: calc(var(--gpu-content) - 20px);
   position: fixed;
   z-index: 4;
-  top: 110px;
+  top: 104px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
   height: 140px;
@@ -491,7 +507,7 @@ html.atoma-cursor-active * {
    invisible interface. */
 .gpu-a11y-bridge:focus-within {
   z-index: 30;
-  top: 62px;
+  top: 56px;
   left: 12px;
   width: min(360px, calc(100vw - 24px));
   height: auto;
@@ -505,6 +521,36 @@ html.atoma-cursor-active * {
   border-radius: 8px;
   background: rgba(11, 17, 30, .98);
   box-shadow: 0 18px 42px rgba(0, 0, 0, .5);
+}
+
+/* The travelling camera crops and enlarges the source plane. Anchor
+   browser-native edge overlays to its inverse-projected viewport corners,
+   otherwise authored fixed coordinates can land beyond the screen. At the
+   identity overview these resolve to the exact authored 12/56/66px values,
+   so the establishing view remains pixel-identical. */
+.gpu-scene-camera .gpu-a11y-bridge:focus-within {
+  top: calc(var(--gpu-camera-top-left-y) + 56px);
+  left: calc(var(--gpu-camera-top-left-x) + 12px);
+  width: min(
+    360px,
+    calc(var(--gpu-camera-top-right-x) - var(--gpu-camera-top-left-x) - 24px)
+  );
+  max-height: calc(
+    var(--gpu-camera-bottom-left-y) - var(--gpu-camera-top-left-y) - 66px
+  );
+}
+
+.gpu-scene-camera .gpu-push-prompt {
+  right: calc(100vw - var(--gpu-camera-bottom-right-x) + 20px);
+  bottom: calc(100vh - var(--gpu-camera-bottom-right-y) + 20px);
+  width: min(
+    340px,
+    calc(var(--gpu-camera-bottom-right-x) - var(--gpu-camera-bottom-left-x) - 40px)
+  );
+}
+
+.gpu-scene-camera .gpu-announce-form {
+  bottom: calc(100vh - var(--gpu-camera-bottom-left-y) + 26px);
 }
 
 .gpu-a11y-bridge:focus-within nav,
@@ -557,15 +603,10 @@ html.atoma-cursor-active * {
   cursor: pointer;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1049px) {
   .gpu-run-input {
-    left: 610px;
-    width: min(420px, calc(100vw - 722px));
+    --gpu-runs-left: calc(var(--gpu-content) - 20px);
   }
-}
-
-@media (max-width: 1000px) {
-  .gpu-run-input { display: none; }
 }
 
 /* Settings: the display-name field is real DOM for the same reason the project
@@ -576,7 +617,7 @@ html.atoma-cursor-active * {
   --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
   position: fixed;
   z-index: 4;
-  top: 178px;
+  top: 172px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
   height: 96px;
@@ -631,7 +672,7 @@ html.atoma-cursor-active * {
   --gpu-frame: calc(var(--gpu-content) - 20px);
   position: fixed;
   z-index: 4;
-  top: 110px;
+  top: 104px;
   bottom: 26px;
   left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   width: calc(var(--gpu-frame) - 32px);
