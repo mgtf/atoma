@@ -390,6 +390,10 @@ import { drawAnnounce } from './renderer/views/announce.js';
 import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawLocaleMenu, type LocaleMenuAnchor } from './renderer/views/locale-menu.js';
+import {
+  overlayMenuClip,
+  publishOverlayMenuClip,
+} from './renderer/overlay-menu-clip.js';
 import { drawSettings } from './renderer/views/settings.js';
 import {
   drawSidebar,
@@ -1634,6 +1638,12 @@ export class GpuRenderer {
           height: 32,
         };
     drawLocaleMenu(this, snapshot, width, layoutHeight, localeAnchor);
+    publishOverlayMenuClip(
+      overlayMenuClip(snapshot, width, layoutHeight, {
+        account: focusRail?.profile,
+        locale: localeAnchor,
+      })
+    );
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
       this.activeViewTransition = {

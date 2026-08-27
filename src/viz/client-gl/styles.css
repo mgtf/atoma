@@ -3,6 +3,11 @@
      112px legibility floor so view overlays never inherit a fictitious 320px
      canvas beyond the right edge. */
   --gpu-sidebar: min(100vw, clamp(112px, calc(100vw - 320px), 208px));
+  /* Pixi overlay-menu hole; `publishOverlayMenuClip` overwrites these. */
+  --gpu-chrome-menu-x: -10000px;
+  --gpu-chrome-menu-y: 0px;
+  --gpu-chrome-menu-w: 0px;
+  --gpu-chrome-menu-h: 0px;
   color-scheme: dark;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #070b13;
@@ -146,13 +151,33 @@ html.atoma-cursor-active * {
     inset 0 1px 0 rgba(199, 226, 255, .18);
 }
 
-/* Pixi overlay menus draw below the DOM layer, so an open menu marks view
-   overlays inert instead of removing them. The veil reads as "temporarily
-   untouchable" and fades back with the scrim when the menu closes. */
+/* Pixi overlay menus draw on the canvas (z-index 1) while view forms are
+   real DOM at z-index 4. Keep the form on screen (the 0.35 veil) but punch a
+   hole where the menu sits so fields cannot paint through the panel. Each
+   overlay restates its `left`/`top` as `--gpu-overlay-*` so the hole is in
+   the element's own box. */
 .gpu-overlays-veiled {
   opacity: .35;
   filter: saturate(.5);
   transition: opacity 120ms ease-out, filter 120ms ease-out;
+  clip-path: polygon(
+    evenodd,
+    0 0,
+    100% 0,
+    100% 100%,
+    0 100%,
+    0 0,
+    calc(var(--gpu-chrome-menu-x) - var(--gpu-overlay-left))
+      calc(var(--gpu-chrome-menu-y) - var(--gpu-overlay-top)),
+    calc(var(--gpu-chrome-menu-x) - var(--gpu-overlay-left))
+      calc(var(--gpu-chrome-menu-y) - var(--gpu-overlay-top) + var(--gpu-chrome-menu-h)),
+    calc(var(--gpu-chrome-menu-x) - var(--gpu-overlay-left) + var(--gpu-chrome-menu-w))
+      calc(var(--gpu-chrome-menu-y) - var(--gpu-overlay-top) + var(--gpu-chrome-menu-h)),
+    calc(var(--gpu-chrome-menu-x) - var(--gpu-overlay-left) + var(--gpu-chrome-menu-w))
+      calc(var(--gpu-chrome-menu-y) - var(--gpu-overlay-top)),
+    calc(var(--gpu-chrome-menu-x) - var(--gpu-overlay-left))
+      calc(var(--gpu-chrome-menu-y) - var(--gpu-overlay-top))
+  );
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -198,6 +223,8 @@ html.atoma-cursor-active * {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-runs-right: min(500px, calc(var(--gpu-content) * .4));
   --gpu-runs-left: calc(var(--gpu-content) - var(--gpu-runs-right) - 30px);
+  --gpu-overlay-top: 66px;
+  --gpu-overlay-left: calc(var(--gpu-sidebar) + 24px);
   top: 66px;
   left: calc(var(--gpu-sidebar) + 24px);
   width: calc(var(--gpu-runs-left) - 156px);
@@ -209,6 +236,10 @@ html.atoma-cursor-active * {
 .gpu-view-search {
   --gpu-left-pane: min(560px, calc((100vw - var(--gpu-sidebar)) * .45));
   --gpu-search-width: min(280px, calc(var(--gpu-left-pane) - 32px));
+  --gpu-overlay-top: 102px;
+  --gpu-overlay-left: calc(
+    var(--gpu-sidebar) + 10px + var(--gpu-left-pane) - 16px - var(--gpu-search-width)
+  );
   top: 102px;
   left: calc(
     var(--gpu-sidebar) + 10px + var(--gpu-left-pane) - 16px - var(--gpu-search-width)
@@ -227,6 +258,8 @@ html.atoma-cursor-active * {
 .gpu-project-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-frame: calc(var(--gpu-content) - 20px);
+  --gpu-overlay-top: 104px;
+  --gpu-overlay-left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   position: fixed;
   z-index: 4;
   top: 104px;
@@ -639,6 +672,8 @@ html.atoma-cursor-active * {
 .gpu-settings-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
+  --gpu-overlay-top: 172px;
+  --gpu-overlay-left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   position: fixed;
   z-index: 4;
   top: 172px;
@@ -699,6 +734,8 @@ html.atoma-cursor-active * {
 .gpu-org-models-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
+  --gpu-overlay-top: 284px;
+  --gpu-overlay-left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   position: fixed;
   z-index: 4;
   top: 284px;
@@ -876,6 +913,8 @@ html.atoma-cursor-active * {
 .gpu-announce-form {
   --gpu-content: calc(100vw - var(--gpu-sidebar));
   --gpu-frame: calc(var(--gpu-content) - 20px);
+  --gpu-overlay-top: 104px;
+  --gpu-overlay-left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
   position: fixed;
   z-index: 4;
   top: 104px;

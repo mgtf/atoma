@@ -60,6 +60,7 @@ import {
   viewFrameGutterRects,
   VIEW_FRAME_PAD,
 } from '../src/viz/client-gl/renderer/view-frame.js';
+import { overlayMenuClip } from '../src/viz/client-gl/renderer/overlay-menu-clip.js';
 import {
   accountMenuLayout,
   drawAccountMenu,
@@ -1274,6 +1275,12 @@ describe('the nav rail', () => {
     expect(css).toMatch(/\.gpu-dom-select\s*\{[\s\S]*?appearance:\s*none/);
     expect(css).toContain('background-position: right 12px center');
     expect(css).toMatch(/\.gpu-project-target \.gpu-dom-input\s*\{[\s\S]*?width:\s*0/);
+    // DOM overlays paint above the canvas. The veil stays translucent so the
+    // form remains on screen; clip-path punches the Pixi menu so fields cannot
+    // paint through it.
+    expect(css).toMatch(/\.gpu-overlays-veiled\s*\{[\s\S]*?opacity:\s*\.35/);
+    expect(css).toMatch(/\.gpu-overlays-veiled\s*\{[\s\S]*?clip-path:\s*polygon\(\s*evenodd/);
+    expect(css).toMatch(/\.gpu-project-form\s*\{[\s\S]*?--gpu-overlay-top:\s*104px/);
   });
 
   it('projects nested hit targets through the rail, pane and scroll transforms', () => {
@@ -2734,6 +2741,26 @@ describe('GPU account menu', () => {
     const signOut = ctx.buttons.find((button) => button.id === 'auth.signOut');
     signOut?.onActivate?.(signOut.id);
     expect(activated).toEqual(['auth.signOut']);
+  });
+
+  it('clips DOM overlays to the same panel rect the account menu draws', () => {
+    const localeAnchor = { x: 1200, y: 8, width: 42, height: 32 };
+    expect(
+      overlayMenuClip(
+        makeSnapshot({ accountMenuOpen: true }, { auth }),
+        1280,
+        720,
+        { locale: localeAnchor }
+      )
+    ).toEqual(accountMenuLayout(1280, auth));
+    expect(
+      overlayMenuClip(
+        makeSnapshot({ accountMenuOpen: false, localeMenuOpen: false }, { auth }),
+        1280,
+        720,
+        { locale: localeAnchor }
+      )
+    ).toBeNull();
   });
 
   it('marks the platform admin and keeps the failure line', () => {

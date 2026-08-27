@@ -323,6 +323,7 @@ describe('full-GL minimal DOM bridge', () => {
     const form = document.querySelector('.gpu-project-form');
     expect(form).toBeInstanceOf(HTMLElement);
     expect(form).toHaveAttribute('inert');
+    expect(form).toHaveClass('gpu-overlays-veiled');
   });
 
   it('renders DOM view overlays inert while the Pixi locale menu is open', () => {
@@ -334,6 +335,7 @@ describe('full-GL minimal DOM bridge', () => {
     });
     renderBridge();
     expect(document.querySelector('.gpu-project-form')).toHaveAttribute('inert');
+    expect(document.querySelector('.gpu-project-form')).toHaveClass('gpu-overlays-veiled');
     const picker = screen.getByRole('combobox', { name: 'Language' });
     expect(picker).toHaveValue('en');
     expect(screen.getAllByRole('option').slice(0, SUPPORTED_LOCALES.length))
@@ -352,6 +354,7 @@ describe('full-GL minimal DOM bridge', () => {
       useGpuStore.setState({ view, entered: true, accountMenuOpen: true });
       renderBridge();
       expect(document.querySelector(selector), view).toHaveAttribute('inert');
+      expect(document.querySelector(selector), view).toHaveClass('gpu-overlays-veiled');
     }
   });
 

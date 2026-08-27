@@ -116,10 +116,9 @@ export function DomBridge({
     matchesSearchQuery(runSearchText(run), search.run)
   );
   // The account menu is Pixi chrome while text-entry controls are real DOM
-  // above the canvas. Rendering the forms inert (rather than unmounting them)
-  // keeps their store-backed values on screen while an overlay menu is open,
-  // and `inert` removes them from click, focus and a11y order so they cannot
-  // intercept a control of the menu that visibly sits over them.
+  // above the canvas. Forms stay mounted (store-backed values stay on screen),
+  // `inert` takes them out of click/focus/a11y, and `.gpu-overlays-veiled`
+  // dims them and clips the menu rectangle so fields cannot paint through it.
   const overlaysInert = accountMenuOpen || localeMenuOpen;
 
   if (!entered) {
@@ -207,7 +206,7 @@ export function DomBridge({
 
       {view === 'runs' ? (
         <input
-          className="gpu-dom-input gpu-run-input"
+          className={`gpu-dom-input gpu-run-input${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
           aria-label={t('runs.search', { count: runs.length })}
           value={runValue}
           placeholder={t('runs.search', { count: runs.length })}
@@ -260,7 +259,7 @@ export function DomBridge({
       ) : null}
       {view === 'registry' ? (
         <input
-          className="gpu-dom-input gpu-view-search"
+          className={`gpu-dom-input gpu-view-search${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
           aria-label={t('nav.filterAtoms')}
           value={search.registry}
           placeholder={t('nav.filterAtoms')}
@@ -272,7 +271,7 @@ export function DomBridge({
       ) : null}
       {view === 'skills' ? (
         <input
-          className="gpu-dom-input gpu-view-search"
+          className={`gpu-dom-input gpu-view-search${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
           aria-label={t('nav.filterSkills')}
           value={search.skills}
           placeholder={t('nav.filterSkills')}
