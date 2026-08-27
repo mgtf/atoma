@@ -110,9 +110,11 @@ export function DomBridge({
     matchesSearchQuery(runSearchText(run), search.run)
   );
   // The account menu is Pixi chrome while text-entry controls are real DOM
-  // above the canvas. Remove view overlays while the menu is open, otherwise
-  // an input/form can intercept clicks on the menu that visibly sits over it.
-  const viewOverlaysVisible = !accountMenuOpen && !localeMenuOpen;
+  // above the canvas. Rendering the forms inert (rather than unmounting them)
+  // keeps their store-backed values on screen while an overlay menu is open,
+  // and `inert` removes them from click, focus and a11y order so they cannot
+  // intercept a control of the menu that visibly sits over them.
+  const overlaysInert = accountMenuOpen || localeMenuOpen;
 
   if (!entered) {
     return (
@@ -197,12 +199,13 @@ export function DomBridge({
         ) : null}
       </div>
 
-      {viewOverlaysVisible && view === 'runs' ? (
+      {view === 'runs' ? (
         <input
           className="gpu-dom-input gpu-run-input"
           aria-label={t('runs.search', { count: runs.length })}
           value={runValue}
           placeholder={t('runs.search', { count: runs.length })}
+          inert={overlaysInert}
           onFocus={() => {
             setSearch('run', '');
             setFocusedInput('run');
@@ -249,31 +252,34 @@ export function DomBridge({
           }}
         />
       ) : null}
-      {viewOverlaysVisible && view === 'registry' ? (
+      {view === 'registry' ? (
         <input
           className="gpu-dom-input gpu-view-search"
           aria-label={t('nav.filterAtoms')}
           value={search.registry}
           placeholder={t('nav.filterAtoms')}
+          inert={overlaysInert}
           onFocus={() => setFocusedInput('registry')}
           onBlur={() => setFocusedInput(null)}
           onChange={(event) => setSearch('registry', event.target.value)}
         />
       ) : null}
-      {viewOverlaysVisible && view === 'skills' ? (
+      {view === 'skills' ? (
         <input
           className="gpu-dom-input gpu-view-search"
           aria-label={t('nav.filterSkills')}
           value={search.skills}
           placeholder={t('nav.filterSkills')}
+          inert={overlaysInert}
           onFocus={() => setFocusedInput('skills')}
           onBlur={() => setFocusedInput(null)}
           onChange={(event) => setSearch('skills', event.target.value)}
         />
       ) : null}
-      {viewOverlaysVisible && projectActionsEnabled && view === 'projects' ? (
+      {projectActionsEnabled && view === 'projects' ? (
         <form
-          className={`gpu-panel-skin gpu-project-form${selectedProjectName ? ' gpu-project-form--run' : ''}`}
+          className={`gpu-panel-skin gpu-project-form${overlaysInert ? ' gpu-overlays-veiled' : ''}${selectedProjectName ? ' gpu-project-form--run' : ''}`}
+          inert={overlaysInert}
           onSubmit={(event) => event.preventDefault()}
         >
           {selectedProjectName ? (
@@ -382,9 +388,10 @@ export function DomBridge({
           </p>
         </form>
       ) : null}
-      {viewOverlaysVisible && view === 'settings' ? (
+      {view === 'settings' ? (
         <form
-          className="gpu-panel-skin gpu-settings-form"
+          className={`gpu-panel-skin gpu-settings-form${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
+          inert={overlaysInert}
           onSubmit={(event) => {
             event.preventDefault();
             const next = search.displayName.trim();
@@ -409,8 +416,8 @@ export function DomBridge({
           </div>
         </form>
       ) : null}
-      {viewOverlaysVisible && view === 'announce' && announcementsEnabled ? (
-        <AnnouncementForm t={t} locale={locale} resetSignal={announcementResetSignal} />
+      {view === 'announce' && announcementsEnabled ? (
+        <AnnouncementForm t={t} locale={locale} resetSignal={announcementResetSignal} inert={overlaysInert} />
       ) : null}
       {pushPrompt !== 'hidden' ? (
         <div

@@ -32,12 +32,17 @@ export function AnnouncementForm({
   t,
   locale,
   resetSignal = 0,
+  inert = false,
 }: {
   t: (key: string, vars?: Record<string, unknown>) => string;
   locale: Locale;
   /** A re-activation of the active Announcements destination. Only a sent
    *  receipt consumes it; an in-progress message must never be erased. */
   resetSignal?: number;
+  /** True while a Pixi overlay menu is open above this composer: it must stay
+   *  mounted (its text is local state worth keeping) but cannot intercept
+   *  clicks or focus meant for the menu. */
+  inert?: boolean;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
   const [phase, setPhase] = useState<Phase>('compose');
@@ -112,7 +117,7 @@ export function AnnouncementForm({
 
   if (phase === 'sent') {
     return (
-      <div className="gpu-panel-skin gpu-announce-form">
+      <div className="gpu-panel-skin gpu-announce-form" inert={inert}>
         <p role="status">
           {sentTo === null ? t('announce.sentAll') : t('announce.sent', { count: sentTo })}
         </p>
@@ -122,7 +127,8 @@ export function AnnouncementForm({
 
   return (
     <form
-      className="gpu-panel-skin gpu-announce-form"
+      className={`gpu-panel-skin gpu-announce-form${inert ? ' gpu-overlays-veiled' : ''}`}
+      inert={inert}
       onSubmit={(event) => {
         event.preventDefault();
         if (phase === 'compose') void draft();

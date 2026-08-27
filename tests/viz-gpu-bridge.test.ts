@@ -317,14 +317,15 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.getByRole('link', { name: 'Connect GitHub' })).toBeInTheDocument();
   });
 
-  it('removes DOM view overlays while the Pixi account menu is open', () => {
+  it('renders DOM view overlays inert while the Pixi account menu is open', () => {
     useGpuStore.setState({ view: 'projects', entered: true, accountMenuOpen: true });
     renderBridge();
-    expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'Project name' })).not.toBeInTheDocument();
+    const form = document.querySelector('.gpu-project-form');
+    expect(form).toBeInstanceOf(HTMLElement);
+    expect(form).toHaveAttribute('inert');
   });
 
-  it('removes DOM view overlays while the Pixi locale menu is open', () => {
+  it('renders DOM view overlays inert while the Pixi locale menu is open', () => {
     useGpuStore.setState({
       view: 'projects',
       entered: true,
@@ -332,14 +333,14 @@ describe('full-GL minimal DOM bridge', () => {
       localeMenuOpen: true,
     });
     renderBridge();
-    expect(document.querySelector('.gpu-project-form')).not.toBeInTheDocument();
+    expect(document.querySelector('.gpu-project-form')).toHaveAttribute('inert');
     const picker = screen.getByRole('combobox', { name: 'Language' });
     expect(picker).toHaveValue('en');
     expect(screen.getAllByRole('option').slice(0, SUPPORTED_LOCALES.length))
       .toHaveLength(SUPPORTED_LOCALES.length);
   });
 
-  it('removes every other view overlay while the Pixi account menu is open', () => {
+  it('renders every other view overlay inert while the Pixi account menu is open', () => {
     const cases = [
       ['runs', '.gpu-run-input'],
       ['registry', '.gpu-view-search'],
@@ -350,7 +351,25 @@ describe('full-GL minimal DOM bridge', () => {
       cleanup();
       useGpuStore.setState({ view, entered: true, accountMenuOpen: true });
       renderBridge();
-      expect(document.querySelector(selector), view).not.toBeInTheDocument();
+      expect(document.querySelector(selector), view).toHaveAttribute('inert');
+    }
+  });
+
+  it('restores interactive view overlays once both overlay menus are closed', () => {
+    for (const view of ['runs', 'projects', 'settings'] as const) {
+      cleanup();
+      useGpuStore.setState({
+        view,
+        entered: true,
+        accountMenuOpen: true,
+        localeMenuOpen: true,
+      });
+      renderBridge();
+      expect(document.querySelectorAll('[inert]').length).toBeGreaterThan(0);
+      cleanup();
+      useGpuStore.setState({ accountMenuOpen: false, localeMenuOpen: false });
+      renderBridge();
+      expect(document.querySelector('[inert]')).not.toBeInTheDocument();
     }
   });
 

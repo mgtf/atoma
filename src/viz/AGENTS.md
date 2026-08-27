@@ -323,9 +323,9 @@ npm run viz:mark-turn:analyze
   VIEW is positioned from the `--gpu-sidebar` CSS variable, whose CSS clamp a
   test holds equal to `sidebarWidthForViewport`: overview shrinks 208px to a
   112px floor; focus preserves that source layout while the camera crops its trailing icon tile. The
-  run search input is not one of them, it lives in the header
-  band. View DOM overlays are removed while the Pixi account menu is open so
-  their higher CSS layer cannot intercept its controls. Short viewports
+  run search input is not one of them, it lives in the header band. With a
+  Pixi overlay menu open, view DOM overlays render INERT (`inert`, veiled)
+  instead of being removed, keeping values on screen without stealing clicks. Short viewports
   compact the rail, then drop group headings before they drop a destination.
   The accessibility bridge is visually clipped only at rest; `:focus-within`
   reveals it as a bounded command palette so keyboard focus is never invisible.
