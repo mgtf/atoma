@@ -11,7 +11,9 @@ import type {
   ProjectRun,
   Publication,
 } from '../contracts/projects.js';
-import { pinForTier, type TierModelPins } from '../contracts/tierModels.js';
+import type { TierModelPins } from '../contracts/tierModels.js';
+import { LLM_PROVIDER_CATALOG, type LlmProviderEntry } from '../core/providerCatalog.js';
+import type { ProviderKeyProvider } from '../auth/store.js';
 import { readTraceTopLevelFields } from '../contracts/traceFields.js';
 // TYPE-ONLY, and it must stay that way: `src/viz/server.ts` imports four
 // `src/projects` modules, so a value edge back into `src/viz` would close a
@@ -76,6 +78,23 @@ export interface ProjectCoordinatorOptions {
    * preference lookup must never be able to block a run.
    */
   readonly tierModelsFor?: (principalId: string) => TierModelPins;
+  /**
+   * The requesting principal's organisation's per-tier DEFAULTS (the second
+   * level of the precedence chain account pin > org default > host env).
+   * Same fail-open rule as `tierModelsFor`: resolved as a QUESTION per run,
+   * never trusted from the request.
+   */
+  readonly orgTierModelsFor?: (orgId: string) => TierModelPins;
+  /**
+   * One provider credential the ORG configured, decrypted for injection into
+   * this run child's environment. Resolved per (orgId, provider) at launch;
+   * null or a throwing resolver means "no key", which degrades to not
+   * forwarding that provider — never to failing the run.
+   */
+  readonly orgProviderKeyFor?: (
+    orgId: string,
+    provider: ProviderKeyProvider
+  ) => string | null;
   /**
    * Does this principal hold the instance-wide platform-admin flag? Supplied
    * as a QUESTION, never as an answer: the coordinator asks it itself, so no
@@ -160,6 +179,73 @@ export function isSubscriptionTransport(value: string | undefined): boolean {
   return kind === 'claude-cli' || kind === 'claude';
 }
 
+/**
+ * Is this tier value routable for a tenant run? The catalogue shape is the
+ * contract — bare historical ids pass (the router treats them as default-
+ * provider models), catalogue selectors pass, and anything else with a
+ * colon (an unknown provider, `claude-cli:*`, a shell fragment) refuses.
+ * Mirrors the write-side validator; kept locally so a drift between them
+ * fails loudly in tests rather than silently at routing time.
+ */
+function isCatalogueSelection(value: string): boolean {
+  const colonIndex = value.indexOf(':');
+  if (colonIndex === -1) return true;
+  const providerId = value.slice(0, colonIndex) as LlmProviderEntry['id'];
+  return LLM_PROVIDER_CATALOG.some((provider) => provider.id === providerId);
+}
+
+/**
+ * Can THIS run honour a selection? A bare model id routes through the
+ * default (anthropic) transport whose credential the base environment
+ * already carries. A `provider:model` selector needs that provider's
+ * credential among the org's configured keys — the org's OWN anthropic
+ * key also satisfies an anthropic selector even where the host env had no
+ * key variable to inherit.
+ */
+function providerCredentialAvailable(
+  value: string,
+  keys: Partial<Record<ProviderKeyProvider, string>>,
+  hostEnv: NodeJS.ProcessEnv
+): boolean {
+  const colonIndex = value.indexOf(':');
+  if (colonIndex === -1) return true;
+  const providerId = value.slice(0, colonIndex);
+  if (providerId === 'anthropic') {
+    // The default transport always has a credential by contract — either
+    // forwarded from the host above or brought BYO-key by this org.
+    return Boolean(keys.anthropic || hostEnv['ANTHROPIC_API_KEY'] || hostEnv['ANTHROPIC_AUTH_TOKEN']);
+  }
+  if (providerId === 'ollama') {
+    // Self-hosted: no secret to bring; reachable whenever unrefused.
+    return true;
+  }
+  return Boolean(keys[providerId as ProviderKeyProvider]);
+}
+
+/**
+ * FORWARD ONLY WHAT THE ORG BROUGHT. Each configured provider's credential
+ * rides the same environment snapshot as its tier pins, so the child's
+ * lazy provider factories can build exactly the referenced clients. Host
+ * values are NOT overridden by absent org keys — but an explicitly
+ * configured org key wins over a host variable of the same name, because
+ * "the org brought its own key" is BYO-key's entire point.
+ */
+function injectOrgProviderKeys(
+  environment: NodeJS.ProcessEnv,
+  keys: Partial<Record<ProviderKeyProvider, string>>
+): void {
+  for (const provider of LLM_PROVIDER_CATALOG) {
+    if (provider.credentialEnvVar === null) continue;
+    const orgKey = keys[provider.id];
+    const trimmed = orgKey?.trim();
+    if (!trimmed) continue;
+    environment[provider.credentialEnvVar] = trimmed;
+    // Optional tuning variables stay HOST-owned: an org never sets base
+    // URLs through this path.
+    void provider.configurableEnvVars;
+  }
+}
+
 export function projectRunEnvironment(input: {
   readonly hostEnv: NodeJS.ProcessEnv;
   readonly dbPath: string;
@@ -169,13 +255,29 @@ export function projectRunEnvironment(input: {
   readonly runId: string;
   readonly artifactManifestPath: string;
   /**
-   * The requesting account's per-tier choices. A pin set here OVERRIDES the
-   * operator's host pin for that tier; a null tier inherits it. Values come
-   * from the closed list in `contracts/tierModels.ts`, so they cannot carry a
-   * provider selector — the `:` refusal below still guards both sources as a
-   * last line of defence rather than as the only one.
+   * The requesting account's per-tier choices, and the organisation's
+   * defaults beneath them: `effectiveTierSelection` resolves the chain
+   * account pin > org default > null, and a null tier inherits the
+   * operator's host pin inside the loop below.
+   *
+   * A selection MAY now be a `provider:model` selector. That is safe by
+   * construction: the values come from `contracts/tierModels.ts`, whose
+   * catalogue admits exactly the credential-honouring providers of
+   * `core/providerCatalog.ts` (claude-cli/codex cannot appear), and each
+   * referenced provider's credential is injected alongside the pin from the
+   * org's own key store — a pin without its key is dropped before it can
+   * reach the router and detonate mid-run. The historical bare-`:`
+   * REFUSAL narrows to what it always defended: any provider prefix that
+   * is not in the catalogue.
    */
   readonly tierModels?: TierModelPins;
+  /** The org-level defaults under `tierModels`. See its doc above. */
+  readonly orgTierModels?: TierModelPins;
+  /**
+   * Credentials the org configured, by catalogue provider id. Present keys
+   * are forwarded into the run child; absent ones are not.
+   */
+  readonly orgProviderKeys?: Partial<Record<ProviderKeyProvider, string>>;
   /**
    * THE SUBSCRIPTION-TRANSPORT DOOR. Present only when the coordinator has
    * verified that the REQUESTING principal holds the platform-admin flag.
@@ -238,18 +340,46 @@ export function projectRunEnvironment(input: {
     const baseUrl = input.hostEnv['ANTHROPIC_BASE_URL']?.trim();
     if (baseUrl) environment['ANTHROPIC_BASE_URL'] = baseUrl;
   }
+  // CATALOGUE-GUARDED TIER RESOLUTION: account pin > org default > host env,
+  // resolved PER CANDIDATE so a preference pointing at a provider whose
+  // credential nobody configured falls through to the level beneath it
+  // instead of reaching the router and detonating mid-run. Non-catalogue
+  // provider prefixes refuse outright at every level.
+  const candidatesPerTier: Array<string | null> = [
+    input.tierModels?.l1 ?? null,
+    input.orgTierModels?.l1 ?? null,
+    typeof input.hostEnv['ATOMA_MODEL_L1'] === 'string' ? input.hostEnv['ATOMA_MODEL_L1'].trim() : null,
+  ];
+  const candidatesL2: Array<string | null> = [
+    input.tierModels?.l2 ?? null,
+    input.orgTierModels?.l2 ?? null,
+    typeof input.hostEnv['ATOMA_MODEL_L2'] === 'string' ? input.hostEnv['ATOMA_MODEL_L2'].trim() : null,
+  ];
+  const candidatesL3: Array<string | null> = [
+    input.tierModels?.l3 ?? null,
+    input.orgTierModels?.l3 ?? null,
+    typeof input.hostEnv['ATOMA_MODEL_L3'] === 'string' ? input.hostEnv['ATOMA_MODEL_L3'].trim() : null,
+  ];
+  const tierCandidates = { 1: candidatesPerTier, 2: candidatesL2, 3: candidatesL3 } as const;
   for (const tier of [1, 2, 3] as const) {
-    const key = `ATOMA_MODEL_L${tier}`;
-    const accountPin = input.tierModels ? pinForTier(input.tierModels, tier) : null;
-    const value = (accountPin ?? input.hostEnv[key])?.trim();
-    if (!value) continue;
-    if (value.includes(':')) {
-      throw new ProjectRunConfigurationError(
-        `${key} cannot route a tenant run to another provider`
-      );
+    for (const candidate of tierCandidates[tier]) {
+      const value = candidate?.trim();
+      if (!value) continue;
+      if (!isCatalogueSelection(value)) {
+        throw new ProjectRunConfigurationError(
+          `${`ATOMA_MODEL_L${tier}`}=${value} names a provider project runs cannot be routed to`
+        );
+      }
+      if (!providerCredentialAvailable(value, input.orgProviderKeys ?? {}, input.hostEnv)) {
+        // Fail-open: nobody brought this provider's credential, so the
+        // next level of the chain decides instead.
+        continue;
+      }
+      environment[`ATOMA_MODEL_L${tier}`] = value;
+      break;
     }
-    environment[key] = value;
   }
+  injectOrgProviderKeys(environment, input.orgProviderKeys ?? {});
   Object.assign(environment, {
     ATOMA_REQUIRE_ISOLATION: '1',
     ATOMA_CONTAINER: '1',
@@ -484,6 +614,11 @@ export class ProjectRunCoordinator {
   private readonly publisher?: ProjectRunPublisher;
   private readonly onRunFinished?: (event: ProjectRunFinishedEvent) => void | Promise<void>;
   private readonly tierModelsFor?: (principalId: string) => TierModelPins;
+  private readonly orgTierModelsFor?: (orgId: string) => TierModelPins;
+  private readonly orgProviderKeyFor?: (
+    orgId: string,
+    provider: ProviderKeyProvider
+  ) => string | null;
   private readonly platformAdmins?: (principalId: string) => boolean;
   private readonly onSubscriptionTransport?: (info: SubscriptionTransportUse) => void;
   private readonly cwd: string;
@@ -501,6 +636,8 @@ export class ProjectRunCoordinator {
     this.publisher = options.publisher;
     if (options.onRunFinished) this.onRunFinished = options.onRunFinished;
     if (options.tierModelsFor) this.tierModelsFor = options.tierModelsFor;
+    if (options.orgTierModelsFor) this.orgTierModelsFor = options.orgTierModelsFor;
+    if (options.orgProviderKeyFor) this.orgProviderKeyFor = options.orgProviderKeyFor;
     if (options.platformAdmins) this.platformAdmins = options.platformAdmins;
     if (options.onSubscriptionTransport) {
       this.onSubscriptionTransport = options.onSubscriptionTransport;
@@ -536,6 +673,46 @@ export class ProjectRunCoordinator {
       );
       return undefined;
     }
+  }
+
+  /**
+   * The requester's organisation tier defaults, or none. Same fail-open
+   * rule as `resolveTierModels` — it is a preference level, not an
+   * authority.
+   */
+  private resolveOrgTierModels(orgId: string): TierModelPins | undefined {
+    if (!this.orgTierModelsFor) return undefined;
+    try {
+      return this.orgTierModelsFor(orgId);
+    } catch (error) {
+      process.stderr.write(
+        `[atoma projects] organisation tier defaults unavailable for ${orgId}: ${String(error)}\n`
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * The org's configured provider credentials, decrypted per run. A key
+   * that cannot be read degrades to absent (the run continues without the
+   * provider), and one failing provider never hides another.
+   */
+  private resolveOrgProviderKeys(
+    orgId: string
+  ): Partial<Record<ProviderKeyProvider, string>> | undefined {
+    if (!this.orgProviderKeyFor) return undefined;
+    const keys: Partial<Record<ProviderKeyProvider, string>> = {};
+    for (const provider of LLM_PROVIDER_CATALOG) {
+      try {
+        const value = this.orgProviderKeyFor(orgId, provider.id);
+        if (value) keys[provider.id] = value;
+      } catch (error) {
+        process.stderr.write(
+          `[atoma projects] provider key lookup failed for ${provider.id} in ${orgId}: ${String(error)}\n`
+        );
+      }
+    }
+    return keys;
   }
 
   /**
@@ -639,6 +816,8 @@ export class ProjectRunCoordinator {
         runId: run.projectRunId,
         artifactManifestPath: paths.artifactManifestPath,
         tierModels: this.resolveTierModels(input.principalId),
+        orgTierModels: this.resolveOrgTierModels(input.orgId),
+        orgProviderKeys: this.resolveOrgProviderKeys(input.orgId),
         ...(subscriptionGrant ? { subscriptionTransport: subscriptionGrant } : {}),
       });
       if (subscriptionGrant && isSubscriptionTransport(this.hostEnv['ATOMA_LLM'])) {

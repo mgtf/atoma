@@ -671,15 +671,15 @@ lands before the SaaS, key it on `(provider, subject)`.
    `kind: script` never globalises and the product thesis applies to `llm` bodies
    and the two saved LLM calls only. That is a real product decision, not an
    engineering one.
-2. **BYO-key or platform-key?** NARROWED 2026-08-17, not closed. The third
-   option some designs assume — "the user's Claude/ChatGPT subscription pays" —
-   **does not exist at any vendor**, and MCP deprecated the one protocol
-   mechanism for it (see "Login providers" in §1). So the answer is one of
-   BYO-key per org or platform-key with metered re-billing; there is no
-   subscription passthrough to weigh against them. What remains genuinely open
-   is the original trade-off: per-org credentials change A6 from "thread a
-   value" to "manage a secret store", and they change who absorbs the cost of a
-   runaway L1 tool loop.
+2. **BYO-key or platform-key?** NARROWED 2026-08-27. Organisation admins
+   enter provider API keys (Anthropic, Z.ai; Ollama needs none) from Settings,
+   stored AES-256-GCM under `ATOMA_SECRET_ENCRYPTION_KEY`. Settings requires
+   at least one billed-provider key before org defaults or member pins can
+   be chosen; models from other providers stay listed but disabled. Run
+   precedence remains account pin > org default > operator env, and a pin
+   whose provider has no resolved key fails open to the next level.
+   Platform-key metered re-billing remains unbuilt. There is still no
+   subscription passthrough (see "Login providers" in §1).
 3. **Does a paying org get its dynamic atoms globalised?** §2 says entity-scoped
    with a promotion path, on catalog-cost grounds ($0.065/run Opus plan, one
    unique uncacheable call). If the answer is "everything is global", the plan

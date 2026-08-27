@@ -14,7 +14,9 @@
  * Flags:
  *   --view <Tab label>   Nav tab to open (Projects, Runs, Registry, Skills,
  *                        Burn-in, Docs — a gated session also has the admin
- *                        plane). Default: Projects, the arrival view.
+ *                        plane). Settings is not a rail tab: `--auth --view
+ *                        Settings` opens the a11y account menu and clicks
+ *                        Settings. Default: Projects, the arrival view.
  *   --auth               Logged-in rendering WITHOUT a real OAuth session:
  *                        /auth/whoami and the org-scoped reads are stubbed in
  *                        the browser (same technique as viz-gpu-smoke's
@@ -23,6 +25,8 @@
  *                        them. Without it: the ungated developer rendering.
  *   --select-first       Click the first project row after arrival (the run
  *                        list + run form state).
+ *   --scroll-end         Scroll the Settings body form to its end before
+ *                        capture (org directory below the keys).
  *   --camera <mode>      Camera pose after navigation: focus (default) or
  *                        overview. Overview re-activates the selected menu,
  *                        exercising the real return transition.
@@ -54,6 +58,7 @@ const view = arg('--view', 'Projects');
 const authed = has('--auth');
 const tuning = has('--tuning');
 const selectFirst = has('--select-first');
+const scrollEnd = has('--scroll-end');
 const cameraMode = arg('--camera', 'focus');
 if (cameraMode !== 'overview' && cameraMode !== 'focus') {
   throw new Error(`--camera must be overview or focus, got ${cameraMode}`);
@@ -158,6 +163,46 @@ function gatedStubs() {
         l3: 'claude-opus-5',
       },
       choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+      catalog: [],
+    },
+    // Settings body fetches this on mount. A 401 here reload-loops the page.
+    '/api/org/models': {
+      models: { l1: null, l2: null, l3: null },
+      keys: [],
+      encryptionReady: true,
+      catalog: [
+        {
+          id: 'anthropic',
+          label: 'Anthropic',
+          credentialEnvVar: 'ANTHROPIC_API_KEY',
+          suggestive: false,
+          models: [
+            { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+            { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+            { id: 'claude-opus-5', label: 'Claude Opus 5' },
+          ],
+        },
+        {
+          id: 'zai',
+          label: 'Z.ai',
+          credentialEnvVar: 'ZAI_API_KEY',
+          suggestive: false,
+          models: [{ id: 'glm-4.5', label: 'GLM-4.5' }],
+        },
+        {
+          id: 'ollama',
+          label: 'Ollama',
+          credentialEnvVar: null,
+          suggestive: true,
+          models: [{ id: 'qwen3:8b', label: 'Qwen3 8B' }],
+        },
+      ],
+      choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+      operatorDefaults: {
+        l1: 'claude-haiku-4-5-20251001',
+        l2: 'claude-sonnet-5',
+        l3: 'claude-opus-5',
+      },
     },
     '/api/projects': [{
       projectId,
@@ -422,29 +467,67 @@ try {
     await page.waitForSelector('[role="tab"]', { timeout: READY_TIMEOUT_MS });
 
     // Open the requested view and let the 560ms view transition finish.
-    await page.evaluate((name) => {
-      const tab = [...document.querySelectorAll('[role="tab"]')].find(
-        (candidate) => candidate.textContent === name
-      );
-      if (!tab) {
-        const names = [...document.querySelectorAll('[role="tab"]')]
-          .map((candidate) => candidate.textContent)
-          .join(', ');
-        throw new Error(`nav tab missing: ${name} (have: ${names})`);
+    // Settings is reached from the account menu, not the rail.
+    if (view === 'Settings') {
+      if (!authed) {
+        throw new Error('--view Settings requires --auth (the account menu is gated)');
       }
-      tab.click();
-    }, view);
+      await page.waitForFunction(
+        () => Boolean(document.querySelector('.gpu-a11y-bridge button[aria-expanded]')),
+        { timeout: READY_TIMEOUT_MS }
+      );
+      await page.evaluate(() => {
+        const button = document.querySelector('.gpu-a11y-bridge button[aria-expanded]');
+        if (button instanceof HTMLButtonElement) button.click();
+      });
+      await page.waitForFunction(
+        (label) =>
+          Array.from(document.querySelectorAll('.gpu-a11y-bridge button')).some(
+            (el) => el.textContent?.trim() === label
+          ),
+        { timeout: READY_TIMEOUT_MS },
+        'Settings'
+      );
+      await page.evaluate((label) => {
+        const button = Array.from(document.querySelectorAll('.gpu-a11y-bridge button')).find(
+          (el) => el.textContent?.trim() === label
+        );
+        if (!(button instanceof HTMLButtonElement)) {
+          throw new Error('Settings menu item missing');
+        }
+        button.click();
+      }, 'Settings');
+    } else {
+      await page.evaluate((name) => {
+        const tab = [...document.querySelectorAll('[role="tab"]')].find(
+          (candidate) => candidate.textContent === name
+        );
+        if (!tab) {
+          const names = [...document.querySelectorAll('[role="tab"]')]
+            .map((candidate) => candidate.textContent)
+            .join(', ');
+          throw new Error(`nav tab missing: ${name} (have: ${names})`);
+        }
+        tab.click();
+      }, view);
+    }
     await page.waitForFunction(
       (expected) => document.querySelector('[data-viz-live]')?.textContent?.includes(expected),
       { timeout: READY_TIMEOUT_MS },
       view
     );
+    if (view === 'Settings') {
+      await page.waitForSelector('.gpu-org-models-form', { timeout: READY_TIMEOUT_MS });
+    }
     await page.waitForFunction(
       () => document.querySelector('.gpu-scene-camera')?.getAttribute('data-scene-camera-motion') === 'settled',
       { timeout: READY_TIMEOUT_MS }
     );
 
     if (cameraMode === 'overview') {
+      if (view === 'Settings') {
+        throw new Error('--camera overview re-activates a nav tab; Settings has none');
+      }
       // A second activation of the CURRENT destination is the camera return;
       // use the same menu contract as the product instead of mutating state.
       await page.evaluate((name) => {
@@ -464,6 +547,17 @@ try {
       );
     }
     await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 700)));
+
+    if (scrollEnd) {
+      if (view !== 'Settings') {
+        throw new Error('--scroll-end is for Settings (the org-models body form)');
+      }
+      await page.evaluate(() => {
+        const form = document.querySelector('.gpu-org-models-form');
+        if (form) form.scrollTop = form.scrollHeight;
+      });
+      await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 200)));
+    }
 
     if (selectFirst) {
       const spot = await page.evaluate(() => {

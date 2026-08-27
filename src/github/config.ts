@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createSecretKey, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { parseEncryptionKeyBytes } from '../core/secretCrypto.js';
 
 export const GITHUB_APP_ENV = Object.freeze({
   appId: 'ATOMA_GITHUB_APP_ID',
@@ -106,23 +107,13 @@ function parsePrivateKey(pem: string | Buffer, sourceName: string): KeyObject {
 }
 
 function parseEncryptionKey(raw: string): Buffer {
-  const value = requiredText(raw, GITHUB_APP_ENV.tokenEncryptionKey, 256);
-  let bytes: Buffer;
-  if (/^[0-9a-fA-F]{64}$/.test(value)) {
-    bytes = Buffer.from(value, 'hex');
-  } else {
-    const payload = value.startsWith('base64url:') ? value.slice('base64url:'.length) : value;
-    if (!/^[A-Za-z0-9_-]{43}$/.test(payload)) {
-      throw new Error(
-        `${GITHUB_APP_ENV.tokenEncryptionKey} must be 32 bytes encoded as 64 hex characters or canonical unpadded base64url`
-      );
-    }
-    bytes = Buffer.from(payload, 'base64url');
-  }
-  if (bytes.length !== 32) {
-    throw new Error(`${GITHUB_APP_ENV.tokenEncryptionKey} must decode to exactly 32 bytes`);
-  }
-  return bytes;
+  // Delegated to the shared cipher mechanics; the GitHub spelling (hex or
+  // `base64url:`) is the strict subset that survives unchanged.
+  return parseEncryptionKeyBytes(
+    requiredText(raw, GITHUB_APP_ENV.tokenEncryptionKey, 256),
+    (message: string) =>
+      new Error(`${GITHUB_APP_ENV.tokenEncryptionKey} ${message.replace(/^the secret encryption key /, '')}`)
+  );
 }
 
 function apiBaseUrl(raw: string | undefined): string {

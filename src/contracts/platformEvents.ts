@@ -91,6 +91,16 @@ export const platformEventKindSchema = z.enum([
   'admin.granted',
   'admin.revoked',
   'invitation.created',
+  /**
+   * An organisation admin changed the org's per-tier model defaults or its
+   * provider credentials. Journaled, never pushed: routine self-service on
+   * a multi-org instance, but the audit trail must answer "who pointed
+   * this org's spend at which models/keys, and when". The key kind carries
+   * NO key material — only the provider and whether one was set or removed.
+   */
+  'org.models_updated',
+  'org.provider_key_set',
+  'org.provider_key_removed',
   'auth.rate_limited',
   'auth.state_flood',
   'webhook.rejected',
@@ -255,6 +265,10 @@ export const PLATFORM_EVENT_SEVERITY: Record<PlatformEventKind, PlatformEventSev
   'admin.granted': 'security',
   'admin.revoked': 'security',
   'invitation.created': 'security',
+  // Self-service preference changes: worth the audit trail, not an alert.
+  'org.models_updated': 'info',
+  'org.provider_key_set': 'info',
+  'org.provider_key_removed': 'info',
   'auth.rate_limited': 'warning',
   'auth.state_flood': 'security',
   'webhook.rejected': 'security',

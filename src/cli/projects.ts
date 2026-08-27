@@ -20,6 +20,10 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { AuthStore } from '../auth/store.js';
 import { snapshotProviderRegistry } from '../auth/providers.js';
+import {
+  resolveSecretEncryption,
+  SECRET_ENCRYPTION_ENV,
+} from '../auth/secretEncryption.js';
 import { isSubscriptionTransport, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
 import { ProjectStore } from '../projects/store.js';
@@ -315,6 +319,20 @@ async function main(): Promise<void> {
   }
   const auth = AuthStore.open(dbPath);
   const projects = ProjectStore.open(dbPath);
+  // Same host-sourced policy as the server: org provider keys decrypt when
+  // ATOMA_SECRET_ENCRYPTION_KEY or ATOMA_GITHUB_TOKEN_ENCRYPTION_KEY is set.
+  // A malformed value refuses at boot; absence degrades to null and each run
+  // continues without org keys.
+  let SECRET_ENCRYPTION: ReturnType<typeof resolveSecretEncryption>;
+  try {
+    SECRET_ENCRYPTION = resolveSecretEncryption(process.env);
+  } catch (error) {
+    fail(
+      `${SECRET_ENCRYPTION_ENV} is invalid: ${String(
+        error instanceof Error ? error.message : error
+      )}`
+    );
+  }
 
   if (command === 'list') {
     for (const org of auth.listOrganisations()) {
@@ -472,6 +490,13 @@ async function main(): Promise<void> {
     ...(publisher ? { publisher } : {}),
     platformAdmins: (id) => auth.isPlatformAdmin(id),
     tierModelsFor: (id) => auth.modelPins(id),
+    // The org levels of the precedence chain, resolved against the SAME
+    // store the browser path uses. The operator CLI passes `--as`, so the
+    // run is attributed to a principal whose org carries these defaults;
+    // key decryption rides the host's ATOMA_SECRET_ENCRYPTION_KEY.
+    orgTierModelsFor: (orgId) => auth.orgTierModels(orgId),
+    orgProviderKeyFor: (orgId, provider) =>
+      auth.decryptOrgProviderKey(orgId, provider, SECRET_ENCRYPTION),
     // The run's own outcome, journaled from the process that drove it — the
     // server's `onRunFinished` twin. A `run.finished` row is what makes the
     // publication attempt (and its failure) answerable after the fact.

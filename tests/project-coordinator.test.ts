@@ -173,7 +173,7 @@ describe('project run environment', () => {
     expect(() => projectRunEnvironment({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
-    })).toThrow(/another provider/);
+    })).toThrow(/cannot be routed/);
     expect(() => projectRunEnvironment({
       ...base,
       hostEnv: { ANTHROPIC_API_KEY: 'key', ANTHROPIC_AUTH_TOKEN: 'token' },
@@ -263,13 +263,75 @@ describe('project run environment', () => {
     expect(withPins['ATOMA_MODEL_L2']).toBe('claude-sonnet-5');
     expect(withPins['ATOMA_MODEL_L3']).toBe('claude-opus-5');
 
-    // The cross-provider refusal still guards the account path, not only the
-    // host one — the closed choice list cannot produce this, and that is
-    // exactly why the check stays.
+    // A non-catalogue provider prefix refuses on the account path exactly as
+    // on the host path; claude-cli/codex stay unreachable whatever a client
+    // sends, because nothing in the catalogue carries their ids.
     expect(() => projectRunEnvironment({
       ...base,
-      tierModels: { l1: 'ollama:llama3' as 'claude-sonnet-5', l2: null, l3: null },
-    })).toThrow(/another provider/);
+      tierModels: { l1: 'claude-cli:opus', l2: null, l3: null },
+    })).toThrow(/cannot be routed/);
+    expect(() => projectRunEnvironment({
+      ...base,
+      hostEnv: { ANTHROPIC_API_KEY: 'key', ATOMA_MODEL_L2: 'codex:gpt-5' },
+    })).toThrow(/cannot be routed/);
+    // An OLLAMA selector is now routable: self-hosted, no credential to
+    // bring, and its tag passes through to the router untouched.
+    const ollamaPin = projectRunEnvironment({
+      ...base,
+      tierModels: { l1: 'ollama:qwen3:8b', l2: null, l3: null },
+    });
+    expect(ollamaPin['ATOMA_MODEL_L1']).toBe('ollama:qwen3:8b');
+  });
+
+  it('resolves the three-level precedence: account > org > operator', () => {
+    const base = {
+      dbPath: '/control/atoma.db',
+      workspacePath: '/control/workspace',
+      runsPath: '/control/runs',
+      skillsPath: '/control/skills',
+      runId: '3c584a3c-933d-4488-ac44-4cdcc8e66f31',
+      artifactManifestPath: '/control/manifest.json',
+      hostEnv: {
+        ANTHROPIC_API_KEY: 'key',
+        ATOMA_MODEL_L1: 'claude-haiku-4-5-20251001',
+        ATOMA_MODEL_L2: 'claude-sonnet-5',
+        ATOMA_MODEL_L3: 'claude-opus-5',
+      },
+      orgTierModels: {
+        l1: 'zai:glm-4.5-air',
+        l2: null,
+        l3: 'anthropic:claude-sonnet-4-5',
+      } as { l1: string | null; l2: string | null; l3: string | null },
+    };
+    // No account pins: the operator's host pins stand, unchanged behaviour.
+    const accountL1 = projectRunEnvironment({
+      ...base,
+      tierModels: { l1: null, l2: null, l3: null },
+      orgProviderKeys: { zai: 'sk-zai-org' },
+    });
+    expect(accountL1['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
+    // Org L1 defaults to zai but nobody brought its key: fail-open drops to
+    // the operator's pin rather than detonating at the first billable call.
+    const noZaiKey = projectRunEnvironment({ ...base });
+    expect(noZaiKey['ATOMA_MODEL_L1']).toBe('claude-haiku-4-5-20251001');
+    // With the org key present the selection stays AND the key is forwarded.
+    const withZaiKey = projectRunEnvironment({
+      ...base,
+      orgProviderKeys: { zai: 'sk-zai-org' },
+    });
+    expect(withZaiKey['ATOMA_MODEL_L1']).toBe('zai:glm-4.5-air');
+    expect(withZaiKey['ZAI_API_KEY']).toBe('sk-zai-org');
+    // The anthropic org default on L3 inherits to a member who did not pin,
+    // because the deployment's own key is always there for that transport.
+    const memberL3 = projectRunEnvironment({ ...base });
+    expect(memberL3['ATOMA_MODEL_L3']).toBe('anthropic:claude-sonnet-4-5');
+    // An account pin beats both levels.
+    const pinned = projectRunEnvironment({
+      ...base,
+      tierModels: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null },
+      orgProviderKeys: { zai: 'sk-zai-org' },
+    });
+    expect(pinned['ATOMA_MODEL_L1']).toBe('anthropic:claude-haiku-4-5');
   });
 });
 

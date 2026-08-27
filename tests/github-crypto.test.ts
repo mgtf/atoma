@@ -113,7 +113,9 @@ describe('encrypted GitHub user tokens', () => {
       key,
       keyId,
     })).toThrow(/authentication failed|invalid shape/);
-    expect(() => parseEncryptedGitHubToken({ ...envelope, version: 2 })).toThrow(/invalid shape/);
+    expect(() => parseEncryptedGitHubToken({ ...envelope, version: 2 })).toThrow(
+      /invalid shape|unsupported version/
+    );
     expect(() => parseEncryptedGitHubToken({ ...envelope, extra: true })).toThrow(/invalid shape/);
   });
 });

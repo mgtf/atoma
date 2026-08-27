@@ -295,7 +295,37 @@ export interface VizAccountModels {
   pins: { l1: string | null; l2: string | null; l3: string | null };
   /** What "operator default" resolves to today, per tier. */
   defaults: { l1: string; l2: string; l3: string };
+  /** Historical closed list, kept so older clients still render chips. */
   choices: string[];
+  catalog: VizLlmCatalogEntry[];
+}
+
+/** One provider family the server offers for tier/model selection. */
+export interface VizLlmCatalogEntry {
+  id: string;
+  label: string;
+  /** Null when self-hosted; otherwise the env var whose absence degrades the provider. */
+  credentialEnvVar: string | null;
+  /** True when the model list reflects an inventory we cannot enumerate statically. */
+  suggestive: boolean;
+  models: Array<{ id: string; label: string }>;
+}
+
+/** One configured org provider key: presence and timestamp, never material. */
+export interface VizOrgProviderKeyStatus {
+  provider: string;
+  configuredAt: string;
+}
+
+/** The organisation-level tier defaults and BYO-key state. */
+export interface VizOrgModels {
+  models: { l1: string | null; l2: string | null; l3: string | null };
+  keys: VizOrgProviderKeyStatus[];
+  /** False when the deployment lacks ATOMA_SECRET_ENCRYPTION_KEY: key management is refused server-side. */
+  encryptionReady: boolean;
+  catalog: VizLlmCatalogEntry[];
+  choices: string[];
+  operatorDefaults: { l1: string; l2: string; l3: string };
 }
 
 /**

@@ -77,6 +77,7 @@ import {
   parseSettingsModelId,
   SETTINGS_DOM_FORM_HEIGHT,
   SETTINGS_DOM_FORM_TOP,
+  SETTINGS_LLM_FORM_TOP,
   settingsGpuContentTop,
 } from '../src/viz/client-gl/renderer/views/settings.js';
 import {
@@ -1240,7 +1241,7 @@ describe('the nav rail', () => {
     ));
     for (const selector of [
       'gpu-run-input', 'gpu-project-form', 'gpu-view-search', 'gpu-settings-form',
-      'gpu-announce-form',
+      'gpu-announce-form', 'gpu-org-models-form',
     ]) {
       expect(css).toMatch(
         new RegExp(`\\.${selector}\\s*\\{[\\s\\S]*?var\\(--gpu-sidebar\\)`)
@@ -2821,6 +2822,7 @@ describe('drawSettings', () => {
       l3: 'claude-opus-5',
     },
     choices: ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5'],
+    catalog: [],
   };
   const organisation = {
     id: 'org-1',
@@ -2849,7 +2851,9 @@ describe('drawSettings', () => {
     pendingInvitations: 1,
   };
 
-  it('offers one cell per tier per choice, plus the operator default', () => {
+  it('does not paint the organisation directory on the GPU', () => {
+    // The directory lives in the DOM body form. A GPU copy in the same
+    // rectangle is what showed through the form (2026-08-27).
     const ctx = createRecordingCtx();
     drawSettings(
       ctx,
@@ -2857,86 +2861,11 @@ describe('drawSettings', () => {
       1280,
       720
     );
-    const ids = ctx.filterButtons.map((filter) => filter.id);
-    for (const tier of [1, 2, 3]) {
-      expect(ids).toContain(`settings.model.${tier}.default`);
-      expect(ids).toContain(`settings.model.${tier}.0`);
-      expect(ids).toContain(`settings.model.${tier}.1`);
-      expect(ids).toContain(`settings.model.${tier}.2`);
-    }
-    // The pinned cell is the active one, and the default is active where no
-    // pin exists — the two must never both read as selected on one tier.
-    const active = ctx.filterButtons.filter((filter) => filter.active).map((filter) => filter.id);
-    expect(active).toContain('settings.model.1.0');
-    expect(active).not.toContain('settings.model.1.default');
-    expect(active).toContain('settings.model.2.default');
-    expect(active).toContain('settings.model.3.default');
-  });
-
-  it('stacks tier labels and keeps every model choice inside a narrow frame', () => {
-    const width = 248;
-    const ctx = createRecordingCtx();
-    drawSettings(
-      ctx,
-      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
-      width,
-      720
-    );
-    const frame = viewFrame(width, 720, 720);
-    expect(ctx.filterButtons).toHaveLength(12);
-    for (const button of ctx.filterButtons) {
-      const origin = button.parent.toGlobal({ x: button.x, y: button.y });
-      expect(origin.x).toBeGreaterThanOrEqual(frame.innerX);
-      expect(origin.x + button.width).toBeLessThanOrEqual(frame.innerX + frame.innerWidth);
-    }
-    expect(ctx.scrollMax.settings).toBeGreaterThan(0);
-  });
-
-  it('shows the organisation card with members, roles and the admin chip', () => {
-    const ctx = createRecordingCtx();
-    drawSettings(
-      ctx,
-      makeSnapshot({ view: 'settings' }, { auth, accountModels, organisation }),
-      1280,
-      720
-    );
+    expect(ctx.filterButtons).toHaveLength(0);
     const labels = ctx.texts.map((text) => text.value);
-    expect(labels).toContain('Analytical Engines');
-    expect(labels).toContain('Ada Lovelace');
-    expect(labels).toContain('Charles Babbage');
-    expect(labels).toContain('PLATFORM ADMIN');
-    expect(labels).toContain('org-1');
-    expect(labels).toContain('3');
-    // Owner/admin only: the pending count is null for a plain member and the
-    // row then disappears entirely.
-    expect(labels.some((label) => label.includes('PENDING INVITATIONS'))).toBe(true);
-    expect(ctx.scrollMax.settings).toBeGreaterThanOrEqual(0);
-  });
-
-  it('hides the invitation count from a member and survives no org at all', () => {
-    const member = createRecordingCtx();
-    drawSettings(
-      member,
-      makeSnapshot(
-        { view: 'settings' },
-        {
-          auth,
-          accountModels,
-          organisation: { ...organisation, viewerRole: 'org:member', pendingInvitations: null },
-        }
-      ),
-      1280,
-      720
-    );
-    expect(
-      member.texts.some((text) => text.value.includes('PENDING INVITATIONS'))
-    ).toBe(false);
-
-    const bare = createRecordingCtx();
-    drawSettings(bare, makeSnapshot({ view: 'settings' }, { auth }), 1280, 720);
-    // No models and no organisation yet: the tier rows still render against the
-    // operator defaults rather than leaving an empty page.
-    expect(bare.filterButtons.length).toBeGreaterThan(0);
+    expect(labels).not.toContain('Analytical Engines');
+    expect(labels).not.toContain('Charles Babbage');
+    expect(ctx.scrollMax.settings).toBe(0);
   });
 
   it('names the name source and retains one orb for the account', () => {
@@ -2992,10 +2921,7 @@ describe('drawSettings', () => {
     );
   });
 
-  it('draws every panel frame behind its own content', () => {
-    // The frames layer is added to the scroll pane FIRST: both panels size
-    // themselves from content they can only measure after drawing it, so a
-    // frame appended afterwards would paint over the rows.
+  it('draws the column frame on the GPU and leaves the body to DOM', () => {
     const ctx = createRecordingCtx();
     drawSettings(
       ctx,
@@ -3003,21 +2929,9 @@ describe('drawSettings', () => {
       1280,
       720
     );
-    // The view's own column frame is drawn straight into the root; the two
-    // panels under test are the ones inside the scrolled frames layer.
     const inner = ctx.panels.filter((panel) => panel.parent !== ctx.root);
-    expect(inner).toHaveLength(2);
-    const framesLayer = inner[0]?.parent;
-    expect(inner[1]?.parent).toBe(framesLayer);
-    expect(
-      inner[0]!.parent.toGlobal({ x: inner[0]!.x, y: inner[0]!.y }).x
-    ).toBe(viewFrame(1280, 720, 720).innerX);
-    // ...and the rows went somewhere else, which is what "behind" means here.
-    const memberLabel = ctx.texts.find((text) => text.value === 'Charles Babbage');
-    expect(memberLabel?.parent).not.toBe(framesLayer);
-    for (const panel of ctx.panels) {
-      expect(panel.height).toBeGreaterThan(0);
-    }
+    expect(inner).toHaveLength(0);
+    expect(ctx.panels.some((panel) => panel.parent === ctx.root)).toBe(true);
   });
 
   it('keeps the GPU content clear of the DOM name form', () => {
@@ -3030,6 +2944,27 @@ describe('drawSettings', () => {
     const form = css.slice(css.indexOf('.gpu-settings-form {'));
     expect(form).toContain(`top: ${SETTINGS_DOM_FORM_TOP}px`);
     expect(form).toContain(`height: ${SETTINGS_DOM_FORM_HEIGHT}px`);
+    expect(css).toContain('.gpu-settings-username');
+    const llmForm = css.slice(css.indexOf('.gpu-org-models-form {'));
+    expect(llmForm).toContain(`top: ${SETTINGS_LLM_FORM_TOP}px`);
+    expect(llmForm).toContain('bottom: 26px');
+    expect(llmForm).toContain('border-radius: 8px');
+    expect(css).toContain('.gpu-org-models-form::after');
+    expect(css).toContain('.gpu-org-keys-form');
+    const nested = css.slice(css.indexOf('.gpu-org-models-form .gpu-dom-input {'));
+    expect(nested).toContain('position: relative');
+    expect(nested).toContain('min-width: 0');
+    const bodySkin = css.slice(
+      css.indexOf('.gpu-org-models-form.gpu-panel-skin'),
+      css.indexOf('.gpu-org-models-title')
+    );
+    expect(bodySkin).toContain('border-color: transparent');
+    expect(bodySkin).toContain('box-shadow: none');
+    expect(css).toContain('.gpu-scene-camera .gpu-org-models-form');
+    expect(css).toContain('.gpu-org-models-row:has(.gpu-settings-actions)');
+    expect(css.slice(css.lastIndexOf('@media (max-width: 687px)'))).toContain(
+      '.gpu-org-models-row'
+    );
   });
 
   it('round-trips a model cell id and shortens model ids for the chips', () => {

@@ -595,7 +595,10 @@ describe('viz auth gate (process level)', () => {
     const base = `http://127.0.0.1:${port}`;
     const running = startViz(
       [...instance.args, '--port', String(port)],
-      providerEnv(provider, base)
+      {
+        ...providerEnv(provider, base),
+        ATOMA_SECRET_ENCRYPTION_KEY: 'k'.repeat(32),
+      }
     );
     await waitReady(running, `${base}/auth/whoami`);
 
@@ -667,6 +670,40 @@ describe('viz auth gate (process level)', () => {
     expect(savedPin.status).toBe(200);
     expect(await (await fetch(`${base}/api/account/models`, { headers: cookie })).json())
       .toMatchObject({ pins: { l1: defaults.choices[1], l2: null, l3: null } });
+
+    const prefixedPin = await fetch(`${base}/api/account/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ pins: { l1: 'anthropic:claude-sonnet-5', l2: null, l3: null } }),
+    });
+    expect(prefixedPin.status).toBe(200);
+
+    const orgModels = await fetch(`${base}/api/org/models`, { headers: cookie });
+    expect(orgModels.status).toBe(200);
+    const orgModelsBody = await orgModels.json() as {
+      models: Record<string, string | null>;
+      catalog: Array<{ id: string; models: Array<{ id: string }> }>;
+      encryptionReady: boolean;
+      keys: Array<{ provider: string }>;
+    };
+    expect(orgModelsBody.encryptionReady).toBe(true);
+    expect(orgModelsBody.catalog.some((entry) => entry.id === 'anthropic')).toBe(true);
+    const savedOrg = await fetch(`${base}/api/org/models`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ models: { l1: 'anthropic:claude-haiku-4-5', l2: null, l3: null } }),
+    });
+    expect(savedOrg.status).toBe(200);
+    const zaiMaterial = `sk-test-${'z'.repeat(24)}`;
+    const savedKey = await fetch(`${base}/api/org/provider-keys/zai`, {
+      method: 'PUT',
+      headers: { ...cookie, 'content-type': 'application/json', origin: base },
+      body: JSON.stringify({ key: zaiMaterial }),
+    });
+    expect(savedKey.status).toBe(200);
+    const keyBody = await savedKey.json() as { keys: Array<{ provider: string; configuredAt: string }> };
+    expect(keyBody.keys.some((row) => row.provider === 'zai')).toBe(true);
+    expect(JSON.stringify(keyBody)).not.toContain(zaiMaterial);
 
     // ---- the viewer's own organisation, with no email anywhere in it.
     const org = await fetch(`${base}/api/org`, { headers: cookie });

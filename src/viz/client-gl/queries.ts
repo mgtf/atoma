@@ -257,3 +257,12 @@ export function useAccountModels(active: boolean) {
     staleTime: 30_000,
   });
 }
+
+export function useOrgModels(active: boolean) {
+  return useQuery({
+    queryKey: ['viz', 'org', 'models'],
+    queryFn: api.orgModels,
+    enabled: active,
+    staleTime: 30_000,
+  });
+}

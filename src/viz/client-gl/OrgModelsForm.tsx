@@ -1,0 +1,347 @@
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  orgHasBilledProviderKey,
+  orgProviderIsReady,
+  tierModelSelectionLabel,
+} from '../../core/providerCatalog.js';
+import { formatDateTime } from '../client/date-format.js';
+import { api } from '../client/data-api.js';
+import type { VizAccountModels, VizLlmCatalogEntry, VizOrganisation, VizOrgModels } from '../client/types.js';
+
+/**
+ * SETTINGS BODY — BYO-keys first, then org defaults, account pins, and the
+ * organisation directory. One DOM scroll inside the Settings frame so GPU
+ * never paints a second copy of the directory through the form.
+ *
+ * SaaS members need a billed-provider key before anyone can pick a model.
+ * Platform admins are the exception: their runs use the host CLI subscription,
+ * so the catalogue is unlocked without a stored org key. Keys remain optional
+ * so the organisation's members can run without that subscription.
+ */
+export function OrgModelsForm({
+  t,
+  locale,
+  enabled,
+  canManageOrg,
+  platformAdmin,
+  organisation,
+  overlaysInert,
+  onError,
+}: {
+  t: (key: string, vars?: Record<string, unknown>) => string;
+  locale: string;
+  enabled: boolean;
+  canManageOrg: boolean;
+  platformAdmin: boolean;
+  organisation: VizOrganisation | null;
+  overlaysInert: boolean;
+  onError: (message: string | null) => void;
+}) {
+  const [account, setAccount] = useState<VizAccountModels | null>(null);
+  const [org, setOrg] = useState<VizOrgModels | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [draftKeys, setDraftKeys] = useState<Record<string, string>>({});
+
+  const refresh = useCallback(async (): Promise<boolean> => {
+    try {
+      const [nextAccount, nextOrg] = await Promise.all([
+        api.accountModels(),
+        api.orgModels(),
+      ]);
+      setAccount(nextAccount);
+      setOrg(nextOrg);
+      onError(null);
+      return true;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : t('settings.actionFailed'));
+      return false;
+    }
+  }, [onError, t]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    void refresh();
+  }, [enabled, refresh]);
+
+  const apply = async (action: () => Promise<unknown>, successKey: string): Promise<void> => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      await action();
+      if (await refresh()) setStatus(t(successKey));
+    } catch (error) {
+      setStatus(null);
+      onError(error instanceof Error ? error.message : t('settings.actionFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!enabled || !account || !org) return null;
+
+  const catalog = org.catalog.length > 0 ? org.catalog : account.catalog;
+  const configuredProviders = new Set(org.keys.map((key) => key.provider));
+  const billedKeyReady = orgHasBilledProviderKey(configuredProviders);
+  const canPickModels = billedKeyReady || platformAdmin;
+  const tierIds = ['l1', 'l2', 'l3'] as const;
+
+  const inheritLabel = (tier: (typeof tierIds)[number]): string => {
+    const orgDefault = org.models[tier];
+    if (!orgDefault) return t('settings.orgModelRequired');
+    return t('settings.inheritOrg', { fallback: tierModelSelectionLabel(orgDefault) });
+  };
+
+  return (
+    <div
+      className={`gpu-panel-skin gpu-org-models-form${overlaysInert ? ' gpu-overlays-veiled' : ''}`}
+      inert={overlaysInert}
+    >
+      {canManageOrg ? (
+        <>
+          <p className="gpu-org-models-title">{t('settings.orgProviderKeys')}</p>
+          <p className="gpu-org-models-hint">
+            {t(platformAdmin ? 'settings.orgKeysHintPlatform' : 'settings.orgKeysHint')}
+          </p>
+          {!org.encryptionReady ? (
+            <p className="gpu-org-models-hint" role="note">
+              {t('settings.orgKeysUnavailable')}
+            </p>
+          ) : null}
+          <form
+            className="gpu-org-keys-form"
+            autoComplete="off"
+            onSubmit={(event) => event.preventDefault()}
+          >
+          {catalog
+            .filter((provider) => provider.credentialEnvVar !== null)
+            .map((provider) => {
+              const configured = org.keys.find((key) => key.provider === provider.id) ?? null;
+              const draft = draftKeys[provider.id] ?? '';
+              const keyId = `orgkey-${provider.id}`;
+              return (
+                <div className="gpu-org-models-row" key={keyId}>
+                  <label htmlFor={keyId}>{provider.label}</label>
+                  <input
+                    id={keyId}
+                    className="gpu-dom-input gpu-org-key-input"
+                    type="text"
+                    name={keyId}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    data-1p-ignore="true"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    placeholder={
+                      configured
+                        ? t('settings.keyConfigured', { date: configured.configuredAt.slice(0, 10) })
+                        : t('settings.keyMissing')
+                    }
+                    disabled={busy}
+                    value={draft}
+                    onChange={(event) =>
+                      setDraftKeys((previous) => ({ ...previous, [provider.id]: event.target.value }))
+                    }
+                  />
+                  <div className="gpu-settings-actions">
+                    <button
+                      type="button"
+                      disabled={busy || !org.encryptionReady || draft.trim().length === 0}
+                      onClick={() => {
+                        const value = draft.trim();
+                        void apply(
+                          () => api.saveOrgProviderKey(provider.id, value),
+                          'settings.keySaved'
+                        ).then(() =>
+                          setDraftKeys((previous) => ({ ...previous, [provider.id]: '' }))
+                        );
+                      }}
+                    >
+                      {t(configured ? 'settings.keyReplace' : 'settings.keySave')}
+                    </button>
+                    {configured ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          void apply(
+                            () => api.removeOrgProviderKey(provider.id),
+                            'settings.keyRemoved'
+                          );
+                        }}
+                      >
+                        {t('settings.keyRemove')}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </form>
+
+          <p className="gpu-org-models-title">{t('settings.orgDefaults')}</p>
+          {!canPickModels ? (
+            <p className="gpu-org-models-hint" role="note">
+              {t('settings.orgModelsNeedKey')}
+            </p>
+          ) : (
+            <p className="gpu-org-models-hint">{t('settings.orgModelsHint')}</p>
+          )}
+          {tierIds.map((tier, index) => (
+            <div className="gpu-org-models-row" key={`org-${tier}`}>
+              <label htmlFor={`orgmodel-${tier}`}>{t(`settings.tier${index + 1}`)}</label>
+              <select
+                id={`orgmodel-${tier}`}
+                className="gpu-dom-input gpu-dom-select"
+                disabled={busy}
+                value={org.models[tier] ?? ''}
+                onChange={(event) => {
+                  const value = event.target.value === '' ? null : event.target.value;
+                  if (!canPickModels || value === null) return;
+                  void apply(
+                    () => api.saveOrgModels({ ...org.models, [tier]: value }),
+                    'settings.orgSaved'
+                  );
+                }}
+              >
+                <option value="" disabled>
+                  {t('settings.orgModelRequired')}
+                </option>
+                {catalogOptions(
+                  catalog,
+                  configuredProviders,
+                  org.models[tier],
+                  platformAdmin,
+                  billedKeyReady
+                )}
+              </select>
+            </div>
+          ))}
+        </>
+      ) : null}
+
+      <p className="gpu-org-models-title">{t('settings.models')}</p>
+      <p className="gpu-org-models-hint">{t('settings.modelsHint')}</p>
+      {!canPickModels && !canManageOrg ? (
+        <p className="gpu-org-models-hint" role="note">
+          {t('settings.modelsNeedKey')}
+        </p>
+      ) : null}
+      {tierIds.map((tier, index) => (
+        <div className="gpu-org-models-row" key={`account-${tier}`}>
+          <label htmlFor={`accountmodel-${tier}`}>{t(`settings.tier${index + 1}`)}</label>
+          <select
+            id={`accountmodel-${tier}`}
+            className="gpu-dom-input gpu-dom-select"
+            disabled={busy}
+            value={account.pins[tier] ?? ''}
+            onChange={(event) => {
+              const value = event.target.value === '' ? null : event.target.value;
+              if (!canPickModels && value !== null) return;
+              if (value === '' && !org.models[tier]) return;
+              void apply(
+                () => api.saveAccountModels({ ...account.pins, [tier]: value }),
+                'settings.saved'
+              );
+            }}
+          >
+            <option value="" disabled={!canPickModels || !org.models[tier]}>
+              {inheritLabel(tier)}
+            </option>
+            {catalogOptions(
+              catalog,
+              configuredProviders,
+              account.pins[tier],
+              platformAdmin,
+              billedKeyReady
+            )}
+          </select>
+        </div>
+      ))}
+
+      {status ? (
+        <span role="status" className="gpu-org-models-status">
+          {status}
+        </span>
+      ) : null}
+
+      {organisation ? (
+        <section className="gpu-org-directory" aria-label={organisation.name}>
+          <p className="gpu-org-models-title">{organisation.name}</p>
+          <dl className="gpu-org-directory-facts">
+            <div>
+              <dt>{t('settings.orgId')}</dt>
+              <dd>{organisation.id}</dd>
+            </div>
+            <div>
+              <dt>{t('settings.orgCreated')}</dt>
+              <dd>{formatDateTime(organisation.createdAt, locale)}</dd>
+            </div>
+            <div>
+              <dt>{t('settings.yourRole')}</dt>
+              <dd>{t(`auth.role.${organisation.viewerRole}`)}</dd>
+            </div>
+            <div>
+              <dt>{t('settings.projects')}</dt>
+              <dd>{organisation.projectCount}</dd>
+            </div>
+            {organisation.pendingInvitations !== null ? (
+              <div>
+                <dt>{t('settings.pendingInvitations')}</dt>
+                <dd>{organisation.pendingInvitations}</dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="gpu-org-models-hint">
+            {t('settings.members', { count: organisation.members.length })}
+          </p>
+          <ul className="gpu-org-directory-members">
+            {organisation.members.map((member) => (
+              <li key={member.principalId}>
+                <span>{member.displayName}</span>
+                <span className="gpu-org-directory-meta">
+                  {t(`auth.role.${member.role}`)}
+                  {member.platformAdmin ? ` · ${t('auth.platformAdmin')}` : ''}
+                  {member.joinedAt
+                    ? ` · ${t('settings.joined', { date: member.joinedAt.slice(0, 10) })}`
+                    : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function catalogOptions(
+  catalog: VizLlmCatalogEntry[],
+  configuredProviders: ReadonlySet<string>,
+  selected: string | null,
+  unlockAll: boolean,
+  billedKeyReady: boolean
+): ReactNode {
+  return catalog.map((provider) => {
+    const unlocked =
+      unlockAll || (billedKeyReady && orgProviderIsReady(provider, configuredProviders));
+    return (
+      <optgroup key={provider.id} label={provider.label}>
+        {provider.models.map((model) => {
+          const value = `${provider.id}:${model.id}`;
+          return (
+            <option
+              key={model.id}
+              value={value}
+              disabled={!unlocked && value !== selected}
+            >
+              {model.label}
+            </option>
+          );
+        })}
+      </optgroup>
+    );
+  });
+}

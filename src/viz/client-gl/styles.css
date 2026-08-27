@@ -564,7 +564,8 @@ html.atoma-cursor-active * {
   );
 }
 
-.gpu-scene-camera .gpu-announce-form {
+.gpu-scene-camera .gpu-announce-form,
+.gpu-scene-camera .gpu-org-models-form {
   bottom: calc(100vh - var(--gpu-camera-bottom-left-y) + 26px);
 }
 
@@ -652,6 +653,13 @@ html.atoma-cursor-active * {
   box-sizing: border-box;
 }
 
+.gpu-settings-username {
+  grid-column: 1 / -1;
+  margin: 0;
+  font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: #9fb0c7;
+}
+
 .gpu-settings-form .gpu-dom-input {
   position: relative;
   top: auto;
@@ -682,6 +690,181 @@ html.atoma-cursor-active * {
 .gpu-settings-actions [role='alert'] {
   color: #f87171;
   font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Settings body: models, keys and the org directory. Fills the column
+   frame under the rename form (`top` = SETTINGS_LLM_FORM_TOP, `bottom` =
+   the same 26px as `.gpu-announce-form`). One overflow so GPU never
+   paints a second directory through this panel. */
+.gpu-org-models-form {
+  --gpu-content: calc(100vw - var(--gpu-sidebar));
+  --gpu-frame: min(720px, calc(var(--gpu-content) - 20px));
+  position: fixed;
+  z-index: 4;
+  top: 284px;
+  bottom: 26px;
+  left: calc(var(--gpu-sidebar) + (var(--gpu-content) - var(--gpu-frame)) / 2 + 16px);
+  width: calc(var(--gpu-frame) - 32px);
+  max-width: calc(var(--gpu-frame) - 32px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  min-width: 0;
+  /* Clip to the GPU frame's inner radius so scrolled content cannot paint
+     through the outer rounded stroke. */
+  border-radius: 8px;
+}
+
+/* Flex + overflow drops padding-bottom on the last item (Chromium). The
+   spacer is the air above the GPU frame's foot. */
+.gpu-org-models-form::after {
+  content: '';
+  flex: 0 0 12px;
+}
+
+/* Password fields must be form descendants (Chrome's credential warning).
+   Same column stack as the rest of the Settings body. */
+.gpu-org-keys-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+/* Mask the secret without `type=password`, which invites Chrome/1Password
+   to treat the field as a login and offer a generated password. */
+.gpu-org-key-input {
+  -webkit-text-security: disc;
+}
+
+/* The Settings column frame is already `ctx.panel()`. A second CSS skin
+   here doubled the border and let the inner radius pierce the outer one
+   at the foot (2026-08-27). Same strip as `.gpu-project-form`. */
+.gpu-org-models-form.gpu-panel-skin {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.gpu-org-models-title {
+  margin: 0;
+  font: 700 12px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: #e6edf7;
+}
+
+.gpu-org-models-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.gpu-org-models-row:has(.gpu-settings-actions) {
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+}
+
+.gpu-org-models-row label {
+  font: 11px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: #9fb0c7;
+  min-width: 0;
+}
+
+/* Nested fields must leave `position: fixed` — that containing block is the
+   viewport, so `width: 100%` was the whole window (the overflow the Settings
+   card could not clip). Same reset as `.gpu-settings-form` / announce. */
+.gpu-org-models-form .gpu-dom-input {
+  position: relative;
+  top: auto;
+  left: auto;
+  z-index: auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 30px;
+  padding: 5px 10px;
+  box-sizing: border-box;
+}
+
+.gpu-org-models-row .gpu-settings-actions button {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.gpu-org-models-form .gpu-dom-select option:disabled {
+  color: #6b7280;
+}
+
+.gpu-org-models-hint {
+  margin: 0;
+  font: 11px/1.35 ui-sans-serif, system-ui, sans-serif;
+  color: #8a96ae;
+}
+
+.gpu-org-directory {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(110, 168, 255, .22);
+}
+
+.gpu-org-directory-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 8px 0;
+}
+
+.gpu-org-directory-facts dt {
+  margin: 0;
+  font: 700 8px/1.3 ui-sans-serif, system-ui, sans-serif;
+  color: #8a96ae;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.gpu-org-directory-facts dd {
+  margin: 2px 0 0;
+  font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #e6edf7;
+  overflow-wrap: anywhere;
+}
+
+.gpu-org-directory-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gpu-org-directory-members li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: 12px/1.35 ui-sans-serif, system-ui, sans-serif;
+  color: #e6edf7;
+}
+
+.gpu-org-directory-meta {
+  font: 10px/1.35 ui-sans-serif, system-ui, sans-serif;
+  color: #8a96ae;
+}
+
+@media (max-width: 687px) {
+  .gpu-org-models-row,
+  .gpu-org-models-row:has(.gpu-settings-actions) {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .gpu-org-directory-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* The announcement composer: real DOM for text entry, the language review and

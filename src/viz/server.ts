@@ -17,15 +17,19 @@ import { authPublicOrigin, openAuthGate, vizAuthEnabled } from '../auth/gate.js'
 import { AUTH_COPY } from '../auth/copy.js';
 import { snapshotProviderRegistry, type ProviderConfig } from '../auth/providers.js';
 import { fetchAvatarImage } from '../auth/avatar.js';
+import { LLM_PROVIDER_CATALOG } from '../core/providerCatalog.js';
 import { operatorTierDefaults, TIER_MODEL_CHOICES } from '../contracts/tierModels.js';
 import {
   ORG_ROLES,
   sha256Hex,
+  PROVIDER_KEY_PROVIDERS,
   TooManyPendingOauthStatesError,
   type AuthStore,
   type OrgRole,
+  type ProviderKeyProvider,
   type Viewer,
 } from '../auth/store.js';
+import { resolveSecretEncryption, SECRET_ENCRYPTION_ENV } from '../auth/secretEncryption.js';
 import {
   buildAuthorizeUrl,
   exchangeCode,
@@ -70,7 +74,7 @@ import { persistGitHubUserTokens, resolveGitHubUserAccessToken } from '../github
 import { ProjectStore } from '../projects/store.js';
 import { DEFAULT_PROJECTS_ROOT, ProjectRunCoordinator } from '../projects/coordinator.js';
 import { GitHubPublisher } from '../projects/publisher.js';
-import { ProjectHttpError, ProjectService } from '../projects/service.js';
+import { ProjectHttpError, ProjectService, roleAtLeast } from '../projects/service.js';
 import { PushStore } from './push/store.js';
 import { PushNotifier } from './push/notifier.js';
 import { NotificationRouter } from './push/router.js';
@@ -362,6 +366,26 @@ const AUTH_RUNTIME: VizAuthRuntime | null = (() => {
 const AUTH = AUTH_RUNTIME?.gate ?? null;
 
 /**
+ * THE OPERATOR'S SECRET-ENCRYPTION CONTEXT for organisation provider keys.
+ * Resolved ONCE at boot from host env — the same launch-time,
+ * host-sourced-policy pattern as the auth gate itself. `context` is null
+ * when `ATOMA_SECRET_ENCRYPTION_KEY` (or the GitHub token wrapping key) is
+ * absent: key MANAGEMENT routes then refuse with an operator-facing message, and stored keys simply do not
+ * decrypt (fail-open per run, never a crash).
+ */
+const SECRET_ENCRYPTION = (() => {
+  try {
+    return { context: resolveSecretEncryption(process.env) };
+  } catch (error) {
+    throw new Error(
+      `Invalid ${SECRET_ENCRYPTION_ENV} configuration: ${String(
+        error instanceof Error ? error.message : error
+      )}`
+    );
+  }
+})();
+
+/**
  * PLATFORM EVENT LOG. Gated deployments only — every event it records is
  * scoped to a principal, an organisation or the instance operator, and none
  * of those exist on the ungated developer path. Declared before the sweep
@@ -571,6 +595,18 @@ const PROJECTS_RUNTIME: ProjectsRuntime | null = (() => {
     // there are no accounts and the operator's host pins are the only pins.
     ...(AUTH?.store
       ? { tierModelsFor: (principalId: string) => AUTH.store!.modelPins(principalId) }
+      : {}),
+    // The ORG level of the precedence chain, and the org's own provider
+    // keys. Both ride the same fail-open resolver contract as
+    // `tierModelsFor`; the encryption context is resolved ONCE from host
+    // env at boot (launch-time host-sourced policy) — absent means org key
+    // management is unavailable and decryption degrades to null per key.
+    ...(AUTH?.store
+      ? {
+          orgTierModelsFor: (orgId: string) => AUTH.store!.orgTierModels(orgId),
+          orgProviderKeyFor: (orgId: string, provider: ProviderKeyProvider) =>
+            AUTH.store!.decryptOrgProviderKey(orgId, provider, SECRET_ENCRYPTION.context),
+        }
       : {}),
     // The subscription-transport authority. Passed as the QUESTION, not the
     // answer — the coordinator asks it — and absent without a gate, where
@@ -2025,6 +2061,7 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           // environment rather than a second copy of the tier defaults.
           defaults: operatorTierDefaults(process.env),
           choices: TIER_MODEL_CHOICES,
+          catalog: LLM_PROVIDER_CATALOG,
         });
         return;
       }
@@ -2067,11 +2104,148 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
           pins,
           defaults: operatorTierDefaults(process.env),
           choices: TIER_MODEL_CHOICES,
+          catalog: LLM_PROVIDER_CATALOG,
         });
       } catch {
-        // The closed choice list is the contract; a rejected value is a
-        // client bug, and echoing zod's shape back adds nothing.
         sendJson(res, 400, { error: 'each tier must be null or one of the offered models' });
+      }
+      return;
+    }
+
+    // ORGANISATION MODEL SETTINGS — org default tiers and provider keys.
+    // Authority rides the VIEWER's ACTIVE organisation (never a body field)
+    // and the role ladder: admin and owner write; members read the defaults
+    // so their own Settings can show what they inherit.
+    if (pathname === '/api/org/models' || pathname.startsWith('/api/org/provider-keys')) {
+      const authStore = AUTH.store!;
+      const mayRead = roleAtLeast(viewer.role, 'org:viewer') || viewer.platformAdmin;
+      const mayWrite = roleAtLeast(viewer.role, 'org:admin') || viewer.platformAdmin;
+      if (!mayRead) {
+        sendJson(res, 403, { error: 'organisation membership required' });
+        return;
+      }
+
+      if (pathname === '/api/org/models') {
+        if (req.method === 'GET') {
+          sendJson(res, 200, {
+            models: authStore.orgTierModels(viewer.orgId),
+            keys: authStore.listOrgProviderKeys(viewer.orgId),
+            encryptionReady: SECRET_ENCRYPTION.context !== null,
+            catalog: LLM_PROVIDER_CATALOG,
+            choices: TIER_MODEL_CHOICES,
+            operatorDefaults: operatorTierDefaults(process.env),
+          });
+          return;
+        }
+        if (!mayWrite) {
+          sendJson(res, 403, { error: 'org admin required' });
+          return;
+        }
+        if (!methodAllowed(req, res, 'PUT')) return;
+        if (!sameOrigin(req, res)) return;
+        let body: unknown;
+        try {
+          body = JSON.parse((await readBodyBounded(req, 4_096)).toString('utf8') || '{}');
+        } catch {
+          sendJson(res, 400, { error: 'request body is not valid JSON' });
+          return;
+        }
+        try {
+          const models = authStore.setOrgTierModels(
+            viewer.orgId,
+            (body as { models?: unknown }).models
+          );
+          emit({
+            kind: 'org.models_updated',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary: `Organisation tier defaults updated (${models.l1 ?? '-'} / ${models.l2 ?? '-'} / ${models.l3 ?? '-'})`,
+          });
+          sendJson(res, 200, { models });
+        } catch (error) {
+          sendJson(res, 400, {
+            error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+          });
+        }
+        return;
+      }
+
+      // /api/org/provider-keys[/:provider]
+      const providerMatch = /^\/api\/org\/provider-keys\/([a-z-]+)$/.exec(pathname);
+      if (!providerMatch) {
+        if (!methodAllowed(req, res, 'GET')) return;
+        sendJson(res, 200, {
+          keys: authStore.listOrgProviderKeys(viewer.orgId),
+          encryptionReady: SECRET_ENCRYPTION.context !== null,
+          catalog: LLM_PROVIDER_CATALOG,
+        });
+        return;
+      }
+      const provider = providerMatch[1] as ProviderKeyProvider;
+      if (!PROVIDER_KEY_PROVIDERS.includes(provider)) {
+        sendJson(res, 404, { error: 'unknown provider' });
+        return;
+      }
+      if (req.method === 'DELETE') {
+        if (!mayWrite) {
+          sendJson(res, 403, { error: 'org admin required' });
+          return;
+        }
+        if (!sameOrigin(req, res)) return;
+        if (authStore.deleteOrgProviderKey(viewer.orgId, provider)) {
+          emit({
+            kind: 'org.provider_key_removed',
+            actorType: 'principal',
+            actorId: viewer.principalId,
+            orgId: viewer.orgId,
+            summary: `Provider key removed for ${provider}`,
+            detail: { provider },
+          });
+        }
+        sendJson(res, 200, { keys: authStore.listOrgProviderKeys(viewer.orgId) });
+        return;
+      }
+      if (!mayWrite) {
+        sendJson(res, 403, { error: 'org admin required' });
+        return;
+      }
+      if (!methodAllowed(req, res, 'PUT')) return;
+      if (!sameOrigin(req, res)) return;
+      let body: unknown;
+      try {
+        body = JSON.parse((await readBodyBounded(req, 65_536)).toString('utf8') || '{}');
+      } catch {
+        sendJson(res, 400, { error: 'request body is not valid JSON' });
+        return;
+      }
+      if (!SECRET_ENCRYPTION.context) {
+        sendJson(res, 503, {
+          error:
+            'provider keys are unavailable: ask the operator to configure ATOMA_SECRET_ENCRYPTION_KEY on this deployment',
+        });
+        return;
+      }
+      try {
+        authStore.setOrgProviderKey({
+          orgId: viewer.orgId,
+          provider,
+          plaintext: (body as { key?: unknown }).key as string,
+          encryption: SECRET_ENCRYPTION.context,
+        });
+        emit({
+          kind: 'org.provider_key_set',
+          actorType: 'principal',
+          actorId: viewer.principalId,
+          orgId: viewer.orgId,
+          summary: `Provider key stored for ${provider}`,
+          detail: { provider },
+        });
+        sendJson(res, 200, { keys: authStore.listOrgProviderKeys(viewer.orgId) });
+      } catch (error) {
+        sendJson(res, 400, {
+          error: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+        });
       }
       return;
     }

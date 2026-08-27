@@ -2,13 +2,18 @@ import { createHash, randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import {
   EMPTY_TIER_MODEL_PINS,
-  TIER_MODEL_CHOICES,
   tierModelPinsSchema,
-  type TierModelChoice,
   type TierModelPins,
 } from '../contracts/tierModels.js';
+import { isValidTierModelSelection } from '../core/providerCatalog.js';
+import {
+  decryptBoundSecret,
+  encryptBoundSecret,
+} from '../core/secretCrypto.js';
 import { openStoreHandle, storeDbPath } from '../core/stores.js';
 import type { AvatarMime } from './avatar.js';
+import type { SecretEncryptionContext } from './secretEncryption.js';
+import { providerKeyAad } from './secretEncryption.js';
 import {
   hasControlCharacters,
   isSessionToken,
@@ -18,11 +23,32 @@ import {
 /** Display names are bounded like the provider claim they usually come from. */
 const MAX_DISPLAY_NAME_LENGTH = 120;
 
-/** A stored pin that is no longer an allowed choice degrades to the default. */
-function allowedChoice(value: string | null): TierModelChoice | null {
-  return TIER_MODEL_CHOICES.includes(value as TierModelChoice)
-    ? (value as TierModelChoice)
-    : null;
+/** Provider API keys are bounded like the tokens they are (GitHub caps at 16 KiB). */
+const MAX_PROVIDER_KEY_CHARS = 16_384;
+
+export type ProviderKeyProvider = 'anthropic' | 'zai' | 'ollama';
+
+export const PROVIDER_KEY_PROVIDERS: readonly ProviderKeyProvider[] = [
+  'anthropic',
+  'zai',
+  'ollama',
+];
+
+/** What GET /api/org/provider-keys may reveal: presence, never bytes. */
+export interface OrgProviderKeyStatus {
+  readonly provider: ProviderKeyProvider;
+  readonly configuredAt: string;
+}
+
+/**
+ * A stored principal pin that is no longer selectable reads as `null`
+ * (inherit) rather than throwing — a retired model id must never break the
+ * account page or a run launch. Validation happens on WRITE; this read-side
+ * degrade is the tolerance for choices retired AFTER they were stored.
+ */
+function allowedStoredSelection(value: string | null): string | null {
+  if (value === null) return null;
+  return isValidTierModelSelection(value) ? value : null;
 }
 
 /**
@@ -129,6 +155,20 @@ CREATE TABLE IF NOT EXISTS auth_principal_model_pins (
   model_l2     TEXT,
   model_l3     TEXT,
   updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_org_tier_models (
+  org_id     TEXT PRIMARY KEY REFERENCES auth_organisations(org_id),
+  model_l1   TEXT,
+  model_l2   TEXT,
+  model_l3   TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS auth_org_provider_keys (
+  org_id       TEXT NOT NULL REFERENCES auth_organisations(org_id),
+  provider     TEXT NOT NULL CHECK (provider IN ('anthropic','zai','ollama')),
+  envelope     TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (org_id, provider)
 );
 CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions(expires_at);
 CREATE INDEX IF NOT EXISTS auth_invitations_expires_idx ON auth_invitations(expires_at);
@@ -309,6 +349,8 @@ const AUTH_TABLE_NAMES = [
   'auth_sessions',
   'auth_invitations',
   'auth_oauth_states',
+  'auth_org_tier_models',
+  'auth_org_provider_keys',
 ] as const;
 
 interface AuthStoreOptions {
@@ -1372,9 +1414,9 @@ export class AuthStore {
       | undefined;
     if (!row) return { ...EMPTY_TIER_MODEL_PINS };
     const parsed = tierModelPinsSchema.safeParse({
-      l1: allowedChoice(row.model_l1),
-      l2: allowedChoice(row.model_l2),
-      l3: allowedChoice(row.model_l3),
+      l1: allowedStoredSelection(row.model_l1),
+      l2: allowedStoredSelection(row.model_l2),
+      l3: allowedStoredSelection(row.model_l3),
     });
     return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
   }
@@ -1393,6 +1435,53 @@ export class AuthStore {
            updated_at = excluded.updated_at`
       )
       .run(principalId, parsed.l1, parsed.l2, parsed.l3, new Date().toISOString());
+    return parsed;
+  }
+
+  /**
+   * ORG TIER DEFAULTS — what members without their own pin inherit.
+   *
+   * Read fail-open and written validated: a stored selection the catalogue no
+   * longer offers degrades to `null` exactly like an account pin, so a
+   * retired model can never block run launch. Written only through
+   * `roleAtLeast('org:admin')` HTTP paths; this store verifies SHAPE, the
+   * route verifies AUTHORITY.
+   */
+  orgTierModels(orgId: string): TierModelPins {
+    const row = this.db
+      .prepare(
+        'SELECT model_l1, model_l2, model_l3 FROM auth_org_tier_models WHERE org_id = ?'
+      )
+      .get(orgId) as
+      | { model_l1: string | null; model_l2: string | null; model_l3: string | null }
+      | undefined;
+    if (!row) return { ...EMPTY_TIER_MODEL_PINS };
+    const parsed = tierModelPinsSchema.safeParse({
+      l1: allowedStoredSelection(row.model_l1),
+      l2: allowedStoredSelection(row.model_l2),
+      l3: allowedStoredSelection(row.model_l3),
+    });
+    return parsed.success ? parsed.data : { ...EMPTY_TIER_MODEL_PINS };
+  }
+
+  setOrgTierModels(orgId: string, pins: unknown): TierModelPins {
+    const organisation = this.db
+      .prepare('SELECT 1 FROM auth_organisations WHERE org_id = ?')
+      .get(orgId);
+    if (!organisation) throw new Error('organisation not found');
+    const parsed = tierModelPinsSchema.parse(pins);
+    this.db
+      .prepare(
+        `INSERT INTO auth_org_tier_models
+           (org_id, model_l1, model_l2, model_l3, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(org_id) DO UPDATE SET
+           model_l1 = excluded.model_l1,
+           model_l2 = excluded.model_l2,
+           model_l3 = excluded.model_l3,
+           updated_at = excluded.updated_at`
+      )
+      .run(orgId, parsed.l1, parsed.l2, parsed.l3, new Date().toISOString());
     return parsed;
   }
 
@@ -1450,6 +1539,119 @@ export class AuthStore {
           .map((i) => ({ provider: i.provider, subject: i.provider_subject, email: i.email, linkedAt: i.linked_at })),
       };
     });
+  }
+
+  /**
+   * ORG PROVIDER KEYS — BYO-key credentials at rest.
+   *
+   * Written and read through the shared AES-256-GCM mechanics; the envelope
+   * is authenticated against (org, provider, key generation) via the AAD
+   * builder, so a row copied to another org/provider never decrypts. The
+   * plaintext exists only inside the call that injects it into a run
+   * child's environment; this store hands back envelopes only.
+   *
+   * `decryption` injected: the HTTP/CLI boundary resolves it once per
+   * process from operator env (`resolveSecretEncryption`); without it the
+   * store still persists rows but cannot hand anyone a usable key, which is
+   * exactly the degraded mode an unconfigured deployment should have.
+   */
+  setOrgProviderKey(input: {
+    readonly orgId: string;
+    readonly provider: 'anthropic' | 'zai' | 'ollama';
+    /** Plaintext credential; must survive one printable-ASCII round-trip like any API key. */
+    readonly plaintext: string;
+    readonly encryption: SecretEncryptionContext;
+  }): void {
+    const trimmed = input.plaintext.trim();
+    if (
+      trimmed.length === 0 ||
+      trimmed.length > MAX_PROVIDER_KEY_CHARS ||
+      [...trimmed].some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code < 33 || code === 127;
+      })
+    ) {
+      throw new Error('provider key has an invalid format');
+    }
+    const envelope = encryptBoundSecret({
+      plaintext: trimmed,
+      key: input.encryption.key,
+      keyId: input.encryption.keyId,
+      aad: providerKeyAad({
+        orgId: input.orgId,
+        provider: input.provider,
+        keyId: input.encryption.keyId,
+      }),
+    });
+    this.db
+      .prepare(
+        `INSERT INTO auth_org_provider_keys (org_id, provider, envelope, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(org_id, provider) DO UPDATE SET
+           envelope = excluded.envelope,
+           updated_at = excluded.updated_at`
+      )
+      .run(
+        input.orgId,
+        input.provider,
+        JSON.stringify(envelope),
+        new Date().toISOString()
+      );
+  }
+
+  deleteOrgProviderKey(orgId: string, provider: 'anthropic' | 'zai' | 'ollama'): boolean {
+    return (
+      this.db
+        .prepare('DELETE FROM auth_org_provider_keys WHERE org_id = ? AND provider = ?')
+        .run(orgId, provider).changes > 0
+    );
+  }
+
+  listOrgProviderKeys(orgId: string): OrgProviderKeyStatus[] {
+    const rows = this.db
+      .prepare('SELECT provider, updated_at FROM auth_org_provider_keys WHERE org_id = ?')
+      .all(orgId) as Array<{ provider: ProviderKeyProvider; updated_at: string }>;
+    // Envelope bytes are NEVER listed; presence + timestamp only.
+    return rows.map((row) => ({
+      provider: row.provider,
+      configuredAt: row.updated_at,
+    }));
+  }
+
+  /**
+   * Resolve one provider's usable credential for THIS org, or null when the
+   * org has none or no decryption context exists (fail-open into the run).
+   * Ciphertext tampering surfaces as a stderr warning + null: one corrupt
+   * row must not fail the run that merely PREFERRED this provider.
+   */
+  decryptOrgProviderKey(
+    orgId: string,
+    provider: ProviderKeyProvider,
+    decryption: SecretEncryptionContext | null
+  ): string | null {
+    if (!decryption) return null;
+    const row = this.db
+      .prepare(
+        'SELECT envelope FROM auth_org_provider_keys WHERE org_id = ? AND provider = ?'
+      )
+      .get(orgId, provider) as { envelope: string } | undefined;
+    if (!row) return null;
+    try {
+      const plaintext = decryptBoundSecret({
+        envelope: JSON.parse(row.envelope) as unknown,
+        key: decryption.key,
+        keyId: decryption.keyId,
+        aad: providerKeyAad({ orgId, provider, keyId: decryption.keyId }),
+      });
+      return plaintext.length > 0 ? plaintext : null;
+    } catch (error) {
+      process.stderr.write(
+        `[atoma auth] org ${orgId} provider key for ${provider} could not be decrypted; ` +
+          'run falls back without it. Was ATOMA_SECRET_ENCRYPTION_KEY rotated? ' +
+          `${String(error)}\n`
+      );
+      return null;
+    }
   }
 
   close(): void {

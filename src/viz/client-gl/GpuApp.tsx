@@ -25,6 +25,7 @@ import { AtomaCursor } from './AtomaCursor.js';
 import { AuthControls } from './AuthControls.js';
 import { useAuthController } from './session-controller.js';
 import { GpuDomBridge } from './DomBridge.js';
+import { OrgModelsForm } from './OrgModelsForm.js';
 import { EntryVeilLayer } from './EntryVeilLayer.js';
 import { useEntryFade } from './entry-fade.js';
 import { GpuSurface } from './GpuSurface.js';
@@ -61,7 +62,6 @@ import {
   visibleViews,
   type DocsThemeKey,
 } from './store.js';
-import { parseSettingsModelId } from './renderer/views/settings.js';
 import type { VizAdminInvitation } from '../client/types.js';
 import { openGitHubRepository } from './repository-link.js';
 
@@ -274,21 +274,6 @@ function GpuAppContent({
   const organisationQuery = useOrganisation(state.view === 'settings' && authed);
   const accountModelsQuery = useAccountModels(state.view === 'settings' && authed);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const saveTierModel = useCallback(
-    async (tier: 1 | 2 | 3, model: string | null) => {
-      const current = accountModelsQuery.data?.pins ?? { l1: null, l2: null, l3: null };
-      setAccountError(null);
-      try {
-        const next = await api.saveAccountModels({ ...current, [`l${tier}`]: model });
-        // Seed the cache with the server's answer instead of refetching: it
-        // returns the stored pins, so a round trip would tell us nothing new.
-        queryClient.setQueryData(['viz', 'account', 'models'], next);
-      } catch (error) {
-        setAccountError(error instanceof Error ? error.message : t('settings.actionFailed'));
-      }
-    },
-    [accountModelsQuery.data, queryClient, t]
-  );
   const renameAccount = useCallback(
     async (displayName: string) => {
       setAccountError(null);
@@ -506,11 +491,6 @@ function GpuAppContent({
       store.setView('settings');
       return;
     }
-    const modelChoice = parseSettingsModelId(id);
-    if (modelChoice) {
-      void saveTierModel(modelChoice.tier, modelChoice.model);
-      return;
-    }
     if (id.startsWith('auth.')) {
       activateAuth(id);
       return;
@@ -707,7 +687,6 @@ function GpuAppContent({
     mintInvitation,
     profilesQuery.data,
     projectsQuery.data,
-    saveTierModel,
   ]);
 
   const loading =
@@ -862,6 +841,26 @@ function GpuAppContent({
           onDismissPush={dismissPush}
           onRenameAccount={(displayName) => { void renameAccount(displayName); }}
           accountError={accountError}
+          orgModelsForm={
+            state.view === 'settings' &&
+            authSnapshot !== null &&
+            authSnapshot.viewer.activeOrganisation !== null ? (
+              <OrgModelsForm
+                t={t}
+                locale={state.locale}
+                enabled={true}
+                canManageOrg={
+                  authSnapshot.viewer.platformAdmin ||
+                  authSnapshot.viewer.role === 'org:owner' ||
+                  authSnapshot.viewer.role === 'org:admin'
+                }
+                platformAdmin={authSnapshot.viewer.platformAdmin}
+                organisation={organisationQuery.data ?? null}
+                overlaysInert={state.accountMenuOpen || state.localeMenuOpen}
+                onError={setAccountError}
+              />
+            ) : null
+          }
         />
         <SceneTuningPanel />
       </SceneCameraPlane>

@@ -2,6 +2,8 @@ import type {
   BurninRow,
   LaunchProfile,
   VizAccountModels,
+  VizOrgModels,
+  VizOrgProviderKeyStatus,
   VizOrganisation,
   RegistrySummary,
   RegistryType,
@@ -116,9 +118,30 @@ export const api = {
     mutateJson<{ segment: string; orgCount: number | null }>('/api/admin/announce', body),
   organisation: () => fetchJson<VizOrganisation>('/api/org'),
   accountModels: () => fetchJson<VizAccountModels>('/api/account/models'),
-  // PUT/PATCH rather than POST: these replace one account-scoped resource.
+  orgModels: () => fetchJson<VizOrgModels>('/api/org/models'),
+  // PUT/PATCH rather than POST: these replace one account/org-scoped resource.
   saveAccountModels: (pins: VizAccountModels['pins']) =>
     mutateJson<VizAccountModels>('/api/account/models', { pins }, 'PUT'),
+  saveOrgModels: (models: VizOrgModels['models']) =>
+    mutateJson<{ models: VizOrgModels['models'] }>('/api/org/models', { models }, 'PUT'),
+  saveOrgProviderKey: (provider: string, key: string) =>
+    mutateJson<{ keys: VizOrgProviderKeyStatus[] }>(
+      `/api/org/provider-keys/${encodeURIComponent(provider)}`,
+      { key },
+      'PUT'
+    ),
+  removeOrgProviderKey: async (provider: string): Promise<{ keys: VizOrgProviderKeyStatus[] }> => {
+    const response = await fetch(
+      `/api/org/provider-keys/${encodeURIComponent(provider)}`,
+      {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { accept: 'application/json' },
+      }
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status} for provider-keys`);
+    return (await response.json()) as { keys: VizOrgProviderKeyStatus[] };
+  },
   renameAccount: (displayName: string) =>
     mutateJson<{ displayName: string; displayNameSource: string }>(
       '/api/account',

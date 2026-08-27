@@ -5,7 +5,7 @@ import {
   type Locale,
 } from '../../contracts/locales.js';
 import type { RunIndexEntry, VizGitHubInstallation, VizProject } from '../client/types.js';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import type { AuthUiSnapshot } from './AuthControls.js';
 import {
   projectSelectionAfterActivate,
@@ -38,6 +38,8 @@ export function DomBridge({
   onRenameAccount,
   accountError = null,
   announcementsEnabled = false,
+  orgModelsForm = null,
+  domOverlaysVeiled = false,
 }: {
   runs: RunIndexEntry[];
   releaseVersion: string;
@@ -70,6 +72,10 @@ export function DomBridge({
   accountError?: string | null;
   /** Platform admins only: the broadcast composer lives on the admin view. */
   announcementsEnabled?: boolean;
+  /** Settings: the org defaults + provider keys form, for org admins. */
+  orgModelsForm?: ReactNode;
+  /** Shared veil state applied to every DOM overlay (see overlaysInert below). */
+  domOverlaysVeiled?: boolean;
 }) {
   const view = useGpuStore((state) => state.view);
   const sceneCameraMode = useGpuStore((state) => state.sceneCameraMode);
@@ -398,9 +404,13 @@ export function DomBridge({
             if (next) onRenameAccount?.(next);
           }}
         >
+          <label className="gpu-settings-username" htmlFor="settings-display-name">
+            {t('settings.username')}
+          </label>
           <input
+            id="settings-display-name"
             className="gpu-dom-input gpu-settings-name"
-            aria-label={t('settings.displayName')}
+            aria-label={t('settings.username')}
             value={search.displayName}
             placeholder={t('settings.displayName')}
             maxLength={120}
@@ -415,6 +425,9 @@ export function DomBridge({
             {accountError ? <span role="alert">{accountError}</span> : null}
           </div>
         </form>
+      ) : null}
+      {view === 'settings' && orgModelsForm ? (
+        <div data-veiled={domOverlaysVeiled ? 'true' : undefined}>{orgModelsForm}</div>
       ) : null}
       {view === 'announce' && announcementsEnabled ? (
         <AnnouncementForm t={t} locale={locale} resetSignal={announcementResetSignal} inert={overlaysInert} />

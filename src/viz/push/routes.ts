@@ -178,6 +178,11 @@ const PUSH_ROUTE_SOURCES: Record<PlatformEventKind, PushRouteSource | null> = {
   // Journaled for audit, never pushed: on a single-operator instance every
   // admin run would fire one.
   'run.host_subscription': null,
+  // Preference changes are audit rows, never notifications: on a healthy
+  // multi-org instance these would be the loudest channel there is.
+  'org.models_updated': null,
+  'org.provider_key_set': null,
+  'org.provider_key_removed': null,
   // Not pushed while the rule table is uncalibrated: an alert nobody trusts
   // trains the operator to dismiss the channel. Revisit once the rules have
   // run against real batches.

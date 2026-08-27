@@ -13,6 +13,8 @@ npm run viz:shot                                    # anonymous visitor (login g
 npm run viz:shot -- --auth                          # logged-in member, Projects view
 npm run viz:shot -- --auth --select-first           # first project selected: run list + run form
 npm run viz:shot -- --auth --view Runs              # any nav tab by its label
+npm run viz:shot -- --auth --view Settings          # account menu, not a rail tab
+npm run viz:shot -- --auth --view Settings --scroll-end  # org directory at the foot of the form
 npm run viz:shot -- --auth --camera overview        # neutral, undeformed whole-scene pose
 npm run viz:shot -- --auth --camera focus           # content-column pose (default)
 npm run viz:shot -- --auth --tuning                  # open the floating Scene Tuning window
@@ -32,15 +34,19 @@ defaults to 1600×900 at deviceScaleFactor 2.
   the script says so instead of failing. With auth off it enters the app and
   opens the requested view.
 - **`--auth`** — a logged-in org member **without any real OAuth session**:
-  `/auth/whoami`, `/api/org`, `/api/projects`, the run list, `/api/profiles`,
-  `/api/account/models` and `/api/github/installations` are stubbed via
-  Puppeteer request interception (the same technique as `viz-gpu-smoke`'s
-  account arm). The fixture is one project with five runs covering delivered
+  `/auth/whoami`, `/api/org`, `/api/org/models`, `/api/projects`, the run list,
+  `/api/profiles`, `/api/account/models` and `/api/github/installations` are
+  stubbed via Puppeteer request interception (the same technique as
+  `viz-gpu-smoke`'s account arm). Settings is not a rail tab: `--view Settings`
+  opens the a11y account menu and clicks the Settings item. The fixture is one
+  project with five runs covering delivered
   (+ commit receipt), failed (+ error line) and cost display. `/api/runs` and
   its trace are stubbed too, so `--view Runs` renders a full run: summary card
   with the metric tiles, branch filter chips, and a two-phase forked timeline.
 - **`--select-first`** — clicks the first project row through the canvas hit
   targets (`?atomaDiag=1`), so the expanded run list and the run form render.
+- **`--scroll-end`** — Settings only: scrolls `.gpu-org-models-form` to its
+  end so the organisation directory (below the keys) is in frame.
 - **`--camera overview|focus`** — captures either endpoint of the global scene
   camera. Overview re-activates the selected menu after navigation, exercising
   the same return transition as the product and restoring the exact undeformed
