@@ -48,8 +48,22 @@ process.stdin.on('end', () => {
     process.exit(1);
   }
   const items = JSON.parse(stdin).items;
+  // STUB_DRIFT_KEYS="ar:key" mimics the 2026-08-27 CI failures: in a FULL
+  // batch (more than one item) the named key comes back with its {{token}}
+  // filled in (placeholder drift). The lone-item RETRY call translates
+  // correctly — showing the failure mode fixes it, which is the contract.
+  const driftKeys = (process.env.STUB_DRIFT_KEYS ?? '')
+    .split(',')
+    .filter((entry) => entry.startsWith(locale + ':'))
+    .map((entry) => entry.slice(locale.length + 1));
   const translations = {};
-  for (const item of items) translations[item.key] = '[' + locale + '] ' + item.en;
+  for (const item of items) {
+    if (items.length > 1 && driftKeys.includes(item.key)) {
+      translations[item.key] = '[' + locale + '] ' + item.en.replace(/\\{\\{\\w+\\}\\}/g, '').trim();
+    } else {
+      translations[item.key] = '[' + locale + '] ' + item.en;
+    }
+  }
   process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: JSON.stringify(translations) } }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 5 } }) + '\\n');
 });
@@ -134,6 +148,19 @@ describe('translate isolates locale failures', () => {
       });
     }
   });
+
+  it('rejects drifting keys, retries them alone, and still exits 0', () => {
+    writeFixtureCatalogs();
+    const { status, stdout } = runTranslate({
+      STUB_DRIFT_KEYS: 'ar:greetings_other',
+    });
+
+    // Pure rejects are not a failure — the retry lands the drifted key.
+    expect(status).toBe(0);
+    expect(stdout).toContain('retry ar');
+    expect(readCatalog('ar').greetings_other).toBe('[ar] {{count}} greetings');
+    expect(readCatalog('ar').farewell).toBe('[ar] goodbye');
+  });
 });
 
 describe('the translation job is one step of CI', () => {
@@ -148,6 +175,20 @@ describe('the translation job is one step of CI', () => {
     expect(workflow).toMatch(/^permissions:\n {2}contents: read$/m);
     // The bot's commit must never re-trigger CI.
     expect(workflow).toContain('[skip ci]');
+  });
+
+  it('translate failing never skips check or the commit step', () => {
+    const i18nJob = workflow.slice(workflow.indexOf('  i18n:'), workflow.indexOf('  worker:'));
+    // The translate step absorbs its own hard failures…
+    expect(i18nJob).toMatch(/continue-on-error: true/);
+    // …and both remaining steps run regardless, so nothing earned is dropped:
+    expect(i18nJob).toMatch(/if: always\(\)\n {8}run: node scripts\/i18n\.mjs check/);
+    const commitStep = i18nJob.slice(i18nJob.indexOf('Commit translated locale files'));
+    // The comment sits between the name and the `if`; the guard must follow
+    // within the step header, before its run block.
+    expect(commitStep.split('run:')[0]).toContain('if: always()');
+    // A push landing mid-run is rebased over, not a failed job.
+    expect(commitStep).toContain('--rebase');
   });
 
   it('the standalone self-pushing i18n workflow is gone', () => {

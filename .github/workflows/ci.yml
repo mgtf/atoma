@@ -35,9 +35,11 @@ jobs:
     # The auto-translation half of the locale pipeline (the manual half is the
     # pre-commit hook that blanks stale target values when en.json changes).
     # A STEP of this CI run, not a second workflow: one runner, one queue, one
-    # place to read the pipeline's health. `translate` isolates locales, so a
-    # failing language still commits its siblings' successes; the job then
-    # stays red and the next push retries only the remaining blanks.
+    # place to read the pipeline's health. `translate` isolates locales, and
+    # the commit step below runs ALWAYS: surviving blanks are reported in the
+    # summary, never dropped with the runner, and a later push retries them.
+    # Only `check` failing (placeholder corruption) leaves the catalog
+    # uncommitted and turns the job red.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -73,11 +75,20 @@ jobs:
           ATOMA_I18N_CODEX_MODEL: gpt-5.6-sol
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: node scripts/i18n.mjs translate
+        # A hard locale failure still exits 1 here — but that MUST NOT skip
+        # the steps below: they land every catalog the run earned on disk.
+        # Dying before them repeats the 2026-08-27 loss exactly (712 paid ar
+        # translations written to disk, then dropped with the runner).
+        continue-on-error: true
 
       - name: Verify locale health
+        if: always()
         run: node scripts/i18n.mjs check
 
       - name: Commit translated locale files
+        # The commit step defines the job's verdict: `check` passing means
+        # placeholder integrity holds, so what translate earned gets committed.
+        if: always()
         run: |
           git config user.name "atoma-i18n-bot"
           git config user.email "actions@github.com"
@@ -86,7 +97,19 @@ jobs:
             echo "No locale changes to commit."
           else
             git commit -m "chore(i18n): auto-translate missing locale values [skip ci]"
-            git push origin HEAD:${{ github.ref_name }}
+            # A push may land on main during the ~30 min translate window;
+            # rebasing onto it beats failing the job over a fast-forward race.
+            for attempt in 1 2 3; do
+              if git -c user.name="atoma-i18n-bot" -c user.email="actions@github.com" \
+                  pull --rebase --autostash origin "${{ github.ref_name }}" && \
+                 git push origin "HEAD:${{ github.ref_name }}"; then
+                exit 0
+              fi
+              echo "push rejected (attempt $attempt); rebasing and retrying…"
+              sleep $((attempt * 10))
+            done
+            echo "could not land the translation commit after 3 attempts" >&2
+            exit 1
           fi
 
   worker:

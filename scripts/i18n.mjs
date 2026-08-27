@@ -27,8 +27,16 @@
  *                      each target catalog as its locale finishes, so a
  *                      later locale's failure never discards an earlier
  *                      locale's successes (the 2026-08-27 incident: a zh
- *                      batch failure left ten `{}` catalogs uncommitted);
- *                      exit 1 when any locale failed or was rejected.
+ *                      batch failure left ten `{}` catalogs uncommitted).
+ *                      A key the model returns with placeholder drift gets
+ *                      ONE isolated retry, then a named summary. Exit 1 only
+ *                      on HARD locale failures (provider down, unreadable
+ *                      batch); surviving rejects stay blank on disk — they
+ *                      commit with everything else and retry next run, so
+ *                      paid work is never dropped because one key refused.
+ *                      CI's translate step is `continue-on-error` and the
+ *                      check/commit steps run `always()`: the catalog write
+ *                      path cannot be skipped by an exit code again.
  *   invalidate-staged  pre-commit helper. When a staged en.json has VALUE
  *                      changes (not additions), blank the same target keys
  *                      and re-stage it, so the next translate run re-does
@@ -529,6 +537,7 @@ async function runTranslate() {
         break;
       }
       let got = 0;
+      const sliceRejected = [];
       for (const key of slice) {
         const value = parsed[key];
         if (typeof value === 'string' && value.length > 0 && placeholdersMatch(en[key], value)) {
@@ -536,6 +545,41 @@ async function runTranslate() {
           got += 1;
         } else if (typeof value === 'string' && value.length > 0) {
           process.stderr.write(`\n    rejected ${target.locale}.${key} (placeholder drift in model output)\n`);
+          sliceRejected.push(key);
+        }
+      }
+      // A rejected key is not lost: one retry with ONLY the rejected keys and
+      // an explicit per-key instruction usually lands them (the model filled a
+      // {{token}} in or dropped it — showing the failure mode fixes it). One
+      // pass only: if the retry also drifts, the key is reported and left for
+      // the next run rather than burning more quota.
+      if (sliceRejected.length > 0 && sliceRejected.length < slice.length) {
+        process.stdout.write(`    retry ${target.locale}: ${sliceRejected.length} key(s) alone… `);
+        try {
+          const retryResult = await call(
+            systemPrompt,
+            { items: sliceRejected.map((key) => ({ key, en: en[key] })) }
+          );
+          const retryParsed = extractJson(retryResult.text);
+          let retried = 0;
+          for (const key of sliceRejected) {
+            const value = retryParsed[key];
+            if (
+              typeof value === 'string' && value.length > 0 &&
+              placeholdersMatch(en[key], value)
+            ) {
+              translated[key] = value;
+              got += 1;
+              retried += 1;
+            } else {
+              process.stderr.write(`\n    still-rejected ${target.locale}.${key}\n`);
+            }
+          }
+          inTok += retryResult.usage?.input_tokens || 0;
+          outTok += retryResult.usage?.output_tokens || 0;
+          process.stdout.write(`${retried}/${sliceRejected.length}\n`);
+        } catch (error) {
+          process.stderr.write(`\n    retry failed: ${error.message}\n`);
         }
       }
       inTok += usage?.input_tokens || 0;
@@ -543,16 +587,30 @@ async function runTranslate() {
       process.stdout.write(`${got}/${slice.length} in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
     }
     // Write what this locale earned even when it failed: successes are never
-    // held hostage to a sibling locale's error, and the exit code still turns
-    // the run red so the remaining blanks are retried.
+    // held hostage to a sibling locale's error. A pure-reject locale (every
+    // batch PARSED, some keys refused) is NOT a failure: the catalog on disk
+    // is better than before, and the commit below lands it; only hard errors
+    // — provider down, unreadable JSON — keep the run red, because there the
+    // next run has real work to redo.
     const next = { ...target.catalog, ...translated };
     writeCatalog(targetPath(target.locale), next);
     process.stdout.write(`  wrote ${Object.keys(translated).length}/${target.missing.length} to ${targetPath(target.locale)} (model ${servedModel}, tokens ${inTok} in / ${outTok} out)\n`);
-    if (localeFailed || Object.keys(translated).length !== target.missing.length) failed = true;
+    if (localeFailed) failed = true;
   }
   if (failed) {
-    process.stderr.write('ERROR: one or more locales are incomplete; completed catalogs were still written — rerun translate for the remaining blanks.\n');
+    process.stderr.write('ERROR: one or more locales hit a hard failure; completed catalogs were still written — rerun translate for the remaining blanks.\n');
     process.exitCode = 1;
+    return;
+  }
+  // Rejected keys (never hard-failed) do not fail the run: the catalogs on
+  // disk are strictly better, the commit below lands them, and this summary
+  // names what stayed blank instead of hiding it behind an exit code.
+  const leftover = work.reduce(
+    (sum, target) => sum + missingKeys(en, readCatalog(targetPath(target.locale))).length,
+    0
+  );
+  if (leftover > 0) {
+    process.stdout.write(`translate: ${leftover} value(s) still blank after rejected keys — they will retry on the next run.\n`);
   }
 }
 
