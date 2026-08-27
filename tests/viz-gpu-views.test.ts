@@ -152,6 +152,7 @@ interface RecordedButton {
   width: number;
   height: number;
   active: boolean;
+  spinning?: boolean;
   onActivate?: (id: string) => void;
 }
 
@@ -436,9 +437,10 @@ function createRecordingCtx(): RecordingCtx {
       onActivate,
       _accent,
       _centerLabel,
-      _spinning,
+      spinning,
       labelMaxWidth,
-      _labelY
+      _labelY,
+      accessibleLabel
     ) {
       // The real `button()` FITS its label to its own width against measured
       // glyphs, so views hand it unbounded copy on purpose. Recording the raw
@@ -458,9 +460,18 @@ function createRecordingCtx(): RecordingCtx {
         width,
         height,
         active,
+        spinning: spinning === true,
         onActivate,
       });
-      ctx.recordHitTarget(parent, { id, role, label, x, y, width, height });
+      ctx.recordHitTarget(parent, {
+        id,
+        role,
+        label: accessibleLabel ?? label,
+        x,
+        y,
+        width,
+        height,
+      });
       const container = new Container();
       parent.addChild(container);
       return container;
@@ -933,6 +944,38 @@ describe('drawWelcome as the login gate', () => {
     expect(ctx.texts.some((text) => text.value === I18N_CATALOGS.en['welcome.tagline'])).toBe(true);
   });
 
+  it('replaces the provider label with a spinner while that login is in flight', () => {
+    const ctx = createRecordingCtx();
+    drawWelcome(
+      ctx,
+      makeSnapshot(
+        { entered: false },
+        {
+          login: {
+            providers: [
+              { id: 'github', label: 'GitHub' },
+              { id: 'google', label: 'Google' },
+            ],
+            notice: null,
+            pendingProvider: 'github',
+          },
+        }
+      ),
+      WIDTH,
+      HEIGHT
+    );
+    const github = ctx.buttons.find((button) => button.id === 'login.provider.github');
+    const google = ctx.buttons.find((button) => button.id === 'login.provider.google');
+    expect(github?.label).toBe('⟳');
+    expect(github?.spinning).toBe(true);
+    expect(github?.active).toBe(true);
+    expect(google?.label).toBe('Continue with Google');
+    expect(google?.spinning).toBe(false);
+    expect(
+      ctx.metrics.hitTargets.find((target) => target.id === 'login.provider.github')?.label
+    ).toBe('Signing in with GitHub');
+  });
+
   it('renders a bounced auth notice from the catalogs, falling back to the generic line', () => {
     const known = createRecordingCtx();
     drawWelcome(
@@ -1102,11 +1145,14 @@ describe('the nav rail', () => {
 
   it('collapses focus to icon tiles with one translated tooltip per destination', () => {
     const ctx = createRecordingCtx();
+    const chrome = focusRailChromeLayout(GPU_LAYOUT.sidebarWidth, 720, false);
     drawSidebar(
       ctx,
       makeSnapshot({ view: 'skills', sceneCameraMode: 'focus' }),
       720,
-      GPU_LAYOUT.sidebarWidth
+      GPU_LAYOUT.sidebarWidth,
+      chrome.navigationBottom,
+      chrome.navigationTop
     );
     expect(ctx.root.children.some((child) => child.label === 'sidebar-band')).toBe(false);
     const nav = ctx.buttons.filter((button) => button.id.startsWith('nav.'));
@@ -1129,6 +1175,7 @@ describe('the nav rail', () => {
         height: button.height,
       });
     }
+    expect(nav[0]!.y - (chrome.crystal.y + chrome.crystal.height)).toBe(12);
   });
 
   it('reserves a top crystal and a profile-language-FPS dock in focus', () => {
@@ -1142,7 +1189,8 @@ describe('the nav rail', () => {
     const rows = sidebarLayout(
       views,
       layout.navigationBottom,
-      layout.navigationTop
+      layout.navigationTop,
+      true
     )
       .filter((row) => row.kind !== 'group');
     const first = rows[0]!;
@@ -1150,6 +1198,7 @@ describe('the nav rail', () => {
 
     expect(layout.crystal).toEqual({ x: 164, y: 65, width: 44, height: 51 });
     expect(layout.navigationTop).toBe(116);
+    expect(first.y - (layout.crystal.y + layout.crystal.height)).toBe(12);
     expect(layout.crystal.y + layout.crystal.height).toBeLessThan(first.y);
     expect(last.y + last.height).toBeLessThan(layout.profile!.y);
     expect(layout.profile!.y + layout.profile!.height).toBeLessThan(layout.locale.y);

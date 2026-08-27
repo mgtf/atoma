@@ -161,6 +161,49 @@ describe('full-GL minimal DOM bridge', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });
 
+  it('replaces the provider label with a spinner when that login starts', async () => {
+    const user = userEvent.setup();
+    const onLoginStart = vi.fn();
+    useGpuStore.setState({ entered: false });
+    render(
+      createElement(GpuDomBridge, {
+        authSnapshot: null,
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+        loginLinks: [
+          { id: 'github', label: 'GitHub', href: '/auth/login?provider=github' },
+        ],
+        pendingLoginProvider: null,
+        onLoginStart,
+      })
+    );
+    await user.click(screen.getByRole('link', { name: 'Continue with GitHub' }));
+    expect(onLoginStart).toHaveBeenCalledWith('github');
+  });
+
+  it('shows a busy spinner on the pending provider link', () => {
+    useGpuStore.setState({ entered: false });
+    render(
+      createElement(GpuDomBridge, {
+        authSnapshot: null,
+        runs,
+        releaseVersion: '9.8.7',
+        t: (key: string, vars?: Record<string, unknown>) => translate('en', key, vars),
+        onSelectRun: vi.fn(),
+        loginLinks: [
+          { id: 'github', label: 'GitHub', href: '/auth/login?provider=github' },
+        ],
+        pendingLoginProvider: 'github',
+      })
+    );
+    const anchor = screen.getByRole('link', { name: 'Signing in with GitHub' });
+    expect(anchor).toHaveAttribute('aria-busy', 'true');
+    expect(anchor.querySelector('.gpu-login-spinner')).not.toBeNull();
+    expect(anchor).not.toHaveTextContent('Continue with GitHub');
+  });
+
   it('routes Continue through onEnter so the fade can own admission', async () => {
     useGpuStore.setState({ entered: false });
     const onEnter = vi.fn();

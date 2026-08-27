@@ -135,6 +135,7 @@ function GpuAppContent({
     (providerId: string) => providerLoginHref(providerId, loginParams.invite),
     [loginParams.invite]
   );
+  const [pendingLoginProvider, setPendingLoginProvider] = useState<string | null>(null);
   const [projectBusy, setProjectBusy] = useState(false);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [cameraRevision, setCameraRevision] = useState(0);
@@ -208,9 +209,31 @@ function GpuAppContent({
   );
 
   const login = useMemo(
-    () => (gateBlocked ? { providers: authProviders, notice: loginParams.notice } : null),
-    [authProviders, gateBlocked, loginParams.notice]
+    () =>
+      gateBlocked
+        ? {
+            providers: authProviders,
+            notice: loginParams.notice,
+            pendingProvider: pendingLoginProvider,
+          }
+        : null,
+    [authProviders, gateBlocked, loginParams.notice, pendingLoginProvider]
   );
+
+  useEffect(() => {
+    if (!pendingLoginProvider) return;
+    const href = loginHref(pendingLoginProvider);
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        window.location.assign(href);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [loginHref, pendingLoginProvider]);
 
   // For MEMBERS the permission ask lives in the FIRST RUN, not at login: the
   // moment a viewer's run is actually alive is when "hear about it even
@@ -648,7 +671,8 @@ function GpuAppContent({
       return;
     }
     if (id.startsWith('login.provider.')) {
-      window.location.assign(loginHref(id.slice('login.provider.'.length)));
+      if (pendingLoginProvider) return;
+      setPendingLoginProvider(id.slice('login.provider.'.length));
       return;
     }
     if (id.startsWith('journal.severity.')) {
@@ -683,8 +707,8 @@ function GpuAppContent({
     activateAuth,
     beginEnter,
     loadOlderEvents,
-    loginHref,
     mintInvitation,
+    pendingLoginProvider,
     profilesQuery.data,
     projectsQuery.data,
   ]);
@@ -827,6 +851,8 @@ function GpuAppContent({
                 }))
               : null
           }
+          pendingLoginProvider={pendingLoginProvider}
+          onLoginStart={setPendingLoginProvider}
           t={t}
           onSelectRun={state.selectRun}
           onEnter={beginEnter}

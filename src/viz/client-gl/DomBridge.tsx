@@ -21,6 +21,8 @@ export function DomBridge({
   releaseVersion,
   views = DEFAULT_VIEWS,
   loginLinks = null,
+  pendingLoginProvider = null,
+  onLoginStart,
   t,
   onSelectRun,
   onEnter,
@@ -47,6 +49,9 @@ export function DomBridge({
   views?: ViewName[];
   /** Non-null when the arrival gate is a login: real anchors, one per provider. */
   loginLinks?: { id: string; label: string; href: string }[] | null;
+  /** Provider whose OAuth redirect is in flight — that anchor shows a spinner. */
+  pendingLoginProvider?: string | null;
+  onLoginStart?: (providerId: string) => void;
   t: (key: string, vars?: Record<string, unknown>) => string;
   onSelectRun: (id: string) => void;
   onEnter?: () => void;
@@ -134,11 +139,29 @@ export function DomBridge({
         {loginLinks ? (
           // The arrival gate is the login: real anchors so keyboard and
           // assistive tech reach the provider flow without the GL canvas.
-          loginLinks.map((link) => (
-            <a key={link.id} href={link.href}>
-              {t('welcome.signInWith', { label: link.label })}
-            </a>
-          ))
+          loginLinks.map((link) => {
+            const pending = pendingLoginProvider === link.id;
+            const name = t('welcome.signInWith', { label: link.label });
+            return (
+              <a
+                key={link.id}
+                href={link.href}
+                aria-busy={pending}
+                aria-disabled={pendingLoginProvider !== null}
+                aria-label={
+                  pending ? t('welcome.signInBusy', { label: link.label }) : name
+                }
+                onClick={(event) => {
+                  if (!onLoginStart) return;
+                  event.preventDefault();
+                  if (pendingLoginProvider) return;
+                  onLoginStart(link.id);
+                }}
+              >
+                {pending ? <span className="gpu-login-spinner" aria-hidden="true" /> : name}
+              </a>
+            );
+          })
         ) : (
           <button onClick={() => (onEnter ?? enter)()}>{t('welcome.continue')}</button>
         )}

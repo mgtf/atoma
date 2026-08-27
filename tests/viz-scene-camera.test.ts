@@ -134,6 +134,29 @@ describe('the global scene camera', () => {
     }
   });
 
+  it('crops the labelled rail lead so compact icons sit on the guard', () => {
+    for (const { width, height } of [
+      { width: 528, height: 800 },
+      { width: 900, height: 600 },
+      { width: 1_024, height: 768 },
+      { width: 1_280, height: 720 },
+      { width: 1_512, height: 982 },
+    ]) {
+      const camera = sceneCameraForMode('focus', width, height);
+      const rail = sidebarWidthForViewport(width);
+      const buttonLeft = Math.max(0, rail - GPU_LAYOUT.sidebarFocusButtonWidth);
+      const guard = Math.min(8, buttonLeft);
+      const sourceTop = camera.sourceTopRatio * height;
+      const projected = projectScenePoint(
+        { x: buttonLeft, y: sourceTop },
+        width,
+        height,
+        camera
+      );
+      expect(projected.x, `${width}x${height}`).toBeCloseTo(guard, 0);
+    }
+  });
+
   it('keeps every compact rail button visibly inside focused viewports', () => {
     const allViews: readonly ViewName[] = [
       'projects', 'runs', 'docs', 'registry', 'skills', 'burnin', ...ADMIN_VIEWS,
@@ -155,7 +178,8 @@ describe('the global scene camera', () => {
       const rows = sidebarLayout(
         allViews,
         chrome.navigationBottom,
-        chrome.navigationTop
+        chrome.navigationTop,
+        true
       )
         .filter((row) => row.kind !== 'group');
       expect(rows.at(-1)!.y + rows.at(-1)!.height).toBeLessThan(chrome.profile!.y);
@@ -226,8 +250,8 @@ describe('the global scene camera', () => {
           const client = projectScenePoint(point, width, height, camera);
           expect(client.x, `${width}x${height} ${name} x at ${progress}`).toBeGreaterThanOrEqual(0.5);
           expect(client.x, `${width}x${height} ${name} x at ${progress}`).toBeLessThanOrEqual(width - 0.5);
-          expect(client.y, `${width}x${height} ${name} bottom at ${progress}`).toBeGreaterThanOrEqual(height - 12);
-          expect(client.y, `${width}x${height} ${name} bottom at ${progress}`).toBeLessThanOrEqual(height - 9);
+          expect(client.y, `${width}x${height} ${name} bottom at ${progress}`).toBeGreaterThanOrEqual(height - 16);
+          expect(client.y, `${width}x${height} ${name} bottom at ${progress}`).toBeLessThanOrEqual(height - 8);
         }
         return layoutHeight;
       });

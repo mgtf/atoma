@@ -59,7 +59,9 @@ const OVERVIEW_DISTANCE_VIEWPORT_RATIO = 2.2;
 const FOCUS_MIN_DISTANCE_PX = 1800;
 const FOCUS_DISTANCE_VIEWPORT_RATIO = 3;
 const FOCUS_RAIL_GUARD_PX = 8;
-const FOCUS_MAX_SCALE = 1.12;
+/** Ceiling on the solved focus scale. Must clear the 528×800 case (~1.44)
+ *  where the labelled rail is still 208px; 1.12 left a ~170px compact column. */
+const FOCUS_MAX_SCALE = 1.5;
 
 /**
  * Reference overview pose. `sceneCameraForMode()` resolves its responsive
@@ -136,7 +138,9 @@ export function sceneCameraForMode(
   // the trailing edge and projects that edge into a compact screen-space rail.
   // Solve the top-edge scale from the requested guard. Pitch changes the
   // apparent scale across the plane, so this uses the top edge rather than an
-  // affine approximation. The cap keeps compact viewports legible.
+  // affine approximation. The cap is a safety on degenerate aspect ratios,
+  // not a second crop: a low cap leaves the labelled rail's empty lead on
+  // screen and the compact menu reads as a wide gutter.
   const requestedTopScale = (width - guard) / Math.max(1, width - buttonLeft);
   const focusScale = Math.min(
     FOCUS_MAX_SCALE,

@@ -31,6 +31,8 @@ const LOCAL_SIZE = ATOMA_MARK_LOCAL_CENTER * 2;
 const MARK_VIEWPORT_FRACTION = 0.52;
 const FLOAT_AMPLITUDE_PX = 12;
 const FLOAT_PERIOD_MS = 1800;
+/** Visual stand-in while OAuth navigation is in flight. Spun by `button()`. */
+const LOGIN_SPINNER_GLYPH = '⟳';
 
 export interface WelcomeLayout {
   scale: number;
@@ -175,19 +177,25 @@ export function drawWelcome(
     // configured provider, and a bounced login failure renders under them
     // from the catalogs — never raw query-string text.
     login.providers.forEach((provider, index) => {
+      const pending = login.pendingProvider === provider.id;
+      const name = snapshot.t('welcome.signInWith', { label: provider.label });
       ctx.button(
         ctx.root,
         `login.provider.${provider.id}`,
         'button',
-        snapshot.t('welcome.signInWith', { label: provider.label }),
+        pending ? LOGIN_SPINNER_GLYPH : name,
         layout.buttonX,
         layout.buttonY + index * (layout.buttonHeight + 12),
         layout.buttonWidth,
         layout.buttonHeight,
-        index === 0,
+        pending || (login.pendingProvider == null && index === 0),
         snapshot.onActivate,
         GPU_COLORS.primary,
-        true
+        true,
+        pending,
+        undefined,
+        undefined,
+        pending ? snapshot.t('welcome.signInBusy', { label: provider.label }) : name
       );
     });
     const noticeY =

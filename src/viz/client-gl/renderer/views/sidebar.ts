@@ -176,6 +176,8 @@ interface SidebarMetrics {
   readonly groupGap: number;
   readonly itemHeight: number;
   readonly itemGap: number;
+  /** Focus tiles skip heading rows so the first icon can sit under the crystal. */
+  readonly includeGroups: boolean;
 }
 
 function groupedLayout(
@@ -188,8 +190,10 @@ function groupedLayout(
     const members = group.views.filter((view) => views.includes(view));
     if (members.length === 0) continue;
     if (rows.length > 0) y += metrics.groupGap;
-    rows.push({ kind: 'group', group: group.key, y, height: metrics.groupHeight });
-    y += metrics.groupHeight;
+    if (metrics.includeGroups) {
+      rows.push({ kind: 'group', group: group.key, y, height: metrics.groupHeight });
+      y += metrics.groupHeight;
+    }
     for (const view of members) {
       rows.push({ kind: 'item', view, y, height: metrics.itemHeight });
       y += metrics.itemHeight + metrics.itemGap;
@@ -218,24 +222,28 @@ function rowsBottom(rows: readonly SidebarRow[]): number {
 export function sidebarLayout(
   views: readonly ViewName[],
   viewportHeight = Number.POSITIVE_INFINITY,
-  navigationTop: number = GPU_LAYOUT.headerHeight
+  navigationTop: number = GPU_LAYOUT.headerHeight,
+  iconOnly = false
 ): readonly SidebarRow[] {
+  const lead = iconOnly ? ITEM_GAP : 18;
   const normal = groupedLayout(views, {
-    top: navigationTop + 18,
+    top: navigationTop + lead,
     groupHeight: GROUP_HEIGHT,
     groupGap: GROUP_GAP,
     itemHeight: ITEM_HEIGHT,
     itemGap: ITEM_GAP,
+    includeGroups: !iconOnly,
   });
   if (rowsBottom(normal) <= viewportHeight - 4) return normal;
 
   // Landscape windows first tighten whitespace while keeping group labels.
   const compact = groupedLayout(views, {
-    top: navigationTop + 8,
+    top: navigationTop + (iconOnly ? ITEM_GAP : 8),
     groupHeight: 14,
     groupGap: 6,
     itemHeight: 26,
     itemGap: 10,
+    includeGroups: !iconOnly,
   });
   if (rowsBottom(compact) <= viewportHeight - 4) return compact;
 
@@ -253,7 +261,7 @@ export function sidebarLayout(
       members.push({ kind: 'action', action: 'tuning' });
     }
   }
-  const top = navigationTop + 4;
+  const top = navigationTop + (iconOnly ? ITEM_GAP : 4);
   const gap = 2;
   const available = Math.max(0, viewportHeight - top - 4 - gap * Math.max(0, members.length - 1));
   const itemHeight = members.length > 0 ? Math.min(26, available / members.length) : 0;
@@ -303,7 +311,8 @@ export function drawSidebar(
   for (const row of sidebarLayout(
     visibleViews(snapshot.data.auth),
     layoutHeight,
-    navigationTop
+    navigationTop,
+    iconOnly
   )) {
     if (row.kind === 'group') {
       // Focus leaves only the icon buttons. Keeping the rows themselves

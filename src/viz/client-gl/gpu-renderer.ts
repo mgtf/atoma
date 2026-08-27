@@ -168,7 +168,12 @@ export interface GpuDataSnapshot {
    * arrival gate offers these providers instead of Continue, and `notice`
    * names a login failure bounced back by the server (`?authNotice=`).
    */
-  login: { providers: { id: string; label: string }[]; notice: string | null } | null;
+  login: {
+    providers: { id: string; label: string }[];
+    notice: string | null;
+    /** Provider whose OAuth redirect is in flight; that button shows a spinner. */
+    pendingProvider?: string | null;
+  } | null;
   loading: boolean;
   error: string | null;
 }
@@ -2727,7 +2732,9 @@ export class GpuRenderer {
     /** Optional visual label column; the hit target keeps the full accessible label. */
     labelMaxWidth?: number,
     /** Optional top offset for compound buttons that draw secondary copy. */
-    labelY?: number
+    labelY?: number,
+    /** Accessible name when the visual label is a spinner glyph. */
+    accessibleLabel?: string
   ) {
     const container = new Container();
     container.position.set(x, y);
@@ -2784,9 +2791,12 @@ export class GpuRenderer {
       }
     }
     container.eventMode = 'static';
-    container.cursor = 'pointer';
+    container.cursor = spinning ? 'wait' : 'pointer';
     container.hitArea = new Rectangle(0, 0, width, height);
-    container.on('pointertap', () => onActivate(id));
+    container.on('pointertap', () => {
+      if (spinning) return;
+      onActivate(id);
+    });
     container.on('pointerover', () => {
       graphics.tint = 0xbfd6ff;
     });
@@ -2794,7 +2804,15 @@ export class GpuRenderer {
       graphics.tint = 0xffffff;
     });
     parent.addChild(container);
-    this.recordHitTarget(parent, { id, role, label, x, y, width, height });
+    this.recordHitTarget(parent, {
+      id,
+      role,
+      label: accessibleLabel ?? label,
+      x,
+      y,
+      width,
+      height,
+    });
     return container;
   }
 

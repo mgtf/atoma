@@ -632,6 +632,30 @@ html.atoma-cursor-active * {
   outline-offset: 2px;
 }
 
+.gpu-login-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: middle;
+  border: 2px solid rgba(230, 237, 247, .25);
+  border-top-color: #e6edf7;
+  border-radius: 50%;
+  animation: gpu-login-spin .7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gpu-login-spinner {
+    animation: none;
+    opacity: .55;
+  }
+}
+
+@keyframes gpu-login-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .gpu-crash {
   position: fixed;
   inset: 0;

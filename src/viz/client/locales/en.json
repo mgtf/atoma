@@ -279,6 +279,7 @@
   "registry.detailPromptTruncated_one": "Preview limited to {{shown}} of {{count}} character.",
   "registry.detailPromptTruncated_other": "Preview limited to {{shown}} of {{count}} characters.",
   "welcome.signInWith": "Continue with {{label}}",
+  "welcome.signInBusy": "Signing in with {{label}}",
   "login.noProviders": "No sign-in provider is configured on this deployment.",
   "login.notice.generic": "Sign-in failed — try again.",
   "login.notice.invalidInvitation": "Invalid invitation token.",
