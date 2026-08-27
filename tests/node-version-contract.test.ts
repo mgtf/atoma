@@ -12,7 +12,8 @@ describe('Node version contract', () => {
     };
 
     expect(local).toBe('22.13.0');
-    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(2);
+    // core, i18n and worker: every job pins the same Node as the engine floor.
+    expect(ci.match(/node-version:\s*22\.13\.0/g)).toHaveLength(3);
     expect(release.match(/node-version:\s*22\.13\.0/g)).toHaveLength(1);
     expect(pkg.engines?.node).toContain('^22.13.0');
     expect(nodeVersionSupported(local)).toBe(true);

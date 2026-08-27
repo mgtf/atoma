@@ -114,7 +114,7 @@ describe('UI pluralisation', () => {
  * (`src/viz/client/locales/*.json`) maintained by scripts/i18n.mjs:
  * en.json is the source of truth, an EMPTY target value means "awaiting
  * translation" (blanked by the pre-commit hook when its EN source changed,
- * filled by the CI i18n workflow), and a NON-empty translation must carry
+ * filled by the CI i18n job), and a NON-empty translation must carry
  * exactly the interpolations of its EN source or i18next renders literal
  * `{{count}}` to the user. These are the invariants that pipeline depends on,
  * so they are enforced where every other catalog rule is.

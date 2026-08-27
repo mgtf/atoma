@@ -23,7 +23,12 @@
  *   translate [--dry]  translate blank fr values with gpt-5.6-sol. Locally,
  *                      Codex CLI reuses `codex login` (ChatGPT Plus/Pro). In
  *                      CI, the OpenAI API uses OPENAI_API_KEY. Honours every
- *                      non-blank value verbatim; never invents keys.
+ *                      non-blank value verbatim; never invents keys. Writes
+ *                      each target catalog as its locale finishes, so a
+ *                      later locale's failure never discards an earlier
+ *                      locale's successes (the 2026-08-27 incident: a zh
+ *                      batch failure left ten `{}` catalogs uncommitted);
+ *                      exit 1 when any locale failed or was rejected.
  *   invalidate-staged  pre-commit helper. When a staged en.json has VALUE
  *                      changes (not additions), blank the same target keys
  *                      and re-stage it, so the next translate run re-does
@@ -489,13 +494,14 @@ async function runTranslate() {
 
   const configuredBatch = Number.parseInt(process.env.ATOMA_I18N_BATCH || '', 10);
   const BATCH = Number.isInteger(configuredBatch) && configuredBatch > 0 ? configuredBatch : 120;
-  let rejected = false;
+  let failed = false;
   for (const target of work) {
     if (target.missing.length === 0) continue;
     const translated = {};
     let inTok = 0;
     let outTok = 0;
     let servedModel = '';
+    let localeFailed = false;
     const systemPrompt = buildSystemPrompt(target.locale);
     process.stdout.write(`  ${target.locale} (${languageName(target.locale)}): ${target.missing.length} key(s)\n`);
     for (let i = 0; i < target.missing.length; i += BATCH) {
@@ -504,14 +510,23 @@ async function runTranslate() {
       const totalBatches = Math.ceil(target.missing.length / BATCH);
       process.stdout.write(`    batch ${batchNum}/${totalBatches} (${slice.length} keys)… `);
       const t0 = Date.now();
-      const { text, usage, model } = await call(systemPrompt, { items: slice.map((key) => ({ key, en: en[key] })) });
+      let result;
+      try {
+        result = await call(systemPrompt, { items: slice.map((key) => ({ key, en: en[key] })) });
+      } catch (error) {
+        process.stderr.write(`\nERROR ${target.locale} batch ${batchNum}: ${error.message}\n`);
+        localeFailed = true;
+        break;
+      }
+      const { text, usage, model } = result;
       servedModel = model;
       let parsed;
       try {
         parsed = extractJson(text);
       } catch (error) {
         process.stderr.write(`\nERROR parsing ${target.locale} batch ${batchNum}: ${error.message}\nRaw: ${text.slice(0, 400)}\n`);
-        process.exit(1);
+        localeFailed = true;
+        break;
       }
       let got = 0;
       for (const key of slice) {
@@ -527,13 +542,16 @@ async function runTranslate() {
       outTok += usage?.output_tokens || 0;
       process.stdout.write(`${got}/${slice.length} in ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
     }
+    // Write what this locale earned even when it failed: successes are never
+    // held hostage to a sibling locale's error, and the exit code still turns
+    // the run red so the remaining blanks are retried.
     const next = { ...target.catalog, ...translated };
     writeCatalog(targetPath(target.locale), next);
     process.stdout.write(`  wrote ${Object.keys(translated).length}/${target.missing.length} to ${targetPath(target.locale)} (model ${servedModel}, tokens ${inTok} in / ${outTok} out)\n`);
-    if (Object.keys(translated).length !== target.missing.length) rejected = true;
+    if (localeFailed || Object.keys(translated).length !== target.missing.length) failed = true;
   }
-  if (rejected) {
-    process.stderr.write('ERROR: one or more translations were rejected or missing; rerun translate for the remaining blanks.\n');
+  if (failed) {
+    process.stderr.write('ERROR: one or more locales are incomplete; completed catalogs were still written — rerun translate for the remaining blanks.\n');
     process.exitCode = 1;
   }
 }

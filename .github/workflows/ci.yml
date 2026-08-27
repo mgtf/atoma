@@ -30,6 +30,65 @@ jobs:
       - run: npm ci
       - run: npm run release:check
 
+  i18n:
+    name: Translate blank locale values
+    # The auto-translation half of the locale pipeline (the manual half is the
+    # pre-commit hook that blanks stale target values when en.json changes).
+    # A STEP of this CI run, not a second workflow: one runner, one queue, one
+    # place to read the pipeline's health. `translate` isolates locales, so a
+    # failing language still commits its siblings' successes; the job then
+    # stays red and the next push retries only the remaining blanks.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      # Job-level: this job commits translations; the rest of CI stays read-only.
+      contents: write
+    concurrency:
+      # Run-level group instead of the workflow's branch group: two pushes to
+      # main may safely overlap elsewhere, but never two translation commits.
+      group: i18n-translate-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # invalidate-staged compares against HEAD, and translate must see the
+          # locale files as committed.
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+
+      # No npm ci: the i18n script is dependency-free (node:fs, node:child_process).
+      - name: Blank placeholder-drifted values
+        run: node scripts/i18n.mjs fix-drift --apply
+
+      - name: Translate missing keys
+        env:
+          # GitHub cannot reuse a developer's personal ChatGPT Pro session.
+          # CI therefore uses the separately billed OpenAI API credential.
+          ATOMA_I18N_BACKEND: openai
+          ATOMA_I18N_CODEX_MODEL: gpt-5.6-sol
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/i18n.mjs translate
+
+      - name: Verify locale health
+        run: node scripts/i18n.mjs check
+
+      - name: Commit translated locale files
+        run: |
+          git config user.name "atoma-i18n-bot"
+          git config user.email "actions@github.com"
+          git add src/viz/client/locales
+          if git diff --cached --quiet; then
+            echo "No locale changes to commit."
+          else
+            git commit -m "chore(i18n): auto-translate missing locale values [skip ci]"
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
   worker:
     name: Fresh worker image
     needs: core

@@ -167,9 +167,12 @@ npm run i18n -- sync                # same, but the caller translates (no API ke
 The viz locale catalogs are JSON (`src/viz/client/locales/`); `en.json` is the
 source of truth and a blank or missing target value means "awaiting translation". A
 husky pre-commit hook (`.husky/pre-commit`) blanks FR values whose EN source
-changed and lints staged files; the CI `i18n` workflow translates the blanks
-on main and commits `[skip ci]`. Local translation reuses `codex login`
-(ChatGPT Plus/Pro); CI requires the separately billed `OPENAI_API_KEY`. The full contract is in
+changed and lints staged files; the CI `i18n` job (a step of the CI workflow,
+not a second one) translates the blanks on main and commits `[skip ci]`.
+Translation isolates locales — a failing language never discards its siblings'
+successes; the job stays red and the next push retries the remaining blanks.
+Local translation reuses `codex login` (ChatGPT Plus/Pro); CI requires the
+separately billed `OPENAI_API_KEY`. The full contract is in
 [src/viz](src/viz/AGENTS.md).
 
 ### Release contract
