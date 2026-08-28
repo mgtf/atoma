@@ -8,6 +8,7 @@ import {
 import type { PushNotifier, PushRenderer } from '../src/viz/push/notifier.js';
 import {
   NotificationRouter,
+  cachedAudienceDirectory,
   resolveAudience,
   type AudienceDirectory,
 } from '../src/viz/push/router.js';
@@ -230,6 +231,44 @@ describe('resolveAudience', () => {
         directory
       )
     ).toEqual([]);
+  });
+});
+
+describe('cachedAudienceDirectory', () => {
+  it('answers each distinct read once and keys membersOf on the org set', () => {
+    const counts = { owners: 0, admins: 0, everyone: 0, members: 0 };
+    const cached = cachedAudienceDirectory({
+      ownersOf: (orgId) => {
+        counts.owners += 1;
+        return [`owner-of-${orgId}`];
+      },
+      platformAdmins: () => {
+        counts.admins += 1;
+        return ['admin-1'];
+      },
+      allPrincipals: () => {
+        counts.everyone += 1;
+        return ['everyone-1'];
+      },
+      membersOf: (orgIds) => {
+        counts.members += 1;
+        return orgIds.map((orgId) => `member-of-${orgId}`);
+      },
+    });
+    // The tray read replays resolveAudience over a page of rows: every repeat
+    // must come from the cache, and distinct arguments must stay distinct.
+    expect(cached.ownersOf('org-1')).toEqual(['owner-of-org-1']);
+    expect(cached.ownersOf('org-1')).toEqual(['owner-of-org-1']);
+    expect(cached.ownersOf('org-2')).toEqual(['owner-of-org-2']);
+    expect(cached.platformAdmins()).toEqual(['admin-1']);
+    expect(cached.platformAdmins()).toEqual(['admin-1']);
+    expect(cached.allPrincipals()).toEqual(['everyone-1']);
+    expect(cached.allPrincipals()).toEqual(['everyone-1']);
+    expect(cached.membersOf(['org-1', 'org-2'])).toEqual(['member-of-org-1', 'member-of-org-2']);
+    // Same set, either spelling and either order: one underlying read.
+    expect(cached.membersOf(['org-2', 'org-1'])).toEqual(['member-of-org-1', 'member-of-org-2']);
+    expect(cached.membersOf(['org-3'])).toEqual(['member-of-org-3']);
+    expect(counts).toEqual({ owners: 2, admins: 1, everyone: 1, members: 2 });
   });
 });
 

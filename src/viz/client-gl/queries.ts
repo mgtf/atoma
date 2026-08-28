@@ -215,6 +215,27 @@ export function useAdminEventsPages(
 }
 
 /**
+ * The viewer's notification tray, paged like the journal. Fetched only while
+ * the menu is open; the first page re-polls on the journal's cadence so a tray
+ * left open tails new arrivals. The locale rides the query key because the
+ * server renders the copy — switching language is a different query, not a
+ * client-side re-render.
+ */
+export function useNotificationsPages(active: boolean, locale: string) {
+  return useInfiniteQuery({
+    queryKey: ['viz', 'notifications', locale],
+    queryFn: ({ pageParam }) =>
+      api.notifications({ limit: 30, before: pageParam, locale }),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.nextBefore ?? undefined,
+    enabled: active,
+    staleTime: 10_000,
+    refetchInterval: (query) =>
+      active && (query.state.data?.pages.length ?? 1) === 1 ? 10_000 : false,
+  });
+}
+
+/**
  * The sentinel's own screen: rule table, live coverage, findings. Polled at
  * the runs cadence rather than the journal's, because half of it IS live
  * state — which runs are in flight right now.

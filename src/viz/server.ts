@@ -2434,6 +2434,20 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
       // every organisation once per row, and dies with the response so a
       // membership change is visible on the next read.
       const directory = cachedAudienceDirectory(audienceDirectory(AUTH.store!));
+      // The event's own scope ids ride each row so the client can LINK a
+      // notification to its subject. `runId` is a PROJECT-RUN id, which the
+      // Runs view cannot address, so the trace is resolved here against the
+      // org-scoped projects store — the same fact the audience member would
+      // get by opening the project. Tolerant like every journal reader: a
+      // foreign or operator-shaped id resolves to null, never to a crash.
+      const traceIdFor = (event: { orgId: string | null; runId: string | null }): string | null => {
+        if (!event.orgId || !event.runId || !PROJECTS_RUNTIME) return null;
+        try {
+          return PROJECTS_RUNTIME.store.getProjectRun(event.orgId, event.runId)?.traceId ?? null;
+        } catch {
+          return null;
+        }
+      };
       const notifications: {
         seq: number;
         at: string;
@@ -2441,6 +2455,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
         severity: string;
         title: string;
         body: string;
+        orgId: string | null;
+        projectId: string | null;
+        runId: string | null;
+        traceId: string | null;
       }[] = [];
       // Routed kinds are sparse in the journal, so the page FILLS by scanning:
       // filtering a fixed page would thin it (the journal filter rule). The
@@ -2472,6 +2490,10 @@ async function handle(req: import('node:http').IncomingMessage, res: import('nod
             severity: event.severity,
             title: copy.title,
             body: copy.body,
+            orgId: event.orgId,
+            projectId: event.projectId,
+            runId: event.runId,
+            traceId: traceIdFor(event),
           });
           if (notifications.length >= limit) break;
         }

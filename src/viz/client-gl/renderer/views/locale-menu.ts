@@ -23,14 +23,20 @@ export interface LocaleMenuLayout {
   readonly height: number;
 }
 
-/** Anchor beside a rail control, opening away from the nearest viewport edge. */
-export function localeMenuLayout(
+/**
+ * Where a panel of the given size sits beside its anchor: opening away from
+ * the nearest viewport edge, below the control when the panel fits there, and
+ * always clamped fully on screen. ONE resolution for every chrome menu that
+ * anchors to a control living in either the header band or the focus rail —
+ * the locale picker and the notification tray must not each reinvent it.
+ */
+export function anchoredMenuPosition(
   viewportWidth: number,
   viewportHeight: number,
-  anchor: LocaleMenuAnchor
-): LocaleMenuLayout {
-  const width = Math.min(PANEL_WIDTH, Math.max(180, viewportWidth - EDGE * 2));
-  const height = SUPPORTED_LOCALES.length * ROW_HEIGHT + PANEL_PAD * 2;
+  anchor: LocaleMenuAnchor,
+  width: number,
+  height: number
+): { x: number; y: number } {
   const opensRight = anchor.x + anchor.width / 2 < viewportWidth / 2;
   const preferredX = opensRight
     ? anchor.x + anchor.width + ANCHOR_GAP
@@ -42,6 +48,19 @@ export function localeMenuLayout(
   return {
     x: Math.min(Math.max(EDGE, preferredX), Math.max(EDGE, viewportWidth - width - EDGE)),
     y: Math.min(Math.max(EDGE, preferredY), Math.max(EDGE, viewportHeight - height - EDGE)),
+  };
+}
+
+/** Anchor beside a rail control, opening away from the nearest viewport edge. */
+export function localeMenuLayout(
+  viewportWidth: number,
+  viewportHeight: number,
+  anchor: LocaleMenuAnchor
+): LocaleMenuLayout {
+  const width = Math.min(PANEL_WIDTH, Math.max(180, viewportWidth - EDGE * 2));
+  const height = SUPPORTED_LOCALES.length * ROW_HEIGHT + PANEL_PAD * 2;
+  return {
+    ...anchoredMenuPosition(viewportWidth, viewportHeight, anchor, width, height),
     width,
     height,
   };

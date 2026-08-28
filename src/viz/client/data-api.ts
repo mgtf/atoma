@@ -14,6 +14,7 @@ import type {
   VizAnnouncementTexts,
   VizAdminOrganisation,
   VizLedgerEvent,
+  VizNotificationPage,
   VizPlatformEventPage,
   VizSentinelSnapshot,
   VizGitHubInstallation,
@@ -68,6 +69,17 @@ export const api = {
       `/api/projects/${encodeURIComponent(projectId)}/runs`,
       body
     ),
+  // The viewer's own tray, paged like the journal: `before` is the exclusive
+  // `seq` cursor from the previous page. The copy comes back rendered in
+  // `locale`, so a language switch is a new query, not a client re-render.
+  notifications: (query: { before?: number | null; limit?: number; locale: string }) => {
+    const params = new URLSearchParams({
+      limit: String(query.limit ?? 30),
+      locale: query.locale,
+    });
+    if (query.before) params.set('before', String(query.before));
+    return fetchJson<VizNotificationPage>(`/api/notifications?${params.toString()}`);
+  },
   pushConfig: () => fetchJson<{ enabled: boolean; publicKey?: string }>('/api/push/config'),
   subscribePush: (body: {
     endpoint: string;

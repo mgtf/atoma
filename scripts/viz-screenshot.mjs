@@ -25,6 +25,8 @@
  *                        them. Without it: the ungated developer rendering.
  *   --select-first       Click the first project row after arrival (the run
  *                        list + run form state).
+ *   --notifications      Open the header bell's notification tray after
+ *                        arrival (gated only: the tray exists with an account).
  *   --scroll-end         Scroll the Settings body form to its end before
  *                        capture (org directory below the keys).
  *   --camera <mode>      Camera pose after navigation: focus (default) or
@@ -58,6 +60,7 @@ const view = arg('--view', 'Projects');
 const authed = has('--auth');
 const tuning = has('--tuning');
 const selectFirst = has('--select-first');
+const notifications = has('--notifications');
 const scrollEnd = has('--scroll-end');
 const cameraMode = arg('--camera', 'focus');
 if (cameraMode !== 'overview' && cameraMode !== 'focus') {
@@ -138,6 +141,86 @@ function gatedStubs() {
       activeOrganisation: { id: 'org-a', name: 'Analytical Engines', role: 'org:owner' },
       organisations: [{ id: 'org-a', name: 'Analytical Engines', role: 'org:owner' }],
       providers: [{ id: 'github', label: 'GitHub' }],
+    },
+    // The tray as the SERVER would answer it: copy pre-rendered per row.
+    '/api/notifications': {
+      notifications: [
+        {
+          seq: 41,
+          at: new Date(Date.now() - 4 * 60_000).toISOString(),
+          kind: 'platform.announcement',
+          severity: 'info',
+          title: 'Maintenance window tonight',
+          // A newline plus enough prose to prove the measured wrap AND the
+          // ellipsis past the line cap.
+          body: 'Runs pause between 22:00 and 23:00 UTC while storage moves.\nDrafts are kept, live runs resume where they stopped, and no publication is retried without an operator looking at it first — this is the sentence that should end in an ellipsis.',
+          orgId: null,
+          projectId: null,
+          runId: null,
+          traceId: null,
+        },
+        {
+          seq: 40,
+          at: new Date(Date.now() - 38 * 60_000).toISOString(),
+          kind: 'run.finished',
+          severity: 'info',
+          title: 'Atoma — run delivered',
+          body: 'Build a churn dashboard from the August export',
+          orgId: 'org-a',
+          projectId: 'proj-1',
+          runId: 'a2b8b7e4-4c8e-4e2a-9f2d-2f7f0c9d1e21',
+          traceId: 'trace-demo-1',
+        },
+        {
+          seq: 38,
+          at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+          kind: 'publication.failed',
+          severity: 'error',
+          title: 'Atoma — publication failed',
+          body: 'The run delivered but could not be published (churn-dashboard). A retry is available.',
+          orgId: 'org-a',
+          projectId: 'proj-1',
+          runId: null,
+          traceId: null,
+        },
+        {
+          seq: 33,
+          at: new Date(Date.now() - 26 * 3_600_000).toISOString(),
+          kind: 'org.member_joined',
+          severity: 'info',
+          title: 'Atoma — member joined',
+          body: 'Grace Hopper joined Analytical Engines as org:member',
+          orgId: 'org-a',
+          projectId: null,
+          runId: null,
+          traceId: null,
+        },
+        {
+          seq: 29,
+          at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+          kind: 'github.installation_status',
+          severity: 'warning',
+          title: 'Atoma — GitHub installation',
+          body: 'Your GitHub installation is now suspended',
+          orgId: 'org-a',
+          projectId: null,
+          runId: null,
+          traceId: null,
+        },
+        {
+          seq: 21,
+          at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+          kind: 'run.finished',
+          severity: 'info',
+          title: 'Atoma — run failed',
+          body: 'Wire the invoicing webhook to the ledger',
+          orgId: 'org-a',
+          projectId: 'proj-1',
+          runId: 'e9d3c2a1-7b6f-4d5e-8a9b-0c1d2e3f4a5b',
+          traceId: 'trace-demo-2',
+        },
+      ],
+      nextBefore: 12,
     },
     '/api/org': {
       id: 'org-a',
@@ -574,9 +657,26 @@ try {
       await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
     }
 
+    if (notifications) {
+      if (!authed) throw new Error('--notifications needs --auth: the bell exists with an account');
+      const bell = await page.evaluate(() => {
+        const handle = globalThis.__ATOMA_GPU__;
+        const target = handle?.hitTargets().find((entry) => entry.id === 'notifications.menu.toggle');
+        if (!target || !handle.projectRendererPoint) return null;
+        return handle.projectRendererPoint(
+          target.x + target.width / 2,
+          target.y + target.height / 2
+        );
+      });
+      if (!bell) throw new Error('--notifications: no bell on screen');
+      await page.mouse.click(bell.x, bell.y);
+      // One beat for the stubbed fetch and the overlay rebuild.
+      await page.evaluate(() => new Promise((resolveWait) => setTimeout(resolveWait, 800)));
+    }
+
     await mkdir(dirname(outPath), { recursive: true });
     await page.screenshot({ path: outPath });
-    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}, ${width}x${height})`);
+    console.log(`viz screenshot: ${outPath} (${view}, ${authed ? 'gated' : 'ungated'}, camera ${cameraMode}${selectFirst ? ', first project selected' : ''}${notifications ? ', notification tray open' : ''}, ${width}x${height})`);
   } finally {
     await browser.close();
   }

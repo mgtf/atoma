@@ -145,6 +145,7 @@ export function DomBridge({
   const selectedDocsTheme = useGpuStore((state) => state.selectedDocsTheme);
   const accountMenuOpen = useGpuStore((state) => state.accountMenuOpen);
   const localeMenuOpen = useGpuStore((state) => state.localeMenuOpen);
+  const notificationsMenuOpen = useGpuStore((state) => state.notificationsMenuOpen);
   const focusedInput = useGpuStore((state) => state.focusedInput);
   const runPickerActiveIndex = useGpuStore((state) => state.runPickerActiveIndex);
   const search = useGpuStore((state) => state.search);
@@ -180,7 +181,7 @@ export function DomBridge({
   // above the canvas. Forms stay mounted (store-backed values stay on screen),
   // `inert` takes them out of click/focus/a11y, and `.gpu-overlays-veiled`
   // dims them and clips the menu rectangle so fields cannot paint through it.
-  const overlaysInert = accountMenuOpen || localeMenuOpen;
+  const overlaysInert = accountMenuOpen || localeMenuOpen || notificationsMenuOpen;
 
   if (!entered) {
     return (

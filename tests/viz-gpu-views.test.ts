@@ -11,6 +11,7 @@ import type {
   RegistryType,
   SkillSummary,
   VizEvent,
+  VizNotification,
   VizProject,
   VizProjectRun,
   VizRun,
@@ -69,6 +70,14 @@ import {
   drawLocaleMenu,
   localeMenuLayout,
 } from '../src/viz/client-gl/renderer/views/locale-menu.js';
+import {
+  drawNotificationsBell,
+  drawNotificationsMenu,
+  notificationsMenuLayout,
+  notificationTarget,
+  wrapNotificationBody,
+  NOTIFICATION_BODY_MAX_LINES,
+} from '../src/viz/client-gl/renderer/views/notifications-menu.js';
 import { LOCALE_NAMES, SUPPORTED_LOCALES } from '../src/contracts/locales.js';
 import {
   drawSettings,
@@ -605,6 +614,7 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     entered: true,
     accountMenuOpen: false,
     localeMenuOpen: false,
+    notificationsMenuOpen: false,
     tuningPanelOpen: false,
     announcementResetSignal: 0,
     enter: noop,
@@ -614,6 +624,8 @@ function makeState(overrides: Partial<GpuUiState> = {}): GpuUiState {
     closeAccountMenu: noop,
     toggleLocaleMenu: noop,
     closeLocaleMenu: noop,
+    toggleNotificationsMenu: noop,
+    closeNotificationsMenu: noop,
     toggleTuningPanel: noop,
     activateView: noop,
     setView: noop,
@@ -663,6 +675,10 @@ function makeData(overrides: Partial<GpuDataSnapshot> = {}): GpuDataSnapshot {
     adminEvents: [],
     adminEventsHasMore: false,
     adminEventsLoading: false,
+    notifications: [],
+    notificationsHasMore: false,
+    notificationsLoading: false,
+    notificationsError: false,
     adminLedger: [],
     adminSentinel: null,
     adminInvitation: null,
@@ -2874,12 +2890,15 @@ describe('GPU account menu', () => {
 
   it('clips DOM overlays to the same panel rect the account menu draws', () => {
     const localeAnchor = { x: 1200, y: 8, width: 42, height: 32 };
+    const measure = (value: string, options?: { size?: number }) =>
+      textStub(value, options).width;
     expect(
       overlayMenuClip(
         makeSnapshot({ accountMenuOpen: true }, { auth }),
         1280,
         720,
-        { locale: localeAnchor }
+        { locale: localeAnchor },
+        measure
       )
     ).toEqual(accountMenuLayout(1280, auth));
     expect(
@@ -2887,7 +2906,8 @@ describe('GPU account menu', () => {
         makeSnapshot({ accountMenuOpen: false, localeMenuOpen: false }, { auth }),
         1280,
         720,
-        { locale: localeAnchor }
+        { locale: localeAnchor },
+        measure
       )
     ).toBeNull();
   });
@@ -2961,6 +2981,337 @@ describe('GPU locale menu', () => {
       SUPPORTED_LOCALES.map((locale) => LOCALE_NAMES[locale])
     );
     expect(open.buttons.find((button) => button.id === 'locale.select.fr')?.active).toBe(true);
+  });
+});
+
+describe('GPU notifications menu', () => {
+  const auth = makeAuth();
+  const headerAnchor = { x: 1188, y: 16, width: 36, height: 32 };
+  const railAnchor = { x: 16, y: 590, width: 42, height: 26 };
+  // The recording ctx's own advance model, so pure-layout assertions and the
+  // drawn labels read one geometry.
+  const measure = (value: string, options?: { size?: number }) =>
+    textStub(value, options).width;
+
+  function makeNotification(seq: number, overrides: Partial<VizNotification> = {}): VizNotification {
+    return {
+      seq,
+      at: '2026-08-14T10:00:00.000Z',
+      kind: 'run.finished',
+      severity: 'info',
+      title: `Atoma — run delivered ${seq}`,
+      body: `Goal number ${seq}`,
+      orgId: null,
+      projectId: null,
+      runId: null,
+      traceId: null,
+      ...overrides,
+    };
+  }
+
+  describe('wrapNotificationBody', () => {
+    // ~50 chars of size-10 copy per 300px line under the stub's advance model.
+    const width = 300;
+
+    it('keeps short copy on one line and honours an authored newline', () => {
+      expect(wrapNotificationBody('All good around ?', width, measure)).toEqual([
+        'All good around ?',
+      ]);
+      expect(
+        wrapNotificationBody('All good around ?\nI hope everyone is going well !', width, measure)
+      ).toEqual(['All good around ?', 'I hope everyone is going well !']);
+    });
+
+    it('wraps long prose by measure and ends over-long copy with an ellipsis', () => {
+      const words = Array.from({ length: 60 }, (_, index) => `word${index}`).join(' ');
+      const lines = wrapNotificationBody(words, width, measure);
+      expect(lines).toHaveLength(NOTIFICATION_BODY_MAX_LINES);
+      for (const line of lines) expect(measure(line, { size: 10 })).toBeLessThanOrEqual(width);
+      expect(lines[lines.length - 1]!.endsWith('…')).toBe(true);
+      // Nothing invented: every rendered word came from the body.
+      for (const word of lines.join(' ').replace('…', '').split(/\s+/)) {
+        if (word) expect(words).toContain(word.replace('…', ''));
+      }
+    });
+
+    it('breaks a word wider than the whole column instead of overflowing it', () => {
+      const token = 'x'.repeat(200);
+      const lines = wrapNotificationBody(token, width, measure);
+      expect(lines.length).toBeGreaterThan(1);
+      for (const line of lines) expect(measure(line, { size: 10 })).toBeLessThanOrEqual(width);
+    });
+
+    it('adds no ellipsis when everything fits inside the cap', () => {
+      const lines = wrapNotificationBody('one\ntwo\nthree', width, measure);
+      expect(lines).toEqual(['one', 'two', 'three']);
+    });
+  });
+
+  it('stays closed until the bell asks for it, and needs an account', () => {
+    const closed = createRecordingCtx();
+    expect(
+      drawNotificationsMenu(
+        closed,
+        makeSnapshot({ notificationsMenuOpen: false }, { auth }),
+        1280,
+        720,
+        headerAnchor,
+        0
+      )
+    ).toBeNull();
+    expect(closed.panels).toHaveLength(0);
+
+    const noViewer = createRecordingCtx();
+    expect(
+      drawNotificationsMenu(
+        noViewer,
+        makeSnapshot({ notificationsMenuOpen: true }),
+        1280,
+        720,
+        headerAnchor,
+        0
+      )
+    ).toBeNull();
+    expect(noViewer.panels).toHaveLength(0);
+  });
+
+  it('renders rendered copy newest first, with the exact instant in a bubble', () => {
+    const ctx = createRecordingCtx();
+    const rows = [makeNotification(9), makeNotification(8, { severity: 'warning' })];
+    const region = drawNotificationsMenu(
+      ctx,
+      makeSnapshot(
+        { notificationsMenuOpen: true },
+        { auth, notifications: rows }
+      ),
+      1280,
+      720,
+      headerAnchor,
+      0
+    );
+    expect(region).not.toBeNull();
+    expect(ctx.metrics.visibleLabels).toContain('NOTIFICATIONS');
+    expect(ctx.metrics.visibleLabels).toContain('Atoma — run delivered 9');
+    expect(ctx.metrics.visibleLabels).toContain('Goal number 8');
+    // The relative stamp is lossy by design: the exact instant rides a bubble.
+    expect(ctx.tooltips.length).toBe(2);
+    // No foot: nothing older to offer, nothing loading, no failure.
+    expect(ctx.buttons.map((button) => button.id)).not.toContain('notifications.more');
+    // Everything fits: the wheel has nowhere to go.
+    expect(region!.scrollMax).toBe(0);
+  });
+
+  it('grows a row with its wrapped body and draws every wrapped line', () => {
+    const twoLine = 'All good around ?\nI hope everyone is going well !';
+    const data = {
+      notifications: [makeNotification(9, { body: twoLine }), makeNotification(8)],
+      notificationsHasMore: false,
+      notificationsLoading: false,
+      notificationsError: false,
+    };
+    const layout = notificationsMenuLayout(1280, 720, headerAnchor, data, measure);
+    expect(layout.rows[0]!.lines).toHaveLength(2);
+    expect(layout.rows[1]!.lines).toHaveLength(1);
+    expect(layout.rows[0]!.height).toBeGreaterThan(layout.rows[1]!.height);
+    // Offsets stack: the second row starts exactly where the first ends.
+    expect(layout.rows[1]!.y).toBe(layout.rows[0]!.height);
+    expect(layout.contentHeight).toBe(layout.rows[0]!.height + layout.rows[1]!.height);
+
+    const ctx = createRecordingCtx();
+    drawNotificationsMenu(
+      ctx,
+      makeSnapshot({ notificationsMenuOpen: true }, { auth, ...data }),
+      1280,
+      720,
+      headerAnchor,
+      0
+    );
+    expect(ctx.metrics.visibleLabels).toContain('All good around ?');
+    expect(ctx.metrics.visibleLabels).toContain('I hope everyone is going well !');
+  });
+
+  it('says when the tray is empty, and when it could not be read', () => {
+    const empty = createRecordingCtx();
+    drawNotificationsMenu(
+      empty,
+      makeSnapshot({ notificationsMenuOpen: true }, { auth }),
+      1280,
+      720,
+      headerAnchor,
+      0
+    );
+    expect(empty.metrics.visibleLabels).toContain('Nothing has been sent to you yet.');
+
+    const failed = createRecordingCtx();
+    drawNotificationsMenu(
+      failed,
+      makeSnapshot(
+        { notificationsMenuOpen: true },
+        { auth, notificationsError: true }
+      ),
+      1280,
+      720,
+      headerAnchor,
+      0
+    );
+    expect(failed.metrics.visibleLabels).toContain('Notifications could not be loaded.');
+  });
+
+  it('offers the older page by button and declares a scroll max past the viewport', () => {
+    const ctx = createRecordingCtx();
+    const activated: string[] = [];
+    const rows = Array.from({ length: 40 }, (_, index) => makeNotification(100 - index));
+    const snapshot = makeSnapshot(
+      { notificationsMenuOpen: true },
+      { auth, notifications: rows, notificationsHasMore: true }
+    );
+    snapshot.onActivate = (id) => activated.push(id);
+    const region = drawNotificationsMenu(ctx, snapshot, 1280, 720, headerAnchor, 0);
+    // 40 rows exceed the bounded list viewport, so the wheel has real range.
+    expect(region!.scrollMax).toBeGreaterThan(0);
+    const more = ctx.buttons.find((button) => button.id === 'notifications.more');
+    expect(more).toBeDefined();
+    more?.onActivate?.(more.id);
+    expect(activated).toEqual(['notifications.more']);
+    // A fetch in flight replaces the button with the loading line.
+    const loading = createRecordingCtx();
+    drawNotificationsMenu(
+      loading,
+      makeSnapshot(
+        { notificationsMenuOpen: true },
+        { auth, notifications: rows, notificationsHasMore: true, notificationsLoading: true }
+      ),
+      1280,
+      720,
+      headerAnchor,
+      0
+    );
+    expect(loading.buttons.map((button) => button.id)).not.toContain('notifications.more');
+    expect(loading.metrics.visibleLabels).toContain('Loading notifications…');
+  });
+
+  describe('notificationTarget', () => {
+    // makeAuth's active organisation is org-1.
+    const member = { platformAdmin: false, activeOrgId: 'org-1' };
+    const admin = { platformAdmin: true, activeOrgId: 'org-1' };
+
+    it('links a run to its trace, scoped to the active organisation', () => {
+      const run = makeNotification(9, { orgId: 'org-1', projectId: 'p1', traceId: 'trace-9' });
+      expect(notificationTarget(run, member)).toBe('notifications.go.run.trace-9');
+      // Another organisation's trace is unreachable for a member…
+      const foreign = makeNotification(9, { orgId: 'org-2', projectId: 'p1', traceId: 'trace-9' });
+      expect(notificationTarget(foreign, member)).toBeNull();
+      // …while the platform admin's run corpus spans every organisation.
+      expect(notificationTarget(foreign, admin)).toBe('notifications.go.run.trace-9');
+    });
+
+    it('falls back to the project, then to the role-scoped surfaces', () => {
+      const publication = makeNotification(8, {
+        kind: 'publication.failed',
+        orgId: 'org-1',
+        projectId: 'proj-7',
+      });
+      expect(notificationTarget(publication, member)).toBe('notifications.go.project.proj-7');
+      const joined = makeNotification(7, { kind: 'org.member_joined', orgId: 'org-1' });
+      expect(notificationTarget(joined, member)).toBe('notifications.go.view.settings');
+      const installation = makeNotification(6, {
+        kind: 'github.installation_status',
+        orgId: 'org-1',
+      });
+      expect(notificationTarget(installation, member)).toBe('notifications.go.view.projects');
+    });
+
+    it('gives an announcement no destination for members, and the journal to admins', () => {
+      const announcement = makeNotification(5, { kind: 'platform.announcement' });
+      expect(notificationTarget(announcement, member)).toBeNull();
+      expect(notificationTarget(announcement, admin)).toBe('notifications.go.view.journal');
+      const granted = makeNotification(4, { kind: 'admin.granted' });
+      expect(notificationTarget(granted, admin)).toBe('notifications.go.view.journal');
+    });
+  });
+
+  it('draws a link region over exactly the rows that lead somewhere', () => {
+    const ctx = createRecordingCtx();
+    const activated: string[] = [];
+    const rows = [
+      makeNotification(9, { orgId: 'org-1', projectId: 'p1', traceId: 'trace-9' }),
+      makeNotification(8, { kind: 'platform.announcement', title: 'Hello world!' }),
+    ];
+    const snapshot = makeSnapshot(
+      { notificationsMenuOpen: true },
+      { auth, notifications: rows }
+    );
+    snapshot.onActivate = (id) => activated.push(id);
+    drawNotificationsMenu(ctx, snapshot, 1280, 720, headerAnchor, 0);
+    expect(ctx.links.map((link) => link.id)).toEqual(['notifications.go.run.trace-9']);
+    // The accessible name is the title the push carried.
+    expect(ctx.links[0]!.label).toBe('Atoma — run delivered 9');
+    ctx.links[0]!.onActivate(ctx.links[0]!.id);
+    expect(activated).toEqual(['notifications.go.run.trace-9']);
+  });
+
+  it('opens down from the header bell and up beside the focus rail bell', () => {
+    const data = {
+      notifications: [makeNotification(3), makeNotification(2), makeNotification(1)],
+      notificationsHasMore: false,
+      notificationsLoading: false,
+      notificationsError: false,
+    };
+    const header = notificationsMenuLayout(1280, 720, headerAnchor, data, measure);
+    const rail = notificationsMenuLayout(1280, 720, railAnchor, data, measure);
+    expect(header.y).toBeGreaterThan(headerAnchor.y);
+    expect(header.x + header.width).toBeLessThanOrEqual(1280);
+    expect(rail.y + rail.height).toBeLessThan(railAnchor.y);
+    expect(rail.x).toBeGreaterThan(railAnchor.x);
+  });
+
+  it('clips DOM overlays to the same panel rect the tray draws', () => {
+    const localeAnchor = { x: 1140, y: 8, width: 42, height: 32 };
+    const snapshot = makeSnapshot(
+      { notificationsMenuOpen: true },
+      { auth, notifications: [makeNotification(3)] }
+    );
+    const clip = overlayMenuClip(
+      snapshot,
+      1280,
+      720,
+      { locale: localeAnchor, notifications: headerAnchor },
+      measure
+    );
+    const layout = notificationsMenuLayout(1280, 720, headerAnchor, snapshot.data, measure);
+    expect(clip).toMatchObject({
+      x: layout.x,
+      y: layout.y,
+      width: layout.width,
+      height: layout.height,
+    });
+    // Without the anchor (signed out: no bell) the open flag clips nothing.
+    expect(
+      overlayMenuClip(snapshot, 1280, 720, { locale: localeAnchor }, measure)
+    ).toBeNull();
+  });
+
+  it('draws the bell as one button whose accessible name is translated', () => {
+    const ctx = createRecordingCtx();
+    const snapshot = makeSnapshot({ notificationsMenuOpen: true }, { auth });
+    drawNotificationsBell(ctx, snapshot, 1188, 16, 36, 32);
+    const bell = ctx.metrics.hitTargets.find(
+      (target) => target.id === 'notifications.menu.toggle'
+    );
+    expect(bell).toBeDefined();
+    expect(bell!.label).toBe('Notifications');
+    expect(ctx.buttons.find((b) => b.id === 'notifications.menu.toggle')?.active).toBe(true);
+  });
+
+  it('stacks the focus rail bell between the locale control and the profile orb', () => {
+    const layout = focusRailChromeLayout(GPU_LAYOUT.sidebarWidth, 720, true);
+    expect(layout.bell).not.toBeNull();
+    expect(layout.profile).not.toBeNull();
+    // Bottom-up: fps, locale, bell, profile — the header order turned vertical.
+    expect(layout.bell!.y + layout.bell!.height).toBeLessThanOrEqual(layout.locale.y);
+    expect(layout.profile!.y + layout.profile!.height).toBeLessThanOrEqual(layout.bell!.y);
+    // Signed out there is no account and no tray to open.
+    expect(focusRailChromeLayout(GPU_LAYOUT.sidebarWidth, 720, false).bell).toBeNull();
   });
 });
 

@@ -79,6 +79,40 @@ export function resolveAudience(
   return [...recipients];
 }
 
+/**
+ * The same directory, with each read answered once. `resolveAudience` is
+ * priced for ONE event; the notification-tray read replays it over a page of
+ * journal rows, and the org-membership reads behind `ownersOf`/`membersOf`
+ * list every organisation per call. Caching is bounded by the request that
+ * owns the wrapper: build one per read, never share it across requests, or a
+ * membership change would be invisible until restart.
+ */
+export function cachedAudienceDirectory(inner: AudienceDirectory): AudienceDirectory {
+  const owners = new Map<string, readonly string[]>();
+  const members = new Map<string, readonly string[]>();
+  let admins: readonly string[] | null = null;
+  let everyone: readonly string[] | null = null;
+  return {
+    ownersOf: (orgId) => {
+      const cached = owners.get(orgId);
+      if (cached) return cached;
+      const resolved = inner.ownersOf(orgId);
+      owners.set(orgId, resolved);
+      return resolved;
+    },
+    platformAdmins: () => (admins ??= inner.platformAdmins()),
+    allPrincipals: () => (everyone ??= inner.allPrincipals()),
+    membersOf: (orgIds) => {
+      const key = [...orgIds].sort().join('|');
+      const cached = members.get(key);
+      if (cached) return cached;
+      const resolved = inner.membersOf(orgIds);
+      members.set(key, resolved);
+      return resolved;
+    },
+  };
+}
+
 export class NotificationRouter {
   private readonly notifier: PushNotifier;
   private readonly directory: AudienceDirectory;

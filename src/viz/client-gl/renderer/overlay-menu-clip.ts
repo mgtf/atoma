@@ -7,6 +7,12 @@ import {
   localeMenuLayout,
   type LocaleMenuAnchor,
 } from './views/locale-menu.js';
+import {
+  notificationsMenuLayout,
+  type NotificationMeasure,
+  type NotificationsMenuAnchor,
+  type NotificationsMenuData,
+} from './views/notifications-menu.js';
 
 /**
  * Extra hole around a Pixi overlay menu. DOM forms paint above the canvas, so
@@ -27,19 +33,41 @@ export interface OverlayMenuClipRect {
  */
 export function overlayMenuClip(
   snapshot: {
-    readonly data: { readonly auth?: AuthUiSnapshot | null };
-    readonly state: { readonly accountMenuOpen: boolean; readonly localeMenuOpen: boolean };
+    readonly data: { readonly auth?: AuthUiSnapshot | null } & NotificationsMenuData;
+    readonly state: {
+      readonly accountMenuOpen: boolean;
+      readonly localeMenuOpen: boolean;
+      readonly notificationsMenuOpen: boolean;
+    };
   },
   viewportWidth: number,
   viewportHeight: number,
   anchors: {
     readonly account?: AccountMenuAnchor;
     readonly locale: LocaleMenuAnchor;
-  }
+    readonly notifications?: NotificationsMenuAnchor;
+  },
+  /**
+   * The renderer's own text measure. The tray's rows wrap prose, so its panel
+   * height is a MEASURED fact — the hole must be cut from the same measure the
+   * draw used or the veil clips through the panel's last rows.
+   */
+  measure: NotificationMeasure
 ): OverlayMenuClipRect | null {
+  // The chrome menus are exclusive in the store, so order here is tie-breaking
+  // paranoia, not policy.
   const auth = snapshot.data.auth;
   if (auth && snapshot.state.accountMenuOpen) {
     return accountMenuLayout(viewportWidth, auth, anchors.account);
+  }
+  if (auth && snapshot.state.notificationsMenuOpen && anchors.notifications) {
+    return notificationsMenuLayout(
+      viewportWidth,
+      viewportHeight,
+      anchors.notifications,
+      snapshot.data,
+      measure
+    );
   }
   if (snapshot.state.localeMenuOpen) {
     return localeMenuLayout(viewportWidth, viewportHeight, anchors.locale);

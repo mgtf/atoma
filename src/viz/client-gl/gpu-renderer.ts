@@ -30,6 +30,7 @@ import type {
   VizAdminOrganisation,
   VizLedgerEvent,
   VizOrganisation,
+  VizNotification,
   VizPlatformEvent,
   VizSentinelSnapshot,
   VizGitHubInstallation,
@@ -152,6 +153,16 @@ export interface GpuDataSnapshot {
   adminEventsHasMore: boolean;
   /** A page is in flight: the list foot says so instead of offering it again. */
   adminEventsLoading: boolean;
+  /**
+   * The viewer's own notification tray, newest first — every page loaded so
+   * far, flattened, with the same three paging facts as the journal above.
+   * Its query error stays HERE rather than in the global `error`: a failed
+   * tray read shows inside the open menu, not as a banner over the view.
+   */
+  notifications: VizNotification[];
+  notificationsHasMore: boolean;
+  notificationsLoading: boolean;
+  notificationsError: boolean;
   /** The product ledger's tail — a SEPARATE journal, in its own view. */
   adminLedger: VizLedgerEvent[];
   /** Rule table, live coverage and findings for the Sentinel view. */
@@ -229,6 +240,8 @@ interface TextOptions {
 
 /** Diameter of the account orb in the overview header. */
 export const HEADER_ORB_SIZE = 34;
+/** Width of the notification bell control beside it. */
+export const HEADER_BELL_WIDTH = 36;
 /** Centred scale used by a hovered left-rail item. */
 export const NAV_HOVER_SCALE = 1.045;
 
@@ -395,6 +408,11 @@ import { drawWelcome } from './renderer/views/welcome.js';
 import { drawAccountMenu } from './renderer/views/account-menu.js';
 import { drawLocaleMenu, type LocaleMenuAnchor } from './renderer/views/locale-menu.js';
 import {
+  drawNotificationsBell,
+  drawNotificationsMenu,
+  type NotificationsMenuAnchor,
+} from './renderer/views/notifications-menu.js';
+import {
   overlayMenuClip,
   publishOverlayMenuClip,
 } from './renderer/overlay-menu-clip.js';
@@ -533,6 +551,15 @@ export class GpuRenderer {
   private currentEventIds = new Set<string>();
   private runPickerBounds: Rectangle | null = null;
   private runPickerScrollMax = 0;
+  /**
+   * The open notification tray's panel rect and scroll ceiling, for the wheel
+   * router. The OFFSET is renderer-owned like `detailScrollY` — an overlay's
+   * scroll is not identity, and a store write per wheel tick would rebuild
+   * React for motion only this class needs to see.
+   */
+  private notificationsBounds: Rectangle | null = null;
+  private notificationsScrollMax = 0;
+  private notificationsScrollY = 0;
   detailBounds: Rectangle | null = null;
   detailScrollY = 0;
   detailScrollMax = 0;
@@ -643,6 +670,29 @@ export class GpuRenderer {
         const delta = event.deltaY > 0 ? step : event.deltaY < 0 ? -step : 0;
         if (delta !== 0) {
           pinMarkTurnDegrees((markTurnDegrees() + delta + 360) % 360);
+        }
+        return;
+      }
+    }
+    if (this.snapshot.state.notificationsMenuOpen && this.notificationsBounds) {
+      const { x: localX, y: localY } = this.clientToRendererPosition(
+        event.clientX,
+        event.clientY
+      );
+      if (this.notificationsBounds.contains(localX, localY)) {
+        const next = Math.max(
+          0,
+          Math.min(this.notificationsScrollMax, this.notificationsScrollY + event.deltaY)
+        );
+        if (next !== this.notificationsScrollY) {
+          this.notificationsScrollY = next;
+          this.render(this.snapshot);
+        }
+        // The bottom of the tray asks for the older page, exactly the
+        // journal's gesture: announced through the activation channel, where
+        // the handler is idempotent against a fetch already in flight.
+        if (event.deltaY > 0 && next >= this.notificationsScrollMax) {
+          this.snapshot.onActivate('notifications.more');
         }
         return;
       }
@@ -1251,6 +1301,10 @@ export class GpuRenderer {
     this.currentEventIds = new Set();
     this.runPickerBounds = null;
     this.runPickerScrollMax = 0;
+    this.notificationsBounds = null;
+    this.notificationsScrollMax = 0;
+    // A closed tray forgets its place: reopening starts at the newest rows.
+    if (!snapshot.state.notificationsMenuOpen) this.notificationsScrollY = 0;
     this.turnSliderBounds = null;
     const nextDetailKey =
       snapshot.state.view === 'runs'
@@ -1532,20 +1586,56 @@ export class GpuRenderer {
     }
     drawAccountMenu(this, snapshot, width, layoutHeight, focusRail?.profile ?? undefined);
     const accountReserve = snapshot.data.auth ? HEADER_ORB_SIZE + 16 : 0;
+    const bellReserve = snapshot.data.auth ? HEADER_BELL_WIDTH + 8 : 0;
     const localeAnchor: LocaleMenuAnchor = snapshot.state.sceneCameraMode === 'focus' && focusRail
       ? focusRail.locale
       : {
-          x: width - 54 - accountReserve,
+          x: width - 54 - accountReserve - bellReserve,
           y: GPU_LAYOUT.headerHeight / 2 - 16,
           width: 42,
           height: 32,
         };
     drawLocaleMenu(this, snapshot, width, layoutHeight, localeAnchor);
+    // The tray anchors to the bell wherever the bell currently lives; the
+    // anchor exists only with an account, exactly like the control.
+    const notificationsAnchor: NotificationsMenuAnchor | undefined = snapshot.data.auth
+      ? snapshot.state.sceneCameraMode === 'focus' && focusRail
+        ? focusRail.bell ?? undefined
+        : {
+            x: width - accountReserve - HEADER_BELL_WIDTH - 4,
+            y: GPU_LAYOUT.headerHeight / 2 - 16,
+            width: HEADER_BELL_WIDTH,
+            height: 32,
+          }
+      : undefined;
+    if (notificationsAnchor) {
+      const tray = drawNotificationsMenu(
+        this,
+        snapshot,
+        width,
+        layoutHeight,
+        notificationsAnchor,
+        this.notificationsScrollY
+      );
+      if (tray) {
+        this.notificationsBounds = tray.bounds;
+        this.notificationsScrollMax = tray.scrollMax;
+        // The clamp the draw applied is the offset the wheel adds to.
+        this.notificationsScrollY = Math.min(this.notificationsScrollY, tray.scrollMax);
+      }
+    }
     publishOverlayMenuClip(
-      overlayMenuClip(snapshot, width, layoutHeight, {
-        account: focusRail?.profile ?? undefined,
-        locale: localeAnchor,
-      })
+      overlayMenuClip(
+        snapshot,
+        width,
+        layoutHeight,
+        {
+          account: focusRail?.profile ?? undefined,
+          locale: localeAnchor,
+          notifications: notificationsAnchor,
+        },
+        (value, options) => this.measureText(value, options)
+      )
     );
     this.drawRemovedFilterEffects();
     if (this.previousView && this.previousView !== snapshot.state.view) {
@@ -4193,18 +4283,22 @@ export class GpuRenderer {
     // draws it from `render()`. `visibleViews` remains the one definition of
     // which tabs exist — the rail reads it and the DOM tablist mirrors it.
 
-    // The account orb owns the far right when there is an account; the rest of
-    // the header controls shift left by its width plus a gap.
+    // The account orb owns the far right when there is an account; the bell
+    // sits between it and the locale control, and everything to the left
+    // shifts by the widths it reserves.
     const auth = snapshot.data.auth;
     const accountReserve = auth ? HEADER_ORB_SIZE + 16 : 0;
+    // Notifications exist exactly where an account does: the tray is the
+    // journal projected onto a principal, and the ungated path has neither.
+    const bellReserve = auth ? HEADER_BELL_WIDTH + 8 : 0;
     const opacityTargets: { alpha: number }[] = [];
-    opacityTargets.push(this.drawFpsReadout(width - 64 - accountReserve, midY));
+    opacityTargets.push(this.drawFpsReadout(width - 64 - accountReserve - bellReserve, midY));
     const locale = this.button(
       this.root,
       'locale.menu.toggle',
       'button',
       snapshot.state.locale.toUpperCase(),
-      width - 54 - accountReserve,
+      width - 54 - accountReserve - bellReserve,
       midY - 16,
       42,
       32,
@@ -4215,6 +4309,18 @@ export class GpuRenderer {
     );
     locale.eventMode = interactive ? 'static' : 'none';
     opacityTargets.push(locale);
+    if (auth) {
+      const bell = drawNotificationsBell(
+        this,
+        snapshot,
+        width - accountReserve - HEADER_BELL_WIDTH - 4,
+        midY - 16,
+        HEADER_BELL_WIDTH,
+        32
+      );
+      bell.eventMode = interactive ? 'static' : 'none';
+      opacityTargets.push(bell);
+    }
     if (auth) {
       const orbX = width - HEADER_ORB_SIZE - 12;
       const orbY = (GPU_LAYOUT.headerHeight - HEADER_ORB_SIZE) / 2;
@@ -4311,6 +4417,18 @@ export class GpuRenderer {
         'focus-rail',
         interactive
       ));
+    }
+    if (layout.bell) {
+      const bell = drawNotificationsBell(
+        this,
+        snapshot,
+        layout.bell.x,
+        layout.bell.y,
+        layout.bell.width,
+        layout.bell.height
+      );
+      bell.eventMode = interactive ? 'static' : 'none';
+      opacityTargets.push(bell);
     }
     const locale = this.button(
       this.root,

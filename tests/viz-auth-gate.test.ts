@@ -984,6 +984,10 @@ describe('viz auth gate (process level)', () => {
         severity: string;
         title: string;
         body: string;
+        orgId: string | null;
+        projectId: string | null;
+        runId: string | null;
+        traceId: string | null;
       }>;
       nextBefore: number | null;
     }
@@ -1006,6 +1010,10 @@ describe('viz auth gate (process level)', () => {
         kind: 'run.finished',
         actorType: 'principal',
         actorId: whoami.principalId,
+        orgId: 'org-tray',
+        // A well-formed project-run id with NO project_runs row behind it:
+        // the trace resolution must answer null, never invent or crash.
+        runId: 'b7a0c9d2-1e2f-4a3b-8c4d-5e6f7a8b9c0d',
         summary: 'their own run SECRET-SUMMARY',
         detail: { status: 'delivered', goal: 'Ship the tray' },
       })
@@ -1049,7 +1057,14 @@ describe('viz auth gate (process level)', () => {
     expect(page.notifications[1]).toMatchObject({
       title: 'Atoma — run delivered',
       body: 'Ship the tray',
+      // The event's scope ids ride the row so the client can link the run;
+      // the trace resolves to null when no project run carries that id.
+      orgId: 'org-tray',
+      runId: 'b7a0c9d2-1e2f-4a3b-8c4d-5e6f7a8b9c0d',
+      projectId: null,
+      traceId: null,
     });
+    expect(page.notifications[0]).toMatchObject({ orgId: null, traceId: null });
     expect(page.notifications.map((row) => row.seq)).toEqual(
       [...page.notifications.map((row) => row.seq)].sort((a, b) => b - a)
     );

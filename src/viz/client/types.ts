@@ -388,6 +388,16 @@ export interface VizNotification {
   severity: string;
   title: string;
   body: string;
+  /**
+   * The event's own scope ids, so a row can LINK to its subject when the app
+   * has a surface for it. `traceId` is resolved server-side from the project
+   * run the event names (`runId` is a project-run id, which the Runs view
+   * cannot address); all four are null when the event carried no such scope.
+   */
+  orgId: string | null;
+  projectId: string | null;
+  runId: string | null;
+  traceId: string | null;
 }
 
 export interface VizNotificationPage {

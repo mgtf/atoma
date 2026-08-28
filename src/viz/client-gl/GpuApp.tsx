@@ -36,6 +36,7 @@ import { api } from '../client/data-api.js';
 import {
   useAccountModels,
   useAdminEventsPages,
+  useNotificationsPages,
   useAdminLedger,
   useAdminSentinel,
   useAdminOrganisations,
@@ -342,6 +343,17 @@ function GpuAppContent({
     if (!adminEventsQuery.hasNextPage || adminEventsQuery.isFetchingNextPage) return;
     void adminEventsQuery.fetchNextPage();
   }, [adminEventsQuery]);
+  // The tray fetches only while it is open — the bell carries no unread badge,
+  // so a closed menu has nothing to keep warm. Same one-loader rule as the
+  // journal: the wheel gesture and the foot button share this callback.
+  const notificationsQuery = useNotificationsPages(
+    state.notificationsMenuOpen && authed,
+    state.locale
+  );
+  const loadOlderNotifications = useCallback(() => {
+    if (!notificationsQuery.hasNextPage || notificationsQuery.isFetchingNextPage) return;
+    void notificationsQuery.fetchNextPage();
+  }, [notificationsQuery]);
   const [adminInvitation, setAdminInvitation] = useState<VizAdminInvitation | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
   const mintInvitation = useCallback(async (orgId: string, role: string) => {
@@ -507,6 +519,37 @@ function GpuAppContent({
     }
     if (id === 'account.menu.close') {
       store.closeAccountMenu();
+      return;
+    }
+    if (id === 'notifications.menu.toggle') {
+      store.toggleNotificationsMenu();
+      return;
+    }
+    if (id === 'notifications.menu.close') {
+      store.closeNotificationsMenu();
+      return;
+    }
+    if (id === 'notifications.more') {
+      loadOlderNotifications();
+      return;
+    }
+    // A tray row's destination — `setView` is a navigation, so it also closes
+    // the menu the click came from (viewChange owns that rule).
+    if (id.startsWith('notifications.go.run.')) {
+      store.selectRun(id.slice('notifications.go.run.'.length));
+      store.setView('runs');
+      return;
+    }
+    if (id.startsWith('notifications.go.project.')) {
+      store.selectProject(id.slice('notifications.go.project.'.length));
+      store.setView('projects');
+      return;
+    }
+    if (id.startsWith('notifications.go.view.')) {
+      const view = id.slice('notifications.go.view.'.length) as typeof store.view;
+      // The resolver already scoped targets to the viewer, but a stale row or
+      // a revoked role must land nowhere rather than on a bounced tab.
+      if (isRoutableView(view, authSnapshot)) store.setView(view);
       return;
     }
     if (id === 'account.settings') {
@@ -704,8 +747,10 @@ function GpuAppContent({
     }
   }, [
     activateAuth,
+    authSnapshot,
     beginEnter,
     loadOlderEvents,
+    loadOlderNotifications,
     mintInvitation,
     pendingLoginProvider,
     profilesQuery.data,
@@ -764,6 +809,14 @@ function GpuAppContent({
     adminEvents: adminEventsQuery.data?.pages.flatMap((page) => page.events) ?? [],
     adminEventsHasMore: adminEventsQuery.hasNextPage === true,
     adminEventsLoading: adminEventsQuery.isFetchingNextPage === true,
+    notifications:
+      notificationsQuery.data?.pages.flatMap((page) => page.notifications) ?? [],
+    notificationsHasMore: notificationsQuery.hasNextPage === true,
+    notificationsLoading:
+      notificationsQuery.isLoading || notificationsQuery.isFetchingNextPage,
+    // Kept OUT of the global `error` above: a failed tray read renders inside
+    // the open menu instead of replacing the view behind it with a banner.
+    notificationsError: notificationsQuery.isError,
     adminLedger: adminLedgerQuery.data?.events ?? [],
     adminSentinel: adminSentinelQuery.data ?? null,
     adminInvitation,
@@ -783,6 +836,11 @@ function GpuAppContent({
     adminEventsQuery.data,
     adminEventsQuery.hasNextPage,
     adminEventsQuery.isFetchingNextPage,
+    notificationsQuery.data,
+    notificationsQuery.hasNextPage,
+    notificationsQuery.isFetchingNextPage,
+    notificationsQuery.isLoading,
+    notificationsQuery.isError,
     adminLedgerQuery.data,
     adminSentinelQuery.data,
     authSnapshot,
@@ -881,7 +939,9 @@ function GpuAppContent({
                 }
                 platformAdmin={authSnapshot.viewer.platformAdmin}
                 organisation={organisationQuery.data ?? null}
-                overlaysInert={state.accountMenuOpen || state.localeMenuOpen}
+                overlaysInert={
+                  state.accountMenuOpen || state.localeMenuOpen || state.notificationsMenuOpen
+                }
                 onError={setAccountError}
               />
             ) : null

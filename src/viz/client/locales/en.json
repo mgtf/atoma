@@ -962,5 +962,11 @@
   "announce.sent_other": "Sent to {{count}} organisations.",
   "announce.sentAll": "Sent to every organisation.",
   "announce.error": "The announcement could not be sent.",
-  "announce.emptySegment": "No organisation matches this segment."
+  "announce.emptySegment": "No organisation matches this segment.",
+  "notifications.open": "Notifications",
+  "notifications.title": "Notifications",
+  "notifications.empty": "Nothing has been sent to you yet.",
+  "notifications.more": "Load older notifications",
+  "notifications.loading": "Loading notifications…",
+  "notifications.error": "Notifications could not be loaded."
 }

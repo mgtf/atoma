@@ -41,6 +41,7 @@ const FOCUS_RAIL_DOCK_GAP = 6;
 const FOCUS_RAIL_FPS_GAP = 4;
 const FOCUS_RAIL_FPS_HEIGHT = 8;
 const FOCUS_RAIL_LOCALE_HEIGHT = 26;
+const FOCUS_RAIL_BELL_HEIGHT = 26;
 const FOCUS_RAIL_PROFILE_SIZE = 30;
 const FOCUS_RAIL_CRYSTAL_HEIGHT = 51;
 /** A little breathing room above the compact crystal after camera arrival. */
@@ -59,6 +60,8 @@ export interface FocusRailRect {
 export interface FocusRailChromeLayout {
   readonly crystal: FocusRailRect;
   readonly profile: FocusRailRect | null;
+  /** The notification bell — like the profile, it exists only with an account. */
+  readonly bell: FocusRailRect | null;
   readonly locale: FocusRailRect;
   readonly fps: FocusRailRect;
   /** Source-space bottom of chrome reserved above the first navigation row. */
@@ -135,10 +138,21 @@ export function focusRailChromeLayout(
     width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
     height: FOCUS_RAIL_LOCALE_HEIGHT,
   };
+  // The dock stacks bottom-up: fps, locale, then — with an account — the bell
+  // and the profile orb above it, the header's locale → bell → profile order
+  // turned vertical.
+  const bell = authenticated
+    ? {
+        x: buttonX,
+        y: locale.y - FOCUS_RAIL_FPS_GAP - FOCUS_RAIL_BELL_HEIGHT,
+        width: Math.min(sidebarWidth, FOCUS_SIDEBAR_BUTTON_WIDTH),
+        height: FOCUS_RAIL_BELL_HEIGHT,
+      }
+    : null;
   const profile = authenticated
     ? {
         x: buttonX + (FOCUS_SIDEBAR_BUTTON_WIDTH - FOCUS_RAIL_PROFILE_SIZE) / 2,
-        y: locale.y - FOCUS_RAIL_DOCK_GAP - FOCUS_RAIL_PROFILE_SIZE,
+        y: (bell?.y ?? locale.y) - FOCUS_RAIL_DOCK_GAP - FOCUS_RAIL_PROFILE_SIZE,
         width: FOCUS_RAIL_PROFILE_SIZE,
         height: FOCUS_RAIL_PROFILE_SIZE,
       }
@@ -152,6 +166,7 @@ export function focusRailChromeLayout(
       height: FOCUS_RAIL_CRYSTAL_HEIGHT,
     },
     profile,
+    bell,
     locale,
     fps,
     navigationTop: FOCUS_RAIL_CRYSTAL_TOP + FOCUS_RAIL_CRYSTAL_HEIGHT,

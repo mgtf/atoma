@@ -191,6 +191,11 @@ export interface GpuUiState {
   accountMenuOpen: boolean;
   /** Endonym picker opened from the compact locale code control. */
   localeMenuOpen: boolean;
+  /**
+   * The notification tray behind the header bell — the same overlay species as
+   * the account menu: never a view, closed by navigation and by its siblings.
+   */
+  notificationsMenuOpen: boolean;
   /** Floating scene controls, opened from the foot of the admin rail. */
   tuningPanelOpen: boolean;
   /** Monotonic signal consumed by a sent announcement receipt only. */
@@ -204,6 +209,8 @@ export interface GpuUiState {
   closeAccountMenu: () => void;
   toggleLocaleMenu: () => void;
   closeLocaleMenu: () => void;
+  toggleNotificationsMenu: () => void;
+  closeNotificationsMenu: () => void;
   toggleTuningPanel: () => void;
   /** User activation of a rail/tab destination; re-activation toggles framing. */
   activateView: (view: ViewName) => void;
@@ -285,6 +292,7 @@ function viewChange(
   | 'focusedInput'
   | 'accountMenuOpen'
   | 'localeMenuOpen'
+  | 'notificationsMenuOpen'
   | 'announcementResetSignal'
 > {
   return {
@@ -293,6 +301,7 @@ function viewChange(
     focusedInput: null,
     accountMenuOpen: false,
     localeMenuOpen: false,
+    notificationsMenuOpen: false,
     announcementResetSignal:
       state.view === 'announce' && view === 'announce'
         ? state.announcementResetSignal + 1
@@ -356,6 +365,7 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   entered: initialEntered(),
   accountMenuOpen: false,
   localeMenuOpen: false,
+  notificationsMenuOpen: false,
   tuningPanelOpen: initialTuningPanelOpen(),
   announcementResetSignal: 0,
   enter: () => {
@@ -371,20 +381,40 @@ export const useGpuStore = create<GpuUiState>()((set) => ({
   // This is an explicit in-app route, not a first-visit reset. Keep the
   // persisted admission bit at `1`, so a later reload still opens the product
   // directly instead of trapping a returning viewer on Welcome again.
-  showWelcome: () => set({ entered: false, accountMenuOpen: false, localeMenuOpen: false }),
+  showWelcome: () => set({
+    entered: false,
+    accountMenuOpen: false,
+    localeMenuOpen: false,
+    notificationsMenuOpen: false,
+  }),
   activateCrystal: () => set((state) => state.sceneCameraMode === 'focus'
     ? viewChange(state, state.view, 'overview')
-    : { entered: false, accountMenuOpen: false, localeMenuOpen: false }),
+    : {
+        entered: false,
+        accountMenuOpen: false,
+        localeMenuOpen: false,
+        notificationsMenuOpen: false,
+      }),
+  // The three chrome menus are exclusive: opening one closes the others, so
+  // two overlays can never contest the same corner of the header.
   toggleAccountMenu: () => set((state) => ({
     accountMenuOpen: !state.accountMenuOpen,
     localeMenuOpen: false,
+    notificationsMenuOpen: false,
   })),
   closeAccountMenu: () => set({ accountMenuOpen: false }),
   toggleLocaleMenu: () => set((state) => ({
     localeMenuOpen: !state.localeMenuOpen,
     accountMenuOpen: false,
+    notificationsMenuOpen: false,
   })),
   closeLocaleMenu: () => set({ localeMenuOpen: false }),
+  toggleNotificationsMenu: () => set((state) => ({
+    notificationsMenuOpen: !state.notificationsMenuOpen,
+    accountMenuOpen: false,
+    localeMenuOpen: false,
+  })),
+  closeNotificationsMenu: () => set({ notificationsMenuOpen: false }),
   toggleTuningPanel: () => set((state) => ({ tuningPanelOpen: !state.tuningPanelOpen })),
   // Navigation closes the menu: an overlay anchored to the account control must not
   // survive the screen it was opened from. Re-activating Announcements also
