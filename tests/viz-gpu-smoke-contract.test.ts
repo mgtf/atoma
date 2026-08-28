@@ -102,6 +102,16 @@ describe('the browser smoke and the renderer agree on control ids', () => {
     expect(smoke).not.toContain('gutterIsViewportFirstChild');
   });
 
+  it('arms the hero-caustic probe from transported bundle energy', () => {
+    // The cast no longer has one global intensity: every facet path carries
+    // its own Fresnel energy. A stale scalar read silently times out before
+    // the only real-browser performance measurement can begin.
+    const smoke = readFileSync(SMOKE, 'utf8');
+    expect(smoke).toContain('__ATOMA_MARK_CAUSTIC__?.optics');
+    expect(smoke).toContain('.map((optical) => optical.intensity)');
+    expect(smoke).not.toContain('__ATOMA_MARK_CAUSTIC__?.intensity');
+  });
+
   it('the renderer names the two chrome menus the same way', () => {
     // The rename that broke the smoke was itself right — `locale.toggle` was
     // the odd one out beside `account.menu.toggle`. Pinning the pair keeps a

@@ -26,8 +26,18 @@ export const CAUSTIC_CORNER_SLOTS = 6;
 export const CAUSTIC_SPECTRAL_SLOTS = 6;
 /** The transport publishes exactly four triangular facet bundles. */
 export const CAUSTIC_BUNDLE_COUNT = 4;
+/** At most one real Fresnel-reflected branch survives CPU ranking. */
+export const CAUSTIC_SECONDARY_BUNDLE_COUNT = 1;
+/** Two vec4 slots carry the secondary triangle's three corners. */
+export const CAUSTIC_SECONDARY_CORNER_SLOTS = 2;
+/** Two matching slots carry its three signed spectral offsets. */
+export const CAUSTIC_SECONDARY_SPECTRAL_SLOTS = 2;
 /** Mean, red and blue moment fits: fixed work per visible bundle. */
 export const CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE = 3;
+/** Hard ceiling across four primary bundles and one secondary branch. */
+export const CAUSTIC_MAX_FOOTPRINT_EVALUATIONS =
+  (CAUSTIC_BUNDLE_COUNT + CAUSTIC_SECONDARY_BUNDLE_COUNT) *
+  CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE;
 
 const CAUSTIC_BLUR_MIN_PX = 4;
 const CAUSTIC_BLUR_MAX_PX = 12;
@@ -35,14 +45,11 @@ const CAUSTIC_BLUR_AREA_FRACTION = 0.035;
 const CAUSTIC_CULL_EDGE_FRACTION = 0.38;
 const CAUSTIC_CULL_PAD_MIN_PX = 18;
 const CAUSTIC_CULL_PAD_MAX_PX = 96;
-const CAUSTIC_DISPERSION_GEOMETRY_GAIN = 0.45;
-const CAUSTIC_DISPERSION_COLOR_GAIN = 0.28;
 const CAUSTIC_ENERGY_GAIN = 0.42;
 const CAUSTIC_PRESS_REF = 24000;
 const CAUSTIC_PRESS_SOFT = 3200;
 const CAUSTIC_PRESS_MIN = 0.32;
 const CAUSTIC_PRESS_MAX = 1.35;
-const CAUSTIC_SOURCE_TINT = 0.08;
 
 export const CAUSTIC_FIELD_GLSL = /* glsl */ `
   float causticCross(vec2 a, vec2 b) {
@@ -68,23 +75,23 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
       yy * delta.x * delta.x - 2.0 * xy * delta.x * delta.y +
       xx * delta.y * delta.y
     ) / determinant);
-    float envelope = 1.0 - smoothstep(0.08, 4.2, distance2 * focus);
-    return envelope * envelope;
+    float penumbra = 1.0 - smoothstep(0.08, 4.2, distance2 * focus);
+    float core = 1.0 - smoothstep(0.015, 0.72, distance2 * focus);
+    return penumbra * penumbra * 0.66 + core * core * 0.34;
   }
 
   vec4 causticBundle(
-    vec2 p, vec2 a, vec2 b, vec2 c, float intensity, vec3 tint,
+    vec2 p, vec2 a, vec2 b, vec2 c, vec4 transmission,
     vec2 da, vec2 db, vec2 dc, float band, float detail
   ) {
-    if (intensity < 0.001) return vec4(0.0);
+    if (transmission.a < 0.001) return vec4(0.0);
 
     float area = abs(causticCross(b - a, c - a)) * 0.5;
     vec2 edge0 = b - a;
     vec2 edge1 = c - b;
     vec2 edge2 = a - c;
     float edge = sqrt(max(max(dot(edge0, edge0), dot(edge1, edge1)), dot(edge2, edge2)));
-    float tracedBand = clamp(band, 0.0, 2.0) *
-      ${CAUSTIC_DISPERSION_GEOMETRY_GAIN.toFixed(2)};
+    float tracedBand = clamp(band, 0.0, 2.0);
     float spectralReach = sqrt(
       max(max(dot(da, da), dot(db, db)), dot(dc, dc))
     ) * tracedBand;
@@ -116,21 +123,16 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
       spectral = vec3(red, green, blue);
     }
 
-    // A dielectric caustic is predominantly white. Only a restrained share
-    // of the measured wavelength separation reaches the final colour.
-    float neutral = dot(spectral, vec3(0.333333));
-    float chroma = min(${CAUSTIC_DISPERSION_COLOR_GAIN.toFixed(2)}, tracedBand * 0.32);
-    vec3 beam = mix(vec3(neutral), spectral, chroma);
-    vec3 source = mix(
-      vec3(1.0), clamp(tint, vec3(0.0), vec3(1.0)),
-      ${CAUSTIC_SOURCE_TINT.toFixed(2)}
-    );
+    // Overlap recombines to white by itself; separated wavelengths retain
+    // their spectral fringe. RGB transmission came from the traced coatings.
+    vec3 beam = spectral;
     float press = clamp(
       ${CAUSTIC_PRESS_REF.toFixed(1)} / (area + ${CAUSTIC_PRESS_SOFT.toFixed(1)}),
       ${CAUSTIC_PRESS_MIN.toFixed(2)}, ${CAUSTIC_PRESS_MAX.toFixed(2)}
     );
     return vec4(
-      source * beam * intensity * press * ${CAUSTIC_ENERGY_GAIN.toFixed(2)},
+      clamp(transmission.rgb, vec3(0.0), vec3(1.0)) * beam *
+        transmission.a * press * ${CAUSTIC_ENERGY_GAIN.toFixed(2)},
       0.0
     );
   }
@@ -139,27 +141,33 @@ export const CAUSTIC_FIELD_GLSL = /* glsl */ `
     vec2 p,
     vec4 c0, vec4 c1, vec4 c2, vec4 c3, vec4 c4, vec4 c5,
     vec4 s0, vec4 s1, vec4 s2, vec4 s3, vec4 s4, vec4 s5,
-    float intensity,
-    vec3 tint,
+    vec4 o0, vec4 o1, vec4 o2, vec4 o3,
+    vec4 secondary0, vec4 secondary1,
+    vec4 secondarySpec0, vec4 secondarySpec1,
+    vec4 secondaryOptics,
     float band,
     float detail
   ) {
     vec3 radiance =
       causticBundle(
-        p, c0.xy, c0.zw, c1.xy, intensity, tint,
+        p, c0.xy, c0.zw, c1.xy, o0,
         s0.xy, s0.zw, s1.xy, band, detail
       ).rgb +
       causticBundle(
-        p, c1.zw, c2.xy, c2.zw, intensity, tint,
+        p, c1.zw, c2.xy, c2.zw, o1,
         s1.zw, s2.xy, s2.zw, band, detail
       ).rgb +
       causticBundle(
-        p, c3.xy, c3.zw, c4.xy, intensity, tint,
+        p, c3.xy, c3.zw, c4.xy, o2,
         s3.xy, s3.zw, s4.xy, band, detail
       ).rgb +
       causticBundle(
-        p, c4.zw, c5.xy, c5.zw, intensity, tint,
+        p, c4.zw, c5.xy, c5.zw, o3,
         s4.zw, s5.xy, s5.zw, band, detail
+      ).rgb +
+      causticBundle(
+        p, secondary0.xy, secondary0.zw, secondary1.xy, secondaryOptics,
+        secondarySpec0.xy, secondarySpec0.zw, secondarySpec1.xy, band, detail
       ).rgb;
     // A soft shoulder preserves overlap brightness without clipping to white.
     radiance = radiance / (vec3(1.0) + radiance * 0.72);
@@ -190,16 +198,17 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
       yy * delta.x * delta.x - 2.0 * xy * delta.x * delta.y +
       xx * delta.y * delta.y
     ) / determinant);
-    let envelope = 1.0 - smoothstep(0.08, 4.2, distance2 * focus);
-    return envelope * envelope;
+    let penumbra = 1.0 - smoothstep(0.08, 4.2, distance2 * focus);
+    let core = 1.0 - smoothstep(0.015, 0.72, distance2 * focus);
+    return penumbra * penumbra * 0.66 + core * core * 0.34;
   }
 
   fn causticBundle(
     p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, c: vec2<f32>,
-    intensity: f32, tint: vec3<f32>,
+    transmission: vec4<f32>,
     da: vec2<f32>, db: vec2<f32>, dc: vec2<f32>, band: f32, detail: f32,
   ) -> vec4<f32> {
-    if (intensity < 0.001) {
+    if (transmission.a < 0.001) {
       return vec4<f32>(0.0);
     }
 
@@ -208,8 +217,7 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
     let edge1 = c - b;
     let edge2 = a - c;
     let edge = sqrt(max(max(dot(edge0, edge0), dot(edge1, edge1)), dot(edge2, edge2)));
-    let tracedBand = clamp(band, 0.0, 2.0) *
-      ${CAUSTIC_DISPERSION_GEOMETRY_GAIN.toFixed(2)};
+    let tracedBand = clamp(band, 0.0, 2.0);
     let spectralReach = sqrt(
       max(max(dot(da, da), dot(db, db)), dot(dc, dc))
     ) * tracedBand;
@@ -243,19 +251,14 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
       spectral = vec3<f32>(red, green, blue);
     }
 
-    let neutral = dot(spectral, vec3<f32>(0.333333));
-    let chroma = min(${CAUSTIC_DISPERSION_COLOR_GAIN.toFixed(2)}, tracedBand * 0.32);
-    let beam = mix(vec3<f32>(neutral), spectral, chroma);
-    let source = mix(
-      vec3<f32>(1.0), clamp(tint, vec3<f32>(0.0), vec3<f32>(1.0)),
-      ${CAUSTIC_SOURCE_TINT.toFixed(2)},
-    );
+    let beam = spectral;
     let press = clamp(
       ${CAUSTIC_PRESS_REF.toFixed(1)} / (area + ${CAUSTIC_PRESS_SOFT.toFixed(1)}),
       ${CAUSTIC_PRESS_MIN.toFixed(2)}, ${CAUSTIC_PRESS_MAX.toFixed(2)},
     );
     return vec4<f32>(
-      source * beam * intensity * press * ${CAUSTIC_ENERGY_GAIN.toFixed(2)},
+      clamp(transmission.rgb, vec3<f32>(0.0), vec3<f32>(1.0)) * beam *
+        transmission.a * press * ${CAUSTIC_ENERGY_GAIN.toFixed(2)},
       0.0,
     );
   }
@@ -266,24 +269,32 @@ export const CAUSTIC_FIELD_WGSL = /* wgsl */ `
     c3: vec4<f32>, c4: vec4<f32>, c5: vec4<f32>,
     s0: vec4<f32>, s1: vec4<f32>, s2: vec4<f32>,
     s3: vec4<f32>, s4: vec4<f32>, s5: vec4<f32>,
-    intensity: f32, tint: vec3<f32>, band: f32, detail: f32,
+    o0: vec4<f32>, o1: vec4<f32>, o2: vec4<f32>, o3: vec4<f32>,
+    secondary0: vec4<f32>, secondary1: vec4<f32>,
+    secondarySpec0: vec4<f32>, secondarySpec1: vec4<f32>,
+    secondaryOptics: vec4<f32>, band: f32, detail: f32,
   ) -> vec4<f32> {
     var radiance =
       causticBundle(
-        p, c0.xy, c0.zw, c1.xy, intensity, tint,
+        p, c0.xy, c0.zw, c1.xy, o0,
         s0.xy, s0.zw, s1.xy, band, detail,
       ).rgb +
       causticBundle(
-        p, c1.zw, c2.xy, c2.zw, intensity, tint,
+        p, c1.zw, c2.xy, c2.zw, o1,
         s1.zw, s2.xy, s2.zw, band, detail,
       ).rgb +
       causticBundle(
-        p, c3.xy, c3.zw, c4.xy, intensity, tint,
+        p, c3.xy, c3.zw, c4.xy, o2,
         s3.xy, s3.zw, s4.xy, band, detail,
       ).rgb +
       causticBundle(
-        p, c4.zw, c5.xy, c5.zw, intensity, tint,
+        p, c4.zw, c5.xy, c5.zw, o3,
         s4.zw, s5.xy, s5.zw, band, detail,
+      ).rgb +
+      causticBundle(
+        p, secondary0.xy, secondary0.zw, secondary1.xy, secondaryOptics,
+        secondarySpec0.xy, secondarySpec0.zw, secondarySpec1.xy,
+        band, detail,
       ).rgb;
     radiance = radiance / (vec3<f32>(1.0) + radiance * 0.72);
     return vec4<f32>(radiance, 0.0);

@@ -964,6 +964,15 @@ const CAUSTIC_THROW_RATIO = (ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z) / ATOMA_MARK_L
  * position is dimmer than it.
  */
 const CAUSTIC_REFERENCE_THROW = ATOMA_MARK_LAMP_Z - CAUSTIC_PLANE_Z;
+/**
+ * A finite receiver cannot collect a ray travelling almost parallel to it.
+ * Treat anything beyond four on-axis throws as a miss: primary rays then use
+ * the bounded roughness leak, while secondary rays simply stop. This keeps a
+ * grazing denominator from turning one legitimate path into a fullscreen cast.
+ */
+const CAUSTIC_MAX_WALL_DISTANCE = CAUSTIC_REFERENCE_THROW * 4;
+/** Maps physically small interface throughput into the dark HDR-style field. */
+const CAUSTIC_DISPLAY_EXPOSURE = 3;
 
 /**
  * How the cast dims as it is thrown further. The lamp is a point source, so
@@ -1000,12 +1009,30 @@ export interface MarkCausticCast {
    */
   spectral: readonly AtomaMarkPoint[] | null;
   /**
-   * 0..1 brightness at the wall: how much of the lamp couples into the glass,
-   * dimmed by how far the cast was thrown.
+   * Transport-derived RGB transmission and energy for each consecutive
+   * three-ray bundle. The colour comes from the entry/exit facet coatings;
+   * it is not a shader-authored lobe tint.
    */
+  optics: readonly MarkCausticOptics[];
+  /** One bounded Fresnel-reflected branch from the strongest primary bundle. */
+  secondary: MarkCausticSecondary | null;
+}
+
+export interface MarkCausticOptics {
+  /** Near-white spectral transmission after the entry and exit coatings. */
+  r: number;
+  g: number;
+  b: number;
+  /** 0..1 energy after coupling, distance falloff and Fresnel losses. */
   intensity: number;
-  /** Colour stained by the entry facet, same palette as the pools. */
-  color: number;
+}
+
+export interface MarkCausticSecondary {
+  /** One three-ray bundle produced by a real partial Fresnel reflection. */
+  points: readonly AtomaMarkPoint[];
+  /** Signed red-blue half-separation at the same three corners. */
+  spectral: readonly AtomaMarkPoint[] | null;
+  optics: MarkCausticOptics;
 }
 
 /**
@@ -1074,27 +1101,56 @@ export function projectMarkCaustic(
       eta * incident[2] + (eta * cosine - Math.sqrt(discriminant)) * normal[2],
     ]);
   };
-  const trace = (
-    sample: MarkVec3,
-    entryFacet: number,
-    wavelengthIor: number
-  ): AtomaMarkPoint | null => {
-    const entryNormal = frame.facets[entryFacet]!.normal;
-    const incident = normalise([
-      sample[0] - lamp[0],
-      sample[1] - lamp[1],
-      sample[2] - lamp[2],
+  const reflect = (direction: MarkVec3, normal: MarkVec3): MarkVec3 => {
+    const reflectedDot = dot(direction, normal);
+    return normalise([
+      direction[0] - 2 * reflectedDot * normal[0],
+      direction[1] - 2 * reflectedDot * normal[1],
+      direction[2] - 2 * reflectedDot * normal[2],
     ]);
-    let direction = refract(incident, entryNormal, 1 / wavelengthIor);
-    if (!direction) return null;
-    // The thin shell's collapsed exit ratio, at THIS wavelength's index.
+  };
+  const fresnel = (wavelengthIor: number, cosine: number): number => {
+    const ratio = (wavelengthIor - 1) / (wavelengthIor + 1);
+    const f0 = ratio * ratio;
+    return f0 + (1 - f0) * (1 - clamp(cosine)) ** 5;
+  };
+  const receiverPoint = (
+    hit: MarkVec3,
+    direction: MarkVec3
+  ): AtomaMarkPoint | null => {
+    if (direction[2] >= -1e-5) return null;
+    const wallDistance = (CAUSTIC_PLANE_Z - hit[2]) / direction[2];
+    if (
+      !(wallDistance > 0) ||
+      !Number.isFinite(wallDistance) ||
+      wallDistance > CAUSTIC_MAX_WALL_DISTANCE
+    ) return null;
+    const wallX = hit[0] + direction[0] * wallDistance;
+    const wallY = hit[1] + direction[1] * wallDistance;
+    return {
+      x: CENTER.x + wallX * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+      y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+    };
+  };
+  interface CausticInterfaceHit {
+    hit: MarkVec3;
+    facet: number;
+    outward: MarkVec3;
+    incoming: MarkVec3;
+    exitDirection: MarkVec3;
+    reflectance: number;
+    tirBounces: number;
+  }
+  const nextTransmissiveInterface = (
+    initialOrigin: MarkVec3,
+    initialDirection: MarkVec3,
+    wavelengthIor: number
+  ): CausticInterfaceHit | null => {
+    // Direction uses the collapsed thin-shell ratio. Energy still uses the
+    // diamond Fresnel term: collapsing geometry must not erase its reflection.
     const exitEta = 1 + (wavelengthIor - 1) * shellExitRatio;
-    let origin: MarkVec3 = [
-      sample[0] + direction[0] * 1e-4,
-      sample[1] + direction[1] * 1e-4,
-      sample[2] + direction[2] * 1e-4,
-    ];
-
+    let origin = initialOrigin;
+    let direction = initialDirection;
     for (let bounce = 0; bounce < 8; bounce += 1) {
       let hitFacet = -1;
       let hitDistance = Number.POSITIVE_INFINITY;
@@ -1123,23 +1179,20 @@ export function projectMarkCaustic(
         exitEta
       );
       if (exitDirection) {
-        if (exitDirection[2] >= -1e-5) return null;
-        const wallDistance = (CAUSTIC_PLANE_Z - hit[2]) / exitDirection[2];
-        if (!(wallDistance > 0) || !Number.isFinite(wallDistance)) return null;
-        const wallX = hit[0] + exitDirection[0] * wallDistance;
-        const wallY = hit[1] + exitDirection[1] * wallDistance;
+        const cosine = clamp(dot(direction, outward));
         return {
-          x: CENTER.x + wallX * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
-          y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
+          hit,
+          facet: hitFacet,
+          outward,
+          incoming: direction,
+          exitDirection,
+          reflectance: fresnel(wavelengthIor, cosine),
+          tirBounces: bounce,
         };
       }
-      // Total internal reflection: remain inside and continue to the next face.
-      const reflectedDot = dot(direction, outward);
-      direction = normalise([
-        direction[0] - 2 * reflectedDot * outward[0],
-        direction[1] - 2 * reflectedDot * outward[1],
-        direction[2] - 2 * reflectedDot * outward[2],
-      ]);
+      // Total internal reflection remains in the hollow shell and tries the
+      // next table. This branch costs CPU only and is capped at eight faces.
+      direction = reflect(direction, outward);
       origin = [
         hit[0] + direction[0] * 1e-4,
         hit[1] + direction[1] * 1e-4,
@@ -1147,6 +1200,95 @@ export function projectMarkCaustic(
       ];
     }
     return null;
+  };
+  interface CausticSecondaryRay {
+    point: AtomaMarkPoint;
+    exitFacet: number;
+    exitCosine: number;
+    energy: number;
+  }
+  interface CausticSecondarySeed {
+    origin: MarkVec3;
+    direction: MarkVec3;
+    wavelengthIor: number;
+    energy: number;
+  }
+  interface CausticTracedRay {
+    point: AtomaMarkPoint | null;
+    exitFacet: number;
+    entryCosine: number;
+    exitCosine: number;
+    energy: number;
+    secondarySeed: CausticSecondarySeed | null;
+  }
+  const bounceRetention = Math.exp(
+    -material.absorption * ATOMA_MARK_THICKNESS * 0.18
+  );
+  const trace = (
+    sample: MarkVec3,
+    entryFacet: number,
+    wavelengthIor: number
+  ): CausticTracedRay | null => {
+    const entryNormal = frame.facets[entryFacet]!.normal;
+    const incident = normalise([
+      sample[0] - lamp[0],
+      sample[1] - lamp[1],
+      sample[2] - lamp[2],
+    ]);
+    const entryCosine = clamp(-dot(incident, entryNormal));
+    const direction = refract(incident, entryNormal, 1 / wavelengthIor);
+    if (!direction) return null;
+    const origin: MarkVec3 = [
+      sample[0] + direction[0] * 1e-4,
+      sample[1] + direction[1] * 1e-4,
+      sample[2] + direction[2] * 1e-4,
+    ];
+    const first = nextTransmissiveInterface(origin, direction, wavelengthIor);
+    if (!first) return null;
+    const entryEnergy = (1 - fresnel(wavelengthIor, entryCosine)) * entryCosine;
+    const retained = bounceRetention ** first.tirBounces;
+    const exitCosine = clamp(dot(first.incoming, first.outward));
+    const primaryEnergy = entryEnergy * (1 - first.reflectance) * retained;
+
+    // Preserve a seed instead of following every reflected branch. Once the
+    // four primary bundles are ranked, only six rays from the strongest one
+    // continue — 24 primary traces + 6 secondary traces, never 24 + 24.
+    const reflected = reflect(first.incoming, first.outward);
+    const reflectedOrigin: MarkVec3 = [
+      first.hit[0] + reflected[0] * 1e-4,
+      first.hit[1] + reflected[1] * 1e-4,
+      first.hit[2] + reflected[2] * 1e-4,
+    ];
+    return {
+      point: receiverPoint(first.hit, first.exitDirection),
+      exitFacet: first.facet,
+      entryCosine,
+      exitCosine,
+      energy: primaryEnergy,
+      secondarySeed: {
+        origin: reflectedOrigin,
+        direction: reflected,
+        wavelengthIor,
+        energy: entryEnergy * first.reflectance * retained,
+      },
+    };
+  };
+  const followSecondary = (seed: CausticSecondarySeed): CausticSecondaryRay | null => {
+    const second = nextTransmissiveInterface(
+      seed.origin,
+      seed.direction,
+      seed.wavelengthIor
+    );
+    if (!second) return null;
+    const point = receiverPoint(second.hit, second.exitDirection);
+    if (!point) return null;
+    return {
+      point,
+      exitFacet: second.facet,
+      exitCosine: clamp(dot(second.incoming, second.outward)),
+      energy: seed.energy * (1 - second.reflectance) *
+        bounceRetention ** (second.tirBounces + 1),
+    };
   };
   const leakedRay = (
     sample: MarkVec3,
@@ -1165,15 +1307,103 @@ export function projectMarkCaustic(
       y: CENTER.y - wallY * PROJECTION_SCALE * CAUSTIC_RECEIVER_PERSPECTIVE,
     };
   };
-  /** Trace one sample at one wavelength, leaking where the trace fails. */
+  interface CausticLandedRay extends Omit<CausticTracedRay, 'point'> {
+    point: AtomaMarkPoint;
+  }
+  /** Trace one sample at one wavelength, leaking where the trace misses the wall. */
   const land = (
     sample: MarkVec3,
     facetIndex: number,
     normal: MarkVec3,
     wavelengthIor: number
-  ): AtomaMarkPoint =>
-    trace(sample, facetIndex, wavelengthIor) ??
-    leakedRay(sample, normal, wavelengthIor);
+  ): CausticLandedRay => {
+    const traced = trace(sample, facetIndex, wavelengthIor);
+    if (traced?.point) return { ...traced, point: traced.point };
+    return {
+      point: leakedRay(sample, normal, wavelengthIor),
+      exitFacet: traced?.exitFacet ?? facetIndex,
+      entryCosine: traced?.entryCosine ?? 0.5,
+      exitCosine: traced?.exitCosine ?? 0.5,
+      // A finite source leaks a low-energy cone around a path that missed the
+      // receiver. It must not rival a physically landed ray.
+      energy: (traced?.energy ?? 0.35) * 0.35,
+      secondarySeed: traced?.secondarySeed ?? null,
+    };
+  };
+
+  interface CausticRgb {
+    r: number;
+    g: number;
+    b: number;
+  }
+  const srgbToLinear = (channel: number): number => {
+    const value = clamp(channel);
+    return value <= 0.04045
+      ? value / 12.92
+      : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  const coatingTransmission = (facetIndex: number, cosine: number): CausticRgb => {
+    const color = markColorForOctant(ATOMA_MARK_MESH.facets[facetIndex]!.octant);
+    // The logo's facet hues behave as thin brand coatings over colourless
+    // diamond. Beer-Lambert optical depth grows at grazing incidence; the
+    // 0.12 floor keeps the coating transmissive instead of turning it into ink.
+    const depth = 0.055 / Math.max(0.32, clamp(cosine));
+    const channel = (shift: number) => {
+      const srgb = (color >> shift & 0xff) / 255;
+      const pigment = 0.12 + srgbToLinear(srgb) * 0.88;
+      return pigment ** depth;
+    };
+    return { r: channel(16), g: channel(8), b: channel(0) };
+  };
+  const pathTransmission = (
+    entryFacet: number,
+    exitFacet: number,
+    entryCosine: number,
+    exitCosine: number
+  ): CausticRgb => {
+    const entry = coatingTransmission(entryFacet, entryCosine);
+    const exit = coatingTransmission(exitFacet, exitCosine);
+    return {
+      r: entry.r * exit.r,
+      g: entry.g * exit.g,
+      b: entry.b * exit.b,
+    };
+  };
+  const averageOptics = (
+    paths: readonly {
+      exitFacet: number;
+      entryCosine: number;
+      exitCosine: number;
+      energy: number;
+    }[],
+    entryFacet: number
+  ): MarkCausticOptics => {
+    let energy = 0;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    for (const path of paths) {
+      const weight = Math.max(0, path.energy);
+      const transmission = pathTransmission(
+        entryFacet,
+        path.exitFacet,
+        path.entryCosine,
+        path.exitCosine
+      );
+      energy += weight;
+      r += transmission.r * weight;
+      g += transmission.g * weight;
+      b += transmission.b * weight;
+    }
+    const count = Math.max(1, paths.length);
+    const safeEnergy = Math.max(energy, 1e-6);
+    return {
+      r: clamp(r / safeEnergy),
+      g: clamp(g / safeEnergy),
+      b: clamp(b / safeEnergy),
+      intensity: clamp(energy / count),
+    };
+  };
 
   const bundles = ATOMA_MARK_MESH.facets.flatMap((meshFacet, facetIndex) => {
     const facet = frame.facets[facetIndex]!;
@@ -1200,9 +1430,17 @@ export function projectMarkCaustic(
       const red = land(sample, facetIndex, facet.normal, tracesWavelengths ? iorRed : ior);
       const blue = land(sample, facetIndex, facet.normal, tracesWavelengths ? iorBlue : ior);
       return {
-        corner: { x: (red.x + blue.x) / 2, y: (red.y + blue.y) / 2 },
+        red,
+        blue,
+        corner: {
+          x: (red.point.x + blue.point.x) / 2,
+          y: (red.point.y + blue.point.y) / 2,
+        },
         delta: tracesWavelengths
-          ? { x: (red.x - blue.x) / 2, y: (red.y - blue.y) / 2 }
+          ? {
+              x: (red.point.x - blue.point.x) / 2,
+              y: (red.point.y - blue.point.y) / 2,
+            }
           : null,
       };
     });
@@ -1211,8 +1449,11 @@ export function projectMarkCaustic(
       facet.centroid[1] - lamp[1],
       facet.centroid[2] - lamp[2],
     ]);
+    const primaryPaths = points.flatMap((point) => [point.red, point.blue]);
     return [{
       points,
+      facetIndex,
+      optics: averageOptics(primaryPaths, facetIndex),
       score: clamp(-dot(entryRay, facet.normal)) * facet.normal[2],
     }];
   }).sort((left, right) => right.score - left.score).slice(0, 4);
@@ -1230,11 +1471,71 @@ export function projectMarkCaustic(
         bundle.points.flatMap((point) => (point.delta ? [point.delta] : []))
       )
     : null;
+  const castIntensity = coupling.gemEnter * markCausticFalloff(lampX, lampY);
+  const optics = bundles.map((bundle): MarkCausticOptics => ({
+    ...bundle.optics,
+    intensity: clamp(
+      bundle.optics.intensity * castIntensity * CAUSTIC_DISPLAY_EXPOSURE
+    ),
+  }));
+  const secondarySource = bundles
+    .map((bundle, index) => ({
+      bundle,
+      intensity: optics[index]!.intensity,
+    }))
+    .filter(({ bundle }) => bundle.points.every((point) =>
+      point.red.secondarySeed !== null && point.blue.secondarySeed !== null
+    ))
+    .sort((left, right) => right.intensity - left.intensity)[0] ?? null;
+  let secondary: MarkCausticSecondary | null = null;
+  if (secondarySource) {
+    const secondaryPairs = secondarySource.bundle.points.map((point) => ({
+      primaryRed: point.red,
+      primaryBlue: point.blue,
+      red: followSecondary(point.red.secondarySeed!),
+      blue: followSecondary(point.blue.secondarySeed!),
+    }));
+    if (secondaryPairs.every((pair) => pair.red !== null && pair.blue !== null)) {
+      const complete = secondaryPairs.map((pair) => ({
+        ...pair,
+        red: pair.red!,
+        blue: pair.blue!,
+      }));
+      const secondaryOptics = averageOptics(
+        complete.flatMap((pair) => [
+          { ...pair.red, entryCosine: pair.primaryRed.entryCosine },
+          { ...pair.blue, entryCosine: pair.primaryBlue.entryCosine },
+        ]),
+        secondarySource.bundle.facetIndex
+      );
+      secondary = {
+        points: complete.map((pair) => ({
+          x: (pair.red.point.x + pair.blue.point.x) / 2,
+          y: (pair.red.point.y + pair.blue.point.y) / 2,
+        })),
+        spectral: tracesWavelengths
+          ? complete.map((pair) => ({
+              x: (pair.red.point.x - pair.blue.point.x) / 2,
+              y: (pair.red.point.y - pair.blue.point.y) / 2,
+            }))
+          : null,
+        optics: {
+          ...secondaryOptics,
+          // A reflected branch is real but subordinate. The cap also prevents
+          // a near-grazing Fresnel spike from reading as a second light source.
+          intensity: Math.min(
+            secondaryOptics.intensity * castIntensity * CAUSTIC_DISPLAY_EXPOSURE,
+            secondarySource.intensity * 0.32
+          ),
+        },
+      };
+    }
+  }
   return {
     points: corners,
     spectral,
-    intensity: coupling.gemEnter * markCausticFalloff(lampX, lampY),
-    color: coupling.color,
+    optics,
+    secondary,
   };
 }
 

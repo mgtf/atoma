@@ -10,6 +10,7 @@ import {
   ATOMA_MARK_CAMERA_Z,
   ATOMA_MARK_DIAMOND_MATERIAL,
   ATOMA_MARK_LAMP_Z,
+  ATOMA_MARK_LOCAL_SIZE,
   ATOMA_MARK_MAX_SPECULAR_POWER,
   ATOMA_MARK_MESH,
   ATOMA_MARK_PROJECTION_SCALE,
@@ -765,7 +766,16 @@ describe('Atoma GPU brand mark', () => {
     const centre = projectMarkCaustic(frame, 14, 14);
     expect(centre).not.toBeNull();
     expect(centre!.points).toHaveLength(12);
-    expect(centre!.intensity).toBeGreaterThan(0.5);
+    expect(centre!.optics).toHaveLength(4);
+    for (const [index, optics] of centre!.optics.entries()) {
+      for (const [channel, value] of Object.entries(optics)) {
+        expect(Number.isFinite(value), `bundle ${index} ${channel}`).toBe(true);
+        expect(value, `bundle ${index} ${channel}`).toBeGreaterThan(0);
+        expect(value, `bundle ${index} ${channel}`).toBeLessThanOrEqual(1);
+      }
+    }
+    expect(centre!.optics.reduce((sum, { intensity }) => sum + intensity, 0))
+      .toBeGreaterThan(0.5);
     // Far away, no coupling: no cast at all.
     expect(projectMarkCaustic(frame, 80, 80)).toBeNull();
 
@@ -800,6 +810,15 @@ describe('Atoma GPU brand mark', () => {
     expect(Math.max(...bundleCentres.slice(1).map((point) =>
       Math.hypot(point.x - bundleCentres[0]!.x, point.y - bundleCentres[0]!.y)
     ))).toBeGreaterThan(1);
+
+    // Energy and colour belong to the transported facet bundle, not to one
+    // global shader tint. This pose is deliberately asymmetric, so at least
+    // two entry/exit paths must retain distinct throughput and coating stain.
+    expect(new Set(centre!.optics.map(({ intensity }) => intensity.toFixed(6))).size)
+      .toBeGreaterThan(1);
+    expect(new Set(centre!.optics.map(({ r, g, b }) =>
+      `${r.toFixed(6)},${g.toFixed(6)},${b.toFixed(6)}`
+    )).size).toBeGreaterThan(1);
   });
 
   it('traces the cast at two wavelengths, diamond-far apart and sign-honest', () => {
@@ -851,9 +870,59 @@ describe('Atoma GPU brand mark', () => {
     for (let tenthDegree = 0; tenthDegree < 3_600; tenthDegree += 1) {
       const elapsedMs = ATOMA_MARK_TURN_MS * tenthDegree / 3_600;
       const cast = projectMarkCaustic(buildAtomaMarkFrame(elapsedMs), 14, 14);
-      if (!cast || cast.points.length !== 12) missing.push(tenthDegree / 10);
+      if (!cast || cast.points.length !== 12 || cast.optics.length !== 4) {
+        missing.push(tenthDegree / 10);
+      }
     }
     expect(missing, 'degrees with an incomplete caustic').toEqual([]);
+  });
+
+  it('bounds grazing receiver rays before they can inflate the far field', () => {
+    // This coupled pose used to send a nearly parallel red/blue ray roughly
+    // 78,000 local units away. The shader then expanded its culling region to
+    // cover almost the full viewport, even though the finite receiver could
+    // never collect that ray. A miss now falls back to the bounded roughness
+    // cone (or stops a secondary path) before it reaches the GPU.
+    const elapsedMs = ATOMA_MARK_TURN_MS * 249 / 360;
+    const cast = projectMarkCaustic(buildAtomaMarkFrame(elapsedMs), 28, 8);
+    expect(cast).not.toBeNull();
+    const published = [
+      ...cast!.points,
+      ...(cast!.spectral ?? []),
+      ...(cast!.secondary?.points ?? []),
+      ...(cast!.secondary?.spectral ?? []),
+    ];
+    expect(published.length).toBeGreaterThan(0);
+    expect(published.every(({ x, y }) => Number.isFinite(x) && Number.isFinite(y)))
+      .toBe(true);
+    expect(Math.max(...published.flatMap(({ x, y }) => [Math.abs(x), Math.abs(y)])))
+      .toBeLessThan(ATOMA_MARK_LOCAL_SIZE * 16);
+  });
+
+  it('publishes at most one real spectral reflection from the strongest bundle', () => {
+    // A centred lamp has no second reflected path that reaches this receiver
+    // in the current geometry. This slightly high, still coupled position has
+    // one real branch around a face-on pose; pin a neighbourhood so the test
+    // cannot pass on a one-frame grazing coincidence.
+    const elapsedMs = 1_875;
+    for (const offsetMs of [-10, 0, 10]) {
+      const cast = projectMarkCaustic(
+        buildAtomaMarkFrame(elapsedMs + offsetMs),
+        15,
+        8
+      )!;
+      const secondary = cast.secondary;
+      expect(secondary, `secondary at ${elapsedMs + offsetMs}ms`).not.toBeNull();
+      expect(secondary!.points).toHaveLength(3);
+      expect(secondary!.spectral).toHaveLength(3);
+      expect(secondary!.optics.intensity).toBeGreaterThan(0);
+      expect(secondary!.optics.intensity)
+        .toBeLessThan(Math.max(...cast.optics.map(({ intensity }) => intensity)));
+      for (const channel of ['r', 'g', 'b'] as const) {
+        expect(secondary!.optics[channel]).toBeGreaterThan(0);
+        expect(secondary!.optics[channel]).toBeLessThanOrEqual(1);
+      }
+    }
   });
 
   it('dims the cast by the distance it was thrown', () => {
@@ -876,7 +945,10 @@ describe('Atoma GPU brand mark', () => {
     const frame = buildAtomaMarkFrame(0);
     const straight = projectMarkCaustic(frame, 14, 14)!;
     const sideways = projectMarkCaustic(frame, 14 + 9, 14)!;
-    expect(sideways.intensity).toBeLessThan(straight.intensity);
+    const totalEnergy = (cast: NonNullable<ReturnType<typeof projectMarkCaustic>>) =>
+      cast.optics.reduce((sum, optics) => sum + optics.intensity, 0) +
+      (cast.secondary?.optics.intensity ?? 0);
+    expect(totalEnergy(sideways)).toBeLessThan(totalEnergy(straight));
   });
 
   it('parks the pointer lamp in front of the gem, not on its surface', () => {

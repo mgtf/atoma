@@ -896,40 +896,48 @@ export function attachAtomaMark(
       );
       if (coupledLocal && updateCaustic) {
         const cast = projectMarkCaustic(frame, coupledLocal.x, coupledLocal.y);
-        const rgb = cast ? markColorToRgb(cast.color) : null;
-        if (!cast || !rgb) {
+        if (!cast) {
           writeMarkFieldCaustic(null);
         } else {
-          const points: { x: number; y: number }[] = [];
-          const spectral: { x: number; y: number }[] | null = cast.spectral ? [] : null;
-          for (let index = 0; index < cast.points.length; index += 1) {
-            const corner = cast.points[index]!;
-            const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
-              (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
-            const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
-              (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
-            const client = markStageToClient(renderer, stageX, stageY);
-            points.push({ x: client.clientX, y: client.clientY });
-            const delta = cast.spectral?.[index];
-            if (spectral && delta) {
-              const endpoint = markStageToClient(
-                renderer,
-                stageX + delta.x * scale,
-                stageY + delta.y * scale
-              );
-              spectral.push({
-                x: endpoint.clientX - client.clientX,
-                y: endpoint.clientY - client.clientY,
-              });
+          const projectBundle = (
+            corners: readonly { x: number; y: number }[],
+            band: readonly { x: number; y: number }[] | null
+          ) => {
+            const points: { x: number; y: number }[] = [];
+            const spectral: { x: number; y: number }[] | null = band ? [] : null;
+            for (let index = 0; index < corners.length; index += 1) {
+              const corner = corners[index]!;
+              const stageX = container.x + ATOMA_MARK_LOCAL_CENTER +
+                (corner.x - ATOMA_MARK_LOCAL_CENTER) * scale;
+              const stageY = container.y + ATOMA_MARK_LOCAL_CENTER +
+                (corner.y - ATOMA_MARK_LOCAL_CENTER) * scale;
+              const client = markStageToClient(renderer, stageX, stageY);
+              points.push({ x: client.clientX, y: client.clientY });
+              const delta = band?.[index];
+              if (spectral && delta) {
+                const endpoint = markStageToClient(
+                  renderer,
+                  stageX + delta.x * scale,
+                  stageY + delta.y * scale
+                );
+                spectral.push({
+                  x: endpoint.clientX - client.clientX,
+                  y: endpoint.clientY - client.clientY,
+                });
+              }
             }
-          }
+            return { points, spectral };
+          };
+          const primary = projectBundle(cast.points, cast.spectral);
+          const secondary = cast.secondary
+            ? projectBundle(cast.secondary.points, cast.secondary.spectral)
+            : null;
           writeMarkFieldCaustic({
-            points,
-            spectral,
-            intensity: cast.intensity,
-            r: rgb.r,
-            g: rgb.g,
-            b: rgb.b,
+            ...primary,
+            optics: cast.optics,
+            secondary: cast.secondary && secondary
+              ? { ...secondary, optics: cast.secondary.optics }
+              : null,
           });
         }
         causticDirty = false;

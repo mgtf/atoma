@@ -810,13 +810,21 @@ try {
       // pointer would flatter the shader through its intensity early-out.
       await page.mouse.move(640, 400);
       await page.waitForFunction(
-        () => (globalThis.__ATOMA_MARK_CAUSTIC__?.intensity ?? 0) > 0.001,
+        () => Math.max(
+          0,
+          ...(globalThis.__ATOMA_MARK_CAUSTIC__?.optics ?? [])
+            .map((optical) => optical.intensity)
+        ) > 0.001,
         { polling: 'raf', timeout: READY_TIMEOUT_MS }
       );
       welcomeCrystalFrameStats = await sampleFrames(page);
       await page.mouse.move(1200, 750);
       await page.waitForFunction(
-        () => (globalThis.__ATOMA_MARK_CAUSTIC__?.intensity ?? 0) < 0.001,
+        () => Math.max(
+          0,
+          ...(globalThis.__ATOMA_MARK_CAUSTIC__?.optics ?? [])
+            .map((optical) => optical.intensity)
+        ) < 0.001,
         { polling: 'raf', timeout: READY_TIMEOUT_MS }
       );
       welcomeRecoveryFrameStats = await sampleFrames(page);

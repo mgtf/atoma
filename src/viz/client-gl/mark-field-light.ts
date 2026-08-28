@@ -37,21 +37,31 @@ export const MARK_CAUSTIC_MAX_POINTS = 12;
  * band gate stays closed rather than drawing a zero-width fringe it cannot see.
  */
 export const MARK_CAUSTIC_MAX_SPECTRAL = 12;
+export const MARK_CAUSTIC_MAX_BUNDLES = 4;
+export const MARK_CAUSTIC_SECONDARY_POINTS = 3;
+
+export interface MarkFieldCausticOptics {
+  r: number;
+  g: number;
+  b: number;
+  intensity: number;
+}
+
+export interface MarkFieldCausticSecondary {
+  points: readonly { x: number; y: number }[];
+  spectral: readonly { x: number; y: number }[] | null;
+  optics: MarkFieldCausticOptics;
+}
 
 export interface MarkFieldCaustic {
   /** Four consecutive three-point ray bundles, in viewport CSS pixels. */
   points: readonly { x: number; y: number }[];
   /** Per-corner signed half-separation, or null when the glass does not disperse. */
   spectral: readonly { x: number; y: number }[] | null;
-  /**
-   * 0..1 brightness at the wall: entry coupling after the crystal's physical
-   * falloff and extreme-lift exposure floor. Readers scale it for their own
-   * surface; none of them re-derives it.
-   */
-  intensity: number;
-  r: number;
-  g: number;
-  b: number;
+  /** Four transport-derived coating transmissions and Fresnel energies. */
+  optics: readonly MarkFieldCausticOptics[];
+  /** At most one bounded partial-reflection branch. */
+  secondary: MarkFieldCausticSecondary | null;
 }
 
 export interface MarkFieldLightSpill {
@@ -116,7 +126,8 @@ export function readMarkFieldLight(): readonly MarkFieldLightSpill[] {
  */
 export function writeMarkFieldCaustic(next: MarkFieldCaustic | null): void {
   const root = globalThis as FieldLightRoot;
-  if (!next || next.points.length < MARK_CAUSTIC_MAX_POINTS) {
+  if (!next || next.points.length < MARK_CAUSTIC_MAX_POINTS ||
+      next.optics.length < MARK_CAUSTIC_MAX_BUNDLES) {
     root.__ATOMA_MARK_CAUSTIC__ = null;
     return;
   }
@@ -125,10 +136,20 @@ export function writeMarkFieldCaustic(next: MarkFieldCaustic | null): void {
     spectral: next.spectral && next.spectral.length >= MARK_CAUSTIC_MAX_SPECTRAL
       ? next.spectral.slice(0, MARK_CAUSTIC_MAX_SPECTRAL)
       : null,
-    intensity: next.intensity,
-    r: next.r,
-    g: next.g,
-    b: next.b,
+    optics: next.optics.slice(0, MARK_CAUSTIC_MAX_BUNDLES).map((optical) => ({
+      ...optical,
+    })),
+    secondary: next.secondary &&
+      next.secondary.points.length >= MARK_CAUSTIC_SECONDARY_POINTS
+      ? {
+          points: next.secondary.points.slice(0, MARK_CAUSTIC_SECONDARY_POINTS),
+          spectral: next.secondary.spectral &&
+            next.secondary.spectral.length >= MARK_CAUSTIC_SECONDARY_POINTS
+            ? next.secondary.spectral.slice(0, MARK_CAUSTIC_SECONDARY_POINTS)
+            : null,
+          optics: { ...next.secondary.optics },
+        }
+      : null,
   };
 }
 
@@ -147,10 +168,12 @@ export interface MarkCausticUniforms {
    * traced. Winding reorders each delta together with the corner it belongs to.
    */
   spectral: readonly { x: number; y: number }[] | null;
-  intensity: number;
-  r: number;
-  g: number;
-  b: number;
+  optics: readonly MarkFieldCausticOptics[];
+  secondary: {
+    corners: readonly { x: number; y: number }[];
+    spectral: readonly { x: number; y: number }[] | null;
+    optics: MarkFieldCausticOptics;
+  } | null;
 }
 
 /**
@@ -168,7 +191,8 @@ export function packMarkCaustic(
   mapClientToRenderer: (x: number, y: number) => { x: number; y: number } =
     (x, y) => pointerClientToRenderer(x, y, bounds, rendererWidth, rendererHeight)
 ): MarkCausticUniforms | null {
-  if (!cast || cast.points.length < MARK_CAUSTIC_MAX_POINTS) return null;
+  if (!cast || cast.points.length < MARK_CAUSTIC_MAX_POINTS ||
+      cast.optics.length < MARK_CAUSTIC_MAX_BUNDLES) return null;
   const corners = cast.points
     .slice(0, MARK_CAUSTIC_MAX_POINTS)
     .map((point) => mapClientToRenderer(point.x, point.y));
@@ -182,29 +206,57 @@ export function packMarkCaustic(
           return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
         })
     : null;
-  for (const start of [0, 3, 6, 9]) {
-    const a = corners[start]!;
-    const b = corners[start + 1]!;
-    const c = corners[start + 2]!;
+  const orientTriangle = (
+    triangle: { x: number; y: number }[],
+    band: { x: number; y: number }[] | null,
+    start: number
+  ) => {
+    const a = triangle[start]!;
+    const b = triangle[start + 1]!;
+    const c = triangle[start + 2]!;
     const area = a.x * b.y + b.x * c.y + c.x * a.y -
       b.x * a.y - c.x * b.y - a.x * c.y;
     if (area < 0) {
-      [corners[start + 1], corners[start + 2]] = [c, b];
-      if (spectral) {
-        [spectral[start + 1], spectral[start + 2]] = [
-          spectral[start + 2]!,
-          spectral[start + 1]!,
+      [triangle[start + 1], triangle[start + 2]] = [c, b];
+      if (band) {
+        [band[start + 1], band[start + 2]] = [
+          band[start + 2]!,
+          band[start + 1]!,
         ];
       }
     }
+  };
+  for (const start of [0, 3, 6, 9]) {
+    orientTriangle(corners, spectral, start);
+  }
+  const secondaryCorners = cast.secondary?.points
+    .slice(0, MARK_CAUSTIC_SECONDARY_POINTS)
+    .map((point) => mapClientToRenderer(point.x, point.y)) ?? null;
+  const secondarySpectral = cast.secondary?.spectral && secondaryCorners
+    ? cast.secondary.spectral
+        .slice(0, MARK_CAUSTIC_SECONDARY_POINTS)
+        .map((delta, index) => {
+          const point = cast.secondary!.points[index]!;
+          const corner = secondaryCorners[index]!;
+          const endpoint = mapClientToRenderer(point.x + delta.x, point.y + delta.y);
+          return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
+        })
+    : null;
+  if (secondaryCorners?.length === MARK_CAUSTIC_SECONDARY_POINTS) {
+    orientTriangle(secondaryCorners, secondarySpectral, 0);
   }
   return {
     corners,
     spectral,
-    intensity: cast.intensity,
-    r: cast.r,
-    g: cast.g,
-    b: cast.b,
+    optics: cast.optics.slice(0, MARK_CAUSTIC_MAX_BUNDLES),
+    secondary: cast.secondary &&
+      secondaryCorners?.length === MARK_CAUSTIC_SECONDARY_POINTS
+      ? {
+          corners: secondaryCorners,
+          spectral: secondarySpectral,
+          optics: cast.secondary.optics,
+        }
+      : null,
   };
 }
 

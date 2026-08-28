@@ -12,6 +12,7 @@ import {
   clearMarkFieldLight,
   packMarkCaustic,
   readMarkFieldCaustic,
+  type MarkFieldCaustic,
   writeMarkFieldCaustic,
 } from '../src/viz/client-gl/mark-field-light.js';
 import {
@@ -20,12 +21,34 @@ import {
   CAUSTIC_FIELD_GLSL,
   CAUSTIC_FIELD_WGSL,
   CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE,
+  CAUSTIC_MAX_FOOTPRINT_EVALUATIONS,
+  CAUSTIC_SECONDARY_BUNDLE_COUNT,
   CAUSTIC_SPECTRAL_SLOTS,
 } from '../src/viz/client-gl/renderer/caustic-shader.js';
 import {
   POINTER_LIGHT_GLSL,
   POINTER_LIGHT_WGSL,
 } from '../src/viz/client-gl/renderer/shaders.js';
+
+const TEST_CAUSTIC_OPTICS = [
+  { r: 0.92, g: 0.68, b: 0.44, intensity: 0.50 },
+  { r: 0.58, g: 0.86, b: 0.72, intensity: 0.40 },
+  { r: 0.70, g: 0.62, b: 0.94, intensity: 0.30 },
+  { r: 0.88, g: 0.76, b: 0.52, intensity: 0.20 },
+] as const;
+
+function fieldCast(
+  points: readonly { x: number; y: number }[],
+  overrides: Partial<MarkFieldCaustic> = {}
+): MarkFieldCaustic {
+  return {
+    points,
+    spectral: null,
+    optics: TEST_CAUSTIC_OPTICS,
+    secondary: null,
+    ...overrides,
+  };
+}
 
 describe('far-field shader contract', () => {
   const wgslVertexInput = FAR_FIELD_WGSL.split('struct VertexInput')[1]
@@ -106,11 +129,19 @@ describe('far-field shader contract', () => {
       expect(source).toContain('causticField');
       expect(source).toContain('uCaustic0');
       expect(source).toContain('uCaustic5');
-      expect(source).toContain('uCausticColor');
+      expect(source).toContain('uCausticOptics0');
+      expect(source).toContain('uCausticOptics3');
+      expect(source).toContain('uCausticSecondary');
       expect(source).toContain('uCausticDetail');
     }
-    expect(FAR_FIELD_UNIFORMS.filter((entry) => entry.name.startsWith('uCaustic')))
-      .toHaveLength(15);
+    const causticUniformNames = FAR_FIELD_UNIFORMS
+      .filter((entry) => entry.name.startsWith('uCaustic'))
+      .map((entry) => entry.name);
+    expect(causticUniformNames).not.toContain('uCausticColor');
+    expect(causticUniformNames.filter((name) => /^uCausticOptics[0-3]$/.test(name)))
+      .toHaveLength(CAUSTIC_BUNDLE_COUNT);
+    expect(causticUniformNames.some((name) => name.startsWith('uCausticSecondary')))
+      .toBe(true);
   });
 
   it('lands the cast on one far-field receiver, never on the filled UI', () => {
@@ -133,17 +164,20 @@ describe('far-field shader contract', () => {
     expect(CAUSTIC_FIELD_WGSL).toContain('vec3<f32>(red, green, blue)');
   });
 
-  it('keeps the analytic caustic bounded, neutral and additive on both backends', () => {
+  it('keeps the analytic caustic bounded, spectrally honest and additive', () => {
     for (const source of [CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL]) {
-      // Four CPU-traced triangles remain independent, but each is evaluated
-      // once with fixed-cost analytic moments. The former generated shader
-      // expanded hundreds of Gaussian kernels into more than 15KB per
-      // backend and scaled cost with its sampling constants.
+      // Four CPU-traced primaries plus at most one real reflected branch stay
+      // fixed-cost. Core and penumbra share each moment fit; neither brings
+      // back the former generated Gaussian banks or fragment loops.
       expect(source).toContain('causticBundle');
-      expect(source.match(/causticBundle\(/g)).toHaveLength(CAUSTIC_BUNDLE_COUNT + 1);
+      expect(source.match(/causticBundle\(/g)).toHaveLength(
+        CAUSTIC_BUNDLE_COUNT + CAUSTIC_SECONDARY_BUNDLE_COUNT + 1
+      );
       expect(source.match(/causticFootprint\(/g))
         .toHaveLength(CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE + 1);
       expect(source.length).toBeLessThan(10_000);
+      expect(source).toContain('core');
+      expect(source).toContain('penumbra');
       expect(source).not.toContain('exp(');
       expect(source).not.toContain('causticKernel');
       expect(source).not.toContain('causticSpectralFold');
@@ -151,13 +185,17 @@ describe('far-field shader contract', () => {
       expect(source).not.toContain('mix(tint');
       expect(source).not.toMatch(/for\s*\(/);
 
-      // Dispersion still follows the traced endpoints; it is not replaced by
-      // radial RGB offsets. Detail may tune concentration, never sample count.
+      // Use the complete measured red/blue separation. No white average or
+      // chroma limiter may renormalise the transported spectrum afterwards.
       expect(source).toContain('a + da * tracedBand');
       expect(source).toContain('a - da * tracedBand');
+      expect(source).toMatch(/tracedBand\s*=\s*clamp\(band,\s*0\.0,\s*2\.0\)\s*;/);
+      expect(source).not.toMatch(/tracedBand\s*=\s*clamp\([^;]+\)\s*\*/);
+      expect(source).not.toMatch(/\b(?:float|let)\s+neutral\b/);
+      expect(source).not.toMatch(/\b(?:float|let)\s+chroma\b/);
+      expect(source).toContain('transmission');
       expect(source).toContain('detail');
       expect(source).not.toContain('prism');
-      expect(source).not.toContain('fringe');
     }
     for (const source of [FAR_FIELD_GLSL, FAR_FIELD_WGSL]) {
       expect(source).toMatch(/color \+= crystalCast\.rgb/);
@@ -166,7 +204,13 @@ describe('far-field shader contract', () => {
     expect(CAUSTIC_CORNER_SLOTS).toBe(6);
     expect(CAUSTIC_SPECTRAL_SLOTS).toBe(6);
     expect(CAUSTIC_BUNDLE_COUNT).toBe(4);
+    expect(CAUSTIC_SECONDARY_BUNDLE_COUNT).toBe(1);
     expect(CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE).toBe(3);
+    expect(CAUSTIC_MAX_FOOTPRINT_EVALUATIONS).toBe(15);
+    expect(CAUSTIC_MAX_FOOTPRINT_EVALUATIONS).toBe(
+      (CAUSTIC_BUNDLE_COUNT + CAUSTIC_SECONDARY_BUNDLE_COUNT) *
+      CAUSTIC_FOOTPRINT_EVALUATIONS_PER_BUNDLE
+    );
   });
 
   it('keeps the caustic source legal without dynamic shader arrays', () => {
@@ -177,8 +221,10 @@ describe('far-field shader contract', () => {
     expect(CAUSTIC_FIELD_GLSL).not.toContain('%');
     expect(CAUSTIC_FIELD_GLSL).toContain('vec4 c5');
     for (const source of [CAUSTIC_FIELD_GLSL, CAUSTIC_FIELD_WGSL]) {
-      expect(source).toContain('intensity < 0.001');
-      expect(source.match(/causticBundle\(/g)).toHaveLength(CAUSTIC_BUNDLE_COUNT + 1);
+      expect(source).toContain('transmission.a < 0.001');
+      expect(source.match(/causticBundle\(/g)).toHaveLength(
+        CAUSTIC_BUNDLE_COUNT + CAUSTIC_SECONDARY_BUNDLE_COUNT + 1
+      );
     }
   });
 
@@ -200,58 +246,62 @@ describe('far-field shader contract', () => {
       { x: 22, y: 22 },
       { x: 6, y: 22 },
     ];
-    writeMarkFieldCaustic({ points, spectral: null, intensity: 0.5, r: 0.2, g: 0.4, b: 0.8 });
+    writeMarkFieldCaustic(fieldCast(points));
     const cast = readMarkFieldCaustic();
     expect(cast).not.toBeNull();
     expect(cast!.points).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
     expect(cast!.points[0]).toEqual(points[0]);
-    expect(cast!.intensity).toBeCloseTo(0.5);
+    expect(cast!.optics).toEqual(TEST_CAUSTIC_OPTICS);
     expect(cast!.spectral).toBeNull();
+    expect(cast!.secondary).toBeNull();
 
     // The spectral band rides the same twelve corners: a short one is
     // dropped whole (never partially drawn), and a long one is clamped.
     const halfBand = points.map((point) => ({ x: point.x * 0.1, y: point.y * 0.1 }));
-    writeMarkFieldCaustic({
-      points,
-      spectral: halfBand,
-      intensity: 0.5,
-      r: 0.2, g: 0.4, b: 0.8,
-    });
+    writeMarkFieldCaustic(fieldCast(points, { spectral: halfBand }));
     expect(readMarkFieldCaustic()!.spectral).toHaveLength(MARK_CAUSTIC_MAX_SPECTRAL);
-    writeMarkFieldCaustic({
-      points,
+    writeMarkFieldCaustic(fieldCast(points, {
       spectral: halfBand.slice(0, MARK_CAUSTIC_MAX_SPECTRAL - 1),
-      intensity: 0.5,
-      r: 0.2, g: 0.4, b: 0.8,
-    });
+    }));
     expect(readMarkFieldCaustic()!.spectral).toBeNull();
-    writeMarkFieldCaustic({
-      points,
+    writeMarkFieldCaustic(fieldCast(points, {
       spectral: [...halfBand, { x: 99, y: 99 }, { x: 99, y: 99 }],
-      intensity: 0.5,
-      r: 0.2, g: 0.4, b: 0.8,
-    });
+    }));
     expect(readMarkFieldCaustic()!.spectral).toHaveLength(MARK_CAUSTIC_MAX_SPECTRAL);
+
+    // The one reflected path carries its own three corners, spectral deltas
+    // and optics. It is optional as a unit: malformed secondary geometry is
+    // dropped without invalidating the four complete primary bundles.
+    const secondary = {
+      points: points.slice(0, 3),
+      spectral: halfBand.slice(0, 3),
+      optics: { r: 0.74, g: 0.82, b: 0.96, intensity: 0.08 },
+    };
+    writeMarkFieldCaustic(fieldCast(points, { spectral: halfBand, secondary }));
+    expect(readMarkFieldCaustic()!.secondary).toEqual(secondary);
+    writeMarkFieldCaustic(fieldCast(points, {
+      secondary: { ...secondary, points: secondary.points.slice(0, 2) },
+    }));
+    expect(readMarkFieldCaustic()!.secondary).toBeNull();
 
     // More corners than slots are clamped to the published maximum.
     const many = Array.from({ length: MARK_CAUSTIC_MAX_POINTS + 3 }, (_, i) => ({
       x: i,
       y: i,
     }));
-    writeMarkFieldCaustic({ points: many, spectral: null, intensity: 0.1, r: 0, g: 0, b: 0 });
+    writeMarkFieldCaustic(fieldCast(many));
     expect(readMarkFieldCaustic()!.points).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
 
     // An incomplete four-bundle field is cleared, never partially drawn.
-    writeMarkFieldCaustic({
-      points: many.slice(0, 11),
-      spectral: null,
-      intensity: 0.9,
-      r: 1, g: 1, b: 1,
-    });
+    writeMarkFieldCaustic(fieldCast(many.slice(0, 11)));
+    expect(readMarkFieldCaustic()).toBeNull();
+
+    // Four path-specific optical records are as integral as four triangles.
+    writeMarkFieldCaustic(fieldCast(points, { optics: TEST_CAUSTIC_OPTICS.slice(0, 3) }));
     expect(readMarkFieldCaustic()).toBeNull();
 
     // The lantern clear sweeps the cast with it.
-    writeMarkFieldCaustic({ points, spectral: null, intensity: 0.5, r: 0, g: 0, b: 0 });
+    writeMarkFieldCaustic(fieldCast(points));
     clearMarkFieldLight();
     expect(readMarkFieldCaustic()).toBeNull();
   });
@@ -278,7 +328,7 @@ describe('far-field shader contract', () => {
       { x: 120, y: 60 },
     ];
     const packed = packMarkCaustic(
-      { points: clockwise, spectral: null, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      fieldCast(clockwise),
       bounds,
       800,
       400
@@ -297,7 +347,8 @@ describe('far-field shader contract', () => {
       expect(area).toBeGreaterThan(0);
     }
     expect(packed.corners).toHaveLength(MARK_CAUSTIC_MAX_POINTS);
-    expect(packed.intensity).toBeCloseTo(0.4);
+    expect(packed.optics).toEqual(TEST_CAUSTIC_OPTICS);
+    expect(packed.secondary).toBeNull();
 
     // The spectral band packs through the SAME affine scale factors, without
     // the bounds' origin: a delta is a difference, so the translation cancels.
@@ -307,7 +358,7 @@ describe('far-field shader contract', () => {
       y: -(index + 0.5),
     }));
     const spectralPacked = packMarkCaustic(
-      { points: clockwise, spectral: halfBand, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      fieldCast(clockwise, { spectral: halfBand }),
       bounds,
       800,
       400
@@ -329,7 +380,14 @@ describe('far-field shader contract', () => {
       return { x: x / divisor, y: y / divisor };
     };
     const projectedBand = packMarkCaustic(
-      { points: clockwise, spectral: halfBand, intensity: 0.4, r: 1, g: 0.5, b: 0.25 },
+      fieldCast(clockwise, {
+        spectral: halfBand,
+        secondary: {
+          points: clockwise.slice(0, 3),
+          spectral: halfBand.slice(0, 3),
+          optics: { r: 0.74, g: 0.82, b: 0.96, intensity: 0.08 },
+        },
+      }),
       bounds,
       800,
       400,
@@ -342,6 +400,21 @@ describe('far-field shader contract', () => {
       const endpoint = projective(point.x + delta.x, point.y + delta.y);
       return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
     }));
+
+    expect(projectedBand.secondary).not.toBeNull();
+    const secondaryOrder = [0, 2, 1];
+    expect(projectedBand.secondary!.corners).toEqual(secondaryOrder.map((index) =>
+      projective(clockwise[index]!.x, clockwise[index]!.y)
+    ));
+    expect(projectedBand.secondary!.spectral).toEqual(secondaryOrder.map((index) => {
+      const point = clockwise[index]!;
+      const delta = halfBand[index]!;
+      const corner = projective(point.x, point.y);
+      const endpoint = projective(point.x + delta.x, point.y + delta.y);
+      return { x: endpoint.x - corner.x, y: endpoint.y - corner.y };
+    }));
+    expect(projectedBand.secondary!.optics)
+      .toEqual({ r: 0.74, g: 0.82, b: 0.96, intensity: 0.08 });
 
     // Nothing published, nothing packed: the caller parks its own slots.
     expect(packMarkCaustic(null, bounds, 800, 400)).toBeNull();
