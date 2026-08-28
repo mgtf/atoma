@@ -1,6 +1,5 @@
 import type { GpuRenderSnapshot, RendererCtx } from '../../gpu-renderer.js';
 import { GPU_COLORS, GPU_LAYOUT } from '../../theme.js';
-import { TIER_MODEL_CHOICES } from '../../../../contracts/tierModels.js';
 import { drawViewFrame, viewFrame, VIEW_FRAME_CONTENT_TOP } from '../view-frame.js';
 
 /**
@@ -82,37 +81,6 @@ export const SETTINGS_ORB = {
   y: GPU_LAYOUT.headerHeight + GPU_LAYOUT.gap + VIEW_FRAME_CONTENT_TOP,
   size: ORB_SIZE,
 } as const;
-
-/**
- * Display copy for a stored selection: known catalogue ids shorten to their
- * label, unknown values stay raw (a retired id must still be visible).
- * Exported because the tests pin the chip vocabulary it must accept.
- */
-export function modelChipLabel(model: string): string {
-  const match = /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?/.exec(model);
-  if (!match) return model;
-  const family = match[1]!;
-  const name = family.charAt(0).toUpperCase() + family.slice(1);
-  const version = match[3] ? `${match[2]}.${match[3]}` : match[2]!;
-  return `${name} ${version}`;
-}
-
-/** Activation id for one tier/choice cell. `default` clears the pin. */
-export function settingsModelId(tier: 1 | 2 | 3, choice: number | 'default'): string {
-  return `settings.model.${tier}.${choice}`;
-}
-
-/** Parse one back, or null when the id is not a model cell. */
-export function parseSettingsModelId(
-  id: string
-): { tier: 1 | 2 | 3; model: string | null } | null {
-  const match = /^settings\.model\.([123])\.(default|[0-9]+)$/.exec(id);
-  if (!match) return null;
-  const tier = Number(match[1]) as 1 | 2 | 3;
-  if (match[2] === 'default') return { tier, model: null };
-  const model = TIER_MODEL_CHOICES[Number(match[2])];
-  return model ? { tier, model } : null;
-}
 
 export function drawSettings(
   ctx: RendererCtx,

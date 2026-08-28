@@ -73,9 +73,7 @@ import { LOCALE_NAMES, SUPPORTED_LOCALES } from '../src/contracts/locales.js';
 import {
   drawSettings,
   MEMBER_ROW_HEIGHT,
-  modelChipLabel,
   organisationPanelLayout,
-  parseSettingsModelId,
   SETTINGS_DOM_FORM_HEIGHT,
   SETTINGS_DOM_FORM_TOP,
   SETTINGS_LLM_FORM_TOP,
@@ -3063,22 +3061,25 @@ describe('drawSettings', () => {
     );
   });
 
-  it('round-trips a model cell id and shortens model ids for the chips', () => {
-    expect(parseSettingsModelId('settings.model.2.1')).toEqual({
-      tier: 2,
-      model: 'claude-sonnet-5',
-    });
-    expect(parseSettingsModelId('settings.model.3.default')).toEqual({
-      tier: 3,
-      model: null,
-    });
-    expect(parseSettingsModelId('settings.model.4.0')).toBeNull();
-    expect(parseSettingsModelId('settings.model.1.9')).toBeNull();
-    expect(parseSettingsModelId('nav.settings')).toBeNull();
-    expect(modelChipLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5');
-    expect(modelChipLabel('claude-sonnet-5')).toBe('Sonnet 5');
-    expect(modelChipLabel('claude-opus-5')).toBe('Opus 5');
-    expect(modelChipLabel('some-future-model')).toBe('some-future-model');
+  it('no longer offers Pixi cells for the tier pickers — they are DOM now', () => {
+    // The per-tier pickers moved out of the GL scene when BYO provider keys and
+    // org defaults landed (e05c7b8): they are real DOM in `OrgModelsForm`, laid
+    // out under `SETTINGS_LLM_FORM_TOP`. `settingsModelId`, its parser and
+    // `modelChipLabel` outlived their last caller and were kept alive by this
+    // test alone — an id vocabulary the renderer had stopped publishing, which
+    // is exactly what left the browser smoke waiting on
+    // `settings.model.1.default` for three weeks (2026-08-28).
+    //
+    // A source scan because the property is an ABSENCE, and nothing that runs
+    // from source can observe a control that is not drawn.
+    const view = readFileSync(
+      resolve(import.meta.dirname, '../src/viz/client-gl/renderer/views/settings.ts'),
+      'utf8'
+    );
+    expect(view).not.toContain('settings.model.');
+    expect(view).not.toContain('modelChipLabel');
+    // The DOM form is where that vocabulary lives now.
+    expect(view).toContain('SETTINGS_LLM_FORM_TOP');
   });
 });
 
