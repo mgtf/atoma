@@ -457,12 +457,14 @@ check that it is still working.
 
 Recorded so nobody has to discover it in a demo:
 
-- **No full multi-tenancy.** The web console is open on loopback by default and has an optional,
-  invitation-only login gate. A principal may join multiple organisations and choose an active
-  one; authenticated projects, their run workspaces and trace reads are scoped to that active
-  organisation, while a platform admin can read across organisations. Registry, skill and trust
-  state remain instance-global, so this is still one dedicated instance rather than the complete
-  tenant-isolation model in [`saas-architecture.md`](saas-architecture.md).
+- **No full multi-tenancy.** The web console is open on loopback by default and has an optional
+  multi-organisation login gate. A first login creates a personal organisation unless it redeems
+  an invitation; a principal may join several organisations and choose an active one.
+  Authenticated projects, their run workspaces, traces and project skills are scoped to that
+  organisation, while a platform admin can read across organisations. The atom catalogue, atom
+  trust and lifecycle ledger remain instance-global, so this is not yet safe for mutually
+  untrusted organisations; see the dated boundary in
+  [`saas-architecture.md`](saas-architecture.md).
 - **No hosted service.** This is a private repository, not a published project.
 - **The browser-based family cannot reach zero cost yet.** Compiled scripts have no browser, so
   the compiler correctly refuses to compile web-validation recipes. Every compiled script in the
@@ -481,7 +483,7 @@ Recorded so nobody has to discover it in a demo:
 |---|---|
 | Why does mechanism X exist? | `AGENTS.md` for the active contract, then its linked engineering-record entry |
 | What was tried and rejected? | `docs/incidents/engineering-record-2026-08-14.md` § *Considered and rejected* |
-| What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) §5 invariants, §7 rules for today |
+| What would multi-tenancy require? | [`saas-architecture.md`](saas-architecture.md) Layer 2 invariants and Layer 3 Track A/Track B roadmap |
 | What does a real run look like? | `npm run viz` — or `npm run viz:demo` for a mocked run with no API key |
 | How does another agent drive atoma? | `npm run build`, then `claude mcp add atoma -s local -- node "$PWD/dist/mcp/stdio.js"` — stdio only, 13 tools plus a goal-template prompt per task family |
 | Are the economics real? | regenerable with `npm run burnin`; the historical CSV was archived out of the repo at the 2026-08-18 from-scratch reset |

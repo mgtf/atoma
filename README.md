@@ -264,13 +264,14 @@ Verified across 156 runs: **single-page web applications**, **zero-dependency HT
 workspace with a machine-readable record of every command that was run to verify it.
 
 It is a **framework for building such systems**, not a finished product. There is no hosted
-service or multi-tenancy; the web console's opt-in login is a deployment gate, not tenant
-isolation — see [Status](#status) below. Behind that gate, run traces and projects are
-organisation-scoped, while the instance-global agent registry, skill store and burn-in
-surfaces answer only the **platform admin** — an operator flag granted exclusively through
-the CLI (`npm run auth -- grant-admin --principal <id-or-email>`), never from a login's
-email. The platform admin also reads every organisation's projects and traces and manages
-organisations and invitations from the Admin tab.
+service or complete multi-tenancy — see [Status](#status) below. The opt-in authenticated
+control plane permits multiple organisations and scopes projects, runs, workspaces, traces and
+project learning to them. The atom catalogue, atom trust and lifecycle ledger remain
+instance-global, while the operator skill store and burn-in surfaces answer only the
+**platform admin** — an operator flag granted exclusively through the CLI
+(`npm run auth -- grant-admin --principal <id-or-email>`), never from a login's email. The
+platform admin also reads every organisation's projects and traces and manages organisations
+and invitations from the Admin tab.
 
 ## Why a technical buyer should look closer
 
@@ -457,16 +458,17 @@ process group is confirmed gone and the trace has closed.
 
 What exists: the full three-tier loop, the learning and compilation lifecycle, sandboxed
 execution with opt-in container isolation and proxied egress, an append-only audit ledger with
-integrity checking, a web console with optional invitation-only organisation login, and a
-measurement harness.
+integrity checking, a web console with optional multi-organisation login, and a measurement
+harness. A first login creates a personal organisation unless it redeems an invitation to an
+existing one.
 
 What does not: full tenant isolation or a hosted service. Authenticated projects, their run
-workspaces and trace reads are scoped to the viewer's active organisation; the platform admin can
-read across organisations. Registry, skill and trust state remain instance-global, however, so
-the authentication gate still does not turn one dedicated instance into a fully multi-tenant
-system. This is a private repository, shared deliberately rather than published. The target
-multi-tenant design is written up in
-[`docs/saas-architecture.md`](docs/saas-architecture.md) and explicitly marked as not built.
+workspaces, traces and project skills are scoped to the viewer's active organisation; the
+platform admin can read across organisations. The atom catalogue, atom trust and lifecycle
+ledger remain instance-global, however, so the control plane is not yet safe for mutually
+untrusted organisations. This is a private repository, shared deliberately rather than
+published. The dated current state, invariants and Track A/Track B roadmap are reconciled in
+[`docs/saas-architecture.md`](docs/saas-architecture.md).
 
 **[→ How it works: components, flows and diagrams](docs/how-it-works.md)**
 

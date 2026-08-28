@@ -1,14 +1,15 @@
-<!-- Design proposal. The owner's answers to section 12 were taken 2026-08-28
-     and are recorded there; the body below still reads as the proposal that
-     was put to them, so the reasoning behind each choice stays legible. -->
+<!-- Historical design proposal. The owner's answers to section 12 were taken
+     2026-08-28 and implemented in commit 6a033b3. The body below still reads
+     as the proposal that was put to them, so the reasoning stays legible. -->
 
 # Per-tier host subscription — design proposal, 2026-08-28
 
 This was a proposal for review: it names the choices, the alternatives it rejects, and the four
 defects an adversarial pass found in earlier drafts. **The eight open questions were answered on
 2026-08-28 and the answers are recorded in section 12** — six confirmed the proposal, one
-reversed it. Nothing is implemented yet; the body below is left as it was put to the owner, so
-the reasoning behind each choice remains readable next to the decision.
+reversed it. The reconciled change was implemented in commit `6a033b3`; the body below is left as
+it was put to the owner so the reasoning behind each choice remains readable next to the
+decision.
 
 ## 1. The ask, in the owner's terms
 
@@ -707,6 +708,6 @@ The questions as they were put:
 
 ---
 
-*Status: decided 2026-08-28, not yet built. Per COOLING-OFF this lands as one reviewed commit — the write
-validator, the store, the coordinator gate, the transport strip, the catalogue neighbour, the
-picker, the audit row and the docs move together, or the guards contradict each other.*
+*Status: decided and implemented 2026-08-28 in commit `6a033b3`. Per COOLING-OFF it landed as one
+reviewed change: the write validator, store, coordinator and child-process gates, transport strip,
+catalogue neighbour, picker, audit row, payer ledger and documentation moved together.*
